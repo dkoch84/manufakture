@@ -149,3 +149,13 @@ interface BodyMesh {
 - The regen engine owns the document copy the kernel works on; the main thread owns the saved one. Deltas, if used, must be versioned by generation.
 - Stale replies are normal and are dropped silently; UI code must not assume one reply per request.
 - The exact edge polyline layout, and how `ReferenceResolution` is shaped, are settled by #926 and the viewport task within this contract.
+
+## Amendment: the regen worker solves sketches in-process (T1.10, #933)
+
+Decision 2 hands the kernel worker a `MessageChannel` port to the solver worker, so the regen engine can re-solve sketches there. When the engine was wired into the app, the solver went into the regen worker instead, as its own `SolverService` (planegcs loaded on the first sketch solve):
+
+- the engine awaits every solve before its next kernel op, so a solver in another worker adds a round trip per sketch and buys no parallelism;
+- the solver worker belongs to the sketcher, starts on the first sketch and is disposed with the app, so a port would tie regen to its lifetime (and start it for every opened document with a sketch);
+- regen solves are stateless and never touch the interactive sessions (decision 4 already said so), and a planegcs abort is contained by `SolverService`, which replaces its instance without touching the kernel's.
+
+The cost is planegcs's 0.5 MB `.wasm` instantiated in both workers. Decision 1 still holds for interactive sketching: drags and dimension edits run in the solver worker, never behind a regen. The engine takes any `solve` implementation (`createRegenWorkerApi({ solver })`), so a port can come back without changing it. Details are in `packages/regen/README.md`, "The worker".

@@ -1,14 +1,23 @@
-// How export and import reach the kernel worker. The scene loader owns the
-// kernel client and knows which kernel shape each viewport body is, so it
-// provides an `Exchanger` (like its `Measurer`). Until the regen engine is
-// wired in, imported STEP bodies are built here directly: one `feature` op
-// with an `import` feature (faces named `import#k:face:<n>`), kept in the
-// worker as a reference body next to the demo part. Reference bodies are
-// measured but never exported, and are released once their import feature
-// can no longer come back (see `retain`).
+// How export, import, measuring and reference picking reach the kernel
+// worker. The scene loader owns the kernel client and knows which kernel
+// shape each viewport body is (the part bodies regen made, and imported
+// reference bodies), so it provides an `Exchanger`, a `Measurer` and a
+// `Referencer`. Imported STEP reference bodies are built here directly: one
+// `feature` op with an `import` feature (faces named `import#k:face:<n>`),
+// kept in the worker next to the part bodies; regen leaves reference imports
+// out of the part. Reference bodies are measured but never exported, and are
+// released once their import feature can no longer come back (see `retain`).
+// After the kernel lost every shape (a recycle or a restart) they are read
+// again from their files (see `reimport`).
+//
+// Every batch goes at the client's current generation: only a regen may take a
+// new one, since a newer generation cancels the regen in flight and nothing
+// would report in its place. Releases are not batches at all (see `release`).
 
 import type {
   Deflection,
+  EdgeRef,
+  FaceRef,
   FeatureOutcome,
   KernelOp,
   MeshData,
@@ -60,6 +69,24 @@ export interface Exchanger {
    * Returns the ids released.
    */
   retain(ids: ReadonlySet<string>): string[];
+  /**
+   * Read STEP reference bodies again after the kernel lost every shape: `files` maps feature
+   * ids to their STEP files. Only bodies still registered are rebuilt (one pruned meanwhile is
+   * released again); returns the ids rebuilt. The viewport meshes stay as they are.
+   */
+  reimport(files: ReadonlyMap<string, Uint8Array>): Promise<string[]>;
+}
+
+/**
+ * Turns a picked face or edge into the reference a feature stores (ADR 0007 decision 8): the
+ * kernel's minimal `FaceRef` or `EdgeRef` for the sub-shape, by its 1-based index on the body.
+ */
+export interface Referencer {
+  reference(
+    bodyId: string,
+    kind: 'face' | 'edge',
+    index: number,
+  ): Promise<ExchangeResult<FaceRef | EdgeRef>>;
 }
 
 const DROPPED = 'The kernel dropped the request; try again.';
@@ -72,7 +99,7 @@ const DROPPED = 'The kernel dropped the request; try again.';
 export function kernelExchange(
   client: () => KernelClient | null,
   registry: Map<string, KernelBody>,
-): { exchanger: Exchanger; measurer: Measurer } {
+): { exchanger: Exchanger; measurer: Measurer; referencer: Referencer } {
   const shapesOf = (ids: readonly string[]): ExchangeResult<KernelBody[]> => {
     const out: KernelBody[] = [];
     for (const id of ids) {
@@ -87,12 +114,61 @@ export function kernelExchange(
       : { ok: true, value: out };
   };
 
-  // At the current generation, so a release never cancels an edit in flight.
-  // Nobody waits for it: an id already gone (a recycle) is simply unknown.
+  // Outside the batch queue (`KernelClient.release`): a release batch, even at the current
+  // generation, is cancelled by the regen the same document change asks for, leaking the
+  // shapes. Nobody waits for it: an id already gone (a recycle) is simply unknown.
   const release = (shapes: ShapeId[]): void => {
     const c = client();
     if (c === null) return;
-    void c.submit([{ op: 'release', shapes }] as const, c.latestGeneration).catch(() => undefined);
+    void c.release(shapes).catch(() => undefined);
+  };
+
+  type Read =
+    { ok: true; shape: ShapeId; body: ExchangeResult<BodyInput> } | { ok: false; message: string };
+
+  // One STEP file into a kept `import` feature body, meshed. At the current generation: an
+  // import must not cancel the regen in flight (ADR 0007 decision 4).
+  const readStep = async (c: KernelClient, bytes: Uint8Array, featureId: string): Promise<Read> => {
+    const reply = await c.submit(
+      [
+        {
+          op: 'feature',
+          body: null,
+          feature: { kind: 'import', id: featureId, step: bytes, mode: 'new' },
+        },
+        { op: 'tessellate', shape: { result: 0 } },
+        { op: 'topology', shape: { result: 0 } },
+      ] as const,
+      c.latestGeneration,
+    );
+    if (reply === null || reply.status !== 'done') return { ok: false, message: DROPPED };
+    const [feature, mesh, topology] = reply.results;
+    if (!feature.ok) return { ok: false, message: feature.error.message };
+    const outcome: FeatureOutcome = feature.value;
+    if (!outcome.ok || outcome.shape === null) {
+      const why = outcome.errors.map((e) => e.message).join('; ') || 'nothing was imported';
+      return { ok: false, message: `The STEP file could not be imported: ${why}` };
+    }
+    if (!mesh.ok || !topology.ok) {
+      return {
+        ok: true,
+        shape: outcome.shape,
+        body: { ok: false, message: 'The imported body could not be meshed.' },
+      };
+    }
+    return {
+      ok: true,
+      shape: outcome.shape,
+      body: {
+        ok: true,
+        value: {
+          id: featureId,
+          mesh: mesh.value,
+          names: fillPlaceholderNames(mesh.value, reply.names),
+          topology: topology.value as Topology,
+        },
+      },
+    };
   };
 
   const exchanger: Exchanger = {
@@ -143,37 +219,13 @@ export function kernelExchange(
     async importStep(bytes, featureId, name) {
       const c = client();
       if (c === null) return { ok: false, message: 'The kernel is not running.' };
-      const reply = await c.submit([
-        {
-          op: 'feature',
-          body: null,
-          feature: { kind: 'import', id: featureId, step: bytes, mode: 'new' },
-        },
-        { op: 'tessellate', shape: { result: 0 } },
-        { op: 'topology', shape: { result: 0 } },
-      ] as const);
-      if (reply === null || reply.status !== 'done') return { ok: false, message: DROPPED };
-      const [feature, mesh, topology] = reply.results;
-      if (!feature.ok) return { ok: false, message: feature.error.message };
-      const outcome: FeatureOutcome = feature.value;
-      if (!outcome.ok || outcome.shape === null) {
-        const why = outcome.errors.map((e) => e.message).join('; ') || 'nothing was imported';
-        return { ok: false, message: `The STEP file could not be imported: ${why}` };
-      }
+      const read = await readStep(c, bytes, featureId);
+      if (!read.ok) return read;
       // A re-import under the same id (never in practice) must not leak the old shape.
       const previous = registry.get(featureId);
-      registry.set(featureId, { shape: outcome.shape, name, role: 'reference' });
-      if (previous && previous.shape !== outcome.shape) release([previous.shape]);
-      if (!mesh.ok || !topology.ok) {
-        return { ok: false, message: 'The imported body could not be meshed.' };
-      }
-      const body: BodyInput = {
-        id: featureId,
-        mesh: mesh.value,
-        names: fillPlaceholderNames(mesh.value, reply.names),
-        topology: topology.value as Topology,
-      };
-      return { ok: true, value: body };
+      registry.set(featureId, { shape: read.shape, name, role: 'reference' });
+      if (previous && previous.shape !== read.shape) release([previous.shape]);
+      return read.body;
     },
 
     retain(ids) {
@@ -187,6 +239,27 @@ export function kernelExchange(
       }
       if (shapes.length > 0) release(shapes);
       return dropped;
+    },
+
+    async reimport(files) {
+      const rebuilt: string[] = [];
+      for (const [id, bytes] of files) {
+        const c = client();
+        if (c === null) break;
+        if (registry.get(id)?.role !== 'reference') continue;
+        const read = await readStep(c, bytes, id);
+        if (!read.ok) continue;
+        // Pruned while it was read (its import can no longer come back): not wanted any more.
+        const entry = registry.get(id);
+        if (entry?.role !== 'reference') {
+          release([read.shape]);
+          continue;
+        }
+        // The old shape died with the instance; nothing to release.
+        registry.set(id, { ...entry, shape: read.shape });
+        rebuilt.push(id);
+      }
+      return rebuilt;
     },
   };
 
@@ -207,5 +280,27 @@ export function kernelExchange(
     },
   };
 
-  return { exchanger, measurer };
+  const referencer: Referencer = {
+    async reference(bodyId, kind, index) {
+      const c = client();
+      const entry = registry.get(bodyId);
+      if (c === null || !entry || entry.role !== 'part') {
+        return { ok: false, message: 'Only faces and edges of the part can be referenced.' };
+      }
+      // At the current generation: picking never cancels an edit in flight.
+      const reply = await c.submit(
+        [{ op: 'pick', shape: entry.shape, kind, index }] as const,
+        c.latestGeneration,
+      );
+      if (reply === null || reply.status !== 'done') return { ok: false, message: DROPPED };
+      const [r] = reply.results;
+      if (!r.ok) return { ok: false, message: r.error.message };
+      if (r.value.ref === null) {
+        return { ok: false, message: `That ${kind} has no stable name to refer to.` };
+      }
+      return { ok: true, value: r.value.ref };
+    },
+  };
+
+  return { exchanger, measurer, referencer };
 }

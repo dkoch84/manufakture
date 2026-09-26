@@ -74,6 +74,38 @@ describe('a sketch session on the real solver', () => {
     expect(t.s().canUndo).toBe(true);
   });
 
+  it('takes the same text typed under other angle units as a new value', async () => {
+    const t = await started(service, {
+      units: { length: { unit: 'mm' }, angle: { unit: 'rad' } },
+      entities: [
+        { id: 'e1', kind: 'line', construction: false, start: [0, 0], end: [10, 0] },
+        { id: 'e2', kind: 'line', construction: false, start: [0, 0], end: [8, 6] },
+      ],
+      constraints: [
+        {
+          id: 'k1',
+          kind: 'angle',
+          a: 'e1',
+          b: 'e2',
+          value: { source: '0.5', lengthUnit: 'mm', angleUnit: 'deg' },
+        },
+      ],
+      nextEntity: 3,
+      nextConstraint: 2,
+    });
+    expect(t.s().canUndo).toBe(false);
+    // `0.5` meant degrees; typed again under radians it means half a radian.
+    expect(t.s().setDimensionValue('k1', '0.5').ok).toBe(true);
+    await t.s().idle();
+    expect(t.s().sketch.constraints[0]).toMatchObject({
+      value: { source: '0.5', angleUnit: 'rad' },
+    });
+    expect(t.s().canUndo).toBe(true);
+    const direction = (l: LineEntity) => Math.atan2(l.end[1] - l.start[1], l.end[0] - l.start[0]);
+    const [e1, e2] = lines(t.s().sketch);
+    expect(direction(e2!) - direction(e1!)).toBeCloseTo(0.5, 6);
+  });
+
   it('places a dimension at its measured value and takes the typed value as the same step', async () => {
     const t = await started();
     await t.rectangle([0, 0], [40, 25]);

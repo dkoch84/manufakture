@@ -1,11 +1,19 @@
 // Where a new sketch can go: one of the three datum planes, or a planar face
 // picked in the viewport. A face is found from its name through the body's
 // name table and its plane from the kernel topology (centroid and outward
-// normal). The sketch stores the plane itself, not a face reference: face
-// names are viewport placeholders until the naming layer (#931) fills them,
-// and a placeholder must never be stored in a document.
+// normal).
+//
+// A face named by the naming layer (a regenerated part) is stored as a
+// reference, so the sketch follows the face; its placement is the frame regen
+// solves such a sketch in (`frameOnPlane`: the world origin projected onto
+// the plane, x along world X projected), so what is drawn is where regen puts
+// it. A viewport placeholder name must never be stored, so on a body without
+// names (the kernel-free test scenes) the sketch stores the plane itself,
+// centred on the face.
 
-import { XY_PLANE, XZ_PLANE, YZ_PLANE, placementFromNormal } from '@manufakture/sketch';
+import type { FaceRef } from '@manufakture/core';
+import { frameOnPlane } from '@manufakture/kernel';
+import { XY_PLANE, XZ_PLANE, YZ_PLANE, placementFromNormal } from '@manufakture/sketch/geometry';
 import type { SketchPlacement, Vec2, Vec3 } from '@manufakture/sketch/model';
 import type { GeometryRef } from '../state/selection';
 import type { BodyInput } from '../viewport/bodies';
@@ -21,6 +29,32 @@ export const DATUM_PLANES: readonly {
   { id: 'XZ', label: 'Front (XZ)', placement: XZ_PLANE },
   { id: 'YZ', label: 'Right (YZ)', placement: YZ_PLANE },
 ];
+
+/** A new sketch's plane on a face: where it goes, and the face to store when it has a real name. */
+export interface FaceTarget {
+  placement: SketchPlacement;
+  face: FaceRef | null;
+}
+
+/**
+ * Where a sketch on a planar face goes, or null when the face is not planar or unknown. Only a
+ * face of a regenerated part body (`partBodies`, by body id) can be referenced: the names of
+ * other bodies (reference imports, test scenes) mean nothing to regen.
+ */
+export function faceTarget(
+  bodies: readonly BodyInput[],
+  face: GeometryRef,
+  partBodies: ReadonlySet<string> = new Set(),
+): FaceTarget | null {
+  const placement = facePlacement(bodies, face);
+  if (!placement) return null;
+  if (face.placeholder || !partBodies.has(face.bodyId)) return { placement, face: null };
+  const frame = frameOnPlane(placement.origin, placement.normal);
+  return {
+    placement: { origin: frame.origin, normal: frame.normal, xDir: frame.xDir },
+    face: { face: face.name },
+  };
+}
 
 /** The sketch placement on a planar face, or null when the face is not planar or unknown. */
 export function facePlacement(

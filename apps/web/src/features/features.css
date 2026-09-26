@@ -1,0 +1,151 @@
+/* The row of part tools under the header. */
+.feature-bar {
+  display: flex;
+  padding: 0.25rem 0.75rem;
+  border-bottom: 1px solid #d6dce3;
+  background: #fff;
+  font-size: 0.85rem;
+}
+
+.feature-bar button {
+  font: inherit;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid #c2cad3;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.feature-bar button:disabled {
+  color: #8a94a1;
+  cursor: default;
+}
+
+.feature-toolbar button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+/* The dialog itself takes focus on open (so Escape works at once); its fields show focus. */
+.feature-dialog:focus {
+  outline: none;
+}
+
+.feature-dialog form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.dialog-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.dialog-field label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.dialog-field input[type='text'],
+.dialog-field select {
+  font: inherit;
+  padding: 0.15rem 0.3rem;
+}
+
+.dialog-field input[aria-invalid='true'],
+.dialog-field select[aria-invalid='true'] {
+  border-color: #c7402d;
+  outline-color: #c7402d;
+}
+
+.dialog-field legend {
+  padding: 0;
+  margin-bottom: 0.15rem;
+}
+
+.field-preview,
+.field-note {
+  color: #5b6673;
+  font-size: 0.78rem;
+  margin: 0;
+}
+
+.field-error {
+  color: #b3261e;
+  font-size: 0.78rem;
+  margin: 0;
+}
+
+.dialog-check {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.ref-field {
+  padding: 0.35rem;
+  border: 1px solid #d6dce3;
+  border-radius: 4px;
+}
+
+.ref-field.active {
+  border-color: #2f6fe4;
+  background: #f3f7ff;
+}
+
+.ref-field > button {
+  font: inherit;
+  font-size: 0.78rem;
+  text-align: left;
+}
+
+.ref-field ul {
+  list-style: none;
+  margin: 0.25rem 0 0;
+  padding: 0;
+}
+
+.ref-field li {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.78rem;
+}
+
+.ref-field li span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ref-field li.lost span {
+  color: #b3261e;
+}
+
+.ref-field li button {
+  font: inherit;
+  font-size: 0.72rem;
+}
+
+.dialog-buttons {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+.dialog-buttons .primary {
+  background: #2f6fe4;
+  border: 1px solid #2f6fe4;
+  color: #fff;
+  border-radius: 4px;
+  padding: 0.2rem 0.9rem;
+}

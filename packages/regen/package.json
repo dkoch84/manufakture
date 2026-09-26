@@ -5,7 +5,9 @@
   "type": "module",
   "license": "GPL-3.0-or-later",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./client": "./src/client.ts",
+    "./worker": "./src/worker.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
@@ -15,6 +17,8 @@
     "@manufakture/core": "workspace:*",
     "@manufakture/kernel": "workspace:*",
     "@manufakture/sketch": "workspace:*",
-    "@manufakture/units": "workspace:*"
+    "@manufakture/units": "workspace:*",
+    "comlink": "^4.4.2",
+    "libcascade": "3.0.2"
   }
 }

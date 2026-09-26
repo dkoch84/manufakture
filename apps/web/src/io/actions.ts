@@ -6,7 +6,6 @@ import {
   MAX_IMPORT_BYTES,
   findPart,
   previewIds,
-  type Command,
   type ImportFeature,
   type ManufaktureDocument,
 } from '@manufakture/core';
@@ -17,6 +16,7 @@ import {
   export3mf,
   exportStl,
   fileName,
+  fromBase64,
   importSource,
   parseStl,
   sniffFormat,
@@ -170,31 +170,25 @@ export async function importFile(
   };
 }
 
-/** Collect the ids of every import feature inside `value` (a command, a feature list). */
-function collectImportIds(value: unknown, out: Set<string>, depth = 0): void {
-  // Commands nest a few levels (batch, feature, sketch entities); strings are skipped,
-  // so a stored file is never scanned.
-  if (depth > 32 || value === null || typeof value !== 'object') return;
-  if (Array.isArray(value)) {
-    for (const v of value) collectImportIds(v, out, depth + 1);
-    return;
+/**
+ * Read the STEP reference bodies of `features` into the kernel again, from the files the
+ * features store, after the kernel lost every shape (a recycle or a restart). STL references
+ * are meshes the kernel never held, so they are left alone. Returns the ids rebuilt.
+ */
+export function reimportSteps(
+  exchanger: Exchanger,
+  features: readonly ImportFeature[],
+): Promise<string[]> {
+  const files = new Map<string, Uint8Array>();
+  for (const f of features) {
+    if (f.source.format !== 'step') continue;
+    try {
+      files.set(f.id, fromBase64(f.source.data));
+    } catch {
+      // A document that validated holds base64; skip anything else rather than fail the rest.
+    }
   }
-  const o = value as Record<string, unknown>;
-  if (o.kind === 'import' && typeof o.id === 'string') out.add(o.id);
-  for (const v of Object.values(o)) collectImportIds(v, out, depth + 1);
+  return files.size === 0 ? Promise.resolve([]) : exchanger.reimport(files);
 }
 
-/**
- * The import features that are in the document or that undo or redo can
- * bring back: the ones whose reference bodies must be kept. A body whose
- * import is in neither can be dropped for good (its kernel shape released).
- */
-export function restorableImportIds(
-  document: ManufaktureDocument,
-  history: readonly { command: Command }[],
-): Set<string> {
-  const ids = new Set<string>();
-  for (const part of document.parts) collectImportIds(part.features, ids);
-  for (const entry of history) collectImportIds(entry.command, ids);
-  return ids;
-}
+export { restorableImportIds } from './restorable';

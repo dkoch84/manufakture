@@ -67,4 +67,9 @@ export {
 export { mapFailure, mapKernelError, mapKernelWarning, mapOutcome } from './errors';
 export { hashString, hashValue, stableStringify } from './hash';
 export { regenTransferables } from './transfer';
+export {
+  createRegenWorkerApi,
+  type RegenWorkerApi,
+  type RegenWorkerApiOptions,
+} from './worker-api';
 export type * from './types';

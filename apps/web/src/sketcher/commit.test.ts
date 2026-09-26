@@ -1,7 +1,8 @@
 import { createDocument, DocumentStore, type ManufaktureDocument } from '@manufakture/core';
-import { XZ_PLANE } from '@manufakture/sketch';
+import { XZ_PLANE } from '@manufakture/sketch/geometry';
 import type { SketchInput } from '@manufakture/sketch/model';
 import { describe, expect, it } from 'vitest';
+import { demoDocument } from '../model/demo';
 import { commitSketch, sketchFeatures, startSketch } from './commit';
 
 const RECT: SketchInput = {
@@ -134,6 +135,40 @@ describe('committing a sketch', () => {
     expect(sketchFeatures(s.document)[0]!.entities).toHaveLength(3);
     s.undo();
     expect(sketchFeatures(s.document)[0]!.entities).toHaveLength(2);
+  });
+
+  it('stores a sketch on a named face as a reference, and edits it where regen placed it', () => {
+    const s = store(demoDocument());
+    const top = { origin: [0, 0, 20], normal: [0, 0, 1], xDir: [1, 0, 0] } as const;
+    const start = startSketch(s.document, {
+      kind: 'new',
+      placement: top,
+      face: { face: 'extrude#1:cap:end' },
+    });
+    if (!start.ok) throw new Error(start.message);
+    const circle: SketchInput = {
+      entities: [{ id: 'e6', kind: 'circle', construction: false, center: [0, 0], radius: 5 }],
+      constraints: [],
+    };
+    const c = commitSketch(s.document, start.value.partId, start.value.source, circle)!;
+    expect(s.execute(c.command, c.label).ok).toBe(true);
+    const sketch = sketchFeatures(s.document).at(-1)!;
+    // The demo's fillet holds r1 to r12.
+    expect(sketch.plane).toEqual({
+      type: 'face',
+      face: { id: 'r13', ref: { face: 'extrude#1:cap:end' } },
+    });
+    // Until regen has placed it, it cannot be opened; then it opens on that placement.
+    expect(startSketch(s.document, { kind: 'edit', featureId: sketch.id })).toMatchObject({
+      ok: false,
+    });
+    const placed = startSketch(
+      s.document,
+      { kind: 'edit', featureId: sketch.id },
+      undefined,
+      new Map([[sketch.id, top]]),
+    );
+    expect(placed.ok && placed.value.source.placement).toEqual(top);
   });
 
   it('is refused by the document when an id was handed out before', () => {

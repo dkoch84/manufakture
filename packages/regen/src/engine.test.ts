@@ -5,6 +5,7 @@
 import { createHash } from 'node:crypto';
 import type {
   Command,
+  ExtrudeFeature,
   ImportFeature,
   ImportSource,
   ManufaktureDocument,
@@ -223,6 +224,12 @@ class FakeKernel implements RegenKernel {
         if (body !== null && typeof body === 'object') return body.fail;
         const mesh = { faceNames: new Uint32Array(0) } as unknown as MeshData;
         return { ok: true, op: 'tessellate', value: mesh, ms: 0 };
+      }
+      case 'topology': {
+        const body = this.#shape(op.shape, results);
+        if (body !== null && typeof body === 'object') return body.fail;
+        const topology = { faces: [], edges: [], vertices: [] };
+        return { ok: true, op: 'topology', value: topology, ms: 0 };
       }
       default:
         throw new Error(`fake kernel: no ${op.op}`);
@@ -722,6 +729,52 @@ describe('cancellation and recycling', () => {
     expect(again.parts[0]!.features[2]).toMatchObject({ status: 'ok', errors: [], cached: true });
   });
 
+  it('rebuilds a part served from the cache when a recycle lands during another part', async () => {
+    const { kernel, engine } = setup();
+    const one = block();
+    const doc: ManufaktureDocument = {
+      ...one,
+      parts: [one.parts[0]!, { ...one.parts[0]!, id: 'part#2', name: 'Part 2' }],
+    };
+    const first = await regen(engine, doc);
+    const shapeOfA = first.parts[0]!.shape!;
+    // Part 2's first kernel feature changes: its batch uses no cached shape, so only the
+    // check after the part loop can see that part 1's cached body died with the recycle.
+    const extrude2 = doc.parts[1]!.features[1]! as ExtrudeFeature;
+    const edited = apply(doc, {
+      type: 'editFeature',
+      partId: 'part#2',
+      feature: { ...extrude2, extent: { type: 'blind', distance: mm('25') } },
+    });
+    let recycled = false;
+    kernel.onRun = () => {
+      if (recycled) return;
+      recycled = true;
+      kernel.recycle();
+    };
+    const result = await regen(engine, edited);
+    expect(engine.stats.retries).toBe(1);
+    expect(kernel.live.has(shapeOfA)).toBe(false);
+    for (const p of result.parts) expect(kernel.live.has(p.shape!)).toBe(true);
+    expect(result.parts.map((p) => statuses({ parts: [p] }))).toEqual([
+      { 'sketch#1': 'ok', 'extrude#1': 'ok', 'fillet#1': 'ok' },
+      { 'sketch#1': 'ok', 'extrude#1': 'ok', 'fillet#1': 'ok' },
+    ]);
+  });
+
+  it('sends the topology of a changed body with its mesh, and neither when it is unchanged', async () => {
+    const { engine } = setup();
+    const doc = block();
+    const first = await regen(engine, doc);
+    expect(first.parts[0]!.mesh).not.toBeNull();
+    expect(first.parts[0]!.topology).toEqual({ faces: [], edges: [], vertices: [] });
+    const renamed = await regen(
+      engine,
+      apply(doc, { type: 'renameFeature', partId: PART, featureId: 'fillet#1', name: 'Round' }),
+    );
+    expect(renamed.parts[0]).toMatchObject({ meshChanged: false, mesh: null, topology: null });
+  });
+
   it('never caches the pass-through of a body the kernel no longer has, whatever the instance says', async () => {
     const cache = new MemoryCache();
     const kernel = new FakeKernel();
@@ -772,7 +825,13 @@ describe('sketches on faces', () => {
     expect(kernel.inputs.get('extrude#2')).toMatchObject({
       profile: { frame: { origin: [0, 0, 20], normal: [0, 0, 1], xDir: [1, 0, 0] } },
     });
-    expect(result.counters.otherOps).toBe(2); // resolve, tessellate
+    expect(result.counters.otherOps).toBe(3); // resolve, tessellate, topology
+    // The result carries the plane the sketch was solved on.
+    expect(result.parts[0]!.features[3]!.placement).toEqual({
+      origin: [0, 0, 20],
+      normal: [0, 0, 1],
+      xDir: [1, 0, 0],
+    });
     // A change to the fillet changes the body the sketch sits on: it is solved again.
     await regen(engine, apply(doc, setVariable('radius', '4mm')));
     expect(solver.solves).toBe(3);

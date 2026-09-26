@@ -10,7 +10,8 @@ import { expect, test, type Page } from '@playwright/test';
 import { openScene } from './helpers';
 
 // Export and import on the demo part (a 60 x 40 x 20 mm block, every edge
-// filleted at 3 mm, a through hole of radius 8), with the real kernel worker.
+// filleted at 3 mm, a through hole of radius 8), regenerated from the demo
+// document by the real regen worker.
 // Downloads are captured and checked with @manufakture/io: STL watertight
 // with the part's volume, 3MF structurally valid in millimetres, STEP named;
 // the exported STEP and STL are then imported back through the file picker.
@@ -54,7 +55,7 @@ async function importFile(page: Page, name: string, bytes: Uint8Array, mimeType:
 
 test.describe('export and import', () => {
   test.beforeEach(async ({ page }) => {
-    await openScene(page, '', 90_000);
+    await openScene(page, '?scene=demo', 90_000);
   });
 
   test('STL and 3MF of the demo part are watertight, in millimetres, with its volume', async ({
@@ -94,12 +95,12 @@ test.describe('export and import', () => {
       { timeout: 30_000 },
     );
     const info = await page.evaluate(() => window.__manufakture!.viewport.info());
-    expect(info.bodies.map((b) => b.id)).toEqual(['demo-part', 'import#1']);
+    expect(info.bodies.map((b) => b.id)).toEqual(['part#1', 'import#1']);
     expect(info.bodies[1]!.faces).toBe(info.bodies[0]!.faces);
 
     // The document holds the import feature with the file.
-    const feature = await page.evaluate(
-      () => window.__manufakture!.document.getState().document.parts[0]!.features[0]!,
+    const feature = await page.evaluate(() =>
+      window.__manufakture!.document.getState().document.parts[0]!.features.at(-1)!,
     );
     expect(feature).toMatchObject({
       id: 'import#1',
@@ -141,7 +142,7 @@ test.describe('export and import', () => {
       .poll(() =>
         page.evaluate(() => window.__manufakture!.viewport.info().bodies.map((b) => b.id)),
       )
-      .toEqual(['demo-part']);
+      .toEqual(['part#1']);
     await onlyThePart();
   });
 
@@ -152,11 +153,11 @@ test.describe('export and import', () => {
       'Imported part.stl as part (STL mesh, a reference body).',
     );
     const info = await page.evaluate(() => window.__manufakture!.viewport.info());
-    expect(info.bodies.map((b) => b.id)).toEqual(['demo-part', 'import#1']);
+    expect(info.bodies.map((b) => b.id)).toEqual(['part#1', 'import#1']);
     expect(info.bodies[1]!.faces).toBe(1);
     expect(info.bodies[1]!.edges).toBe(0);
-    const feature = await page.evaluate(
-      () => window.__manufakture!.document.getState().document.parts[0]!.features[0]!,
+    const feature = await page.evaluate(() =>
+      window.__manufakture!.document.getState().document.parts[0]!.features.at(-1)!,
     );
     expect(feature).toMatchObject({ kind: 'import', source: { format: 'stl' } });
   });

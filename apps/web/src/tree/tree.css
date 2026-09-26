@@ -1,0 +1,261 @@
+.feature-tree {
+  position: relative;
+  width: 15rem;
+  flex: none;
+  padding: 0.5rem 0.5rem;
+  border-right: 1px solid #d6dce3;
+  background: #fff;
+  font-size: 0.85rem;
+  overflow: auto;
+}
+
+.feature-tree h2 {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  margin: 0.25rem 0.25rem 0.5rem;
+}
+
+.regen-pending {
+  font-weight: normal;
+  font-size: 0.75rem;
+  color: #5b6673;
+}
+
+.tree-empty {
+  margin: 0.25rem;
+  color: #5b6673;
+}
+
+.feature-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  user-select: none;
+}
+
+.feature-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.3rem;
+  border-radius: 4px;
+  cursor: default;
+  outline: none;
+}
+
+.feature-row:hover,
+.feature-row:focus-visible {
+  background: #eef3fb;
+}
+
+.feature-row.selected {
+  background: #dbe7ff;
+}
+
+.feature-row.dragged {
+  opacity: 0.5;
+}
+
+.feature-row.drop-before::before,
+.feature-row.drop-after::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #2f6fe4;
+}
+
+.feature-row.drop-before::before {
+  top: -1px;
+}
+
+.feature-row.drop-after::after {
+  bottom: -1px;
+}
+
+.feature-row.refused::before,
+.feature-row.refused::after {
+  background: #c7402d;
+}
+
+.feature-row .kind {
+  display: inline-flex;
+  color: #3a4452;
+}
+
+.feature-row .name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.feature-row .rename {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+}
+
+.feature-row.status-suppressed .name,
+.feature-row.status-rolled-back .name {
+  color: #8a94a1;
+}
+
+.feature-row.status-suppressed .name {
+  text-decoration: line-through;
+}
+
+.feature-row.status-error .name,
+.feature-row.status-upstream-error .name {
+  color: #b3261e;
+}
+
+.feature-row button.status {
+  display: inline-flex;
+  padding: 0.1rem;
+  border: 0;
+  background: none;
+  cursor: help;
+}
+
+.feature-row.status-ok .status {
+  color: #2e7d4f;
+}
+
+.feature-row.status-warning .status {
+  color: #b7791f;
+}
+
+.feature-row.status-error .status,
+.feature-row.status-upstream-error .status {
+  color: #b3261e;
+}
+
+.feature-row.status-suppressed .status,
+.feature-row.status-rolled-back .status,
+.feature-row.status-pending .status {
+  color: #8a94a1;
+}
+
+.feature-row.stale .status {
+  opacity: 0.45;
+}
+
+/* Over the end of the name, so a long name keeps its room until the row is hovered. */
+.row-actions {
+  position: absolute;
+  top: 50%;
+  right: 1.6rem;
+  transform: translateY(-50%);
+  display: none;
+  gap: 0.15rem;
+  padding-left: 0.3rem;
+  background: #eef3fb;
+}
+
+.feature-row.selected .row-actions {
+  background: #dbe7ff;
+}
+
+.feature-row:hover .row-actions,
+.feature-row:focus-within .row-actions,
+.feature-row.selected .row-actions {
+  display: inline-flex;
+}
+
+.row-actions button {
+  display: inline-flex;
+  padding: 0.05rem;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: none;
+  color: #3a4452;
+  cursor: pointer;
+}
+
+.row-actions button:hover,
+.row-actions button:focus-visible {
+  border-color: #c2cad3;
+  background: #fff;
+}
+
+.row-actions button:disabled {
+  color: #b0b8c2;
+  cursor: default;
+}
+
+.feature-tip {
+  position: absolute;
+  z-index: 5;
+  top: 100%;
+  left: 1.5rem;
+  right: 0;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid #c2cad3;
+  border-radius: 4px;
+  background: #fff;
+  box-shadow: 0 2px 6px rgb(0 0 0 / 15%);
+  font-size: 0.8rem;
+  user-select: text;
+}
+
+.feature-tip p {
+  margin: 0 0 0.3rem;
+}
+
+.feature-tip .tip-status {
+  font-weight: 600;
+}
+
+.feature-tip .tip-error {
+  color: #b3261e;
+}
+
+.feature-tip .tip-warning {
+  color: #8a5a00;
+}
+
+.rollback-bar {
+  height: 4px;
+  margin: 3px 0.2rem;
+  border-radius: 2px;
+  background: #2f6fe4;
+  cursor: ns-resize;
+  outline: none;
+}
+
+.rollback-bar:focus-visible,
+.rollback-bar.dragging {
+  box-shadow: 0 0 0 2px #a9c4f5;
+}
+
+.tree-message,
+.tree-hint {
+  margin: 0.5rem 0.25rem;
+  font-size: 0.8rem;
+}
+
+.tree-message {
+  color: #b3261e;
+}
+
+.tree-hint.refused {
+  color: #b3261e;
+}
+
+.tree-confirm {
+  margin: 0.5rem 0.25rem;
+  padding: 0.5rem;
+  border: 1px solid #e0875e;
+  border-radius: 4px;
+  background: #fff4f2;
+}
+
+.tree-confirm p {
+  margin: 0 0 0.4rem;
+}

@@ -10,14 +10,18 @@ Units are millimetres and radians throughout ([ADR 0005](../../docs/adr/0005-uni
 
 ## Entry points
 
-| Import                       | What                                                                          |
-| ---------------------------- | ----------------------------------------------------------------------------- |
-| `@manufakture/sketch/model`  | The data model only: types and pure helpers, no solver code at runtime        |
-| `@manufakture/sketch`        | Everything: model, validation, placement, splitting, regions, solver, service |
-| `@manufakture/sketch/worker` | The solver worker entry (see [Worker](#worker))                               |
+| Import                         | What                                                                                                       |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| `@manufakture/sketch/model`    | The data model only: types and pure helpers, no solver code at runtime                                     |
+| `@manufakture/sketch/geometry` | Everything but the solver: model, ids, splitting, placement, regions, fills, validation; loads no planegcs |
+| `@manufakture/sketch/rpc`      | `connectSolver` / `serveSolver`, the worker protocol, without the solver                                   |
+| `@manufakture/sketch`          | Everything: the above plus the solver and its service                                                      |
+| `@manufakture/sketch/worker`   | The solver worker entry (see [Worker](#worker))                                                            |
 
 `packages/core` stores sketches with the types from `/model`; a test checks that `model.ts` only
-has type imports, so holding a sketch never loads planegcs.
+has type imports, so holding a sketch never loads planegcs. The app imports `/geometry` and `/rpc`,
+which keeps planegcs's Emscripten glue out of its main bundle (it loads in the solver worker and
+the regen worker only); `geometry.test.ts` walks their runtime imports to keep it so.
 
 ## Data model
 

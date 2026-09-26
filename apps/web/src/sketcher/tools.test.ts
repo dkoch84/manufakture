@@ -287,3 +287,22 @@ describe('tool state', () => {
     expect(toolPrompt(s)).toBe('Click the end of the arc.');
   });
 });
+
+describe('the point tool', () => {
+  it('places a point per click, joined to what it snapped to, and stays in the tool', () => {
+    const r = run(initialDrawState('point'), [free([3, 4]), onPoint([0, 0], '@origin')]);
+    expect(r.drafts).toEqual([
+      {
+        entities: [{ id: '$0', kind: 'point', construction: false, position: [3, 4] }],
+        constraints: [],
+      },
+      {
+        entities: [{ id: '$0', kind: 'point', construction: false, position: [0, 0] }],
+        constraints: [{ kind: 'coincident', a: { entity: '@origin' }, b: { entity: '$0' } }],
+      },
+    ]);
+    expect(isIdle(r.state)).toBe(true);
+    expect(toolPrompt(r.state)).toContain('point');
+    expect(toolClick(r.state, free([1, 1]), ctx(), true).draft).toBeUndefined();
+  });
+});

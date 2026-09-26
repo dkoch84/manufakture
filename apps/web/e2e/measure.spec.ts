@@ -18,7 +18,7 @@ const value = (page: Page, key: string) => page.getByTestId(`measure-value-${key
 
 test.describe('measuring the demo part', () => {
   test.beforeEach(async ({ page }) => {
-    await openScene(page, '', 90_000);
+    await openScene(page, '?scene=demo', 90_000);
   });
 
   test('a face shows its area, and the body its volume', async ({ page }) => {

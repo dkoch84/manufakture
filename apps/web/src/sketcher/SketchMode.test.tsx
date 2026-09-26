@@ -1,5 +1,5 @@
 import { DEFAULT_UNITS } from '@manufakture/core';
-import { XY_PLANE } from '@manufakture/sketch';
+import { XY_PLANE } from '@manufakture/sketch/geometry';
 import type { SketchConstraint, SketchEntity } from '@manufakture/sketch/model';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
@@ -111,6 +111,43 @@ describe('the sketch overlay', () => {
     const k3 = s.getState().sketch.constraints.find((c) => c.id === 'k3')!;
     expect(k3).toMatchObject({ value: { source: '1/2"', lengthUnit: 'mm' } });
     expect(screen.getByTestId('dimension-k3').textContent).toBe('1/2" = 12.70 mm');
+  });
+
+  it('names glyphs and dimension labels for assistive technology', async () => {
+    const { s } = await session({ conflicting: ['k2'] });
+    renderCanvas(s);
+    expect(screen.getByRole('button', { name: 'Horizontal constraint k1' })).toBeDefined();
+    expect(screen.getByRole('button', { name: 'Vertical constraint k2, conflicting' })).toBe(
+      screen.getByTestId('constraint-k2'),
+    );
+    expect(screen.getByRole('button', { name: 'Distance dimension 10.00 mm' })).toBe(
+      screen.getByTestId('dimension-k3'),
+    );
+  });
+
+  it('gives the keyboard back to the 3D view when the dimension box closes', async () => {
+    const { s } = await session();
+    const vp = fakeViewport();
+    render(
+      <div className="viewport">
+        <canvas data-testid="canvas" tabIndex={0} />
+        <SketchCanvas session={s} viewport={vp.api} size={{ width: 400, height: 400 }} />
+      </div>,
+    );
+    fireEvent.doubleClick(screen.getByTestId('dimension-k3'));
+    const input = screen.getByTestId('dimension-input');
+    input.focus();
+    fireEvent.change(input, { target: { value: '12' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await act(() => s.getState().idle());
+    expect(screen.queryByTestId('dimension-input')).toBeNull();
+    expect(document.activeElement).toBe(screen.getByTestId('canvas'));
+    // Esc too.
+    screen.getByTestId('canvas').blur();
+    fireEvent.doubleClick(screen.getByTestId('dimension-k3'));
+    screen.getByTestId('dimension-input').focus();
+    fireEvent.keyDown(screen.getByTestId('dimension-input'), { key: 'Escape' });
+    expect(document.activeElement).toBe(screen.getByTestId('canvas'));
   });
 
   it('closes the editor on Esc without changing the value', async () => {

@@ -60,7 +60,7 @@ test.describe('the sketcher', () => {
     const [sketch] = await features(page);
     expect(sketch).toMatchObject({ id: 'sketch#1', kind: 'sketch', name: 'Sketch 1' });
     expect(sketch!.entities).toHaveLength(4);
-    await expect(page.getByTestId('sketch-list')).toContainText('Sketch 1');
+    await expect(page.getByTestId('feature-tree')).toContainText('Sketch 1');
   });
 
   test('a dimension accepts an expression with units and variables', async ({ page }) => {
@@ -114,7 +114,7 @@ test.describe('the sketcher', () => {
     // Make the (vertical, 25 mm) right side horizontal as well.
     await tool(page, 'Select');
     await clickSketch(page, [40, 8]);
-    await page.getByRole('button', { name: /Horizontal/ }).click();
+    await page.getByRole('button', { name: 'Horizontal', exact: true }).click();
     await sketchIdle(page);
 
     const panel = page.getByTestId('conflict-panel');
@@ -148,17 +148,17 @@ test.describe('the sketcher', () => {
     await newSketch(page, 'Top (XY)');
     await rectangle(page, [0, 0], [40, 25]);
     await page.getByRole('button', { name: 'Finish sketch' }).click();
-    await expect(page.getByTestId('sketch-list')).toContainText('Sketch 1');
+    await expect(page.getByTestId('feature-tree')).toContainText('Sketch 1');
     await expect(page.getByTestId('committed-sketches').locator('path')).toHaveCount(4);
 
     await page.keyboard.press('Control+z');
     expect(await features(page)).toEqual([]);
-    await expect(page.getByTestId('sketch-list')).toBeHidden();
+    await expect(page.getByTestId('feature-tree')).not.toContainText('Sketch 1');
     await page.keyboard.press('Control+y');
     expect((await features(page)).map((f) => f.id)).toEqual(['sketch#1']);
 
     // Edit it again: add a circle, finish, and undo only that edit.
-    await page.getByRole('button', { name: 'Edit Sketch 1' }).click();
+    await page.getByTestId('feature-sketch#1').dblclick();
     await expect(page.getByTestId('sketch-name')).toHaveText('Sketch 1');
     await settle(page);
     await sketchIdle(page);

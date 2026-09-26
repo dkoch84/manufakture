@@ -47,17 +47,26 @@ The engine depends only on the `RegenKernel` interface (`run`, `release`, `cance
 `onRecycle` and `stats`), which `KernelService` satisfies as it is, so Node tests drive the real
 service (`@manufakture/kernel/node`) and the real solver directly.
 
-Not wired yet, and outside this package's footprint:
+### The worker
 
-- **A worker entry that hosts the engine.** `packages/kernel/src/worker.ts` exposes only the
-  kernel API. Hosting regen needs an entry that builds `createKernelWorkerApi`, waits for its
-  `service`, creates the engine and exposes `{ ...kernelApi, regen }` through Comlink, marking
-  mesh buffers with `regenTransferables(result)`. Either regen gets that entry (it then needs
-  `comlink` as a dependency and the kernel's `.wasm?url` import), or the kernel's worker API takes
-  an extension hook.
-- **The solver port** (ADR 0007 decision 2): a `MessageChannel` port handed to the kernel worker,
-  on which `connectSolver(port)` gives the engine its `SketchSolverApi`. Until then a host can pass
-  any object with `solve`.
+| Import                      | Where        | What                                                                                           |
+| --------------------------- | ------------ | ---------------------------------------------------------------------------------------------- |
+| `@manufakture/regen`        | worker, Node | the engine, graph, translation, cache, `createRegenWorkerApi`                                  |
+| `@manufakture/regen/worker` | worker entry | `Comlink.expose` of the regen worker API, with the kernel's `.wasm` imported as a `?url` asset |
+| `@manufakture/regen/client` | main thread  | `spawnRegenWorker()`, `RegenClient`                                                            |
+
+`createRegenWorkerApi` (`src/worker-api.ts`) builds the kernel's worker API (`createKernelWorkerApi`: loading with progress, batches, release, cancel, recycle, stats), waits for its service, creates the engine next to it and adds `regen(document, { generation })` and `regenStats()`. Mesh buffers are marked with `regenTransferables(result)`; nothing else heavy crosses. `RegenClient` extends the kernel's `KernelClient` (imported from `@manufakture/kernel/kernel-client`, so the kernel's own worker entry is not bundled), so every request of every kind (a regen, a `pick`, a `measure`, an export) takes its generation from the one sequence the client keeps. The service cancels by generation whoever sent a batch (see Cancellation), so a regen cancels older requests, and a pick or measure sent at the client's current generation never cancels a regen. Only a regen may take a new generation: any other batch that did (a STEP import, say) would cancel the regen in flight, which then resolves to null with nothing reporting in its place, so the app sends every other batch at `latestGeneration` and releases shapes with `KernelClient.release`, outside the batch queue. The app's `startRegen` also asks again when its newest regen comes back null. A pending regen resolves to null when the worker is restarted or terminated, like a pending submit. `RegenClient.regen` returns every regen the worker completed, even when a newer request came meanwhile: the engine reports a changed mesh once, to the regen that built it, so a caller that dropped completed results would lose meshes.
+
+After a recycle every body is gone. The engine only forgets (its hook runs inside the service's queue, where nothing may be submitted); the main thread hears of it through the kernel's `recycled` status and asks for a regen of its current document (apps/web `kernelLoader`). A worker restart is handled the same way, through the client's `onRestarted` option. Imported STEP reference bodies are not part of a regen, so the app reads them again from the files their import features store.
+
+**Decision: the sketch solver runs in the regen worker, in-process**, as a `SolverService` loading planegcs on the first sketch solve, instead of on a `MessageChannel` port to the solver worker (ADR 0007 decision 2, amended there):
+
+- the engine awaits every solve before its next kernel op, so a solver in another worker buys no parallelism, only a round trip per sketch;
+- the solver worker is the sketcher's, started lazily on the first sketch and disposed with the app; a regen of an opened document would otherwise have to start it and couple its lifetime to the kernel's;
+- regen solves are stateless (a fresh system per solve), so they share nothing with the sketcher's interactive sessions anyway, and a planegcs abort is contained by `SolverService`, which discards the poisoned instance without touching the kernel's;
+- the cost is planegcs's 0.5 MB `.wasm` loaded a second time, in this worker, when the first sketch is regenerated.
+
+Pass `solver` to `createRegenWorkerApi` to use another (a `connectSolver` proxy on a port, in tests a fake).
 
 ## Dependency graph and the dirty subgraph
 
@@ -146,7 +155,12 @@ shape that is now).
 least recently used out first, so undo and toggling back are cache hits. The engine releases the
 shapes of dropped entries. After a recycle every body entry is dropped (`dropBodies`).
 
-**Stale shapes.** A recycle can still land between a cache hit (the body is now a cached shape
+**Stale shapes.** After the part loop, every part's body must come from the kernel instance of
+the run's latest reply: a part built only from cache hits holds a shape id from before a recycle
+that landed during another part's batch, and nothing in its own (empty) batch would notice. Such a
+run restarts like any other stale batch.
+
+A recycle can also land between a cache hit (the body is now a cached shape
 id) and the batch that uses it: a heap-threshold recycle queued after a batch, or a trap in
 another client's batch. Every batch notes the kernel instance its concrete shape ids come from,
 and before any of its results is used or cached the engine checks the reply: a reply from
@@ -211,14 +225,17 @@ superseded regen did finish stay cached for the next one.
 interface RegenResult {
   generation: number;
   names: string[]; // one name table for every mesh in the result
-  parts: PartResult[]; // per part: features, dirty, shape, bodyKey, meshChanged, mesh
+  parts: PartResult[]; // per part: features, dirty, shape, bodyKey, meshChanged, mesh, topology
   counters: RegenCounters; // featureOps, otherOps, batches, solves, cacheHits, cacheMisses
   ms: number;
 }
 ```
 
 A part's `mesh` is sent only when its body differs from the one last reported (`meshChanged`); its
-name slots index `names`. `shape` is the final body's arena id for `pick` and `resolve` ops, valid
+name slots index `names`. Its `topology` (faces with their planes and normals, edges with their
+faces, vertices; numbered like the mesh) comes with it, in the same batch, for edge picking, vertex
+markers and sketch planes on faces. A sketch's result carries the `placement` it was solved on, so
+the app draws and edits a sketch on a face where regen put it. `shape` is the final body's arena id for `pick` and `resolve` ops, valid
 until a later regen evicts it or the kernel recycles. `regenTransferables(result)` lists the mesh
 buffers for `Comlink.transfer`.
 
@@ -237,9 +254,15 @@ pnpm --filter @manufakture/regen test
   dimension checks, pattern counts from expressions, suppression, rollback, cancellation of a
   running batch, stale generations, recovery from a recycle (the fake kernel answers a dead body
   as the real one does, with a feature-level `no-body` pass-through), no caching of such a
-  pass-through, sketch keys per solver build, sketches on faces.
+  pass-through, a part served from the cache while a recycle lands during another part's batch,
+  topology sent with a changed mesh only, sketch keys per solver build, sketches on faces and the
+  placement they report.
 - `translate.test.ts`, `values.test.ts`, `cache.test.ts`: profile selection, revolve axes and
   `flip`, holes, patterns, expressions and units, keys and the memory cache.
+- `worker-api.test.ts`: the regen worker through Comlink on a real `MessageChannel` with the real
+  kernel and solver: a named mesh with its topology and sketch placements, buffers transferred
+  (detached in the worker), a measure at the current generation next to regens, a newer regen
+  superseding an older one, and a regen after a recycle rebuilding on the new instance.
 - `integration.test.ts`: the real kernel (node harness) and the real planegcs solver, driven by a
   `DocumentStore`. A sketch, an extrude and a fillet whose radius variable nothing else reads:
   editing the variable sends exactly one `feature` op (the fillet) with the sketch and extrude from

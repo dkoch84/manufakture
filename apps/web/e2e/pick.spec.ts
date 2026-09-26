@@ -31,7 +31,9 @@ test.describe('picking in the test scene', () => {
     ]);
     await clickWorld(page, [0, -15, 10], ['Control']);
     expect(await selection(page)).toEqual(['face test-box/top', 'face test-box/right']);
-    await page.mouse.click(60, 700);
+    // Empty space: the bottom left corner of the 3D view.
+    const canvas = (await page.getByTestId('viewport-canvas').boundingBox())!;
+    await page.mouse.click(canvas.x + 30, canvas.y + canvas.height - 30);
     expect(await selection(page)).toEqual([]);
   });
 

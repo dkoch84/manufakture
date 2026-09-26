@@ -2,7 +2,7 @@
 // through the viewport camera, and back by casting the line of sight onto
 // the plane. Works in any view, not only the one normal to the sketch.
 
-import { sketchToWorld, worldToSketch } from '@manufakture/sketch';
+import { sketchToWorld, worldToSketch } from '@manufakture/sketch/geometry';
 import type { SketchPlacement, Vec2 } from '@manufakture/sketch/model';
 import type { ViewportApi } from '../viewport/Viewport';
 
@@ -39,16 +39,20 @@ export function sketchView(viewport: Projector, placement: SketchPlacement): Ske
   };
 }
 
-/** SVG path data for a polyline of sketch points. */
+/**
+ * SVG path data for a polyline of sketch points; empty when a point does not project (before the
+ * canvas has a size, the camera maps everything to infinity).
+ */
 export function pathData(
   view: Pick<SketchView, 'toCanvas'>,
   points: readonly Vec2[],
   close = false,
 ): string {
   let d = '';
-  points.forEach((p, i) => {
+  for (const [i, p] of points.entries()) {
     const c = view.toCanvas(p);
+    if (!Number.isFinite(c.x) || !Number.isFinite(c.y)) return '';
     d += `${i === 0 ? 'M' : 'L'}${c.x.toFixed(1)} ${c.y.toFixed(1)}`;
-  });
+  }
   return close && d ? `${d}Z` : d;
 }

@@ -12,8 +12,13 @@ type Reply = Partial<BatchReply> & { results: OpResult[] };
 
 function scripted(replies: (Reply | null)[]) {
   const sent: { ops: readonly KernelOp[]; generation: number | undefined }[] = [];
+  const released: number[][] = [];
   const client = {
     latestGeneration: 7,
+    release: vi.fn(async (shapes: number[]) => {
+      released.push([...shapes]);
+      return { released: shapes, unknown: [] };
+    }),
     submit: vi.fn(async (ops: readonly KernelOp[], generation?: number) => {
       sent.push({ ops, generation });
       const r = replies.shift();
@@ -21,7 +26,7 @@ function scripted(replies: (Reply | null)[]) {
       return r === null ? null : { status: 'done', names: [], generation: 7, ...r };
     }),
   } as unknown as KernelClient;
-  return { client, sent };
+  return { client, sent, released };
 }
 
 const ok = (op: string, value: unknown): OpResult =>
@@ -79,8 +84,9 @@ describe('kernelExchange', () => {
       body: null,
       feature: { kind: 'import', id: 'import#1', step: bytes, mode: 'new' },
     });
-    // An edit: a new generation.
-    expect(sent[0]!.generation).toBeUndefined();
+    // At the latest generation: an import must not cancel the regen in flight, which would
+    // leave the model stale when the import then fails.
+    expect(sent[0]!.generation).toBe(7);
     expect(reg.get('import#1')).toEqual({ shape: 12, name: 'Bracket', role: 'reference' });
     // A reference body: measured, never exported.
     expect(exchanger.bodies().map((b) => b.id)).toEqual(['demo-part']);
@@ -100,22 +106,80 @@ describe('kernelExchange', () => {
     });
   });
 
-  it('retain releases the reference bodies it is not given, at the latest generation', async () => {
-    const { client, sent } = scripted([{ results: [ok('release', {})] }]);
+  it('retain releases the reference bodies it is not given, outside the batch queue', async () => {
+    const { client, sent, released } = scripted([]);
     const reg = registry();
     reg.set('import#1', { shape: 12 as never, name: 'A', role: 'reference' });
     reg.set('import#2', { shape: 13 as never, name: 'B', role: 'reference' });
     const { exchanger } = kernelExchange(() => client, reg);
     expect(exchanger.retain(new Set(['import#2']))).toEqual(['import#1']);
     expect([...reg.keys()]).toEqual(['demo-part', 'import#2']);
-    expect(sent).toEqual([{ ops: [{ op: 'release', shapes: [12] }], generation: 7 }]);
+    // Not a batch: the regen that follows the edit cancels every batch up to the latest
+    // generation, and a cancelled release would leak the shape.
+    expect(sent).toEqual([]);
+    expect(released).toEqual([[12]]);
     // Part bodies are never dropped; nothing to release sends nothing.
     expect(exchanger.retain(new Set(['import#2']))).toEqual([]);
-    expect(sent).toHaveLength(1);
+    expect(released).toHaveLength(1);
     // Without a kernel the entry is still forgotten.
     const none = kernelExchange(() => null, reg).exchanger;
     expect(none.retain(new Set())).toEqual(['import#2']);
     expect([...reg.keys()]).toEqual(['demo-part']);
+  });
+
+  it('re-imports the reference bodies it still holds after the kernel lost every shape', async () => {
+    const box = boxBody({ named: false });
+    const reply = (shape: number) => ({
+      results: [
+        ok('feature', { ok: true, shape, errors: [] }),
+        ok('tessellate', box.mesh),
+        ok('topology', box.topology),
+      ],
+    });
+    const { client, sent, released } = scripted([reply(40)]);
+    const reg = registry();
+    reg.set('import#1', { shape: 12 as never, name: 'A', role: 'reference' });
+    const { exchanger } = kernelExchange(() => client, reg);
+    const bytes = new TextEncoder().encode('ISO-10303-21;');
+    // import#2 was pruned meanwhile: nothing to rebuild.
+    const rebuilt = await exchanger.reimport(
+      new Map([
+        ['import#1', bytes],
+        ['import#2', bytes],
+      ]),
+    );
+    expect(rebuilt).toEqual(['import#1']);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.generation).toBe(7);
+    expect(sent[0]!.ops[0]).toMatchObject({ op: 'feature', feature: { id: 'import#1' } });
+    expect(reg.get('import#1')).toEqual({ shape: 40, name: 'A', role: 'reference' });
+    // The old id died with the instance: nothing to release.
+    expect(released).toEqual([]);
+  });
+
+  it('releases a re-imported body that was pruned while it was being rebuilt', async () => {
+    const box = boxBody({ named: false });
+    const reg = registry();
+    reg.set('import#1', { shape: 12 as never, name: 'A', role: 'reference' });
+    const { client, released } = scripted([]);
+    (client.submit as ReturnType<typeof vi.fn>).mockImplementationOnce(async () => {
+      // The import feature can no longer come back: pruned while the kernel reads the file.
+      exchanger.retain(new Set());
+      return {
+        status: 'done',
+        names: [],
+        generation: 7,
+        results: [
+          ok('feature', { ok: true, shape: 41, errors: [] }),
+          ok('tessellate', box.mesh),
+          ok('topology', box.topology),
+        ],
+      };
+    });
+    const { exchanger } = kernelExchange(() => client, reg);
+    expect(await exchanger.reimport(new Map([['import#1', new Uint8Array([1])]]))).toEqual([]);
+    expect(reg.has('import#1')).toBe(false);
+    expect(released).toEqual([[12], [41]]);
   });
 
   it('reports import failures without registering anything', async () => {

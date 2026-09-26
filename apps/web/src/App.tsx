@@ -1,29 +1,30 @@
-import { sketchToWorld } from '@manufakture/sketch';
-import type { Vec2 } from '@manufakture/sketch/model';
+import { sketchToWorld } from '@manufakture/sketch/geometry';
+import type { SketchPlacement, Vec2 } from '@manufakture/sketch/model';
 import { DEFAULT_PART_ID, findPart } from '@manufakture/core';
 import type { ExportTolerancePreset } from '@manufakture/io';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from 'zustand';
-import {
-  exportBodies,
-  importFile,
-  restorableImportIds,
-  type ExportFormat,
-  type ImportedBody,
-} from './io/actions';
+import type { ExportFormat, ImportedBody } from './io/actions';
+import { restorableImportIds } from './io/restorable';
 import { downloadBytes, readFileBytes } from './io/files';
 import { ExportMenu, ImportButton } from './io/IoMenus';
 import { withMeshBodies } from './io/meshBody';
 import { MeasureOverlay } from './measure/MeasureOverlay';
 import { MeasurePanel } from './measure/MeasurePanel';
 import { measureTargets } from './measure/measurer';
+import { modelBodies, modelStore, startRegen, useModel, type ModelStore } from './model/model';
 import { documentStore, historyShortcut, type DocumentStoreApi } from './state/document';
 import { measureStore, type MeasureStore } from './state/measure';
-import { isGeometryRef, selectionStore, type SelectionStore } from './state/selection';
+import {
+  isFeatureItem,
+  isGeometryRef,
+  selectionStore,
+  type SelectionStore,
+} from './state/selection';
 import { viewSettingsStore, type ViewSettingsStore } from './state/viewSettings';
-import { sketchFeatures } from './sketcher/commit';
-import { lazySolver, spawnDefaultSolver } from './sketcher/lazySolver';
-import { facePlacement } from './sketcher/planes';
+import { sketchFeatures, type SketchPlacements } from './sketcher/commit';
+import { lazySolver, spawnDefaultSolver, type LazySolver } from './sketcher/lazySolver';
+import { faceTarget } from './sketcher/planes';
 import { createSketchSession, type SketchSessionStore } from './sketcher/session';
 import { SketchLayer } from './sketcher/SketchLayer';
 import {
@@ -32,7 +33,13 @@ import {
   SketchStatusBar,
   SketchToolbar,
 } from './sketcher/SketchMode';
-import { SketchList, SketchMenu } from './sketcher/SketchPanels';
+import { SketchMenu } from './sketcher/SketchPanels';
+import { FeatureTree } from './tree/FeatureTree';
+import type { DialogRequest } from './features/FeatureDialog';
+import { FeatureToolbar } from './features/FeatureToolbar';
+import type { RefKind } from './features/forms';
+import { isDialogKind } from './features/kinds';
+import type { GeometryRef } from './state/selection';
 import { useSketchShortcuts } from './sketcher/shortcuts';
 import { useSketching } from './sketcher/useSketching';
 import { testHooksEnabled } from './testHooks';
@@ -45,6 +52,15 @@ import './viewport/viewport.css';
 import './sketcher/sketcher.css';
 import './measure/measure.css';
 import './io/io.css';
+import './tree/tree.css';
+import './features/features.css';
+
+const defaultSolver = () => lazySolver(spawnDefaultSolver);
+
+// The feature dialogs (and their forms and hole tables) load when one is first opened.
+const FeatureDialog = lazy(() =>
+  import('./features/FeatureDialog').then((m) => ({ default: m.FeatureDialog })),
+);
 
 export interface AppProps {
   /** A loader owned by the caller: the app uses it but never disposes it. */
@@ -61,8 +77,15 @@ export interface AppProps {
   documents?: DocumentStoreApi;
   /** The sketch session; by default one on the solver worker, started on the first sketch. */
   sketchSession?: SketchSessionStore;
+  /**
+   * Makes the sketch solver when no `sketchSession` is given (default: the solver worker,
+   * started on the first sketch). The app disposes it when it unmounts.
+   */
+  createSolver?: () => LazySolver;
   /** The measure tool's state; it measures through the loader's `measurer`. */
   measure?: MeasureStore;
+  /** The regenerated model, kept current through the loader's `regenerator`. */
+  model?: ModelStore;
 }
 
 export function App({
@@ -73,7 +96,9 @@ export function App({
   settings = viewSettingsStore,
   documents = documentStore,
   sketchSession,
+  createSolver = defaultSolver,
   measure = measureStore,
+  model = modelStore,
 }: AppProps) {
   // A loader starts nothing until `load`, so the initialiser running twice
   // under StrictMode leaves nothing behind.
@@ -81,9 +106,13 @@ export function App({
     given ? { loader: given, owned: false } : { loader: createLoader(), owned: true },
   );
   // Likewise the solver: its worker starts on the first sketch.
-  const [session] = useState(
-    () => sketchSession ?? createSketchSession(lazySolver(spawnDefaultSolver)),
-  );
+  // The app owns the solver it makes (and disposes it with the loader); a given session's
+  // solver is the caller's.
+  const [{ session, solver: ownedSolver }] = useState(() => {
+    if (sketchSession) return { session: sketchSession, solver: null };
+    const solver = createSolver();
+    return { session: createSketchSession(solver), solver };
+  });
   const pendingDispose = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [status, setStatus] = useState<LoadStatus>({ label: 'Starting', fraction: null });
   const [bodies, setBodies] = useState<readonly BodyInput[] | null>(null);
@@ -95,24 +124,50 @@ export function App({
   const [ioStatus, setIoStatus] = useState<{ error: boolean; text: string } | null>(null);
   const [ioBusy, setIoBusy] = useState(false);
 
+  // The scene's own document (the demo scene) replaces the open one once, when the scene loads.
+  const openedInitial = useRef(false);
   useEffect(() => {
     // The loader outlives a remount (StrictMode): aborting only stops status updates.
     const controller = new AbortController();
     loader.load(setStatus, controller.signal).then(
       (b) => {
-        if (!controller.signal.aborted) setBodies(b);
+        if (controller.signal.aborted) return;
+        if (loader.initialDocument && !openedInitial.current) {
+          openedInitial.current = true;
+          documents.getState().load(loader.initialDocument);
+        }
+        setBodies(b);
       },
       (e: unknown) => {
         if (!controller.signal.aborted) setError(e instanceof Error ? e.message : String(e));
       },
     );
     return () => controller.abort();
-  }, [loader]);
+  }, [loader, documents]);
+
+  // Regenerate the document on every change, once the kernel is up.
+  const loaded = bodies !== null;
+  useEffect(() => {
+    const regenerator = loader.regenerator;
+    if (!loaded || !regenerator) return;
+    return startRegen(regenerator, documents, model);
+  }, [loaded, loader, documents, model]);
+  const parts = useModel(model, (s) => s.parts);
+  const modelGeneration = useModel(model, (s) => s.generation);
+  const partBodies = useMemo(() => modelBodies({ parts }), [parts]);
+  // Where regen placed each sketch, for sketches on faces.
+  const placements = useMemo<SketchPlacements>(() => {
+    const out = new Map<string, SketchPlacement>();
+    for (const p of parts) {
+      for (const f of p.features) if (f.placement) out.set(f.featureId, f.placement);
+    }
+    return out;
+  }, [parts]);
 
   useEffect(() => {
-    if (!owned) return;
+    if (!owned && !ownedSolver) return;
     // StrictMode unmounts and remounts every effect once in development, with
-    // the same state: disposing in the cleanup would kill the live worker.
+    // the same state: disposing in the cleanup would kill the live workers.
     // Defer it, and let a remount cancel it.
     if (pendingDispose.current !== null) {
       clearTimeout(pendingDispose.current);
@@ -121,10 +176,11 @@ export function App({
     return () => {
       pendingDispose.current = setTimeout(() => {
         pendingDispose.current = null;
-        loader.dispose();
+        if (owned) loader.dispose();
+        ownedSolver?.dispose();
       }, 0);
     };
-  }, [loader, owned]);
+  }, [loader, owned, ownedSolver]);
 
   const document = useStore(documents, (s) => s.document);
   const sketches = useMemo(() => sketchFeatures(document), [document]);
@@ -153,12 +209,31 @@ export function App({
       unsubscribe();
     };
   }, [documents, pruneImports]);
+  // After a recycle or restart the kernel holds none of the imported STEP bodies: read them
+  // again from the files their import features store, so measuring them keeps working.
+  const importsRef = useRef(imports);
+  useEffect(() => {
+    importsRef.current = imports;
+  }, [imports]);
+  useEffect(() => {
+    const { regenerator, exchanger } = loader;
+    if (!regenerator || !exchanger) return;
+    return regenerator.onInvalidated(() => {
+      const features = importsRef.current.map((i) => i.feature);
+      if (!features.some((f) => f.source.format === 'step')) return;
+      void import('./io/actions')
+        .then(({ reimportSteps }) => reimportSteps(exchanger, features))
+        .catch(() => undefined);
+    });
+  }, [loader]);
   const shownBodies = useMemo(
     () =>
-      bodies === null || shownImports.length === 0
-        ? bodies
-        : [...bodies, ...shownImports.map((i) => i.body)],
-    [bodies, shownImports],
+      bodies === null
+        ? null
+        : partBodies.length === 0 && shownImports.length === 0
+          ? bodies
+          : [...bodies, ...partBodies, ...shownImports.map((i) => i.body)],
+    [bodies, partBodies, shownImports],
   );
   const measurer = useMemo(() => {
     const meshes = new Map(
@@ -178,7 +253,11 @@ export function App({
       }
       setIoBusy(true);
       setIoStatus({ error: false, text: 'Exporting...' });
-      exportBodies(exchanger, format, { tolerance, documentName: document.name })
+      // The export code (STL, 3MF with its zip library, STEP) loads on first use.
+      import('./io/actions')
+        .then(({ exportBodies }) =>
+          exportBodies(exchanger, format, { tolerance, documentName: document.name }),
+        )
         .then(
           (r) => {
             if (r.ok) for (const f of r.value) downloadBytes(f.bytes, f.name, f.type);
@@ -198,9 +277,10 @@ export function App({
       importing.current = true;
       setIoStatus({ error: false, text: `Importing ${file.name}...` });
       readFileBytes(file)
-        .then((bytes) =>
-          importFile({ name: file.name, bytes }, documents, loader.exchanger ?? null),
-        )
+        .then(async (bytes) => {
+          const { importFile } = await import('./io/actions');
+          return importFile({ name: file.name, bytes }, documents, loader.exchanger ?? null);
+        })
         .then(
           (r) => {
             if (r.ok) setImports((prev) => [...prev, r.value]);
@@ -217,7 +297,26 @@ export function App({
     },
     [loader, documents, pruneImports],
   );
-  const sketching = useSketching(session, documents, viewport);
+  const sketching = useSketching(session, documents, viewport, placements);
+  // The open feature dialog, if any: a new feature from the toolbar, or one opened from the tree.
+  const [dialog, setDialog] = useState<DialogRequest | null>(null);
+  const onEditFeature = useCallback(
+    (featureId: string, options: { repick?: string } = {}) => {
+      const feature = findPart(documents.getState().document, DEFAULT_PART_ID)?.features.find(
+        (f) => f.id === featureId,
+      );
+      if (!feature) return;
+      if (feature.kind === 'sketch') sketching.enter({ kind: 'edit', featureId });
+      else if (isDialogKind(feature.kind)) {
+        setDialog({
+          kind: feature.kind,
+          featureId,
+          ...(options.repick ? { repick: options.repick } : {}),
+        });
+      }
+    },
+    [documents, sketching],
+  );
   useSketchShortcuts(session, sketching.active);
 
   // Undo and redo: the sketch's own history while sketching, else the document's.
@@ -246,28 +345,50 @@ export function App({
       ...window.__manufakture,
       sketcher: { store: session, toClient },
       document: documents,
+      model,
     };
     return () => {
       const hooks = window.__manufakture;
       if (!hooks) return;
       delete hooks.sketcher;
       delete hooks.document;
+      delete hooks.model;
       if (Object.keys(hooks).length === 0) delete window.__manufakture;
     };
-  }, [viewport, session, documents]);
+  }, [viewport, session, documents, model]);
 
   const selected = useStore(selection, (s) => s.selected);
+  const hoveredFeature = useStore(selection, (s) =>
+    isFeatureItem(s.hovered) ? s.hovered.id : null,
+  );
   const face = useMemo(() => {
     if (!shownBodies) return null;
     const ref = selected.find((i) => isGeometryRef(i) && i.kind === 'face');
-    return ref && isGeometryRef(ref) ? facePlacement(shownBodies, ref) : null;
-  }, [shownBodies, selected]);
+    const parts = new Set(partBodies.map((b) => b.id));
+    return ref && isGeometryRef(ref) ? faceTarget(shownBodies, ref, parts) : null;
+  }, [shownBodies, partBodies, selected]);
+
+  // Viewport picks to references for the feature dialogs, against the bodies shown now.
+  const pickContext = useRef({ bodies: [] as readonly BodyInput[], partBodies: new Set<string>() });
+  useEffect(() => {
+    pickContext.current = {
+      bodies: shownBodies ?? [],
+      partBodies: new Set(partBodies.map((b) => b.id)),
+    };
+  }, [shownBodies, partBodies]);
+  const resolveReference = useCallback(
+    async (geo: GeometryRef, accepts: readonly RefKind[]) => {
+      const { referenceFor } = await import('./features/references');
+      return referenceFor(geo, accepts, { ...pickContext.current, referencer: loader.referencer });
+    },
+    [loader],
+  );
 
   // Measure the selection (and the body it is on) whenever either changes.
   const bodiesRevision = useRef(0);
   useEffect(() => {
     bodiesRevision.current++;
-  }, [shownBodies]);
+  }, [shownBodies, modelGeneration]);
   useEffect(() => {
     if (shownBodies === null) return;
     const refs = selected.filter(isGeometryRef);
@@ -282,7 +403,7 @@ export function App({
             revision: bodiesRevision.current,
           },
     );
-  }, [shownBodies, selected, measurer, measure]);
+  }, [shownBodies, modelGeneration, selected, measurer, measure]);
 
   // Registered with the viewport, like the other hooks: tests wait for the viewport hook.
   useEffect(() => {
@@ -311,7 +432,7 @@ export function App({
         <div className="toolbar-group document-actions">
           <SketchMenu
             face={face}
-            disabled={sketching.active}
+            disabled={sketching.active || dialog !== null}
             onPick={(target) => sketching.enter(target)}
           />
           <button
@@ -347,6 +468,12 @@ export function App({
         </div>
         <Toolbar viewport={viewport} {...stores} />
       </header>
+      {/* The part tools; in a sketch the sketch toolbar takes this row. */}
+      {!sketching.active && (
+        <div className="feature-bar">
+          <FeatureToolbar disabled={dialog !== null} onOpen={(kind) => setDialog({ kind })} />
+        </div>
+      )}
       {sketching.active && (
         <SketchToolbar
           session={session}
@@ -363,13 +490,38 @@ export function App({
         </div>
       )}
       <main className="app-main">
+        {/* A sketch is edited on its own (the tree cannot change anything meanwhile), so the
+            tree steps aside and the sketch gets the room. */}
+        {!sketching.active && (
+          <FeatureTree
+            documents={documents}
+            model={model}
+            selection={selection}
+            disabled={dialog !== null}
+            onEdit={onEditFeature}
+          />
+        )}
         <Viewport
           bodies={shownBodies}
           onReady={setViewport}
           {...(createEngine ? { createEngine } : {})}
           {...stores}
         >
-          {viewport && <SketchLayer viewport={viewport} session={session} sketches={sketches} />}
+          {viewport && (
+            <SketchLayer
+              viewport={viewport}
+              session={session}
+              sketches={sketches}
+              placements={placements}
+              highlighted={hoveredFeature}
+            />
+          )}
+          {shownBodies.length === 0 && !sketching.active && (
+            <p className="viewport-hint" data-testid="empty-hint">
+              Nothing here yet. Start with <strong>New sketch</strong>: pick a plane, draw a closed
+              shape, then extrude it.
+            </p>
+          )}
           {viewport && !sketching.active && (
             <MeasureOverlay viewport={viewport} measure={measure} units={document.units} />
           )}
@@ -382,16 +534,28 @@ export function App({
               <h2>Sketch selection</h2>
               <SketchSelectionList session={session} />
             </aside>
+          ) : dialog ? (
+            <Suspense
+              fallback={
+                <aside className="selection-panel" aria-busy="true">
+                  Opening...
+                </aside>
+              }
+            >
+              <FeatureDialog
+                key={`${dialog.kind}/${dialog.featureId ?? 'new'}/${dialog.repick ?? ''}`}
+                request={dialog}
+                documents={documents}
+                model={model}
+                selection={selection}
+                resolve={resolveReference}
+                onClose={() => setDialog(null)}
+              />
+            </Suspense>
           ) : (
             <>
               <SelectionPanel selection={selection} />
               <MeasurePanel measure={measure} documents={documents} />
-              <aside className="selection-panel">
-                <SketchList
-                  sketches={sketches}
-                  onEdit={(featureId) => sketching.enter({ kind: 'edit', featureId })}
-                />
-              </aside>
             </>
           )}
         </div>

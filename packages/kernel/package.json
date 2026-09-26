@@ -7,6 +7,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./client": "./src/client.ts",
+    "./kernel-client": "./src/kernel-client.ts",
     "./worker": "./src/worker.ts",
     "./node": "./src/node.ts",
     "./testing": "./src/track.ts"

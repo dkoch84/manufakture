@@ -4,8 +4,8 @@
 // cross the worker boundary (ADR 0007); mesh buffers are transferred.
 
 import type { FeatureKind, Vec3 } from '@manufakture/core';
-import type { MeshData, ShapeId, Via } from '@manufakture/kernel';
-import type { RegionDiagnosticCode } from '@manufakture/sketch';
+import type { MeshData, ShapeId, Topology, Via } from '@manufakture/kernel';
+import type { RegionDiagnosticCode, SketchPlacement } from '@manufakture/sketch';
 import type { UnitsError } from '@manufakture/units';
 
 /**
@@ -130,6 +130,11 @@ export interface FeatureResult {
   cached: boolean;
   /** Milliseconds spent on it in this regen: translation plus solve or kernel op. */
   ms: number;
+  /**
+   * Sketches only: where the sketch lies in this regen (a face sketch's plane is resolved on the
+   * body before it), so the app can draw and edit it in the frame regen solved it in.
+   */
+  placement?: SketchPlacement;
 }
 
 export interface PartResult {
@@ -148,6 +153,11 @@ export interface PartResult {
   meshChanged: boolean;
   /** The body's mesh when `meshChanged` (name slots index `RegenResult.names`); null otherwise or without a body. */
   mesh: MeshData | null;
+  /**
+   * The body's topology (faces with their planes, edges with their faces, vertices), sent with
+   * the mesh: face and edge `index` is the mesh's 1-based face and edge numbering.
+   */
+  topology: Topology | null;
 }
 
 export interface RegenCounters {

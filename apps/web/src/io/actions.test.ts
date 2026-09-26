@@ -13,7 +13,13 @@ import { describe, expect, it, vi } from 'vitest';
 import { createDocumentStore } from '../state/document';
 import type { BodyInput } from '../viewport/bodies';
 import { boxBody } from '../viewport/testMeshes';
-import { MAX_IMPORT_BYTES, exportBodies, importFile, restorableImportIds } from './actions';
+import {
+  MAX_IMPORT_BYTES,
+  exportBodies,
+  importFile,
+  reimportSteps,
+  restorableImportIds,
+} from './actions';
 import { kernelExchange, type Exchanger, type KernelBody } from './exchange';
 
 /** A fake kernel exchange over box meshes (in the kernel's layout: vertices per face). */
@@ -39,6 +45,7 @@ function fakeExchanger(names: string[] = ['Demo part']): Exchanger & {
       value: { ...boxBody({ id: featureId }) } as BodyInput,
     })),
     retain: vi.fn(() => []),
+    reimport: vi.fn(async () => []),
   };
 }
 
@@ -196,15 +203,21 @@ describe('importFile', () => {
  */
 function kernelWithPart() {
   const sent: KernelOp[][] = [];
+  const released: number[][] = [];
   const box = boxBody();
+  let nextShape = 12;
   const client = {
     latestGeneration: 1,
+    release: vi.fn(async (shapes: number[]) => {
+      released.push([...shapes]);
+      return { released: shapes, unknown: [] };
+    }),
     submit: vi.fn(async (ops: readonly KernelOp[]) => {
       sent.push([...ops]);
       const results = ops.map((op) => {
         const value =
           op.op === 'feature'
-            ? { ok: true, shape: 12, errors: [] }
+            ? { ok: true, shape: nextShape++, errors: [] }
             : op.op === 'tessellate'
               ? box.mesh
               : op.op === 'topology'
@@ -220,7 +233,7 @@ function kernelWithPart() {
   const registry = new Map<string, KernelBody>([
     ['demo-part', { shape: 3 as never, name: 'Demo part', role: 'part' }],
   ]);
-  return { ...kernelExchange(() => client, registry), registry, sent };
+  return { ...kernelExchange(() => client, registry), registry, sent, released };
 }
 
 describe('reference bodies and export', () => {
@@ -299,9 +312,33 @@ describe('reference bodies and export', () => {
     expect(k.exchanger.retain(keep())).toEqual(['import#1']);
     expect(k.registry.has('import#1')).toBe(false);
     expect(k.registry.has('demo-part')).toBe(true);
-    expect(k.sent).toEqual([[{ op: 'release', shapes: [12] }]]);
+    expect(k.sent).toEqual([]);
+    expect(k.released).toEqual([[12]]);
     // Nothing left to release a second time.
     expect(k.exchanger.retain(keep())).toEqual([]);
+  });
+
+  it('rebuilds imported STEP bodies from the files the document stores', async () => {
+    const k = kernelWithPart();
+    const docs = documents();
+    const r = await importFile({ name: 'ref.step', bytes: step }, docs, k.exchanger);
+    if (!r.ok) throw new Error(r.message);
+    const stl = await importFile({ name: 'a.stl', bytes: cubeStl() }, docs, k.exchanger);
+    if (!stl.ok) throw new Error(stl.message);
+    expect(k.registry.get('import#1')).toMatchObject({ shape: 12 });
+    k.sent.length = 0;
+    // The kernel recycled: shape 12 is gone.
+    expect(await reimportSteps(k.exchanger, [r.value.feature, stl.value.feature])).toEqual([
+      'import#1',
+    ]);
+    expect(k.registry.get('import#1')).toMatchObject({ shape: 13, role: 'reference' });
+    // Only the STEP file goes to the kernel, byte for byte.
+    expect(k.sent).toHaveLength(1);
+    const op = k.sent[0]![0]!;
+    expect(op).toMatchObject({ op: 'feature', feature: { id: 'import#1' } });
+    expect(Array.from((op as { feature: { step: Uint8Array } }).feature.step)).toEqual(
+      Array.from(step),
+    );
   });
 
   it('finds imports in the document and in nested history commands', () => {

@@ -1,13 +1,14 @@
-import { validateOp, type KernelStatus } from '@manufakture/kernel';
-import type { KernelClient, KernelClientOptions } from '@manufakture/kernel/client';
+import { createDocument } from '@manufakture/core';
+import { validateOp, type KernelStatus, type ShapeId } from '@manufakture/kernel';
+import type { KernelClientOptions } from '@manufakture/kernel/client';
+import type { RegenResult } from '@manufakture/regen';
+import type { RegenClient } from '@manufakture/regen/client';
 import { describe, expect, it, vi } from 'vitest';
 import { isPlaceholderName } from './naming';
 import {
   DEFAULT_PERF_TRIANGLES,
-  DEMO_BODY_ID,
-  demoPartOps,
-  kernelDemoLoader,
   kernelLoadStatus,
+  kernelLoader,
   loaderForLocation,
   perfLoader,
   sceneFromSearch,
@@ -45,12 +46,13 @@ describe('kernel load status', () => {
 });
 
 describe('scene choice', () => {
-  it('defaults to the kernel demo part', () => {
-    expect(sceneFromSearch('')).toEqual({ scene: 'demo', triangles: DEFAULT_PERF_TRIANGLES });
-    expect(sceneFromSearch('?scene=nonsense').scene).toBe('demo');
+  it('defaults to the kernel with an empty document', () => {
+    expect(sceneFromSearch('')).toEqual({ scene: 'default', triangles: DEFAULT_PERF_TRIANGLES });
+    expect(sceneFromSearch('?scene=nonsense').scene).toBe('default');
   });
 
-  it('reads the test and perf scenes and a triangle count', () => {
+  it('reads the demo, test and perf scenes and a triangle count', () => {
+    expect(sceneFromSearch('?scene=demo').scene).toBe('demo');
     expect(sceneFromSearch('?scene=test').scene).toBe('test');
     expect(sceneFromSearch('?scene=perf&triangles=50000')).toEqual({
       scene: 'perf',
@@ -61,21 +63,7 @@ describe('scene choice', () => {
   });
 });
 
-describe('demo part batch', () => {
-  it('is a valid op batch whose inputs refer to earlier ops', () => {
-    const ops = demoPartOps();
-    ops.forEach((op, i) => {
-      expect(validateOp(op)).toBeNull();
-      for (const ref of JSON.stringify(op).matchAll(/"result":(\d+)/g)) {
-        expect(Number(ref[1])).toBeLessThan(i);
-      }
-    });
-    expect(ops.at(-2)!.op).toBe('tessellate');
-    expect(ops.at(-1)!.op).toBe('topology');
-  });
-});
-
-/** A stand-in for the kernel worker client that replies with a box. */
+/** A stand-in for the regen worker client. */
 function fakeKernel(options: KernelClientOptions, fail = false) {
   const body = boxBody({ named: false });
   const statuses: KernelStatus[] = [
@@ -85,65 +73,77 @@ function fakeKernel(options: KernelClientOptions, fail = false) {
     },
     { type: 'loading', progress: { phase: 'init' } },
   ];
+  let generation = 0;
   const client = {
-    ready: Promise.resolve().then(() => {
-      for (const s of statuses) options.onStatus?.(s);
-      return { instance: 1, heapBytes: 0, ms: 1 };
+    ready: fail
+      ? Promise.reject(new Error('no WebAssembly'))
+      : Promise.resolve().then(() => {
+          for (const s of statuses) options.onStatus?.(s);
+          return { instance: 1, heapBytes: 0, ms: 1 };
+        }),
+    get latestGeneration() {
+      return generation;
+    },
+    status: (s: KernelStatus) => options.onStatus?.(s),
+    regen: vi.fn(async (): Promise<RegenResult> => {
+      generation++;
+      return {
+        generation,
+        names: body.names as string[],
+        parts: [
+          {
+            partId: 'part#1',
+            features: [],
+            dirty: [],
+            shape: 1 as ShapeId,
+            bodyKey: 'k',
+            meshChanged: generation === 1,
+            mesh: generation === 1 ? body.mesh : null,
+            topology: generation === 1 ? body.topology! : null,
+          },
+        ],
+        counters: {
+          featureOps: 0,
+          otherOps: 0,
+          batches: 0,
+          solves: 0,
+          cacheHits: 0,
+          cacheMisses: 0,
+        },
+        ms: 1,
+      };
     }),
-    submit: vi.fn(async () => ({
-      status: 'done',
-      names: [],
-      results: fail
-        ? [
-            {
-              ok: false,
-              op: 'fillet',
-              error: { code: 'kernel', operation: 'fillet', message: 'boom' },
-            },
-          ]
-        : [
-            ...demoPartOps()
-              .slice(0, 4)
-              .map((o) => ({ ok: true, op: o.op, value: { shape: 1 } })),
-            { ok: true, op: 'tessellate', value: body.mesh },
-            { ok: true, op: 'topology', value: body.topology },
-          ],
-    })),
+    submit: vi.fn(async () => null as never),
     terminate: vi.fn(),
   };
   return client;
 }
 
-describe('kernel demo loader', () => {
-  it('spawns the worker once, reports progress and names the mesh with placeholders', async () => {
+const asClient = (fake: ReturnType<typeof fakeKernel>) => fake as unknown as RegenClient;
+
+describe('kernel loader', () => {
+  it('spawns the worker once, reports progress, and resolves with no fixed bodies', async () => {
     let fake!: ReturnType<typeof fakeKernel>;
-    const spawn = vi.fn(
-      (o: KernelClientOptions) => (fake = fakeKernel(o)) as unknown as KernelClient,
-    );
-    const loader = kernelDemoLoader(spawn);
+    const spawn = vi.fn((o: KernelClientOptions) => asClient((fake = fakeKernel(o))));
+    const loader = kernelLoader(spawn);
     const seen: LoadStatus[] = [];
     const first = loader.load((s) => seen.push(s));
     const second = loader.load(() => {});
     expect(second).toBe(first);
-    const [body] = await first;
+    expect(await first).toEqual([]);
     expect(spawn).toHaveBeenCalledTimes(1);
-    expect(fake.submit).toHaveBeenCalledTimes(1);
     expect(seen.map((s) => s.label)).toEqual([
       'Starting the geometry kernel',
       'Downloading the geometry kernel (5.0 of 10.0 MB)',
       'Initialising the geometry kernel',
-      'Building the demo part',
     ]);
-    expect(body!.id).toBe(DEMO_BODY_ID);
-    // Until #931 names faces, every name is a placeholder.
-    expect(body!.names.length).toBeGreaterThan(0);
-    expect(body!.names.every(isPlaceholderName)).toBe(true);
+    expect(loader.initialDocument).toBeUndefined();
     loader.dispose();
     expect(fake.terminate).toHaveBeenCalled();
   });
 
   it('stops reporting to a listener whose signal aborted', async () => {
-    const loader = kernelDemoLoader((o) => fakeKernel(o) as unknown as KernelClient);
+    const loader = kernelLoader((o) => asClient(fakeKernel(o)));
     const controller = new AbortController();
     const seen: LoadStatus[] = [];
     const done = loader.load((s) => seen.push(s), controller.signal);
@@ -152,65 +152,91 @@ describe('kernel demo loader', () => {
     expect(seen).toHaveLength(1);
   });
 
-  it('rejects with the kernel message when an op fails', async () => {
-    const loader = kernelDemoLoader((o) => fakeKernel(o, true) as unknown as KernelClient);
-    await expect(loader.load(() => {})).rejects.toThrow('Kernel fillet failed: boom');
+  it('rejects when the kernel cannot load', async () => {
+    const loader = kernelLoader((o) => asClient(fakeKernel(o, true)));
+    await expect(loader.load(() => {})).rejects.toThrow('no WebAssembly');
   });
-});
 
-describe('measuring the demo part', () => {
-  it('sends a measure op on the demo body, at the current generation', async () => {
+  it('turns regen results into part bodies and registers them for measuring', async () => {
     let fake!: ReturnType<typeof fakeKernel>;
-    const loader = kernelDemoLoader((o) => (fake = fakeKernel(o)) as unknown as KernelClient);
-    expect(await loader.measurer!.measure(DEMO_BODY_ID, [], true)).toMatchObject({ ok: false });
+    const loader = kernelLoader((o) => asClient((fake = fakeKernel(o))));
+    expect(await loader.regenerator!.regen(createDocument({ id: 'd', name: 'D' }))).toBeNull();
     await loader.load(() => {});
-    const measured = { items: [], distance: null, angle: null, body: null };
-    Object.assign(fake, { latestGeneration: 7 });
+    const doc = createDocument({ id: 'd', name: 'D' });
+    const first = (await loader.regenerator!.regen(doc))!;
+    expect(first.parts[0]!.body!.id).toBe('part#1');
+    expect(first.parts[0]!.body!.topology).not.toBeNull();
+    // The next result carries no mesh (unchanged): the body is kept.
+    const second = (await loader.regenerator!.regen(doc))!;
+    expect(second.parts[0]!.body).toBe(first.parts[0]!.body);
+    // The part is what export writes, under the part's name.
+    expect(loader.exchanger!.bodies()).toEqual([{ id: 'part#1', name: 'Part 1' }]);
     fake.submit.mockImplementationOnce(
       async () =>
         ({
           status: 'done',
           names: [],
-          results: [{ ok: true, op: 'measure', value: measured }],
+          results: [{ ok: true, op: 'measure', value: { items: [], body: null } }],
         }) as never,
     );
-    const targets = [{ kind: 'face' as const, index: 3 }];
-    expect(await loader.measurer!.measure(DEMO_BODY_ID, targets, true)).toEqual({
-      ok: true,
-      result: measured,
-    });
+    expect(await loader.measurer!.measure('part#1', [], true)).toMatchObject({ ok: true });
     const [ops, generation] = fake.submit.mock.lastCall as unknown as [unknown[], number];
-    expect(ops).toEqual([{ op: 'measure', shape: 1, targets, body: true }]);
+    expect(ops).toEqual([{ op: 'measure', shape: 1, targets: [], body: true }]);
     expect(validateOp(ops[0])).toBeNull();
     // Never a new generation: measuring must not cancel an edit in flight.
-    expect(generation).toBe(7);
+    expect(generation).toBe(2);
   });
 
-  it('passes kernel failures on as messages, and a superseded reply as null', async () => {
+  it('asks for a regen after a recycle', async () => {
     let fake!: ReturnType<typeof fakeKernel>;
-    const loader = kernelDemoLoader((o) => (fake = fakeKernel(o)) as unknown as KernelClient);
+    const loader = kernelLoader((o) => asClient((fake = fakeKernel(o))));
     await loader.load(() => {});
+    const listener = vi.fn();
+    loader.regenerator!.onInvalidated(listener);
+    fake.status({
+      type: 'recycled',
+      reason: 'heap-threshold',
+      instance: 2,
+      heapBytesBefore: 0,
+      heapBytesAfter: 0,
+      lostShapes: 3,
+      ms: 1,
+      hookErrors: [],
+    });
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it('asks for a regen after the worker was restarted', async () => {
+    let options!: KernelClientOptions;
+    const loader = kernelLoader((o) => asClient(fakeKernel((options = o))));
+    await loader.load(() => {});
+    const listener = vi.fn();
+    loader.regenerator!.onInvalidated(listener);
+    options.onRestarted?.();
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it('picks the minimal reference of an edge through the kernel', async () => {
+    let fake!: ReturnType<typeof fakeKernel>;
+    const loader = kernelLoader((o) => asClient((fake = fakeKernel(o))));
+    await loader.load(() => {});
+    await loader.regenerator!.regen(createDocument({ id: 'd', name: 'D' }));
+    const ref = { faces: ['a', 'b'] };
     fake.submit.mockImplementationOnce(
       async () =>
         ({
           status: 'done',
           names: [],
-          results: [
-            {
-              ok: false,
-              op: 'measure',
-              error: { code: 'unknown-shape', operation: 'measure', message: 'unknown shape id 1' },
-            },
-          ],
+          results: [{ ok: true, op: 'pick', value: { ref } }],
         }) as never,
     );
-    expect(await loader.measurer!.measure(DEMO_BODY_ID, [], true)).toEqual({
-      ok: false,
-      message: 'unknown shape id 1',
+    expect(await loader.referencer!.reference('part#1', 'edge', 4)).toEqual({
+      ok: true,
+      value: ref,
     });
-    fake.submit.mockImplementationOnce(async () => null as never);
-    expect(await loader.measurer!.measure(DEMO_BODY_ID, [], true)).toBeNull();
-    expect(await loader.measurer!.measure('other-body', [], true)).toMatchObject({ ok: false });
+    const [ops] = fake.submit.mock.lastCall as unknown as [unknown[]];
+    expect(ops).toEqual([{ op: 'pick', shape: 1, kind: 'edge', index: 4 }]);
+    expect(await loader.referencer!.reference('other', 'face', 1)).toMatchObject({ ok: false });
   });
 });
 
@@ -232,8 +258,7 @@ describe('kernel-free scenes', () => {
 });
 
 describe('the scene the page URL names', () => {
-  const spawnFake = () =>
-    vi.fn((o: KernelClientOptions) => fakeKernel(o) as unknown as KernelClient);
+  const spawnFake = () => vi.fn((o: KernelClientOptions) => asClient(fakeKernel(o)));
 
   it('opens a test scene where the test hooks are on', async () => {
     const spawn = spawnFake();
@@ -242,11 +267,23 @@ describe('the scene the page URL names', () => {
     expect(spawn).not.toHaveBeenCalled();
   });
 
-  it('ignores test scenes in a production build and loads the demo part', async () => {
-    for (const search of ['?scene=test', '?scene=perf&triangles=1000']) {
+  it('opens the demo document in the demo scene', () => {
+    const loader = loaderForLocation('?scene=demo', spawnFake(), true);
+    expect(loader.initialDocument!.parts[0]!.features.map((f) => f.id)).toEqual([
+      'sketch#1',
+      'extrude#1',
+      'fillet#1',
+      'sketch#2',
+      'extrude#2',
+    ]);
+  });
+
+  it('ignores test scenes in a production build and starts the kernel with no document', async () => {
+    for (const search of ['?scene=test', '?scene=perf&triangles=1000', '?scene=demo']) {
       const spawn = spawnFake();
-      const [body] = await loaderForLocation(search, spawn, false).load(() => {});
-      expect(body!.id).toBe(DEMO_BODY_ID);
+      const loader = loaderForLocation(search, spawn, false);
+      expect(await loader.load(() => {})).toEqual([]);
+      expect(loader.initialDocument).toBeUndefined();
       expect(spawn).toHaveBeenCalledTimes(1);
     }
   });

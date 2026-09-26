@@ -51,6 +51,7 @@ import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
 import type { Vec3 } from '@manufakture/kernel';
 import {
+  isFeatureItem,
   isGeometryRef,
   selectModeFor,
   type GeometryKind,
@@ -70,7 +71,7 @@ import {
 } from './bodies';
 import { gridCenter, gridLevels } from './grid';
 import { createGridMaterial, createPickMaterial, createSilhouetteMaterial } from './materials';
-import { PLACEHOLDER_PREFIX } from './naming';
+import { PLACEHOLDER_PREFIX, nameFromFeature } from './naming';
 import {
   NO_MODIFIERS,
   PRESETS,
@@ -828,6 +829,17 @@ export class ViewportEngine {
     };
     for (const item of selected) if (isGeometryRef(item)) mark(item, 'selected');
     if (hovered && isGeometryRef(hovered)) mark(hovered, 'hover');
+    // A feature hovered in the feature tree: every face it made.
+    if (isFeatureItem(hovered)) {
+      for (const b of this.bodies) {
+        for (const [name, index] of b.faceByName) {
+          if (!nameFromFeature(name, hovered.id)) continue;
+          let m = wanted.get(b);
+          if (!m) wanted.set(b, (m = new Map()));
+          if (m.get(index) !== 'selected') m.set(index, 'hover');
+        }
+      }
+    }
 
     for (const b of this.bodies) {
       const w = wanted.get(b);

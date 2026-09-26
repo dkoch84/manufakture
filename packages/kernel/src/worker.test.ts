@@ -289,15 +289,20 @@ describe('recycling and restart', () => {
     channels.push(stuck.port1, stuck.port2);
     let connects = 0;
     const fresh = createKernelWorkerApi({ source: { url: 'kernel.wasm', fetch: fetchWasm } });
-    const c = new KernelClient(() =>
-      ++connects === 1
-        ? { endpoint: stuck.port2, terminate: () => stuck.port1.close() }
-        : connectTo(fresh),
+    const onRestarted = vi.fn();
+    const c = new KernelClient(
+      () =>
+        ++connects === 1
+          ? { endpoint: stuck.port2, terminate: () => stuck.port1.close() }
+          : connectTo(fresh),
+      { onRestarted },
     );
     const pending = c.submit([{ op: 'box', size: [1, 1, 1] }]);
     const report = await c.restart();
     expect(report.instance).toBe(1);
     expect(await pending).toBeNull();
+    // Every shape id is gone: the owner hears of it once the new worker is ready, to replay.
+    await vi.waitFor(() => expect(onRestarted).toHaveBeenCalledTimes(1));
     const reply = await c.submit([{ op: 'box', size: [1, 1, 1], keep: false }]);
     expect(reply?.status).toBe('done');
     expect(connects).toBe(2);

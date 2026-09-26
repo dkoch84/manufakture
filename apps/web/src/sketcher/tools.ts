@@ -28,7 +28,14 @@ import {
 import type { PickPoint } from './snap';
 
 export type DrawToolId =
-  'line' | 'rectangle' | 'centerRectangle' | 'circle' | 'arc3' | 'tangentArc' | 'centerArc';
+  | 'line'
+  | 'rectangle'
+  | 'centerRectangle'
+  | 'circle'
+  | 'arc3'
+  | 'tangentArc'
+  | 'centerArc'
+  | 'point';
 
 export type ToolId = 'select' | 'dimension' | DrawToolId;
 
@@ -40,6 +47,7 @@ export const DRAW_TOOLS: readonly DrawToolId[] = [
   'arc3',
   'tangentArc',
   'centerArc',
+  'point',
 ];
 
 /** Keyboard shortcuts for the tools. */
@@ -50,6 +58,7 @@ export const TOOL_KEYS: Readonly<Record<string, ToolId>> = {
   c: 'circle',
   a: 'arc3',
   g: 'tangentArc',
+  p: 'point',
   d: 'dimension',
 };
 
@@ -58,6 +67,7 @@ export function isDrawTool(tool: ToolId): tool is DrawToolId {
 }
 
 export type DrawState =
+  | { tool: 'point' }
   | { tool: 'line'; start: PickPoint | null }
   | { tool: 'rectangle' | 'centerRectangle' | 'circle'; first: PickPoint | null }
   | { tool: 'arc3'; start: PickPoint | null; end: PickPoint | null }
@@ -89,6 +99,8 @@ export interface ToolStep {
 /** Status bar prompts per tool and step. */
 export function toolPrompt(state: DrawState): string {
   switch (state.tool) {
+    case 'point':
+      return 'Click where the point goes (a hole centre, a reference point).';
     case 'line':
       return state.start
         ? 'Click the next point. Double-click or Esc ends the line.'
@@ -120,6 +132,8 @@ export function toolPrompt(state: DrawState): string {
 
 export function initialDrawState(tool: DrawToolId): DrawState {
   switch (tool) {
+    case 'point':
+      return { tool };
     case 'line':
     case 'tangentArc':
       return { tool, start: null };
@@ -299,6 +313,17 @@ export function toolClick(
   const c = ctx.construction;
   const same = (a: Vec2, b: Vec2) => distance(a, b) <= Math.max(ctx.tolerance * 0.25, 1e-9);
   switch (state.tool) {
+    case 'point': {
+      if (preview) return { state };
+      const id = tempId(0);
+      return {
+        state,
+        draft: {
+          entities: [{ id, kind: 'point', construction: c, position: pick.position }],
+          constraints: snapConstraints(pick.target, { entity: id }),
+        },
+      };
+    }
     case 'line': {
       const start = state.start;
       if (!start) return preview ? { state } : { state: { tool: 'line', start: pick } };

@@ -5,9 +5,15 @@
 // so they can be clicked and typed into. Everything is projected through the
 // viewport camera, so it follows the view when the user orbits.
 
-import { detectRegions, flattenRegion } from '@manufakture/sketch';
+import { detectRegions, flattenRegion } from '@manufakture/sketch/geometry';
 import type { DimensionalConstraint, SketchEntity, Vec2 } from '@manufakture/sketch/model';
-import { useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
 import { useStore } from 'zustand';
 import { CONSTRAINT_NAMES, constraintGlyphs } from './constraints';
 import { isDimension, layoutDimension, proposeDimension, type DimensionLayout } from './dimension';
@@ -195,6 +201,8 @@ export function SketchOverlay({ session, view, size }: SketchOverlayProps) {
               data-testid={`constraint-${g.constraintId}`}
               data-kind={g.kind}
               data-state={state}
+              aria-label={`${CONSTRAINT_NAMES[g.kind]} constraint ${g.constraintId}${state === 'ok' ? '' : `, ${state}`}`}
+              aria-pressed={sel}
               title={`${CONSTRAINT_NAMES[g.kind]} (${g.constraintId})`}
               style={{ left: c.x + 8 + g.slot * PX.glyph, top: c.y - 22 }}
               onPointerDown={(e) => e.stopPropagation()}
@@ -364,6 +372,8 @@ function DimensionLabel({
       data-kind={constraint.kind}
       data-state={state}
       data-source={constraint.value.source}
+      aria-label={`${CONSTRAINT_NAMES[constraint.kind]} dimension ${text}${state === 'ok' ? '' : `, ${state}`}`}
+      aria-pressed={selected}
       title={`${CONSTRAINT_NAMES[constraint.kind]}: ${constraint.value.source}. Double-click to edit.`}
       style={{ left: c.x, top: c.y }}
       onPointerDown={onDown}
@@ -418,6 +428,16 @@ function DimensionEditor({
   const [text, setText] = useState(c && isDimension(c) ? c.value.source : '');
   const [error, setError] = useState<string | null>(null);
   const done = useRef(false);
+  const box = useRef<HTMLDivElement>(null);
+  // When the box closes, the keyboard goes back to the 3D view (the sketch's shortcuts), unless
+  // the user has moved focus somewhere else on purpose.
+  useEffect(() => {
+    const canvas = box.current?.closest('.viewport')?.querySelector('canvas') ?? null;
+    return () => {
+      const active = document.activeElement;
+      if (canvas && (active === null || active === document.body)) canvas.focus();
+    };
+  }, []);
   if (!c || !isDimension(c) || !s.source) return null;
   const layout = layoutDimension(c, indexEntities(s.sketch.entities), upp * PX.gap, s.labels[id]);
   const at = layout ? view.toCanvas(layout.label) : { x: 0, y: 0 };
@@ -432,6 +452,7 @@ function DimensionEditor({
   };
   return (
     <div
+      ref={box}
       className="sk-editor"
       style={{ left: at.x, top: at.y }}
       onPointerDown={(e) => e.stopPropagation()}

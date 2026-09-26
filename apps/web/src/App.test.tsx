@@ -1,7 +1,8 @@
 import { StrictMode } from 'react';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { createDocument, findPart } from '@manufakture/core';
+import { createDocument, findPart, type ManufaktureDocument } from '@manufakture/core';
+import type { FeatureResult } from '@manufakture/regen';
 import { writeBinaryStl } from '@manufakture/io';
 import { App } from './App';
 import type { Exchanger } from './io/exchange';
@@ -9,6 +10,8 @@ import { createSketchSession } from './sketcher/session';
 import { immediateSolver } from './sketcher/testSolver';
 import { twoFaces } from './measure/fixtures';
 import type { Measurer } from './measure/measurer';
+import { demoDocument } from './model/demo';
+import { createModelStore, type Regenerator, type RegenView } from './model/model';
 import { createDocumentStore } from './state/document';
 import { createMeasureStore } from './state/measure';
 import { createSelectionStore, geometryRef } from './state/selection';
@@ -19,7 +22,7 @@ import { boxBody } from './viewport/testMeshes';
 import type { EngineFactory, ViewportApi } from './viewport/Viewport';
 
 /** A loader the test drives by hand. */
-function manualLoader(measurer?: Measurer, exchanger?: Exchanger) {
+function manualLoader(measurer?: Measurer, exchanger?: Exchanger, regenerator?: Regenerator) {
   let report!: (s: LoadStatus) => void;
   let resolve!: (b: BodyInput[]) => void;
   let reject!: (e: Error) => void;
@@ -36,6 +39,7 @@ function manualLoader(measurer?: Measurer, exchanger?: Exchanger) {
     dispose: vi.fn(),
     ...(measurer ? { measurer } : {}),
     ...(exchanger ? { exchanger } : {}),
+    ...(regenerator ? { regenerator } : {}),
   };
   return { loader, report: (s: LoadStatus) => report(s), resolve, reject };
 }
@@ -65,8 +69,10 @@ function fakeEngine() {
   return { api, factory };
 }
 
-function setup(options: { measurer?: Measurer; exchanger?: Exchanger } = {}) {
-  const manual = manualLoader(options.measurer, options.exchanger);
+function setup(
+  options: { measurer?: Measurer; exchanger?: Exchanger; regenerator?: Regenerator } = {},
+) {
+  const manual = manualLoader(options.measurer, options.exchanger, options.regenerator);
   const engine = fakeEngine();
   const selection = createSelectionStore();
   const settings = createViewSettingsStore();
@@ -109,6 +115,7 @@ function boxExchanger(): Exchanger {
     exportStep: vi.fn(async () => ({ ok: true as const, value: new TextEncoder().encode('ISO') })),
     importStep: vi.fn(async () => ({ ok: false as const, message: 'not in this test' })),
     retain: vi.fn(() => []),
+    reimport: vi.fn(async () => []),
   };
 }
 
@@ -385,6 +392,53 @@ describe('App', () => {
       expect(manual.loader.dispose).toHaveBeenCalledTimes(1);
     });
 
+    /** A solver whose disposal the test watches. */
+    function ownSolver() {
+      const solver = { ...immediateSolver({ dof: 0 }).solver, dispose: vi.fn() };
+      return { solver, createSolver: vi.fn(() => solver) };
+    }
+
+    it('disposes the sketch solver it made when it unmounts, not before', async () => {
+      const { manual, createLoader } = ownLoader();
+      const { solver, createSolver } = ownSolver();
+      const view = render(
+        <StrictMode>
+          <App
+            createLoader={createLoader}
+            createSolver={createSolver}
+            createEngine={fakeEngine().factory}
+          />
+        </StrictMode>,
+      );
+      await tick();
+      await act(async () => manual.resolve([boxBody()]));
+      await tick();
+      // The StrictMode remount keeps it.
+      expect(solver.dispose).not.toHaveBeenCalled();
+      view.unmount();
+      await tick();
+      expect(solver.dispose).toHaveBeenCalledTimes(1);
+      expect(manual.loader.dispose).toHaveBeenCalledTimes(1);
+    });
+
+    it('never disposes the solver of a session it was given', async () => {
+      const { solver, createSolver } = ownSolver();
+      const manual = manualLoader();
+      const view = render(
+        <App
+          loader={manual.loader}
+          createSolver={createSolver}
+          sketchSession={createSketchSession(solver)}
+          createEngine={fakeEngine().factory}
+        />,
+      );
+      await act(async () => manual.resolve([boxBody()]));
+      view.unmount();
+      await tick();
+      expect(createSolver).not.toHaveBeenCalled();
+      expect(solver.dispose).not.toHaveBeenCalled();
+    });
+
     it('never disposes a loader it was given', async () => {
       const t = setup();
       await act(async () => t.resolve([boxBody()]));
@@ -446,7 +500,7 @@ describe('App', () => {
       await waitFor(() => expect(features(t)).toHaveLength(1));
       expect(features(t)[0]).toMatchObject({ id: 'sketch#1', entities: [{ kind: 'circle' }] });
       expect(screen.queryByRole('toolbar', { name: 'Sketch' })).toBeNull();
-      expect(screen.getByTestId('sketch-list').textContent).toContain('Sketch 1');
+      expect(screen.getByTestId('feature-tree').textContent).toContain('Sketch 1');
 
       // Ctrl+Z undoes the commit, Ctrl+Y brings it back.
       fireEvent.keyDown(window, { key: 'z', ctrlKey: true });
@@ -562,6 +616,37 @@ describe('App export and import', () => {
     expect(last()).toBe(loaded);
   });
 
+  it('reads imported STEP bodies again when the kernel lost every shape', async () => {
+    const exchanger = boxExchanger();
+    vi.mocked(exchanger.importStep).mockImplementation(async (_bytes, featureId) => ({
+      ok: true,
+      value: boxBody({ id: featureId, min: [20, 0, 0] }),
+    }));
+    const lost = new Set<() => void>();
+    const regenerator: Regenerator = {
+      regen: () => new Promise(() => {}),
+      onInvalidated: (l) => {
+        lost.add(l);
+        return () => lost.delete(l);
+      },
+    };
+    const t = setup({ exchanger, regenerator });
+    await act(async () => t.resolve([boxBody()]));
+    const text = 'ISO-10303-21;\nDATA;\nENDSEC;\n';
+    const file = new File([text], 'ref.step', { type: 'model/step' });
+    fireEvent.change(await screen.findByTestId('import-input'), { target: { files: [file] } });
+    await waitFor(() =>
+      expect(screen.getByTestId('io-status').textContent).toMatch(/^Imported ref\.step/),
+    );
+    expect(exchanger.reimport).not.toHaveBeenCalled();
+    // A recycle (or a restart) of the kernel.
+    act(() => lost.forEach((l) => l()));
+    await waitFor(() => expect(exchanger.reimport).toHaveBeenCalledTimes(1));
+    const files = vi.mocked(exchanger.reimport).mock.lastCall![0];
+    expect([...files.keys()]).toEqual(['import#1']);
+    expect(new TextDecoder().decode(files.get('import#1'))).toBe(text);
+  });
+
   it('reports a file it cannot import', async () => {
     const t = setup();
     await act(async () => t.resolve([boxBody()]));
@@ -571,5 +656,150 @@ describe('App export and import', () => {
       expect(screen.getByRole('alert').textContent).toBe('notes.txt is not a STEP or STL file.'),
     );
     expect(findPart(t.documents.getState().document, 'part#1')!.features).toEqual([]);
+  });
+
+  describe('the regenerated model, the feature tree and the feature dialogs', () => {
+    /** A loader with a regenerator the test answers by hand, opening the demo document. */
+    function modelSetup() {
+      const requests: { document: ManufaktureDocument; resolve: (v: RegenView | null) => void }[] =
+        [];
+      const invalidate = new Set<() => void>();
+      const regenerator: Regenerator = {
+        regen: (document) => new Promise((resolve) => requests.push({ document, resolve })),
+        onInvalidated: (l) => {
+          invalidate.add(l);
+          return () => invalidate.delete(l);
+        },
+      };
+      const loader: SceneLoader = {
+        load: async () => [],
+        dispose: vi.fn(),
+        regenerator,
+        initialDocument: demoDocument(),
+      };
+      const engine = fakeEngine();
+      const selection = createSelectionStore();
+      const documents = createDocumentStore(createDocument({ id: 'doc', name: 'Test' }));
+      const model = createModelStore();
+      const solver = immediateSolver({ dof: 0 });
+      render(
+        <App
+          loader={loader}
+          createEngine={engine.factory}
+          selection={selection}
+          settings={createViewSettingsStore()}
+          documents={documents}
+          sketchSession={createSketchSession(solver.solver)}
+          measure={createMeasureStore()}
+          model={model}
+        />,
+      );
+      const answer = (i: number, patch: (id: string) => Partial<FeatureResult> = () => ({})) =>
+        act(async () => {
+          const r = requests[i]!;
+          const part = r.document.parts[0]!;
+          r.resolve({
+            generation: i + 1,
+            ms: 1,
+            parts: [
+              {
+                partId: part.id,
+                body: boxBody({ id: part.id }),
+                features: part.features.map((f, index) => ({
+                  featureId: f.id,
+                  kind: f.kind,
+                  index,
+                  status: 'ok' as const,
+                  errors: [],
+                  warnings: [],
+                  references: [],
+                  cached: false,
+                  ms: 0,
+                  ...patch(f.id),
+                })),
+              },
+            ],
+          });
+        });
+      return { requests, invalidate, engine, selection, documents, model, answer };
+    }
+
+    it('opens the scene document, regenerates it on every change and after a recycle', async () => {
+      const t = modelSetup();
+      await waitFor(() => expect(t.requests).toHaveLength(1));
+      expect(t.requests[0]!.document.parts[0]!.name).toBe('Demo part');
+      await t.answer(0);
+      await waitFor(() =>
+        expect(t.engine.api.setBodies).toHaveBeenLastCalledWith([
+          expect.objectContaining({ id: 'part#1' }),
+        ]),
+      );
+      const tree = screen.getByTestId('feature-tree');
+      expect(within(tree).getByTestId('feature-fillet#1').dataset.status).toBe('ok');
+
+      act(() => {
+        t.documents.getState().execute({
+          type: 'suppressFeature',
+          partId: 'part#1',
+          featureId: 'fillet#1',
+          suppressed: true,
+        });
+      });
+      expect(t.requests).toHaveLength(2);
+      expect(within(tree).getByTestId('feature-fillet#1').dataset.status).toBe('suppressed');
+      act(() => t.invalidate.forEach((l) => l()));
+      expect(t.requests).toHaveLength(3);
+    });
+
+    it('opens a feature dialog from the toolbar and from the tree, and applies it', async () => {
+      const t = modelSetup();
+      await waitFor(() => expect(t.requests).toHaveLength(1));
+      await t.answer(0, (id) =>
+        id === 'fillet#1'
+          ? {
+              status: 'error',
+              errors: [
+                {
+                  code: 'reference-lost',
+                  message: 'Edge r3 of Fillet 1 is gone; re-pick it',
+                  referenceId: 'r3',
+                  missing: [],
+                },
+              ],
+            }
+          : {},
+      );
+      // A new chamfer from the toolbar; the tree and the toolbar wait while it is open.
+      fireEvent.click(
+        within(screen.getByRole('toolbar', { name: 'Features' })).getByRole('button', {
+          name: /Chamfer/,
+        }),
+      );
+      // The dialogs load on first use.
+      expect(await screen.findByRole('dialog', { name: 'Chamfer: Chamfer 1' })).toBeTruthy();
+      expect(
+        (screen.getByRole('button', { name: 'Delete Sketch 1' }) as HTMLButtonElement).disabled,
+      ).toBe(true);
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+      expect(screen.queryByTestId('feature-dialog')).toBeNull();
+
+      // Double-click edits: the extrusion's depth.
+      fireEvent.doubleClick(screen.getByTestId('feature-extrude#1'));
+      const depth = (await screen.findByTestId('field-distance')) as HTMLInputElement;
+      expect(depth.value).toBe('20');
+      fireEvent.change(depth, { target: { value: '25' } });
+      fireEvent.click(screen.getByTestId('dialog-ok'));
+      expect(t.documents.getState().undoLabel).toBe('Edit Extrude 1');
+      expect(t.requests.at(-1)!.document.parts[0]!.features[1]).toMatchObject({
+        extent: { distance: { source: '25' } },
+      });
+
+      // Re-pick from the error tooltip opens the fillet with the lost edge marked.
+      fireEvent.mouseEnter(screen.getByTestId('status-fillet#1'));
+      fireEvent.click(screen.getByRole('button', { name: 'Re-pick r3' }));
+      expect(
+        within(await screen.findByTestId('ref-edges')).getByText(/not found: pick it again/),
+      ).toBeTruthy();
+    });
   });
 });

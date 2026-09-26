@@ -4,7 +4,8 @@
 // itself. The worker is started on the first sketch and kept for the session.
 
 import SolverWorker from '@manufakture/sketch/worker?worker';
-import { connectSolver, type SketchSolverApi } from '@manufakture/sketch';
+import type { SketchSolverApi } from '@manufakture/sketch';
+import { connectSolver } from '@manufakture/sketch/rpc';
 
 export interface SolverHandle {
   api: SketchSolverApi;

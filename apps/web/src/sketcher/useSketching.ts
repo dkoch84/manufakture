@@ -6,7 +6,7 @@ import { useCallback, useRef, useState } from 'react';
 import { useStore } from 'zustand';
 import type { DocumentStoreApi } from '../state/document';
 import type { ViewportApi } from '../viewport/Viewport';
-import { commitSketch, startSketch, type SketchTarget } from './commit';
+import { commitSketch, startSketch, type SketchPlacements, type SketchTarget } from './commit';
 import { sketchUp } from './planes';
 import type { SketchSessionStore } from './session';
 
@@ -25,6 +25,7 @@ export function useSketching(
   session: SketchSessionStore,
   documents: DocumentStoreApi,
   viewport: ViewportApi | null,
+  placements?: SketchPlacements,
 ): Sketching {
   const active = useStore(session, (s) => s.active);
   const [error, setError] = useState<string | null>(null);
@@ -33,7 +34,7 @@ export function useSketching(
   const enter = useCallback(
     (target: SketchTarget) => {
       if (session.getState().active) return false;
-      const r = startSketch(documents.getState().document, target);
+      const r = startSketch(documents.getState().document, target, undefined, placements);
       if (!r.ok) {
         setError(r.message);
         return false;
@@ -46,7 +47,7 @@ export function useSketching(
       viewport?.alignView(p.normal, sketchUp(p), p.origin);
       return true;
     },
-    [session, documents, viewport],
+    [session, documents, viewport, placements],
   );
 
   const finish = useCallback(async () => {

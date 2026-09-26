@@ -70,8 +70,23 @@ interface E2eFeature {
   operation?: string;
 }
 
+interface E2eFeatureResult {
+  featureId: string;
+  kind: string;
+  status: string;
+  errors: { code: string; message: string }[];
+  warnings: { code: string; message: string }[];
+}
+
 interface Window {
   __manufakture?: {
+    model: {
+      getState(): {
+        generation: number;
+        pending: boolean;
+        parts: { partId: string; features: E2eFeatureResult[] }[];
+      };
+    };
     sketcher: {
       store: { getState(): E2eSketchState };
       toClient(p: E2eVec2): { x: number; y: number };

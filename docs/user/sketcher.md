@@ -7,10 +7,10 @@ A sketch is a flat drawing of lines, arcs and circles on a plane, held in shape 
 - **New sketch** in the header opens a menu: **Top (XY)**, **Front (XZ)**, **Right (YZ)**, or **Selected face** when a flat face of the model is selected. The view turns to look straight at the plane, with the sketch's x axis to the right.
 - **Finish sketch** saves the sketch to the part as one step: **Undo** in the header (or Ctrl+Z) takes the whole sketch back out, **Redo** (Ctrl+Y or Ctrl+Shift+Z) puts it back.
 - **Cancel** leaves the sketch without saving what you changed in it.
-- The side panel lists the part's sketches. **Edit** (or a double-click on the name) opens one again; finishing an edit is again one undo step.
+- The [feature tree](feature-tree.md) lists the part's sketches with its other features. A double-click on a sketch (or its edit button) opens it again; finishing an edit is again one undo step.
 - Finished sketches stay visible in grey.
 
-A sketch on a face is placed where the face is now. It does not follow the face if the model changes later; that needs the naming layer, which is still to come.
+A sketch on a face of the part stores the face itself, by its name, so it follows the face when the part changes (a taller extrusion lifts a sketch on its top). Its x axis runs along the world X axis (Y for a face that faces X), and its origin is where the world origin projects onto the face. A face of an imported reference body cannot be followed; a sketch there stores the plane as it is.
 
 ## Drawing
 
@@ -25,6 +25,7 @@ Pick a tool in the sketch toolbar, or press its key. **Esc** drops the shape you
 | 3-point arc      | A   | Click the start, the end, then a point the arc passes through.                                       |
 | Tangent arc      | G   | Click the end of a line or arc, then where the arc ends. The arc continues the curve smoothly.       |
 | Center arc       |     | Click the centre, the start, then the end. The arc goes the way you moved the pointer round.         |
+| Point            | P   | Click where a point goes: a hole centre for the Hole feature, or a reference to constrain to.        |
 | Construction     | Q   | New geometry is construction geometry (dashed). With geometry selected, it switches that geometry.   |
 
 You can also press, drag and release instead of clicking twice. Construction geometry helps position other geometry and never becomes part of a closed area.
@@ -100,7 +101,7 @@ A constraint that repeats what others already say (a redundant one) is shown in 
 
 | Key                        | Action                                                          |
 | -------------------------- | --------------------------------------------------------------- |
-| S, L, R, C, A, G, D        | Select, Line, Rectangle, Circle, Arc, Tangent arc, Dimension    |
+| S, L, R, C, A, G, P, D     | Select, Line, Rectangle, Circle, Arc, Tangent arc, Point, Dim.  |
 | Q                          | Construction                                                    |
 | H, V, I, T, E              | Constraints, with geometry selected                             |
 | Delete, Backspace          | Delete the selection                                            |

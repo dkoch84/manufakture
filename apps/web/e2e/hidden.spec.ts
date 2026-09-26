@@ -23,7 +23,7 @@ const MARGIN_PX = 1.5;
 test('hidden edges and vertices of the demo part cannot be picked through it', async ({
   page,
 }, testInfo) => {
-  await openScene(page, '', 90_000);
+  await openScene(page, '?scene=demo', 90_000);
   const report: Record<string, unknown> = {};
   let totalProbes = 0;
   for (const view of ['iso', 'front', 'right'] as const) {

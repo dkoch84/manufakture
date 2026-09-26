@@ -42,6 +42,7 @@ const TOOLS: readonly { id: ToolId; label: string; key: string; title: string }[
     title: 'Arc tangent to the end of a line or arc (G)',
   },
   { id: 'centerArc', label: 'Center arc', key: '', title: 'Arc from its centre' },
+  { id: 'point', label: 'Point', key: 'p', title: 'Point: a hole centre or a reference (P)' },
   {
     id: 'dimension',
     label: 'Dimension',

@@ -1,6 +1,6 @@
 # The 3D viewport
 
-The viewport shows the model and is where you pick faces, edges and vertices. On start-up it shows a loading screen while the geometry kernel downloads and starts (about 42 MB on a first visit, cached after that), then the model.
+The viewport shows the model and is where you pick faces, edges and vertices. On start-up it shows a loading screen while the geometry kernel downloads and starts (about 42 MB on a first visit, cached after that), then the model. The model is rebuilt from the [feature tree](feature-tree.md) after every change; an empty document shows a hint to start with a sketch.
 
 ## Mouse
 
@@ -39,7 +39,7 @@ The ground grid lies on the XY plane, with the X axis in red and the Y axis in g
 
 The side panel lists the selection in the order you picked it, by name. Two tags may appear next to a name:
 
-- **placeholder**: the viewport made the name up because the modelling history has not named that face, edge or vertex yet. Until the naming work lands, every name in the demo part is a placeholder. Placeholder names are never stored in a document.
+- **placeholder**: the viewport made the name up because the modelling history has not named that face, edge or vertex. Faces and edges of the part always have real names; vertices and the faces of an imported STL mesh have placeholders. Placeholder names are never stored in a document.
 - **fragile**: the name depends on the position of the item, so after an edit it may point at a different face or edge. Check such references after changing the model.
 
 ## Section view

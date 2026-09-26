@@ -37,6 +37,7 @@ import {
   type ReferenceReport,
   type ShapeId,
   type TessellateOp,
+  type Topology,
 } from '@manufakture/kernel';
 import type { SketchPlacement } from '@manufakture/sketch';
 import {
@@ -150,7 +151,8 @@ interface BodyState {
 type Meta =
   | { type: 'feature'; feature: Feature; key: string; result: FeatureResult; started: number }
   | { type: 'resolve'; take: (r: OpResult) => void }
-  | { type: 'mesh'; partId: string };
+  | { type: 'mesh'; partId: string }
+  | { type: 'topology'; partId: string };
 
 interface Batch {
   ops: KernelOp[];
@@ -400,9 +402,25 @@ export class RegenEngine {
       built.push({ state, features, dirty });
     }
 
-    // Meshes of the bodies that changed since the last completed regen, in one batch, so they
-    // share one name table.
+    // Every body must come from the kernel instance of the latest reply: a part built only from
+    // cache hits can hold a shape id from before a recycle that landed during another part's
+    // batch. Its tessellation would fail, or worse, a later pick or measure would.
+    for (const { state } of built) {
+      const { ref, instance } = state.body;
+      if (
+        typeof ref === 'number' &&
+        instance !== null &&
+        run.instance !== null &&
+        instance !== run.instance
+      ) {
+        throw new StaleShapes(run.instance);
+      }
+    }
+
+    // Meshes (and topologies, for edge adjacency, vertices and face planes) of the bodies that
+    // changed since the last completed regen, in one batch, so they share one name table.
     const meshes = new Map<string, MeshData>();
+    const topologies = new Map<string, Topology>();
     const batch = emptyBatch();
     for (const { state } of built) {
       const { ref, key } = state.body;
@@ -410,8 +428,11 @@ export class RegenEngine {
       if (ref !== null && this.#reported.get(state.part.id) !== bodyKey) {
         const op: TessellateOp = { op: 'tessellate', shape: ref as ShapeId };
         if (this.#deflection !== undefined) op.deflection = this.#deflection;
-        batch.ops.push(op);
-        batch.metas.push({ type: 'mesh', partId: state.part.id });
+        batch.ops.push(op, { op: 'topology', shape: ref as ShapeId });
+        batch.metas.push(
+          { type: 'mesh', partId: state.part.id },
+          { type: 'topology', partId: state.part.id },
+        );
         if (state.body.instance !== null) batch.shapesFrom = state.body.instance;
       }
     }
@@ -423,12 +444,13 @@ export class RegenEngine {
       names = reply.names;
       batch.metas.forEach((meta, j) => {
         const r = reply.results[j]!;
-        if (meta.type !== 'mesh') return;
+        if (meta.type !== 'mesh' && meta.type !== 'topology') return;
         if (!r.ok) {
           if (r.error.code === 'unknown-shape') throw new StaleShapes(reply.instance);
-          throw new Error(`tessellating ${meta.partId} failed: ${r.error.message}`);
+          throw new Error(`${meta.type} of ${meta.partId} failed: ${r.error.message}`);
         }
-        meshes.set(meta.partId, r.value as MeshData);
+        if (meta.type === 'mesh') meshes.set(meta.partId, r.value as MeshData);
+        else topologies.set(meta.partId, r.value as Topology);
       });
     }
     this.#checkStale(run);
@@ -448,6 +470,7 @@ export class RegenEngine {
         bodyKey,
         meshChanged,
         mesh: meshes.get(state.part.id) ?? null,
+        topology: topologies.get(state.part.id) ?? null,
       };
     });
     for (const id of [...this.#reported.keys()]) {
@@ -684,6 +707,7 @@ export class RegenEngine {
       run.counters.cacheHits++;
       this.#fill(result, hit, started);
       result.cached = true;
+      if (hit.sketch) result.placement = hit.sketch.placement;
       if (hit.ok && hit.sketch) state.sketches.set(f.id, hit.sketch);
       else state.unavailable.set(f.id, 'error');
       return;
@@ -771,6 +795,7 @@ export class RegenEngine {
       return;
     }
     state.sketches.set(f.id, solved.sketch);
+    result.placement = solved.sketch.placement;
     await store({
       ok: true,
       errors: [],

@@ -1,17 +1,19 @@
-// What the viewport shows at start-up. Until documents and the regen engine
-// exist, the app asks the kernel for a demo part. Two kernel-free scenes serve
-// tests: `?scene=test` (a named box, for the e2e pick check) and
-// `?scene=perf&triangles=N` (a dense sphere, for frame time measurements).
-// They are only honoured where the test hooks are on (see testHooks.ts).
+// What the app starts with. By default the kernel worker (with the regen engine) and an empty
+// document: every body the viewport shows is regenerated from the document (model/model.ts).
+// Three test scenes are only honoured where the test hooks are on (see testHooks.ts):
+// `?scene=demo` opens the demo part as a document (model/demo.ts), and two kernel-free scenes
+// serve tests: `?scene=test` (a named box, for the e2e pick check) and `?scene=perf&triangles=N`
+// (a dense sphere, for frame time measurements).
 
-import {
-  spawnKernelWorker,
-  type KernelClient,
-  type KernelClientOptions,
-} from '@manufakture/kernel/client';
-import type { KernelOp, LoadProgress, MeshData, Topology } from '@manufakture/kernel';
-import { kernelExchange, type Exchanger, type KernelBody } from '../io/exchange';
+import type { ManufaktureDocument } from '@manufakture/core';
+import type { LoadProgress } from '@manufakture/kernel';
+import type { KernelClientOptions } from '@manufakture/kernel/client';
+import { spawnRegenWorker, type RegenClient } from '@manufakture/regen/client';
+import { kernelExchange, type Exchanger, type KernelBody, type Referencer } from '../io/exchange';
 import type { Measurer } from '../measure/measurer';
+import { demoDocument } from '../model/demo';
+import { kernelRegenerator } from '../model/kernelModel';
+import type { Regenerator } from '../model/model';
 import { testHooksEnabled } from '../testHooks';
 import type { BodyInput } from './bodies';
 import { fillPlaceholderNames } from './naming';
@@ -25,17 +27,23 @@ export interface LoadStatus {
 
 export interface SceneLoader {
   /**
-   * Start loading (once) and resolve with the bodies. May be called again,
-   * e.g. by a remounted component: it gets the same promise. `onStatus` is
-   * called with the current status at once and with every change until
-   * `signal` aborts.
+   * Start loading (once) and resolve with the scene's fixed bodies (none for the kernel scenes,
+   * whose bodies come from regen). May be called again, e.g. by a remounted component: it gets
+   * the same promise. `onStatus` is called with the current status at once and with every
+   * change until `signal` aborts.
    */
   load(onStatus: (status: LoadStatus) => void, signal?: AbortSignal): Promise<BodyInput[]>;
   dispose(): void;
-  /** Exact measurements of the loaded bodies in the kernel; absent for kernel-free scenes. */
+  /** Regenerates documents in the kernel worker; absent for kernel-free scenes. */
+  regenerator?: Regenerator;
+  /** Exact measurements of the kernel's bodies; absent for kernel-free scenes. */
   measurer?: Measurer;
   /** Export and STEP import through the kernel; absent for kernel-free scenes. */
   exchanger?: Exchanger;
+  /** Picking references to store (the kernel's minimal edge refs); absent for kernel-free scenes. */
+  referencer?: Referencer;
+  /** A document the scene opens with (the demo scene); the app loads it once the scene is loaded. */
+  initialDocument?: ManufaktureDocument;
 }
 
 /** Shared plumbing: one load, status fan-out, late subscribers get the latest status. */
@@ -99,86 +107,47 @@ export function kernelLoadStatus(p: LoadProgress): LoadStatus {
   }
 }
 
-export const DEMO_BODY_ID = 'demo-part';
-/** What the demo part is called in exported files. */
-export const DEMO_BODY_NAME = 'Demo part';
-
 /**
- * The demo part: a 60 x 40 x 20 mm block with every edge filleted and a
- * through hole, as one batch (one round trip, ADR 0007 decision 3).
+ * The kernel scene: starts the regen worker (the kernel and the regen engine, ADR 0007) with load
+ * progress, and resolves with no fixed bodies once the kernel is ready; the part bodies come
+ * from regenerating the document. The worker is spawned by the first `load`; call it at app
+ * start-up so kernel loading overlaps UI start-up (ADR 0002).
  */
-export function demoPartOps() {
-  return [
-    { op: 'box', size: [60, 40, 20], at: [-30, -20, 0], featureId: 'block', keep: false },
-    {
-      op: 'fillet',
-      shape: { result: 0 },
-      edges: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
-      radius: 3,
-      featureId: 'fillet',
-      keep: false,
-      history: false,
-    },
-    { op: 'cylinder', radius: 8, height: 30, at: [0, 0, -5], featureId: 'hole', keep: false },
-    {
-      op: 'boolean',
-      kind: 'cut',
-      shape: { result: 1 },
-      tools: [{ result: 2 }],
-      featureId: 'hole',
-      history: false,
-    },
-    { op: 'tessellate', shape: { result: 3 } },
-    { op: 'topology', shape: { result: 3 } },
-  ] as const satisfies readonly KernelOp[];
-}
-
-/**
- * Loads the demo part from a kernel worker, reporting load progress. The
- * worker is spawned by the first `load`; call it at app start-up so kernel
- * loading overlaps UI start-up (ADR 0002).
- */
-export function kernelDemoLoader(
-  spawn: (options: KernelClientOptions) => KernelClient,
+export function kernelLoader(
+  spawn: (options: KernelClientOptions) => RegenClient,
+  options: { initialDocument?: ManufaktureDocument } = {},
 ): SceneLoader {
-  let client: KernelClient | null = null;
-  // Viewport body id to kernel shape: the demo part, then imported STEP bodies.
+  let client: RegenClient | null = null;
+  // Viewport body id to kernel shape: the part bodies from regen, then imported STEP bodies.
   const registry = new Map<string, KernelBody>();
-  const { exchanger, measurer } = kernelExchange(() => client, registry);
+  const { exchanger, measurer, referencer } = kernelExchange(() => client, registry);
+  const regenerator = kernelRegenerator(() => client, registry);
   const loader = loaderFrom(
     { label: 'Starting the geometry kernel', fraction: null },
     async (report) => {
       const c = spawn({
         onStatus: (s) => {
           if (s.type === 'loading') report(kernelLoadStatus(s.progress));
+          // Every shape is gone: the document is regenerated again (and imports re-read).
+          if (s.type === 'recycled') regenerator.invalidate();
         },
+        // Likewise after a stuck worker was replaced.
+        onRestarted: () => regenerator.invalidate(),
       });
       client = c;
       await c.ready;
-      report({ label: 'Building the demo part', fraction: 0.97 });
-      const reply = await c.submit(demoPartOps());
-      if (reply === null || reply.status !== 'done') {
-        throw new Error('The kernel dropped the request.');
-      }
-      for (const r of reply.results) {
-        if (!r.ok) throw new Error(`Kernel ${r.op} failed: ${r.error.message}`);
-      }
-      const cut = reply.results[3];
-      const mesh = reply.results[4];
-      const topology = reply.results[5];
-      if (!mesh.ok || !topology.ok) throw new Error('The demo part has no mesh.');
-      if (cut.ok) {
-        registry.set(DEMO_BODY_ID, { shape: cut.value.shape, name: DEMO_BODY_NAME, role: 'part' });
-      }
-      return [demoBody(mesh.value, reply.names, topology.value)];
+      return [];
     },
     () => client?.terminate(),
   );
-  return { ...loader, measurer, exchanger };
-}
-
-export function demoBody(mesh: MeshData, names: readonly string[], topology: Topology): BodyInput {
-  return { id: DEMO_BODY_ID, mesh, names: fillPlaceholderNames(mesh, names), topology };
+  return {
+    ...loader,
+    regenerator,
+    measurer,
+    exchanger,
+    referencer,
+    ...(options.initialDocument ? { initialDocument: options.initialDocument } : {}),
+  };
 }
 
 /** A loader for bodies that need no kernel. */
@@ -190,7 +159,7 @@ export function staticLoader(label: string, make: () => BodyInput[]): SceneLoade
   });
 }
 
-export type SceneName = 'demo' | 'test' | 'perf';
+export type SceneName = 'default' | 'demo' | 'test' | 'perf';
 
 export interface SceneChoice {
   scene: SceneName;
@@ -202,7 +171,7 @@ export const DEFAULT_PERF_TRIANGLES = 200_000;
 export function sceneFromSearch(search: string): SceneChoice {
   const params = new URLSearchParams(search);
   const s = params.get('scene');
-  const scene: SceneName = s === 'test' || s === 'perf' ? s : 'demo';
+  const scene: SceneName = s === 'test' || s === 'perf' || s === 'demo' ? s : 'default';
   const t = Number(params.get('triangles'));
   const triangles =
     Number.isFinite(t) && t > 0 ? Math.min(Math.floor(t), 5_000_000) : DEFAULT_PERF_TRIANGLES;
@@ -225,18 +194,19 @@ export function perfLoader(triangles: number): SceneLoader {
 }
 
 /**
- * The scene named in the page URL; the kernel demo part by default, and
- * always when `testScenes` is off.
+ * The scene named in the page URL; the kernel with an empty document by default, and always
+ * when `testScenes` is off.
  */
 export function loaderForLocation(
   search: string = window.location.search,
-  spawn: (options: KernelClientOptions) => KernelClient = spawnKernelWorker,
+  spawn: (options: KernelClientOptions) => RegenClient = spawnRegenWorker,
   testScenes: boolean = testHooksEnabled,
 ): SceneLoader {
   const choice: SceneChoice = testScenes
     ? sceneFromSearch(search)
-    : { scene: 'demo', triangles: 0 };
+    : { scene: 'default', triangles: 0 };
   if (choice.scene === 'test') return testLoader();
   if (choice.scene === 'perf') return perfLoader(choice.triangles);
-  return kernelDemoLoader(spawn);
+  if (choice.scene === 'demo') return kernelLoader(spawn, { initialDocument: demoDocument() });
+  return kernelLoader(spawn);
 }

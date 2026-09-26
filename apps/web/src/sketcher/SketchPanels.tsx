@@ -1,16 +1,14 @@
 // Starting sketches: the Sketch menu (a datum plane, or the selected planar
-// face) and the list of the part's sketches to edit again. The feature tree
-// (#933) takes the list over.
+// face). Sketches are opened again from the feature tree.
 
-import type { SketchFeature } from '@manufakture/core';
 import type { SketchPlacement } from '@manufakture/sketch/model';
 import { useEffect, useRef, useState } from 'react';
 import type { SketchTarget } from './commit';
-import { DATUM_PLANES } from './planes';
+import { DATUM_PLANES, type FaceTarget } from './planes';
 
 export interface SketchMenuProps {
-  /** The selected planar face's placement, when there is one. */
-  face: SketchPlacement | null;
+  /** Where a sketch on the selected planar face goes, when there is one. */
+  face: FaceTarget | null;
   disabled?: boolean;
   onPick: (target: SketchTarget) => void;
 }
@@ -27,9 +25,9 @@ export function SketchMenu({ face, disabled = false, onPick }: SketchMenuProps) 
     window.addEventListener('pointerdown', onDown);
     return () => window.removeEventListener('pointerdown', onDown);
   }, [open]);
-  const pick = (placement: SketchPlacement) => {
+  const pick = (placement: SketchPlacement, face?: FaceTarget['face']) => {
     setOpen(false);
-    onPick({ kind: 'new', placement });
+    onPick(face ? { kind: 'new', placement, face } : { kind: 'new', placement });
   };
   return (
     <div className="sketch-menu" ref={root}>
@@ -60,48 +58,12 @@ export function SketchMenu({ face, disabled = false, onPick }: SketchMenuProps) 
             role="menuitem"
             disabled={!face}
             title={face ? 'Sketch on the selected face' : 'Select a planar face first'}
-            onClick={() => face && pick(face)}
+            onClick={() => face && pick(face.placement, face.face)}
           >
             Selected face
           </button>
         </div>
       )}
     </div>
-  );
-}
-
-export interface SketchListProps {
-  sketches: readonly SketchFeature[];
-  disabled?: boolean;
-  onEdit: (featureId: string) => void;
-}
-
-export function SketchList({ sketches, disabled = false, onEdit }: SketchListProps) {
-  return (
-    <section className="sketch-list" aria-label="Sketches">
-      <h2>Sketches</h2>
-      {sketches.length === 0 ? (
-        <p>No sketches yet. Start one with New sketch.</p>
-      ) : (
-        <ul data-testid="sketch-list">
-          {sketches.map((f) => (
-            <li key={f.id} data-feature={f.id} onDoubleClick={() => !disabled && onEdit(f.id)}>
-              <span>{f.name}</span>{' '}
-              <span className="kind">
-                {f.entities.length} {f.entities.length === 1 ? 'entity' : 'entities'}
-              </span>
-              <button
-                type="button"
-                disabled={disabled}
-                aria-label={`Edit ${f.name}`}
-                onClick={() => onEdit(f.id)}
-              >
-                Edit
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
   );
 }

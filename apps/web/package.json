@@ -16,6 +16,7 @@
     "@manufakture/core": "workspace:*",
     "@manufakture/io": "workspace:*",
     "@manufakture/kernel": "workspace:*",
+    "@manufakture/regen": "workspace:*",
     "@manufakture/sketch": "workspace:*",
     "@manufakture/units": "workspace:*",
     "react": "^19.3.0",

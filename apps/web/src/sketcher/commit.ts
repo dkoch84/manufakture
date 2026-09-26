@@ -9,6 +9,7 @@ import {
   peekCounter,
   previewIds,
   type Command,
+  type FaceRef,
   type ManufaktureDocument,
   type SketchFeature,
 } from '@manufakture/core';
@@ -16,8 +17,16 @@ import type { SketchInput, SketchPlacement } from '@manufakture/sketch/model';
 import type { SketchSource } from './session';
 import { evaluateVariables } from './values';
 
+/**
+ * A new sketch on a placement (a datum plane, or a face where the placement is the face's plane),
+ * or an existing sketch. `face` is set for a face with a name from the naming layer: the sketch
+ * then stores a reference to the face and follows it through later edits.
+ */
 export type SketchTarget =
-  { kind: 'new'; placement: SketchPlacement } | { kind: 'edit'; featureId: string };
+  { kind: 'new'; placement: SketchPlacement; face?: FaceRef } | { kind: 'edit'; featureId: string };
+
+/** Where regen last placed each sketch (face sketches have no stored placement). */
+export type SketchPlacements = ReadonlyMap<string, SketchPlacement>;
 
 export interface SketchStart {
   partId: string;
@@ -33,10 +42,17 @@ export function sketchFeatures(
   return (part?.features ?? []).filter((f): f is SketchFeature => f.kind === 'sketch');
 }
 
-/** The placement of a sketch feature, or null when it lies on a face reference. */
-export function sketchPlacement(feature: SketchFeature): SketchPlacement | null {
+/**
+ * The placement of a sketch feature: its stored plane, or for a sketch on a face reference where
+ * regen last resolved it (null before regen has).
+ */
+export function sketchPlacement(
+  feature: SketchFeature,
+  placements?: SketchPlacements,
+): SketchPlacement | null {
   const p = feature.plane;
-  return p.type === 'plane' ? { origin: p.origin, normal: p.normal, xDir: p.xDir } : null;
+  if (p.type === 'plane') return { origin: p.origin, normal: p.normal, xDir: p.xDir };
+  return placements?.get(feature.id) ?? null;
 }
 
 /** What a session starts from, or an error message. */
@@ -44,6 +60,7 @@ export function startSketch(
   doc: ManufaktureDocument,
   target: SketchTarget,
   partId = DEFAULT_PART_ID,
+  placements?: SketchPlacements,
 ): { ok: true; value: SketchStart } | { ok: false; message: string } {
   const part = findPart(doc, partId);
   if (!part) return { ok: false, message: `There is no part ${partId}.` };
@@ -66,6 +83,7 @@ export function startSketch(
           isNew: true,
           name: `Sketch ${n}`,
           placement: target.placement,
+          ...(target.face ? { face: target.face } : {}),
           entities: [],
           constraints: [],
         },
@@ -76,11 +94,11 @@ export function startSketch(
   if (!feature || feature.kind !== 'sketch') {
     return { ok: false, message: `There is no sketch ${target.featureId}.` };
   }
-  const placement = sketchPlacement(feature);
+  const placement = sketchPlacement(feature, placements);
   if (!placement) {
     return {
       ok: false,
-      message: 'Sketches on a face reference cannot be edited until regen resolves faces.',
+      message: `${feature.name} is on a face that could not be found; fix the features before it first.`,
     };
   }
   return {
@@ -114,12 +132,17 @@ export function commitSketch(
   const constraints = [...sketch.constraints];
   if (source.isNew) {
     const p = source.placement;
+    const part = findPart(doc, partId);
+    const [refId] = part ? previewIds(part.nextIds, 'r') : [];
     const feature: SketchFeature = {
       id: source.featureId,
       kind: 'sketch',
       name: source.name,
       suppressed: false,
-      plane: { type: 'plane', origin: p.origin, normal: p.normal, xDir: p.xDir },
+      plane:
+        source.face && refId
+          ? { type: 'face', face: { id: refId, ref: source.face } }
+          : { type: 'plane', origin: p.origin, normal: p.normal, xDir: p.xDir },
       entities,
       constraints,
     };

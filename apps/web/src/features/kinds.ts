@@ -1,0 +1,20 @@
+// The feature kinds that have a dialog. Apart from the dialogs themselves, which load on first
+// use, so the toolbar and the feature tree can name them without loading the forms.
+
+export type DialogKind =
+  'extrude' | 'revolve' | 'fillet' | 'chamfer' | 'shell' | 'hole' | 'pattern' | 'mirror';
+
+export const DIALOG_KINDS: readonly DialogKind[] = [
+  'extrude',
+  'revolve',
+  'fillet',
+  'chamfer',
+  'shell',
+  'hole',
+  'pattern',
+  'mirror',
+];
+
+export function isDialogKind(kind: string): kind is DialogKind {
+  return (DIALOG_KINDS as readonly string[]).includes(kind);
+}

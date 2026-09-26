@@ -20,7 +20,7 @@ import type {
   Vec2,
 } from '@manufakture/sketch/model';
 import { applyCoordinates } from '@manufakture/sketch/model';
-import type { DisplayUnits } from '@manufakture/core';
+import type { DisplayUnits, FaceRef } from '@manufakture/core';
 import type { SketchSolverApi } from '@manufakture/sketch';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import { constraintsFromSelection, type ConstraintToolKind } from './constraints';
@@ -48,6 +48,8 @@ export interface SketchSource {
   isNew: boolean;
   name: string;
   placement: SketchPlacement;
+  /** A new sketch on a named face: stored as a reference to it, so it follows the face. */
+  face?: FaceRef;
   entities: readonly SketchEntity[];
   constraints: readonly SketchConstraint[];
   /** Next numbers of the part's `e` and `k` counters. */
@@ -689,9 +691,12 @@ export function createSketchSession(solver: SketchSolverApi): SketchSessionStore
         if (!check.ok) return check;
         const fresh = editing?.id === id && editing.fresh;
         set({ editing: null });
+        // Unchanged only when the text and both bare-number units are: an angle typed as `30`
+        // under degrees and under radians are different values.
         if (
           check.expression.source === c.value.source &&
-          check.expression.lengthUnit === c.value.lengthUnit
+          check.expression.lengthUnit === c.value.lengthUnit &&
+          check.expression.angleUnit === c.value.angleUnit
         ) {
           return check;
         }

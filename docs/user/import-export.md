@@ -15,7 +15,7 @@ Click **Export** and pick a format:
 
 Export saves your part's bodies only. Imported reference bodies are never exported, whether they are shown or hidden by **Undo**: they belong to another file, and you already have it.
 
-The file downloads straight away, named after the body (or the document, when there are several bodies). The header says what was saved and how big it is.
+The file downloads straight away, named after the part (or the document, when there are several bodies). The header says what was saved and how big it is.
 
 ### Mesh tolerance
 
@@ -44,7 +44,7 @@ Before an STL or 3MF file is written, its triangles are joined into one closed s
 
 Click **Import** and pick a file:
 
-- **STEP** (`.step`, `.stp`): read by the geometry kernel as exact geometry. The body is named after the first product in the file, or the file name. Its faces can be selected and measured like the demo part's.
+- **STEP** (`.step`, `.stp`): read by the geometry kernel as exact geometry. The body is named after the first product in the file, or the file name. Its faces can be selected and measured like the part's.
 - **STL** (`.stl`, binary or ASCII): a triangle mesh. It is shown and its **Body** measurements (volume, surface area, centre of mass, size) work; single faces and edges of a mesh cannot be measured, and no modelling feature can use a mesh. A mesh with holes or other bad edges encloses no volume, so its volume, centre of mass and mass show as none (hover over **Volume** for why); surface area and size still work.
 
 An imported file becomes a **reference body**: it is shown next to the model and can be measured, but it is not joined to your part and is never exported with it. It is added to the document as an **Import** feature, one undo step: **Undo** removes it and hides the body, **Redo** brings it back. Once an undone import can no longer be redone (you made another change after the undo), the body is let go for good.

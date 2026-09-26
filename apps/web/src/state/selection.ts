@@ -56,6 +56,17 @@ export function isGeometryRef(item: SelectableItem): item is GeometryRef {
   return (GEOMETRY_KINDS as readonly string[]).includes(item.kind) && 'bodyId' in item;
 }
 
+/** A feature of the part (the feature tree selects and hovers these), by feature id. */
+export const FEATURE_KIND = 'feature';
+
+export function featureItem(featureId: string): SelectableItem {
+  return { kind: FEATURE_KIND, id: featureId };
+}
+
+export function isFeatureItem(item: SelectableItem | null): item is SelectableItem {
+  return item !== null && item.kind === FEATURE_KIND;
+}
+
 export function itemKey(item: SelectableItem): string {
   return `${item.kind}:${item.id}`;
 }
