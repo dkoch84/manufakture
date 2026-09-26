@@ -32,6 +32,13 @@ export {
   type CommandType,
   type SimpleCommand,
 } from './commands';
+export {
+  inlineVariable,
+  renameVariable,
+  rewriteReferences,
+  variableUses,
+  type VariableUse,
+} from './variables';
 export { diffDocuments, type DocumentChange, type PartChange } from './changes';
 export {
   DocumentStore,

@@ -92,6 +92,18 @@ other variables. Names are unique, references must resolve, and cycles are refus
 `variableOrder(variables)` gives an evaluation order. A variable cannot be deleted while a
 variable or a feature reads it (`variableUsers` lists them).
 
+`src/variables.ts` has the edits that touch every use of a variable at once, each returned as one
+`batch` command (one undo step):
+
+- `variableUses(doc, name)` lists each direct use: another variable, or a feature field with its
+  path and expected kind (and `constraintId` for a sketch dimension).
+- `renameVariable(doc, from, to, expression?)` renames in place and rewrites every reference as
+  `#to` (found by the parser, so `#width` is untouched when renaming `w`).
+- `inlineVariable(doc, name, literal)` writes `literal` into every use, parenthesised inside a
+  larger expression, then deletes the variable. Core does not evaluate, so the caller supplies the
+  literal (the app writes the current value with explicit units, such as `25mm`).
+- `rewriteReferences(source, name, replacement)` is the text rewrite both use.
+
 ### Ids
 
 Ids are permanent and never reused, including after deletion (ADR 0004 decision 4):

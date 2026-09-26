@@ -74,6 +74,7 @@ interface E2eFeatureResult {
   featureId: string;
   kind: string;
   status: string;
+  cached: boolean;
   errors: { code: string; message: string }[];
   warnings: { code: string; message: string }[];
 }
@@ -84,6 +85,7 @@ interface Window {
       getState(): {
         generation: number;
         pending: boolean;
+        document: unknown;
         parts: { partId: string; features: E2eFeatureResult[] }[];
       };
     };

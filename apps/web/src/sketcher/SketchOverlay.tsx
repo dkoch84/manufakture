@@ -24,7 +24,14 @@ import { pathData, type SketchView } from './projection';
 import type { SketchSessionStore } from './session';
 import { constraintState, entityStatus } from './status';
 import { toolPreview } from './tools';
-import { checkValue, evaluateStored, formatValue, isPlainNumber, valueKindOf } from './values';
+import { ExpressionField } from '../components/ExpressionField';
+import {
+  dimensionValueProblem,
+  evaluateStored,
+  formatValue,
+  isPlainNumber,
+  valueKindOf,
+} from './values';
 
 /** Pixel sizes of the overlay. */
 const PX = { gap: 28, glyph: 16, snap: 10 };
@@ -442,7 +449,7 @@ function DimensionEditor({
   const layout = layoutDimension(c, indexEntities(s.sketch.entities), upp * PX.gap, s.labels[id]);
   const at = layout ? view.toCanvas(layout.label) : { x: 0, y: 0 };
   const source = s.source;
-  const live = checkValue(text, c.kind, source.units, source.variables);
+  const kind = c.kind;
 
   const commit = () => {
     if (done.current) return;
@@ -457,15 +464,22 @@ function DimensionEditor({
       style={{ left: at.x, top: at.y }}
       onPointerDown={(e) => e.stopPropagation()}
     >
-      <input
-        aria-label="Dimension value"
-        data-testid="dimension-input"
-        aria-invalid={!live.ok}
+      <ExpressionField
+        variant="compact"
+        ariaLabel="Dimension value"
+        testId="dimension-input"
+        errorTestId="dimension-error"
+        previewTestId="dimension-preview"
         value={text}
+        kind={valueKindOf(c)}
+        units={source.units}
+        variables={source.variables}
+        validate={(v) => dimensionValueProblem(kind, v)}
+        error={error ?? undefined}
         autoFocus
-        onFocus={(e) => e.currentTarget.select()}
-        onChange={(e) => {
-          setText(e.target.value);
+        selectOnFocus
+        onChange={(v) => {
+          setText(v);
           setError(null);
         }}
         onKeyDown={(e) => {
@@ -476,25 +490,15 @@ function DimensionEditor({
             session.getState().closeEditor();
           }
         }}
-        onBlur={() => {
+        onBlur={(_, live) => {
           if (done.current) return;
-          if (live.ok) commit();
+          if (live.state === 'ok') commit();
           else {
             done.current = true;
             session.getState().closeEditor();
           }
         }}
       />
-      {(error ?? (!live.ok && text.trim() !== '' ? live.message : null)) && (
-        <div className="sk-editor-error" role="alert" data-testid="dimension-error">
-          {error ?? (live.ok ? '' : live.message)}
-        </div>
-      )}
-      {live.ok && !isPlainNumber(text) && (
-        <div className="sk-editor-value" data-testid="dimension-preview">
-          = {formatValue(live.value, valueKindOf(c), source.units)}
-        </div>
-      )}
     </div>
   );
 }

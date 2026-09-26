@@ -1,0 +1,65 @@
+/* The shared numeric input and its variable completion list. */
+.expr {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.expr-options {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 20;
+  min-width: 100%;
+  max-height: 12rem;
+  overflow: auto;
+  margin: 2px 0 0;
+  padding: 0.15rem 0;
+  list-style: none;
+  background: #fff;
+  border: 1px solid #c2cad3;
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 12%);
+  font-size: 0.8rem;
+}
+
+.expr-options[hidden] {
+  display: none;
+}
+
+.expr-options li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.15rem 0.45rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.expr-options li.active {
+  background: #dbe7ff;
+}
+
+.expr-option-name {
+  font-family: ui-monospace, monospace;
+}
+
+.expr-option-value {
+  color: #5b6673;
+}
+
+.expr-source {
+  display: block;
+  margin-top: 0.1rem;
+  font-size: 0.75rem;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: #1d2733;
+}
+
+.expr-source mark {
+  background: #fbd9d3;
+  color: inherit;
+  text-decoration: underline wavy #c7402d;
+  text-underline-offset: 2px;
+}

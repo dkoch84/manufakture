@@ -1,0 +1,118 @@
+/* The Variables panel in the side panel. */
+.variables-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.variables-head button,
+.variable-actions button {
+  font: inherit;
+  font-size: 0.78rem;
+}
+
+.variable-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.variable-item {
+  padding: 0.3rem 0.4rem;
+  border: 1px solid #d6dce3;
+  border-radius: 4px;
+}
+
+.variable-item.failed {
+  border-color: #e3a79e;
+}
+
+.variable-item.editing {
+  border-color: #2f6fe4;
+  background: #f7faff;
+}
+
+.variable-item.editing form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.variable-main,
+.variable-sub {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.variable-name {
+  font-weight: 600;
+}
+
+.variable-value {
+  white-space: nowrap;
+}
+
+.variable-sub {
+  color: #5b6673;
+  font-size: 0.78rem;
+}
+
+.variable-source {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, monospace;
+}
+
+.variable-unused,
+.variable-uses summary {
+  margin: 0.15rem 0 0;
+  color: #5b6673;
+  font-size: 0.75rem;
+}
+
+.variable-uses summary {
+  cursor: pointer;
+}
+
+.variable-use-list {
+  margin: 0.15rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.75rem;
+}
+
+.variable-use-list button.link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #2f6fe4;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.variable-actions {
+  display: flex;
+  gap: 0.35rem;
+  margin-top: 0.25rem;
+}
+
+.variable-blocked {
+  margin-top: 0.35rem;
+  padding: 0.3rem 0.4rem;
+  border-radius: 4px;
+  background: #fdf1ef;
+  font-size: 0.78rem;
+}
+
+.variable-blocked p {
+  margin: 0 0 0.2rem;
+}

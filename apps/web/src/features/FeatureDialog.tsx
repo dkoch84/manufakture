@@ -16,9 +16,9 @@ import {
   type SelectableItem,
   type SelectionStore,
 } from '../state/selection';
+import { ExpressionField } from '../components/ExpressionField';
 import { evaluateVariables } from '../sketcher/values';
 import { KIND_LABELS } from '../tree/tree';
-import { ExpressionInput } from './ExpressionInput';
 import {
   addRef,
   applyStandard,
@@ -82,6 +82,7 @@ export function FeatureDialog({
     : undefined;
   const units = doc.units;
   const variables = useMemo(() => evaluateVariables(doc), [doc]);
+  const variableNames = useMemo(() => doc.variables.map((v) => v.name), [doc]);
 
   const [form, setForm] = useState<FeatureForm>(() => {
     if (existing) {
@@ -202,14 +203,15 @@ export function FeatureDialog({
     kind: 'length' | 'angle' | 'number',
     value: string,
   ) => (
-    <ExpressionInput
+    <ExpressionField
       key={key}
       label={label}
-      name={key}
+      testId={`field-${key}`}
       value={value}
       kind={kind}
       units={units}
       variables={variables}
+      names={variableNames}
       error={errors[key]}
       onChange={(v) => set(key, v)}
     />

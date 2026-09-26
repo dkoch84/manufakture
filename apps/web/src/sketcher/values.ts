@@ -57,6 +57,14 @@ function signed(kind: DimensionalConstraint['kind']): boolean {
   return kind === 'horizontalDistance' || kind === 'verticalDistance';
 }
 
+/** What is wrong with a value for this kind of dimension, or null. */
+export function dimensionValueProblem(
+  kind: DimensionalConstraint['kind'],
+  value: number,
+): string | null {
+  return signed(kind) || value > 0 ? null : 'The value must be positive.';
+}
+
 export type ValueCheck =
   | { ok: true; value: number; expression: StoredExpression }
   | { ok: false; message: string; error?: UnitsError };
@@ -80,7 +88,8 @@ export function checkValue(
     variables: (n) => variables[n],
   });
   if (!r.ok) return { ok: false, message: r.error.message, error: r.error };
-  if (!signed(kind) && !(r.value > 0)) return { ok: false, message: 'The value must be positive.' };
+  const problem = dimensionValueProblem(kind, r.value);
+  if (problem !== null) return { ok: false, message: problem };
   return { ok: true, value: r.value, expression };
 }
 

@@ -42,6 +42,7 @@ import { isDialogKind } from './features/kinds';
 import type { GeometryRef } from './state/selection';
 import { useSketchShortcuts } from './sketcher/shortcuts';
 import { useSketching } from './sketcher/useSketching';
+import { VariablesPanel } from './variables/VariablesPanel';
 import { testHooksEnabled } from './testHooks';
 import type { BodyInput } from './viewport/bodies';
 import { LoadingSplash } from './viewport/LoadingSplash';
@@ -554,6 +555,7 @@ export function App({
             </Suspense>
           ) : (
             <>
+              <VariablesPanel documents={documents} selection={selection} />
               <SelectionPanel selection={selection} />
               <MeasurePanel measure={measure} documents={documents} />
             </>
