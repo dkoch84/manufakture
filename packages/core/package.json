@@ -8,6 +8,12 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --root ../.. --project packages packages/core"
+  },
+  "dependencies": {
+    "@manufakture/sketch": "workspace:*",
+    "@manufakture/units": "workspace:*",
+    "zod": "^4.6.5"
   }
 }
