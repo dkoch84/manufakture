@@ -129,6 +129,7 @@ export function featureExpressions(feature: Feature): ExpressionSite[] {
       if (feature.extent.type === 'blind' || feature.extent.type === 'symmetric') {
         add(['extent', 'distance'], feature.extent.distance, 'length');
       }
+      add(['draft'], feature.draft, 'angle');
       break;
     case 'revolve':
       add(['angle'], feature.angle, 'angle');
@@ -139,6 +140,7 @@ export function featureExpressions(feature: Feature): ExpressionSite[] {
     case 'chamfer':
       add(['distance'], feature.distance, 'length');
       add(['secondDistance'], feature.secondDistance, 'length');
+      add(['angle'], feature.angle, 'angle');
       break;
     case 'shell':
       add(['thickness'], feature.thickness, 'length');

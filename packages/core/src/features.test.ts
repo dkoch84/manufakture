@@ -28,6 +28,9 @@ describe('featureIdsInName', () => {
       ['fillet#3', 'extrude#1'],
     ],
     ['cut#4:side:s3', []],
+    ['pattern#7:i2/extrude#3:side:e1', ['pattern#7', 'extrude#3']],
+    ['mirror#8:image/hole#5:wall:e5', ['mirror#8', 'hole#5']],
+    ['shell#2:offset:extrude#1:cap:end', ['shell#2', 'extrude#1']],
     ['?face3', []],
     ['myextrude#1:cap:end', []],
     ['extrude#1', []],
@@ -125,6 +128,30 @@ describe('featureExpressions', () => {
 
   it.each<[string, Feature, [string, string][]]>([
     ['blind extrude', baseExtrude(), [['extent.distance', 'length']]],
+    [
+      'drafted extrude',
+      { ...baseExtrude(), draft: mm('2deg') },
+      [
+        ['extent.distance', 'length'],
+        ['draft', 'angle'],
+      ],
+    ],
+    [
+      'distance-angle chamfer',
+      {
+        id: 'chamfer#1',
+        kind: 'chamfer',
+        name: 'C',
+        suppressed: false,
+        edges: [{ id: 'r4', ref: { faces: ['a', 'b'] } }],
+        distance: mm('1'),
+        angle: mm('30deg'),
+      },
+      [
+        ['distance', 'length'],
+        ['angle', 'angle'],
+      ],
+    ],
     ['through-all extrude', holeCut(), []],
     ['fillet', cornerFillet(), [['radius', 'length']]],
     [

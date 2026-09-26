@@ -20,6 +20,7 @@ import { KernelError, type KernelFailure } from './errors';
 import { Kernel } from './kernel';
 import type { LoadProgress } from './loader';
 import { meshBuffers } from './mesh';
+import { NameTable } from './names';
 import type { Oc } from './occt';
 import {
   executeOp,
@@ -64,8 +65,9 @@ export interface BatchReply<T extends readonly KernelOp[] = readonly KernelOp[]>
   /** Ops that ran before the batch finished or was cancelled. */
   completedOps: number;
   /**
-   * Name table for the meshes' name slots (ADR 0007, decision 7). Raw kernel
-   * ops leave the slots UNNAMED and this empty; the regen engine fills both.
+   * Name table for the meshes' name slots (ADR 0007, decision 7). Meshes of
+   * bodies made by `feature` ops have every slot filled from it; meshes of raw
+   * shapes leave their slots UNNAMED. Empty when no named body was meshed.
    */
   names: string[];
   heapBytes: number;
@@ -344,6 +346,7 @@ export class KernelService {
     }
     const kernel = this.current;
     const results: OpResult[] = [];
+    const names = new NameTable();
     const created: ShapeId[] = [];
     const transient: ShapeId[] = [];
     let cancelled = false;
@@ -359,7 +362,7 @@ export class KernelService {
       const featureId =
         typeof op === 'object' && op !== null && typeof (op as KernelOp).featureId === 'string'
           ? (op as KernelOp).featureId
-          : undefined;
+          : featureOpId(op);
       const name =
         typeof op === 'object' && op !== null && typeof (op as KernelOp).op === 'string'
           ? (op as KernelOp).op
@@ -407,10 +410,13 @@ export class KernelService {
         return shape;
       };
       kernel.setContext({ generation, ...(featureId === undefined ? {} : { featureId }) });
+      // Every shape an op makes has an id from here on; a feature op that
+      // passes its input body through returns an older one, not its own.
+      const mark = kernel.checkpoint();
       try {
-        const value = executeOp(kernel, valid, resolve);
+        const value = executeOp(kernel, valid, resolve, { names });
         const shape = shapeOf(value);
-        if (shape !== null) {
+        if (shape !== null && shape >= mark) {
           created.push(shape);
           if (valid.keep === false) transient.push(shape);
         }
@@ -448,7 +454,7 @@ export class KernelService {
       status: cancelled ? 'cancelled' : 'done',
       results: (cancelled ? [] : results) as unknown as OpResults<readonly KernelOp[]>,
       completedOps: results.length,
-      names: [],
+      names: cancelled ? [] : names.names,
       heapBytes: kernel.heapBytes(),
       shapeCount: kernel.shapeCount,
       ms: performance.now() - t0,
@@ -538,4 +544,15 @@ export class KernelService {
     this.emit({ type: 'recycled', ...report });
     return report;
   }
+}
+
+/** The feature id of a `feature` op, so its shapes and failures carry it without `featureId`. */
+function featureOpId(op: unknown): string | undefined {
+  if (typeof op !== 'object' || op === null || (op as { op?: unknown }).op !== 'feature') {
+    return undefined;
+  }
+  const feature = (op as { feature?: unknown }).feature;
+  const id =
+    typeof feature === 'object' && feature !== null ? (feature as { id?: unknown }).id : undefined;
+  return typeof id === 'string' ? id : undefined;
 }

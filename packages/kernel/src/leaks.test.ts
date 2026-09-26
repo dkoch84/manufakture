@@ -4,6 +4,7 @@
 
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { KernelError } from './errors';
+import { applyFeature, type FeatureInput } from './features';
 import { Kernel } from './kernel';
 import { createNodeInstance } from './node';
 import { track, type Tracker } from './track';
@@ -66,6 +67,125 @@ describe('embind objects', () => {
     for (const id of made) expect(k.release(id)).toBe(true);
     expect(tracker.liveNames()).toEqual([]);
     expect(k.shapeCount).toBe(0);
+  });
+
+  it('feature operations delete every temporary, on success and on failure', () => {
+    const top: Frame = { origin: [0, 0, 8], xDir: [1, 0, 0], normal: [0, 0, 1] };
+    const pin: FeatureInput = {
+      kind: 'extrude',
+      id: 'extrude#2',
+      profile: {
+        frame: top,
+        loops: [{ entities: [{ kind: 'circle', id: 'c1', center: [4, 4], radius: 1 }] }],
+      },
+      extent: { type: 'throughAll' },
+      reverse: true,
+      mode: 'subtract',
+    };
+    const side = (id: string) => `extrude#1:side:${id}`;
+    const features: FeatureInput[] = [
+      {
+        kind: 'extrude',
+        id: 'extrude#1',
+        profile: {
+          frame: XY,
+          loops: [
+            { entities: outline.entities.map((e, i) => ({ ...e, id: `e${i + 1}` })) },
+            { entities: hole.entities.map((e) => ({ ...e, id: 'h1' })) },
+          ],
+        },
+        extent: { type: 'blind', distance: 8 },
+        mode: 'new',
+      },
+      {
+        kind: 'shell',
+        id: 'shell#8',
+        thickness: 1,
+        faces: [{ id: 'r1', ref: { face: 'extrude#1:cap:start' } }],
+      },
+      pin,
+      {
+        kind: 'pattern',
+        id: 'pattern#3',
+        source: { type: 'features', features: [pin] },
+        layout: { type: 'linear', direction: [0, 1, 0], count: 2, spacing: 12 },
+      },
+      {
+        kind: 'mirror',
+        id: 'mirror#4',
+        source: { type: 'body' },
+        plane: { origin: [-5, 0, 0], normal: [1, 0, 0] },
+      },
+      {
+        kind: 'fillet',
+        id: 'fillet#5',
+        radius: 0.5,
+        edges: [{ id: 'r1', ref: { faces: ['extrude#1:cap:end', side('e3')] } }],
+      },
+      {
+        kind: 'chamfer',
+        id: 'chamfer#6',
+        size: { kind: 'distance-angle', distance: 0.5, angle: 0.5 },
+        edges: [{ id: 'r1', ref: { faces: ['extrude#1:cap:end', side('e4')] } }],
+      },
+      {
+        kind: 'hole',
+        id: 'hole#7',
+        frame: top,
+        points: [{ id: 'e9', at: [14, 14] }],
+        diameter: 2,
+        extent: { type: 'blind', depth: 3 },
+        head: { type: 'countersink', diameter: 4, angle: Math.PI / 2 },
+      },
+      {
+        kind: 'extrude',
+        id: 'extrude#11',
+        profile: {
+          frame: XY,
+          loops: [{ entities: [{ kind: 'circle', id: 'c1', center: [40, 0], radius: 3 }] }],
+        },
+        extent: { type: 'symmetric', distance: 4 },
+        draft: 0.05,
+        mode: 'add',
+      },
+      {
+        kind: 'revolve',
+        id: 'revolve#12',
+        profile: {
+          frame: { origin: [0, 0, 0], xDir: [1, 0, 0], normal: [0, 1, 0] },
+          // Clear of the body: a new solid must not overlap it.
+          loops: [{ entities: [{ kind: 'circle', id: 'c1', center: [80, 0], radius: 1 }] }],
+        },
+        axis: { origin: [70, 0, 0], direction: [0, 0, 1] },
+        angle: Math.PI,
+        mode: 'new',
+      },
+      // Fails: the reference is gone; and OCCT refuses a huge fillet.
+      {
+        kind: 'fillet',
+        id: 'fillet#9',
+        radius: 1,
+        edges: [{ id: 'r1', ref: { faces: [side('e9'), side('e1')] } }],
+      },
+      {
+        kind: 'fillet',
+        id: 'fillet#10',
+        radius: 50,
+        edges: [{ id: 'r1', ref: { faces: ['extrude#1:cap:start', side('e4')] } }],
+      },
+    ];
+    let body: ShapeId | null = null;
+    const errors: string[] = [];
+    for (const f of features) {
+      const out = applyFeature(k, body, f);
+      errors.push(...out.errors.map((e) => `${e.featureId}: ${e.code}`));
+      if (out.created && body !== null) k.release(body);
+      body = out.shape;
+    }
+    expect(errors).toEqual(['fillet#9: lost', 'fillet#10: kernel']);
+    expect(k.shapeCount).toBe(1);
+    expect(k.release(body!)).toBe(true);
+    expect(tracker.liveNames()).toEqual([]);
   });
 
   it('each operation on its own leaves only its result', () => {

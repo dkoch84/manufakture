@@ -335,12 +335,28 @@ export const ExtrudeFeatureSchema = z.strictObject({
   extent: ExtrudeExtentSchema,
   /** Extrude against the sketch normal. */
   reverse: z.boolean(),
+  /**
+   * Draft angle: positive tapers the sides inward along the extrusion, negative outward. The
+   * neutral plane is the sketch plane. Absent means no draft.
+   */
+  draft: StoredExpressionSchema.exactOptional(),
 });
 
 export const RevolveAxisSchema = z.discriminatedUnion('type', [
-  /** A line of the profile's sketch. */
-  z.strictObject({ type: z.literal('sketchLine'), entity: EntityIdSchema }),
-  z.strictObject({ type: z.literal('edge'), edge: EdgeReferenceSchema }),
+  z.strictObject({
+    type: z.literal('sketchLine'),
+    /** A line of the profile's sketch; the axis runs from its start to its end. */
+    entity: EntityIdSchema,
+    /** Turn the axis round (end to start), so the revolve goes the other way. */
+    flip: z.boolean().exactOptional(),
+  }),
+  z.strictObject({
+    type: z.literal('edge'),
+    /** A straight edge, oriented by the names of its faces (kernel README, Directions). */
+    edge: EdgeReferenceSchema,
+    /** Turn the edge's direction round, so the revolve goes the other way. */
+    flip: z.boolean().exactOptional(),
+  }),
 ]);
 
 export const RevolveFeatureSchema = z.strictObject({
@@ -359,13 +375,30 @@ export const FilletFeatureSchema = z.strictObject({
   radius: StoredExpressionSchema,
 });
 
-export const ChamferFeatureSchema = z.strictObject({
-  ...base('chamfer'),
-  edges: z.array(EdgeReferenceSchema).min(1),
-  distance: StoredExpressionSchema,
-  /** Unequal chamfer: the distance along the second face. Absent means equal distances. */
-  secondDistance: StoredExpressionSchema.exactOptional(),
-});
+export const ChamferFeatureSchema = z
+  .strictObject({
+    ...base('chamfer'),
+    edges: z.array(EdgeReferenceSchema).min(1),
+    /**
+     * Along the reference face of each edge: the adjacent face whose name sorts first (T1.8).
+     * Equal chamfers measure it on both faces.
+     */
+    distance: StoredExpressionSchema,
+    /** Unequal chamfer: the distance along the other face. Absent means equal distances. */
+    secondDistance: StoredExpressionSchema.exactOptional(),
+    /** Distance-angle chamfer: the angle from the reference face. Excludes `secondDistance`. */
+    angle: StoredExpressionSchema.exactOptional(),
+  })
+  .check((ctx) => {
+    if (ctx.value.secondDistance !== undefined && ctx.value.angle !== undefined) {
+      ctx.issues.push({
+        code: 'custom',
+        message: 'a chamfer has a second distance or an angle, not both',
+        input: ctx.value.angle,
+        path: ['angle'],
+      });
+    }
+  });
 
 export const ShellFeatureSchema = z.strictObject({
   ...base('shell'),
@@ -390,6 +423,9 @@ export const HoleHeadSchema = z.discriminatedUnion('type', [
   }),
 ]);
 
+/** Clearance fits of the standard hole tables (ISO 273 fine / medium / coarse, ASME B18.2.8). */
+export const HoleFitSchema = z.enum(['close', 'normal', 'loose']);
+
 export const HoleFeatureSchema = z.strictObject({
   ...base('hole'),
   /** The sketch whose points place the holes, drilled along its normal. */
@@ -401,37 +437,85 @@ export const HoleFeatureSchema = z.strictObject({
     z.strictObject({ type: z.literal('throughAll') }),
   ]),
   head: HoleHeadSchema,
+  /**
+   * The screw size and fit the hole was sized for (`M6`, `#10`, `1/4`), from the kernel's
+   * `HOLE_SIZES`. Informational: `diameter` and the head sizes are what regen uses, so a
+   * standard hole can still be edited by hand.
+   */
+  standard: z.strictObject({ size: z.string().min(1), fit: HoleFitSchema }).exactOptional(),
 });
+
+/**
+ * The most instances a pattern may have, the original included. The schema does not check it:
+ * the kernel does at regen, for a count written as a plain number and one computed by an
+ * expression alike, so an out-of-range count fails that pattern at regen instead of refusing to
+ * load the whole document.
+ */
+export const MAX_PATTERN_COUNT = 1000;
 
 export const PatternLayoutSchema = z.discriminatedUnion('type', [
   z.strictObject({
     type: z.literal('linear'),
-    /** An edge or a planar face; the direction is the edge's tangent or the face's normal. */
+    /**
+     * An edge or a planar face; the direction is the edge's tangent, oriented by the names of
+     * its faces (kernel README, Directions), or the face's outward normal.
+     */
     direction: ReferenceSchema,
+    /** Turn the direction round. */
+    flip: z.boolean().exactOptional(),
+    /** Instances including the original, 1 to `MAX_PATTERN_COUNT` (checked at regen). */
     count: StoredExpressionSchema,
     spacing: StoredExpressionSchema,
   }),
   z.strictObject({
     type: z.literal('circular'),
-    /** A straight edge or a cylindrical face. */
+    /** A straight or circular edge or a cylindrical face, oriented like a linear direction. */
     axis: ReferenceSchema,
+    /** Turn the axis round; it matters when the angle is less than a full turn. */
+    flip: z.boolean().exactOptional(),
     count: StoredExpressionSchema,
     /** Total angle the instances are spread over. */
     angle: StoredExpressionSchema,
   }),
 ]);
 
-export const PatternFeatureSchema = z.strictObject({
-  ...base('pattern'),
-  features: z.array(featureId).min(1),
-  layout: PatternLayoutSchema,
-});
+/**
+ * What a pattern or mirror repeats: the listed features, or with `body: true` the whole body
+ * (then `features` is empty).
+ */
+function checkInstanceSource<T extends { features: string[]; body?: boolean }>(
+  ctx: z.core.ParsePayload<T>,
+): void {
+  const { features, body } = ctx.value;
+  if (body === true ? features.length > 0 : features.length === 0) {
+    ctx.issues.push({
+      code: 'custom',
+      message: body === true ? 'a body pattern lists no features' : 'list at least one feature',
+      input: features,
+      path: ['features'],
+    });
+  }
+}
 
-export const MirrorFeatureSchema = z.strictObject({
-  ...base('mirror'),
-  features: z.array(featureId).min(1),
-  plane: FaceReferenceSchema,
-});
+export const PatternFeatureSchema = z
+  .strictObject({
+    ...base('pattern'),
+    features: z.array(featureId),
+    /** Repeat the whole body instead of features. */
+    body: z.boolean().exactOptional(),
+    layout: PatternLayoutSchema,
+  })
+  .check(checkInstanceSource);
+
+export const MirrorFeatureSchema = z
+  .strictObject({
+    ...base('mirror'),
+    features: z.array(featureId),
+    /** Mirror the whole body instead of features. */
+    body: z.boolean().exactOptional(),
+    plane: FaceReferenceSchema,
+  })
+  .check(checkInstanceSource);
 
 /**
  * The extension point for later domain features (printing, CAM, woodworking). `extension` is a
@@ -550,6 +634,7 @@ export type FilletFeature = z.infer<typeof FilletFeatureSchema>;
 export type ChamferFeature = z.infer<typeof ChamferFeatureSchema>;
 export type ShellFeature = z.infer<typeof ShellFeatureSchema>;
 export type HoleFeature = z.infer<typeof HoleFeatureSchema>;
+export type HoleFit = z.infer<typeof HoleFitSchema>;
 export type PatternFeature = z.infer<typeof PatternFeatureSchema>;
 export type MirrorFeature = z.infer<typeof MirrorFeatureSchema>;
 export type ExtensionFeature = z.infer<typeof ExtensionFeatureSchema>;

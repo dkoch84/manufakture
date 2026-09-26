@@ -3,8 +3,33 @@
 // by an earlier op of the same batch, so a whole chain (profile, extrude,
 // cut, fillet, tessellate) is one round trip.
 
+import {
+  arrayOf,
+  bool,
+  either,
+  isObject,
+  num,
+  oneOf,
+  shape,
+  shapeRef,
+  str,
+  vec3,
+  frame,
+  loop,
+  type Check,
+} from './checks';
 import { KernelError, type KernelFailure } from './errors';
+import {
+  applyFeature,
+  pickReference,
+  resolveReferences,
+  type FeatureInput,
+  type FeatureOutcome,
+  type ReferenceReport,
+} from './features';
 import { DEFAULT_DEFLECTION, type BooleanKind, type Kernel } from './kernel';
+import { applyNames, type NameTable } from './names';
+import { isUnnamed, type TopoRef } from './naming';
 import type {
   Deflection,
   ExtrudeResult,
@@ -71,6 +96,27 @@ export type TessellateOp = OpCommon & {
 export type TopologyOp = OpCommon & { op: 'topology'; shape: ShapeRef };
 export type PropertiesOp = OpCommon & { op: 'properties'; shape: ShapeRef };
 export type ReleaseOp = OpCommon & { op: 'release'; shapes: readonly ShapeRef[] };
+/**
+ * Apply one part feature to a body (null before the first feature): see
+ * `applyFeature`. The value's `shape` is the body after the feature, which is
+ * the input body itself when the feature failed or changed nothing, so a
+ * later op of the batch can take `{ result }` either way. Only a new body is
+ * owned by the batch (`keep: false` releases it).
+ */
+export type FeatureOp = OpCommon & {
+  op: 'feature';
+  body: ShapeRef | null;
+  feature: FeatureInput;
+};
+/** Resolve stored references on a named body. */
+export type ResolveOp = OpCommon & { op: 'resolve'; shape: ShapeRef; refs: readonly TopoRef[] };
+/** The reference a click on face or edge `index` of a named body is stored as. */
+export type PickOp = OpCommon & {
+  op: 'pick';
+  shape: ShapeRef;
+  kind: 'face' | 'edge';
+  index: number;
+};
 
 export type KernelOp =
   | BoxOp
@@ -82,7 +128,10 @@ export type KernelOp =
   | TessellateOp
   | TopologyOp
   | PropertiesOp
-  | ReleaseOp;
+  | ReleaseOp
+  | FeatureOp
+  | ResolveOp
+  | PickOp;
 
 export type OpName = KernelOp['op'];
 
@@ -104,6 +153,9 @@ export interface OpValues {
   topology: Topology;
   properties: ShapeProperties;
   release: ReleaseResult;
+  feature: FeatureOutcome;
+  resolve: { results: ReferenceReport[] };
+  pick: { ref: TopoRef | null };
 }
 
 export type OpValue<O extends { op: OpName }> = OpValues[O['op']];
@@ -126,6 +178,9 @@ const OP_NAMES: ReadonlySet<string> = new Set<OpName>([
   'topology',
   'properties',
   'release',
+  'feature',
+  'resolve',
+  'pick',
 ]);
 
 // Validation ----------------------------------------------------------------------
@@ -134,78 +189,11 @@ const OP_NAMES: ReadonlySet<string> = new Set<OpName>([
 // errors are reported as `invalid-op`; range errors (a negative radius) are
 // left to the kernel, which reports them as `invalid-argument`.
 
-type Check = (value: unknown, path: string) => string | null;
-
-const isObject = (v: unknown): v is Record<string, unknown> =>
-  typeof v === 'object' && v !== null && !Array.isArray(v);
-
-const num: Check = (v, p) => (typeof v === 'number' ? null : `${p} must be a number`);
-const bool: Check = (v, p) => (typeof v === 'boolean' ? null : `${p} must be a boolean`);
-const str: Check = (v, p) => (typeof v === 'string' ? null : `${p} must be a string`);
-const vec2: Check = (v, p) =>
-  Array.isArray(v) && v.length === 2 && v.every((c) => typeof c === 'number')
-    ? null
-    : `${p} must be [number, number]`;
-const vec3: Check = (v, p) =>
-  Array.isArray(v) && v.length === 3 && v.every((c) => typeof c === 'number')
-    ? null
-    : `${p} must be [number, number, number]`;
-const shapeRef: Check = (v, p) =>
-  (typeof v === 'number' && Number.isInteger(v)) ||
-  (isObject(v) && typeof v.result === 'number' && Number.isInteger(v.result))
-    ? null
-    : `${p} must be a shape id or { result: <op index> }`;
-const arrayOf =
-  (item: Check, nonEmpty = false): Check =>
-  (v, p) => {
-    if (!Array.isArray(v)) return `${p} must be an array`;
-    if (nonEmpty && v.length === 0) return `${p} must not be empty`;
-    for (let i = 0; i < v.length; i++) {
-      const e = item(v[i], `${p}[${i}]`);
-      if (e) return e;
-    }
-    return null;
-  };
-const oneOf =
-  (...values: string[]): Check =>
-  (v, p) =>
-    typeof v === 'string' && values.includes(v) ? null : `${p} must be one of ${values.join(', ')}`;
-const either =
-  (a: Check, b: Check, what: string): Check =>
-  (v, p) =>
-    a(v, p) === null || b(v, p) === null ? null : `${p} must be ${what}`;
-const shape =
-  (fields: Record<string, Check>, optional: Record<string, Check> = {}): Check =>
-  (v, p) => {
-    if (!isObject(v)) return `${p} must be an object`;
-    for (const [k, check] of Object.entries(fields)) {
-      const e = check(v[k], `${p}.${k}`);
-      if (e) return e;
-    }
-    for (const [k, check] of Object.entries(optional)) {
-      if (v[k] === undefined) continue;
-      const e = check(v[k], `${p}.${k}`);
-      if (e) return e;
-    }
-    return null;
-  };
-
-const entity: Check = (v, p) => {
-  if (!isObject(v)) return `${p} must be an object`;
-  switch (v.kind) {
-    case 'line':
-      return shape({ start: vec2, end: vec2 }, { id: str })(v, p);
-    case 'arc':
-      return shape({ center: vec2, start: vec2, end: vec2 }, { clockwise: bool, id: str })(v, p);
-    case 'circle':
-      return shape({ center: vec2, radius: num }, { id: str })(v, p);
-    default:
-      return `${p}.kind must be line, arc or circle`;
-  }
-};
-
-const frame = shape({ origin: vec3, xDir: vec3, normal: vec3 });
-const loop = shape({ entities: arrayOf(entity, true) });
+/** A stored reference: `{ face }` or `{ faces, ends?, ordinal? }` with names. */
+const topoRef: Check = (v, p) =>
+  isObject(v) && 'face' in v
+    ? shape({ face: str })(v, p)
+    : shape({ faces: arrayOf(str, true) }, { ends: arrayOf(str), ordinal: num })(v, p);
 
 const FIELDS: Record<OpName, [Record<string, Check>, Record<string, Check>]> = {
   box: [{ size: vec3 }, { at: vec3 }],
@@ -227,6 +215,17 @@ const FIELDS: Record<OpName, [Record<string, Check>, Record<string, Check>]> = {
   topology: [{ shape: shapeRef }, {}],
   properties: [{ shape: shapeRef }, {}],
   release: [{ shapes: arrayOf(shapeRef) }, {}],
+  // The feature itself is checked by `applyFeature`, which reports a
+  // malformed feature as that feature's error and passes the body through.
+  feature: [
+    {
+      body: (v, p) => (v === null ? null : shapeRef(v, p)),
+      feature: shape({ id: str, kind: str }),
+    },
+    {},
+  ],
+  resolve: [{ shape: shapeRef, refs: arrayOf(topoRef) }, {}],
+  pick: [{ shape: shapeRef, kind: oneOf('face', 'edge'), index: num }, {}],
 };
 
 /** Why `value` is not a valid op, or null. */
@@ -242,11 +241,22 @@ export function validateOp(value: unknown): string | null {
 
 // Execution -----------------------------------------------------------------------
 
+/** What ops share within one batch. */
+export interface BatchContext {
+  /** The reply's name table: tessellating a named body fills its mesh's name slots from it. */
+  names: NameTable;
+}
+
 /** Resolves `ShapeRef`s against the results of the batch so far. */
 export type ResolveShape = (ref: ShapeRef, operation: string) => ShapeId;
 
 /** Run one validated op on the kernel. Throws KernelError. */
-export function executeOp(kernel: Kernel, op: KernelOp, resolve: ResolveShape): OpValues[OpName] {
+export function executeOp(
+  kernel: Kernel,
+  op: KernelOp,
+  resolve: ResolveShape,
+  context?: BatchContext,
+): OpValues[OpName] {
   const history = (o: { history?: boolean }) => (o.history === false ? { history: false } : {});
   switch (op.op) {
     case 'box':
@@ -266,15 +276,45 @@ export function executeOp(kernel: Kernel, op: KernelOp, resolve: ResolveShape): 
       );
     case 'fillet':
       return kernel.fillet(resolve(op.shape, 'fillet'), op.edges, op.radius, history(op));
-    case 'tessellate':
-      return kernel.mesh(resolve(op.shape, 'tessellate'), {
+    case 'tessellate': {
+      const id = resolve(op.shape, 'tessellate');
+      const mesh = kernel.mesh(id, {
         linear: op.deflection?.linear ?? DEFAULT_DEFLECTION.linear,
         angular: op.deflection?.angular ?? DEFAULT_DEFLECTION.angular,
       });
+      const named = kernel.named(id);
+      if (named !== null && context !== undefined) {
+        // A body made by feature operations: every slot gets its name.
+        const { faces, edges } = named.names;
+        applyNames(
+          mesh,
+          context.names,
+          (i) => {
+            const f = faces[i - 1];
+            return f && !isUnnamed(f.name) ? { name: f.name, fragile: f.fragile } : null;
+          },
+          (i) => {
+            const e = edges[i - 1];
+            return e ? { name: e.name, fragile: e.fragile } : null;
+          },
+        );
+      }
+      return mesh;
+    }
     case 'topology':
       return kernel.topology(resolve(op.shape, 'topology'));
     case 'properties':
       return kernel.properties(resolve(op.shape, 'properties'));
+    case 'feature':
+      return applyFeature(
+        kernel,
+        op.body === null ? null : resolve(op.body, 'feature'),
+        op.feature,
+      );
+    case 'resolve':
+      return { results: resolveReferences(kernel, resolve(op.shape, 'resolve'), op.refs) };
+    case 'pick':
+      return { ref: pickReference(kernel, resolve(op.shape, 'pick'), op.kind, op.index) };
     case 'release': {
       // Like every other op on a lost kernel: fatal, not a list of unknown ids.
       const lost = kernel.lostReason;

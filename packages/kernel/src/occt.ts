@@ -43,8 +43,10 @@ export function releaseOwned(oc: Oc, item: Deletable): void {
     } finally {
       empty.delete();
     }
-  } else if (name === 'BRepFilletAPI_MakeFillet') {
+  } else if (name === 'BRepFilletAPI_MakeFillet' || name === 'BRepFilletAPI_MakeChamfer') {
     (o.Reset as () => void).call(o);
+  } else if (name === 'BRepOffsetAPI_DraftAngle') {
+    (o.Clear as () => void).call(o);
   }
 }
 

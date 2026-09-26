@@ -12,16 +12,25 @@
 // Ported and hardened from spikes/topo-naming/src/kernel.ts and
 // spikes/kernel-wrapper/src/own/kernel.ts.
 
-import type { TopoDS_Edge, TopoDS_Shape } from 'libcascade/single/init';
+import type { TopoDS_Edge, TopoDS_Face, TopoDS_Shape } from 'libcascade/single/init';
 import { KernelError, isFatalWasmError } from './errors';
-import { collectHistory, resultMaps } from './history';
+import { collectHistory, resultMaps, type HistorySource, type ResultMaps } from './history';
 import { tessellate } from './mesh';
-import { mapShapes, norm, Scope, type Oc } from './occt';
+import { mapShapes, norm, Scope, toVec3, type Oc, type ShapeList } from './occt';
+import type { Names } from './naming';
 import { buildProfile } from './profile';
 import { topologyOf } from './topology';
 import type {
+  Axis,
+  ChamferEdge,
+  ChamferSize,
   Deflection,
   ExtrudeResult,
+  Plane,
+  RevolveResult,
+  SubShapeGeometry,
+  SubShapeRef,
+  Transform,
   MeshData,
   OperationOptions,
   OperationResult,
@@ -64,6 +73,14 @@ interface Entry {
   record: ShapeRecord;
   /** Set for shapes made by `profile`: its edges and entity ids in loop and entity order. */
   profile?: { loops: TopoDS_Edge[][]; ids: (string | null)[][]; normal: Vec3 };
+  /** Set for bodies made by feature operations: face and edge names, and the topology they index. */
+  named?: NamedShape;
+}
+
+/** A body's names with the topology they are indexed by (plain data). */
+export interface NamedShape {
+  names: Names;
+  topology: Topology;
 }
 
 export const DEFAULT_DEFLECTION: Deflection = { linear: 0.1, angular: 0.5 };
@@ -149,6 +166,16 @@ export class Kernel {
     for (const loop of entry.profile?.loops ?? []) for (const e of loop) s.own(e);
     s.dispose();
     return true;
+  }
+
+  /** Attach names (and the topology they index) to a live shape; they go when it is released. */
+  setNames(id: ShapeId, named: NamedShape): void {
+    this.entry(id, 'names').named = named;
+  }
+
+  /** The names attached to a shape, or null for a shape no feature operation named. */
+  named(id: ShapeId): NamedShape | null {
+    return this.arena.get(id)?.named ?? null;
   }
 
   /** A mark for `releaseSince`: every shape created after it has an id at least this big. */
@@ -268,26 +295,12 @@ export class Kernel {
       const result = prism.Shape();
       return this.storeWith('extrude', result, (id) => {
         const maps = resultMaps(this.oc, s, result);
-        const sides = entry.profile!.loops.map((loop, li) =>
-          loop.map((edge, i) => {
-            const generated = s.own(prism.Generated(edge));
-            if (generated.Size() !== 1) {
-              throw new Error(`loop ${li} entity ${i} generated ${generated.Size()} faces`);
-            }
-            return maps.face.FindIndex(s.own(generated.First()));
-          }),
-        );
+        const { sides, sideIds } = sweptSides(s, prism, entry.profile!, maps, false);
         const capStart = maps.face.FindIndex(s.own(prism.FirstShape()));
         const capEnd = maps.face.FindIndex(s.own(prism.LastShape()));
-        if (capStart === 0 || capEnd === 0 || sides.some((l) => l.includes(0))) {
+        if (capStart === 0 || capEnd === 0) {
           throw new Error('prism history did not resolve to result faces');
         }
-        const sideIds: Record<string, number> = {};
-        entry.profile!.ids.forEach((loop, li) =>
-          loop.forEach((entityId, i) => {
-            if (entityId !== null) sideIds[entityId] = sides[li]![i]!;
-          }),
-        );
         const history =
           options.history === false ? [] : collectHistory(this.oc, s, prism, [face], maps);
         return { shape: id, history, capStart, capEnd, sides, sideIds };
@@ -375,10 +388,427 @@ export class Kernel {
     });
   }
 
+  /**
+   * Revolve a profile about an axis by `angle` radians (up to 2 pi, a full
+   * revolution). The axis must not cross the profile. Returns the caps (none
+   * for a full revolution) and the face each entity swept; an entity lying on
+   * the axis sweeps none.
+   */
+  revolve(
+    profile: ShapeId,
+    axis: Axis,
+    angle: number,
+    options: OperationOptions = {},
+  ): RevolveResult {
+    return this.op('revolve', (s) => {
+      const entry = this.entry(profile, 'revolve');
+      if (!entry.profile) {
+        throw new KernelError('revolve', `shape ${profile} is not a profile`, {
+          code: 'invalid-argument',
+        });
+      }
+      finite('revolve', 'angle', angle);
+      if (!(angle > 1e-9 && angle <= 2 * Math.PI + 1e-9)) {
+        throw new KernelError('revolve', 'angle must be in (0, 2 pi]', {
+          code: 'invalid-argument',
+        });
+      }
+      const ax1 = this.ax1(s, 'revolve', axis);
+      const full = angle >= 2 * Math.PI - 1e-9;
+      const face = entry.shape;
+      const maker = s.own(
+        full
+          ? new this.oc.BRepPrimAPI_MakeRevol(face, ax1, true)
+          : new this.oc.BRepPrimAPI_MakeRevol(face, ax1, angle, true),
+      );
+      maker.Build();
+      if (!maker.IsDone()) throw new Error('revolve failed');
+      const result = maker.Shape();
+      return this.storeWith('revolve', result, (id) => {
+        const maps = resultMaps(this.oc, s, result);
+        const { sides, sideIds } = sweptSides(s, maker, entry.profile!, maps, true);
+        let capStart = 0;
+        let capEnd = 0;
+        if (!full) {
+          capStart = maps.face.FindIndex(s.own(maker.FirstShape()));
+          capEnd = maps.face.FindIndex(s.own(maker.LastShape()));
+          if (capStart === 0 || capEnd === 0) {
+            throw new Error('revolve history did not resolve to result faces');
+          }
+        }
+        if (sides.every((l) => l.every((f) => f === 0))) {
+          throw new KernelError('revolve', 'the profile sweeps no face about this axis', {
+            code: 'invalid-argument',
+          });
+        }
+        const history =
+          options.history === false ? [] : collectHistory(this.oc, s, maker, [face], maps);
+        return { shape: id, history, capStart, capEnd, sides, sideIds };
+      });
+    });
+  }
+
+  /** Chamfer edges (1-based indices), each with the face asymmetric sizes are measured on. */
+  chamfer(
+    shape: ShapeId,
+    edges: readonly ChamferEdge[],
+    size: ChamferSize,
+    options: OperationOptions = {},
+  ): OperationResult {
+    return this.op('chamfer', (s) => {
+      positive('chamfer', 'distance', size.distance);
+      if (size.kind === 'distances') positive('chamfer', 'distance2', size.distance2);
+      if (size.kind === 'distance-angle') {
+        finite('chamfer', 'angle', size.angle);
+        if (!(size.angle > 0 && size.angle < Math.PI / 2)) {
+          throw new KernelError('chamfer', 'angle must be between 0 and pi/2', {
+            code: 'invalid-argument',
+          });
+        }
+      }
+      if (edges.length === 0) {
+        throw new KernelError('chamfer', 'no edges given', { code: 'invalid-argument' });
+      }
+      const input = this.get(shape, 'chamfer');
+      const edgeMap = mapShapes(this.oc, s, input, 'edge');
+      const faceMap = mapShapes(this.oc, s, input, 'face');
+      const maker = s.own(new this.oc.BRepFilletAPI_MakeChamfer(input));
+      for (const { edge: i, face: f } of edges) {
+        const edge = this.subEdge(s, edgeMap, i, 'chamfer', shape);
+        if (size.kind === 'distance') {
+          maker.Add(size.distance, edge);
+          continue;
+        }
+        if (f === undefined || !Number.isInteger(f) || f < 1 || f > faceMap.Extent()) {
+          throw new KernelError('chamfer', `edge ${i} needs a reference face of shape ${shape}`, {
+            code: 'invalid-argument',
+          });
+        }
+        const face: TopoDS_Face = s.own(this.oc.TopoDS.Face(s.own(faceMap.FindKey(f))));
+        if (size.kind === 'distances') maker.Add(size.distance, size.distance2, edge, face);
+        else maker.AddDA(size.distance, size.angle, edge, face);
+      }
+      maker.Build();
+      if (!maker.IsDone()) throw new Error('chamfer failed');
+      const result = maker.Shape();
+      return this.storeWith('chamfer', result, (id) => ({
+        shape: id,
+        history:
+          options.history === false
+            ? []
+            : collectHistory(this.oc, s, maker, [input], resultMaps(this.oc, s, result)),
+      }));
+    });
+  }
+
+  /**
+   * Hollow a solid: remove `faces` (1-based; at least one) and give the rest a
+   * wall of `thickness`, inward, or outward with `outward`.
+   */
+  shell(
+    shape: ShapeId,
+    faces: readonly number[],
+    thickness: number,
+    outward = false,
+    options: OperationOptions = {},
+  ): OperationResult {
+    return this.op('shell', (s) => {
+      positive('shell', 'thickness', thickness);
+      if (faces.length === 0) {
+        throw new KernelError('shell', 'a shell needs at least one face to remove', {
+          code: 'invalid-argument',
+        });
+      }
+      const input = this.get(shape, 'shell');
+      const faceMap = mapShapes(this.oc, s, input, 'face');
+      const closing: TopoDS_Shape[] = [];
+      for (const f of faces) {
+        if (!Number.isInteger(f) || f < 1 || f > faceMap.Extent()) {
+          throw new KernelError('shell', `shape ${shape} has no face ${f}`, {
+            code: 'invalid-argument',
+          });
+        }
+        closing.push(s.own(faceMap.FindKey(f)));
+      }
+      const list = s.own(new this.oc.NCollection_List_TopoDS_Shape(closing));
+      const maker = s.own(new this.oc.BRepOffsetAPI_MakeThickSolid());
+      maker.MakeThickSolidByJoin(
+        input,
+        list,
+        outward ? thickness : -thickness,
+        1e-6,
+        this.oc.BRepOffset_Mode.BRepOffset_Skin,
+        true,
+        false,
+        this.oc.GeomAbs_JoinType.GeomAbs_Intersection,
+        false,
+      );
+      if (!maker.IsDone()) throw new Error('shell failed');
+      const result = maker.Shape();
+      return this.storeWith('shell', result, (id) => {
+        if (mapShapes(this.oc, s, result, 'face').Extent() === 0) {
+          throw new Error('shell made an empty shape');
+        }
+        return {
+          shape: id,
+          history:
+            options.history === false
+              ? []
+              : collectHistory(this.oc, s, maker, [input], resultMaps(this.oc, s, result)),
+        };
+      });
+    });
+  }
+
+  /**
+   * The solid bounded by the faces of `shape` moved `distance` along their
+   * outward normals (negative: inward), with sharp (intersection) joins. Every
+   * result face comes from a face of the input.
+   */
+  offset(shape: ShapeId, distance: number, options: OperationOptions = {}): OperationResult {
+    return this.op('offset', (s) => {
+      finite('offset', 'distance', distance);
+      if (distance === 0) {
+        throw new KernelError('offset', 'distance must not be zero', { code: 'invalid-argument' });
+      }
+      const input = this.get(shape, 'offset');
+      const maker = s.own(new this.oc.BRepOffsetAPI_MakeOffsetShape());
+      maker.PerformByJoin(
+        input,
+        distance,
+        1e-6,
+        this.oc.BRepOffset_Mode.BRepOffset_Skin,
+        true,
+        false,
+        this.oc.GeomAbs_JoinType.GeomAbs_Intersection,
+        false,
+      );
+      if (!maker.IsDone()) throw new Error('offset failed');
+      const result = maker.Shape();
+      return this.storeWith('offset', result, (id) => {
+        if (mapShapes(this.oc, s, result, 'face').Extent() === 0) {
+          throw new Error('offset made an empty shape');
+        }
+        return {
+          shape: id,
+          history:
+            options.history === false
+              ? []
+              : collectHistory(this.oc, s, maker, [input], resultMaps(this.oc, s, result)),
+        };
+      });
+    });
+  }
+
+  /**
+   * Tilt `faces` (1-based) by `angle` radians about their intersection with
+   * the neutral plane, away from `direction` (the pull direction): a positive
+   * angle makes a prism's sides taper as they go along `direction`.
+   */
+  draft(
+    shape: ShapeId,
+    faces: readonly number[],
+    direction: Vec3,
+    angle: number,
+    neutral: Plane,
+    options: OperationOptions = {},
+  ): OperationResult {
+    return this.op('draft', (s) => {
+      finite('draft', 'angle', angle);
+      if (!(Math.abs(angle) < Math.PI / 2)) {
+        throw new KernelError('draft', 'angle must be within (-pi/2, pi/2)', {
+          code: 'invalid-argument',
+        });
+      }
+      vector('draft', 'direction', direction);
+      const input = this.get(shape, 'draft');
+      const faceMap = mapShapes(this.oc, s, input, 'face');
+      const dir = this.dir(s, 'draft', 'direction', direction);
+      const pln = s.own(
+        new this.oc.gp_Pln(
+          this.pnt(s, neutral.origin),
+          this.dir(s, 'draft', 'neutral.normal', neutral.normal),
+        ),
+      );
+      const maker = s.own(new this.oc.BRepOffsetAPI_DraftAngle(input));
+      for (const f of faces) {
+        if (!Number.isInteger(f) || f < 1 || f > faceMap.Extent()) {
+          throw new KernelError('draft', `shape ${shape} has no face ${f}`, {
+            code: 'invalid-argument',
+          });
+        }
+        const face: TopoDS_Face = s.own(this.oc.TopoDS.Face(s.own(faceMap.FindKey(f))));
+        maker.Add(face, dir, angle, pln, true);
+        if (!maker.AddDone()) throw new Error(`draft cannot tilt face ${f}`);
+      }
+      maker.Build();
+      if (!maker.IsDone()) throw new Error('draft failed');
+      const result = maker.Shape();
+      return this.storeWith('draft', result, (id) => ({
+        shape: id,
+        history:
+          options.history === false
+            ? []
+            : collectHistory(this.oc, s, maker, [input], resultMaps(this.oc, s, result)),
+      }));
+    });
+  }
+
+  /** A moved (or mirrored) copy of a shape; the history maps every sub-shape to its image. */
+  transform(shape: ShapeId, motion: Transform, options: OperationOptions = {}): OperationResult {
+    return this.op('transform', (s) => {
+      const input = this.get(shape, 'transform');
+      const trsf = s.own(new this.oc.gp_Trsf());
+      if (motion.kind === 'translate') {
+        vector('transform', 'vector', motion.vector);
+        const v = motion.vector;
+        trsf.SetTranslation(s.own(new this.oc.gp_Vec(v[0], v[1], v[2])));
+      } else if (motion.kind === 'rotate') {
+        finite('transform', 'angle', motion.angle);
+        trsf.SetRotation(this.ax1(s, 'transform', motion.axis), motion.angle);
+      } else {
+        vector('transform', 'plane.origin', motion.plane.origin);
+        const ax2 = s.own(
+          new this.oc.gp_Ax2(
+            this.pnt(s, motion.plane.origin),
+            this.dir(s, 'transform', 'plane.normal', motion.plane.normal),
+          ),
+        );
+        trsf.SetMirror(ax2);
+      }
+      const maker = s.own(new this.oc.BRepBuilderAPI_Transform(input, trsf, true, false));
+      if (!maker.IsDone()) throw new Error('transform failed');
+      const result = maker.Shape();
+      return this.storeWith('transform', result, (id) => ({
+        shape: id,
+        history:
+          options.history === false
+            ? []
+            : collectHistory(this.oc, s, maker, [input], resultMaps(this.oc, s, result)),
+      }));
+    });
+  }
+
+  /**
+   * Several shapes as one compound, unchanged: separate bodies of one part.
+   * Every sub-shape is kept, so the history maps each operand into it.
+   */
+  compound(shapes: readonly ShapeId[], options: OperationOptions = {}): OperationResult {
+    return this.op('compound', (s) => {
+      if (shapes.length === 0) {
+        throw new KernelError('compound', 'needs at least one shape', { code: 'invalid-argument' });
+      }
+      const inputs = shapes.map((id) => this.get(id, 'compound'));
+      const builder = s.own(new this.oc.BRep_Builder());
+      const result = new this.oc.TopoDS_Compound();
+      builder.MakeCompound(result);
+      for (const input of inputs) builder.Add(result, input);
+      return this.storeWith('compound', result, (id) => {
+        const oc = this.oc;
+        const none: HistorySource = {
+          Modified: () => new oc.NCollection_List_TopoDS_Shape(),
+          Generated: () => new oc.NCollection_List_TopoDS_Shape(),
+          IsDeleted: () => false,
+        };
+        return {
+          shape: id,
+          history:
+            options.history === false
+              ? []
+              : collectHistory(oc, s, none, inputs, resultMaps(oc, s, result)),
+        };
+      });
+    });
+  }
+
+  /** The analytic geometry of a face or edge (a line, circle, plane or axis), or null. */
+  geometry(shape: ShapeId, ref: SubShapeRef): SubShapeGeometry | null {
+    return this.op('geometry', (s) => {
+      const oc = this.oc;
+      const input = this.get(shape, 'geometry');
+      if (ref.kind === 'vertex') return null;
+      const map = mapShapes(oc, s, input, ref.kind);
+      if (!Number.isInteger(ref.index) || ref.index < 1 || ref.index > map.Extent()) {
+        throw new KernelError('geometry', `shape ${shape} has no ${ref.kind} ${ref.index}`, {
+          code: 'invalid-argument',
+        });
+      }
+      const unit = (v: Vec3): Vec3 => {
+        const n = norm(v);
+        return [v[0] / n, v[1] / n, v[2] / n];
+      };
+      const axisOf = (ax: { Location(): unknown; Direction(): unknown }) => ({
+        origin: toVec3(s.own(ax.Location() as InstanceType<Oc['gp_Pnt']>)),
+        direction: unit(toVec3(s.own(ax.Direction() as InstanceType<Oc['gp_Dir']>))),
+      });
+      if (ref.kind === 'edge') {
+        const edge: TopoDS_Edge = s.own(oc.TopoDS.Edge(s.own(map.FindKey(ref.index))));
+        if (oc.BRep_Tool.Degenerated(edge)) return null;
+        const curve = s.own(new oc.BRepAdaptor_Curve(edge));
+        const type = curve.GetType();
+        if (type === oc.GeomAbs_CurveType.GeomAbs_Line) {
+          const a = toVec3(s.own(curve.Value(curve.FirstParameter())));
+          const b = toVec3(s.own(curve.Value(curve.LastParameter())));
+          const reversed = edge.Orientation() === oc.TopAbs_Orientation.TopAbs_REVERSED;
+          const d = unit([b[0] - a[0], b[1] - a[1], b[2] - a[2]]);
+          return {
+            kind: 'line',
+            origin: reversed ? b : a,
+            direction: reversed ? [-d[0], -d[1], -d[2]] : d,
+          };
+        }
+        if (type === oc.GeomAbs_CurveType.GeomAbs_Circle) {
+          return { kind: 'circle', ...axisOf(s.own(s.own(curve.Circle()).Axis())) };
+        }
+        return null;
+      }
+      const face: TopoDS_Face = s.own(oc.TopoDS.Face(s.own(map.FindKey(ref.index))));
+      const adaptor = s.own(new oc.BRepAdaptor_Surface(face, true));
+      const type = adaptor.GetType();
+      const T = oc.GeomAbs_SurfaceType;
+      if (type === T.GeomAbs_Plane) {
+        const plane = s.own(adaptor.Plane());
+        const d = toVec3(s.own(s.own(plane.Axis()).Direction()));
+        const reversed = face.Orientation() === oc.TopAbs_Orientation.TopAbs_REVERSED;
+        const sign = (reversed ? -1 : 1) * (plane.Direct() ? 1 : -1);
+        const props = s.own(new oc.GProp_GProps());
+        oc.BRepGProp.SurfaceProperties(face, props, false, false);
+        return {
+          kind: 'plane',
+          origin: toVec3(s.own(props.CentreOfMass())),
+          direction: unit([sign * d[0], sign * d[1], sign * d[2]]),
+        };
+      }
+      if (type === T.GeomAbs_Cylinder) {
+        return { kind: 'cylinder', ...axisOf(s.own(s.own(adaptor.Cylinder()).Axis())) };
+      }
+      if (type === T.GeomAbs_Cone) {
+        return { kind: 'cone', ...axisOf(s.own(s.own(adaptor.Cone()).Axis())) };
+      }
+      if (type === T.GeomAbs_Sphere) {
+        return { kind: 'sphere', ...axisOf(s.own(s.own(adaptor.Sphere()).Position())) };
+      }
+      if (type === T.GeomAbs_Torus) {
+        return { kind: 'torus', ...axisOf(s.own(s.own(adaptor.Torus()).Axis())) };
+      }
+      return null;
+    });
+  }
+
   // Queries ------------------------------------------------------------------------
 
   count(shape: ShapeId, kind: SubShapeKind): number {
     return this.op('count', (s) => mapShapes(this.oc, s, this.get(shape, 'count'), kind).Extent());
+  }
+
+  /** `BRepCheck_Analyzer`'s verdict alone: cheaper than `properties` when only validity matters. */
+  isValid(shape: ShapeId): boolean {
+    return this.op('valid', (s) => {
+      const analyzer = s.own(
+        new this.oc.BRepCheck_Analyzer(this.get(shape, 'valid'), true, false, false),
+      );
+      return analyzer.IsValid();
+    });
   }
 
   topology(shape: ShapeId): Topology {
@@ -480,6 +910,43 @@ export class Kernel {
     return new KernelError(operation, error instanceof Error ? error.message : String(error));
   }
 
+  private pnt(s: Scope, p: Vec3) {
+    return s.own(new this.oc.gp_Pnt(p[0], p[1], p[2]));
+  }
+
+  private dir(s: Scope, operation: string, name: string, d: Vec3) {
+    vector(operation, name, d);
+    if (!(norm(d) > 1e-12)) {
+      throw new KernelError(operation, `${name} is a zero vector`, { code: 'invalid-argument' });
+    }
+    return s.own(new this.oc.gp_Dir(d[0], d[1], d[2]));
+  }
+
+  private ax1(s: Scope, operation: string, axis: Axis) {
+    vector(operation, 'axis.origin', axis.origin);
+    return s.own(
+      new this.oc.gp_Ax1(
+        this.pnt(s, axis.origin),
+        this.dir(s, operation, 'axis.direction', axis.direction),
+      ),
+    );
+  }
+
+  private subEdge(
+    s: Scope,
+    edgeMap: ReturnType<typeof mapShapes>,
+    i: number,
+    operation: string,
+    shape: ShapeId,
+  ): TopoDS_Edge {
+    if (!Number.isInteger(i) || i < 1 || i > edgeMap.Extent()) {
+      throw new KernelError(operation, `shape ${shape} has no edge ${i}`, {
+        code: 'invalid-argument',
+      });
+    }
+    return s.own(this.oc.TopoDS.Edge(s.own(edgeMap.FindKey(i))));
+  }
+
   /** The arena entry of `id`; `operation` is the op asking, for the error. */
   private entry(id: ShapeId, operation: string): Entry {
     const entry = this.arena.get(id);
@@ -527,4 +994,45 @@ export class Kernel {
       throw error;
     }
   }
+}
+
+/**
+ * The result face each profile entity swept, per loop in entity order, and
+ * by entity id. With `allowNone`, an entity that swept no face (an edge on a
+ * revolve axis) gets 0; otherwise it is an error, as is an entity that swept
+ * several faces.
+ */
+function sweptSides(
+  s: Scope,
+  builder: { Generated(x: TopoDS_Shape): ShapeList },
+  profile: NonNullable<Entry['profile']>,
+  maps: ResultMaps,
+  allowNone: boolean,
+): { sides: number[][]; sideIds: Record<string, number> } {
+  const sides = profile.loops.map((loop, li) =>
+    loop.map((edge, i) => {
+      // `Generated` returns a copy of the list, owned here and drained.
+      const copy = s.own(builder.Generated(edge));
+      const faces: number[] = [];
+      while (copy.Size() > 0) {
+        const item = s.own(copy.First());
+        copy.RemoveFirst();
+        const f = maps.face.FindIndex(item);
+        if (f > 0) faces.push(f);
+      }
+      if (faces.length === 0 && allowNone) return 0;
+      if (faces.length !== 1) {
+        throw new Error(`loop ${li} entity ${i} generated ${faces.length} faces`);
+      }
+      return faces[0]!;
+    }),
+  );
+  const sideIds: Record<string, number> = {};
+  profile.ids.forEach((loop, li) =>
+    loop.forEach((entityId, i) => {
+      const face = sides[li]![i]!;
+      if (entityId !== null && face > 0) sideIds[entityId] = face;
+    }),
+  );
+  return { sides, sideIds };
 }

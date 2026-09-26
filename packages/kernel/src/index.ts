@@ -13,13 +13,86 @@ export * from './types';
 export { KernelError, isFatalWasmError } from './errors';
 export type { KernelFailure, KernelFailureCode } from './errors';
 export { Kernel, DEFAULT_DEFLECTION } from './kernel';
-export type { BooleanKind, BooleanOptions, KernelContext, KernelOptions } from './kernel';
+export type {
+  BooleanKind,
+  BooleanOptions,
+  KernelContext,
+  KernelOptions,
+  NamedShape,
+} from './kernel';
+export {
+  MAX_PATTERN_COUNT,
+  applyFeature,
+  frameOnPlane,
+  orientedGeometry,
+  pickReference,
+  resolveReferences,
+  sketchFrame,
+  validateFeature,
+} from './features';
+export type {
+  ChamferInput,
+  EdgeReference,
+  ExtrudeExtent,
+  ExtrudeInput,
+  FaceReference,
+  FeatureError,
+  FeatureErrorCode,
+  FeatureInput,
+  FeatureKind,
+  FeatureOutcome,
+  FeatureWarning,
+  FilletInput,
+  HoleHead,
+  HoleInput,
+  InstanceSource,
+  MirrorInput,
+  PatternInput,
+  PatternLayout,
+  ReferenceReport,
+  ResolvedRef,
+  ResultMode,
+  RevolveInput,
+  ShellInput,
+  SketchProfile,
+  ToolInput,
+} from './features';
+export {
+  UNNAMED_PREFIX,
+  describeFailure,
+  edgeRefName,
+  invalidFeatureId,
+  invalidSketchId,
+  isPositional,
+  isUnnamed,
+  pickEdge,
+  pickFace,
+  refName,
+  resolveEdge,
+  resolveFace,
+  splitParent,
+} from './naming';
+export type {
+  EdgeName,
+  EdgeRef,
+  FaceName,
+  FaceRef,
+  Failure,
+  Names,
+  Resolution,
+  TopoRef,
+  Via,
+} from './naming';
+export { HOLE_SIZES, clearanceDiameter, holeSize } from './holes';
+export type { HoleFit, HoleStandardSize } from './holes';
 export { validateOp } from './ops';
 export type {
+  BatchContext,
   BooleanOp,
   BoxOp,
   CylinderOp,
   ExtrudeOp,
+  FeatureOp,
   FilletOp,
   KernelOp,
   OpName,
@@ -27,10 +100,12 @@ export type {
   OpResults,
   OpValue,
   OpValues,
+  PickOp,
   ProfileOp,
   PropertiesOp,
   ReleaseOp,
   ReleaseResult,
+  ResolveOp,
   ShapeRef,
   TessellateOp,
   TopologyOp,

@@ -137,22 +137,37 @@ themselves, and how a reference resolved, are derived data and never stored.
 Every feature has `id`, `kind`, a display `name` (1 to 200 characters) and `suppressed`. The
 union is discriminated by `kind`.
 
-| Kind        | Inputs                                                                                                                                   |
-| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `sketch`    | `plane` (explicit `origin`, `normal`, `xDir`, or a `face` reference), `entities`, `constraints`                                          |
-| `extrude`   | `profile`, `operation` (`new`, `add`, `cut`, `intersect`), `extent`, `reverse`                                                           |
-| `revolve`   | `profile`, `axis` (a line of the sketch, or an edge reference), `angle`, `symmetric`, `operation`                                        |
-| `fillet`    | `edges` (edge references), `radius`                                                                                                      |
-| `chamfer`   | `edges`, `distance`, optional `secondDistance`                                                                                           |
-| `shell`     | `faces` to remove (face references), `thickness`, `outward`                                                                              |
-| `hole`      | `sketch` and its `points`, `diameter`, `extent` (blind depth or through all), `head` (simple, counterbore, countersink)                  |
-| `pattern`   | `features` to repeat, `layout` (linear: direction, count, spacing; circular: axis, count, angle)                                         |
-| `mirror`    | `features`, `plane` (a planar face reference)                                                                                            |
-| `extension` | a later domain feature: `extension` type (`print.brim`), `schemaVersion`, `dependsOn`, `references`, `expressions`, opaque JSON `params` |
+| Kind        | Inputs                                                                                                                                                         |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sketch`    | `plane` (explicit `origin`, `normal`, `xDir`, or a `face` reference), `entities`, `constraints`                                                                |
+| `extrude`   | `profile`, `operation` (`new`, `add`, `cut`, `intersect`), `extent`, `reverse`, optional `draft` (angle; + tapers inward)                                      |
+| `revolve`   | `profile`, `axis` (a line of the sketch or an edge reference, each with optional `flip`), `angle`, `symmetric`, `operation`                                    |
+| `fillet`    | `edges` (edge references), `radius`                                                                                                                            |
+| `chamfer`   | `edges`, `distance`, optional `secondDistance` or `angle` (not both)                                                                                           |
+| `shell`     | `faces` to remove (face references), `thickness`, `outward`                                                                                                    |
+| `hole`      | `sketch` and its `points`, `diameter`, `extent` (blind depth or through all), `head` (simple, counterbore, countersink), optional `standard` (`size`, `fit`)   |
+| `pattern`   | `features` to repeat, or `body: true` (and no features) for the whole body, `layout` (linear: direction, count, spacing; circular: axis, count, angle; `flip`) |
+| `mirror`    | `features`, or `body: true`, `plane` (a planar face reference)                                                                                                 |
+| `extension` | a later domain feature: `extension` type (`print.brim`), `schemaVersion`, `dependsOn`, `references`, `expressions`, opaque JSON `params`                       |
 
 A `profile` is `{ sketch, entities? }`: the sketch feature and the entities bounding the chosen
 regions (absent: every closed region). Extrude extents are `blind`, `symmetric` (total depth,
 centred), `throughAll` and `upToFace`.
+
+The kernel implements these as `applyFeature` inputs (`packages/kernel`, Part features). Unequal
+chamfers measure `distance` on the reference face of each edge, the adjacent face whose name sorts
+first. A hole's `standard` records the screw size and clearance fit (`close`, `normal`, `loose`)
+of the kernel's `HOLE_SIZES` table it was sized from; `diameter` and the head sizes stay what
+regen uses. A shell with no `faces` is a closed hollow.
+
+A direction or axis taken from an edge or face reference (a revolve's edge axis, a pattern's
+direction or axis) points the way the kernel's naming rules orient it, never the way OCCT happens
+to store the edge (kernel README, Directions); `flip: true` turns it round. A revolve about a
+sketch line turns right-handed about the line's direction, start to end; `flip: true` turns that
+round too. A pattern count is at most `MAX_PATTERN_COUNT` (1000) instances, the original included.
+The schema does not check the range: the kernel does at regen, for a count written as a plain
+number and one computed by an expression alike, so a stored count out of range (say `1001`) still
+loads and fails only that pattern at regen, where the user can fix it.
 
 `extension` is the extension point: core validates its dependencies, references and
 expressions like any other feature's, and leaves `params` to the domain package that owns the

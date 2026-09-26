@@ -4,6 +4,7 @@ import {
   DisplayUnitsSchema,
   FEATURE_KINDS,
   FeatureSchema,
+  MAX_PATTERN_COUNT,
   ReferenceSchema,
   SketchConstraintSchema,
   SketchPlaneSchema,
@@ -20,6 +21,17 @@ import {
 } from './test-helpers';
 
 const common = { name: 'F', suppressed: false } as const;
+
+const holeFeature = () => ({
+  id: 'hole#9',
+  kind: 'hole' as const,
+  ...common,
+  sketch: 'sketch#2',
+  points: ['e5'],
+  diameter: mm('5'),
+  extent: { type: 'throughAll' as const },
+  head: { type: 'simple' as const },
+});
 
 /** One valid example of every feature kind. */
 const validFeatures: Feature[] = [
@@ -42,6 +54,7 @@ const validFeatures: Feature[] = [
     ...baseExtrude(),
     extent: { type: 'symmetric', distance: mm('10') },
   },
+  { ...baseExtrude(), draft: mm('3deg') },
   {
     ...baseExtrude(),
     profile: { sketch: 'sketch#1', entities: ['e1', 'e2#a'] },
@@ -65,10 +78,21 @@ const validFeatures: Feature[] = [
     axis: {
       type: 'edge',
       edge: { id: 'r3', ref: { faces: ['a:b', 'c:d'], ends: ['x:y'], ordinal: 2 } },
+      flip: true,
     },
     angle: mm('90'),
     symmetric: true,
     operation: 'intersect',
+  },
+  {
+    id: 'revolve#3',
+    kind: 'revolve',
+    ...common,
+    profile: { sketch: 'sketch#1' },
+    axis: { type: 'sketchLine', entity: 'e4', flip: true },
+    angle: mm('90deg'),
+    symmetric: false,
+    operation: 'add',
   },
   cornerFillet(),
   {
@@ -78,6 +102,14 @@ const validFeatures: Feature[] = [
     edges: [{ id: 'r4', ref: { faces: ['extrude#1:cap:end|x'] } }],
     distance: mm('1'),
     secondDistance: mm('2'),
+  },
+  {
+    id: 'chamfer#2',
+    kind: 'chamfer',
+    ...common,
+    edges: [{ id: 'r10', ref: { faces: ['extrude#1:cap:end', 'x'] } }],
+    distance: mm('1'),
+    angle: mm('30deg'),
   },
   {
     id: 'shell#1',
@@ -106,6 +138,7 @@ const validFeatures: Feature[] = [
     diameter: mm('5'),
     extent: { type: 'throughAll' },
     head: { type: 'countersink', diameter: mm('10'), angle: mm('90deg') },
+    standard: { size: 'M5', fit: 'normal' },
   },
   {
     id: 'pattern#1',
@@ -115,6 +148,7 @@ const validFeatures: Feature[] = [
     layout: {
       type: 'linear',
       direction: { id: 'r5', ref: { faces: ['a:b', 'c:d'] } },
+      flip: true,
       count: mm('4'),
       spacing: mm('10'),
     },
@@ -127,9 +161,44 @@ const validFeatures: Feature[] = [
     layout: {
       type: 'circular',
       axis: { id: 'r6', ref: { face: 'x:y' } },
+      flip: false,
       count: mm('6'),
       angle: mm('360deg'),
     },
+  },
+  {
+    id: 'pattern#3',
+    kind: 'pattern',
+    ...common,
+    features: [],
+    body: true,
+    layout: {
+      type: 'linear',
+      direction: { id: 'r11', ref: { face: 'extrude#1:side:e2' } },
+      // The largest count; an expression is checked when regen evaluates it.
+      count: mm('1000'),
+      spacing: mm('50'),
+    },
+  },
+  {
+    id: 'pattern#4',
+    kind: 'pattern',
+    ...common,
+    features: ['extrude#2'],
+    layout: {
+      type: 'circular',
+      axis: { id: 'r13', ref: { faces: ['a:b', 'c:d'] } },
+      count: mm('holes * 2'),
+      angle: mm('90deg'),
+    },
+  },
+  {
+    id: 'mirror#2',
+    kind: 'mirror',
+    ...common,
+    features: [],
+    body: true,
+    plane: { id: 'r12', ref: { face: 'extrude#1:side:e4' } },
   },
   {
     id: 'mirror#1',
@@ -207,6 +276,55 @@ describe('FeatureSchema', () => {
     ],
     ['bad operation', { ...extrude, operation: 'union' }, 'operation'],
     ['fillet without edges', { ...cornerFillet(), edges: [] }, 'edges'],
+    [
+      'chamfer with a second distance and an angle',
+      {
+        id: 'chamfer#1',
+        kind: 'chamfer',
+        name: 'C',
+        suppressed: false,
+        edges: [{ id: 'r4', ref: { faces: ['a', 'b'] } }],
+        distance: mm('1'),
+        secondDistance: mm('2'),
+        angle: mm('30deg'),
+      },
+      'angle',
+    ],
+    [
+      'pattern without features',
+      {
+        id: 'pattern#1',
+        kind: 'pattern',
+        name: 'P',
+        suppressed: false,
+        features: [],
+        layout: {
+          type: 'linear',
+          direction: { id: 'r5', ref: { face: 'a' } },
+          count: mm('2'),
+          spacing: mm('1'),
+        },
+      },
+      'features',
+    ],
+    [
+      'body mirror that lists features',
+      {
+        id: 'mirror#1',
+        kind: 'mirror',
+        name: 'M',
+        suppressed: false,
+        features: ['extrude#1'],
+        body: true,
+        plane: { id: 'r7', ref: { face: 'a' } },
+      },
+      'features',
+    ],
+    [
+      'hole with an unknown fit',
+      { ...holeFeature(), standard: { size: 'M5', fit: 'snug' } },
+      'standard.fit',
+    ],
     [
       'fillet with a face reference',
       { ...cornerFillet(), edges: [{ id: 'r2', ref: { face: 'a' } }] },
@@ -309,11 +427,49 @@ describe('FeatureSchema', () => {
     ],
   ];
 
+  const countPattern = (count: string) => ({
+    id: 'pattern#1',
+    kind: 'pattern',
+    name: 'P',
+    suppressed: false,
+    features: ['extrude#2'],
+    layout: {
+      type: 'linear',
+      direction: { id: 'r5', ref: { face: 'a' } },
+      count: mm(count),
+      spacing: mm('1'),
+    },
+  });
+  invalid.push(
+    [
+      'revolve sketch line flip not a boolean',
+      {
+        ...(validFeatures.find((f) => f.id === 'revolve#1') as Feature),
+        axis: { type: 'sketchLine', entity: 'e4', flip: 'yes' },
+      },
+      'axis.flip',
+    ],
+    [
+      'pattern flip not a boolean',
+      {
+        ...countPattern('2'),
+        layout: { ...countPattern('2').layout, flip: 'yes' },
+      },
+      'layout.flip',
+    ],
+  );
+
   it.each(invalid)('rejects %s', (_label, input, path) => {
     const r = FeatureSchema.safeParse(input);
     expect(r.success).toBe(false);
     const paths = r.error!.issues.map((i) => i.path.join('.'));
     expect(paths).toContain(path);
+  });
+
+  // The count range is the kernel's to check at regen (MAX_PATTERN_COUNT), so a
+  // stored count out of range still loads and only that pattern fails.
+  it.each(['1001', '0', '2.5', `${MAX_PATTERN_COUNT}`])('loads a pattern count of %s', (count) => {
+    expect(FeatureSchema.safeParse(countPattern(count)).success).toBe(true);
   });
 });
 

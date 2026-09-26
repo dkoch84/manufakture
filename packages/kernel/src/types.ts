@@ -71,6 +71,68 @@ export interface ExtrudeResult extends OperationResult {
   sideIds: Record<string, number>;
 }
 
+/** Result of `revolve`: like an extrusion, but a full revolution has no caps. */
+export interface RevolveResult extends OperationResult {
+  /** Result face index of the cap at the profile; 0 for a full revolution. */
+  capStart: number;
+  /** Result face index of the far cap; 0 for a full revolution. */
+  capEnd: number;
+  /**
+   * Per profile loop, the result face each entity generated, in loop order;
+   * 0 for an entity on the axis, which sweeps no face.
+   */
+  sides: number[][];
+  /** The result face of every entity with an `id` that swept a face, by id. */
+  sideIds: Record<string, number>;
+}
+
+/** A line in space: a point on it and a direction (need not be unit length). */
+export interface Axis {
+  origin: Vec3;
+  direction: Vec3;
+}
+
+/** A plane in space: a point on it and its normal (need not be unit length). */
+export interface Plane {
+  origin: Vec3;
+  normal: Vec3;
+}
+
+/**
+ * A rigid motion for `transform`. `mirror` reflects about a plane, so it
+ * changes handedness; the kernel reorients the copy so the solid stays valid.
+ */
+export type Transform =
+  | { kind: 'translate'; vector: Vec3 }
+  | { kind: 'rotate'; axis: Axis; angle: number }
+  | { kind: 'mirror'; plane: Plane };
+
+/** How a chamfer is sized. Asymmetric chamfers measure `distance` on the edge's reference face. */
+export type ChamferSize =
+  | { kind: 'distance'; distance: number }
+  | { kind: 'distances'; distance: number; distance2: number }
+  | { kind: 'distance-angle'; distance: number; angle: number };
+
+/** One chamfered edge, with the face the asymmetric sizes are measured on (1-based indices). */
+export interface ChamferEdge {
+  edge: number;
+  /** Required for `distances` and `distance-angle`; must be adjacent to the edge. */
+  face?: number;
+}
+
+/**
+ * The analytic geometry of a face or edge, for axes and planes taken from
+ * the model: a line edge gives its direction, a circle its centre and
+ * normal, a plane its normal, a cylinder, cone, sphere or torus its axis.
+ */
+export interface SubShapeGeometry {
+  kind: 'line' | 'circle' | 'plane' | 'cylinder' | 'cone' | 'sphere' | 'torus' | 'other';
+  /** A point on the line or axis, the centre of a circle, or a point on the plane. */
+  origin: Vec3;
+  /** Line direction, circle or plane normal (outward for faces), or axis direction; unit length. */
+  direction: Vec3;
+}
+
 /**
  * A right-handed placement for a planar profile. Profile coordinates (u, v)
  * map to `origin + u * xDir + v * yDir` with `yDir = normal x xDir`.
