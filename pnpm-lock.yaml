@@ -73,15 +73,39 @@ importers:
         specifier: ^6.1.1
         version: 6.1.1(vite@8.3.1(@types/node@22.20.4))
 
-  packages/core: {}
+  packages/core:
+    dependencies:
+      '@manufakture/sketch':
+        specifier: workspace:*
+        version: link:../sketch
+      '@manufakture/units':
+        specifier: workspace:*
+        version: link:../units
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
 
   packages/io: {}
 
-  packages/kernel: {}
+  packages/kernel:
+    dependencies:
+      comlink:
+        specifier: ^4.4.2
+        version: 4.4.2
+      libcascade:
+        specifier: 3.0.2
+        version: 3.0.2
 
   packages/regen: {}
 
-  packages/sketch: {}
+  packages/sketch:
+    dependencies:
+      '@manufakture/units':
+        specifier: workspace:*
+        version: link:../units
+      '@salusoft89/planegcs':
+        specifier: 1.2.0
+        version: 1.2.0
 
   packages/units: {}
 

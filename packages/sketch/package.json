@@ -5,9 +5,16 @@
   "type": "module",
   "license": "GPL-3.0-or-later",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./model": "./src/model.ts",
+    "./worker": "./src/worker.ts"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --root ../.. --project packages packages/sketch"
+  },
+  "dependencies": {
+    "@manufakture/units": "workspace:*",
+    "@salusoft89/planegcs": "1.2.0"
   }
 }
