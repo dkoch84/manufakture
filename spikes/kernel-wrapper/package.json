@@ -1,0 +1,22 @@
+{
+  "name": "@manufakture/spike-kernel-wrapper",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "GPL-3.0-or-later",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "measure": "node scripts/measure.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "brepjs": "20.0.0",
+    "libcascade": "3.0.2",
+    "occt-wasm": "5.3.5",
+    "replicad": "1.1.0",
+    "replicad-opencascadejs": "1.1.0"
+  },
+  "devDependencies": {
+    "prettier": "^3.9.9"
+  }
+}

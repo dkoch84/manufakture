@@ -1,0 +1,102 @@
+{
+  "fetchedAt": "2026-09-26T15:48:23.211Z",
+  "window": { "since": "2026-06-28T15:48:20.292Z" },
+  "packages": {
+    "brepjs": {
+      "repo": "andymai/brepjs",
+      "npm": {
+        "latest": "20.0.0",
+        "license": "Apache-2.0",
+        "versions": 496,
+        "majorVersions": 20,
+        "releasesLast90Days": 118,
+        "created": "2026-02-02T08:40:04.830Z",
+        "lastPublish": "2026-09-21T14:56:54.592Z",
+        "downloadsLastMonth": 10520
+      },
+      "stars": 113,
+      "forks": 9,
+      "openIssuesAndPrs": 1,
+      "createdAt": "2026-02-01T22:47:42Z",
+      "pushedAt": "2026-09-23T16:37:41Z",
+      "license": "Apache-2.0",
+      "contributors": 7,
+      "commitsLast90Days": 577
+    },
+    "occt-wasm": {
+      "repo": "andymai/occt-wasm",
+      "npm": {
+        "latest": "5.3.5",
+        "license": "MIT OR Apache-2.0",
+        "versions": 54,
+        "majorVersions": 6,
+        "releasesLast90Days": 28,
+        "created": "2026-03-27T17:05:27.341Z",
+        "lastPublish": "2026-09-21T15:40:24.759Z",
+        "downloadsLastMonth": 20790
+      },
+      "stars": 57,
+      "forks": 14,
+      "openIssuesAndPrs": 1,
+      "createdAt": "2026-03-26T17:34:38Z",
+      "pushedAt": "2026-09-24T20:49:06Z",
+      "license": "MIT",
+      "contributors": 5,
+      "commitsLast90Days": 140
+    },
+    "replicad": {
+      "repo": "sgenoud/replicad",
+      "npm": {
+        "latest": "1.1.0",
+        "license": "MIT",
+        "versions": 63,
+        "majorVersions": 2,
+        "releasesLast90Days": 3,
+        "created": "2021-11-01T15:22:11.794Z",
+        "lastPublish": "2026-09-04T14:13:55.777Z",
+        "downloadsLastMonth": 41702
+      },
+      "stars": 688,
+      "forks": 81,
+      "openIssuesAndPrs": 49,
+      "createdAt": "2021-11-01T15:09:47Z",
+      "pushedAt": "2026-09-04T14:09:20Z",
+      "license": "MIT",
+      "contributors": 19,
+      "commitsLast90Days": 43
+    },
+    "libcascade": {
+      "repo": "taucad/opencascade.js",
+      "npm": {
+        "latest": "3.0.2",
+        "license": "LGPL-2.1-only WITH Open-CASCADE-Exception-1.0",
+        "versions": 11,
+        "majorVersions": 1,
+        "releasesLast90Days": 11,
+        "created": "2026-07-29T09:14:03.394Z",
+        "lastPublish": "2026-08-17T01:17:50.813Z",
+        "downloadsLastMonth": 671
+      },
+      "stars": 9,
+      "forks": 4,
+      "openIssuesAndPrs": 5,
+      "createdAt": "2026-02-21T04:41:47Z",
+      "pushedAt": "2026-09-03T02:50:48Z",
+      "license": "LGPL-2.1",
+      "contributors": 12,
+      "commitsLast90Days": 71
+    },
+    "replicad-opencascadejs": {
+      "npm": {
+        "latest": "1.1.0",
+        "license": "LGPL-2.1-only",
+        "versions": 28,
+        "majorVersions": 2,
+        "releasesLast90Days": 2,
+        "created": "2021-11-01T15:22:13.965Z",
+        "lastPublish": "2026-09-04T14:13:27.518Z",
+        "downloadsLastMonth": 41564
+      }
+    }
+  }
+}

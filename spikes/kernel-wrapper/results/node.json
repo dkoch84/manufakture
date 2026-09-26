@@ -1,0 +1,395 @@
+{
+  "host": {
+    "cpu": "AMD Ryzen 5 7600X 6-Core Processor",
+    "logicalCpus": 12,
+    "memoryGiB": 62,
+    "node": "v26.10.0",
+    "platform": "linux x64",
+    "packages": {
+      "libcascade": "3.0.2",
+      "replicad": "1.1.0",
+      "replicad-opencascadejs": "1.1.0",
+      "brepjs": "20.0.0",
+      "occt-wasm": "5.3.5"
+    },
+    "measuredAt": "2026-09-26T15:47:28.024Z"
+  },
+  "init": {
+    "libcascade": {
+      "readMs": { "n": 5, "median": 4.01, "min": 3.97, "max": 4.46 },
+      "compileMs": { "n": 5, "median": 37.5, "min": 36.64, "max": 38.12 },
+      "instantiateMs": { "n": 5, "median": 13.21, "min": 12.93, "max": 13.4 },
+      "runtimeInitMs": { "n": 5, "median": 423.78, "min": 420.66, "max": 426.47 },
+      "totalMs": { "n": 5, "median": 481.74, "min": 478.73, "max": 484.47 },
+      "heapBytesAfterInit": 134217728
+    },
+    "replicad-opencascadejs": {
+      "readMs": { "n": 5, "median": 2.73, "min": 2.66, "max": 2.81 },
+      "compileMs": { "n": 5, "median": 19.51, "min": 19.15, "max": 19.76 },
+      "instantiateMs": { "n": 5, "median": 3.7, "min": 3.28, "max": 4.21 },
+      "runtimeInitMs": { "n": 5, "median": 56.48, "min": 55.82, "max": 59.55 },
+      "totalMs": { "n": 5, "median": 83.92, "min": 83.28, "max": 87.47 },
+      "heapBytesAfterInit": 104857600
+    },
+    "occt-wasm": {
+      "readMs": { "n": 5, "median": 2.98, "min": 2.62, "max": 3.04 },
+      "compileMs": { "n": 5, "median": 18.59, "min": 18.31, "max": 19.08 },
+      "instantiateMs": { "n": 5, "median": 2.1, "min": 2, "max": 2.5 },
+      "runtimeInitMs": { "n": 5, "median": 6.09, "min": 5.89, "max": 6.81 },
+      "totalMs": { "n": 5, "median": 31.82, "min": 31.57, "max": 32.81 },
+      "heapBytesAfterInit": 134217728
+    }
+  },
+  "imports": {
+    "replicad": { "n": 5, "median": 8.48, "min": 8.45, "max": 8.61 },
+    "brepjs": { "n": 5, "median": 39.71, "min": 36.72, "max": 42.36 },
+    "occt-wasm": { "n": 5, "median": 2.53, "min": 2.47, "max": 2.57 }
+  },
+  "timing": [
+    {
+      "config": "model",
+      "candidate": "own-libcascade",
+      "options": { "mesh": false, "history": false },
+      "firstRunMs": 68.69,
+      "filletMs": { "n": 20, "median": 4.34, "min": 3.83, "max": 6.09 },
+      "cutMs": { "n": 20, "median": 2.61, "min": 2.19, "max": 3.22 },
+      "meshMs": { "n": 20, "median": 0, "min": 0, "max": 0 },
+      "queryMs": { "n": 20, "median": 1.64, "min": 1.56, "max": 1.9 },
+      "totalMs": { "n": 20, "median": 8.49, "min": 7.64, "max": 11.23 },
+      "report": {
+        "filleted": { "volume": 23701.68722955831, "faces": 26, "triangles": 0, "vertices": 0 },
+        "extruded": { "volume": 22500, "faces": 8 },
+        "cut": { "volume": 21997.34517542563, "faces": 9, "triangles": 0, "vertices": 0 }
+      }
+    },
+    {
+      "config": "scenario",
+      "candidate": "own-libcascade",
+      "options": { "mesh": true, "history": false },
+      "firstRunMs": 90.25,
+      "filletMs": { "n": 20, "median": 4.27, "min": 3.87, "max": 5.91 },
+      "cutMs": { "n": 20, "median": 2.51, "min": 2.2, "max": 3.12 },
+      "meshMs": { "n": 20, "median": 8.93, "min": 8.19, "max": 12.63 },
+      "queryMs": { "n": 20, "median": 1.63, "min": 1.56, "max": 1.93 },
+      "totalMs": { "n": 20, "median": 17.39, "min": 15.9, "max": 21.73 },
+      "report": {
+        "filleted": { "volume": 23701.68722955831, "faces": 26, "triangles": 628, "vertices": 536 },
+        "extruded": { "volume": 22500, "faces": 8 },
+        "cut": { "volume": 21997.34517542563, "faces": 9, "triangles": 128, "vertices": 142 }
+      }
+    },
+    {
+      "config": "history",
+      "candidate": "own-libcascade",
+      "options": { "mesh": false, "history": true },
+      "firstRunMs": 70.25,
+      "filletMs": { "n": 20, "median": 4.53, "min": 4.1, "max": 6.5 },
+      "cutMs": { "n": 20, "median": 2.71, "min": 2.27, "max": 3.46 },
+      "meshMs": { "n": 20, "median": 0, "min": 0, "max": 0 },
+      "queryMs": { "n": 20, "median": 1.63, "min": 1.55, "max": 1.89 },
+      "totalMs": { "n": 20, "median": 9.07, "min": 7.96, "max": 11.9 },
+      "report": {
+        "filleted": { "volume": 23701.68722955831, "faces": 26, "triangles": 0, "vertices": 0 },
+        "extruded": { "volume": 22500, "faces": 8 },
+        "cut": { "volume": 21997.34517542563, "faces": 9, "triangles": 0, "vertices": 0 }
+      }
+    },
+    {
+      "config": "fine",
+      "candidate": "own-libcascade",
+      "options": { "mesh": true, "history": false, "fine": true },
+      "firstRunMs": 165.95,
+      "filletMs": { "n": 20, "median": 4.32, "min": 4.02, "max": 6.02 },
+      "cutMs": { "n": 20, "median": 2.67, "min": 2.3, "max": 3.29 },
+      "meshMs": { "n": 20, "median": 76.89, "min": 75.62, "max": 80.56 },
+      "queryMs": { "n": 20, "median": 1.63, "min": 1.59, "max": 1.76 },
+      "totalMs": { "n": 20, "median": 85.35, "min": 83.77, "max": 91.4 },
+      "report": {
+        "filleted": {
+          "volume": 23701.68722955831,
+          "faces": 26,
+          "triangles": 9460,
+          "vertices": 5552
+        },
+        "extruded": { "volume": 22500, "faces": 8 },
+        "cut": { "volume": 21997.34517542563, "faces": 9, "triangles": 528, "vertices": 542 }
+      }
+    },
+    {
+      "config": "model",
+      "candidate": "replicad",
+      "options": { "mesh": false, "history": false },
+      "firstRunMs": 78.8,
+      "filletMs": { "n": 20, "median": 4.29, "min": 3.9, "max": 6.56 },
+      "cutMs": { "n": 20, "median": 4.78, "min": 4.36, "max": 8.16 },
+      "meshMs": { "n": 20, "median": 0, "min": 0, "max": 0 },
+      "queryMs": { "n": 20, "median": 1.71, "min": 1.66, "max": 2.13 },
+      "totalMs": { "n": 20, "median": 10.76, "min": 9.99, "max": 15.66 },
+      "report": {
+        "filleted": { "volume": 23701.68722955831, "faces": 26, "triangles": 0, "vertices": 0 },
+        "extruded": { "volume": 22500, "faces": 8 },
+        "cut": { "volume": 21997.34517542563, "faces": 9, "triangles": 0, "vertices": 0 }
+      }
+    },
+    {
+      "config": "scenario",
+      "candidate": "replicad",
+      "options": { "mesh": true, "history": false },
+      "firstRunMs": 90.94,
+      "filletMs": { "n": 20, "median": 4.2, "min": 3.91, "max": 5.96 },
+      "cutMs": { "n": 20, "median": 4.78, "min": 4.4, "max": 7.06 },
+      "meshMs": { "n": 20, "median": 3.59, "min": 3.26, "max": 7.21 },
+      "queryMs": { "n": 20, "median": 1.77, "min": 1.68, "max": 2.14 },
+      "totalMs": { "n": 20, "median": 14.3, "min": 13.4, "max": 19.96 },
+      "report": {
+        "filleted": { "volume": 23701.68722955831, "faces": 26, "triangles": 628, "vertices": 536 },
+        "extruded": { "volume": 22500, "faces": 8 },
+        "cut": { "volume": 21997.34517542563, "faces": 9, "triangles": 128, "vertices": 142 }
+      }
+    },
+    {
+      "config": "history",
+      "candidate": "replicad",
+      "options": { "mesh": false, "history": true },
+      "firstRunMs": 74.71,
+      "filletMs": { "n": 20, "median": 5.54, "min": 4.73, "max": 7.62 },
+      "cutMs": { "n": 20, "median": 3.23, "min": 2.58, "max": 3.96 },
+      "meshMs": { "n": 20, "median": 0, "min": 0, "max": 0 },
+      "queryMs": { "n": 20, "median": 1.87, "min": 1.74, "max": 2.27 },
+      "totalMs": { "n": 20, "median": 10.76, "min": 9.05, "max": 13.56 },
+      "report": {
+        "filleted": { "volume": 23701.68722955831, "faces": 26, "triangles": 0, "vertices": 0 },
+        "extruded": { "volume": 22500, "faces": 8 },
+        "cut": { "volume": 21997.34517542563, "faces": 9, "triangles": 0, "vertices": 0 }
+      }
+    },
+    {
+      "config": "fine",
+      "candidate": "replicad",
+      "options": { "mesh": true, "history": false, "fine": true },
+      "firstRunMs": 121.01,
+      "filletMs": { "n": 20, "median": 4.46, "min": 3.94, "max": 5.97 },
+      "cutMs": { "n": 20, "median": 4.9, "min": 4.34, "max": 6.76 },
+      "meshMs": { "n": 20, "median": 29.59, "min": 28.26, "max": 31.74 },
+      "queryMs": { "n": 20, "median": 1.79, "min": 1.67, "max": 2 },
+      "totalMs": { "n": 20, "median": 40.83, "min": 38.29, "max": 46.17 },
+      "report": {
+        "filleted": {
+          "volume": 23701.68722955831,
+          "faces": 26,
+          "triangles": 9460,
+          "vertices": 5552
+        },
+        "extruded": { "volume": 22500, "faces": 8 },
+        "cut": { "volume": 21997.34517542563, "faces": 9, "triangles": 528, "vertices": 542 }
+      }
+    },
+    {
+      "config": "model",
+      "candidate": "replicad-libcascade",
+      "options": { "mesh": false, "history": false },
+      "firstRunMs": 80.73,
+      "filletMs": { "n": 20, "median": 4.61, "min": 3.88, "max": 5.98 },
+      "cutMs": { "n": 20, "median": 5.06, "min": 4.45, "max": 7.1 },
+      "meshMs": { "n": 20, "median": 0, "min": 0, "max": 0 },
+      "queryMs": { "n": 20, "median": 1.76, "min": 1.67, "max": 2.15 },
+      "totalMs": { "n": 20, "median": 11.56, "min": 10, "max": 14.8 },
+      "report": {
+        "filleted": { "volume": 23701.68722955831, "faces": 26, "triangles": 0, "vertices": 0 },
+        "extruded": { "volume": 22500, "faces": 8 },
+        "cut": { "volume": 21997.34517542563, "faces": 9, "triangles": 0, "vertices": 0 }
+      }
+    },
+    {
+      "config": "history",
+      "candidate": "replicad-libcascade",
+      "options": { "mesh": false, "history": true },
+      "firstRunMs": 74.74,
+      "filletMs": { "n": 20, "median": 5.33, "min": 4.79, "max": 7.36 },
+      "cutMs": { "n": 20, "median": 3.33, "min": 2.72, "max": 4.23 },
+      "meshMs": { "n": 20, "median": 0, "min": 0, "max": 0 },
+      "queryMs": { "n": 20, "median": 1.84, "min": 1.74, "max": 4.61 },
+      "totalMs": { "n": 20, "median": 10.67, "min": 9.24, "max": 14.19 },
+      "report": {
+        "filleted": { "volume": 23701.68722955831, "faces": 26, "triangles": 0, "vertices": 0 },
+        "extruded": { "volume": 22500, "faces": 8 },
+        "cut": { "volume": 21997.34517542563, "faces": 9, "triangles": 0, "vertices": 0 }
+      }
+    },
+    {
+      "config": "model",
+      "candidate": "occt-wasm",
+      "options": { "mesh": false, "history": false },
+      "firstRunMs": 74.99,
+      "filletMs": { "n": 20, "median": 5.26, "min": 4.88, "max": 7.15 },
+      "cutMs": { "n": 20, "median": 4.4, "min": 4.15, "max": 5.89 },
+      "meshMs": { "n": 20, "median": 0, "min": 0, "max": 0 },
+      "queryMs": { "n": 20, "median": 1.52, "min": 1.5, "max": 2.26 },
+      "totalMs": { "n": 20, "median": 11.17, "min": 10.55, "max": 15.33 },
+      "report": {
+        "filleted": { "volume": 23701.68722955831, "faces": 26, "triangles": 0, "vertices": 0 },
+        "extruded": { "volume": 22500, "faces": 8 },
+        "cut": { "volume": 21997.345175425635, "faces": 9, "triangles": 0, "vertices": 0 }
+      }
+    },
+    {
+      "config": "scenario",
+      "candidate": "occt-wasm",
+      "options": { "mesh": true, "history": false },
+      "firstRunMs": 85.63,
+      "filletMs": { "n": 20, "median": 5.2, "min": 4.81, "max": 7.03 },
+      "cutMs": { "n": 20, "median": 4.36, "min": 4.14, "max": 5.8 },
+      "meshMs": { "n": 20, "median": 3.3, "min": 3.18, "max": 4.96 },
+      "queryMs": { "n": 20, "median": 1.53, "min": 1.51, "max": 1.95 },
+      "totalMs": { "n": 20, "median": 14.37, "min": 13.67, "max": 19.55 },
+      "report": {
+        "filleted": { "volume": 23701.68722955831, "faces": 26, "triangles": 628, "vertices": 536 },
+        "extruded": { "volume": 22500, "faces": 8 },
+        "cut": { "volume": 21997.345175425635, "faces": 9, "triangles": 128, "vertices": 142 }
+      }
+    },
+    {
+      "config": "history",
+      "candidate": "occt-wasm",
+      "options": { "mesh": false, "history": true },
+      "firstRunMs": 75.06,
+      "filletMs": { "n": 20, "median": 5.42, "min": 4.94, "max": 7.25 },
+      "cutMs": { "n": 20, "median": 4.49, "min": 4.24, "max": 6.01 },
+      "meshMs": { "n": 20, "median": 0, "min": 0, "max": 0 },
+      "queryMs": { "n": 20, "median": 1.52, "min": 1.5, "max": 1.78 },
+      "totalMs": { "n": 20, "median": 11.53, "min": 10.75, "max": 14.99 },
+      "report": {
+        "filleted": { "volume": 23701.68722955831, "faces": 26, "triangles": 0, "vertices": 0 },
+        "extruded": { "volume": 22500, "faces": 8 },
+        "cut": { "volume": 21997.345175425635, "faces": 9, "triangles": 0, "vertices": 0 }
+      }
+    },
+    {
+      "config": "fine",
+      "candidate": "occt-wasm",
+      "options": { "mesh": true, "history": false, "fine": true },
+      "firstRunMs": 114.08,
+      "filletMs": { "n": 20, "median": 5.16, "min": 4.78, "max": 6.86 },
+      "cutMs": { "n": 20, "median": 4.39, "min": 4.09, "max": 5.8 },
+      "meshMs": { "n": 20, "median": 27.66, "min": 27.44, "max": 29.31 },
+      "queryMs": { "n": 20, "median": 1.55, "min": 1.52, "max": 1.63 },
+      "totalMs": { "n": 20, "median": 38.81, "min": 37.88, "max": 43.59 },
+      "report": {
+        "filleted": {
+          "volume": 23701.68722955831,
+          "faces": 26,
+          "triangles": 9460,
+          "vertices": 5552
+        },
+        "extruded": { "volume": 22500, "faces": 8 },
+        "cut": { "volume": 21997.345175425635, "faces": 9, "triangles": 528, "vertices": 542 }
+      }
+    },
+    {
+      "config": "model",
+      "candidate": "brepjs",
+      "options": { "mesh": false, "history": false },
+      "firstRunMs": 80.32,
+      "filletMs": { "n": 20, "median": 5.35, "min": 4.98, "max": 7.08 },
+      "cutMs": { "n": 20, "median": 5.31, "min": 5.1, "max": 7.01 },
+      "meshMs": { "n": 20, "median": 0, "min": 0, "max": 0 },
+      "queryMs": { "n": 20, "median": 3.21, "min": 3.09, "max": 3.33 },
+      "totalMs": { "n": 20, "median": 13.81, "min": 13.2, "max": 17.44 },
+      "report": {
+        "filleted": { "volume": 23701.68722955831, "faces": 26, "triangles": 0, "vertices": 0 },
+        "extruded": { "volume": 22500, "faces": 8 },
+        "cut": { "volume": 21997.345175425635, "faces": 9, "triangles": 0, "vertices": 0 }
+      }
+    },
+    {
+      "config": "scenario",
+      "candidate": "brepjs",
+      "options": { "mesh": true, "history": false },
+      "firstRunMs": 92.49,
+      "filletMs": { "n": 20, "median": 5.29, "min": 4.91, "max": 7.17 },
+      "cutMs": { "n": 20, "median": 5.31, "min": 4.99, "max": 6.96 },
+      "meshMs": { "n": 20, "median": 3.36, "min": 3.23, "max": 4.94 },
+      "queryMs": { "n": 20, "median": 3.21, "min": 3.09, "max": 3.8 },
+      "totalMs": { "n": 20, "median": 17.19, "min": 16.29, "max": 22.42 },
+      "report": {
+        "filleted": { "volume": 23701.68722955831, "faces": 26, "triangles": 628, "vertices": 536 },
+        "extruded": { "volume": 22500, "faces": 8 },
+        "cut": { "volume": 21997.345175425635, "faces": 9, "triangles": 128, "vertices": 142 }
+      }
+    },
+    {
+      "config": "history",
+      "candidate": "brepjs",
+      "options": { "mesh": false, "history": true },
+      "firstRunMs": 80.52,
+      "filletMs": { "n": 20, "median": 5.5, "min": 5.04, "max": 7.16 },
+      "cutMs": { "n": 20, "median": 5.36, "min": 5.08, "max": 7 },
+      "meshMs": { "n": 20, "median": 0, "min": 0, "max": 0 },
+      "queryMs": { "n": 20, "median": 3.16, "min": 3.07, "max": 3.32 },
+      "totalMs": { "n": 20, "median": 14.24, "min": 13.29, "max": 17.54 },
+      "report": {
+        "filleted": { "volume": 23701.68722955831, "faces": 26, "triangles": 0, "vertices": 0 },
+        "extruded": { "volume": 22500, "faces": 8 },
+        "cut": { "volume": 21997.345175425635, "faces": 9, "triangles": 0, "vertices": 0 }
+      }
+    },
+    {
+      "config": "fine",
+      "candidate": "brepjs",
+      "options": { "mesh": true, "history": false, "fine": true },
+      "firstRunMs": 125.01,
+      "filletMs": { "n": 20, "median": 5.3, "min": 4.89, "max": 6.96 },
+      "cutMs": { "n": 20, "median": 5.35, "min": 4.96, "max": 6.99 },
+      "meshMs": { "n": 20, "median": 27.65, "min": 27.35, "max": 29.08 },
+      "queryMs": { "n": 20, "median": 3.23, "min": 3.05, "max": 3.8 },
+      "totalMs": { "n": 20, "median": 41.52, "min": 40.33, "max": 46.49 },
+      "report": {
+        "filleted": {
+          "volume": 23701.68722955831,
+          "faces": 26,
+          "triangles": 9460,
+          "vertices": 5552
+        },
+        "extruded": { "volume": 22500, "faces": 8 },
+        "cut": { "volume": 21997.345175425635, "faces": 9, "triangles": 528, "vertices": 542 }
+      }
+    }
+  ],
+  "calls": [
+    {
+      "candidate": "own-libcascade",
+      "n": 500,
+      "perIterationUs": { "n": 5, "median": 73.25, "min": 71.74, "max": 76.73 }
+    },
+    {
+      "candidate": "replicad",
+      "n": 500,
+      "perIterationUs": { "n": 5, "median": 74.13, "min": 72.15, "max": 78.12 }
+    },
+    {
+      "candidate": "replicad-libcascade",
+      "n": 500,
+      "perIterationUs": { "n": 5, "median": 74.09, "min": 71.65, "max": 79 }
+    },
+    {
+      "candidate": "occt-wasm",
+      "n": 500,
+      "perIterationUs": { "n": 5, "median": 68.7, "min": 67.15, "max": 78.18 }
+    },
+    {
+      "candidate": "brepjs",
+      "n": 500,
+      "perIterationUs": { "n": 5, "median": 121.88, "min": 118.56, "max": 126.73 }
+    }
+  ],
+  "replicadBoxes": {
+    "makeBaseBox": {
+      "boxVolumeDeleteUs": { "n": 5, "median": 351.5, "min": 345.48, "max": 365.29 },
+      "filletAll12EdgesMs": { "n": 20, "median": 12.47, "min": 11.67, "max": 17.04 }
+    },
+    "makeBox": {
+      "boxVolumeDeleteUs": { "n": 5, "median": 71.7, "min": 71.22, "max": 73.54 },
+      "filletAll12EdgesMs": { "n": 20, "median": 3.82, "min": 3.73, "max": 4.04 }
+    }
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "host": {
+    "cpu": "AMD Ryzen 5 7600X 6-Core Processor",
+    "logicalCpus": 12,
+    "memoryGiB": 62,
+    "node": "v26.10.0",
+    "platform": "linux x64",
+    "packages": {
+      "libcascade": "3.0.2",
+      "replicad": "1.1.0",
+      "replicad-opencascadejs": "1.1.0",
+      "brepjs": "20.0.0",
+      "occt-wasm": "5.3.5"
+    },
+    "measuredAt": "2026-09-26T15:51:11.339Z"
+  },
+  "files": {
+    "libcascade: opencascade_single.wasm": {
+      "raw": 42691285,
+      "gzip9": 12154297,
+      "brotli11": 8223986
+    },
+    "libcascade: opencascade_single.js": { "raw": 66865, "gzip9": 24840, "brotli11": 22213 },
+    "replicad-opencascadejs: replicad_single.wasm": {
+      "raw": 22980267,
+      "gzip9": 7193790,
+      "brotli11": 4837826
+    },
+    "replicad-opencascadejs: replicad_single.js": {
+      "raw": 60124,
+      "gzip9": 22482,
+      "brotli11": 20209
+    },
+    "occt-wasm: occt-wasm.wasm": { "raw": 22259342, "gzip9": 7037982, "brotli11": 4757200 },
+    "occt-wasm: occt-wasm.js (glue)": { "raw": 125679, "gzip9": 33569, "brotli11": 29844 },
+    "occt-wasm: index.js (TS wrapper)": { "raw": 75926, "gzip9": 16716, "brotli11": 14266 }
+  },
+  "wrapperJs": {
+    "replicad": { "files": 3, "raw": 614921, "brotli11": 114131 },
+    "brepjs": { "files": 54, "raw": 1713785, "brotli11": 373659 }
+  },
+  "installed": {
+    "libcascade": 138469208,
+    "replicad": 5865123,
+    "replicad-opencascadejs": 48853341,
+    "brepjs": 4567124,
+    "occt-wasm": 22788623,
+    "opentype.js": 3783535,
+    "flatbush": 53919
+  },
+  "apiSurface": { "replicadExports": 172, "brepjsExports": 626, "occtWasmKernelMethods": 207 }
+}
