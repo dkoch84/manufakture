@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { selectionStore as defaultSelection, type SelectionStore } from '../state/selection';
 import {
   viewSettingsStore as defaultSettings,
@@ -21,6 +21,12 @@ export type ViewportApi = Pick<
   | 'measureFrames'
   | 'geometrySamples'
   | 'hiddenDepth'
+  | 'projectToCanvas'
+  | 'canvasToPlane'
+  | 'alignView'
+  | 'setPointerDelegate'
+  | 'onViewChange'
+  | 'requestRender'
   | 'dispose'
 >;
 
@@ -28,14 +34,20 @@ export type EngineFactory = (canvas: HTMLCanvasElement, stores: EngineStores) =>
 
 const createDefaultEngine: EngineFactory = (canvas, stores) => new ViewportEngine(canvas, stores);
 
+/**
+ * Test and tooling hook (see testHooks.ts): the live viewport and its stores,
+ * plus whatever other parts of the app register (the sketcher, the document).
+ */
+export interface TestHookRegistry {
+  viewport?: ViewportApi;
+  selection?: SelectionStore;
+  settings?: ViewSettingsStore;
+  [key: string]: unknown;
+}
+
 declare global {
   interface Window {
-    /** Test and tooling hook: the live viewport and its stores (see testHooks.ts). */
-    __manufakture?: {
-      viewport: ViewportApi;
-      selection: SelectionStore;
-      settings: ViewSettingsStore;
-    };
+    __manufakture?: TestHookRegistry;
   }
 }
 
@@ -45,6 +57,8 @@ export interface ViewportProps {
   createEngine?: EngineFactory;
   selection?: SelectionStore;
   settings?: ViewSettingsStore;
+  /** Overlays drawn over the canvas (the sketcher), in the viewport's element. */
+  children?: ReactNode;
 }
 
 export function Viewport({
@@ -53,6 +67,7 @@ export function Viewport({
   createEngine = createDefaultEngine,
   selection = defaultSelection,
   settings = defaultSettings,
+  children,
 }: ViewportProps) {
   const [engine, setEngine] = useState<ViewportApi | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -71,9 +86,19 @@ export function Viewport({
       }
       setError(null);
       setEngine(api);
-      if (testHooksEnabled) window.__manufakture = { viewport: api, selection, settings };
+      if (testHooksEnabled) {
+        window.__manufakture = { ...window.__manufakture, viewport: api, selection, settings };
+      }
       return () => {
-        if (window.__manufakture?.viewport === api) delete window.__manufakture;
+        const hooks = window.__manufakture;
+        if (hooks?.viewport === api) {
+          const rest: TestHookRegistry = { ...hooks };
+          delete rest.viewport;
+          delete rest.selection;
+          delete rest.settings;
+          if (Object.keys(rest).length > 0) window.__manufakture = rest;
+          else delete window.__manufakture;
+        }
         api.dispose();
         setEngine(null);
       };
@@ -98,6 +123,7 @@ export function Viewport({
         aria-label="3D viewport"
         data-testid="viewport-canvas"
       />
+      {children}
       {error !== null && (
         <div className="viewport-error" role="alert">
           The 3D view could not start: {error}. It needs a browser with WebGL 2.

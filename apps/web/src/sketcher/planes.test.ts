@@ -1,0 +1,51 @@
+import { XY_PLANE, XZ_PLANE, YZ_PLANE } from '@manufakture/sketch';
+import { describe, expect, it } from 'vitest';
+import { geometryRef } from '../state/selection';
+import { boxBody } from '../viewport/testMeshes';
+import { facePlacement, sketchUp } from './planes';
+import { sketchView } from './projection';
+
+describe('sketch planes', () => {
+  it('puts a sketch on a planar face of a body, found by name', () => {
+    const body = boxBody({ id: 'box', min: [-20, -15, 0], size: [40, 30, 20] });
+    const top = facePlacement([body], geometryRef('face', 'box', 'box/top'));
+    expect(top).toEqual({ origin: [0, 0, 20], normal: [0, 0, 1], xDir: [1, 0, 0] });
+    const front = facePlacement([body], geometryRef('face', 'box', 'box/front'))!;
+    expect(front.normal).toEqual([0, -1, 0]);
+    expect(front.origin).toEqual([0, -15, 10]);
+    expect(facePlacement([body], geometryRef('face', 'box', 'box/nothing'))).toBeNull();
+    expect(facePlacement([body], geometryRef('edge', 'box', 'box/front|top'))).toBeNull();
+    expect(facePlacement([], geometryRef('face', 'box', 'box/top'))).toBeNull();
+  });
+
+  it('points the view up along the sketch y axis', () => {
+    expect(sketchUp(XY_PLANE)).toEqual([0, 1, 0]);
+    expect(sketchUp(XZ_PLANE)).toEqual([0, 0, 1]);
+    expect(sketchUp(YZ_PLANE)).toEqual([0, 0, 1]);
+  });
+});
+
+describe('the sketch projection', () => {
+  // A stand-in camera: looking down on XY, 2 px per mm, origin at (100, 100).
+  const projector = {
+    projectToCanvas: ([x, y]: readonly [number, number, number]) => ({
+      x: 100 + 2 * x,
+      y: 100 - 2 * y,
+    }),
+    canvasToPlane: (x: number, y: number) =>
+      [(x - 100) / 2, (100 - y) / 2, 0] as [number, number, number],
+  };
+
+  it('maps sketch points to the canvas and back', () => {
+    const view = sketchView(projector, XY_PLANE);
+    expect(view.toCanvas([10, 5])).toEqual({ x: 120, y: 90 });
+    expect(view.fromCanvas(120, 90)).toEqual([10, 5]);
+    expect(view.unitsPerPixel(0, 0)).toBe(0.5);
+  });
+
+  it('falls back to one unit per pixel when the plane is edge on', () => {
+    const view = sketchView({ ...projector, canvasToPlane: () => null }, XY_PLANE);
+    expect(view.fromCanvas(1, 1)).toBeNull();
+    expect(view.unitsPerPixel(1, 1)).toBe(1);
+  });
+});

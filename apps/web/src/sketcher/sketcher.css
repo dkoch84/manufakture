@@ -1,0 +1,497 @@
+/* Sketch mode. Constraint state colours: under-constrained blue, fully
+   constrained the foreground colour, over-constrained red (Onshape's scheme). */
+
+:root {
+  --sk-under: #1a6fe0;
+  --sk-fully: #1f2733;
+  --sk-over: #d4351c;
+  --sk-redundant: #c77700;
+  --sk-select: #ef8a00;
+  --sk-preview: #3d8bff;
+}
+
+.side-panel {
+  display: flex;
+  flex-direction: column;
+  width: 16rem;
+  border-left: 1px solid #d6dce3;
+  background: #fff;
+  overflow: auto;
+}
+
+.side-panel .selection-panel {
+  width: auto;
+  border-left: 0;
+  overflow: visible;
+}
+
+.document-actions {
+  gap: 0.35rem;
+  font-size: 0.85rem;
+}
+
+.document-actions button,
+.sketch-toolbar button,
+.sketch-menu .menu button {
+  font: inherit;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid #c2cad3;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.document-actions button:disabled,
+.sketch-toolbar button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.sketch-menu {
+  position: relative;
+}
+
+.sketch-menu .menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 2px);
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 11rem;
+  padding: 0.25rem;
+  gap: 0.2rem;
+  background: #fff;
+  border: 1px solid #c2cad3;
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 12%);
+}
+
+.sketch-menu .menu button {
+  text-align: left;
+  border-color: transparent;
+}
+
+.sketch-menu .menu button:hover:not(:disabled) {
+  background: #e3edff;
+}
+
+.sketch-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.25rem 0.75rem;
+  font-size: 0.8rem;
+  border-bottom: 1px solid #d6dce3;
+  background: #f9fbfd;
+}
+
+.sketch-toolbar button[aria-pressed='true'] {
+  background: #e3edff;
+  border-color: var(--sk-under);
+}
+
+.sketch-toolbar button.primary {
+  background: var(--sk-under);
+  border-color: var(--sk-under);
+  color: #fff;
+}
+
+.sketch-toolbar .glyph {
+  font-weight: 600;
+}
+
+.sketch-name {
+  font-weight: 600;
+}
+
+.app-error {
+  padding: 0.35rem 0.75rem;
+  background: #fff4f2;
+  border-bottom: 1px solid #e0875e;
+  font-size: 0.85rem;
+}
+
+/* The overlay: SVG geometry and HTML labels over the canvas. */
+
+.sketch-overlay,
+.sketch-svg,
+.sketch-labels {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.sketch-svg {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.sketch-labels {
+  overflow: hidden;
+}
+
+.sk-fill {
+  fill: rgb(26 111 224 / 9%);
+  stroke: none;
+}
+
+.sk-axis {
+  fill: none;
+  stroke-width: 1;
+  stroke-dasharray: 6 4;
+}
+
+.sk-axis.x {
+  stroke: rgb(212 53 28 / 45%);
+}
+
+.sk-axis.y {
+  stroke: rgb(40 150 60 / 45%);
+}
+
+.sk-origin {
+  fill: #fff;
+  stroke: var(--sk-fully);
+  stroke-width: 1.5;
+}
+
+.sk-origin.selected {
+  stroke: var(--sk-select);
+}
+
+.sk-entity {
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.sk-entity.under {
+  stroke: var(--sk-under);
+}
+
+.sk-entity.fully {
+  stroke: var(--sk-fully);
+}
+
+.sk-entity.over {
+  stroke: var(--sk-over);
+}
+
+.sk-entity.construction {
+  stroke-width: 1.25;
+  stroke-dasharray: 7 4;
+}
+
+.sk-entity.hovered {
+  stroke-width: 3.5;
+}
+
+.sk-entity.selected {
+  stroke: var(--sk-select);
+  stroke-width: 3;
+}
+
+.sk-entity.preview {
+  stroke: var(--sk-preview);
+  stroke-width: 1.5;
+  stroke-dasharray: 5 3;
+}
+
+.sk-vertex {
+  stroke: #fff;
+  stroke-width: 1;
+}
+
+.sk-vertex.under {
+  fill: var(--sk-under);
+}
+
+.sk-vertex.fully {
+  fill: var(--sk-fully);
+}
+
+.sk-vertex.over {
+  fill: var(--sk-over);
+}
+
+.sk-vertex.hovered {
+  r: 5;
+}
+
+.sk-vertex.selected {
+  fill: var(--sk-select);
+}
+
+.sk-snap {
+  fill: none;
+  stroke: var(--sk-select);
+  stroke-width: 2;
+}
+
+.sk-dim path {
+  fill: none;
+  stroke: #5b6673;
+  stroke-width: 1;
+}
+
+.sk-dim.preview path {
+  stroke: var(--sk-preview);
+  stroke-dasharray: 4 3;
+}
+
+.sk-dim.conflicting path {
+  stroke: var(--sk-over);
+}
+
+.sk-dim.redundant path {
+  stroke: var(--sk-redundant);
+}
+
+.sk-dim.selected path {
+  stroke: var(--sk-select);
+  stroke-width: 2;
+}
+
+.sk-glyph,
+.sk-dim-label {
+  position: absolute;
+  pointer-events: auto;
+  font:
+    600 11px/1 system-ui,
+    sans-serif;
+  border: 1px solid #aab4c0;
+  border-radius: 3px;
+  background: rgb(255 255 255 / 92%);
+  color: var(--sk-fully);
+  cursor: pointer;
+}
+
+.sk-glyph {
+  min-width: 15px;
+  height: 15px;
+  padding: 0 2px;
+}
+
+.sk-glyph[data-kind='coincident'],
+.sk-glyph[data-kind='pointOnObject'] {
+  min-width: 11px;
+  height: 11px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 9px;
+  opacity: 0.75;
+}
+
+.sk-dim-label {
+  transform: translate(-50%, -50%);
+  padding: 2px 5px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: move;
+}
+
+.sk-glyph.conflicting,
+.sk-dim-label.conflicting {
+  border-color: var(--sk-over);
+  background: #fde8e4;
+  color: var(--sk-over);
+}
+
+.sk-glyph.redundant,
+.sk-dim-label.redundant {
+  border-color: var(--sk-redundant);
+  background: #fff3dc;
+}
+
+.sk-glyph.selected,
+.sk-dim-label.selected {
+  border-color: var(--sk-select);
+  box-shadow: 0 0 0 2px rgb(239 138 0 / 35%);
+}
+
+.sk-hints {
+  position: absolute;
+  display: flex;
+  gap: 3px;
+}
+
+.sk-hint {
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: var(--sk-select);
+  color: #fff;
+  font:
+    600 10px/1.3 system-ui,
+    sans-serif;
+}
+
+.sk-editor {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
+  z-index: 5;
+}
+
+.sk-editor input {
+  width: 9rem;
+  font:
+    13px system-ui,
+    sans-serif;
+  padding: 3px 5px;
+  border: 1px solid var(--sk-under);
+  border-radius: 3px;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 15%);
+}
+
+.sk-editor input[aria-invalid='true'] {
+  border-color: var(--sk-over);
+}
+
+.sk-editor-error,
+.sk-editor-value {
+  margin-top: 2px;
+  padding: 2px 5px;
+  font-size: 11px;
+  border-radius: 3px;
+  background: #fff;
+  white-space: nowrap;
+}
+
+.sk-editor-error {
+  color: var(--sk-over);
+  border: 1px solid var(--sk-over);
+}
+
+.sk-committed {
+  fill: none;
+  stroke: #6b7684;
+  stroke-width: 1.5;
+}
+
+.sk-committed.construction {
+  stroke-dasharray: 6 4;
+  stroke-width: 1;
+}
+
+.sketch-status {
+  position: absolute;
+  left: 0.5rem;
+  bottom: 0.5rem;
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.3rem 0.6rem;
+  border: 1px solid #d6dce3;
+  border-radius: 4px;
+  background: rgb(255 255 255 / 94%);
+  font-size: 0.8rem;
+  pointer-events: none;
+}
+
+.sketch-state {
+  font-weight: 600;
+}
+
+.sketch-state.under {
+  color: var(--sk-under);
+}
+
+.sketch-state.fully {
+  color: var(--sk-fully);
+}
+
+.sketch-state.conflict,
+.sketch-state.invalid,
+.sketch-state.failed,
+.sketch-state.error {
+  color: var(--sk-over);
+}
+
+.sketch-prompt {
+  color: #5b6673;
+}
+
+.conflict-panel {
+  margin: 0.25rem 0 0.75rem;
+  padding: 0.5rem;
+  border: 1px solid var(--sk-over);
+  border-radius: 4px;
+  background: #fff6f4;
+}
+
+.conflict-panel h3 {
+  margin: 0 0 0.25rem;
+  font-size: 0.85rem;
+  color: var(--sk-over);
+}
+
+.conflict-panel p {
+  margin: 0 0 0.4rem;
+}
+
+.conflict-panel ol {
+  margin: 0 0 0.5rem;
+  padding-left: 1.2rem;
+}
+
+.conflict-panel li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.3rem;
+  margin-bottom: 0.2rem;
+}
+
+.conflict-panel li.blamed {
+  font-weight: 600;
+}
+
+.conflict-panel button {
+  font: inherit;
+  font-size: 0.8rem;
+  padding: 0.1rem 0.4rem;
+  border: 1px solid #c2cad3;
+  border-radius: 3px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.conflict-panel button.primary {
+  border-color: var(--sk-over);
+  background: var(--sk-over);
+  color: #fff;
+}
+
+.conflict-panel button.link {
+  border: 0;
+  padding: 0;
+  background: none;
+  text-align: left;
+}
+
+.sketch-list ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.sketch-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.15rem 0;
+}
+
+.sketch-list li .kind {
+  flex: 1;
+  color: #5b6673;
+}
+
+.sketch-list h2 {
+  font-size: 0.9rem;
+  margin: 0.25rem 0 0.5rem;
+}

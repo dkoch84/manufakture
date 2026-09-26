@@ -28,8 +28,59 @@ interface E2eGeometrySample {
   points: [number, number, number][];
 }
 
+type E2eVec2 = [number, number];
+
+interface E2eSketchEntity {
+  id: string;
+  kind: 'point' | 'line' | 'circle' | 'arc';
+  construction: boolean;
+  start?: E2eVec2;
+  end?: E2eVec2;
+  center?: E2eVec2;
+  radius?: number;
+  position?: E2eVec2;
+}
+
+interface E2eSketchConstraint {
+  id: string;
+  kind: string;
+  value?: { source: string; lengthUnit: string; angleUnit: string };
+}
+
+interface E2eSketchState {
+  active: boolean;
+  sketch: { entities: E2eSketchEntity[]; constraints: E2eSketchConstraint[] };
+  solve: {
+    status: string;
+    diagnosis: { dof: number | null; conflicting: string[]; redundant: string[] };
+  } | null;
+  solving: boolean;
+  source: { featureId: string; placement: { origin: number[]; normal: number[] } } | null;
+  idle(): Promise<void>;
+}
+
+interface E2eFeature {
+  id: string;
+  kind: string;
+  name: string;
+  entities?: E2eSketchEntity[];
+  constraints?: E2eSketchConstraint[];
+  plane?: { type: string; origin?: number[]; normal?: number[] };
+}
+
 interface Window {
   __manufakture?: {
+    sketcher: {
+      store: { getState(): E2eSketchState };
+      toClient(p: E2eVec2): { x: number; y: number };
+    };
+    document: {
+      getState(): {
+        document: { parts: { features: E2eFeature[] }[] };
+        canUndo: boolean;
+        execute(command: unknown, label?: string): { ok: boolean };
+      };
+    };
     viewport: {
       info(): {
         bodies: { id: string; faces: number; edges: number; triangles: number }[];

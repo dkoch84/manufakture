@@ -173,6 +173,29 @@ export interface EngineStores {
   settings: ViewSettingsStore;
 }
 
+/** A canvas point in CSS pixels from the canvas's top left. */
+export interface CanvasPoint {
+  x: number;
+  y: number;
+}
+
+/**
+ * Takes over left-button input while a tool (the sketcher) is active. The
+ * view cube and the navigation buttons keep working; 3D hover and selection
+ * are off while a delegate is set.
+ */
+export interface PointerDelegate {
+  /** A left-button press. Return true to take it and the drag that follows. */
+  down(e: PointerEvent, p: CanvasPoint): boolean;
+  /** Every move that is not a navigation drag, pressed or not. */
+  move(e: PointerEvent, p: CanvasPoint): void;
+  /** The release of a press the delegate took. */
+  up(e: PointerEvent, p: CanvasPoint): void;
+  dblclick?(e: MouseEvent, p: CanvasPoint): void;
+  /** The pointer left the canvas. */
+  leave?(): void;
+}
+
 export class ViewportEngine {
   readonly renderer: WebGLRenderer;
   private readonly scene = new Scene();
@@ -239,6 +262,11 @@ export class ViewportEngine {
     panScale: number | null;
   } | null = null;
   private benchmark: ((now: number) => void) | null = null;
+  private delegate: PointerDelegate | null = null;
+  /** The delegate took the current press. */
+  private delegated = false;
+  private readonly viewListeners = new Set<() => void>();
+  private notifiedVersion = -1;
 
   constructor(
     readonly canvas: HTMLCanvasElement,
@@ -506,6 +534,67 @@ export class ViewportEngine {
       x: rect.left + ((v.x + 1) / 2) * this.width,
       y: rect.top + ((1 - v.y) / 2) * this.height,
     };
+  }
+
+  /** A world point in canvas coordinates (CSS pixels), in the view last drawn. */
+  projectToCanvas(p: Vec3): CanvasPoint {
+    const v = new Vector3(...p).project(this.activeCamera());
+    return { x: ((v.x + 1) / 2) * this.width, y: ((1 - v.y) / 2) * this.height };
+  }
+
+  /**
+   * The world point where the line of sight through a canvas point meets the
+   * plane through `origin` with `normal`, or null when it runs parallel.
+   */
+  canvasToPlane(x: number, y: number, origin: Vec3, normal: Vec3): Vec3 | null {
+    const ndc = this.ndc(x, y);
+    this.raycaster.setFromCamera(new Vector2(ndc.x, ndc.y), this.activeCamera());
+    const plane = new Plane().setFromNormalAndCoplanarPoint(
+      new Vector3(...normal).normalize(),
+      new Vector3(...origin),
+    );
+    const ray = this.raycaster.ray;
+    const denom = plane.normal.dot(ray.direction);
+    if (Math.abs(denom) < 1e-9) return null;
+    // Behind the camera is fine: an orthographic ray starts far in front of the plane.
+    const t = -(ray.origin.dot(plane.normal) + plane.constant) / denom;
+    const hit = ray.origin.clone().addScaledVector(ray.direction, t);
+    return [hit.x, hit.y, hit.z];
+  }
+
+  /**
+   * Look along `-eye` (the camera sits on the `eye` side) with `up` pointing
+   * up on screen, centred on `target`. The zoom is kept.
+   */
+  alignView(eye: Vec3, up: Vec3, target: Vec3, animate = true): void {
+    const to: ViewState = {
+      target: new Vector3(...target),
+      orientation: orientationFor(eye, new Vector3(...up)),
+      halfHeight: this.currentView().halfHeight,
+    };
+    this.goTo(to, animate);
+  }
+
+  /** Hand left-button input to a tool, or take it back with null. */
+  setPointerDelegate(delegate: PointerDelegate | null): void {
+    this.delegate = delegate;
+    this.delegated = false;
+    if (delegate) this.stores.selection.getState().setHovered(null);
+    this.hoverPending = true;
+  }
+
+  /**
+   * Call `listener` after every frame drawn with a changed camera or canvas
+   * size, so overlays can follow the view. Returns the unsubscribe function.
+   */
+  onViewChange(listener: () => void): () => void {
+    this.viewListeners.add(listener);
+    return () => this.viewListeners.delete(listener);
+  }
+
+  /** Redraw on the next frame (overlays that changed call it). */
+  requestRender(): void {
+    this.invalidate();
   }
 
   info() {
@@ -950,6 +1039,10 @@ export class ViewportEngine {
     r.clear(true, true, true);
     r.render(this.scene, this.activeCamera());
     this.cube.render(r, this.width, this.height, this.view.orientation);
+    if (this.notifiedVersion !== this.cameraVersion) {
+      this.notifiedVersion = this.cameraVersion;
+      for (const l of this.viewListeners) l();
+    }
   }
 
   private resize(): void {
@@ -1044,6 +1137,12 @@ export class ViewportEngine {
       this.canvas.style.cursor = p ? 'pointer' : '';
       return;
     }
+    if (this.delegate) {
+      // The tool owns hover and the cursor.
+      selection.setHovered(null);
+      this.canvas.style.cursor = 'crosshair';
+      return;
+    }
     const ref = this.pickAt(p.x, p.y);
     selection.setHovered(ref);
     this.canvas.style.cursor = ref ? 'pointer' : '';
@@ -1065,12 +1164,17 @@ export class ViewportEngine {
     on('pointerdown', (e) => this.onPointerDown(e));
     on('pointermove', (e) => this.onPointerMove(e));
     on('pointerup', (e) => this.onPointerUp(e));
-    on('pointercancel', () => (this.drag = null));
+    on('pointercancel', () => {
+      this.drag = null;
+      this.delegated = false;
+    });
     on('pointerleave', () => {
-      if (this.drag) return;
+      if (this.drag || this.delegated) return;
       this.pointer = null;
       this.hoverPending = true;
+      this.delegate?.leave?.();
     });
+    on('dblclick', (e) => this.delegate?.dblclick?.(e, this.local(e)));
     on('wheel', (e) => this.onWheel(e), { passive: false });
     on('contextmenu', (e) => e.preventDefault());
     on('keydown', (e) => this.onKey(e));
@@ -1093,9 +1197,21 @@ export class ViewportEngine {
     if (e.button === 1 || e.button === 0) e.preventDefault();
     this.canvas.focus({ preventScroll: true });
     const p = this.local(e);
+    if (this.delegated) return;
     if (this.drag) {
       // Another button joined a drag (a chord, as FreeCAD uses).
       this.drag.buttons = e.buttons;
+      return;
+    }
+    if (
+      this.delegate &&
+      e.button === 0 &&
+      e.buttons === 1 &&
+      !this.cube.contains(this.width, p.x, p.y) &&
+      this.delegate.down(e, p)
+    ) {
+      this.delegated = true;
+      this.canvas.setPointerCapture(e.pointerId);
       return;
     }
     this.canvas.setPointerCapture(e.pointerId);
@@ -1115,9 +1231,14 @@ export class ViewportEngine {
   private onPointerMove(e: PointerEvent): void {
     const p = this.local(e);
     this.pointer = p;
+    if (this.delegated) {
+      this.delegate?.move(e, p);
+      return;
+    }
     const drag = this.drag;
     if (!drag) {
       this.hoverPending = true;
+      if (this.delegate && !this.cube.contains(this.width, p.x, p.y)) this.delegate.move(e, p);
       return;
     }
     if (Math.hypot(p.x - drag.startX, p.y - drag.startY) > CLICK_SLOP_PX) drag.moved = true;
@@ -1145,6 +1266,15 @@ export class ViewportEngine {
   }
 
   private onPointerUp(e: PointerEvent): void {
+    if (this.delegated) {
+      if (e.button !== 0) return;
+      this.delegated = false;
+      if (this.canvas.hasPointerCapture(e.pointerId))
+        this.canvas.releasePointerCapture(e.pointerId);
+      this.delegate?.up(e, this.local(e));
+      this.hoverPending = true;
+      return;
+    }
     const drag = this.drag;
     if (!drag) return;
     if (e.buttons !== 0) {
@@ -1161,6 +1291,8 @@ export class ViewportEngine {
       if (region) this.setViewDirection(region.dir);
       return;
     }
+    // With a tool in charge, a plain click is the tool's, never a 3D selection.
+    if (this.delegate) return;
     const ref = this.pickAt(p.x, p.y);
     this.stores.selection.getState().click(ref, selectModeFor(e));
   }
@@ -1215,7 +1347,7 @@ export class ViewportEngine {
 
   private onKey(e: KeyboardEvent): void {
     if (e.key === 'f' || e.key === 'F') this.fitAll();
-    else if (e.key === 'Escape') this.stores.selection.getState().clear();
+    else if (e.key === 'Escape' && !this.delegate) this.stores.selection.getState().clear();
   }
 
   private ndc(x: number, y: number) {
