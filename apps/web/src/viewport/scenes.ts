@@ -9,7 +9,8 @@ import {
   type KernelClient,
   type KernelClientOptions,
 } from '@manufakture/kernel/client';
-import type { KernelOp, LoadProgress, MeshData, ShapeId, Topology } from '@manufakture/kernel';
+import type { KernelOp, LoadProgress, MeshData, Topology } from '@manufakture/kernel';
+import { kernelExchange, type Exchanger, type KernelBody } from '../io/exchange';
 import type { Measurer } from '../measure/measurer';
 import { testHooksEnabled } from '../testHooks';
 import type { BodyInput } from './bodies';
@@ -33,6 +34,8 @@ export interface SceneLoader {
   dispose(): void;
   /** Exact measurements of the loaded bodies in the kernel; absent for kernel-free scenes. */
   measurer?: Measurer;
+  /** Export and STEP import through the kernel; absent for kernel-free scenes. */
+  exchanger?: Exchanger;
 }
 
 /** Shared plumbing: one load, status fan-out, late subscribers get the latest status. */
@@ -97,6 +100,8 @@ export function kernelLoadStatus(p: LoadProgress): LoadStatus {
 }
 
 export const DEMO_BODY_ID = 'demo-part';
+/** What the demo part is called in exported files. */
+export const DEMO_BODY_NAME = 'Demo part';
 
 /**
  * The demo part: a 60 x 40 x 20 mm block with every edge filleted and a
@@ -137,23 +142,9 @@ export function kernelDemoLoader(
   spawn: (options: KernelClientOptions) => KernelClient,
 ): SceneLoader {
   let client: KernelClient | null = null;
-  let part: ShapeId | null = null;
-  const measurer: Measurer = {
-    async measure(bodyId, targets, body) {
-      if (client === null || part === null || bodyId !== DEMO_BODY_ID) {
-        return { ok: false, message: `The kernel has no body ${bodyId}.` };
-      }
-      // At the current generation: a measurement never cancels an edit in flight.
-      const reply = await client.submit(
-        [{ op: 'measure', shape: part, targets, body }] as const,
-        client.latestGeneration,
-      );
-      if (reply === null) return null;
-      const [r] = reply.results;
-      if (reply.status !== 'done' || r === undefined) return null;
-      return r.ok ? { ok: true, result: r.value } : { ok: false, message: r.error.message };
-    },
-  };
+  // Viewport body id to kernel shape: the demo part, then imported STEP bodies.
+  const registry = new Map<string, KernelBody>();
+  const { exchanger, measurer } = kernelExchange(() => client, registry);
   const loader = loaderFrom(
     { label: 'Starting the geometry kernel', fraction: null },
     async (report) => {
@@ -176,12 +167,14 @@ export function kernelDemoLoader(
       const mesh = reply.results[4];
       const topology = reply.results[5];
       if (!mesh.ok || !topology.ok) throw new Error('The demo part has no mesh.');
-      if (cut.ok) part = cut.value.shape;
+      if (cut.ok) {
+        registry.set(DEMO_BODY_ID, { shape: cut.value.shape, name: DEMO_BODY_NAME, role: 'part' });
+      }
       return [demoBody(mesh.value, reply.names, topology.value)];
     },
     () => client?.terminate(),
   );
-  return { ...loader, measurer };
+  return { ...loader, measurer, exchanger };
 }
 
 export function demoBody(mesh: MeshData, names: readonly string[], topology: Topology): BodyInput {

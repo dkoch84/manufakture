@@ -4,7 +4,7 @@
 
 import type { DisplayUnits, Material } from '@manufakture/core';
 import { massGrams } from '@manufakture/core';
-import type { MeasureItemReport, MeasureResult } from '@manufakture/kernel';
+import type { MeasureItemReport } from '@manufakture/kernel';
 import {
   formatAngleIn,
   formatAreaIn,
@@ -14,6 +14,7 @@ import {
   formatPointIn,
   formatVolumeIn,
 } from './format';
+import type { Measurement } from './measurer';
 
 export interface MeasureRow {
   /** Stable within the panel, for tests and React keys. */
@@ -99,7 +100,7 @@ export interface BodyContext {
 
 /** Every section for a measurement: each item, what is between two, and the body. */
 export function measureSections(
-  result: MeasureResult,
+  result: Measurement,
   units: DisplayUnits,
   context: BodyContext = { material: null },
 ): MeasureSection[] {
@@ -146,11 +147,18 @@ export function measureSections(
   if (result.body) {
     const b = result.body;
     const rows: MeasureRow[] = [
-      { key: 'body.volume', label: 'Volume', value: formatVolumeIn(b.volume, units) },
+      b.volume === null
+        ? {
+            key: 'body.volume',
+            label: 'Volume',
+            value: 'None',
+            ...(b.note ? { note: b.note } : {}),
+          }
+        : { key: 'body.volume', label: 'Volume', value: formatVolumeIn(b.volume, units) },
       { key: 'body.area', label: 'Surface area', value: formatAreaIn(b.area, units) },
     ];
     const m = context.material;
-    if (m) {
+    if (m && b.volume !== null) {
       rows.push({
         key: 'body.mass',
         label: 'Mass',

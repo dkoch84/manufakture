@@ -2,7 +2,14 @@
 // the cache, how errors propagate, rollback, suppression, eviction, recycles and cancellation.
 // The real kernel and solver are in integration.test.ts.
 
-import type { Command, ManufaktureDocument, PatternFeature } from '@manufakture/core';
+import { createHash } from 'node:crypto';
+import type {
+  Command,
+  ImportFeature,
+  ImportSource,
+  ManufaktureDocument,
+  PatternFeature,
+} from '@manufakture/core';
 import type {
   BatchReply,
   BatchRequest,
@@ -16,9 +23,10 @@ import type {
   ShapeId,
 } from '@manufakture/kernel';
 import type { SketchInput, SolveResult } from '@manufakture/sketch';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { MemoryCache } from './cache';
 import { RegenEngine, type RegenKernel } from './engine';
+import { importSourceMatches, keyInput } from './imports';
 import type { RegenSolver } from './sketches';
 import {
   PART,
@@ -768,5 +776,92 @@ describe('sketches on faces', () => {
     // A change to the fillet changes the body the sketch sits on: it is solved again.
     await regen(engine, apply(doc, setVariable('radius', '4mm')));
     expect(solver.solves).toBe(3);
+  });
+});
+
+describe('imports', () => {
+  const bytes = new TextEncoder().encode('ISO-10303-21;\nDATA;\nENDSEC;\n');
+  const source = (data: Uint8Array = bytes, sha256?: string): ImportSource => ({
+    format: 'step',
+    fileName: 'cube.step',
+    size: data.length,
+    sha256: sha256 ?? createHash('sha256').update(data).digest('hex'),
+    data: Buffer.from(data).toString('base64'),
+  });
+  const cube = (src: ImportSource): ImportFeature => ({
+    id: 'import#1',
+    kind: 'import',
+    name: 'cube',
+    suppressed: false,
+    source: src,
+    operation: 'cut',
+  });
+  const withImport = (src: ImportSource) =>
+    build([
+      add(rectangle('sketch#1', { width: '40', depth: '30' })),
+      add(extrude('extrude#1', 'sketch#1', '20')),
+      add(cube(src)),
+    ]);
+
+  it('checks the stored hash once per file and builds a matching one from its data', async () => {
+    const { kernel, engine } = setup();
+    const digest = vi.spyOn(crypto.subtle, 'digest');
+    try {
+      const doc = withImport(source());
+      const first = await regen(engine, doc);
+      expect(statuses(first)['import#1']).toBe('ok');
+      expect(kernel.featureOps).toEqual(['extrude#1', 'import#1']);
+      expect(kernel.inputs.get('import#1')).toMatchObject({
+        step: source().data,
+        mode: 'subtract',
+      });
+      expect(digest).toHaveBeenCalledTimes(1);
+
+      // An edit elsewhere shares the source object: no second hash, and a cache hit.
+      const renamed = apply(doc, {
+        type: 'renameFeature',
+        partId: PART,
+        featureId: 'extrude#1',
+        name: 'Base',
+      });
+      const second = await regen(engine, renamed);
+      expect(second.counters.featureOps).toBe(0);
+      expect(digest).toHaveBeenCalledTimes(1);
+    } finally {
+      digest.mockRestore();
+    }
+  });
+
+  it('fails an import whose data does not match its SHA-256, without sending it to the kernel', async () => {
+    const { kernel, engine } = setup();
+    const other = new TextEncoder().encode('ISO-10303-21;\nDATA;\nENDSEC;\n'.toLowerCase());
+    // The hash of other bytes of the same length: valid to the schema, wrong for the data.
+    const damaged = source(bytes, createHash('sha256').update(other).digest('hex'));
+    const r = await regen(engine, withImport(damaged));
+    expect(statuses(r)).toMatchObject({ 'extrude#1': 'ok', 'import#1': 'error' });
+    expect(r.parts[0]!.features[2]!.errors).toMatchObject([
+      { code: 'invalid', field: ['source', 'sha256'], message: /does not match its SHA-256/ },
+    ]);
+    expect(kernel.featureOps).toEqual(['extrude#1']);
+  });
+
+  it('keys an import by its hash and size, not its text', () => {
+    const input = { kind: 'import', id: 'import#1', step: 'QUJD', mode: 'new' } as FeatureInput;
+    const src = source();
+    expect(keyInput(input, src)).toEqual({
+      kind: 'import',
+      id: 'import#1',
+      mode: 'new',
+      step: { sha256: src.sha256, size: src.size },
+    });
+    const extrusion = { kind: 'extrude' } as FeatureInput;
+    expect(keyInput(extrusion, null)).toBe(extrusion);
+  });
+
+  it('rejects data that is not the stored size or not base64', async () => {
+    const src = source();
+    expect(await importSourceMatches(src)).toBe(true);
+    expect(await importSourceMatches({ ...src, size: src.size + 1 })).toBe(false);
+    expect(await importSourceMatches({ ...src, data: '!!!!' })).toBe(false);
   });
 });

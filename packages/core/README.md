@@ -23,7 +23,7 @@ import {
 ```ts
 interface ManufaktureDocument {
   format: 'manufakture';
-  version: 2; // file format version, FORMAT_VERSION
+  version: 3; // file format version, FORMAT_VERSION
   namingScheme: 1; // topological naming scheme version (T0.5), NAMING_SCHEME
   id: string;
   name: string;
@@ -152,18 +152,19 @@ themselves, and how a reference resolved, are derived data and never stored.
 Every feature has `id`, `kind`, a display `name` (1 to 200 characters) and `suppressed`. The
 union is discriminated by `kind`.
 
-| Kind        | Inputs                                                                                                                                                         |
-| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `sketch`    | `plane` (explicit `origin`, `normal`, `xDir`, or a `face` reference), `entities`, `constraints`                                                                |
-| `extrude`   | `profile`, `operation` (`new`, `add`, `cut`, `intersect`), `extent`, `reverse`, optional `draft` (angle; + tapers inward)                                      |
-| `revolve`   | `profile`, `axis` (a line of the sketch or an edge reference, each with optional `flip`), `angle`, `symmetric`, `operation`                                    |
-| `fillet`    | `edges` (edge references), `radius`                                                                                                                            |
-| `chamfer`   | `edges`, `distance`, optional `secondDistance` or `angle` (not both)                                                                                           |
-| `shell`     | `faces` to remove (face references), `thickness`, `outward`                                                                                                    |
-| `hole`      | `sketch` and its `points`, `diameter`, `extent` (blind depth or through all), `head` (simple, counterbore, countersink), optional `standard` (`size`, `fit`)   |
-| `pattern`   | `features` to repeat, or `body: true` (and no features) for the whole body, `layout` (linear: direction, count, spacing; circular: axis, count, angle; `flip`) |
-| `mirror`    | `features`, or `body: true`, `plane` (a planar face reference)                                                                                                 |
-| `extension` | a later domain feature: `extension` type (`print.brim`), `schemaVersion`, `dependsOn`, `references`, `expressions`, opaque JSON `params`                       |
+| Kind        | Inputs                                                                                                                                                           |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sketch`    | `plane` (explicit `origin`, `normal`, `xDir`, or a `face` reference), `entities`, `constraints`                                                                  |
+| `extrude`   | `profile`, `operation` (`new`, `add`, `cut`, `intersect`), `extent`, `reverse`, optional `draft` (angle; + tapers inward)                                        |
+| `revolve`   | `profile`, `axis` (a line of the sketch or an edge reference, each with optional `flip`), `angle`, `symmetric`, `operation`                                      |
+| `fillet`    | `edges` (edge references), `radius`                                                                                                                              |
+| `chamfer`   | `edges`, `distance`, optional `secondDistance` or `angle` (not both)                                                                                             |
+| `shell`     | `faces` to remove (face references), `thickness`, `outward`                                                                                                      |
+| `hole`      | `sketch` and its `points`, `diameter`, `extent` (blind depth or through all), `head` (simple, counterbore, countersink), optional `standard` (`size`, `fit`)     |
+| `pattern`   | `features` to repeat, or `body: true` (and no features) for the whole body, `layout` (linear: direction, count, spacing; circular: axis, count, angle; `flip`)   |
+| `mirror`    | `features`, or `body: true`, `plane` (a planar face reference)                                                                                                   |
+| `extension` | a later domain feature: `extension` type (`print.brim`), `schemaVersion`, `dependsOn`, `references`, `expressions`, opaque JSON `params`                         |
+| `import`    | `source` (the imported file: `format` `step` or `stl`, `fileName`, `size`, `sha256`, base64 `data`), `operation` (`reference`, `new`, `add`, `cut`, `intersect`) |
 
 A `profile` is `{ sketch, entities? }`: the sketch feature and the entities bounding the chosen
 regions (absent: every closed region). Extrude extents are `blind`, `symmetric` (total depth,
@@ -187,6 +188,37 @@ loads and fails only that pattern at regen, where the user can fix it.
 `extension` is the extension point: core validates its dependencies, references and
 expressions like any other feature's, and leaves `params` to the domain package that owns the
 type.
+
+### Imported geometry
+
+An `import` feature (since version 3) is a file brought in from another program. A STEP file is a
+B-rep: the kernel reads it (`import` feature input, kernel README) and names its faces
+`import#k:face:<n>` in the file's face order. Imported topology has no history, so those names
+are positional and every reference to them resolves `fragile`; a face name mentioning `import#k`
+makes `import#k` a dependency like any other feature id. With `operation: 'reference'` the body is
+kept aside (shown and measured, not part of the part's body); `new`, `add`, `cut` and `intersect`
+combine it with the body like an extrusion. An STL file is a mesh with no B-rep, so it can only be
+a `reference` (the schema refuses anything else): shown and measured, never used by a B-rep
+feature.
+
+**Where the file lives: in the document.** `source.data` is the file's bytes as base64, next to
+its `size` and the lower-case hex SHA-256 of the bytes. The schema checks that `data` is base64
+and decodes to exactly `size` bytes, and refuses a file over `MAX_IMPORT_BYTES` (20 MiB) by the
+length of `size` and `data` alone, before the text is scanned. The schema does not hash `data`
+(checking a document is synchronous); regen checks `sha256` against `data` before a combining
+import is built (regen README, "Import integrity"). This was chosen over a separate blob store because:
+
+- ADR 0004 makes the document the source of truth and everything else a disposable cache. An
+  imported file is input, not derived data: it cannot be rebuilt from anything else, so it cannot
+  live in the cache, and a store beside the document would have to be saved, copied, exported
+  and undone together with it. Inside the document, undo, redo, save and copy just work.
+- Persistence (#935) does not exist yet. The hash makes the later move mechanical: a
+  content-addressed store can take `data` out and key it by `sha256`, with a format migration
+  that changes only where the bytes are, never what the feature means.
+
+The cost is size: base64 is 4/3 of the file, in every saved copy and in the undo history's
+snapshots (which share it, since documents are immutable). The app refuses files over the same
+`MAX_IMPORT_BYTES`, which is below the kernel's own STEP limit (`MAX_STEP_BYTES`, 64 MiB).
 
 ### Sketch data
 
@@ -387,8 +419,9 @@ to version N + 1 that must set the new `version`. `FORMAT_MIGRATIONS[i]` goes fr
 naming scheme migrations are a separate chain. Version 0 was the pre-release draft (no
 `namingScheme`, no `suppressed`, no `rollbackIndex`); `migrateV0ToV1` adds them. Version 2 added
 the optional part `material`; `migrateV1ToV2` only bumps the version, since a version 1 part has no
-material. The test migrates `src/fixtures/v0-bracket.json` to exactly `v1-bracket.json`, and that
-to exactly `v2-bracket.json`.
+material. Version 3 added the `import` feature kind; `migrateV2ToV3` only bumps the version, since
+a version 2 part has no imports. The test migrates `src/fixtures/v0-bracket.json` to exactly
+`v1-bracket.json`, that to exactly `v2-bracket.json`, and that to exactly `v3-bracket.json`.
 
 To change the file shape:
 

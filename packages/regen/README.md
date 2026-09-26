@@ -67,7 +67,7 @@ needs:
 - features it names by id or by face name: core's `featureDependencies` (profiles, hole sketches,
   pattern and mirror sources, `dependsOn`, and the creator of every face a reference names);
 - the **body edge**: every kernel feature (extrude, revolve, fillet, chamfer, shell, hole, pattern,
-  mirror) takes the body the last active, unsuppressed kernel feature left, and so does a sketch
+  mirror, and a STEP import that is not a reference) takes the body the last active, unsuppressed kernel feature left, and so does a sketch
   placed on a face, which resolves the face on that body;
 - the variables its expressions read, closed over variables that read other variables.
 
@@ -178,7 +178,7 @@ reference's `lastResolved` hint when it has one. Missing sketch geometry (a prof
 line, a hole point) is `reference-lost` on `profile`, `axis` or `points`. Kernel warnings map the
 same way: `reference` (with `via` and `fragile`, for `ends`, `descendant`, `ancestor`, ordinal and
 fragile resolutions), `missed` and `direction`. Regen adds `expression`, `sketch` and `upstream`
-errors, and `sketch`, `redundant` and `extension` warnings.
+errors, and `sketch`, `redundant`, `extension` and `reference-body` warnings.
 
 **Propagation.** A failed feature is skipped: the kernel passes the body through, so independent
 later features still build on it. A feature naming a failed, suppressed or upstream-errored feature
@@ -258,6 +258,22 @@ pnpm --filter @manufakture/regen test
 - **One region per profile**, a kernel limit (see above).
 - **Hole points** must be point entities.
 - **Extension features** change no geometry yet; they are `ok` with an `extension` warning.
+- **Imports.** A STEP import with operation `new`, `add`, `cut` or `intersect` is a kernel feature
+  like an extrusion: it is translated to the kernel's `import` input with the document's base64
+  text passed as is, and its faces are named `import#k:face:<n>` (always fragile). A file the kernel
+  cannot read fails that feature (`invalid`) and the body passes through. A `reference` import (and
+  every STL import, which the schema only allows as a reference) is not part of the body: regen
+  sends nothing to the kernel for it and reports it `ok` with a `reference-body` warning. The app
+  shows and measures reference bodies from the file itself. Patterning or mirroring a reference
+  import is `unsupported`.
+- **Import integrity.** Before a combining import is first built, regen checks that `data`
+  decodes to `size` bytes whose SHA-256 is the stored `sha256` (`src/imports.ts`); a mismatch
+  fails that import (`invalid`, field `source.sha256`) and nothing goes to the kernel. The check
+  runs once per source object (documents share unchanged objects between edits), not on every
+  regen. Regen rather than document load does it: load is a synchronous schema check and would
+  hash every import, reference ones included, on every open. Once checked, the cache key holds
+  the import's `sha256` and `size` instead of the base64 text, so a regen never hashes a 20 MB
+  file again (about 80 ms each time).
 - **Chamfer reference faces** are left to the kernel's default (the adjacent face whose name sorts
   first); core stores none.
 - **Kernel build identity**: the kernel exports none, so `DEFAULT_KERNEL_BUILD` names the pinned

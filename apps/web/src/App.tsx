@@ -1,7 +1,19 @@
 import { sketchToWorld } from '@manufakture/sketch';
 import type { Vec2 } from '@manufakture/sketch/model';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { DEFAULT_PART_ID, findPart } from '@manufakture/core';
+import type { ExportTolerancePreset } from '@manufakture/io';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from 'zustand';
+import {
+  exportBodies,
+  importFile,
+  restorableImportIds,
+  type ExportFormat,
+  type ImportedBody,
+} from './io/actions';
+import { downloadBytes, readFileBytes } from './io/files';
+import { ExportMenu, ImportButton } from './io/IoMenus';
+import { withMeshBodies } from './io/meshBody';
 import { MeasureOverlay } from './measure/MeasureOverlay';
 import { MeasurePanel } from './measure/MeasurePanel';
 import { measureTargets } from './measure/measurer';
@@ -32,6 +44,7 @@ import { Viewport, type EngineFactory, type ViewportApi } from './viewport/Viewp
 import './viewport/viewport.css';
 import './sketcher/sketcher.css';
 import './measure/measure.css';
+import './io/io.css';
 
 export interface AppProps {
   /** A loader owned by the caller: the app uses it but never disposes it. */
@@ -76,6 +89,11 @@ export function App({
   const [bodies, setBodies] = useState<readonly BodyInput[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [viewport, setViewport] = useState<ViewportApi | null>(null);
+  // Imported reference bodies, shown next to the loaded ones while their
+  // import feature is in the document (so undo hides them, redo brings them back).
+  const [imports, setImports] = useState<readonly ImportedBody[]>([]);
+  const [ioStatus, setIoStatus] = useState<{ error: boolean; text: string } | null>(null);
+  const [ioBusy, setIoBusy] = useState(false);
 
   useEffect(() => {
     // The loader outlives a remount (StrictMode): aborting only stops status updates.
@@ -110,6 +128,95 @@ export function App({
 
   const document = useStore(documents, (s) => s.document);
   const sketches = useMemo(() => sketchFeatures(document), [document]);
+  const shownImports = useMemo(() => {
+    const features = findPart(document, DEFAULT_PART_ID)?.features ?? [];
+    return imports.filter((i) => features.some((f) => f.id === i.feature.id));
+  }, [imports, document]);
+  // Forget imported bodies whose import feature can no longer come back (not
+  // in the document, the undo stack or the redo stack), releasing their
+  // kernel shapes. Runs on every document change, except while an import
+  // runs: its body is registered before its feature lands in the document,
+  // so the import prunes once more when it is done.
+  const importing = useRef(false);
+  const pruneImports = useCallback(() => {
+    if (importing.current) return;
+    const { core } = documents;
+    const keep = restorableImportIds(core.document, [...core.undoStack, ...core.redoStack]);
+    loader.exchanger?.retain(keep);
+    setImports((prev) =>
+      prev.every((i) => keep.has(i.feature.id)) ? prev : prev.filter((i) => keep.has(i.feature.id)),
+    );
+  }, [documents, loader]);
+  useEffect(() => {
+    const unsubscribe = documents.core.subscribe(pruneImports);
+    return () => {
+      unsubscribe();
+    };
+  }, [documents, pruneImports]);
+  const shownBodies = useMemo(
+    () =>
+      bodies === null || shownImports.length === 0
+        ? bodies
+        : [...bodies, ...shownImports.map((i) => i.body)],
+    [bodies, shownImports],
+  );
+  const measurer = useMemo(() => {
+    const meshes = new Map(
+      shownImports.flatMap((i) => (i.mesh ? [[i.body.id, i.mesh] as const] : [])),
+    );
+    return meshes.size > 0
+      ? withMeshBodies(loader.measurer ?? null, () => meshes)
+      : (loader.measurer ?? null);
+  }, [loader, shownImports]);
+
+  const onExport = useCallback(
+    (format: ExportFormat, tolerance: ExportTolerancePreset) => {
+      const exchanger = loader.exchanger;
+      if (!exchanger) {
+        setIoStatus({ error: true, text: 'Export needs the geometry kernel.' });
+        return;
+      }
+      setIoBusy(true);
+      setIoStatus({ error: false, text: 'Exporting...' });
+      exportBodies(exchanger, format, { tolerance, documentName: document.name })
+        .then(
+          (r) => {
+            if (r.ok) for (const f of r.value) downloadBytes(f.bytes, f.name, f.type);
+            setIoStatus({ error: !r.ok, text: r.message });
+          },
+          (e: unknown) =>
+            setIoStatus({ error: true, text: e instanceof Error ? e.message : String(e) }),
+        )
+        .finally(() => setIoBusy(false));
+    },
+    [loader, document.name],
+  );
+
+  const onImport = useCallback(
+    (file: File) => {
+      setIoBusy(true);
+      importing.current = true;
+      setIoStatus({ error: false, text: `Importing ${file.name}...` });
+      readFileBytes(file)
+        .then((bytes) =>
+          importFile({ name: file.name, bytes }, documents, loader.exchanger ?? null),
+        )
+        .then(
+          (r) => {
+            if (r.ok) setImports((prev) => [...prev, r.value]);
+            setIoStatus({ error: !r.ok, text: r.message });
+          },
+          (e: unknown) =>
+            setIoStatus({ error: true, text: e instanceof Error ? e.message : String(e) }),
+        )
+        .finally(() => {
+          importing.current = false;
+          setIoBusy(false);
+          pruneImports();
+        });
+    },
+    [loader, documents, pruneImports],
+  );
   const sketching = useSketching(session, documents, viewport);
   useSketchShortcuts(session, sketching.active);
 
@@ -151,22 +258,22 @@ export function App({
 
   const selected = useStore(selection, (s) => s.selected);
   const face = useMemo(() => {
-    if (!bodies) return null;
+    if (!shownBodies) return null;
     const ref = selected.find((i) => isGeometryRef(i) && i.kind === 'face');
-    return ref && isGeometryRef(ref) ? facePlacement(bodies, ref) : null;
-  }, [bodies, selected]);
+    return ref && isGeometryRef(ref) ? facePlacement(shownBodies, ref) : null;
+  }, [shownBodies, selected]);
 
   // Measure the selection (and the body it is on) whenever either changes.
   const bodiesRevision = useRef(0);
   useEffect(() => {
     bodiesRevision.current++;
-  }, [bodies]);
+  }, [shownBodies]);
   useEffect(() => {
-    if (bodies === null) return;
+    if (shownBodies === null) return;
     const refs = selected.filter(isGeometryRef);
-    const bodyId = refs[0]?.bodyId ?? bodies[0]?.id ?? null;
+    const bodyId = refs[0]?.bodyId ?? shownBodies[0]?.id ?? null;
     void measure.getState().measure(
-      loader.measurer ?? null,
+      measurer,
       bodyId === null
         ? null
         : {
@@ -175,7 +282,7 @@ export function App({
             revision: bodiesRevision.current,
           },
     );
-  }, [bodies, selected, loader, measure]);
+  }, [shownBodies, selected, measurer, measure]);
 
   // Registered with the viewport, like the other hooks: tests wait for the viewport hook.
   useEffect(() => {
@@ -194,7 +301,7 @@ export function App({
   const undoLabel = useStore(documents, (s) => s.undoLabel);
   const redoLabel = useStore(documents, (s) => s.redoLabel);
 
-  if (bodies === null) return <LoadingSplash status={status} error={error} />;
+  if (shownBodies === null) return <LoadingSplash status={status} error={error} />;
 
   const stores = { selection, settings };
   return (
@@ -223,6 +330,20 @@ export function App({
           >
             Redo
           </button>
+          <ExportMenu
+            disabled={sketching.active || ioBusy || !loader.exchanger}
+            onExport={onExport}
+          />
+          <ImportButton disabled={sketching.active || ioBusy} onFile={onImport} />
+          {ioStatus && (
+            <span
+              className={ioStatus.error ? 'io-status io-error' : 'io-status'}
+              role={ioStatus.error ? 'alert' : 'status'}
+              data-testid="io-status"
+            >
+              {ioStatus.text}
+            </span>
+          )}
         </div>
         <Toolbar viewport={viewport} {...stores} />
       </header>
@@ -243,7 +364,7 @@ export function App({
       )}
       <main className="app-main">
         <Viewport
-          bodies={bodies}
+          bodies={shownBodies}
           onReady={setViewport}
           {...(createEngine ? { createEngine } : {})}
           {...stores}

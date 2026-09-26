@@ -45,6 +45,7 @@ export type {
   FilletInput,
   HoleHead,
   HoleInput,
+  ImportInput,
   InstanceSource,
   MirrorInput,
   PatternInput,
@@ -61,6 +62,7 @@ export {
   UNNAMED_PREFIX,
   describeFailure,
   edgeRefName,
+  importedFace,
   invalidFeatureId,
   invalidSketchId,
   isPositional,
@@ -91,9 +93,11 @@ export type {
   BooleanOp,
   BoxOp,
   CylinderOp,
+  ExportStepOp,
   ExtrudeOp,
   FeatureOp,
   FilletOp,
+  ImportStepOp,
   KernelOp,
   MeasureOp,
   OpName,
@@ -149,3 +153,4 @@ export type {
 } from './service';
 export { createKernelWorkerApi } from './worker-api';
 export type { InitReport, KernelWorkerApi, WorkerApiOptions } from './worker-api';
+export { MAX_STEP_BYTES } from './exchange';

@@ -131,6 +131,14 @@ export type MeasureOp = OpCommon & {
   body?: boolean;
 };
 
+/** One AP214 STEP file of the shapes, each a named top-level product. */
+export type ExportStepOp = OpCommon & {
+  op: 'exportStep';
+  bodies: readonly { shape: ShapeRef; name: string }[];
+};
+/** Read a STEP file (bytes, or base64 text) into a new, unnamed shape. */
+export type ImportStepOp = OpCommon & { op: 'importStep'; data: Uint8Array | string };
+
 export type KernelOp =
   | BoxOp
   | CylinderOp
@@ -145,7 +153,9 @@ export type KernelOp =
   | FeatureOp
   | ResolveOp
   | PickOp
-  | MeasureOp;
+  | MeasureOp
+  | ExportStepOp
+  | ImportStepOp;
 
 export type OpName = KernelOp['op'];
 
@@ -171,6 +181,9 @@ export interface OpValues {
   resolve: { results: ReferenceReport[] };
   pick: { ref: TopoRef | null };
   measure: MeasureResult;
+  /** `data` is transferred. */
+  exportStep: { data: Uint8Array };
+  importStep: { shape: ShapeId };
 }
 
 export type OpValue<O extends { op: OpName }> = OpValues[O['op']];
@@ -197,6 +210,8 @@ const OP_NAMES: ReadonlySet<string> = new Set<OpName>([
   'resolve',
   'pick',
   'measure',
+  'exportStep',
+  'importStep',
 ]);
 
 // Validation ----------------------------------------------------------------------
@@ -251,6 +266,16 @@ const FIELDS: Record<OpName, [Record<string, Check>, Record<string, Check>]> = {
   resolve: [{ shape: shapeRef, refs: arrayOf(topoRef) }, {}],
   pick: [{ shape: shapeRef, kind: oneOf('face', 'edge'), index: num }, {}],
   measure: [{ shape: shapeRef, targets: arrayOf(measureTarget) }, { body: bool }],
+  exportStep: [{ bodies: arrayOf(shape({ shape: shapeRef, name: str }), true) }, {}],
+  importStep: [
+    {
+      data: (v, p) =>
+        typeof v === 'string' || v instanceof Uint8Array
+          ? null
+          : `${p} must be a Uint8Array or base64 text`,
+    },
+    {},
+  ],
 };
 
 /** Why `value` is not a valid op, or null. */
@@ -346,6 +371,14 @@ export function executeOp(
         op.targets,
         op.body === undefined ? {} : { body: op.body },
       );
+    case 'exportStep':
+      return {
+        data: kernel.exportStep(
+          op.bodies.map((b) => ({ shape: resolve(b.shape, 'exportStep'), name: b.name })),
+        ),
+      };
+    case 'importStep':
+      return { shape: kernel.importStep(op.data) };
     case 'release': {
       // Like every other op on a lost kernel: fatal, not a list of unknown ids.
       const lost = kernel.lostReason;

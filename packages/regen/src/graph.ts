@@ -36,6 +36,8 @@ export const BODY_KINDS: ReadonlySet<Feature['kind']> = new Set([
 ]);
 
 export function isBodyFeature(feature: Feature): boolean {
+  // An import joins the body unless it is only a reference body (kept aside, never built).
+  if (feature.kind === 'import') return feature.operation !== 'reference';
   return BODY_KINDS.has(feature.kind);
 }
 

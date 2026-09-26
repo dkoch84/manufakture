@@ -46,6 +46,7 @@ export {
   NAMING_MIGRATIONS,
   migrateV0ToV1,
   migrateV1ToV2,
+  migrateV2ToV3,
   type JsonObject,
   type Migration,
 } from './migrations';

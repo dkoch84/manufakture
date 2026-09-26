@@ -31,6 +31,8 @@ describe('featureIdsInName', () => {
     ['pattern#7:i2/extrude#3:side:e1', ['pattern#7', 'extrude#3']],
     ['mirror#8:image/hole#5:wall:e5', ['mirror#8', 'hole#5']],
     ['shell#2:offset:extrude#1:cap:end', ['shell#2', 'extrude#1']],
+    ['import#2:face:7', ['import#2']],
+    ['fillet#3:round:import#2:face:7&extrude#1:cap:end', ['fillet#3', 'import#2', 'extrude#1']],
     ['?face3', []],
     ['myextrude#1:cap:end', []],
     ['extrude#1', []],

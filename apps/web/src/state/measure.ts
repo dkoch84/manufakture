@@ -3,10 +3,10 @@
 // witness points. Requests go to the kernel through a `Measurer`; a request
 // that finishes after a newer one started is dropped.
 
-import type { MeasureResult, MeasureTarget } from '@manufakture/kernel';
+import type { MeasureTarget } from '@manufakture/kernel';
 import { useStore } from 'zustand';
 import { createStore, type StoreApi } from 'zustand/vanilla';
-import type { Measurer } from '../measure/measurer';
+import type { Measurement, Measurer } from '../measure/measurer';
 
 export type MeasureStatus = 'idle' | 'measuring' | 'ready' | 'error' | 'unavailable';
 
@@ -21,7 +21,7 @@ export interface MeasureState {
   status: MeasureStatus;
   /** What the current result (or the request in flight) measures. */
   request: MeasureRequest | null;
-  result: MeasureResult | null;
+  result: Measurement | null;
   error: string | null;
 
   /**

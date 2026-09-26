@@ -53,6 +53,9 @@ importers:
       '@manufakture/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@manufakture/io':
+        specifier: workspace:*
+        version: link:../../packages/io
       '@manufakture/kernel':
         specifier: workspace:*
         version: link:../../packages/kernel
@@ -109,7 +112,15 @@ importers:
         specifier: ^4.6.5
         version: 4.6.5
 
-  packages/io: {}
+  packages/io:
+    dependencies:
+      fflate:
+        specifier: ^0.8.3
+        version: 0.8.3
+    devDependencies:
+      '@manufakture/kernel':
+        specifier: workspace:*
+        version: link:../kernel
 
   packages/kernel:
     dependencies:
@@ -120,7 +131,20 @@ importers:
         specifier: 3.0.2
         version: 3.0.2
 
-  packages/regen: {}
+  packages/regen:
+    dependencies:
+      '@manufakture/core':
+        specifier: workspace:*
+        version: link:../core
+      '@manufakture/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      '@manufakture/sketch':
+        specifier: workspace:*
+        version: link:../sketch
+      '@manufakture/units':
+        specifier: workspace:*
+        version: link:../units
 
   packages/sketch:
     dependencies:

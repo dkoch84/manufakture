@@ -37,6 +37,8 @@ export function featureReferences(feature: Feature): Reference[] {
       return [feature.plane];
     case 'extension':
       return [...feature.references];
+    case 'import':
+      return [];
   }
 }
 
@@ -165,6 +167,7 @@ export function featureExpressions(feature: Feature): ExpressionSite[] {
       }
       break;
     case 'mirror':
+    case 'import':
       break;
     case 'extension':
       for (const key of Object.keys(feature.expressions).sort()) {

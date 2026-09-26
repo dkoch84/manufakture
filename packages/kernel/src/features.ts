@@ -26,6 +26,7 @@ import {
   bornFace,
   describeFailure,
   edgeFacesName,
+  importedFace,
   invalidFeatureId,
   invalidSketchId,
   isUnnamed,
@@ -244,6 +245,19 @@ export interface MirrorInput {
   plane: Plane | FaceRef;
 }
 
+/**
+ * A shape read from a STEP file, combined with the body by `mode` like an
+ * extrusion. Its faces are named `<id>:face:<n>` in the file's face order:
+ * imported topology has no history, so every such name is fragile.
+ */
+export interface ImportInput {
+  kind: 'import';
+  id: string;
+  /** The STEP file: its bytes, or base64 text of them (as the document stores it). */
+  step: Uint8Array | string;
+  mode: ResultMode;
+}
+
 export type FeatureInput =
   | ExtrudeInput
   | RevolveInput
@@ -252,7 +266,8 @@ export type FeatureInput =
   | ShellInput
   | HoleInput
   | PatternInput
-  | MirrorInput;
+  | MirrorInput
+  | ImportInput;
 
 export type FeatureKind = FeatureInput['kind'];
 
@@ -499,7 +514,25 @@ function run(ctx: Ctx, body: Body | null, input: FeatureInput): Made | null {
       return pattern(ctx, needBody(ctx, body), input);
     case 'mirror':
       return mirror(ctx, needBody(ctx, body), input);
+    case 'import': {
+      const tool = importTool(ctx, input);
+      return combine(ctx, body, [tool], input.mode);
+    }
   }
+}
+
+/** The imported shape, every face named by its position in the file. */
+function importTool(ctx: Ctx, input: ImportInput): Made {
+  const { k } = ctx;
+  const shape = temp(ctx, { shape: k.importStep(input.step) }).shape;
+  const topology = k.topology(shape);
+  if (topology.faces.length === 0) fail(ctx, 'invalid', 'the STEP file has no faces');
+  return {
+    shape,
+    faces: topology.faces.map((f) => importedFace(input.id, f.index)),
+    topology,
+    unnamed: [],
+  };
 }
 
 function fail(
@@ -1744,6 +1777,10 @@ export function validateFeature(input: unknown): string | null {
       }
       return 'layout.type must be linear or circular';
     }
+    case 'import':
+      return typeof f.step === 'string' || f.step instanceof Uint8Array
+        ? mode(f.mode)
+        : 'step must be the bytes of a STEP file or base64 text of them';
     case 'mirror': {
       const e = source(f.source);
       if (e) return e;

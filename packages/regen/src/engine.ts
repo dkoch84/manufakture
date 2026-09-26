@@ -17,7 +17,13 @@
 // older one (`KernelService.cancel`) and the older one stops at its next await, returning null.
 // Regens run one at a time, so they never race on the cache.
 
-import type { DocumentChange, Feature, ManufaktureDocument, Part } from '@manufakture/core';
+import type {
+  DocumentChange,
+  Feature,
+  ImportSource,
+  ManufaktureDocument,
+  Part,
+} from '@manufakture/core';
 import {
   frameOnPlane,
   type BatchReply,
@@ -45,6 +51,7 @@ import {
 } from './cache';
 import { mapFailure, mapOutcome, planeReport } from './errors';
 import { buildGraph, dirtyFeaturesOf, readsBody } from './graph';
+import { importSourceMatches, keyInput } from './imports';
 import { explicitPlacement, solveSketch, type RegenSolver, type SketchResult } from './sketches';
 import { faceRef, translateFeature } from './translate';
 import type {
@@ -175,6 +182,8 @@ interface PartState {
   pending: Set<string>;
   sketches: Map<string, SketchResult>;
   inputs: Map<string, FeatureInput>;
+  /** Reference imports seen so far (not part of the body, never in the kernel). */
+  references: Set<string>;
 }
 
 const now = (): number => performance.now();
@@ -207,6 +216,12 @@ export class RegenEngine {
   readonly #solverBuild: string;
   readonly #deflection: Partial<Deflection> | undefined;
   readonly #onRecycled: (() => void) | undefined;
+  /**
+   * Import sources whose stored SHA-256 was checked against their data, and the outcome. Keyed by
+   * the source object: documents share unchanged objects between edits, so each file is hashed
+   * once, not on every regen.
+   */
+  readonly #checkedSources = new WeakMap<ImportSource, boolean>();
   #latest = 0;
   #chain: Promise<unknown> = Promise.resolve();
   #instance: number | null = null;
@@ -485,6 +500,7 @@ export class RegenEngine {
       pending: new Set(),
       sketches: new Map(),
       inputs: new Map(),
+      references: new Set(),
     };
 
     for (const [i, f] of graph.active.entries()) {
@@ -539,6 +555,18 @@ export class RegenEngine {
         ]);
         continue;
       }
+      if (f.kind === 'import' && f.operation === 'reference') {
+        // Shown and measured by the app from the file itself; never part of the body.
+        state.references.add(f.id);
+        result.warnings = [
+          {
+            code: 'reference-body',
+            message: `${f.source.fileName} is a reference body: shown and measured, not part of the part's body`,
+          },
+        ];
+        result.ms = now() - started;
+        continue;
+      }
       if (f.kind === 'extension') {
         result.warnings = [
           {
@@ -561,17 +589,40 @@ export class RegenEngine {
         continue;
       }
 
+      if (f.kind === 'import') {
+        let matches = this.#checkedSources.get(f.source);
+        if (matches === undefined) {
+          matches = await importSourceMatches(f.source);
+          this.#checkedSources.set(f.source, matches);
+        }
+        if (!matches) {
+          fail('error', [
+            {
+              code: 'invalid',
+              field: ['source', 'sha256'],
+              message: `The stored copy of ${f.source.fileName} does not match its SHA-256: the document is damaged; import the file again`,
+            },
+          ]);
+          continue;
+        }
+      }
+
       const t = translateFeature(f, {
         values: values.values,
         sketches: state.sketches,
         inputs: state.inputs,
+        references: state.references,
       });
       if (!t.ok) {
         fail('error', t.errors);
         continue;
       }
       state.inputs.set(f.id, t.input);
-      const key = cacheKey(run.versions, { input: t.input, body: state.body.key });
+      // An import is keyed by its (verified) hash and size, not its whole base64 text.
+      const key = cacheKey(run.versions, {
+        input: keyInput(t.input, f.kind === 'import' ? f.source : null),
+        body: state.body.key,
+      });
       run.used.add(key);
       const hit = await this.#cache.get(key);
       if (hit !== undefined && hit.type === 'body' && hit.body !== undefined) {

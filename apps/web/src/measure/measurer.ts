@@ -3,11 +3,24 @@
 // which kernel shape each body is), and `measureTargets` turns the viewport's
 // selection into the op's targets.
 
-import type { MeasureResult, MeasureTarget } from '@manufakture/kernel';
+import type { BodyMeasure, MeasureResult, MeasureTarget } from '@manufakture/kernel';
 import type { GeometryRef } from '../state/selection';
 import { PLACEHOLDER_PREFIX } from '../viewport/naming';
 
-export type MeasureOutcome = { ok: true; result: MeasureResult } | { ok: false; message: string };
+/**
+ * A body's properties as the measure tool shows them: the kernel's, or a
+ * mesh body's, whose `volume` is null when the mesh does not enclose one (an
+ * open or non-manifold STL), with a `note` saying why.
+ */
+export type BodyMeasurement = Omit<BodyMeasure, 'volume'> & {
+  volume: number | null;
+  note?: string;
+};
+
+/** A measurement: the kernel's `MeasureResult`, or a mesh body's. */
+export type Measurement = Omit<MeasureResult, 'body'> & { body: BodyMeasurement | null };
+
+export type MeasureOutcome = { ok: true; result: Measurement } | { ok: false; message: string };
 
 export interface Measurer {
   /**

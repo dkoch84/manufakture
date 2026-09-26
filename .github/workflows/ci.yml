@@ -61,3 +61,33 @@ jobs:
             apps/web/playwright-report/
             apps/web/test-results/
           retention-days: 14
+
+  interop:
+    # Optional: FreeCAD reopens our STEP and PrusaSlicer slices our 3MF and STL
+    # (packages/io/src/interop.test.ts). Each check skips itself when its
+    # program is missing, so a failed install skips it rather than failing,
+    # and the job never blocks a merge.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    continue-on-error: true
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Install FreeCAD and PrusaSlicer
+        continue-on-error: true
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends freecad prusa-slicer xvfb
+      - name: Interop checks
+        run: |
+          # PrusaSlicer's CLI links GTK; give it a virtual display.
+          if command -v prusa-slicer > /dev/null; then export SLICER_CMD="xvfb-run -a prusa-slicer"; fi
+          pnpm --filter @manufakture/io exec vitest run --root ../.. --project packages packages/io/src/interop.test.ts

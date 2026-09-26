@@ -14,6 +14,7 @@
 
 import type { TopoDS_Edge, TopoDS_Face, TopoDS_Shape } from 'libcascade/single/init';
 import { KernelError, isFatalWasmError } from './errors';
+import { MAX_STEP_BYTES, decodeBase64, readStep, writeStep } from './exchange';
 import { collectHistory, resultMaps, type HistorySource, type ResultMaps } from './history';
 import { tessellate } from './mesh';
 import {
@@ -872,6 +873,61 @@ export class Kernel {
       positive('tessellate', 'deflection.linear', deflection.linear);
       positive('tessellate', 'deflection.angular', deflection.angular);
       return tessellate(this.oc, s, this.get(shape, 'tessellate'), deflection);
+    });
+  }
+
+  // Exchange ----------------------------------------------------------------------
+
+  /**
+   * One AP214 STEP file of the given shapes, each a top-level product with
+   * its name (see exchange.ts). Lengths in millimetres.
+   */
+  exportStep(bodies: readonly { shape: ShapeId; name: string }[]): Uint8Array {
+    return this.op('exportStep', (s) =>
+      writeStep(
+        this.oc,
+        s,
+        bodies.map((b) => {
+          if (typeof b.name !== 'string' || b.name.length === 0) {
+            throw new KernelError('exportStep', 'every body needs a name', {
+              code: 'invalid-argument',
+            });
+          }
+          return { shape: this.get(b.shape, 'exportStep'), name: b.name };
+        }),
+      ),
+    );
+  }
+
+  /**
+   * Read a STEP file (its bytes, or base64 text of them) into a new shape: a
+   * compound when the file has several roots. Imported shapes have no names;
+   * the `import` feature names their faces.
+   */
+  importStep(data: Uint8Array | string): ShapeId {
+    return this.op('importStep', (s) => {
+      let bytes: Uint8Array;
+      if (typeof data === 'string') {
+        if (Math.floor((data.length * 3) / 4) > MAX_STEP_BYTES + 2) {
+          throw new KernelError(
+            'importStep',
+            `the STEP file is larger than ${MAX_STEP_BYTES} bytes`,
+            {
+              code: 'invalid-argument',
+            },
+          );
+        }
+        try {
+          bytes = decodeBase64(data);
+        } catch {
+          throw new KernelError('importStep', 'the STEP data is not valid base64', {
+            code: 'invalid-argument',
+          });
+        }
+      } else {
+        bytes = data;
+      }
+      return this.store('importStep', readStep(this.oc, s, bytes));
     });
   }
 

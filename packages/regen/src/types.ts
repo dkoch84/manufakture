@@ -102,7 +102,9 @@ export type RegenWarning =
       entityIds: string[];
     }
   | { code: 'redundant'; message: string; constraints: string[] }
-  | { code: 'extension'; message: string };
+  | { code: 'extension'; message: string }
+  /** An import kept aside as a reference body (display and measure only): no geometry change. */
+  | { code: 'reference-body'; message: string };
 
 /** How one reference of a feature resolved (ADR 0004 decision 6: recomputed, never stored). */
 export interface ReferenceResolution {

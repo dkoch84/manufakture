@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildGraph,
   changedVariables,
+  isBodyFeature,
   dirtyFeaturesOf,
   regenOrder,
   topologicalOrder,
@@ -18,7 +19,7 @@ import {
   rectangle,
   setVariable,
 } from './test-helpers';
-import type { ManufaktureDocument } from '@manufakture/core';
+import type { ImportFeature, ManufaktureDocument } from '@manufakture/core';
 
 const part = (doc: ManufaktureDocument) => doc.parts[0]!;
 
@@ -106,6 +107,42 @@ describe('dependency graph', () => {
     ]);
     expect([...variableClosure(doc.variables, ['c'])].sort()).toEqual(['a', 'b', 'c']);
     expect([...variableClosure(doc.variables, ['d'])]).toEqual(['d']);
+  });
+});
+
+describe('imports', () => {
+  const imported = (operation: ImportFeature['operation']): ImportFeature => ({
+    id: 'import#1',
+    kind: 'import',
+    name: 'part.step',
+    suppressed: false,
+    source: {
+      format: 'step',
+      fileName: 'part.step',
+      size: 13,
+      sha256: '0'.repeat(64),
+      data: 'SVNPLTEwMzAzLTIxOw==',
+    },
+    operation,
+  });
+
+  it('puts an import that joins the body on the body chain, and a reference import beside it', () => {
+    expect(isBodyFeature(imported('cut'))).toBe(true);
+    expect(isBodyFeature(imported('reference'))).toBe(false);
+    const cut = apply(
+      block(),
+      add(imported('cut')),
+      add(fillet('fillet#2', ['a', 'b'], '1', 'r2')),
+    );
+    expect(buildGraph(part(cut), cut.variables).body.get('fillet#2')).toBe('import#1');
+    const ref = apply(
+      block(),
+      add(imported('reference')),
+      add(fillet('fillet#2', ['a', 'b'], '1', 'r2')),
+    );
+    const g = buildGraph(part(ref), ref.variables);
+    expect(g.body.has('import#1')).toBe(false);
+    expect(g.body.get('fillet#2')).toBe('fillet#1');
   });
 });
 

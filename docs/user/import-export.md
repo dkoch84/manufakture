@@ -1,0 +1,58 @@
+# Importing and exporting
+
+**Export** in the header saves the model's bodies as a file for a slicer or another CAD program. **Import** brings a STEP or STL file in as a reference body. Both need the geometry kernel, so they are available once the model has loaded.
+
+## Export
+
+Click **Export** and pick a format:
+
+| Format                     | What you get                                                                                                        | Use it for                                      |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| **STL**                    | One binary STL file with every body, in millimetres                                                                 | Any slicer; the most widely read mesh format    |
+| **STL, one file per body** | A binary STL file for each body, named after it                                                                     | Printing bodies separately                      |
+| **3MF**                    | A 3MF file: millimetres, one named object per body                                                                  | OrcaSlicer, Bambu Studio, PrusaSlicer, Cura     |
+| **STEP**                   | A STEP (AP214) file with the exact geometry, each body a named product; no triangles, so no tolerance applies to it | FreeCAD, Fusion, Onshape, SolidWorks, and so on |
+
+Export saves your part's bodies only. Imported reference bodies are never exported, whether they are shown or hidden by **Undo**: they belong to another file, and you already have it.
+
+The file downloads straight away, named after the body (or the document, when there are several bodies). The header says what was saved and how big it is.
+
+### Mesh tolerance
+
+STL and 3MF are made of flat triangles, so curved faces (fillets, holes, rounds) are approximated. **Mesh tolerance**, at the bottom of the Export menu, sets how closely:
+
+| Setting    | Largest gap to the true surface | Largest angle between facets | Notes                              |
+| ---------- | ------------------------------- | ---------------------------- | ---------------------------------- |
+| Draft      | 0.1 mm                          | 28.6 degrees                 | Small files; visible facets        |
+| **Normal** | 0.02 mm                         | 14.3 degrees                 | The default; fine for FDM printing |
+| Fine       | 0.005 mm                        | 5.7 degrees                  | Small or precise round parts       |
+
+Hover over the setting to see its values. A finer tolerance gives larger files and slower slicing, and past what the printer can resolve it changes nothing in the print.
+
+### Every exported mesh is watertight
+
+Before an STL or 3MF file is written, its triangles are joined into one closed surface and checked: every edge must be shared by exactly two triangles that face the same way, with no gaps, no flipped triangles and no zero-size triangles. A body that fails the check is not exported; you get a message saying what was wrong instead of a file your slicer would have to repair.
+
+### Checking an export in OrcaSlicer or Bambu Studio
+
+1. Export as **3MF**.
+2. In OrcaSlicer or Bambu Studio, import it from the **File** menu, or drag the file onto the plate.
+3. The part appears at its real size, named after the body in the object list. Bambu Studio may say the file was not made by Bambu Studio and load the geometry only; that is expected, since manufakture writes geometry, not slicer settings.
+4. Slice. The slicer should report no errors about the mesh (no "open edges" or "non-manifold" warnings, and no automatic repair).
+
+## Import
+
+Click **Import** and pick a file:
+
+- **STEP** (`.step`, `.stp`): read by the geometry kernel as exact geometry. The body is named after the first product in the file, or the file name. Its faces can be selected and measured like the demo part's.
+- **STL** (`.stl`, binary or ASCII): a triangle mesh. It is shown and its **Body** measurements (volume, surface area, centre of mass, size) work; single faces and edges of a mesh cannot be measured, and no modelling feature can use a mesh. A mesh with holes or other bad edges encloses no volume, so its volume, centre of mass and mass show as none (hover over **Volume** for why); surface area and size still work.
+
+An imported file becomes a **reference body**: it is shown next to the model and can be measured, but it is not joined to your part and is never exported with it. It is added to the document as an **Import** feature, one undo step: **Undo** removes it and hides the body, **Redo** brings it back. Once an undone import can no longer be redone (you made another change after the undo), the body is let go for good.
+
+The file itself is stored inside the document, so the document stays complete on its own when it is saved or copied. Files up to 20 MB can be imported.
+
+### Good to know
+
+- Face names of an imported STEP body are numbered in the order the file lists them (`import#1:face:7`). A STEP file has no modelling history, so if you replace it with an edited version, the numbers may point at different faces. Anything that refers to an imported face is marked as fragile and warns you when it is resolved.
+- Combining an imported STEP body with your part (cutting it out, adding it) is supported by the document and the geometry kernel, and becomes available in the app with the feature tree.
+- Units: STEP files carry their units and are converted to millimetres on import. STL files have no units; like every slicer, manufakture reads them as millimetres.

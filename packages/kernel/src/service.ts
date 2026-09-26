@@ -153,11 +153,13 @@ export function yieldToEventLoop(): Promise<void> {
   });
 }
 
-/** The buffers of every mesh in a reply, for `Comlink.transfer`. */
+/** The buffers of every mesh and exported file in a reply, for `Comlink.transfer`. */
 export function collectTransferables(reply: BatchReply): ArrayBuffer[] {
   const out: ArrayBuffer[] = [];
   for (const r of reply.results as readonly OpResult[]) {
     if (r.ok && r.op === 'tessellate') out.push(...meshBuffers(r.value as MeshData));
+    if (r.ok && r.op === 'exportStep')
+      out.push((r.value as { data: Uint8Array }).data.buffer as ArrayBuffer);
   }
   return out;
 }

@@ -2,16 +2,23 @@ import { describe, expect, it } from 'vitest';
 import { applyCommand } from './commands';
 import { createDocument } from './document';
 import { deserialize, migrateJson, parseDocument, serialize } from './format';
-import { FORMAT_MIGRATIONS, migrateV0ToV1, migrateV1ToV2, type Migration } from './migrations';
+import {
+  FORMAT_MIGRATIONS,
+  migrateV0ToV1,
+  migrateV1ToV2,
+  migrateV2ToV3,
+  type Migration,
+} from './migrations';
 import type { CoreErrorCode } from './result';
 import { FORMAT_VERSION, NAMING_SCHEME, type ManufaktureDocument } from './schema';
 import { PART, bracket, clone, deepFreeze, mm, unwrap } from './test-helpers';
 import v0Bracket from './fixtures/v0-bracket.json';
 import v1Bracket from './fixtures/v1-bracket.json';
 import v2Bracket from './fixtures/v2-bracket.json';
+import v3Bracket from './fixtures/v3-bracket.json';
 
 /** One fixture per older file version; `migrates every older version` checks this is complete. */
-const FIXTURES: Record<number, unknown> = { 0: v0Bracket, 1: v1Bracket };
+const FIXTURES: Record<number, unknown> = { 0: v0Bracket, 1: v1Bracket, 2: v2Bracket };
 
 function load(value: unknown): ManufaktureDocument {
   return unwrap(parseDocument(value)).document;
@@ -21,7 +28,7 @@ describe('serialize and deserialize', () => {
   const documents: [string, () => ManufaktureDocument][] = [
     ['an empty document', () => createDocument({ id: 'd', name: 'Empty' })],
     ['the bracket', bracket],
-    ['the current fixture', () => load(v2Bracket)],
+    ['the current fixture', () => load(v3Bracket)],
     [
       'a document with a material',
       () =>
@@ -78,6 +85,30 @@ describe('serialize and deserialize', () => {
           }),
         ).document,
     ],
+    [
+      'a document with an imported STEP file',
+      () =>
+        unwrap(
+          applyCommand(bracket(), {
+            type: 'addFeature',
+            partId: PART,
+            feature: {
+              id: 'import#1',
+              kind: 'import',
+              name: 'Bracket.step',
+              suppressed: false,
+              source: {
+                format: 'step',
+                fileName: 'Bracket.step',
+                size: 13,
+                sha256: '0'.repeat(64),
+                data: 'SVNPLTEwMzAzLTIxOw==',
+              },
+              operation: 'reference',
+            },
+          }),
+        ).document,
+    ],
   ];
 
   it.each(documents)('round trips %s', (_label, make) => {
@@ -111,7 +142,7 @@ describe('serialize and deserialize', () => {
     expect(serialize(unwrap(deserialize(serialize(shuffled))).document)).toBe(serialize(doc));
     expect(
       serialize(doc).startsWith(
-        '{\n  "format": "manufakture",\n  "version": 2,\n  "namingScheme": 1,',
+        '{\n  "format": "manufakture",\n  "version": 3,\n  "namingScheme": 1,',
       ),
     ).toBe(true);
   });
@@ -124,7 +155,7 @@ describe('serialize and deserialize', () => {
 });
 
 describe('loading errors', () => {
-  const current = () => clone(v2Bracket) as Record<string, unknown>;
+  const current = () => clone(v3Bracket) as Record<string, unknown>;
   const cases: [string, string | (() => unknown), CoreErrorCode, RegExp?][] = [
     ['not JSON', '{ "format": ', 'json'],
     ['an array', '[]', 'format'],
@@ -180,9 +211,9 @@ describe('loading errors', () => {
   it('never modifies the value it is given, even a newer one', () => {
     for (const value of [
       clone(v0Bracket),
-      { ...clone(v2Bracket), version: 99 },
+      { ...clone(v3Bracket), version: 99 },
       clone(v1Bracket),
-      clone(v2Bracket),
+      clone(v3Bracket),
     ]) {
       const frozen = deepFreeze(value);
       const snapshot = JSON.stringify(frozen);
@@ -192,7 +223,7 @@ describe('loading errors', () => {
   });
 
   it('reports schema problems with paths', () => {
-    const d = clone(v2Bracket) as { variables: { expression: unknown }[] };
+    const d = clone(v3Bracket) as { variables: { expression: unknown }[] };
     d.variables[0]!.expression = 6;
     const r = parseDocument(d);
     expect(r.ok).toBe(false);
@@ -207,11 +238,12 @@ describe('migrations', () => {
   it('migrates each fixture to exactly the next one, and the oldest to the current fixture', () => {
     expect(migrateV0ToV1.migrate(clone(v0Bracket) as Record<string, unknown>)).toEqual(v1Bracket);
     expect(migrateV1ToV2.migrate(clone(v1Bracket) as Record<string, unknown>)).toEqual(v2Bracket);
+    expect(migrateV2ToV3.migrate(clone(v2Bracket) as Record<string, unknown>)).toEqual(v3Bracket);
     const loaded = unwrap(parseDocument(v0Bracket));
     expect(loaded.from).toEqual({ version: 0, namingScheme: 1 });
     expect(loaded.migrated).toBe(true);
-    expect(loaded.document).toEqual(load(v2Bracket));
-    expect(JSON.parse(serialize(loaded.document))).toEqual(v2Bracket);
+    expect(loaded.document).toEqual(load(v3Bracket));
+    expect(JSON.parse(serialize(loaded.document))).toEqual(v3Bracket);
   });
 
   it('v1 to v2 changes only the version: a version 1 part has no material', () => {
@@ -221,8 +253,22 @@ describe('migrations', () => {
     expect(loaded.document.parts.every((p) => !('material' in p))).toBe(true);
   });
 
+  it('v2 to v3 changes only the version: a version 2 part has no imports', () => {
+    const loaded = unwrap(parseDocument(v2Bracket));
+    expect(loaded.from.version).toBe(2);
+    expect(loaded.migrated).toBe(true);
+    expect(loaded.document.version).toBe(3);
+    expect(loaded.document.parts.flatMap((p) => p.features).some((f) => f.kind === 'import')).toBe(
+      false,
+    );
+    expect(migrateV2ToV3.migrate(clone(v2Bracket) as Record<string, unknown>)).toEqual({
+      ...clone(v2Bracket),
+      version: 3,
+    });
+  });
+
   it('refuses a material that is not in the built-in table', () => {
-    const bad = clone(v2Bracket) as { parts: Record<string, unknown>[] };
+    const bad = clone(v3Bracket) as { parts: Record<string, unknown>[] };
     bad.parts[0]!.material = 'unobtainium';
     const r = parseDocument(bad);
     expect(r.ok).toBe(false);

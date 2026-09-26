@@ -9,6 +9,7 @@ import {
   type EdgeRef as CoreEdgeRef,
   type FaceRef as CoreFaceRef,
   type Feature,
+  type ImportFeature,
   type MirrorFeature,
   type PatternFeature,
   type RevolveFeature,
@@ -37,6 +38,8 @@ export interface TranslateContext {
   sketches: ReadonlyMap<string, SketchResult>;
   /** Kernel inputs of the features built before it, by feature id (pattern and mirror sources). */
   inputs: ReadonlyMap<string, FeatureInput>;
+  /** Reference bodies built before it (imports with operation `reference`), by feature id. */
+  references?: ReadonlySet<string>;
 }
 
 export type Translation = { ok: true; input: FeatureInput } | { ok: false; errors: RegenError[] };
@@ -167,6 +170,14 @@ function instanceSource(ctx: TranslateContext, f: PatternFeature | MirrorFeature
   const errors: RegenError[] = [];
   for (const id of f.features) {
     const input = ctx.inputs.get(id);
+    if (!input && ctx.references?.has(id)) {
+      errors.push({
+        code: 'unsupported',
+        field: ['features'],
+        message: `${id} is a reference body, not part of the body: it cannot be repeated`,
+      });
+      continue;
+    }
     if (!input) throw new Error(`no kernel input for ${id}`);
     if (input.kind === 'extrude' || input.kind === 'revolve' || input.kind === 'hole') {
       tools.push(input);
@@ -244,6 +255,18 @@ function holeInput(ctx: TranslateContext, f: Extract<Feature, { kind: 'hole' }>)
         : { type: 'throughAll' },
     head,
   };
+}
+
+/**
+ * A STEP import that joins the body: the kernel reads the file (the document's base64 text, passed
+ * as is) and names its faces `import#k:face:<n>`. A reference import, and every STL import (a
+ * mesh, always a reference), is not part of the body: the engine keeps it out of the kernel.
+ */
+function importInput(f: ImportFeature): FeatureInput {
+  if (f.operation === 'reference' || f.source.format !== 'step') {
+    throw new Error('a reference import is not a kernel feature');
+  }
+  return { kind: 'import', id: f.id, step: f.source.data, mode: MODES[f.operation] };
 }
 
 function translateOrThrow(f: Feature, ctx: TranslateContext): FeatureInput {
@@ -347,6 +370,8 @@ function translateOrThrow(f: Feature, ctx: TranslateContext): FeatureInput {
         source: instanceSource(ctx, f),
         plane: faceRef(f.plane.ref),
       };
+    case 'import':
+      return importInput(f);
     case 'sketch':
     case 'extension':
       throw new Error(`${f.kind} features are not kernel features`);

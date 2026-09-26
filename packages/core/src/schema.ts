@@ -28,7 +28,7 @@ import { MATERIAL_IDS } from './materials';
  */
 
 /** The file format version this code reads and writes. Bump it only together with a migration. */
-export const FORMAT_VERSION = 2;
+export const FORMAT_VERSION = 3;
 /** The topological naming scheme version (T0.5) that stored references are written in. */
 export const NAMING_SCHEME = 1;
 export const FORMAT_TAG = 'manufakture';
@@ -536,6 +536,75 @@ export const ExtensionFeatureSchema = z.strictObject({
   params: z.record(z.string(), z.json()),
 });
 
+/**
+ * An imported file, kept in the document itself (README, "Imported geometry"): the file's bytes
+ * as base64 `data`, with its `size` in bytes and the lower-case hex SHA-256 of the bytes, so a
+ * later content-addressed blob store can move `data` out of the document by hash without
+ * changing what the feature means.
+ */
+/**
+ * The largest file an import may store, in bytes (20 MiB). The document holds the file as base64,
+ * a third larger, in every saved copy, so the schema refuses a bigger one up front, before its
+ * text is even scanned. The app's import limit is this value; the kernel's own STEP limit
+ * (`MAX_STEP_BYTES`, 64 MiB) is higher, so every stored file is one the kernel accepts.
+ */
+export const MAX_IMPORT_BYTES = 20 * 1024 * 1024;
+const MAX_IMPORT_BASE64 = Math.ceil(MAX_IMPORT_BYTES / 3) * 4;
+
+export const ImportSourceSchema = z
+  .strictObject({
+    format: z.enum(['step', 'stl']),
+    /** The file's name when it was imported, for display. */
+    fileName: z.string().min(1).max(255),
+    size: z.int().min(1).max(MAX_IMPORT_BYTES),
+    sha256: z.string().regex(/^[0-9a-f]{64}$/, 'Expected a lower-case hex SHA-256'),
+    data: z
+      .string()
+      .max(MAX_IMPORT_BASE64, { abort: true })
+      .regex(/^[A-Za-z0-9+/]*={0,2}$/, 'Expected base64 text'),
+  })
+  .check((ctx) => {
+    const { data, size } = ctx.value;
+    const padding = data.endsWith('==') ? 2 : data.endsWith('=') ? 1 : 0;
+    if (data.length % 4 !== 0 || (data.length / 4) * 3 - padding !== size) {
+      ctx.issues.push({
+        code: 'custom',
+        message: `data does not hold ${size} bytes`,
+        input: data,
+        path: ['data'],
+      });
+    }
+  });
+
+/**
+ * How an import joins the part. `reference` keeps it aside as a reference body (shown, measured,
+ * never part of the body); the others combine a STEP solid with the body like an extrusion.
+ */
+export const ImportOperationSchema = z.enum(['reference', 'new', 'add', 'cut', 'intersect']);
+
+/**
+ * Geometry read from a file. A STEP file gives a B-rep whose faces are named
+ * `import#k:face:<n>` in the file's face order (fragile: imported topology has no history); an
+ * STL file gives a mesh, which can only be a reference (display and measure, no B-rep features).
+ * Since version 3.
+ */
+export const ImportFeatureSchema = z
+  .strictObject({
+    ...base('import'),
+    source: ImportSourceSchema,
+    operation: ImportOperationSchema,
+  })
+  .check((ctx) => {
+    if (ctx.value.source.format === 'stl' && ctx.value.operation !== 'reference') {
+      ctx.issues.push({
+        code: 'custom',
+        message: 'an STL import is a mesh: it can only be a reference',
+        input: ctx.value.operation,
+        path: ['operation'],
+      });
+    }
+  });
+
 export const FeatureSchema = z.discriminatedUnion('kind', [
   SketchFeatureSchema,
   ExtrudeFeatureSchema,
@@ -547,6 +616,7 @@ export const FeatureSchema = z.discriminatedUnion('kind', [
   PatternFeatureSchema,
   MirrorFeatureSchema,
   ExtensionFeatureSchema,
+  ImportFeatureSchema,
 ]);
 
 export const FEATURE_KINDS = [
@@ -560,6 +630,7 @@ export const FEATURE_KINDS = [
   'pattern',
   'mirror',
   'extension',
+  'import',
 ] as const;
 
 // ---------------------------------------------------------------------------------------------
@@ -647,6 +718,9 @@ export type HoleFit = z.infer<typeof HoleFitSchema>;
 export type PatternFeature = z.infer<typeof PatternFeatureSchema>;
 export type MirrorFeature = z.infer<typeof MirrorFeatureSchema>;
 export type ExtensionFeature = z.infer<typeof ExtensionFeatureSchema>;
+export type ImportSource = z.infer<typeof ImportSourceSchema>;
+export type ImportOperation = z.infer<typeof ImportOperationSchema>;
+export type ImportFeature = z.infer<typeof ImportFeatureSchema>;
 export type Feature = z.infer<typeof FeatureSchema>;
 export type FeatureKind = Feature['kind'];
 export type Variable = z.infer<typeof VariableSchema>;

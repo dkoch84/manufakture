@@ -3,13 +3,14 @@
 // `feature` ops sent, solves, cache hits), so "only the last feature was rebuilt" is asserted on
 // what actually went to the kernel.
 
-import { DocumentStore, type ChangeEvent } from '@manufakture/core';
+import { createHash } from 'node:crypto';
+import { DocumentStore, type ChangeEvent, type ImportFeature } from '@manufakture/core';
 import type { KernelService, MeshData, ShapeId } from '@manufakture/kernel';
 import { createNodeService } from '@manufakture/kernel/node';
 import { createSolverService, type SolverService } from '@manufakture/sketch';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { RegenEngine, type RegenKernel } from './engine';
-import { block, setVariable, statuses, unwrap } from './test-helpers';
+import { add, block, setVariable, statuses, unwrap } from './test-helpers';
 import type { RegenResult } from './types';
 
 let service: KernelService;
@@ -254,6 +255,71 @@ describe('regen with the real kernel and solver', () => {
     expect(third.counters).toMatchObject({ featureOps: 0, cacheHits: 3 });
     expect(third.parts[0]!.features[2]).toMatchObject({ status: 'ok', errors: [], cached: true });
     expect(await volume(engine, third.parts[0]!.shape!)).toBeCloseTo(blockVolume(40, 30, 4), 3);
+
+    await engine.dispose();
+    await service.idle();
+    expect(service.leaks()).toEqual([]);
+  });
+
+  it('cuts an imported STEP solid from the body, and keeps a reference import out of it', async () => {
+    const engine = new RegenEngine({ kernel: service, solver });
+    const first = (await engine.regen(block()))!;
+    const props = async (shape: ShapeId) => {
+      const r = (
+        await service.run({ generation: engine.generation, ops: [{ op: 'properties', shape }] })
+      ).results[0]!;
+      if (!r.ok) throw new Error(r.error.message);
+      return r.value as { volume: number; boundingBox: { min: readonly number[] } };
+    };
+    // A 5 mm cube at the block's plain corner (the fillet is at the other end), as a STEP file.
+    const min = (await props(first.parts[0]!.shape!)).boundingBox.min;
+    const made = await service.run({
+      generation: engine.generation,
+      ops: [
+        { op: 'box', size: [5, 5, 5], at: [min[0]!, min[1]!, min[2]!], keep: false },
+        { op: 'exportStep', bodies: [{ shape: { result: 0 }, name: 'Cube' }] },
+      ],
+    });
+    const exported = made.results[1]!;
+    if (!exported.ok) throw new Error(exported.error.message);
+    const bytes = (exported.value as { data: Uint8Array }).data;
+    const imported = (operation: ImportFeature['operation'], data = bytes): ImportFeature => ({
+      id: 'import#1',
+      kind: 'import',
+      name: 'Cube.step',
+      suppressed: false,
+      source: {
+        format: 'step',
+        fileName: 'Cube.step',
+        size: data.length,
+        sha256: createHash('sha256').update(data).digest('hex'),
+        data: Buffer.from(data).toString('base64'),
+      },
+      operation,
+    });
+    const doc = (operation: ImportFeature['operation'], data?: Uint8Array) => {
+      const store = unwrap(DocumentStore.create(block()));
+      unwrap(store.execute(add(imported(operation, data))));
+      return store.document;
+    };
+
+    const cut = (await engine.regen(doc('cut')))!;
+    expect(statuses(cut)['import#1']).toBe('ok');
+    expect(await volume(engine, cut.parts[0]!.shape!)).toBeCloseTo(blockVolume(40, 30, 3) - 125, 3);
+    expect(cut.names.filter((n) => n.startsWith('import#1:face:')).length).toBeGreaterThan(0);
+
+    // A reference changes no geometry and sends no feature op.
+    const reference = (await engine.regen(doc('reference')))!;
+    expect(statuses(reference)['import#1']).toBe('ok');
+    expect(reference.parts[0]!.features[3]!.warnings).toMatchObject([{ code: 'reference-body' }]);
+    expect(reference.counters.featureOps).toBe(0);
+    expect(reference.parts[0]!.shape).toBe(first.parts[0]!.shape);
+
+    // A file the kernel cannot read fails the import, not the regen; the body passes through.
+    const broken = (await engine.regen(doc('add', new TextEncoder().encode('not a STEP file'))))!;
+    expect(statuses(broken)['import#1']).toBe('error');
+    expect(broken.parts[0]!.features[3]!.errors.length).toBeGreaterThan(0);
+    expect(await volume(engine, broken.parts[0]!.shape!)).toBeCloseTo(blockVolume(40, 30, 3), 3);
 
     await engine.dispose();
     await service.idle();

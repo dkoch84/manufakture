@@ -15,6 +15,8 @@
 //   shell#5:offset:X                         the wall face a shell grew from face X
 //   hole#6:wall:p1                           a hole's faces, by part and sketch point
 //   pattern#7:i2/X, mirror#8:image/X         face X of pattern instance 2, of a mirror image
+//   import#9:face:4                          face 4 of an imported file, by its position in
+//                                            the file (no history: always fragile)
 //   X#1, X#2                                 face X split by the kernel into pieces, or
 //                                            several faces born with one name (fragile)
 //   (A+B)                                    faces A and B merged into one
@@ -149,12 +151,17 @@ export function refName(ref: TopoRef): string {
 
 /**
  * Whether a name contains a positional piece number: `#<digits>` closing a
- * name segment (`X#2`, `(X#2+Y)`, `A&X#2`, `pattern#7:i2/X#2`). Feature ids
- * (`cut#4:`) and sketch splits (`e2#a`) do not count.
+ * name segment (`X#2`, `(X#2+Y)`, `A&X#2`, `pattern#7:i2/X#2`), or is built
+ * on a face of an imported file (`import#9:face:4`), which is numbered by its
+ * position in the file. Feature ids (`cut#4:`) and sketch splits (`e2#a`) do
+ * not count.
  */
 export function isPositional(name: string): boolean {
-  return /#\d+(?=$|[#+)&,|\]/])/.test(name);
+  return /#\d+(?=$|[#+)&,|\]/])/.test(name) || IMPORTED_FACE.test(name);
 }
+
+/** A face of an imported file, anywhere in a name. */
+const IMPORTED_FACE = /(?<![A-Za-z0-9#])import#[1-9][0-9]*:face:\d+/;
 
 /**
  * Whether a name is, or was built from, the placeholder of a face no history
@@ -205,6 +212,16 @@ export function bornFace(feature: string, role: string, id?: string): FaceName {
     lineage: [name, ...sketchAncestors(id).map((a) => `${feature}:${role}:${a}`)],
     fragile: isPositional(id),
   };
+}
+
+/**
+ * Face `index` (1-based, in the file's face order) of a shape imported by
+ * feature `feature`: `import#k:face:<index>`. Imported topology has no
+ * history, so the name is positional and always fragile.
+ */
+export function importedFace(feature: string, index: number): FaceName {
+  const name = `${feature}:face:${index}`;
+  return { name, lineage: [name], fragile: true };
 }
 
 export interface SweepFaces {

@@ -4,12 +4,14 @@ import {
   DisplayUnitsSchema,
   FEATURE_KINDS,
   FeatureSchema,
+  MAX_IMPORT_BYTES,
   MAX_PATTERN_COUNT,
   ReferenceSchema,
   SketchConstraintSchema,
   SketchPlaneSchema,
   StoredExpressionSchema,
   type Feature,
+  type ImportFeature,
 } from './schema';
 import {
   baseExtrude,
@@ -217,6 +219,33 @@ const validFeatures: Feature[] = [
     references: [{ id: 'r8', ref: { face: 'extrude#1:cap:start' } }],
     expressions: { width: mm('5') },
     params: { pattern: 'mouse-ears', corners: [1, 2], nested: { ok: true, none: null } },
+  },
+  {
+    id: 'import#1',
+    kind: 'import',
+    ...common,
+    // 'ISO-10303-21;' (13 bytes).
+    source: {
+      format: 'step',
+      fileName: 'bracket.step',
+      size: 13,
+      sha256: 'c0a4d1d8f0e0ee4c5f2b0d0e8b6d1fb4a9c5d2f7e3b8a1c6d4e9f2a7b3c8d5e1',
+      data: 'SVNPLTEwMzAzLTIxOw==',
+    },
+    operation: 'cut',
+  },
+  {
+    id: 'import#2',
+    kind: 'import',
+    ...common,
+    source: {
+      format: 'stl',
+      fileName: 'scan.stl',
+      size: 3,
+      sha256: 'c0a4d1d8f0e0ee4c5f2b0d0e8b6d1fb4a9c5d2f7e3b8a1c6d4e9f2a7b3c8d5e1',
+      data: 'AAEC',
+    },
+    operation: 'reference',
   },
 ];
 
@@ -458,6 +487,55 @@ describe('FeatureSchema', () => {
       'layout.flip',
     ],
   );
+
+  const stepImport = validFeatures.find((f) => f.id === 'import#1') as ImportFeature;
+  const stlImport = validFeatures.find((f) => f.id === 'import#2') as ImportFeature;
+  invalid.push(
+    ['an STL import that is not a reference', { ...stlImport, operation: 'add' }, 'operation'],
+    ['an unknown import operation', { ...stepImport, operation: 'subtract' }, 'operation'],
+    [
+      'an import whose data does not hold its size',
+      { ...stepImport, source: { ...stepImport.source, size: 14 } },
+      'source.data',
+    ],
+    [
+      'an import whose data is not base64',
+      { ...stepImport, source: { ...stepImport.source, data: 'SVNP LTEw' } },
+      'source.data',
+    ],
+    [
+      'an import hash that is not a SHA-256',
+      { ...stepImport, source: { ...stepImport.source, sha256: 'ABC' } },
+      'source.sha256',
+    ],
+    [
+      'an import of an unknown format',
+      { ...stepImport, source: { ...stepImport.source, format: 'obj' } },
+      'source.format',
+    ],
+    [
+      'an empty import',
+      { ...stepImport, source: { ...stepImport.source, size: 0, data: '' } },
+      'source.size',
+    ],
+    [
+      'an import over the size limit',
+      { ...stepImport, source: { ...stepImport.source, size: MAX_IMPORT_BYTES + 1 } },
+      'source.size',
+    ],
+  );
+
+  it('refuses an oversized import by its length alone, before scanning its text', () => {
+    const data = '#'.repeat(Math.ceil(MAX_IMPORT_BYTES / 3) * 4 + 4);
+    const r = FeatureSchema.safeParse({
+      ...stepImport,
+      source: { ...stepImport.source, size: MAX_IMPORT_BYTES, data },
+    });
+    expect(r.success).toBe(false);
+    const issues = r.error!.issues.filter((i) => i.path.join('.') === 'source.data');
+    // Only the length: the base64 pattern never ran on the 27 MB of text.
+    expect(issues.map((i) => i.code)).toEqual(['too_big']);
+  });
 
   it.each(invalid)('rejects %s', (_label, input, path) => {
     const r = FeatureSchema.safeParse(input);

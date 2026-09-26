@@ -1,8 +1,10 @@
 import { StrictMode } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { createDocument } from '@manufakture/core';
+import { createDocument, findPart } from '@manufakture/core';
+import { writeBinaryStl } from '@manufakture/io';
 import { App } from './App';
+import type { Exchanger } from './io/exchange';
 import { createSketchSession } from './sketcher/session';
 import { immediateSolver } from './sketcher/testSolver';
 import { twoFaces } from './measure/fixtures';
@@ -17,7 +19,7 @@ import { boxBody } from './viewport/testMeshes';
 import type { EngineFactory, ViewportApi } from './viewport/Viewport';
 
 /** A loader the test drives by hand. */
-function manualLoader(measurer?: Measurer) {
+function manualLoader(measurer?: Measurer, exchanger?: Exchanger) {
   let report!: (s: LoadStatus) => void;
   let resolve!: (b: BodyInput[]) => void;
   let reject!: (e: Error) => void;
@@ -33,6 +35,7 @@ function manualLoader(measurer?: Measurer) {
     },
     dispose: vi.fn(),
     ...(measurer ? { measurer } : {}),
+    ...(exchanger ? { exchanger } : {}),
   };
   return { loader, report: (s: LoadStatus) => report(s), resolve, reject };
 }
@@ -62,8 +65,8 @@ function fakeEngine() {
   return { api, factory };
 }
 
-function setup(options: { measurer?: Measurer } = {}) {
-  const manual = manualLoader(options.measurer);
+function setup(options: { measurer?: Measurer; exchanger?: Exchanger } = {}) {
+  const manual = manualLoader(options.measurer, options.exchanger);
   const engine = fakeEngine();
   const selection = createSelectionStore();
   const settings = createViewSettingsStore();
@@ -93,6 +96,44 @@ function setup(options: { measurer?: Measurer } = {}) {
     measure,
     view,
   };
+}
+
+/** A kernel exchange with one box body, for the Export menu. */
+function boxExchanger(): Exchanger {
+  return {
+    bodies: () => [{ id: 'box', name: 'Box' }],
+    tessellate: vi.fn(async () => ({
+      ok: true as const,
+      value: [{ name: 'Box', mesh: boxBody().mesh }],
+    })),
+    exportStep: vi.fn(async () => ({ ok: true as const, value: new TextEncoder().encode('ISO') })),
+    importStep: vi.fn(async () => ({ ok: false as const, message: 'not in this test' })),
+    retain: vi.fn(() => []),
+  };
+}
+
+/** Capture downloads: jsdom has no object URLs and does not navigate. */
+function captureDownloads() {
+  const saved: { name: string; blob: Blob }[] = [];
+  const blobs = new Map<string, Blob>();
+  let n = 0;
+  vi.stubGlobal(
+    'URL',
+    Object.assign(URL, {
+      createObjectURL: (b: Blob) => {
+        const url = `blob:test/${++n}`;
+        blobs.set(url, b);
+        return url;
+      },
+      revokeObjectURL: () => {},
+    }),
+  );
+  const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (
+    this: HTMLAnchorElement,
+  ) {
+    saved.push({ name: this.download, blob: blobs.get(this.href)! });
+  });
+  return { saved, restore: () => click.mockRestore() };
 }
 
 describe('App', () => {
@@ -424,5 +465,111 @@ describe('App', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
       expect(t.sketchSession.getState().active).toBe(false);
     });
+  });
+});
+
+describe('App export and import', () => {
+  it('exports STL from the Export menu as a download', async () => {
+    const downloads = captureDownloads();
+    const exchanger = boxExchanger();
+    const t = setup({ exchanger });
+    await act(async () => t.resolve([boxBody()]));
+    fireEvent.click(await screen.findByRole('button', { name: 'Export' }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Mesh tolerance' }), {
+      target: { value: 'fine' },
+    });
+    fireEvent.click(screen.getByRole('menuitem', { name: 'STL' }));
+    await waitFor(() =>
+      expect(screen.getByTestId('io-status').textContent).toMatch(/^Exported Box\.stl/),
+    );
+    expect(exchanger.tessellate).toHaveBeenCalledWith(['box'], { linear: 0.005, angular: 0.1 });
+    expect(downloads.saved.map((d) => [d.name, d.blob.type])).toEqual([['Box.stl', 'model/stl']]);
+    expect(downloads.saved[0]!.blob.size).toBe(84 + 12 * 50);
+    downloads.restore();
+  });
+
+  it('has no Export without a kernel', async () => {
+    const t = setup();
+    await act(async () => t.resolve([boxBody()]));
+    expect((await screen.findByRole('button', { name: 'Export' })).hasAttribute('disabled')).toBe(
+      true,
+    );
+  });
+
+  it('imports an STL as a reference body; undo hides it and redo shows it again', async () => {
+    const t = setup();
+    const loaded = [boxBody()];
+    await act(async () => t.resolve(loaded));
+    const mesh = boxBody({ id: 'x', min: [20, 0, 0] }).mesh;
+    const bytes = writeBinaryStl({
+      positions: new Float32Array(mesh.positions),
+      indices: new Uint32Array(mesh.indices),
+    });
+    const file = new File([bytes], 'bracket.stl', { type: 'model/stl' });
+    fireEvent.change(await screen.findByTestId('import-input'), { target: { files: [file] } });
+    await waitFor(() =>
+      expect(screen.getByTestId('io-status').textContent).toBe(
+        'Imported bracket.stl as bracket (STL mesh, a reference body).',
+      ),
+    );
+    const last = () => t.engine.api.setBodies.mock.lastCall![0] as BodyInput[];
+    expect(last().map((b) => b.id)).toEqual(['box', 'import#1']);
+    const part = () => findPart(t.documents.getState().document, 'part#1')!;
+    expect(part().features.map((f) => f.id)).toEqual(['import#1']);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+    await waitFor(() => expect(last()).toBe(loaded));
+    fireEvent.click(screen.getByRole('button', { name: 'Redo' }));
+    await waitFor(() => expect(last().map((b) => b.id)).toEqual(['box', 'import#1']));
+  });
+
+  it('keeps an undone STEP import for redo, and drops it once it cannot come back', async () => {
+    const exchanger = boxExchanger();
+    vi.mocked(exchanger.importStep).mockImplementation(async (_bytes, featureId) => ({
+      ok: true,
+      value: boxBody({ id: featureId, min: [20, 0, 0] }),
+    }));
+    const t = setup({ exchanger });
+    const loaded = [boxBody()];
+    await act(async () => t.resolve(loaded));
+    const file = new File(['ISO-10303-21;\nDATA;\nENDSEC;\n'], 'ref.step', {
+      type: 'model/step',
+    });
+    fireEvent.change(await screen.findByTestId('import-input'), { target: { files: [file] } });
+    await waitFor(() =>
+      expect(screen.getByTestId('io-status').textContent).toMatch(/^Imported ref\.step/),
+    );
+    const retained = () => [...vi.mocked(exchanger.retain).mock.lastCall![0]];
+    await waitFor(() => expect(retained()).toEqual(['import#1']));
+    const last = () => t.engine.api.setBodies.mock.lastCall![0] as BodyInput[];
+
+    // Undone: hidden, but kept, since redo brings it back.
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+    await waitFor(() => expect(last()).toBe(loaded));
+    expect(retained()).toEqual(['import#1']);
+    fireEvent.click(screen.getByRole('button', { name: 'Redo' }));
+    await waitFor(() => expect(last().map((b) => b.id)).toEqual(['box', 'import#1']));
+
+    // Undone, then a new edit clears the redo stack: the body is dropped for good.
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+    act(() => {
+      t.documents.getState().execute({
+        type: 'setDisplayUnits',
+        units: { length: { unit: 'in' }, angle: { unit: 'deg' } },
+      });
+    });
+    await waitFor(() => expect(retained()).toEqual([]));
+    expect(last()).toBe(loaded);
+  });
+
+  it('reports a file it cannot import', async () => {
+    const t = setup();
+    await act(async () => t.resolve([boxBody()]));
+    const file = new File(['hello'], 'notes.txt');
+    fireEvent.change(await screen.findByTestId('import-input'), { target: { files: [file] } });
+    await waitFor(() =>
+      expect(screen.getByRole('alert').textContent).toBe('notes.txt is not a STEP or STL file.'),
+    );
+    expect(findPart(t.documents.getState().document, 'part#1')!.features).toEqual([]);
   });
 });

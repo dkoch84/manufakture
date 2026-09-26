@@ -47,6 +47,20 @@ describe('measure sections', () => {
     expect(mass.note).toContain(plywood.source);
   });
 
+  it('shows an open mesh as having no volume, with the reason, and no mass', () => {
+    const r = twoFaces();
+    const open = { ...r, body: { ...r.body!, volume: null, note: 'The mesh is not closed' } };
+    const sections = measureSections(open, MM, { material: findMaterial('plywood')! });
+    const body = sections.at(-1)!.rows;
+    expect(body.find((row) => row.key === 'body.volume')).toEqual({
+      key: 'body.volume',
+      label: 'Volume',
+      value: 'None',
+      note: 'The mesh is not closed',
+    });
+    expect(body.find((row) => row.key === 'body.mass')).toBeUndefined();
+  });
+
   it('follows the display units: feet, inches and fractions for a woodworking document', () => {
     const v = values(measureSections(twoFaces(), FT_IN, { material: findMaterial('oak')! }));
     expect(v.distance).toBe('13/16"');

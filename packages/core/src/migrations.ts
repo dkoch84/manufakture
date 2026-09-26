@@ -67,8 +67,25 @@ export const migrateV1ToV2: Migration = {
   },
 };
 
+/**
+ * Version 3 added the `import` feature kind (imported STEP and STL files, kept in the document).
+ * Nothing in a version 2 file changes: it has no imports.
+ */
+export const migrateV2ToV3: Migration = {
+  from: 2,
+  to: 3,
+  description: 'Add the import feature kind',
+  migrate(doc) {
+    return { ...doc, version: 3 };
+  },
+};
+
 /** File format migrations, in order: `FORMAT_MIGRATIONS[i]` goes from version i to i + 1. */
-export const FORMAT_MIGRATIONS: readonly Migration[] = [migrateV0ToV1, migrateV1ToV2];
+export const FORMAT_MIGRATIONS: readonly Migration[] = [
+  migrateV0ToV1,
+  migrateV1ToV2,
+  migrateV2ToV3,
+];
 
 /**
  * Naming scheme migrations (T0.5): rewrite stored face and edge names when the naming scheme

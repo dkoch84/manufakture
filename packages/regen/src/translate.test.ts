@@ -1,6 +1,7 @@
 import type {
   Feature,
   HoleFeature,
+  ImportFeature,
   PatternFeature,
   RevolveFeature,
   SketchFeature,
@@ -263,5 +264,64 @@ describe('holes and patterns', () => {
   it('maps kernel field names back to core reference ids', () => {
     expect(referenceIdOf(pattern(['hole#1']), 'axis')).toBe('r4');
     expect(referenceIdOf(pattern(['hole#1']), 'r9')).toBe('r9');
+  });
+});
+
+describe('imports', () => {
+  const source = {
+    format: 'step' as const,
+    fileName: 'part.step',
+    size: 13,
+    sha256: '0'.repeat(64),
+    data: 'SVNPLTEwMzAzLTIxOw==',
+  };
+  const stepImport = (operation: ImportFeature['operation']): ImportFeature => ({
+    id: 'import#1',
+    kind: 'import',
+    name: 'part.step',
+    suppressed: false,
+    source,
+    operation,
+  });
+
+  it('passes a STEP file that joins the body to the kernel as it is stored, with its mode', () => {
+    const s = solved(rect);
+    expect(translate(stepImport('cut'), s, {})).toEqual({
+      ok: true,
+      input: { kind: 'import', id: 'import#1', step: source.data, mode: 'subtract' },
+    });
+    expect(translate(stepImport('new'), s, {})).toMatchObject({ input: { mode: 'new' } });
+  });
+
+  it('refuses to translate a reference import: it is not a kernel feature', () => {
+    expect(() => translate(stepImport('reference'), solved(rect), {})).toThrow(
+      /not a kernel feature/,
+    );
+  });
+
+  it('does not repeat a reference body in a pattern', () => {
+    const pattern: PatternFeature = {
+      id: 'pattern#1',
+      kind: 'pattern',
+      name: 'p',
+      suppressed: false,
+      features: ['import#1'],
+      layout: {
+        type: 'linear',
+        direction: { id: 'r1', ref: { faces: ['a', 'b'] } },
+        count: mm('2'),
+        spacing: mm('10'),
+      },
+    };
+    const r = translateFeature(pattern, {
+      values: new Map([
+        ['layout.count', 2],
+        ['layout.spacing', 10],
+      ]),
+      sketches: new Map(),
+      inputs: new Map(),
+      references: new Set(['import#1']),
+    });
+    expect(r).toMatchObject({ ok: false, errors: [{ code: 'unsupported', field: ['features'] }] });
   });
 });

@@ -66,6 +66,8 @@ interface E2eFeature {
   entities?: E2eSketchEntity[];
   constraints?: E2eSketchConstraint[];
   plane?: { type: string; origin?: number[]; normal?: number[] };
+  source?: { format: string; fileName: string; size: number; sha256: string; data: string };
+  operation?: string;
 }
 
 interface Window {
