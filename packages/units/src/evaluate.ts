@@ -1,0 +1,459 @@
+import type { CallNode, Expression } from './ast';
+import {
+  ANGLE,
+  DIMENSIONLESS,
+  LENGTH,
+  describeDimension,
+  dimensionOfKind,
+  dimensionsEqual,
+  divideDimensions,
+  isDimensionless,
+  multiplyDimensions,
+  powerDimension,
+  type Dimension,
+  type Quantity,
+  type QuantityKind,
+} from './dimension';
+import { parseExpression } from './parser';
+import { err, ok, type Result } from './result';
+import { angleUnitFactor, lengthUnitFactor, type AngleUnit, type LengthUnit } from './units';
+
+/** Resolves a variable name (without `#`) to its value, or `undefined` if it does not exist. */
+export type VariableLookup = (name: string) => Quantity | undefined;
+
+export interface EvaluationContext {
+  /** Unit that bare numbers are read in when a length is needed. Default `'mm'`. */
+  readonly lengthUnit?: LengthUnit;
+  /** Unit that bare numbers are read in when an angle is needed. Default `'deg'`. */
+  readonly angleUnit?: AngleUnit;
+  /** Variable resolution. Without it every variable reference is an `unknown-variable` error. */
+  readonly variables?: VariableLookup;
+}
+
+export interface EvaluateOptions extends EvaluationContext {
+  /** What the input must evaluate to. */
+  readonly expected: QuantityKind;
+}
+
+interface Environment {
+  readonly lengthFactor: number;
+  readonly angleFactor: number;
+  readonly variables: VariableLookup;
+}
+
+function environment(context: EvaluationContext): Environment {
+  return {
+    lengthFactor: lengthUnitFactor(context.lengthUnit ?? 'mm'),
+    angleFactor: angleUnitFactor(context.angleUnit ?? 'deg'),
+    variables: context.variables ?? (() => undefined),
+  };
+}
+
+/**
+ * Reads a dimensionless value as a length or angle in the display unit, so `thickness + 3` and
+ * `sin(30)` mean 3 display units and 30 display-angle units. Other values are returned unchanged.
+ */
+function promote(q: Quantity, target: Dimension, env: Environment): Quantity {
+  if (!isDimensionless(q.dimension)) return q;
+  if (dimensionsEqual(target, LENGTH))
+    return { value: q.value * env.lengthFactor, dimension: LENGTH };
+  if (dimensionsEqual(target, ANGLE)) return { value: q.value * env.angleFactor, dimension: ANGLE };
+  return q;
+}
+
+/** Brings two operands to a common dimension, or returns `undefined` if they are incompatible. */
+function unify(a: Quantity, b: Quantity, env: Environment): [Quantity, Quantity] | undefined {
+  const pa = promote(a, b.dimension, env);
+  const pb = promote(b, a.dimension, env);
+  return dimensionsEqual(pa.dimension, pb.dimension) ? [pa, pb] : undefined;
+}
+
+function roundHalfAwayFromZero(x: number): number {
+  return Math.sign(x) * Math.round(Math.abs(x));
+}
+
+type Rounder = (x: number) => number;
+
+interface FunctionSpec {
+  readonly minArgs: number;
+  readonly maxArgs: number;
+  apply(args: readonly Quantity[], node: CallNode, env: Environment): Result<Quantity>;
+}
+
+function argSpan(node: CallNode, index: number): [number, number] {
+  const arg = node.args[index];
+  return arg === undefined ? [node.start, node.end] : [arg.start, arg.end];
+}
+
+function arg(args: readonly Quantity[], index: number): Quantity {
+  return args[index] as Quantity;
+}
+
+/** Trig input: an angle, or a bare number read in the display angle unit. */
+function angleArgument(node: CallNode, q: Quantity, env: Environment): Result<number> {
+  const angle = promote(q, ANGLE, env);
+  if (!dimensionsEqual(angle.dimension, ANGLE)) {
+    return err(
+      'dimension',
+      `${node.name}() expects an angle, got ${describeDimension(q.dimension)}`,
+      ...argSpan(node, 0),
+    );
+  }
+  return ok(angle.value);
+}
+
+function trig(fn: (x: number) => number): FunctionSpec {
+  return {
+    minArgs: 1,
+    maxArgs: 1,
+    apply(args, node, env) {
+      const angle = angleArgument(node, arg(args, 0), env);
+      if (!angle.ok) return angle;
+      return ok({ value: fn(angle.value), dimension: DIMENSIONLESS });
+    },
+  };
+}
+
+function inverseTrig(fn: (x: number) => number, domain?: [number, number]): FunctionSpec {
+  return {
+    minArgs: 1,
+    maxArgs: 1,
+    apply(args, node) {
+      const x = arg(args, 0);
+      if (!isDimensionless(x.dimension)) {
+        return err(
+          'dimension',
+          `${node.name}() expects a number, got ${describeDimension(x.dimension)}`,
+          ...argSpan(node, 0),
+        );
+      }
+      if (domain !== undefined && (x.value < domain[0] || x.value > domain[1])) {
+        return err(
+          'domain',
+          `${node.name}() is only defined between ${domain[0]} and ${domain[1]}`,
+          ...argSpan(node, 0),
+        );
+      }
+      return ok({ value: fn(x.value), dimension: ANGLE });
+    },
+  };
+}
+
+function extremum(pick: (a: number, b: number) => number): FunctionSpec {
+  return {
+    minArgs: 1,
+    maxArgs: Infinity,
+    apply(args, node, env) {
+      let acc = arg(args, 0);
+      for (let i = 1; i < args.length; i++) {
+        const pair = unify(acc, arg(args, i), env);
+        if (pair === undefined) {
+          return err(
+            'dimension',
+            `${node.name}() arguments must have the same dimension: got ${describeDimension(acc.dimension)} and ${describeDimension(arg(args, i).dimension)}`,
+            ...argSpan(node, i),
+          );
+        }
+        acc = { value: pick(pair[0].value, pair[1].value), dimension: pair[0].dimension };
+      }
+      return ok(acc);
+    },
+  };
+}
+
+/**
+ * `round(x)` rounds a length or angle in the display unit; `round(x, step)` rounds to a multiple
+ * of `step` (e.g. `round(width, 1/16")`).
+ */
+function rounding(rounder: Rounder): FunctionSpec {
+  return {
+    minArgs: 1,
+    maxArgs: 2,
+    apply(args, node, env) {
+      const x = arg(args, 0);
+      if (args.length === 1) {
+        let scale = 1;
+        if (dimensionsEqual(x.dimension, LENGTH)) scale = env.lengthFactor;
+        else if (dimensionsEqual(x.dimension, ANGLE)) scale = env.angleFactor;
+        return ok({ value: rounder(x.value / scale) * scale, dimension: x.dimension });
+      }
+      const pair = unify(x, arg(args, 1), env);
+      if (pair === undefined) {
+        return err(
+          'dimension',
+          `${node.name}() step must have the same dimension as the value: got ${describeDimension(x.dimension)} and ${describeDimension(arg(args, 1).dimension)}`,
+          ...argSpan(node, 1),
+        );
+      }
+      const [value, step] = pair;
+      if (step.value === 0) {
+        return err('domain', `${node.name}() step must not be zero`, ...argSpan(node, 1));
+      }
+      return ok({
+        value: rounder(value.value / step.value) * step.value,
+        dimension: value.dimension,
+      });
+    },
+  };
+}
+
+const FUNCTIONS: ReadonlyMap<string, FunctionSpec> = new Map<string, FunctionSpec>([
+  ['min', extremum(Math.min)],
+  ['max', extremum(Math.max)],
+  [
+    'abs',
+    {
+      minArgs: 1,
+      maxArgs: 1,
+      apply: (args) =>
+        ok({ value: Math.abs(arg(args, 0).value), dimension: arg(args, 0).dimension }),
+    },
+  ],
+  [
+    'sqrt',
+    {
+      minArgs: 1,
+      maxArgs: 1,
+      apply(args, node) {
+        const x = arg(args, 0);
+        if (x.value < 0) {
+          return err('domain', 'sqrt() of a negative value', ...argSpan(node, 0));
+        }
+        return ok({ value: Math.sqrt(x.value), dimension: powerDimension(x.dimension, 0.5) });
+      },
+    },
+  ],
+  ['sin', trig(Math.sin)],
+  ['cos', trig(Math.cos)],
+  ['tan', trig(Math.tan)],
+  ['asin', inverseTrig(Math.asin, [-1, 1])],
+  ['acos', inverseTrig(Math.acos, [-1, 1])],
+  ['atan', inverseTrig(Math.atan)],
+  [
+    'atan2',
+    {
+      minArgs: 2,
+      maxArgs: 2,
+      apply(args, node, env) {
+        const pair = unify(arg(args, 0), arg(args, 1), env);
+        if (pair === undefined) {
+          return err(
+            'dimension',
+            `atan2() arguments must have the same dimension: got ${describeDimension(arg(args, 0).dimension)} and ${describeDimension(arg(args, 1).dimension)}`,
+            ...argSpan(node, 1),
+          );
+        }
+        return ok({ value: Math.atan2(pair[0].value, pair[1].value), dimension: ANGLE });
+      },
+    },
+  ],
+  ['round', rounding(roundHalfAwayFromZero)],
+  ['floor', rounding(Math.floor)],
+  ['ceil', rounding(Math.ceil)],
+]);
+
+/** Names of the built-in functions, e.g. for autocompletion. */
+export const FUNCTION_NAMES: readonly string[] = [...FUNCTIONS.keys()];
+
+function plural(n: number, word: string): string {
+  return `${n} ${word}${n === 1 ? '' : 's'}`;
+}
+
+function evaluateCall(node: CallNode, env: Environment): Result<Quantity> {
+  const spec = FUNCTIONS.get(node.name);
+  if (spec === undefined) {
+    return err('unknown-function', `Unknown function '${node.name}'`, node.start, node.nameEnd);
+  }
+  const count = node.args.length;
+  if (count < spec.minArgs || count > spec.maxArgs) {
+    const expected =
+      spec.maxArgs === Infinity
+        ? `at least ${plural(spec.minArgs, 'argument')}`
+        : spec.minArgs === spec.maxArgs
+          ? plural(spec.minArgs, 'argument')
+          : `${spec.minArgs} to ${plural(spec.maxArgs, 'argument')}`;
+    return err('arity', `${node.name}() takes ${expected}, got ${count}`, node.start, node.end);
+  }
+  const args: Quantity[] = [];
+  for (const a of node.args) {
+    const value = evaluateNode(a, env);
+    if (!value.ok) return value;
+    args.push(value.value);
+  }
+  return spec.apply(args, node, env);
+}
+
+/**
+ * Evaluates one node and rejects a non-finite result right there, so an overflow is reported
+ * where it happens rather than disappearing later (`1/1e300^2` would otherwise give 0).
+ */
+function evaluateNode(node: Expression, env: Environment): Result<Quantity> {
+  const result = evaluateUnchecked(node, env);
+  if (result.ok && !Number.isFinite(result.value.value)) {
+    return err('domain', 'Result is not a finite number', node.start, node.end);
+  }
+  return result;
+}
+
+function evaluateUnchecked(node: Expression, env: Environment): Result<Quantity> {
+  switch (node.type) {
+    case 'number':
+      return ok({ value: node.value, dimension: DIMENSIONLESS });
+    case 'measure':
+      return ok({ value: node.value, dimension: node.dimension });
+    case 'variable': {
+      const value = env.variables(node.name);
+      if (value === undefined) {
+        const shown = node.hashed ? `#${node.name}` : node.name;
+        return err('unknown-variable', `Unknown variable '${shown}'`, node.start, node.end);
+      }
+      return ok(value);
+    }
+    case 'unit': {
+      const operand = evaluateNode(node.operand, env);
+      if (!operand.ok) return operand;
+      if (!isDimensionless(operand.value.dimension)) {
+        return err(
+          'dimension',
+          `Cannot apply unit '${node.unit.symbol}' to ${describeDimension(operand.value.dimension)}`,
+          node.start,
+          node.end,
+        );
+      }
+      return ok({ value: operand.value.value * node.unit.factor, dimension: node.unit.dimension });
+    }
+    case 'unary': {
+      const operand = evaluateNode(node.operand, env);
+      if (!operand.ok || node.op === '+') return operand;
+      return ok({ value: -operand.value.value, dimension: operand.value.dimension });
+    }
+    case 'call':
+      return evaluateCall(node, env);
+    case 'binary': {
+      const left = evaluateNode(node.left, env);
+      if (!left.ok) return left;
+      const right = evaluateNode(node.right, env);
+      if (!right.ok) return right;
+      const a = left.value;
+      const b = right.value;
+      switch (node.op) {
+        case '+':
+        case '-': {
+          const pair = unify(a, b, env);
+          if (pair === undefined) {
+            const verb = node.op === '+' ? 'add' : 'subtract';
+            const joiner = node.op === '+' ? 'and' : 'from';
+            const [first, second] = node.op === '+' ? [a, b] : [b, a];
+            return err(
+              'dimension',
+              `Cannot ${verb} ${describeDimension(first.dimension)} ${joiner} ${describeDimension(second.dimension)}`,
+              node.start,
+              node.end,
+            );
+          }
+          const [x, y] = pair;
+          const value = node.op === '+' ? x.value + y.value : x.value - y.value;
+          return ok({ value, dimension: x.dimension });
+        }
+        case '*':
+          return ok({
+            value: a.value * b.value,
+            dimension: multiplyDimensions(a.dimension, b.dimension),
+          });
+        case '/':
+          if (b.value === 0) {
+            return err('domain', 'Division by zero', node.right.start, node.right.end);
+          }
+          return ok({
+            value: a.value / b.value,
+            dimension: divideDimensions(a.dimension, b.dimension),
+          });
+        case '^': {
+          if (!isDimensionless(b.dimension)) {
+            return err(
+              'dimension',
+              `An exponent must be a number, got ${describeDimension(b.dimension)}`,
+              node.right.start,
+              node.right.end,
+            );
+          }
+          const value = Math.pow(a.value, b.value);
+          if (Number.isNaN(value)) {
+            return err('domain', 'Fractional power of a negative value', node.start, node.end);
+          }
+          return ok({ value, dimension: powerDimension(a.dimension, b.value) });
+        }
+      }
+    }
+  }
+}
+
+/** Results never carry `-0`, so `formatX` and equality checks need not care. */
+function withoutNegativeZero(q: Quantity): Quantity {
+  return q.value === 0 ? { value: 0, dimension: q.dimension } : q;
+}
+
+/** Evaluates an already-parsed expression without imposing an expected kind. */
+export function evaluateParsedQuantity(
+  expression: Expression,
+  context: EvaluationContext = {},
+): Result<Quantity> {
+  const result = evaluateNode(expression, environment(context));
+  return result.ok ? ok(withoutNegativeZero(result.value)) : result;
+}
+
+/**
+ * Evaluates an already-parsed expression and checks it against `options.expected`. Returns the
+ * value in internal units: millimetres, radians, or a plain number.
+ */
+export function evaluateParsed(expression: Expression, options: EvaluateOptions): Result<number> {
+  const env = environment(options);
+  const result = evaluateNode(expression, env);
+  if (!result.ok) return result;
+  const target = dimensionOfKind(options.expected);
+  const value = promote(result.value, target, env);
+  if (!dimensionsEqual(value.dimension, target)) {
+    return err(
+      'dimension',
+      `Expected ${describeDimension(target)} but got ${describeDimension(value.dimension)}`,
+      expression.start,
+      expression.end,
+    );
+  }
+  // Promotion multiplies by a unit factor, which can itself overflow.
+  if (!Number.isFinite(value.value)) {
+    return err('domain', 'Result is not a finite number', expression.start, expression.end);
+  }
+  return ok(withoutNegativeZero(value).value);
+}
+
+/**
+ * Evaluates `source` without imposing an expected kind: bare numbers stay dimensionless.
+ * Useful for a variables table where the kind is inferred from the expression.
+ */
+export function evaluateQuantity(
+  source: string,
+  context: EvaluationContext = {},
+): Result<Quantity> {
+  const parsed = parseExpression(source);
+  return parsed.ok ? evaluateParsedQuantity(parsed.value, context) : parsed;
+}
+
+/**
+ * Parses and evaluates `source` as `options.expected`. Returns millimetres for lengths, radians
+ * for angles and a plain number for numbers. A dimensionless result is read in the display unit.
+ */
+export function evaluate(source: string, options: EvaluateOptions): Result<number> {
+  const parsed = parseExpression(source);
+  return parsed.ok ? evaluateParsed(parsed.value, options) : parsed;
+}
+
+/** Parses a length (or length expression without variables); bare numbers are in `unit`. */
+export function parseLength(source: string, unit: LengthUnit = 'mm'): Result<number> {
+  return evaluate(source, { expected: 'length', lengthUnit: unit });
+}
+
+/** Parses an angle (or angle expression without variables) to radians; bare numbers in `unit`. */
+export function parseAngle(source: string, unit: AngleUnit = 'deg'): Result<number> {
+  return evaluate(source, { expected: 'angle', angleUnit: unit });
+}
