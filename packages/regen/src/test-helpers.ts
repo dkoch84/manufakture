@@ -1,0 +1,177 @@
+// Test-only fixtures; not exported from the package. Documents are built through core commands,
+// so they are valid and their id counters are real.
+
+import {
+  applyCommand,
+  createDocument,
+  type Command,
+  type ExtrudeFeature,
+  type Feature,
+  type FilletFeature,
+  type ManufaktureDocument,
+  type SketchFeature,
+  type SketchPlane,
+  type StoredExpression,
+} from '@manufakture/core';
+
+export const PART = 'part#1';
+
+export function mm(source: string | number): StoredExpression {
+  return { source: String(source), lengthUnit: 'mm', angleUnit: 'deg' };
+}
+
+export function unwrap<T>(
+  r: { ok: true; value: T } | { ok: false; error: { code: string; message: string } },
+): T {
+  if (!r.ok) throw new Error(`Expected ok, got ${r.error.code}: ${r.error.message}`);
+  return r.value;
+}
+
+export const XY: SketchPlane = {
+  type: 'plane',
+  origin: [0, 0, 0],
+  normal: [0, 0, 1],
+  xDir: [1, 0, 0],
+};
+
+/**
+ * A fully constrained rectangle from the origin: e1 along +x (front, y = 0), e2 up the right
+ * side, e3 back, e4 left. Constraint and entity ids start at `first`.
+ */
+export function rectangle(
+  id: string,
+  options: {
+    width: string;
+    depth: string;
+    plane?: SketchPlane;
+    at?: [number, number];
+    ids?: [string, string, string, string];
+    firstConstraint?: number;
+  },
+): SketchFeature {
+  const [x, y] = options.at ?? [0, 0];
+  const w = 40;
+  const d = 30;
+  const [a, b, c, e] = options.ids ?? ['e1', 'e2', 'e3', 'e4'];
+  let k = options.firstConstraint ?? 1;
+  const kid = () => `k${k++}`;
+  const anchor: SketchFeature['constraints'] =
+    options.at === undefined
+      ? [{ id: kid(), kind: 'coincident', a: { entity: a, at: 'start' }, b: { entity: '@origin' } }]
+      : [{ id: kid(), kind: 'fix', point: { entity: a, at: 'start' } }];
+  return {
+    id,
+    kind: 'sketch',
+    name: id,
+    suppressed: false,
+    plane: options.plane ?? XY,
+    entities: [
+      { id: a, kind: 'line', construction: false, start: [x, y], end: [x + w, y] },
+      { id: b, kind: 'line', construction: false, start: [x + w, y], end: [x + w, y + d] },
+      { id: c, kind: 'line', construction: false, start: [x + w, y + d], end: [x, y + d] },
+      { id: e, kind: 'line', construction: false, start: [x, y + d], end: [x, y] },
+    ],
+    constraints: [
+      { id: kid(), kind: 'coincident', a: { entity: a, at: 'end' }, b: { entity: b, at: 'start' } },
+      { id: kid(), kind: 'coincident', a: { entity: b, at: 'end' }, b: { entity: c, at: 'start' } },
+      { id: kid(), kind: 'coincident', a: { entity: c, at: 'end' }, b: { entity: e, at: 'start' } },
+      { id: kid(), kind: 'coincident', a: { entity: e, at: 'end' }, b: { entity: a, at: 'start' } },
+      { id: kid(), kind: 'horizontal', line: a },
+      { id: kid(), kind: 'horizontal', line: c },
+      { id: kid(), kind: 'vertical', line: b },
+      { id: kid(), kind: 'vertical', line: e },
+      ...anchor,
+      {
+        id: kid(),
+        kind: 'distance',
+        a: { entity: a, at: 'start' },
+        b: { entity: a, at: 'end' },
+        value: mm(options.width),
+      },
+      {
+        id: kid(),
+        kind: 'distance',
+        a: { entity: b, at: 'start' },
+        b: { entity: b, at: 'end' },
+        value: mm(options.depth),
+      },
+    ],
+  };
+}
+
+export function extrude(
+  id: string,
+  sketch: string,
+  distance: string,
+  operation: ExtrudeFeature['operation'] = 'new',
+): ExtrudeFeature {
+  return {
+    id,
+    kind: 'extrude',
+    name: id,
+    suppressed: false,
+    profile: { sketch },
+    operation,
+    extent: { type: 'blind', distance: mm(distance) },
+    reverse: false,
+  };
+}
+
+export function fillet(
+  id: string,
+  faces: [string, string],
+  radius: string,
+  refId = 'r1',
+): FilletFeature {
+  return {
+    id,
+    kind: 'fillet',
+    name: id,
+    suppressed: false,
+    edges: [{ id: refId, ref: { faces: [...faces].sort() } }],
+    radius: mm(radius),
+  };
+}
+
+export function add(feature: Feature, index?: number): Command {
+  return index === undefined
+    ? { type: 'addFeature', partId: PART, feature }
+    : { type: 'addFeature', partId: PART, feature, index };
+}
+
+export function setVariable(name: string, source: string): Command {
+  return { type: 'setVariable', name, expression: mm(source) };
+}
+
+export function build(commands: readonly Command[]): ManufaktureDocument {
+  let doc = createDocument({ id: 'doc-1', name: 'Test' });
+  for (const c of commands) doc = unwrap(applyCommand(doc, c)).document;
+  return doc;
+}
+
+export function apply(doc: ManufaktureDocument, ...commands: Command[]): ManufaktureDocument {
+  for (const c of commands) doc = unwrap(applyCommand(doc, c)).document;
+  return doc;
+}
+
+/**
+ * The block of the acceptance test: a 40 x 30 rectangle (`width`, `depth`), extruded 20 mm, one
+ * vertical edge (front right, between the sides swept by e1 and e2) filleted by `radius`, which
+ * nothing else reads.
+ */
+export function block(): ManufaktureDocument {
+  return build([
+    setVariable('width', '40'),
+    setVariable('depth', '30'),
+    setVariable('radius', '3mm'),
+    add(rectangle('sketch#1', { width: 'width', depth: 'depth' })),
+    add(extrude('extrude#1', 'sketch#1', '20')),
+    add(fillet('fillet#1', ['extrude#1:side:e1', 'extrude#1:side:e2'], 'radius')),
+  ]);
+}
+
+export function statuses(result: {
+  parts: { features: { featureId: string; status: string }[] }[];
+}): Record<string, string> {
+  return Object.fromEntries(result.parts[0]!.features.map((f) => [f.featureId, f.status]));
+}

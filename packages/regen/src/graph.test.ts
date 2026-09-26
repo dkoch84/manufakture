@@ -1,0 +1,241 @@
+import { describe, expect, it } from 'vitest';
+import {
+  buildGraph,
+  changedVariables,
+  dirtyFeaturesOf,
+  regenOrder,
+  topologicalOrder,
+  variableClosure,
+} from './graph';
+import {
+  PART,
+  add,
+  apply,
+  block,
+  build,
+  extrude,
+  fillet,
+  rectangle,
+  setVariable,
+} from './test-helpers';
+import type { ManufaktureDocument } from '@manufakture/core';
+
+const part = (doc: ManufaktureDocument) => doc.parts[0]!;
+
+/** block() plus a second, independent sketch and cut on the top face. */
+function withPocket(): ManufaktureDocument {
+  return apply(
+    block(),
+    setVariable('pocket', '5'),
+    add(
+      rectangle('sketch#2', {
+        width: '10',
+        depth: '10',
+        at: [5, 5],
+        ids: ['e5', 'e6', 'e7', 'e8'],
+        firstConstraint: 12,
+        plane: { type: 'face', face: { id: 'r2', ref: { face: 'extrude#1:cap:end' } } },
+      }),
+    ),
+    add(extrude('extrude#2', 'sketch#2', 'pocket', 'cut')),
+  );
+}
+
+describe('dependency graph', () => {
+  it('has named dependencies, body edges and variables read through variables', () => {
+    const doc = apply(withPocket(), setVariable('deep', 'pocket * 2'), {
+      type: 'editFeature',
+      partId: PART,
+      feature: extrude('extrude#2', 'sketch#2', 'deep', 'cut'),
+    });
+    const g = buildGraph(part(doc), doc.variables);
+    expect(g.depends.get('extrude#1')).toEqual(['sketch#1']);
+    expect(g.depends.get('fillet#1')).toEqual(['extrude#1']);
+    expect(g.depends.get('sketch#2')).toEqual(['extrude#1']);
+    expect(g.depends.get('extrude#2')).toEqual(['sketch#2']);
+    // Body edges: a kernel feature, or a sketch on a face, takes the body the last kernel
+    // feature left.
+    expect(g.body.get('extrude#1')).toBeNull();
+    expect(g.body.get('fillet#1')).toBe('extrude#1');
+    expect(g.body.get('sketch#2')).toBe('fillet#1');
+    expect(g.body.get('extrude#2')).toBe('fillet#1');
+    expect(g.body.has('sketch#1')).toBe(false);
+    expect(g.variables.get('sketch#1')).toEqual(['depth', 'width']);
+    expect(g.variables.get('fillet#1')).toEqual(['radius']);
+    expect(g.variables.get('extrude#2')).toEqual(['deep', 'pocket']);
+    expect(g.dependents.get('extrude#1')).toEqual(['fillet#1', 'sketch#2']);
+    expect(g.dependents.get('fillet#1')).toEqual(['sketch#2', 'extrude#2']);
+  });
+
+  it('skips suppressed features in the body chain', () => {
+    const doc = apply(withPocket(), {
+      type: 'suppressFeature',
+      partId: PART,
+      featureId: 'fillet#1',
+      suppressed: true,
+    });
+    const g = buildGraph(part(doc), doc.variables);
+    expect(g.body.get('sketch#2')).toBe('extrude#1');
+    expect(g.body.get('extrude#2')).toBe('extrude#1');
+  });
+
+  it('stops at the rollback bar', () => {
+    const doc = apply(withPocket(), { type: 'setRollback', partId: PART, index: 3 });
+    const g = buildGraph(part(doc), doc.variables);
+    expect(g.active.map((f) => f.id)).toEqual(['sketch#1', 'extrude#1', 'fillet#1']);
+    expect(g.rolledBack.map((f) => f.id)).toEqual(['sketch#2', 'extrude#2']);
+  });
+
+  it('orders a valid part in document order', () => {
+    const doc = withPocket();
+    expect(regenOrder(buildGraph(part(doc), doc.variables))).toEqual([
+      'sketch#1',
+      'extrude#1',
+      'fillet#1',
+      'sketch#2',
+      'extrude#2',
+    ]);
+  });
+
+  it('closes variables over the variables they read', () => {
+    const doc = build([
+      setVariable('a', '1'),
+      setVariable('b', 'a + 1'),
+      setVariable('c', 'b * 2'),
+      setVariable('d', '4'),
+    ]);
+    expect([...variableClosure(doc.variables, ['c'])].sort()).toEqual(['a', 'b', 'c']);
+    expect([...variableClosure(doc.variables, ['d'])]).toEqual(['d']);
+  });
+});
+
+describe('topological order', () => {
+  it('orders dependencies first and keeps the given order otherwise', () => {
+    const deps: Record<string, string[]> = { a: [], b: ['d'], c: [], d: ['a'] };
+    expect(topologicalOrder(['a', 'b', 'c', 'd'], (n) => deps[n]!)).toEqual(['a', 'c', 'd', 'b']);
+    expect(topologicalOrder(['c', 'a', 'd', 'b'], (n) => deps[n]!)).toEqual(['c', 'a', 'd', 'b']);
+  });
+
+  it('ignores dependencies outside the set and throws on a cycle', () => {
+    expect(topologicalOrder(['x', 'y'], (n) => (n === 'y' ? ['x', 'gone'] : []))).toEqual([
+      'x',
+      'y',
+    ]);
+    expect(() =>
+      topologicalOrder(['p', 'q', 'r'], (n) => (n === 'p' ? ['q'] : n === 'q' ? ['p'] : [])),
+    ).toThrow(/cycle among p, q/);
+  });
+});
+
+describe('dirty subgraph', () => {
+  const dirty = (a: ManufaktureDocument | null, b: ManufaktureDocument) =>
+    dirtyFeaturesOf(a, b, PART);
+
+  it('is everything on a first regen, and nothing for a rename', () => {
+    const doc = withPocket();
+    expect(dirty(null, doc)).toEqual([
+      'sketch#1',
+      'extrude#1',
+      'fillet#1',
+      'sketch#2',
+      'extrude#2',
+    ]);
+    const renamed = apply(doc, {
+      type: 'renameFeature',
+      partId: PART,
+      featureId: 'sketch#1',
+      name: 'Base',
+    });
+    expect(dirty(doc, renamed)).toEqual([]);
+    expect(
+      dirty(
+        doc,
+        apply(doc, {
+          type: 'setDisplayUnits',
+          units: { length: { unit: 'in' }, angle: { unit: 'deg' } },
+        }),
+      ),
+    ).toEqual([]);
+  });
+
+  it('is only the readers of a variable (and what depends on them)', () => {
+    const doc = withPocket();
+    expect(dirty(doc, apply(doc, setVariable('pocket', '6')))).toEqual(['extrude#2']);
+    // The fillet feeds the body the pocket sketch sits on.
+    expect(dirty(doc, apply(doc, setVariable('radius', '4mm')))).toEqual([
+      'fillet#1',
+      'sketch#2',
+      'extrude#2',
+    ]);
+    // Through another variable.
+    const derived = apply(doc, setVariable('base', '40'), setVariable('width', 'base'));
+    expect(dirty(derived, apply(derived, setVariable('base', '50')))).toEqual([
+      'sketch#1',
+      'extrude#1',
+      'fillet#1',
+      'sketch#2',
+      'extrude#2',
+    ]);
+  });
+
+  it('follows body edges and named dependencies from an edited feature', () => {
+    const doc = withPocket();
+    const edited = apply(doc, {
+      type: 'editFeature',
+      partId: PART,
+      feature: extrude('extrude#1', 'sketch#1', '25'),
+    });
+    expect(dirty(doc, edited)).toEqual(['extrude#1', 'fillet#1', 'sketch#2', 'extrude#2']);
+    const cut = apply(doc, {
+      type: 'editFeature',
+      partId: PART,
+      feature: extrude('extrude#2', 'sketch#2', 'pocket', 'intersect'),
+    });
+    expect(dirty(doc, cut)).toEqual(['extrude#2']);
+  });
+
+  it('marks what a suppression or a reorder changes the body for', () => {
+    const doc = withPocket();
+    const off = apply(doc, {
+      type: 'suppressFeature',
+      partId: PART,
+      featureId: 'fillet#1',
+      suppressed: true,
+    });
+    expect(dirty(doc, off)).toEqual(['fillet#1', 'sketch#2', 'extrude#2']);
+    // Two independent features after the base: swapping them changes both bodies.
+    const two = apply(
+      block(),
+      add(fillet('fillet#2', ['extrude#1:side:e3', 'extrude#1:side:e4'], '1mm', 'r2')),
+    );
+    const swapped = apply(two, {
+      type: 'reorderFeature',
+      partId: PART,
+      featureId: 'fillet#2',
+      index: 2,
+    });
+    expect(dirty(two, swapped)).toEqual(['fillet#2', 'fillet#1']);
+  });
+
+  it('adds what the rollback bar uncovers, and nothing it covers', () => {
+    const doc = withPocket();
+    const rolled = apply(doc, { type: 'setRollback', partId: PART, index: 3 });
+    expect(dirty(doc, rolled)).toEqual([]);
+    expect(dirty(rolled, doc)).toEqual(['sketch#2', 'extrude#2']);
+  });
+
+  it('trusts the first affected index of the store change', () => {
+    const doc = withPocket();
+    const next = apply(doc, setVariable('pocket', '6'));
+    expect(dirtyFeaturesOf(doc, next, PART, { firstAffectedIndex: null })).toEqual([]);
+    expect(dirtyFeaturesOf(doc, next, PART, { firstAffectedIndex: 4 })).toEqual(['extrude#2']);
+  });
+
+  it('lists changed variables and their readers', () => {
+    const a = build([setVariable('x', '1'), setVariable('y', 'x'), setVariable('z', '3')]);
+    const b = apply(a, setVariable('x', '2'), setVariable('w', '5'));
+    expect([...changedVariables(a.variables, b.variables)].sort()).toEqual(['w', 'x', 'y']);
+    const c = apply(a, { type: 'deleteVariable', name: 'z' });
+    expect([...changedVariables(a.variables, c.variables)]).toEqual(['z']);
+  });
+});
