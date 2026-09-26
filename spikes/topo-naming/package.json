@@ -1,0 +1,18 @@
+{
+  "name": "@manufakture/spike-topo-naming",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "GPL-3.0-or-later",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "bench": "node scripts/bench.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "libcascade": "3.0.2"
+  },
+  "devDependencies": {
+    "prettier": "^3.9.9"
+  }
+}
