@@ -1,0 +1,25 @@
+{
+  "name": "@manufakture/spike-occt-worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "GPL-3.0-or-later",
+  "scripts": {
+    "dev": "vite",
+    "build:spike": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "measure": "node scripts/measure.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "comlink": "^4.4.2",
+    "libcascade": "3.0.2",
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "@types/three": "^0.186.0",
+    "playwright": "^1.63.0",
+    "prettier": "^3.9.9"
+  }
+}

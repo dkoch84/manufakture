@@ -1,0 +1,87 @@
+{
+  "host": {
+    "cpu": "AMD Ryzen 5 7600X 6-Core Processor",
+    "logicalCpus": 12,
+    "memoryGiB": 62,
+    "node": "v26.10.0",
+    "platform": "linux x64",
+    "libcascade": "3.0.2",
+    "measuredAt": "2026-09-26T14:41:40.015Z"
+  },
+  "libcascade": {
+    "opencascade_single.wasm": {
+      "raw": 42691285,
+      "gzip6": 12206848,
+      "gzip9": 12154297,
+      "brotli5": 10196544,
+      "brotli11": 8223986,
+      "gzipMs": 3199,
+      "brotli11Ms": 48313
+    },
+    "opencascade_single.js": {
+      "raw": 66865,
+      "gzip6": 24872,
+      "gzip9": 24840,
+      "brotli5": 24136,
+      "brotli11": 22213,
+      "gzipMs": 3,
+      "brotli11Ms": 47
+    },
+    "init.single.js": {
+      "raw": 2424,
+      "gzip6": 1207,
+      "gzip9": 1207,
+      "brotli5": 1116,
+      "brotli11": 982,
+      "gzipMs": 0,
+      "brotli11Ms": 2
+    },
+    "opencascade_multi.wasm": {
+      "raw": 42674572,
+      "gzip6": 12238081,
+      "gzip9": 12185026,
+      "brotli5": 10153131,
+      "brotli11": 8210601,
+      "gzipMs": 3180,
+      "brotli11Ms": 47270
+    },
+    "opencascade_multi.js": {
+      "raw": 74007,
+      "gzip6": 27908,
+      "gzip9": 27881,
+      "brotli5": 26880,
+      "brotli11": 24628,
+      "gzipMs": 4,
+      "brotli11Ms": 53
+    },
+    "init.multi.js": {
+      "raw": 3013,
+      "gzip6": 1439,
+      "gzip9": 1439,
+      "brotli5": 1329,
+      "brotli11": 1192,
+      "gzipMs": 0,
+      "brotli11Ms": 2
+    }
+  },
+  "spikeBundle": {
+    "index.js": {
+      "raw": 556964,
+      "gzip6": 137478,
+      "gzip9": 136859,
+      "brotli5": 127781,
+      "brotli11": 113027,
+      "gzipMs": 24,
+      "brotli11Ms": 472
+    },
+    "worker.js": {
+      "raw": 12984,
+      "gzip6": 5231,
+      "gzip9": 5230,
+      "brotli5": 5071,
+      "brotli11": 4715,
+      "gzipMs": 0,
+      "brotli11Ms": 8
+    }
+  }
+}

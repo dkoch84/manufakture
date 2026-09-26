@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OCCT worker spike</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        font-family: sans-serif;
+      }
+      #view {
+        width: 100%;
+        height: 100%;
+        display: block;
+      }
+      #status {
+        position: absolute;
+        top: 8px;
+        left: 8px;
+        margin: 0;
+        padding: 4px 8px;
+        background: rgb(255 255 255 / 80%);
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="view"></canvas>
+    <pre id="status">loading...</pre>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
