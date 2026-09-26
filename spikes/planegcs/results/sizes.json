@@ -1,0 +1,17 @@
+{
+  "host": {
+    "cpu": "AMD Ryzen 5 7600X 6-Core Processor",
+    "logicalCpus": 12,
+    "memoryGiB": 62,
+    "node": "v26.10.0",
+    "platform": "linux x64",
+    "planegcs": "1.2.0",
+    "measuredAt": "2026-09-26T15:09:41.592Z"
+  },
+  "files": {
+    "planegcs.wasm": { "raw": 508141, "gzip9": 173176, "brotli11": 135586 },
+    "planegcs.js (Emscripten glue)": { "raw": 28493, "gzip9": 11041, "brotli11": 9969 },
+    "gcs_wrapper.js": { "raw": 29586, "gzip9": 5007, "brotli11": 4385 }
+  },
+  "wasmMemory": { "minPages": 256, "maxPages": 256, "minMiB": 16, "maxMiB": 16 }
+}

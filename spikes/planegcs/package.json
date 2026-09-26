@@ -1,0 +1,22 @@
+{
+  "name": "@manufakture/spike-planegcs",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "GPL-3.0-or-later",
+  "scripts": {
+    "dev": "vite",
+    "build:spike": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "measure": "node scripts/measure.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@salusoft89/planegcs": "1.2.0"
+  },
+  "devDependencies": {
+    "playwright": "^1.63.0",
+    "prettier": "^3.9.9"
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "host": {
+    "cpu": "AMD Ryzen 5 7600X 6-Core Processor",
+    "logicalCpus": 12,
+    "memoryGiB": 62,
+    "node": "v26.10.0",
+    "platform": "linux x64",
+    "planegcs": "1.2.0",
+    "measuredAt": "2026-09-26T15:09:56.495Z"
+  },
+  "note": "chain() sketches solved once with DogLeg in a fresh module per attempt; \"full\" is DOF 0, \"free\" has no dimensions",
+  "stock16MiB": [
+    { "mode": "full", "entities": 50, "ok": true, "status": "Success", "dof": 0, "ms": 27.7 },
+    { "mode": "full", "entities": 100, "ok": true, "status": "Success", "dof": 0, "ms": 64 },
+    { "mode": "full", "entities": 125, "ok": true, "status": "Success", "dof": 0, "ms": 92.1 },
+    { "mode": "full", "entities": 130, "ok": false, "error": "Aborted(OOM)" },
+    { "mode": "full", "entities": 135, "ok": false, "error": "Aborted(OOM)" },
+    { "mode": "full", "entities": 140, "ok": false, "error": "Aborted(OOM)" },
+    { "mode": "full", "entities": 145, "ok": false, "error": "Aborted(OOM)" },
+    { "mode": "full", "entities": 150, "ok": false, "error": "Aborted(OOM)" },
+    { "mode": "full", "entities": 200, "ok": false, "error": "Aborted(OOM)" },
+    { "mode": "free", "entities": 50, "ok": true, "status": "Success", "dof": 39, "ms": 5.7 },
+    { "mode": "free", "entities": 100, "ok": true, "status": "Success", "dof": 79, "ms": 26.7 },
+    { "mode": "free", "entities": 125, "ok": true, "status": "Success", "dof": 99, "ms": 45.4 },
+    { "mode": "free", "entities": 130, "ok": false, "error": "Aborted(OOM)" },
+    { "mode": "free", "entities": 135, "ok": false, "error": "Aborted(OOM)" },
+    { "mode": "free", "entities": 140, "ok": false, "error": "Aborted(OOM)" },
+    { "mode": "free", "entities": 145, "ok": false, "error": "Aborted(OOM)" },
+    { "mode": "free", "entities": 150, "ok": false, "error": "Aborted(OOM)" },
+    { "mode": "free", "entities": 200, "ok": false, "error": "Aborted(OOM)" }
+  ],
+  "entities200ByMemory": [
+    { "pages": 384, "MiB": 24, "ok": false, "error": "Aborted(OOM)" },
+    { "pages": 512, "MiB": 32, "ok": false, "error": "Aborted(OOM)" },
+    { "pages": 640, "MiB": 40, "ok": true, "status": "Success", "dof": 0, "ms": 531.9 },
+    { "pages": 768, "MiB": 48, "ok": true, "status": "Success", "dof": 0, "ms": 557.9 },
+    { "pages": 896, "MiB": 56, "ok": true, "status": "Success", "dof": 0, "ms": 529.1 },
+    { "pages": 1024, "MiB": 64, "ok": true, "status": "Success", "dof": 0, "ms": 537.2 }
+  ],
+  "rebuildLoop": { "entities": 50, "rebuildsCompleted": 300, "error": null }
+}
