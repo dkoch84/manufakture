@@ -27,6 +27,32 @@ export {
   type SketchPlacement,
 } from './placement';
 export {
+  detectRegions,
+  type Region,
+  type RegionCurve,
+  type RegionDiagnostic,
+  type RegionDiagnosticCode,
+  type RegionLoop,
+  type RegionOptions,
+  type SketchRegions,
+} from './regions';
+export {
+  regionProfile,
+  type RegionProfile,
+  type RegionProfileEdge,
+  type RegionProfileEntity,
+  type RegionProfileLoop,
+} from './region-profile';
+export {
+  DEFAULT_FILL_DEFLECTION,
+  flattenRegion,
+  regionFill,
+  regionFills,
+  triangulateRegion2D,
+  type FillDeflection,
+  type RegionFill,
+} from './region-mesh';
+export {
   evaluateValues,
   pointKey,
   referencedEntities,

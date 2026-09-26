@@ -51,22 +51,24 @@ if (reply !== null) {
 
 A batch is a list of ops and gets one reply (ADR 0007, decision 3). An op can use the shape made by an earlier op of the same batch with `{ result: <index> }`, so a whole chain is one round trip.
 
-| Op           | Arguments                                                                   | Value                                                                                   |
-| ------------ | --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| `box`        | `size`, `at?`                                                               | `{ shape }`                                                                             |
-| `cylinder`   | `radius`, `height`, `at?`, `axis?`                                          | `{ shape }`                                                                             |
-| `profile`    | `frame` (origin, xDir, normal), `loops` of line/arc/circle                  | `{ shape }`: a planar face                                                              |
-| `extrude`    | `profile`, `distance` (along the normal) or a vector, `history?`            | `ExtrudeResult`: shape, history, `capStart`, `capEnd`, `sides` per loop in entity order |
-| `boolean`    | `kind` (`fuse`, `cut`, `common`), `shape`, `tools`, `simplify?`, `history?` | `OperationResult`: shape, history                                                       |
-| `fillet`     | `shape`, `edges` (1-based edge indices), `radius`, `history?`               | `OperationResult`                                                                       |
-| `tessellate` | `shape`, `deflection?` (`linear` 0.1 mm, `angular` 0.5 rad)                 | `MeshData`, transferred                                                                 |
-| `topology`   | `shape`                                                                     | `Topology`: faces, edges, vertices (ADR 0007)                                           |
-| `properties` | `shape`                                                                     | volume, area, bounding box, validity, counts                                            |
-| `release`    | `shapes`                                                                    | `{ released, unknown }`                                                                 |
+| Op           | Arguments                                                                   | Value                                                                                              |
+| ------------ | --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `box`        | `size`, `at?`                                                               | `{ shape }`                                                                                        |
+| `cylinder`   | `radius`, `height`, `at?`, `axis?`                                          | `{ shape }`                                                                                        |
+| `profile`    | `frame` (origin, xDir, normal), `loops` of line/arc/circle, each with `id?` | `{ shape }`: a planar face                                                                         |
+| `extrude`    | `profile`, `distance` (along the normal) or a vector, `history?`            | `ExtrudeResult`: shape, history, `capStart`, `capEnd`, `sides` per loop in entity order, `sideIds` |
+| `boolean`    | `kind` (`fuse`, `cut`, `common`), `shape`, `tools`, `simplify?`, `history?` | `OperationResult`: shape, history                                                                  |
+| `fillet`     | `shape`, `edges` (1-based edge indices), `radius`, `history?`               | `OperationResult`                                                                                  |
+| `tessellate` | `shape`, `deflection?` (`linear` 0.1 mm, `angular` 0.5 rad)                 | `MeshData`, transferred                                                                            |
+| `topology`   | `shape`                                                                     | `Topology`: faces, edges, vertices (ADR 0007)                                                      |
+| `properties` | `shape`                                                                     | volume, area, bounding box, validity, counts                                                       |
+| `release`    | `shapes`                                                                    | `{ released, unknown }`                                                                            |
 
 Every op takes `featureId?` (echoed in its result and any failure, and stamped on the shapes it makes) and `keep?` (default true; `false` releases the op's shape when the batch ends, for intermediates).
 
 Inside the worker the same operations are methods of the synchronous `Kernel` (`box`, `cylinder`, `profile`, `extrude`, `boolean`, `fillet`, `mesh`, `topology`, `properties`, `count`, `release`, `checkpoint`, `releaseSince`), which throw `KernelError`. The regen engine (`packages/regen`, #931) will call those directly from the worker.
+
+Profile entities may carry an `id` (a sketch region's edge id, `e2` or `e2#1`; unique within the profile, else `invalid-argument`). The kernel does not interpret it: `extrude` returns `sideIds`, the side face of every tagged entity by id, so the naming layer can name `<feature>:side:<id>` directly. `packages/sketch`'s `regionProfile` produces such loops from a sketch region; `regions.test.ts` builds its fixture profiles (`fixtures/region-profiles.json`) end to end.
 
 ### History
 
@@ -155,6 +157,7 @@ The tests run the real 42 MB kernel in Node, one instance per test file (about h
 - `service.test.ts`: batches, references, errors as data, cancellation, recycling, leak warnings;
 - `worker.test.ts`: the worker API through Comlink on a real `MessageChannel`, so requests are cloned and buffers transferred: progress, transfer, cancellation across the channel, stale replies, restart;
 - `loader.test.ts`: the browser loading path (streaming compile, progress) fed from memory;
+- `regions.test.ts`: sketch regions (a fixture made by `packages/sketch`) as faces and extrusions, with every side face named by its edge id;
 - `names.test.ts`, `ops.test.ts`: name tables and op validation, no wasm.
 
 For golden tests, `createNodeKernel()` gives a synchronous kernel and `createNodeService()` the full service, both from a module compiled once per process.

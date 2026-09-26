@@ -62,8 +62,8 @@ export interface KernelContext {
 interface Entry {
   shape: TopoDS_Shape;
   record: ShapeRecord;
-  /** Set for shapes made by `profile`: its edges in loop and entity order. */
-  profile?: { loops: TopoDS_Edge[][]; normal: Vec3 };
+  /** Set for shapes made by `profile`: its edges and entity ids in loop and entity order. */
+  profile?: { loops: TopoDS_Edge[][]; ids: (string | null)[][]; normal: Vec3 };
 }
 
 export const DEFAULT_DEFLECTION: Deflection = { linear: 0.1, angular: 0.5 };
@@ -223,7 +223,11 @@ export class Kernel {
       vector('profile', 'frame.xDir', frame.xDir);
       vector('profile', 'frame.normal', frame.normal);
       const built = buildProfile(this.oc, s, frame, loops);
-      return this.store('profile', built.face, { loops: built.loops, normal: built.normal });
+      return this.store('profile', built.face, {
+        loops: built.loops,
+        ids: built.ids,
+        normal: built.normal,
+      });
     });
   }
 
@@ -278,9 +282,15 @@ export class Kernel {
         if (capStart === 0 || capEnd === 0 || sides.some((l) => l.includes(0))) {
           throw new Error('prism history did not resolve to result faces');
         }
+        const sideIds: Record<string, number> = {};
+        entry.profile!.ids.forEach((loop, li) =>
+          loop.forEach((entityId, i) => {
+            if (entityId !== null) sideIds[entityId] = sides[li]![i]!;
+          }),
+        );
         const history =
           options.history === false ? [] : collectHistory(this.oc, s, prism, [face], maps);
-        return { shape: id, history, capStart, capEnd, sides };
+        return { shape: id, history, capStart, capEnd, sides, sideIds };
       });
     });
   }

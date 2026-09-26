@@ -272,6 +272,38 @@ describe('profile and extrude', () => {
       expect(new Set([r.capStart, r.capEnd, ...r.sides[0]!]).size).toBe(6);
     }));
 
+  it('reports the side face of every entity with an id in sideIds', () =>
+    scoped(() => {
+      const outer = rect(0, 0, 10, 20);
+      const tagged: ProfileLoop = {
+        entities: outer.entities.map((e, i) => (i === 1 ? e : { ...e, id: `e${i + 1}` })),
+      };
+      const hole: ProfileLoop = {
+        entities: [{ kind: 'circle', center: [5, 10], radius: 2, id: 'c1' }],
+      };
+      const r = k.extrude(k.profile(XY, [tagged, hole]), 5);
+      expect(r.sideIds).toEqual({
+        e1: r.sides[0]![0],
+        e3: r.sides[0]![2],
+        e4: r.sides[0]![3],
+        c1: r.sides[1]![0],
+      });
+      const t = k.topology(r.shape);
+      expectVec(t.faces[r.sideIds.e1! - 1]!.normal, [0, -1, 0]);
+      expect(t.faces[r.sideIds.c1! - 1]!.surface).toBe('cylinder');
+      expect(k.extrude(k.profile(XY, [outer]), 1).sideIds).toEqual({});
+    }));
+
+  it('rejects an entity id used twice in one profile', () =>
+    scoped(() => {
+      const outer = rect(0, 0, 10, 10);
+      const e = failure(() =>
+        k.profile(XY, [{ entities: outer.entities.map((x) => ({ ...x, id: 'same' })) }]),
+      );
+      expect(e.code).toBe('invalid-argument');
+      expect(e.message).toMatch(/'same' is used twice/);
+    }));
+
   it('orients loops itself: a clockwise outer loop gives the same solid', () =>
     scoped(() => {
       const ccw = rect(0, 0, 10, 20);

@@ -15,9 +15,9 @@ describe('validateOp', () => {
         loops: [
           {
             entities: [
-              { kind: 'line', start: [0, 0], end: [1, 0] },
+              { kind: 'line', start: [0, 0], end: [1, 0], id: 'e1' },
               { kind: 'arc', center: [1, 1], start: [1, 0], end: [1, 2], clockwise: true },
-              { kind: 'line', start: [1, 2], end: [0, 0] },
+              { kind: 'line', start: [1, 2], end: [0, 0], id: 'e3#2' },
             ],
           },
           { entities: [{ kind: 'circle', center: [0.5, 0.5], radius: 0.1 }] },
@@ -55,6 +55,14 @@ describe('validateOp', () => {
     [
       { op: 'profile', frame: XY, loops: [{ entities: [{ kind: 'circle', center: [0, 0] }] }] },
       /entities\[0\]\.radius must be a number/,
+    ],
+    [
+      {
+        op: 'profile',
+        frame: XY,
+        loops: [{ entities: [{ kind: 'circle', center: [0, 0], radius: 1, id: 7 }] }],
+      },
+      /entities\[0\]\.id must be a string/,
     ],
     [{ op: 'extrude', profile: 1.5, distance: 1 }, /op\.profile must be a shape id/],
     [{ op: 'extrude', profile: 1, distance: 'far' }, /a number or a vector/],

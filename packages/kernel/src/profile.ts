@@ -13,6 +13,8 @@ export interface BuiltProfile {
   face: TopoDS_Face;
   /** Per loop, the edge each entity became, in entity order. Owned by the caller. */
   loops: TopoDS_Edge[][];
+  /** Per loop, each entity's `id`, or null. */
+  ids: (string | null)[][];
   normal: Vec3;
 }
 
@@ -153,6 +155,13 @@ export function buildProfile(
   const pnt = (p: Vec3) => s.own(new oc.gp_Pnt(p[0], p[1], p[2]));
   const dir = (d: Vec3) => s.own(new oc.gp_Dir(d[0], d[1], d[2]));
   loops.forEach(checkLoop);
+  const ids = loops.map((loop) => loop.entities.map((e) => e.id ?? null));
+  const seen = new Set<string>();
+  for (const id of ids.flat()) {
+    if (id === null) continue;
+    if (seen.has(id)) throw invalid(`entity id '${id}' is used twice`);
+    seen.add(id);
+  }
 
   // Edges are handed to the caller, so they are not owned by the scope; on
   // failure they are released here.
@@ -215,7 +224,7 @@ export function buildProfile(
     const faceMaker = s.own(new oc.BRepBuilderAPI_MakeFace(plane, wires[0]!, true));
     for (const hole of wires.slice(1)) faceMaker.Add(hole);
     if (!faceMaker.IsDone()) throw invalid('the loops do not make a face');
-    return { face: faceMaker.Face(), loops: built, normal };
+    return { face: faceMaker.Face(), loops: built, ids, normal };
   } catch (error) {
     release();
     throw error;

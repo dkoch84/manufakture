@@ -1,0 +1,508 @@
+[
+  {
+    "name": "rectangle with a hole",
+    "regionId": "l1/L+l2/L+l3/L+l4/L",
+    "area": 1121.460183660255,
+    "profile": {
+      "frame": {
+        "origin": [0, 0, 0],
+        "xDir": [1, 0, 0],
+        "normal": [0, 0, 1]
+      },
+      "loops": [
+        {
+          "entities": [
+            {
+              "kind": "line",
+              "id": "l1",
+              "start": [0, 0],
+              "end": [40, 0]
+            },
+            {
+              "kind": "line",
+              "id": "l2",
+              "start": [40, 0],
+              "end": [40, 30]
+            },
+            {
+              "kind": "line",
+              "id": "l3",
+              "start": [40, 30],
+              "end": [0, 30]
+            },
+            {
+              "kind": "line",
+              "id": "l4",
+              "start": [0, 30],
+              "end": [0, 0]
+            }
+          ]
+        },
+        {
+          "entities": [
+            {
+              "kind": "circle",
+              "id": "c1",
+              "center": [20, 15],
+              "radius": 5
+            }
+          ]
+        }
+      ],
+      "edges": {
+        "l1": {
+          "entityId": "l1",
+          "fragile": false
+        },
+        "l2": {
+          "entityId": "l2",
+          "fragile": false
+        },
+        "l3": {
+          "entityId": "l3",
+          "fragile": false
+        },
+        "l4": {
+          "entityId": "l4",
+          "fragile": false
+        },
+        "c1": {
+          "entityId": "c1",
+          "fragile": false
+        }
+      }
+    }
+  },
+  {
+    "name": "overlap of two rectangles",
+    "regionId": "a2/L+a3/L+b1/L+b4/L",
+    "area": 25,
+    "profile": {
+      "frame": {
+        "origin": [0, 0, 0],
+        "xDir": [1, 0, 0],
+        "normal": [0, 0, 1]
+      },
+      "loops": [
+        {
+          "entities": [
+            {
+              "kind": "line",
+              "id": "a2#2",
+              "start": [10, 5],
+              "end": [10, 10]
+            },
+            {
+              "kind": "line",
+              "id": "a3#1",
+              "start": [10, 10],
+              "end": [5, 10]
+            },
+            {
+              "kind": "line",
+              "id": "b4#2",
+              "start": [5, 10],
+              "end": [5, 5]
+            },
+            {
+              "kind": "line",
+              "id": "b1#1",
+              "start": [5, 5],
+              "end": [10, 5]
+            }
+          ]
+        }
+      ],
+      "edges": {
+        "a2#2": {
+          "entityId": "a2",
+          "fragile": true
+        },
+        "a3#1": {
+          "entityId": "a3",
+          "fragile": true
+        },
+        "b4#2": {
+          "entityId": "b4",
+          "fragile": true
+        },
+        "b1#1": {
+          "entityId": "b1",
+          "fragile": true
+        }
+      }
+    }
+  },
+  {
+    "name": "rectangle less an overlap",
+    "regionId": "a1/L+a2/L+a3/L+a4/L+b1/R+b4/R",
+    "area": 75,
+    "profile": {
+      "frame": {
+        "origin": [0, 0, 0],
+        "xDir": [1, 0, 0],
+        "normal": [0, 0, 1]
+      },
+      "loops": [
+        {
+          "entities": [
+            {
+              "kind": "line",
+              "id": "a1",
+              "start": [0, 0],
+              "end": [10, 0]
+            },
+            {
+              "kind": "line",
+              "id": "a2#1",
+              "start": [10, 0],
+              "end": [10, 5]
+            },
+            {
+              "kind": "line",
+              "id": "b1#1",
+              "start": [10, 5],
+              "end": [5, 5]
+            },
+            {
+              "kind": "line",
+              "id": "b4#2",
+              "start": [5, 5],
+              "end": [5, 10]
+            },
+            {
+              "kind": "line",
+              "id": "a3#2",
+              "start": [5, 10],
+              "end": [0, 10]
+            },
+            {
+              "kind": "line",
+              "id": "a4",
+              "start": [0, 10],
+              "end": [0, 0]
+            }
+          ]
+        }
+      ],
+      "edges": {
+        "a1": {
+          "entityId": "a1",
+          "fragile": false
+        },
+        "a2#1": {
+          "entityId": "a2",
+          "fragile": true
+        },
+        "b1#1": {
+          "entityId": "b1",
+          "fragile": true
+        },
+        "b4#2": {
+          "entityId": "b4",
+          "fragile": true
+        },
+        "a3#2": {
+          "entityId": "a3",
+          "fragile": true
+        },
+        "a4": {
+          "entityId": "a4",
+          "fragile": false
+        }
+      }
+    }
+  },
+  {
+    "name": "slot on a tilted plane",
+    "regionId": "s1/L+s2/L+s3/L+s4/L",
+    "area": 378.539816339745,
+    "profile": {
+      "frame": {
+        "origin": [10, -5, 3],
+        "xDir": [0, 0.707106781187, -0.707106781187],
+        "normal": [0.333333333333, 0.666666666667, 0.666666666667]
+      },
+      "loops": [
+        {
+          "entities": [
+            {
+              "kind": "line",
+              "id": "s1",
+              "start": [0, -5],
+              "end": [30, -5]
+            },
+            {
+              "kind": "arc",
+              "id": "s2",
+              "center": [30, 0],
+              "start": [30, -5],
+              "end": [30, 5],
+              "clockwise": false
+            },
+            {
+              "kind": "line",
+              "id": "s3",
+              "start": [30, 5],
+              "end": [0, 5]
+            },
+            {
+              "kind": "arc",
+              "id": "s4",
+              "center": [0, 0],
+              "start": [0, 5],
+              "end": [0, -5],
+              "clockwise": false
+            }
+          ]
+        }
+      ],
+      "edges": {
+        "s1": {
+          "entityId": "s1",
+          "fragile": false
+        },
+        "s2": {
+          "entityId": "s2",
+          "fragile": false
+        },
+        "s3": {
+          "entityId": "s3",
+          "fragile": false
+        },
+        "s4": {
+          "entityId": "s4",
+          "fragile": false
+        }
+      }
+    }
+  },
+  {
+    "name": "circle cap above a line",
+    "regionId": "c1/L+l1/L",
+    "area": 117.347922658191,
+    "profile": {
+      "frame": {
+        "origin": [0, 0, 0],
+        "xDir": [1, 0, 0],
+        "normal": [0, 0, 1]
+      },
+      "loops": [
+        {
+          "entities": [
+            {
+              "kind": "arc",
+              "id": "c1#1",
+              "center": [0, 0],
+              "start": [9.797958971133, 2],
+              "end": [-9.797958971133, 2],
+              "clockwise": false
+            },
+            {
+              "kind": "line",
+              "id": "l1",
+              "start": [-9.797958971133, 2],
+              "end": [9.797958971133, 2]
+            }
+          ]
+        }
+      ],
+      "edges": {
+        "c1#1": {
+          "entityId": "c1",
+          "fragile": true
+        },
+        "l1": {
+          "entityId": "l1",
+          "fragile": false
+        }
+      }
+    }
+  },
+  {
+    "name": "annulus around an island",
+    "regionId": "c1/L",
+    "area": 373.849525777185,
+    "profile": {
+      "frame": {
+        "origin": [0, 0, 0],
+        "xDir": [1, 0, 0],
+        "normal": [0, 0, 1]
+      },
+      "loops": [
+        {
+          "entities": [
+            {
+              "kind": "circle",
+              "id": "c1",
+              "center": [20, 20],
+              "radius": 12
+            }
+          ]
+        },
+        {
+          "entities": [
+            {
+              "kind": "circle",
+              "id": "c2",
+              "center": [20, 20],
+              "radius": 5
+            }
+          ]
+        }
+      ],
+      "edges": {
+        "c1": {
+          "entityId": "c1",
+          "fragile": false
+        },
+        "c2": {
+          "entityId": "c2",
+          "fragile": false
+        }
+      }
+    }
+  },
+  {
+    "name": "half of a T-junction",
+    "regionId": "l1/L+l3/L+l4/L+m/L",
+    "area": 100,
+    "profile": {
+      "frame": {
+        "origin": [0, 0, 0],
+        "xDir": [1, 0, 0],
+        "normal": [0, 0, 1]
+      },
+      "loops": [
+        {
+          "entities": [
+            {
+              "kind": "line",
+              "id": "l1#1",
+              "start": [0, 0],
+              "end": [10, 0]
+            },
+            {
+              "kind": "line",
+              "id": "m",
+              "start": [10, 0],
+              "end": [10, 10]
+            },
+            {
+              "kind": "line",
+              "id": "l3#2",
+              "start": [10, 10],
+              "end": [0, 10]
+            },
+            {
+              "kind": "line",
+              "id": "l4",
+              "start": [0, 10],
+              "end": [0, 0]
+            }
+          ]
+        }
+      ],
+      "edges": {
+        "l1#1": {
+          "entityId": "l1",
+          "fragile": true
+        },
+        "m": {
+          "entityId": "m",
+          "fragile": false
+        },
+        "l3#2": {
+          "entityId": "l3",
+          "fragile": true
+        },
+        "l4": {
+          "entityId": "l4",
+          "fragile": false
+        }
+      }
+    }
+  },
+  {
+    "name": "rectangle bitten by a circle",
+    "regionId": "c1/R+l1/L+l2/L+l3/L+l4/L",
+    "area": 85.862833058846,
+    "profile": {
+      "frame": {
+        "origin": [0, 0, 0],
+        "xDir": [1, 0, 0],
+        "normal": [0, 0, 1]
+      },
+      "loops": [
+        {
+          "entities": [
+            {
+              "kind": "line",
+              "id": "l1",
+              "start": [0, 0],
+              "end": [10, 0]
+            },
+            {
+              "kind": "line",
+              "id": "l2#1",
+              "start": [10, 0],
+              "end": [10, 2]
+            },
+            {
+              "kind": "arc",
+              "id": "c1#1",
+              "center": [10, 5],
+              "start": [10, 2],
+              "end": [10, 8],
+              "clockwise": true
+            },
+            {
+              "kind": "line",
+              "id": "l2#3",
+              "start": [10, 8],
+              "end": [10, 10]
+            },
+            {
+              "kind": "line",
+              "id": "l3",
+              "start": [10, 10],
+              "end": [0, 10]
+            },
+            {
+              "kind": "line",
+              "id": "l4",
+              "start": [0, 10],
+              "end": [0, 0]
+            }
+          ]
+        }
+      ],
+      "edges": {
+        "l1": {
+          "entityId": "l1",
+          "fragile": false
+        },
+        "l2#1": {
+          "entityId": "l2",
+          "fragile": true
+        },
+        "c1#1": {
+          "entityId": "c1",
+          "fragile": true
+        },
+        "l2#3": {
+          "entityId": "l2",
+          "fragile": true
+        },
+        "l3": {
+          "entityId": "l3",
+          "fragile": false
+        },
+        "l4": {
+          "entityId": "l4",
+          "fragile": false
+        }
+      }
+    }
+  }
+]

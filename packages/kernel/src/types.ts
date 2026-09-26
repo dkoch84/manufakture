@@ -63,6 +63,12 @@ export interface ExtrudeResult extends OperationResult {
   capEnd: number;
   /** Per profile loop, the result face each entity generated, in loop order. */
   sides: number[][];
+  /**
+   * The result face each profile entity with an `id` generated, by id: what
+   * the naming layer turns into `<feature>:side:<id>`. Empty when no entity
+   * has an id.
+   */
+  sideIds: Record<string, number>;
 }
 
 /**
@@ -80,11 +86,16 @@ export interface Frame {
  * several entities each one must end where the next starts. A circle is a
  * loop on its own. Arcs run counter-clockwise about the frame normal from
  * `start` to `end` unless `clockwise` is set.
+ *
+ * `id` is an optional tag, unique within the profile (the sketch edge id of a
+ * region, `e2` or `e2#1`). The kernel does not interpret it; extrude reports
+ * the side face of every tagged entity under it in `sideIds`.
  */
-export type ProfileEntity =
+export type ProfileEntity = { id?: string } & (
   | { kind: 'line'; start: Vec2; end: Vec2 }
   | { kind: 'arc'; center: Vec2; start: Vec2; end: Vec2; clockwise?: boolean }
-  | { kind: 'circle'; center: Vec2; radius: number };
+  | { kind: 'circle'; center: Vec2; radius: number }
+);
 
 /**
  * A closed loop. In a profile the first loop is the outer boundary and every

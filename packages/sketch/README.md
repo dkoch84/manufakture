@@ -10,11 +10,11 @@ Units are millimetres and radians throughout ([ADR 0005](../../docs/adr/0005-uni
 
 ## Entry points
 
-| Import                       | What                                                                   |
-| ---------------------------- | ---------------------------------------------------------------------- |
-| `@manufakture/sketch/model`  | The data model only: types and pure helpers, no solver code at runtime |
-| `@manufakture/sketch`        | Everything: model, validation, placement, splitting, solver, service   |
-| `@manufakture/sketch/worker` | The solver worker entry (see [Worker](#worker))                        |
+| Import                       | What                                                                          |
+| ---------------------------- | ----------------------------------------------------------------------------- |
+| `@manufakture/sketch/model`  | The data model only: types and pure helpers, no solver code at runtime        |
+| `@manufakture/sketch`        | Everything: model, validation, placement, splitting, regions, solver, service |
+| `@manufakture/sketch/worker` | The solver worker entry (see [Worker](#worker))                               |
 
 `packages/core` stores sketches with the types from `/model`; a test checks that `model.ts` only
 has type imports, so holding a sketch never loads planegcs.
@@ -231,6 +231,97 @@ planar face, normalising and projecting `xDir` into the plane (or picking one). 
 `sketchDirectionToWorld`, `worldToSketch` (projecting along the normal), `distanceFromPlane` and
 `placementMatrix` (column-major 4x4, as three.js reads it) map between the two.
 
+## Regions
+
+`detectRegions(entities)` turns a solved sketch into the closed areas extrude and revolve consume.
+It is pure and takes the entities with their solved coordinates:
+
+```ts
+const { regions, voids, diagnostics } = detectRegions(result.entities);
+regions[0].id; // 'l1/L+l2/L+l3/L+l4/L'
+regions[0].outer.curves; // lines, arcs, circles in loop order, each with its edgeId
+regions[0].holes; // clockwise loops
+```
+
+**How.** Non-construction lines, arcs and circles are split wherever they meet: crossings,
+T-junctions (an endpoint on another curve), tangencies, and collinear or concentric overlaps, where
+the shared stretch becomes one edge, owned by the entity with the smaller id (plain string order,
+so the result does not depend on the order entities are listed in). Points closer than the tolerance
+(1e-6 times the sketch extent, at least 1e-6 mm) are one vertex. Tangency is decided by distance: a
+line and a circle touch when the centre is within the tolerance of the radius from the line, two
+circles when the centre distance is within the tolerance of the sum or difference of the radii. They
+then meet at one point, so solver residue that dips one curve a hair into the other does not open a
+sliver face between two crossings. Edges with a free end are pruned, then bridges (an edge with the
+same face on both sides), and the faces of the remaining planar graph are traced, taking at every
+vertex the next edge clockwise; edges that leave a vertex in the same direction (tangent arcs) are
+ordered by curvature. Every bounded face is a candidate region. Loops that do not touch are nested
+by containment (the smallest enclosing face, by exact winding number over lines and arcs), and the
+nesting depth decides even-odd: faces at even depth are `regions`, faces at odd depth (inside a hole)
+are `voids`, and an island inside a hole is a region again. Overlapping outlines that cross are one
+connected outline, so their faces are all regions (two overlapping rectangles give three), which is
+what a user picking faces expects; the even-odd rule applies to separate nested outlines.
+
+A region's `outer` loop runs counter-clockwise and its `holes` clockwise. A loop that touches itself
+or a hole at a single point (a hole tangent to the outline) is split there, so a touching hole is a
+hole; it gets a `touching` warning, because OCCT may refuse such a face.
+
+**Edge ids.** Every curve of a loop carries `edgeId`, the name its side face gets on extrusion
+(`extrude#3:side:<edgeId>`, T0.5). It is the entity id when the regions use the entity in one
+stretch, and `<id>#1`, `<id>#2`, ... when other geometry meets the entity and splits it into several
+used stretches, numbered along the entity (lines from start to end, arcs from start
+counter-clockwise, circles counter-clockwise from angle 0). Stretches that meet only each other are
+joined again, so a line that merely overshoots a corner, or is touched by a dangling edge, keeps its
+plain id. `#<digits>` is the positional form of T0.5 (the sketcher's own splits use letters, `e2#a`,
+and a sketch id can never contain `#<digits>`), so these edges are `fragile: true`: the naming layer
+reads `e2` as the ancestor of `e2#1` (a reference to `side:e2` still resolves, as a descendant), and
+any reference resting on `e2#1` itself warns at regen, since an edit that adds or removes a
+crossing can renumber the pieces.
+
+**Region ids.** A region's `id` is the set of entities on its outer loop, each with the side the
+region lies on relative to the entity's own direction (`/L` left, `/R` right, `/LR` both), sorted by
+entity id and joined by `+`: a rectangle with a hole is `l1/L+l2/L+l3/L+l4/L`, and a circle cut by a
+line gives `c1/L+l1/L` and `c1/L+l1/R`. Entity ids, not edge ids, so a region keeps its id when
+other geometry crosses its entities elsewhere; sides, so the two halves of a cut shape differ; the
+outer loop only, so adding or removing a hole keeps the id. Resizing and moving keep it too, as long
+as no entity is reversed: `/L` and `/R` are relative to the entity's direction, so reversing a line
+(swapping `start` and `end`) or an arc flips its side and changes the id of every region it bounds
+(`c1/L+l1/L` becomes `c1/L+l1/R`). The sketcher must therefore not reverse entities in place; an
+edit that needs the other direction must either keep the stored direction or be handled by the naming
+layer (#931) as a rename. When two faces still get the same id (a line cutting both horns of a
+crescent), they are numbered by position, x then y (`...#1`, `...#2`), flagged `fragile`, and
+reported as `ambiguous-id`. Ids are unique across `regions` and `voids`.
+
+**Diagnostics.** Each has a `code`, a `severity`, a readable `message`, the `entityIds` involved and,
+where it helps, `points`.
+
+| Code            | Severity | Meaning                                                               |
+| --------------- | -------- | --------------------------------------------------------------------- |
+| `open-profile`  | warning  | connected geometry that encloses nothing; `points` are its open ends  |
+| `dangling-edge` | warning  | an entity that bounds no region, although what it touches does        |
+| `overlap`       | warning  | two entities on top of each other; the smaller id keeps the edge      |
+| `touching`      | warning  | loops of one region touch at a point; the kernel may refuse the face  |
+| `degenerate`    | warning  | zero length or radius, or an arc whose end is off its circle; ignored |
+| `overhang`      | info     | part of an entity runs past where it meets other geometry             |
+| `crossing`      | info     | two entities cross between their ends; `points` are the crossings     |
+| `ambiguous-id`  | info     | faces numbered by position because their ids collided                 |
+
+**To the kernel.** `regionProfile(region, placement)` gives the kernel's `profile` input as plain data
+(`frame`, then `loops`, outer first, each entity tagged with its `id` = edge id; arcs traversed
+against their entity are `clockwise`) plus an `edges` map from edge id to `{ entityId, fragile }`.
+The kernel's extrude reports the side face of every tagged entity in `sideIds`, so the regen engine
+names `extrude#3:side:<edgeId>` without matching geometry. This package does not import the kernel;
+the kernel's `regions.test.ts` builds a checked-in fixture of such profiles in OCCT, and
+`region-profile.test.ts` keeps the fixture equal to what `regionProfile` produces (regenerate with
+`UPDATE_REGION_FIXTURES=1`, then format it with Prettier).
+
+**Fills.** `regionFill(region, placement, deflection?)` (and `regionFills` for a list) triangulates a
+region with its holes for hover highlighting: `positions` (world xyz, `Float32Array`), `indices`
+(`Uint32Array`, counter-clockwise about the placement normal), `normal` and `area`. Arcs are
+flattened within a linear and angular deflection (default 0.05 mm, 0.25 rad), chords are split
+further where other geometry comes closer to an arc than its chord (a corner just inside a circle, a
+tangent hole), holes are bridged into the outline, and the polygon is ear clipped. It is meant for
+highlights, not for export: cost grows quadratically with the number of flattened points.
+
 ## Performance
 
 Measured in Node by `src/latency.test.ts` on one coupled 50-entity system (the T0.4 chain of ten
@@ -252,4 +343,7 @@ Node, including the real planegcs wasm: DOF sequences for the rectangle (16, 8, 
 rounded rectangle with a tangent arc (21, 11, 7, 5, 2, 0), redundancy and conflicts with their ids,
 every constraint kind, expressions, incremental edits (including geometry-derived values that change
 between updates), dragging, the service's coalescing and recovery from an out-of-memory abort, and
-the RPC over a `MessageChannel`.
+the RPC over a `MessageChannel`. Region tests (`regions.test.ts`, `region-profile.test.ts`,
+`region-mesh.test.ts`) cover the cases in [Regions](#regions), fills whose triangles add up to the
+flattened region, and 60 random grid-snapped rectangle sets whose faces must tile exactly the area
+their outlines enclose.

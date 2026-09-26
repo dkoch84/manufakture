@@ -194,11 +194,11 @@ const entity: Check = (v, p) => {
   if (!isObject(v)) return `${p} must be an object`;
   switch (v.kind) {
     case 'line':
-      return shape({ start: vec2, end: vec2 })(v, p);
+      return shape({ start: vec2, end: vec2 }, { id: str })(v, p);
     case 'arc':
-      return shape({ center: vec2, start: vec2, end: vec2 }, { clockwise: bool })(v, p);
+      return shape({ center: vec2, start: vec2, end: vec2 }, { clockwise: bool, id: str })(v, p);
     case 'circle':
-      return shape({ center: vec2, radius: num })(v, p);
+      return shape({ center: vec2, radius: num }, { id: str })(v, p);
     default:
       return `${p}.kind must be line, arc or circle`;
   }
