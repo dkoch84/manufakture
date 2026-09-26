@@ -1,0 +1,23 @@
+# Architecture Decision Records
+
+Technical decisions for manufakture, one per file, numbered in order. Each records its context, the decision, the alternatives considered and the consequences, and cites the spike write-ups in [`docs/spikes/`](../spikes/) it relies on.
+
+Product decisions (license, local-first storage, target machines, what comes first) are not ADRs. They live in [`docs/decisions/`](../decisions/), starting with [0000: Product decisions](../decisions/0000-product-decisions.md), and the ADRs build on them.
+
+## Index
+
+- [0001: Kernel wrapper: a thin wrapper of our own over OCCT](0001-kernel-wrapper.md). Accepted.
+- [0002: Kernel binary, loading and memory lifecycle](0002-kernel-build-and-loading.md). Accepted.
+- [0003: Sketch solver: planegcs in a worker, behind our own wrapper](0003-sketch-solver.md). Accepted.
+- [0004: Document format: a versioned JSON feature list, with names as references](0004-document-format.md). Accepted.
+- [0005: Units: millimetres and radians inside, per-document display units outside](0005-units.md). Accepted.
+- [0006: Licensing: GPL-3.0-or-later, and what we may depend on](0006-licensing.md). Accepted.
+- [0007: Worker protocol: Comlink, coarse calls, errors as data, named meshes](0007-worker-protocol.md). Accepted.
+
+## Adding an ADR
+
+- Take the next free number and name the file `NNNN-short-title.md`.
+- Use the format of the existing records: a title line, `Status` and `Date`, then Context, Decision, Alternatives considered and Consequences.
+- Cite the evidence by relative link, and state only what the sources measured or say; mark estimates as estimates.
+- To change a decision, write a new ADR that supersedes the old one and set the old one's status to "superseded by NNNN". Fix an accepted ADR in place only for factual errors.
+- Add the new record to the index above.
