@@ -112,5 +112,15 @@ interface Window {
     settings: {
       getState(): { projection: string; setSection(patch: Record<string, unknown>): void };
     };
+    measure: {
+      getState(): {
+        status: string;
+        request: { targets: unknown[] } | null;
+        result: {
+          distance: { value: number; from: number[]; to: number[] } | null;
+          body: { volume: number } | null;
+        } | null;
+      };
+    };
   };
 }

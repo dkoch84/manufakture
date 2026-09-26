@@ -158,9 +158,67 @@ describe('kernel demo loader', () => {
   });
 });
 
+describe('measuring the demo part', () => {
+  it('sends a measure op on the demo body, at the current generation', async () => {
+    let fake!: ReturnType<typeof fakeKernel>;
+    const loader = kernelDemoLoader((o) => (fake = fakeKernel(o)) as unknown as KernelClient);
+    expect(await loader.measurer!.measure(DEMO_BODY_ID, [], true)).toMatchObject({ ok: false });
+    await loader.load(() => {});
+    const measured = { items: [], distance: null, angle: null, body: null };
+    Object.assign(fake, { latestGeneration: 7 });
+    fake.submit.mockImplementationOnce(
+      async () =>
+        ({
+          status: 'done',
+          names: [],
+          results: [{ ok: true, op: 'measure', value: measured }],
+        }) as never,
+    );
+    const targets = [{ kind: 'face' as const, index: 3 }];
+    expect(await loader.measurer!.measure(DEMO_BODY_ID, targets, true)).toEqual({
+      ok: true,
+      result: measured,
+    });
+    const [ops, generation] = fake.submit.mock.lastCall as unknown as [unknown[], number];
+    expect(ops).toEqual([{ op: 'measure', shape: 1, targets, body: true }]);
+    expect(validateOp(ops[0])).toBeNull();
+    // Never a new generation: measuring must not cancel an edit in flight.
+    expect(generation).toBe(7);
+  });
+
+  it('passes kernel failures on as messages, and a superseded reply as null', async () => {
+    let fake!: ReturnType<typeof fakeKernel>;
+    const loader = kernelDemoLoader((o) => (fake = fakeKernel(o)) as unknown as KernelClient);
+    await loader.load(() => {});
+    fake.submit.mockImplementationOnce(
+      async () =>
+        ({
+          status: 'done',
+          names: [],
+          results: [
+            {
+              ok: false,
+              op: 'measure',
+              error: { code: 'unknown-shape', operation: 'measure', message: 'unknown shape id 1' },
+            },
+          ],
+        }) as never,
+    );
+    expect(await loader.measurer!.measure(DEMO_BODY_ID, [], true)).toEqual({
+      ok: false,
+      message: 'unknown shape id 1',
+    });
+    fake.submit.mockImplementationOnce(async () => null as never);
+    expect(await loader.measurer!.measure(DEMO_BODY_ID, [], true)).toBeNull();
+    expect(await loader.measurer!.measure('other-body', [], true)).toMatchObject({ ok: false });
+  });
+});
+
 describe('kernel-free scenes', () => {
-  it('loads the named test box', async () => {
-    const [body] = await testLoader().load(() => {});
+  it('loads the named test box, with nothing to measure it', async () => {
+    const loader = testLoader();
+    expect(loader.measurer).toBeUndefined();
+    const [body] = await loader.load(() => {});
     expect(body!.names).toContain('test-box/top');
   });
 

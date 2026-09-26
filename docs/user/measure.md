@@ -1,0 +1,58 @@
+# Measuring
+
+The **Measure** panel, in the side panel under the selection, shows exact measurements of whatever is selected in the 3D view, and of the whole body. Values come from the model's exact geometry, not from the triangles the view draws, so a circle measures as a true circle and a distance is not off by the mesh's facets.
+
+## What it shows
+
+Select faces, edges and vertices as usual: click to select one, Shift+click to add, Ctrl+click (Cmd+click on macOS) to add or remove. The selection filter limits what a click can pick.
+
+For **each selected item**:
+
+| Item   | Values                                                                                         |
+| ------ | ---------------------------------------------------------------------------------------------- |
+| Face   | Its area. A cylindrical or spherical face (a hole wall, a round) also its radius and diameter. |
+| Edge   | Its length. A circle or arc also its radius, diameter and centre; an arc the angle it spans.   |
+| Vertex | Its position (x, y, z).                                                                        |
+
+With **exactly two items selected**, **Between** adds:
+
+- **Distance**: the shortest distance between the two, for any combination (face to face, edge to edge, vertex to face, and so on). Two items that touch are 0 apart. The view draws the two closest points (the witness points) and a dashed line between them, labelled with the distance. For parallel faces, many point pairs are equally close; the pair in the middle of them is drawn.
+- **X, Y and Z distance**: how far apart those two closest points are along each axis.
+- **Angle**: between two straight edges, two flat faces, or a straight edge and a flat face. A hole or other cylindrical face counts as its axis. The angle is always between 0 and 90 degrees, like the angle between two lines on paper.
+- **Between normals**: for two flat faces, the angle between the directions they face (0 to 180 degrees). Two opposite sides of a block are 0 degrees apart as planes but 180 degrees apart as normals.
+
+With nothing selected, and always at the bottom, **Body** shows the whole part: **Volume**, **Surface area**, **Centre of mass** (for a body of uniform density), **Size** (the bounding box along X, Y and Z) and the bounding box corners, **Box min** and **Box max**.
+
+## Units
+
+Every value is shown in the document's display units, the same ones the rest of the app uses. In a woodworking document set to feet and inches, lengths read `3' 4-1/2"`, rounded to the fraction the document uses; in a metric one, `1028.70 mm`. Angles follow the document's angle unit (degrees or radians).
+
+Areas and volumes are shown in the square and cubic length unit (mm², cm³, in², ft³, ...). Documents with fractional inch formats show them in square and cubic inches.
+
+## Material and mass
+
+Pick a **Material** under Body to get the body's **Mass**. The choice is saved in the document and is one undo step, like any other change. The built-in materials, with the typical density each uses:
+
+| Material             | Typical density | Source                                                   |
+| -------------------- | --------------- | -------------------------------------------------------- |
+| PLA                  | 1240 kg/m³      | NatureWorks Ingeo 4043D data sheet                       |
+| PETG                 | 1270 kg/m³      | Eastman Eastar 6763 data sheet                           |
+| ABS                  | 1040 kg/m³      | INEOS Styrolution Terluran GP-22 data sheet              |
+| Pine (eastern white) | 400 kg/m³       | The Wood Database, at 12% moisture content               |
+| Oak (red)            | 700 kg/m³       | The Wood Database, at 12% moisture content               |
+| Plywood (birch)      | 680 kg/m³       | Birch plywood makers' data (softwood plywood is lighter) |
+| MDF                  | 750 kg/m³       | European Panel Federation (600 to 800 kg/m³)             |
+| Aluminium 6061       | 2700 kg/m³      | ASM data sheet for 6061-T6                               |
+| Steel (carbon)       | 7850 kg/m³      | EN 1993-1-1 (Eurocode 3)                                 |
+
+These are typical values, so the mass is an estimate. Real stock varies: wood with the species, the board and how dry it is; panels by maker; filament by brand. A 3D print weighs less than its solid volume suggests, because of its infill. Hover over the mass to see the density and source it used. Metric documents show grams or kilograms, imperial ones ounces or pounds.
+
+## Copying values
+
+Every value has a **Copy** button that puts it on the clipboard exactly as shown. **Copy all** copies every section, one value per line, for pasting into a cut list or a message.
+
+## Good to know
+
+- Measuring needs the geometry kernel. Scenes without it (the test scenes) say so in the panel.
+- The measurement is redone whenever the selection or the model changes.
+- The witness line is drawn on top of the model, so it stays visible when the closest points are behind a face.

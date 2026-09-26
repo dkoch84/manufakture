@@ -16,6 +16,12 @@ import type { TopoDS_Edge, TopoDS_Face, TopoDS_Shape } from 'libcascade/single/i
 import { KernelError, isFatalWasmError } from './errors';
 import { collectHistory, resultMaps, type HistorySource, type ResultMaps } from './history';
 import { tessellate } from './mesh';
+import {
+  measureShape,
+  type MeasureOptions,
+  type MeasureResult,
+  type MeasureTarget,
+} from './measure';
 import { mapShapes, norm, Scope, toVec3, type Oc, type ShapeList } from './occt';
 import type { Names } from './naming';
 import { buildProfile } from './profile';
@@ -843,6 +849,21 @@ export class Kernel {
         vertices: mapShapes(oc, s, body, 'vertex').Extent(),
       };
     });
+  }
+
+  /**
+   * Exact measurements of faces, edges and vertices of a shape (by name on a
+   * named body, or by index), the distance and angle between two of them,
+   * and with `body` the shape's mass properties. See measure.ts.
+   */
+  measure(
+    shape: ShapeId,
+    targets: readonly MeasureTarget[],
+    options: MeasureOptions = {},
+  ): MeasureResult {
+    return this.op('measure', (s) =>
+      measureShape(this.oc, s, this.get(shape, 'measure'), this.named(shape), targets, options),
+    );
   }
 
   /** Tessellate: triangles per face and polylines per edge, in face-map and edge-map order. */

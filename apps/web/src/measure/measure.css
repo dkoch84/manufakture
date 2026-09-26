@@ -1,0 +1,84 @@
+.measure-panel h3 {
+  font-size: 0.8rem;
+  margin: 0.6rem 0 0.25rem;
+  color: #2b3440;
+}
+
+.measure-panel dl {
+  margin: 0;
+}
+
+.measure-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.4rem;
+  align-items: baseline;
+  padding: 0.1rem 0;
+}
+
+.measure-row dt {
+  color: #5b6673;
+  flex: 0 0 auto;
+}
+
+.measure-row dd {
+  margin: 0;
+  display: flex;
+  gap: 0.3rem;
+  align-items: baseline;
+  text-align: right;
+}
+
+.measure-value {
+  font-variant-numeric: tabular-nums;
+  word-break: break-word;
+}
+
+.measure-copy {
+  font-size: 0.7rem;
+  padding: 0 0.25rem;
+}
+
+.measure-material {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin-top: 0.4rem;
+}
+
+.measure-copy-all {
+  margin-top: 0.5rem;
+}
+
+.measure-error {
+  color: #a3242a;
+}
+
+.measure-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.measure-line {
+  stroke: #d9480f;
+  stroke-width: 2;
+  stroke-dasharray: 6 4;
+}
+
+.measure-point {
+  fill: #d9480f;
+  stroke: #fff;
+  stroke-width: 1.5;
+}
+
+.measure-label {
+  fill: #7a2a07;
+  font-size: 12px;
+  paint-order: stroke;
+  stroke: #fff;
+  stroke-width: 3px;
+}

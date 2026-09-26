@@ -9,6 +9,7 @@ import type {
 } from '@manufakture/sketch/model';
 import { z } from 'zod';
 import { FEATURE_ID_PATTERN, isSubId } from './ids';
+import { MATERIAL_IDS } from './materials';
 
 /**
  * The document schema, current file format version (ADR 0004). Everything here is plain JSON
@@ -27,7 +28,7 @@ import { FEATURE_ID_PATTERN, isSubId } from './ids';
  */
 
 /** The file format version this code reads and writes. Bump it only together with a migration. */
-export const FORMAT_VERSION = 1;
+export const FORMAT_VERSION = 2;
 /** The topological naming scheme version (T0.5) that stored references are written in. */
 export const NAMING_SCHEME = 1;
 export const FORMAT_TAG = 'manufakture';
@@ -569,6 +570,8 @@ export const VariableSchema = z.strictObject({
   expression: StoredExpressionSchema,
 });
 
+export const MaterialIdSchema = z.enum(MATERIAL_IDS);
+
 export const PartSchema = z.strictObject({
   id: z.string().min(1),
   name: featureName,
@@ -581,6 +584,12 @@ export const PartSchema = z.strictObject({
   rollbackIndex: z.int().min(0).nullable(),
   /** Next number per id counter (feature kind, or `e`, `k`, `r`). Only ever increases. */
   nextIds: z.record(z.string(), z.int().min(1)),
+  /**
+   * What the part's body is made of: a built-in material id (`MATERIALS`). Absent: not set. A
+   * part has one body until multi-body parts (M2), so this is the body's material. Since
+   * version 2.
+   */
+  material: MaterialIdSchema.exactOptional(),
 });
 
 export const DocumentSchema = z.strictObject({

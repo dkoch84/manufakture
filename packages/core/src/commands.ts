@@ -6,6 +6,7 @@ import { fail, ok, schemaError, type CoreResult } from './result';
 import {
   DisplayUnitsSchema,
   FeatureSchema,
+  MaterialIdSchema,
   StoredExpressionSchema,
   type Feature,
   type ManufaktureDocument,
@@ -67,6 +68,12 @@ export const SimpleCommandSchema = z.discriminatedUnion('type', [
     suppressed: z.boolean(),
   }),
   z.strictObject({ type: z.literal('renameFeature'), partId, featureId, name: z.string() }),
+  /** Set what the part's body is made of (a built-in material id), or clear it with `null`. */
+  z.strictObject({
+    type: z.literal('setMaterial'),
+    partId,
+    material: MaterialIdSchema.nullable(),
+  }),
   /** Move the rollback bar; `null` puts it after the last feature. */
   z.strictObject({ type: z.literal('setRollback'), partId, index: index.nullable() }),
   /** Create or update a variable. `index` places a new one (default: last); ignored on update. */
@@ -482,6 +489,15 @@ function applyPartCommand(part: Part, command: PartCommand): CoreResult<PartAppl
       return ok({
         part: withFeatures(part, features, part.rollbackIndex),
         inverse: { type: 'renameFeature', partId, featureId: old.id, name: old.name },
+      });
+    }
+
+    case 'setMaterial': {
+      const { material: _old, ...rest } = part;
+      void _old;
+      return ok({
+        part: command.material === null ? rest : { ...rest, material: command.material },
+        inverse: { type: 'setMaterial', partId, material: part.material ?? null },
       });
     }
 

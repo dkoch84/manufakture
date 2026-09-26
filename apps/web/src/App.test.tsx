@@ -5,7 +5,10 @@ import { createDocument } from '@manufakture/core';
 import { App } from './App';
 import { createSketchSession } from './sketcher/session';
 import { immediateSolver } from './sketcher/testSolver';
+import { twoFaces } from './measure/fixtures';
+import type { Measurer } from './measure/measurer';
 import { createDocumentStore } from './state/document';
+import { createMeasureStore } from './state/measure';
 import { createSelectionStore, geometryRef } from './state/selection';
 import { createViewSettingsStore } from './state/viewSettings';
 import type { BodyInput } from './viewport/bodies';
@@ -14,7 +17,7 @@ import { boxBody } from './viewport/testMeshes';
 import type { EngineFactory, ViewportApi } from './viewport/Viewport';
 
 /** A loader the test drives by hand. */
-function manualLoader() {
+function manualLoader(measurer?: Measurer) {
   let report!: (s: LoadStatus) => void;
   let resolve!: (b: BodyInput[]) => void;
   let reject!: (e: Error) => void;
@@ -29,6 +32,7 @@ function manualLoader() {
       return result;
     },
     dispose: vi.fn(),
+    ...(measurer ? { measurer } : {}),
   };
   return { loader, report: (s: LoadStatus) => report(s), resolve, reject };
 }
@@ -58,14 +62,15 @@ function fakeEngine() {
   return { api, factory };
 }
 
-function setup() {
-  const manual = manualLoader();
+function setup(options: { measurer?: Measurer } = {}) {
+  const manual = manualLoader(options.measurer);
   const engine = fakeEngine();
   const selection = createSelectionStore();
   const settings = createViewSettingsStore();
   const documents = createDocumentStore(createDocument({ id: 'doc', name: 'Test' }));
   const solver = immediateSolver({ dof: 0 });
   const sketchSession = createSketchSession(solver.solver);
+  const measure = createMeasureStore();
   const view = render(
     <App
       loader={manual.loader}
@@ -74,9 +79,20 @@ function setup() {
       settings={settings}
       documents={documents}
       sketchSession={sketchSession}
+      measure={measure}
     />,
   );
-  return { ...manual, engine, selection, settings, documents, sketchSession, solver, view };
+  return {
+    ...manual,
+    engine,
+    selection,
+    settings,
+    documents,
+    sketchSession,
+    solver,
+    measure,
+    view,
+  };
 }
 
 describe('App', () => {
@@ -191,6 +207,103 @@ describe('App', () => {
     t.view.unmount();
     expect(t.engine.api.dispose).toHaveBeenCalledTimes(1);
     expect(window.__manufakture).toBeUndefined();
+  });
+
+  describe('measuring', () => {
+    function measurerReplying() {
+      const measurer: Measurer = {
+        measure: vi.fn(async () => ({ ok: true as const, result: twoFaces() })),
+      };
+      return measurer;
+    }
+
+    it('measures the body at once, then the selection, and draws the witness points', async () => {
+      const measurer = measurerReplying();
+      const t = setup({ measurer });
+      await act(async () => t.resolve([boxBody()]));
+      await waitFor(() => expect(measurer.measure).toHaveBeenCalledWith('box', [], true));
+      expect(screen.getByText(/Select faces, edges or vertices/)).toBeDefined();
+      await act(async () =>
+        t.selection
+          .getState()
+          .select([
+            geometryRef('face', 'box', 'box/top'),
+            geometryRef('face', 'box', 'placeholder:face:5', { placeholder: true }),
+          ]),
+      );
+      await waitFor(() =>
+        expect(measurer.measure).toHaveBeenLastCalledWith(
+          'box',
+          [
+            { kind: 'face', name: 'box/top' },
+            { kind: 'face', index: 5 },
+          ],
+          true,
+        ),
+      );
+      expect((await screen.findByTestId('measure-value-distance')).textContent).toBe('20.00 mm');
+      expect(screen.getByTestId('measure-value-body.volume').textContent).toBe('44000.00 mm³');
+      // The witness line, projected by the viewport.
+      expect(screen.getByTestId('measure-witness')).toBeDefined();
+      expect(t.engine.api.projectToCanvas).toHaveBeenCalledWith([10, 10, 20]);
+      expect(t.engine.api.projectToCanvas).toHaveBeenCalledWith([10, 10, 0]);
+    });
+
+    it('shows values in the display units, and copies them', async () => {
+      const t = setup({ measurer: measurerReplying() });
+      const writeText = vi.fn(async () => {});
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+      await act(async () => t.resolve([boxBody()]));
+      act(() => {
+        t.documents.getState().execute({
+          type: 'setDisplayUnits',
+          units: { length: { unit: 'ft-in', denominator: 16 }, angle: { unit: 'deg' } },
+        });
+      });
+      expect((await screen.findByTestId('measure-value-distance')).textContent).toBe('13/16"');
+      fireEvent.click(screen.getByRole('button', { name: 'Copy Distance' }));
+      await waitFor(() => expect(writeText).toHaveBeenCalledWith('13/16"'));
+      fireEvent.click(screen.getByRole('button', { name: 'Copy all' }));
+      await waitFor(() =>
+        expect(writeText).toHaveBeenLastCalledWith(expect.stringContaining('Distance: 13/16"')),
+      );
+    });
+
+    it('sets the body material as one undoable command, and shows the mass', async () => {
+      const t = setup({ measurer: measurerReplying() });
+      await act(async () => t.resolve([boxBody()]));
+      const select = await screen.findByRole('combobox', { name: 'Material' });
+      expect(screen.queryByTestId('measure-value-body.mass')).toBeNull();
+      fireEvent.change(select, { target: { value: 'pla' } });
+      expect(t.documents.getState().document.parts[0]!.material).toBe('pla');
+      expect(t.documents.getState().undoLabel).toBe('Set material to PLA');
+      // 44000 mm3 of PLA at 1240 kg/m3.
+      expect(screen.getByTestId('measure-value-body.mass').textContent).toBe('54.56 g');
+      act(() => {
+        t.documents.getState().undo();
+      });
+      expect(t.documents.getState().document.parts[0]!.material).toBeUndefined();
+      expect(screen.queryByTestId('measure-value-body.mass')).toBeNull();
+    });
+
+    it('explains a scene without a kernel, and shows measuring errors', async () => {
+      const t = setup();
+      await act(async () => t.resolve([boxBody()]));
+      expect(await screen.findByText(/needs the geometry kernel/)).toBeDefined();
+      const failing = setup({
+        measurer: { measure: async () => ({ ok: false, message: 'unknown shape id 9' }) },
+      });
+      await act(async () => failing.resolve([boxBody()]));
+      expect((await screen.findByText('unknown shape id 9')).getAttribute('role')).toBe('alert');
+    });
+
+    it('registers the measure store as a test hook', async () => {
+      const t = setup({ measurer: measurerReplying() });
+      await act(async () => t.resolve([boxBody()]));
+      expect(window.__manufakture?.measure).toBe(t.measure);
+      t.view.unmount();
+      expect(window.__manufakture?.measure).toBeUndefined();
+    });
   });
 
   describe('the scene loader (and with it the kernel worker)', () => {

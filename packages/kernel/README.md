@@ -66,10 +66,11 @@ A batch is a list of ops and gets one reply (ADR 0007, decision 3). An op can us
 | `feature`    | `body` (a named body or null), `feature` (a `FeatureInput`)                 | `FeatureOutcome`: the body after the feature, its names, errors, warnings (see Part features)      |
 | `resolve`    | `shape` (a named body), `refs` (`FaceRef` / `EdgeRef`)                      | `{ results }`: per reference its `Resolution` plus the face or edge geometry                       |
 | `pick`       | `shape` (a named body), `kind` (`face`, `edge`), `index`                    | `{ ref }`: the `FaceRef` / `EdgeRef` a click there is stored as, or null                           |
+| `measure`    | `shape`, `targets` (`{ kind, name }` or `{ kind, index }`), `body?`         | `MeasureResult`: per target its exact values, distance and angle of two, body properties (Measure) |
 
 Every op takes `featureId?` (echoed in its result and any failure, and stamped on the shapes it makes) and `keep?` (default true; `false` releases the op's shape when the batch ends, for intermediates).
 
-Inside the worker the same operations are methods of the synchronous `Kernel` (`box`, `cylinder`, `profile`, `extrude`, `boolean`, `fillet`, `mesh`, `topology`, `properties`, `count`, `release`, `checkpoint`, `releaseSince`), which throw `KernelError`. For the part features it also has `revolve` (with caps and the face each entity swept, 0 for an entity on the axis), `chamfer` (distance, two distances or distance and angle, on a reference face), `shell` (remove faces, wall inward or outward), `offset`, `draft`, `transform` (translate, rotate, mirror), `compound`, `geometry` (the line, circle, plane or axis of a face or edge), `isValid`, and `setNames` / `named` (a body's names, kept on its arena entry and dropped with it). Every topology-changing one returns kinded history. The regen engine (`packages/regen`, #932) calls `applyFeature` directly from the worker, or sends `feature` ops.
+Inside the worker the same operations are methods of the synchronous `Kernel` (`box`, `cylinder`, `profile`, `extrude`, `boolean`, `fillet`, `mesh`, `topology`, `properties`, `measure`, `count`, `release`, `checkpoint`, `releaseSince`), which throw `KernelError`. For the part features it also has `revolve` (with caps and the face each entity swept, 0 for an entity on the axis), `chamfer` (distance, two distances or distance and angle, on a reference face), `shell` (remove faces, wall inward or outward), `offset`, `draft`, `transform` (translate, rotate, mirror), `compound`, `geometry` (the line, circle, plane or axis of a face or edge), `isValid`, and `setNames` / `named` (a body's names, kept on its arena entry and dropped with it). Every topology-changing one returns kinded history. The regen engine (`packages/regen`, #932) calls `applyFeature` directly from the worker, or sends `feature` ops.
 
 Profile entities may carry an `id` (a sketch region's edge id, `e2` or `e2#1`; unique within the profile, else `invalid-argument`). The kernel does not interpret it: `extrude` returns `sideIds`, the side face of every tagged entity by id, so the naming layer can name `<feature>:side:<id>` directly. `packages/sketch`'s `regionProfile` produces such loops from a sketch region; `regions.test.ts` builds its fixture profiles (`fixtures/region-profiles.json`) end to end.
 
@@ -153,6 +154,16 @@ For the UI and sketch placement: `resolveReferences` (the `resolve` op) gives ea
 - **Instances.** A pattern instance is `<pattern>:i<k>/<source name>`, a mirror image `<mirror>:image/<source name>`. Their lineage is prefixed too and never contains the source names, so a reference to the source never finds a copy, and a copy can be referenced like any face (`{ faces: [top, 'pattern#3:i2/extrude#2:side:c1'] }`).
 - **Nested positional names.** `splitParent` reads a trailing `#<digits>` as a kernel split. In a corner name whose last component is a piece (`fillet#3:corner:A&B&C#2`, where `C#2` is a piece of `C`) that reading is ambiguous: the "parent" `fillet#3:corner:A&B&C` is the same corner round the whole `C`, which is the right face when `C` became whole again, and such a resolution is always `fragile`, so it warns.
 - **Sketch region pieces.** Region edge ids `e2#1` are positional: their faces are fragile, and `e2` is their ancestor, so a reference to `side:e2` finds `side:e2#1` as a descendant.
+
+### Measure
+
+`Kernel.measure(shape, targets, { body? })` (the `measure` op, `src/measure.ts`) measures the exact B-rep, never the mesh, in millimetres and radians. A target is a face, edge or vertex of the shape: by its name on a body made by feature operations (faces and edges by the naming layer's name, a vertex by `vertexName`, the sorted names of the faces around it joined by `&`), or by 1-based index (a body with no names, and the viewport's vertices, which have no mesh name slots). A target that is not on the shape, or whose name matches several, is reported in its `items` slot (`not-found`, `ambiguous`) and the others are still measured.
+
+- **Per target**: a vertex's point; an edge's curve type, length, end points, midpoint, direction (lines) and centre, radius, axis and swept angle (circles and arcs); a face's surface type, area, centroid, outward normal (planes), axis and radius (cylinders, spheres, tori; cones get the axis).
+- **Two targets**: `distance`, the minimum distance from `BRepExtrema_DistShapeShape` with its witness points `from` and `to` (when several pairs reach it, as between parallel faces, the pair nearest the middle of all of them), and `angle` when both have a direction: between two lines (line edges, cylinder and cone axes), two planes, or a line and a plane, always 0 to 90 degrees, plus for two planar faces the angle between their outward normals (0 to 180).
+- **`body: true`**: volume, surface area, centre of mass (`BRepGProp`, uniform density) and a tight bounding box (`BRepBndLib.AddOptimal`, not enlarged by tolerances, unlike `properties`).
+
+`BRepExtrema_DistShapeShape` holds both input shapes, so it is released before delete by loading null shapes into it (`releaseOwned`). `measure.test.ts` checks every value against geometry computed by hand.
 
 ### Hole sizes
 
@@ -255,6 +266,7 @@ The tests run the real 42 MB kernel in Node, one instance per test file (about h
 - `features.test.ts`: golden volume, face count and bounding box of every feature against hand-computed values, the names each gives, and the known-hard corpus;
 - `survival.test.ts`: the T0.5 scenarios on the production features: the fillet stays on its semantic edge through resizing, sketch splits, reordering and all at once (its geometry is asserted), lost, ambiguous, ancestor, ends and ordinal resolutions, with their warnings;
 - `feature-ops.test.ts`: the `feature`, `resolve` and `pick` ops through the service, and meshes of named bodies with every name slot filled;
+- `measure.test.ts`: golden measurements (volume, area, centre of mass, bounding box, face-face, skew edge-edge and vertex-face distances with witness points, angles, radii, arcs) of boxes, cylinders and named prisms, and the `measure` op through the service;
 - `names.test.ts`, `naming.test.ts`, `ops.test.ts`: name tables, the naming rules on synthetic history, and op validation, no wasm.
 
 For golden tests, `createNodeKernel()` gives a synchronous kernel and `createNodeService()` the full service, both from a module compiled once per process.

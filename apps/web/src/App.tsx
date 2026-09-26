@@ -2,7 +2,11 @@ import { sketchToWorld } from '@manufakture/sketch';
 import type { Vec2 } from '@manufakture/sketch/model';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from 'zustand';
+import { MeasureOverlay } from './measure/MeasureOverlay';
+import { MeasurePanel } from './measure/MeasurePanel';
+import { measureTargets } from './measure/measurer';
 import { documentStore, historyShortcut, type DocumentStoreApi } from './state/document';
+import { measureStore, type MeasureStore } from './state/measure';
 import { isGeometryRef, selectionStore, type SelectionStore } from './state/selection';
 import { viewSettingsStore, type ViewSettingsStore } from './state/viewSettings';
 import { sketchFeatures } from './sketcher/commit';
@@ -27,6 +31,7 @@ import { SelectionPanel, Toolbar } from './viewport/Toolbar';
 import { Viewport, type EngineFactory, type ViewportApi } from './viewport/Viewport';
 import './viewport/viewport.css';
 import './sketcher/sketcher.css';
+import './measure/measure.css';
 
 export interface AppProps {
   /** A loader owned by the caller: the app uses it but never disposes it. */
@@ -43,6 +48,8 @@ export interface AppProps {
   documents?: DocumentStoreApi;
   /** The sketch session; by default one on the solver worker, started on the first sketch. */
   sketchSession?: SketchSessionStore;
+  /** The measure tool's state; it measures through the loader's `measurer`. */
+  measure?: MeasureStore;
 }
 
 export function App({
@@ -53,6 +60,7 @@ export function App({
   settings = viewSettingsStore,
   documents = documentStore,
   sketchSession,
+  measure = measureStore,
 }: AppProps) {
   // A loader starts nothing until `load`, so the initialiser running twice
   // under StrictMode leaves nothing behind.
@@ -148,6 +156,39 @@ export function App({
     return ref && isGeometryRef(ref) ? facePlacement(bodies, ref) : null;
   }, [bodies, selected]);
 
+  // Measure the selection (and the body it is on) whenever either changes.
+  const bodiesRevision = useRef(0);
+  useEffect(() => {
+    bodiesRevision.current++;
+  }, [bodies]);
+  useEffect(() => {
+    if (bodies === null) return;
+    const refs = selected.filter(isGeometryRef);
+    const bodyId = refs[0]?.bodyId ?? bodies[0]?.id ?? null;
+    void measure.getState().measure(
+      loader.measurer ?? null,
+      bodyId === null
+        ? null
+        : {
+            bodyId,
+            targets: measureTargets(refs.filter((r) => r.bodyId === bodyId)),
+            revision: bodiesRevision.current,
+          },
+    );
+  }, [bodies, selected, loader, measure]);
+
+  // Registered with the viewport, like the other hooks: tests wait for the viewport hook.
+  useEffect(() => {
+    if (!testHooksEnabled || !viewport) return;
+    window.__manufakture = { ...window.__manufakture, measure };
+    return () => {
+      const hooks = window.__manufakture;
+      if (!hooks) return;
+      delete hooks.measure;
+      if (Object.keys(hooks).length === 0) delete window.__manufakture;
+    };
+  }, [viewport, measure]);
+
   const canUndo = useStore(documents, (s) => s.canUndo);
   const canRedo = useStore(documents, (s) => s.canRedo);
   const undoLabel = useStore(documents, (s) => s.undoLabel);
@@ -208,6 +249,9 @@ export function App({
           {...stores}
         >
           {viewport && <SketchLayer viewport={viewport} session={session} sketches={sketches} />}
+          {viewport && !sketching.active && (
+            <MeasureOverlay viewport={viewport} measure={measure} units={document.units} />
+          )}
           {sketching.active && <SketchStatusBar session={session} />}
         </Viewport>
         <div className="side-panel">
@@ -220,6 +264,7 @@ export function App({
           ) : (
             <>
               <SelectionPanel selection={selection} />
+              <MeasurePanel measure={measure} documents={documents} />
               <aside className="selection-panel">
                 <SketchList
                   sketches={sketches}

@@ -32,6 +32,8 @@ export interface PartChange {
   /** The relative order of features present in both documents changed. */
   readonly reordered: boolean;
   readonly rollbackChanged: boolean;
+  /** The part's material changed. No geometry changes; masses do. */
+  readonly materialChanged: boolean;
   /**
    * The first index in the new feature list whose result may differ, because the feature or an
    * earlier one was added, removed, edited, moved, suppressed, or reads a changed variable (also
@@ -153,6 +155,7 @@ function diffPart(
     mark(Math.min(p, n));
   }
   if (first !== null && first > nf.length) first = nf.length;
+  const materialChanged = !!prev && !!next && prev.material !== next.material;
 
   return {
     partId,
@@ -162,6 +165,7 @@ function diffPart(
     changed,
     reordered,
     rollbackChanged,
+    materialChanged,
     firstAffectedIndex: first,
   };
 }
@@ -189,6 +193,7 @@ export function diffDocuments(
       c.added.length + c.removed.length + c.changed.length === 0 &&
       !c.reordered &&
       !c.rollbackChanged &&
+      !c.materialChanged &&
       c.firstAffectedIndex === null &&
       deepEqual(old, p);
     if (!noop) parts.push(c);

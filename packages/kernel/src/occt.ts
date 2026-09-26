@@ -47,6 +47,15 @@ export function releaseOwned(oc: Oc, item: Deletable): void {
     (o.Reset as () => void).call(o);
   } else if (name === 'BRepOffsetAPI_DraftAngle') {
     (o.Clear as () => void).call(o);
+  } else if (name === 'BRepExtrema_DistShapeShape') {
+    // Holds both input shapes; loading null shapes drops their handles.
+    const empty = new oc.TopoDS_Shape();
+    try {
+      (o.LoadS1 as (s: unknown) => void).call(o, empty);
+      (o.LoadS2 as (s: unknown) => void).call(o, empty);
+    } finally {
+      empty.delete();
+    }
   }
 }
 

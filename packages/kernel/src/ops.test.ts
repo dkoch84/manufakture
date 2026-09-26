@@ -32,6 +32,16 @@ describe('validateOp', () => {
       { op: 'topology', shape: { result: 2 } },
       { op: 'properties', shape: 1 },
       { op: 'release', shapes: [] },
+      { op: 'measure', shape: 1, targets: [] },
+      {
+        op: 'measure',
+        shape: { result: 0 },
+        targets: [
+          { kind: 'face', name: 'extrude#1:cap:end' },
+          { kind: 'vertex', index: 3 },
+        ],
+        body: true,
+      },
     ];
     for (const op of ops) expect(validateOp(op), JSON.stringify(op)).toBeNull();
   });
@@ -68,6 +78,13 @@ describe('validateOp', () => {
     [{ op: 'extrude', profile: 1, distance: 'far' }, /a number or a vector/],
     [{ op: 'boolean', kind: 'xor', shape: 1, tools: [2] }, /one of fuse, cut, common/],
     [{ op: 'boolean', kind: 'cut', shape: 1, tools: [] }, /op\.tools must not be empty/],
+    [{ op: 'measure', shape: 1 }, /op\.targets must be an array/],
+    [
+      { op: 'measure', shape: 1, targets: [{ kind: 'solid', index: 1 }] },
+      /op\.targets\[0\]\.kind must be one of face, edge, vertex/,
+    ],
+    [{ op: 'measure', shape: 1, targets: [{ kind: 'edge' }] }, /op\.targets\[0\]\.index/],
+    [{ op: 'measure', shape: 1, targets: [], body: 1 }, /op\.body must be a boolean/],
     [{ op: 'fillet', shape: 1, edges: 1, radius: 1 }, /op\.edges must be an array/],
     [{ op: 'tessellate', shape: 1, deflection: { linear: 'fine' } }, /deflection\.linear/],
     [{ op: 'release', shapes: [{ result: '0' }] }, /op\.shapes\[0\]/],

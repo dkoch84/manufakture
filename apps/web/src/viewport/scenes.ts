@@ -9,7 +9,8 @@ import {
   type KernelClient,
   type KernelClientOptions,
 } from '@manufakture/kernel/client';
-import type { KernelOp, LoadProgress, MeshData, Topology } from '@manufakture/kernel';
+import type { KernelOp, LoadProgress, MeshData, ShapeId, Topology } from '@manufakture/kernel';
+import type { Measurer } from '../measure/measurer';
 import { testHooksEnabled } from '../testHooks';
 import type { BodyInput } from './bodies';
 import { fillPlaceholderNames } from './naming';
@@ -30,6 +31,8 @@ export interface SceneLoader {
    */
   load(onStatus: (status: LoadStatus) => void, signal?: AbortSignal): Promise<BodyInput[]>;
   dispose(): void;
+  /** Exact measurements of the loaded bodies in the kernel; absent for kernel-free scenes. */
+  measurer?: Measurer;
 }
 
 /** Shared plumbing: one load, status fan-out, late subscribers get the latest status. */
@@ -134,7 +137,24 @@ export function kernelDemoLoader(
   spawn: (options: KernelClientOptions) => KernelClient,
 ): SceneLoader {
   let client: KernelClient | null = null;
-  return loaderFrom(
+  let part: ShapeId | null = null;
+  const measurer: Measurer = {
+    async measure(bodyId, targets, body) {
+      if (client === null || part === null || bodyId !== DEMO_BODY_ID) {
+        return { ok: false, message: `The kernel has no body ${bodyId}.` };
+      }
+      // At the current generation: a measurement never cancels an edit in flight.
+      const reply = await client.submit(
+        [{ op: 'measure', shape: part, targets, body }] as const,
+        client.latestGeneration,
+      );
+      if (reply === null) return null;
+      const [r] = reply.results;
+      if (reply.status !== 'done' || r === undefined) return null;
+      return r.ok ? { ok: true, result: r.value } : { ok: false, message: r.error.message };
+    },
+  };
+  const loader = loaderFrom(
     { label: 'Starting the geometry kernel', fraction: null },
     async (report) => {
       const c = spawn({
@@ -152,13 +172,16 @@ export function kernelDemoLoader(
       for (const r of reply.results) {
         if (!r.ok) throw new Error(`Kernel ${r.op} failed: ${r.error.message}`);
       }
+      const cut = reply.results[3];
       const mesh = reply.results[4];
       const topology = reply.results[5];
       if (!mesh.ok || !topology.ok) throw new Error('The demo part has no mesh.');
+      if (cut.ok) part = cut.value.shape;
       return [demoBody(mesh.value, reply.names, topology.value)];
     },
     () => client?.terminate(),
   );
+  return { ...loader, measurer };
 }
 
 export function demoBody(mesh: MeshData, names: readonly string[], topology: Topology): BodyInput {

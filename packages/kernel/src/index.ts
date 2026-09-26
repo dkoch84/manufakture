@@ -95,6 +95,7 @@ export type {
   FeatureOp,
   FilletOp,
   KernelOp,
+  MeasureOp,
   OpName,
   OpResult,
   OpResults,
@@ -110,6 +111,20 @@ export type {
   TessellateOp,
   TopologyOp,
 } from './ops';
+export type {
+  AngleMeasure,
+  BodyMeasure,
+  DistanceMeasure,
+  MeasureAxis,
+  MeasureItemReport,
+  MeasureOptions,
+  MeasureResult,
+  MeasureTarget,
+  MeasuredEdge,
+  MeasuredFace,
+  MeasuredItem,
+  MeasuredVertex,
+} from './measure';
 export { NameTable, applyNames, faceNameOfTriangle } from './names';
 export type { SubShapeName } from './names';
 export { meshBuffers } from './mesh';

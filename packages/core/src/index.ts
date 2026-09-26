@@ -6,6 +6,15 @@ export * from './ids';
 export * from './features';
 export * from './document';
 export {
+  MATERIALS,
+  MATERIAL_IDS,
+  findMaterial,
+  massGrams,
+  type Material,
+  type MaterialCategory,
+  type MaterialId,
+} from './materials';
+export {
   checkDocument,
   expressionReferences,
   expressionVariableNames,
@@ -36,6 +45,7 @@ export {
   FORMAT_MIGRATIONS,
   NAMING_MIGRATIONS,
   migrateV0ToV1,
+  migrateV1ToV2,
   type JsonObject,
   type Migration,
 } from './migrations';

@@ -23,7 +23,7 @@ import {
 ```ts
 interface ManufaktureDocument {
   format: 'manufakture';
-  version: 1; // file format version, FORMAT_VERSION
+  version: 2; // file format version, FORMAT_VERSION
   namingScheme: 1; // topological naming scheme version (T0.5), NAMING_SCHEME
   id: string;
   name: string;
@@ -38,11 +38,26 @@ interface Part {
   features: Feature[]; // regen order
   rollbackIndex: number | null; // features [0, rollbackIndex) regenerate; null means all
   nextIds: Record<string, number>; // next number per id counter; only ever increases
+  material?: MaterialId; // what the part's body is made of; absent: not set (since version 2)
 }
 ```
 
 `createDocument({ id, name, units? })` makes an empty document with one part, `part#1`. Core never
 invents document ids; pass a UUID or similar.
+
+### Materials
+
+`MATERIALS` (`src/materials.ts`) is the built-in table: PLA, PETG, ABS, pine, oak, plywood, MDF,
+aluminium 6061 and steel, each with an `id`, a display `name`, a `category`, a **typical** density
+in kg/m3, the range stock is usually found in where it varies notably, and the `source` the value
+comes from (maker data sheets for the plastics and aluminium, The Wood Database for pine and oak,
+EN 1993-1-1 for steel). Real stock varies with species, moisture, maker and infill, so a mass
+computed from these is an estimate. `findMaterial(id)` looks one up and `massGrams(mm3, kgPerM3)`
+turns a volume into grams.
+
+A part stores only the id (`material`), set with the `setMaterial` command. A part has one body
+until multi-body parts (M2), so the part's material is its body's. Ids are permanent: the table
+may gain materials, but an id is never removed or given another meaning.
 
 ### Numbers are expressions
 
@@ -283,6 +298,7 @@ resulting document with `checkDocument`, and returns `{ document, inverse }` or 
 | `setVariable`     | `name`, `expression`, `index?` (for a new one)        | `setVariable` or `deleteVariable`   |
 | `deleteVariable`  | `name`                                                | `setVariable` at the old index      |
 | `setDisplayUnits` | `units`                                               | `setDisplayUnits`                   |
+| `setMaterial`     | `partId`, `material` (a material id, `null` clears)   | `setMaterial` (the old one or null) |
 | `batch`           | `commands` (applied in order, all or nothing)         | `batch` of inverses, reversed       |
 
 `restoreFeature` is a history-only command: it is what undo and redo use to put a feature state
@@ -342,7 +358,8 @@ comparing documents (`diffDocuments`), so it is the same for every cause. Per pa
 removed and changed features, whether the order or the rollback bar changed, and
 `firstAffectedIndex`: the first feature whose result may differ, counting edits, moves,
 suppression, the rollback bar, and features that read a changed variable, directly or through
-other variables. A rename has none. Every listener runs even if one throws; the first error is
+other variables. A rename has none, and neither has a material change, which sets
+`materialChanged` instead: masses change, geometry does not. Every listener runs even if one throws; the first error is
 rethrown afterwards.
 
 ## File format
@@ -368,8 +385,10 @@ app should offer to save in the current version. Nothing is repaired silently.
 A migration is `{ from, to, description, migrate }`, a pure function from the JSON of version N
 to version N + 1 that must set the new `version`. `FORMAT_MIGRATIONS[i]` goes from i to i + 1;
 naming scheme migrations are a separate chain. Version 0 was the pre-release draft (no
-`namingScheme`, no `suppressed`, no `rollbackIndex`); `migrateV0ToV1` adds them, and the test
-migrates `src/fixtures/v0-bracket.json` to exactly `src/fixtures/v1-bracket.json`.
+`namingScheme`, no `suppressed`, no `rollbackIndex`); `migrateV0ToV1` adds them. Version 2 added
+the optional part `material`; `migrateV1ToV2` only bumps the version, since a version 1 part has no
+material. The test migrates `src/fixtures/v0-bracket.json` to exactly `v1-bracket.json`, and that
+to exactly `v2-bracket.json`.
 
 To change the file shape:
 
@@ -380,8 +399,9 @@ To change the file shape:
 
 ## Where this deviates from ADR 0004's first cut
 
-- **Added fields.** The document has `id` and `name`; a part has `name` and `rollbackIndex`; every
-  feature has `name` and `suppressed`. The ADR's shape was a first cut that expected feature kinds
+- **Added fields.** The document has `id` and `name`; a part has `name`, `rollbackIndex` and an
+  optional `material` (the material of its one body; per body once parts have several bodies);
+  every feature has `name` and `suppressed`. The ADR's shape was a first cut that expected feature kinds
   to add their own fields.
 - **Cuts are extrudes.** The ADR's comment lists `'cut'` as a kind and T0.5 names faces
   `cut#4:...`. Here a cut is an `extrude` (or `revolve`) with `operation: 'cut'`, so its faces are

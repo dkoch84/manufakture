@@ -54,8 +54,21 @@ export const migrateV0ToV1: Migration = {
   },
 };
 
+/**
+ * Version 2 added the optional per-part `material`. Nothing in a version 1 file changes: it has
+ * no material, which is what an absent `material` means.
+ */
+export const migrateV1ToV2: Migration = {
+  from: 1,
+  to: 2,
+  description: 'Add the optional part material',
+  migrate(doc) {
+    return { ...doc, version: 2 };
+  },
+};
+
 /** File format migrations, in order: `FORMAT_MIGRATIONS[i]` goes from version i to i + 1. */
-export const FORMAT_MIGRATIONS: readonly Migration[] = [migrateV0ToV1];
+export const FORMAT_MIGRATIONS: readonly Migration[] = [migrateV0ToV1, migrateV1ToV2];
 
 /**
  * Naming scheme migrations (T0.5): rewrite stored face and edge names when the naming scheme

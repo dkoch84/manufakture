@@ -195,6 +195,27 @@ describe('embind objects', () => {
       ['properties', () => k.properties(box)],
       ['mesh', () => k.mesh(box)],
       ['count', () => k.count(box, 'edge')],
+      [
+        'measure',
+        () =>
+          k.measure(
+            box,
+            [
+              { kind: 'face', index: 1 },
+              { kind: 'edge', index: 5 },
+              { kind: 'vertex', index: 2 },
+            ],
+            { body: true },
+          ),
+      ],
+      [
+        'measure a distance and an angle',
+        () =>
+          k.measure(box, [
+            { kind: 'face', index: 1 },
+            { kind: 'face', index: 2 },
+          ]),
+      ],
     ];
     for (const [name, fn] of ops) {
       tracker.reset();

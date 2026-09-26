@@ -28,6 +28,7 @@ import {
   type ReferenceReport,
 } from './features';
 import { DEFAULT_DEFLECTION, type BooleanKind, type Kernel } from './kernel';
+import type { MeasureResult, MeasureTarget } from './measure';
 import { applyNames, type NameTable } from './names';
 import { isUnnamed, type TopoRef } from './naming';
 import type {
@@ -118,6 +119,18 @@ export type PickOp = OpCommon & {
   index: number;
 };
 
+/**
+ * Exact measurements on a body: every target (a face, edge or vertex by name,
+ * or by 1-based index), the distance and angle between exactly two, and with
+ * `body` the body's volume, area, centre of mass and bounding box.
+ */
+export type MeasureOp = OpCommon & {
+  op: 'measure';
+  shape: ShapeRef;
+  targets: readonly MeasureTarget[];
+  body?: boolean;
+};
+
 export type KernelOp =
   | BoxOp
   | CylinderOp
@@ -131,7 +144,8 @@ export type KernelOp =
   | ReleaseOp
   | FeatureOp
   | ResolveOp
-  | PickOp;
+  | PickOp
+  | MeasureOp;
 
 export type OpName = KernelOp['op'];
 
@@ -156,6 +170,7 @@ export interface OpValues {
   feature: FeatureOutcome;
   resolve: { results: ReferenceReport[] };
   pick: { ref: TopoRef | null };
+  measure: MeasureResult;
 }
 
 export type OpValue<O extends { op: OpName }> = OpValues[O['op']];
@@ -181,6 +196,7 @@ const OP_NAMES: ReadonlySet<string> = new Set<OpName>([
   'feature',
   'resolve',
   'pick',
+  'measure',
 ]);
 
 // Validation ----------------------------------------------------------------------
@@ -194,6 +210,14 @@ const topoRef: Check = (v, p) =>
   isObject(v) && 'face' in v
     ? shape({ face: str })(v, p)
     : shape({ faces: arrayOf(str, true) }, { ends: arrayOf(str), ordinal: num })(v, p);
+
+/** A measure target: `{ kind, name }` or `{ kind, index }`. */
+const measureTarget: Check = (v, p) => {
+  const kind = oneOf('face', 'edge', 'vertex');
+  return isObject(v) && 'name' in v
+    ? shape({ kind, name: str })(v, p)
+    : shape({ kind, index: num })(v, p);
+};
 
 const FIELDS: Record<OpName, [Record<string, Check>, Record<string, Check>]> = {
   box: [{ size: vec3 }, { at: vec3 }],
@@ -226,6 +250,7 @@ const FIELDS: Record<OpName, [Record<string, Check>, Record<string, Check>]> = {
   ],
   resolve: [{ shape: shapeRef, refs: arrayOf(topoRef) }, {}],
   pick: [{ shape: shapeRef, kind: oneOf('face', 'edge'), index: num }, {}],
+  measure: [{ shape: shapeRef, targets: arrayOf(measureTarget) }, { body: bool }],
 };
 
 /** Why `value` is not a valid op, or null. */
@@ -315,6 +340,12 @@ export function executeOp(
       return { results: resolveReferences(kernel, resolve(op.shape, 'resolve'), op.refs) };
     case 'pick':
       return { ref: pickReference(kernel, resolve(op.shape, 'pick'), op.kind, op.index) };
+    case 'measure':
+      return kernel.measure(
+        resolve(op.shape, 'measure'),
+        op.targets,
+        op.body === undefined ? {} : { body: op.body },
+      );
     case 'release': {
       // Like every other op on a lost kernel: fatal, not a list of unknown ids.
       const lost = kernel.lostReason;
