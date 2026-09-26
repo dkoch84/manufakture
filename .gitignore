@@ -8,3 +8,6 @@ coverage/
 .env.*
 .DS_Store
 .pnpm-store/
+# Playwright output (apps/web)
+test-results/
+playwright-report/

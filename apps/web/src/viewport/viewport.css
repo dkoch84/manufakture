@@ -1,0 +1,170 @@
+:root {
+  font-family: system-ui, sans-serif;
+  color: #1f2733;
+  background: #f4f6f8;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.25rem 0.75rem;
+  border-bottom: 1px solid #d6dce3;
+  background: #fff;
+}
+
+.app-header h1 {
+  font-size: 1rem;
+  margin: 0;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.85rem;
+}
+
+.toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.toolbar-group legend {
+  float: left;
+  margin-right: 0.35rem;
+  color: #5b6673;
+}
+
+.toolbar button {
+  font: inherit;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid #c2cad3;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.toolbar button[aria-pressed='true'] {
+  background: #e3edff;
+}
+
+.app-main {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.viewport {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.viewport-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  outline: none;
+  touch-action: none;
+}
+
+.viewport-error {
+  position: absolute;
+  inset: 2rem;
+  padding: 1rem;
+  background: #fff4f2;
+  border: 1px solid #e0875e;
+}
+
+.selection-panel {
+  width: 16rem;
+  padding: 0.5rem 0.75rem;
+  border-left: 1px solid #d6dce3;
+  background: #fff;
+  font-size: 0.85rem;
+  overflow: auto;
+}
+
+.selection-panel h2 {
+  font-size: 0.9rem;
+  margin: 0.25rem 0 0.5rem;
+}
+
+.selection-panel ol {
+  padding-left: 1.25rem;
+}
+
+.selection-panel code {
+  word-break: break-all;
+}
+
+.selection-panel .kind {
+  color: #5b6673;
+}
+
+.badge {
+  margin-left: 0.3rem;
+  padding: 0 0.3rem;
+  border-radius: 3px;
+  background: #eef1f4;
+  font-size: 0.75rem;
+}
+
+.badge.warn {
+  background: #fff1d6;
+}
+
+.splash {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 0.5rem;
+}
+
+.splash-bar {
+  width: min(24rem, 80vw);
+  height: 6px;
+  border-radius: 3px;
+  background: #d6dce3;
+  overflow: hidden;
+}
+
+.splash-fill {
+  height: 100%;
+  background: #4d8dff;
+  transition: width 0.2s;
+}
+
+.splash-fill.indeterminate {
+  animation: splash-slide 1.2s ease-in-out infinite;
+}
+
+@keyframes splash-slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(340%);
+  }
+}

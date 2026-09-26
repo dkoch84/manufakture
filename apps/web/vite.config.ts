@@ -12,9 +12,29 @@ export default defineConfig({
   plugins: [react()],
   server: { headers: crossOriginIsolationHeaders },
   preview: { headers: crossOriginIsolationHeaders },
+  build: {
+    rolldownOptions: {
+      output: {
+        // three.js is most of the app's JavaScript and changes far less often
+        // than the app, so it gets chunks of its own that cache separately.
+        // Split along three's own seam (the renderer-independent core and the
+        // WebGL renderer) so no chunk exceeds the size warning.
+        codeSplitting: {
+          groups: [
+            { name: 'three-core', test: /[\\/]node_modules[\\/]three[\\/]build[\\/]three\.core/ },
+            { name: 'three', test: /[\\/]node_modules[\\/]three[\\/]/ },
+          ],
+        },
+      },
+    },
+  },
+  // The kernel worker is started with { type: 'module' } (packages/kernel README).
+  worker: { format: 'es' },
   test: {
     name: 'web',
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
+    // Playwright specs in e2e/ run in a real browser, never in the unit run.
+    include: ['src/**/*.test.{ts,tsx}'],
   },
 });

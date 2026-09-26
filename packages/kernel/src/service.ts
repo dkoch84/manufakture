@@ -134,8 +134,11 @@ export const DEFAULT_HEAP_THRESHOLD = 1024 * 1024 * 1024;
 
 /** Let queued messages (a newer request, a cancel) run. */
 export function yieldToEventLoop(): Promise<void> {
+  // Node's setImmediate, when the host has one. Looked up on globalThis with a
+  // local type, so browser apps that compile this file need no Node types.
+  const { setImmediate } = globalThis as { setImmediate?: (callback: () => void) => unknown };
   if (typeof setImmediate === 'function') {
-    return new Promise((resolve) => setImmediate(resolve));
+    return new Promise((resolve) => setImmediate(() => resolve()));
   }
   // setTimeout(0) is clamped to 4 ms after a few nested calls; a message is not.
   return new Promise((resolve) => {
