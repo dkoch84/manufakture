@@ -5,9 +5,18 @@
   "type": "module",
   "license": "GPL-3.0-or-later",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./client": "./src/client.ts",
+    "./worker": "./src/worker.ts",
+    "./node": "./src/node.ts",
+    "./testing": "./src/track.ts"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --root ../.. --project packages packages/kernel"
+  },
+  "dependencies": {
+    "comlink": "^4.4.2",
+    "libcascade": "3.0.2"
   }
 }
