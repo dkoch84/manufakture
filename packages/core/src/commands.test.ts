@@ -145,6 +145,7 @@ describe('undo and redo round trips', () => {
         units: { length: { unit: 'ft-in', denominator: 32 }, angle: { unit: 'rad' } },
       },
     ],
+    ['rename the document', { type: 'renameDocument', name: 'Shelf bracket' }],
     [
       'batch',
       {
@@ -727,6 +728,24 @@ describe('variables', () => {
     // Nothing else is touched: variables and parts are the very same objects.
     expect(doc.variables).toBe(before.variables);
     expect(doc.parts).toBe(before.parts);
+  });
+});
+
+describe('renameDocument', () => {
+  it('trims the name, touches nothing else, and undoes to the old name', () => {
+    const before = base();
+    const done = unwrap(applyCommand(before, { type: 'renameDocument', name: '  Shelf  ' }));
+    expect(done.document.name).toBe('Shelf');
+    expect(done.document.parts).toBe(before.parts);
+    expect(done.inverse).toEqual({ type: 'renameDocument', name: before.name });
+  });
+
+  it('refuses an empty or overlong name', () => {
+    for (const name of ['', '   ', 'x'.repeat(201)]) {
+      const r = applyCommand(base(), { type: 'renameDocument', name });
+      expect(r.ok ? null : r.error.code).toBe('invalid-name');
+    }
+    expect(applyCommand(base(), { type: 'renameDocument', name: 'x'.repeat(200) }).ok).toBe(true);
   });
 });
 

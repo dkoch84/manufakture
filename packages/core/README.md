@@ -224,9 +224,11 @@ import is built (regen README, "Import integrity"). This was chosen over a separ
   imported file is input, not derived data: it cannot be rebuilt from anything else, so it cannot
   live in the cache, and a store beside the document would have to be saved, copied, exported
   and undone together with it. Inside the document, undo, redo, save and copy just work.
-- Persistence (#935) does not exist yet. The hash makes the later move mechanical: a
-  content-addressed store can take `data` out and key it by `sha256`, with a format migration
-  that changes only where the bytes are, never what the feature means.
+- The hash makes storing the bytes apart mechanical, and the app's persistence (#935) does so
+  without a format change: in storage and in `.mfk` files each `source` loses `data` and the
+  bytes go to a content-addressed blob keyed by `sha256`, checked when they are put back on load
+  (`apps/web/src/persistence/README.md`). In memory the document keeps `data` inline, so core,
+  regen and the kernel are unaffected.
 
 The cost is size: base64 is 4/3 of the file, in every saved copy and in the undo history's
 snapshots (which share it, since documents are immutable). The app refuses files over the same
@@ -343,6 +345,7 @@ resulting document with `checkDocument`, and returns `{ document, inverse }` or 
 | `deleteVariable`  | `name`                                                | `setVariable` at the old index      |
 | `setDisplayUnits` | `units`                                               | `setDisplayUnits`                   |
 | `setMaterial`     | `partId`, `material` (a material id, `null` clears)   | `setMaterial` (the old one or null) |
+| `renameDocument`  | `name` (trimmed, 1 to 200 characters)                 | `renameDocument` (the old name)     |
 | `batch`           | `commands` (applied in order, all or nothing)         | `batch` of inverses, reversed       |
 
 `restoreFeature` is a history-only command: it is what undo and redo use to put a feature state

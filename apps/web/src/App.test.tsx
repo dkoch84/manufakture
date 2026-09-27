@@ -1,10 +1,13 @@
 import { StrictMode } from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDocument, findPart, type ManufaktureDocument } from '@manufakture/core';
 import type { FeatureResult } from '@manufakture/regen';
 import { writeBinaryStl } from '@manufakture/io';
 import { App } from './App';
+import { MemoryBackend } from './persistence/backend';
+import { DocumentLibrary } from './persistence/library';
+import { partDocument, partWithImport } from './persistence/test-fixtures';
 import type { Exchanger } from './io/exchange';
 import { createSketchSession } from './sketcher/session';
 import { immediateSolver } from './sketcher/testSolver';
@@ -801,5 +804,208 @@ describe('App export and import', () => {
         within(await screen.findByTestId('ref-edges')).getByText(/not found: pick it again/),
       ).toBeTruthy();
     });
+  });
+});
+
+describe('App documents', () => {
+  afterEach(() => window.history.replaceState(null, '', '/'));
+
+  /** The app with a library in memory holding Alpha (a plain part) and Bravo (with an STL import). */
+  async function persisted(
+    options: { initialDocumentId?: string | null; empty?: boolean; backend?: MemoryBackend } = {},
+  ) {
+    let n = 0;
+    let tick = 0;
+    const library = new DocumentLibrary(options.backend ?? new MemoryBackend(), {
+      locks: null,
+      newId: () => `new-${++n}`,
+      now: () => new Date(Date.UTC(2026, 8, 26, 12, 0, tick++)),
+    });
+    if (!options.empty) {
+      await library.save(partDocument('a', 'Alpha'));
+      await library.save(await partWithImport('b'));
+    }
+    const manual = manualLoader();
+    const engine = fakeEngine();
+    const documents = createDocumentStore(createDocument({ id: 'scratch', name: 'Scratch' }));
+    render(
+      <App
+        loader={manual.loader}
+        createEngine={engine.factory}
+        selection={createSelectionStore()}
+        settings={createViewSettingsStore()}
+        documents={documents}
+        sketchSession={createSketchSession(immediateSolver({ dof: 0 }).solver)}
+        measure={createMeasureStore()}
+        library={Promise.resolve(library)}
+        autosaveDelays={{ delayMs: 5, maxDelayMs: 20 }}
+        {...(options.initialDocumentId !== undefined
+          ? { initialDocumentId: options.initialDocumentId }
+          : {})}
+      />,
+    );
+    await act(async () => manual.resolve([]));
+    const bodies = () =>
+      (engine.api.setBodies.mock.lastCall?.[0] as BodyInput[] | undefined)?.map((b) => b.id) ?? [];
+    return { library, documents, engine, bodies };
+  }
+
+  it('opens the most recent document with its imported reference body, and names it in the URL', async () => {
+    const t = await persisted();
+    await waitFor(() => expect(screen.getByTestId('document-name').textContent).toBe('Bracket'));
+    expect(t.documents.getState().document.id).toBe('b');
+    await waitFor(() => expect(t.bodies()).toEqual(['import#1']));
+    expect(window.location.search).toBe('?doc=b');
+  });
+
+  it('opens the document the URL names, and autosaves every change', async () => {
+    const t = await persisted({ initialDocumentId: 'a' });
+    await waitFor(() => expect(t.documents.getState().document.id).toBe('a'));
+    act(() => {
+      t.documents.getState().execute({ type: 'renameDocument', name: 'Shelf' }, 'Rename document');
+    });
+    await waitFor(() => expect(screen.getByTestId('save-status').textContent).toBe('Saved'));
+    const opened = await t.library.open('a');
+    expect(opened.ok && opened.value.document.name).toBe('Shelf');
+    const log = await t.library.readLog('a');
+    expect(log.ok && log.value.map((e) => e.label)).toEqual(['Rename document']);
+  });
+
+  it('says so when the document it opens at startup was recovered from its last complete save', async () => {
+    const backend = new MemoryBackend();
+    const seed = new DocumentLibrary(backend, { locks: null });
+    await seed.save(partDocument('a', 'Alpha'));
+    backend.files.delete('documents/a/head.json');
+    const t = await persisted({ initialDocumentId: 'a', backend, empty: true });
+    await waitFor(() => expect(t.documents.getState().document.id).toBe('a'));
+    expect((await screen.findByTestId('io-status')).textContent).toBe(
+      'Opened Alpha (recovered from its last complete save).',
+    );
+  });
+
+  it('keeps a new document unsaved until its first change', async () => {
+    const t = await persisted({ empty: true });
+    expect(await screen.findByTestId('document-name')).toBeTruthy();
+    expect(await t.library.list()).toEqual([]);
+    expect(window.location.search).toBe('');
+    act(() => {
+      t.documents.getState().execute({ type: 'renameDocument', name: 'Mine' }, 'Rename document');
+    });
+    await waitFor(() => expect(window.location.search).toBe('?doc=scratch'));
+    expect((await t.library.list()).map((d) => d.name)).toEqual(['Mine']);
+  });
+
+  it('switches documents from the home screen, dropping the reference bodies of the one before', async () => {
+    const t = await persisted();
+    await waitFor(() => expect(t.bodies()).toEqual(['import#1']));
+    fireEvent.click(screen.getByTestId('open-home'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Alpha' }));
+    await waitFor(() => expect(screen.getByTestId('document-name').textContent).toBe('Alpha'));
+    await waitFor(() => expect(t.bodies()).toEqual([]));
+    expect(window.location.search).toBe('?doc=a');
+    // And back: the import is read again.
+    fireEvent.click(screen.getByTestId('open-home'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Bracket' }));
+    await waitFor(() => expect(t.bodies()).toEqual(['import#1']));
+  });
+
+  it('stays on the home screen after deleting the open document, with a new one open', async () => {
+    const t = await persisted();
+    await waitFor(() => expect(t.documents.getState().document.id).toBe('b'));
+    fireEvent.click(screen.getByTestId('open-home'));
+    const row = within(await screen.findByTestId('doc-b'));
+    fireEvent.click(row.getByRole('button', { name: 'Delete' }));
+    fireEvent.click(row.getByRole('button', { name: 'Delete' }));
+    await waitFor(() => expect(screen.queryByTestId('doc-b')).toBeNull());
+    expect(screen.getByTestId('home')).toBeTruthy();
+    expect(t.documents.getState().document.name).toBe('Untitled');
+    expect(window.location.search).toBe('');
+    // Back in the editor, the deleted document's reference body is gone.
+    fireEvent.click(screen.getByTestId('home-back'));
+    await waitFor(() => expect(t.bodies()).toEqual([]));
+  });
+
+  it('shows the home screen with the reason when the document cannot be opened', async () => {
+    await persisted({ initialDocumentId: 'gone' });
+    expect((await screen.findByTestId('home-status')).textContent).toBe(
+      'The document could not be opened. There is no document "gone".',
+    );
+    expect(screen.getByRole('table', { name: 'Documents' })).toBeTruthy();
+  });
+
+  it('opens a .mfk file dropped on the page', async () => {
+    const t = await persisted();
+    await waitFor(() => expect(t.documents.getState().document.id).toBe('b'));
+    const exported = await t.library.exportMfk('a');
+    if (!exported.ok) throw new Error(exported.message);
+    const file = new File([exported.value.bytes as Uint8Array<ArrayBuffer>], 'Alpha.mfk');
+    const drop = new Event('drop', { cancelable: true }) as DragEvent;
+    Object.defineProperty(drop, 'dataTransfer', { value: { files: [file], types: ['Files'] } });
+    act(() => {
+      window.dispatchEvent(drop);
+    });
+    expect(drop.defaultPrevented).toBe(true);
+    await waitFor(() => expect(t.documents.getState().document.name).toBe('Alpha'));
+    // Alpha is still there, so the dropped copy got a new id.
+    expect(t.documents.getState().document.id).toBe('new-1');
+  });
+
+  it('asks before the page closes while a change is not saved yet', async () => {
+    const t = await persisted({ initialDocumentId: 'a' });
+    await waitFor(() => expect(t.documents.getState().document.id).toBe('a'));
+    const unload = () => {
+      const e = new Event('beforeunload', { cancelable: true });
+      window.dispatchEvent(e);
+      return e.defaultPrevented;
+    };
+    expect(unload()).toBe(false);
+    act(() => {
+      t.documents.getState().execute({ type: 'renameDocument', name: 'Shelf' }, 'Rename document');
+    });
+    expect(unload()).toBe(true);
+    await waitFor(() => expect(screen.getByTestId('save-status').textContent).toBe('Saved'));
+    expect(unload()).toBe(false);
+  });
+
+  it('shows a conflict with another tab, and keeps this version as a copy', async () => {
+    const backend = new MemoryBackend();
+    const t = await persisted({ initialDocumentId: 'a', backend });
+    await waitFor(() => expect(t.documents.getState().document.id).toBe('a'));
+    const other = new DocumentLibrary(backend, { locks: null });
+    await other.open('a');
+    await other.save(partDocument('a', 'Theirs'));
+    act(() => {
+      t.documents.getState().execute({ type: 'renameDocument', name: 'Mine' }, 'Rename document');
+    });
+    const banner = await screen.findByTestId('save-conflict');
+    expect(banner.textContent).toMatch(/^Mine was changed in another tab or window/);
+    expect(screen.getByTestId('save-status').textContent).toMatch(
+      /^Not saved: It was changed in another tab or window/,
+    );
+    fireEvent.click(screen.getByTestId('conflict-copy'));
+    await waitFor(() => expect(t.documents.getState().document.name).toBe('Mine (copy)'));
+    expect(screen.queryByTestId('save-conflict')).toBeNull();
+    expect(screen.getByTestId('io-status').textContent).toBe(
+      'Saved this version as Mine (copy); the other version stays as it was.',
+    );
+    const theirs = await t.library.open('a');
+    expect(theirs.ok && theirs.value.document.name).toBe('Theirs');
+  });
+
+  it('says why a dropped .mfk file could not be read', async () => {
+    const t = await persisted();
+    await waitFor(() => expect(t.documents.getState().document.id).toBe('b'));
+    const file = new File([new Uint8Array(4)], 'broken.mfk');
+    Object.defineProperty(file, 'arrayBuffer', {
+      value: () => Promise.reject(new Error('The file could not be read')),
+    });
+    const drop = new Event('drop', { cancelable: true }) as DragEvent;
+    Object.defineProperty(drop, 'dataTransfer', { value: { files: [file], types: ['Files'] } });
+    act(() => {
+      window.dispatchEvent(drop);
+    });
+    expect((await screen.findByTestId('home-status')).textContent).toBe(
+      'broken.mfk: The file could not be read',
+    );
   });
 });

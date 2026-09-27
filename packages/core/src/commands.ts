@@ -21,6 +21,9 @@ import { checkDocument, expressionVariableNames } from './validate';
  * input document.
  */
 
+/** Longest document name `renameDocument` accepts. */
+export const MAX_DOCUMENT_NAME = 200;
+
 const partId = z.string().min(1);
 const featureId = z.string().min(1);
 const index = z.int().min(0);
@@ -87,6 +90,8 @@ export const SimpleCommandSchema = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('deleteVariable'), name: z.string() }),
   /** Change display units. Stored expressions keep their own units, so no geometry changes. */
   z.strictObject({ type: z.literal('setDisplayUnits'), units: DisplayUnitsSchema }),
+  /** Rename the document (trimmed, 1 to 200 characters). */
+  z.strictObject({ type: z.literal('renameDocument'), name: z.string() }),
 ]);
 
 export type SimpleCommand = z.infer<typeof SimpleCommandSchema>;
@@ -148,6 +153,20 @@ function applyUnchecked(doc: ManufaktureDocument, command: Command): CoreResult<
         document: { ...doc, units: command.units },
         inverse: { type: 'setDisplayUnits', units: doc.units },
       });
+    case 'renameDocument': {
+      const name = command.name.trim();
+      if (name.length === 0 || name.length > MAX_DOCUMENT_NAME) {
+        return fail(
+          'invalid-name',
+          `A document name must be 1 to ${MAX_DOCUMENT_NAME} characters`,
+          ['name'],
+        );
+      }
+      return ok({
+        document: name === doc.name ? doc : { ...doc, name },
+        inverse: { type: 'renameDocument', name: doc.name },
+      });
+    }
     default:
       return applyToPart(doc, command);
   }

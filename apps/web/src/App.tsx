@@ -1,9 +1,16 @@
 import { sketchToWorld } from '@manufakture/sketch/geometry';
 import type { SketchPlacement, Vec2 } from '@manufakture/sketch/model';
-import { DEFAULT_PART_ID, findPart } from '@manufakture/core';
+import { DEFAULT_PART_ID, findPart, type ManufaktureDocument } from '@manufakture/core';
 import type { ExportTolerancePreset } from '@manufakture/io';
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from 'zustand';
+import { createStore } from 'zustand/vanilla';
+import { homeActions, openedMessage, type ActionOutcome } from './home/actions';
+import { HomeScreen } from './home/HomeScreen';
+import { startAutosave, type Autosave, type SaveStatus } from './persistence/autosave';
+import type { DocumentLibrary } from './persistence/library';
+import { requestPersistence, storageInfo } from './persistence/storage';
+import { docIdFromSearch, showDocIdInUrl } from './persistence/url';
 import type { ExportFormat, ImportedBody } from './io/actions';
 import { restorableImportIds } from './io/restorable';
 import { downloadBytes, readFileBytes } from './io/files';
@@ -87,7 +94,40 @@ export interface AppProps {
   measure?: MeasureStore;
   /** The regenerated model, kept current through the loader's `regenerator`. */
   model?: ModelStore;
+  /**
+   * Where documents are saved (main.tsx passes the browser's library). Without one the
+   * document lives in memory only, and there is no home screen.
+   */
+  library?: Promise<DocumentLibrary> | null;
+  /** The document to open first (default: the URL's `doc`, else the most recent one). */
+  initialDocumentId?: string | null;
+  /** Autosave delays, for tests. */
+  autosaveDelays?: { delayMs: number; maxDelayMs: number };
 }
+
+/** Whether `doc` has imported reference bodies, which live outside regen and must be read again. */
+function hasReferenceImports(doc: ManufaktureDocument): boolean {
+  return doc.parts.some((p) =>
+    p.features.some((f) => f.kind === 'import' && f.operation === 'reference'),
+  );
+}
+
+/** The save status shown when nothing is saved (no library). */
+const NO_SAVING = createStore<SaveStatus>()(() => ({
+  state: 'idle',
+  message: null,
+  documentId: '',
+  documentName: '',
+}));
+
+const SAVE_TEXT: Record<SaveStatus['state'], string> = {
+  idle: '',
+  pending: 'Unsaved changes',
+  saving: 'Saving...',
+  saved: 'Saved',
+  error: 'Not saved',
+  conflict: 'Not saved',
+};
 
 export function App({
   loader: given,
@@ -100,6 +140,9 @@ export function App({
   createSolver = defaultSolver,
   measure = measureStore,
   model = modelStore,
+  library: libraryPromise = null,
+  initialDocumentId,
+  autosaveDelays,
 }: AppProps) {
   // A loader starts nothing until `load`, so the initialiser running twice
   // under StrictMode leaves nothing behind.
@@ -124,6 +167,15 @@ export function App({
   const [imports, setImports] = useState<readonly ImportedBody[]>([]);
   const [ioStatus, setIoStatus] = useState<{ error: boolean; text: string } | null>(null);
   const [ioBusy, setIoBusy] = useState(false);
+  // Persistence: the library once open, autosave, and which screen shows.
+  const [library, setLibrary] = useState<DocumentLibrary | null>(null);
+  const [autosave, setAutosave] = useState<Autosave | null>(null);
+  const [docReady, setDocReady] = useState(libraryPromise === null);
+  const [view, setView] = useState<'editor' | 'home'>('editor');
+  const [homeOutcome, setHomeOutcome] = useState<ActionOutcome | null>(null);
+  const [homeRevision, setHomeRevision] = useState(0);
+  // A document just opened whose reference imports must be read again, once the kernel is up.
+  const [restoreRequest, setRestoreRequest] = useState<ManufaktureDocument | null>(null);
 
   // The scene's own document (the demo scene) replaces the open one once, when the scene loads.
   const openedInitial = useRef(false);
@@ -227,6 +279,141 @@ export function App({
         .catch(() => undefined);
     });
   }, [loader]);
+  // Open a document in the editor: the imported reference bodies of the one before are
+  // dropped (feature ids repeat across documents), and this one's are read again from its files.
+  const show = useCallback(
+    (doc: ManufaktureDocument, options: { stored: boolean; stayHome?: boolean }) => {
+      loader.exchanger?.retain(new Set());
+      setImports([]);
+      documents.getState().load(doc);
+      setRestoreRequest(hasReferenceImports(doc) ? doc : null);
+      showDocIdInUrl(options.stored ? doc.id : null);
+      if (!options.stayHome) setView('editor');
+    },
+    [loader, documents],
+  );
+  const restoring = useRef<ManufaktureDocument | null>(null);
+  useEffect(() => {
+    if (!loaded || !restoreRequest || restoring.current === restoreRequest) return;
+    const doc = restoreRequest;
+    restoring.current = doc;
+    importing.current = true;
+    import('./persistence/imports')
+      .then(({ restoreImports }) => restoreImports(doc, loader.exchanger ?? null))
+      .then(
+        (r) => {
+          if (documents.getState().document.id !== doc.id) return;
+          setImports(r.bodies);
+          if (r.errors.length > 0) {
+            setIoStatus({
+              error: true,
+              text: `Could not read an import again: ${r.errors.join(' ')}`,
+            });
+          }
+        },
+        (e: unknown) =>
+          setIoStatus({ error: true, text: e instanceof Error ? e.message : String(e) }),
+      )
+      .finally(() => {
+        importing.current = false;
+        restoring.current = null;
+        setRestoreRequest((current) => (current === doc ? null : current));
+        pruneImports();
+      });
+  }, [loaded, restoreRequest, loader, documents, pruneImports]);
+
+  // Open the library, then the document the URL names (or the most recent one). A scene with
+  // its own document (the demo) keeps that one.
+  const opening = useRef(false);
+  useEffect(() => {
+    if (!libraryPromise || opening.current) return;
+    opening.current = true;
+    void (async () => {
+      let lib: DocumentLibrary;
+      try {
+        lib = await libraryPromise;
+      } catch (e) {
+        setIoStatus({
+          error: true,
+          text: `Documents cannot be saved: ${e instanceof Error ? e.message : String(e)}`,
+        });
+        setDocReady(true);
+        return;
+      }
+      if (!loader.initialDocument) {
+        const wanted =
+          initialDocumentId !== undefined
+            ? initialDocumentId
+            : docIdFromSearch(window.location.search);
+        const id = wanted ?? (await lib.list()).find((d) => d.damaged === undefined)?.id ?? null;
+        if (id !== null) {
+          const opened = await lib.open(id);
+          if (opened.ok) {
+            show(opened.value.document, { stored: true });
+            // Recovered or migrated: say so, as the home screen does.
+            const note = openedMessage(opened.value, true);
+            if (note) setIoStatus({ error: false, text: note });
+          } else {
+            showDocIdInUrl(null);
+            setHomeOutcome({
+              ok: false,
+              message: `The document could not be opened. ${opened.message}`,
+            });
+            setView('home');
+          }
+        }
+      }
+      setLibrary(lib);
+      setDocReady(true);
+    })();
+  }, [libraryPromise, loader, initialDocumentId, show]);
+
+  // Autosave the open document; ask once for persistent storage after the first save.
+  const askedPersistence = useRef(false);
+  useEffect(() => {
+    if (!library) return;
+    const auto = startAutosave(documents, library, {
+      ...autosaveDelays,
+      onSaved: (summary) => {
+        if (summary.id === documents.getState().document.id) showDocIdInUrl(summary.id);
+        if (!askedPersistence.current && library.kind !== 'memory') {
+          askedPersistence.current = true;
+          void requestPersistence();
+        }
+      },
+    });
+    setAutosave(auto);
+    // Save before the page goes away (best effort: the browser may not wait).
+    const onHide = () => {
+      if (window.document.visibilityState === 'hidden') void auto.flush();
+    };
+    // Closing or reloading with changes not saved yet (waiting, being written, failed, or in
+    // conflict with another tab): the browser asks the user first, and the save starts.
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (!auto.unsaved()) return;
+      void auto.flush();
+      e.preventDefault();
+      // Older browsers ask only when returnValue is set.
+      e.returnValue = '';
+    };
+    window.addEventListener('visibilitychange', onHide);
+    window.addEventListener('pagehide', onHide);
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => {
+      window.removeEventListener('visibilitychange', onHide);
+      window.removeEventListener('pagehide', onHide);
+      window.removeEventListener('beforeunload', onBeforeUnload);
+      void auto.stop();
+    };
+  }, [library, documents, autosaveDelays]);
+  const saveStatus = useStore(autosave?.status ?? NO_SAVING);
+
+  const actions = useMemo(
+    () =>
+      library ? homeActions({ library, documents, autosave, show, download: downloadBytes }) : null,
+    [library, documents, autosave, show],
+  );
+
   const shownBodies = useMemo(
     () =>
       bodies === null
@@ -298,6 +485,44 @@ export function App({
     },
     [loader, documents, pruneImports],
   );
+  // A file dropped anywhere on the page: a .mfk opens as a document; in the editor, a STEP or
+  // STL file is imported as a reference body. Never let the browser navigate to a dropped file.
+  const viewRef = useRef(view);
+  useEffect(() => {
+    viewRef.current = view;
+  }, [view]);
+  useEffect(() => {
+    const hasFiles = (e: DragEvent) => e.dataTransfer?.types.includes('Files') ?? false;
+    const onDragOver = (e: DragEvent) => {
+      if (hasFiles(e)) e.preventDefault();
+    };
+    const onDrop = (e: DragEvent) => {
+      const file = e.dataTransfer?.files[0];
+      if (!file) return;
+      e.preventDefault();
+      if (/\.mfk$/i.test(file.name)) {
+        if (!actions) return;
+        void actions
+          .importPicked(file)
+          .catch((e: unknown): ActionOutcome => ({
+            ok: false,
+            message: `${file.name}: ${e instanceof Error ? e.message : String(e)}`,
+          }))
+          .then((outcome) => {
+            setHomeOutcome(outcome);
+            setHomeRevision((n) => n + 1);
+            if (!outcome.ok) setView('home');
+          });
+      } else if (viewRef.current === 'editor') onImport(file);
+    };
+    window.addEventListener('dragover', onDragOver);
+    window.addEventListener('drop', onDrop);
+    return () => {
+      window.removeEventListener('dragover', onDragOver);
+      window.removeEventListener('drop', onDrop);
+    };
+  }, [actions, onImport]);
+
   const sketching = useSketching(session, documents, viewport, placements);
   // The open feature dialog, if any: a new feature from the toolbar, or one opened from the tree.
   const [dialog, setDialog] = useState<DialogRequest | null>(null);
@@ -423,13 +648,79 @@ export function App({
   const undoLabel = useStore(documents, (s) => s.undoLabel);
   const redoLabel = useStore(documents, (s) => s.redoLabel);
 
-  if (shownBodies === null) return <LoadingSplash status={status} error={error} />;
+  if (view === 'home' && actions && library) {
+    const open = documents.getState().document;
+    return (
+      <HomeScreen
+        actions={actions}
+        kind={library.kind}
+        current={{ id: open.id, name: open.name }}
+        onClose={() => setView('editor')}
+        storage={storageInfo}
+        onPersist={requestPersistence}
+        outcome={homeOutcome}
+        revision={homeRevision}
+      />
+    );
+  }
+  if (shownBodies === null || !docReady) {
+    return (
+      <LoadingSplash
+        status={shownBodies === null ? status : { label: 'Opening the document', fraction: null }}
+        error={error}
+      />
+    );
+  }
 
   const stores = { selection, settings };
+  // The save status is about the open document, unless an earlier one failed to save.
+  const statusHere = saveStatus.documentId === document.id;
+  const failing = saveStatus.state === 'error' || saveStatus.state === 'conflict';
+  const saveText = failing
+    ? `${statusHere ? 'Not saved' : `${saveStatus.documentName} not saved`}: ${saveStatus.message ?? ''}`
+    : statusHere
+      ? SAVE_TEXT[saveStatus.state]
+      : '';
+  const resolveConflict = async (action: () => Promise<ActionOutcome>) => {
+    try {
+      const r = await action();
+      setIoStatus({ error: !r.ok, text: r.message });
+    } catch (e) {
+      setIoStatus({ error: true, text: e instanceof Error ? e.message : String(e) });
+    }
+  };
   return (
     <div className="app">
       <header className="app-header">
         <h1>manufakture</h1>
+        {library && (
+          <div className="toolbar-group document-title">
+            <button
+              type="button"
+              disabled={sketching.active || dialog !== null}
+              onClick={() => {
+                setHomeOutcome(null);
+                void autosave?.flush();
+                setView('home');
+              }}
+              data-testid="open-home"
+              title="Your documents: open, new, rename, duplicate, delete, import and export"
+            >
+              Documents
+            </button>
+            <span className="document-name" data-testid="document-name" title={document.name}>
+              {document.name}
+            </span>
+            <span
+              className={failing ? 'save-status save-error' : 'save-status'}
+              role={failing ? 'alert' : 'status'}
+              data-testid="save-status"
+              title={saveStatus.message ?? undefined}
+            >
+              {saveText}
+            </span>
+          </div>
+        )}
         <div className="toolbar-group document-actions">
           <SketchMenu
             face={face}
@@ -469,6 +760,28 @@ export function App({
         </div>
         <Toolbar viewport={viewport} {...stores} />
       </header>
+      {actions && saveStatus.state === 'conflict' && statusHere && (
+        <div className="save-conflict" role="alert" data-testid="save-conflict">
+          <span>
+            {document.name} was changed in another tab or window since this tab opened it, so the
+            changes made here are not saved. Choose which version to keep:
+          </span>
+          <button
+            type="button"
+            data-testid="conflict-reload"
+            onClick={() => void resolveConflict(actions.reloadNewer)}
+          >
+            Load the newer version (drop the changes made here)
+          </button>
+          <button
+            type="button"
+            data-testid="conflict-copy"
+            onClick={() => void resolveConflict(actions.keepAsCopy)}
+          >
+            Keep this version as a copy
+          </button>
+        </div>
+      )}
       {/* The part tools; in a sketch the sketch toolbar takes this row. */}
       {!sketching.active && (
         <div className="feature-bar">

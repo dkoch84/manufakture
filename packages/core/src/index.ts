@@ -23,6 +23,7 @@ export {
 } from './validate';
 export {
   CommandSchema,
+  MAX_DOCUMENT_NAME,
   SimpleCommandSchema,
   applyCommand,
   variableUsers,

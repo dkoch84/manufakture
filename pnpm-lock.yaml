@@ -68,6 +68,9 @@ importers:
       '@manufakture/units':
         specifier: workspace:*
         version: link:../../packages/units
+      fflate:
+        specifier: ^0.8.3
+        version: 0.8.3
       react:
         specifier: ^19.3.0
         version: 19.3.0
