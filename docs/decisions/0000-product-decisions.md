@@ -13,7 +13,7 @@ The initial plan assumed a permissive MIT/Apache-2.0 license and left the target
 
 2. **GUI feature tree first.** Modelling is driven by an Onshape-style feature tree and sketches in the UI. Scripting or code-first modelling can come later on top of the same document model.
 
-3. **License: GPL-3.0-or-later.** The project is copyleft. GPLv3 (not v2) is required because Apache-2.0 dependencies such as replicad, brepjs and manifold are only compatible with GPLv3. LGPL components (OpenCascade, planegcs) are fine; OpenCascade is loaded as a separate, replaceable `.wasm` module, which satisfies the LGPL's relinking requirement. The repository is public on GitHub and CI runs on GitHub Actions.
+3. **License: GPL-3.0-or-later.** The project is copyleft. GPLv3 (not v2) is required because Apache-2.0 dependencies such as brepjs and manifold are only compatible with GPLv3. (This decision first listed replicad among them; replicad is MIT, which is compatible with either version.) LGPL components (OpenCascade, planegcs) are fine; OpenCascade is loaded as a separate, replaceable `.wasm` module, which satisfies the LGPL's relinking requirement. The repository is public on GitHub and CI runs on GitHub Actions. [ADR 0006](../adr/0006-licensing.md) turns this into dependency rules and keeps the license inventory.
 
 4. **First domain after M1: 3D printing.** It has the shortest path from a solid to a physical part (mesh export to a slicer) and exercises the core modelling features.
 

@@ -12,7 +12,7 @@ Product decisions (license, local-first storage, target machines, what comes fir
 - [0004: Document format: a versioned JSON feature list, with names as references](0004-document-format.md). Accepted.
 - [0005: Units: millimetres and radians inside, per-document display units outside](0005-units.md). Accepted.
 - [0006: Licensing: GPL-3.0-or-later, and what we may depend on](0006-licensing.md). Accepted.
-- [0007: Worker protocol: Comlink, coarse calls, errors as data, named meshes](0007-worker-protocol.md). Accepted.
+- [0007: Worker protocol: Comlink, coarse calls, errors as data, named meshes](0007-worker-protocol.md). Accepted, amended 2026-09-26.
 - [0008: Assembly mate solver: our own joint-coordinate solver in TypeScript](0008-assembly-mate-solver.md). Accepted.
 - [0009: Sync model: a server-ordered command log, validated by core, rebased on the client](0009-sync-model.md). Proposed.
 - [0010: Scripting sandbox: QuickJS in WebAssembly, inside the regen worker, with no capabilities](0010-scripting-sandbox.md). Proposed.
@@ -22,5 +22,7 @@ Product decisions (license, local-first storage, target machines, what comes fir
 - Take the next free number and name the file `NNNN-short-title.md`.
 - Use the format of the existing records: a title line, `Status` and `Date`, then Context, Decision, Alternatives considered and Consequences.
 - Cite the evidence by relative link, and state only what the sources measured or say; mark estimates as estimates.
-- To change a decision, write a new ADR that supersedes the old one and set the old one's status to "superseded by NNNN". Fix an accepted ADR in place only for factual errors.
+- To reverse or replace a decision, write a new ADR that supersedes the old one and set the old one's status to "superseded by NNNN".
+- A change that keeps the decision but adjusts how it is carried out may be recorded in place as an amendment: add a section at the end headed "Amendment: ..." that says what changed, why, and which task did it, and set the status to "accepted, amended YYYY-MM-DD" with the date of the latest amendment. Leave the original text as it was, so the record shows both.
+- Fix an accepted ADR in place without an amendment only for factual errors.
 - Add the new record to the index above.

@@ -1,6 +1,6 @@
 # 0007: Worker protocol: Comlink, coarse calls, errors as data, named meshes
 
-- Status: accepted
+- Status: accepted, amended 2026-09-26
 - Date: 2026-09-26
 
 ## Context
