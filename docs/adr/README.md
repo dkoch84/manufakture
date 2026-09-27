@@ -13,6 +13,7 @@ Product decisions (license, local-first storage, target machines, what comes fir
 - [0005: Units: millimetres and radians inside, per-document display units outside](0005-units.md). Accepted.
 - [0006: Licensing: GPL-3.0-or-later, and what we may depend on](0006-licensing.md). Accepted.
 - [0007: Worker protocol: Comlink, coarse calls, errors as data, named meshes](0007-worker-protocol.md). Accepted.
+- [0008: Assembly mate solver: our own joint-coordinate solver in TypeScript](0008-assembly-mate-solver.md). Accepted.
 
 ## Adding an ADR
 
