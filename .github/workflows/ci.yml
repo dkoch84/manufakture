@@ -115,11 +115,21 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Install FreeCAD and PrusaSlicer
+      - name: Install PrusaSlicer
         continue-on-error: true
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends freecad prusa-slicer xvfb
+          sudo apt-get install -y --no-install-recommends prusa-slicer xvfb
+      - name: Install FreeCAD
+        # Ubuntu 24.04 has no freecad package, so use the upstream AppImage, extracted rather
+        # than mounted (no FUSE needed).
+        continue-on-error: true
+        run: |
+          curl -sSfLo "$RUNNER_TEMP/freecad.AppImage" \
+            https://github.com/FreeCAD/FreeCAD/releases/download/1.1.3/FreeCAD_1.1.3-Linux-x86_64-py311.AppImage
+          chmod +x "$RUNNER_TEMP/freecad.AppImage"
+          (cd "$RUNNER_TEMP" && ./freecad.AppImage --appimage-extract > /dev/null)
+          echo "FREECADCMD=$RUNNER_TEMP/squashfs-root/usr/bin/freecadcmd" >> "$GITHUB_ENV"
       - name: Download the M1 bracket exports
         continue-on-error: true
         uses: actions/download-artifact@v7

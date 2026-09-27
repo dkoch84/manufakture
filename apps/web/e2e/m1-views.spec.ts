@@ -41,9 +41,21 @@ test('the bracket in the iso, top and front views', async ({ page }) => {
   const errors = await openEmpty(page);
   await buildBracket(page);
   await page.evaluate(() => window.__manufakture!.selection.getState().clear());
-  // Off the canvas, so nothing is hovered.
-  await page.mouse.move(0, 0);
+  // A fixed canvas size and position: left to the layout, the canvas takes whatever the toolbar
+  // and panels leave, and their height follows the machine's fonts (CI's canvas came out 5px
+  // taller than the baseline's; a fractional offset also rounds the screenshot differently). The
+  // engine picks up the new size on its next frame.
+  await page.addStyleTag({
+    content:
+      '[data-testid="viewport-canvas"] { position: fixed !important; left: 0 !important; ' +
+      'top: 0 !important; width: 760px !important; height: 540px !important; }',
+  });
+  // Off the canvas (now at the top left), so nothing is hovered.
+  await page.mouse.move(1270, 790);
   const canvas = page.getByTestId('viewport-canvas');
+  await expect
+    .poll(() => canvas.evaluate((c: HTMLCanvasElement) => [c.width, c.height].join('x')))
+    .toBe(await page.evaluate(() => `${760 * devicePixelRatio}x${540 * devicePixelRatio}`));
   const mask = await cubeMask(page);
   for (const v of ['iso', 'top', 'front'] as const) {
     await view(page, v);
