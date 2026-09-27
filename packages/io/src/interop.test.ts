@@ -7,6 +7,11 @@
 // `interop` CI job installs them. Commands can be overridden with FREECADCMD
 // and SLICER_CMD (whitespace-separated, e.g. `xvfb-run -a prusa-slicer`).
 // Set INTEROP_KEEP=1 to keep the files it writes.
+//
+// INTEROP_BRACKET_DIR points at the M1 bracket as the app exported it in the browser
+// (bracket.step, bracket.3mf, bracket.stl and expected.json, written by
+// apps/web/e2e/m1-bracket.spec.ts to apps/web/test-results/m1-bracket/); the same checks then
+// run on those files. Unset or missing, they are skipped.
 
 import type { Kernel, ShapeId } from '@manufakture/kernel';
 import { createNodeKernel } from '@manufakture/kernel/node';
@@ -67,30 +72,7 @@ describe.skipIf(!freecad)('FreeCAD reopens our STEP', () => {
   it('with the same volume, face count and bounding box', () => {
     const step = join(dir, 'demo.step');
     writeFileSync(step, k.exportStep([{ shape: part, name: 'Demo part' }]));
-    const script = join(dir, 'check_step.py');
-    writeFileSync(
-      script,
-      [
-        'import json, os, Part',
-        'shape = Part.read(os.environ["INTEROP_STEP"])',
-        'box = shape.BoundBox',
-        'print("INTEROP " + json.dumps({"valid": shape.isValid(), "volume": shape.Volume,',
-        '  "faces": len(shape.Faces), "solids": len(shape.Solids),',
-        '  "min": [box.XMin, box.YMin, box.ZMin], "max": [box.XMax, box.YMax, box.ZMax]}))',
-        '',
-      ].join('\n'),
-    );
-    const r = run(freecad!, [script], { INTEROP_STEP: step });
-    const line = r.out.split('\n').find((l) => l.startsWith('INTEROP '));
-    expect(line, r.out).toBeDefined();
-    const got = JSON.parse(line!.slice('INTEROP '.length)) as {
-      valid: boolean;
-      volume: number;
-      faces: number;
-      solids: number;
-      min: number[];
-      max: number[];
-    };
+    const got = freecadReads(step);
     const ours = k.properties(part);
     expect(got.valid).toBe(true);
     expect(got.solids).toBe(1);
@@ -102,30 +84,102 @@ describe.skipIf(!freecad)('FreeCAD reopens our STEP', () => {
 });
 
 describe.skipIf(!slicer)('a slicer slices our files', () => {
-  const slice = (file: string) => {
-    const out = `${file}.gcode`;
-    const r = run(slicer!, ['--export-gcode', '--output', out, file]);
-    expect(r.error, r.out).toBeUndefined();
-    expect(r.status, r.out).toBe(0);
-    expect(existsSync(out), r.out).toBe(true);
-    const gcode = readFileSync(out, 'utf8');
-    expect(statSync(out).size).toBeGreaterThan(10_000);
-    // Moves up to the part's full height (20 mm), so the whole part was sliced.
-    const zs = [...gcode.matchAll(/^G1 Z([\d.]+)/gm)].map((m) => Number(m[1]));
-    expect(Math.max(...zs)).toBeGreaterThan(19);
-  };
-
   it('3MF', () => {
     const mesh = k.mesh(part, deflectionOf(EXPORT_TOLERANCES.normal));
     const file = join(dir, 'demo.3mf');
     writeFileSync(file, export3mf([{ name: 'Demo part', mesh }]));
-    slice(file);
+    slice(file, 20);
   });
 
   it('STL', () => {
     const mesh = k.mesh(part, deflectionOf(EXPORT_TOLERANCES.normal));
     const file = join(dir, 'demo.stl');
     writeFileSync(file, exportStl([{ name: 'Demo part', mesh }])[0]!.bytes);
-    slice(file);
+    slice(file, 20);
   });
+});
+
+/** Slice `file` with the slicer; the G-code must reach the part's full `height`. */
+function slice(file: string, height: number) {
+  const out = `${file}.gcode`;
+  const r = run(slicer!, ['--export-gcode', '--output', out, file]);
+  expect(r.error, r.out).toBeUndefined();
+  expect(r.status, r.out).toBe(0);
+  expect(existsSync(out), r.out).toBe(true);
+  const gcode = readFileSync(out, 'utf8');
+  expect(statSync(out).size).toBeGreaterThan(10_000);
+  // Moves up to the part's full height, so the whole part was sliced.
+  const zs = [...gcode.matchAll(/^G1 Z([\d.]+)/gm)].map((m) => Number(m[1]));
+  expect(Math.max(...zs)).toBeGreaterThan(height - 1);
+}
+
+/** FreeCAD's view of a STEP file: validity, volume, faces, solids and bounding box. */
+function freecadReads(step: string) {
+  const script = join(dir, 'check_step.py');
+  writeFileSync(
+    script,
+    [
+      'import json, os, Part',
+      'shape = Part.read(os.environ["INTEROP_STEP"])',
+      'box = shape.BoundBox',
+      'print("INTEROP " + json.dumps({"valid": shape.isValid(), "volume": shape.Volume,',
+      '  "faces": len(shape.Faces), "solids": len(shape.Solids),',
+      '  "min": [box.XMin, box.YMin, box.ZMin], "max": [box.XMax, box.YMax, box.ZMax]}))',
+      '',
+    ].join('\n'),
+  );
+  const r = run(freecad!, [script], { INTEROP_STEP: step });
+  const line = r.out.split('\n').find((l) => l.startsWith('INTEROP '));
+  expect(line, r.out).toBeDefined();
+  return JSON.parse(line!.slice('INTEROP '.length)) as {
+    valid: boolean;
+    volume: number;
+    faces: number;
+    solids: number;
+    min: number[];
+    max: number[];
+  };
+}
+
+// The M1 bracket, exported by the app (see the top of this file).
+const bracketDir = process.env.INTEROP_BRACKET_DIR?.trim();
+const bracket =
+  bracketDir && existsSync(join(bracketDir, 'expected.json'))
+    ? {
+        dir: bracketDir,
+        expected: JSON.parse(readFileSync(join(bracketDir, 'expected.json'), 'utf8')) as {
+          volume: number;
+          faces: number;
+          min: number[];
+          max: number[];
+        },
+      }
+    : null;
+
+describe.skipIf(!bracket)('the M1 bracket as the app exported it', () => {
+  it.skipIf(!freecad)('FreeCAD reopens its STEP with the same volume, faces and box', () => {
+    const got = freecadReads(join(bracket!.dir, 'bracket.step'));
+    const want = bracket!.expected;
+    expect(got.valid).toBe(true);
+    expect(got.solids).toBe(1);
+    expect(got.faces).toBe(want.faces);
+    expect(Math.abs(got.volume - want.volume) / want.volume).toBeLessThan(1e-6);
+    got.min.forEach((v, i) => expect(v).toBeCloseTo(want.min[i]!, 3));
+    got.max.forEach((v, i) => expect(v).toBeCloseTo(want.max[i]!, 3));
+  });
+
+  it.skipIf(!slicer)('the slicer slices its 3MF', () => {
+    slice(copyToWorkDir('bracket.3mf'), bracket!.expected.max[2]! - bracket!.expected.min[2]!);
+  });
+
+  it.skipIf(!slicer)('the slicer slices its STL', () => {
+    slice(copyToWorkDir('bracket.stl'), bracket!.expected.max[2]! - bracket!.expected.min[2]!);
+  });
+
+  /** The slicer writes its G-code next to the file: work on a copy in the scratch directory. */
+  function copyToWorkDir(name: string): string {
+    const to = join(dir, name);
+    writeFileSync(to, readFileSync(join(bracket!.dir, name)));
+    return to;
+  }
 });

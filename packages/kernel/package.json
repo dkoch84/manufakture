@@ -14,7 +14,8 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run --root ../.. --project packages packages/kernel"
+    "test": "vitest run --root ../.. --project packages --project kernel-goldens packages/kernel",
+    "goldens": "vitest run --root ../.. --project kernel-goldens"
   },
   "dependencies": {
     "comlink": "^4.4.2",

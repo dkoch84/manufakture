@@ -23,7 +23,20 @@ export default defineConfig({
   // One worker: the perf check must not share the CPU with other tests.
   workers: 1,
   timeout: 120_000,
-  expect: { timeout: 15_000 },
+  expect: {
+    timeout: 15_000,
+    // Viewport screenshots (m1-views.spec.ts) are rendered by SwiftShader. Tolerant on purpose:
+    // a pixel counts as different only past a colour distance of 0.2, and up to 1% of them may
+    // differ, which absorbs rasterization noise between machines but not a changed model, view
+    // or shading.
+    toHaveScreenshot: { threshold: 0.2, maxDiffPixelRatio: 0.01, animations: 'disabled' },
+  },
+  // Baselines are shared by every platform (the renderer is SwiftShader everywhere), so their
+  // names carry no browser or OS suffix.
+  snapshotPathTemplate: '{testDir}/__screenshots__/{testFilePath}/{arg}{ext}',
+  // CI only compares: it never writes or rewrites a baseline, so a missing or changed image
+  // fails there and is updated on purpose, locally, with --update-snapshots.
+  updateSnapshots: ci ? 'none' : 'missing',
   forbidOnly: ci,
   retries: ci ? 1 : 0,
   reporter: ci

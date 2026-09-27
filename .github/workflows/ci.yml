@@ -29,8 +29,28 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm lint
-      - run: pnpm test
+      # Unit tests; the kernel goldens run in their own job below.
+      - run: pnpm test --project packages --project web
       - run: pnpm build
+
+  kernel-goldens:
+    # The kernel's golden tests in one job: volume, face count and bounding box per feature
+    # (features), exact measures (measure), STEP round trips (exchange) and the M1 bracket
+    # (packages/kernel/test). The `kernel-goldens` project in vitest.config.ts.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @manufakture/kernel run goldens
 
   e2e:
     # Playwright against a production build (vite preview). Kept out of the
@@ -51,7 +71,18 @@ jobs:
       - name: Install Chromium and its system libraries
         run: pnpm --filter @manufakture/web exec playwright install --with-deps chromium
       - name: Run e2e tests
+        # Includes M1 acceptance (e2e/m1-*.spec.ts): the bracket walkthrough, viewport
+        # screenshots against the committed baselines (never rewritten here), and the
+        # performance budgets, which are written to this job's summary.
         run: pnpm --filter @manufakture/web e2e
+      - name: Upload the M1 bracket exports for the interop job
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: m1-bracket
+          path: apps/web/test-results/m1-bracket/
+          if-no-files-found: ignore
+          retention-days: 14
       - name: Upload the Playwright report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7
@@ -64,9 +95,12 @@ jobs:
 
   interop:
     # Optional: FreeCAD reopens our STEP and PrusaSlicer slices our 3MF and STL
-    # (packages/io/src/interop.test.ts). Each check skips itself when its
-    # program is missing, so a failed install skips it rather than failing,
-    # and the job never blocks a merge.
+    # (packages/io/src/interop.test.ts), for a part made in Node and for the
+    # M1 bracket exported by the app in the e2e job. Each check skips itself
+    # when its program (or the bracket export) is missing, so a failed install
+    # skips it rather than failing, and the job never blocks a merge.
+    needs: e2e
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     continue-on-error: true
@@ -86,8 +120,15 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends freecad prusa-slicer xvfb
+      - name: Download the M1 bracket exports
+        continue-on-error: true
+        uses: actions/download-artifact@v7
+        with:
+          name: m1-bracket
+          path: m1-bracket
       - name: Interop checks
         run: |
           # PrusaSlicer's CLI links GTK; give it a virtual display.
           if command -v prusa-slicer > /dev/null; then export SLICER_CMD="xvfb-run -a prusa-slicer"; fi
+          if [ -f m1-bracket/expected.json ]; then export INTEROP_BRACKET_DIR="$PWD/m1-bracket"; fi
           pnpm --filter @manufakture/io exec vitest run --root ../.. --project packages packages/io/src/interop.test.ts

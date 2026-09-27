@@ -77,6 +77,7 @@ interface E2eFeatureResult {
   cached: boolean;
   errors: { code: string; message: string }[];
   warnings: { code: string; message: string }[];
+  references: { referenceId: string; target: string; via: string; fragile: boolean }[];
 }
 
 interface Window {
@@ -85,6 +86,8 @@ interface Window {
       getState(): {
         generation: number;
         pending: boolean;
+        /** Milliseconds the last regen took in the worker. */
+        ms: number;
         document: unknown;
         parts: { partId: string; features: E2eFeatureResult[] }[];
       };
