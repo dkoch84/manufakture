@@ -20,6 +20,10 @@ const result = await engine.regen(document, { generation }); // null when supers
 store.subscribe((event) => engine.update(event)); // uses the event's previous document and change
 ```
 
+That is the engine's own API, as tests and a custom host use it. apps/web does not construct an
+engine: it spawns the regen worker (`@manufakture/regen/worker`) through `spawnRegenWorker` and
+calls `RegenClient.regen(document)` (see "The worker").
+
 ## Where it runs
 
 **Decision: the engine runs in the kernel worker, and the main thread makes one `regen` call per
@@ -59,6 +63,17 @@ service (`@manufakture/kernel/node`) and the real solver directly.
 
 After a recycle every body is gone. The engine only forgets (its hook runs inside the service's queue, where nothing may be submitted); the main thread hears of it through the kernel's `recycled` status and asks for a regen of its current document (apps/web `kernelLoader`). A worker restart is handled the same way, through the client's `onRestarted` option. Imported STEP reference bodies are not part of a regen, so the app reads them again from the files their import features store.
 
+**In apps/web.** `kernelLoader` (`apps/web/src/viewport/scenes.ts`) spawns the regen worker, and
+`kernelRegenerator` (`apps/web/src/model/kernelModel.ts`) wraps its `RegenClient`: it skips a
+completed result no newer than the last one it applied, keeps each part's last mesh (the engine sends one only
+when the body changed), and registers each part's `shape` for measuring, exporting and picking.
+`startRegen` (`apps/web/src/model/model.ts`) asks for one regen of the whole document on every
+document change and after every recycle or restart, applies a result only when it is newer than
+the one shown, and asks again, up to three times, when its newest regen comes back null. The
+client's `regen` sends the document and a generation only, not the store's previous document and
+change, so in the app the engine finds the dirty subgraph by comparing with the document of its
+last completed regen (see below).
+
 **Decision: the sketch solver runs in the regen worker, in-process**, as a `SolverService` loading planegcs on the first sketch solve, instead of on a `MessageChannel` port to the solver worker (ADR 0007 decision 2, amended there):
 
 - the engine awaits every solve before its next kernel op, so a solver in another worker buys no parallelism, only a round trip per sketch;
@@ -84,9 +99,11 @@ needs:
 features, changed inputs ignoring the display name, a different body before them, a changed
 variable they read) plus everything depending on a seed, through any edge. A variable edit dirties
 only its readers and what hangs off them; a sketch edit dirties the sketch, the features built on
-it, and everything later in the body chain. With a store change event, the part's
-`firstAffectedIndex` bounds the comparison (features before it are not compared, and `null` means
-nothing in the part is dirty). `regenOrder` and `topologicalOrder` give a dependency order that is
+it, and everything later in the body chain. The comparison is always with the document of the
+engine's last completed regen. With a store change event (`update`, or `regen` given `previous`
+and `change`) whose previous document is that one, the part's `firstAffectedIndex` bounds the
+comparison (features before it are not compared, and `null` means nothing in the part is dirty);
+the worker's `regen` takes no change, so it compares whole parts. `regenOrder` and `topologicalOrder` give a dependency order that is
 the document order for any valid part (core keeps dependencies earlier).
 
 The dirty set is reported per part (`PartResult.dirty`). It is informational: the cache, not the
@@ -170,12 +187,17 @@ through with `no-body` and no names (what `applyFeature` returns for an unknown 
 bodies, up to twice. Such a batch's results are never cached, so a pass-through built on a dead
 shape can never be served later.
 
-**Persistent backend (T1.12, #935).** `FeatureCache` is the plug-in point: `get`, `set`, `retain`,
-`dropBodies` and `clear` may return promises, and the engine awaits them. An OPFS tier stores what
-outlives a kernel instance: statuses, errors and warnings, and solved sketches (plain data) as they
-are. Kernel bodies need a serialized B-rep with its names and topology to restore from, which the
-kernel cannot yet export or import; until it can, a persistent tier should return body entries
-without `body`, which the engine treats as a miss.
+**Persistent tier: allowed, not built.** `MemoryCache` is the only cache there is, so a reload
+regenerates from the document (document persistence in apps/web stores no regen cache; see
+`apps/web/src/persistence/README.md`). `FeatureCache` leaves room for one: `get`, `set`, `retain`,
+`dropBodies` and `clear` may return promises, and the engine awaits them. Such a tier (in OPFS,
+say) could store what outlives a kernel instance as it is: statuses, errors and warnings, and
+solved sketches (plain data). Kernel bodies are the hard part. The kernel does read and write STEP
+(`exportStep` and `importStep`, `packages/kernel/src/exchange.ts`), but STEP keeps only a product
+name per body and none of the face, edge and vertex names that later features and references
+resolve against; restoring a body needs a B-rep format that keeps its names and topology, which
+the kernel does not have. Until it does, a persistent tier should return body entries without
+`body`, which the engine treats as a miss.
 
 ## Errors, warnings, statuses
 
@@ -214,10 +236,12 @@ await and resolves to null.
 
 `KernelService.cancel(generation)` cancels every batch up to that generation, whoever sent it:
 generations are one sequence shared by every client of the kernel (ADR 0007 decision 4), not one
-per client. So when the engine is wired into apps/web, its `cancel(older)` also abandons other
-clients' batches (`pick`, `measure`) with generations up to `older`; those clients must send the
-current generation and treat a `cancelled` reply as "ask again". Regens run one at a time, so they never race on the cache; results a
-superseded regen did finish stay cached for the next one.
+per client. So the engine's `cancel(older)` also abandons other batches (`pick`, `measure`, STEP
+import and export) with generations up to `older`. In apps/web every request goes through the
+one `RegenClient` and its one generation sequence: only a regen takes a new generation, every
+other batch is sent at `latestGeneration` (`apps/web/src/io/exchange.ts`), and a regen that comes
+back null is asked for again (see "The worker"). Regens run one at a time, so they never race on
+the cache; results a superseded regen did finish stay cached for the next one.
 
 ## Result
 
