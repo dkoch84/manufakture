@@ -30,8 +30,11 @@ export function MeasurePanel({ measure, documents, copy = browserCopy }: Measure
   const error = useStore(measure, (s) => s.error);
   const request = useStore(measure, (s) => s.request);
   const units = useStore(documents, (s) => s.document.units);
-  // One body per part for now (ADR 0004): the first part's material is the body's.
-  const part = useStore(documents, (s) => s.document.parts[0] ?? null);
+  // The active part studio's material is its bodies' default.
+  const part = useStore(
+    documents,
+    (s) => s.document.parts.find((p) => p.id === s.activePartId) ?? null,
+  );
   const material: Material | null = part?.material ? (findMaterial(part.material) ?? null) : null;
   const [copied, setCopied] = useState<string | null>(null);
 

@@ -570,22 +570,53 @@ describe('App export and import', () => {
       ),
     );
     const last = () => t.engine.api.setBodies.mock.lastCall![0] as BodyInput[];
-    expect(last().map((b) => b.id)).toEqual(['box', 'import#1']);
+    expect(last().map((b) => b.id)).toEqual(['box', 'part#1/import#1']);
     const part = () => findPart(t.documents.getState().document, 'part#1')!;
     expect(part().features.map((f) => f.id)).toEqual(['import#1']);
 
     fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
     await waitFor(() => expect(last()).toBe(loaded));
     fireEvent.click(screen.getByRole('button', { name: 'Redo' }));
-    await waitFor(() => expect(last().map((b) => b.id)).toEqual(['box', 'import#1']));
+    await waitFor(() => expect(last().map((b) => b.id)).toEqual(['box', 'part#1/import#1']));
+  });
+
+  it('shows the reference imports of a duplicated part studio on its tab', async () => {
+    const t = setup();
+    const loaded = [boxBody()];
+    await act(async () => t.resolve(loaded));
+    const mesh = boxBody({ id: 'x', min: [20, 0, 0] }).mesh;
+    const bytes = writeBinaryStl({
+      positions: new Float32Array(mesh.positions),
+      indices: new Uint32Array(mesh.indices),
+    });
+    const file = new File([bytes], 'bracket.stl', { type: 'model/stl' });
+    fireEvent.change(await screen.findByTestId('import-input'), { target: { files: [file] } });
+    const last = () => t.engine.api.setBodies.mock.lastCall![0] as BodyInput[];
+    await waitFor(() => expect(last().map((b) => b.id)).toEqual(['box', 'part#1/import#1']));
+
+    // The copy is active, and its import (also import#1) is read from the file it stores.
+    fireEvent.click(screen.getByTestId('part-duplicate'));
+    expect(t.documents.getState().activePartId).toBe('part#2');
+    await waitFor(() => expect(last().map((b) => b.id)).toEqual(['box', 'part#2/import#1']));
+    fireEvent.click(screen.getByTestId('part-tab-part#1'));
+    await waitFor(() => expect(last().map((b) => b.id)).toEqual(['box', 'part#1/import#1']));
+
+    // Undo drops the copy; redo puts it back with its body.
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+    expect(t.documents.getState().document.parts).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Redo' }));
+    expect(t.documents.getState().activePartId).toBe('part#2');
+    await waitFor(() => expect(last().map((b) => b.id)).toEqual(['box', 'part#2/import#1']));
   });
 
   it('keeps an undone STEP import for redo, and drops it once it cannot come back', async () => {
     const exchanger = boxExchanger();
-    vi.mocked(exchanger.importStep).mockImplementation(async (_bytes, featureId) => ({
-      ok: true,
-      value: boxBody({ id: featureId, min: [20, 0, 0] }),
-    }));
+    vi.mocked(exchanger.importStep).mockImplementation(
+      async (_bytes, featureId, _name, bodyId) => ({
+        ok: true,
+        value: boxBody({ id: bodyId ?? featureId, min: [20, 0, 0] }),
+      }),
+    );
     const t = setup({ exchanger });
     const loaded = [boxBody()];
     await act(async () => t.resolve(loaded));
@@ -597,15 +628,15 @@ describe('App export and import', () => {
       expect(screen.getByTestId('io-status').textContent).toMatch(/^Imported ref\.step/),
     );
     const retained = () => [...vi.mocked(exchanger.retain).mock.lastCall![0]];
-    await waitFor(() => expect(retained()).toEqual(['import#1']));
+    await waitFor(() => expect(retained()).toEqual(['part#1/import#1']));
     const last = () => t.engine.api.setBodies.mock.lastCall![0] as BodyInput[];
 
     // Undone: hidden, but kept, since redo brings it back.
     fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
     await waitFor(() => expect(last()).toBe(loaded));
-    expect(retained()).toEqual(['import#1']);
+    expect(retained()).toEqual(['part#1/import#1']);
     fireEvent.click(screen.getByRole('button', { name: 'Redo' }));
-    await waitFor(() => expect(last().map((b) => b.id)).toEqual(['box', 'import#1']));
+    await waitFor(() => expect(last().map((b) => b.id)).toEqual(['box', 'part#1/import#1']));
 
     // Undone, then a new edit clears the redo stack: the body is dropped for good.
     fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
@@ -621,10 +652,12 @@ describe('App export and import', () => {
 
   it('reads imported STEP bodies again when the kernel lost every shape', async () => {
     const exchanger = boxExchanger();
-    vi.mocked(exchanger.importStep).mockImplementation(async (_bytes, featureId) => ({
-      ok: true,
-      value: boxBody({ id: featureId, min: [20, 0, 0] }),
-    }));
+    vi.mocked(exchanger.importStep).mockImplementation(
+      async (_bytes, featureId, _name, bodyId) => ({
+        ok: true,
+        value: boxBody({ id: bodyId ?? featureId, min: [20, 0, 0] }),
+      }),
+    );
     const lost = new Set<() => void>();
     const regenerator: Regenerator = {
       regen: () => new Promise(() => {}),
@@ -646,8 +679,8 @@ describe('App export and import', () => {
     act(() => lost.forEach((l) => l()));
     await waitFor(() => expect(exchanger.reimport).toHaveBeenCalledTimes(1));
     const files = vi.mocked(exchanger.reimport).mock.lastCall![0];
-    expect([...files.keys()]).toEqual(['import#1']);
-    expect(new TextDecoder().decode(files.get('import#1'))).toBe(text);
+    expect([...files.keys()]).toEqual(['part#1/import#1']);
+    expect(new TextDecoder().decode(files.get('part#1/import#1'))).toBe(text);
   });
 
   it('reports a file it cannot import', async () => {
@@ -854,7 +887,7 @@ describe('App documents', () => {
     const t = await persisted();
     await waitFor(() => expect(screen.getByTestId('document-name').textContent).toBe('Bracket'));
     expect(t.documents.getState().document.id).toBe('b');
-    await waitFor(() => expect(t.bodies()).toEqual(['import#1']));
+    await waitFor(() => expect(t.bodies()).toEqual(['part#1/import#1']));
     expect(window.location.search).toBe('?doc=b');
   });
 
@@ -897,7 +930,7 @@ describe('App documents', () => {
 
   it('switches documents from the home screen, dropping the reference bodies of the one before', async () => {
     const t = await persisted();
-    await waitFor(() => expect(t.bodies()).toEqual(['import#1']));
+    await waitFor(() => expect(t.bodies()).toEqual(['part#1/import#1']));
     fireEvent.click(screen.getByTestId('open-home'));
     fireEvent.click(await screen.findByRole('button', { name: 'Alpha' }));
     await waitFor(() => expect(screen.getByTestId('document-name').textContent).toBe('Alpha'));
@@ -906,7 +939,7 @@ describe('App documents', () => {
     // And back: the import is read again.
     fireEvent.click(screen.getByTestId('open-home'));
     fireEvent.click(await screen.findByRole('button', { name: 'Bracket' }));
-    await waitFor(() => expect(t.bodies()).toEqual(['import#1']));
+    await waitFor(() => expect(t.bodies()).toEqual(['part#1/import#1']));
   });
 
   it('stays on the home screen after deleting the open document, with a new one open', async () => {

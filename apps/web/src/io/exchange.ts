@@ -40,6 +40,11 @@ export interface KernelBody {
    * (like an STL reference, which the kernel never holds).
    */
   role: 'part' | 'reference';
+  /**
+   * For a reference body: the import feature it was read for, which names its faces. Feature ids
+   * repeat across part studios, so the registry key (the viewport id) is part-qualified.
+   */
+  featureId?: string;
 }
 
 export type ExchangeResult<T> = { ok: true; value: T } | { ok: false; message: string };
@@ -56,12 +61,14 @@ export interface Exchanger {
   exportStep(ids: readonly string[]): Promise<ExchangeResult<Uint8Array>>;
   /**
    * Read a STEP file into a reference body named after the import feature
-   * `featureId`; the body's viewport id is the feature id.
+   * `featureId`; the body's viewport id is `bodyId` (default: the feature id), which the app
+   * qualifies with the part studio (`importBodyId`), since feature ids repeat across parts.
    */
   importStep(
     bytes: Uint8Array,
     featureId: string,
     name: string,
+    bodyId?: string,
   ): Promise<ExchangeResult<BodyInput>>;
   /**
    * Keep only the reference bodies whose ids are in `ids`: every other one is
@@ -70,8 +77,8 @@ export interface Exchanger {
    */
   retain(ids: ReadonlySet<string>): string[];
   /**
-   * Read STEP reference bodies again after the kernel lost every shape: `files` maps feature
-   * ids to their STEP files. Only bodies still registered are rebuilt (one pruned meanwhile is
+   * Read STEP reference bodies again after the kernel lost every shape: `files` maps viewport
+   * body ids to their STEP files. Only bodies still registered are rebuilt (one pruned meanwhile is
    * released again); returns the ids rebuilt. The viewport meshes stay as they are.
    */
   reimport(files: ReadonlyMap<string, Uint8Array>): Promise<string[]>;
@@ -128,7 +135,12 @@ export function kernelExchange(
 
   // One STEP file into a kept `import` feature body, meshed. At the current generation: an
   // import must not cancel the regen in flight (ADR 0007 decision 4).
-  const readStep = async (c: KernelClient, bytes: Uint8Array, featureId: string): Promise<Read> => {
+  const readStep = async (
+    c: KernelClient,
+    bytes: Uint8Array,
+    featureId: string,
+    bodyId: string,
+  ): Promise<Read> => {
     const reply = await c.submit(
       [
         {
@@ -163,7 +175,7 @@ export function kernelExchange(
       body: {
         ok: true,
         value: {
-          id: featureId,
+          id: bodyId,
           mesh: mesh.value,
           names: fillPlaceholderNames(mesh.value, reply.names),
           topology: topology.value as Topology,
@@ -217,14 +229,19 @@ export function kernelExchange(
       return { ok: true, value: r.value.data };
     },
 
-    async importStep(bytes, featureId, name) {
+    async importStep(bytes, featureId, name, bodyId = featureId) {
       const c = client();
       if (c === null) return { ok: false, message: 'The kernel is not running.' };
-      const read = await readStep(c, bytes, featureId);
+      const read = await readStep(c, bytes, featureId, bodyId);
       if (!read.ok) return read;
       // A re-import under the same id (never in practice) must not leak the old shape.
-      const previous = registry.get(featureId);
-      registry.set(featureId, { shape: read.shape, name, role: 'reference' });
+      const previous = registry.get(bodyId);
+      registry.set(bodyId, {
+        shape: read.shape,
+        name,
+        role: 'reference',
+        ...(bodyId === featureId ? {} : { featureId }),
+      });
       if (previous && previous.shape !== read.shape) release([previous.shape]);
       return read.body;
     },
@@ -247,8 +264,9 @@ export function kernelExchange(
       for (const [id, bytes] of files) {
         const c = client();
         if (c === null) break;
-        if (registry.get(id)?.role !== 'reference') continue;
-        const read = await readStep(c, bytes, id);
+        const known = registry.get(id);
+        if (known?.role !== 'reference') continue;
+        const read = await readStep(c, bytes, known.featureId ?? id, id);
         if (!read.ok) continue;
         // Pruned while it was read (its import can no longer come back): not wanted any more.
         const entry = registry.get(id);

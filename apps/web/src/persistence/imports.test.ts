@@ -11,7 +11,7 @@ function exchanger(ok = true): Exchanger {
     bodies: () => [],
     tessellate: vi.fn(),
     exportStep: vi.fn(),
-    importStep: vi.fn(async (_bytes: Uint8Array, id: string) =>
+    importStep: vi.fn(async (_bytes: Uint8Array, _feature: string, _name: string, id: string) =>
       ok
         ? { ok: true as const, value: boxBody({ id }) }
         : { ok: false as const, message: 'bad STEP' },
@@ -42,12 +42,37 @@ describe('restoreImports', () => {
     const r = await restoreImports(doc, ex);
     expect(r.errors).toEqual([]);
     expect(r.bodies.map((b) => [b.feature.id, b.body.id, b.mesh !== undefined])).toEqual([
-      ['import#1', 'import#1', true],
-      ['import#2', 'import#2', false],
+      ['import#1', 'part#1/import#1', true],
+      ['import#2', 'part#1/import#2', false],
     ]);
     // A 10 mm cube: 12 triangles.
     expect(r.bodies[0]!.mesh!.indices.length).toBe(36);
-    expect(ex.importStep).toHaveBeenCalledWith(expect.any(Uint8Array), 'import#2', 'Bracket');
+    expect(ex.importStep).toHaveBeenCalledWith(
+      expect.any(Uint8Array),
+      'import#2',
+      'Bracket',
+      'part#1/import#2',
+    );
+  });
+
+  it('keeps apart the same import id in two part studios', async () => {
+    const doc = await withStep();
+    const two = unwrapDoc(
+      applyCommand(doc, {
+        type: 'duplicatePart',
+        sourcePartId: 'part#1',
+        partId: 'part#2',
+        name: 'Copy',
+      }),
+    );
+    const r = await restoreImports(two, exchanger());
+    expect(r.errors).toEqual([]);
+    expect(r.bodies.map((b) => [b.partId, b.feature.id, b.body.id])).toEqual([
+      ['part#1', 'import#1', 'part#1/import#1'],
+      ['part#1', 'import#2', 'part#1/import#2'],
+      ['part#2', 'import#1', 'part#2/import#1'],
+      ['part#2', 'import#2', 'part#2/import#2'],
+    ]);
   });
 
   it('reports what it cannot read, and keeps the rest', async () => {

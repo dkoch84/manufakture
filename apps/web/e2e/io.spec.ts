@@ -95,7 +95,7 @@ test.describe('export and import', () => {
       { timeout: 30_000 },
     );
     const info = await page.evaluate(() => window.__manufakture!.viewport.info());
-    expect(info.bodies.map((b) => b.id)).toEqual(['part#1', 'import#1']);
+    expect(info.bodies.map((b) => b.id)).toEqual(['part#1', 'part#1/import#1']);
     expect(info.bodies[1]!.faces).toBe(info.bodies[0]!.faces);
 
     // The document holds the import feature with the file.
@@ -153,7 +153,7 @@ test.describe('export and import', () => {
       'Imported part.stl as part (STL mesh, a reference body).',
     );
     const info = await page.evaluate(() => window.__manufakture!.viewport.info());
-    expect(info.bodies.map((b) => b.id)).toEqual(['part#1', 'import#1']);
+    expect(info.bodies.map((b) => b.id)).toEqual(['part#1', 'part#1/import#1']);
     expect(info.bodies[1]!.faces).toBe(1);
     expect(info.bodies[1]!.edges).toBe(0);
     const feature = await page.evaluate(() =>

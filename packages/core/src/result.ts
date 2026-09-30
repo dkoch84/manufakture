@@ -40,7 +40,9 @@ export type CoreErrorCode =
   /** A migration failed. */
   | 'migration'
   /** Undo or redo with an empty stack. */
-  | 'empty-history';
+  | 'empty-history'
+  /** The command would delete the document's only part studio. */
+  | 'last-part';
 
 export interface CoreError {
   readonly code: CoreErrorCode;

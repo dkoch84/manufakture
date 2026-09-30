@@ -34,7 +34,8 @@ export function useSketching(
   const enter = useCallback(
     (target: SketchTarget) => {
       if (session.getState().active) return false;
-      const r = startSketch(documents.getState().document, target, undefined, placements);
+      const { document, activePartId } = documents.getState();
+      const r = startSketch(document, target, activePartId, placements);
       if (!r.ok) {
         setError(r.message);
         return false;

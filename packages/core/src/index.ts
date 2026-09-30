@@ -25,8 +25,11 @@ export {
 export {
   CommandSchema,
   MAX_DOCUMENT_NAME,
+  MAX_PART_NAME,
+  PART_ID_PATTERN,
   SimpleCommandSchema,
   applyCommand,
+  partParameters,
   variableParameters,
   variableUsers,
   type Applied,

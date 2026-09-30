@@ -4,7 +4,7 @@
 // reorder (a move the document refuses is explained and not made), and the rollback bar is
 // dragged between rows. Every change is one core command, so Undo and Redo cover all of it.
 
-import { DEFAULT_PART_ID, findPart, type Command } from '@manufakture/core';
+import { findPart, type Command } from '@manufakture/core';
 import {
   useEffect,
   useMemo,
@@ -40,6 +40,7 @@ export interface FeatureTreeProps {
   documents: DocumentStoreApi;
   model: ModelStore;
   selection: SelectionStore;
+  /** The part studio shown; default: the active one. */
   partId?: string;
   /** No changes while something else edits the document (a sketch, a feature dialog). */
   disabled?: boolean;
@@ -70,10 +71,12 @@ export function FeatureTree({
   documents,
   model,
   selection,
-  partId = DEFAULT_PART_ID,
+  partId: givenPartId,
   disabled = false,
   onEdit,
 }: FeatureTreeProps) {
+  const activePartId = useStore(documents, (s) => s.activePartId);
+  const partId = givenPartId ?? activePartId;
   const document = useStore(documents, (s) => s.document);
   const available = useModel(model, (s) => s.available);
   const built = useModel(model, (s) => s.document);

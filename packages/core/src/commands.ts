@@ -1,7 +1,7 @@
 import { isValidVariableName } from '@manufakture/units';
 import { z } from 'zod';
 import { bodyCreator, featureDependencies, featureExpressions, featureSubIds } from './features';
-import { parseAnyId, peekCounter } from './ids';
+import { PART_COUNTER, parseAnyId, peekCounter } from './ids';
 import { fail, ok, schemaError, type CoreResult } from './result';
 import {
   BodyIdSchema,
@@ -15,6 +15,7 @@ import {
   DisplayUnitsSchema,
   FeatureSchema,
   MaterialIdSchema,
+  PartSchema,
   StoredExpressionSchema,
   type BodyProps,
   type BodyPropsFields,
@@ -25,6 +26,7 @@ import {
   type ManufaktureDocument,
   type Part,
 } from './schema';
+import { createPart } from './document';
 import { checkDocument, expressionVariableNames } from './validate';
 
 /**
@@ -36,6 +38,10 @@ import { checkDocument, expressionVariableNames } from './validate';
 
 /** Longest document name `renameDocument` accepts. */
 export const MAX_DOCUMENT_NAME = 200;
+/** Longest part studio name `addPart`, `renamePart` and `duplicatePart` accept. */
+export const MAX_PART_NAME = 200;
+/** A part id straight from the document counter: `part#n`. */
+export const PART_ID_PATTERN = /^part#[1-9][0-9]*$/;
 
 const partId = z.string().min(1);
 const featureId = z.string().min(1);
@@ -154,6 +160,42 @@ export const SimpleCommandSchema = z.discriminatedUnion('type', [
     type: z.literal('setActiveConfiguration'),
     rowId: ConfigRowIdSchema.nullable(),
   }),
+  /**
+   * Add an empty part studio. `partId` must be a fresh `part#n` from the document's
+   * `nextIds.part`; it goes at `index` (default: last).
+   */
+  z.strictObject({
+    type: z.literal('addPart'),
+    partId,
+    name: z.string(),
+    index: index.optional(),
+  }),
+  /** Rename a part studio (trimmed, 1 to 200 characters). */
+  z.strictObject({ type: z.literal('renamePart'), partId, name: z.string() }),
+  /**
+   * Remove a part studio. Refused for the last one, and while a configuration parameter
+   * suppresses one of its features.
+   */
+  z.strictObject({ type: z.literal('deletePart'), partId }),
+  /**
+   * History only: put a deleted part studio back at `index` (undo of a delete, redo of an add
+   * or a duplicate). Its id must have been allocated before; the counter does not move.
+   */
+  z.strictObject({ type: z.literal('restorePart'), part: PartSchema, index }),
+  /** Move a part studio so it ends up at `index`. */
+  z.strictObject({ type: z.literal('reorderParts'), partId, index }),
+  /**
+   * Copy part studio `sourcePartId` to a new one, `partId` (a fresh `part#n`), at `index`
+   * (default: just after the source). Features keep their ids, since ids are per part; body
+   * names, colours and materials, the rollback bar and the counters are copied too.
+   */
+  z.strictObject({
+    type: z.literal('duplicatePart'),
+    sourcePartId: partId,
+    partId,
+    name: z.string(),
+    index: index.optional(),
+  }),
 ]);
 
 export type SimpleCommand = z.infer<typeof SimpleCommandSchema>;
@@ -237,12 +279,29 @@ function applyUnchecked(doc: ManufaktureDocument, command: Command): CoreResult<
     case 'restoreConfigRow':
     case 'setActiveConfiguration':
       return applyToConfigurations(doc, command);
+    case 'addPart':
+    case 'renamePart':
+    case 'deletePart':
+    case 'restorePart':
+    case 'reorderParts':
+    case 'duplicatePart':
+      return applyToParts(doc, command);
     default:
       return applyToPart(doc, command);
   }
 }
 
-type PartCommand = Extract<SimpleCommand, { partId: string }>;
+/** Commands that add, remove, rename or move whole part studios. */
+type PartsCommand = Extract<
+  SimpleCommand,
+  {
+    type:
+      'addPart' | 'renamePart' | 'deletePart' | 'restorePart' | 'reorderParts' | 'duplicatePart';
+  }
+>;
+
+/** Commands that change what is inside one part. */
+type PartCommand = Exclude<Extract<SimpleCommand, { partId: string }>, PartsCommand>;
 
 function applyToPart(doc: ManufaktureDocument, command: PartCommand): CoreResult<Applied> {
   const pi = doc.parts.findIndex((p) => p.id === command.partId);
@@ -904,6 +963,122 @@ function applyToConfigurations(
         { ...table, active: command.rowId },
         { type: 'setActiveConfiguration', rowId: table.active },
       );
+    }
+  }
+}
+
+function partName(raw: string): CoreResult<string> {
+  const name = raw.trim();
+  return name.length === 0 || name.length > MAX_PART_NAME
+    ? fail('invalid-name', `A part studio name must be 1 to ${MAX_PART_NAME} characters`, ['name'])
+    : ok(name);
+}
+
+/** Allocates a fresh `part#n` for a new part studio. */
+function allocatePartId(doc: ManufaktureDocument, id: string): CoreResult<Record<string, number>> {
+  if (!PART_ID_PATTERN.test(id)) {
+    return fail('invalid-id', `"${id}" is not a part id (part#n)`, ['partId'], { blockers: [id] });
+  }
+  if (doc.parts.some((p) => p.id === id)) {
+    return fail('duplicate', `Part "${id}" already exists`, ['partId']);
+  }
+  return allocateDocumentId(doc, PART_COUNTER, id, 'fresh');
+}
+
+/** Configuration parameters that suppress a feature of part `partId`. */
+export function partParameters(doc: ManufaktureDocument, partId: string): string[] {
+  return (doc.configurations?.parameters ?? [])
+    .filter((p) => p.kind === 'suppression' && p.partId === partId)
+    .map((p) => p.id);
+}
+
+function applyToParts(doc: ManufaktureDocument, command: PartsCommand): CoreResult<Applied> {
+  const done = (parts: Part[], inverse: Command, nextIds = doc.nextIds) =>
+    ok<Applied>({ document: { ...doc, parts, nextIds }, inverse });
+  const find = (id: string, field = 'partId'): CoreResult<number> => {
+    const i = doc.parts.findIndex((p) => p.id === id);
+    return i < 0 ? fail('not-found', `No part "${id}"`, [field]) : ok(i);
+  };
+
+  switch (command.type) {
+    case 'addPart':
+    case 'duplicatePart': {
+      const name = partName(command.name);
+      if (!name.ok) return name;
+      let part: Part = createPart(command.partId, name.value);
+      let at = doc.parts.length;
+      if (command.type === 'duplicatePart') {
+        const si = find(command.sourcePartId, 'sourcePartId');
+        if (!si.ok) return si;
+        part = { ...doc.parts[si.value]!, id: command.partId, name: name.value };
+        at = si.value + 1;
+      }
+      const ids = allocatePartId(doc, command.partId);
+      if (!ids.ok) return ids;
+      const parts = insertAt(doc.parts, part, command.index ?? at, 'parts');
+      if (!parts.ok) return parts;
+      return done(parts.value, { type: 'deletePart', partId: command.partId }, ids.value);
+    }
+
+    case 'renamePart': {
+      const i = find(command.partId);
+      if (!i.ok) return i;
+      const name = partName(command.name);
+      if (!name.ok) return name;
+      const old = doc.parts[i.value]!;
+      const parts = doc.parts.slice();
+      parts[i.value] = { ...old, name: name.value };
+      return done(parts, { type: 'renamePart', partId: old.id, name: old.name });
+    }
+
+    case 'deletePart': {
+      const i = find(command.partId);
+      if (!i.ok) return i;
+      if (doc.parts.length === 1) {
+        return fail('last-part', 'A document keeps at least one part studio', ['partId']);
+      }
+      const params = partParameters(doc, command.partId);
+      if (params.length > 0) {
+        return fail(
+          'dependency',
+          `Cannot delete ${command.partId}: configuration parameter ${params.join(', ')} suppresses a feature in it`,
+          ['partId'],
+          { blockers: params },
+        );
+      }
+      const parts = doc.parts.slice();
+      const [old] = parts.splice(i.value, 1);
+      return done(parts, { type: 'restorePart', part: old!, index: i.value });
+    }
+
+    case 'restorePart': {
+      const p = command.part;
+      if (doc.parts.some((x) => x.id === p.id)) {
+        return fail('duplicate', `Part "${p.id}" already exists`, ['part', 'id']);
+      }
+      if (PART_ID_PATTERN.test(p.id)) {
+        const ids = allocateDocumentId(doc, PART_COUNTER, p.id, 'restore');
+        if (!ids.ok) return ids;
+      }
+      const parts = insertAt(doc.parts, p, command.index, 'parts');
+      if (!parts.ok) return parts;
+      return done(parts.value, { type: 'deletePart', partId: p.id });
+    }
+
+    case 'reorderParts': {
+      const i = find(command.partId);
+      if (!i.ok) return i;
+      if (command.index >= doc.parts.length) {
+        return fail(
+          'invalid-index',
+          `Index ${command.index} is past the last of ${doc.parts.length} parts`,
+          ['index'],
+        );
+      }
+      const parts = doc.parts.slice();
+      const [moved] = parts.splice(i.value, 1);
+      parts.splice(command.index, 0, moved!);
+      return done(parts, { type: 'reorderParts', partId: command.partId, index: i.value });
     }
   }
 }

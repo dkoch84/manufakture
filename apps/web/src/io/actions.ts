@@ -2,7 +2,6 @@
 // tested with a fake kernel exchange and a real document store.
 
 import {
-  DEFAULT_PART_ID,
   MAX_IMPORT_BYTES,
   findPart,
   previewIds,
@@ -29,6 +28,7 @@ import type { BodyInput } from '../viewport/bodies';
 import type { Exchanger } from './exchange';
 import { MIME, formatBytes } from './files';
 import { meshBody } from './meshBody';
+import { importBodyId } from './restorable';
 
 export type ExportFormat = 'stl' | 'stl-each' | '3mf' | 'step';
 
@@ -92,7 +92,10 @@ export async function exportBodies(
 export { MAX_IMPORT_BYTES };
 
 export interface ImportedBody {
+  /** The part studio the import feature is in. */
+  partId: string;
   feature: ImportFeature;
+  /** Its viewport id is `importBodyId(partId, feature.id)`. */
   body: BodyInput;
   /** Set for an STL import: the welded mesh, which the mesh measurer uses. */
   mesh?: TriMesh;
@@ -101,13 +104,14 @@ export interface ImportedBody {
 /**
  * Import a STEP or STL file as a reference body: read it (STEP in the
  * kernel, STL here), then add an `import` feature holding the file to the
- * document, as one undoable step. The body's viewport id is the feature id.
+ * document, as one undoable step. The body's viewport id is the feature id qualified with the
+ * part studio (`importBodyId`).
  */
 export async function importFile(
   file: { name: string; bytes: Uint8Array },
   documents: DocumentStoreApi,
   exchanger: Exchanger | null,
-  partId: string = DEFAULT_PART_ID,
+  partId: string = documents.getState().activePartId,
 ): Promise<ActionResult<ImportedBody>> {
   const { bytes } = file;
   if (bytes.length === 0) return { ok: false, message: `${file.name} is empty.` };
@@ -125,6 +129,7 @@ export async function importFile(
   const part = findPart(doc, partId);
   if (!part) return { ok: false, message: `There is no part ${partId}.` };
   const [featureId] = previewIds(part.nextIds, 'import');
+  const bodyId = importBodyId(partId, featureId!);
   const stem = file.name.replace(/\.[^.]*$/, '') || file.name;
 
   let body: BodyInput;
@@ -136,7 +141,7 @@ export async function importFile(
       stepProductNames(bytes)
         .find((n) => n.trim().length > 0)
         ?.trim() ?? stem;
-    const read = await exchanger.importStep(bytes, featureId!, name);
+    const read = await exchanger.importStep(bytes, featureId!, name, bodyId);
     if (!read.ok) return read;
     body = read.value;
   } else {
@@ -144,7 +149,7 @@ export async function importFile(
       const stl = parseStl(bytes);
       name = stl.name.length > 0 && stl.format === 'ascii' ? stl.name : stem;
       mesh = stl.mesh;
-      body = meshBody(featureId!, stl.mesh);
+      body = meshBody(bodyId, stl.mesh);
     } catch (e) {
       return { ok: false, message: `${file.name}: ${e instanceof Error ? e.message : String(e)}` };
     }
@@ -165,25 +170,25 @@ export async function importFile(
   const kind = format === 'step' ? 'STEP' : 'STL mesh';
   return {
     ok: true,
-    value: mesh ? { feature, body, mesh } : { feature, body },
+    value: mesh ? { partId, feature, body, mesh } : { partId, feature, body },
     message: `Imported ${file.name} as ${feature.name} (${kind}, a reference body).`,
   };
 }
 
 /**
- * Read the STEP reference bodies of `features` into the kernel again, from the files the
+ * Read the STEP reference bodies of `imports` into the kernel again, from the files their
  * features store, after the kernel lost every shape (a recycle or a restart). STL references
- * are meshes the kernel never held, so they are left alone. Returns the ids rebuilt.
+ * are meshes the kernel never held, so they are left alone. Returns the body ids rebuilt.
  */
 export function reimportSteps(
   exchanger: Exchanger,
-  features: readonly ImportFeature[],
+  imports: readonly Pick<ImportedBody, 'partId' | 'feature'>[],
 ): Promise<string[]> {
   const files = new Map<string, Uint8Array>();
-  for (const f of features) {
+  for (const { partId, feature: f } of imports) {
     if (f.source.format !== 'step') continue;
     try {
-      files.set(f.id, fromBase64(f.source.data));
+      files.set(importBodyId(partId, f.id), fromBase64(f.source.data));
     } catch {
       // A document that validated holds base64; skip anything else rather than fail the rest.
     }
@@ -191,4 +196,4 @@ export function reimportSteps(
   return files.size === 0 ? Promise.resolve([]) : exchanger.reimport(files);
 }
 
-export { restorableImportIds } from './restorable';
+export { importBodyId, restorableImportIds } from './restorable';

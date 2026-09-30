@@ -118,7 +118,8 @@ describe('importFile', () => {
     const bytes = cubeStl();
     const r = await importFile({ name: 'cube.stl', bytes }, docs, null);
     if (!r.ok) throw new Error(r.message);
-    expect(r.value.body.id).toBe('import#1');
+    expect(r.value.body.id).toBe('part#1/import#1');
+    expect(r.value.partId).toBe('part#1');
     expect(r.value.mesh!.positions.length / 3).toBe(8);
     const features = findPart(docs.getState().document, 'part#1')!.features;
     expect(features).toHaveLength(1);
@@ -147,7 +148,12 @@ describe('importFile', () => {
     );
     const r = await importFile({ name: 'part.step', bytes }, docs, ex);
     if (!r.ok) throw new Error(r.message);
-    expect(ex.importStep).toHaveBeenCalledWith(bytes, 'import#1', 'Bracket body');
+    expect(ex.importStep).toHaveBeenCalledWith(
+      bytes,
+      'import#1',
+      'Bracket body',
+      'part#1/import#1',
+    );
     expect(r.value.feature).toMatchObject({ name: 'Bracket body', source: { format: 'step' } });
     expect(r.value.mesh).toBeUndefined();
     expect(r.message).toBe('Imported part.step as Bracket body (STEP, a reference body).');
@@ -258,7 +264,11 @@ describe('reference bodies and export', () => {
     const docs = documents();
     const r = await importFile({ name: 'ref.step', bytes: step }, docs, k.exchanger);
     if (!r.ok) throw new Error(r.message);
-    expect(k.registry.get('import#1')).toMatchObject({ shape: 12, role: 'reference' });
+    expect(k.registry.get('part#1/import#1')).toMatchObject({
+      shape: 12,
+      role: 'reference',
+      featureId: 'import#1',
+    });
     expect(k.exchanger.bodies()).toEqual([{ id: 'demo-part', name: 'Demo part' }]);
 
     k.sent.length = 0;
@@ -277,9 +287,9 @@ describe('reference bodies and export', () => {
     expect(shapesSent(k.sent, 'tessellate')).toEqual([3, 3]);
     expect(shapesSent(k.sent, 'exportStep')).toEqual([3]);
     // Asking for a reference body by id is refused too.
-    expect(await k.exchanger.exportStep(['import#1'])).toEqual({
+    expect(await k.exchanger.exportStep(['part#1/import#1'])).toEqual({
       ok: false,
-      message: 'The kernel has no body import#1.',
+      message: 'The kernel has no body part#1/import#1.',
     });
   });
 
@@ -291,11 +301,11 @@ describe('reference bodies and export', () => {
     const history = () => [...docs.core.undoStack, ...docs.core.redoStack];
     const keep = () => restorableImportIds(docs.getState().document, history());
 
-    expect([...keep()]).toEqual(['import#1']);
+    expect([...keep()]).toEqual(['part#1/import#1']);
     docs.getState().undo();
     // Out of the document, but on the redo stack: kept, and still not exported.
     expect(findPart(docs.getState().document, 'part#1')!.features).toHaveLength(0);
-    expect([...keep()]).toEqual(['import#1']);
+    expect([...keep()]).toEqual(['part#1/import#1']);
     expect(k.exchanger.retain(keep())).toEqual([]);
     k.sent.length = 0;
     const stl = await exportBodies(k.exchanger, 'stl');
@@ -309,8 +319,8 @@ describe('reference bodies and export', () => {
     });
     expect(keep().size).toBe(0);
     k.sent.length = 0;
-    expect(k.exchanger.retain(keep())).toEqual(['import#1']);
-    expect(k.registry.has('import#1')).toBe(false);
+    expect(k.exchanger.retain(keep())).toEqual(['part#1/import#1']);
+    expect(k.registry.has('part#1/import#1')).toBe(false);
     expect(k.registry.has('demo-part')).toBe(true);
     expect(k.sent).toEqual([]);
     expect(k.released).toEqual([[12]]);
@@ -325,13 +335,11 @@ describe('reference bodies and export', () => {
     if (!r.ok) throw new Error(r.message);
     const stl = await importFile({ name: 'a.stl', bytes: cubeStl() }, docs, k.exchanger);
     if (!stl.ok) throw new Error(stl.message);
-    expect(k.registry.get('import#1')).toMatchObject({ shape: 12 });
+    expect(k.registry.get('part#1/import#1')).toMatchObject({ shape: 12 });
     k.sent.length = 0;
     // The kernel recycled: shape 12 is gone.
-    expect(await reimportSteps(k.exchanger, [r.value.feature, stl.value.feature])).toEqual([
-      'import#1',
-    ]);
-    expect(k.registry.get('import#1')).toMatchObject({ shape: 13, role: 'reference' });
+    expect(await reimportSteps(k.exchanger, [r.value, stl.value])).toEqual(['part#1/import#1']);
+    expect(k.registry.get('part#1/import#1')).toMatchObject({ shape: 13, role: 'reference' });
     // Only the STEP file goes to the kernel, byte for byte.
     expect(k.sent).toHaveLength(1);
     const op = k.sent[0]![0]!;
@@ -341,6 +349,58 @@ describe('reference bodies and export', () => {
     );
   });
 
+  it('keeps apart the imports of two part studios, which share feature ids', async () => {
+    const k = kernelWithPart();
+    const docs = documents();
+    const one = await importFile({ name: 'ref.step', bytes: step }, docs, k.exchanger);
+    if (!one.ok) throw new Error(one.message);
+    docs.getState().execute({ type: 'addPart', partId: 'part#2', name: 'Two' });
+    expect(docs.getState().activePartId).toBe('part#2');
+    const two = await importFile({ name: 'ref.step', bytes: step }, docs, k.exchanger);
+    if (!two.ok) throw new Error(two.message);
+    // Both are import#1 in their own part; the bodies and the kernel shapes stay separate.
+    expect([one.value.feature.id, two.value.feature.id]).toEqual(['import#1', 'import#1']);
+    expect([one.value.body.id, two.value.body.id]).toEqual(['part#1/import#1', 'part#2/import#1']);
+    expect(two.value.partId).toBe('part#2');
+    expect(k.registry.get('part#1/import#1')).toMatchObject({ shape: 12 });
+    expect(k.registry.get('part#2/import#1')).toMatchObject({ shape: 13 });
+    expect(k.released).toEqual([]);
+
+    // Deleting the second part studio keeps its body while undo can bring the part back.
+    const history = () => [...docs.core.undoStack, ...docs.core.redoStack];
+    const keep = () => restorableImportIds(docs.getState().document, history());
+    expect([...keep()].sort()).toEqual(['part#1/import#1', 'part#2/import#1']);
+    docs.getState().execute({ type: 'deletePart', partId: 'part#2' });
+    expect([...keep()].sort()).toEqual(['part#1/import#1', 'part#2/import#1']);
+    expect(k.exchanger.retain(keep())).toEqual([]);
+
+    // Rebuilt after a recycle under their own ids, each read as its own import feature.
+    k.sent.length = 0;
+    expect(await reimportSteps(k.exchanger, [one.value, two.value])).toEqual([
+      'part#1/import#1',
+      'part#2/import#1',
+    ]);
+    expect(k.sent.map((ops) => ops[0])).toMatchObject([
+      { op: 'feature', feature: { id: 'import#1' } },
+      { op: 'feature', feature: { id: 'import#1' } },
+    ]);
+    expect(k.registry.get('part#2/import#1')).toMatchObject({ shape: 15, featureId: 'import#1' });
+  });
+
+  it('finds imports in a whole part a history command restores', () => {
+    const doc = createDocument({ id: 'd', name: 'D' });
+    const part = {
+      id: 'part#3',
+      name: 'Three',
+      features: [{ id: 'import#2', kind: 'import' }],
+      rollbackIndex: null,
+      nextIds: {},
+      bodies: [],
+    };
+    const history = [{ command: { type: 'restorePart', part, index: 1 } }] as never;
+    expect([...restorableImportIds(doc, history)]).toEqual(['part#3/import#2']);
+  });
+
   it('finds imports in the document and in nested history commands', () => {
     const doc = createDocument({ id: 'd', name: 'D' });
     const feature = { id: 'import#4', kind: 'import' };
@@ -348,6 +408,6 @@ describe('reference bodies and export', () => {
       { command: { type: 'batch', commands: [{ type: 'addFeature', partId: 'part#1', feature }] } },
       { command: { type: 'deleteFeature', partId: 'part#1', featureId: 'import#9' } },
     ] as never;
-    expect([...restorableImportIds(doc, history)]).toEqual(['import#4']);
+    expect([...restorableImportIds(doc, history)]).toEqual(['part#1/import#4']);
   });
 });

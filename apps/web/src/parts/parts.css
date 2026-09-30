@@ -1,0 +1,74 @@
+/* The editor area the tabs control: lays out the tree, viewport and side panel as .app-main does. */
+.part-studio-panel {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.part-tabs {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex: none;
+  padding: 0 0.5rem;
+  border-top: 1px solid #d6dce3;
+  background: #f4f6f9;
+  font-size: 0.85rem;
+  min-height: 2.1rem;
+}
+
+.part-tab-list {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  overflow-x: auto;
+  min-width: 0;
+}
+
+.part-tab {
+  padding: 0.3rem 0.8rem;
+  border: 1px solid transparent;
+  border-top: none;
+  border-radius: 0 0 4px 4px;
+  background: transparent;
+  color: #33404d;
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.part-tab:hover:not(:disabled) {
+  background: #e6ebf2;
+}
+
+.part-tab.active {
+  background: #fff;
+  border-color: #d6dce3;
+  color: #111a24;
+  font-weight: 600;
+}
+
+.part-tab.dragged {
+  opacity: 0.5;
+}
+
+.part-tab.drop-target {
+  box-shadow: inset 2px 0 0 #3b6fd8;
+}
+
+.part-tab-rename {
+  width: 10rem;
+  font: inherit;
+  padding: 0.2rem 0.4rem;
+}
+
+.part-tab-actions {
+  display: flex;
+  gap: 0.25rem;
+  flex: none;
+}
+
+.part-tabs-error {
+  color: #b3261e;
+}

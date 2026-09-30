@@ -123,8 +123,9 @@ interface Window {
     };
     document: {
       getState(): {
-        document: { parts: { features: E2eFeature[] }[] };
+        document: { parts: { id: string; name: string; features: E2eFeature[] }[] };
         canUndo: boolean;
+        activePartId: string;
         execute(command: unknown, label?: string): { ok: boolean };
       };
     };

@@ -96,3 +96,55 @@ describe('the undo and redo shortcuts', () => {
     expect(isTextField(document.createElement('button'))).toBe(false);
   });
 });
+
+describe('the active part studio', () => {
+  const twoParts = () => {
+    const store = createDocumentStore(createDocument({ id: 'd', name: 'D' }));
+    store.getState().execute({ type: 'addPart', partId: 'part#2', name: 'Two' }, 'Add Two');
+    return store;
+  };
+
+  it('starts on the first part, and a new part studio becomes active', () => {
+    const store = twoParts();
+    expect(store.getState().activePartId).toBe('part#2');
+    expect(store.getState().setActivePart('part#1')).toBe(true);
+    expect(store.getState().activePartId).toBe('part#1');
+    expect(store.getState().setActivePart('part#9')).toBe(false);
+    expect(store.getState().activePartId).toBe('part#1');
+  });
+
+  it('undo and redo switch to the part studio they touch', () => {
+    const store = twoParts();
+    store
+      .getState()
+      .execute({ type: 'setMaterial', partId: 'part#2', material: 'pla' }, 'Set material');
+    store.getState().setActivePart('part#1');
+    store.getState().undo();
+    expect(store.getState().activePartId).toBe('part#2');
+    store.getState().setActivePart('part#1');
+    store.getState().redo();
+    expect(store.getState().activePartId).toBe('part#2');
+    // A change that touches no part keeps the tab.
+    store.getState().setActivePart('part#1');
+    store.getState().execute({ type: 'renameDocument', name: 'E' });
+    store.getState().undo();
+    expect(store.getState().activePartId).toBe('part#1');
+  });
+
+  it('falls back to a neighbour when the active part goes, and to the first on another document', () => {
+    const store = twoParts();
+    store.getState().undo();
+    expect(store.getState().activePartId).toBe('part#1');
+    store.getState().redo();
+    expect(store.getState().activePartId).toBe('part#2');
+    store.getState().load(createDocument({ id: 'other', name: 'Other' }));
+    expect(store.getState().activePartId).toBe('part#1');
+  });
+
+  it('keeps the tab when the same document loads again with that part', () => {
+    const store = twoParts();
+    store.getState().setActivePart('part#2');
+    store.getState().load(store.getState().document);
+    expect(store.getState().activePartId).toBe('part#2');
+  });
+});

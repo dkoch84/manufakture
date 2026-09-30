@@ -115,7 +115,7 @@ test('a part survives a reload, and a .mfk export, delete and import', async ({ 
   await regenerated(page, 2);
   await saved(page);
   const before = await snapshot(page);
-  expect(before.bodies.map((b) => b.id)).toEqual(['part#1', 'import#1']);
+  expect(before.bodies.map((b) => b.id)).toEqual(['part#1', 'part#1/import#1']);
   expect(before.bodies[0]!.faces).toBe(7);
   expect(before.bodies[1]!.faces).toBe(7);
   const id = (before.document as { id: string }).id;

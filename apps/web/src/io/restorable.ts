@@ -4,31 +4,59 @@
 
 import type { Command, ManufaktureDocument } from '@manufakture/core';
 
-/** Collect the ids of every import feature inside `value` (a command, a feature list). */
-function collectImportIds(value: unknown, out: Set<string>, depth = 0): void {
-  // Commands nest a few levels (batch, feature, sketch entities); strings are skipped,
+/**
+ * The viewport and kernel id of the reference body of import feature `featureId` in part studio
+ * `partId`. Feature ids are counted per part, so two part studios can both have `import#1`.
+ */
+export function importBodyId(partId: string, featureId: string): string {
+  return `${partId}/${featureId}`;
+}
+
+/**
+ * Collect the body ids of every import feature inside `value` (a command, a part, a feature
+ * list), qualified with the part it is in: the `partId` of the command that holds it, or the id
+ * of the part (a `restorePart` carries a whole part).
+ */
+function collectImportIds(
+  value: unknown,
+  partId: string | null,
+  out: Set<string>,
+  depth = 0,
+): void {
+  // Commands nest a few levels (batch, part, feature, sketch entities); strings are skipped,
   // so a stored file is never scanned.
   if (depth > 32 || value === null || typeof value !== 'object') return;
   if (Array.isArray(value)) {
-    for (const v of value) collectImportIds(v, out, depth + 1);
+    for (const v of value) collectImportIds(v, partId, out, depth + 1);
     return;
   }
   const o = value as Record<string, unknown>;
-  if (o.kind === 'import' && typeof o.id === 'string') out.add(o.id);
-  for (const v of Object.values(o)) collectImportIds(v, out, depth + 1);
+  // The qualifier follows the shape of the commands that carry features: `addFeature`,
+  // `editFeature` and `restoreFeature` name their part in `partId`, and `restorePart` holds a
+  // whole part (an object with `id`, `features` and `nextIds`). A new command that carries
+  // features some other way must be added here, or its imports are not kept.
+  let part = partId;
+  if (typeof o.partId === 'string') part = o.partId;
+  else if (typeof o.id === 'string' && Array.isArray(o.features) && typeof o.nextIds === 'object') {
+    part = o.id;
+  }
+  if (o.kind === 'import' && typeof o.id === 'string' && part !== null) {
+    out.add(importBodyId(part, o.id));
+  }
+  for (const v of Object.values(o)) collectImportIds(v, part, out, depth + 1);
 }
 
 /**
  * The import features that are in the document or that undo or redo can
- * bring back: the ones whose reference bodies must be kept. A body whose
- * import is in neither can be dropped for good (its kernel shape released).
+ * bring back, by body id (`importBodyId`): the ones whose reference bodies must be kept. A body
+ * whose import is in neither can be dropped for good (its kernel shape released).
  */
 export function restorableImportIds(
   document: ManufaktureDocument,
   history: readonly { command: Command }[],
 ): Set<string> {
   const ids = new Set<string>();
-  for (const part of document.parts) collectImportIds(part.features, ids);
-  for (const entry of history) collectImportIds(entry.command, ids);
+  for (const part of document.parts) collectImportIds(part.features, part.id, ids);
+  for (const entry of history) collectImportIds(entry.command, null, ids);
   return ids;
 }

@@ -3,7 +3,6 @@
 // document command that commits it when the user exits the sketch.
 
 import {
-  DEFAULT_PART_ID,
   findPart,
   parseFeatureId,
   peekCounter,
@@ -33,10 +32,10 @@ export interface SketchStart {
   source: SketchSource;
 }
 
-/** The sketch features of a part, in feature order. */
+/** The sketch features of a part (default: the first), in feature order. */
 export function sketchFeatures(
   doc: ManufaktureDocument,
-  partId = DEFAULT_PART_ID,
+  partId = doc.parts[0]!.id,
 ): SketchFeature[] {
   const part = findPart(doc, partId);
   return (part?.features ?? []).filter((f): f is SketchFeature => f.kind === 'sketch');
@@ -55,11 +54,11 @@ export function sketchPlacement(
   return placements?.get(feature.id) ?? null;
 }
 
-/** What a session starts from, or an error message. */
+/** What a session starts from in part `partId` (default: the first), or an error message. */
 export function startSketch(
   doc: ManufaktureDocument,
   target: SketchTarget,
-  partId = DEFAULT_PART_ID,
+  partId = doc.parts[0]!.id,
   placements?: SketchPlacements,
 ): { ok: true; value: SketchStart } | { ok: false; message: string } {
   const part = findPart(doc, partId);

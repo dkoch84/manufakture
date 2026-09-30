@@ -4,7 +4,7 @@
 // Cancel or Escape leaves the document alone. The dialog takes focus when it opens (so Escape
 // works at once) and gives it back to where it was when it closes. The form logic is in forms.ts.
 
-import { DEFAULT_PART_ID, defaultFeatureName, findPart, previewIds } from '@manufakture/core';
+import { defaultFeatureName, findPart, previewIds } from '@manufakture/core';
 import { HOLE_SIZES, type HoleFit } from '@manufakture/kernel';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { featureResult, type ModelStore } from '../model/model';
@@ -55,6 +55,7 @@ export interface FeatureDialogProps {
   selection: SelectionStore;
   /** Turns a viewport pick into a reference for a field that accepts `accepts`. */
   resolve: (geo: GeometryRef, accepts: readonly RefKind[]) => Promise<PickOutcome>;
+  /** The part studio the feature is in; default: the active one when the dialog opens. */
   partId?: string;
   onClose: () => void;
 }
@@ -72,9 +73,11 @@ export function FeatureDialog({
   model,
   selection,
   resolve,
-  partId = DEFAULT_PART_ID,
+  partId: givenPartId,
   onClose,
 }: FeatureDialogProps) {
+  // The part is fixed for the dialog's life: the tabs are disabled while it is open.
+  const [partId] = useState(() => givenPartId ?? documents.getState().activePartId);
   const doc = documents.getState().document;
   const part = findPart(doc, partId)!;
   const existing = request.featureId

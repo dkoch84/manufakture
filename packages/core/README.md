@@ -471,11 +471,27 @@ resulting document with `checkDocument`, and returns `{ document, inverse }` or 
 | `deleteConfigRow`        | `rowId` (the active row: none is active after)        | `restoreConfigRow`, plus `setActiveConfiguration` if it was active     |
 | `restoreConfigRow`       | `row`, `index` (history only)                         | `deleteConfigRow`                                                      |
 | `setActiveConfiguration` | `rowId` (`null`: none)                                | `setActiveConfiguration`                                               |
+| `addPart`                | `partId` (a fresh `part#n`), `name`, `index?`         | `deletePart`                                                           |
+| `renamePart`             | `partId`, `name` (trimmed, 1 to 200 characters)       | `renamePart` (the old name)                                            |
+| `deletePart`             | `partId` (not the last part)                          | `restorePart`                                                          |
+| `restorePart`            | `part`, `index` (history only)                        | `deletePart`                                                           |
+| `reorderParts`           | `partId`, `index` (final position)                    | `reorderParts`                                                         |
+| `duplicatePart`          | `sourcePartId`, `partId` (fresh), `name`, `index?`    | `deletePart`                                                           |
 | `batch`                  | `commands` (applied in order, all or nothing)         | `batch` of inverses, reversed                                          |
 
 `restoreConfigParameter` and `restoreConfigRow` are history-only in the same way: they put back a
 deleted parameter or row under its old id, which must have been allocated before, while
 `setConfigParameter` and `setConfigRow` require a fresh id for a new item.
+
+Part studios: `addPart` and `duplicatePart` take a `part#n` id from the document's
+`nextIds.part` (`previewIds(doc.nextIds, PART_COUNTER)` gives the next one) and move the counter
+past it, so a deleted part's id is never handed out again. `restorePart` is their history-only
+counterpart: undo of a delete puts the part back under its old id without counting as reuse. A
+new part goes last; a duplicate goes just after its source and copies the whole part (features
+with the same ids, since ids are per part, counters, rollback bar, material and body props).
+`deletePart` refuses the document's last part (`last-part`), and refuses while a suppression
+configuration parameter names a feature of the part (`dependency`, the parameter ids in
+`blockers`; `partParameters(doc, partId)` lists them): delete the parameter in the same batch.
 
 `restoreFeature` is a history-only command: it is what undo and redo use to put a feature state
 back, and clients must not use it to edit. Unlike `addFeature` and `editFeature`, it requires its

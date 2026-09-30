@@ -18,7 +18,7 @@ If you close or reload the tab while a change is not saved yet (or a save failed
 
 While the open document's changes cannot be saved, the Documents screen will not open, create or import another document in its place: it says why, and offers **Save again** and **Export the open document**, which downloads it as a `.mfk` file as it is, unsaved changes included.
 
-A new document is saved on its first change, so opening the app and closing it again leaves nothing behind. Reloading the page opens the document you were working on (its id is in the address, `?doc=...`); opening the app without one opens the most recently saved document.
+A new document is saved on its first change, so opening the app and closing it again leaves nothing behind. Reloading the page opens the document you were working on (its id is in the address, `?doc=...`), on the [part studio](part-studios.md) tab you had open (`?part=...`); opening the app without one opens the most recently saved document.
 
 Imported reference bodies come back too: the files you imported are stored with the document, and are read again when it opens.
 

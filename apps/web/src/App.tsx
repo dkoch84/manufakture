@@ -1,6 +1,6 @@
 import { sketchToWorld } from '@manufakture/sketch/geometry';
 import type { SketchPlacement, Vec2 } from '@manufakture/sketch/model';
-import { DEFAULT_PART_ID, findPart, type ManufaktureDocument } from '@manufakture/core';
+import { findPart, type ManufaktureDocument } from '@manufakture/core';
 import type { ExportTolerancePreset } from '@manufakture/io';
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from 'zustand';
@@ -10,14 +10,21 @@ import { HomeScreen } from './home/HomeScreen';
 import { startAutosave, type Autosave, type SaveStatus } from './persistence/autosave';
 import type { DocumentLibrary } from './persistence/library';
 import { requestPersistence, storageInfo } from './persistence/storage';
-import { docIdFromSearch, showDocIdInUrl } from './persistence/url';
+import {
+  docIdFromSearch,
+  partIdFromSearch,
+  showDocIdInUrl,
+  showPartIdInUrl,
+} from './persistence/url';
 import type { ExportFormat, ImportedBody } from './io/actions';
-import { restorableImportIds } from './io/restorable';
+import { importBodyId, restorableImportIds } from './io/restorable';
 import { downloadBytes, readFileBytes } from './io/files';
 import { ExportMenu, ImportButton } from './io/IoMenus';
 import { withMeshBodies } from './io/meshBody';
 import { MeasureOverlay } from './measure/MeasureOverlay';
 import { MeasurePanel } from './measure/MeasurePanel';
+import { PART_STUDIO_PANEL_ID } from './parts/names';
+import { PartTabs } from './parts/PartTabs';
 import { measureTargets } from './measure/measurer';
 import { modelBodies, modelStore, startRegen, useModel, type ModelStore } from './model/model';
 import { documentStore, historyShortcut, type DocumentStoreApi } from './state/document';
@@ -62,6 +69,7 @@ import './measure/measure.css';
 import './io/io.css';
 import './tree/tree.css';
 import './features/features.css';
+import './parts/parts.css';
 
 const defaultSolver = () => lazySolver(spawnDefaultSolver);
 
@@ -205,7 +213,13 @@ export function App({
     if (!loaded || !regenerator) return;
     return startRegen(regenerator, documents, model);
   }, [loaded, loader, documents, model]);
-  const parts = useModel(model, (s) => s.parts);
+  // Regen builds every part studio; the viewport, the sketches and the picks see the active one.
+  const activePartId = useStore(documents, (s) => s.activePartId);
+  const allParts = useModel(model, (s) => s.parts);
+  const parts = useMemo(
+    () => allParts.filter((p) => p.partId === activePartId),
+    [allParts, activePartId],
+  );
   const modelGeneration = useModel(model, (s) => s.generation);
   const partBodies = useMemo(() => modelBodies({ parts }), [parts]);
   // Where regen placed each sketch, for sketches on faces.
@@ -236,11 +250,13 @@ export function App({
   }, [loader, owned, ownedSolver]);
 
   const document = useStore(documents, (s) => s.document);
-  const sketches = useMemo(() => sketchFeatures(document), [document]);
+  const sketches = useMemo(() => sketchFeatures(document, activePartId), [document, activePartId]);
   const shownImports = useMemo(() => {
-    const features = findPart(document, DEFAULT_PART_ID)?.features ?? [];
-    return imports.filter((i) => features.some((f) => f.id === i.feature.id));
-  }, [imports, document]);
+    const features = findPart(document, activePartId)?.features ?? [];
+    return imports.filter(
+      (i) => i.partId === activePartId && features.some((f) => f.id === i.feature.id),
+    );
+  }, [imports, document, activePartId]);
   // Forget imported bodies whose import feature can no longer come back (not
   // in the document, the undo stack or the redo stack), releasing their
   // kernel shapes. Runs on every document change, except while an import
@@ -252,9 +268,8 @@ export function App({
     const { core } = documents;
     const keep = restorableImportIds(core.document, [...core.undoStack, ...core.redoStack]);
     loader.exchanger?.retain(keep);
-    setImports((prev) =>
-      prev.every((i) => keep.has(i.feature.id)) ? prev : prev.filter((i) => keep.has(i.feature.id)),
-    );
+    const kept = (i: ImportedBody) => keep.has(importBodyId(i.partId, i.feature.id));
+    setImports((prev) => (prev.every(kept) ? prev : prev.filter(kept)));
   }, [documents, loader]);
   useEffect(() => {
     const unsubscribe = documents.core.subscribe(pruneImports);
@@ -272,13 +287,67 @@ export function App({
     const { regenerator, exchanger } = loader;
     if (!regenerator || !exchanger) return;
     return regenerator.onInvalidated(() => {
-      const features = importsRef.current.map((i) => i.feature);
-      if (!features.some((f) => f.source.format === 'step')) return;
+      const current = importsRef.current;
+      if (!current.some((i) => i.feature.source.format === 'step')) return;
       void import('./io/actions')
-        .then(({ reimportSteps }) => reimportSteps(exchanger, features))
+        .then(({ reimportSteps }) => reimportSteps(exchanger, current))
         .catch(() => undefined);
     });
   }, [loader]);
+  // A part studio that arrives with reference imports (a duplicate, or a redo that puts one
+  // back after its bodies were dropped) has no bodies for them yet: read them from its files.
+  const loadedRef = useRef(loaded);
+  useEffect(() => {
+    loadedRef.current = loaded;
+  }, [loaded]);
+  const reading = useRef(new Set<string>());
+  useEffect(() => {
+    return documents.core.subscribe((event) => {
+      if (event.cause === 'load' || !loadedRef.current) return;
+      const added = new Set(
+        event.change.parts.filter((p) => p.status === 'added').map((p) => p.partId),
+      );
+      if (added.size === 0) return;
+      const have = new Set(importsRef.current.map((i) => importBodyId(i.partId, i.feature.id)));
+      const missing = new Set<string>();
+      for (const part of event.document.parts) {
+        if (!added.has(part.id)) continue;
+        for (const f of part.features) {
+          const id = importBodyId(part.id, f.id);
+          if (f.kind !== 'import' || f.operation !== 'reference') continue;
+          if (!have.has(id) && !reading.current.has(id)) missing.add(id);
+        }
+      }
+      if (missing.size === 0) return;
+      for (const id of missing) reading.current.add(id);
+      const doc = event.document;
+      import('./persistence/imports')
+        .then(({ restoreImports }) => restoreImports(doc, loader.exchanger ?? null, missing))
+        .then(
+          (r) => {
+            if (documents.getState().document.id !== doc.id) return;
+            const key = (i: ImportedBody) => importBodyId(i.partId, i.feature.id);
+            setImports((prev) => {
+              const held = new Set(prev.map(key));
+              const fresh = r.bodies.filter((b) => !held.has(key(b)));
+              return fresh.length === 0 ? prev : [...prev, ...fresh];
+            });
+            if (r.errors.length > 0) {
+              setIoStatus({
+                error: true,
+                text: `Could not read an import again: ${r.errors.join(' ')}`,
+              });
+            }
+          },
+          (e: unknown) =>
+            setIoStatus({ error: true, text: e instanceof Error ? e.message : String(e) }),
+        )
+        .finally(() => {
+          for (const id of missing) reading.current.delete(id);
+          pruneImports();
+        });
+    });
+  }, [documents, loader, pruneImports]);
   // Open a document in the editor: the imported reference bodies of the one before are
   // dropped (feature ids repeat across documents), and this one's are read again from its files.
   const show = useCallback(
@@ -325,6 +394,10 @@ export function App({
   // Open the library, then the document the URL names (or the most recent one). A scene with
   // its own document (the demo) keeps that one.
   const opening = useRef(false);
+  // The part studio the URL names, read once before anything rewrites the URL.
+  const [initialPartId] = useState(() =>
+    typeof window === 'undefined' ? null : partIdFromSearch(window.location.search),
+  );
   useEffect(() => {
     if (!libraryPromise || opening.current) return;
     opening.current = true;
@@ -350,6 +423,9 @@ export function App({
           const opened = await lib.open(id);
           if (opened.ok) {
             show(opened.value.document, { stored: true });
+            if (wanted === id && initialPartId !== null) {
+              documents.getState().setActivePart(initialPartId);
+            }
             // Recovered or migrated: say so, as the home screen does.
             const note = openedMessage(opened.value, true);
             if (note) setIoStatus({ error: false, text: note });
@@ -366,7 +442,20 @@ export function App({
       setLibrary(lib);
       setDocReady(true);
     })();
-  }, [libraryPromise, loader, initialDocumentId, show]);
+  }, [libraryPromise, loader, initialDocumentId, show, documents, initialPartId]);
+
+  // The URL names the active part studio (none for the first), once the document is open.
+  useEffect(() => {
+    if (!docReady) return;
+    showPartIdInUrl(document.parts[0]?.id === activePartId ? null : activePartId);
+  }, [docReady, document, activePartId]);
+  // What was selected belongs to the part studio shown before.
+  const shownPart = useRef(activePartId);
+  useEffect(() => {
+    if (shownPart.current === activePartId) return;
+    shownPart.current = activePartId;
+    selection.getState().clear();
+  }, [activePartId, selection]);
 
   // Autosave the open document; ask once for persistent storage after the first save.
   const askedPersistence = useRef(false);
@@ -541,9 +630,8 @@ export function App({
   const [dialog, setDialog] = useState<DialogRequest | null>(null);
   const onEditFeature = useCallback(
     (featureId: string, options: { repick?: string } = {}) => {
-      const feature = findPart(documents.getState().document, DEFAULT_PART_ID)?.features.find(
-        (f) => f.id === featureId,
-      );
+      const { document: doc, activePartId: partId } = documents.getState();
+      const feature = findPart(doc, partId)?.features.find((f) => f.id === featureId);
       if (!feature) return;
       if (feature.kind === 'sketch') sketching.enter({ kind: 'edit', featureId });
       else if (isDialogKind(feature.kind)) {
@@ -817,77 +905,85 @@ export function App({
         </div>
       )}
       <main className="app-main">
-        {/* A sketch is edited on its own (the tree cannot change anything meanwhile), so the
-            tree steps aside and the sketch gets the room. */}
-        {!sketching.active && (
-          <FeatureTree
-            documents={documents}
-            model={model}
-            selection={selection}
-            disabled={dialog !== null}
-            onEdit={onEditFeature}
-          />
-        )}
-        <Viewport
-          bodies={shownBodies}
-          onReady={setViewport}
-          {...(createEngine ? { createEngine } : {})}
-          {...stores}
+        <div
+          className="part-studio-panel"
+          id={PART_STUDIO_PANEL_ID}
+          role="tabpanel"
+          aria-labelledby={`part-tab-${activePartId}`}
         >
-          {viewport && (
-            <SketchLayer
-              viewport={viewport}
-              session={session}
-              sketches={sketches}
-              placements={placements}
-              highlighted={hoveredFeature}
+          {/* A sketch is edited on its own (the tree cannot change anything meanwhile), so the
+            tree steps aside and the sketch gets the room. */}
+          {!sketching.active && (
+            <FeatureTree
+              documents={documents}
+              model={model}
+              selection={selection}
+              disabled={dialog !== null}
+              onEdit={onEditFeature}
             />
           )}
-          {shownBodies.length === 0 && !sketching.active && (
-            <p className="viewport-hint" data-testid="empty-hint">
-              Nothing here yet. Start with <strong>New sketch</strong>: pick a plane, draw a closed
-              shape, then extrude it.
-            </p>
-          )}
-          {viewport && !sketching.active && (
-            <MeasureOverlay viewport={viewport} measure={measure} units={document.units} />
-          )}
-          {sketching.active && <SketchStatusBar session={session} />}
-        </Viewport>
-        <div className="side-panel">
-          {sketching.active ? (
-            <aside className="selection-panel" aria-label="Sketch">
-              <ConflictPanel session={session} />
-              <h2>Sketch selection</h2>
-              <SketchSelectionList session={session} />
-            </aside>
-          ) : dialog ? (
-            <Suspense
-              fallback={
-                <aside className="selection-panel" aria-busy="true">
-                  Opening...
-                </aside>
-              }
-            >
-              <FeatureDialog
-                key={`${dialog.kind}/${dialog.featureId ?? 'new'}/${dialog.repick ?? ''}`}
-                request={dialog}
-                documents={documents}
-                model={model}
-                selection={selection}
-                resolve={resolveReference}
-                onClose={() => setDialog(null)}
+          <Viewport
+            bodies={shownBodies}
+            onReady={setViewport}
+            {...(createEngine ? { createEngine } : {})}
+            {...stores}
+          >
+            {viewport && (
+              <SketchLayer
+                viewport={viewport}
+                session={session}
+                sketches={sketches}
+                placements={placements}
+                highlighted={hoveredFeature}
               />
-            </Suspense>
-          ) : (
-            <>
-              <VariablesPanel documents={documents} selection={selection} />
-              <SelectionPanel selection={selection} />
-              <MeasurePanel measure={measure} documents={documents} />
-            </>
-          )}
+            )}
+            {shownBodies.length === 0 && !sketching.active && (
+              <p className="viewport-hint" data-testid="empty-hint">
+                Nothing here yet. Start with <strong>New sketch</strong>: pick a plane, draw a
+                closed shape, then extrude it.
+              </p>
+            )}
+            {viewport && !sketching.active && (
+              <MeasureOverlay viewport={viewport} measure={measure} units={document.units} />
+            )}
+            {sketching.active && <SketchStatusBar session={session} />}
+          </Viewport>
+          <div className="side-panel">
+            {sketching.active ? (
+              <aside className="selection-panel" aria-label="Sketch">
+                <ConflictPanel session={session} />
+                <h2>Sketch selection</h2>
+                <SketchSelectionList session={session} />
+              </aside>
+            ) : dialog ? (
+              <Suspense
+                fallback={
+                  <aside className="selection-panel" aria-busy="true">
+                    Opening...
+                  </aside>
+                }
+              >
+                <FeatureDialog
+                  key={`${dialog.kind}/${dialog.featureId ?? 'new'}/${dialog.repick ?? ''}`}
+                  request={dialog}
+                  documents={documents}
+                  model={model}
+                  selection={selection}
+                  resolve={resolveReference}
+                  onClose={() => setDialog(null)}
+                />
+              </Suspense>
+            ) : (
+              <>
+                <VariablesPanel documents={documents} selection={selection} />
+                <SelectionPanel selection={selection} />
+                <MeasurePanel measure={measure} documents={documents} />
+              </>
+            )}
+          </div>
         </div>
       </main>
+      <PartTabs documents={documents} disabled={sketching.active || dialog !== null} />
     </div>
   );
 }
