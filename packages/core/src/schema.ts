@@ -28,7 +28,7 @@ import { MATERIAL_IDS } from './materials';
  */
 
 /** The file format version this code reads and writes. Bump it only together with a migration. */
-export const FORMAT_VERSION = 6;
+export const FORMAT_VERSION = 7;
 /** The topological naming scheme version (T0.5) that stored references are written in. */
 export const NAMING_SCHEME = 1;
 export const FORMAT_TAG = 'manufakture';
@@ -180,6 +180,20 @@ export const EdgeRefSchema = z.strictObject({
   /** Present only when faces and ends tie; 1-based, positional, always fragile. */
   ordinal: z.int().min(1).optional(),
 });
+/**
+ * The most faces a vertex name may list. A vertex usually has three; the apex of a fine circular
+ * pattern has one per copy, up to `MAX_PATTERN_COUNT`.
+ */
+export const MAX_VERTEX_FACES = 1024;
+/**
+ * A vertex, by the sorted names of the faces around it (the kernel's `vertexName`, joined by `&`
+ * there). Only mate connectors reference vertices. Since version 7.
+ */
+export const VertexRefSchema = z.strictObject({
+  faces: z.array(topoName).min(1).max(MAX_VERTEX_FACES),
+  /** Present only when faces tie (two vertices around the same faces); 1-based, fragile. */
+  ordinal: z.int().min(1).optional(),
+});
 const lastResolved = z.strictObject({ point: Vec3Schema, direction: Vec3Schema }).optional();
 
 export const ReferenceSchema = z.strictObject({
@@ -195,6 +209,11 @@ export const FaceReferenceSchema = z.strictObject({
 export const EdgeReferenceSchema = z.strictObject({
   id: ReferenceIdSchema,
   ref: EdgeRefSchema,
+  lastResolved,
+});
+export const VertexReferenceSchema = z.strictObject({
+  id: ReferenceIdSchema,
+  ref: VertexRefSchema,
   lastResolved,
 });
 
@@ -978,6 +997,227 @@ export const ConfigurationsSchema = z.strictObject({
   active: ConfigRowIdSchema.nullable(),
 });
 
+// ---------------------------------------------------------------------------------------------
+// Assemblies (since version 7): instances of parts placed by mates between mate connectors. The
+// mates are the solver's (ADR 0008, `packages/assembly`); core only stores them.
+
+/** The document-level `nextIds` key for assembly ids (`assembly#n`). */
+export const ASSEMBLY_COUNTER = 'assembly';
+/** Assembly-level `nextIds` keys: instances (`inst#n`), mates (`mate#n`), connectors (`mc#n`). */
+export const INSTANCE_COUNTER = 'inst';
+export const MATE_COUNTER = 'mate';
+export const CONNECTOR_COUNTER = 'mc';
+/**
+ * Assembly, instance, mate and connector ids: `<counter>#n` with at most 15 digits, so every `n`
+ * and the counter past it stay exact integers. Connector references use `ReferenceIdSchema`
+ * (`r<n>`), as feature references do.
+ */
+export const ASSEMBLY_ID_PATTERN = /^assembly#[1-9][0-9]{0,14}$/;
+export const INSTANCE_ID_PATTERN = /^inst#[1-9][0-9]{0,14}$/;
+export const MATE_ID_PATTERN = /^mate#[1-9][0-9]{0,14}$/;
+export const CONNECTOR_ID_PATTERN = /^mc#[1-9][0-9]{0,14}$/;
+/**
+ * The most assemblies a document, and instances or mates an assembly, may hold. The solver is
+ * budgeted for hundreds of instances (T2.3a); the caps bound what a crafted file costs to check.
+ */
+export const MAX_ASSEMBLY_ITEMS = 10_000;
+/**
+ * The farthest an instance may be placed from the origin along any axis, in millimetres (1,000 km).
+ * Far beyond any real assembly; it keeps a crafted pose from wrecking the solver's precision.
+ */
+export const MAX_POSE_TRANSLATION = 1e9;
+/** Longest instance name (as for features). */
+export const MAX_INSTANCE_NAME = 200;
+
+/** The longest part id an instance source may name (part ids are free-form before version 4). */
+export const MAX_PART_ID_LENGTH = 4096;
+
+const counted = (pattern: RegExp, example: string) =>
+  z.string().max(32, { abort: true }).regex(pattern, `Expected an id like "${example}"`);
+export const AssemblyIdSchema = counted(ASSEMBLY_ID_PATTERN, 'assembly#1');
+export const InstanceIdSchema = counted(INSTANCE_ID_PATTERN, 'inst#1');
+export const MateIdSchema = counted(MATE_ID_PATTERN, 'mate#1');
+export const ConnectorIdSchema = counted(CONNECTOR_ID_PATTERN, 'mc#1');
+
+/** A unit quaternion `[x, y, z, w]` (three.js order), as the solver's `Quat`. */
+export const QuaternionSchema = z.tuple([finite, finite, finite, finite]).readonly();
+
+/**
+ * A rigid placement: `p_world = R p_local + translation`, with `rotation` a unit quaternion
+ * (checked to 1e-6, so a stored pose is a rotation and nothing else) and each translation
+ * component within `MAX_POSE_TRANSLATION`. Lengths in millimetres. The
+ * same shape as the solver's `Pose`, which core does not import.
+ */
+export const PoseSchema = z
+  .strictObject({ translation: Vec3Schema, rotation: QuaternionSchema })
+  .check((ctx) => {
+    ctx.value.translation.forEach((x, i) => {
+      if (Math.abs(x) > MAX_POSE_TRANSLATION) {
+        ctx.issues.push({
+          code: 'custom',
+          message: `translation is at most ${MAX_POSE_TRANSLATION} mm from the origin on each axis`,
+          input: x,
+          path: ['translation', i],
+        });
+      }
+    });
+    if (Math.abs(Math.hypot(...ctx.value.rotation) - 1) > 1e-6) {
+      ctx.issues.push({
+        code: 'custom',
+        message: 'rotation must be a unit quaternion',
+        input: ctx.value.rotation,
+        path: ['rotation'],
+      });
+    }
+  });
+
+/** An instance of a part studio of this document, optionally in a configuration row. */
+export const PartInstanceSourceSchema = z.strictObject({
+  part: z.string().min(1).max(MAX_PART_ID_LENGTH),
+  /** A row of this document's configuration table to build the part in; absent: as it is. */
+  configuration: ConfigRowIdSchema.exactOptional(),
+});
+
+/**
+ * What an instance shows: a part of this document (`{ part, configuration? }`), or a part of a
+ * pinned version of another document, carried inside the document exactly like a derived
+ * feature's source (`DerivedSourceSchema`, which has `configuration?` too). `configuration` is
+ * read by T2.4c; regen checks it against the source, not the load.
+ */
+export const InstanceSourceSchema = z.union([PartInstanceSourceSchema, DerivedSourceSchema]);
+
+/**
+ * One placed copy of a part. `pose` is the last solved pose: it seeds the solver and picks among
+ * solutions; the mates define where the instance really is (ADR 0008 decision 3).
+ */
+export const InstanceSchema = z.strictObject({
+  id: InstanceIdSchema,
+  name: featureName,
+  source: InstanceSourceSchema,
+  /** The source part's bodies to show, by body id in that part; absent: every body. */
+  bodies: z.array(BodyIdSchema).min(1).max(MAX_BODY_LIST).exactOptional(),
+  /** A fixed instance never moves; fixed instances are the roots of the mate graph. */
+  fixed: z.boolean(),
+  suppressed: z.boolean(),
+  pose: PoseSchema,
+});
+
+/**
+ * A move of a connector frame in its own coordinates: a rotation by `rotation` (angles about the
+ * frame's fixed x, y and z axes, in that order) and then a translation by `translation`
+ * (lengths), all expressions, like a derived feature's placement.
+ */
+export const ConnectorOffsetSchema = z.strictObject({
+  translation: z.tuple([StoredExpressionSchema, StoredExpressionSchema, StoredExpressionSchema]),
+  rotation: z.tuple([StoredExpressionSchema, StoredExpressionSchema, StoredExpressionSchema]),
+});
+
+const connector = {
+  id: ConnectorIdSchema,
+  /** The instance of the same assembly the connector sits on. */
+  instance: InstanceIdSchema,
+  /** Turn the frame's z axis round (a half turn about its x axis). */
+  flip: z.boolean().exactOptional(),
+  /** Quarter turns of the frame about its z axis, 1 to 3; absent: none. */
+  rotate: z.union([z.literal(1), z.literal(2), z.literal(3)]).exactOptional(),
+  /** Applied after `flip` and `rotate`. Absent: none. */
+  offset: ConnectorOffsetSchema.exactOptional(),
+};
+
+/**
+ * A mate connector: a frame on an instance, found at every regen from a named face, edge or
+ * vertex of the instance's part (`origin`) and a rule picking the point on it (`inference`):
+ * a face's `centroid`, the `centre` of a circular edge or of a cylindrical, conical or spherical
+ * face, an edge's `midpoint`, or a `vertex`. The frame's orientation follows the kernel's rules
+ * (T2.3c); `flip`, `rotate` and `offset` adjust it. Names are those of the instance's part (or of
+ * its pinned source), so they are never read for this document's feature ids.
+ */
+export const MateConnectorSchema = z.discriminatedUnion('inference', [
+  z.strictObject({ ...connector, inference: z.literal('centroid'), origin: FaceReferenceSchema }),
+  z.strictObject({
+    ...connector,
+    inference: z.literal('centre'),
+    origin: z.union([FaceReferenceSchema, EdgeReferenceSchema]),
+  }),
+  z.strictObject({ ...connector, inference: z.literal('midpoint'), origin: EdgeReferenceSchema }),
+  z.strictObject({ ...connector, inference: z.literal('vertex'), origin: VertexReferenceSchema }),
+]);
+
+/**
+ * The mate kinds, as the solver names them (`packages/assembly`, `MateKind`): what each leaves
+ * free between connector a and connector b. Fastened: nothing; revolute: a turn about z; slider:
+ * a move along z; planar: x, y and a turn about z; cylindrical: a move along and a turn about z;
+ * ball: any turn about the origin.
+ */
+export const MATE_KINDS = [
+  'fastened',
+  'revolute',
+  'slider',
+  'planar',
+  'cylindrical',
+  'ball',
+] as const;
+export const MateKindSchema = z.enum(MATE_KINDS);
+
+/**
+ * Bounds on a revolute's angle or a slider's distance, as expressions (angles and lengths). At
+ * least one bound; whether `min` is below `max` is known once they are evaluated, so regen
+ * reports it (the solver's `invalid-limits`).
+ */
+export const MateLimitsSchema = z
+  .strictObject({
+    min: StoredExpressionSchema.exactOptional(),
+    max: StoredExpressionSchema.exactOptional(),
+  })
+  .check((ctx) => {
+    if (ctx.value.min === undefined && ctx.value.max === undefined) {
+      ctx.issues.push({
+        code: 'custom',
+        message: 'limits set a minimum, a maximum or both',
+        input: ctx.value,
+        path: [],
+      });
+    }
+  });
+
+/**
+ * A mate between two connectors on two different instances. Mates are kept in creation order:
+ * the solver blames the newest mate of a redundant or conflicting group.
+ */
+export const MateSchema = z
+  .strictObject({
+    id: MateIdSchema,
+    name: featureName,
+    kind: MateKindSchema,
+    a: MateConnectorSchema,
+    b: MateConnectorSchema,
+    suppressed: z.boolean(),
+    /** Revolute and slider only. */
+    limits: MateLimitsSchema.exactOptional(),
+  })
+  .check((ctx) => {
+    const { kind, limits } = ctx.value;
+    if (limits !== undefined && kind !== 'revolute' && kind !== 'slider') {
+      ctx.issues.push({
+        code: 'custom',
+        message: `a ${kind} mate has no limits; only a revolute or a slider has`,
+        input: limits,
+        path: ['limits'],
+      });
+    }
+  });
+
+/** An assembly (README, "Assemblies"). Since version 7. */
+export const AssemblySchema = z.strictObject({
+  id: AssemblyIdSchema,
+  name: featureName,
+  instances: z.array(InstanceSchema).max(MAX_ASSEMBLY_ITEMS),
+  /** In creation order: the last is the newest. */
+  mates: z.array(MateSchema).max(MAX_ASSEMBLY_ITEMS),
+  /** Next number per id counter (`inst`, `mate`, `mc`, `r`). Only ever increases. */
+  nextIds: z.record(z.string(), z.int().min(1)),
+});
+
 export const DocumentSchema = z.strictObject({
   format: z.literal(FORMAT_TAG),
   version: z.literal(FORMAT_VERSION),
@@ -987,12 +1227,14 @@ export const DocumentSchema = z.strictObject({
   units: DisplayUnitsSchema,
   variables: z.array(VariableSchema),
   parts: z.array(PartSchema).min(1),
+  /** Assemblies of this document's parts and of pinned parts, in tab order. Since version 7. */
+  assemblies: z.array(AssemblySchema).max(MAX_ASSEMBLY_ITEMS),
   /** The configuration table; absent when the document has none. Since version 5. */
   configurations: ConfigurationsSchema.exactOptional(),
   /**
    * Next number per document-level id counter (`part`, giving `part#n`; `cp` and `cfg`, giving
-   * configuration parameter and row ids). Only ever increases, so an id is never reused. Since
-   * version 4.
+   * configuration parameter and row ids; `assembly`, giving `assembly#n`). Only ever increases,
+   * so an id is never reused. Since version 4.
    */
   nextIds: z.record(z.string(), z.int().min(1)),
 });
@@ -1058,4 +1300,17 @@ export type ConfigParameter = z.infer<typeof ConfigParameterSchema>;
 export type ConfigValue = z.infer<typeof ConfigValueSchema>;
 export type ConfigRow = z.infer<typeof ConfigRowSchema>;
 export type Configurations = z.infer<typeof ConfigurationsSchema>;
+export type VertexRef = z.infer<typeof VertexRefSchema>;
+export type VertexReference = z.infer<typeof VertexReferenceSchema>;
+export type Pose = z.infer<typeof PoseSchema>;
+export type PartInstanceSource = z.infer<typeof PartInstanceSourceSchema>;
+export type InstanceSource = z.infer<typeof InstanceSourceSchema>;
+export type Instance = z.infer<typeof InstanceSchema>;
+export type ConnectorOffset = z.infer<typeof ConnectorOffsetSchema>;
+export type MateConnector = z.infer<typeof MateConnectorSchema>;
+export type ConnectorInference = MateConnector['inference'];
+export type MateKind = z.infer<typeof MateKindSchema>;
+export type MateLimits = z.infer<typeof MateLimitsSchema>;
+export type Mate = z.infer<typeof MateSchema>;
+export type Assembly = z.infer<typeof AssemblySchema>;
 export type ManufaktureDocument = z.infer<typeof DocumentSchema>;

@@ -23,15 +23,16 @@ import {
 ```ts
 interface ManufaktureDocument {
   format: 'manufakture';
-  version: 6; // file format version, FORMAT_VERSION
+  version: 7; // file format version, FORMAT_VERSION
   namingScheme: 1; // topological naming scheme version (T0.5), NAMING_SCHEME
   id: string;
   name: string;
   units: DisplayUnits; // display only; never changes geometry
   variables: Variable[]; // { name, expression: StoredExpression }, in display order
   parts: Part[];
+  assemblies: Assembly[]; // instances of parts placed by mates, in tab order (since version 7)
   configurations?: Configurations; // the configuration table; absent: none (since version 5)
-  nextIds: Record<string, number>; // document-level counters: `part` (since version 4), `cp`, `cfg`
+  nextIds: Record<string, number>; // document-level counters: `part` (since version 4), `cp`, `cfg`, `assembly`
 }
 
 interface Part {
@@ -52,8 +53,8 @@ interface BodyProps {
 }
 ```
 
-`createDocument({ id, name, units? })` makes an empty document with one part, `part#1`, and
-`nextIds: { part: 2 }`. Core never invents document ids; pass a UUID or similar.
+`createDocument({ id, name, units? })` makes an empty document with one part, `part#1`, no
+assemblies, and `nextIds: { part: 2 }`. Core never invents document ids; pass a UUID or similar.
 
 ### Bodies
 
@@ -162,9 +163,120 @@ What a configuration uses cannot be removed under it:
   in every row.
 - `deleteFeature` refuses while a suppression parameter names the feature (`blockers` lists the
   parameter ids); delete the parameter first in the same `batch`.
+- `deleteConfigRow` refuses while an assembly instance of a part of this document is built in the
+  row (`dependency`; `blockers` lists `<assembly id>/<instance id>`, as `rowInstances(doc, rowId)`
+  does). Instances of pinned parts name rows of their own source and do not block.
 
 A table left with no parameters, no rows and no active row is removed from the document, so
 undoing the first configuration command gives back a document with no `configurations` key.
+
+### Assemblies
+
+A document holds assemblies (since version 7): instances of its part studios, or of parts pinned
+from other documents, placed by mates between mate connectors. The mates are the ones the solver
+of [ADR 0008](../../docs/adr/0008-assembly-mate-solver.md) solves (`packages/assembly`); core
+stores them and never loads the solver.
+
+```ts
+interface Assembly {
+  id: 'assembly#1'; // from the document's nextIds.assembly
+  name: string;
+  instances: Instance[];
+  mates: Mate[]; // in creation order: the last is the newest
+  nextIds: Record<string, number>; // `inst`, `mate`, `mc`, `r`; only ever increase
+}
+
+interface Instance {
+  id: 'inst#1';
+  name: string;
+  source: { part: string; configuration?: string } | DerivedSource; // a part here, or pinned
+  bodies?: string[]; // the source part's bodies to show, by body id; absent: every body
+  fixed: boolean; // fixed instances never move; they root the mate graph
+  suppressed: boolean;
+  pose: Pose; // the last solved pose (ADR 0008 decision 3)
+}
+
+interface Pose {
+  translation: [number, number, number]; // mm, each within MAX_POSE_TRANSLATION (1e9)
+  rotation: [number, number, number, number]; // unit quaternion [x, y, z, w], checked to 1e-6
+}
+
+interface Mate {
+  id: 'mate#1';
+  name: string;
+  kind: 'fastened' | 'revolute' | 'slider' | 'planar' | 'cylindrical' | 'ball'; // MATE_KINDS
+  a: MateConnector;
+  b: MateConnector; // on another instance than a
+  suppressed: boolean;
+  limits?: { min?: StoredExpression; max?: StoredExpression }; // revolute (angles), slider (lengths)
+}
+
+type MateConnector = {
+  id: 'mc#1';
+  instance: string; // an instance of the same assembly
+  flip?: boolean; // turn the z axis round (a half turn about x)
+  rotate?: 1 | 2 | 3; // quarter turns about z
+  offset?: { translation: [E, E, E]; rotation: [E, E, E] }; // E = StoredExpression, as a derived placement
+} & (
+  | { inference: 'centroid'; origin: FaceReference }
+  | { inference: 'centre'; origin: FaceReference | EdgeReference } // circle, cylinder, cone, sphere
+  | { inference: 'midpoint'; origin: EdgeReference }
+  | { inference: 'vertex'; origin: VertexReference } // VertexRef: { faces: string[]; ordinal? }
+);
+```
+
+**Why these shapes.** The mate kinds and their names are the solver's `MateKind`, and a `Pose` is
+the solver's `Pose`, so T2.3c passes them through; `limits` hold expressions like every number a
+user types (the solver's are radians and millimetres once evaluated). The poses are stored because
+the solver needs a seed and they choose among solutions (a four-bar's two branches); the mates
+define the result, so poses are output as much as input, and change on every solve that moves
+something. Commit them with `setPoses` on drag end and after a mate edit, never per frame, or the
+command log grows with every pointer move. A connector's `inference` decides what `origin` is,
+so a vertex (`{ faces }`) and an edge (`{ faces, ends?, ordinal? }`) never have to be told apart
+by shape. A connector belongs to its mate: deleting the mate deletes it, so no connector is ever
+left unused. `configuration` on either source kind is a row id of the source's table for T2.4c,
+which makes regen build it. For a part of this document the row must exist in this document's
+table, checked at load and by every command (like `active`); for a pinned part it names a row of
+the pinned document, which regen, not the load, checks.
+
+**Names are the source part's.** A connector's `origin` and an instance's `bodies` name faces and
+bodies of the instance's part (or of its pinned source), found at every regen like a feature's
+references. So they are not read for this document's feature ids, and nothing in a part is
+blocked by them: a connector whose face is gone is a regen error on its mate, which leaves the
+instance free (T2.3c).
+
+**Ids.** Assembly ids are `assembly#n` from the document's `nextIds.assembly`; inside an
+assembly, instances are `inst#n`, mates `mate#n`, connectors `mc#n` and connector references
+`r<n>`, from the assembly's own `nextIds` (`previewIds(assembly.nextIds, 'mc', 2)`), never
+reused. Assembly, instance, mate and connector ids have at most 15 digits; connector references
+use the same `ReferenceIdSchema` as feature references, with no digit cap of their own. There are
+no split pieces in an assembly.
+
+Validation refuses: an id at or past its counter, used twice in its assembly, or a split piece; an
+instance of a part of this document that does not exist, or in a configuration row this
+document's table does not have; a body listed twice in an instance's
+`bodies`; a connector on an instance that is not in the assembly; a mate whose connectors are on
+the same instance; an offset or limit expression that does not parse or names an unknown variable.
+The schema refuses limits on a kind other than revolute and slider, limits with neither bound, a
+rotation that is not a unit quaternion, a translation component beyond `MAX_POSE_TRANSLATION`, a
+vertex `ordinal` below 1 or not an integer, a reference that does not suit the inference, and more
+than `MAX_ASSEMBLY_ITEMS` (10,000) assemblies, instances per assembly or mates per assembly.
+
+What an assembly uses cannot be removed under it:
+
+- `deletePart` refuses while an instance in any assembly shows the part (`dependency`; `blockers`
+  lists `<assembly id>/<instance id>`, as `partInstances(doc, partId)` does). An instance of a
+  pinned part names no part of this document and does not block.
+- `deleteInstance` refuses while a mate connects the instance (`blockers`: the mate ids;
+  `instanceMates(assembly, id)` lists them). Delete the mates first in the same `batch`.
+- `deleteVariable` refuses while a connector offset or a limit reads the variable (`variableUsers`
+  lists `<assembly id>/<mate id>`, and `variableMates(doc, name)` the mates). `renameVariable` and
+  `inlineVariable` rewrite those expressions with `editMate`. `variableUses` does not list them
+  yet.
+
+`mateExpressions(mate)` lists a mate's expressions with the kind each expects, like
+`featureExpressions`; `mateIds`, `mateConnectors`, `mateInstances`, `isPinnedSource` and
+`instancePart` are the other generic views, in `src/features.ts`.
 
 ### Materials
 
@@ -238,6 +350,8 @@ Ids are permanent and never reused, including after deletion (ADR 0004 decision 
 | geometry reference  | `r<n>`         | `r`                     |
 | sketch split pieces | `<id>#a`, `#b` | none: named from `<id>` |
 
+Assemblies have their own counters, per assembly (see Assemblies): `inst`, `mate`, `mc` and `r`.
+
 All counters are per part, so sub-ids are unique across the part, not only within one feature.
 Entities are `e` and constraints `k` because T0.5 face names use sketch entity ids after `side:`
 (`extrude#1:side:e2`, `side:c1` for a circle in the spike); a constraint prefix of `c` would read
@@ -276,9 +390,14 @@ interface EdgeRef {
   ends?: string[];
   ordinal?: number;
 }
+interface VertexRef {
+  faces: string[]; // the sorted names of the faces around the vertex (the kernel's `vertexName`)
+  ordinal?: number; // only when two vertices share the same faces; 1-based, fragile
+} // since version 7, for mate connectors only
 ```
 
-Fields that must be a face or an edge use `FaceReference` or `EdgeReference`. Face and edge names
+Fields that must be a face or an edge use `FaceReference` or `EdgeReference`, and a connector on a
+vertex uses `VertexReference`. Face and edge names
 themselves, and how a reference resolved, are derived data and never stored.
 
 ## Features
@@ -547,6 +666,20 @@ resulting document with `checkDocument`, and returns `{ document, inverse }` or 
 | `restorePart`            | `part`, `index` (history only)                        | `deletePart`                                                           |
 | `reorderParts`           | `partId`, `index` (final position)                    | `reorderParts`                                                         |
 | `duplicatePart`          | `sourcePartId`, `partId` (fresh), `name`, `index?`    | `deletePart`                                                           |
+| `addAssembly`            | `assemblyId` (a fresh `assembly#n`), `name`, `index?` | `deleteAssembly`                                                       |
+| `renameAssembly`         | `assemblyId`, `name` (trimmed, 1 to 200 characters)   | `renameAssembly` (the old name)                                        |
+| `deleteAssembly`         | `assemblyId` (with its instances and mates)           | `restoreAssembly`                                                      |
+| `restoreAssembly`        | `assembly`, `index` (history only)                    | `deleteAssembly`                                                       |
+| `addInstance`            | `assemblyId`, `instance` (a fresh `inst#n`; last)     | `deleteInstance`                                                       |
+| `editInstance`           | `assemblyId`, `instanceId`, fields to change (below)  | `editInstance` (the old values)                                        |
+| `setPoses`               | `assemblyId`, `poses` (by instance id; one step)      | `setPoses` (the old poses)                                             |
+| `deleteInstance`         | `assemblyId`, `instanceId` (not while mated)          | `restoreInstance`                                                      |
+| `restoreInstance`        | `assemblyId`, `instance`, `index` (history only)      | `deleteInstance`                                                       |
+| `addMate`                | `assemblyId`, `mate` (fresh ids; goes last)           | `deleteMate`                                                           |
+| `editMate`               | `assemblyId`, `mate` (by id; new ids fresh)           | `restoreMate` (old state)                                              |
+| `deleteMate`             | `assemblyId`, `mateId` (with its connectors)          | `restoreMate`                                                          |
+| `restoreMate`            | `assemblyId`, `mate`, `index` (history only)          | `restoreMate` or `deleteMate`                                          |
+| `suppressMate`           | `assemblyId`, `mateId`, `suppressed`                  | `suppressMate`                                                         |
 | `batch`                  | `commands` (applied in order, all or nothing)         | `batch` of inverses, reversed                                          |
 
 `restoreConfigParameter` and `restoreConfigRow` are history-only in the same way: they put back a
@@ -559,9 +692,24 @@ past it, so a deleted part's id is never handed out again. `restorePart` is thei
 counterpart: undo of a delete puts the part back under its old id without counting as reuse. A
 new part goes last; a duplicate goes just after its source and copies the whole part (features
 with the same ids, since ids are per part, counters, rollback bar, material and body props).
-`deletePart` refuses the document's last part (`last-part`), and refuses while a suppression
+`deletePart` refuses the document's last part (`last-part`), refuses while a suppression
 configuration parameter names a feature of the part (`dependency`, the parameter ids in
-`blockers`; `partParameters(doc, partId)` lists them): delete the parameter in the same batch.
+`blockers`; `partParameters(doc, partId)` lists them): delete the parameter in the same batch,
+and refuses while an assembly instance shows the part (`dependency`, `<assembly id>/<instance id>`
+in `blockers`; `partInstances(doc, partId)` lists them).
+
+Assemblies: `addAssembly` takes an `assembly#n` from the document's `nextIds.assembly`, like
+`addPart`. `addInstance` and `addMate` allocate from the assembly's `nextIds` and refuse an id
+handed out before (`id-reused`): a mate introduces its own id, both connector ids and both
+reference ids. Instances and mates are appended, so mates stay in creation order, which is what
+the solver blames by; only the history-only `restoreInstance` and `restoreMate` put one back at
+an index. `editMate` replaces a mate by id, and the ids it introduces must be fresh, as for
+`editFeature`; its inverse is `restoreMate` with the old state. `editInstance` changes only the
+fields it is given (`name`, `fixed`, `suppressed`, `bodies` with `null` for every body, `source`
+for another part, pin or configuration row), and its inverse gives exactly those fields their old
+values. `setPoses`
+changes the poses of several instances in one undo step; it is what a drag or a mate dialog
+commits.
 
 `restoreFeature` is a history-only command: it is what undo and redo use to put a feature state
 back, and clients must not use it to edit. Unlike `addFeature` and `editFeature`, it requires its
@@ -635,6 +783,14 @@ it flips in `changed`, and sets `firstAffectedIndex` as for a variable edit; an 
 inactive row changes no feature result. Every listener runs even if one throws; the first error is
 rethrown afterwards.
 
+Per assembly, `assemblies` lists added, removed and changed instances (anything but the pose),
+the instances whose pose changed (`posed`), added, removed and changed mates (edited,
+suppressed, renamed, or with an offset or limit reading a changed variable, also through the
+active configuration row), whether mates were reordered, and `posesOnly`: only poses changed, as
+after a committed drag, so nothing regenerates and nothing needs solving again. An assembly change
+never lists a part in `parts`; an instance's geometry changes when its part does, which `parts`
+reports.
+
 ## File format
 
 `serialize(doc)` writes canonical JSON: keys in schema order (records such as `nextIds` and a row's
@@ -669,12 +825,16 @@ solids in one compound (`v3-two-bodies.json`) regenerates the same solids, now a
 (`extrude#1` and `extrude#2`). The test migrates `src/fixtures/v0-bracket.json` to exactly
 `v1-bracket.json`, that to exactly `v2-bracket.json`, that to exactly `v3-bracket.json` and that
 to exactly `v4-bracket.json` and that to exactly `v5-bracket.json` and that to exactly
-`v6-bracket.json`, and `v3-two-bodies.json` to
+`v6-bracket.json` and that to exactly `v7-bracket.json`, and `v3-two-bodies.json` to
 exactly `v4-two-bodies.json`. Version 5 added the optional configuration table; `migrateV4ToV5`
 only bumps the version, since a version 4 document has none and an absent counter starts at 1.
 Version 6 added the `derived` feature kind and the optional `mode` of a pattern or mirror of
 bodies; `migrateV5ToV6` only bumps the version, since a version 5 document has no derived feature
-and an absent `mode` is `add`; `v5-bracket.json` migrates to exactly `v6-bracket.json`.
+and an absent `mode` is `add`; `v5-bracket.json` migrates to exactly `v6-bracket.json`. Version 7
+added assemblies and the vertex reference; `migrateV6ToV7` adds `assemblies: []` right after
+`parts` (where a saved file has it) and changes nothing else, since a version 6 document has no
+assembly and an absent `assembly` counter starts at 1; `v6-bracket.json` migrates to exactly
+`v7-bracket.json`.
 
 To change the file shape:
 
@@ -685,7 +845,7 @@ To change the file shape:
 
 ## Where this deviates from ADR 0004's first cut
 
-- **Added fields.** The document has `id`, `name`, `nextIds` and an optional `configurations`; a part has `name`,
+- **Added fields.** The document has `id`, `name`, `nextIds`, `assemblies` and an optional `configurations`; a part has `name`,
   `rollbackIndex`, an optional `material` (the default for its bodies) and `bodies`;
   every feature has `name` and `suppressed`. The ADR's shape was a first cut that expected feature kinds
   to add their own fields.

@@ -12,13 +12,19 @@ import {
   featureExpressions,
   featureScope,
   featureSubIds,
+  instancePart,
+  mateConnectors,
+  mateExpressions,
+  mateIds,
 } from './features';
-import { PART_COUNTER, parseFeatureId, parseSubId, peekCounter } from './ids';
+import { PART_COUNTER, parseAnyId, parseFeatureId, parseSubId, peekCounter } from './ids';
 import { fail, ok, type CoreError, type CoreResult } from './result';
 import {
+  ASSEMBLY_COUNTER,
   CONFIG_PARAMETER_COUNTER,
   CONFIG_ROW_COUNTER,
   SKETCH_ORIGIN,
+  type Assembly,
   type ConfigRow,
   type Configurations,
   type Feature,
@@ -675,6 +681,129 @@ function checkConfigurations(
   }
 }
 
+/**
+ * One assembly: every id in it (instances, mates, connectors, connector references) allocated by
+ * the assembly's `nextIds` and used once; every instance of a part of this document names a part
+ * that exists; no body listed twice in an instance; every connector on an instance of this
+ * assembly, the two connectors of a mate on two different instances; every expression parses and
+ * names existing variables. Connector references and instance bodies name geometry of the source
+ * part, so, like a feature's references, whether they resolve is a regen result.
+ */
+function checkAssembly(
+  assembly: Assembly,
+  ai: number,
+  partIds: ReadonlySet<string>,
+  rowIds: ReadonlySet<string>,
+  variables: ReadonlySet<string>,
+  out: CoreError[],
+): void {
+  const apath = ['assemblies', ai];
+  const seen = new Set<string>();
+  const checkId = (id: string, path: readonly (string | number)[]) => {
+    const parsed = parseAnyId(id);
+    if (
+      parsed &&
+      (parsed.split !== '' || parsed.n >= peekCounter(assembly.nextIds, parsed.counter))
+    ) {
+      out.push({
+        code: 'invalid-id',
+        message:
+          parsed.split !== ''
+            ? `Id "${id}" in assembly ${assembly.id} is a split piece; assemblies have none`
+            : `Id "${id}" in assembly ${assembly.id} was never allocated (next is ${previewId(parsed.counter, peekCounter(assembly.nextIds, parsed.counter))})`,
+        path,
+        blockers: [id],
+      });
+    }
+    if (seen.has(id)) {
+      out.push({
+        code: 'duplicate',
+        message: `Id "${id}" is used twice in assembly ${assembly.id}`,
+        path,
+        blockers: [id],
+      });
+    }
+    seen.add(id);
+  };
+
+  const instances = new Set<string>();
+  assembly.instances.forEach((instance, ii) => {
+    const ipath = [...apath, 'instances', ii];
+    checkId(instance.id, [...ipath, 'id']);
+    instances.add(instance.id);
+    const part = instancePart(instance.source);
+    if (part !== undefined && !partIds.has(part)) {
+      out.push({
+        code: 'dependency',
+        message: `Instance ${instance.id} shows part ${part}, which does not exist`,
+        path: [...ipath, 'source', 'part'],
+        blockers: [part],
+      });
+    }
+    // A pinned source's row is a row of the source document: regen checks it (T2.4c).
+    const row = part === undefined ? undefined : instance.source.configuration;
+    if (row !== undefined && !rowIds.has(row)) {
+      out.push({
+        code: 'not-found',
+        message: `Instance ${instance.id} is built in configuration "${row}", which is not a row`,
+        path: [...ipath, 'source', 'configuration'],
+        blockers: [row],
+      });
+    }
+    if (instance.bodies !== undefined) {
+      checkDuplicates(
+        instance.bodies,
+        `the bodies instance ${instance.id} shows`,
+        [...ipath, 'bodies'],
+        out,
+      );
+    }
+  });
+
+  assembly.mates.forEach((mate, mi) => {
+    const mpath = [...apath, 'mates', mi];
+    // In the order `mateIds` lists them.
+    const idPaths = [
+      ['id'],
+      ['a', 'id'],
+      ['a', 'origin', 'id'],
+      ['b', 'id'],
+      ['b', 'origin', 'id'],
+    ];
+    mateIds(mate).forEach((id, k) => checkId(id, [...mpath, ...idPaths[k]!]));
+    const [a, b] = mateConnectors(mate);
+    for (const [side, c] of [
+      ['a', a],
+      ['b', b],
+    ] as const) {
+      if (!instances.has(c.instance)) {
+        out.push({
+          code: 'dependency',
+          message: `Mate ${mate.id} connects ${c.instance}, which is not an instance of assembly ${assembly.id}`,
+          path: [...mpath, side, 'instance'],
+          blockers: [c.instance],
+        });
+      }
+    }
+    if (mate.a.instance === mate.b.instance) {
+      out.push({
+        code: 'dependency',
+        message: `Mate ${mate.id} connects ${mate.a.instance} to itself; a mate joins two instances`,
+        path: [...mpath, 'b', 'instance'],
+        blockers: [mate.b.instance],
+      });
+    }
+    for (const site of mateExpressions(mate)) {
+      checkExpression(site.expression, [...mpath, ...site.path], variables, out);
+    }
+  });
+}
+
+/** `<counter>#n` for an assembly-level counter, `<prefix>n` for a reference prefix. */
+function previewId(counter: string, n: number): string {
+  return counter.length === 1 ? `${counter}${n}` : `${counter}#${n}`;
+}
+
 /** Every semantic problem in a schema-valid document; empty when it is valid. */
 export function validateDocument(doc: ManufaktureDocument): CoreError[] {
   const out: CoreError[] = [];
@@ -700,6 +829,24 @@ export function validateDocument(doc: ManufaktureDocument): CoreError[] {
     checkPart(part, pi, variables, out);
   });
   checkConfigurations(doc, variables, out);
+  checkUnique(
+    doc.assemblies.map((a) => a.id),
+    'Assembly id',
+    (i) => ['assemblies', i, 'id'],
+    out,
+  );
+  const rowIds = new Set((doc.configurations?.rows ?? []).map((r) => r.id));
+  doc.assemblies.forEach((assembly, ai) => {
+    checkAllocated(
+      assembly.id,
+      ASSEMBLY_COUNTER,
+      doc.nextIds,
+      'Assembly',
+      ['assemblies', ai, 'id'],
+      out,
+    );
+    checkAssembly(assembly, ai, partIds, rowIds, variables, out);
+  });
   return out;
 }
 

@@ -465,6 +465,7 @@ describe('saving configurations', () => {
       'units',
       'variables',
       'parts',
+      'assemblies',
       'configurations',
       'nextIds',
     ]);

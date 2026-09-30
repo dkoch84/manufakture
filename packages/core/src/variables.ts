@@ -2,13 +2,14 @@
 // inlining one (replacing each reference with a literal, then deleting it). Both return one
 // `batch` command, so each is a single undo step, checked once at the end like any batch.
 // Configurations count as uses: a parameter that configures a variable, and a row value that
-// mentions one.
+// mentions one. Mate connector offsets and limits are rewritten too, but not listed by
+// `variableUses` (whose entries the app's variables table labels); `variableUsers` lists them.
 
 import { isValidVariableName } from '@manufakture/units';
 import { variableParameters, type Command, type SimpleCommand } from './commands';
-import { featureExpressions, type ExpressionKind } from './features';
+import { featureExpressions, mateExpressions, type ExpressionKind } from './features';
 import { fail, ok, type CoreResult } from './result';
-import type { ConfigRow, Feature, ManufaktureDocument, StoredExpression } from './schema';
+import type { ConfigRow, Feature, ManufaktureDocument, Mate, StoredExpression } from './schema';
 import { expressionReferences } from './validate';
 
 /** One place that reads a variable directly: another variable, or a feature's field. */
@@ -111,7 +112,8 @@ function replaceAt<T>(value: T, path: readonly (string | number)[], next: unknow
 
 /**
  * The commands that rewrite every expression reading `name` with `rewrite` (variables other
- * than `name` itself, then features), without deleting or adding anything.
+ * than `name` itself, then features, then mates, then configuration rows), without deleting or
+ * adding anything.
  */
 function rewriteUses(
   doc: ManufaktureDocument,
@@ -135,6 +137,18 @@ function rewriteUses(
         next = replaceAt(next, site.path, { ...site.expression, source });
       }
       if (next !== f) commands.push({ type: 'editFeature', partId: part.id, feature: next });
+    }
+  }
+  for (const assembly of doc.assemblies) {
+    for (const mate of assembly.mates) {
+      let next: Mate = mate;
+      for (const site of mateExpressions(mate)) {
+        if (!mentions(site.expression, name)) continue;
+        const source = rewrite(site.expression.source);
+        if (source === null) continue;
+        next = replaceAt(next, site.path, { ...site.expression, source });
+      }
+      if (next !== mate) commands.push({ type: 'editMate', assemblyId: assembly.id, mate: next });
     }
   }
   for (const row of doc.configurations?.rows ?? []) {

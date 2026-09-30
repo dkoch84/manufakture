@@ -1,7 +1,13 @@
 import type {
+  Assembly,
   ConstraintKind,
+  DerivedSource,
   Feature,
   FeatureKind,
+  InstanceSource,
+  Mate,
+  MateConnector,
+  PartInstanceSource,
   Reference,
   SketchConstraint,
   SketchEntity,
@@ -311,4 +317,69 @@ export function constraintTargets(constraint: SketchConstraint): ConstraintTarge
 /** Whether a constraint kind holds a dimension value. */
 export function isDimensionKind(kind: ConstraintKind): kind is keyof typeof DIMENSION_KINDS {
   return kind in DIMENSION_KINDS;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Assemblies (since version 7): generic views of mates and instances, like the ones above for
+// features, so validation, commands and regen describe each once.
+
+/** Whether an instance shows a pinned part of another document rather than a part of this one. */
+export function isPinnedSource(source: InstanceSource): source is DerivedSource {
+  return !('part' in source);
+}
+
+/** The part of this document an instance shows, or `undefined` for a pinned source. */
+export function instancePart(source: InstanceSource): string | undefined {
+  return isPinnedSource(source) ? undefined : (source as PartInstanceSource).part;
+}
+
+/** A mate's two connectors, `a` then `b`. */
+export function mateConnectors(mate: Mate): readonly [MateConnector, MateConnector] {
+  return [mate.a, mate.b];
+}
+
+/** Every id a mate owns: its own, its connectors' (`mc#n`) and their references' (`r<n>`). */
+export function mateIds(mate: Mate): string[] {
+  return [mate.id, mate.a.id, mate.a.origin.id, mate.b.id, mate.b.origin.id];
+}
+
+/** The instances a mate connects, `a`'s then `b`'s. */
+export function mateInstances(mate: Mate): [string, string] {
+  return [mate.a.instance, mate.b.instance];
+}
+
+/** Every expression in a mate (connector offsets and limits), with the kind its field expects. */
+export function mateExpressions(mate: Mate): ExpressionSite[] {
+  const out: ExpressionSite[] = [];
+  for (const side of ['a', 'b'] as const) {
+    const offset = mate[side].offset;
+    if (offset === undefined) continue;
+    for (const i of [0, 1, 2]) {
+      out.push({
+        path: [side, 'offset', 'translation', i],
+        expression: offset.translation[i]!,
+        expected: 'length',
+      });
+    }
+    for (const i of [0, 1, 2]) {
+      out.push({
+        path: [side, 'offset', 'rotation', i],
+        expression: offset.rotation[i]!,
+        expected: 'angle',
+      });
+    }
+  }
+  const expected: ExpressionKind = mate.kind === 'revolute' ? 'angle' : 'length';
+  for (const bound of ['min', 'max'] as const) {
+    const expression = mate.limits?.[bound];
+    if (expression !== undefined) out.push({ path: ['limits', bound], expression, expected });
+  }
+  return out;
+}
+
+/** The mates of an assembly that connect instance `instanceId`, by mate id. */
+export function instanceMates(assembly: Assembly, instanceId: string): string[] {
+  return assembly.mates
+    .filter((m) => m.a.instance === instanceId || m.b.instance === instanceId)
+    .map((m) => m.id);
 }

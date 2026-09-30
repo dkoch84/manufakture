@@ -3,6 +3,7 @@ import {
   FORMAT_TAG,
   FORMAT_VERSION,
   NAMING_SCHEME,
+  type Assembly,
   type DisplayUnits,
   type Feature,
   type ManufaktureDocument,
@@ -35,12 +36,18 @@ export function createDocument(options: NewDocumentOptions): ManufaktureDocument
     units: options.units ?? DEFAULT_UNITS,
     variables: [],
     parts: [createPart(DEFAULT_PART_ID, 'Part 1')],
+    assemblies: [],
     nextIds: { part: 2 },
   };
 }
 
 export function createPart(id: string, name: string): Part {
   return { id, name, features: [], rollbackIndex: null, nextIds: {}, bodies: [] };
+}
+
+/** An empty assembly: no instances, no mates, fresh counters. */
+export function createAssembly(id: string, name: string): Assembly {
+  return { id, name, instances: [], mates: [], nextIds: {} };
 }
 
 /**
@@ -62,6 +69,10 @@ export function storedExpression(source: string, units: DisplayUnits): StoredExp
 
 export function findPart(doc: ManufaktureDocument, partId: string): Part | undefined {
   return doc.parts.find((p) => p.id === partId);
+}
+
+export function findAssembly(doc: ManufaktureDocument, assemblyId: string): Assembly | undefined {
+  return doc.assemblies.find((a) => a.id === assemblyId);
 }
 
 export function findFeature(part: Part, featureId: string): Feature | undefined {

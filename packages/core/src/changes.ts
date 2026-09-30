@@ -1,6 +1,6 @@
 import { applyConfigurationRow, configurationRow } from './configurations';
-import { featureExpressions } from './features';
-import type { ManufaktureDocument, Part, Variable } from './schema';
+import { featureExpressions, mateExpressions } from './features';
+import type { Assembly, ManufaktureDocument, Part, Variable } from './schema';
 import { expressionVariableNames } from './validate';
 
 /**
@@ -35,6 +35,42 @@ export interface DocumentChange {
    * changes.
    */
   readonly parts: readonly PartChange[];
+  /**
+   * Per assembly that changed. An assembly change never regenerates a part; what an instance
+   * shows changes when its part does, which `parts` reports.
+   */
+  readonly assemblies: readonly AssemblyChange[];
+}
+
+/** Added, removed and changed items of one kind in an assembly, by id. */
+export interface ItemChanges {
+  readonly added: readonly string[];
+  readonly removed: readonly string[];
+  readonly changed: readonly string[];
+}
+
+export interface AssemblyChange {
+  readonly assemblyId: string;
+  /** Assemblies that exist in only one of the two documents. */
+  readonly status: 'added' | 'removed' | 'changed';
+  readonly nameChanged: boolean;
+  /** Instances; `changed` lists those with any change but their pose. */
+  readonly instances: ItemChanges;
+  /** Instances whose pose changed. */
+  readonly posed: readonly string[];
+  /**
+   * Mates; `changed` lists those edited, suppressed or renamed, and those whose connector
+   * offsets or limits read a changed variable (also through other variables, or through the
+   * active configuration row).
+   */
+  readonly mates: ItemChanges;
+  /** The relative order of mates present in both documents changed (it decides blame). */
+  readonly matesReordered: boolean;
+  /**
+   * Only instance poses changed (a committed drag or solve): nothing to regenerate and nothing to
+   * solve again, since the poses are already the solver's answer.
+   */
+  readonly posesOnly: boolean;
 }
 
 export interface PartChange {
@@ -193,6 +229,96 @@ function diffPart(
   };
 }
 
+function withoutPose<T extends { pose: unknown }>(i: T): Omit<T, 'pose'> {
+  const { pose: _pose, ...rest } = i;
+  void _pose;
+  return rest;
+}
+
+function diffAssembly(
+  prev: Assembly | undefined,
+  next: Assembly | undefined,
+  vars: ReadonlySet<string>,
+): AssemblyChange {
+  const assemblyId = (next ?? prev)!.id;
+  const pi = new Map((prev?.instances ?? []).map((x) => [x.id, x]));
+  const ni = next?.instances ?? [];
+  const nIds = new Set(ni.map((x) => x.id));
+  const instances: ItemChanges = {
+    added: ni.filter((x) => !pi.has(x.id)).map((x) => x.id),
+    removed: (prev?.instances ?? []).filter((x) => !nIds.has(x.id)).map((x) => x.id),
+    changed: ni
+      .filter((x) => pi.has(x.id) && !deepEqual(withoutPose(pi.get(x.id)!), withoutPose(x)))
+      .map((x) => x.id),
+  };
+  const posed = ni
+    .filter((x) => pi.has(x.id) && !deepEqual(pi.get(x.id)!.pose, x.pose))
+    .map((x) => x.id);
+
+  const pm = prev?.mates ?? [];
+  const nm = next?.mates ?? [];
+  const pById = new Map(pm.map((m) => [m.id, m]));
+  const nmIds = new Set(nm.map((m) => m.id));
+  const readsChanged = (m: (typeof nm)[number]) =>
+    vars.size > 0 &&
+    mateExpressions(m).some((s) => expressionVariableNames(s.expression).some((n) => vars.has(n)));
+  const mates: ItemChanges = {
+    added: nm.filter((m) => !pById.has(m.id)).map((m) => m.id),
+    removed: pm.filter((m) => !nmIds.has(m.id)).map((m) => m.id),
+    changed: nm
+      .filter((m) => pById.has(m.id) && (!deepEqual(pById.get(m.id), m) || readsChanged(m)))
+      .map((m) => m.id),
+  };
+  const pCommon = pm.filter((m) => nmIds.has(m.id)).map((m) => m.id);
+  const nCommon = nm.filter((m) => pById.has(m.id)).map((m) => m.id);
+  const matesReordered = pCommon.some((id, i) => nCommon[i] !== id);
+  const nameChanged = !!prev && !!next && prev.name !== next.name;
+  const status = !prev ? 'added' : !next ? 'removed' : 'changed';
+  const posesOnly =
+    status === 'changed' &&
+    posed.length > 0 &&
+    !nameChanged &&
+    !matesReordered &&
+    [instances, mates].every((c) => c.added.length + c.removed.length + c.changed.length === 0);
+  return {
+    assemblyId,
+    status,
+    nameChanged,
+    instances,
+    posed,
+    mates,
+    matesReordered,
+    posesOnly,
+  };
+}
+
+function diffAssemblies(
+  prev: ManufaktureDocument,
+  next: ManufaktureDocument,
+  vars: ReadonlySet<string>,
+): AssemblyChange[] {
+  const pa = new Map(prev.assemblies.map((a) => [a.id, a]));
+  const na = new Set(next.assemblies.map((a) => a.id));
+  const out: AssemblyChange[] = [];
+  for (const a of next.assemblies) {
+    const old = pa.get(a.id);
+    if (old === a && vars.size === 0) continue;
+    const c = diffAssembly(old, a, vars);
+    const noop =
+      c.status === 'changed' &&
+      !c.nameChanged &&
+      !c.matesReordered &&
+      c.posed.length === 0 &&
+      [c.instances, c.mates].every(
+        (x) => x.added.length + x.removed.length + x.changed.length === 0,
+      ) &&
+      deepEqual(old, a);
+    if (!noop) out.push(c);
+  }
+  for (const a of prev.assemblies) if (!na.has(a.id)) out.push(diffAssembly(a, undefined, vars));
+  return out;
+}
+
 function diffRaw(prev: ManufaktureDocument, next: ManufaktureDocument): DocumentChange {
   const variables = diffVariables(prev.variables, next.variables);
   const vars = affectedVariables(next.variables, [
@@ -220,6 +346,7 @@ function diffRaw(prev: ManufaktureDocument, next: ManufaktureDocument): Document
     if (!noop) parts.push(c);
   }
   for (const p of prev.parts) if (!nParts.has(p.id)) parts.push(diffPart(p, undefined, vars));
+  const assemblies = diffAssemblies(prev, next, vars);
   const nameChanged = prev.name !== next.name;
   const unitsChanged = !deepEqual(prev.units, next.units);
   const empty =
@@ -235,6 +362,7 @@ function diffRaw(prev: ManufaktureDocument, next: ManufaktureDocument): Document
     configurationsChanged: !deepEqual(prev.configurations, next.configurations),
     variables,
     parts,
+    assemblies,
   };
 }
 
@@ -250,6 +378,27 @@ function union(a: readonly string[], b: readonly string[]): string[] {
 
 function minIndex(a: number | null, b: number | null): number | null {
   return a === null ? b : b === null ? a : Math.min(a, b);
+}
+
+function mergeItems(a: ItemChanges, b: ItemChanges): ItemChanges {
+  return {
+    added: union(a.added, b.added),
+    removed: union(a.removed, b.removed),
+    changed: union(a.changed, b.changed),
+  };
+}
+
+function mergeAssembly(a: AssemblyChange, b: AssemblyChange): AssemblyChange {
+  return {
+    assemblyId: a.assemblyId,
+    status: a.status,
+    nameChanged: a.nameChanged || b.nameChanged,
+    instances: mergeItems(a.instances, b.instances),
+    posed: union(a.posed, b.posed),
+    mates: mergeItems(a.mates, b.mates),
+    matesReordered: a.matesReordered || b.matesReordered,
+    posesOnly: a.posesOnly && b.posesOnly,
+  };
 }
 
 function mergePart(a: PartChange, b: PartChange): PartChange {
@@ -290,6 +439,13 @@ export function diffDocuments(
     return c ? mergePart(p, c) : p;
   });
   parts.push(...byId.values());
+  const assemblyById = new Map(configured.assemblies.map((a) => [a.assemblyId, a]));
+  const assemblies = raw.assemblies.map((a) => {
+    const c = assemblyById.get(a.assemblyId);
+    assemblyById.delete(a.assemblyId);
+    return c ? mergeAssembly(a, c) : a;
+  });
+  assemblies.push(...assemblyById.values());
   return {
     ...raw,
     variables: {
@@ -298,5 +454,6 @@ export function diffDocuments(
       changed: union(raw.variables.changed, configured.variables.changed),
     },
     parts,
+    assemblies,
   };
 }

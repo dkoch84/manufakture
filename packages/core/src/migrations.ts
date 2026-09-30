@@ -137,6 +137,28 @@ export const migrateV5ToV6: Migration = {
   },
 };
 
+/**
+ * Version 7 added assemblies (instances of parts, mates and mate connectors) and the vertex
+ * reference connectors use. A version 6 document has none, so it gets `assemblies: []`, right
+ * after `parts` as in a freshly saved file; nothing else changes, and an absent `assembly`
+ * counter starts at 1.
+ */
+export const migrateV6ToV7: Migration = {
+  from: 6,
+  to: 7,
+  description: 'Add assemblies',
+  migrate(doc) {
+    const out: JsonObject = {};
+    for (const [k, v] of Object.entries(doc)) {
+      if (k === 'assemblies') continue;
+      out[k] = k === 'version' ? 7 : v;
+      if (k === 'parts') out.assemblies = [];
+    }
+    if (!('assemblies' in out)) out.assemblies = [];
+    return out;
+  },
+};
+
 /** File format migrations, in order: `FORMAT_MIGRATIONS[i]` goes from version i to i + 1. */
 export const FORMAT_MIGRATIONS: readonly Migration[] = [
   migrateV0ToV1,
@@ -145,6 +167,7 @@ export const FORMAT_MIGRATIONS: readonly Migration[] = [
   migrateV3ToV4,
   migrateV4ToV5,
   migrateV5ToV6,
+  migrateV6ToV7,
 ];
 
 /**

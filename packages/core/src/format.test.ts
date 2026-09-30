@@ -10,6 +10,7 @@ import {
   migrateV3ToV4,
   migrateV4ToV5,
   migrateV5ToV6,
+  migrateV6ToV7,
   type Migration,
 } from './migrations';
 import type { CoreErrorCode } from './result';
@@ -24,6 +25,7 @@ import v4Bracket from './fixtures/v4-bracket.json';
 import v4TwoBodies from './fixtures/v4-two-bodies.json';
 import v5Bracket from './fixtures/v5-bracket.json';
 import v6Bracket from './fixtures/v6-bracket.json';
+import v7Bracket from './fixtures/v7-bracket.json';
 
 /** One fixture per older file version; `migrates every older version` checks this is complete. */
 const FIXTURES: Record<number, unknown> = {
@@ -33,6 +35,7 @@ const FIXTURES: Record<number, unknown> = {
   3: v3Bracket,
   4: v4Bracket,
   5: v5Bracket,
+  6: v6Bracket,
 };
 
 function load(value: unknown): ManufaktureDocument {
@@ -43,7 +46,7 @@ describe('serialize and deserialize', () => {
   const documents: [string, () => ManufaktureDocument][] = [
     ['an empty document', () => createDocument({ id: 'd', name: 'Empty' })],
     ['the bracket', bracket],
-    ['the current fixture', () => load(v6Bracket)],
+    ['the current fixture', () => load(v7Bracket)],
     ['the two-body fixture', () => load(v4TwoBodies)],
     [
       'a document with body props and a scope',
@@ -176,20 +179,20 @@ describe('serialize and deserialize', () => {
     expect(serialize(unwrap(deserialize(serialize(shuffled))).document)).toBe(serialize(doc));
     expect(
       serialize(doc).startsWith(
-        '{\n  "format": "manufakture",\n  "version": 6,\n  "namingScheme": 1,',
+        '{\n  "format": "manufakture",\n  "version": 7,\n  "namingScheme": 1,',
       ),
     ).toBe(true);
   });
 
   it('refuses to serialize an invalid document', () => {
     const doc = clone(bracket()) as unknown as { version: number };
-    doc.version = 7;
+    doc.version = 8;
     expect(() => serialize(doc as unknown as ManufaktureDocument)).toThrow(/Cannot serialize/);
   });
 });
 
 describe('loading errors', () => {
-  const current = () => clone(v6Bracket) as Record<string, unknown>;
+  const current = () => clone(v7Bracket) as Record<string, unknown>;
   const cases: [string, string | (() => unknown), CoreErrorCode, RegExp?][] = [
     ['not JSON', '{ "format": ', 'json'],
     ['an array', '[]', 'format'],
@@ -245,12 +248,13 @@ describe('loading errors', () => {
   it('never modifies the value it is given, even a newer one', () => {
     for (const value of [
       clone(v0Bracket),
-      { ...clone(v6Bracket), version: 99 },
+      { ...clone(v7Bracket), version: 99 },
       clone(v1Bracket),
       clone(v3Bracket),
       clone(v4Bracket),
       clone(v5Bracket),
       clone(v6Bracket),
+      clone(v7Bracket),
     ]) {
       const frozen = deepFreeze(value);
       const snapshot = JSON.stringify(frozen);
@@ -260,7 +264,7 @@ describe('loading errors', () => {
   });
 
   it('reports schema problems with paths', () => {
-    const d = clone(v6Bracket) as { variables: { expression: unknown }[] };
+    const d = clone(v7Bracket) as { variables: { expression: unknown }[] };
     d.variables[0]!.expression = 6;
     const r = parseDocument(d);
     expect(r.ok).toBe(false);
@@ -279,11 +283,12 @@ describe('migrations', () => {
     expect(migrateV3ToV4.migrate(clone(v3Bracket) as Record<string, unknown>)).toEqual(v4Bracket);
     expect(migrateV4ToV5.migrate(clone(v4Bracket) as Record<string, unknown>)).toEqual(v5Bracket);
     expect(migrateV5ToV6.migrate(clone(v5Bracket) as Record<string, unknown>)).toEqual(v6Bracket);
+    expect(migrateV6ToV7.migrate(clone(v6Bracket) as Record<string, unknown>)).toEqual(v7Bracket);
     const loaded = unwrap(parseDocument(v0Bracket));
     expect(loaded.from).toEqual({ version: 0, namingScheme: 1 });
     expect(loaded.migrated).toBe(true);
-    expect(loaded.document).toEqual(load(v6Bracket));
-    expect(JSON.parse(serialize(loaded.document))).toEqual(v6Bracket);
+    expect(loaded.document).toEqual(load(v7Bracket));
+    expect(JSON.parse(serialize(loaded.document))).toEqual(v7Bracket);
   });
 
   it('v1 to v2 changes only the version: a version 1 part has no material', () => {
@@ -331,7 +336,11 @@ describe('migrations', () => {
     expect(doc.parts.map((p) => p.bodies)).toEqual([[], []]);
     expect(doc.parts[0]!.features.some((f) => 'scope' in f)).toBe(false);
     expect(doc.parts[0]!.material).toBe('pla');
-    expect(JSON.parse(serialize(doc))).toEqual({ ...v4TwoBodies, version: FORMAT_VERSION });
+    expect(JSON.parse(serialize(doc))).toEqual({
+      ...v4TwoBodies,
+      version: FORMAT_VERSION,
+      assemblies: [],
+    });
   });
 
   it('v3 to v4 starts the part counter at 1 when no part id is numbered', () => {
@@ -369,8 +378,33 @@ describe('migrations', () => {
     expect(features.some((f) => f.kind === 'derived' || 'mode' in f)).toBe(false);
   });
 
+  it('v6 to v7 adds an empty assembly list after the parts, and changes nothing else', () => {
+    const migrated = migrateV6ToV7.migrate(clone(v6Bracket) as Record<string, unknown>);
+    expect(migrated).toEqual({ ...clone(v6Bracket), version: 7, assemblies: [] });
+    const keys = Object.keys(migrated);
+    expect(keys.indexOf('assemblies')).toBe(keys.indexOf('parts') + 1);
+    const loaded = unwrap(parseDocument(v6Bracket));
+    expect(loaded.from.version).toBe(6);
+    expect(loaded.migrated).toBe(true);
+    expect(loaded.document).toEqual(load(v7Bracket));
+    expect(loaded.document.assemblies).toEqual([]);
+    expect(loaded.document.nextIds).toEqual({ part: 2 });
+    expect(serialize(loaded.document)).toBe(serialize(load(v7Bracket)));
+  });
+
+  it('v6 to v7 replaces an assemblies key a version 6 file cannot have had', () => {
+    const odd = { ...clone(v6Bracket), assemblies: 'junk' } as Record<string, unknown>;
+    expect(migrateV6ToV7.migrate(odd).assemblies).toEqual([]);
+    const noParts = { format: 'manufakture', version: 6 } as Record<string, unknown>;
+    expect(migrateV6ToV7.migrate(noParts)).toEqual({
+      format: 'manufakture',
+      version: 7,
+      assemblies: [],
+    });
+  });
+
   it('refuses a material that is not in the built-in table', () => {
-    const bad = clone(v6Bracket) as { parts: Record<string, unknown>[] };
+    const bad = clone(v7Bracket) as { parts: Record<string, unknown>[] };
     bad.parts[0]!.material = 'unobtainium';
     const r = parseDocument(bad);
     expect(r.ok).toBe(false);

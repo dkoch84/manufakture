@@ -42,9 +42,10 @@ describe('createDocument', () => {
     expect(validateDocument(doc)).toEqual([]);
     expect(doc).toMatchObject({
       format: 'manufakture',
-      version: 6,
+      version: 7,
       namingScheme: 1,
       variables: [],
+      assemblies: [],
       nextIds: { part: 2 },
     });
     expect(doc.parts).toEqual([

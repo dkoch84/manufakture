@@ -1,9 +1,22 @@
 import { isValidVariableName } from '@manufakture/units';
 import { z } from 'zod';
-import { bodyCreator, featureDependencies, featureExpressions, featureSubIds } from './features';
+import {
+  bodyCreator,
+  featureDependencies,
+  featureExpressions,
+  featureSubIds,
+  instanceMates,
+  instancePart,
+  isPinnedSource,
+  mateExpressions,
+  mateIds,
+} from './features';
 import { PART_COUNTER, parseAnyId, peekCounter } from './ids';
 import { fail, ok, schemaError, type CoreResult } from './result';
 import {
+  ASSEMBLY_COUNTER,
+  ASSEMBLY_ID_PATTERN,
+  AssemblySchema,
   BodyIdSchema,
   BodyPropsFieldsSchema,
   CONFIG_PARAMETER_COUNTER,
@@ -14,19 +27,28 @@ import {
   ConfigRowSchema,
   DisplayUnitsSchema,
   FeatureSchema,
+  InstanceSchema,
+  InstanceSourceSchema,
+  MateSchema,
+  MAX_INSTANCE_NAME,
   MaterialIdSchema,
   PartSchema,
+  PoseSchema,
   StoredExpressionSchema,
+  type Assembly,
   type BodyProps,
   type BodyPropsFields,
   type ConfigParameter,
   type ConfigRow,
   type Configurations,
   type Feature,
+  type Instance,
   type ManufaktureDocument,
+  type Mate,
   type Part,
+  type Pose,
 } from './schema';
-import { createPart } from './document';
+import { createAssembly, createPart } from './document';
 import { checkDocument, expressionVariableNames } from './validate';
 
 /**
@@ -42,8 +64,13 @@ export const MAX_DOCUMENT_NAME = 200;
 export const MAX_PART_NAME = 200;
 /** A part id straight from the document counter: `part#n`. */
 export const PART_ID_PATTERN = /^part#[1-9][0-9]*$/;
+/** Longest assembly name `addAssembly` and `renameAssembly` accept. */
+export const MAX_ASSEMBLY_NAME = 200;
 
 const partId = z.string().min(1);
+const assemblyId = z.string().min(1).max(32);
+const instanceId = z.string().min(1).max(32);
+const mateId = z.string().min(1).max(32);
 const featureId = z.string().min(1);
 const index = z.int().min(0);
 
@@ -196,6 +223,79 @@ export const SimpleCommandSchema = z.discriminatedUnion('type', [
     name: z.string(),
     index: index.optional(),
   }),
+  /**
+   * Add an empty assembly. `assemblyId` must be a fresh `assembly#n` from the document's
+   * `nextIds.assembly`; it goes at `index` (default: last).
+   */
+  z.strictObject({
+    type: z.literal('addAssembly'),
+    assemblyId,
+    name: z.string(),
+    index: index.optional(),
+  }),
+  /** Rename an assembly (trimmed, 1 to 200 characters). */
+  z.strictObject({ type: z.literal('renameAssembly'), assemblyId, name: z.string() }),
+  /** Remove an assembly with its instances and mates. Nothing else refers to an assembly. */
+  z.strictObject({ type: z.literal('deleteAssembly'), assemblyId }),
+  /** History only: put a deleted assembly back at `index` (its id was allocated before). */
+  z.strictObject({ type: z.literal('restoreAssembly'), assembly: AssemblySchema, index }),
+  /**
+   * Add an instance, last. Its id must be a fresh `inst#n` from the assembly's `nextIds.inst`;
+   * a part of this document must exist.
+   */
+  z.strictObject({ type: z.literal('addInstance'), assemblyId, instance: InstanceSchema }),
+  /**
+   * Change an instance's name, `fixed`, `suppressed`, shown `bodies` (`null`: every body) or
+   * `source` (another part or pin, or another configuration row). Absent fields stay.
+   */
+  z.strictObject({
+    type: z.literal('editInstance'),
+    assemblyId,
+    instanceId,
+    name: z.string().exactOptional(),
+    fixed: z.boolean().exactOptional(),
+    suppressed: z.boolean().exactOptional(),
+    bodies: InstanceSchema.shape.bodies.unwrap().nullable().exactOptional(),
+    source: InstanceSourceSchema.exactOptional(),
+  }),
+  /**
+   * Set the poses of several instances at once, by instance id: one undo step for a solve or a
+   * drag. Commit on drag end and after mate edits, never per frame.
+   */
+  z.strictObject({
+    type: z.literal('setPoses'),
+    assemblyId,
+    poses: z.record(instanceId, PoseSchema),
+  }),
+  /** Remove an instance. Refused while a mate connects it. */
+  z.strictObject({ type: z.literal('deleteInstance'), assemblyId, instanceId }),
+  /** History only: put a deleted instance back at `index` (its id was allocated before). */
+  z.strictObject({
+    type: z.literal('restoreInstance'),
+    assemblyId,
+    instance: InstanceSchema,
+    index,
+  }),
+  /**
+   * Add a mate, last (the newest). Its id, its connectors' ids and their references' ids must be
+   * fresh (`mate#n`, `mc#n`, `r<n>` from the assembly's `nextIds`).
+   */
+  z.strictObject({ type: z.literal('addMate'), assemblyId, mate: MateSchema }),
+  /** Replace a mate's inputs, by id. Ids it introduces must be fresh. */
+  z.strictObject({ type: z.literal('editMate'), assemblyId, mate: MateSchema }),
+  /** Remove a mate with its connectors. */
+  z.strictObject({ type: z.literal('deleteMate'), assemblyId, mateId }),
+  /**
+   * History only: put a mate state back, replacing the mate with the same id (at `index`) or
+   * inserting it at `index`. Its ids must have been allocated before.
+   */
+  z.strictObject({ type: z.literal('restoreMate'), assemblyId, mate: MateSchema, index }),
+  z.strictObject({
+    type: z.literal('suppressMate'),
+    assemblyId,
+    mateId,
+    suppressed: z.boolean(),
+  }),
 ]);
 
 export type SimpleCommand = z.infer<typeof SimpleCommandSchema>;
@@ -286,6 +386,22 @@ function applyUnchecked(doc: ManufaktureDocument, command: Command): CoreResult<
     case 'reorderParts':
     case 'duplicatePart':
       return applyToParts(doc, command);
+    case 'addAssembly':
+    case 'renameAssembly':
+    case 'deleteAssembly':
+    case 'restoreAssembly':
+      return applyToAssemblies(doc, command);
+    case 'addInstance':
+    case 'editInstance':
+    case 'setPoses':
+    case 'deleteInstance':
+    case 'restoreInstance':
+    case 'addMate':
+    case 'editMate':
+    case 'deleteMate':
+    case 'restoreMate':
+    case 'suppressMate':
+      return applyToAssembly(doc, command);
     default:
       return applyToPart(doc, command);
   }
@@ -940,6 +1056,15 @@ function applyToConfigurations(
       const i = table.rows.findIndex((x) => x.id === command.rowId);
       const old = table.rows[i];
       if (!old) return fail('not-found', `No configuration row "${command.rowId}"`, ['rowId']);
+      const users = rowInstances(doc, old.id);
+      if (users.length > 0) {
+        return fail(
+          'dependency',
+          `Cannot delete ${old.id}: ${users.length === 1 ? 'instance' : 'instances'} ${users.join(', ')} ${users.length === 1 ? 'is' : 'are'} built in it`,
+          ['rowId'],
+          { blockers: users },
+        );
+      }
       const rows = table.rows.slice();
       rows.splice(i, 1);
       const wasActive = table.active === old.id;
@@ -1046,6 +1171,15 @@ function applyToParts(doc: ManufaktureDocument, command: PartsCommand): CoreResu
           { blockers: params },
         );
       }
+      const instances = partInstances(doc, command.partId);
+      if (instances.length > 0) {
+        return fail(
+          'dependency',
+          `Cannot delete ${command.partId}: ${instances.length === 1 ? 'instance' : 'instances'} ${instances.join(', ')} ${instances.length === 1 ? 'shows' : 'show'} it`,
+          ['partId'],
+          { blockers: instances },
+        );
+      }
       const parts = doc.parts.slice();
       const [old] = parts.splice(i.value, 1);
       return done(parts, { type: 'restorePart', part: old!, index: i.value });
@@ -1083,6 +1217,361 @@ function applyToParts(doc: ManufaktureDocument, command: PartsCommand): CoreResu
   }
 }
 
+/**
+ * Instances, in any assembly, that show part `partId` of this document, as
+ * `<assembly id>/<instance id>` (instance ids are per assembly).
+ */
+export function partInstances(doc: ManufaktureDocument, partId: string): string[] {
+  const out: string[] = [];
+  for (const assembly of doc.assemblies) {
+    for (const instance of assembly.instances) {
+      if (instancePart(instance.source) === partId) out.push(`${assembly.id}/${instance.id}`);
+    }
+  }
+  return out;
+}
+
+/**
+ * Instances of parts of this document, in any assembly, built in configuration row `rowId`, as
+ * `<assembly id>/<instance id>`. Pinned sources name rows of their own document, so none count.
+ */
+export function rowInstances(doc: ManufaktureDocument, rowId: string): string[] {
+  const out: string[] = [];
+  for (const assembly of doc.assemblies) {
+    for (const instance of assembly.instances) {
+      const s = instance.source;
+      if (!isPinnedSource(s) && s.configuration === rowId)
+        out.push(`${assembly.id}/${instance.id}`);
+    }
+  }
+  return out;
+}
+
+type AssembliesCommand = Extract<
+  SimpleCommand,
+  { type: 'addAssembly' | 'renameAssembly' | 'deleteAssembly' | 'restoreAssembly' }
+>;
+
+function assemblyName(raw: string): CoreResult<string> {
+  const name = raw.trim();
+  return name.length === 0 || name.length > MAX_ASSEMBLY_NAME
+    ? fail('invalid-name', `An assembly name must be 1 to ${MAX_ASSEMBLY_NAME} characters`, [
+        'name',
+      ])
+    : ok(name);
+}
+
+function applyToAssemblies(
+  doc: ManufaktureDocument,
+  command: AssembliesCommand,
+): CoreResult<Applied> {
+  const done = (assemblies: Assembly[], inverse: Command, nextIds = doc.nextIds) =>
+    ok<Applied>({ document: { ...doc, assemblies, nextIds }, inverse });
+  const find = (id: string): CoreResult<number> => {
+    const i = doc.assemblies.findIndex((a) => a.id === id);
+    return i < 0 ? fail('not-found', `No assembly "${id}"`, ['assemblyId']) : ok(i);
+  };
+
+  switch (command.type) {
+    case 'addAssembly': {
+      const name = assemblyName(command.name);
+      if (!name.ok) return name;
+      const id = command.assemblyId;
+      if (!ASSEMBLY_ID_PATTERN.test(id)) {
+        return fail('invalid-id', `"${id}" is not an assembly id (assembly#n)`, ['assemblyId'], {
+          blockers: [id],
+        });
+      }
+      if (doc.assemblies.some((a) => a.id === id)) {
+        return fail('duplicate', `Assembly "${id}" already exists`, ['assemblyId']);
+      }
+      const ids = allocateDocumentId(doc, ASSEMBLY_COUNTER, id, 'fresh');
+      if (!ids.ok) return ids;
+      const assemblies = insertAt(
+        doc.assemblies,
+        createAssembly(id, name.value),
+        command.index ?? doc.assemblies.length,
+        'assemblies',
+      );
+      if (!assemblies.ok) return assemblies;
+      return done(assemblies.value, { type: 'deleteAssembly', assemblyId: id }, ids.value);
+    }
+
+    case 'renameAssembly': {
+      const i = find(command.assemblyId);
+      if (!i.ok) return i;
+      const name = assemblyName(command.name);
+      if (!name.ok) return name;
+      const old = doc.assemblies[i.value]!;
+      const assemblies = doc.assemblies.slice();
+      assemblies[i.value] = { ...old, name: name.value };
+      return done(assemblies, { type: 'renameAssembly', assemblyId: old.id, name: old.name });
+    }
+
+    case 'deleteAssembly': {
+      const i = find(command.assemblyId);
+      if (!i.ok) return i;
+      const assemblies = doc.assemblies.slice();
+      const [old] = assemblies.splice(i.value, 1);
+      return done(assemblies, { type: 'restoreAssembly', assembly: old!, index: i.value });
+    }
+
+    case 'restoreAssembly': {
+      const a = command.assembly;
+      if (doc.assemblies.some((x) => x.id === a.id)) {
+        return fail('duplicate', `Assembly "${a.id}" already exists`, ['assembly', 'id']);
+      }
+      const ids = allocateDocumentId(doc, ASSEMBLY_COUNTER, a.id, 'restore');
+      if (!ids.ok) return ids;
+      const assemblies = insertAt(doc.assemblies, a, command.index, 'assemblies');
+      if (!assemblies.ok) return assemblies;
+      return done(assemblies.value, { type: 'deleteAssembly', assemblyId: a.id });
+    }
+  }
+}
+
+type AssemblyCommand = Exclude<Extract<SimpleCommand, { assemblyId: string }>, AssembliesCommand>;
+
+/** Commands that change what is inside one assembly. */
+function applyToAssembly(doc: ManufaktureDocument, command: AssemblyCommand): CoreResult<Applied> {
+  const ai = doc.assemblies.findIndex((a) => a.id === command.assemblyId);
+  const assembly = doc.assemblies[ai];
+  if (!assembly) return fail('not-found', `No assembly "${command.assemblyId}"`, ['assemblyId']);
+  const r = applyAssemblyCommand(assembly, command);
+  if (!r.ok) return r;
+  const assemblies = doc.assemblies.slice();
+  assemblies[ai] = r.value.assembly;
+  return ok({ document: { ...doc, assemblies }, inverse: r.value.inverse });
+}
+
+interface AssemblyApplied {
+  assembly: Assembly;
+  inverse: Command;
+}
+
+function applyAssemblyCommand(
+  assembly: Assembly,
+  command: AssemblyCommand,
+): CoreResult<AssemblyApplied> {
+  const { assemblyId } = command;
+  const done = (changes: Partial<Assembly>, inverse: Command) =>
+    ok<AssemblyApplied>({ assembly: { ...assembly, ...changes }, inverse });
+  const findInstance = (id: string): CoreResult<number> => {
+    const i = assembly.instances.findIndex((x) => x.id === id);
+    return i < 0
+      ? fail('not-found', `No instance "${id}" in assembly ${assembly.id}`, ['instanceId'])
+      : ok(i);
+  };
+  const findMate = (id: string): CoreResult<number> => {
+    const i = assembly.mates.findIndex((x) => x.id === id);
+    return i < 0
+      ? fail('not-found', `No mate "${id}" in assembly ${assembly.id}`, ['mateId'])
+      : ok(i);
+  };
+
+  switch (command.type) {
+    case 'addInstance':
+    case 'restoreInstance': {
+      const inst = command.instance;
+      if (assembly.instances.some((x) => x.id === inst.id)) {
+        return fail('duplicate', `Instance "${inst.id}" already exists`, ['instance', 'id']);
+      }
+      const restore = command.type === 'restoreInstance';
+      const ids = allocate(
+        assembly.nextIds,
+        [inst.id],
+        restore ? { type: 'restore' } : { type: 'fresh', before: [], after: [] },
+      );
+      if (!ids.ok) return ids;
+      const instances = insertAt(
+        assembly.instances,
+        inst,
+        restore ? command.index : assembly.instances.length,
+        'instances',
+      );
+      if (!instances.ok) return instances;
+      return done(
+        { instances: instances.value, nextIds: ids.value },
+        { type: 'deleteInstance', assemblyId, instanceId: inst.id },
+      );
+    }
+
+    case 'editInstance': {
+      const i = findInstance(command.instanceId);
+      if (!i.ok) return i;
+      const old = assembly.instances[i.value]!;
+      let next: Instance = old;
+      const inverse: Extract<SimpleCommand, { type: 'editInstance' }> = {
+        type: 'editInstance',
+        assemblyId,
+        instanceId: old.id,
+      };
+      if (command.name !== undefined) {
+        const name = command.name.trim();
+        if (name.length === 0 || name.length > MAX_INSTANCE_NAME) {
+          return fail(
+            'invalid-name',
+            `An instance name must be 1 to ${MAX_INSTANCE_NAME} characters`,
+            ['name'],
+          );
+        }
+        next = { ...next, name };
+        inverse.name = old.name;
+      }
+      if (command.fixed !== undefined) {
+        next = { ...next, fixed: command.fixed };
+        inverse.fixed = old.fixed;
+      }
+      if (command.suppressed !== undefined) {
+        next = { ...next, suppressed: command.suppressed };
+        inverse.suppressed = old.suppressed;
+      }
+      if (command.source !== undefined) {
+        next = { ...next, source: command.source };
+        inverse.source = old.source;
+      }
+      if (command.bodies !== undefined) {
+        const { bodies: _bodies, ...rest } = next;
+        void _bodies;
+        next = command.bodies === null ? rest : { ...rest, bodies: command.bodies };
+        inverse.bodies = old.bodies ?? null;
+      }
+      const instances = assembly.instances.slice();
+      instances[i.value] = next;
+      return done({ instances }, inverse);
+    }
+
+    case 'setPoses': {
+      const instances = assembly.instances.slice();
+      const at = new Map(instances.map((x, i) => [x.id, i]));
+      const old: Record<string, Pose> = {};
+      for (const [id, pose] of Object.entries(command.poses)) {
+        const i = at.get(id);
+        if (i === undefined) {
+          return fail('not-found', `No instance "${id}" in assembly ${assembly.id}`, ['poses', id]);
+        }
+        old[id] = instances[i]!.pose;
+        instances[i] = { ...instances[i]!, pose };
+      }
+      return done({ instances }, { type: 'setPoses', assemblyId, poses: old });
+    }
+
+    case 'deleteInstance': {
+      const i = findInstance(command.instanceId);
+      if (!i.ok) return i;
+      const mates = instanceMates(assembly, command.instanceId);
+      if (mates.length > 0) {
+        return fail(
+          'dependency',
+          `Cannot delete ${command.instanceId}: ${mates.length === 1 ? 'mate' : 'mates'} ${mates.join(', ')} ${mates.length === 1 ? 'connects' : 'connect'} it`,
+          ['instanceId'],
+          { blockers: mates },
+        );
+      }
+      const instances = assembly.instances.slice();
+      const [old] = instances.splice(i.value, 1);
+      return done(
+        { instances },
+        { type: 'restoreInstance', assemblyId, instance: old!, index: i.value },
+      );
+    }
+
+    case 'addMate': {
+      const m = command.mate;
+      if (assembly.mates.some((x) => x.id === m.id)) {
+        return fail('duplicate', `Mate "${m.id}" already exists`, ['mate', 'id']);
+      }
+      const ids = allocate(assembly.nextIds, mateIds(m), { type: 'fresh', before: [], after: [] });
+      if (!ids.ok) return ids;
+      return done(
+        { mates: [...assembly.mates, m], nextIds: ids.value },
+        { type: 'deleteMate', assemblyId, mateId: m.id },
+      );
+    }
+
+    case 'editMate': {
+      const m = command.mate;
+      const i = findMate(m.id);
+      if (!i.ok) return i;
+      const old = assembly.mates[i.value]!;
+      const before = mateIds(old);
+      const after = mateIds(m);
+      const ids = allocate(assembly.nextIds, introducedIds(before, after), {
+        type: 'fresh',
+        before,
+        after,
+      });
+      if (!ids.ok) return ids;
+      const mates = assembly.mates.slice();
+      mates[i.value] = m;
+      return done(
+        { mates, nextIds: ids.value },
+        { type: 'restoreMate', assemblyId, mate: old, index: i.value },
+      );
+    }
+
+    case 'restoreMate': {
+      const m = command.mate;
+      const existing = assembly.mates.findIndex((x) => x.id === m.id);
+      if (existing >= 0) {
+        if (existing !== command.index) {
+          return fail('invalid-index', `${m.id} is at ${existing}, not ${command.index}`, [
+            'index',
+          ]);
+        }
+        const old = assembly.mates[existing]!;
+        const ids = allocate(assembly.nextIds, introducedIds(mateIds(old), mateIds(m)), {
+          type: 'restore',
+        });
+        if (!ids.ok) return ids;
+        const mates = assembly.mates.slice();
+        mates[existing] = m;
+        return done({ mates }, { type: 'restoreMate', assemblyId, mate: old, index: existing });
+      }
+      const ids = allocate(assembly.nextIds, mateIds(m), { type: 'restore' });
+      if (!ids.ok) return ids;
+      const mates = insertAt(assembly.mates, m, command.index, 'mates');
+      if (!mates.ok) return mates;
+      return done({ mates: mates.value }, { type: 'deleteMate', assemblyId, mateId: m.id });
+    }
+
+    case 'deleteMate': {
+      const i = findMate(command.mateId);
+      if (!i.ok) return i;
+      const mates = assembly.mates.slice();
+      const [old] = mates.splice(i.value, 1);
+      return done({ mates }, { type: 'restoreMate', assemblyId, mate: old!, index: i.value });
+    }
+
+    case 'suppressMate': {
+      const i = findMate(command.mateId);
+      if (!i.ok) return i;
+      const old = assembly.mates[i.value]!;
+      const mates = assembly.mates.slice();
+      mates[i.value] = { ...old, suppressed: command.suppressed };
+      return done(
+        { mates },
+        { type: 'suppressMate', assemblyId, mateId: old.id, suppressed: old.suppressed },
+      );
+    }
+  }
+}
+
+/** Mates whose expressions (connector offsets, limits) mention variable `name`, by mate. */
+export function variableMates(
+  doc: ManufaktureDocument,
+  name: string,
+): { assemblyId: string; mate: Mate }[] {
+  const out: { assemblyId: string; mate: Mate }[] = [];
+  for (const assembly of doc.assemblies) {
+    for (const mate of assembly.mates) {
+      if (mateExpressions(mate).some((s) => expressionVariableNames(s.expression).includes(name)))
+        out.push({ assemblyId: assembly.id, mate });
+    }
+  }
+  return out;
+}
+
 /** Configuration parameters that name variable `name`. */
 export function variableParameters(
   doc: ManufaktureDocument,
@@ -1095,9 +1584,9 @@ export function variableParameters(
 }
 
 /**
- * Variables, features, configuration parameters and configuration rows that use variable
- * `name`: expressions that mention it, parameters that configure it, and rows with a value
- * that mentions it.
+ * Variables, features, mates, configuration parameters and configuration rows that use variable
+ * `name`: expressions that mention it (a mate as `<assembly id>/<mate id>`), parameters that
+ * configure it, and rows with a value that mentions it.
  */
 export function variableUsers(doc: ManufaktureDocument, name: string): string[] {
   const users: string[] = [];
@@ -1109,6 +1598,9 @@ export function variableUsers(doc: ManufaktureDocument, name: string): string[] 
       if (featureExpressions(f).some((s) => expressionVariableNames(s.expression).includes(name)))
         users.push(f.id);
     }
+  }
+  for (const { assemblyId, mate } of variableMates(doc, name)) {
+    users.push(`${assemblyId}/${mate.id}`);
   }
   for (const p of variableParameters(doc, name)) users.push(p.id);
   for (const row of doc.configurations?.rows ?? []) {

@@ -24,12 +24,16 @@ export {
 } from './validate';
 export {
   CommandSchema,
+  MAX_ASSEMBLY_NAME,
   MAX_DOCUMENT_NAME,
   MAX_PART_NAME,
   PART_ID_PATTERN,
   SimpleCommandSchema,
   applyCommand,
+  partInstances,
   partParameters,
+  rowInstances,
+  variableMates,
   variableParameters,
   variableUsers,
   type Applied,
@@ -52,7 +56,13 @@ export {
   configuredVariables,
   emptyConfigurations,
 } from './configurations';
-export { diffDocuments, type DocumentChange, type PartChange } from './changes';
+export {
+  diffDocuments,
+  type AssemblyChange,
+  type DocumentChange,
+  type ItemChanges,
+  type PartChange,
+} from './changes';
 export {
   DocumentStore,
   type ChangeCause,
@@ -70,6 +80,7 @@ export {
   migrateV3ToV4,
   migrateV4ToV5,
   migrateV5ToV6,
+  migrateV6ToV7,
   type JsonObject,
   type Migration,
 } from './migrations';
