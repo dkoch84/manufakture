@@ -35,6 +35,11 @@ export interface PartChange {
   /** The part's material changed. No geometry changes; masses do. */
   readonly materialChanged: boolean;
   /**
+   * A body's name, colour or material changed (`Part.bodies`). No geometry changes; what bodies
+   * look like and weigh does.
+   */
+  readonly bodyPropsChanged: boolean;
+  /**
    * The first index in the new feature list whose result may differ, because the feature or an
    * earlier one was added, removed, edited, moved, suppressed, or reads a changed variable (also
    * through other variables), or because the rollback bar moved past it. `null`: no feature
@@ -156,6 +161,7 @@ function diffPart(
   }
   if (first !== null && first > nf.length) first = nf.length;
   const materialChanged = !!prev && !!next && prev.material !== next.material;
+  const bodyPropsChanged = !!prev && !!next && !deepEqual(prev.bodies, next.bodies);
 
   return {
     partId,
@@ -166,6 +172,7 @@ function diffPart(
     reordered,
     rollbackChanged,
     materialChanged,
+    bodyPropsChanged,
     firstAffectedIndex: first,
   };
 }
@@ -194,6 +201,7 @@ export function diffDocuments(
       !c.reordered &&
       !c.rollbackChanged &&
       !c.materialChanged &&
+      !c.bodyPropsChanged &&
       c.firstAffectedIndex === null &&
       deepEqual(old, p);
     if (!noop) parts.push(c);

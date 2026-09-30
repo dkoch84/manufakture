@@ -15,6 +15,7 @@ export {
   type MaterialId,
 } from './materials';
 export {
+  bodyCreationProblem,
   checkDocument,
   expressionReferences,
   expressionVariableNames,
@@ -55,6 +56,7 @@ export {
   migrateV0ToV1,
   migrateV1ToV2,
   migrateV2ToV3,
+  migrateV3ToV4,
   type JsonObject,
   type Migration,
 } from './migrations';

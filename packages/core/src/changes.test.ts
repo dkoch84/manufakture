@@ -135,7 +135,14 @@ describe('diffDocuments', () => {
   it('reports added and removed parts', () => {
     const doc = bracket();
     const two = clone(doc);
-    two.parts.push({ id: 'part#2', name: 'Lid', features: [], rollbackIndex: null, nextIds: {} });
+    two.parts.push({
+      id: 'part#2',
+      name: 'Lid',
+      features: [],
+      rollbackIndex: null,
+      nextIds: {},
+      bodies: [],
+    });
     expect(diffDocuments(doc, two).parts).toMatchObject([
       { partId: 'part#2', status: 'added', firstAffectedIndex: null },
     ]);

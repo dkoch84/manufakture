@@ -5,16 +5,19 @@ import {
   type VariableReference,
 } from '@manufakture/units';
 import {
+  bodyCreator,
   constraintTargets,
   explicitDependencies,
   featureDependencies,
   featureExpressions,
+  featureScope,
   featureSubIds,
 } from './features';
-import { parseFeatureId, parseSubId, peekCounter } from './ids';
+import { PART_COUNTER, parseFeatureId, parseSubId, peekCounter } from './ids';
 import { fail, ok, type CoreError, type CoreResult } from './result';
 import {
   SKETCH_ORIGIN,
+  type Feature,
   type ManufaktureDocument,
   type Part,
   type SketchFeature,
@@ -211,6 +214,101 @@ function checkSketch(
   });
 }
 
+/**
+ * Why a feature cannot create the body `bodyId` names, or `undefined` when it can. Extrude,
+ * revolve and import make one body under their own id with a `new` operation, and with `add`
+ * when the solid touches no body (M2 plan, decision 2: known only after regen, which reports
+ * props on an `add` that merged as lost). A pattern or mirror of bodies makes its copies under
+ * an instance suffix (`pattern#2:i3`, `mirror#1:image`); which suffixes exist is a regen result.
+ */
+export function bodyCreationProblem(creator: Feature, bodyId: string): string | undefined {
+  const suffix = bodyId.length > creator.id.length;
+  switch (creator.kind) {
+    case 'extrude':
+    case 'revolve':
+    case 'import':
+      if (creator.operation !== 'new' && creator.operation !== 'add') {
+        return `${creator.id} is a "${creator.operation}" ${creator.kind}, which makes no body`;
+      }
+      return suffix ? `${creator.id} makes one body, named "${creator.id}"` : undefined;
+    case 'pattern':
+    case 'mirror':
+      if (creator.body !== true) {
+        return `${creator.id} repeats features, not bodies, so it makes no body`;
+      }
+      return suffix
+        ? undefined
+        : `a body made by ${creator.id} is named after its copy, like "${creator.id}:${creator.kind === 'pattern' ? 'i2' : 'image'}"`;
+    default:
+      return `${creator.id} is a ${creator.kind}, which makes no body`;
+  }
+}
+
+/**
+ * Checks a body id against the part: its creating feature exists, can make that body, and (for a
+ * `scope` of the feature at `before`) comes earlier in the list.
+ */
+function checkBodyId(
+  part: Part,
+  index: ReadonlyMap<string, number>,
+  bodyId: string,
+  before: number | undefined,
+  path: readonly (string | number)[],
+  out: CoreError[],
+): void {
+  const creatorId = bodyCreator(bodyId);
+  const ci = creatorId === undefined ? undefined : index.get(creatorId);
+  if (creatorId === undefined || ci === undefined) {
+    out.push({
+      code: 'dependency',
+      message: `Body "${bodyId}" names ${creatorId ?? 'no feature'}, which does not exist`,
+      path,
+      blockers: creatorId === undefined ? [] : [creatorId],
+    });
+    return;
+  }
+  const problem = bodyCreationProblem(part.features[ci]!, bodyId);
+  if (problem !== undefined) {
+    out.push({
+      code: 'kind-mismatch',
+      message: `Body "${bodyId}" cannot exist: ${problem}`,
+      path,
+      blockers: [creatorId],
+    });
+    return;
+  }
+  // A later creator is already a dependency error (featureDependencies); the feature's own id is
+  // not, since a feature never depends on itself.
+  if (before !== undefined && ci === before) {
+    out.push({
+      code: 'dependency',
+      message: `${creatorId} cannot act on the body it makes`,
+      path,
+      blockers: [creatorId],
+    });
+  }
+}
+
+function checkDuplicates(
+  ids: readonly string[],
+  what: string,
+  path: readonly (string | number)[],
+  out: CoreError[],
+): void {
+  const seen = new Set<string>();
+  ids.forEach((id, i) => {
+    if (seen.has(id)) {
+      out.push({
+        code: 'duplicate',
+        message: `Body "${id}" is listed twice in ${what}`,
+        path: [...path, i],
+        blockers: [id],
+      });
+    }
+    seen.add(id);
+  });
+}
+
 function checkPart(part: Part, pi: number, variables: ReadonlySet<string>, out: CoreError[]): void {
   const ppath = ['parts', pi];
   const index = new Map<string, number>();
@@ -303,10 +401,19 @@ function checkPart(part: Part, pi: number, variables: ReadonlySet<string>, out: 
         });
       }
     }
+    const scope = featureScope(f);
+    checkDuplicates(scope, `the scope of ${f.id}`, [...fpath, 'scope'], out);
+    scope.forEach((body, si) => checkBodyId(part, index, body, fi, [...fpath, 'scope', si], out));
     if (f.kind === 'sketch') checkSketch(f, fpath, out);
     for (const site of featureExpressions(f))
       checkExpression(site.expression, [...fpath, ...site.path], variables, out);
   });
+
+  const bodies = part.bodies.map((b) => b.id);
+  checkDuplicates(bodies, `the bodies of part ${part.id}`, [...ppath, 'bodies'], out);
+  bodies.forEach((body, bi) =>
+    checkBodyId(part, index, body, undefined, [...ppath, 'bodies', bi, 'id'], out),
+  );
 }
 
 /** Every semantic problem in a schema-valid document; empty when it is valid. */
@@ -315,6 +422,14 @@ export function validateDocument(doc: ManufaktureDocument): CoreError[] {
   const variables = checkVariables(doc.variables, out);
   const partIds = new Set<string>();
   doc.parts.forEach((part, pi) => {
+    const parsed = parseFeatureId(part.id);
+    if (parsed?.counter === PART_COUNTER && parsed.n >= peekCounter(doc.nextIds, PART_COUNTER)) {
+      out.push({
+        code: 'invalid-id',
+        message: `Part id "${part.id}" was never allocated (next part id is ${peekCounter(doc.nextIds, PART_COUNTER)})`,
+        path: ['parts', pi, 'id'],
+      });
+    }
     if (partIds.has(part.id)) {
       out.push({
         code: 'duplicate',

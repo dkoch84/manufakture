@@ -35,11 +35,12 @@ export function createDocument(options: NewDocumentOptions): ManufaktureDocument
     units: options.units ?? DEFAULT_UNITS,
     variables: [],
     parts: [createPart(DEFAULT_PART_ID, 'Part 1')],
+    nextIds: { part: 2 },
   };
 }
 
 export function createPart(id: string, name: string): Part {
-  return { id, name, features: [], rollbackIndex: null, nextIds: {} };
+  return { id, name, features: [], rollbackIndex: null, nextIds: {}, bodies: [] };
 }
 
 /**

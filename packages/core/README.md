@@ -23,13 +23,14 @@ import {
 ```ts
 interface ManufaktureDocument {
   format: 'manufakture';
-  version: 3; // file format version, FORMAT_VERSION
+  version: 4; // file format version, FORMAT_VERSION
   namingScheme: 1; // topological naming scheme version (T0.5), NAMING_SCHEME
   id: string;
   name: string;
   units: DisplayUnits; // display only; never changes geometry
   variables: Variable[]; // { name, expression: StoredExpression }, in display order
   parts: Part[];
+  nextIds: Record<string, number>; // document-level counters: `part` (since version 4)
 }
 
 interface Part {
@@ -38,12 +39,62 @@ interface Part {
   features: Feature[]; // regen order
   rollbackIndex: number | null; // features [0, rollbackIndex) regenerate; null means all
   nextIds: Record<string, number>; // next number per id counter; only ever increases
-  material?: MaterialId; // what the part's body is made of; absent: not set (since version 2)
+  material?: MaterialId; // default material of the part's bodies; absent: not set (since version 2)
+  bodies: BodyProps[]; // per-body name, colour, material, for bodies that have any (since version 4)
+}
+
+interface BodyProps {
+  id: string; // a body id: 'extrude#3', 'pattern#2:i3'
+  name?: string;
+  color?: string; // '#rrggbb', lower-case
+  material?: MaterialId; // overrides Part.material for this body
 }
 ```
 
-`createDocument({ id, name, units? })` makes an empty document with one part, `part#1`. Core never
-invents document ids; pass a UUID or similar.
+`createDocument({ id, name, units? })` makes an empty document with one part, `part#1`, and
+`nextIds: { part: 2 }`. Core never invents document ids; pass a UUID or similar.
+
+### Bodies
+
+A part holds any number of bodies. Which bodies exist, their solids and volumes are derived by
+regen; the document stores only what the user set on a body, and which bodies each feature acts
+on.
+
+- **A body is named after the feature that made it.** Its id is the creating feature's id
+  (`extrude#3`, `import#1`); copies a pattern or mirror of bodies makes take its instance prefix
+  (`pattern#2:i3`, `mirror#1:image`); a derived body will be `derived#1:from/<source body id>`.
+  Feature ids are never reused, so body ids are not either, and they need no counter.
+  `bodyCreator(bodyId)` gives the creating feature: the id up to the first `:`. Nothing after it
+  is read for feature ids, since it is an instance suffix or a name in another document.
+- **Merging and splitting.** A `new` extrude, revolve or import makes a body. An `add` whose tool
+  touches several bodies in its scope fuses them into one, which keeps the id of the body whose
+  creating feature comes first in the part; the others end there. An `add` that touches no body
+  makes a new body under its own id (with a `detached` warning), like any other body. A `cut` that
+  leaves a body in pieces keeps one body with several solids; splitting a body into separate bodies
+  is later work.
+- **Scope.** Extrude, revolve, import and hole, and a pattern or mirror with `body: true`, take an
+  optional `scope: string[]` of body ids: the bodies the operation combines with, or the bodies a
+  body pattern copies. Absent means every body at that point, which is what a version 3 part (one
+  compound) did, so old documents regenerate unchanged. A scope is at least one body; a `new` or
+  `reference` operation and a pattern of features have none (the schema refuses it). Fillet,
+  chamfer and shell take no scope: they act on the bodies that own their references.
+- **What is stored.** `Part.bodies` has an entry only for a body the user has named, coloured or
+  given a material, so every entry sets at least one of them. `Part.material` stays and is the
+  default: a body's material is its own `material` if it has one, else the part's, else none.
+  Visibility is view state in the app, not document state.
+
+Validation checks body ids as far as it can without regen. A `BodyProps.id` or a `scope` entry
+must name a body a feature of the part can create: its creating feature exists and is an extrude,
+revolve or import with operation `new` or `add` (named exactly its id), or a pattern or mirror of
+bodies (named with a suffix). A scope entry's creator must come before the feature; it becomes one
+of `featureDependencies`, so reorder and delete respect it. Duplicate ids in `bodies` or in one
+scope are refused. The rest is regen's: whether an `add` really made a body (it may have merged),
+and whether an instance suffix exists (`:i3` of a three-copy pattern), are reported by regen as
+`reference-lost`.
+
+Part ids are `part#n`, allocated from the document's `nextIds.part` like feature ids: a
+`part#n` at or past the counter is refused, and the counter only increases. A part id of another
+form is allowed and not counted.
 
 ### Materials
 
@@ -55,8 +106,9 @@ EN 1993-1-1 for steel). Real stock varies with species, moisture, maker and infi
 computed from these is an estimate. `findMaterial(id)` looks one up and `massGrams(mm3, kgPerM3)`
 turns a volume into grams.
 
-A part stores only the id (`material`), set with the `setMaterial` command. A part has one body
-until multi-body parts (M2), so the part's material is its body's. Ids are permanent: the table
+A part stores only the id (`material`), set with the `setMaterial` command. It is the default for
+the part's bodies; a body can override it in `Part.bodies` with `setBodyProps` (see Bodies). Ids
+are permanent: the table
 may gain materials, but an id is never removed or given another meaning.
 
 ### Numbers are expressions
@@ -182,6 +234,9 @@ A `profile` is `{ sketch, entities? }`: the sketch feature and the entities boun
 regions (absent: every closed region). Extrude extents are `blind`, `symmetric` (total depth,
 centred), `throughAll` and `upToFace`.
 
+Extrude, revolve, import, hole, and pattern and mirror with `body: true`, also take an optional
+`scope` (since version 4; see Bodies).
+
 The kernel implements these as `applyFeature` inputs (`packages/kernel`, Part features). Unequal
 chamfers measure `distance` on the reference face of each edge, the adjacent face whose name sorts
 first. A hole's `standard` records the screw size and clearance fit (`close`, `normal`, `loose`)
@@ -304,16 +359,19 @@ and the sketch types allow the key to be absent but never `undefined`.
 ### Dependencies
 
 `featureDependencies(feature)` lists the features a feature depends on: the ones it names by id
-(profiles, hole sketches, patterned and mirrored features, `dependsOn`) and every feature whose id
+(profiles, hole sketches, patterned and mirrored features, `dependsOn`), every feature whose id
 starts a face name in one of its references (`extrude#1:cap:end`, including names nested in
-merges and corners). The rule, checked on every command and on load:
+merges and corners), and the creator of every body in its `scope` (by `bodyCreator`, never by
+reading the body id as a face name). The rule, checked on every command and on load:
 
 - **A feature comes after everything it depends on.** Every dependency must exist in the part and
   sit earlier in the list.
 - **Reorder** refuses to move a feature before one of its dependencies, or after one of its
   dependents, and names them in `error.blockers`.
 - **Delete** refuses while any feature depends on the one being deleted; delete the dependents
-  first, or edit them to drop the reference.
+  first, or edit them to drop the reference. It also refuses while `Part.bodies` has props for a
+  body the feature makes (`blockers` lists the body ids); clear them with `setBodyProps` and
+  empty `props` in the same `batch`, so one undo brings both back.
 - **Suppress** is always allowed. Regen skips a suppressed feature, and its dependents report
   what they cannot find.
 - **Face-name dependencies see only the creating feature.** `extrude#1:side:e2` depends on
@@ -345,6 +403,7 @@ resulting document with `checkDocument`, and returns `{ document, inverse }` or 
 | `deleteVariable`  | `name`                                                | `setVariable` at the old index      |
 | `setDisplayUnits` | `units`                                               | `setDisplayUnits`                   |
 | `setMaterial`     | `partId`, `material` (a material id, `null` clears)   | `setMaterial` (the old one or null) |
+| `setBodyProps`    | `partId`, `bodyId`, `props`, `index?` (for a new one) | `setBodyProps` (the old props)      |
 | `renameDocument`  | `name` (trimmed, 1 to 200 characters)                 | `renameDocument` (the old name)     |
 | `batch`           | `commands` (applied in order, all or nothing)         | `batch` of inverses, reversed       |
 
@@ -354,6 +413,10 @@ ids to have been allocated before, so undoing a delete brings back the same ids 
 as reuse. That is its only id check: it does not apply the split rule, because the states it
 restores really existed. Everything else (dependencies, expressions, sketch consistency) is
 checked as for any command.
+
+`setBodyProps` replaces the body's whole entry with `props` (`{ name?, color?, material? }`);
+empty `props` removes the entry. Its inverse sets the old props back at the old index, or removes
+the entry when there was none.
 
 A `batch` is checked once, at the end, so its steps may pass through invalid states (add a
 feature, then the sketch it uses, in one step).
@@ -406,7 +469,9 @@ removed and changed features, whether the order or the rollback bar changed, and
 `firstAffectedIndex`: the first feature whose result may differ, counting edits, moves,
 suppression, the rollback bar, and features that read a changed variable, directly or through
 other variables. A rename has none, and neither has a material change, which sets
-`materialChanged` instead: masses change, geometry does not. Every listener runs even if one throws; the first error is
+`materialChanged` instead: masses change, geometry does not. A change to `Part.bodies` sets
+`bodyPropsChanged` the same way (names, colours, materials: no geometry). A scope is a feature
+input, so changing one is a feature change. Every listener runs even if one throws; the first error is
 rethrown afterwards.
 
 ## File format
@@ -435,8 +500,13 @@ naming scheme migrations are a separate chain. Version 0 was the pre-release dra
 `namingScheme`, no `suppressed`, no `rollbackIndex`); `migrateV0ToV1` adds them. Version 2 added
 the optional part `material`; `migrateV1ToV2` only bumps the version, since a version 1 part has no
 material. Version 3 added the `import` feature kind; `migrateV2ToV3` only bumps the version, since
-a version 2 part has no imports. The test migrates `src/fixtures/v0-bracket.json` to exactly
-`v1-bracket.json`, that to exactly `v2-bracket.json`, and that to exactly `v3-bracket.json`.
+a version 2 part has no imports. Version 4 added bodies: `migrateV3ToV4` adds `bodies: []` to
+every part and `nextIds: { part: <highest part#n + 1> }` to the document (1 when no part id is
+numbered), and changes no feature, since an absent `scope` means every body; a part with two `new`
+solids in one compound (`v3-two-bodies.json`) regenerates the same solids, now as two bodies
+(`extrude#1` and `extrude#2`). The test migrates `src/fixtures/v0-bracket.json` to exactly
+`v1-bracket.json`, that to exactly `v2-bracket.json`, that to exactly `v3-bracket.json` and that
+to exactly `v4-bracket.json`, and `v3-two-bodies.json` to exactly `v4-two-bodies.json`.
 
 To change the file shape:
 
@@ -447,8 +517,8 @@ To change the file shape:
 
 ## Where this deviates from ADR 0004's first cut
 
-- **Added fields.** The document has `id` and `name`; a part has `name`, `rollbackIndex` and an
-  optional `material` (the material of its one body; per body once parts have several bodies);
+- **Added fields.** The document has `id`, `name` and `nextIds`; a part has `name`,
+  `rollbackIndex`, an optional `material` (the default for its bodies) and `bodies`;
   every feature has `name` and `suppressed`. The ADR's shape was a first cut that expected feature kinds
   to add their own fields.
 - **Cuts are extrudes.** The ADR's comment lists `'cut'` as a kind and T0.5 names faces

@@ -1,0 +1,166 @@
+{
+  "format": "manufakture",
+  "version": 4,
+  "namingScheme": 1,
+  "id": "doc-two-bodies",
+  "name": "Two blocks",
+  "units": {
+    "length": {
+      "unit": "mm"
+    },
+    "angle": {
+      "unit": "deg"
+    }
+  },
+  "variables": [],
+  "parts": [
+    {
+      "id": "part#1",
+      "name": "Blocks",
+      "features": [
+        {
+          "id": "sketch#1",
+          "kind": "sketch",
+          "name": "Two blocks",
+          "suppressed": false,
+          "plane": {
+            "type": "plane",
+            "origin": [0, 0, 0],
+            "normal": [0, 0, 1],
+            "xDir": [1, 0, 0]
+          },
+          "entities": [
+            {
+              "id": "e1",
+              "kind": "line",
+              "construction": false,
+              "start": [0, 0],
+              "end": [20, 0]
+            },
+            {
+              "id": "e2",
+              "kind": "line",
+              "construction": false,
+              "start": [20, 0],
+              "end": [20, 20]
+            },
+            {
+              "id": "e3",
+              "kind": "line",
+              "construction": false,
+              "start": [20, 20],
+              "end": [0, 20]
+            },
+            {
+              "id": "e4",
+              "kind": "line",
+              "construction": false,
+              "start": [0, 20],
+              "end": [0, 0]
+            },
+            {
+              "id": "e5",
+              "kind": "line",
+              "construction": false,
+              "start": [40, 0],
+              "end": [60, 0]
+            },
+            {
+              "id": "e6",
+              "kind": "line",
+              "construction": false,
+              "start": [60, 0],
+              "end": [60, 20]
+            },
+            {
+              "id": "e7",
+              "kind": "line",
+              "construction": false,
+              "start": [60, 20],
+              "end": [40, 20]
+            },
+            {
+              "id": "e8",
+              "kind": "line",
+              "construction": false,
+              "start": [40, 20],
+              "end": [40, 0]
+            }
+          ],
+          "constraints": [
+            {
+              "id": "k1",
+              "kind": "horizontal",
+              "line": "e1"
+            },
+            {
+              "id": "k2",
+              "kind": "horizontal",
+              "line": "e5"
+            }
+          ]
+        },
+        {
+          "id": "extrude#1",
+          "kind": "extrude",
+          "name": "Left block",
+          "suppressed": false,
+          "profile": {
+            "sketch": "sketch#1",
+            "entities": ["e1", "e2", "e3", "e4"]
+          },
+          "operation": "new",
+          "extent": {
+            "type": "blind",
+            "distance": {
+              "source": "10",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            }
+          },
+          "reverse": false
+        },
+        {
+          "id": "extrude#2",
+          "kind": "extrude",
+          "name": "Right block",
+          "suppressed": false,
+          "profile": {
+            "sketch": "sketch#1",
+            "entities": ["e5", "e6", "e7", "e8"]
+          },
+          "operation": "new",
+          "extent": {
+            "type": "blind",
+            "distance": {
+              "source": "10",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            }
+          },
+          "reverse": false
+        }
+      ],
+      "rollbackIndex": null,
+      "nextIds": {
+        "e": 9,
+        "extrude": 3,
+        "k": 3,
+        "sketch": 2
+      },
+      "material": "pla",
+      "bodies": []
+    },
+    {
+      "id": "part#3",
+      "name": "Empty",
+      "features": [],
+      "rollbackIndex": null,
+      "nextIds": {},
+      "bodies": []
+    }
+  ],
+  "nextIds": {
+    "part": 4
+  }
+}

@@ -8,6 +8,7 @@ import type {
   StoredExpression,
 } from './schema';
 import { DIMENSION_KINDS, FEATURE_KINDS } from './schema';
+import { FEATURE_ID_PATTERN } from './ids';
 
 /**
  * Generic views of a feature: the geometry references it holds, the features it depends on and
@@ -74,6 +75,24 @@ export function featureIdsInName(name: string): string[] {
   return [...out];
 }
 
+/**
+ * The feature that creates a body: the leading feature id of its body id (decision 1 of the M2
+ * plan). `extrude#3` gives `extrude#3`, `pattern#2:i3` gives `pattern#2`, and a derived body
+ * `derived#1:from/pattern#2:i3` gives `derived#1`: everything after the first `:` belongs to
+ * the creating feature (an instance suffix, or a name in another document), so it is never read
+ * for feature ids. `undefined` when the id does not start with a feature id.
+ */
+export function bodyCreator(bodyId: string): string | undefined {
+  const colon = bodyId.indexOf(':');
+  const head = colon < 0 ? bodyId : bodyId.slice(0, colon);
+  return FEATURE_ID_PATTERN.test(head) ? head : undefined;
+}
+
+/** The body ids a feature's `scope` lists; empty when it has none (every body). */
+export function featureScope(feature: Feature): readonly string[] {
+  return 'scope' in feature && feature.scope !== undefined ? feature.scope : [];
+}
+
 /** Every face name a reference stores (its faces and, for edges, its end faces). */
 export function referenceNames(reference: Reference): string[] {
   const r = reference.ref;
@@ -81,11 +100,16 @@ export function referenceNames(reference: Reference): string[] {
 }
 
 /**
- * Every feature this feature depends on: the ones it names by id, and the ones whose faces its
- * references name. Sorted, without duplicates, never including itself.
+ * Every feature this feature depends on: the ones it names by id, the ones whose faces its
+ * references name, and the creators of the bodies in its `scope`. Sorted, without duplicates,
+ * never including itself.
  */
 export function featureDependencies(feature: Feature): string[] {
   const out = new Set(explicitDependencies(feature));
+  for (const body of featureScope(feature)) {
+    const creator = bodyCreator(body);
+    if (creator !== undefined) out.add(creator);
+  }
   for (const reference of featureReferences(feature)) {
     for (const name of referenceNames(reference)) {
       for (const id of featureIdsInName(name)) out.add(id);

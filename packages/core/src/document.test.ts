@@ -42,12 +42,13 @@ describe('createDocument', () => {
     expect(validateDocument(doc)).toEqual([]);
     expect(doc).toMatchObject({
       format: 'manufakture',
-      version: 3,
+      version: 4,
       namingScheme: 1,
       variables: [],
+      nextIds: { part: 2 },
     });
     expect(doc.parts).toEqual([
-      { id: PART, name: 'Part 1', features: [], rollbackIndex: null, nextIds: {} },
+      { id: PART, name: 'Part 1', features: [], rollbackIndex: null, nextIds: {}, bodies: [] },
     ]);
     expect(doc.units).toEqual({ length: { unit: 'mm' }, angle: { unit: 'deg' } });
   });

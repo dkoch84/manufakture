@@ -68,6 +68,7 @@ function sortKeys(value: unknown, deep: boolean): unknown {
 function canonical(doc: ManufaktureDocument): ManufaktureDocument {
   return {
     ...doc,
+    nextIds: sortKeys(doc.nextIds, false) as Record<string, number>,
     parts: doc.parts.map((part) => ({
       ...part,
       nextIds: sortKeys(part.nextIds, false) as Record<string, number>,

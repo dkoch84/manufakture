@@ -80,11 +80,40 @@ export const migrateV2ToV3: Migration = {
   },
 };
 
+/**
+ * Version 4 added bodies: per-body props (`Part.bodies`), an optional `scope` on features with an
+ * operation, and the document's own `nextIds` for part ids. Every part gets `bodies: []`, and
+ * `nextIds.part` starts past the highest `part#n` in the file (at 1 when there is none). Features
+ * are unchanged: an absent `scope` means every body, which is what the version 3 compound did,
+ * so a part with several `new` solids regenerates the same bodies.
+ */
+export const migrateV3ToV4: Migration = {
+  from: 3,
+  to: 4,
+  description: 'Add body props, feature scopes and the document part counter',
+  migrate(doc) {
+    const parts = Array.isArray(doc.parts) ? doc.parts : [];
+    let highest = 0;
+    for (const part of parts) {
+      const m =
+        isObject(part) && typeof part.id === 'string' ? /^part#([1-9][0-9]*)$/.exec(part.id) : null;
+      if (m) highest = Math.max(highest, Number(m[1]));
+    }
+    return {
+      ...doc,
+      version: 4,
+      parts: parts.map((part) => (isObject(part) ? { ...part, bodies: [] } : part)),
+      nextIds: { part: highest + 1 },
+    };
+  },
+};
+
 /** File format migrations, in order: `FORMAT_MIGRATIONS[i]` goes from version i to i + 1. */
 export const FORMAT_MIGRATIONS: readonly Migration[] = [
   migrateV0ToV1,
   migrateV1ToV2,
   migrateV2ToV3,
+  migrateV3ToV4,
 ];
 
 /**

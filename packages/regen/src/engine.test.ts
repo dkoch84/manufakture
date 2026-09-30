@@ -735,6 +735,7 @@ describe('cancellation and recycling', () => {
     const doc: ManufaktureDocument = {
       ...one,
       parts: [one.parts[0]!, { ...one.parts[0]!, id: 'part#2', name: 'Part 2' }],
+      nextIds: { part: 3 },
     };
     const first = await regen(engine, doc);
     const shapeOfA = first.parts[0]!.shape!;

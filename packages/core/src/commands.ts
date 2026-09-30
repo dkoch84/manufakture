@@ -1,13 +1,17 @@
 import { isValidVariableName } from '@manufakture/units';
 import { z } from 'zod';
-import { featureDependencies, featureExpressions, featureSubIds } from './features';
+import { bodyCreator, featureDependencies, featureExpressions, featureSubIds } from './features';
 import { parseAnyId, peekCounter } from './ids';
 import { fail, ok, schemaError, type CoreResult } from './result';
 import {
+  BodyIdSchema,
+  BodyPropsFieldsSchema,
   DisplayUnitsSchema,
   FeatureSchema,
   MaterialIdSchema,
   StoredExpressionSchema,
+  type BodyProps,
+  type BodyPropsFields,
   type Feature,
   type ManufaktureDocument,
   type Part,
@@ -76,6 +80,17 @@ export const SimpleCommandSchema = z.discriminatedUnion('type', [
     type: z.literal('setMaterial'),
     partId,
     material: MaterialIdSchema.nullable(),
+  }),
+  /**
+   * Set a body's name, colour and material, all at once: `props` replaces the body's entry, and
+   * empty `props` removes it. `index` places a new entry (default: last); ignored on update.
+   */
+  z.strictObject({
+    type: z.literal('setBodyProps'),
+    partId,
+    bodyId: BodyIdSchema,
+    props: BodyPropsFieldsSchema,
+    index: index.optional(),
   }),
   /** Move the rollback bar; `null` puts it after the last feature. */
   z.strictObject({ type: z.literal('setRollback'), partId, index: index.nullable() }),
@@ -292,6 +307,18 @@ function dependentsOf(part: Part, id: string): string[] {
   return part.features.filter((f) => featureDependencies(f).includes(id)).map((f) => f.id);
 }
 
+/** Bodies with props that the feature `id` creates, by body id. */
+function propsOf(part: Part, id: string): string[] {
+  return part.bodies.filter((b) => bodyCreator(b.id) === id).map((b) => b.id);
+}
+
+/** The props fields of an entry, without its id. */
+function propsFields(entry: BodyProps): BodyPropsFields {
+  const { id: _id, ...fields } = entry;
+  void _id;
+  return fields;
+}
+
 function applyPartCommand(part: Part, command: PartCommand): CoreResult<PartApplied> {
   const { partId } = command;
   switch (command.type) {
@@ -362,6 +389,17 @@ function applyPartCommand(part: Part, command: PartCommand): CoreResult<PartAppl
           `Cannot delete ${command.featureId}: ${dependents.join(', ')} ${dependents.length === 1 ? 'depends' : 'depend'} on it`,
           ['featureId'],
           { blockers: dependents },
+        );
+      }
+      // Props of a body the feature makes: clear them in the same batch (`setBodyProps` with
+      // empty props), so undo brings both back.
+      const props = propsOf(part, command.featureId);
+      if (props.length > 0) {
+        return fail(
+          'dependency',
+          `Cannot delete ${command.featureId}: body ${props.join(', ')} ${props.length === 1 ? 'has' : 'have'} a name, colour or material`,
+          ['featureId'],
+          { blockers: props },
         );
       }
       const old = part.features[i.value]!;
@@ -518,6 +556,32 @@ function applyPartCommand(part: Part, command: PartCommand): CoreResult<PartAppl
         part: command.material === null ? rest : { ...rest, material: command.material },
         inverse: { type: 'setMaterial', partId, material: part.material ?? null },
       });
+    }
+
+    case 'setBodyProps': {
+      const i = part.bodies.findIndex((b) => b.id === command.bodyId);
+      const old = part.bodies[i];
+      const entry: BodyProps = { id: command.bodyId, ...command.props };
+      const empty = Object.keys(command.props).length === 0;
+      const bodies = part.bodies.slice();
+      if (old) {
+        if (empty) bodies.splice(i, 1);
+        else bodies[i] = entry;
+      } else if (!empty) {
+        const at = command.index ?? bodies.length;
+        if (at > bodies.length) {
+          return fail(
+            'invalid-index',
+            `Index ${at} is past the end of ${bodies.length} body entries`,
+            ['index'],
+          );
+        }
+        bodies.splice(at, 0, entry);
+      }
+      const inverse: Command = old
+        ? { type: 'setBodyProps', partId, bodyId: old.id, props: propsFields(old), index: i }
+        : { type: 'setBodyProps', partId, bodyId: command.bodyId, props: {} };
+      return ok({ part: old || !empty ? { ...part, bodies } : part, inverse });
     }
 
     case 'setRollback': {

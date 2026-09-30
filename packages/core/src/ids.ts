@@ -8,7 +8,11 @@
  *   the pieces of a piece are `<id>#a#a` and so on. Split ids carry no counter of their own.
  * - The part's `nextIds` holds the next number per counter. It only ever increases, so an id is
  *   never handed out twice, including after the item is deleted.
+ * - Part ids are `part#n`, counted by the document's own `nextIds` (key `part`), by the same rule.
  */
+
+/** The document-level `nextIds` key for part ids (`part#n`). */
+export const PART_COUNTER = 'part';
 
 /** Counter prefixes of ids that live inside features. */
 export const ENTITY_PREFIX = 'e';

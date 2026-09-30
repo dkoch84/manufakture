@@ -28,7 +28,7 @@ import { MATERIAL_IDS } from './materials';
  */
 
 /** The file format version this code reads and writes. Bump it only together with a migration. */
-export const FORMAT_VERSION = 3;
+export const FORMAT_VERSION = 4;
 /** The topological naming scheme version (T0.5) that stored references are written in. */
 export const NAMING_SCHEME = 1;
 export const FORMAT_TAG = 'manufakture';
@@ -48,6 +48,22 @@ export const EntityIdSchema = subId('e', 'e1');
 export const ConstraintIdSchema = subId('k', 'k1');
 export const ReferenceIdSchema = subId('r', 'r1');
 export const FeatureIdSchema = featureId;
+
+/**
+ * A body id: the id of the feature that made the body, alone (`extrude#3`) or followed by a
+ * suffix naming one of its bodies (`pattern#2:i3`, `mirror#1:image`, later
+ * `derived#1:from/<source body id>`). Since version 4.
+ */
+export const BODY_ID_PATTERN = /^[a-z][a-zA-Z0-9]*#[1-9][0-9]*(?::.+)?$/;
+export const BodyIdSchema = z
+  .string()
+  .regex(BODY_ID_PATTERN, 'Expected a body id like "extrude#3" or "pattern#2:i3"');
+
+/**
+ * Which bodies a feature acts on, by body id. Absent means every body at that point in the
+ * feature list, which is what a version 3 part (one compound) did. Since version 4.
+ */
+const scope = z.array(BodyIdSchema).min(1).exactOptional();
 
 export const LengthUnitSchema = z.enum(['mm', 'cm', 'm', 'in', 'ft']);
 export const AngleUnitSchema = z.enum(['deg', 'rad']);
@@ -314,6 +330,24 @@ export const ProfileSchema = z.strictObject({
   entities: z.array(EntityIdSchema).min(1).optional(),
 });
 
+/**
+ * A `scope` says which existing bodies an operation combines with, so a feature that makes a new
+ * body (`new`) or keeps its solid aside (`reference`) has none.
+ */
+function checkScopeOperation<T extends { operation: string; scope?: readonly string[] }>(
+  ctx: z.core.ParsePayload<T>,
+): void {
+  const { operation, scope } = ctx.value;
+  if (scope !== undefined && (operation === 'new' || operation === 'reference')) {
+    ctx.issues.push({
+      code: 'custom',
+      message: `a "${operation}" operation acts on no existing body, so it has no scope`,
+      input: scope,
+      path: ['scope'],
+    });
+  }
+}
+
 export const SketchFeatureSchema = z.strictObject({
   ...base('sketch'),
   plane: SketchPlaneSchema,
@@ -329,19 +363,23 @@ export const ExtrudeExtentSchema = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('upToFace'), face: FaceReferenceSchema }),
 ]);
 
-export const ExtrudeFeatureSchema = z.strictObject({
-  ...base('extrude'),
-  profile: ProfileSchema,
-  operation: BooleanOperationSchema,
-  extent: ExtrudeExtentSchema,
-  /** Extrude against the sketch normal. */
-  reverse: z.boolean(),
-  /**
-   * Draft angle: positive tapers the sides inward along the extrusion, negative outward. The
-   * neutral plane is the sketch plane. Absent means no draft.
-   */
-  draft: StoredExpressionSchema.exactOptional(),
-});
+export const ExtrudeFeatureSchema = z
+  .strictObject({
+    ...base('extrude'),
+    profile: ProfileSchema,
+    operation: BooleanOperationSchema,
+    extent: ExtrudeExtentSchema,
+    /** Extrude against the sketch normal. */
+    reverse: z.boolean(),
+    /**
+     * Draft angle: positive tapers the sides inward along the extrusion, negative outward. The
+     * neutral plane is the sketch plane. Absent means no draft.
+     */
+    draft: StoredExpressionSchema.exactOptional(),
+    /** The bodies the operation combines with; absent: every body. Not for a `new` extrude. */
+    scope,
+  })
+  .check(checkScopeOperation);
 
 export const RevolveAxisSchema = z.discriminatedUnion('type', [
   z.strictObject({
@@ -360,15 +398,19 @@ export const RevolveAxisSchema = z.discriminatedUnion('type', [
   }),
 ]);
 
-export const RevolveFeatureSchema = z.strictObject({
-  ...base('revolve'),
-  profile: ProfileSchema,
-  axis: RevolveAxisSchema,
-  angle: StoredExpressionSchema,
-  /** Split the angle evenly to both sides of the sketch plane. */
-  symmetric: z.boolean(),
-  operation: BooleanOperationSchema,
-});
+export const RevolveFeatureSchema = z
+  .strictObject({
+    ...base('revolve'),
+    profile: ProfileSchema,
+    axis: RevolveAxisSchema,
+    angle: StoredExpressionSchema,
+    /** Split the angle evenly to both sides of the sketch plane. */
+    symmetric: z.boolean(),
+    operation: BooleanOperationSchema,
+    /** The bodies the operation combines with; absent: every body. Not for a `new` revolve. */
+    scope,
+  })
+  .check(checkScopeOperation);
 
 export const FilletFeatureSchema = z.strictObject({
   ...base('fillet'),
@@ -444,6 +486,8 @@ export const HoleFeatureSchema = z.strictObject({
    * standard hole can still be edited by hand.
    */
   standard: z.strictObject({ size: z.string().min(1), fit: HoleFitSchema }).exactOptional(),
+  /** The bodies the holes are drilled into; absent: every body. */
+  scope,
 });
 
 /**
@@ -481,13 +525,14 @@ export const PatternLayoutSchema = z.discriminatedUnion('type', [
 ]);
 
 /**
- * What a pattern or mirror repeats: the listed features, or with `body: true` the whole body
- * (then `features` is empty).
+ * What a pattern or mirror repeats: the listed features, or with `body: true` the bodies (then
+ * `features` is empty). `scope` narrows which bodies a body pattern copies, so only a body
+ * pattern has one: copies of features act where the features did.
  */
-function checkInstanceSource<T extends { features: string[]; body?: boolean }>(
-  ctx: z.core.ParsePayload<T>,
-): void {
-  const { features, body } = ctx.value;
+function checkInstanceSource<
+  T extends { features: string[]; body?: boolean; scope?: readonly string[] },
+>(ctx: z.core.ParsePayload<T>): void {
+  const { features, body, scope } = ctx.value;
   if (body === true ? features.length > 0 : features.length === 0) {
     ctx.issues.push({
       code: 'custom',
@@ -496,14 +541,24 @@ function checkInstanceSource<T extends { features: string[]; body?: boolean }>(
       path: ['features'],
     });
   }
+  if (scope !== undefined && body !== true) {
+    ctx.issues.push({
+      code: 'custom',
+      message: 'only a pattern or mirror of bodies has a scope',
+      input: scope,
+      path: ['scope'],
+    });
+  }
 }
 
 export const PatternFeatureSchema = z
   .strictObject({
     ...base('pattern'),
     features: z.array(featureId),
-    /** Repeat the whole body instead of features. */
+    /** Repeat the bodies instead of features. */
     body: z.boolean().exactOptional(),
+    /** With `body: true`, the bodies to copy; absent: every body. */
+    scope,
     layout: PatternLayoutSchema,
   })
   .check(checkInstanceSource);
@@ -512,8 +567,10 @@ export const MirrorFeatureSchema = z
   .strictObject({
     ...base('mirror'),
     features: z.array(featureId),
-    /** Mirror the whole body instead of features. */
+    /** Mirror the bodies instead of features. */
     body: z.boolean().exactOptional(),
+    /** With `body: true`, the bodies to mirror; absent: every body. */
+    scope,
     plane: FaceReferenceSchema,
   })
   .check(checkInstanceSource);
@@ -593,7 +650,10 @@ export const ImportFeatureSchema = z
     ...base('import'),
     source: ImportSourceSchema,
     operation: ImportOperationSchema,
+    /** The bodies the operation combines with; absent: every body. Not for `new` or `reference`. */
+    scope,
   })
+  .check(checkScopeOperation)
   .check((ctx) => {
     if (ctx.value.source.format === 'stl' && ctx.value.operation !== 'reference') {
       ctx.issues.push({
@@ -643,6 +703,38 @@ export const VariableSchema = z.strictObject({
 
 export const MaterialIdSchema = z.enum(MATERIAL_IDS);
 
+/** A display colour: `#rrggbb`, lower-case hex, so equal colours are equal text. */
+export const ColorSchema = z
+  .string()
+  .regex(/^#[0-9a-f]{6}$/, 'Expected a lower-case colour like "#1f77b4"');
+
+/** What a user can set on one body. Every field is optional; absent means the default. */
+export const BodyPropsFieldsSchema = z.strictObject({
+  name: featureName.exactOptional(),
+  color: ColorSchema.exactOptional(),
+  /** Overrides the part's `material` for this body. */
+  material: MaterialIdSchema.exactOptional(),
+});
+
+/**
+ * The user's settings for one body of a part, by body id (README, "Bodies"). Only bodies the
+ * user has named, coloured or given a material have an entry, so an entry sets at least one of
+ * them. Which bodies exist, and their solids, is derived by regen. Since version 4.
+ */
+export const BodyPropsSchema = z
+  .strictObject({ id: BodyIdSchema, ...BodyPropsFieldsSchema.shape })
+  .check((ctx) => {
+    const { name, color, material } = ctx.value;
+    if (name === undefined && color === undefined && material === undefined) {
+      ctx.issues.push({
+        code: 'custom',
+        message: 'a body entry sets a name, a colour or a material',
+        input: ctx.value,
+        path: [],
+      });
+    }
+  });
+
 export const PartSchema = z.strictObject({
   id: z.string().min(1),
   name: featureName,
@@ -656,11 +748,12 @@ export const PartSchema = z.strictObject({
   /** Next number per id counter (feature kind, or `e`, `k`, `r`). Only ever increases. */
   nextIds: z.record(z.string(), z.int().min(1)),
   /**
-   * What the part's body is made of: a built-in material id (`MATERIALS`). Absent: not set. A
-   * part has one body until multi-body parts (M2), so this is the body's material. Since
-   * version 2.
+   * What the part's bodies are made of: a built-in material id (`MATERIALS`). Absent: not set.
+   * A body with its own `material` in `bodies` uses that instead. Since version 2.
    */
   material: MaterialIdSchema.exactOptional(),
+  /** Per-body names, colours and materials, for the bodies that have any. Since version 4. */
+  bodies: z.array(BodyPropsSchema),
 });
 
 export const DocumentSchema = z.strictObject({
@@ -672,6 +765,11 @@ export const DocumentSchema = z.strictObject({
   units: DisplayUnitsSchema,
   variables: z.array(VariableSchema),
   parts: z.array(PartSchema).min(1),
+  /**
+   * Next number per document-level id counter (`part`, giving `part#n`). Only ever increases,
+   * so a part id is never reused. Since version 4.
+   */
+  nextIds: z.record(z.string(), z.int().min(1)),
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -724,5 +822,7 @@ export type ImportFeature = z.infer<typeof ImportFeatureSchema>;
 export type Feature = z.infer<typeof FeatureSchema>;
 export type FeatureKind = Feature['kind'];
 export type Variable = z.infer<typeof VariableSchema>;
+export type BodyPropsFields = z.infer<typeof BodyPropsFieldsSchema>;
+export type BodyProps = z.infer<typeof BodyPropsSchema>;
 export type Part = z.infer<typeof PartSchema>;
 export type ManufaktureDocument = z.infer<typeof DocumentSchema>;
