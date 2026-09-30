@@ -19,7 +19,8 @@ import {
 import type { ExportFormat, ImportedBody } from './io/actions';
 import { importBodyId, restorableImportIds } from './io/restorable';
 import { downloadBytes, readFileBytes } from './io/files';
-import { ExportMenu, ImportButton } from './io/IoMenus';
+import type { ConfigurationExportFormat } from './io/configExport';
+import { ExportMenu, ExportProgress, ImportButton } from './io/IoMenus';
 import { withMeshBodies } from './io/meshBody';
 import { MeasureOverlay } from './measure/MeasureOverlay';
 import { MeasurePanel } from './measure/MeasurePanel';
@@ -27,7 +28,9 @@ import { PART_STUDIO_PANEL_ID } from './parts/names';
 import { PartTabs } from './parts/PartTabs';
 import { measureTargets } from './measure/measurer';
 import { partBodies as bodiesOfPart, sameOr } from './model/bodies';
-import { modelStore, startRegen, useModel, type ModelStore } from './model/model';
+import { modelStore, shareRegenerator, startRegen, useModel, type ModelStore } from './model/model';
+import { ConfigurationsPanel } from './configurations/ConfigurationsPanel';
+import { ConfigurationSwitcher } from './configurations/ConfigurationSwitcher';
 import { documentStore, historyShortcut, type DocumentStoreApi } from './state/document';
 import { measureStore, type MeasureStore } from './state/measure';
 import {
@@ -176,6 +179,13 @@ export function App({
   const [imports, setImports] = useState<readonly ImportedBody[]>([]);
   const [ioStatus, setIoStatus] = useState<{ error: boolean; text: string } | null>(null);
   const [ioBusy, setIoBusy] = useState(false);
+  // An export of every configuration in progress: which row, and how to cancel it.
+  const [exportAll, setExportAll] = useState<{
+    index: number;
+    count: number;
+    row: string;
+    controller: AbortController;
+  } | null>(null);
   // Persistence: the library once open, autosave, and which screen shows.
   const [library, setLibrary] = useState<DocumentLibrary | null>(null);
   const [autosave, setAutosave] = useState<Autosave | null>(null);
@@ -207,13 +217,18 @@ export function App({
     return () => controller.abort();
   }, [loader, documents]);
 
-  // Regenerate the document on every change, once the kernel is up.
+  // Regenerate the document on every change, once the kernel is up. Exporting every
+  // configuration shares the regenerator, holding the open document's regens meanwhile.
   const loaded = bodies !== null;
+  const shared = useMemo(
+    () => (loader.regenerator ? shareRegenerator(loader.regenerator) : null),
+    [loader],
+  );
   useEffect(() => {
-    const regenerator = loader.regenerator;
-    if (!loaded || !regenerator) return;
-    return startRegen(regenerator, documents, model);
-  }, [loaded, loader, documents, model]);
+    if (!loaded || !shared) return;
+    return startRegen(shared.regenerator, documents, model);
+  }, [loaded, shared, documents, model]);
+  const configurationError = useModel(model, (s) => s.configurationError);
   // Regen builds every part studio; the viewport, the sketches and the picks see the active one.
   const activePartId = useStore(documents, (s) => s.activePartId);
   const allParts = useModel(model, (s) => s.parts);
@@ -589,6 +604,60 @@ export function App({
     [loader, document.name, exportable],
   );
 
+  // Every configuration, one file per row, each from its own regen; the files download as they
+  // are made, so a cancelled export keeps the ones it finished.
+  const onExportAll = useCallback(
+    (
+      format: ConfigurationExportFormat,
+      tolerance: ExportTolerancePreset,
+      ids: readonly string[],
+    ) => {
+      const exchanger = loader.exchanger;
+      if (!exchanger || !shared) {
+        setIoStatus({ error: true, text: 'Export needs the geometry kernel.' });
+        return;
+      }
+      const { document: doc, activePartId: partId } = documents.getState();
+      // Bodies not chosen in the menu, and hidden ones it does not list (a body that exists only
+      // in another configuration is written unless it is hidden).
+      const chosen = new Set(ids);
+      const skip = new Set(
+        [...exportable.map((b) => b.id), ...hiddenIds].filter((id) => !chosen.has(id)),
+      );
+      const controller = new AbortController();
+      setIoBusy(true);
+      setIoStatus(null);
+      setExportAll({ index: 0, count: doc.configurations?.rows.length ?? 0, row: '', controller });
+      import('./io/configExport')
+        .then(({ exportConfigurations }) =>
+          shared.exclusive((regen) =>
+            exportConfigurations(exchanger, regen, {
+              document: doc,
+              partId,
+              format,
+              tolerance,
+              skip,
+              signal: controller.signal,
+              onProgress: ({ index, count, row }) =>
+                setExportAll({ index, count, row: row.name, controller }),
+              onFile: (f) => downloadBytes(f.bytes, f.name, f.type),
+            }),
+          ),
+        )
+        .then(
+          (r) => setIoStatus({ error: !r.ok && !r.cancelled, text: r.message }),
+          (e: unknown) =>
+            setIoStatus({ error: true, text: e instanceof Error ? e.message : String(e) }),
+        )
+        .finally(() => {
+          setExportAll(null);
+          setIoBusy(false);
+        });
+    },
+    [loader, shared, documents, exportable, hiddenIds],
+  );
+  const configurationCount = document.configurations?.rows.length ?? 0;
+
   const onImport = useCallback(
     (file: File) => {
       setIoBusy(true);
@@ -879,12 +948,26 @@ export function App({
           >
             Redo
           </button>
+          <ConfigurationSwitcher
+            documents={documents}
+            disabled={sketching.active || dialog !== null || exportAll !== null}
+          />
           <ExportMenu
             disabled={sketching.active || ioBusy || !loader.exchanger}
             bodies={exportable}
             onExport={onExport}
+            configurations={shared ? configurationCount : 0}
+            onExportAll={onExportAll}
           />
           <ImportButton disabled={sketching.active || ioBusy} onFile={onImport} />
+          {exportAll && (
+            <ExportProgress
+              index={exportAll.index}
+              count={exportAll.count}
+              row={exportAll.row}
+              onCancel={() => exportAll.controller.abort()}
+            />
+          )}
           {ioStatus && (
             <span
               className={ioStatus.error ? 'io-status io-error' : 'io-status'}
@@ -1013,6 +1096,11 @@ export function App({
             ) : (
               <>
                 <VariablesPanel documents={documents} selection={selection} />
+                <ConfigurationsPanel
+                  documents={documents}
+                  configurationError={configurationError}
+                  disabled={exportAll !== null}
+                />
                 <SelectionPanel selection={selection} />
                 <MeasurePanel measure={measure} documents={documents} bodies={measuredBodies} />
               </>

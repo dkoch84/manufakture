@@ -116,3 +116,13 @@
 .variable-blocked p {
   margin: 0 0 0.2rem;
 }
+
+.variable-warning {
+  color: #8a5a00;
+}
+
+.variable-configured {
+  margin: 0.1rem 0 0;
+  font-size: 0.78rem;
+  color: #2f6fe4;
+}

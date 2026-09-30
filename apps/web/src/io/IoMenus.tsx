@@ -1,10 +1,15 @@
 // The Export menu (STL, 3MF, STEP, with the mesh tolerance and, in a part of
-// several bodies, which bodies to write: the shown ones unless changed) and the
-// Import button (a STEP or STL file picker), in the app header.
+// several bodies, which bodies to write: the shown ones unless changed; a hidden
+// body is never written unless ticked), the choice to export every configuration
+// with its progress, and the Import button (a STEP or STL file picker), in the
+// app header.
 
 import { EXPORT_TOLERANCES, type ExportTolerancePreset } from '@manufakture/io';
 import { useEffect, useRef, useState } from 'react';
 import type { ExportFormat } from './actions';
+import { chosenBodies, type ExportableBody } from './chosenBodies';
+
+export type { ExportableBody };
 
 const FORMATS: readonly [ExportFormat, string, string][] = [
   ['stl', 'STL', 'Binary STL, every body in one file'],
@@ -25,32 +30,46 @@ function toleranceTitle(preset: ExportTolerancePreset): string {
   return `Chordal ${t.chordal} mm, angular ${degrees} degrees`;
 }
 
-/** A body the menu offers: its viewport id, its name, and whether it is hidden in the view. */
-export interface ExportableBody {
-  id: string;
-  name: string;
-  hidden: boolean;
-}
-
 export interface ExportMenuProps {
   disabled?: boolean;
   /** The bodies of the part; with several, the menu lets the user choose (default: none known). */
   bodies?: readonly ExportableBody[];
   /** `ids`: the bodies chosen, in body order. */
   onExport: (format: ExportFormat, tolerance: ExportTolerancePreset, ids: string[]) => void;
+  /**
+   * How many configuration rows the document has; with any, the menu offers to export every
+   * configuration, one file per row, through `onExportAll`.
+   */
+  configurations?: number;
+  onExportAll?: (
+    format: Exclude<ExportFormat, 'stl-each'>,
+    tolerance: ExportTolerancePreset,
+    ids: string[],
+  ) => void;
 }
 
 const NO_BODIES: readonly ExportableBody[] = [];
+const NO_TICKS: ReadonlyMap<string, boolean> = new Map();
 
-export function ExportMenu({ disabled = false, bodies = NO_BODIES, onExport }: ExportMenuProps) {
+export function ExportMenu({
+  disabled = false,
+  bodies = NO_BODIES,
+  onExport,
+  configurations = 0,
+  onExportAll,
+}: ExportMenuProps) {
   const [open, setOpen] = useState(false);
   const [tolerance, setTolerance] = useState<ExportTolerancePreset>('normal');
-  // The bodies chosen while the menu is open; it opens with the shown ones.
-  const [chosen, setChosen] = useState<ReadonlySet<string>>(new Set());
+  // The ticks the user changed while the menu is open; every other body follows its visibility,
+  // so hiding or showing one with the menu open is reflected at once.
+  const [ticks, setTicks] = useState<ReadonlyMap<string, boolean>>(new Map());
+  const [every, setEvery] = useState(false);
   const several = bodies.length > 1;
-  const ids = several
-    ? bodies.filter((b) => chosen.has(b.id)).map((b) => b.id)
-    : bodies.map((b) => b.id);
+  // One body has no tick: it is written unless it is hidden.
+  const ids = chosenBodies(bodies, several ? ticks : NO_TICKS);
+  // A scene without regen lists no bodies and exports what the kernel holds.
+  const nothing = bodies.length > 0 && ids.length === 0;
+  const all = every && configurations > 0 && onExportAll !== undefined;
   const root = useRef<HTMLDivElement>(null);
   // A press anywhere else closes the menu.
   useEffect(() => {
@@ -69,7 +88,7 @@ export function ExportMenu({ disabled = false, bodies = NO_BODIES, onExport }: E
         aria-expanded={open}
         disabled={disabled}
         onClick={() => {
-          if (!open) setChosen(new Set(bodies.filter((b) => !b.hidden).map((b) => b.id)));
+          if (!open) setTicks(new Map());
           setOpen(!open);
         }}
         title="Export the bodies as STL, 3MF or STEP"
@@ -88,17 +107,26 @@ export function ExportMenu({ disabled = false, bodies = NO_BODIES, onExport }: E
               key={format}
               type="button"
               role="menuitem"
-              title={title}
+              title={all && format === 'stl-each' ? 'One file per configuration: use STL' : title}
               data-testid={`export-${format}`}
-              disabled={several && ids.length === 0}
+              disabled={nothing || (all && format === 'stl-each')}
               onClick={() => {
                 setOpen(false);
-                onExport(format, tolerance, ids);
+                if (all && format !== 'stl-each' && onExportAll)
+                  onExportAll(format, tolerance, ids);
+                else onExport(format, tolerance, ids);
               }}
             >
               {label}
             </button>
           ))}
+          {nothing && (
+            <p className="io-note" role="note" data-testid="export-nothing">
+              {several
+                ? 'No body is chosen: tick one to export it.'
+                : 'The body is hidden: show it to export it.'}
+            </p>
+          )}
           {several && (
             <fieldset className="io-bodies" data-testid="export-bodies">
               <legend>Bodies</legend>
@@ -106,12 +134,11 @@ export function ExportMenu({ disabled = false, bodies = NO_BODIES, onExport }: E
                 <label key={b.id} title={b.hidden ? 'Hidden in the view' : undefined}>
                   <input
                     type="checkbox"
-                    checked={chosen.has(b.id)}
+                    checked={ticks.get(b.id) ?? !b.hidden}
                     onChange={(e) => {
-                      const next = new Set(chosen);
-                      if (e.target.checked) next.add(b.id);
-                      else next.delete(b.id);
-                      setChosen(next);
+                      const next = new Map(ticks);
+                      next.set(b.id, e.target.checked);
+                      setTicks(next);
                     }}
                   />
                   {b.name}
@@ -119,6 +146,20 @@ export function ExportMenu({ disabled = false, bodies = NO_BODIES, onExport }: E
                 </label>
               ))}
             </fieldset>
+          )}
+          {configurations > 0 && onExportAll && (
+            <label
+              className="io-every"
+              title="One file per configuration row, named <document>-<row>, each regenerated in turn"
+            >
+              <input
+                type="checkbox"
+                checked={every}
+                data-testid="export-every-configuration"
+                onChange={(e) => setEvery(e.target.checked)}
+              />
+              Every configuration ({configurations} {configurations === 1 ? 'file' : 'files'})
+            </label>
           )}
           <label className="io-tolerance" title={toleranceTitle(tolerance)}>
             Mesh tolerance
@@ -136,6 +177,29 @@ export function ExportMenu({ disabled = false, bodies = NO_BODIES, onExport }: E
         </div>
       )}
     </div>
+  );
+}
+
+/** Progress of an export of every configuration, with its Cancel button. */
+export function ExportProgress({
+  index,
+  count,
+  row,
+  onCancel,
+}: {
+  index: number;
+  count: number;
+  row: string;
+  onCancel: () => void;
+}) {
+  return (
+    <span className="io-progress" role="status" data-testid="export-progress">
+      <progress max={count} value={index} aria-label="Configurations exported" />
+      Exporting configuration {index + 1} of {count} ({row})...
+      <button type="button" data-testid="export-cancel" onClick={onCancel}>
+        Cancel
+      </button>
+    </span>
   );
 }
 

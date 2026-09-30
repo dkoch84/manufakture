@@ -1,0 +1,107 @@
+/* The Configurations panel in the side panel, and the toolbar's configuration switcher. The
+   head and buttons follow the Variables panel (variables.css). */
+.configurations-panel h3 {
+  margin: 0.4rem 0 0.2rem;
+  font-size: 0.8rem;
+  color: #5b6673;
+}
+
+.configurations-panel button,
+.configurations-panel select {
+  font: inherit;
+  font-size: 0.78rem;
+}
+
+.config-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.config-param,
+.config-row-head {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.config-target {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #5b6673;
+  font-size: 0.78rem;
+}
+
+.config-name {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.config-name input {
+  font: inherit;
+  min-width: 0;
+}
+
+.config-add-parameter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin: 0.3rem 0 0.4rem;
+  font-size: 0.78rem;
+  color: #5b6673;
+}
+
+.config-rows {
+  margin-top: 0.3rem;
+}
+
+.config-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.3rem 0.4rem;
+  border: 1px solid #d6dce3;
+  border-radius: 4px;
+}
+
+.config-row.active {
+  border-color: #2f6fe4;
+  background: #f7faff;
+}
+
+.config-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  font-size: 0.78rem;
+}
+
+.config-cell-name {
+  color: #5b6673;
+}
+
+.config-base {
+  color: #5b6673;
+}
+
+.configuration-switcher {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+}
+
+.configuration-switcher select {
+  font: inherit;
+  max-width: 12rem;
+}

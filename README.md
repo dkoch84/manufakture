@@ -58,6 +58,7 @@ The user guide lives in `docs/user`:
 - [Bodies](docs/user/bodies.md): several bodies in a part, their names, colours and materials, hiding and exporting them
 - [The feature tree](docs/user/feature-tree.md): editing, reordering, suppressing, the rollback bar
 - [Variables](docs/user/variables.md): named values and expressions
+- [Configurations](docs/user/configurations.md): variants in a table, switching them, exporting every one
 - [Measuring](docs/user/measure.md): exact measurements, material and mass
 - [The 3D viewport](docs/user/viewport.md): mouse, views, selection and section view
 - [Importing and exporting](docs/user/import-export.md): STL, 3MF, STEP, and checking a 3MF in a slicer

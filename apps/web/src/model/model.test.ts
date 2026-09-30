@@ -1,9 +1,11 @@
-import { createDocument, type ManufaktureDocument } from '@manufakture/core';
+import { applyCommand, createDocument, type ManufaktureDocument } from '@manufakture/core';
 import { describe, expect, it, vi } from 'vitest';
 import { createDocumentStore } from '../state/document';
 import { boxBody } from '../viewport/testMeshes';
 import {
+  buildable,
   createModelStore,
+  shareRegenerator,
   featureResult,
   modelBodies,
   startRegen,
@@ -173,5 +175,115 @@ describe('keeping the model current', () => {
     const spy = vi.fn();
     model.subscribe(spy);
     expect(spy).not.toHaveBeenCalled();
+  });
+});
+
+/** A document with a variable #w configured in a row `Wide` (80 mm), active when `active`. */
+function configuredDocument(active: boolean): ManufaktureDocument {
+  let doc = createDocument({ id: 'd', name: 'D' });
+  const mm = (source: string) => ({ source, lengthUnit: 'mm' as const, angleUnit: 'deg' as const });
+  for (const command of [
+    { type: 'setVariable' as const, name: 'w', expression: mm('40 mm') },
+    {
+      type: 'setConfigParameter' as const,
+      parameter: { id: 'cp#1', name: 'w', kind: 'variable' as const, variable: 'w' },
+    },
+    {
+      type: 'setConfigRow' as const,
+      row: { id: 'cfg#1', name: 'Wide', values: { 'cp#1': mm('80 mm') } },
+    },
+    ...(active ? [{ type: 'setActiveConfiguration' as const, rowId: 'cfg#1' }] : []),
+  ]) {
+    const r = applyCommand(doc, command);
+    if (!r.ok) throw new Error(r.error.message);
+    doc = r.value.document;
+  }
+  return doc;
+}
+
+describe('building the active configuration', () => {
+  it('regenerates the document with its active row applied, and keeps the stored one', async () => {
+    const documents = createDocumentStore(configuredDocument(true));
+    const model = createModelStore();
+    const manual = manualRegenerator();
+    startRegen(manual.regenerator, documents, model);
+    const built = manual.requests[0]!.document;
+    expect(built).not.toBe(documents.getState().document);
+    expect(built.variables[0]!.expression.source).toBe('80 mm');
+    manual.requests[0]!.resolve(view(1));
+    await flush();
+    expect(model.getState().document).toBe(documents.getState().document);
+    expect(model.getState().configurationError).toBeNull();
+  });
+
+  it('builds a document with no active row as it is', () => {
+    const doc = configuredDocument(false);
+    expect(buildable(doc)).toEqual({ document: doc, error: null });
+  });
+
+  it('builds the document without a row that cannot be applied, and says why', () => {
+    const doc = configuredDocument(true);
+    // Not reachable through commands (they are checked); a document damaged some other way.
+    const broken: ManufaktureDocument = {
+      ...doc,
+      configurations: { ...doc.configurations!, active: 'cfg#9' },
+    };
+    const r = buildable(broken);
+    expect(r.document).toBe(broken);
+    expect(r.error).toMatch(/^The active configuration cannot be applied/);
+  });
+});
+
+describe('sharing the regenerator', () => {
+  it('holds the open document back while exclusive work runs, then builds it again', async () => {
+    const documents = createDocumentStore(createDocument({ id: 'd', name: 'D' }));
+    const model = createModelStore();
+    const manual = manualRegenerator();
+    const shared = shareRegenerator(manual.regenerator);
+    startRegen(shared.regenerator, documents, model);
+    expect(manual.requests).toHaveLength(1);
+    const variant = createDocument({ id: 'v', name: 'V' });
+
+    let finish!: () => void;
+    const work = shared.exclusive(async (regen) => {
+      const r = regen(variant);
+      expect(manual.requests.at(-1)!.document).toBe(variant);
+      // The open document's regen was superseded by the variant's: startRegen asks again,
+      // and so does an edit; both are held.
+      manual.requests[0]!.resolve(null);
+      await flush();
+      documents.getState().execute({ type: 'setMaterial', partId: 'part#1', material: 'pla' });
+      expect(manual.requests).toHaveLength(2);
+      manual.requests[1]!.resolve(view(7));
+      await new Promise<void>((resolve) => (finish = resolve));
+      return r;
+    });
+    expect(shared.busy()).toBe(true);
+    await expect(shared.exclusive(async () => 1)).rejects.toThrow(/Another export/);
+    await flush();
+    finish();
+    expect((await work)?.generation).toBe(7);
+    expect(shared.busy()).toBe(false);
+    // Afterwards the open document is built again, once.
+    await flush();
+    expect(manual.requests).toHaveLength(3);
+    expect(manual.requests[2]!.document).toBe(documents.getState().document);
+    manual.requests[2]!.resolve(view(8));
+    await flush();
+    expect(model.getState()).toMatchObject({ generation: 8, pending: false });
+  });
+
+  it('passes regens straight through when nothing exclusive runs', () => {
+    const manual = manualRegenerator();
+    const shared = shareRegenerator(manual.regenerator);
+    const listener = vi.fn();
+    const off = shared.regenerator.onInvalidated(listener);
+    void shared.regenerator.regen(createDocument({ id: 'd', name: 'D' }));
+    expect(manual.requests).toHaveLength(1);
+    manual.invalidate();
+    expect(listener).toHaveBeenCalledTimes(1);
+    off();
+    manual.invalidate();
+    expect(listener).toHaveBeenCalledTimes(1);
   });
 });

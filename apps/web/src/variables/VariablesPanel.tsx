@@ -12,12 +12,15 @@ import { featureItem, type SelectionStore } from '../state/selection';
 import {
   VARIABLE_TYPES,
   checkDraft,
+  configuredVariablesInfo,
   deleteCommand,
   draftOf,
   evaluateTable,
+  inlineWarning,
   replaceWithValueCommand,
   tableValues,
   variableRows,
+  type ConfiguredVariable,
   type UseRow,
   type VariableDraft,
   type VariableRow,
@@ -46,12 +49,18 @@ interface Blocked {
   message: string;
   uses: UseRow[];
   failure: string | null;
+  /**
+   * The configuration table configures the variable: replacing it with its value would delete
+   * that parameter, so the user is warned (this text) and must confirm first.
+   */
+  warning: string | null;
 }
 
 export function VariablesPanel({ documents, selection }: VariablesPanelProps) {
   const doc = useStore(documents, (s) => s.document);
   const table = useMemo(() => evaluateTable(doc.variables), [doc]);
   const rows = useMemo(() => variableRows(doc, table), [doc, table]);
+  const configured = useMemo(() => configuredVariablesInfo(doc), [doc]);
   const [editing, setEditing] = useState<Editing | null>(null);
   const [blocked, setBlocked] = useState<Blocked | null>(null);
 
@@ -63,7 +72,13 @@ export function VariablesPanel({ documents, selection }: VariablesPanelProps) {
   const remove = (name: string) => {
     const r = deleteCommand(doc, name);
     if (!r.ok) {
-      setBlocked({ name, message: r.message, uses: r.uses, failure: null });
+      setBlocked({
+        name,
+        message: r.message,
+        uses: r.uses,
+        failure: null,
+        warning: inlineWarning(doc, name),
+      });
       return;
     }
     setBlocked(null);
@@ -71,6 +86,7 @@ export function VariablesPanel({ documents, selection }: VariablesPanelProps) {
   };
 
   const replaceAndDelete = (name: string) => {
+    // A configured variable: the warning is shown with the button, which confirms it.
     const r = replaceWithValueCommand(doc, name);
     const done = r.ok ? documents.getState().execute(r.command, r.label) : null;
     if (!r.ok || (done && !done.ok)) {
@@ -122,6 +138,7 @@ export function VariablesPanel({ documents, selection }: VariablesPanelProps) {
             <VariableItem
               key={row.name}
               row={row}
+              configured={configured.get(row.name) ?? null}
               busy={editing !== null}
               blocked={blocked?.name === row.name ? blocked : null}
               onEdit={() => startEdit(row.name)}
@@ -140,6 +157,7 @@ export function VariablesPanel({ documents, selection }: VariablesPanelProps) {
 
 function VariableItem({
   row,
+  configured,
   busy,
   blocked,
   onEdit,
@@ -149,6 +167,7 @@ function VariableItem({
   onSelectUse,
 }: {
   row: VariableRow;
+  configured: ConfiguredVariable | null;
   busy: boolean;
   blocked: Blocked | null;
   onEdit: () => void;
@@ -174,8 +193,18 @@ function VariableItem({
         <span className="variable-source" title={row.source}>
           {row.source}
         </span>
+        {configured?.parameter && (
+          <span className="badge" title={`Configuration parameter ${configured.parameter}`}>
+            Configured
+          </span>
+        )}
         {typeLabel && <span className="badge">{typeLabel}</span>}
       </div>
+      {configured?.value && (
+        <p className="variable-configured" data-testid={`variable-${row.name}-configured`}>
+          In {configured.row}: {configured.value}
+        </p>
+      )}
       {row.error && (
         <p className="field-error" data-testid={`variable-${row.name}-error`}>
           {row.error}
@@ -204,10 +233,17 @@ function VariableItem({
           <p>{blocked.message}</p>
           <UseList uses={blocked.uses} onSelect={onSelectUse} />
           <p>Its uses can take its current value ({row.value ?? 'none'}) instead.</p>
+          {blocked.warning && (
+            <p className="variable-warning" data-testid="variable-inline-warning">
+              {blocked.warning}
+            </p>
+          )}
           {blocked.failure && <p className="field-error">{blocked.failure}</p>}
           <div className="variable-actions">
             <button type="button" data-testid="variable-replace" onClick={onReplace}>
-              Replace with value and delete
+              {blocked.warning
+                ? 'Replace with value, delete it and its parameter'
+                : 'Replace with value and delete'}
             </button>
             <button type="button" onClick={onKeep}>
               Keep it

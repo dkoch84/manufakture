@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
+import { applyCommand } from '@manufakture/core';
 import { describe, expect, it } from 'vitest';
 import { createDocumentStore } from '../state/document';
 import { createSelectionStore } from '../state/selection';
@@ -148,5 +149,53 @@ describe('the Variables panel', () => {
     expect(t.documents.getState().undoLabel).toBe('Replace #d with 25mm');
     t.documents.getState().undo();
     expect(t.variables().d).toBe('25 mm');
+  });
+
+  it('warns before replacing a configured variable with its value', () => {
+    let doc = boxDocument();
+    for (const command of [
+      {
+        type: 'setConfigParameter' as const,
+        parameter: { id: 'cp#1', name: 'Depth', kind: 'variable' as const, variable: 'd' },
+      },
+      {
+        type: 'setConfigRow' as const,
+        row: {
+          id: 'cfg#1',
+          name: 'Deep',
+          values: {
+            'cp#1': { source: '50 mm', lengthUnit: 'mm' as const, angleUnit: 'deg' as const },
+          },
+        },
+      },
+      { type: 'setActiveConfiguration' as const, rowId: 'cfg#1' },
+    ]) {
+      const r = applyCommand(doc, command);
+      if (!r.ok) throw new Error(r.error.message);
+      doc = r.value.document;
+    }
+    const t = setup(doc);
+    // The table says the variable is configured, and its value in the shown row.
+    expect(screen.getByTestId('variable-d').textContent).toContain('Configured');
+    expect(screen.getByTestId('variable-d-configured').textContent).toBe('In Deep: 50.00 mm');
+    // #h reads #d, so the row changes it too.
+    expect(screen.getByTestId('variable-h-configured').textContent).toBe('In Deep: 40.00 mm');
+    expect(screen.queryByTestId('variable-w-configured')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete #d' }));
+    expect(screen.getByTestId('variable-inline-warning').textContent).toBe(
+      "#d is set by the configuration table (parameter Depth). Replacing it with its value deletes that parameter, and its value in configuration Deep: every configuration then gets the document's own value.",
+    );
+    const replace = screen.getByTestId('variable-replace');
+    expect(replace.textContent).toBe('Replace with value, delete it and its parameter');
+    fireEvent.click(replace);
+    expect(t.variables().d).toBeUndefined();
+    expect(t.documents.getState().document.configurations!.parameters).toEqual([]);
+  });
+
+  it('gives no warning for a variable the table does not configure', () => {
+    setup();
+    fireEvent.click(screen.getByRole('button', { name: 'Delete #d' }));
+    expect(screen.queryByTestId('variable-inline-warning')).toBeNull();
   });
 });

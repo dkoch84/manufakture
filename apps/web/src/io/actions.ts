@@ -49,7 +49,8 @@ export interface ExportChoice {
 
 /**
  * Export B-rep bodies: `options.bodies` (the ones the user chose, under the names given), or
- * every part body the kernel holds. Binary STL (all bodies in one file, or one file per body),
+ * every part body the kernel holds. The files are named after the one body, or the document
+ * when there are several (`options.fileBase` overrides both). Binary STL (all bodies in one file, or one file per body),
  * 3MF (one named object per body) or STEP (one named product per body). Mesh exports are
  * tessellated at `tolerance` and must be watertight.
  */
@@ -60,13 +61,17 @@ export async function exportBodies(
     tolerance?: ExportTolerancePreset;
     documentName?: string;
     bodies?: readonly ExportChoice[];
+    /** The file name, without extension, whatever the bodies are (default: see below). */
+    fileBase?: string;
   } = {},
 ): Promise<ActionResult<ExportedFile[]>> {
   const bodies = options.bodies ?? exchanger.bodies();
   if (bodies.length === 0) return { ok: false, message: 'There is nothing to export.' };
   const ids = bodies.map((b) => b.id);
   const names = options.bodies ? new Map(bodies.map((b) => [b.id, b.name])) : undefined;
-  const base = bodies.length === 1 ? bodies[0]!.name : (options.documentName ?? 'bodies');
+  const base =
+    options.fileBase ??
+    (bodies.length === 1 ? bodies[0]!.name : (options.documentName ?? 'bodies'));
   let files: ExportedFile[];
   if (format === 'step') {
     const step = names ? await exchanger.exportStep(ids, names) : await exchanger.exportStep(ids);

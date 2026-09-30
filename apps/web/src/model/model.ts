@@ -9,8 +9,13 @@
 // A regen that comes back null while it is still the newest request was dropped by something
 // other than a newer regen (a batch at a newer generation, a worker restart): nobody else will
 // report, so it is asked for again.
+//
+// Regen builds the document in its active configuration row (`configured`, T2.4b); the model's
+// `document` stays the stored one, which is what the tree compares against. Exporting every
+// configuration regenerates other rows through the same worker: `shareRegenerator` holds the
+// open document's regens back meanwhile and builds it again when that is done.
 
-import type { ManufaktureDocument } from '@manufakture/core';
+import { configured, type ManufaktureDocument } from '@manufakture/core';
 import type { FeatureResult } from '@manufakture/regen';
 import { useStore } from 'zustand';
 import { createStore, type StoreApi } from 'zustand/vanilla';
@@ -70,8 +75,13 @@ export interface ModelState {
   error: string | null;
   /** Generation of the result shown; 0 before the first. */
   generation: number;
-  /** The document the shown result was built from. */
+  /** The document the shown result was built from, as stored (before its configuration). */
   document: ManufaktureDocument | null;
+  /**
+   * The active configuration row could not be applied (a value that does not evaluate): the
+   * document is built as it is, without the row, and this says why. Null otherwise.
+   */
+  configurationError: string | null;
   parts: readonly PartModel[];
   ms: number;
 }
@@ -85,6 +95,7 @@ export function createModelStore(): ModelStore {
     error: null,
     generation: 0,
     document: null,
+    configurationError: null,
     parts: [],
     ms: 0,
   }));
@@ -113,6 +124,24 @@ export function modelBodies(state: Pick<ModelState, 'parts'>): BodyInput[] {
   return state.parts.flatMap((p) => p.bodies.map((b) => b.view));
 }
 
+/**
+ * What regen builds for `document`: the document with its active configuration row applied, or
+ * `document` itself when it has none. A row that cannot be applied leaves the document as it
+ * is, with the reason. (`configured(doc, null)` keeps `active` as it is; the app never asks for
+ * that: no active row simply builds the stored document.)
+ */
+export function buildable(document: ManufaktureDocument): {
+  document: ManufaktureDocument;
+  error: string | null;
+} {
+  const r = configured(document);
+  if (r.ok) return { document: r.value, error: null };
+  return {
+    document,
+    error: `The active configuration cannot be applied, so the part is shown without it: ${r.error.message}`,
+  };
+}
+
 /** How often a dropped regen is asked for again before `startRegen` gives up until the next edit. */
 const MAX_REGEN_RETRIES = 3;
 
@@ -134,7 +163,8 @@ export function startRegen(
     latest = document;
     const mine = ++requests;
     model.setState({ available: true, pending: true });
-    regenerator.regen(document).then(
+    const built = buildable(document);
+    regenerator.regen(built.document).then(
       (view) => {
         if (stopped) return;
         if (view === null) {
@@ -153,6 +183,7 @@ export function startRegen(
         model.setState({
           generation: view.generation,
           document,
+          configurationError: built.error,
           parts: view.parts,
           ms: view.ms,
           error: null,
@@ -178,5 +209,62 @@ export function startRegen(
     stopped = true;
     unsubscribe();
     uninvalidate();
+  };
+}
+
+/**
+ * One regenerator shared by the open document (`regenerator`, for `startRegen`) and work that
+ * builds other documents through the same kernel worker (`exclusive`), such as exporting every
+ * configuration. While exclusive work runs, regens of the open document are held (they would
+ * cancel the work's regens, and `startRegen` would ask again); when it ends, the listeners hear
+ * that the kernel no longer holds the open document's bodies, so `startRegen` builds it again,
+ * and the held requests resolve to null as superseded.
+ */
+export interface SharedRegenerator {
+  regenerator: Regenerator;
+  /** Whether exclusive work is running. */
+  busy(): boolean;
+  /**
+   * Run `work`, which regenerates what it likes with `regen`, with the worker to itself. Refused
+   * (rejects) while other exclusive work runs.
+   */
+  exclusive<T>(
+    work: (regen: (document: ManufaktureDocument) => Promise<RegenView | null>) => Promise<T>,
+  ): Promise<T>;
+}
+
+export function shareRegenerator(inner: Regenerator): SharedRegenerator {
+  let running = false;
+  let held: ((v: RegenView | null) => void)[] = [];
+  const listeners = new Set<() => void>();
+  return {
+    regenerator: {
+      regen(document) {
+        if (!running) return inner.regen(document);
+        return new Promise((resolve) => held.push(resolve));
+      },
+      onInvalidated(listener) {
+        listeners.add(listener);
+        const off = inner.onInvalidated(listener);
+        return () => {
+          listeners.delete(listener);
+          off();
+        };
+      },
+    },
+    busy: () => running,
+    async exclusive(work) {
+      if (running) throw new Error('Another export is running.');
+      running = true;
+      try {
+        return await work((document) => inner.regen(document));
+      } finally {
+        running = false;
+        const waiting = held;
+        held = [];
+        for (const l of [...listeners]) l();
+        for (const resolve of waiting) resolve(null);
+      }
+    },
   };
 }

@@ -10,10 +10,13 @@
 
 import {
   bareUnits,
+  configurationRow,
+  configuredVariables,
   findPart,
   inlineVariable,
   renameVariable,
   variableOrder,
+  variableParameters,
   variableUses,
   type Command,
   type DisplayUnits,
@@ -385,4 +388,65 @@ export function replaceWithValueCommand(
   const r = inlineVariable(doc, name, literal);
   if (!r.ok) return { ok: false, message: r.error.message };
   return { ok: true, command: r.value, label: `Replace #${name} with ${literal}`, literal };
+}
+
+/**
+ * The warning to give before `name` is replaced with its value, when the configuration table
+ * configures it: inlining deletes the parameter and every row's value for it, so all
+ * configurations get the document's own value. Null when no parameter configures it.
+ */
+export function inlineWarning(doc: ManufaktureDocument, name: string): string | null {
+  const params = variableParameters(doc, name);
+  if (params.length === 0) return null;
+  const ids = new Set(params.map((p) => p.id));
+  const rows = (doc.configurations?.rows ?? []).filter((r) =>
+    Object.keys(r.values).some((id) => ids.has(id)),
+  );
+  const names = params.map((p) => p.name).join(', ');
+  const values =
+    rows.length === 0
+      ? ''
+      : `, and its value in ${rows.length === 1 ? 'configuration' : 'configurations'} ${rows.map((r) => r.name).join(', ')}`;
+  return (
+    `#${name} is set by the configuration table (parameter ${names}). Replacing it with its ` +
+    `value deletes that parameter${values}: every configuration then gets the document's own ` +
+    `value.`
+  );
+}
+
+/** How the configuration table sets a variable, for the Variables panel. */
+export interface ConfiguredVariable {
+  /** The parameter that configures it. */
+  parameter: string;
+  /** The active row, when it has a value of its own for the variable. */
+  row: string | null;
+  /** The variable's value in the active row, when that row sets it (or reads one it sets). */
+  value: string | null;
+}
+
+/**
+ * The variables the configuration table configures, or whose value the active row changes
+ * (it reads a configured one), by name.
+ */
+export function configuredVariablesInfo(doc: ManufaktureDocument): Map<string, ConfiguredVariable> {
+  const out = new Map<string, ConfiguredVariable>();
+  const table = doc.configurations;
+  if (!table) return out;
+  const row = configurationRow(doc) ?? null;
+  const shown = row ? evaluateTable(configuredVariables(doc.variables, table, row)) : null;
+  const base = shown ? evaluateTable(doc.variables) : null;
+  for (const v of doc.variables) {
+    const p = table.parameters.find((x) => x.kind === 'variable' && x.variable === v.name);
+    const e = shown?.get(v.name);
+    const b = base?.get(v.name);
+    const changed =
+      e !== undefined && (e.ok !== b?.ok || (e.ok && b?.ok && e.value.value !== b.value.value));
+    if (!p && !changed) continue;
+    out.set(v.name, {
+      parameter: p?.name ?? '',
+      row: row && changed ? row.name : null,
+      value: changed ? (e.ok ? formatQuantity(e.value, doc.units) : 'no value') : null,
+    });
+  }
+  return out;
 }
