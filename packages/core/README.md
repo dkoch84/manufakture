@@ -23,14 +23,15 @@ import {
 ```ts
 interface ManufaktureDocument {
   format: 'manufakture';
-  version: 4; // file format version, FORMAT_VERSION
+  version: 5; // file format version, FORMAT_VERSION
   namingScheme: 1; // topological naming scheme version (T0.5), NAMING_SCHEME
   id: string;
   name: string;
   units: DisplayUnits; // display only; never changes geometry
   variables: Variable[]; // { name, expression: StoredExpression }, in display order
   parts: Part[];
-  nextIds: Record<string, number>; // document-level counters: `part` (since version 4)
+  configurations?: Configurations; // the configuration table; absent: none (since version 5)
+  nextIds: Record<string, number>; // document-level counters: `part` (since version 4), `cp`, `cfg`
 }
 
 interface Part {
@@ -95,6 +96,64 @@ and whether an instance suffix exists (`:i3` of a three-copy pattern), are repor
 Part ids are `part#n`, allocated from the document's `nextIds.part` like feature ids: a
 `part#n` at or past the counter is refused, and the counter only increases. A part id of another
 form is allowed and not counted.
+
+### Configurations
+
+A document can define variants as rows of a parameter table (since version 5). Each row gives an
+ordinary document that regen builds unchanged.
+
+```ts
+interface Configurations {
+  parameters: ConfigParameter[]; // the columns, in display order
+  rows: ConfigRow[]; // the variants, in display order
+  active: string | null; // the row the document is shown and built in; null: none
+}
+
+type ConfigParameter =
+  | { id: 'cp#1'; name: string; kind: 'variable'; variable: string } // overrides its expression
+  | { id: 'cp#2'; name: string; kind: 'suppression'; partId: string; featureId: string }; // overrides `suppressed`
+
+interface ConfigRow {
+  id: 'cfg#1';
+  name: string;
+  values: Record<string, StoredExpression | boolean>; // by parameter id
+}
+```
+
+`configured(doc, rowId?)` (`src/configurations.ts`) is a pure function giving the document with a
+row applied, the active row by default: each variable a parameter names takes the row's
+expression, and each feature a suppression parameter names takes the row's flag. A parameter the
+row has no value for keeps the document's own value, so a new column needs no value in every row.
+The result has `active` set to that row and is checked with `checkDocument` like any document.
+With no row to apply (no table, no active row, or `rowId` `null`) it returns `doc` itself. The
+document's own variable expressions and `suppressed` flags stay the base values; rows only
+override them.
+
+Parameter ids are `cp#n` and row ids `cfg#n`, allocated from the document's `nextIds.cp` and
+`nextIds.cfg` (`CONFIG_PARAMETER_COUNTER`, `CONFIG_ROW_COUNTER`; `previewIds(doc.nextIds, 'cp')`
+gives the next one), by the same rules as feature ids: never reused, never moved back by undo.
+
+Validation refuses: an id at or past its counter, or used twice; a parameter or row name used
+twice; a parameter naming a variable, part or feature that does not exist; two parameters for one
+variable or one feature; a row value for an id that is not a parameter, or of the wrong kind (an
+expression for a variable, `true`/`false` for a suppression); a row expression that does not parse
+or names an unknown variable; a row that makes a variable cycle once applied; and an `active` that
+is not a row. Core does not evaluate row values, as for any expression.
+
+What a configuration uses cannot be removed under it:
+
+- `deleteVariable` refuses while a parameter configures the variable or a row value mentions it
+  (`variableUsers` lists the `cp#n` and `cfg#n` ids; `variableUses` has `parameter` and `row`
+  entries).
+- `renameVariable` updates the parameters that configure it and rewrites references in row
+  values. `inlineVariable` rewrites row values too, and deletes the parameter that configures the
+  variable (with every row's value for it) in the same batch: once inlined, the value is the same
+  in every row.
+- `deleteFeature` refuses while a suppression parameter names the feature (`blockers` lists the
+  parameter ids); delete the parameter first in the same `batch`.
+
+A table left with no parameters, no rows and no active row is removed from the document, so
+undoing the first configuration command gives back a document with no `configurations` key.
 
 ### Materials
 
@@ -389,23 +448,34 @@ Every change is a command: a plain, JSON-serializable object. `applyCommand(doc,
 validates the command against `CommandSchema`, applies it without mutating `doc`, checks the
 resulting document with `checkDocument`, and returns `{ document, inverse }` or a `CoreError`.
 
-| Command           | Fields                                                | Inverse                             |
-| ----------------- | ----------------------------------------------------- | ----------------------------------- |
-| `addFeature`      | `partId`, `feature`, `index?` (default: rollback bar) | `deleteFeature`                     |
-| `editFeature`     | `partId`, `feature` (same id and kind)                | `restoreFeature` (old state)        |
-| `deleteFeature`   | `partId`, `featureId`                                 | `restoreFeature`                    |
-| `restoreFeature`  | `partId`, `feature`, `index`, `rollbackIndex`         | `restoreFeature` or `deleteFeature` |
-| `reorderFeature`  | `partId`, `featureId`, `index` (final position)       | `reorderFeature`                    |
-| `suppressFeature` | `partId`, `featureId`, `suppressed`                   | `suppressFeature`                   |
-| `renameFeature`   | `partId`, `featureId`, `name` (trimmed)               | `renameFeature`                     |
-| `setRollback`     | `partId`, `index` (`null`: after the last)            | `setRollback`                       |
-| `setVariable`     | `name`, `expression`, `index?` (for a new one)        | `setVariable` or `deleteVariable`   |
-| `deleteVariable`  | `name`                                                | `setVariable` at the old index      |
-| `setDisplayUnits` | `units`                                               | `setDisplayUnits`                   |
-| `setMaterial`     | `partId`, `material` (a material id, `null` clears)   | `setMaterial` (the old one or null) |
-| `setBodyProps`    | `partId`, `bodyId`, `props`, `index?` (for a new one) | `setBodyProps` (the old props)      |
-| `renameDocument`  | `name` (trimmed, 1 to 200 characters)                 | `renameDocument` (the old name)     |
-| `batch`           | `commands` (applied in order, all or nothing)         | `batch` of inverses, reversed       |
+| Command                  | Fields                                                | Inverse                                                                |
+| ------------------------ | ----------------------------------------------------- | ---------------------------------------------------------------------- |
+| `addFeature`             | `partId`, `feature`, `index?` (default: rollback bar) | `deleteFeature`                                                        |
+| `editFeature`            | `partId`, `feature` (same id and kind)                | `restoreFeature` (old state)                                           |
+| `deleteFeature`          | `partId`, `featureId`                                 | `restoreFeature`                                                       |
+| `restoreFeature`         | `partId`, `feature`, `index`, `rollbackIndex`         | `restoreFeature` or `deleteFeature`                                    |
+| `reorderFeature`         | `partId`, `featureId`, `index` (final position)       | `reorderFeature`                                                       |
+| `suppressFeature`        | `partId`, `featureId`, `suppressed`                   | `suppressFeature`                                                      |
+| `renameFeature`          | `partId`, `featureId`, `name` (trimmed)               | `renameFeature`                                                        |
+| `setRollback`            | `partId`, `index` (`null`: after the last)            | `setRollback`                                                          |
+| `setVariable`            | `name`, `expression`, `index?` (for a new one)        | `setVariable` or `deleteVariable`                                      |
+| `deleteVariable`         | `name`                                                | `setVariable` at the old index                                         |
+| `setDisplayUnits`        | `units`                                               | `setDisplayUnits`                                                      |
+| `setMaterial`            | `partId`, `material` (a material id, `null` clears)   | `setMaterial` (the old one or null)                                    |
+| `setBodyProps`           | `partId`, `bodyId`, `props`, `index?` (for a new one) | `setBodyProps` (the old props)                                         |
+| `renameDocument`         | `name` (trimmed, 1 to 200 characters)                 | `renameDocument` (the old name)                                        |
+| `setConfigParameter`     | `parameter` (by id: new or replaced), `index?`        | `setConfigParameter` or `deleteConfigParameter`                        |
+| `deleteConfigParameter`  | `parameterId` (its row values go too)                 | `restoreConfigParameter`, plus `setConfigRow` per row that had a value |
+| `restoreConfigParameter` | `parameter`, `index` (history only)                   | `deleteConfigParameter`                                                |
+| `setConfigRow`           | `row` (by id: new or replaced), `index?`              | `setConfigRow` or `deleteConfigRow`                                    |
+| `deleteConfigRow`        | `rowId` (the active row: none is active after)        | `restoreConfigRow`, plus `setActiveConfiguration` if it was active     |
+| `restoreConfigRow`       | `row`, `index` (history only)                         | `deleteConfigRow`                                                      |
+| `setActiveConfiguration` | `rowId` (`null`: none)                                | `setActiveConfiguration`                                               |
+| `batch`                  | `commands` (applied in order, all or nothing)         | `batch` of inverses, reversed                                          |
+
+`restoreConfigParameter` and `restoreConfigRow` are history-only in the same way: they put back a
+deleted parameter or row under its old id, which must have been allocated before, while
+`setConfigParameter` and `setConfigRow` require a fresh id for a new item.
 
 `restoreFeature` is a history-only command: it is what undo and redo use to put a feature state
 back, and clients must not use it to edit. Unlike `addFeature` and `editFeature`, it requires its
@@ -471,12 +541,18 @@ suppression, the rollback bar, and features that read a changed variable, direct
 other variables. A rename has none, and neither has a material change, which sets
 `materialChanged` instead: masses change, geometry does not. A change to `Part.bodies` sets
 `bodyPropsChanged` the same way (names, colours, materials: no geometry). A scope is a feature
-input, so changing one is a feature change. Every listener runs even if one throws; the first error is
+input, so changing one is a feature change. `configurationsChanged` says the table changed. The
+change is computed for the documents as stored and for them with their active rows applied
+(`configured`), and the two are merged: switching the active row, or editing its values, lists
+the variables it overrides differently in `variables.changed` and the features whose suppression
+it flips in `changed`, and sets `firstAffectedIndex` as for a variable edit; an edit of an
+inactive row changes no feature result. Every listener runs even if one throws; the first error is
 rethrown afterwards.
 
 ## File format
 
-`serialize(doc)` writes canonical JSON: keys in schema order (records such as `nextIds` sorted),
+`serialize(doc)` writes canonical JSON: keys in schema order (records such as `nextIds` and a row's
+`values` sorted),
 two-space indent, trailing newline. `deserialize(text)` (or `parseDocument(value)`) loads:
 
 1. parse the JSON (`json` error);
@@ -506,7 +582,9 @@ numbered), and changes no feature, since an absent `scope` means every body; a p
 solids in one compound (`v3-two-bodies.json`) regenerates the same solids, now as two bodies
 (`extrude#1` and `extrude#2`). The test migrates `src/fixtures/v0-bracket.json` to exactly
 `v1-bracket.json`, that to exactly `v2-bracket.json`, that to exactly `v3-bracket.json` and that
-to exactly `v4-bracket.json`, and `v3-two-bodies.json` to exactly `v4-two-bodies.json`.
+to exactly `v4-bracket.json` and that to exactly `v5-bracket.json`, and `v3-two-bodies.json` to
+exactly `v4-two-bodies.json`. Version 5 added the optional configuration table; `migrateV4ToV5`
+only bumps the version, since a version 4 document has none and an absent counter starts at 1.
 
 To change the file shape:
 
@@ -517,7 +595,7 @@ To change the file shape:
 
 ## Where this deviates from ADR 0004's first cut
 
-- **Added fields.** The document has `id`, `name` and `nextIds`; a part has `name`,
+- **Added fields.** The document has `id`, `name`, `nextIds` and an optional `configurations`; a part has `name`,
   `rollbackIndex`, an optional `material` (the default for its bodies) and `bodies`;
   every feature has `name` and `suppressed`. The ADR's shape was a first cut that expected feature kinds
   to add their own fields.

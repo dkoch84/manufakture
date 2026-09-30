@@ -108,12 +108,27 @@ export const migrateV3ToV4: Migration = {
   },
 };
 
+/**
+ * Version 5 added the optional configuration table (`configurations`) and its id counters
+ * (`nextIds.cp`, `nextIds.cfg`). Nothing in a version 4 file changes: it has no table, which is
+ * what an absent `configurations` means, and a counter that is absent starts at 1.
+ */
+export const migrateV4ToV5: Migration = {
+  from: 4,
+  to: 5,
+  description: 'Add the configuration table',
+  migrate(doc) {
+    return { ...doc, version: 5 };
+  },
+};
+
 /** File format migrations, in order: `FORMAT_MIGRATIONS[i]` goes from version i to i + 1. */
 export const FORMAT_MIGRATIONS: readonly Migration[] = [
   migrateV0ToV1,
   migrateV1ToV2,
   migrateV2ToV3,
   migrateV3ToV4,
+  migrateV4ToV5,
 ];
 
 /**

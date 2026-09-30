@@ -135,6 +135,14 @@ const FIELD_LABELS: Record<string, string> = {
 /** What a use is called in the table. */
 export function labelOfUse(doc: ManufaktureDocument, use: VariableUse): string {
   if (use.kind === 'variable') return `#${use.name}`;
+  if (use.kind === 'parameter') {
+    const p = doc.configurations?.parameters.find((x) => x.id === use.parameterId);
+    return `Configuration: ${p?.name ?? use.parameterId}`;
+  }
+  if (use.kind === 'row') {
+    const row = doc.configurations?.rows.find((x) => x.id === use.rowId);
+    return `Configuration ${row?.name ?? use.rowId}`;
+  }
   const feature = findPart(doc, use.partId)?.features.find((f) => f.id === use.featureId);
   const name = feature?.name ?? use.featureId;
   if (use.constraintId) return `${name}: dimension ${use.constraintId}`;
@@ -144,7 +152,14 @@ export function labelOfUse(doc: ManufaktureDocument, use: VariableUse): string {
 
 function usesOf(doc: ManufaktureDocument, name: string): UseRow[] {
   return variableUses(doc, name).map((u) => ({
-    key: u.kind === 'variable' ? `v:${u.name}` : `f:${u.featureId}:${u.path.join('.')}`,
+    key:
+      u.kind === 'variable'
+        ? `v:${u.name}`
+        : u.kind === 'parameter'
+          ? `p:${u.parameterId}`
+          : u.kind === 'row'
+            ? `r:${u.rowId}:${u.parameterId}`
+            : `f:${u.featureId}:${u.path.join('.')}`,
     label: labelOfUse(doc, u),
     featureId: u.kind === 'feature' ? u.featureId : null,
   }));

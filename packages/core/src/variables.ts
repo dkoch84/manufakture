@@ -1,12 +1,14 @@
 // Where variables are used, and the edits that touch every use at once: renaming a variable and
 // inlining one (replacing each reference with a literal, then deleting it). Both return one
 // `batch` command, so each is a single undo step, checked once at the end like any batch.
+// Configurations count as uses: a parameter that configures a variable, and a row value that
+// mentions one.
 
 import { isValidVariableName } from '@manufakture/units';
-import type { Command, SimpleCommand } from './commands';
+import { variableParameters, type Command, type SimpleCommand } from './commands';
 import { featureExpressions, type ExpressionKind } from './features';
 import { fail, ok, type CoreResult } from './result';
-import type { Feature, ManufaktureDocument, StoredExpression } from './schema';
+import type { ConfigRow, Feature, ManufaktureDocument, StoredExpression } from './schema';
 import { expressionReferences } from './validate';
 
 /** One place that reads a variable directly: another variable, or a feature's field. */
@@ -21,14 +23,21 @@ export type VariableUse =
       expected: ExpressionKind;
       /** For a sketch dimension: the constraint's id. */
       constraintId?: string;
-    };
+    }
+  /** A configuration parameter that configures the variable (it names it, not an expression). */
+  | { kind: 'parameter'; parameterId: string }
+  /** A configuration row whose value for `parameterId` mentions the variable. */
+  | { kind: 'row'; rowId: string; parameterId: string };
 
 function mentions(expression: StoredExpression, name: string): boolean {
   const r = expressionReferences(expression.source);
   return r.ok && r.value.some((ref) => ref.name === name);
 }
 
-/** Every direct use of variable `name`, in document order (variables first, then features). */
+/**
+ * Every direct use of variable `name`, in document order: variables, then features, then
+ * configuration parameters that configure it, then configuration row values that mention it.
+ */
 export function variableUses(doc: ManufaktureDocument, name: string): VariableUse[] {
   const out: VariableUse[] = [];
   for (const v of doc.variables) {
@@ -51,6 +60,14 @@ export function variableUses(doc: ManufaktureDocument, name: string): VariableUs
           if (c) use.constraintId = c.id;
         }
         out.push(use);
+      }
+    }
+  }
+  for (const p of variableParameters(doc, name)) out.push({ kind: 'parameter', parameterId: p.id });
+  for (const row of doc.configurations?.rows ?? []) {
+    for (const [parameterId, value] of Object.entries(row.values)) {
+      if (typeof value === 'object' && mentions(value, name)) {
+        out.push({ kind: 'row', rowId: row.id, parameterId });
       }
     }
   }
@@ -120,12 +137,23 @@ function rewriteUses(
       if (next !== f) commands.push({ type: 'editFeature', partId: part.id, feature: next });
     }
   }
+  for (const row of doc.configurations?.rows ?? []) {
+    let values: ConfigRow['values'] | undefined;
+    for (const [id, value] of Object.entries(row.values)) {
+      if (typeof value !== 'object' || !mentions(value, name)) continue;
+      const source = rewrite(value.source);
+      if (source === null) continue;
+      values = { ...(values ?? row.values), [id]: { ...value, source } };
+    }
+    if (values) commands.push({ type: 'setConfigRow', row: { ...row, values } });
+  }
   return commands;
 }
 
 /**
- * Rename variable `from` to `to`, updating every reference (as `#to`), as one batch. The
- * variable keeps its place in the table. `expression`, when given, is its new expression.
+ * Rename variable `from` to `to`, updating every reference (as `#to`), including configuration
+ * row values, and every configuration parameter that configures it, as one batch. The variable
+ * keeps its place in the table. `expression`, when given, is its new expression.
  */
 export function renameVariable(
   doc: ManufaktureDocument,
@@ -148,6 +176,10 @@ export function renameVariable(
     // In at the old position; the old one moves down one and goes last.
     { type: 'setVariable', name: to, expression: own, index: i },
     ...rewriteUses(doc, from, (s) => rewriteReferences(s, from, () => `#${to}`)),
+    ...variableParameters(doc, from).map((parameter): SimpleCommand => ({
+      type: 'setConfigParameter',
+      parameter: { ...parameter, variable: to },
+    })),
     { type: 'deleteVariable', name: from },
   ];
   return ok({ type: 'batch', commands });
@@ -157,6 +189,9 @@ export function renameVariable(
  * Replace every reference to `name` with `literal` (the variable's current value, written as an
  * expression by the caller, who evaluates it), then delete the variable: one batch. The literal
  * is parenthesised wherever it is part of a larger expression, so precedence cannot change.
+ * References in configuration row values are rewritten too. A configuration parameter that
+ * configures the variable is deleted with it, together with every row's value for it: once
+ * inlined, the value is the same in every row.
  */
 export function inlineVariable(
   doc: ManufaktureDocument,
@@ -174,6 +209,10 @@ export function inlineVariable(
     ...rewriteUses(doc, name, (s) =>
       rewriteReferences(s, name, ({ whole }) => (whole ? lit : `(${lit})`)),
     ),
+    ...variableParameters(doc, name).map((p): SimpleCommand => ({
+      type: 'deleteConfigParameter',
+      parameterId: p.id,
+    })),
     { type: 'deleteVariable', name },
   ];
   return ok({ type: 'batch', commands });

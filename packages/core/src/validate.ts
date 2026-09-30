@@ -16,7 +16,11 @@ import {
 import { PART_COUNTER, parseFeatureId, parseSubId, peekCounter } from './ids';
 import { fail, ok, type CoreError, type CoreResult } from './result';
 import {
+  CONFIG_PARAMETER_COUNTER,
+  CONFIG_ROW_COUNTER,
   SKETCH_ORIGIN,
+  type ConfigRow,
+  type Configurations,
   type Feature,
   type ManufaktureDocument,
   type Part,
@@ -416,6 +420,208 @@ function checkPart(part: Part, pi: number, variables: ReadonlySet<string>, out: 
   );
 }
 
+/**
+ * The variables with a configuration row's expression overrides applied, in their order. A
+ * parameter the row has no value for leaves its variable as it is.
+ */
+export function configuredVariables(
+  variables: readonly Variable[],
+  table: Configurations,
+  row: ConfigRow,
+): Variable[] {
+  const overrides = new Map<string, StoredExpression>();
+  for (const p of table.parameters) {
+    const value = row.values[p.id];
+    if (p.kind === 'variable' && typeof value === 'object') overrides.set(p.variable, value);
+  }
+  if (overrides.size === 0) return variables.slice();
+  return variables.map((v) => {
+    const expression = overrides.get(v.name);
+    return expression ? { name: v.name, expression } : v;
+  });
+}
+
+/** `n` of an id `<counter>#n`, or undefined. */
+function counted(id: string, counter: string): number | undefined {
+  const m = /^([a-z]+)#([1-9][0-9]*)$/.exec(id);
+  return m && m[1] === counter ? Number(m[2]) : undefined;
+}
+
+function checkAllocated(
+  id: string,
+  counter: string,
+  nextIds: Readonly<Record<string, number>>,
+  what: string,
+  path: readonly (string | number)[],
+  out: CoreError[],
+): void {
+  const n = counted(id, counter);
+  if (n !== undefined && n >= peekCounter(nextIds, counter)) {
+    out.push({
+      code: 'invalid-id',
+      message: `${what} id "${id}" was never allocated (next is ${counter}#${peekCounter(nextIds, counter)})`,
+      path,
+    });
+  }
+}
+
+function checkUnique(
+  values: readonly string[],
+  what: string,
+  path: (i: number) => (string | number)[],
+  out: CoreError[],
+): void {
+  const seen = new Set<string>();
+  values.forEach((v, i) => {
+    if (seen.has(v)) {
+      out.push({ code: 'duplicate', message: `${what} "${v}" is used twice`, path: path(i) });
+    }
+    seen.add(v);
+  });
+}
+
+/**
+ * The configuration table: ids allocated and unique, names unique, every parameter names a
+ * variable or feature that exists (one parameter each), every row value is for a parameter of
+ * the table and of its kind, row expressions parse and name existing variables, applying a row
+ * makes no variable cycle, and `active` is a row.
+ */
+function checkConfigurations(
+  doc: ManufaktureDocument,
+  variables: ReadonlySet<string>,
+  out: CoreError[],
+): void {
+  const table = doc.configurations;
+  if (!table) return;
+  const base = ['configurations'];
+  const ppath = (i: number) => [...base, 'parameters', i];
+  const rpath = (i: number) => [...base, 'rows', i];
+  const params = new Map(table.parameters.map((p) => [p.id, p]));
+  checkUnique(
+    table.parameters.map((p) => p.id),
+    'Configuration parameter id',
+    (i) => [...ppath(i), 'id'],
+    out,
+  );
+  checkUnique(
+    table.parameters.map((p) => p.name),
+    'Configuration parameter name',
+    (i) => [...ppath(i), 'name'],
+    out,
+  );
+  const targets = new Set<string>();
+  table.parameters.forEach((p, i) => {
+    checkAllocated(
+      p.id,
+      CONFIG_PARAMETER_COUNTER,
+      doc.nextIds,
+      'Configuration parameter',
+      [...ppath(i), 'id'],
+      out,
+    );
+    let target: string;
+    if (p.kind === 'variable') {
+      target = `variable ${p.variable}`;
+      if (!variables.has(p.variable)) {
+        out.push({
+          code: 'unknown-variable',
+          message: `Configuration parameter ${p.id} names variable "${p.variable}", which does not exist`,
+          path: [...ppath(i), 'variable'],
+          blockers: [p.variable],
+        });
+      }
+    } else {
+      target = `feature ${p.partId}/${p.featureId}`;
+      const part = doc.parts.find((x) => x.id === p.partId);
+      if (!part || !part.features.some((f) => f.id === p.featureId)) {
+        out.push({
+          code: 'dependency',
+          message: `Configuration parameter ${p.id} names ${part ? p.featureId : `part ${p.partId}`}, which does not exist`,
+          path: [...ppath(i), part ? 'featureId' : 'partId'],
+          blockers: [part ? p.featureId : p.partId],
+        });
+      }
+    }
+    if (targets.has(target)) {
+      out.push({
+        code: 'duplicate',
+        message: `Two configuration parameters configure ${target}`,
+        path: ppath(i),
+        blockers: [p.id],
+      });
+    }
+    targets.add(target);
+  });
+
+  checkUnique(
+    table.rows.map((r) => r.id),
+    'Configuration row id',
+    (i) => [...rpath(i), 'id'],
+    out,
+  );
+  checkUnique(
+    table.rows.map((r) => r.name),
+    'Configuration row name',
+    (i) => [...rpath(i), 'name'],
+    out,
+  );
+  table.rows.forEach((row, ri) => {
+    checkAllocated(
+      row.id,
+      CONFIG_ROW_COUNTER,
+      doc.nextIds,
+      'Configuration row',
+      [...rpath(ri), 'id'],
+      out,
+    );
+    const before = out.length;
+    for (const [pid, value] of Object.entries(row.values)) {
+      const vpath = [...rpath(ri), 'values', pid];
+      const p = params.get(pid);
+      if (!p) {
+        out.push({
+          code: 'not-found',
+          message: `Configuration row ${row.id} has a value for ${pid}, which is not a parameter`,
+          path: vpath,
+          blockers: [pid],
+        });
+      } else if (p.kind === 'variable' && typeof value !== 'object') {
+        out.push({
+          code: 'kind-mismatch',
+          message: `Configuration row ${row.id}: ${pid} configures a variable, so its value is an expression`,
+          path: vpath,
+        });
+      } else if (p.kind === 'suppression' && typeof value !== 'boolean') {
+        out.push({
+          code: 'kind-mismatch',
+          message: `Configuration row ${row.id}: ${pid} configures a suppression, so its value is true or false`,
+          path: vpath,
+        });
+      } else if (typeof value === 'object') {
+        checkExpression(value, vpath, variables, out);
+      }
+    }
+    if (out.length === before) {
+      const order = variableOrder(configuredVariables(doc.variables, table, row));
+      if (!order.ok) {
+        out.push({
+          ...order.error,
+          message: `In configuration row ${row.id}: ${order.error.message}`,
+          path: [...rpath(ri), 'values'],
+        });
+      }
+    }
+  });
+  if (table.active !== null && !table.rows.some((r) => r.id === table.active)) {
+    out.push({
+      code: 'not-found',
+      message: `The active configuration "${table.active}" is not a row`,
+      path: [...base, 'active'],
+      blockers: [table.active],
+    });
+  }
+}
+
 /** Every semantic problem in a schema-valid document; empty when it is valid. */
 export function validateDocument(doc: ManufaktureDocument): CoreError[] {
   const out: CoreError[] = [];
@@ -440,6 +646,7 @@ export function validateDocument(doc: ManufaktureDocument): CoreError[] {
     partIds.add(part.id);
     checkPart(part, pi, variables, out);
   });
+  checkConfigurations(doc, variables, out);
   return out;
 }
 

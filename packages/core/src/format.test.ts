@@ -8,6 +8,7 @@ import {
   migrateV1ToV2,
   migrateV2ToV3,
   migrateV3ToV4,
+  migrateV4ToV5,
   type Migration,
 } from './migrations';
 import type { CoreErrorCode } from './result';
@@ -20,6 +21,7 @@ import v3Bracket from './fixtures/v3-bracket.json';
 import v3TwoBodies from './fixtures/v3-two-bodies.json';
 import v4Bracket from './fixtures/v4-bracket.json';
 import v4TwoBodies from './fixtures/v4-two-bodies.json';
+import v5Bracket from './fixtures/v5-bracket.json';
 
 /** One fixture per older file version; `migrates every older version` checks this is complete. */
 const FIXTURES: Record<number, unknown> = {
@@ -27,6 +29,7 @@ const FIXTURES: Record<number, unknown> = {
   1: v1Bracket,
   2: v2Bracket,
   3: v3Bracket,
+  4: v4Bracket,
 };
 
 function load(value: unknown): ManufaktureDocument {
@@ -37,7 +40,7 @@ describe('serialize and deserialize', () => {
   const documents: [string, () => ManufaktureDocument][] = [
     ['an empty document', () => createDocument({ id: 'd', name: 'Empty' })],
     ['the bracket', bracket],
-    ['the current fixture', () => load(v4Bracket)],
+    ['the current fixture', () => load(v5Bracket)],
     ['the two-body fixture', () => load(v4TwoBodies)],
     [
       'a document with body props and a scope',
@@ -170,7 +173,7 @@ describe('serialize and deserialize', () => {
     expect(serialize(unwrap(deserialize(serialize(shuffled))).document)).toBe(serialize(doc));
     expect(
       serialize(doc).startsWith(
-        '{\n  "format": "manufakture",\n  "version": 4,\n  "namingScheme": 1,',
+        '{\n  "format": "manufakture",\n  "version": 5,\n  "namingScheme": 1,',
       ),
     ).toBe(true);
   });
@@ -183,7 +186,7 @@ describe('serialize and deserialize', () => {
 });
 
 describe('loading errors', () => {
-  const current = () => clone(v4Bracket) as Record<string, unknown>;
+  const current = () => clone(v5Bracket) as Record<string, unknown>;
   const cases: [string, string | (() => unknown), CoreErrorCode, RegExp?][] = [
     ['not JSON', '{ "format": ', 'json'],
     ['an array', '[]', 'format'],
@@ -239,10 +242,11 @@ describe('loading errors', () => {
   it('never modifies the value it is given, even a newer one', () => {
     for (const value of [
       clone(v0Bracket),
-      { ...clone(v4Bracket), version: 99 },
+      { ...clone(v5Bracket), version: 99 },
       clone(v1Bracket),
       clone(v3Bracket),
       clone(v4Bracket),
+      clone(v5Bracket),
     ]) {
       const frozen = deepFreeze(value);
       const snapshot = JSON.stringify(frozen);
@@ -252,7 +256,7 @@ describe('loading errors', () => {
   });
 
   it('reports schema problems with paths', () => {
-    const d = clone(v4Bracket) as { variables: { expression: unknown }[] };
+    const d = clone(v5Bracket) as { variables: { expression: unknown }[] };
     d.variables[0]!.expression = 6;
     const r = parseDocument(d);
     expect(r.ok).toBe(false);
@@ -269,11 +273,12 @@ describe('migrations', () => {
     expect(migrateV1ToV2.migrate(clone(v1Bracket) as Record<string, unknown>)).toEqual(v2Bracket);
     expect(migrateV2ToV3.migrate(clone(v2Bracket) as Record<string, unknown>)).toEqual(v3Bracket);
     expect(migrateV3ToV4.migrate(clone(v3Bracket) as Record<string, unknown>)).toEqual(v4Bracket);
+    expect(migrateV4ToV5.migrate(clone(v4Bracket) as Record<string, unknown>)).toEqual(v5Bracket);
     const loaded = unwrap(parseDocument(v0Bracket));
     expect(loaded.from).toEqual({ version: 0, namingScheme: 1 });
     expect(loaded.migrated).toBe(true);
-    expect(loaded.document).toEqual(load(v4Bracket));
-    expect(JSON.parse(serialize(loaded.document))).toEqual(v4Bracket);
+    expect(loaded.document).toEqual(load(v5Bracket));
+    expect(JSON.parse(serialize(loaded.document))).toEqual(v5Bracket);
   });
 
   it('v1 to v2 changes only the version: a version 1 part has no material', () => {
@@ -315,12 +320,13 @@ describe('migrations', () => {
     );
     const doc = unwrap(parseDocument(v3TwoBodies)).document;
     expect(doc).toEqual(load(v4TwoBodies));
+    expect(doc.version).toBe(FORMAT_VERSION);
     // The counter starts past the highest part number, not past the part count.
     expect(doc.nextIds).toEqual({ part: 4 });
     expect(doc.parts.map((p) => p.bodies)).toEqual([[], []]);
     expect(doc.parts[0]!.features.some((f) => 'scope' in f)).toBe(false);
     expect(doc.parts[0]!.material).toBe('pla');
-    expect(JSON.parse(serialize(doc))).toEqual(v4TwoBodies);
+    expect(JSON.parse(serialize(doc))).toEqual({ ...v4TwoBodies, version: FORMAT_VERSION });
   });
 
   it('v3 to v4 starts the part counter at 1 when no part id is numbered', () => {
@@ -330,8 +336,23 @@ describe('migrations', () => {
     expect(unwrap(parseDocument(v3)).document.parts[0]!.id).toBe('main');
   });
 
+  it('v4 to v5 changes only the version: a version 4 document has no configuration table', () => {
+    expect(migrateV4ToV5.migrate(clone(v4Bracket) as Record<string, unknown>)).toEqual({
+      ...clone(v4Bracket),
+      version: 5,
+    });
+    const loaded = unwrap(parseDocument(v4Bracket));
+    expect(loaded.from.version).toBe(4);
+    expect(loaded.migrated).toBe(true);
+    expect(loaded.document).toEqual(load(v5Bracket));
+    expect('configurations' in loaded.document).toBe(false);
+    const twoBodies = unwrap(parseDocument(v4TwoBodies)).document;
+    expect(twoBodies.version).toBe(FORMAT_VERSION);
+    expect(twoBodies.nextIds).toEqual({ part: 4 });
+  });
+
   it('refuses a material that is not in the built-in table', () => {
-    const bad = clone(v4Bracket) as { parts: Record<string, unknown>[] };
+    const bad = clone(v5Bracket) as { parts: Record<string, unknown>[] };
     bad.parts[0]!.material = 'unobtainium';
     const r = parseDocument(bad);
     expect(r.ok).toBe(false);

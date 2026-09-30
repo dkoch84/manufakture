@@ -28,7 +28,7 @@ import { MATERIAL_IDS } from './materials';
  */
 
 /** The file format version this code reads and writes. Bump it only together with a migration. */
-export const FORMAT_VERSION = 4;
+export const FORMAT_VERSION = 5;
 /** The topological naming scheme version (T0.5) that stored references are written in. */
 export const NAMING_SCHEME = 1;
 export const FORMAT_TAG = 'manufakture';
@@ -756,6 +756,67 @@ export const PartSchema = z.strictObject({
   bodies: z.array(BodyPropsSchema),
 });
 
+// ---------------------------------------------------------------------------------------------
+// Configurations (since version 5)
+
+/** The document-level `nextIds` key for configuration parameter ids (`cp#n`). */
+export const CONFIG_PARAMETER_COUNTER = 'cp';
+/** The document-level `nextIds` key for configuration row ids (`cfg#n`). */
+export const CONFIG_ROW_COUNTER = 'cfg';
+/** A configuration parameter id: `cp#n`, counted by the document's `nextIds.cp`. */
+export const CONFIG_PARAMETER_ID_PATTERN = /^cp#[1-9][0-9]*$/;
+/** A configuration row id: `cfg#n`, counted by the document's `nextIds.cfg`. */
+export const CONFIG_ROW_ID_PATTERN = /^cfg#[1-9][0-9]*$/;
+export const ConfigParameterIdSchema = z
+  .string()
+  .regex(CONFIG_PARAMETER_ID_PATTERN, 'Expected a configuration parameter id like "cp#1"');
+export const ConfigRowIdSchema = z
+  .string()
+  .regex(CONFIG_ROW_ID_PATTERN, 'Expected a configuration row id like "cfg#1"');
+
+/**
+ * One column of the configuration table: what a row can override. A `variable` parameter
+ * overrides the expression of a document variable; a `suppression` parameter overrides the
+ * `suppressed` flag of one feature.
+ */
+export const ConfigParameterSchema = z.discriminatedUnion('kind', [
+  z.strictObject({
+    id: ConfigParameterIdSchema,
+    name: featureName,
+    kind: z.literal('variable'),
+    /** The name of the variable whose expression a row overrides. */
+    variable: z.string().min(1),
+  }),
+  z.strictObject({
+    id: ConfigParameterIdSchema,
+    name: featureName,
+    kind: z.literal('suppression'),
+    partId: z.string().min(1),
+    featureId: featureId,
+  }),
+]);
+
+/** A row's value for one parameter: an expression for a variable, a flag for a suppression. */
+export const ConfigValueSchema = z.union([StoredExpressionSchema, z.boolean()]);
+
+/**
+ * One variant: a value per parameter id. A parameter with no value in a row keeps the
+ * document's own value (the variable's expression, the feature's `suppressed`) in that row.
+ */
+export const ConfigRowSchema = z.strictObject({
+  id: ConfigRowIdSchema,
+  name: featureName,
+  values: z.record(ConfigParameterIdSchema, ConfigValueSchema),
+});
+
+/** The configuration table (README, "Configurations"). Since version 5. */
+export const ConfigurationsSchema = z.strictObject({
+  parameters: z.array(ConfigParameterSchema),
+  rows: z.array(ConfigRowSchema),
+  /** The row the document is shown and built in; `null`: none, the document as it is. */
+  active: ConfigRowIdSchema.nullable(),
+});
+
 export const DocumentSchema = z.strictObject({
   format: z.literal(FORMAT_TAG),
   version: z.literal(FORMAT_VERSION),
@@ -765,9 +826,12 @@ export const DocumentSchema = z.strictObject({
   units: DisplayUnitsSchema,
   variables: z.array(VariableSchema),
   parts: z.array(PartSchema).min(1),
+  /** The configuration table; absent when the document has none. Since version 5. */
+  configurations: ConfigurationsSchema.exactOptional(),
   /**
-   * Next number per document-level id counter (`part`, giving `part#n`). Only ever increases,
-   * so a part id is never reused. Since version 4.
+   * Next number per document-level id counter (`part`, giving `part#n`; `cp` and `cfg`, giving
+   * configuration parameter and row ids). Only ever increases, so an id is never reused. Since
+   * version 4.
    */
   nextIds: z.record(z.string(), z.int().min(1)),
 });
@@ -825,4 +889,8 @@ export type Variable = z.infer<typeof VariableSchema>;
 export type BodyPropsFields = z.infer<typeof BodyPropsFieldsSchema>;
 export type BodyProps = z.infer<typeof BodyPropsSchema>;
 export type Part = z.infer<typeof PartSchema>;
+export type ConfigParameter = z.infer<typeof ConfigParameterSchema>;
+export type ConfigValue = z.infer<typeof ConfigValueSchema>;
+export type ConfigRow = z.infer<typeof ConfigRowSchema>;
+export type Configurations = z.infer<typeof ConfigurationsSchema>;
 export type ManufaktureDocument = z.infer<typeof DocumentSchema>;

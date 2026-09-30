@@ -6,12 +6,21 @@ import { fail, ok, schemaError, type CoreResult } from './result';
 import {
   BodyIdSchema,
   BodyPropsFieldsSchema,
+  CONFIG_PARAMETER_COUNTER,
+  CONFIG_ROW_COUNTER,
+  ConfigParameterIdSchema,
+  ConfigParameterSchema,
+  ConfigRowIdSchema,
+  ConfigRowSchema,
   DisplayUnitsSchema,
   FeatureSchema,
   MaterialIdSchema,
   StoredExpressionSchema,
   type BodyProps,
   type BodyPropsFields,
+  type ConfigParameter,
+  type ConfigRow,
+  type Configurations,
   type Feature,
   type ManufaktureDocument,
   type Part,
@@ -107,6 +116,44 @@ export const SimpleCommandSchema = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('setDisplayUnits'), units: DisplayUnitsSchema }),
   /** Rename the document (trimmed, 1 to 200 characters). */
   z.strictObject({ type: z.literal('renameDocument'), name: z.string() }),
+  /**
+   * Create or replace a configuration parameter, by id. A new one needs a fresh `cp#n` id and
+   * goes at `index` (default: last); `index` is ignored on replace.
+   */
+  z.strictObject({
+    type: z.literal('setConfigParameter'),
+    parameter: ConfigParameterSchema,
+    index: index.optional(),
+  }),
+  /** Remove a configuration parameter and every row's value for it. */
+  z.strictObject({
+    type: z.literal('deleteConfigParameter'),
+    parameterId: ConfigParameterIdSchema,
+  }),
+  /** History only: put a deleted parameter back at `index` (its id was allocated before). */
+  z.strictObject({
+    type: z.literal('restoreConfigParameter'),
+    parameter: ConfigParameterSchema,
+    index,
+  }),
+  /**
+   * Create or replace a configuration row, by id. A new one needs a fresh `cfg#n` id and goes
+   * at `index` (default: last); `index` is ignored on replace.
+   */
+  z.strictObject({
+    type: z.literal('setConfigRow'),
+    row: ConfigRowSchema,
+    index: index.optional(),
+  }),
+  /** Remove a configuration row. Deleting the active row leaves no row active. */
+  z.strictObject({ type: z.literal('deleteConfigRow'), rowId: ConfigRowIdSchema }),
+  /** History only: put a deleted row back at `index` (its id was allocated before). */
+  z.strictObject({ type: z.literal('restoreConfigRow'), row: ConfigRowSchema, index }),
+  /** Choose the row the document is shown and built in; `null`: none. */
+  z.strictObject({
+    type: z.literal('setActiveConfiguration'),
+    rowId: ConfigRowIdSchema.nullable(),
+  }),
 ]);
 
 export type SimpleCommand = z.infer<typeof SimpleCommandSchema>;
@@ -182,6 +229,14 @@ function applyUnchecked(doc: ManufaktureDocument, command: Command): CoreResult<
         inverse: { type: 'renameDocument', name: doc.name },
       });
     }
+    case 'setConfigParameter':
+    case 'deleteConfigParameter':
+    case 'restoreConfigParameter':
+    case 'setConfigRow':
+    case 'deleteConfigRow':
+    case 'restoreConfigRow':
+    case 'setActiveConfiguration':
+      return applyToConfigurations(doc, command);
     default:
       return applyToPart(doc, command);
   }
@@ -193,6 +248,25 @@ function applyToPart(doc: ManufaktureDocument, command: PartCommand): CoreResult
   const pi = doc.parts.findIndex((p) => p.id === command.partId);
   const part = doc.parts[pi];
   if (!part) return fail('not-found', `No part "${command.partId}"`, ['partId']);
+  if (command.type === 'deleteFeature') {
+    // A suppression parameter names the feature: delete the parameter in the same batch.
+    const params = (doc.configurations?.parameters ?? [])
+      .filter(
+        (p) =>
+          p.kind === 'suppression' &&
+          p.partId === command.partId &&
+          p.featureId === command.featureId,
+      )
+      .map((p) => p.id);
+    if (params.length > 0) {
+      return fail(
+        'dependency',
+        `Cannot delete ${command.featureId}: configuration parameter ${params.join(', ')} suppresses it`,
+        ['featureId'],
+        { blockers: params },
+      );
+    }
+  }
   const r = applyPartCommand(part, command);
   if (!r.ok) return r;
   const parts = doc.parts.slice();
@@ -630,7 +704,226 @@ function setVariable(
   });
 }
 
-/** Variables and features whose expressions mention `name`. */
+type ConfigCommand = Extract<
+  SimpleCommand,
+  {
+    type:
+      | 'setConfigParameter'
+      | 'deleteConfigParameter'
+      | 'restoreConfigParameter'
+      | 'setConfigRow'
+      | 'deleteConfigRow'
+      | 'restoreConfigRow'
+      | 'setActiveConfiguration';
+  }
+>;
+
+/**
+ * `doc` with the configuration table `table`. A table with nothing in it is dropped, so undoing
+ * the first parameter or row gives back a document with no `configurations` at all.
+ */
+function withConfigurations(doc: ManufaktureDocument, table: Configurations): ManufaktureDocument {
+  const { configurations: _old, ...rest } = doc;
+  void _old;
+  if (table.parameters.length === 0 && table.rows.length === 0 && table.active === null) {
+    return rest;
+  }
+  return { ...rest, configurations: table };
+}
+
+/**
+ * Allocates a document-level id `<counter>#n` for a new item: `fresh` refuses an id handed out
+ * before and moves the counter past it; `restore` requires it to have been handed out.
+ */
+function allocateDocumentId(
+  doc: ManufaktureDocument,
+  counter: string,
+  id: string,
+  mode: 'fresh' | 'restore',
+): CoreResult<Record<string, number>> {
+  const n = Number(id.slice(counter.length + 1));
+  const next = peekCounter(doc.nextIds, counter);
+  if (mode === 'restore') {
+    return n < next
+      ? ok(doc.nextIds)
+      : fail('invalid-id', `Id "${id}" was never allocated, so it cannot be restored`, [], {
+          blockers: [id],
+        });
+  }
+  if (n < next) {
+    return fail(
+      'id-reused',
+      `Id "${id}" was already used; ids are never reused (next is ${counter}#${next})`,
+      [],
+      { blockers: [id] },
+    );
+  }
+  return ok({ ...doc.nextIds, [counter]: n + 1 });
+}
+
+function insertAt<T>(list: readonly T[], item: T, at: number, what: string): CoreResult<T[]> {
+  if (at > list.length) {
+    return fail('invalid-index', `Index ${at} is past the end of ${list.length} ${what}`, [
+      'index',
+    ]);
+  }
+  const out = list.slice();
+  out.splice(at, 0, item);
+  return ok(out);
+}
+
+function applyToConfigurations(
+  doc: ManufaktureDocument,
+  command: ConfigCommand,
+): CoreResult<Applied> {
+  const table: Configurations = doc.configurations ?? { parameters: [], rows: [], active: null };
+  const done = (next: Configurations, inverse: Command, nextIds = doc.nextIds) =>
+    ok<Applied>({ document: { ...withConfigurations(doc, next), nextIds }, inverse });
+
+  switch (command.type) {
+    case 'setConfigParameter':
+    case 'restoreConfigParameter': {
+      const p = command.parameter;
+      const i = table.parameters.findIndex((x) => x.id === p.id);
+      if (i >= 0) {
+        if (command.type === 'restoreConfigParameter') {
+          return fail('duplicate', `Configuration parameter "${p.id}" already exists`, [
+            'parameter',
+            'id',
+          ]);
+        }
+        const parameters = table.parameters.slice();
+        const old = parameters[i]!;
+        parameters[i] = p;
+        return done({ ...table, parameters }, { type: 'setConfigParameter', parameter: old });
+      }
+      const ids = allocateDocumentId(
+        doc,
+        CONFIG_PARAMETER_COUNTER,
+        p.id,
+        command.type === 'restoreConfigParameter' ? 'restore' : 'fresh',
+      );
+      if (!ids.ok) return ids;
+      const parameters = insertAt(
+        table.parameters,
+        p,
+        command.index ?? table.parameters.length,
+        'configuration parameters',
+      );
+      if (!parameters.ok) return parameters;
+      return done(
+        { ...table, parameters: parameters.value },
+        { type: 'deleteConfigParameter', parameterId: p.id },
+        ids.value,
+      );
+    }
+
+    case 'deleteConfigParameter': {
+      const i = table.parameters.findIndex((x) => x.id === command.parameterId);
+      const old = table.parameters[i];
+      if (!old) {
+        return fail('not-found', `No configuration parameter "${command.parameterId}"`, [
+          'parameterId',
+        ]);
+      }
+      const parameters = table.parameters.slice();
+      parameters.splice(i, 1);
+      const restoreRows: Command[] = [];
+      const rows = table.rows.map((row): ConfigRow => {
+        if (!(old.id in row.values)) return row;
+        restoreRows.push({ type: 'setConfigRow', row });
+        const values = { ...row.values };
+        delete values[old.id];
+        return { ...row, values };
+      });
+      const restore: Command = { type: 'restoreConfigParameter', parameter: old, index: i };
+      return done(
+        { ...table, parameters, rows },
+        restoreRows.length === 0 ? restore : { type: 'batch', commands: [restore, ...restoreRows] },
+      );
+    }
+
+    case 'setConfigRow':
+    case 'restoreConfigRow': {
+      const r = command.row;
+      const i = table.rows.findIndex((x) => x.id === r.id);
+      if (i >= 0) {
+        if (command.type === 'restoreConfigRow') {
+          return fail('duplicate', `Configuration row "${r.id}" already exists`, ['row', 'id']);
+        }
+        const rows = table.rows.slice();
+        const old = rows[i]!;
+        rows[i] = r;
+        return done({ ...table, rows }, { type: 'setConfigRow', row: old });
+      }
+      const ids = allocateDocumentId(
+        doc,
+        CONFIG_ROW_COUNTER,
+        r.id,
+        command.type === 'restoreConfigRow' ? 'restore' : 'fresh',
+      );
+      if (!ids.ok) return ids;
+      const rows = insertAt(
+        table.rows,
+        r,
+        command.index ?? table.rows.length,
+        'configuration rows',
+      );
+      if (!rows.ok) return rows;
+      return done(
+        { ...table, rows: rows.value },
+        { type: 'deleteConfigRow', rowId: r.id },
+        ids.value,
+      );
+    }
+
+    case 'deleteConfigRow': {
+      const i = table.rows.findIndex((x) => x.id === command.rowId);
+      const old = table.rows[i];
+      if (!old) return fail('not-found', `No configuration row "${command.rowId}"`, ['rowId']);
+      const rows = table.rows.slice();
+      rows.splice(i, 1);
+      const wasActive = table.active === old.id;
+      const restore: Command = { type: 'restoreConfigRow', row: old, index: i };
+      return done(
+        { ...table, rows, active: wasActive ? null : table.active },
+        wasActive
+          ? {
+              type: 'batch',
+              commands: [restore, { type: 'setActiveConfiguration', rowId: old.id }],
+            }
+          : restore,
+      );
+    }
+
+    case 'setActiveConfiguration': {
+      if (command.rowId !== null && !table.rows.some((r) => r.id === command.rowId)) {
+        return fail('not-found', `No configuration row "${command.rowId}"`, ['rowId']);
+      }
+      return done(
+        { ...table, active: command.rowId },
+        { type: 'setActiveConfiguration', rowId: table.active },
+      );
+    }
+  }
+}
+
+/** Configuration parameters that name variable `name`. */
+export function variableParameters(
+  doc: ManufaktureDocument,
+  name: string,
+): Extract<ConfigParameter, { kind: 'variable' }>[] {
+  return (doc.configurations?.parameters ?? []).filter(
+    (p): p is Extract<ConfigParameter, { kind: 'variable' }> =>
+      p.kind === 'variable' && p.variable === name,
+  );
+}
+
+/**
+ * Variables, features, configuration parameters and configuration rows that use variable
+ * `name`: expressions that mention it, parameters that configure it, and rows with a value
+ * that mentions it.
+ */
 export function variableUsers(doc: ManufaktureDocument, name: string): string[] {
   const users: string[] = [];
   for (const v of doc.variables) {
@@ -641,6 +934,13 @@ export function variableUsers(doc: ManufaktureDocument, name: string): string[] 
       if (featureExpressions(f).some((s) => expressionVariableNames(s.expression).includes(name)))
         users.push(f.id);
     }
+  }
+  for (const p of variableParameters(doc, name)) users.push(p.id);
+  for (const row of doc.configurations?.rows ?? []) {
+    const mentions = Object.values(row.values).some(
+      (v) => typeof v === 'object' && expressionVariableNames(v).includes(name),
+    );
+    if (mentions) users.push(row.id);
   }
   return users;
 }

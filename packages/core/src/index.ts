@@ -27,6 +27,7 @@ export {
   MAX_DOCUMENT_NAME,
   SimpleCommandSchema,
   applyCommand,
+  variableParameters,
   variableUsers,
   type Applied,
   type BatchCommand,
@@ -41,6 +42,13 @@ export {
   variableUses,
   type VariableUse,
 } from './variables';
+export {
+  applyConfigurationRow,
+  configurationRow,
+  configured,
+  configuredVariables,
+  emptyConfigurations,
+} from './configurations';
 export { diffDocuments, type DocumentChange, type PartChange } from './changes';
 export {
   DocumentStore,
@@ -57,6 +65,7 @@ export {
   migrateV1ToV2,
   migrateV2ToV3,
   migrateV3ToV4,
+  migrateV4ToV5,
   type JsonObject,
   type Migration,
 } from './migrations';

@@ -1,3 +1,4 @@
+import { applyConfigurationRow, configurationRow } from './configurations';
 import { featureExpressions } from './features';
 import type { ManufaktureDocument, Part, Variable } from './schema';
 import { expressionVariableNames } from './validate';
@@ -13,11 +14,26 @@ export interface DocumentChange {
   readonly nameChanged: boolean;
   /** Display units only: stored expressions keep their own units, so no geometry changes. */
   readonly unitsChanged: boolean;
+  /**
+   * The configuration table changed (parameters, rows or the active row). What that does to the
+   * active configuration is reported in `variables` and `parts` as well.
+   */
+  readonly configurationsChanged: boolean;
+  /**
+   * Variables whose expression changed, in the document or in the configuration it is built in
+   * (the active row): a change of the active row, or of its values, lists the variables it
+   * overrides differently, as if they had been edited.
+   */
   readonly variables: {
     readonly added: readonly string[];
     readonly removed: readonly string[];
     readonly changed: readonly string[];
   };
+  /**
+   * Per part, as for `variables`: a feature whose suppression the active row changes is
+   * `changed`, and `firstAffectedIndex` counts it and every feature reading a variable the row
+   * changes.
+   */
   readonly parts: readonly PartChange[];
 }
 
@@ -177,10 +193,7 @@ function diffPart(
   };
 }
 
-export function diffDocuments(
-  prev: ManufaktureDocument,
-  next: ManufaktureDocument,
-): DocumentChange {
+function diffRaw(prev: ManufaktureDocument, next: ManufaktureDocument): DocumentChange {
   const variables = diffVariables(prev.variables, next.variables);
   const vars = affectedVariables(next.variables, [
     ...variables.added,
@@ -215,5 +228,75 @@ export function diffDocuments(
     variables.added.length + variables.removed.length + variables.changed.length === 0 &&
     parts.length === 0 &&
     deepEqual(prev, next);
-  return { empty, nameChanged, unitsChanged, variables, parts };
+  return {
+    empty,
+    nameChanged,
+    unitsChanged,
+    configurationsChanged: !deepEqual(prev.configurations, next.configurations),
+    variables,
+    parts,
+  };
+}
+
+/** The document with its active configuration row applied (what T2.4b has regen build). */
+function effective(doc: ManufaktureDocument): ManufaktureDocument {
+  const row = configurationRow(doc);
+  return row ? applyConfigurationRow(doc, row) : doc;
+}
+
+function union(a: readonly string[], b: readonly string[]): string[] {
+  return [...new Set([...a, ...b])];
+}
+
+function minIndex(a: number | null, b: number | null): number | null {
+  return a === null ? b : b === null ? a : Math.min(a, b);
+}
+
+function mergePart(a: PartChange, b: PartChange): PartChange {
+  return {
+    partId: a.partId,
+    status: a.status,
+    added: union(a.added, b.added),
+    removed: union(a.removed, b.removed),
+    changed: union(a.changed, b.changed),
+    reordered: a.reordered || b.reordered,
+    rollbackChanged: a.rollbackChanged || b.rollbackChanged,
+    materialChanged: a.materialChanged || b.materialChanged,
+    bodyPropsChanged: a.bodyPropsChanged || b.bodyPropsChanged,
+    firstAffectedIndex: minIndex(a.firstAffectedIndex, b.firstAffectedIndex),
+  };
+}
+
+/**
+ * What changed between two documents. Changes are reported both for the documents as stored
+ * and for them with their active configuration rows applied, merged: a subscriber that builds
+ * the stored document and one that builds the configured one both see everything that affects
+ * them. Switching the active row, or editing its values, reports the variables and features
+ * the row overrides differently, so regen's dirty set is as for a variable edit.
+ */
+export function diffDocuments(
+  prev: ManufaktureDocument,
+  next: ManufaktureDocument,
+): DocumentChange {
+  const raw = diffRaw(prev, next);
+  const ep = effective(prev);
+  const en = effective(next);
+  if (ep === prev && en === next) return raw;
+  const configured = diffRaw(ep, en);
+  const byId = new Map(configured.parts.map((p) => [p.partId, p]));
+  const parts = raw.parts.map((p) => {
+    const c = byId.get(p.partId);
+    byId.delete(p.partId);
+    return c ? mergePart(p, c) : p;
+  });
+  parts.push(...byId.values());
+  return {
+    ...raw,
+    variables: {
+      added: raw.variables.added,
+      removed: raw.variables.removed,
+      changed: union(raw.variables.changed, configured.variables.changed),
+    },
+    parts,
+  };
 }
