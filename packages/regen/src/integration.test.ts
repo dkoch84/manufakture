@@ -9,14 +9,29 @@ import {
   DocumentStore,
   parseDocument,
   type ChangeEvent,
+  type DerivedFeature,
   type ImportFeature,
+  type ManufaktureDocument,
 } from '@manufakture/core';
 import type { KernelService, MeshData, ShapeId } from '@manufakture/kernel';
 import { createNodeService } from '@manufakture/kernel/node';
 import { createSolverService, type SolverService } from '@manufakture/sketch';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { RegenEngine, type RegenKernel } from './engine';
-import { add, block, setVariable, statuses, twoBodies, unwrap } from './test-helpers';
+import {
+  add,
+  apply,
+  block,
+  build,
+  derivedOf,
+  fillet,
+  mm,
+  pin,
+  setVariable,
+  statuses,
+  twoBodies,
+  unwrap,
+} from './test-helpers';
 import type { RegenResult } from './types';
 
 let service: KernelService;
@@ -433,6 +448,131 @@ describe('regen with the real kernel and solver', () => {
       3,
     );
 
+    await engine.dispose();
+    await service.idle();
+    expect(service.leaks()).toEqual([]);
+  });
+});
+
+describe('derived parts with the real kernel', () => {
+  const D = 'derived#1:from/';
+  const bracket = (): ManufaktureDocument =>
+    unwrap(
+      parseDocument(
+        JSON.parse(
+          readFileSync(new URL('../../core/src/fixtures/v6-bracket.json', import.meta.url), 'utf8'),
+        ),
+      ),
+    ).document;
+  /** The M1 bracket: a 40 x 20 plate of `t` mm with a 2 mm round on one vertical edge. */
+  const bracketVolume = (t: number) => 40 * 20 * t - (4 - Math.PI) * t;
+  const derivedAt = (source: ManufaktureDocument): DerivedFeature =>
+    derivedOf('derived#1', pin(source), {
+      placement: {
+        translation: [mm('0'), mm('0'), mm('10')],
+        rotation: [mm('0'), mm('0'), mm('0')],
+      },
+    });
+  // The back left vertical edge of the plate (x = 0, y = 20), by its derived faces.
+  const edge: [string, string] = [`${D}extrude#1:side:e3`, `${D}extrude#1:side:e4`];
+  const ROUND2 = 'fillet#1:round:r1';
+
+  it('keeps a fillet on a derived edge exact when the pin moves to a version with another #thickness', async () => {
+    const engine = new RegenEngine({ kernel: service, solver });
+    const doc = build([add(derivedAt(bracket())), add(fillet('fillet#1', edge, '1'))]);
+    const first = (await engine.regen(doc))!;
+    expect(statuses(first)).toEqual({ 'derived#1': 'ok', 'fillet#1': 'ok' });
+    const at6 = first.parts[0]!.bodies;
+    expect(at6.map((b) => b.bodyId)).toEqual([`${D}extrude#1`]);
+    expect(first.parts[0]!.features[1]!.references).toEqual([
+      { referenceId: 'r1', target: edge.join('|'), via: 'exact', fragile: false },
+    ]);
+    const small = (1 - Math.PI / 4) * 6;
+    expect(await volume(engine, at6[0]!.shape)).toBeCloseTo(bracketVolume(6) - small, 6);
+    // Every face of the derived body is named from the source, the fillet's round excepted.
+    const names = Array.from(at6[0]!.mesh!.faceNames, (i) => first.names[i]!);
+    expect(names.filter((n) => !n.startsWith(D))).toEqual([ROUND2]);
+    expect(names).toContain(`${D}fillet#1:round:r2`);
+    let round = faceBox(first, at6[0]!.mesh!, ROUND2);
+    expect(round.min[2]).toBeCloseTo(10, 3);
+    expect(round.max[2]).toBeCloseTo(16, 3);
+
+    // Update the pin: the source at a version where #thickness is 8 mm.
+    const thicker = apply(bracket(), setVariable('thickness', '8mm'));
+    const updated = (await engine.regen(
+      apply(doc, {
+        type: 'editFeature',
+        partId: doc.parts[0]!.id,
+        feature: derivedAt(thicker),
+      }),
+    ))!;
+    expect(statuses(updated)).toEqual({ 'derived#1': 'ok', 'fillet#1': 'ok' });
+    expect(updated.parts[0]!.features[1]!.references).toEqual([
+      { referenceId: 'r1', target: edge.join('|'), via: 'exact', fragile: false },
+    ]);
+    const at8 = updated.parts[0]!.bodies[0]!;
+    expect(await volume(engine, at8.shape)).toBeCloseTo(
+      bracketVolume(8) - (1 - Math.PI / 4) * 8,
+      6,
+    );
+    // The round runs the full new height, on the same edge.
+    round = faceBox(updated, at8.mesh!, ROUND2);
+    expect(round.min[0]).toBeCloseTo(0, 3);
+    expect(round.max[0]).toBeCloseTo(1, 3);
+    expect(round.min[1]).toBeCloseTo(19, 3);
+    expect(round.max[1]).toBeCloseTo(20, 3);
+    expect(round.min[2]).toBeCloseTo(10, 3);
+    expect(round.max[2]).toBeCloseTo(18, 3);
+
+    await engine.dispose();
+    await service.idle();
+    expect(service.leaks()).toEqual([]);
+  });
+
+  it('cuts with a derived body, and recovers from a recycle between the source and the derive', async () => {
+    let recycleBeforeDerive = true;
+    const kernel: RegenKernel = {
+      run: (request) => {
+        const op = request.ops[0];
+        if (recycleBeforeDerive && op?.op === 'feature' && op.feature.kind === 'derive') {
+          recycleBeforeDerive = false;
+          void service.recycle();
+        }
+        return service.run(request);
+      },
+      release: (shapes) => service.release(shapes),
+      cancel: (generation) => service.cancel(generation),
+      onRecycle: (hook) => service.onRecycle(hook),
+      stats: () => service.stats(),
+    };
+    const engine = new RegenEngine({ kernel, solver });
+    // The block (40 x 30 x 20) minus the bracket, sunk 6 mm into the back of its top, clear of
+    // the block's own round at the front.
+    const doc = apply(
+      block(),
+      add({
+        ...derivedAt(bracket()),
+        operation: 'cut',
+        placement: {
+          translation: [mm('0'), mm('10'), mm('14')],
+          rotation: [mm('0'), mm('0'), mm('0')],
+        },
+      }),
+    );
+    const r = (await engine.regen(doc))!;
+    expect(statuses(r)).toEqual({
+      'sketch#1': 'ok',
+      'extrude#1': 'ok',
+      'fillet#1': 'ok',
+      'derived#1': 'ok',
+    });
+    expect(engine.stats.retries).toBe(1);
+    const body = r.parts[0]!.bodies;
+    expect(body.map((b) => b.bodyId)).toEqual(['extrude#1']);
+    expect(await volume(engine, body[0]!.shape)).toBeCloseTo(
+      blockVolume(40, 30, 3) - bracketVolume(6),
+      3,
+    );
     await engine.dispose();
     await service.idle();
     expect(service.leaks()).toEqual([]);

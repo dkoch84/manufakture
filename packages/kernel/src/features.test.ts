@@ -1892,3 +1892,154 @@ describe('bodies', () => {
     expect(badScope.errors).toMatchObject([{ code: 'invalid' }]);
   });
 });
+
+describe('derive', () => {
+  const D = 'derived#1:from/';
+  const volumeOf = (shape: ShapeId) => k.properties(shape).volume;
+  /** A source part of its own: the 40 x 30 x 20 block. */
+  const source = () => build(k, [block()]).bodies;
+  const derive = (
+    sources: readonly { id: string; shape: ShapeId }[],
+    extra: Partial<Extract<FeatureInput, { kind: 'derive' }>> = {},
+  ): FeatureInput => ({
+    kind: 'derive',
+    id: 'derived#1',
+    sources,
+    rotation: [0, 0, 0],
+    translation: [0, 0, 0],
+    mode: 'new',
+    ...extra,
+  });
+
+  it('a derived box at a placement: exact volume and box, every name prefixed', () => {
+    const src = source();
+    // A quarter turn about z takes [0, 40] x [0, 30] to [-30, 0] x [0, 40]; then 100 along x.
+    const out = apply(k, [], derive(src, { rotation: [0, 0, 90 * DEG], translation: [100, 0, 0] }));
+    expect(out.errors).toEqual([]);
+    expect(out.created).toEqual([`${D}extrude#1`]);
+    const shape = out.bodies[0]!.shape;
+    expectGolden(k, shape, { volume: 24000, faces: 6, min: [70, 0, 0], max: [100, 40, 20] });
+    const b = named(k, shape);
+    expect(faceNames(b).sort()).toEqual(
+      [BOTTOM, TOP, side('e1'), side('e2'), side('e3'), side('e4')].map((n) => D + n).sort(),
+    );
+    // The front face (y = 0 in the source) is turned to x = 0, then moved to x = 100.
+    expect(b.topology.faces[faceIndex(b, `${D}${side('e1')}`) - 1]!.centroid[0]).toBeCloseTo(
+      100,
+      9,
+    );
+    expect(b.names.edges.map((e) => e.name)).toContain(`${D}${side('e1')}|${D}${side('e2')}`);
+    expect(b.names.faces.every((f) => f.lineage.every((n) => n.startsWith(D)))).toBe(true);
+    // The source keeps its shape and its own names.
+    expect(faceNames(named(k, src[0]!.shape))).toContain(TOP);
+    expect(k.properties(src[0]!.shape).boundingBox!.max[0]).toBeCloseTo(40, 6);
+  });
+
+  it('rotations turn about x, then y, then z, before the translation', () => {
+    const src = source();
+    // About x by 90: y to z, z to -y; then about y by 90: x to -z, z to x.
+    const out = apply(
+      k,
+      [],
+      derive(src, { rotation: [90 * DEG, 90 * DEG, 0], translation: [0, 0, 5] }),
+    );
+    expect(out.errors).toEqual([]);
+    expectGolden(k, out.bodies[0]!.shape, {
+      volume: 24000,
+      faces: 6,
+      min: [0, -20, -35],
+      max: [30, 0, 5],
+    });
+  });
+
+  it('cut with a derived body: the copy is a tool, the source is untouched', () => {
+    const src = source();
+    const part = build(k, [block()]).bodies;
+    const out = apply(k, part, derive(src, { translation: [20, 0, 10], mode: 'subtract' }));
+    expect(out.errors).toEqual([]);
+    expect(out.changed).toEqual(['extrude#1']);
+    expect(out.created).toEqual([]);
+    expect(volumeOf(out.shape!)).toBeCloseTo(24000 - 20 * 30 * 10, 6);
+    const names = faceNames(named(k, out.shape!));
+    // The copy's left face (the source's x = 0 side) is the step's wall at x = 20.
+    expect(names).toContain(`${D}${side('e4')}`);
+    expect(names).toContain(`${D}${BOTTOM}`);
+    expect(volumeOf(src[0]!.shape)).toBeCloseTo(24000, 6);
+  });
+
+  it('add fuses a copy with the bodies it touches; a scope limits them', () => {
+    const src = source();
+    const part = build(k, [block()]).bodies;
+    const out = apply(k, part, derive(src, { translation: [20, 0, 0], mode: 'add' }));
+    expect(out.errors).toEqual([]);
+    expect(out.bodies.map((b) => b.id)).toEqual(['extrude#1']);
+    expect(volumeOf(out.shape!)).toBeCloseTo(24000 + 20 * 30 * 20, 6);
+    const lost = apply(k, part, derive(src, { mode: 'add', scope: ['extrude#9'] }));
+    expect(lost.errors).toMatchObject([{ code: 'lost', ref: 'scope' }]);
+  });
+
+  it('a source corner is prefixed member by member; several sources become several bodies', () => {
+    const rounded = build(k, [
+      block(),
+      {
+        kind: 'fillet',
+        id: 'fillet#2',
+        radius: 3,
+        edges: [
+          { id: 'r1', ref: { faces: [side('e1'), side('e2')] } },
+          { id: 'r2', ref: { faces: [TOP, side('e1')] } },
+          { id: 'r3', ref: { faces: [TOP, side('e2')] } },
+        ],
+      },
+    ]).bodies;
+    const other = build(k, [
+      { ...block('extrude#5'), extent: { type: 'blind', distance: 5 } },
+    ]).bodies;
+    const out = apply(k, [], derive([...rounded, ...other], { translation: [0, 100, 0] }));
+    expect(out.errors).toEqual([]);
+    expect(out.created).toEqual([`${D}extrude#1`, `${D}extrude#5`]);
+    const corner = [TOP, side('e1'), side('e2')].sort();
+    const name = `${D}fillet#2:corner:${corner.map((n, i) => (i === 0 ? n : D + n)).join('&')}`;
+    const b = named(k, out.bodies[0]!.shape);
+    expect(b.topology.faces[faceIndex(b, name) - 1]!.surface).toBe('sphere');
+    expect(volumeOf(out.bodies[1]!.shape)).toBeCloseTo(40 * 30 * 5, 6);
+  });
+
+  it('a later feature resolves a derived edge by its prefixed name', () => {
+    const src = source();
+    const { shape, last } = build(k, [
+      derive(src, { translation: [0, 0, 50] }),
+      {
+        kind: 'fillet',
+        id: 'fillet#2',
+        radius: 3,
+        edges: [{ id: 'r1', ref: { faces: [`${D}${side('e1')}`, `${D}${side('e2')}`].sort() } }],
+      },
+    ]);
+    expect(last.resolved).toMatchObject([{ ref: 'r1', via: 'exact', fragile: false }]);
+    expect(volumeOf(shape)).toBeCloseTo(24000 - (9 - (9 * PI) / 4) * 20, 6);
+    // The local-looking name is not a face of the derived body.
+    const local = apply(k, [{ id: `${D}extrude#1`, shape }], {
+      kind: 'fillet',
+      id: 'fillet#3',
+      radius: 1,
+      edges: [{ id: 'r1', ref: { faces: [TOP, side('e1')] } }],
+    });
+    expect(local.errors).toMatchObject([{ code: 'lost' }]);
+  });
+
+  it('refuses malformed sources, and a source that is not a live named shape', () => {
+    const src = source();
+    expect(apply(k, [], derive([])).errors).toMatchObject([{ code: 'invalid' }]);
+    expect(apply(k, [], derive([src[0]!, src[0]!])).errors).toMatchObject([{ code: 'invalid' }]);
+    expect(
+      apply(k, [], { ...derive(src), rotation: [0, 0] } as unknown as FeatureInput).errors,
+    ).toMatchObject([{ code: 'invalid' }]);
+    const gone = apply(k, [], derive([{ id: 'extrude#1', shape: 999_999 as ShapeId }]));
+    expect(gone.errors).toMatchObject([{ code: 'no-body', ref: 'sources', target: 'extrude#1' }]);
+    const bare = k.box(1, 1, 1);
+    const unnamed = apply(k, [], derive([{ id: 'x#1', shape: bare }]));
+    expect(unnamed.errors).toMatchObject([{ code: 'no-body', ref: 'sources' }]);
+    k.release(bare);
+  });
+});

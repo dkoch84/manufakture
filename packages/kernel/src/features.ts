@@ -15,7 +15,9 @@
 // with every body in scope it touches (merged under the first of them), cuts
 // and intersections act on each body in scope the tool reaches, and blends
 // act on the body that owns their references. Bodies a feature does not touch
-// keep their shape ids.
+// keep their shape ids. A `derive` copies bodies of another part (a derived
+// part's source, built by regen in the same kernel) under `<id>:from/` names
+// and combines them like an import.
 //
 // Inputs are evaluated, resolved plain data: numbers in millimetres and
 // radians, sketch profiles as loops of entities tagged with their sketch edge
@@ -32,6 +34,7 @@ import { KernelError } from './errors';
 import type { Kernel, NamedShape } from './kernel';
 import {
   bornFace,
+  deriveFaces,
   describeFailure,
   edgeFacesName,
   importedFace,
@@ -299,6 +302,24 @@ export interface ImportInput extends MakesBody {
   mode: ResultMode;
 }
 
+/**
+ * Bodies of another part (a derived part's source, which regen builds first in this same
+ * kernel), copied into this one and combined by `mode` like an import. Each copy is rotated by
+ * `rotation` (angles in radians about the fixed x, y and z axes, in that order, about the
+ * origin), then moved by `translation`. A copy's body id is `<id>:from/<source body id>`, and
+ * every face name and lineage entry is read through `derivedName` (`<id>:from/<source name>`).
+ * The sources are not bodies of this part: they are read, never changed or released.
+ */
+export interface DeriveInput extends Scoped {
+  kind: 'derive';
+  id: string;
+  /** The source bodies, in the order to derive them: their ids in the source and live named shapes. */
+  sources: readonly FeatureBody[];
+  rotation: Vec3;
+  translation: Vec3;
+  mode: ResultMode;
+}
+
 export type FeatureInput =
   | ExtrudeInput
   | RevolveInput
@@ -308,7 +329,8 @@ export type FeatureInput =
   | HoleInput
   | PatternInput
   | MirrorInput
-  | ImportInput;
+  | ImportInput
+  | DeriveInput;
 
 export type FeatureKind = FeatureInput['kind'];
 
@@ -649,7 +671,62 @@ function run(ctx: Ctx, slots: readonly Slot[], input: FeatureInput): Slot[] | nu
       const tool = importTool(ctx, input);
       return combine(ctx, slots, scoped, [{ ...tool, bodyId: input.body ?? input.id }], input.mode);
     }
+    case 'derive': {
+      const scoped = inScope(ctx, slots, input.scope);
+      return combine(ctx, slots, scoped, deriveTools(ctx, input), input.mode);
+    }
   }
+}
+
+/**
+ * The derived copies: each source body transformed by the placement, its names carried through
+ * the transform's history and then prefixed (`deriveFaces`). A source that is not a live named
+ * shape fails the feature with `no-body` on `sources`: regen reads that as a shape lost to a
+ * recycle, never as a missing body of the part.
+ */
+function deriveTools(ctx: Ctx, input: DeriveInput): Placed[] {
+  const { k } = ctx;
+  const motions: Transform[] = [];
+  const axes: Vec3[] = [
+    [1, 0, 0],
+    [0, 1, 0],
+    [0, 0, 1],
+  ];
+  input.rotation.forEach((angle, i) => {
+    if (angle !== 0) {
+      motions.push({ kind: 'rotate', axis: { origin: [0, 0, 0], direction: axes[i]! }, angle });
+    }
+  });
+  // Always last, even when zero: the copy is a new shape, so the source keeps its own names.
+  motions.push({ kind: 'translate', vector: input.translation });
+  return input.sources.map((source) => {
+    const named = k.has(source.shape) ? k.named(source.shape) : null;
+    if (named === null) {
+      fail(
+        ctx,
+        'no-body',
+        k.has(source.shape)
+          ? `source body ${source.id} (shape ${source.shape}) has no names`
+          : `unknown shape id ${source.shape} (source body ${source.id})`,
+        { ref: 'sources', target: source.id },
+      );
+    }
+    let made: Made = {
+      shape: source.shape,
+      faces: named.names.faces,
+      topology: named.topology,
+      unnamed: [],
+    };
+    for (const motion of motions) {
+      const moved = temp(ctx, k.transform(made.shape, motion));
+      made = propagated(ctx, moved.shape, [made.faces], moved.history);
+    }
+    return {
+      ...made,
+      faces: deriveFaces(made.faces, input.id),
+      bodyId: `${input.id}:from/${source.id}`,
+    };
+  });
 }
 
 /** The imported shape, every face named by its position in the file. */
@@ -2274,6 +2351,29 @@ export function validateFeature(input: unknown): string | null {
         );
       }
       return 'layout.type must be linear or circular';
+    }
+    case 'derive': {
+      const e =
+        targets(f, false) ??
+        mode(f.mode) ??
+        vec3(f.rotation, 'rotation') ??
+        vec3(f.translation, 'translation');
+      if (e) return e;
+      if (!Array.isArray(f.sources) || f.sources.length === 0) {
+        return 'sources must be a non-empty array';
+      }
+      const seen = new Set<string>();
+      for (const [i, b] of (f.sources as unknown[]).entries()) {
+        if (!isObj(b)) return `sources[${i}] must be an object`;
+        const bad = bodyId(b.id, `sources[${i}].id`);
+        if (bad) return bad;
+        if (typeof b.shape !== 'number' || !Number.isInteger(b.shape)) {
+          return `sources[${i}] (${String(b.id)}) must have a shape id`;
+        }
+        if (seen.has(b.id as string)) return `source body ${String(b.id)} is listed twice`;
+        seen.add(b.id as string);
+      }
+      return null;
     }
     case 'import':
       return typeof f.step === 'string' || f.step instanceof Uint8Array

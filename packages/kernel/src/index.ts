@@ -32,6 +32,7 @@ export {
 } from './features';
 export type {
   ChamferInput,
+  DeriveInput,
   EdgeReference,
   ExtrudeExtent,
   ExtrudeInput,
@@ -62,6 +63,7 @@ export type {
 } from './features';
 export {
   UNNAMED_PREFIX,
+  derivedName,
   describeFailure,
   edgeRefName,
   importedFace,

@@ -320,7 +320,13 @@ export function buildGraph(part: Part, variables: readonly Variable[]): Dependen
               const source = lookup(id);
               return source !== undefined && 'operation' in source && source.operation === 'new';
             }));
-        if (makes) bodies.push({ id: f.id, carries: new Set([f.id]), last: f.id });
+        // A derived feature makes `<id>:from/<source body id>` per body it lists (M2 plan,
+        // decision 1); listing none, the ids come from the source, so its own id stands in.
+        const made =
+          f.kind === 'derived' && f.bodies !== undefined
+            ? f.bodies.map((b) => `${f.id}:from/${b}`)
+            : [f.id];
+        if (makes) for (const id of made) bodies.push({ id, carries: new Set([f.id]), last: f.id });
       }
     }
     vars.set(f.id, [...variableClosure(variables, directVariables(f))].sort());

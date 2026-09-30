@@ -281,6 +281,44 @@ export function prefixFaces(faces: readonly FaceName[], prefix: string): FaceNam
   }));
 }
 
+/**
+ * A face name of a derived part's source as it reads in the deriving part: `<feature>:from/`
+ * before it, in the form core's `featureIdsInName` reads (M2 plan, decision 6). A parenthesised
+ * group is prefixed once (`(A+B)` gives `derived#1:from/(A+B)`), since the parser skips a whole
+ * group after the prefix. A corner has no brackets (`fillet#3:corner:A&B&C`), so every member
+ * after an `&` outside brackets is prefixed too: none of them can then be read as a face of the
+ * deriving part. A nested derived name simply gains another prefix.
+ */
+export function derivedName(name: string, feature: string): string {
+  const prefix = `${feature}:from/`;
+  let out = prefix;
+  let depth = 0;
+  let from = 0;
+  for (let i = 0; i < name.length; i++) {
+    const c = name.charCodeAt(i);
+    if (c === 0x28 /* ( */) depth++;
+    else if (c === 0x29 /* ) */) depth = Math.max(0, depth - 1);
+    else if (depth === 0 && (c === 0x26 /* & */ || c === 0x2b) /* + */) {
+      out += name.slice(from, i + 1) + prefix;
+      from = i + 1;
+    }
+  }
+  return out + name.slice(from);
+}
+
+/**
+ * The faces of a derived body: every name and every lineage entry read through `derivedName`,
+ * so a reference to a source face finds its copy in the deriving part only by the prefixed name,
+ * and a local face of the same name never matches it.
+ */
+export function deriveFaces(faces: readonly FaceName[], feature: string): FaceName[] {
+  return faces.map((f) => ({
+    name: derivedName(f.name, feature),
+    lineage: f.lineage.map((n) => derivedName(n, feature)),
+    fragile: f.fragile,
+  }));
+}
+
 // Propagation through an operation ------------------------------------------------
 
 /**

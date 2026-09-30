@@ -14,11 +14,18 @@
 // feature is looked at. A sketch placed on a face needs the face's plane, so it adds a `resolve`
 // op and flushes too. In the worker a batch costs no structured clone, so flushing is cheap.
 //
+// Derived parts: a derived feature's pinned source part is regenerated first, in this same
+// kernel and by this same engine, with the source document's own variables and under a cache
+// namespace of its own (`derived.ts`), then its bodies are copied in by a kernel `derive` op.
+// Every derived feature of one pinned part in a regen shares that one build.
+//
 // Cancellation: every regen has a generation. A newer regen cancels the kernel batches of the
 // older one (`KernelService.cancel`) and the older one stops at its next await, returning null.
 // Regens run one at a time, so they never race on the cache.
 
 import type {
+  BodyPropsFields,
+  DerivedFeature,
   DocumentChange,
   Feature,
   ImportSource,
@@ -53,6 +60,7 @@ import {
   type FeatureCache,
   type KeyVersions,
 } from './cache';
+import { DerivedSources, carriedProps, effectiveProps, sourceNamespace, tooDeep } from './derived';
 import { mapFailure, mapOutcome, planeReport } from './errors';
 import {
   bodyUse,
@@ -188,9 +196,21 @@ interface Run {
   /** Kernel instance of the latest reply. */
   instance: number | null;
   versions: KeyVersions;
+  /** Source parts of derived features built in this regen, by `sourceNamespace`. */
+  sources: Map<string, PartState>;
 }
 
-interface PartState {
+/** Where a part is built: the document being regenerated, or a derived part's source. */
+interface BuildScope {
+  /** Cache namespace: null for the document's own parts, `sourceNamespace` for a source. */
+  ns: string | null;
+  /** 0 for the document's own parts, 1 for a source of one of them, and so on. */
+  depth: number;
+  /** The key versions of the document the part is in (its own naming scheme). */
+  versions: KeyVersions;
+}
+
+interface PartState extends BuildScope {
   part: Part;
   /** The bodies after the features so far, in creator order. */
   bodies: LiveBody[];
@@ -206,6 +226,11 @@ interface PartState {
   inputs: Map<string, FeatureInput>;
   /** Reference imports seen so far (not part of the body, never in the kernel). */
   references: Set<string>;
+  /**
+   * What bodies a derived feature makes carry over from their source (name, colour, material),
+   * by the body id they would have (`derived#1:from/<source body id>`).
+   */
+  inherited: Map<string, BodyPropsFields>;
 }
 
 const now = (): number => performance.now();
@@ -219,10 +244,16 @@ const emptyBatch = (): Batch => ({ ops: [], metas: [], shapesFrom: null });
  * feature op), and a `no-body` failure on a live body (an empty one) keeps them.
  */
 function staleBody(op: KernelOp, r: OpResult): boolean {
-  if (op.op !== 'feature' || !Array.isArray(op.bodies) || op.bodies.length === 0 || !r.ok) {
-    return false;
-  }
+  if (op.op !== 'feature' || !r.ok) return false;
   const outcome = r.value as FeatureOutcome;
+  // A derive whose source shape is gone says so on `sources`; the engine only sends live ones.
+  if (
+    op.feature.kind === 'derive' &&
+    outcome.errors.some((e) => e.code === 'no-body' && e.ref === 'sources')
+  ) {
+    return true;
+  }
+  if (!Array.isArray(op.bodies) || op.bodies.length === 0) return false;
   return (
     outcome.bodies.some((b) => b.names === null) && outcome.errors.some((e) => e.code === 'no-body')
   );
@@ -249,6 +280,8 @@ export class RegenEngine {
    * once, not on every regen.
    */
   readonly #checkedSources = new WeakMap<ImportSource, boolean>();
+  /** Pinned sources of derived features: checked, read and measured for depth once each. */
+  readonly #derived = new DerivedSources();
   #latest = 0;
   #chain: Promise<unknown> = Promise.resolve();
   #instance: number | null = null;
@@ -351,6 +384,7 @@ export class RegenEngine {
         namingScheme: document.namingScheme,
         implementation: REGEN_IMPLEMENTATION_VERSION,
       },
+      sources: new Map(),
     };
     for (let attempt = 0; ; attempt++) {
       try {
@@ -370,6 +404,7 @@ export class RegenEngine {
           this.#instance = error.instance;
           run.instance = error.instance;
           run.used.clear();
+          run.sources.clear();
           continue;
         }
         throw error;
@@ -391,6 +426,7 @@ export class RegenEngine {
     options: RegenOptions,
   ): Promise<RegenResult> {
     const variables = evaluateVariables(document.variables);
+    this.#derived.begin();
     const reuseChange =
       options.change !== undefined &&
       options.previous !== undefined &&
@@ -409,7 +445,11 @@ export class RegenEngine {
           ? { firstAffectedIndex: partChange ? partChange.firstAffectedIndex : null }
           : {},
       );
-      const state = await this.#buildPart(run, part, document, variables);
+      const state = await this.#buildPart(run, part, document, variables, {
+        ns: null,
+        depth: 0,
+        versions: run.versions,
+      });
       const features = part.features.map(
         (f, i) =>
           state.results.get(f.id) ?? {
@@ -482,7 +522,9 @@ export class RegenEngine {
       const bodies = finalBodies(state).map((b): BodyResult => {
         const slot = slotOf(state.part.id, b.id);
         reported.set(slot, b.key);
+        const inherited = carriedProps(state.part, b.id, state.inherited.get(b.id));
         return {
+          ...(inherited === undefined ? {} : { inherited }),
           bodyId: b.id,
           creator: b.creator,
           shape: b.shape,
@@ -497,6 +539,7 @@ export class RegenEngine {
     });
     this.#reported = reported;
     this.#lastDocument = document;
+    this.#derived.retain();
     const dropped = await this.#cache.retain(run.used);
     await this.#releaseEntries(dropped);
     this.#addStats(run.counters);
@@ -527,15 +570,22 @@ export class RegenEngine {
     return reply;
   }
 
+  /** A cache key of a feature of `state`'s part: its document's versions and namespace. */
+  #key(state: BuildScope, parts: Record<string, unknown>): string {
+    return cacheKey(state.versions, state.ns === null ? parts : { namespace: state.ns, ...parts });
+  }
+
   async #buildPart(
     run: Run,
     part: Part,
     document: ManufaktureDocument,
     variables: VariableValues,
+    scope: BuildScope,
   ): Promise<PartState> {
     const graph = buildGraph(part, document.variables);
     const lookup = (id: string) => graph.byId.get(id);
     const state: PartState = {
+      ...scope,
       part,
       bodies: [],
       consumed: [],
@@ -546,6 +596,7 @@ export class RegenEngine {
       sketches: new Map(),
       inputs: new Map(),
       references: new Set(),
+      inherited: new Map(),
     };
 
     for (const [i, f] of graph.active.entries()) {
@@ -650,12 +701,27 @@ export class RegenEngine {
         }
       }
 
+      // A derived feature's source part is built first; its bodies are the op's sources.
+      let sources: LiveBody[] = [];
+      let sourceWarnings: RegenWarning[] = [];
+      if (f.kind === 'derived') {
+        const got = await this.#derivedBodies(run, state, f);
+        if (!got.ok) {
+          fail('error', got.errors);
+          continue;
+        }
+        sources = got.bodies;
+        sourceWarnings = got.warnings;
+        for (const [id, props] of got.props) state.inherited.set(`${f.id}:from/${id}`, props);
+      }
+
       const t = translateFeature(f, {
         values: values.values,
         sketches: state.sketches,
         inputs: state.inputs,
         references: state.references,
         bodies: new Set(state.bodies.map((b) => b.id)),
+        sources: new Map([[f.id, sources]]),
       });
       if (!t.ok) {
         fail('error', t.errors);
@@ -665,9 +731,13 @@ export class RegenEngine {
       // Only the bodies the feature reads go to the kernel, and only their keys into its key.
       const read = new Set(routeBodies(bodyUse(f, lookup)!, state.bodies));
       const reads = state.bodies.filter((b) => read.has(b.id));
-      // An import is keyed by its (verified) hash and size, not its whole base64 text.
-      const key = cacheKey(run.versions, {
-        input: keyInput(t.input, f.kind === 'import' ? f.source : null),
+      // An import is keyed by its (verified) hash and size, not its whole base64 text; a
+      // derive by the keys of its source bodies, not their shape ids.
+      const key = this.#key(state, {
+        input:
+          t.input.kind === 'derive'
+            ? { ...t.input, sources: sources.map((b) => [b.id, b.key]) }
+            : keyInput(t.input, f.kind === 'import' ? f.source : null),
         bodies: reads.map((b) => [b.id, b.key]),
       });
       run.used.add(key);
@@ -678,10 +748,11 @@ export class RegenEngine {
         this.#fill(result, hit, started);
         result.cached = true;
         if (!hit.ok) state.unavailable.set(f.id, 'error');
+        if (sourceWarnings.length > 0) result.warnings = [...result.warnings, ...sourceWarnings];
         continue;
       }
       run.counters.cacheMisses++;
-      this.#usesBodies(state.batch, reads);
+      this.#usesBodies(state.batch, [...reads, ...sources]);
       state.batch.ops.push({
         op: 'feature',
         bodies: reads.map((b) => ({ id: b.id, shape: b.shape })),
@@ -689,8 +760,110 @@ export class RegenEngine {
       });
       state.batch.metas.push({ type: 'feature', feature: f, key, result, started });
       await this.#flush(run, state);
+      if (sourceWarnings.length > 0) result.warnings = [...result.warnings, ...sourceWarnings];
     }
     return state;
+  }
+
+  /**
+   * The source bodies of a derived feature: its pinned source checked and opened, its nesting
+   * checked against `MAX_DERIVED_DEPTH` before anything is built, then its part regenerated
+   * (once per regen for every derived feature of that part) and the listed bodies picked.
+   */
+  async #derivedBodies(
+    run: Run,
+    state: PartState,
+    f: DerivedFeature,
+  ): Promise<
+    | {
+        ok: true;
+        bodies: LiveBody[];
+        warnings: RegenWarning[];
+        props: Map<string, BodyPropsFields>;
+      }
+    | { ok: false; errors: RegenError[] }
+  > {
+    const opened = await this.#derived.open(f.source);
+    this.#checkStale(run);
+    if (!opened.ok) return { ok: false, errors: [opened.error] };
+    const fits = await this.#derived.fits(f.source, state.depth + 1);
+    this.#checkStale(run);
+    if (!fits) return { ok: false, errors: [tooDeep(f.source)] };
+
+    const ns = sourceNamespace(f.source);
+    let built = run.sources.get(ns);
+    if (built === undefined) {
+      const { document, part } = opened;
+      built = await this.#buildPart(run, part, document, evaluateVariables(document.variables), {
+        ns,
+        depth: state.depth + 1,
+        versions: { ...run.versions, namingScheme: document.namingScheme },
+      });
+      run.sources.set(ns, built);
+    }
+    const where = `${f.source.documentName || f.source.documentId} at ${f.source.versionName || f.source.versionId}`;
+    if (built.broken) {
+      return {
+        ok: false,
+        errors: [
+          {
+            code: 'source',
+            field: ['source'],
+            message: `The kernel failed while building ${where}; nothing of it can be derived`,
+          },
+        ],
+      };
+    }
+    const all = built.bodies;
+    if (f.bodies !== undefined) {
+      const missing = f.bodies.filter((id) => !all.some((b) => b.id === id));
+      if (missing.length > 0) {
+        return {
+          ok: false,
+          errors: [
+            {
+              code: 'reference-lost',
+              referenceId: 'bodies',
+              missing,
+              message: `${where} has no body ${missing.join(', ')} (merged into another, or never made in that version): re-pick the bodies`,
+            },
+          ],
+        };
+      }
+    }
+    const bodies = f.bodies === undefined ? all : all.filter((b) => f.bodies!.includes(b.id));
+    if (bodies.length === 0) {
+      return {
+        ok: false,
+        errors: [
+          {
+            code: 'no-body',
+            field: ['source'],
+            message: `Part ${f.source.partId} of ${where} has no bodies to derive`,
+          },
+        ],
+      };
+    }
+    const failed = built.part.features
+      .filter((x) => {
+        const s = built.results.get(x.id)?.status;
+        return s === 'error' || s === 'upstream-error';
+      })
+      .map((x) => x.id);
+    const warnings: RegenWarning[] =
+      failed.length === 0
+        ? []
+        : [
+            {
+              code: 'derived-source',
+              features: failed,
+              message: `${failed.length === 1 ? 'A feature' : `${failed.length} features`} of ${where} failed (${failed.join(', ')}): the derived bodies are what it built without ${failed.length === 1 ? 'it' : 'them'}`,
+            },
+          ];
+    const props = new Map(
+      bodies.map((b) => [b.id, effectiveProps(built.part, b.id, built.inherited.get(b.id))]),
+    );
+    return { ok: true, bodies, warnings, props };
   }
 
   /**
@@ -762,7 +935,7 @@ export class RegenEngine {
       f.plane.type === 'plane'
         ? { placement: explicitPlacement(f.plane) }
         : { bodies: owners.map((b) => [b.id, b.key]), ref: f.plane.face.ref };
-    const key = cacheKey(run.versions, {
+    const key = this.#key(state, {
       solver: this.#solverBuild,
       sketch: definition,
       values: [...values.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),

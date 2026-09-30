@@ -3,7 +3,7 @@
 // its arena id, and its mesh when it changed). Everything is plain data, so a reply can
 // cross the worker boundary (ADR 0007); mesh buffers are transferred.
 
-import type { FeatureKind, Vec3 } from '@manufakture/core';
+import type { BodyPropsFields, FeatureKind, Vec3 } from '@manufakture/core';
 import type { MeshData, ShapeId, Topology, Via } from '@manufakture/kernel';
 import type { RegionDiagnosticCode, SketchPlacement } from '@manufakture/sketch';
 import type { UnitsError } from '@manufakture/units';
@@ -77,7 +77,19 @@ export type RegenError =
       conflicting: string[];
       redundant: string[];
     }
-  | { code: 'upstream'; message: string; upstream: string[] };
+  | { code: 'upstream'; message: string; upstream: string[] }
+  | {
+      /**
+       * A derived part's pinned source cannot be built: its data does not match its SHA-256, it
+       * is not a readable document, it was saved by a newer version, it has no such part, or it
+       * nests derived parts deeper than `MAX_DERIVED_DEPTH`. `field` is the part of `source` at
+       * fault (`['source', 'sha256']`, `['source', 'data']`, `['source', 'partId']`, or `['source']`
+       * for the depth).
+       */
+      code: 'source';
+      message: string;
+      field: FieldPath;
+    };
 
 export type RegenErrorCode = RegenError['code'];
 
@@ -106,7 +118,12 @@ export type RegenWarning =
   | { code: 'redundant'; message: string; constraints: string[] }
   | { code: 'extension'; message: string }
   /** An import kept aside as a reference body (display and measure only): no geometry change. */
-  | { code: 'reference-body'; message: string };
+  | { code: 'reference-body'; message: string }
+  /**
+   * Features of a derived part's source failed (or could not be built) at that version: the
+   * derived bodies are what the source built without them. `features` lists them in order.
+   */
+  | { code: 'derived-source'; message: string; features: string[] };
 
 /** How one reference of a feature resolved (ADR 0004 decision 6: recomputed, never stored). */
 export interface ReferenceResolution {
@@ -163,6 +180,13 @@ export interface BodyResult {
    * the mesh: face and edge `index` is the mesh's 1-based face and edge numbering.
    */
   topology: Topology | null;
+  /**
+   * Bodies a derived feature made (`derived#1:from/<source body id>`): the name, colour and
+   * material the body has in its source (its own, else the source part's material), for each of
+   * them this part does not set for the body itself. Absent when nothing carries over. The body's
+   * own settings (`Part.bodies`) win, then these, then this part's material.
+   */
+  inherited?: BodyPropsFields;
 }
 
 /** A body that ended in a merge: an `add` fused it into another body. */

@@ -1,10 +1,14 @@
 // Test-only fixtures; not exported from the package. Documents are built through core commands,
 // so they are valid and their id counters are real.
 
+import { createHash } from 'node:crypto';
 import {
   applyCommand,
   createDocument,
+  serialize,
   type Command,
+  type DerivedFeature,
+  type DerivedSource,
   type ExtrudeFeature,
   type Feature,
   type FilletFeature,
@@ -216,4 +220,41 @@ export function pocket(id: string, at: [number, number], n = 0): SketchFeature {
     ids: [`e${e}`, `e${e + 1}`, `e${e + 2}`, `e${e + 3}`],
     firstConstraint: 23 + 11 * n,
   });
+}
+
+/** A pin of `data` (a source document's text), with its real size and hash. */
+export function pinText(data: string, partId = PART): DerivedSource {
+  return {
+    documentId: 'doc-src',
+    documentName: 'Source',
+    versionId: 'v-1',
+    versionName: 'One',
+    partId,
+    size: Buffer.byteLength(data, 'utf8'),
+    sha256: createHash('sha256').update(data).digest('hex'),
+    data,
+  };
+}
+
+export const pin = (source: ManufaktureDocument, partId = PART) =>
+  pinText(serialize(source), partId);
+
+export function derivedOf(
+  id: string,
+  source: DerivedSource,
+  extra: Partial<DerivedFeature> = {},
+): DerivedFeature {
+  return {
+    id,
+    kind: 'derived',
+    name: id,
+    suppressed: false,
+    source,
+    placement: {
+      translation: [mm('0'), mm('0'), mm('0')],
+      rotation: [mm('0'), mm('0'), mm('0')],
+    },
+    operation: 'new',
+    ...extra,
+  };
 }

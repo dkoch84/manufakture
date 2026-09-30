@@ -4,6 +4,8 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  deriveFaces,
+  derivedName,
   disambiguate,
   invalidFeatureId,
   invalidSketchId,
@@ -303,5 +305,54 @@ describe('references', () => {
     expect(pickEdge(nameShape([plain('a'), plain('b')], topology), 1)).toEqual({
       faces: ['a', 'b'],
     });
+  });
+});
+
+describe('derived names', () => {
+  const D = 'derived#1:from/';
+  it.each([
+    ['extrude#1:cap:end', `${D}extrude#1:cap:end`],
+    // A merge is one group, prefixed once; a split piece keeps its suffix.
+    ['(extrude#1:cap:end+extrude#2:side:e5)', `${D}(extrude#1:cap:end+extrude#2:side:e5)`],
+    ['(extrude#1:cap:end+extrude#2:side:e5)#2', `${D}(extrude#1:cap:end+extrude#2:side:e5)#2`],
+    // A corner has no brackets: every member is prefixed.
+    [
+      'fillet#3:corner:extrude#1:cap:end&extrude#1:side:e1&extrude#1:side:e2',
+      `${D}fillet#3:corner:extrude#1:cap:end&${D}extrude#1:side:e1&${D}extrude#1:side:e2`,
+    ],
+    // Members inside a group stay inside it; members after a group are prefixed.
+    [
+      'fillet#3:corner:(extrude#1:a+extrude#2:b)&extrude#1:c',
+      `${D}fillet#3:corner:(extrude#1:a+extrude#2:b)&${D}extrude#1:c`,
+    ],
+    ['(fillet#3:corner:A&B+extrude#2:c)', `${D}(fillet#3:corner:A&B+extrude#2:c)`],
+    ['pattern#7:i2/extrude#3:side:e1', `${D}pattern#7:i2/extrude#3:side:e1`],
+    // A nested derived name gains another prefix.
+    [
+      'derived#2:from/fillet#3:corner:A&derived#2:from/B',
+      `${D}derived#2:from/fillet#3:corner:A&${D}derived#2:from/B`,
+    ],
+  ])('%s', (name, expected) => {
+    expect(derivedName(name, 'derived#1')).toBe(expected);
+  });
+
+  it('prefixes every lineage entry and keeps fragility', () => {
+    const faces: FaceName[] = [
+      {
+        name: 'extrude#1:side:e2#1',
+        lineage: ['extrude#1:side:e2#1', 'extrude#1:side:e2'],
+        fragile: true,
+      },
+    ];
+    expect(deriveFaces(faces, 'derived#4')).toEqual([
+      {
+        name: 'derived#4:from/extrude#1:side:e2#1',
+        lineage: ['derived#4:from/extrude#1:side:e2#1', 'derived#4:from/extrude#1:side:e2'],
+        fragile: true,
+      },
+    ]);
+    // A positional source name stays positional once prefixed.
+    expect(isPositional(derivedName('extrude#1:side:e2#1', 'derived#4'))).toBe(true);
+    expect(isPositional(derivedName('extrude#1:side:e2', 'derived#4'))).toBe(false);
   });
 });

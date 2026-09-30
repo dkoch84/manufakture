@@ -156,7 +156,7 @@ dirty but a cache hit).
 | hole `sketch`, `points`              | the sketch placement as the frame, each point entity's solved position                      |
 | pattern, mirror `features`           | the source features' own kernel inputs (extrudes, revolves, holes); `body: true` the body   |
 | pattern, mirror `body: true`, `mode` | `source: { type: 'body', mode }`; no `mode` when the document has none (the kernel's `add`) |
-| `derived`                            | not built yet: an `unsupported` error on `source`, so its dependents are not built          |
+| `derived`                            | `derive` of the pinned source part's bodies (see Derived parts); placement in mm, radians   |
 | pattern `count`                      | checked here: a whole number, 1 to `MAX_PATTERN_COUNT`, however it was computed             |
 | `scope`                              | the same list; an entry that is not a body at that point is `reference-lost` on `scope`     |
 | body id of a `new` or `add` feature  | `body`: the feature's own id (M2 plan, decision 1)                                          |
@@ -193,6 +193,11 @@ canonical JSON of
   it reads (see the graph section), not of the whole body set, so an edit to one body is a cache
   hit for the features of the others. A body's key is the key of the feature that last changed it
   plus its id, which chains every upstream key of that body;
+- for a derived feature: its `derive` input with each source body's id and key in place of its
+  shape id, so it is keyed by what the source built, not by where it lives in the arena;
+- for a feature of a derived part's source: the source document's naming scheme and a
+  `namespace` (`sourceNamespace`: the pin's `sha256` and part id) besides the usual fields, so
+  every derived feature of one pinned part, in any part and in any regen, shares its entries;
 - for a sketch: the solver build (`DEFAULT_SOLVER_BUILD`, the pinned planegcs release; pass
   `solverBuild` to override), its definition without the display name, its evaluated dimension
   values, and its plane (the placement, or the keys of the bodies the face may lie on plus the
@@ -237,6 +242,54 @@ resolve against; restoring a body needs a B-rep format that keeps its names and 
 the kernel does not have. Until it does, a persistent tier should return body entries without
 `body`, which the engine treats as a miss.
 
+## Derived parts
+
+A `derived` feature (core README, "Derived parts") carries its source document at a pinned
+version as canonical JSON text. Regen builds it in four steps (`src/derived.ts`, the engine's
+`#derivedBodies`):
+
+1. **Open the pin.** The UTF-8 bytes of `data` must be `size` long and hash to `sha256`; this is
+   checked once per source object, as for imported files. The text is read with core's
+   `deserialize`, which migrates an older format in memory; a newer format, text that is not a
+   document, and a `partId` the document does not have are each a `source` error on the feature
+   (`field` `['source', 'sha256']`, `['source', 'data']` or `['source', 'partId']`). A read
+   document is kept by hash while regens use it, so an edit elsewhere never parses it again.
+2. **Check the nesting, before building anything.** A source may derive from another source, and
+   so on. Regen walks the chain (the active, unsuppressed derived features of each part it would
+   build), opening each source but building none, and refuses one that nests deeper than
+   `MAX_DERIVED_DEPTH` (8): the feature fails with `source` on `['source']` and nothing of the
+   chain reaches the kernel. The walk stops at that depth, so a hostile chain costs at most eight
+   openings; the height of each (hash, part) is memoized. A source that cannot be opened counts as
+   one level, since it fails on its own when its turn comes.
+3. **Regenerate the source part** in the same kernel, by the same engine, with the source
+   document's own variables and naming scheme, under its cache namespace (see Cache). Every
+   derived feature of that part in the regen uses this one build; across regens, an unchanged
+   pin is all cache hits. The source's features are not reported; features of it that failed
+   give the derived feature a `derived-source` warning listing them (from the kernel and from the
+   cache alike), and its bodies are what it built without them. A kernel failure as a whole in
+   the source is a `source` error.
+4. **Derive.** The listed `bodies` (absent: every body of the source part, in its creator order)
+   go to the kernel's `derive` input with the placement. A listed body the source does not have
+   at that version (merged away, or never made) is `reference-lost` on `bodies` with `missing`,
+   and a source with no bodies is `no-body`. The kernel names the copies `<id>:from/<source
+body id>` and their faces `<id>:from/<source face name>` (kernel README, "Derived bodies"),
+   which core's name parser reads as depending on the derived feature only.
+
+**Updating a pin** (a new `source` with another version) is a new `sha256`, so a new namespace:
+the source is built afresh, while a fillet on a derived edge keeps its reference, which names
+source features, not positions, and resolves `exact` wherever the edge still exists.
+
+**Body properties.** A derived body's name, colour and material in its source (its own, else
+the source part's material) carry over to `BodyResult.inherited`, field by field, unless the
+deriving part sets that field for the body itself in `Part.bodies`. The app shows the body's
+own settings, then these, then the deriving part's material.
+
+**Recycles.** A nested build adds shapes to the same heap, so a recycle can land between the
+source build and the derive. Source bodies take part in the stale-shape check like any body the
+batch reads (see Cache), and a derive whose source shape is unknown fails with `no-body` on
+`sources`, which the engine treats as stale too: the regen restarts, rebuilding the source on
+the new instance, and nothing built on the dead shapes is cached.
+
 ## Errors, warnings, statuses
 
 Per feature: `ok`, `error`, `upstream-error`, `suppressed` or `rolled-back`, with `errors`,
@@ -251,8 +304,9 @@ mapped back to the id of the reference that field holds), a message ending in "r
 reference's `lastResolved` hint when it has one. Missing sketch geometry (a profile entity, an axis
 line, a hole point) is `reference-lost` on `profile`, `axis` or `points`. Kernel warnings map the
 same way: `reference` (with `via` and `fragile`, for `ends`, `descendant`, `ancestor`, ordinal and
-fragile resolutions), `missed` and `direction`. Regen adds `expression`, `sketch` and `upstream`
-errors, and `sketch`, `redundant`, `extension` and `reference-body` warnings.
+fragile resolutions), `missed` and `direction`. Regen adds `expression`, `sketch`, `upstream` and
+`source` errors, and `sketch`, `redundant`, `extension`, `reference-body` and `derived-source`
+warnings.
 
 **Propagation.** A failed feature is skipped: the kernel passes the bodies through, so independent
 later features still build on them. A feature naming a failed, suppressed or upstream-errored feature
@@ -311,6 +365,7 @@ interface BodyResult {
   meshChanged: boolean;
   mesh: MeshData | null;
   topology: Topology | null;
+  inherited?: BodyPropsFields; // derived bodies: name, colour, material from the source
 }
 ```
 
@@ -346,7 +401,15 @@ pnpm --filter @manufakture/regen test
   topology sent with a changed mesh only, sketch keys per solver build, sketches on faces and the
   placement they report; with two bodies, the bodies each feature op gets, the ops sent per edit, a
   mesh only for the changed body, scoped versus unscoped features, consumed bodies and references
-  routed to the body they merged into, and a scope naming a missing body.
+  routed to the body they merged into, and a scope naming a missing body; derived features: a
+  damaged pin, two derived features of one source building it once, an unrelated edit all cache
+  hits, a pin update rebuilding only that source, unreadable, newer-format and part-less sources,
+  a lost source body, `derived-source` warnings, carried body properties, a chain one level too
+  deep refused before anything is built (and one at the limit built), and a recycle between the
+  source build and the derive.
+- `derived.test.ts`: every derived name form read by core's parser as depending on the derived
+  feature alone, hashing once per source object, document reuse by hash, the nesting walk, and
+  body properties.
 - `translate.test.ts`, `values.test.ts`, `cache.test.ts`: profile selection, revolve axes and
   `flip`, holes, patterns, scopes and body ids, expressions and units, keys and the memory cache.
 - `worker-api.test.ts`: the regen worker through Comlink on a real `MessageChannel` with the real
@@ -366,7 +429,11 @@ pnpm --filter @manufakture/regen test
   blocks, each with its own fillet): editing one body's width or radius sends only that body's
   features, the other body keeps its shape, and the volumes are checked per body. The M1 bracket
   fixture (`packages/core/src/fixtures/v5-bracket.json`, no scopes) regenerates to one body with
-  the volume and face names the one-body regen gave.
+  the volume and face names the one-body regen gave. Derived parts: the M1 bracket derived at a
+  placement with a fillet on one of its edges, whose pin is then updated to a version where
+  `#thickness` is 8 mm; the fillet resolves `exact` to the same named edge, and the volume and the
+  round's extent are checked at both versions. A cut with the derived bracket, with a recycle
+  forced between the source build and the derive; nothing leaks.
 
 ## Deviations and gaps
 

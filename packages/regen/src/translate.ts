@@ -17,6 +17,7 @@ import {
 import type {
   EdgeRef,
   FaceRef,
+  FeatureBody,
   FeatureInput,
   HoleHead,
   HoleInput,
@@ -45,6 +46,12 @@ export interface TranslateContext {
    * is a `reference-lost` error on `scope` (the body was merged away, or never made).
    */
   bodies?: ReadonlySet<string>;
+  /**
+   * The source bodies of derived features, by feature id: the bodies of the pinned source part
+   * the feature derives, built in this kernel (`derived.ts`, the engine). A derived feature
+   * without an entry fails with `source`.
+   */
+  sources?: ReadonlyMap<string, readonly FeatureBody[]>;
 }
 
 export type Translation = { ok: true; input: FeatureInput } | { ok: false; errors: RegenError[] };
@@ -414,15 +421,24 @@ function translateInput(f: Feature, ctx: TranslateContext): FeatureInput {
       };
     case 'import':
       return importInput(f);
-    case 'derived':
-      // Regenerating the pinned source is T2.2b; until then the feature fails on its own.
-      throw new Failed([
-        {
-          code: 'unsupported',
-          field: ['source'],
-          message: `${f.id}: derived parts cannot be regenerated yet`,
-        },
-      ]);
+    case 'derived': {
+      const sources = ctx.sources?.get(f.id);
+      if (sources === undefined || sources.length === 0) {
+        throw new Failed([
+          { code: 'source', field: ['source'], message: `${f.id}: its source was not built` },
+        ]);
+      }
+      const v = (field: 'translation' | 'rotation') =>
+        [0, 1, 2].map((i) => value(ctx, 'placement', field, i)) as [number, number, number];
+      return {
+        kind: 'derive',
+        id: f.id,
+        sources: sources.map((b) => ({ id: b.id, shape: b.shape })),
+        rotation: v('rotation'),
+        translation: v('translation'),
+        mode: MODES[f.operation],
+      };
+    }
     case 'sketch':
     case 'extension':
       throw new Error(`${f.kind} features are not kernel features`);

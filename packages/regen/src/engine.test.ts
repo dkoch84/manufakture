@@ -3,14 +3,17 @@
 // The real kernel and solver are in integration.test.ts.
 
 import { createHash } from 'node:crypto';
-import type {
-  Command,
-  DerivedFeature,
-  ExtrudeFeature,
-  ImportFeature,
-  ImportSource,
-  ManufaktureDocument,
-  PatternFeature,
+import {
+  MAX_DERIVED_DEPTH,
+  serialize,
+  type Command,
+  type DerivedFeature,
+  type DerivedSource,
+  type ExtrudeFeature,
+  type ImportFeature,
+  type ImportSource,
+  type ManufaktureDocument,
+  type PatternFeature,
 } from '@manufakture/core';
 import type {
   BatchReply,
@@ -36,9 +39,12 @@ import {
   apply,
   block,
   build,
+  derivedOf,
   extrude,
   fillet,
   mm,
+  pin,
+  pinText,
   pocket,
   rectangle,
   setVariable,
@@ -210,6 +216,22 @@ class FakeKernel implements RegenKernel {
             false,
           );
         }
+        if (op.feature.kind === 'derive') {
+          // The real kernel reads a derive's sources as it reads bodies: a dead one is `no-body`
+          // on `sources`.
+          const gone = op.feature.sources.find((x) => !this.live.has(x.shape));
+          if (gone !== undefined) {
+            return fail([
+              {
+                featureId: id,
+                code: 'no-body',
+                ref: 'sources',
+                target: gone.id,
+                message: `unknown shape id ${gone.shape}`,
+              },
+            ]);
+          }
+        }
         const b = this.behaviours.get(id) ?? {};
         if ((b.errors ?? []).length > 0) return fail(b.errors!);
         const input = op.feature as { mode?: string; body?: string };
@@ -224,9 +246,14 @@ class FakeKernel implements RegenKernel {
         const changed: string[] = [];
         let consumed: string[] = [];
         if (input.mode === 'new' || given.length === 0) {
-          const bodyId = input.body ?? id;
-          bodies.push({ id: bodyId, shape: mint(), names: { faces: [], edges: [] }, solids: 1 });
-          created.push(bodyId);
+          const made =
+            op.feature.kind === 'derive'
+              ? op.feature.sources.map((x) => `${id}:from/${x.id}`)
+              : [input.body ?? id];
+          for (const bodyId of made) {
+            bodies.push({ id: bodyId, shape: mint(), names: { faces: [], edges: [] }, solids: 1 });
+            created.push(bodyId);
+          }
         } else {
           // Every body read is changed (a scripted `touch` narrows it), and `merge` fuses them.
           const touched = given.filter((g) => b.touch?.includes(g.id) ?? true).map((g) => g.id);
@@ -1097,33 +1124,26 @@ describe('imports', () => {
   });
 });
 
+/** A document of one part holding `features` (derived features need no sketch). */
+const holding = (...features: DerivedFeature[]) =>
+  build([setVariable('unrelated', '1'), ...features.map((f) => add(f))]);
+
+/** Replace a feature of the part, as an edit would. */
+function withFeature(doc: ManufaktureDocument, feature: DerivedFeature): ManufaktureDocument {
+  const part = doc.parts[0]!;
+  return {
+    ...doc,
+    parts: [{ ...part, features: part.features.map((f) => (f.id === feature.id ? feature : f)) }],
+  };
+}
+
 describe('derived features', () => {
-  it('fails a derived feature and what reads it, without sending either to the kernel', async () => {
+  it('fails on a pin whose data does not match its hash, without sending anything', async () => {
     const { kernel, engine } = setup();
-    const derived: DerivedFeature = {
-      id: 'derived#1',
-      kind: 'derived',
-      name: 'Derived 1',
-      suppressed: false,
-      source: {
-        documentId: 'doc-src',
-        documentName: 'Source',
-        versionId: 'v-1',
-        versionName: 'One',
-        partId: 'part#1',
-        size: 2,
-        sha256: '0'.repeat(64),
-        data: '{}',
-      },
-      placement: {
-        translation: [mm('0'), mm('0'), mm('0')],
-        rotation: [mm('0'), mm('0'), mm('0')],
-      },
-      operation: 'new',
-    };
+    const damaged = { ...pin(block()), sha256: '0'.repeat(64) };
     const doc = apply(
       block(),
-      add(derived),
+      add(derivedOf('derived#1', damaged)),
       add(
         fillet(
           'fillet#2',
@@ -1141,8 +1161,187 @@ describe('derived features', () => {
       'fillet#2': 'upstream-error',
     });
     expect(r.parts[0]!.features[3]!.errors).toMatchObject([
-      { code: 'unsupported', field: ['source'] },
+      { code: 'source', field: ['source', 'sha256'] },
     ]);
     expect(kernel.featureOps).toEqual(['extrude#1', 'fillet#1']);
+  });
+
+  it('two derived features of one source regenerate it once; an unrelated edit is a cache hit', async () => {
+    const { kernel, solver, engine } = setup();
+    const source = pin(block());
+    const doc = holding(
+      derivedOf('derived#1', source),
+      derivedOf('derived#2', source, {
+        placement: {
+          translation: [mm('100'), mm('0'), mm('0')],
+          rotation: [mm('0'), mm('0'), mm('90deg')],
+        },
+      }),
+    );
+    const first = await regen(engine, doc);
+    expect(statuses(first)).toEqual({ 'derived#1': 'ok', 'derived#2': 'ok' });
+    // The source's sketch, extrude and fillet once, then one derive per feature.
+    expect(kernel.featureOps).toEqual(['extrude#1', 'fillet#1', 'derived#1', 'derived#2']);
+    expect(solver.solves).toBe(1);
+    const one = kernel.inputs.get('derived#1') as Extract<FeatureInput, { kind: 'derive' }>;
+    const two = kernel.inputs.get('derived#2') as Extract<FeatureInput, { kind: 'derive' }>;
+    expect(one.sources).toEqual(two.sources);
+    expect(one.sources.map((b) => b.id)).toEqual(['extrude#1']);
+    expect(two).toMatchObject({ translation: [100, 0, 0], mode: 'new' });
+    expect(two.rotation[2]).toBeCloseTo(Math.PI / 2, 12);
+    expect(first.parts[0]!.bodies.map((b) => [b.bodyId, b.creator])).toEqual([
+      ['derived#1:from/extrude#1', 'derived#1'],
+      ['derived#2:from/extrude#1', 'derived#2'],
+    ]);
+    // The source's parts are built, not reported.
+    expect(first.parts.map((p) => p.partId)).toEqual([PART]);
+
+    const edited = await regen(engine, apply(doc, setVariable('unrelated', '2')));
+    expect(edited.counters).toMatchObject({ featureOps: 0, solves: 0, cacheMisses: 0 });
+    expect(edited.parts[0]!.features.every((f) => f.cached)).toBe(true);
+    expect(edited.parts[0]!.bodies.map((b) => b.meshChanged)).toEqual([false, false]);
+
+    // Updating one pin rebuilds that source, under its own namespace; the other stays cached.
+    const changed = pin(apply(block(), setVariable('radius', '5mm')));
+    const updated = await regen(engine, withFeature(doc, derivedOf('derived#1', changed)));
+    expect(kernel.featureOps.slice(4)).toEqual(['extrude#1', 'fillet#1', 'derived#1']);
+    expect(updated.parts[0]!.features.map((f) => f.cached)).toEqual([false, true]);
+    expect(updated.parts[0]!.bodies.map((b) => b.meshChanged)).toEqual([true, false]);
+  });
+
+  it('reports what is wrong with a source on the feature', async () => {
+    const { kernel, engine } = setup();
+    const text = serialize(block());
+    const newer = JSON.stringify({ ...(JSON.parse(text) as object), version: 99 });
+    const cases: [DerivedSource, string[], RegExp][] = [
+      [pinText('{"format":"something else"}'), ['source', 'data'], /cannot be read/],
+      [pinText(newer), ['source', 'data'], /newer version of manufakture \(file format 99/],
+      [pinText(text, 'part#9'), ['source', 'partId'], /has no part part#9/],
+    ];
+    for (const [source, field, message] of cases) {
+      const r = await regen(engine, holding(derivedOf('derived#1', source)));
+      expect(r.parts[0]!.features[0]).toMatchObject({
+        status: 'error',
+        errors: [{ code: 'source', field }],
+      });
+      expect(r.parts[0]!.features[0]!.errors[0]!.message).toMatch(message);
+    }
+    expect(kernel.featureOps).toEqual([]);
+
+    // A body the source does not have at that version: the source is built, nothing derived.
+    const lost = await regen(
+      engine,
+      holding(derivedOf('derived#1', pinText(text), { bodies: ['extrude#1', 'extrude#7'] })),
+    );
+    expect(lost.parts[0]!.features[0]!.errors).toMatchObject([
+      { code: 'reference-lost', referenceId: 'bodies', missing: ['extrude#7'] },
+    ]);
+    expect(kernel.featureOps).toEqual(['extrude#1', 'fillet#1']);
+  });
+
+  it('warns when source features failed, from the kernel and from the cache alike', async () => {
+    const { kernel, engine } = setup();
+    kernel.behaviours.set('fillet#1', {
+      errors: [{ featureId: 'fillet#1', code: 'kernel', message: 'refused' }],
+    });
+    const doc = holding(derivedOf('derived#1', pin(block())));
+    for (const next of [doc, apply(doc, setVariable('unrelated', '3'))]) {
+      const r = await regen(engine, next);
+      expect(r.parts[0]!.features[0]).toMatchObject({
+        status: 'ok',
+        warnings: [{ code: 'derived-source', features: ['fillet#1'] }],
+      });
+    }
+    expect(kernel.featureOps).toEqual(['extrude#1', 'fillet#1', 'derived#1']);
+  });
+
+  it('carries the source body name, colour and material over unless the part sets its own', async () => {
+    const { engine } = setup();
+    const src = block();
+    const styled: ManufaktureDocument = {
+      ...src,
+      parts: [
+        {
+          ...src.parts[0]!,
+          material: 'pla',
+          bodies: [{ id: 'extrude#1', name: 'Plate', color: '#ff0000' }],
+        },
+      ],
+    };
+    const doc = holding(derivedOf('derived#1', pin(styled)));
+    const own: ManufaktureDocument = {
+      ...doc,
+      parts: [{ ...doc.parts[0]!, bodies: [{ id: 'derived#1:from/extrude#1', color: '#00ff00' }] }],
+    };
+    const r = await regen(engine, own);
+    expect(r.parts[0]!.bodies[0]!.inherited).toEqual({ name: 'Plate', material: 'pla' });
+    const plain = await regen(engine, holding(derivedOf('derived#1', pin(block()))));
+    expect(plain.parts[0]!.bodies[0]!.inherited).toBeUndefined();
+  });
+
+  it('refuses a chain of sources deeper than MAX_DERIVED_DEPTH before building any of it', async () => {
+    const base = build([
+      add(rectangle('sketch#1', { width: '40', depth: '30' })),
+      add(extrude('extrude#1', 'sketch#1', '20')),
+    ]);
+    // chain[n] derives chain[n - 1]: regenerating it opens n levels of sources.
+    const chain = [base];
+    for (let n = 1; n <= MAX_DERIVED_DEPTH + 1; n++) {
+      chain.push(build([add(derivedOf('derived#1', pin(chain[n - 1]!)))]));
+    }
+    const deep = setup();
+    const refused = await regen(deep.engine, chain[MAX_DERIVED_DEPTH + 1]!);
+    expect(refused.parts[0]!.features[0]).toMatchObject({
+      status: 'error',
+      errors: [{ code: 'source', field: ['source'] }],
+    });
+    expect(refused.parts[0]!.features[0]!.errors[0]!.message).toMatch(/more than 8 deep/);
+    expect(deep.kernel.featureOps).toEqual([]);
+
+    const fits = setup();
+    const built = await regen(fits.engine, chain[MAX_DERIVED_DEPTH]!);
+    expect(statuses(built)).toEqual({ 'derived#1': 'ok' });
+    expect(fits.kernel.featureOps).toEqual([
+      'extrude#1',
+      ...Array.from({ length: MAX_DERIVED_DEPTH }, () => 'derived#1'),
+    ]);
+    // Names nest: the top body is derived from a derived body, eight levels down.
+    expect(built.parts[0]!.bodies[0]!.bodyId).toBe(
+      `${'derived#1:from/'.repeat(MAX_DERIVED_DEPTH)}extrude#1`,
+    );
+  });
+
+  it('restarts when the kernel recycles in the middle of building a source', async () => {
+    const { kernel, engine } = setup();
+    let recycled = false;
+    kernel.onRun = () => {
+      // The batch after the source's fillet is the derive: its source shapes are now gone.
+      if (!recycled && kernel.featureOps.at(-1) === 'fillet#1') {
+        recycled = true;
+        kernel.recycle();
+      }
+    };
+    const r = await regen(engine, holding(derivedOf('derived#1', pin(block()))));
+    expect(statuses(r)).toEqual({ 'derived#1': 'ok' });
+    expect(engine.stats.retries).toBe(1);
+    // The derive ran on the new instance with dead sources and was thrown away; the source is
+    // rebuilt there, then derived from.
+    expect(kernel.featureOps).toEqual([
+      'extrude#1',
+      'fillet#1',
+      'derived#1',
+      'extrude#1',
+      'fillet#1',
+      'derived#1',
+    ]);
+    const input = kernel.inputs.get('derived#1') as Extract<FeatureInput, { kind: 'derive' }>;
+    expect(input.sources.every((b) => kernel.live.has(b.shape))).toBe(true);
+    // Nothing built on the dead shapes was cached: the next regen is all hits.
+    const again = await regen(
+      engine,
+      apply(holding(derivedOf('derived#1', pin(block()))), setVariable('unrelated', '5')),
+    );
+    expect(again.counters).toMatchObject({ featureOps: 0, cacheMisses: 0 });
+    expect(statuses(again)).toEqual({ 'derived#1': 'ok' });
   });
 });

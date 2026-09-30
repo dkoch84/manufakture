@@ -4,7 +4,7 @@
 
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { KernelError } from './errors';
-import { applyFeature, type FeatureBody, type FeatureInput } from './features';
+import { applyFeature, type DeriveInput, type FeatureBody, type FeatureInput } from './features';
 import { Kernel } from './kernel';
 import { createNodeInstance } from './node';
 import { track, type Tracker } from './track';
@@ -247,6 +247,82 @@ describe('embind objects', () => {
     ]);
     expect(k.shapeCount).toBe(4);
     for (const b of run.set) expect(k.release(b.shape)).toBe(true);
+    expect(tracker.liveNames()).toEqual([]);
+  });
+
+  it('derive copies, fuses and cuts without leaking; the sources are left alone', () => {
+    const block = (id: string, x: number, mode: 'new' | 'add' | 'subtract'): FeatureInput => ({
+      kind: 'extrude',
+      id,
+      profile: {
+        frame: XY,
+        loops: [
+          {
+            entities: [
+              { kind: 'line', id: 'e1', start: [x, 0], end: [x + 20, 0] },
+              { kind: 'line', id: 'e2', start: [x + 20, 0], end: [x + 20, 10] },
+              { kind: 'line', id: 'e3', start: [x + 20, 10], end: [x, 10] },
+              { kind: 'line', id: 'e4', start: [x, 10], end: [x, 0] },
+            ],
+          },
+        ],
+      },
+      extent: { type: 'blind', distance: 5 },
+      mode,
+    });
+    // The source part, as a nested regen would build it.
+    const source = chain([
+      block('extrude#1', 0, 'new'),
+      {
+        kind: 'fillet',
+        id: 'fillet#2',
+        radius: 1,
+        edges: [{ id: 'r1', ref: { faces: ['extrude#1:cap:end', 'extrude#1:side:e2'] } }],
+      },
+      block('extrude#3', 40, 'new'),
+    ]);
+    const derive = (
+      id: string,
+      mode: 'new' | 'add' | 'subtract',
+      translation: [number, number, number],
+    ): DeriveInput => ({
+      kind: 'derive',
+      id,
+      sources: source.set,
+      rotation: [0.3, 0, 0.5],
+      translation,
+      mode,
+    });
+    const before = tracker.liveNames().length;
+    const run = chain([
+      block('extrude#1', 0, 'new'),
+      derive('derived#2', 'new', [0, 100, 0]),
+      derive('derived#3', 'add', [5, 2, 0]),
+      derive('derived#4', 'subtract', [-5, -2, 3]),
+      // Fails: a scope naming no body; and a source that is gone.
+      { ...derive('derived#5', 'add', [0, 0, 0]), scope: ['extrude#9'] },
+      {
+        kind: 'derive',
+        id: 'derived#6',
+        sources: [{ id: 'x', shape: 999_999 as ShapeId }],
+        rotation: [0, 0, 0],
+        translation: [0, 0, 0],
+        mode: 'new',
+      },
+    ]);
+    expect(run.errors).toEqual(['derived#5: lost', 'derived#6: no-body']);
+    expect(run.set.map((b) => b.id)).toEqual([
+      'extrude#1',
+      'derived#2:from/extrude#1',
+      'derived#2:from/extrude#3',
+      // The add's second copy touches no body: detached, a body of its own.
+      'derived#3:from/extrude#3',
+    ]);
+    expect(k.shapeCount).toBe(source.set.length + run.set.length);
+    for (const b of run.set) expect(k.release(b.shape)).toBe(true);
+    // Only the sources' shapes are left, exactly as many objects as before the part.
+    expect(tracker.liveNames().length).toBe(before);
+    for (const b of source.set) expect(k.release(b.shape)).toBe(true);
     expect(tracker.liveNames()).toEqual([]);
   });
 

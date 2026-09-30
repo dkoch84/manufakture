@@ -384,8 +384,7 @@ envelope only: the hash format, `size` against the UTF-8 length of `data` (count
 encoding it, after refusing a text longer than `MAX_DERIVED_BYTES`, 64 MiB, since a UTF-8 length
 is never less than the text's), and the other fields' shapes. The nested document itself is not
 opened at load: regen checks the hash, migrates, validates and builds it, and reports what is
-wrong on the feature, as for imports. Until regen can build pinned sources, a derived feature
-fails with `unsupported` and its dependents are not built.
+wrong on the feature, as for imports (`packages/regen/README.md`, "Derived parts").
 
 **Cycles are impossible.** A pin names an immutable snapshot, not a live document, so a document
 can derive from an older version of itself, and a chain of pins can never lead back to the

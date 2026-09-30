@@ -7,7 +7,7 @@ import type {
   RevolveFeature,
   SketchFeature,
 } from '@manufakture/core';
-import type { FeatureInput, RevolveInput } from '@manufakture/kernel';
+import type { FeatureInput, RevolveInput, ShapeId } from '@manufakture/kernel';
 import { XZ_PLANE, type SketchEntity } from '@manufakture/sketch';
 import { describe, expect, it } from 'vitest';
 import { profileOf, selectRegions, sketchOutcome, type SketchResult } from './sketches';
@@ -419,7 +419,7 @@ describe('body patterns and derived features', () => {
     });
   });
 
-  it('fails a derived feature on its own until derived parts regenerate', () => {
+  it('translates a derived feature into a derive of its source bodies, and fails one without them', () => {
     const derived: DerivedFeature = {
       id: 'derived#1',
       kind: 'derived',
@@ -436,14 +436,43 @@ describe('body patterns and derived features', () => {
         data: '{}',
       },
       placement: {
-        translation: [mm('0'), mm('0'), mm('0')],
-        rotation: [mm('0'), mm('0'), mm('0')],
+        translation: [mm('10'), mm('0'), mm('-5')],
+        rotation: [mm('0'), mm('0'), mm('90deg')],
       },
-      operation: 'new',
+      operation: 'cut',
+      scope: ['extrude#1'],
     };
-    expect(translateFeature(derived, ctx)).toMatchObject({
+    const values = new Map([
+      ['placement.translation.0', 10],
+      ['placement.translation.1', 0],
+      ['placement.translation.2', -5],
+      ['placement.rotation.0', 0],
+      ['placement.rotation.1', 0],
+      ['placement.rotation.2', Math.PI / 2],
+    ]);
+    const base = { values, sketches: new Map(), inputs: new Map() };
+    expect(translateFeature(derived, base)).toMatchObject({
       ok: false,
-      errors: [{ code: 'unsupported', field: ['source'] }],
+      errors: [{ code: 'source', field: ['source'] }],
     });
+    const sources = new Map([
+      ['derived#1', [{ id: 'extrude#1', shape: 7 as ShapeId, extra: 'dropped' }]],
+    ]);
+    expect(translateFeature(derived, { ...base, sources })).toEqual({
+      ok: true,
+      input: {
+        kind: 'derive',
+        id: 'derived#1',
+        sources: [{ id: 'extrude#1', shape: 7 }],
+        rotation: [0, 0, Math.PI / 2],
+        translation: [10, 0, -5],
+        mode: 'subtract',
+        scope: ['extrude#1'],
+      },
+    });
+    // A scope naming no body here is lost before anything is sent.
+    expect(
+      translateFeature(derived, { ...base, sources, bodies: new Set(['extrude#2']) }),
+    ).toMatchObject({ ok: false, errors: [{ code: 'reference-lost', referenceId: 'scope' }] });
   });
 });
