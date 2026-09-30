@@ -69,6 +69,7 @@ export {
   migrateV2ToV3,
   migrateV3ToV4,
   migrateV4ToV5,
+  migrateV5ToV6,
   type JsonObject,
   type Migration,
 } from './migrations';

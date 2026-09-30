@@ -39,6 +39,7 @@ export function featureReferences(feature: Feature): Reference[] {
     case 'extension':
       return [...feature.references];
     case 'import':
+    case 'derived':
       return [];
   }
 }
@@ -62,16 +63,59 @@ export function explicitDependencies(feature: Feature): string[] {
 }
 
 const KIND_ALTERNATION = FEATURE_KINDS.join('|');
-/**
- * A feature id at the start of a face name: `extrude#1:cap:end`. Names nest (merges `(A+B)`,
- * corners `fillet#3:corner:A&B&C`), so every occurrence counts, not only the first.
- */
-const NAME_FEATURE_ID = new RegExp(`(?<![A-Za-z0-9#])((?:${KIND_ALTERNATION})#[1-9][0-9]*):`, 'g');
+/** A feature id starting a face name at this position: `extrude#1:cap:end`. */
+const NAME_FEATURE_ID = new RegExp(`(?<![A-Za-z0-9#])((?:${KIND_ALTERNATION})#[1-9][0-9]*):`, 'y');
+/** What follows `<id>:` when the rest of a name is a name in another document (M2 decision 6). */
+const FROM = 'from/';
 
-/** Feature ids that face names mention, in order of appearance, without duplicates. */
+/**
+ * One pass over a face name, left to right, keeping a stack of open groups: for each level, whether
+ * the current member is in a source-name tail (after `<id>:from/`) and whether the whole group is
+ * (it opened inside such a tail). `+` and `&` end a member at their level; `(` opens a level and
+ * `)` closes it (a stray `)` at the top is ignored, an unclosed `(` runs to the end). Linear in
+ * the name's length, with no recursion, so no input can exhaust the stack.
+ */
+function scanName(name: string, out: Set<string>): void {
+  // skip[d]: the member at depth d is in a source tail; locked[d]: the group itself is.
+  const skip: boolean[] = [false];
+  const locked: boolean[] = [false];
+  let d = 0;
+  let i = 0;
+  while (i < name.length) {
+    const c = name[i];
+    if (c === '(') {
+      d++;
+      skip[d] = skip[d - 1]!;
+      locked[d] = skip[d - 1]!;
+      i++;
+    } else if (c === ')') {
+      if (d > 0) d--;
+      i++;
+    } else if (c === '+' || c === '&') {
+      if (!locked[d]) skip[d] = false;
+      i++;
+    } else if (!skip[d] && c! >= 'a' && c! <= 'z') {
+      NAME_FEATURE_ID.lastIndex = i;
+      const m = NAME_FEATURE_ID.exec(name);
+      if (m) {
+        out.add(m[1]!);
+        i += m[0].length;
+        if (name.startsWith(FROM, i)) skip[d] = true;
+      } else i++;
+    } else i++;
+  }
+}
+
+/**
+ * Feature ids that a face name mentions, in order of appearance, without duplicates. Names nest
+ * (merges `(A+B)`, corners `fillet#3:corner:A&B&C`, copies `pattern#2:i3/A`), so every feature id
+ * starting a name counts, not only the first; but in each merge or corner member, what follows
+ * `<id>:from/` is a name in a derived part's source document, so only `<id>` counts there:
+ * `derived#1:from/extrude#1:cap:end` gives `derived#1` alone.
+ */
 export function featureIdsInName(name: string): string[] {
   const out = new Set<string>();
-  for (const m of name.matchAll(NAME_FEATURE_ID)) out.add(m[1]!);
+  scanName(name, out);
   return [...out];
 }
 
@@ -192,6 +236,14 @@ export function featureExpressions(feature: Feature): ExpressionSite[] {
       break;
     case 'mirror':
     case 'import':
+      break;
+    case 'derived':
+      for (const i of [0, 1, 2]) {
+        add(['placement', 'translation', i], feature.placement.translation[i], 'length');
+      }
+      for (const i of [0, 1, 2]) {
+        add(['placement', 'rotation', i], feature.placement.rotation[i], 'angle');
+      }
       break;
     case 'extension':
       for (const key of Object.keys(feature.expressions).sort()) {

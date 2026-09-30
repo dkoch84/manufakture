@@ -1,4 +1,5 @@
 import type {
+  DerivedFeature,
   Feature,
   HoleFeature,
   ImportFeature,
@@ -361,5 +362,88 @@ describe('imports', () => {
       references: new Set(['import#1']),
     });
     expect(r).toMatchObject({ ok: false, errors: [{ code: 'unsupported', field: ['features'] }] });
+  });
+});
+
+describe('body patterns and derived features', () => {
+  const ctx = {
+    values: new Map([
+      ['layout.count', 3],
+      ['layout.spacing', 30],
+    ]),
+    sketches: new Map(),
+    inputs: new Map(),
+  };
+  const bodyPattern = (mode?: 'new' | 'add'): PatternFeature => ({
+    id: 'pattern#1',
+    kind: 'pattern',
+    name: 'p',
+    suppressed: false,
+    features: [],
+    body: true,
+    ...(mode === undefined ? {} : { mode }),
+    layout: {
+      type: 'linear',
+      direction: { id: 'r1', ref: { face: 'extrude#1:cap:end' } },
+      count: mm('3'),
+      spacing: mm('30'),
+    },
+  });
+
+  it('passes the mode of a body pattern, and none when the document has none', () => {
+    expect(translateFeature(bodyPattern(), ctx)).toMatchObject({
+      ok: true,
+      input: { source: { type: 'body' } },
+    });
+    const plain = translateFeature(bodyPattern(), ctx);
+    expect(plain.ok && plain.input.kind === 'pattern' && 'mode' in plain.input.source).toBe(false);
+    for (const mode of ['new', 'add'] as const) {
+      expect(translateFeature(bodyPattern(mode), ctx)).toMatchObject({
+        ok: true,
+        input: { source: { type: 'body', mode } },
+      });
+    }
+    const mirror: Feature = {
+      id: 'mirror#1',
+      kind: 'mirror',
+      name: 'm',
+      suppressed: false,
+      features: [],
+      body: true,
+      mode: 'new',
+      plane: { id: 'r1', ref: { face: 'extrude#1:side:e1' } },
+    };
+    expect(translateFeature(mirror, ctx)).toMatchObject({
+      ok: true,
+      input: { kind: 'mirror', source: { type: 'body', mode: 'new' } },
+    });
+  });
+
+  it('fails a derived feature on its own until derived parts regenerate', () => {
+    const derived: DerivedFeature = {
+      id: 'derived#1',
+      kind: 'derived',
+      name: 'd',
+      suppressed: false,
+      source: {
+        documentId: 'doc-src',
+        documentName: 'Source',
+        versionId: 'v-1',
+        versionName: 'One',
+        partId: 'part#1',
+        size: 2,
+        sha256: '0'.repeat(64),
+        data: '{}',
+      },
+      placement: {
+        translation: [mm('0'), mm('0'), mm('0')],
+        rotation: [mm('0'), mm('0'), mm('0')],
+      },
+      operation: 'new',
+    };
+    expect(translateFeature(derived, ctx)).toMatchObject({
+      ok: false,
+      errors: [{ code: 'unsupported', field: ['source'] }],
+    });
   });
 });

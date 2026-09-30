@@ -18,6 +18,7 @@ import {
   cloneBackend,
   emptyDocument,
   partDocument,
+  partWithDerived,
   partWithImport,
   stlImport,
   unwrapDoc,
@@ -124,6 +125,22 @@ describe('DocumentLibrary', () => {
     expect(summary!.bytes).toBe(
       backend.files.get('documents/doc-1/snapshot-00000002.json')!.length + source.size,
     );
+  });
+
+  it('stores a pinned version once, as a blob of its UTF-8 text, and opens it again', async () => {
+    const backend = new MemoryBackend();
+    const lib = library(backend);
+    const doc = await partWithDerived();
+    const feature = doc.parts[0]!.features.at(-1)!;
+    if (feature.kind !== 'derived') throw new Error('expected a derived feature');
+    await lib.save(doc);
+    await lib.save(doc);
+    const blobPath = `documents/doc-1/blobs/${feature.source.sha256}`;
+    expect(files(backend).filter((f) => f.includes('/blobs/'))).toEqual([blobPath]);
+    expect(new TextDecoder().decode(backend.files.get(blobPath)!)).toBe(feature.source.data);
+    const snapshot = text(backend, 'documents/doc-1/snapshot-00000002.json');
+    expect(JSON.parse(snapshot).parts[0].features.at(-1).source.data).toBeUndefined();
+    expect((await opened(library(backend), 'doc-1')).document).toEqual(doc);
   });
 
   it('refuses a blob that does not match its SHA-256 or is missing', async () => {

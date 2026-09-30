@@ -5,6 +5,7 @@
 import { createHash } from 'node:crypto';
 import type {
   Command,
+  DerivedFeature,
   ExtrudeFeature,
   ImportFeature,
   ImportSource,
@@ -1093,5 +1094,55 @@ describe('imports', () => {
     expect(await importSourceMatches(src)).toBe(true);
     expect(await importSourceMatches({ ...src, size: src.size + 1 })).toBe(false);
     expect(await importSourceMatches({ ...src, data: '!!!!' })).toBe(false);
+  });
+});
+
+describe('derived features', () => {
+  it('fails a derived feature and what reads it, without sending either to the kernel', async () => {
+    const { kernel, engine } = setup();
+    const derived: DerivedFeature = {
+      id: 'derived#1',
+      kind: 'derived',
+      name: 'Derived 1',
+      suppressed: false,
+      source: {
+        documentId: 'doc-src',
+        documentName: 'Source',
+        versionId: 'v-1',
+        versionName: 'One',
+        partId: 'part#1',
+        size: 2,
+        sha256: '0'.repeat(64),
+        data: '{}',
+      },
+      placement: {
+        translation: [mm('0'), mm('0'), mm('0')],
+        rotation: [mm('0'), mm('0'), mm('0')],
+      },
+      operation: 'new',
+    };
+    const doc = apply(
+      block(),
+      add(derived),
+      add(
+        fillet(
+          'fillet#2',
+          ['derived#1:from/extrude#1:cap:end', 'derived#1:from/extrude#1:side:e1'],
+          '1',
+          'r2',
+        ),
+      ),
+    );
+    const r = await regen(engine, doc);
+    expect(statuses(r)).toMatchObject({
+      'extrude#1': 'ok',
+      'fillet#1': 'ok',
+      'derived#1': 'error',
+      'fillet#2': 'upstream-error',
+    });
+    expect(r.parts[0]!.features[3]!.errors).toMatchObject([
+      { code: 'unsupported', field: ['source'] },
+    ]);
+    expect(kernel.featureOps).toEqual(['extrude#1', 'fillet#1']);
   });
 });

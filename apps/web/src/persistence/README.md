@@ -10,7 +10,7 @@ is in [docs/user/files.md](../../../../docs/user/files.md).
 | `opfs.ts`     | The Origin Private File System backend, probed before use.                                         |
 | `idb.ts`      | The IndexedDB fallback (one object store, path to bytes).                                          |
 | `storage.ts`  | Picks OPFS, then IndexedDB, then memory; storage estimate and `persist()`.                         |
-| `blobs.ts`    | The storage form of imported files: content-addressed blobs, checked on load.                      |
+| `blobs.ts`    | The storage form of imported files and pinned versions: content-addressed blobs, checked on load.  |
 | `library.ts`  | `DocumentLibrary`: list, open, save, rename, duplicate, delete, versions, replay, `.mfk` files.    |
 | `mfk.ts`      | Packing and unpacking `.mfk` zips, with limits and a bounded inflate (loaded on first use).        |
 | `limits.ts`   | The `.mfk` file size limit, checked before a picked or dropped file is read.                       |
@@ -26,7 +26,7 @@ documents/<id>/head.json              pointer: current revision, its SHA-256, na
 documents/<id>/snapshot-<rev>.json    the document at revision <rev>, storage form
 documents/<id>/log-<rev>.json         the commands from the previous revision to <rev>
 documents/<id>/versions-<n>.json      the named versions, the n-th write of the list
-documents/<id>/blobs/<sha256>         each imported file, once
+documents/<id>/blobs/<sha256>         each imported file and pinned version, once
 documents/<id>/damaged-snapshot-<rev>-<sha>.json, damaged-log-<rev>-<sha>.json
                                       a complete snapshot that did not read, and its log, kept aside
 ```
@@ -192,8 +192,13 @@ version list.
 An `import` feature keeps its file inline, as base64, in the document (core README, "Imported
 geometry"); in memory nothing changes. In storage and in `.mfk` files each import's `source` loses
 `data`, and the bytes go to `blobs/<sha256>` (`externalize`, `hydrate` in `blobs.ts`). This is a
-storage form, not a new file format version: `document.json` is a version 3 document with
-`source.data` left out, and a plain version 3 document with the data inline is accepted too.
+storage form, not a new file format version: `document.json` is a document with `source.data`
+left out, and a plain document with the data inline is accepted too.
+
+A `derived` feature (core README, "Derived parts") is stored the same way: its `source.data` is
+the pinned version's document as JSON text, and the blob is that text's UTF-8 bytes, which is
+what the source's `sha256` and `size` describe. So each pinned version is one blob per document,
+however many derived features, snapshots and commands pin it, and loading checks it like a file.
 
 The log is what `DocumentStore` reports: one entry per `execute`, `undo` and `redo`, as
 `{ cause, label, command, at }`. Commands go through the same rewrite, so an `addFeature` of a

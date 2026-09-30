@@ -170,7 +170,8 @@ function patternCount(ctx: TranslateContext): number {
 }
 
 function instanceSource(ctx: TranslateContext, f: PatternFeature | MirrorFeature): InstanceSource {
-  if (f.body === true) return { type: 'body' };
+  if (f.body === true)
+    return f.mode === undefined ? { type: 'body' } : { type: 'body', mode: f.mode };
   const tools: ToolInput[] = [];
   const errors: RegenError[] = [];
   for (const id of f.features) {
@@ -413,6 +414,15 @@ function translateInput(f: Feature, ctx: TranslateContext): FeatureInput {
       };
     case 'import':
       return importInput(f);
+    case 'derived':
+      // Regenerating the pinned source is T2.2b; until then the feature fails on its own.
+      throw new Failed([
+        {
+          code: 'unsupported',
+          field: ['source'],
+          message: `${f.id}: derived parts cannot be regenerated yet`,
+        },
+      ]);
     case 'sketch':
     case 'extension':
       throw new Error(`${f.kind} features are not kernel features`);

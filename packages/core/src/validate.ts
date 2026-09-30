@@ -227,13 +227,30 @@ function makesBody(feature: Feature | undefined): boolean {
 }
 
 /**
+ * A derived feature's `bodies` as a set, made once per list: validation looks up every body id
+ * naming the feature in it, so a linear scan per id would make a crafted file quadratic.
+ * Documents are immutable, so the list itself is the key.
+ */
+const derivedBodySets = new WeakMap<readonly string[], ReadonlySet<string>>();
+function derivedBodies(bodies: readonly string[]): ReadonlySet<string> {
+  let set = derivedBodySets.get(bodies);
+  if (set === undefined) {
+    set = new Set(bodies);
+    derivedBodySets.set(bodies, set);
+  }
+  return set;
+}
+
+/**
  * Why a feature cannot create the body `bodyId` names, or `undefined` when it can. Extrude,
  * revolve and import make one body under their own id with a `new` operation, and with `add`
  * when the solid touches no body (M2 plan, decision 2: known only after regen, which reports
  * props on an `add` that merged as lost). A pattern or mirror makes its copies under an instance
  * suffix (`pattern#2:i3`, `mirror#1:image`): of bodies, and of features when one of the features
  * it repeats makes a body (`new`, or `add` copies touching nothing); which suffixes exist is a
- * regen result. `features` looks up the repeated features by id; without it, a pattern of
+ * regen result. A derived feature with `new` or `add` makes its bodies under
+ * `<id>:from/<source body id>`, one per source body it derives (all, or those in `bodies`); which
+ * source bodies exist is a regen result too. `features` looks up the repeated features by id; without it, a pattern of
  * features makes no body.
  */
 export function bodyCreationProblem(
@@ -250,6 +267,20 @@ export function bodyCreationProblem(
         return `${creator.id} is a "${creator.operation}" ${creator.kind}, which makes no body`;
       }
       return suffix ? `${creator.id} makes one body, named "${creator.id}"` : undefined;
+    case 'derived': {
+      if (creator.operation !== 'new' && creator.operation !== 'add') {
+        return `${creator.id} is a "${creator.operation}" derived feature, which makes no body`;
+      }
+      const prefix = `${creator.id}:from/`;
+      if (!bodyId.startsWith(prefix) || bodyId.length === prefix.length) {
+        return `a body made by ${creator.id} is named after its source body, like "${prefix}extrude#1"`;
+      }
+      const source = bodyId.slice(prefix.length);
+      if (creator.bodies !== undefined && !derivedBodies(creator.bodies).has(source)) {
+        return `${creator.id} does not derive the source body "${source}"`;
+      }
+      return undefined;
+    }
     case 'pattern':
     case 'mirror':
       if (creator.body !== true && !creator.features.some((id) => makesBody(features?.(id)))) {
@@ -427,6 +458,10 @@ function checkPart(part: Part, pi: number, variables: ReadonlySet<string>, out: 
     checkDuplicates(scope, `the scope of ${f.id}`, [...fpath, 'scope'], out);
     scope.forEach((body, si) => checkBodyId(part, index, body, fi, [...fpath, 'scope', si], out));
     if (f.kind === 'sketch') checkSketch(f, fpath, out);
+    // Source body ids name bodies of the source document: only duplicates are checked here.
+    if (f.kind === 'derived' && f.bodies !== undefined) {
+      checkDuplicates(f.bodies, `the bodies ${f.id} derives`, [...fpath, 'bodies'], out);
+    }
     for (const site of featureExpressions(f))
       checkExpression(site.expression, [...fpath, ...site.path], variables, out);
   });

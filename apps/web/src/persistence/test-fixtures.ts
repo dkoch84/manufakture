@@ -3,10 +3,12 @@
 import {
   applyCommand,
   createDocument,
+  serialize,
+  type DerivedFeature,
   type ImportFeature,
   type ManufaktureDocument,
 } from '@manufakture/core';
-import { importSource, writeBinaryStl } from '@manufakture/io';
+import { importSource, sha256Hex, writeBinaryStl } from '@manufakture/io';
 import { demoDocument } from '../model/demo';
 import { boxBody } from '../viewport/testMeshes';
 import { MemoryBackend, type StorageBackend } from './backend';
@@ -51,6 +53,52 @@ export async function partWithImport(id = 'doc-1'): Promise<ManufaktureDocument>
   const feature = await stlImport();
   return unwrapDoc(
     applyCommand(partDocument(id), { type: 'addFeature', partId: 'part#1', feature }),
+  );
+}
+
+const mm = (source: string) => ({ source, lengthUnit: 'mm', angleUnit: 'deg' }) as const;
+const deg = mm;
+
+/**
+ * A derived feature pinning `source` (by default the demo part with an imported STL, so the pin
+ * holds a file of its own) at version `v-1`: `data` is its canonical text, hashed as UTF-8.
+ */
+export async function derivedFeature(
+  source?: ManufaktureDocument,
+  id = 'derived#1',
+  versionName = 'Release 1',
+): Promise<DerivedFeature> {
+  const pinned = source ?? (await partWithImport('doc-src'));
+  const data = serialize({ ...pinned, name: `${pinned.name} ✓` });
+  const bytes = new TextEncoder().encode(data);
+  return {
+    id,
+    kind: 'derived',
+    name: 'Derived',
+    suppressed: false,
+    source: {
+      documentId: pinned.id,
+      documentName: pinned.name,
+      versionId: 'v-1',
+      versionName,
+      partId: 'part#1',
+      size: bytes.length,
+      sha256: await sha256Hex(bytes),
+      data,
+    },
+    placement: {
+      translation: [mm('0'), mm('0'), mm('0')],
+      rotation: [deg('0'), deg('0'), deg('0')],
+    },
+    operation: 'new',
+  };
+}
+
+/** An empty document deriving the demo part with an import (one pin, `derived#1`). */
+export async function partWithDerived(id = 'doc-1'): Promise<ManufaktureDocument> {
+  const feature = await derivedFeature();
+  return unwrapDoc(
+    applyCommand(emptyDocument(id, 'Deriving'), { type: 'addFeature', partId: 'part#1', feature }),
   );
 }
 

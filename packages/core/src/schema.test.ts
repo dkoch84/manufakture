@@ -247,6 +247,30 @@ const validFeatures: Feature[] = [
     },
     operation: 'reference',
   },
+  {
+    id: 'derived#1',
+    kind: 'derived',
+    ...common,
+    source: {
+      documentId: 'doc-src',
+      documentName: 'Bracket',
+      versionId: 'v-1',
+      versionName: 'Release 1',
+      partId: 'part#1',
+      configuration: 'cfg#1',
+      // '{"a":"€"}' is 11 bytes of UTF-8 in 9 characters.
+      size: 11,
+      sha256: 'c0a4d1d8f0e0ee4c5f2b0d0e8b6d1fb4a9c5d2f7e3b8a1c6d4e9f2a7b3c8d5e1',
+      data: '{"a":"€"}',
+    },
+    bodies: ['extrude#1'],
+    placement: {
+      translation: [mm('0'), mm('0'), mm('10')],
+      rotation: [mm('0'), mm('0'), mm('45')],
+    },
+    operation: 'add',
+    scope: ['extrude#2'],
+  },
 ];
 
 describe('FeatureSchema', () => {

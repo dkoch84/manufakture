@@ -36,8 +36,61 @@ describe('featureIdsInName', () => {
     ['?face3', []],
     ['myextrude#1:cap:end', []],
     ['extrude#1', []],
+    // Derived names (M2 plan, decision 6): what follows `<id>:from/` is a source name.
+    ['derived#1:from/extrude#1:cap:end', ['derived#1']],
+    ['(derived#1:from/extrude#1:cap:end+extrude#2:side:e5)', ['derived#1', 'extrude#2']],
+    ['(extrude#2:side:e5+derived#1:from/extrude#1:cap:end)', ['extrude#2', 'derived#1']],
+    ['derived#1:from/(extrude#1:cap:end+extrude#2:side:e5)', ['derived#1']],
+    ['derived#1:from/(extrude#1:cap:end+extrude#2:side:e5)#2', ['derived#1']],
+    ['pattern#7:i2/derived#1:from/extrude#3:side:e1', ['pattern#7', 'derived#1']],
+    ['mirror#8:image/derived#1:from/(extrude#1:cap:end+hole#5:wall:e5)', ['mirror#8', 'derived#1']],
+    [
+      'fillet#3:corner:derived#1:from/extrude#1:cap:end&extrude#1:side:e1',
+      ['fillet#3', 'derived#1', 'extrude#1'],
+    ],
+    [
+      'fillet#3:corner:extrude#1:side:e1&derived#1:from/(extrude#1:cap:end+extrude#4:side:e2)&extrude#2:cap:end',
+      ['fillet#3', 'extrude#1', 'derived#1', 'extrude#2'],
+    ],
+    // A source corner: every member is prefixed, so none is read as a local face.
+    [
+      'derived#1:from/fillet#3:corner:extrude#1:cap:end&derived#1:from/extrude#1:side:e1&derived#1:from/extrude#1:side:e2',
+      ['derived#1'],
+    ],
+    ['derived#1:from/derived#2:from/extrude#1:cap:end', ['derived#1']],
+    ['derived#1:from/?face3', ['derived#1']],
+    ['shell#2:offset:derived#1:from/extrude#1:cap:end', ['shell#2', 'derived#1']],
+    // Only `<id>:from/` starts a source name: other text after an id is read as before.
+    ['extrude#1:fromage/extrude#2:cap:end', ['extrude#1', 'extrude#2']],
+    ['myderived#1:from/extrude#1:cap:end', ['extrude#1']],
+    // Unbalanced brackets are scanned as far as they go.
+    ['(extrude#1:cap:end+extrude#2:side:e5', ['extrude#1', 'extrude#2']],
+    ['extrude#1:cap:end)+extrude#2:side:e5', ['extrude#1', 'extrude#2']],
   ])('%s', (name, ids) => {
     expect(featureIdsInName(name)).toEqual(ids);
+  });
+});
+
+describe('featureIdsInName on hostile input', () => {
+  it('scans very deep nesting in one pass, without recursion', () => {
+    const deep = `${'('.repeat(100_000)}extrude#1:cap:end+derived#1:from/extrude#2:x${')'.repeat(100_000)}`;
+    expect(featureIdsInName(deep)).toEqual(['extrude#1', 'derived#1']);
+    const start = performance.now();
+    expect(featureIdsInName('('.repeat(1_000_000))).toEqual([]);
+    expect(featureIdsInName(')'.repeat(1_000_000))).toEqual([]);
+    expect(featureIdsInName('(extrude#1:a+'.repeat(50_000))).toEqual(['extrude#1']);
+    // Linear: a million characters take milliseconds, not seconds.
+    expect(performance.now() - start).toBeLessThan(2000);
+  });
+
+  it('reads unclosed and stray brackets as far as they go', () => {
+    expect(featureIdsInName('(((extrude#1:cap:end')).toEqual(['extrude#1']);
+    expect(featureIdsInName('derived#1:from/((extrude#1:a&extrude#2:b')).toEqual(['derived#1']);
+    expect(featureIdsInName('))extrude#1:a&derived#1:from/extrude#2:b)&hole#1:c')).toEqual([
+      'extrude#1',
+      'derived#1',
+      'hole#1',
+    ]);
   });
 });
 

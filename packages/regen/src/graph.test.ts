@@ -16,12 +16,13 @@ import {
   build,
   extrude,
   fillet,
+  mm,
   pocket,
   rectangle,
   setVariable,
   twoBodies,
 } from './test-helpers';
-import type { ImportFeature, ManufaktureDocument } from '@manufakture/core';
+import type { DerivedFeature, ImportFeature, ManufaktureDocument } from '@manufakture/core';
 
 const part = (doc: ManufaktureDocument) => doc.parts[0]!;
 
@@ -145,6 +146,55 @@ describe('imports', () => {
     const g = buildGraph(part(ref), ref.variables);
     expect(g.body.has('import#1')).toBe(false);
     expect(g.body.get('fillet#2')).toEqual(['fillet#1']);
+  });
+});
+
+describe('derived features', () => {
+  const derived: DerivedFeature = {
+    id: 'derived#1',
+    kind: 'derived',
+    name: 'Derived 1',
+    suppressed: false,
+    source: {
+      documentId: 'doc-src',
+      documentName: 'Source',
+      versionId: 'v-1',
+      versionName: 'One',
+      partId: 'part#1',
+      size: 2,
+      sha256: '0'.repeat(64),
+      data: '{}',
+    },
+    placement: {
+      translation: [mm('0'), mm('0'), mm('0')],
+      rotation: [mm('0'), mm('0'), mm('0')],
+    },
+    operation: 'new',
+  };
+
+  it('has no edge from a later local extrude#1 to a fillet on a derived face', () => {
+    const doc = build([
+      setVariable('width', '40'),
+      setVariable('depth', '30'),
+      add(derived),
+      add(
+        fillet(
+          'fillet#1',
+          ['derived#1:from/extrude#1:cap:end', 'derived#1:from/extrude#1:side:e1'],
+          '1',
+        ),
+      ),
+      add(rectangle('sketch#1', { width: 'width', depth: 'depth' })),
+      add(extrude('extrude#1', 'sketch#1', '20')),
+    ]);
+    expect(isBodyFeature(derived)).toBe(true);
+    const g = buildGraph(part(doc), doc.variables);
+    expect(g.depends.get('fillet#1')).toEqual(['derived#1']);
+    expect(g.body.get('fillet#1')).toEqual(['derived#1']);
+    expect(g.dependents.get('extrude#1')).toEqual([]);
+    expect(g.dependents.get('sketch#1')).toEqual(['extrude#1']);
+    expect(g.dependents.get('derived#1')).toEqual(['fillet#1']);
+    expect(regenOrder(g)).toEqual(['derived#1', 'fillet#1', 'sketch#1', 'extrude#1']);
   });
 });
 

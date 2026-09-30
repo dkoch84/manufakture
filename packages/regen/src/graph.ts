@@ -39,6 +39,7 @@ export const BODY_KINDS: ReadonlySet<Feature['kind']> = new Set([
   'hole',
   'pattern',
   'mirror',
+  'derived',
 ]);
 
 export function isBodyFeature(feature: Feature): boolean {
@@ -87,6 +88,7 @@ export function bodyUse(
     case 'extrude':
     case 'revolve':
     case 'import':
+    case 'derived':
     case 'hole': {
       const scope = feature.scope ?? [];
       if (feature.kind !== 'hole' && feature.operation === 'new') {
@@ -233,6 +235,7 @@ function actsOn(
     case 'extrude':
     case 'revolve':
     case 'import':
+    case 'derived':
       if (f.operation === 'new') return { ids: [], merges: false };
       return { ids: scoped(f.scope), merges: f.operation === 'add' };
     case 'hole':
@@ -243,7 +246,8 @@ function actsOn(
       return { ids: [...read], merges: false };
     case 'pattern':
     case 'mirror': {
-      if (f.body === true) return { ids: scoped(f.scope), merges: true };
+      // `new` copies stay bodies of their own; `add` (the default) fuses them where they touch.
+      if (f.body === true) return { ids: scoped(f.scope), merges: f.mode !== 'new' };
       const ids = new Set<string>();
       let merges = false;
       for (const id of f.features) {

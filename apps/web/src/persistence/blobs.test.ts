@@ -1,8 +1,15 @@
-import { sha256Hex, toBase64 } from '@manufakture/io';
+import { fromBase64, sha256Hex, toBase64 } from '@manufakture/io';
 import { describe, expect, it } from 'vitest';
 import { MemoryBackend } from './backend';
 import { BlobStore, blobRefs, externalize, hydrate, hydrateFrom, isSha256 } from './blobs';
-import { cubeStl, partWithImport, stlImport } from './test-fixtures';
+import { deserialize, type DerivedFeature } from '@manufakture/core';
+import {
+  cubeStl,
+  derivedFeature,
+  partWithDerived,
+  partWithImport,
+  stlImport,
+} from './test-fixtures';
 
 describe('externalize and hydrate', () => {
   it('never lets a `__proto__` key in stored JSON set a prototype', () => {
@@ -77,6 +84,87 @@ describe('externalize and hydrate', () => {
   });
 });
 
+describe('derived sources', () => {
+  const pin = (doc: unknown) =>
+    (doc as { parts: { features: DerivedFeature[] }[] }).parts[0]!.features.at(-1)!.source;
+
+  it('moves a pinned version out as its UTF-8 bytes, and puts the text back', async () => {
+    const doc = await partWithDerived();
+    const source = pin(doc);
+    const { value, blobs } = externalize(doc);
+    const stored = pin(value);
+    expect('data' in stored).toBe(false);
+    const { data: _data, ...rest } = source;
+    void _data;
+    expect(stored).toEqual(rest);
+    expect([...blobs.keys()]).toEqual([source.sha256]);
+    const bytes = fromBase64(blobs.get(source.sha256)!);
+    expect(bytes.length).toBe(source.size);
+    expect(await sha256Hex(bytes)).toBe(source.sha256);
+    expect(new TextDecoder().decode(bytes)).toBe(source.data);
+    // The pinned document's own import stays inside the pinned text: one blob, not two.
+    expect(source.data).toContain('"kind": "import"');
+    expect(blobRefs(value)).toEqual([
+      {
+        sha256: source.sha256,
+        size: source.size,
+        fileName: '"Release 1" of Bracket',
+        derived: true,
+      },
+    ]);
+    expect(hydrate(value, blobs)).toEqual(doc);
+    expect(externalize(doc).value).toEqual(value);
+    // The pinned text is still a document of its own.
+    expect(deserialize(pin(hydrate(value, blobs)).data).ok).toBe(true);
+  });
+
+  it('checks the pinned version against its SHA-256 and size, and names it', async () => {
+    const doc = await partWithDerived();
+    const source = pin(doc);
+    const { value } = externalize(doc);
+    const bytes = new TextEncoder().encode(source.data);
+    expect(await hydrateFrom(value, async () => bytes)).toEqual(doc);
+    const flipped = bytes.slice();
+    flipped[10] = flipped[10]! ^ 1;
+    await expect(hydrateFrom(value, async () => flipped)).rejects.toThrow(
+      'The pinned version "Release 1" of Bracket is damaged: its SHA-256 does not match.',
+    );
+    await expect(hydrateFrom(value, async () => null)).rejects.toThrow(
+      'The pinned version "Release 1" of Bracket is missing.',
+    );
+  });
+
+  it('stores a version pinned twice, by a document and by a command, once', async () => {
+    const a = await derivedFeature(undefined, 'derived#1');
+    const b = await derivedFeature(undefined, 'derived#2', 'Release 1');
+    const command = {
+      type: 'batch',
+      commands: [
+        { type: 'addFeature', partId: 'part#1', feature: a },
+        { type: 'addFeature', partId: 'part#1', feature: b },
+      ],
+    };
+    const { value, blobs } = externalize(command);
+    expect(blobs.size).toBe(1);
+    expect(JSON.stringify(value)).not.toContain('"format": "manufakture"');
+    expect(hydrate(value, blobs)).toEqual(command);
+    const store = new BlobStore(new MemoryBackend(), 'blobs');
+    const [[sha, base64]] = [...blobs] as [[string, string]];
+    expect(await store.put(sha, base64)).toBe(a.source.size);
+    expect(await store.put(sha, base64)).toBe(0);
+  });
+
+  it('refuses a derived source whose sha256 could name a path, and a blob that is not UTF-8', () => {
+    const bad = { id: 'derived#1', kind: 'derived', source: { sha256: '../x', data: '{}' } };
+    expect(() => externalize(bad)).toThrow('A derived part has no valid SHA-256');
+    const missing = { id: 'derived#1', kind: 'derived', source: { sha256: '../x', size: 2 } };
+    expect(() => blobRefs(missing)).toThrow('A derived part names no valid blob');
+    const sha = 'a'.repeat(64);
+    const stored = { id: 'derived#1', kind: 'derived', source: { sha256: sha, size: 1 } };
+    expect(hydrate(stored, new Map([[sha, toBase64(new Uint8Array([0xff]))]]))).toEqual(stored);
+  });
+});
+
 describe('BlobStore', () => {
   it('writes a blob once, rewrites one that a crash cut short, and refuses a wrong hash', async () => {
     const backend = new MemoryBackend();
@@ -94,7 +182,7 @@ describe('BlobStore', () => {
     expect(await store.read(sha)).toEqual(bytes);
     // Bytes that are not what the name says are never stored.
     await expect(store.put('0'.repeat(64), toBase64(bytes))).rejects.toThrow(
-      'An imported file does not match its SHA-256.',
+      'A stored file or pinned version does not match its SHA-256.',
     );
     expect(() => store.read('../../x')).toThrow('Not a blob name: ../../x');
   });

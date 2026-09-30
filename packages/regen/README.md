@@ -145,19 +145,21 @@ dirty but a cache hit).
 
 `translateFeature` (`src/translate.ts`) turns a core feature into a kernel input:
 
-| Core                                 | Kernel                                                                                     |
-| ------------------------------------ | ------------------------------------------------------------------------------------------ |
-| `operation` new, add, cut, intersect | `mode` new, add, subtract, intersect                                                       |
-| `profile` (sketch, entities?)        | one region's `regionProfile` loops on the sketch placement, every entity tagged by edge id |
-| extrude `extent`, `reverse`, `draft` | the same, distances in mm, draft in radians; `upToFace` as a `FaceRef`                     |
-| revolve `sketchLine` axis            | a model-space `Axis` from the line's start to its end; core's `flip: true` negates it      |
-| revolve `edge` axis                  | `{ edge, flip }`, oriented by the kernel's naming rules                                    |
-| fillet, chamfer, shell references    | `{ id, ref }` with the stored names; chamfer `secondDistance` / `angle` pick the size kind |
-| hole `sketch`, `points`              | the sketch placement as the frame, each point entity's solved position                     |
-| pattern, mirror `features`           | the source features' own kernel inputs (extrudes, revolves, holes); `body: true` the body  |
-| pattern `count`                      | checked here: a whole number, 1 to `MAX_PATTERN_COUNT`, however it was computed            |
-| `scope`                              | the same list; an entry that is not a body at that point is `reference-lost` on `scope`    |
-| body id of a `new` or `add` feature  | `body`: the feature's own id (M2 plan, decision 1)                                         |
+| Core                                 | Kernel                                                                                      |
+| ------------------------------------ | ------------------------------------------------------------------------------------------- |
+| `operation` new, add, cut, intersect | `mode` new, add, subtract, intersect                                                        |
+| `profile` (sketch, entities?)        | one region's `regionProfile` loops on the sketch placement, every entity tagged by edge id  |
+| extrude `extent`, `reverse`, `draft` | the same, distances in mm, draft in radians; `upToFace` as a `FaceRef`                      |
+| revolve `sketchLine` axis            | a model-space `Axis` from the line's start to its end; core's `flip: true` negates it       |
+| revolve `edge` axis                  | `{ edge, flip }`, oriented by the kernel's naming rules                                     |
+| fillet, chamfer, shell references    | `{ id, ref }` with the stored names; chamfer `secondDistance` / `angle` pick the size kind  |
+| hole `sketch`, `points`              | the sketch placement as the frame, each point entity's solved position                      |
+| pattern, mirror `features`           | the source features' own kernel inputs (extrudes, revolves, holes); `body: true` the body   |
+| pattern, mirror `body: true`, `mode` | `source: { type: 'body', mode }`; no `mode` when the document has none (the kernel's `add`) |
+| `derived`                            | not built yet: an `unsupported` error on `source`, so its dependents are not built          |
+| pattern `count`                      | checked here: a whole number, 1 to `MAX_PATTERN_COUNT`, however it was computed             |
+| `scope`                              | the same list; an entry that is not a body at that point is `reference-lost` on `scope`     |
+| body id of a `new` or `add` feature  | `body`: the feature's own id (M2 plan, decision 1)                                          |
 
 **Numbers.** Variables are evaluated once per regen, in dependency order, in the units each was
 stored with (`evaluateVariables`; they have no declared kind). Every feature expression is

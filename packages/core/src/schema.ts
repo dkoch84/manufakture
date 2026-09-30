@@ -28,7 +28,7 @@ import { MATERIAL_IDS } from './materials';
  */
 
 /** The file format version this code reads and writes. Bump it only together with a migration. */
-export const FORMAT_VERSION = 5;
+export const FORMAT_VERSION = 6;
 /** The topological naming scheme version (T0.5) that stored references are written in. */
 export const NAMING_SCHEME = 1;
 export const FORMAT_TAG = 'manufakture';
@@ -49,21 +49,47 @@ export const ConstraintIdSchema = subId('k', 'k1');
 export const ReferenceIdSchema = subId('r', 'r1');
 export const FeatureIdSchema = featureId;
 
+// Configuration ids (since version 5); the table itself is below the parts.
+/** The document-level `nextIds` key for configuration parameter ids (`cp#n`). */
+export const CONFIG_PARAMETER_COUNTER = 'cp';
+/** The document-level `nextIds` key for configuration row ids (`cfg#n`). */
+export const CONFIG_ROW_COUNTER = 'cfg';
+/** A configuration parameter id: `cp#n`, counted by the document's `nextIds.cp`. */
+export const CONFIG_PARAMETER_ID_PATTERN = /^cp#[1-9][0-9]*$/;
+/** A configuration row id: `cfg#n`, counted by the document's `nextIds.cfg`. */
+export const CONFIG_ROW_ID_PATTERN = /^cfg#[1-9][0-9]*$/;
+export const ConfigParameterIdSchema = z
+  .string()
+  .regex(CONFIG_PARAMETER_ID_PATTERN, 'Expected a configuration parameter id like "cp#1"');
+export const ConfigRowIdSchema = z
+  .string()
+  .regex(CONFIG_ROW_ID_PATTERN, 'Expected a configuration row id like "cfg#1"');
+
 /**
  * A body id: the id of the feature that made the body, alone (`extrude#3`) or followed by a
- * suffix naming one of its bodies (`pattern#2:i3`, `mirror#1:image`, later
+ * suffix naming one of its bodies (`pattern#2:i3`, `mirror#1:image`, and since version 6
  * `derived#1:from/<source body id>`). Since version 4.
  */
 export const BODY_ID_PATTERN = /^[a-z][a-zA-Z0-9]*#[1-9][0-9]*(?::.+)?$/;
+/**
+ * The longest body id, in characters (4 KiB, like a face name), and the most entries a list of
+ * body ids (a `scope`, a derived feature's `bodies`) or a part's `bodies` props may have. Real ids
+ * are tens of characters; a part holds at most a few thousand bodies even with a full
+ * `MAX_PATTERN_COUNT` pattern of several bodies. The caps bound what a crafted file costs to check.
+ */
+export const MAX_BODY_ID_LENGTH = 4096;
+export const MAX_BODY_LIST = 10_000;
+
 export const BodyIdSchema = z
   .string()
+  .max(MAX_BODY_ID_LENGTH, { abort: true })
   .regex(BODY_ID_PATTERN, 'Expected a body id like "extrude#3" or "pattern#2:i3"');
 
 /**
  * Which bodies a feature acts on, by body id. Absent means every body at that point in the
  * feature list, which is what a version 3 part (one compound) did. Since version 4.
  */
-const scope = z.array(BodyIdSchema).min(1).exactOptional();
+const scope = z.array(BodyIdSchema).min(1).max(MAX_BODY_LIST).exactOptional();
 
 export const LengthUnitSchema = z.enum(['mm', 'cm', 'm', 'in', 'ft']);
 export const AngleUnitSchema = z.enum(['deg', 'rad']);
@@ -115,7 +141,36 @@ export const DisplayUnitsSchema = z.strictObject({
 // ---------------------------------------------------------------------------------------------
 // References (ADR 0004 decision 5, T0.5)
 
-const topoName = z.string().min(1);
+/**
+ * The longest face name a reference may store, in characters (4 KiB), and the deepest nesting of
+ * brackets in one. The longest name the kernel goldens, the M1 bracket and the regen integration
+ * tests produce is 84 characters with one level of brackets; derived names add `<id>:from/` per
+ * pinned level (at most `MAX_DERIVED_DEPTH`) and per corner member, which stays far inside both.
+ * The caps refuse hostile input as a schema problem before any name is parsed.
+ */
+export const MAX_FACE_NAME_LENGTH = 4096;
+export const MAX_FACE_NAME_DEPTH = 32;
+
+/** How deeply brackets nest in `name` (an unclosed `(` still counts). */
+export function nameDepth(name: string): number {
+  let depth = 0;
+  let max = 0;
+  for (let i = 0; i < name.length; i++) {
+    const c = name.charCodeAt(i);
+    if (c === 40) max = Math.max(max, ++depth);
+    else if (c === 41 && depth > 0) depth--;
+  }
+  return max;
+}
+
+const topoName = z
+  .string()
+  .min(1)
+  .max(MAX_FACE_NAME_LENGTH, { abort: true })
+  .refine(
+    (name) => nameDepth(name) <= MAX_FACE_NAME_DEPTH,
+    `A face name nests brackets at most ${MAX_FACE_NAME_DEPTH} deep`,
+  );
 export const FaceRefSchema = z.strictObject({ face: topoName });
 export const EdgeRefSchema = z.strictObject({
   /** The sorted names of the adjacent faces; a seam lists its one face. */
@@ -530,9 +585,9 @@ export const PatternLayoutSchema = z.discriminatedUnion('type', [
  * pattern has one: copies of features act where the features did.
  */
 function checkInstanceSource<
-  T extends { features: string[]; body?: boolean; scope?: readonly string[] },
+  T extends { features: string[]; body?: boolean; mode?: string; scope?: readonly string[] },
 >(ctx: z.core.ParsePayload<T>): void {
-  const { features, body, scope } = ctx.value;
+  const { features, body, mode, scope } = ctx.value;
   if (body === true ? features.length > 0 : features.length === 0) {
     ctx.issues.push({
       code: 'custom',
@@ -549,7 +604,22 @@ function checkInstanceSource<
       path: ['scope'],
     });
   }
+  if (mode !== undefined && body !== true) {
+    ctx.issues.push({
+      code: 'custom',
+      message: 'only a pattern or mirror of bodies has a mode',
+      input: mode,
+      path: ['mode'],
+    });
+  }
 }
+
+/**
+ * How the copies of a pattern or mirror of bodies join the part: `add` fuses each copy with the
+ * body it touches (the default, and what an absent `mode` means, so older documents are
+ * unchanged); `new` keeps every copy a body of its own. Since version 6.
+ */
+export const BodyCopyModeSchema = z.enum(['new', 'add']);
 
 export const PatternFeatureSchema = z
   .strictObject({
@@ -559,6 +629,8 @@ export const PatternFeatureSchema = z
     body: z.boolean().exactOptional(),
     /** With `body: true`, the bodies to copy; absent: every body. */
     scope,
+    /** With `body: true`, how the copies join the part; absent: `add`. Since version 6. */
+    mode: BodyCopyModeSchema.exactOptional(),
     layout: PatternLayoutSchema,
   })
   .check(checkInstanceSource);
@@ -571,6 +643,8 @@ export const MirrorFeatureSchema = z
     body: z.boolean().exactOptional(),
     /** With `body: true`, the bodies to mirror; absent: every body. */
     scope,
+    /** With `body: true`, how the copies join the part; absent: `add`. Since version 6. */
+    mode: BodyCopyModeSchema.exactOptional(),
     plane: FaceReferenceSchema,
   })
   .check(checkInstanceSource);
@@ -665,6 +739,106 @@ export const ImportFeatureSchema = z
     }
   });
 
+/**
+ * The largest pinned source a derived feature may store: the UTF-8 length of `source.data`, in
+ * bytes (64 MiB). The source holds its own imports inline, so this is above `MAX_IMPORT_BYTES`
+ * in base64 with room for the rest of the document. The schema checks the text length first
+ * (a UTF-8 length is never less), before counting bytes.
+ */
+export const MAX_DERIVED_BYTES = 64 * 1024 * 1024;
+
+/**
+ * How deeply derived features may nest: a part deriving from a source that derives from another,
+ * and so on. A pin is an immutable snapshot, so a chain can never loop back on itself; the cap
+ * bounds the cost of regenerating one. Regen checks it while it opens the sources (the nested
+ * documents are not validated at load).
+ */
+export const MAX_DERIVED_DEPTH = 8;
+
+/** The UTF-8 length of `s` in bytes, without encoding it. A lone surrogate counts as U+FFFD (3). */
+export function utf8Length(s: string): number {
+  let n = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c < 0x80) n += 1;
+    else if (c < 0x800) n += 2;
+    else if (c >= 0xd800 && c < 0xdc00 && i + 1 < s.length) {
+      const d = s.charCodeAt(i + 1);
+      if (d >= 0xdc00 && d < 0xe000) {
+        n += 4;
+        i++;
+      } else n += 3;
+    } else n += 3;
+  }
+  return n;
+}
+
+/**
+ * The pinned source of a derived feature (README, "Derived parts"): which document, version and
+ * part it is, for display and for updating the pin, and the document itself. `data` is the
+ * canonical JSON text (`serialize`) of the source document at that version, its imports inline,
+ * so the pin is self-contained like an import's bytes. `size` is the UTF-8 length of `data` and
+ * `sha256` the lower-case hex SHA-256 of those bytes. Only this envelope is checked at load; the
+ * nested document is regen's to open and check. Since version 6.
+ */
+export const DerivedSourceSchema = z
+  .strictObject({
+    documentId: z.string().min(1),
+    /** The source document's name when the pin was made, for display. */
+    documentName: z.string(),
+    /** A named version of the source (its id is permanent). */
+    versionId: z.string().min(1),
+    /** The version's name when the pin was made, for display. */
+    versionName: z.string(),
+    /** The part of the source document whose bodies are derived. */
+    partId: z.string().min(1),
+    /** A row of the source's configuration table to build it in; absent: as it is. */
+    configuration: ConfigRowIdSchema.exactOptional(),
+    size: z.int().min(1).max(MAX_DERIVED_BYTES),
+    sha256: z.string().regex(/^[0-9a-f]{64}$/, 'Expected a lower-case hex SHA-256'),
+    data: z.string().min(1).max(MAX_DERIVED_BYTES, { abort: true }),
+  })
+  .check((ctx) => {
+    const { data, size } = ctx.value;
+    if (utf8Length(data) !== size) {
+      ctx.issues.push({
+        code: 'custom',
+        message: `data is not ${size} bytes of UTF-8`,
+        input: size,
+        path: ['size'],
+      });
+    }
+  });
+
+/**
+ * Where derived bodies go: a translation (lengths) and a rotation (angles about the fixed x, y
+ * and z axes, applied in that order, about the origin), both expressions. The rotation is applied
+ * first, then the translation.
+ */
+export const DerivedPlacementSchema = z.strictObject({
+  translation: z.tuple([StoredExpressionSchema, StoredExpressionSchema, StoredExpressionSchema]),
+  rotation: z.tuple([StoredExpressionSchema, StoredExpressionSchema, StoredExpressionSchema]),
+});
+
+/**
+ * Bodies of a part of another document (or of another version of this one), pinned to a version
+ * and carried inside the document. Its bodies are `<id>:from/<source body id>`, and its faces are
+ * named `<id>:from/<source face name>`: everything after `:from/` is a name in the source
+ * document, never read for this part's feature ids. Since version 6.
+ */
+export const DerivedFeatureSchema = z
+  .strictObject({
+    ...base('derived'),
+    source: DerivedSourceSchema,
+    /** The source part's bodies to derive, by their ids in the source; absent: every body. */
+    bodies: z.array(BodyIdSchema).min(1).max(MAX_BODY_LIST).exactOptional(),
+    placement: DerivedPlacementSchema,
+    operation: BooleanOperationSchema,
+    /** The bodies the operation combines with; absent: every body. Not for a `new` feature. */
+    scope,
+  })
+  .check(checkScopeOperation);
+
 export const FeatureSchema = z.discriminatedUnion('kind', [
   SketchFeatureSchema,
   ExtrudeFeatureSchema,
@@ -677,6 +851,7 @@ export const FeatureSchema = z.discriminatedUnion('kind', [
   MirrorFeatureSchema,
   ExtensionFeatureSchema,
   ImportFeatureSchema,
+  DerivedFeatureSchema,
 ]);
 
 export const FEATURE_KINDS = [
@@ -691,6 +866,7 @@ export const FEATURE_KINDS = [
   'mirror',
   'extension',
   'import',
+  'derived',
 ] as const;
 
 // ---------------------------------------------------------------------------------------------
@@ -753,26 +929,11 @@ export const PartSchema = z.strictObject({
    */
   material: MaterialIdSchema.exactOptional(),
   /** Per-body names, colours and materials, for the bodies that have any. Since version 4. */
-  bodies: z.array(BodyPropsSchema),
+  bodies: z.array(BodyPropsSchema).max(MAX_BODY_LIST),
 });
 
 // ---------------------------------------------------------------------------------------------
-// Configurations (since version 5)
-
-/** The document-level `nextIds` key for configuration parameter ids (`cp#n`). */
-export const CONFIG_PARAMETER_COUNTER = 'cp';
-/** The document-level `nextIds` key for configuration row ids (`cfg#n`). */
-export const CONFIG_ROW_COUNTER = 'cfg';
-/** A configuration parameter id: `cp#n`, counted by the document's `nextIds.cp`. */
-export const CONFIG_PARAMETER_ID_PATTERN = /^cp#[1-9][0-9]*$/;
-/** A configuration row id: `cfg#n`, counted by the document's `nextIds.cfg`. */
-export const CONFIG_ROW_ID_PATTERN = /^cfg#[1-9][0-9]*$/;
-export const ConfigParameterIdSchema = z
-  .string()
-  .regex(CONFIG_PARAMETER_ID_PATTERN, 'Expected a configuration parameter id like "cp#1"');
-export const ConfigRowIdSchema = z
-  .string()
-  .regex(CONFIG_ROW_ID_PATTERN, 'Expected a configuration row id like "cfg#1"');
+// Configurations (since version 5). The id schemas are with the primitives, above.
 
 /**
  * One column of the configuration table: what a row can override. A `variable` parameter
@@ -883,6 +1044,10 @@ export type ExtensionFeature = z.infer<typeof ExtensionFeatureSchema>;
 export type ImportSource = z.infer<typeof ImportSourceSchema>;
 export type ImportOperation = z.infer<typeof ImportOperationSchema>;
 export type ImportFeature = z.infer<typeof ImportFeatureSchema>;
+export type DerivedSource = z.infer<typeof DerivedSourceSchema>;
+export type DerivedPlacement = z.infer<typeof DerivedPlacementSchema>;
+export type DerivedFeature = z.infer<typeof DerivedFeatureSchema>;
+export type BodyCopyMode = z.infer<typeof BodyCopyModeSchema>;
 export type Feature = z.infer<typeof FeatureSchema>;
 export type FeatureKind = Feature['kind'];
 export type Variable = z.infer<typeof VariableSchema>;

@@ -23,7 +23,7 @@ import {
 ```ts
 interface ManufaktureDocument {
   format: 'manufakture';
-  version: 5; // file format version, FORMAT_VERSION
+  version: 6; // file format version, FORMAT_VERSION
   namingScheme: 1; // topological naming scheme version (T0.5), NAMING_SCHEME
   id: string;
   name: string;
@@ -45,7 +45,7 @@ interface Part {
 }
 
 interface BodyProps {
-  id: string; // a body id: 'extrude#3', 'pattern#2:i3'
+  id: string; // a body id: 'extrude#3', 'pattern#2:i3', 'derived#1:from/extrude#1'
   name?: string;
   color?: string; // '#rrggbb', lower-case
   material?: MaterialId; // overrides Part.material for this body
@@ -62,11 +62,16 @@ regen; the document stores only what the user set on a body, and which bodies ea
 on.
 
 - **A body is named after the feature that made it.** Its id is the creating feature's id
-  (`extrude#3`, `import#1`); copies a pattern or mirror of bodies makes take its instance prefix
-  (`pattern#2:i3`, `mirror#1:image`); a derived body will be `derived#1:from/<source body id>`.
-  Feature ids are never reused, so body ids are not either, and they need no counter.
-  `bodyCreator(bodyId)` gives the creating feature: the id up to the first `:`. Nothing after it
-  is read for feature ids, since it is an instance suffix or a name in another document.
+  (`extrude#3`, `import#1`). A pattern or mirror owns the bodies its copies make, under its
+  instance prefix: copies of bodies (`body: true`), and copies of features that make bodies (a
+  `new` extrude, revolve or import, or an `add` whose copy touches nothing). A copy is
+  `pattern#2:i3` or `mirror#1:image`, followed by `/<source id>` when the pattern copies several
+  bodies or features (`pattern#2:i3/extrude#1`). A derived body is
+  `derived#1:from/<source body id>`, the source body id being the body's id in the source
+  document (`derived#1:from/pattern#2:i3/extrude#1`). Feature ids are never reused, so body ids
+  are not either, and they need no counter. `bodyCreator(bodyId)` gives the creating feature: the
+  id up to the first `:`. Nothing after it is read for feature ids, since it is an instance suffix
+  or a name in another document.
 - **Merging and splitting.** A `new` extrude, revolve or import makes a body. An `add` whose tool
   touches several bodies in its scope fuses them into one, which keeps the id of the body whose
   creating feature comes first in the part; the others end there. An `add` that touches no body
@@ -77,8 +82,13 @@ on.
   optional `scope: string[]` of body ids: the bodies the operation combines with, or the bodies a
   body pattern copies. Absent means every body at that point, which is what a version 3 part (one
   compound) did, so old documents regenerate unchanged. A scope is at least one body; a `new` or
-  `reference` operation and a pattern of features have none (the schema refuses it). Fillet,
-  chamfer and shell take no scope: they act on the bodies that own their references.
+  `reference` operation and a pattern of features have none (the schema refuses it). A derived
+  feature takes a scope like an import (since version 6). Fillet, chamfer and shell take no
+  scope: they act on the bodies that own their references.
+- **Body pattern mode.** A pattern or mirror with `body: true` may say how its copies join the
+  part (since version 6): `mode: 'add'` fuses each copy with the bodies it touches, `mode: 'new'`
+  keeps every copy a body of its own. Absent means `add`, which is what a body pattern did before,
+  so older documents are unchanged. Only a pattern or mirror of bodies has a mode.
 - **What is stored.** `Part.bodies` has an entry only for a body the user has named, coloured or
   given a material, so every entry sets at least one of them. `Part.material` stays and is the
   default: a body's material is its own `material` if it has one, else the part's, else none.
@@ -86,12 +96,13 @@ on.
 
 Validation checks body ids as far as it can without regen. A `BodyProps.id` or a `scope` entry
 must name a body a feature of the part can create: its creating feature exists and is an extrude,
-revolve or import with operation `new` or `add` (named exactly its id), or a pattern or mirror of
-bodies (named with a suffix). A scope entry's creator must come before the feature; it becomes one
+revolve or import with operation `new` or `add` (named exactly its id), a pattern or mirror of
+bodies or of body-making features (named with a suffix), or a derived feature with operation
+`new` or `add` (named `<id>:from/<source body id>`, and when it lists `bodies`, one of them). A scope entry's creator must come before the feature; it becomes one
 of `featureDependencies`, so reorder and delete respect it. Duplicate ids in `bodies` or in one
 scope are refused. The rest is regen's: whether an `add` really made a body (it may have merged),
-and whether an instance suffix exists (`:i3` of a three-copy pattern), are reported by regen as
-`reference-lost`.
+whether an instance suffix exists (`:i3` of a three-copy pattern) and whether a source body
+exists in the pinned version, are reported by regen as `reference-lost`.
 
 Part ids are `part#n`, allocated from the document's `nextIds.part` like feature ids: a
 `part#n` at or past the counter is refused, and the counter only increases. A part id of another
@@ -275,26 +286,27 @@ themselves, and how a reference resolved, are derived data and never stored.
 Every feature has `id`, `kind`, a display `name` (1 to 200 characters) and `suppressed`. The
 union is discriminated by `kind`.
 
-| Kind        | Inputs                                                                                                                                                           |
-| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `sketch`    | `plane` (explicit `origin`, `normal`, `xDir`, or a `face` reference), `entities`, `constraints`                                                                  |
-| `extrude`   | `profile`, `operation` (`new`, `add`, `cut`, `intersect`), `extent`, `reverse`, optional `draft` (angle; + tapers inward)                                        |
-| `revolve`   | `profile`, `axis` (a line of the sketch or an edge reference, each with optional `flip`), `angle`, `symmetric`, `operation`                                      |
-| `fillet`    | `edges` (edge references), `radius`                                                                                                                              |
-| `chamfer`   | `edges`, `distance`, optional `secondDistance` or `angle` (not both)                                                                                             |
-| `shell`     | `faces` to remove (face references), `thickness`, `outward`                                                                                                      |
-| `hole`      | `sketch` and its `points`, `diameter`, `extent` (blind depth or through all), `head` (simple, counterbore, countersink), optional `standard` (`size`, `fit`)     |
-| `pattern`   | `features` to repeat, or `body: true` (and no features) for the whole body, `layout` (linear: direction, count, spacing; circular: axis, count, angle; `flip`)   |
-| `mirror`    | `features`, or `body: true`, `plane` (a planar face reference)                                                                                                   |
-| `extension` | a later domain feature: `extension` type (`print.brim`), `schemaVersion`, `dependsOn`, `references`, `expressions`, opaque JSON `params`                         |
-| `import`    | `source` (the imported file: `format` `step` or `stl`, `fileName`, `size`, `sha256`, base64 `data`), `operation` (`reference`, `new`, `add`, `cut`, `intersect`) |
+| Kind        | Inputs                                                                                                                                                                                                                                                                 |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sketch`    | `plane` (explicit `origin`, `normal`, `xDir`, or a `face` reference), `entities`, `constraints`                                                                                                                                                                        |
+| `extrude`   | `profile`, `operation` (`new`, `add`, `cut`, `intersect`), `extent`, `reverse`, optional `draft` (angle; + tapers inward)                                                                                                                                              |
+| `revolve`   | `profile`, `axis` (a line of the sketch or an edge reference, each with optional `flip`), `angle`, `symmetric`, `operation`                                                                                                                                            |
+| `fillet`    | `edges` (edge references), `radius`                                                                                                                                                                                                                                    |
+| `chamfer`   | `edges`, `distance`, optional `secondDistance` or `angle` (not both)                                                                                                                                                                                                   |
+| `shell`     | `faces` to remove (face references), `thickness`, `outward`                                                                                                                                                                                                            |
+| `hole`      | `sketch` and its `points`, `diameter`, `extent` (blind depth or through all), `head` (simple, counterbore, countersink), optional `standard` (`size`, `fit`)                                                                                                           |
+| `pattern`   | `features` to repeat, or `body: true` (and no features) for the bodies with an optional `mode` (`new`, `add`), `layout` (linear: direction, count, spacing; circular: axis, count, angle; `flip`)                                                                      |
+| `mirror`    | `features`, or `body: true` with an optional `mode`, `plane` (a planar face reference)                                                                                                                                                                                 |
+| `extension` | a later domain feature: `extension` type (`print.brim`), `schemaVersion`, `dependsOn`, `references`, `expressions`, opaque JSON `params`                                                                                                                               |
+| `import`    | `source` (the imported file: `format` `step` or `stl`, `fileName`, `size`, `sha256`, base64 `data`), `operation` (`reference`, `new`, `add`, `cut`, `intersect`)                                                                                                       |
+| `derived`   | `source` (the pinned version: `documentId`, `documentName`, `versionId`, `versionName`, `partId`, optional `configuration`, `size`, `sha256`, text `data`), optional `bodies`, `placement` (`translation`, `rotation`), `operation` (`new`, `add`, `cut`, `intersect`) |
 
 A `profile` is `{ sketch, entities? }`: the sketch feature and the entities bounding the chosen
 regions (absent: every closed region). Extrude extents are `blind`, `symmetric` (total depth,
 centred), `throughAll` and `upToFace`.
 
-Extrude, revolve, import, hole, and pattern and mirror with `body: true`, also take an optional
-`scope` (since version 4; see Bodies).
+Extrude, revolve, import, hole, derived, and pattern and mirror with `body: true`, also take an
+optional `scope` (since version 4; see Bodies).
 
 The kernel implements these as `applyFeature` inputs (`packages/kernel`, Part features). Unequal
 chamfers measure `distance` on the reference face of each edge, the adjacent face whose name sorts
@@ -347,6 +359,45 @@ import is built (regen README, "Import integrity"). This was chosen over a separ
 The cost is size: base64 is 4/3 of the file, in every saved copy and in the undo history's
 snapshots (which share it, since documents are immutable). The app refuses files over the same
 `MAX_IMPORT_BYTES`, which is below the kernel's own STEP limit (`MAX_STEP_BYTES`, 64 MiB).
+
+### Derived parts
+
+A `derived` feature (since version 6) brings bodies of a part of another document into this one,
+or of another version of this document, pinned to a named version (`apps/web/src/persistence`,
+"versions"). `source` names what is pinned: `documentId` and `versionId` (the version's id is
+permanent), `partId`, and for display `documentName` and `versionName` as they were when the pin
+was made. `configuration` is a row id of the source's configuration table to build it in; nothing
+writes it yet, and regen checks it against the source, not the load. `bodies` lists the source
+part's bodies to derive by their ids in the source (absent: every body); `placement` moves them,
+a rotation by `rotation` (angles about the fixed x, y and z axes, in that order, about the
+origin) and then a translation by `translation` (lengths), all expressions like any other; and
+`operation` and `scope` combine them with the part like an import's.
+
+**The pinned document is in the document.** `source.data` is the canonical JSON text
+(`serialize`) of the source document at that version, its imports inline, with `size` its UTF-8
+length in bytes and `sha256` the lower-case hex SHA-256 of those bytes. The reasoning is the one
+for imported files (above): the pin is input, not cache, since nothing in this document can
+rebuild it, so it lives in the document, and undo, save, copy and export just work, with no store
+beside the document to keep in step. Storage moves `data` out by hash the same way, so each
+pinned version is one blob per document (`apps/web/src/persistence/README.md`). Load checks the
+envelope only: the hash format, `size` against the UTF-8 length of `data` (counted without
+encoding it, after refusing a text longer than `MAX_DERIVED_BYTES`, 64 MiB, since a UTF-8 length
+is never less than the text's), and the other fields' shapes. The nested document itself is not
+opened at load: regen checks the hash, migrates, validates and builds it, and reports what is
+wrong on the feature, as for imports. Until regen can build pinned sources, a derived feature
+fails with `unsupported` and its dependents are not built.
+
+**Cycles are impossible.** A pin names an immutable snapshot, not a live document, so a document
+can derive from an older version of itself, and a chain of pins can never lead back to the
+version being edited. Deep nesting (a source deriving from a source, and so on) multiplies the
+work of a regen; it is capped at `MAX_DERIVED_DEPTH` (8), checked by regen as it opens sources.
+
+**Names from the source.** A derived body is `<id>:from/<source body id>` (see Bodies), and its
+faces are named `<id>:from/<source face name>`. Everything after `<id>:from/` is a name in the
+source document, whose feature ids are not features of this part, so `featureIdsInName` reads it
+as `<id>` alone: `derived#1:from/extrude#1:cap:end` depends on `derived#1` and never on a local
+`extrude#1`, which may not exist or may come later (see Dependencies). No stored reference had
+this form before, so `NAMING_SCHEME` stays 1.
 
 ### Sketch data
 
@@ -421,7 +472,27 @@ and the sketch types allow the key to be absent but never `undefined`.
 (profiles, hole sketches, patterned and mirrored features, `dependsOn`), every feature whose id
 starts a face name in one of its references (`extrude#1:cap:end`, including names nested in
 merges and corners), and the creator of every body in its `scope` (by `bodyCreator`, never by
-reading the body id as a face name). The rule, checked on every command and on load:
+reading the body id as a face name).
+
+`featureIdsInName(name)` splits a name into members at `+` in a merge `(A+B)` and at `&` in a
+corner `A&B&C`, keeping parenthesised groups whole, and reads every feature id that starts a name
+in a member, up to its first `<id>:from/`. That `<id>` counts; the rest of the member (a name,
+or one group) is a name in a derived part's source and is skipped. So
+`(derived#1:from/extrude#1:cap:end+extrude#2:side:e5)` gives `derived#1` and `extrude#2`,
+`pattern#7:i2/derived#1:from/extrude#3:side:e1` gives `pattern#7` and `derived#1`, and a corner
+of the source, whose members are each prefixed
+(`derived#1:from/fillet#3:corner:A&derived#1:from/B`), gives `derived#1` alone.
+
+The scan is one pass with a stack of open groups, linear in the name's length and with no
+recursion. The schema caps a stored face name at `MAX_FACE_NAME_LENGTH` (4096) characters and
+`MAX_FACE_NAME_DEPTH` (32) nested brackets, so a hostile name is a `schema` error at load rather
+than work for the parser; the longest name the kernel's golden and bracket tests produce is 84
+characters with one level of brackets.
+Body ids are capped the same way: `MAX_BODY_ID_LENGTH` (4096) characters, and at most
+`MAX_BODY_LIST` (10,000) entries in a `scope`, a derived feature's `bodies` and a part's `bodies`
+props.
+
+The rule, checked on every command and on load:
 
 - **A feature comes after everything it depends on.** Every dependency must exist in the part and
   sit earlier in the list.
@@ -598,9 +669,13 @@ numbered), and changes no feature, since an absent `scope` means every body; a p
 solids in one compound (`v3-two-bodies.json`) regenerates the same solids, now as two bodies
 (`extrude#1` and `extrude#2`). The test migrates `src/fixtures/v0-bracket.json` to exactly
 `v1-bracket.json`, that to exactly `v2-bracket.json`, that to exactly `v3-bracket.json` and that
-to exactly `v4-bracket.json` and that to exactly `v5-bracket.json`, and `v3-two-bodies.json` to
+to exactly `v4-bracket.json` and that to exactly `v5-bracket.json` and that to exactly
+`v6-bracket.json`, and `v3-two-bodies.json` to
 exactly `v4-two-bodies.json`. Version 5 added the optional configuration table; `migrateV4ToV5`
 only bumps the version, since a version 4 document has none and an absent counter starts at 1.
+Version 6 added the `derived` feature kind and the optional `mode` of a pattern or mirror of
+bodies; `migrateV5ToV6` only bumps the version, since a version 5 document has no derived feature
+and an absent `mode` is `add`; `v5-bracket.json` migrates to exactly `v6-bracket.json`.
 
 To change the file shape:
 

@@ -122,6 +122,21 @@ export const migrateV4ToV5: Migration = {
   },
 };
 
+/**
+ * Version 6 added the `derived` feature kind (bodies of a pinned version of a part, carried in
+ * the document) and the optional `mode` of a pattern or mirror of bodies. Nothing in a version 5
+ * file changes: it has no derived features, and an absent `mode` is `add`, which is what a body
+ * pattern did before.
+ */
+export const migrateV5ToV6: Migration = {
+  from: 5,
+  to: 6,
+  description: 'Add the derived feature kind and the body pattern mode',
+  migrate(doc) {
+    return { ...doc, version: 6 };
+  },
+};
+
 /** File format migrations, in order: `FORMAT_MIGRATIONS[i]` goes from version i to i + 1. */
 export const FORMAT_MIGRATIONS: readonly Migration[] = [
   migrateV0ToV1,
@@ -129,6 +144,7 @@ export const FORMAT_MIGRATIONS: readonly Migration[] = [
   migrateV2ToV3,
   migrateV3ToV4,
   migrateV4ToV5,
+  migrateV5ToV6,
 ];
 
 /**
