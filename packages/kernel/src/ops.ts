@@ -115,13 +115,12 @@ export type ReleaseOp = OpCommon & { op: 'release'; shapes: readonly ShapeRef[] 
  * the input bodies themselves when the feature failed or changed nothing, so
  * a later op of the batch can take `{ result }` either way. Only the shapes
  * of bodies the feature made or changed are owned by the batch (`keep:
- * false` releases them). `join`: see `ApplyOptions`.
+ * false` releases them).
  */
 export type FeatureOp = OpCommon & {
   op: 'feature';
   bodies: BodySetRef;
   feature: FeatureInput;
-  join?: boolean;
 };
 /** Resolve stored references on a named body. */
 export type ResolveOp = OpCommon & { op: 'resolve'; shape: ShapeRef; refs: readonly TopoRef[] };
@@ -280,7 +279,7 @@ const FIELDS: Record<OpName, [Record<string, Check>, Record<string, Check>]> = {
             : `${p} must be a list of { id, shape } or { result: <op index> }`,
       feature: shape({ id: str, kind: str }),
     },
-    { join: bool },
+    {},
   ],
   resolve: [{ shape: shapeRef, refs: arrayOf(topoRef) }, {}],
   pick: [{ shape: shapeRef, kind: oneOf('face', 'edge'), index: num }, {}],
@@ -393,7 +392,7 @@ export function executeOp(
           code: 'invalid-op',
         });
       }
-      return applyFeature(kernel, bodies, op.feature, op.join ? { join: true } : {});
+      return applyFeature(kernel, bodies, op.feature);
     }
     case 'resolve':
       return { results: resolveReferences(kernel, resolve(op.shape, 'resolve'), op.refs) };

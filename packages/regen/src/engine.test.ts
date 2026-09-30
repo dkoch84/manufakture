@@ -38,14 +38,20 @@ import {
   extrude,
   fillet,
   mm,
+  pocket,
   rectangle,
   setVariable,
   statuses,
+  twoBodies,
 } from './test-helpers';
 
 interface Behaviour {
   errors?: FeatureError[];
   warnings?: FeatureWarning[];
+  /** The bodies (of those read) the feature changes; default every one. */
+  touch?: string[];
+  /** Fuse the touched bodies into the first of them. */
+  merge?: boolean;
 }
 
 /** A kernel that makes numbered shapes, fails features on request and supports cancellation. */
@@ -57,8 +63,10 @@ class FakeKernel implements RegenKernel {
   cancelledThrough = 0;
   /** Feature ids of every `feature` op run, in order. */
   readonly featureOps: string[] = [];
-  /** The body each feature op got, by feature id (last run). */
-  readonly bodies = new Map<string, number | null>();
+  /** The body shapes each feature op got, by feature id (last run). */
+  readonly bodies = new Map<string, number[]>();
+  /** The body ids each feature op got, by feature id (last run). */
+  readonly sets = new Map<string, string[]>();
   readonly inputs = new Map<string, FeatureInput>();
   readonly released: number[] = [];
   readonly cancels: number[] = [];
@@ -147,7 +155,7 @@ class FakeKernel implements RegenKernel {
         },
       };
     }
-    // A feature op's value is a body set (one body at most: regen joins them); others carry `shape`.
+    // A feature op's value is a body set: a bare { result } takes its first body; others carry `shape`.
     const value = earlier.value as { shape?: number | null; bodies?: { shape: number }[] };
     return value.bodies !== undefined ? (value.bodies[0]?.shape ?? null) : (value.shape ?? null);
   }
@@ -156,57 +164,88 @@ class FakeKernel implements RegenKernel {
     switch (op.op) {
       case 'feature': {
         const id = op.feature.id;
-        expect(op.join).toBe(true);
-        const given = Array.isArray(op.bodies)
-          ? (op.bodies as { id: string; shape: unknown }[])
-          : null;
-        expect(given === null || given.length <= 1).toBe(true);
-        const input = given === null ? op.bodies : (given[0]?.shape ?? null);
-        if (typeof input === 'number' && !this.live.has(input)) {
-          // What `applyFeature` does with an unknown body id: a normal feature result that
-          // passes the id through with a `no-body` error and no names, not a failed op.
-          this.featureOps.push(id);
-          this.bodies.set(id, input);
-          this.inputs.set(id, op.feature);
+        expect('join' in op).toBe(false);
+        // Regen sends the bodies a feature reads, listed with their ids.
+        expect(Array.isArray(op.bodies)).toBe(true);
+        const given = op.bodies as readonly { id: string; shape: number }[];
+        this.featureOps.push(id);
+        this.bodies.set(
+          id,
+          given.map((g) => g.shape),
+        );
+        this.sets.set(
+          id,
+          given.map((g) => g.id),
+        );
+        this.inputs.set(id, op.feature);
+        const passed = (names: boolean) =>
+          given.map((g) => ({
+            id: g.id,
+            shape: g.shape as ShapeId,
+            names: names ? { faces: [], edges: [] } : null,
+            solids: names ? 1 : 0,
+          }));
+        const fail = (errors: FeatureError[], names = true): OpResult => {
           const value: FeatureOutcome = {
             featureId: id,
             kind: op.feature.kind,
             ok: false,
-            bodies: [{ id: 'part', shape: input as ShapeId, names: null, solids: 0 }],
+            bodies: passed(names),
             created: [],
             changed: [],
             consumed: [],
-            errors: [{ featureId: id, code: 'no-body', message: `unknown shape id ${input}` }],
+            errors,
             warnings: [],
             resolved: [],
           };
           return { ok: true, op: 'feature', value, ms: 0 };
+        };
+        const dead = given.find((g) => !this.live.has(g.shape));
+        if (dead !== undefined) {
+          // What `applyFeature` does with an unknown body id: a normal feature result that
+          // passes the ids through with a `no-body` error and no names, not a failed op.
+          return fail(
+            [{ featureId: id, code: 'no-body', message: `unknown shape id ${dead.shape}` }],
+            false,
+          );
         }
-        const body = this.#shape(input, results);
-        if (body !== null && typeof body === 'object') return body.fail;
-        this.featureOps.push(id);
-        this.bodies.set(id, body);
-        this.inputs.set(id, op.feature);
         const b = this.behaviours.get(id) ?? {};
-        const failed = (b.errors ?? []).length > 0;
-        let shape = body as ShapeId | null;
-        if (!failed) {
-          shape = this.next++ as ShapeId;
+        if ((b.errors ?? []).length > 0) return fail(b.errors!);
+        const input = op.feature as { mode?: string; body?: string };
+        const mint = () => {
+          const shape = this.next++ as ShapeId;
           this.live.add(shape);
+          return shape;
+        };
+        // A live body always has names (the engine never reads them).
+        const bodies = passed(true);
+        const created: string[] = [];
+        const changed: string[] = [];
+        let consumed: string[] = [];
+        if (input.mode === 'new' || given.length === 0) {
+          const bodyId = input.body ?? id;
+          bodies.push({ id: bodyId, shape: mint(), names: { faces: [], edges: [] }, solids: 1 });
+          created.push(bodyId);
+        } else {
+          // Every body read is changed (a scripted `touch` narrows it), and `merge` fuses them.
+          const touched = given.filter((g) => b.touch?.includes(g.id) ?? true).map((g) => g.id);
+          if (b.merge) consumed = touched.slice(1);
+          for (const body of bodies) {
+            if (touched[0] === body.id || (!b.merge && touched.includes(body.id))) {
+              body.shape = mint();
+              changed.push(body.id);
+            }
+          }
         }
         const value: FeatureOutcome = {
           featureId: id,
           kind: op.feature.kind,
-          ok: !failed,
-          // A live body always has names (the engine never reads them).
-          bodies:
-            shape === null
-              ? []
-              : [{ id: 'part', shape, names: { faces: [], edges: [] }, solids: 1 }],
-          created: !failed && body === null ? ['part'] : [],
-          changed: !failed && body !== null ? ['part'] : [],
-          consumed: [],
-          errors: b.errors ?? [],
+          ok: true,
+          bodies: bodies.filter((x) => !consumed.includes(x.id)),
+          created,
+          changed,
+          consumed,
+          errors: [],
           warnings: b.warnings ?? [],
           resolved: [],
         };
@@ -335,7 +374,7 @@ describe('cache and minimal rebuilds', () => {
     expect(statuses(first)).toEqual({ 'sketch#1': 'ok', 'extrude#1': 'ok', 'fillet#1': 'ok' });
     expect(kernel.featureOps).toEqual(['extrude#1', 'fillet#1']);
     expect(solver.solves).toBe(1);
-    expect(first.parts[0]!.meshChanged).toBe(true);
+    expect(first.parts[0]!.bodies[0]!.meshChanged).toBe(true);
     // The fillet waited for the extrude it names: two batches, plus the mesh.
     expect(first.counters).toMatchObject({ batches: 3, featureOps: 2, cacheMisses: 3 });
 
@@ -351,8 +390,8 @@ describe('cache and minimal rebuilds', () => {
     expect(second.counters).toMatchObject({ batches: 0, cacheHits: 3, cacheMisses: 0 });
     expect(second.parts[0]!.dirty).toEqual([]);
     expect(second.parts[0]!.features.every((f) => f.cached)).toBe(true);
-    expect(second.parts[0]!.shape).toBe(first.parts[0]!.shape);
-    expect(second.parts[0]!.meshChanged).toBe(false);
+    expect(second.parts[0]!.bodies[0]!.shape).toBe(first.parts[0]!.bodies[0]!.shape);
+    expect(second.parts[0]!.bodies[0]!.meshChanged).toBe(false);
   });
 
   it('rebuilds only the feature that reads an edited variable', async () => {
@@ -365,7 +404,8 @@ describe('cache and minimal rebuilds', () => {
     expect(edited.parts[0]!.dirty).toEqual(['fillet#1']);
     expect(edited.parts[0]!.features.map((f) => f.cached)).toEqual([true, true, false]);
     // The fillet was applied to the cached extrude body.
-    expect(kernel.bodies.get('fillet#1')).toBe(100);
+    expect(kernel.bodies.get('fillet#1')).toEqual([100]);
+    expect(kernel.sets.get('fillet#1')).toEqual(['extrude#1']);
     expect(kernel.inputs.get('fillet#1')).toMatchObject({ radius: 4 });
   });
 
@@ -388,7 +428,7 @@ describe('cache and minimal rebuilds', () => {
     );
     const next = await regen(engine, more);
     expect(kernel.featureOps).toEqual(['extrude#1', 'fillet#1', 'extrude#2']);
-    expect(kernel.bodies.get('extrude#2')).toBe(first.parts[0]!.shape);
+    expect(kernel.bodies.get('extrude#2')).toEqual([first.parts[0]!.bodies[0]!.shape]);
     expect(next.parts[0]!.dirty).toEqual(['sketch#2', 'extrude#2']);
   });
 
@@ -407,7 +447,7 @@ describe('cache and minimal rebuilds', () => {
     const { kernel, engine } = setup({ spare: 0 });
     const doc = block();
     const first = await regen(engine, doc);
-    const oldFillet = first.parts[0]!.shape!;
+    const oldFillet = first.parts[0]!.bodies[0]!.shape!;
     await regen(engine, apply(doc, setVariable('radius', '4mm')));
     expect(kernel.released).toEqual([oldFillet]);
     await engine.dispose();
@@ -421,8 +461,8 @@ describe('cache and minimal rebuilds', () => {
     await regen(engine, apply(doc, setVariable('radius', '4mm')));
     const back = await regen(engine, doc);
     expect(kernel.featureOps).toEqual(['extrude#1', 'fillet#1', 'fillet#1']);
-    expect(back.parts[0]!.shape).toBe(first.parts[0]!.shape);
-    expect(back.parts[0]!.meshChanged).toBe(true);
+    expect(back.parts[0]!.bodies[0]!.shape).toBe(first.parts[0]!.bodies[0]!.shape);
+    expect(back.parts[0]!.bodies[0]!.meshChanged).toBe(true);
     expect(kernel.released).toEqual([]);
   });
 
@@ -443,6 +483,119 @@ describe('cache and minimal rebuilds', () => {
     );
     expect(other.counters.solves).toBe(1);
     expect(solver.solves).toBe(2);
+  });
+});
+
+describe('bodies', () => {
+  /** The document with extrusion `id` 25 mm deep instead of 20 (the fake solver moves nothing). */
+  const deeper = (doc: ManufaktureDocument, id: string) => {
+    const f = doc.parts[0]!.features.find((x) => x.id === id) as ExtrudeFeature;
+    return apply(doc, {
+      type: 'editFeature',
+      partId: PART,
+      feature: { ...f, extent: { type: 'blind', distance: mm('25') } },
+    });
+  };
+  const ids = (r: { parts: { bodies: { bodyId: string }[] }[] }) =>
+    r.parts[0]!.bodies.map((b) => b.bodyId);
+
+  it('sends each feature only the bodies it reads, and rebuilds only the edited body', async () => {
+    const { kernel, engine } = setup();
+    const doc = twoBodies();
+    const first = await regen(engine, doc);
+    expect(ids(first)).toEqual(['extrude#1', 'extrude#2']);
+    expect(first.parts[0]!.bodies.map((b) => [b.creator, b.meshChanged])).toEqual([
+      ['extrude#1', true],
+      ['extrude#2', true],
+    ]);
+    expect(kernel.featureOps).toEqual(['extrude#1', 'extrude#2', 'fillet#1', 'fillet#2']);
+    // A new body reads none; each fillet reads the body its edge is on.
+    expect(kernel.sets.get('extrude#2')).toEqual([]);
+    expect(kernel.sets.get('fillet#1')).toEqual(['extrude#1']);
+    expect(kernel.sets.get('fillet#2')).toEqual(['extrude#2']);
+    expect(kernel.inputs.get('extrude#2')).toMatchObject({ mode: 'new', body: 'extrude#2' });
+
+    // Body 2's radius: one op, on body 2, and only its mesh.
+    const r2 = await regen(engine, apply(doc, setVariable('r2', '4mm')));
+    expect(kernel.featureOps.slice(4)).toEqual(['fillet#2']);
+    expect(r2.parts[0]!.bodies.map((b) => [b.bodyId, b.meshChanged, b.mesh !== null])).toEqual([
+      ['extrude#1', false, false],
+      ['extrude#2', true, true],
+    ]);
+    expect(r2.parts[0]!.bodies[0]!.bodyKey).toBe(first.parts[0]!.bodies[0]!.bodyKey);
+
+    // Body 1's height: its extrusion and fillet; body 2 is all cache hits.
+    const taller = await regen(engine, deeper(doc, 'extrude#1'));
+    expect(kernel.featureOps.slice(5)).toEqual(['extrude#1', 'fillet#1']);
+    // Body 2 is back to the radius of the first regen: its first body again, re-sent.
+    expect(taller.parts[0]!.bodies.map((b) => b.meshChanged)).toEqual([true, true]);
+    expect(taller.parts[0]!.bodies[1]!.bodyKey).toBe(first.parts[0]!.bodies[1]!.bodyKey);
+  });
+
+  it('reads every body for a feature without a scope, and the scoped ones for one with', async () => {
+    const withCut = (scope?: string[]) =>
+      twoBodies([
+        add(pocket('sketch#3', [5, 5])),
+        add({ ...extrude('extrude#3', 'sketch#3', '5', 'cut'), ...(scope ? { scope } : {}) }),
+      ]);
+    const open = setup();
+    open.kernel.behaviours.set('extrude#3', { touch: ['extrude#1'] });
+    const a = withCut();
+    await regen(open.engine, a);
+    expect(open.kernel.sets.get('extrude#3')).toEqual(['extrude#1', 'extrude#2']);
+    await regen(open.engine, deeper(a, 'extrude#2'));
+    // The cut read body 2, so body 1's fillet after it is rebuilt too.
+    expect(open.kernel.featureOps.slice(5)).toEqual([
+      'extrude#2',
+      'extrude#3',
+      'fillet#1',
+      'fillet#2',
+    ]);
+
+    const scoped = setup();
+    const b = withCut(['extrude#1']);
+    await regen(scoped.engine, b);
+    expect(scoped.kernel.sets.get('extrude#3')).toEqual(['extrude#1']);
+    expect(scoped.kernel.inputs.get('extrude#3')).toMatchObject({ scope: ['extrude#1'] });
+    await regen(scoped.engine, deeper(b, 'extrude#2'));
+    expect(scoped.kernel.featureOps.slice(5)).toEqual(['extrude#2', 'fillet#2']);
+  });
+
+  it('lists merged bodies as consumed and routes their faces to the body they went into', async () => {
+    const { kernel, engine } = setup();
+    kernel.behaviours.set('extrude#3', { merge: true });
+    const doc = twoBodies([
+      add(pocket('sketch#3', [30, 5])),
+      add(extrude('extrude#3', 'sketch#3', '5', 'add')),
+    ]);
+    const result = await regen(engine, doc);
+    expect(ids(result)).toEqual(['extrude#1']);
+    expect(result.parts[0]!.consumed).toEqual([{ bodyId: 'extrude#2', featureId: 'extrude#3' }]);
+    // fillet#2 names body 2's faces, which are on body 1 now.
+    expect(kernel.sets.get('fillet#2')).toEqual(['extrude#1']);
+    expect(statuses(result)['fillet#2']).toBe('ok');
+    // From the cache, the same.
+    const again = await regen(engine, apply(doc, setVariable('r2', '4mm')));
+    expect(again.parts[0]!.consumed).toEqual([{ bodyId: 'extrude#2', featureId: 'extrude#3' }]);
+    expect(kernel.featureOps.slice(-1)).toEqual(['fillet#2']);
+    expect(kernel.sets.get('fillet#2')).toEqual(['extrude#1']);
+  });
+
+  it('fails a scope naming a body that is not there, without sending it', async () => {
+    const { kernel, engine } = setup();
+    kernel.behaviours.set('extrude#3', { merge: true });
+    const doc = twoBodies([
+      add(pocket('sketch#3', [30, 5])),
+      add(extrude('extrude#3', 'sketch#3', '5', 'add')),
+      add(pocket('sketch#4', [110, 5], 1)),
+      add({ ...extrude('extrude#4', 'sketch#4', '5', 'cut'), scope: ['extrude#2'] }),
+    ]);
+    const result = await regen(engine, doc);
+    expect(result.parts[0]!.features.find((f) => f.featureId === 'extrude#4')).toMatchObject({
+      status: 'error',
+      errors: [{ code: 'reference-lost', referenceId: 'scope', missing: ['extrude#2'] }],
+    });
+    expect(kernel.featureOps).not.toContain('extrude#4');
   });
 });
 
@@ -478,8 +631,8 @@ describe('errors', () => {
     ]);
     // The fillet never reached the kernel; extrude#3 got the body extrude#1 made, passed through.
     expect(kernel.featureOps).toEqual(['extrude#1', 'extrude#2', 'extrude#3']);
-    expect(kernel.bodies.get('extrude#3')).toBe(kernel.bodies.get('extrude#2'));
-    expect(kernel.bodies.get('extrude#2')).toBe(100);
+    expect(kernel.bodies.get('extrude#3')).toEqual(kernel.bodies.get('extrude#2'));
+    expect(kernel.bodies.get('extrude#2')).toEqual([100]);
   });
 
   it('caches failures too: an unrelated edit does not retry them', async () => {
@@ -573,7 +726,7 @@ describe('errors', () => {
     });
     expect(statuses(result)['extrude#1']).toBe('upstream-error');
     expect(kernel.featureOps).toEqual([]);
-    expect(result.parts[0]!.shape).toBeNull();
+    expect(result.parts[0]!.bodies).toEqual([]);
   });
 
   it('checks the dimension an expression evaluates to', async () => {
@@ -735,7 +888,7 @@ describe('cancellation and recycling', () => {
       'fillet#1',
     ]);
     expect(engine.stats.retries).toBe(1);
-    expect(kernel.live.has(result.parts[0]!.shape!)).toBe(true);
+    expect(kernel.live.has(result.parts[0]!.bodies[0]!.shape!)).toBe(true);
     // The pass-through the kernel gave the fillet on the dead body was never cached.
     const again = await regen(engine, apply(doc, setVariable('radius', '4mm')));
     expect(again.counters).toMatchObject({ featureOps: 0, cacheHits: 3 });
@@ -751,7 +904,7 @@ describe('cancellation and recycling', () => {
       nextIds: { part: 3 },
     };
     const first = await regen(engine, doc);
-    const shapeOfA = first.parts[0]!.shape!;
+    const shapeOfA = first.parts[0]!.bodies[0]!.shape!;
     // Part 2's first kernel feature changes: its batch uses no cached shape, so only the
     // check after the part loop can see that part 1's cached body died with the recycle.
     const extrude2 = doc.parts[1]!.features[1]! as ExtrudeFeature;
@@ -769,7 +922,7 @@ describe('cancellation and recycling', () => {
     const result = await regen(engine, edited);
     expect(engine.stats.retries).toBe(1);
     expect(kernel.live.has(shapeOfA)).toBe(false);
-    for (const p of result.parts) expect(kernel.live.has(p.shape!)).toBe(true);
+    for (const p of result.parts) expect(kernel.live.has(p.bodies[0]!.shape)).toBe(true);
     expect(result.parts.map((p) => statuses({ parts: [p] }))).toEqual([
       { 'sketch#1': 'ok', 'extrude#1': 'ok', 'fillet#1': 'ok' },
       { 'sketch#1': 'ok', 'extrude#1': 'ok', 'fillet#1': 'ok' },
@@ -780,13 +933,17 @@ describe('cancellation and recycling', () => {
     const { engine } = setup();
     const doc = block();
     const first = await regen(engine, doc);
-    expect(first.parts[0]!.mesh).not.toBeNull();
-    expect(first.parts[0]!.topology).toEqual({ faces: [], edges: [], vertices: [] });
+    expect(first.parts[0]!.bodies[0]!.mesh).not.toBeNull();
+    expect(first.parts[0]!.bodies[0]!.topology).toEqual({ faces: [], edges: [], vertices: [] });
     const renamed = await regen(
       engine,
       apply(doc, { type: 'renameFeature', partId: PART, featureId: 'fillet#1', name: 'Round' }),
     );
-    expect(renamed.parts[0]).toMatchObject({ meshChanged: false, mesh: null, topology: null });
+    expect(renamed.parts[0]!.bodies[0]).toMatchObject({
+      meshChanged: false,
+      mesh: null,
+      topology: null,
+    });
   });
 
   it('never caches the pass-through of a body the kernel no longer has, whatever the instance says', async () => {

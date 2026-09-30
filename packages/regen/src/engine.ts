@@ -2,16 +2,17 @@
 //
 // It runs next to the kernel (ADR 0007 decision 1: the regen engine lives in the kernel worker)
 // and drives it through the kernel service's batch API: one `feature` op per kernel feature,
-// with `applyFeature` semantics, chained by `{ result }` references inside a batch. Every
-// feature's result is cached under a key that covers everything its output depends on (see
-// `cache.ts`), so a regen walks the whole part but only sends ops for keys it has never built.
+// with `applyFeature` semantics, on the bodies the feature reads. A part carries a set of bodies
+// (M2 plan, decisions 1 to 3): every feature reads only some of them (its scope, the bodies its
+// references lie on, or all of them), and its result is cached under a key that covers its input
+// and the keys of those bodies (see `cache.ts`), so an edit to one body is a cache hit for the
+// features of the others. A regen walks the whole part but only sends ops for keys it has never
+// built.
 //
-// Batches: a feature that depends on another one (by id or by face name) needs to know whether
-// that one failed before it runs (it is then an upstream error, not attempted), so the pending
-// batch is flushed first. Features that only share the body do not wait: a failed feature passes
-// the body through and the next one builds on it. A sketch placed on a face needs the face's
-// plane, so it adds a `resolve` op and flushes. In the worker a batch costs no structured clone,
-// and the service yields between ops anyway, so flushing is cheap.
+// Batches: the next feature's key depends on what the previous one did to the body set (which
+// bodies it made, changed or merged away), so every `feature` op is flushed before the next
+// feature is looked at. A sketch placed on a face needs the face's plane, so it adds a `resolve`
+// op and flushes too. In the worker a batch costs no structured clone, so flushing is cheap.
 //
 // Cancellation: every regen has a generation. A newer regen cancels the kernel batches of the
 // older one (`KernelService.cancel`) and the older one stops at its next await, returning null.
@@ -30,7 +31,6 @@ import {
   type BatchRequest,
   type Deflection,
   type FeatureInput,
-  type FeatureOp,
   type FeatureOutcome,
   type KernelOp,
   type MeshData,
@@ -47,16 +47,27 @@ import {
   MemoryCache,
   REGEN_IMPLEMENTATION_VERSION,
   cacheKey,
+  holdsShapes,
   type CacheEntry,
+  type CachedOutcome,
   type FeatureCache,
   type KeyVersions,
 } from './cache';
 import { mapFailure, mapOutcome, planeReport } from './errors';
-import { buildGraph, dirtyFeaturesOf, readsBody } from './graph';
+import {
+  bodyUse,
+  buildGraph,
+  dirtyFeaturesOf,
+  readsBody,
+  routeBodies,
+  type RoutedBody,
+} from './graph';
 import { importSourceMatches, keyInput } from './imports';
 import { explicitPlacement, solveSketch, type RegenSolver, type SketchResult } from './sketches';
 import { faceRef, translateFeature } from './translate';
 import type {
+  BodyResult,
+  ConsumedBody,
   FeatureResult,
   PartResult,
   RegenCounters,
@@ -137,23 +148,27 @@ class StaleShapes extends Error {
   }
 }
 
-type BodyRef = ShapeId | { result: number } | null;
-
-interface BodyState {
-  ref: BodyRef;
-  /** Cache key of the body: `empty` before the first kernel feature. */
-  key: string;
-  /** An op-level failure left no usable body; kernel features after it are not attempted. */
-  broken: boolean;
-  /** The kernel instance `ref` lives in, when it is a concrete shape id. */
+/** A body of the part while a regen walks its features. */
+interface LiveBody extends RoutedBody {
+  id: string;
+  /** The feature that made it. */
+  creator: string;
+  shape: ShapeId;
+  /** The kernel instance `shape` lives in. */
   instance: number | null;
+  /** Cache key of the body: the key of the feature that last changed it, and its id. */
+  key: string;
+  solids: number;
 }
+
+/** A `shapesFrom` for a batch reading shapes of two instances: one of them is stale. */
+const MIXED_INSTANCES = -1;
 
 type Meta =
   | { type: 'feature'; feature: Feature; key: string; result: FeatureResult; started: number }
   | { type: 'resolve'; take: (r: OpResult) => void }
-  | { type: 'mesh'; partId: string }
-  | { type: 'topology'; partId: string };
+  | { type: 'mesh'; slot: string }
+  | { type: 'topology'; slot: string };
 
 interface Batch {
   ops: KernelOp[];
@@ -177,12 +192,16 @@ interface Run {
 
 interface PartState {
   part: Part;
-  body: BodyState;
+  /** The bodies after the features so far, in creator order. */
+  bodies: LiveBody[];
+  /** Bodies merged away so far. */
+  consumed: ConsumedBody[];
+  /** An op-level failure left no usable bodies; kernel features after it are not attempted. */
+  broken: boolean;
   batch: Batch;
   results: Map<string, FeatureResult>;
   /** Features whose dependents cannot be built, and why. */
   unavailable: Map<string, 'error' | 'suppressed' | 'upstream-error'>;
-  pending: Set<string>;
   sketches: Map<string, SketchResult>;
   inputs: Map<string, FeatureInput>;
   /** Reference imports seen so far (not part of the body, never in the kernel). */
@@ -209,18 +228,8 @@ function staleBody(op: KernelOp, r: OpResult): boolean {
   );
 }
 
-/**
- * The body id regen gives the one body it carries per part. The kernel works on body sets; until
- * regen carries them too (M2 plan, T2.1c), every feature op joins its bodies into one compound
- * (`join`), which is what a part was before M2, and this is its id.
- */
-const PART_BODY = 'part';
-
-/** The `bodies` of a feature op on the part's one body. */
-function bodySet(ref: BodyRef): FeatureOp['bodies'] {
-  if (ref === null) return [];
-  return typeof ref === 'number' ? [{ id: PART_BODY, shape: ref }] : { result: ref.result };
-}
+/** The key `#reported` and the mesh batch use for a body of a part. */
+const slotOf = (partId: string, bodyId: string): string => `${partId}\n${bodyId}`;
 
 function emptyCounters(): RegenCounters {
   return { featureOps: 0, otherOps: 0, batches: 0, solves: 0, cacheHits: 0, cacheMisses: 0 };
@@ -244,8 +253,8 @@ export class RegenEngine {
   #chain: Promise<unknown> = Promise.resolve();
   #instance: number | null = null;
   #lastDocument: ManufaktureDocument | null = null;
-  /** Body key per part as last reported, to send meshes only when a body changed. */
-  readonly #reported = new Map<string, string | null>();
+  /** Body key per part and body (`slotOf`) as last reported, to send meshes only when a body changed. */
+  #reported = new Map<string, string>();
   readonly #stats: EngineStats = { ...emptyCounters(), regens: 0, superseded: 0, retries: 0 };
   readonly #unsubscribe: (() => void) | undefined;
 
@@ -422,14 +431,10 @@ export class RegenEngine {
     // cache hits can hold a shape id from before a recycle that landed during another part's
     // batch. Its tessellation would fail, or worse, a later pick or measure would.
     for (const { state } of built) {
-      const { ref, instance } = state.body;
-      if (
-        typeof ref === 'number' &&
-        instance !== null &&
-        run.instance !== null &&
-        instance !== run.instance
-      ) {
-        throw new StaleShapes(run.instance);
+      for (const b of state.bodies) {
+        if (b.instance !== null && run.instance !== null && b.instance !== run.instance) {
+          throw new StaleShapes(run.instance);
+        }
       }
     }
 
@@ -438,18 +443,16 @@ export class RegenEngine {
     const meshes = new Map<string, MeshData>();
     const topologies = new Map<string, Topology>();
     const batch = emptyBatch();
+    const finalBodies = (state: PartState) => (state.broken ? [] : state.bodies);
     for (const { state } of built) {
-      const { ref, key } = state.body;
-      const bodyKey = ref === null ? null : key;
-      if (ref !== null && this.#reported.get(state.part.id) !== bodyKey) {
-        const op: TessellateOp = { op: 'tessellate', shape: ref as ShapeId };
+      for (const b of finalBodies(state)) {
+        const slot = slotOf(state.part.id, b.id);
+        if (this.#reported.get(slot) === b.key) continue;
+        const op: TessellateOp = { op: 'tessellate', shape: b.shape };
         if (this.#deflection !== undefined) op.deflection = this.#deflection;
-        batch.ops.push(op, { op: 'topology', shape: ref as ShapeId });
-        batch.metas.push(
-          { type: 'mesh', partId: state.part.id },
-          { type: 'topology', partId: state.part.id },
-        );
-        if (state.body.instance !== null) batch.shapesFrom = state.body.instance;
+        batch.ops.push(op, { op: 'topology', shape: b.shape });
+        batch.metas.push({ type: 'mesh', slot }, { type: 'topology', slot });
+        this.#usesBodies(batch, [b]);
       }
     }
     let names: string[] = [];
@@ -463,35 +466,36 @@ export class RegenEngine {
         if (meta.type !== 'mesh' && meta.type !== 'topology') return;
         if (!r.ok) {
           if (r.error.code === 'unknown-shape') throw new StaleShapes(reply.instance);
-          throw new Error(`${meta.type} of ${meta.partId} failed: ${r.error.message}`);
+          throw new Error(
+            `${meta.type} of ${meta.slot.replace('\n', ' body ')} failed: ${r.error.message}`,
+          );
         }
-        if (meta.type === 'mesh') meshes.set(meta.partId, r.value as MeshData);
-        else topologies.set(meta.partId, r.value as Topology);
+        if (meta.type === 'mesh') meshes.set(meta.slot, r.value as MeshData);
+        else topologies.set(meta.slot, r.value as Topology);
       });
     }
     this.#checkStale(run);
 
     // Completed: this is now the state the next edit is compared with.
+    const reported = new Map<string, string>();
     const parts: PartResult[] = built.map(({ state, features, dirty }) => {
-      const shape = state.body.ref as ShapeId | null;
-      const bodyKey = shape === null ? null : state.body.key;
-      const before = this.#reported.get(state.part.id);
-      const meshChanged = before === undefined || before !== bodyKey;
-      this.#reported.set(state.part.id, bodyKey);
-      return {
-        partId: state.part.id,
-        features,
-        dirty,
-        shape,
-        bodyKey,
-        meshChanged,
-        mesh: meshes.get(state.part.id) ?? null,
-        topology: topologies.get(state.part.id) ?? null,
-      };
+      const bodies = finalBodies(state).map((b): BodyResult => {
+        const slot = slotOf(state.part.id, b.id);
+        reported.set(slot, b.key);
+        return {
+          bodyId: b.id,
+          creator: b.creator,
+          shape: b.shape,
+          bodyKey: b.key,
+          solids: b.solids,
+          meshChanged: this.#reported.get(slot) !== b.key,
+          mesh: meshes.get(slot) ?? null,
+          topology: topologies.get(slot) ?? null,
+        };
+      });
+      return { partId: state.part.id, features, dirty, bodies, consumed: state.consumed };
     });
-    for (const id of [...this.#reported.keys()]) {
-      if (!document.parts.some((p) => p.id === id)) this.#reported.delete(id);
-    }
+    this.#reported = reported;
     this.#lastDocument = document;
     const dropped = await this.#cache.retain(run.used);
     await this.#releaseEntries(dropped);
@@ -502,8 +506,8 @@ export class RegenEngine {
   async #releaseEntries(entries: readonly CacheEntry[]): Promise<void> {
     const shapes: ShapeId[] = [];
     for (const e of entries) {
-      if (e.body !== undefined && e.body !== 'passthrough' && e.body.instance === this.#instance) {
-        shapes.push(e.body.shape);
+      if (holdsShapes(e) && e.outcome!.instance === this.#instance) {
+        for (const b of e.outcome!.bodies) shapes.push(b.shape);
       }
     }
     if (shapes.length > 0) await this.#kernel.release(shapes);
@@ -530,13 +534,15 @@ export class RegenEngine {
     variables: VariableValues,
   ): Promise<PartState> {
     const graph = buildGraph(part, document.variables);
+    const lookup = (id: string) => graph.byId.get(id);
     const state: PartState = {
       part,
-      body: { ref: null, key: 'empty', broken: false, instance: null },
+      bodies: [],
+      consumed: [],
+      broken: false,
       batch: emptyBatch(),
       results: new Map(),
       unavailable: new Map(),
-      pending: new Set(),
       sketches: new Map(),
       inputs: new Map(),
       references: new Set(),
@@ -571,8 +577,6 @@ export class RegenEngine {
         continue;
       }
       const deps = graph.depends.get(f.id) ?? [];
-      // A dependency still in the pending batch: find out how it went first.
-      if (deps.some((d) => state.pending.has(d))) await this.#flush(run, state);
       const upstream = deps.filter((d) => state.unavailable.has(d));
       if (upstream.length > 0) {
         const why = upstream.map((d) => {
@@ -584,7 +588,7 @@ export class RegenEngine {
         ]);
         continue;
       }
-      if (readsBody(f) && state.body.broken) {
+      if (readsBody(f) && state.broken) {
         fail('upstream-error', [
           {
             code: 'upstream',
@@ -624,7 +628,7 @@ export class RegenEngine {
       }
 
       if (f.kind === 'sketch') {
-        await this.#sketch(run, state, f, values.values, variables, result, started);
+        await this.#sketch(run, state, f, values.values, variables, result, started, lookup);
         continue;
       }
 
@@ -651,46 +655,79 @@ export class RegenEngine {
         sketches: state.sketches,
         inputs: state.inputs,
         references: state.references,
+        bodies: new Set(state.bodies.map((b) => b.id)),
       });
       if (!t.ok) {
         fail('error', t.errors);
         continue;
       }
       state.inputs.set(f.id, t.input);
+      // Only the bodies the feature reads go to the kernel, and only their keys into its key.
+      const read = new Set(routeBodies(bodyUse(f, lookup)!, state.bodies));
+      const reads = state.bodies.filter((b) => read.has(b.id));
       // An import is keyed by its (verified) hash and size, not its whole base64 text.
       const key = cacheKey(run.versions, {
         input: keyInput(t.input, f.kind === 'import' ? f.source : null),
-        body: state.body.key,
+        bodies: reads.map((b) => [b.id, b.key]),
       });
       run.used.add(key);
       const hit = await this.#cache.get(key);
-      if (hit !== undefined && hit.type === 'body' && hit.body !== undefined) {
+      if (hit !== undefined && hit.type === 'body' && hit.outcome !== undefined) {
         run.counters.cacheHits++;
-        if (hit.body !== 'passthrough') {
-          state.body.ref = hit.body.shape;
-          state.body.instance = hit.body.instance;
-        }
-        state.body.key = key;
+        this.#applyOutcome(state, f.id, key, hit.outcome);
         this.#fill(result, hit, started);
         result.cached = true;
         if (!hit.ok) state.unavailable.set(f.id, 'error');
         continue;
       }
       run.counters.cacheMisses++;
-      this.#usesBody(state);
+      this.#usesBodies(state.batch, reads);
       state.batch.ops.push({
         op: 'feature',
-        bodies: bodySet(state.body.ref),
+        bodies: reads.map((b) => ({ id: b.id, shape: b.shape })),
         feature: t.input,
-        join: true,
       });
       state.batch.metas.push({ type: 'feature', feature: f, key, result, started });
-      state.pending.add(f.id);
-      state.body.ref = { result: state.batch.ops.length - 1 };
-      state.body.key = key;
+      await this.#flush(run, state);
     }
-    await this.#flush(run, state);
     return state;
+  }
+
+  /**
+   * Apply what a feature did (from the kernel, or from the cache) to the part's bodies: merged
+   * bodies go, changed ones take their new shape and key, made ones are added at the end. A
+   * body's `carries` follows merges, so a reference to a face that came from a merged body is
+   * routed to the body it is now on.
+   */
+  #applyOutcome(state: PartState, featureId: string, key: string, outcome: CachedOutcome): void {
+    if (outcome.bodies.length === 0 && outcome.consumed.length === 0) return;
+    const consumed = new Set(outcome.consumed);
+    const merged = new Set<string>();
+    for (const b of state.bodies) {
+      if (!consumed.has(b.id)) continue;
+      for (const c of b.carries) merged.add(c);
+      state.consumed.push({ bodyId: b.id, featureId });
+    }
+    state.bodies = state.bodies.filter((b) => !consumed.has(b.id));
+    for (const c of outcome.bodies) {
+      const next = {
+        shape: c.shape,
+        instance: outcome.instance,
+        solids: c.solids,
+        key: `${key}/${c.id}`,
+      };
+      const at = c.created ? -1 : state.bodies.findIndex((b) => b.id === c.id);
+      if (at >= 0) {
+        const old = state.bodies[at]!;
+        state.bodies[at] = {
+          ...old,
+          ...next,
+          carries: new Set([...old.carries, ...merged, featureId]),
+        };
+      } else {
+        state.bodies.push({ id: c.id, creator: featureId, carries: new Set([featureId]), ...next });
+      }
+    }
   }
 
   #fill(result: FeatureResult, entry: CacheEntry, started: number): void {
@@ -709,13 +746,22 @@ export class RegenEngine {
     variables: VariableValues,
     result: FeatureResult,
     started: number,
+    lookup: (id: string) => Feature | undefined,
   ): Promise<void> {
     const { name: _name, ...definition } = f;
     void _name;
+    // A face sketch reads the bodies its face may lie on.
+    const owners =
+      f.plane.type === 'face'
+        ? (() => {
+            const read = new Set(routeBodies(bodyUse(f, lookup)!, state.bodies));
+            return state.bodies.filter((b) => read.has(b.id));
+          })()
+        : [];
     const plane =
       f.plane.type === 'plane'
         ? { placement: explicitPlacement(f.plane) }
-        : { body: state.body.key, ref: f.plane.face.ref };
+        : { bodies: owners.map((b) => [b.id, b.key]), ref: f.plane.face.ref };
     const key = cacheKey(run.versions, {
       solver: this.#solverBuild,
       sketch: definition,
@@ -756,7 +802,7 @@ export class RegenEngine {
     } else {
       const reference = f.plane.face;
       const target = reference.ref.face;
-      if (state.body.ref === null) {
+      if (owners.length === 0) {
         await store({
           ok: false,
           errors: [
@@ -771,23 +817,24 @@ export class RegenEngine {
         });
         return;
       }
-      let report: ReferenceReport | undefined;
+      // One resolve per body the face may lie on (usually one); face names are unique across
+      // the bodies of a part, so at most one resolves.
+      const reports: ReferenceReport[] = [];
       let failure: RegenError | undefined;
-      this.#usesBody(state);
-      state.batch.ops.push({
-        op: 'resolve',
-        shape: state.body.ref,
-        refs: [faceRef(reference.ref)],
-      });
-      state.batch.metas.push({
-        type: 'resolve',
-        take: (r) => {
-          if (r.ok) report = (r.value as { results: ReferenceReport[] }).results[0];
-          else failure = mapFailure(r.error);
-        },
-      });
-      run.counters.otherOps++;
+      this.#usesBodies(state.batch, owners);
+      for (const b of owners) {
+        state.batch.ops.push({ op: 'resolve', shape: b.shape, refs: [faceRef(reference.ref)] });
+        state.batch.metas.push({
+          type: 'resolve',
+          take: (r) => {
+            if (r.ok) reports.push((r.value as { results: ReferenceReport[] }).results[0]!);
+            else failure ??= mapFailure(r.error);
+          },
+        });
+        run.counters.otherOps++;
+      }
       await this.#flush(run, state);
+      const report = reports.find((r) => r.ok) ?? reports[0];
       if (report === undefined) {
         await store({
           ok: false,
@@ -826,9 +873,13 @@ export class RegenEngine {
     });
   }
 
-  /** The next op reads the current body: note which instance its shape id is from. */
-  #usesBody(state: PartState): void {
-    if (typeof state.body.ref === 'number') state.batch.shapesFrom = state.body.instance;
+  /** The next op reads these bodies: note which instance their shape ids are from. */
+  #usesBodies(batch: Batch, bodies: readonly LiveBody[]): void {
+    for (const b of bodies) {
+      if (b.instance === null) continue;
+      const from = batch.shapesFrom;
+      batch.shapesFrom = from === null || from === b.instance ? b.instance : MIXED_INSTANCES;
+    }
   }
 
   /**
@@ -853,12 +904,10 @@ export class RegenEngine {
     const batch = state.batch;
     if (batch.ops.length === 0) return;
     state.batch = emptyBatch();
-    state.pending.clear();
     run.counters.featureOps += batch.metas.filter((m) => m.type === 'feature').length;
     const reply = await this.#submit(run, batch.ops);
     this.#checkLive(batch, reply);
 
-    const opFailed = new Map<number, string>();
     for (const [j, meta] of batch.metas.entries()) {
       const r = reply.results[j]!;
       if (meta.type === 'resolve') {
@@ -868,62 +917,44 @@ export class RegenEngine {
       if (meta.type !== 'feature') continue;
       const { feature, key, result, started } = meta;
       if (!r.ok) {
-        opFailed.set(j, feature.id);
-        const failedBody =
-          r.error.code === 'dependency' ? this.#failedInput(batch.ops[j]!, opFailed) : undefined;
-        result.status = failedBody !== undefined ? 'upstream-error' : 'error';
-        result.errors =
-          failedBody !== undefined
-            ? [
-                {
-                  code: 'upstream',
-                  upstream: [failedBody],
-                  message: `${failedBody} failed in the kernel`,
-                },
-              ]
-            : [mapFailure(r.error)];
+        // The op failed as a whole (a wasm trap): no usable bodies are left.
+        result.status = 'error';
+        result.errors = [mapFailure(r.error)];
         result.ms = now() - started;
-        state.unavailable.set(feature.id, result.status);
+        state.unavailable.set(feature.id, 'error');
+        state.broken = true;
         continue;
       }
       const outcome = r.value as FeatureOutcome;
-      const mapped = mapOutcome(feature, outcome);
+      const made = new Set([...outcome.created, ...outcome.changed]);
+      const stored: CachedOutcome =
+        made.size === 0 && outcome.consumed.length === 0
+          ? { instance: null, bodies: [], consumed: [] }
+          : {
+              instance: reply.instance,
+              bodies: outcome.bodies
+                .filter((b) => made.has(b.id))
+                .map((b) => ({
+                  id: b.id,
+                  shape: b.shape,
+                  solids: b.solids,
+                  created: outcome.created.includes(b.id),
+                })),
+              consumed: [...outcome.consumed],
+            };
       const entry: CacheEntry = {
         key,
         featureId: feature.id,
         type: 'body',
         ok: outcome.ok,
-        ...mapped,
-        body:
-          outcome.created.length + outcome.changed.length > 0 && outcome.bodies.length === 1
-            ? { shape: outcome.bodies[0]!.shape, instance: reply.instance }
-            : 'passthrough',
+        ...mapOutcome(feature, outcome),
+        outcome: stored,
         ms: r.ms,
       };
       await this.#cache.set(key, entry);
+      this.#applyOutcome(state, feature.id, key, stored);
       this.#fill(result, entry, started);
       if (!outcome.ok) state.unavailable.set(feature.id, 'error');
     }
-
-    // The body is now a real shape id (or gone, after an op-level failure).
-    const ref = state.body.ref;
-    if (ref !== null && typeof ref === 'object') {
-      const r = reply.results[ref.result]!;
-      // A feature op with `join` leaves one body at most.
-      const shape = r.ok ? ((r.value as FeatureOutcome).bodies[0]?.shape ?? null) : undefined;
-      if (shape === undefined) {
-        state.body.ref = null;
-        state.body.broken = true;
-      } else {
-        state.body.ref = shape;
-        state.body.instance = shape === null ? null : reply.instance;
-      }
-    }
-  }
-
-  /** The feature whose failed op made op `op`'s body input fail. */
-  #failedInput(op: KernelOp, failed: ReadonlyMap<number, string>): string | undefined {
-    if (op.op !== 'feature' || Array.isArray(op.bodies)) return undefined;
-    return failed.get((op.bodies as { result: number }).result);
   }
 }

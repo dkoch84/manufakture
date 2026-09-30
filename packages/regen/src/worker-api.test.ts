@@ -10,7 +10,7 @@ import { wasmPath } from '@manufakture/kernel/node';
 import * as Comlink from 'comlink';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { RegenClient } from './client';
-import { block, statuses } from './test-helpers';
+import { apply, block, setVariable, statuses, twoBodies } from './test-helpers';
 import type { RegenResult } from './types';
 import { createRegenWorkerApi } from './worker-api';
 
@@ -73,16 +73,20 @@ describe('the regen worker', () => {
     expect(result.generation).toBe(client.latestGeneration);
     expect(statuses(result)).toEqual({ 'sketch#1': 'ok', 'extrude#1': 'ok', 'fillet#1': 'ok' });
     const part = result.parts[0]!;
-    expect(part.meshChanged).toBe(true);
-    const mesh = part.mesh!;
+    const body = part.bodies[0]!;
+    expect(part.bodies.map((b) => [b.bodyId, b.creator, b.solids])).toEqual([
+      ['extrude#1', 'extrude#1', 1],
+    ]);
+    expect(body.meshChanged).toBe(true);
+    const mesh = body.mesh!;
     expect(faceCount(mesh)).toBe(7);
     // Every face slot holds a name from the naming layer.
     const names = Array.from(mesh.faceNames, (i) => result.names[i]);
     expect(names).toContain('fillet#1:round:r1');
     expect(names).toContain('extrude#1:cap:end');
     // Topology numbers faces and edges like the mesh.
-    expect(part.topology!.faces).toHaveLength(7);
-    expect(part.topology!.edges).toHaveLength(mesh.edgeRanges.length / 2);
+    expect(body.topology!.faces).toHaveLength(7);
+    expect(body.topology!.edges).toHaveLength(mesh.edgeRanges.length / 2);
     // The sketch result says where it was solved.
     expect(part.features[0]!.placement).toEqual({
       origin: [0, 0, 0],
@@ -90,14 +94,14 @@ describe('the regen worker', () => {
       xDir: [1, 0, 0],
     });
     // Transferred, not copied: the worker's buffers are detached.
-    expect(sent.at(-1)!.parts[0]!.mesh!.positions.byteLength).toBe(0);
+    expect(sent.at(-1)!.parts[0]!.bodies[0]!.mesh!.positions.byteLength).toBe(0);
   });
 
   it('lets a measure at the current generation run next to regens, on the body it returned', async () => {
     const result = (await client.regen(block()))!;
     // The same document again: nothing changed, so no mesh, but the body is the same shape.
-    expect(result.parts[0]!.meshChanged).toBe(false);
-    const shape = result.parts[0]!.shape!;
+    expect(result.parts[0]!.bodies[0]!.meshChanged).toBe(false);
+    const shape = result.parts[0]!.bodies[0]!.shape!;
     const reply = await client.submit(
       [{ op: 'measure', shape, targets: [], body: true }] as const,
       client.latestGeneration,
@@ -108,6 +112,34 @@ describe('the regen worker', () => {
       40 * 30 * 20 - (9 - (Math.PI * 9) / 4) * 20,
       3,
     );
+  });
+
+  it('sends a mesh per body, and only for the bodies an edit changed, transferring each', async () => {
+    // Body 1 wider than the block before: the same block would be the body already reported.
+    const doc = apply(twoBodies(), setVariable('w1', '45'));
+    const first = (await client.regen(doc))!;
+    const bodies = first.parts[0]!.bodies;
+    expect(bodies.map((b) => [b.bodyId, b.meshChanged, faceCount(b.mesh!)])).toEqual([
+      ['extrude#1', true, 7],
+      ['extrude#2', true, 7],
+    ]);
+    // Each body's mesh names its own faces from the one name table.
+    const names = (mesh: MeshData) => Array.from(mesh.faceNames, (i) => first.names[i]);
+    expect(names(bodies[0]!.mesh!)).toContain('fillet#1:round:r1');
+    expect(names(bodies[1]!.mesh!)).toContain('fillet#2:round:r2');
+    expect(names(bodies[1]!.mesh!)).not.toContain('extrude#1:cap:end');
+    for (const b of sent.at(-1)!.parts[0]!.bodies) expect(b.mesh!.positions.byteLength).toBe(0);
+
+    // A radius only body 2 reads: only its mesh comes back.
+    const edited = apply(doc, setVariable('r2', '4mm'));
+    const second = (await client.regen(edited))!;
+    expect(second.counters.featureOps).toBe(1);
+    expect(second.parts[0]!.bodies.map((b) => [b.bodyId, b.meshChanged, b.mesh !== null])).toEqual([
+      ['extrude#1', false, false],
+      ['extrude#2', true, true],
+    ]);
+    expect(second.parts[0]!.bodies[0]!.shape).toBe(bodies[0]!.shape);
+    expect(sent.at(-1)!.parts[0]!.bodies[1]!.mesh!.positions.byteLength).toBe(0);
   });
 
   it('supersedes an older regen with a newer one', async () => {
@@ -178,7 +210,7 @@ describe('the regen worker', () => {
     expect(report.lostShapes).toBeGreaterThan(0);
     const after = (await client.regen(block()))!;
     expect(statuses(after)).toEqual({ 'sketch#1': 'ok', 'extrude#1': 'ok', 'fillet#1': 'ok' });
-    expect(after.parts[0]!.shape).not.toBe(before.parts[0]!.shape);
+    expect(after.parts[0]!.bodies[0]!.shape).not.toBe(before.parts[0]!.bodies[0]!.shape);
     expect(after.counters.featureOps).toBe(2);
     const stats = await client.regenStats();
     expect(stats.regens).toBeGreaterThanOrEqual(4);

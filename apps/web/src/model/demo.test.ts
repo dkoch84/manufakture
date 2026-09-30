@@ -26,7 +26,8 @@ describe('the demo document', () => {
       ['sketch#2', 'ok', []],
       ['extrude#2', 'ok', []],
     ]);
-    const mesh = part.mesh!;
+    expect(part.bodies.map((b) => b.bodyId)).toEqual(['extrude#1']);
+    const mesh = part.bodies[0]!.mesh!;
     const names = Array.from(mesh.faceNames, (i) => result.names[i]!);
     expect(names).toContain('extrude#1:cap:end');
     expect(names).toContain('extrude#2:side:e5');
@@ -34,7 +35,7 @@ describe('the demo document', () => {
 
     const reply = await service.run({
       generation: engine.generation,
-      ops: [{ op: 'measure', shape: part.shape!, targets: [], body: true }],
+      ops: [{ op: 'measure', shape: part.bodies[0]!.shape, targets: [], body: true }],
     });
     const r = reply.results[0]!;
     if (!r.ok) throw new Error(r.error.message);

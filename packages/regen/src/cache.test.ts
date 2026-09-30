@@ -14,7 +14,13 @@ function entry(key: string, shape?: number, instance = 1): CacheEntry {
     references: [],
     ms: 0,
   };
-  if (shape !== undefined) e.body = { shape: shape as ShapeId, instance };
+  if (shape !== undefined) {
+    e.outcome = {
+      instance,
+      bodies: [{ id: 'extrude#1', shape: shape as ShapeId, solids: 1, created: true }],
+      consumed: [],
+    };
+  }
   return e;
 }
 
@@ -52,7 +58,7 @@ describe('MemoryCache', () => {
     const c = new MemoryCache();
     c.set('old', entry('old', 1, 1));
     c.set('new', entry('new', 2, 2));
-    c.set('pass', { ...entry('pass'), body: 'passthrough' });
+    c.set('pass', { ...entry('pass'), outcome: { instance: null, bodies: [], consumed: [] } });
     c.set('sketch', { ...entry('sketch'), type: 'sketch' });
     c.dropBodies(2);
     expect(c.keys().sort()).toEqual(['new', 'pass', 'sketch']);

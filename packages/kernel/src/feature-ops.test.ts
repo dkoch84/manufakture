@@ -139,7 +139,7 @@ describe('feature ops', () => {
       { op: 'properties', shape: { result: 1 } },
       { op: 'properties', shape: { result: 1, body: 'extrude#9' } },
       { op: 'feature', bodies: { result: 2 }, feature: fillet },
-      { op: 'feature', bodies: { result: 1 }, feature: { ...beside, id: 'extrude#3' }, join: true },
+      { op: 'feature', bodies: { result: 1 }, feature: { ...beside, id: 'extrude#3' } },
     ]);
     const second = value<FeatureOutcome>(reply.results[1]!);
     expect(second.bodies.map((b) => b.id)).toEqual(['extrude#1', 'extrude#2']);
@@ -149,15 +149,15 @@ describe('feature ops', () => {
     expect(reply.results[4]).toMatchObject({ ok: false, error: { code: 'invalid-op' } });
     // { result } bodies of an op that is not a feature.
     expect(reply.results[5]).toMatchObject({ ok: false, error: { code: 'invalid-op' } });
-    const joined = value<FeatureOutcome>(reply.results[6]!);
-    expect(joined.bodies.map((b) => b.id)).toEqual(['extrude#1']);
-    expect(joined).toMatchObject({ changed: ['extrude#1'], consumed: ['extrude#2'] });
-    expect(joined.bodies[0]!.solids).toBe(3);
-    // keep: false released both bodies of op 1; only the joined compound is kept.
+    const third = value<FeatureOutcome>(reply.results[6]!);
+    expect(third.bodies.map((b) => b.id)).toEqual(['extrude#1', 'extrude#2', 'extrude#3']);
+    expect(third).toMatchObject({ created: ['extrude#3'], changed: [], consumed: [] });
+    // keep: false released both bodies of op 1; only the body op 6 made is kept.
+    const made = third.bodies[2]!.shape;
     const leaks = service.leaks().map((s) => s.id);
     for (const b of second.bodies) expect(leaks).not.toContain(b.shape);
-    expect(leaks).toEqual([joined.bodies[0]!.shape]);
-    await service.release([joined.bodies[0]!.shape]);
+    expect(leaks).toEqual([made]);
+    await service.release([made]);
   });
 
   it('resolve and pick work on names', async () => {

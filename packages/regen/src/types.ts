@@ -1,6 +1,6 @@
 // What a regen reports: per feature a status, errors, warnings, how its
-// references resolved and what it cost; per part the final body (its arena
-// id, and its mesh when it changed). Everything is plain data, so a reply can
+// references resolved and what it cost; per part its final bodies (each with
+// its arena id, and its mesh when it changed). Everything is plain data, so a reply can
 // cross the worker boundary (ADR 0007); mesh buffers are transferred.
 
 import type { FeatureKind, Vec3 } from '@manufakture/core';
@@ -139,27 +139,52 @@ export interface FeatureResult {
   placement?: SketchPlacement;
 }
 
-export interface PartResult {
-  partId: string;
-  features: FeatureResult[];
-  /** Features the edit could have changed, in order (the dirty subgraph); everything on a first regen. */
-  dirty: string[];
+/** One body of a part after the last feature (M2 plan, decision 1: named after its creator). */
+export interface BodyResult {
+  /** The body id: the id of the feature that made it (`extrude#3`), or of its copy (`pattern#2:i3`). */
+  bodyId: string;
+  /** The feature that made it. */
+  creator: string;
   /**
-   * The final body in the kernel arena, for pick and resolve ops. Valid until a later regen
-   * evicts it or the kernel recycles. Null when the part has no body.
+   * The body in the kernel arena, for pick, resolve and measure ops. Valid until a later regen
+   * evicts it or the kernel recycles.
    */
-  shape: ShapeId | null;
-  /** Cache key of the final body; equal keys mean identical bodies. */
-  bodyKey: string | null;
-  /** The body differs from the one the last completed regen reported. */
+  shape: ShapeId;
+  /** Cache key of the body; equal keys mean identical bodies. */
+  bodyKey: string;
+  /** How many solids it holds: a cut can leave a body in several disjoint pieces. */
+  solids: number;
+  /** The body differs from the one the last completed regen reported under this id. */
   meshChanged: boolean;
-  /** The body's mesh when `meshChanged` (name slots index `RegenResult.names`); null otherwise or without a body. */
+  /** The body's mesh when `meshChanged` (name slots index `RegenResult.names`); null otherwise. */
   mesh: MeshData | null;
   /**
    * The body's topology (faces with their planes, edges with their faces, vertices), sent with
    * the mesh: face and edge `index` is the mesh's 1-based face and edge numbering.
    */
   topology: Topology | null;
+}
+
+/** A body that ended in a merge: an `add` fused it into another body. */
+export interface ConsumedBody {
+  bodyId: string;
+  /** The feature that merged it away. */
+  featureId: string;
+}
+
+export interface PartResult {
+  partId: string;
+  features: FeatureResult[];
+  /** Features the edit could have changed, in order (the dirty subgraph); everything on a first regen. */
+  dirty: string[];
+  /**
+   * The part's bodies after its last feature, in creator order (a merged body in the place of
+   * the first body merged into it). Empty when the part has no body, or when the kernel failed
+   * as a whole during the part.
+   */
+  bodies: BodyResult[];
+  /** Bodies that ended in a merge during the part, in feature order. */
+  consumed: ConsumedBody[];
 }
 
 export interface RegenCounters {

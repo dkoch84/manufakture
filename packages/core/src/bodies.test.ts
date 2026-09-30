@@ -25,7 +25,7 @@ import {
   mm,
   unwrap,
 } from './test-helpers';
-import { validateDocument } from './validate';
+import { bodyCreationProblem, validateDocument } from './validate';
 import v4TwoBodies from './fixtures/v4-two-bodies.json';
 
 /**
@@ -273,12 +273,23 @@ describe('validateDocument: body ids', () => {
       'parts.0.bodies.0.id',
     ],
     [
-      'props on a feature pattern',
+      'props on a pattern of a cut',
+      (d) => {
+        const p = feature(d, 'pattern#1') as PatternFeature;
+        p.body = false;
+        p.features = ['extrude#4'];
+        setProps(d, 'pattern#1:i2');
+      },
+      'kind-mismatch',
+      'parts.0.bodies.0.id',
+    ],
+    [
+      'props on a feature pattern without an instance',
       (d) => {
         const p = feature(d, 'pattern#1') as PatternFeature;
         p.body = false;
         p.features = ['extrude#3'];
-        setProps(d, 'pattern#1:i2');
+        setProps(d, 'pattern#1');
       },
       'kind-mismatch',
       'parts.0.bodies.0.id',
@@ -337,6 +348,34 @@ describe('validateDocument: body ids', () => {
     mutate(doc);
     const errors = validateDocument(doc);
     expect(errors.map((e) => [e.code, e.path.join('.')])).toContainEqual([code, path]);
+  });
+
+  it('accepts bodies made by patterns and mirrors of features that make bodies', () => {
+    // The kernel makes a body of each copy of a `new` feature, and of an `add` copy touching
+    // nothing: `pattern#1:i2`, `mirror#1:image`, suffixed by the source when there are several.
+    const doc = clone(many());
+    const p = feature(doc, 'pattern#1') as PatternFeature;
+    p.body = false;
+    p.features = ['extrude#3'];
+    const m = feature(doc, 'mirror#1') as MirrorFeature;
+    m.body = false;
+    m.features = ['extrude#4', 'extrude#3'];
+    part(doc).bodies = [
+      { id: 'pattern#1:i2', name: 'Copy' },
+      { id: 'mirror#1:image/extrude#3', color: '#00ff00' },
+    ];
+    expect(validateDocument(doc)).toEqual([]);
+  });
+
+  it('says why a pattern of features makes no body', () => {
+    const doc = many();
+    const byId = (id: string) => part(doc).features.find((f) => f.id === id);
+    const cutPattern: PatternFeature = { ...bodyPattern(), body: false, features: ['extrude#4'] };
+    expect(bodyCreationProblem(cutPattern, 'pattern#1:i2', byId)).toMatch(/make no body/);
+    const addPattern: PatternFeature = { ...cutPattern, features: ['extrude#4', 'extrude#3'] };
+    expect(bodyCreationProblem(addPattern, 'pattern#1:i2/extrude#3', byId)).toBeUndefined();
+    // Without a way to look the features up, nothing says they make a body.
+    expect(bodyCreationProblem(addPattern, 'pattern#1:i2')).toMatch(/make no body/);
   });
 
   it('checks allocation only for numbered part ids', () => {

@@ -1877,18 +1877,6 @@ describe('bodies', () => {
     expect(miss.errors).toMatchObject([{ code: 'invalid' }]);
   });
 
-  it('join returns the bodies as one compound under the first id', () => {
-    const base = build(k, [block()]).bodies;
-    const out = apply(k, base, boxAt('extrude#2', 20), { join: true });
-    expect(out.errors).toEqual([]);
-    expect(ids(out.bodies)).toEqual(['extrude#1']);
-    expect(out).toMatchObject({ created: [], changed: ['extrude#1'], consumed: [] });
-    expect(out.bodies[0]!.solids).toBe(2);
-    const names = faceNames(named(k, out.shape!));
-    expect(names).toContain('extrude#2:cap:end');
-    expect(names).toContain(TOP);
-  });
-
   it('refuses a malformed body set', () => {
     const base = build(k, [block()]).bodies;
     const twice = apply(k, [...base, base[0]!], boxAt('extrude#2', 100));

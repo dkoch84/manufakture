@@ -16,8 +16,10 @@ import {
   build,
   extrude,
   fillet,
+  pocket,
   rectangle,
   setVariable,
+  twoBodies,
 } from './test-helpers';
 import type { ImportFeature, ManufaktureDocument } from '@manufakture/core';
 
@@ -54,12 +56,12 @@ describe('dependency graph', () => {
     expect(g.depends.get('fillet#1')).toEqual(['extrude#1']);
     expect(g.depends.get('sketch#2')).toEqual(['extrude#1']);
     expect(g.depends.get('extrude#2')).toEqual(['sketch#2']);
-    // Body edges: a kernel feature, or a sketch on a face, takes the body the last kernel
-    // feature left.
-    expect(g.body.get('extrude#1')).toBeNull();
-    expect(g.body.get('fillet#1')).toBe('extrude#1');
-    expect(g.body.get('sketch#2')).toBe('fillet#1');
-    expect(g.body.get('extrude#2')).toBe('fillet#1');
+    // Body edges: a kernel feature, or a sketch on a face, depends on the last feature that
+    // changed each body it reads. The first extrusion reads none.
+    expect(g.body.get('extrude#1')).toEqual([]);
+    expect(g.body.get('fillet#1')).toEqual(['extrude#1']);
+    expect(g.body.get('sketch#2')).toEqual(['fillet#1']);
+    expect(g.body.get('extrude#2')).toEqual(['fillet#1']);
     expect(g.body.has('sketch#1')).toBe(false);
     expect(g.variables.get('sketch#1')).toEqual(['depth', 'width']);
     expect(g.variables.get('fillet#1')).toEqual(['radius']);
@@ -76,8 +78,8 @@ describe('dependency graph', () => {
       suppressed: true,
     });
     const g = buildGraph(part(doc), doc.variables);
-    expect(g.body.get('sketch#2')).toBe('extrude#1');
-    expect(g.body.get('extrude#2')).toBe('extrude#1');
+    expect(g.body.get('sketch#2')).toEqual(['extrude#1']);
+    expect(g.body.get('extrude#2')).toEqual(['extrude#1']);
   });
 
   it('stops at the rollback bar', () => {
@@ -134,7 +136,7 @@ describe('imports', () => {
       add(imported('cut')),
       add(fillet('fillet#2', ['a', 'b'], '1', 'r2')),
     );
-    expect(buildGraph(part(cut), cut.variables).body.get('fillet#2')).toBe('import#1');
+    expect(buildGraph(part(cut), cut.variables).body.get('fillet#2')).toEqual(['import#1']);
     const ref = apply(
       block(),
       add(imported('reference')),
@@ -142,7 +144,7 @@ describe('imports', () => {
     );
     const g = buildGraph(part(ref), ref.variables);
     expect(g.body.has('import#1')).toBe(false);
-    expect(g.body.get('fillet#2')).toBe('fillet#1');
+    expect(g.body.get('fillet#2')).toEqual(['fillet#1']);
   });
 });
 
@@ -266,6 +268,56 @@ describe('dirty subgraph', () => {
     const next = apply(doc, setVariable('pocket', '6'));
     expect(dirtyFeaturesOf(doc, next, PART, { firstAffectedIndex: null })).toEqual([]);
     expect(dirtyFeaturesOf(doc, next, PART, { firstAffectedIndex: 4 })).toEqual(['extrude#2']);
+  });
+
+  it('is per body: an edit to body 2 leaves body 1 clean when scopes say so', () => {
+    // A cut through the first body only, scoped or not, before the fillets.
+    const withCut = (scope?: string[]) =>
+      twoBodies([
+        add(pocket('sketch#3', [5, 5])),
+        add({ ...extrude('extrude#3', 'sketch#3', '5', 'cut'), ...(scope ? { scope } : {}) }),
+      ]);
+    const scoped = withCut(['extrude#1']);
+    const g = buildGraph(part(scoped), scoped.variables);
+    // A `new` extrusion reads no body; the scoped cut reads its body; each fillet the body its
+    // edge is on.
+    expect(g.body.get('extrude#2')).toEqual([]);
+    expect(g.body.get('extrude#3')).toEqual(['extrude#1']);
+    expect(g.body.get('fillet#1')).toEqual(['extrude#3']);
+    expect(g.body.get('fillet#2')).toEqual(['extrude#2']);
+    expect(dirty(scoped, apply(scoped, setVariable('w2', '50')))).toEqual([
+      'sketch#2',
+      'extrude#2',
+      'fillet#2',
+    ]);
+    expect(dirty(scoped, apply(scoped, setVariable('r1', '4mm')))).toEqual(['fillet#1']);
+
+    // Without a scope the cut reads (and may change) both bodies: body 2's edit reaches body 1.
+    const open = withCut();
+    expect(buildGraph(part(open), open.variables).body.get('extrude#3')).toEqual([
+      'extrude#1',
+      'extrude#2',
+    ]);
+    expect(dirty(open, apply(open, setVariable('w2', '50')))).toEqual([
+      'sketch#2',
+      'extrude#2',
+      'extrude#3',
+      'fillet#1',
+      'fillet#2',
+    ]);
+  });
+
+  it('routes references after a merge to the body the faces went to', () => {
+    // An unscoped add may fuse both bodies: a fillet on body 2's faces then depends on it.
+    const doc = twoBodies([
+      add(pocket('sketch#3', [30, 5])),
+      add(extrude('extrude#3', 'sketch#3', '5', 'add')),
+    ]);
+    const g = buildGraph(part(doc), doc.variables);
+    expect(g.body.get('extrude#3')).toEqual(['extrude#1', 'extrude#2']);
+    expect(g.body.get('fillet#1')).toEqual(['extrude#3']);
+    expect(g.body.get('fillet#2')).toEqual(['fillet#1']);
+    expect(dirty(doc, apply(doc, setVariable('r2', '1mm')))).toEqual(['fillet#2']);
   });
 
   it('lists changed variables and their readers', () => {

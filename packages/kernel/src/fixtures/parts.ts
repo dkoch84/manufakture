@@ -4,7 +4,6 @@
 import { expect } from 'vitest';
 import {
   applyFeature,
-  type ApplyOptions,
   type FeatureBody,
   type FeatureInput,
   type FeatureOutcome,
@@ -95,9 +94,8 @@ export function apply(
   k: Kernel,
   from: ShapeId | readonly FeatureBody[] | null,
   input: FeatureInput,
-  options?: ApplyOptions,
 ): Applied {
-  return withShape(applyFeature(k, bodySet(from), input, options));
+  return withShape(applyFeature(k, bodySet(from), input));
 }
 
 /** Apply features in order, requiring each to succeed; returns the last outcome's bodies. */

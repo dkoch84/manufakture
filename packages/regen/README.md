@@ -4,7 +4,9 @@ The regeneration engine: turns a core document (`packages/core`) into geometry t
 (`packages/kernel`), rebuilding only what an edit changed. It evaluates expressions
 (`packages/units`), solves sketches (`packages/sketch`), translates every core feature into a kernel
 `FeatureInput`, caches each feature's result, and reports per feature a status, errors, warnings,
-reference resolutions and timing, plus the final body's mesh and name table for the viewport.
+reference resolutions and timing, plus every final body's mesh and one name table for the
+viewport. A part carries a set of bodies (M2 plan, decisions 1 to 3), and an edit rebuilds only the
+features of the bodies it touches.
 
 ```ts
 import { RegenEngine } from '@manufakture/regen';
@@ -29,7 +31,10 @@ calls `RegenClient.regen(document)` (see "The worker").
 **Decision: the engine runs in the kernel worker, and the main thread makes one `regen` call per
 user intent** ([ADR 0007](../../docs/adr/0007-worker-protocol.md), decisions 1 and 3). Inside the
 worker it drives the kernel through `KernelService`'s batch API in-process: `feature` ops with
-`applyFeature` semantics, chained by `{ result }` references, plus `resolve` and `tessellate`.
+`applyFeature` semantics on the bodies each feature reads, plus `resolve` and `tessellate`. The next
+feature's cache key depends on what the previous one did to the body set (which bodies it made,
+changed or merged away), so every `feature` op is its own batch; in the worker a batch costs no
+structured clone.
 
 Why not drive op batches from the main thread:
 
@@ -65,8 +70,10 @@ After a recycle every body is gone. The engine only forgets (its hook runs insid
 
 **In apps/web.** `kernelLoader` (`apps/web/src/viewport/scenes.ts`) spawns the regen worker, and
 `kernelRegenerator` (`apps/web/src/model/kernelModel.ts`) wraps its `RegenClient`: it skips a
-completed result no newer than the last one it applied, keeps each part's last mesh (the engine sends one only
-when the body changed), and registers each part's `shape` for measuring, exporting and picking.
+completed result no newer than the last one it applied, keeps each body's last mesh (the engine sends one only
+when the body changed), and registers each body's `shape` for measuring, exporting and picking. Until
+the app shows bodies as such (T2.1d), a part's first body has the part id as its viewport id and
+every other body is `<part id>/<body id>`.
 `startRegen` (`apps/web/src/model/model.ts`) asks for one regen of the whole document on every
 document change and after every recycle or restart, applies a result only when it is newer than
 the one shown, and asks again, up to three times, when its newest regen comes back null. The
@@ -89,17 +96,40 @@ Pass `solver` to `createRegenWorkerApi` to use another (a `connectSolver` proxy 
 needs:
 
 - features it names by id or by face name: core's `featureDependencies` (profiles, hole sketches,
-  pattern and mirror sources, `dependsOn`, and the creator of every face a reference names);
-- the **body edge**: every kernel feature (extrude, revolve, fillet, chamfer, shell, hole, pattern,
-  mirror, and a STEP import that is not a reference) takes the body the last active, unsuppressed kernel feature left, and so does a sketch
-  placed on a face, which resolves the face on that body;
+  pattern and mirror sources, `dependsOn`, the creator of every face a reference names, and the
+  creator of every body in its `scope`);
+- the **body edges**, one per body it reads: a feature depends on the last active, unsuppressed
+  kernel feature that changed each body it reads (see below), and so does a sketch placed on a
+  face, which resolves the face on the body it lies on;
 - the variables its expressions read, closed over variables that read other variables.
 
+**Which bodies a feature reads** (`bodyUse`, `routeBodies`): with a `scope`, the bodies it lists;
+without one, every body at that point (an `add`, a cut, a hole, a pattern or mirror of bodies),
+which is exactly the M1 chain; plus, for every reference, the bodies it lies on. Fillets, chamfers
+and shells read only the bodies their references lie on (a shell removing no face, a closed hollow,
+reads every body). A `new` extrusion, revolution or import reads only the bodies its references lie
+on (an up-to-face face, an edge axis; a through-all extrusion reads every body, since its length is
+measured against them), so a blind `new` feature reads none: a body made later does not depend on
+the bodies before it. A pattern or mirror of features reads what the features it repeats read,
+plus its own reference.
+
+**Which body owns a face name.** Face names never include a body id. Each body keeps the set of
+features it `carries`: the feature that made it, every feature that changed it, and everything the
+bodies merged into it carried. A reference goes to the bodies that carry one of the feature ids of
+every name in it (`featureIdsInName`), so a fillet after a merge finds the faces of a consumed body
+on the body they went into. A reference that no body carries is sent every body, so the kernel
+reports it `lost` exactly as it would have on one body, never on the wrong one. The engine routes
+on the bodies the kernel really returned; the graph routes on an estimate from the document (a
+`new` feature makes a body under its id; a feature changes the bodies in its scope, or all of them;
+an `add` may merge them), which errs towards more edges.
+
 `dirtyFeatures(previous, next)` gives the dirty subgraph of an edit: the seeds (new or newly active
-features, changed inputs ignoring the display name, a different body before them, a changed
+features, changed inputs ignoring the display name, different body edges, a changed
 variable they read) plus everything depending on a seed, through any edge. A variable edit dirties
 only its readers and what hangs off them; a sketch edit dirties the sketch, the features built on
-it, and everything later in the body chain. The comparison is always with the document of the
+it, and the features that read the bodies it changes. With explicit scopes, an edit to one body
+leaves the features of the others clean; without scopes, an unscoped feature reads every body, so
+everything after it is dirty, as in M1. The comparison is always with the document of the
 engine's last completed regen. With a store change event (`update`, or `regen` given `previous`
 and `change`) whose previous document is that one, the part's `firstAffectedIndex` bounds the
 comparison (features before it are not compared, and `null` means nothing in the part is dirty);
@@ -126,6 +156,8 @@ dirty but a cache hit).
 | hole `sketch`, `points`              | the sketch placement as the frame, each point entity's solved position                     |
 | pattern, mirror `features`           | the source features' own kernel inputs (extrudes, revolves, holes); `body: true` the body  |
 | pattern `count`                      | checked here: a whole number, 1 to `MAX_PATTERN_COUNT`, however it was computed            |
+| `scope`                              | the same list; an entry that is not a body at that point is `reference-lost` on `scope`    |
+| body id of a `new` or `add` feature  | `body`: the feature's own id (M2 plan, decision 1)                                         |
 
 **Numbers.** Variables are evaluated once per regen, in dependency order, in the units each was
 stored with (`evaluateVariables`; they have no declared kind). Every feature expression is
@@ -135,7 +167,7 @@ the units error's range. An expression reading a variable that itself failed say
 
 **Sketches** are solved as stored with a fresh solver system each time (`SketchSolverApi.solve`),
 then split into regions (`detectRegions`). An explicit plane is normalised with
-`placementFromNormal`; a face plane is resolved on the body before the sketch with a `resolve` op
+`placementFromNormal`; a face plane is resolved on the body it lies on before the sketch with a `resolve` op
 and turned into a frame with the kernel's `frameOnPlane` (exactly what `sketchFrame` does), and a
 fragile or non-exact resolution is a warning on the sketch. A conflict fails the sketch with the
 solver's conflicting and redundant constraint ids; redundant constraints alone are a warning;
@@ -155,24 +187,28 @@ canonical JSON of
 - the kernel build, the naming scheme version of the document and `REGEN_IMPLEMENTATION_VERSION`
   (ADR 0004 decision 8; bump it with any change that can alter an output);
 - for a kernel feature: its translated `FeatureInput` (the definition with evaluated parameters and
-  resolved upstream data: profile loops, axes, pattern sources) and the key of the body it is
-  applied to, which chains every upstream key;
+  resolved upstream data: profile loops, axes, pattern sources) and the id and key of every body
+  it reads (see the graph section), not of the whole body set, so an edit to one body is a cache
+  hit for the features of the others. A body's key is the key of the feature that last changed it
+  plus its id, which chains every upstream key of that body;
 - for a sketch: the solver build (`DEFAULT_SOLVER_BUILD`, the pinned planegcs release; pass
   `solverBuild` to override), its definition without the display name, its evaluated dimension
-  values, and its plane (the placement, or the body key plus the face reference).
+  values, and its plane (the placement, or the keys of the bodies the face may lie on plus the
+  face reference).
 
 Equal keys mean equal results, so entries are never invalidated by hand. Failures are cached too
 (they are just as deterministic), so an unrelated edit does not retry a failing fillet. An entry
 holds the statuses, errors, warnings and resolutions, the solved sketch for sketches, and for
-kernel features the body: its own new arena shape with the kernel instance it lives in, or
-`passthrough` when the feature failed or changed nothing (the body before it is used, whatever
-shape that is now).
+kernel features the per-body outcome (`CachedOutcome`): the bodies it made or changed, each with
+its own new arena shape and solid count, the bodies it merged away, and the kernel instance the
+shapes live in. Both lists are empty when the feature failed or changed nothing: every body keeps
+its shape. A hit applies the outcome to the body set exactly as the kernel's reply was applied.
 
 `MemoryCache` keeps every entry the last completed regen used plus `spare` (default 64) others,
 least recently used out first, so undo and toggling back are cache hits. The engine releases the
 shapes of dropped entries. After a recycle every body entry is dropped (`dropBodies`).
 
-**Stale shapes.** After the part loop, every part's body must come from the kernel instance of
+**Stale shapes.** After the part loop, every part's bodies must come from the kernel instance of
 the run's latest reply: a part built only from cache hits holds a shape id from before a recycle
 that landed during another part's batch, and nothing in its own (empty) batch would notice. Such a
 run restarts like any other stale batch.
@@ -216,13 +252,15 @@ same way: `reference` (with `via` and `fragile`, for `ends`, `descendant`, `ance
 fragile resolutions), `missed` and `direction`. Regen adds `expression`, `sketch` and `upstream`
 errors, and `sketch`, `redundant`, `extension` and `reference-body` warnings.
 
-**Propagation.** A failed feature is skipped: the kernel passes the body through, so independent
-later features still build on it. A feature naming a failed, suppressed or upstream-errored feature
+**Propagation.** A failed feature is skipped: the kernel passes the bodies through, so independent
+later features still build on them. A feature naming a failed, suppressed or upstream-errored feature
 (by id or through a face name) is `upstream-error` and never reaches the kernel. An op that fails
 as a whole (a wasm trap) leaves no body; kernel features after it are upstream errors, and the
-recycle that follows is reported through `onKernelRecycled`.
+recycle that follows is reported through `onKernelRecycled`. A `scope` entry that is not a body
+at that point (merged into another, or never made) fails the feature with `reference-lost` on
+`scope` before anything is sent.
 
-**Suppression and rollback.** A suppressed feature is skipped and leaves the body chain; its
+**Suppression and rollback.** A suppressed feature is skipped and changes no body; its
 dependents are upstream errors. Features at or after the part's `rollbackIndex` are not evaluated
 and are reported `rolled-back`.
 
@@ -249,19 +287,41 @@ the cache; results a superseded regen did finish stay cached for the next one.
 interface RegenResult {
   generation: number;
   names: string[]; // one name table for every mesh in the result
-  parts: PartResult[]; // per part: features, dirty, shape, bodyKey, meshChanged, mesh, topology
+  parts: PartResult[]; // per part: features, dirty, bodies, consumed
   counters: RegenCounters; // featureOps, otherOps, batches, solves, cacheHits, cacheMisses
   ms: number;
 }
+
+interface PartResult {
+  partId: string;
+  features: FeatureResult[];
+  dirty: string[];
+  bodies: BodyResult[]; // after the last feature, in creator order
+  consumed: { bodyId: string; featureId: string }[]; // bodies an `add` merged away
+}
+
+interface BodyResult {
+  bodyId: string; // `extrude#3`, `pattern#2:i3`: named after the feature that made it
+  creator: string; // that feature
+  shape: ShapeId;
+  bodyKey: string;
+  solids: number; // a cut can leave a body in several pieces
+  meshChanged: boolean;
+  mesh: MeshData | null;
+  topology: Topology | null;
+}
 ```
 
-A part's `mesh` is sent only when its body differs from the one last reported (`meshChanged`); its
-name slots index `names`. Its `topology` (faces with their planes and normals, edges with their
-faces, vertices; numbered like the mesh) comes with it, in the same batch, for edge picking, vertex
-markers and sketch planes on faces. A sketch's result carries the `placement` it was solved on, so
-the app draws and edits a sketch on a face where regen put it. `shape` is the final body's arena id for `pick` and `resolve` ops, valid
-until a later regen evicts it or the kernel recycles. `regenTransferables(result)` lists the mesh
-buffers for `Comlink.transfer`.
+A body's `mesh` is sent only when it differs from the one last reported under that part and body
+id (`meshChanged`), so an edit to one body sends one mesh; its name slots index `names`. Its
+`topology` (faces with their planes and normals, edges with their faces, vertices; numbered like
+the mesh) comes with it, in the same batch, for edge picking, vertex markers and sketch planes on
+faces. A sketch's result carries the `placement` it was solved on, so the app draws and edits a
+sketch on a face where regen put it. `shape` is the body's arena id for `pick`, `resolve` and
+`measure` ops, valid until a later regen evicts it or the kernel recycles. Body ids follow the
+kernel's convention (M2 plan, decision 1), in the ops regen sends as in the result. A part whose
+kernel failed as a whole has no bodies. `regenTransferables(result)` lists the mesh buffers of
+every body for `Comlink.transfer`.
 
 ## Tests
 
@@ -269,9 +329,11 @@ buffers for `Comlink.transfer`.
 pnpm --filter @manufakture/regen test
 ```
 
-- `graph.test.ts`: edges, body chain with suppression and rollback, variable closure, topological
+- `graph.test.ts`: edges, body edges with suppression and rollback, variable closure, topological
   order, and the dirty subgraph for renames, variable edits (through variables), feature edits,
-  suppression, reorder, rollback and `firstAffectedIndex`.
+  suppression, reorder, rollback and `firstAffectedIndex`; per-body dirty sets (an edit to body 2
+  leaves body 1's fillet clean with a scoped cut between them, not with an unscoped one) and
+  references routed through a merge.
 - `engine.test.ts`: the engine against a scripted kernel and solver: ops sent, cache hits on
   unrelated edits, same-value rewrites, eviction and release, undo from spare entries, upstream
   versus independent failures, cached failures, reference errors and warnings, sketch conflicts,
@@ -280,13 +342,16 @@ pnpm --filter @manufakture/regen test
   as the real one does, with a feature-level `no-body` pass-through), no caching of such a
   pass-through, a part served from the cache while a recycle lands during another part's batch,
   topology sent with a changed mesh only, sketch keys per solver build, sketches on faces and the
-  placement they report.
+  placement they report; with two bodies, the bodies each feature op gets, the ops sent per edit, a
+  mesh only for the changed body, scoped versus unscoped features, consumed bodies and references
+  routed to the body they merged into, and a scope naming a missing body.
 - `translate.test.ts`, `values.test.ts`, `cache.test.ts`: profile selection, revolve axes and
-  `flip`, holes, patterns, expressions and units, keys and the memory cache.
+  `flip`, holes, patterns, scopes and body ids, expressions and units, keys and the memory cache.
 - `worker-api.test.ts`: the regen worker through Comlink on a real `MessageChannel` with the real
   kernel and solver: a named mesh with its topology and sketch placements, buffers transferred
   (detached in the worker), a measure at the current generation next to regens, a newer regen
-  superseding an older one, and a regen after a recycle rebuilding on the new instance.
+  superseding an older one, a regen after a recycle rebuilding on the new instance, and a mesh per
+  body, transferred, sent only for the body an edit changed.
 - `integration.test.ts`: the real kernel (node harness) and the real planegcs solver, driven by a
   `DocumentStore`. A sketch, an extrude and a fillet whose radius variable nothing else reads:
   editing the variable sends exactly one `feature` op (the fillet) with the sketch and extrude from
@@ -295,17 +360,21 @@ pnpm --filter @manufakture/regen test
   mesh), with the volume checked each time; a rename sends nothing; a regen whose batch is running
   in the kernel is cancelled by a newer one; a recycle is recovered, including one that runs
   between a cache hit and the batch using its shape (the regen retries, and the next regen serves
-  an `ok` fillet from the cache, not a `no-body` failure); nothing leaks.
+  an `ok` fillet from the cache, not a `no-body` failure); nothing leaks. A two-body part (two
+  blocks, each with its own fillet): editing one body's width or radius sends only that body's
+  features, the other body keeps its shape, and the volumes are checked per body. The M1 bracket
+  fixture (`packages/core/src/fixtures/v5-bracket.json`, no scopes) regenerates to one body with
+  the volume and face names the one-body regen gave.
 
 ## Deviations and gaps
 
 - **`FeatureResult`** extends ADR 0007's first cut with `status`, `warnings`, `cached`, `ms` and
   `kind`, and its references are `ReferenceResolution`s. Errors carry a `message` each.
-- **Meshes per part**, not per body id: a part is one body (a compound) until multi-body parts (M2).
-  The kernel's `feature` op works on body sets; until the engine carries them (M2 plan, T2.1c) it
-  sends each part's one body as a one-element set and asks for `join`, so the kernel returns the
-  bodies a feature leaves as one compound, as a part was before M2. An `add` that touches nothing
-  now warns `detached`.
+- **One feature op per batch.** Before body sets, a run of cache misses went to the kernel as one
+  batch chained by `{ result }`. The next feature's key now depends on the outcome of the previous
+  one, so each is flushed on its own (in the worker, a batch costs no structured clone).
+- **Detached bodies.** An `add` that touches no body used to stay in the part's one compound; it is
+  now a body of its own (with a `detached` warning), so such an M1 document shows two bodies.
 - **One region per profile**, a kernel limit (see above).
 - **Hole points** must be point entities.
 - **Extension features** change no geometry yet; they are `ok` with an `extension` warning.

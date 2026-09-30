@@ -410,16 +410,6 @@ export interface FeatureOutcome {
   resolved: ResolvedRef[];
 }
 
-/** Options of `applyFeature`. */
-export interface ApplyOptions {
-  /**
-   * Return the bodies as one body, a compound under the first body's id, when
-   * there are several: for a caller that still carries one body per part
-   * (the regen engine until it carries body sets).
-   */
-  join?: boolean;
-}
-
 // Engine --------------------------------------------------------------------------
 
 interface Body extends NamedShape {
@@ -487,7 +477,6 @@ export function applyFeature(
   k: Kernel,
   bodies: readonly FeatureBody[],
   input: FeatureInput,
-  options: ApplyOptions = {},
 ): FeatureOutcome {
   const featureId = typeof input?.id === 'string' ? input.id : '';
   const kind = typeof input?.kind === 'string' ? input.kind : '';
@@ -543,8 +532,7 @@ export function applyFeature(
 
   const keep = new Set<ShapeId>();
   try {
-    const ran = run(ctx, slots, input) ?? slots;
-    const after = options.join ? join(ctx, ran) : ran;
+    const after = run(ctx, slots, input) ?? slots;
     for (const slot of after) {
       if (slot.made === null) continue;
       // A placeholder can be carried (and prefixed) by later steps of the
@@ -1535,24 +1523,6 @@ function cutTools(
     fail(ctx, 'empty', `${ctx.id} leaves nothing of ${scoped.map((s) => s.body.id).join(', ')}`);
   }
   return out;
-}
-
-/** Several bodies as one compound under the first id (`ApplyOptions.join`). */
-function join(ctx: Ctx, slots: readonly Slot[]): Slot[] {
-  if (slots.length < 2) return [...slots];
-  const joined = temp(ctx, ctx.k.compound(slots.map((s) => s.body.shape)));
-  const p = propagated(
-    ctx,
-    joined.shape,
-    slots.map((s) => s.body.names.faces),
-    joined.history,
-  );
-  const made: Made = {
-    ...p,
-    unnamed: [...p.unnamed, ...slots.flatMap((s) => s.made?.unnamed ?? [])],
-  };
-  const first = slots[0]!;
-  return [{ body: bodyOf(first.body.id, made), made, created: first.created }];
 }
 
 /** Check a result with `BRepCheck_Analyzer`; an invalid one fails the feature. */

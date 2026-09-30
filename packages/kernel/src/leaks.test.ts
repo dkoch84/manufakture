@@ -188,7 +188,7 @@ describe('embind objects', () => {
     expect(tracker.liveNames()).toEqual([]);
   });
 
-  it('features on several bodies leave only the bodies, merged, cut, blended or joined', () => {
+  it('features on several bodies leave only the bodies, merged, cut or blended', () => {
     const slab = (id: string, x: number, mode: 'new' | 'add' | 'subtract'): FeatureInput => ({
       kind: 'extrude',
       id,
@@ -246,12 +246,7 @@ describe('embind objects', () => {
       'pattern#7:i3',
     ]);
     expect(k.shapeCount).toBe(4);
-    // Joined into one compound: the parts are released, only the compound stays.
-    const joined = applyFeature(k, run.set, slab('extrude#9', 100, 'new'), { join: true });
-    expect(joined.errors).toEqual([]);
-    expect(joined.bodies.map((b) => b.id)).toEqual(['extrude#1']);
-    expect(k.shapeCount).toBe(5);
-    for (const b of [...run.set, ...joined.bodies]) expect(k.release(b.shape)).toBe(true);
+    for (const b of run.set) expect(k.release(b.shape)).toBe(true);
     expect(tracker.liveNames()).toEqual([]);
   });
 

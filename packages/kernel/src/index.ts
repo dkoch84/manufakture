@@ -31,7 +31,6 @@ export {
   validateFeature,
 } from './features';
 export type {
-  ApplyOptions,
   ChamferInput,
   EdgeReference,
   ExtrudeExtent,

@@ -5,8 +5,10 @@
 // - features it names by id or by face name (core's `featureDependencies`: profiles, hole
 //   sketches, pattern and mirror sources, `dependsOn`, and every feature whose id starts a face
 //   name in one of its references);
-// - the body before it: every kernel feature takes the body the previous kernel feature left,
-//   and a sketch on a face resolves that face on it. This is the `body` edge;
+// - the bodies it reads: a kernel feature depends on the last feature that changed each body in
+//   its scope, or that owns one of its references (a fillet's edges, an up-to-face face), and a
+//   feature with no scope on the last feature that changed each body; a sketch on a face depends
+//   on the last change of the body owning the face. This is the `body` edge, one per body;
 // - the variables its expressions read, directly or through other variables.
 //
 // A feature whose own inputs changed is a seed; the dirty subgraph is the seeds plus everything
@@ -14,16 +16,20 @@
 // that read it (and what depends on those), not everything after the first of them.
 
 import {
+  bodyCreator,
   expressionVariableNames,
   featureDependencies,
   featureExpressions,
+  featureIdsInName,
+  featureReferences,
+  referenceNames,
   type Feature,
   type ManufaktureDocument,
   type Part,
   type Variable,
 } from '@manufakture/core';
 
-/** Features the kernel builds: each takes the body before it and gives the body after it. */
+/** Features the kernel builds: each takes the bodies before it and gives the bodies after it. */
 export const BODY_KINDS: ReadonlySet<Feature['kind']> = new Set([
   'extrude',
   'revolve',
@@ -36,14 +42,121 @@ export const BODY_KINDS: ReadonlySet<Feature['kind']> = new Set([
 ]);
 
 export function isBodyFeature(feature: Feature): boolean {
-  // An import joins the body unless it is only a reference body (kept aside, never built).
+  // An import is built unless it is only a reference body (kept aside, never built).
   if (feature.kind === 'import') return feature.operation !== 'reference';
   return BODY_KINDS.has(feature.kind);
 }
 
-/** Whether a feature needs the body before it: kernel features, and sketches placed on a face. */
+/** Whether a feature needs the body set before it: kernel features, and sketches placed on a face. */
 export function readsBody(feature: Feature): boolean {
   return isBodyFeature(feature) || (feature.kind === 'sketch' && feature.plane.type === 'face');
+}
+
+/**
+ * What a feature reads of the part's bodies (M2 plan, decisions 2 and 3):
+ *
+ * - `all`: every body at that point. A feature with an operation and no `scope` (an `add`, a cut,
+ *   a hole, a pattern or mirror of bodies), a through-all `new` extrusion (its length is measured
+ *   against the bodies) and a closed hollow (a shell removing no face) read them all;
+ * - `scope`: the bodies its scope lists;
+ * - `refs`: the face names of each of its references, one group per reference, all on one body:
+ *   a fillet's edges, a shell's faces, an up-to-face face, an edge axis, a pattern direction, a
+ *   mirror plane, the face a sketch lies on.
+ *
+ * A `new` feature reads only the bodies its references lie on (a blind extrusion reads none), so
+ * a body made later does not depend on earlier bodies. A pattern or mirror of features reads what
+ * the features it repeats read, plus its own references. Null for a feature that reads no body
+ * (a sketch on a plane, an extension, a reference import).
+ */
+export interface BodyUse {
+  all: boolean;
+  scope: readonly string[];
+  refs: readonly (readonly string[])[];
+}
+
+/** `bodyUse`; `features` looks up the features a pattern or mirror repeats. */
+export function bodyUse(
+  feature: Feature,
+  features: (id: string) => Feature | undefined = () => undefined,
+): BodyUse | null {
+  if (!readsBody(feature)) return null;
+  const refs = featureReferences(feature).map((r) => referenceNames(r));
+  switch (feature.kind) {
+    case 'sketch':
+      return { all: false, scope: [], refs };
+    case 'extrude':
+    case 'revolve':
+    case 'import':
+    case 'hole': {
+      const scope = feature.scope ?? [];
+      if (feature.kind !== 'hole' && feature.operation === 'new') {
+        const through = feature.kind === 'extrude' && feature.extent.type === 'throughAll';
+        return { all: through, scope: [], refs };
+      }
+      return { all: feature.scope === undefined, scope, refs };
+    }
+    case 'fillet':
+    case 'chamfer':
+      return { all: false, scope: [], refs };
+    case 'shell':
+      return { all: feature.faces.length === 0, scope: [], refs };
+    case 'pattern':
+    case 'mirror': {
+      if (feature.body === true) {
+        return { all: feature.scope === undefined, scope: feature.scope ?? [], refs };
+      }
+      let all = false;
+      const scope = new Set<string>();
+      const groups: (readonly string[])[] = [...refs];
+      for (const id of feature.features) {
+        const source = features(id);
+        const use = source === undefined ? null : bodyUse(source, features);
+        if (source === undefined) all = true;
+        if (use === null) continue;
+        all ||= use.all;
+        for (const b of use.scope) scope.add(b);
+        groups.push(...use.refs);
+      }
+      return { all, scope: [...scope], refs: groups };
+    }
+    default:
+      return null;
+  }
+}
+
+/** A body as the routing of references sees it. */
+export interface RoutedBody {
+  id: string;
+  /**
+   * Features whose faces the body may carry: the feature that made it, every feature that
+   * changed it, and everything the bodies merged into it carried. A face name belongs to a body
+   * carrying one of the feature ids in it.
+   */
+  carries: ReadonlySet<string>;
+}
+
+/**
+ * The bodies a feature reads, as ids in `bodies` order (creator order). References go to the
+ * bodies that carry a feature of every name of the reference (face names never include a body
+ * id; which body owns which name follows merges through `carries`). A reference that no body
+ * carries sends the feature every body, so the kernel reports it as it would with one body: a
+ * lost reference is lost on every body, never on the wrong one. Scope entries that are not
+ * bodies are left out; the kernel (or translation) reports them.
+ */
+export function routeBodies(use: BodyUse, bodies: readonly RoutedBody[]): string[] {
+  if (use.all) return bodies.map((b) => b.id);
+  const read = new Set(use.scope);
+  for (const names of use.refs) {
+    const owners = bodies.filter((b) =>
+      names.every((name) => {
+        const ids = featureIdsInName(name);
+        return ids.length === 0 || ids.some((id) => b.carries.has(id));
+      }),
+    );
+    if (owners.length === 0) return bodies.map((b) => b.id);
+    for (const b of owners) read.add(b.id);
+  }
+  return bodies.filter((b) => read.has(b.id)).map((b) => b.id);
 }
 
 export interface DependencyGraph {
@@ -56,10 +169,11 @@ export interface DependencyGraph {
   /** Features named by id or face name (not the body edge), sorted. */
   readonly depends: ReadonlyMap<string, readonly string[]>;
   /**
-   * For features that read the body: the kernel feature that made it (the last active,
-   * unsuppressed kernel feature before them), or null when there is none yet.
+   * For features that read bodies: the kernel features that last changed the bodies they read
+   * (active and unsuppressed), in document order; empty when there is none yet or they read no
+   * body (a blind `new` extrusion).
    */
-  readonly body: ReadonlyMap<string, string | null>;
+  readonly body: ReadonlyMap<string, readonly string[]>;
   /** Variables each feature reads, directly or through other variables, sorted. */
   readonly variables: ReadonlyMap<string, readonly string[]>;
   /** Reverse edges (named dependencies and body edges), in document order. */
@@ -93,6 +207,62 @@ export function directVariables(feature: Feature): string[] {
   return [...out];
 }
 
+/** A body as the graph sees it before any regen: an estimate from operations and scopes. */
+interface StaticBody extends RoutedBody {
+  carries: Set<string>;
+  /** The last feature that may have changed it. */
+  last: string;
+}
+
+/**
+ * The bodies a feature acts on (changes), as far as the document says: the bodies in its scope,
+ * or every body without one; for fillets, chamfers and shells the bodies owning their
+ * references. `read` is what `routeBodies` gave; a `new` feature changes none (it adds a body).
+ */
+function actsOn(
+  f: Feature,
+  use: BodyUse,
+  read: readonly string[],
+  bodies: readonly StaticBody[],
+  features: (id: string) => Feature | undefined,
+): { ids: string[]; merges: boolean } {
+  const all = bodies.map((b) => b.id);
+  const scoped = (scope: readonly string[] | undefined) =>
+    scope === undefined ? all : all.filter((id) => scope.includes(id));
+  switch (f.kind) {
+    case 'extrude':
+    case 'revolve':
+    case 'import':
+      if (f.operation === 'new') return { ids: [], merges: false };
+      return { ids: scoped(f.scope), merges: f.operation === 'add' };
+    case 'hole':
+      return { ids: scoped(f.scope), merges: false };
+    case 'fillet':
+    case 'chamfer':
+    case 'shell':
+      return { ids: [...read], merges: false };
+    case 'pattern':
+    case 'mirror': {
+      if (f.body === true) return { ids: scoped(f.scope), merges: true };
+      const ids = new Set<string>();
+      let merges = false;
+      for (const id of f.features) {
+        const source = features(id);
+        if (source === undefined) {
+          for (const b of all) ids.add(b);
+          continue;
+        }
+        if ('operation' in source && source.operation === 'new') continue;
+        for (const b of actsOn(source, use, read, bodies, features).ids) ids.add(b);
+        merges ||= 'operation' in source && source.operation === 'add';
+      }
+      return { ids: all.filter((b) => ids.has(b)), merges };
+    }
+    default:
+      return { ids: [], merges: false };
+  }
+}
+
 export function buildGraph(part: Part, variables: readonly Variable[]): DependencyGraph {
   const bar = part.rollbackIndex ?? part.features.length;
   const active = part.features.slice(0, bar);
@@ -100,21 +270,56 @@ export function buildGraph(part: Part, variables: readonly Variable[]): Dependen
   const byId = new Map(part.features.map((f) => [f.id, f]));
   const index = new Map(part.features.map((f, i) => [f.id, i]));
   const depends = new Map<string, string[]>();
-  const body = new Map<string, string | null>();
+  const body = new Map<string, string[]>();
   const vars = new Map<string, string[]>();
   const dependents = new Map<string, string[]>(active.map((f) => [f.id, []]));
+  const lookup = (id: string) => byId.get(id);
 
-  let lastBody: string | null = null;
+  // The bodies as far as the document tells: made by `new` features, changed by the features
+  // acting on them, merged by `add`s. Regen knows the real set only from the kernel; this
+  // estimate errs on the side of more edges (an unscoped feature reads and changes every body).
+  const bodies: StaticBody[] = [];
+  const materialize = (id: string) => {
+    // A body named in a scope that no `new` feature made here: an `add` that touched nothing,
+    // or a pattern copy. It starts with its creator.
+    if (bodies.some((b) => b.id === id)) return;
+    const creator = bodyCreator(id);
+    if (creator === undefined || !byId.has(creator)) return;
+    bodies.push({ id, carries: new Set([creator]), last: creator });
+  };
   for (const f of active) {
     const deps = featureDependencies(f).filter((d) => byId.has(d));
     depends.set(f.id, deps);
     for (const d of deps) dependents.get(d)?.push(f.id);
-    if (readsBody(f)) {
-      body.set(f.id, lastBody);
-      if (lastBody !== null && !deps.includes(lastBody)) dependents.get(lastBody)?.push(f.id);
+    const use = bodyUse(f, lookup);
+    if (use !== null) {
+      for (const id of use.scope) materialize(id);
+      const read = routeBodies(use, bodies);
+      const last = [...new Set(read.map((id) => bodies.find((b) => b.id === id)!.last))].sort(
+        (a, b) => index.get(a)! - index.get(b)!,
+      );
+      body.set(f.id, last);
+      for (const l of last) if (!deps.includes(l)) dependents.get(l)?.push(f.id);
+      if (isBodyFeature(f) && !f.suppressed) {
+        const acts = actsOn(f, use, read, bodies, lookup);
+        const changed = bodies.filter((b) => acts.ids.includes(b.id));
+        const merged = new Set(acts.merges ? changed.flatMap((b) => [...b.carries]) : []);
+        for (const b of changed) {
+          b.last = f.id;
+          b.carries.add(f.id);
+          for (const c of merged) b.carries.add(c);
+        }
+        const makes =
+          ('operation' in f && f.operation === 'new') ||
+          ((f.kind === 'pattern' || f.kind === 'mirror') &&
+            f.features.some((id) => {
+              const source = lookup(id);
+              return source !== undefined && 'operation' in source && source.operation === 'new';
+            }));
+        if (makes) bodies.push({ id: f.id, carries: new Set([f.id]), last: f.id });
+      }
     }
     vars.set(f.id, [...variableClosure(variables, directVariables(f))].sort());
-    if (isBodyFeature(f) && !f.suppressed) lastBody = f.id;
   }
   for (const list of dependents.values()) list.sort((a, b) => index.get(a)! - index.get(b)!);
   return { active, rolledBack, byId, index, depends, body, variables: vars, dependents };
@@ -193,7 +398,7 @@ export function regenOrder(graph: DependencyGraph): string[] {
     graph.active.map((f) => f.id),
     (id) => {
       const b = graph.body.get(id);
-      return b ? [...graph.depends.get(id)!, b] : graph.depends.get(id)!;
+      return b ? [...graph.depends.get(id)!, ...b] : graph.depends.get(id)!;
     },
   );
 }
@@ -261,7 +466,7 @@ export interface DirtyOptions {
 
 /**
  * The features of `next` whose result may differ from the one built for `previous`, in document
- * order: the seeds (new or newly active features, changed inputs, a different body before them,
+ * order: the seeds (new or newly active features, changed inputs, different body edges,
  * a changed variable they read) and everything depending on a seed. Without a previous part,
  * every active feature is dirty.
  */
@@ -290,7 +495,7 @@ export function dirtyFeatures(
     const seed =
       !was ||
       !sameInputs(was, f) ||
-      (graph.body.get(f.id) ?? null) !== (old.body.get(f.id) ?? null) ||
+      !deepEqual(graph.body.get(f.id) ?? null, old.body.get(f.id) ?? null) ||
       graph.variables.get(f.id)!.some((v) => vars.has(v));
     if (seed) visit(f.id);
   });

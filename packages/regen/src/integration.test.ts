@@ -4,13 +4,19 @@
 // what actually went to the kernel.
 
 import { createHash } from 'node:crypto';
-import { DocumentStore, type ChangeEvent, type ImportFeature } from '@manufakture/core';
+import { readFileSync } from 'node:fs';
+import {
+  DocumentStore,
+  parseDocument,
+  type ChangeEvent,
+  type ImportFeature,
+} from '@manufakture/core';
 import type { KernelService, MeshData, ShapeId } from '@manufakture/kernel';
 import { createNodeService } from '@manufakture/kernel/node';
 import { createSolverService, type SolverService } from '@manufakture/sketch';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { RegenEngine, type RegenKernel } from './engine';
-import { add, block, setVariable, statuses, unwrap } from './test-helpers';
+import { add, block, setVariable, statuses, twoBodies, unwrap } from './test-helpers';
 import type { RegenResult } from './types';
 
 let service: KernelService;
@@ -76,8 +82,8 @@ describe('regen with the real kernel and solver', () => {
     });
     const part = first.parts[0]!;
     expect(part.dirty).toEqual(['sketch#1', 'extrude#1', 'fillet#1']);
-    expect(part.meshChanged).toBe(true);
-    expect(part.mesh).not.toBeNull();
+    expect(part.bodies[0]!.meshChanged).toBe(true);
+    expect(part.bodies[0]!.mesh).not.toBeNull();
     expect(part.features[2]!.references).toEqual([
       {
         referenceId: 'r1',
@@ -86,8 +92,8 @@ describe('regen with the real kernel and solver', () => {
         fragile: false,
       },
     ]);
-    expect(await volume(engine, part.shape!)).toBeCloseTo(blockVolume(40, 30, 3), 3);
-    const round = faceBox(first, part.mesh!, ROUND);
+    expect(await volume(engine, part.bodies[0]!.shape!)).toBeCloseTo(blockVolume(40, 30, 3), 3);
+    const round = faceBox(first, part.bodies[0]!.mesh!, ROUND);
     expect(round.min[0]).toBeCloseTo(37, 3);
     expect(round.max[0]).toBeCloseTo(40, 3);
     expect(round.min[1]).toBeCloseTo(0, 3);
@@ -104,14 +110,17 @@ describe('regen with the real kernel and solver', () => {
     });
     expect(second.parts[0]!.dirty).toEqual(['fillet#1']);
     expect(second.parts[0]!.features.map((f) => f.cached)).toEqual([true, true, false]);
-    expect(await volume(engine, second.parts[0]!.shape!)).toBeCloseTo(blockVolume(40, 30, 5), 3);
+    expect(await volume(engine, second.parts[0]!.bodies[0]!.shape!)).toBeCloseTo(
+      blockVolume(40, 30, 5),
+      3,
+    );
 
     // Undo: back to a body the cache still has; nothing is sent to the kernel but the mesh.
     unwrap(store.undo());
     const undone = (await engine.update(events.at(-1)!))!;
     expect(undone.counters).toMatchObject({ featureOps: 0, solves: 0, cacheHits: 3 });
-    expect(undone.parts[0]!.shape).toBe(part.shape);
-    expect(undone.parts[0]!.meshChanged).toBe(true);
+    expect(undone.parts[0]!.bodies[0]!.shape).toBe(part.bodies[0]!.shape);
+    expect(undone.parts[0]!.bodies[0]!.meshChanged).toBe(true);
 
     // Survival: widen the base sketch. Sketch, extrude and fillet rebuild; the fillet resolves
     // exactly to the same named edge, which has moved to the new corner.
@@ -130,12 +139,15 @@ describe('regen with the real kernel and solver', () => {
         fragile: false,
       },
     ]);
-    const moved = faceBox(third, third.parts[0]!.mesh!, ROUND);
+    const moved = faceBox(third, third.parts[0]!.bodies[0]!.mesh!, ROUND);
     expect(moved.min[0]).toBeCloseTo(57, 3);
     expect(moved.max[0]).toBeCloseTo(60, 3);
     expect(moved.min[1]).toBeCloseTo(0, 3);
     expect(moved.max[1]).toBeCloseTo(3, 3);
-    expect(await volume(engine, third.parts[0]!.shape!)).toBeCloseTo(blockVolume(60, 30, 3), 3);
+    expect(await volume(engine, third.parts[0]!.bodies[0]!.shape!)).toBeCloseTo(
+      blockVolume(60, 30, 3),
+      3,
+    );
 
     // A rename changes no geometry: no op, no solve, no mesh.
     unwrap(
@@ -149,10 +161,92 @@ describe('regen with the real kernel and solver', () => {
     const renamed = (await engine.update(events.at(-1)!))!;
     expect(renamed.counters).toMatchObject({ featureOps: 0, otherOps: 0, solves: 0, batches: 0 });
     expect(renamed.parts[0]!.dirty).toEqual([]);
-    expect(renamed.parts[0]!.meshChanged).toBe(false);
-    expect(renamed.parts[0]!.mesh).toBeNull();
+    expect(renamed.parts[0]!.bodies[0]!.meshChanged).toBe(false);
+    expect(renamed.parts[0]!.bodies[0]!.mesh).toBeNull();
 
     // Disposing releases every shape the engine kept.
+    await engine.dispose();
+    await service.idle();
+    expect(service.leaks()).toEqual([]);
+  });
+
+  it('rebuilds only the edited body of a two-body part', async () => {
+    const store = unwrap(DocumentStore.create(twoBodies()));
+    const engine = new RegenEngine({ kernel: service, solver });
+    const events: ChangeEvent[] = [];
+    store.subscribe((e) => events.push(e));
+    const volumes = async (r: RegenResult) =>
+      Promise.all(r.parts[0]!.bodies.map((b) => volume(engine, b.shape)));
+
+    const first = (await engine.regen(store.document))!;
+    expect(Object.values(statuses(first)).every((s) => s === 'ok')).toBe(true);
+    expect(first.parts[0]!.bodies.map((b) => [b.bodyId, b.solids, b.meshChanged])).toEqual([
+      ['extrude#1', 1, true],
+      ['extrude#2', 1, true],
+    ]);
+    expect(first.counters.featureOps).toBe(4);
+    const [v1, v2] = await volumes(first);
+    expect(v1).toBeCloseTo(blockVolume(40, 30, 3), 3);
+    expect(v2).toBeCloseTo(blockVolume(40, 30, 2), 3);
+    // Two bodies, not one compound: each mesh has its own seven faces.
+    for (const b of first.parts[0]!.bodies) expect(b.mesh!.faceRanges.length / 2).toBe(7);
+
+    // Body 2's width: its sketch, extrusion and fillet; nothing of body 1 reaches the kernel.
+    unwrap(store.execute(setVariable('w2', '60')));
+    const wide = (await engine.update(events.at(-1)!))!;
+    expect(wide.counters).toMatchObject({ featureOps: 2, solves: 1 });
+    expect(wide.parts[0]!.dirty).toEqual(['sketch#2', 'extrude#2', 'fillet#2']);
+    const cached = Object.fromEntries(wide.parts[0]!.features.map((f) => [f.featureId, f.cached]));
+    expect(cached).toMatchObject({
+      'extrude#1': true,
+      'fillet#1': true,
+      'extrude#2': false,
+      'fillet#2': false,
+    });
+    expect(wide.parts[0]!.bodies.map((b) => b.meshChanged)).toEqual([false, true]);
+    expect(wide.parts[0]!.bodies[0]!.shape).toBe(first.parts[0]!.bodies[0]!.shape);
+    const [w1, w2] = await volumes(wide);
+    expect(w1).toBeCloseTo(v1!, 6);
+    expect(w2).toBeCloseTo(blockVolume(60, 30, 2), 3);
+
+    // Body 1's radius: its fillet alone.
+    unwrap(store.execute(setVariable('r1', '5mm')));
+    const round = (await engine.update(events.at(-1)!))!;
+    expect(round.counters).toMatchObject({ featureOps: 1, solves: 0 });
+    expect(round.parts[0]!.bodies.map((b) => b.meshChanged)).toEqual([true, false]);
+    expect((await volumes(round))[0]).toBeCloseTo(blockVolume(40, 30, 5), 3);
+
+    await engine.dispose();
+    await service.idle();
+    expect(service.leaks()).toEqual([]);
+  });
+
+  it('regenerates the M1 bracket (no scopes) to the same volume and names as before bodies', async () => {
+    const json: unknown = JSON.parse(
+      readFileSync(new URL('../../core/src/fixtures/v5-bracket.json', import.meta.url), 'utf8'),
+    );
+    const doc = unwrap(parseDocument(json)).document;
+    const engine = new RegenEngine({ kernel: service, solver });
+    const result = (await engine.regen(doc))!;
+    expect(Object.values(statuses(result)).every((s) => s === 'ok')).toBe(true);
+    const bodies = result.parts[0]!.bodies;
+    expect(bodies.map((b) => [b.bodyId, b.creator, b.solids])).toEqual([
+      ['extrude#1', 'extrude#1', 1],
+    ]);
+    expect(result.parts[0]!.consumed).toEqual([]);
+    // What the one-body (joined) regen gave before T2.1c.
+    expect(await volume(engine, bodies[0]!.shape)).toBeCloseTo(4794.849555921539, 6);
+    const names = new Set(Array.from(bodies[0]!.mesh!.faceNames, (i) => result.names[i]));
+    expect([...names].sort()).toEqual([
+      '(extrude#1:cap:end#2+extrude#2:cap:start)',
+      'extrude#1:cap:end#1',
+      'extrude#1:cap:start',
+      'extrude#1:side:e1',
+      'extrude#1:side:e2',
+      'extrude#1:side:e3',
+      'extrude#1:side:e4',
+      'fillet#1:round:r2',
+    ]);
     await engine.dispose();
     await service.idle();
     expect(service.leaks()).toEqual([]);
@@ -186,7 +280,10 @@ describe('regen with the real kernel and solver', () => {
     expect(replies[0]).toMatch(/:cancelled$/);
     expect(statuses(result)).toEqual({ 'sketch#1': 'ok', 'extrude#1': 'ok', 'fillet#1': 'ok' });
     expect(result.generation).toBe(engine.generation);
-    expect(await volume(engine, result.parts[0]!.shape!)).toBeCloseTo(blockVolume(40, 30, 4), 3);
+    expect(await volume(engine, result.parts[0]!.bodies[0]!.shape!)).toBeCloseTo(
+      blockVolume(40, 30, 4),
+      3,
+    );
     expect(engine.stats.superseded).toBe(1);
     await engine.dispose();
     await service.idle();
@@ -206,10 +303,13 @@ describe('regen with the real kernel and solver', () => {
     expect(recycled).toBe(1);
     const again = (await engine.regen(store.document))!;
     expect(again.counters).toMatchObject({ featureOps: 2, solves: 0 });
-    expect(again.parts[0]!.bodyKey).toBe(first.parts[0]!.bodyKey);
+    expect(again.parts[0]!.bodies[0]!.bodyKey).toBe(first.parts[0]!.bodies[0]!.bodyKey);
     // Same body, so the mesh the viewport has is still right.
-    expect(again.parts[0]!.meshChanged).toBe(false);
-    expect(await volume(engine, again.parts[0]!.shape!)).toBeCloseTo(blockVolume(40, 30, 3), 3);
+    expect(again.parts[0]!.bodies[0]!.meshChanged).toBe(false);
+    expect(await volume(engine, again.parts[0]!.bodies[0]!.shape!)).toBeCloseTo(
+      blockVolume(40, 30, 3),
+      3,
+    );
     await engine.dispose();
     await service.idle();
     expect(service.leaks()).toEqual([]);
@@ -248,13 +348,19 @@ describe('regen with the real kernel and solver', () => {
     expect(engine.stats.retries).toBe(1);
     expect(statuses(second)).toEqual({ 'sketch#1': 'ok', 'extrude#1': 'ok', 'fillet#1': 'ok' });
     expect(second.parts[0]!.features[2]!.errors).toEqual([]);
-    expect(await volume(engine, second.parts[0]!.shape!)).toBeCloseTo(blockVolume(40, 30, 4), 3);
+    expect(await volume(engine, second.parts[0]!.bodies[0]!.shape!)).toBeCloseTo(
+      blockVolume(40, 30, 4),
+      3,
+    );
 
     // Nothing the stale batch produced was cached: the same document is all cache hits, and ok.
     const third = (await engine.regen(store.document))!;
     expect(third.counters).toMatchObject({ featureOps: 0, cacheHits: 3 });
     expect(third.parts[0]!.features[2]).toMatchObject({ status: 'ok', errors: [], cached: true });
-    expect(await volume(engine, third.parts[0]!.shape!)).toBeCloseTo(blockVolume(40, 30, 4), 3);
+    expect(await volume(engine, third.parts[0]!.bodies[0]!.shape!)).toBeCloseTo(
+      blockVolume(40, 30, 4),
+      3,
+    );
 
     await engine.dispose();
     await service.idle();
@@ -272,7 +378,7 @@ describe('regen with the real kernel and solver', () => {
       return r.value as { volume: number; boundingBox: { min: readonly number[] } };
     };
     // A 5 mm cube at the block's plain corner (the fillet is at the other end), as a STEP file.
-    const min = (await props(first.parts[0]!.shape!)).boundingBox.min;
+    const min = (await props(first.parts[0]!.bodies[0]!.shape!)).boundingBox.min;
     const made = await service.run({
       generation: engine.generation,
       ops: [
@@ -305,7 +411,10 @@ describe('regen with the real kernel and solver', () => {
 
     const cut = (await engine.regen(doc('cut')))!;
     expect(statuses(cut)['import#1']).toBe('ok');
-    expect(await volume(engine, cut.parts[0]!.shape!)).toBeCloseTo(blockVolume(40, 30, 3) - 125, 3);
+    expect(await volume(engine, cut.parts[0]!.bodies[0]!.shape!)).toBeCloseTo(
+      blockVolume(40, 30, 3) - 125,
+      3,
+    );
     expect(cut.names.filter((n) => n.startsWith('import#1:face:')).length).toBeGreaterThan(0);
 
     // A reference changes no geometry and sends no feature op.
@@ -313,13 +422,16 @@ describe('regen with the real kernel and solver', () => {
     expect(statuses(reference)['import#1']).toBe('ok');
     expect(reference.parts[0]!.features[3]!.warnings).toMatchObject([{ code: 'reference-body' }]);
     expect(reference.counters.featureOps).toBe(0);
-    expect(reference.parts[0]!.shape).toBe(first.parts[0]!.shape);
+    expect(reference.parts[0]!.bodies[0]!.shape).toBe(first.parts[0]!.bodies[0]!.shape);
 
     // A file the kernel cannot read fails the import, not the regen; the body passes through.
     const broken = (await engine.regen(doc('add', new TextEncoder().encode('not a STEP file'))))!;
     expect(statuses(broken)['import#1']).toBe('error');
     expect(broken.parts[0]!.features[3]!.errors.length).toBeGreaterThan(0);
-    expect(await volume(engine, broken.parts[0]!.shape!)).toBeCloseTo(blockVolume(40, 30, 3), 3);
+    expect(await volume(engine, broken.parts[0]!.bodies[0]!.shape!)).toBeCloseTo(
+      blockVolume(40, 30, 3),
+      3,
+    );
 
     await engine.dispose();
     await service.idle();

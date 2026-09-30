@@ -10,7 +10,7 @@ import type { FeatureInput, RevolveInput } from '@manufakture/kernel';
 import { XZ_PLANE, type SketchEntity } from '@manufakture/sketch';
 import { describe, expect, it } from 'vitest';
 import { profileOf, selectRegions, sketchOutcome, type SketchResult } from './sketches';
-import { mm, rectangle } from './test-helpers';
+import { extrude, mm, rectangle } from './test-helpers';
 import { referenceIdOf, translateFeature } from './translate';
 
 /** A sketch "solved" as stored, through the real region detection. */
@@ -89,6 +89,44 @@ describe('profiles', () => {
     expect(profileOf('sketch#1', solved([rect[0]!]), undefined)).toMatchObject({
       ok: false,
       error: { code: 'invalid' },
+    });
+  });
+});
+
+describe('bodies', () => {
+  const s = solved(rect);
+  const values = { 'extent.distance': 5 };
+
+  it('names the body a new or add feature makes, and passes the scope', () => {
+    const made = translate(extrude('extrude#2', 'sketch#1', '5', 'add'), s, values);
+    expect(made.ok && made.input).toMatchObject({ mode: 'add', body: 'extrude#2' });
+    expect(made.ok && 'scope' in made.input).toBe(false);
+    const cut = translateFeature(
+      { ...extrude('extrude#3', 'sketch#1', '5', 'cut'), scope: ['extrude#1'] },
+      {
+        values: new Map(Object.entries(values)),
+        sketches: new Map([['sketch#1', s]]),
+        inputs: new Map(),
+        bodies: new Set(['extrude#1', 'extrude#2']),
+      },
+    );
+    expect(cut.ok && cut.input).toMatchObject({ mode: 'subtract', scope: ['extrude#1'] });
+    expect(cut.ok && 'body' in cut.input).toBe(false);
+  });
+
+  it('loses a scope entry that is not a body at that point', () => {
+    const r = translateFeature(
+      { ...extrude('extrude#3', 'sketch#1', '5', 'cut'), scope: ['extrude#1', 'extrude#2'] },
+      {
+        values: new Map(Object.entries(values)),
+        sketches: new Map([['sketch#1', s]]),
+        inputs: new Map(),
+        bodies: new Set(['extrude#1']),
+      },
+    );
+    expect(r).toMatchObject({
+      ok: false,
+      errors: [{ code: 'reference-lost', referenceId: 'scope', missing: ['extrude#2'] }],
     });
   });
 });

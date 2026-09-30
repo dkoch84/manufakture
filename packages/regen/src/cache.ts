@@ -1,7 +1,7 @@
 // The per-feature result cache (ADR 0004 decision 8). An entry is keyed by a hash of the
 // feature's inputs (definition with evaluated parameters, resolved upstream data such as
-// profiles and pattern sources), the key of the body it was applied to, the kernel build, the
-// naming scheme and the implementation version (`cacheKey`). Equal keys mean equal results, so
+// profiles and pattern sources), the keys of the bodies it reads (not of the whole body set), the
+// kernel build, the naming scheme and the implementation version (`cacheKey`). Equal keys mean equal results, so
 // an entry never needs invalidating by hand; a missing entry is always just a miss.
 //
 // Kernel results hold a shape id in the kernel arena, which is only valid in the kernel instance
@@ -19,7 +19,7 @@ import type { ReferenceResolution, RegenError, RegenWarning } from './types';
  * Bump with any change to regen or feature code that can change a feature's output, so results
  * computed by older code are never served (ADR 0004 decision 8).
  */
-export const REGEN_IMPLEMENTATION_VERSION = 1;
+export const REGEN_IMPLEMENTATION_VERSION = 2;
 
 /**
  * The kernel build the results come from. The kernel package does not export a build identity
@@ -45,9 +45,26 @@ export function cacheKey(versions: KeyVersions, parts: Record<string, unknown>):
   return hashValue({ versions, ...parts });
 }
 
-/** The body a kernel feature left: its own new shape, or the body before it, unchanged. */
-export type CachedBody = { shape: ShapeId; instance: number } | 'passthrough';
+/** A body a kernel feature made or gave a new shape. */
+export interface CachedBody {
+  id: string;
+  shape: ShapeId;
+  solids: number;
+  /** Made by the feature (`created`), rather than an existing body it changed. */
+  created: boolean;
+}
 
+/**
+ * What a kernel feature did to the bodies it read: the bodies it made or changed, in the kernel's
+ * order, and the ones it merged away. Every other body keeps its shape. Empty lists (and a null
+ * instance) when the feature failed or changed nothing.
+ */
+export interface CachedOutcome {
+  /** The kernel instance the shapes live in. */
+  instance: number | null;
+  bodies: CachedBody[];
+  consumed: string[];
+}
 export interface CacheEntry {
   key: string;
   /** The feature it was built for (informational; keys do not depend on ids alone). */
@@ -57,8 +74,8 @@ export interface CacheEntry {
   errors: RegenError[];
   warnings: RegenWarning[];
   references: ReferenceResolution[];
-  /** Kernel features: the body after the feature. */
-  body?: CachedBody;
+  /** Kernel features: what it did to the bodies it read. */
+  outcome?: CachedOutcome;
   /** Sketches: the solved sketch. */
   sketch?: SketchResult;
   /** What building it cost, in milliseconds. */
@@ -92,6 +109,11 @@ export interface MemoryCacheOptions {
    * Default 64.
    */
   spare?: number;
+}
+
+/** Whether an entry holds kernel shapes (a kernel feature that made or changed a body). */
+export function holdsShapes(entry: CacheEntry): boolean {
+  return entry.outcome !== undefined && entry.outcome.bodies.length > 0;
 }
 
 /** The in-memory cache: a map in least-recently-used order. */
@@ -141,9 +163,7 @@ export class MemoryCache implements FeatureCache {
 
   dropBodies(instance: number | null): void {
     for (const [k, e] of this.#entries) {
-      if (e.body !== undefined && e.body !== 'passthrough' && e.body.instance !== instance) {
-        this.#entries.delete(k);
-      }
+      if (holdsShapes(e) && e.outcome!.instance !== instance) this.#entries.delete(k);
     }
   }
 

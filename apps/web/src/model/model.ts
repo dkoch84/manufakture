@@ -1,6 +1,6 @@
 // The regenerated model: what the regen engine (in the kernel worker) made of the document, as
 // the viewport and the feature tree read it. Per part: the status of every feature and the
-// part's body, ready for the viewport.
+// part's bodies, ready for the viewport.
 //
 // `startRegen` keeps it current: every document change (whatever caused it: a command, undo,
 // redo, load) asks for one regen of the whole document (ADR 0007 decision 3), and so does a
@@ -21,8 +21,13 @@ export interface PartModel {
   partId: string;
   /** Per feature, in document order. */
   features: readonly FeatureResult[];
-  /** The part's body for the viewport (its id is the part id), or null when it has none. */
+  /** The part's first body for the viewport (its id is the part id), or null when it has none. */
   body: BodyInput | null;
+  /**
+   * Every body of the part for the viewport, `body` first; absent means `body` alone. The others
+   * are `<part id>/<body id>` (see `viewBodyId`).
+   */
+  bodies?: readonly BodyInput[];
 }
 
 /** One completed regen, as the app uses it. */
@@ -93,9 +98,9 @@ export function featureResult(
     ?.features.find((f) => f.featureId === featureId);
 }
 
-/** Every part body of the shown model, in part order. */
+/** Every part body of the shown model, in part order, each part's bodies in creator order. */
 export function modelBodies(state: Pick<ModelState, 'parts'>): BodyInput[] {
-  return state.parts.flatMap((p) => (p.body ? [p.body] : []));
+  return state.parts.flatMap((p) => p.bodies ?? (p.body ? [p.body] : []));
 }
 
 /** How often a dropped regen is asked for again before `startRegen` gives up until the next edit. */

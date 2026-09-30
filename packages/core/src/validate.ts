@@ -218,27 +218,42 @@ function checkSketch(
   });
 }
 
+/** Whether a feature makes a body of its own: an extrude, revolve or import that is `new` or `add`. */
+function makesBody(feature: Feature | undefined): boolean {
+  return (
+    (feature?.kind === 'extrude' || feature?.kind === 'revolve' || feature?.kind === 'import') &&
+    (feature.operation === 'new' || feature.operation === 'add')
+  );
+}
+
 /**
  * Why a feature cannot create the body `bodyId` names, or `undefined` when it can. Extrude,
  * revolve and import make one body under their own id with a `new` operation, and with `add`
  * when the solid touches no body (M2 plan, decision 2: known only after regen, which reports
- * props on an `add` that merged as lost). A pattern or mirror of bodies makes its copies under
- * an instance suffix (`pattern#2:i3`, `mirror#1:image`); which suffixes exist is a regen result.
+ * props on an `add` that merged as lost). A pattern or mirror makes its copies under an instance
+ * suffix (`pattern#2:i3`, `mirror#1:image`): of bodies, and of features when one of the features
+ * it repeats makes a body (`new`, or `add` copies touching nothing); which suffixes exist is a
+ * regen result. `features` looks up the repeated features by id; without it, a pattern of
+ * features makes no body.
  */
-export function bodyCreationProblem(creator: Feature, bodyId: string): string | undefined {
+export function bodyCreationProblem(
+  creator: Feature,
+  bodyId: string,
+  features?: (id: string) => Feature | undefined,
+): string | undefined {
   const suffix = bodyId.length > creator.id.length;
   switch (creator.kind) {
     case 'extrude':
     case 'revolve':
     case 'import':
-      if (creator.operation !== 'new' && creator.operation !== 'add') {
+      if (!makesBody(creator)) {
         return `${creator.id} is a "${creator.operation}" ${creator.kind}, which makes no body`;
       }
       return suffix ? `${creator.id} makes one body, named "${creator.id}"` : undefined;
     case 'pattern':
     case 'mirror':
-      if (creator.body !== true) {
-        return `${creator.id} repeats features, not bodies, so it makes no body`;
+      if (creator.body !== true && !creator.features.some((id) => makesBody(features?.(id)))) {
+        return `${creator.id} repeats features that make no body (only a new or add extrude, revolve or import does), so it makes no body`;
       }
       return suffix
         ? undefined
@@ -271,7 +286,10 @@ function checkBodyId(
     });
     return;
   }
-  const problem = bodyCreationProblem(part.features[ci]!, bodyId);
+  const problem = bodyCreationProblem(part.features[ci]!, bodyId, (id) => {
+    const i = index.get(id);
+    return i === undefined ? undefined : part.features[i];
+  });
   if (problem !== undefined) {
     out.push({
       code: 'kind-mismatch',

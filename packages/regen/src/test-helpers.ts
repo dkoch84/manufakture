@@ -175,3 +175,45 @@ export function statuses(result: {
 }): Record<string, string> {
   return Object.fromEntries(result.parts[0]!.features.map((f) => [f.featureId, f.status]));
 }
+
+/**
+ * Two bodies side by side: body `extrude#1` (a `w1` x 30 x 20 block from sketch#1) and body
+ * `extrude#2` (a `w2` x 30 x 20 block from sketch#2, 100 mm along x), each with a vertical
+ * front-right edge filleted by its own radius (`r1`, `r2`). Everything after extrude#2 is
+ * appended by `more`, before the fillets.
+ */
+export function twoBodies(more: readonly Command[] = []): ManufaktureDocument {
+  return build([
+    setVariable('w1', '40'),
+    setVariable('w2', '40'),
+    setVariable('r1', '3mm'),
+    setVariable('r2', '2mm'),
+    add(rectangle('sketch#1', { width: 'w1', depth: '30' })),
+    add(extrude('extrude#1', 'sketch#1', '20')),
+    add(
+      rectangle('sketch#2', {
+        width: 'w2',
+        depth: '30',
+        at: [100, 0],
+        ids: ['e5', 'e6', 'e7', 'e8'],
+        firstConstraint: 12,
+      }),
+    ),
+    add(extrude('extrude#2', 'sketch#2', '20')),
+    ...more,
+    add(fillet('fillet#1', ['extrude#1:side:e1', 'extrude#1:side:e2'], 'r1')),
+    add(fillet('fillet#2', ['extrude#2:side:e5', 'extrude#2:side:e6'], 'r2', 'r2')),
+  ]);
+}
+
+/** A 10 x 10 pocket sketch on the XY plane at `at`, for cuts in `twoBodies`; `n` numbers its ids. */
+export function pocket(id: string, at: [number, number], n = 0): SketchFeature {
+  const e = 9 + 4 * n;
+  return rectangle(id, {
+    width: '10',
+    depth: '10',
+    at,
+    ids: [`e${e}`, `e${e + 1}`, `e${e + 2}`, `e${e + 3}`],
+    firstConstraint: 23 + 11 * n,
+  });
+}

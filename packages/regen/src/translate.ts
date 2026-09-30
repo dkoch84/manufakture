@@ -40,6 +40,11 @@ export interface TranslateContext {
   inputs: ReadonlyMap<string, FeatureInput>;
   /** Reference bodies built before it (imports with operation `reference`), by feature id. */
   references?: ReadonlySet<string>;
+  /**
+   * Ids of the part's bodies at this point. When given, a `scope` entry that is not one of them
+   * is a `reference-lost` error on `scope` (the body was merged away, or never made).
+   */
+  bodies?: ReadonlySet<string>;
 }
 
 export type Translation = { ok: true; input: FeatureInput } | { ok: false; errors: RegenError[] };
@@ -269,7 +274,43 @@ function importInput(f: ImportFeature): FeatureInput {
   return { kind: 'import', id: f.id, step: f.source.data, mode: MODES[f.operation] };
 }
 
+/** A scope that names only bodies that exist here, or the `reference-lost` error on `scope`. */
+function checkScope(f: Feature, ctx: TranslateContext): void {
+  if (ctx.bodies === undefined || !('scope' in f) || f.scope === undefined) return;
+  const missing = f.scope.filter((id) => !ctx.bodies!.has(id));
+  if (missing.length === 0) return;
+  throw new Failed([
+    {
+      code: 'reference-lost',
+      referenceId: 'scope',
+      missing,
+      message: `${f.id} acts on ${missing.join(', ')}, which ${missing.length === 1 ? 'is not a body' : 'are not bodies'} at this point (merged into another, or never made): re-pick the bodies`,
+    },
+  ]);
+}
+
+/**
+ * The scope and body id of a kernel input: `scope` as stored (absent: every body), and for a
+ * feature that can make a body the id it makes it under, its own id (M2 plan, decision 1).
+ */
+function withBodies<T extends FeatureInput>(f: Feature, input: T): T {
+  const out = input as T & { scope?: readonly string[]; body?: string };
+  if ('scope' in f && f.scope !== undefined) out.scope = [...f.scope];
+  if (
+    (f.kind === 'extrude' || f.kind === 'revolve' || f.kind === 'import') &&
+    (f.operation === 'new' || f.operation === 'add')
+  ) {
+    out.body = f.id;
+  }
+  return out;
+}
+
 function translateOrThrow(f: Feature, ctx: TranslateContext): FeatureInput {
+  checkScope(f, ctx);
+  return withBodies(f, translateInput(f, ctx));
+}
+
+function translateInput(f: Feature, ctx: TranslateContext): FeatureInput {
   switch (f.kind) {
     case 'extrude': {
       const p = profileOf(f.profile.sketch, sketchOf(ctx, f.profile.sketch), f.profile.entities);

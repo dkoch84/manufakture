@@ -16,14 +16,17 @@ export {
   MemoryCache,
   REGEN_IMPLEMENTATION_VERSION,
   cacheKey,
+  holdsShapes,
   type CacheEntry,
   type CachedBody,
+  type CachedOutcome,
   type FeatureCache,
   type KeyVersions,
   type MemoryCacheOptions,
 } from './cache';
 export {
   BODY_KINDS,
+  bodyUse,
   buildGraph,
   changedVariables,
   dirtyFeatures,
@@ -31,11 +34,14 @@ export {
   isBodyFeature,
   readsBody,
   regenOrder,
+  routeBodies,
   sameInputs,
   topologicalOrder,
   variableClosure,
+  type BodyUse,
   type DependencyGraph,
   type DirtyOptions,
+  type RoutedBody,
 } from './graph';
 export {
   evaluateFeature,
