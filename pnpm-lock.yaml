@@ -106,6 +106,8 @@ importers:
         specifier: ^6.1.1
         version: 6.1.1(vite@8.3.1(@types/node@22.20.4))
 
+  packages/assembly: {}
+
   packages/core:
     dependencies:
       '@manufakture/sketch':
