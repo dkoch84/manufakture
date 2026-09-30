@@ -302,6 +302,10 @@ pnpm --filter @manufakture/regen test
 - **`FeatureResult`** extends ADR 0007's first cut with `status`, `warnings`, `cached`, `ms` and
   `kind`, and its references are `ReferenceResolution`s. Errors carry a `message` each.
 - **Meshes per part**, not per body id: a part is one body (a compound) until multi-body parts (M2).
+  The kernel's `feature` op works on body sets; until the engine carries them (M2 plan, T2.1c) it
+  sends each part's one body as a one-element set and asks for `join`, so the kernel returns the
+  bodies a feature leaves as one compound, as a part was before M2. An `add` that touches nothing
+  now warns `detached`.
 - **One region per profile**, a kernel limit (see above).
 - **Hole points** must be point entities.
 - **Extension features** change no geometry yet; they are `ok` with an `extension` warning.

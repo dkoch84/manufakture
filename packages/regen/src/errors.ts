@@ -62,6 +62,8 @@ export function mapKernelWarning(feature: Feature, w: FeatureWarning): RegenWarn
       };
     case 'missed':
       return { code: 'missed', message: w.message, instances: [...w.instances] };
+    case 'detached':
+      return { code: 'detached', message: w.message, bodies: [...w.bodies] };
     case 'direction':
       return {
         code: 'direction',

@@ -11,8 +11,9 @@
 // drilled from its top face; a 4 mm fillet in the inside corner.
 
 import { beforeAll, describe, expect, it } from 'vitest';
-import { applyFeature, type FeatureInput } from '../src/features';
+import { type FeatureInput } from '../src/features';
 import {
+  apply,
   build,
   expectGolden,
   faceIndex,
@@ -140,7 +141,7 @@ describe.each([6, 8])('the M1 bracket with %d mm walls', (t) => {
 it('a hole outside the foot is an error, not a silent no-op', () => {
   const features = bracket(6);
   const extruded = build(k, features.slice(0, 1)).shape;
-  const out = applyFeature(k, extruded, {
+  const out = apply(k, extruded, {
     ...(features[1] as Extract<FeatureInput, { kind: 'hole' }>),
     points: [{ id: 'e7', at: [80, 0] }],
   });

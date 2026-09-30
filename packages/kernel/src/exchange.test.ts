@@ -7,8 +7,9 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { KernelError } from './errors';
 import { MAX_STEP_BYTES } from './exchange';
-import { applyFeature, type ExtrudeInput, type ImportInput } from './features';
+import { type ExtrudeInput, type ImportInput } from './features';
 import {
+  apply,
   XY,
   build,
   circle,
@@ -155,9 +156,9 @@ describe('the import feature', () => {
   });
 
   it('makes the first body, every face named import#k:face:<n> and fragile', () => {
-    const out = applyFeature(k, null, importPin('new', 'import#1'));
+    const out = apply(k, null, importPin('new', 'import#1'));
     expect(out.errors).toEqual([]);
-    expect(out.created).toBe(true);
+    expect(out.created).toEqual(['import#1']);
     const body = named(k, out.shape!);
     expect(faceNames(body)).toEqual(['import#1:face:1', 'import#1:face:2', 'import#1:face:3']);
     expect(body.names.faces.every((f) => f.fragile)).toBe(true);
@@ -174,7 +175,7 @@ describe('the import feature', () => {
 
   it('can be booleaned against the body: subtract drills the pin out of the block', () => {
     const { shape: blockShape } = build(k, [block]);
-    const out = applyFeature(k, blockShape, importPin('subtract'));
+    const out = apply(k, blockShape, importPin('subtract'));
     expect(out.errors).toEqual([]);
     expectGolden(k, out.shape!, {
       volume: 40 * 30 * 20 - Math.PI * 16 * 20,
@@ -192,10 +193,10 @@ describe('the import feature', () => {
 
   it('adds and intersects like any tool', () => {
     const { shape: blockShape } = build(k, [block]);
-    const added = applyFeature(k, blockShape, importPin('add'));
+    const added = apply(k, blockShape, importPin('add'));
     expect(added.errors).toEqual([]);
     expect(k.properties(added.shape!).volume).toBeCloseTo(24_000 + Math.PI * 16 * 10, 6);
-    const common = applyFeature(k, blockShape, importPin('intersect'));
+    const common = apply(k, blockShape, importPin('intersect'));
     expect(common.errors).toEqual([]);
     expect(k.properties(common.shape!).volume).toBeCloseTo(Math.PI * 16 * 20, 6);
     for (const id of [added.shape!, common.shape!, blockShape]) k.release(id);
@@ -204,7 +205,7 @@ describe('the import feature', () => {
   it('fails cleanly on a bad file, passing the body through', () => {
     const { shape: blockShape } = build(k, [block]);
     const count = k.shapeCount;
-    const out = applyFeature(k, blockShape, {
+    const out = apply(k, blockShape, {
       kind: 'import',
       id: 'import#3',
       step: new TextEncoder().encode('not a step file'),
@@ -214,7 +215,7 @@ describe('the import feature', () => {
     expect(out.shape).toBe(blockShape);
     expect(out.errors[0]).toMatchObject({ code: 'invalid', featureId: 'import#3' });
     expect(k.shapeCount).toBe(count);
-    const malformed = applyFeature(k, blockShape, {
+    const malformed = apply(k, blockShape, {
       kind: 'import',
       id: 'import#4',
       step: 42,
@@ -225,12 +226,12 @@ describe('the import feature', () => {
   });
 
   it('with a body-less subtract, says it needs a body', () => {
-    const out = applyFeature(k, null, importPin('subtract'));
+    const out = apply(k, null, importPin('subtract'));
     expect(out.errors[0]).toMatchObject({ code: 'no-body' });
   });
 
   it('keeps a hole through an imported part named after the import', () => {
-    const plate = applyFeature(k, null, importPin('new', 'import#1'));
+    const plate = apply(k, null, importPin('new', 'import#1'));
     const drilled = build(
       k,
       [
@@ -368,7 +369,7 @@ describe('no leaks', () => {
     const step = tk.exportStep([{ shape: box, name: 'Box' }]);
     tk.release(box);
     tracker.reset();
-    const out = applyFeature(tk, null, { kind: 'import', id: 'import#1', step, mode: 'new' });
+    const out = apply(tk, null, { kind: 'import', id: 'import#1', step, mode: 'new' });
     expect(out.errors).toEqual([]);
     expect(tk.shapeCount).toBe(1);
     tk.release(out.shape!);

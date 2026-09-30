@@ -4,6 +4,8 @@
 import { expect } from 'vitest';
 import {
   applyFeature,
+  type ApplyOptions,
+  type FeatureBody,
   type FeatureInput,
   type FeatureOutcome,
   type SketchProfile,
@@ -61,34 +63,86 @@ export interface NamedBody {
   topology: Topology;
 }
 
-/** Apply features in order, requiring each to succeed; returns the last outcome's body. */
-export function build(k: Kernel, features: readonly FeatureInput[], from: ShapeId | null = null) {
-  let body = from;
-  const outcomes: FeatureOutcome[] = [];
+/** Body ids of the shapes features made, so a test can pass a body on by its shape. */
+const bodyIds = new Map<ShapeId, string>();
+
+/** A body set of the one body `shape` (none for null), with the id the feature that made it gave. */
+export function bodySet(from: ShapeId | readonly FeatureBody[] | null): FeatureBody[] {
+  if (from === null) return [];
+  if (Array.isArray(from)) return [...from];
+  const shape = from as ShapeId;
+  return [{ id: bodyIds.get(shape) ?? 'body#1', shape }];
+}
+
+/** An outcome with `shape`: its one body's shape (null for none; reading it with several throws). */
+export type Applied = FeatureOutcome & { readonly shape: ShapeId | null };
+
+/** The one body's shape of an outcome, null without one; several bodies throw. */
+export function withShape(out: FeatureOutcome): Applied {
+  for (const b of out.bodies) bodyIds.set(b.shape, b.id);
+  return Object.defineProperty(out, 'shape', {
+    get() {
+      if (out.bodies.length > 1) {
+        throw new Error(`${out.featureId} left ${out.bodies.length} bodies, not one`);
+      }
+      return out.bodies[0]?.shape ?? null;
+    },
+  }) as Applied;
+}
+
+/** `applyFeature` on a one-body part (a shape, or null before the first feature) or a body set. */
+export function apply(
+  k: Kernel,
+  from: ShapeId | readonly FeatureBody[] | null,
+  input: FeatureInput,
+  options?: ApplyOptions,
+): Applied {
+  return withShape(applyFeature(k, bodySet(from), input, options));
+}
+
+/** Apply features in order, requiring each to succeed; returns the last outcome's bodies. */
+export function build(
+  k: Kernel,
+  features: readonly FeatureInput[],
+  from: ShapeId | readonly FeatureBody[] | null = null,
+) {
+  let bodies = bodySet(from);
+  const outcomes: Applied[] = [];
   for (const f of features) {
-    const out = applyFeature(k, body, f);
+    const out = apply(k, bodies, f);
     expect(out.errors, `${f.id} failed`).toEqual([]);
     expect(out.ok).toBe(true);
     outcomes.push(out);
-    body = out.shape;
+    bodies = out.bodies.map((b) => ({ id: b.id, shape: b.shape }));
   }
-  return { shape: body!, outcomes, last: outcomes.at(-1)! };
+  const last = outcomes.at(-1)!;
+  return {
+    bodies,
+    /** The one body's shape; several bodies throw. */
+    get shape(): ShapeId {
+      return last.shape!;
+    },
+    outcomes,
+    last,
+  };
 }
 
 /** Apply features in order, letting failures pass through like the regen engine would. */
 export function regen(k: Kernel, features: readonly FeatureInput[]) {
-  let body: ShapeId | null = null;
-  const outcomes: FeatureOutcome[] = [];
+  let bodies: FeatureBody[] = [];
+  const outcomes: Applied[] = [];
   for (const f of features) {
-    const out = applyFeature(k, body, f);
+    const out = apply(k, bodies, f);
     outcomes.push(out);
-    body = out.shape;
+    bodies = out.bodies.map((b) => ({ id: b.id, shape: b.shape }));
   }
-  const named = body === null ? null : k.named(body);
+  const shape = outcomes.at(-1)?.shape ?? null;
+  const named = shape === null ? null : k.named(shape);
   return {
-    shape: body,
+    bodies,
+    shape,
     outcomes,
-    body: named && body !== null ? { shape: body, ...named } : null,
+    body: named && shape !== null ? { shape, ...named } : null,
     errors: outcomes.flatMap((o) => o.errors),
     warnings: outcomes.flatMap((o) => o.warnings),
     resolved: outcomes.flatMap((o) => o.resolved),

@@ -4,7 +4,7 @@
 
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { KernelError } from './errors';
-import { applyFeature, type FeatureInput } from './features';
+import { applyFeature, type FeatureBody, type FeatureInput } from './features';
 import { Kernel } from './kernel';
 import { createNodeInstance } from './node';
 import { track, type Tracker } from './track';
@@ -174,19 +174,100 @@ describe('embind objects', () => {
         edges: [{ id: 'r1', ref: { faces: ['extrude#1:cap:start', side('e4')] } }],
       },
     ];
-    let body: ShapeId | null = null;
-    const errors: string[] = [];
-    for (const f of features) {
-      const out = applyFeature(k, body, f);
-      errors.push(...out.errors.map((e) => `${e.featureId}: ${e.code}`));
-      if (out.created && body !== null) k.release(body);
-      body = out.shape;
-    }
-    expect(errors).toEqual(['fillet#9: lost', 'fillet#10: kernel']);
-    expect(k.shapeCount).toBe(1);
-    expect(k.release(body!)).toBe(true);
+    const bodies = chain(features);
+    expect(bodies.errors).toEqual(['fillet#9: lost', 'fillet#10: kernel']);
+    // The block, its mirror image (clear of it), the detached boss and the revolved ring.
+    expect(bodies.set.map((b) => b.id)).toEqual([
+      'extrude#1',
+      'mirror#4:image',
+      'extrude#11',
+      'revolve#12',
+    ]);
+    expect(k.shapeCount).toBe(4);
+    for (const b of bodies.set) expect(k.release(b.shape)).toBe(true);
     expect(tracker.liveNames()).toEqual([]);
   });
+
+  it('features on several bodies leave only the bodies, merged, cut, blended or joined', () => {
+    const slab = (id: string, x: number, mode: 'new' | 'add' | 'subtract'): FeatureInput => ({
+      kind: 'extrude',
+      id,
+      profile: {
+        frame: XY,
+        loops: [
+          {
+            entities: [
+              { kind: 'line', id: 'e1', start: [x, 0], end: [x + 20, 0] },
+              { kind: 'line', id: 'e2', start: [x + 20, 0], end: [x + 20, 10] },
+              { kind: 'line', id: 'e3', start: [x + 20, 10], end: [x, 10] },
+              { kind: 'line', id: 'e4', start: [x, 10], end: [x, 0] },
+            ],
+          },
+        ],
+      },
+      extent: { type: 'blind', distance: mode === 'subtract' ? 3 : 5 },
+      mode,
+    });
+    const features: FeatureInput[] = [
+      slab('extrude#1', 0, 'new'),
+      slab('extrude#2', 10, 'new'),
+      slab('extrude#3', 40, 'new'),
+      // Cuts the two overlapping bodies, misses the third.
+      slab('extrude#4', 5, 'subtract'),
+      {
+        kind: 'fillet',
+        id: 'fillet#5',
+        radius: 1,
+        edges: [{ id: 'r1', ref: { faces: ['extrude#3:cap:end', 'extrude#3:side:e2'] } }],
+      },
+      // Spans two bodies: the feature fails and nothing leaks.
+      {
+        kind: 'fillet',
+        id: 'fillet#6',
+        radius: 1,
+        edges: [{ id: 'r1', ref: { faces: ['extrude#1:cap:end', 'extrude#3:side:e2'] } }],
+      },
+      {
+        kind: 'pattern',
+        id: 'pattern#7',
+        scope: ['extrude#3'],
+        source: { type: 'body', mode: 'new' },
+        layout: { type: 'linear', direction: [0, 1, 0], count: 3, spacing: 20 },
+      },
+      // Touches extrude#1 and extrude#2: merges them.
+      slab('extrude#8', 15, 'add'),
+    ];
+    const run = chain(features);
+    expect(run.errors).toEqual(['fillet#6: invalid']);
+    expect(run.set.map((b) => b.id)).toEqual([
+      'extrude#1',
+      'extrude#3',
+      'pattern#7:i2',
+      'pattern#7:i3',
+    ]);
+    expect(k.shapeCount).toBe(4);
+    // Joined into one compound: the parts are released, only the compound stays.
+    const joined = applyFeature(k, run.set, slab('extrude#9', 100, 'new'), { join: true });
+    expect(joined.errors).toEqual([]);
+    expect(joined.bodies.map((b) => b.id)).toEqual(['extrude#1']);
+    expect(k.shapeCount).toBe(5);
+    for (const b of [...run.set, ...joined.bodies]) expect(k.release(b.shape)).toBe(true);
+    expect(tracker.liveNames()).toEqual([]);
+  });
+
+  /** Apply features as regen would, releasing every shape a feature replaced. */
+  function chain(features: readonly FeatureInput[]): { set: FeatureBody[]; errors: string[] } {
+    let set: FeatureBody[] = [];
+    const errors: string[] = [];
+    for (const f of features) {
+      const out = applyFeature(k, set, f);
+      errors.push(...out.errors.map((e) => `${e.featureId}: ${e.code}`));
+      const live = new Set(out.bodies.map((b) => b.shape));
+      for (const b of set) if (!live.has(b.shape)) k.release(b.shape);
+      set = out.bodies.map((b) => ({ id: b.id, shape: b.shape }));
+    }
+    return { set, errors };
+  }
 
   it('each operation on its own leaves only its result', () => {
     const box = k.box(10, 10, 10);

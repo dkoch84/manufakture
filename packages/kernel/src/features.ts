@@ -1,24 +1,32 @@
 // Part features as kernel operations with stable names (T0.5 naming scheme).
 //
-// One call per feature: `applyFeature(kernel, body, input)` takes the body
-// before the feature (a shape id, or null for the first one) and a plain-data
-// feature input, and returns the body after it with every face and edge
-// named, plus per-feature errors and warnings. It never throws for a feature
-// that fails: a lost reference, an OCCT refusal (common with fillets and
-// shells) or an invalid result becomes a `FeatureError`, and the input body
-// passes through unchanged so the features after it still regenerate. Only a
-// wasm trap (`fatal`) propagates, since the instance is gone.
+// One call per feature: `applyFeature(kernel, bodies, input)` takes the part's
+// bodies before the feature (named shapes with body ids, in creator order;
+// none before the first feature) and a plain-data feature input, and returns
+// the bodies after it with every face and edge named, plus per-feature errors
+// and warnings. It never throws for a feature that fails: a lost reference, an
+// OCCT refusal (common with fillets and shells) or an invalid result becomes a
+// `FeatureError`, and the input bodies pass through unchanged so the features
+// after it still regenerate. Only a wasm trap (`fatal`) propagates, since the
+// instance is gone.
+//
+// A body's id is the id of the feature that made it (M2 plan, decision 1).
+// Each body is combined on its own: `new` adds a body, `add` fuses the tool
+// with every body in scope it touches (merged under the first of them), cuts
+// and intersections act on each body in scope the tool reaches, and blends
+// act on the body that owns their references. Bodies a feature does not touch
+// keep their shape ids.
 //
 // Inputs are evaluated, resolved plain data: numbers in millimetres and
 // radians, sketch profiles as loops of entities tagged with their sketch edge
 // ids (`@manufakture/sketch`'s `regionProfile`), and references to the model
 // as names (`FaceRef`, `EdgeRef`), which are resolved here, in the worker,
-// against the input body's names. The kernel has no runtime dependency on the
-// sketch or core packages; the regen engine translates core features into
-// these inputs.
+// against the names of all the input bodies. The kernel has no runtime
+// dependency on the sketch or core packages; the regen engine translates core
+// features into these inputs.
 //
-// Names are attached to the body in the kernel's arena (`Kernel.named`), so a
-// later feature, a tessellation or a pick can use them.
+// Names are attached to each body in the kernel's arena (`Kernel.named`), so
+// a later feature, a tessellation or a pick can use them.
 
 import { KernelError } from './errors';
 import type { Kernel, NamedShape } from './kernel';
@@ -65,8 +73,39 @@ import type {
 
 // Inputs --------------------------------------------------------------------------
 
-/** How a feature's new solid combines with the body. `new` keeps it as a separate solid. */
+/**
+ * How a feature's new solid combines with the part's bodies: `new` makes it a
+ * body of its own, `add` fuses it with the bodies it touches, `subtract` and
+ * `intersect` act on each body it reaches.
+ */
 export type ResultMode = 'new' | 'add' | 'subtract' | 'intersect';
+
+/**
+ * A body of the part: its id (the id of the feature that made it, or an
+ * instance of one: `extrude#3`, `pattern#2:i3`) and its named shape.
+ */
+export interface FeatureBody {
+  id: string;
+  shape: ShapeId;
+}
+
+/** What features that combine with bodies share. */
+interface Scoped {
+  /**
+   * The ids of the bodies the feature combines with (or, for a body pattern
+   * or mirror, copies). Absent: every body at that point.
+   */
+  scope?: readonly string[];
+}
+
+/** What features that can make a body share. */
+interface MakesBody extends Scoped {
+  /**
+   * The id of the body a `new` feature makes, or an `add` whose tool touches
+   * no body. Default: the feature id.
+   */
+  body?: string;
+}
 
 /**
  * A resolved sketch region: the kernel's `profile` input. Every entity must
@@ -87,7 +126,7 @@ export type ExtrudeExtent =
   /** To the plane of a planar face of the body. */
   | { type: 'upToFace'; face: FaceRef };
 
-export interface ExtrudeInput {
+export interface ExtrudeInput extends MakesBody {
   kind: 'extrude';
   /** The feature id, `kind#n`; every name the feature gives starts with it. */
   id: string;
@@ -104,7 +143,7 @@ export interface ExtrudeInput {
   mode: ResultMode;
 }
 
-export interface RevolveInput {
+export interface RevolveInput extends MakesBody {
   kind: 'revolve';
   id: string;
   profile: SketchProfile;
@@ -168,7 +207,7 @@ export type HoleHead =
   /** `angle` is the included angle of the cone, radians (90 degrees for ISO 10642). */
   | { type: 'countersink'; diameter: number; angle: number };
 
-export interface HoleInput {
+export interface HoleInput extends Scoped {
   kind: 'hole';
   id: string;
   /** The sketch plane; holes are drilled against its normal (into a face it lies on). */
@@ -191,11 +230,13 @@ export type ToolInput = ExtrudeInput | RevolveInput | HoleInput;
 
 /**
  * What a pattern or mirror repeats: the tools of some features (rebuilt, moved,
- * and combined with each feature's own mode), or the whole body (moved copies
- * fused with it).
+ * and combined with each feature's own mode and scope), or the bodies in the
+ * pattern's scope. Copies of bodies are fused with the bodies they touch
+ * (`add`, the default: what a one-body part did) or become bodies of their
+ * own (`new`).
  */
 export type InstanceSource =
-  { type: 'features'; features: readonly ToolInput[] } | { type: 'body' };
+  { type: 'features'; features: readonly ToolInput[] } | { type: 'body'; mode?: 'new' | 'add' };
 
 /** The most instances a pattern may have, the original included. Core validates the same limit. */
 export const MAX_PATTERN_COUNT = 1000;
@@ -230,14 +271,14 @@ export type PatternLayout =
       angle: number;
     };
 
-export interface PatternInput {
+export interface PatternInput extends Scoped {
   kind: 'pattern';
   id: string;
   source: InstanceSource;
   layout: PatternLayout;
 }
 
-export interface MirrorInput {
+export interface MirrorInput extends Scoped {
   kind: 'mirror';
   id: string;
   source: InstanceSource;
@@ -250,7 +291,7 @@ export interface MirrorInput {
  * extrusion. Its faces are named `<id>:face:<n>` in the file's face order:
  * imported topology has no history, so every such name is fragile.
  */
-export interface ImportInput {
+export interface ImportInput extends MakesBody {
   kind: 'import';
   id: string;
   /** The STEP file: its bytes, or base64 text of them (as the document stores it). */
@@ -328,34 +369,61 @@ export interface ResolvedRef {
  * - `direction`: no naming rule could orient the direction of a reference
  *   (a symmetric case), so OCCT's order chose it and an edit may flip it;
  *   set `flip` if it points the wrong way.
+ * - `detached`: an added solid touches no body in scope, so it became a body
+ *   of its own (`bodies` lists their ids).
  */
 export type FeatureWarning =
   | (ResolvedRef & { featureId: string; code: 'reference'; message: string })
   | { featureId: string; code: 'missed'; message: string; instances: string[] }
-  | { featureId: string; code: 'direction'; message: string; ref: string; target: string };
+  | { featureId: string; code: 'direction'; message: string; ref: string; target: string }
+  | { featureId: string; code: 'detached'; message: string; bodies: string[] };
+
+/** A body after a feature. */
+export interface OutcomeBody extends FeatureBody {
+  /**
+   * Names of `shape`, indexed like its topology. Null only when an input
+   * body was not a live named shape (the feature then fails with `no-body`).
+   */
+  names: Names | null;
+  /** How many solids the body holds: a cut can leave it in several pieces. */
+  solids: number;
+}
 
 export interface FeatureOutcome {
   featureId: string;
   kind: string;
   ok: boolean;
   /**
-   * The body after the feature: a new shape when `created`; the input body,
-   * unchanged, when the feature failed or changed nothing (null when there
-   * was none).
+   * The part's bodies after the feature, in creator order: a new body comes
+   * last, a merged body keeps the place of the first body merged into it.
+   * The input bodies, unchanged, when the feature failed.
    */
-  shape: ShapeId | null;
-  /** Whether `shape` was made by this call (the caller owns it). */
-  created: boolean;
-  /** Names of `shape`, indexed like its topology; null when there is no body. */
-  names: Names | null;
+  bodies: OutcomeBody[];
+  /** Ids of the bodies this feature made. */
+  created: string[];
+  /** Ids of existing bodies this feature gave a new shape. */
+  changed: string[];
+  /** Ids of input bodies merged into another one: they end here. */
+  consumed: string[];
   errors: FeatureError[];
   warnings: FeatureWarning[];
   resolved: ResolvedRef[];
 }
 
+/** Options of `applyFeature`. */
+export interface ApplyOptions {
+  /**
+   * Return the bodies as one body, a compound under the first body's id, when
+   * there are several: for a caller that still carries one body per part
+   * (the regen engine until it carries body sets).
+   */
+  join?: boolean;
+}
+
 // Engine --------------------------------------------------------------------------
 
 interface Body extends NamedShape {
+  id: string;
   shape: ShapeId;
 }
 
@@ -371,10 +439,29 @@ interface Tool extends Made {
   mode: ResultMode;
 }
 
+/** A tool, with the id of the body it becomes when it stays on its own (`new`, or a detached `add`). */
+interface Placed extends Made {
+  bodyId: string;
+}
+
+/** A body while a feature runs. */
+interface Slot {
+  body: Body;
+  /** The body's new shape, not yet attached; null while it is the input body, unchanged. */
+  made: Made | null;
+  /** Made by this feature. */
+  created: boolean;
+}
+
 class FeatureFailed extends Error {
   constructor(readonly errors: FeatureError[]) {
     super(errors.map((e) => e.message).join('; '));
   }
+}
+
+interface Box {
+  min: Vec3;
+  max: Vec3;
 }
 
 interface Ctx {
@@ -384,87 +471,124 @@ interface Ctx {
   temps: ShapeId[];
   resolved: ResolvedRef[];
   warnings: FeatureWarning[];
+  /** Bounding boxes and solid counts by shape id, computed once per feature. */
+  boxes: Map<ShapeId, Box | null>;
+  solids: Map<ShapeId, number>;
 }
 
 const TWO_PI = 2 * Math.PI;
 
 /**
- * Apply one feature to `body` (null before the first feature). Never throws
- * for a failing feature; see `FeatureOutcome`. Throws `KernelError` with code
- * `fatal` only when the wasm instance is lost.
+ * Apply one feature to the part's `bodies` (none before the first feature),
+ * in creator order. Never throws for a failing feature; see `FeatureOutcome`.
+ * Throws `KernelError` with code `fatal` only when the wasm instance is lost.
  */
-export function applyFeature(k: Kernel, body: ShapeId | null, input: FeatureInput): FeatureOutcome {
+export function applyFeature(
+  k: Kernel,
+  bodies: readonly FeatureBody[],
+  input: FeatureInput,
+  options: ApplyOptions = {},
+): FeatureOutcome {
   const featureId = typeof input?.id === 'string' ? input.id : '';
   const kind = typeof input?.kind === 'string' ? input.kind : '';
-  const ctx: Ctx = { k, id: featureId, temps: [], resolved: [], warnings: [] };
+  const ctx: Ctx = {
+    k,
+    id: featureId,
+    temps: [],
+    resolved: [],
+    warnings: [],
+    boxes: new Map(),
+    solids: new Map(),
+  };
+  const given = Array.isArray(bodies) ? bodies : [];
   const pass = (errors: FeatureError[]): FeatureOutcome => ({
     featureId,
     kind,
     ok: errors.length === 0,
-    shape: body,
-    created: false,
-    names: body === null ? null : (k.named(body)?.names ?? null),
+    bodies: given.map((b) => {
+      const named = typeof b?.shape === 'number' && k.has(b.shape) ? k.named(b.shape) : null;
+      return {
+        id: b?.id,
+        shape: b?.shape,
+        names: named?.names ?? null,
+        solids: named === null ? 0 : solidsOf(ctx, b.shape),
+      };
+    }),
+    created: [],
+    changed: [],
+    consumed: [],
     errors,
     warnings: ctx.warnings,
     resolved: ctx.resolved,
   });
 
-  const invalid = validateFeature(input);
+  const invalid = validateFeature(input) ?? validateBodies(bodies);
   if (invalid !== null) return pass([{ featureId, code: 'invalid', message: invalid }]);
-  let current: Body | null = null;
-  if (body !== null) {
-    const named = k.has(body) ? k.named(body) : null;
+  const slots: Slot[] = [];
+  for (const b of given) {
+    const named = k.has(b.shape) ? k.named(b.shape) : null;
     if (named === null) {
       return pass([
         {
           featureId,
           code: 'no-body',
-          message: k.has(body)
-            ? `shape ${body} has no names: bodies must come from feature operations`
-            : `unknown shape id ${body}`,
+          message: k.has(b.shape)
+            ? `body ${b.id} (shape ${b.shape}) has no names: bodies must come from feature operations`
+            : `unknown shape id ${b.shape} (body ${b.id})`,
         },
       ]);
     }
-    current = { shape: body, ...named };
+    slots.push({ body: { id: b.id, shape: b.shape, ...named }, made: null, created: false });
   }
 
-  let made: Made | null = null;
+  const keep = new Set<ShapeId>();
   try {
-    made = run(ctx, current, input);
-    if (made === null) return pass([]);
-    // The result is the one shape that is not released.
-    ctx.temps = ctx.temps.filter((id) => id !== made!.shape);
-    // A placeholder can be carried (and prefixed) by later steps of the
-    // feature, so the names are checked as well as the list: `?` is reserved
-    // in ids, so a name containing it was never given by a feature.
-    const placeholders = made.faces.flatMap((f, i) => (isUnnamed(f.name) ? [i + 1] : []));
-    if (made.unnamed.length > 0 || placeholders.length > 0) {
-      const count = Math.max(made.unnamed.length, placeholders.length);
-      const where = placeholders.length > 0 ? ` (faces ${placeholders.join(', ')})` : '';
-      throw new FeatureFailed([
-        {
-          featureId,
-          code: 'unnamed',
-          message: `the result has ${count} face(s) no history named${where}`,
-        },
-      ]);
+    const ran = run(ctx, slots, input) ?? slots;
+    const after = options.join ? join(ctx, ran) : ran;
+    for (const slot of after) {
+      if (slot.made === null) continue;
+      // A placeholder can be carried (and prefixed) by later steps of the
+      // feature, so the names are checked as well as the list: `?` is reserved
+      // in ids, so a name containing it was never given by a feature.
+      const made = slot.made;
+      const placeholders = made.faces.flatMap((f, i) => (isUnnamed(f.name) ? [i + 1] : []));
+      if (made.unnamed.length > 0 || placeholders.length > 0) {
+        const count = Math.max(made.unnamed.length, placeholders.length);
+        const where = placeholders.length > 0 ? ` (faces ${placeholders.join(', ')})` : '';
+        const of = after.length > 1 ? ` of ${slot.body.id}` : '';
+        throw new FeatureFailed([
+          {
+            featureId,
+            code: 'unnamed',
+            message: `the result${of} has ${count} face(s) no history named${where}`,
+          },
+        ]);
+      }
     }
-    const names = nameShape(made.faces, made.topology);
-    k.setNames(made.shape, { names, topology: made.topology });
-    const result = made;
-    made = null;
+    const out: OutcomeBody[] = after.map((slot) => {
+      const { id, shape } = slot.body;
+      if (slot.made !== null) {
+        k.setNames(shape, { names: slot.body.names, topology: slot.body.topology });
+      }
+      return { id, shape, names: slot.body.names, solids: solidsOf(ctx, shape) };
+    });
+    // The results are the shapes that are not released.
+    for (const slot of after) if (slot.made !== null) keep.add(slot.made.shape);
+    const ids = new Set(after.map((s) => s.body.id));
     return {
       featureId,
       kind,
       ok: true,
-      shape: result.shape,
-      created: true,
-      names,
+      bodies: out,
+      created: after.filter((s) => s.created).map((s) => s.body.id),
+      changed: after.filter((s) => !s.created && s.made !== null).map((s) => s.body.id),
+      consumed: given.filter((b) => !ids.has(b.id)).map((b) => b.id),
       errors: [],
       warnings: ctx.warnings,
       resolved: ctx.resolved,
     };
   } catch (error) {
+    keep.clear();
     if (error instanceof FeatureFailed) return pass(error.errors);
     if (error instanceof KernelError) {
       if (error.code === 'fatal') throw error;
@@ -485,38 +609,57 @@ export function applyFeature(k: Kernel, body: ShapeId | null, input: FeatureInpu
     ]);
   } finally {
     if (k.lostReason === null) {
-      if (made !== null) k.release(made.shape);
-      for (const id of new Set(ctx.temps)) k.release(id);
+      for (const id of new Set(ctx.temps)) if (!keep.has(id)) k.release(id);
     }
   }
 }
 
-function run(ctx: Ctx, body: Body | null, input: FeatureInput): Made | null {
+/** Why a body set is malformed, or null. */
+function validateBodies(bodies: unknown): string | null {
+  if (!Array.isArray(bodies)) return 'bodies must be an array';
+  const seen = new Set<string>();
+  for (const [i, b] of (bodies as unknown[]).entries()) {
+    if (!isObj(b) || typeof b.id !== 'string' || b.id.length === 0) {
+      return `bodies[${i}] must have a non-empty id`;
+    }
+    if (typeof b.shape !== 'number' || !Number.isInteger(b.shape)) {
+      return `bodies[${i}] (${b.id}) must have a shape id`;
+    }
+    if (seen.has(b.id)) return `body id ${b.id} is used twice`;
+    seen.add(b.id);
+  }
+  return null;
+}
+
+function run(ctx: Ctx, slots: readonly Slot[], input: FeatureInput): Slot[] | null {
   switch (input.kind) {
     case 'extrude':
     case 'revolve': {
-      const tool = buildTool(ctx, body, input);
-      return combine(ctx, body, [tool], tool.mode);
+      const scoped = inScope(ctx, slots, input.scope);
+      const tool = buildTool(ctx, slots, scoped, input);
+      return combine(ctx, slots, scoped, [{ ...tool, bodyId: input.body ?? input.id }], tool.mode);
     }
     case 'hole': {
-      const b = needBody(ctx, body);
-      const made = combine(ctx, b, [buildTool(ctx, b, input)], 'subtract');
-      missedHoles(ctx, input, made);
-      return made;
+      const scoped = needBodies(ctx, inScope(ctx, slots, input.scope));
+      const tool = buildTool(ctx, slots, scoped, input);
+      const after = combine(ctx, slots, scoped, [{ ...tool, bodyId: input.id }], 'subtract');
+      missedHoles(ctx, input, after);
+      return after;
     }
     case 'fillet':
-      return fillet(ctx, needBody(ctx, body), input);
+      return fillet(ctx, needBodies(ctx, slots), input);
     case 'chamfer':
-      return chamfer(ctx, needBody(ctx, body), input);
+      return chamfer(ctx, needBodies(ctx, slots), input);
     case 'shell':
-      return shell(ctx, needBody(ctx, body), input);
+      return shell(ctx, needBodies(ctx, slots), input);
     case 'pattern':
-      return pattern(ctx, needBody(ctx, body), input);
+      return pattern(ctx, needBodies(ctx, slots), input);
     case 'mirror':
-      return mirror(ctx, needBody(ctx, body), input);
+      return mirror(ctx, needBodies(ctx, slots), input);
     case 'import': {
+      const scoped = inScope(ctx, slots, input.scope);
       const tool = importTool(ctx, input);
-      return combine(ctx, body, [tool], input.mode);
+      return combine(ctx, slots, scoped, [{ ...tool, bodyId: input.body ?? input.id }], input.mode);
     }
   }
 }
@@ -544,9 +687,28 @@ function fail(
   throw new FeatureFailed([{ featureId: ctx.id, code, message, ...extra }]);
 }
 
-function needBody(ctx: Ctx, body: Body | null): Body {
-  if (body === null) fail(ctx, 'no-body', `${ctx.id} needs a body`);
-  return body;
+function needBodies<T>(ctx: Ctx, bodies: readonly T[]): readonly T[] {
+  if (bodies.length === 0) fail(ctx, 'no-body', `${ctx.id} needs a body`);
+  return bodies;
+}
+
+/** The bodies a feature's scope names, in creator order; every body when it has none. */
+function inScope(ctx: Ctx, slots: readonly Slot[], scope: readonly string[] | undefined): Slot[] {
+  if (scope === undefined) return [...slots];
+  const missing = scope.filter((id) => !slots.some((s) => s.body.id === id));
+  if (missing.length > 0) {
+    fail(
+      ctx,
+      'lost',
+      `${ctx.id} acts on ${missing.join(', ')}, which ${missing.length === 1 ? 'is not a body' : 'are not bodies'} at this point`,
+      { ref: 'scope', target: missing.join(', '), missing },
+    );
+  }
+  return slots.filter((s) => scope.includes(s.body.id));
+}
+
+function bodiesOf(slots: readonly Slot[]): Body[] {
+  return slots.map((s) => s.body);
 }
 
 function temp<T extends { shape: ShapeId }>(ctx: Ctx, made: T): T {
@@ -554,31 +716,132 @@ function temp<T extends { shape: ShapeId }>(ctx: Ctx, made: T): T {
   return made;
 }
 
+/** A made shape as a body: named, not yet attached. */
+function bodyOf(id: string, made: Made): Body {
+  return {
+    id,
+    shape: made.shape,
+    names: nameShape(made.faces, made.topology),
+    topology: made.topology,
+  };
+}
+
+function changedSlot(slot: Slot, made: Made): Slot {
+  return { body: bodyOf(slot.body.id, made), made, created: slot.created };
+}
+
+function boxOf(ctx: Ctx, shape: ShapeId): Box | null {
+  let box = ctx.boxes.get(shape);
+  if (box === undefined) {
+    box = ctx.k.properties(shape).boundingBox;
+    ctx.boxes.set(shape, box);
+  }
+  return box;
+}
+
+function solidsOf(ctx: Ctx, shape: ShapeId): number {
+  let n = ctx.solids.get(shape);
+  if (n === undefined) {
+    n = ctx.k.solids(shape);
+    ctx.solids.set(shape, n);
+  }
+  return n;
+}
+
+/** Whether two bounding boxes meet: shapes whose boxes do not can never touch. */
+function overlaps(a: Box | null, b: Box | null): boolean {
+  if (a === null || b === null) return false;
+  const tol = 1e-6;
+  return [0, 1, 2].every((i) => a.min[i]! <= b.max[i]! + tol && b.min[i]! <= a.max[i]! + tol);
+}
+
 // References ------------------------------------------------------------------------
 
+interface Hit {
+  body: Body;
+  index: number;
+}
+
 /**
- * Resolve references against the body; every failure is collected, then
- * they all fail the feature together.
+ * Resolve references against the names of every body; every failure is
+ * collected, then they all fail the feature together. Names are unique
+ * across a part's bodies, so a reference finds at most one body; one whose
+ * names lie on two bodies (an edge between faces of different bodies) is
+ * `invalid`.
  */
-function resolveAll(ctx: Ctx, body: Body, refs: readonly { id: string; ref: TopoRef }[]): number[] {
+function resolveAll(
+  ctx: Ctx,
+  bodies: readonly Body[],
+  refs: readonly { id: string; ref: TopoRef }[],
+): Hit[] {
   const errors: FeatureError[] = [];
-  const out: number[] = [];
+  const out: Hit[] = [];
   for (const { id, ref } of refs) {
-    const r = resolve(body.names, body.topology, ref);
     const target = refName(ref);
-    if (!r.ok) {
-      errors.push(refError(ctx, id, target, r));
+    const r = resolveOnBodies(bodies, ref);
+    if ('spans' in r) {
+      errors.push({
+        featureId: ctx.id,
+        code: 'invalid',
+        message: `${target} spans bodies ${r.spans.join(' and ')}: a reference must lie on one body`,
+        ref: id,
+        target,
+      });
       continue;
     }
-    record(ctx, id, target, 'face' in ref ? 'face' : 'edge', r);
-    out.push(r.index);
+    if (!r.resolution.ok) {
+      errors.push(refError(ctx, id, target, r.resolution));
+      continue;
+    }
+    record(ctx, id, target, 'face' in ref ? 'face' : 'edge', r.resolution);
+    out.push({ body: r.body!, index: r.resolution.index });
   }
   if (errors.length > 0) throw new FeatureFailed(errors);
   return out;
 }
 
-function resolveOne(ctx: Ctx, body: Body, id: string, ref: TopoRef): number {
-  return resolveAll(ctx, body, [{ id, ref }])[0]!;
+function resolveOnBodies(
+  bodies: readonly Body[],
+  ref: TopoRef,
+): { resolution: Resolution; body?: Body } | { spans: string[] } {
+  const results = bodies.map((body) => ({ body, r: resolve(body.names, body.topology, ref) }));
+  const found = results.filter((x) => x.r.ok);
+  const exact = found.filter((x) => x.r.ok && x.r.via === 'exact');
+  const pick = found.length === 1 ? found[0] : exact.length === 1 ? exact[0] : undefined;
+  if (pick !== undefined) return { resolution: pick.r, body: pick.body };
+  if (found.length > 1) {
+    const kind = 'face' in ref ? 'faces' : 'edges';
+    const candidates = found
+      .map((x) => (x.r.ok ? (x.body.names[kind][x.r.index - 1]?.name ?? '') : ''))
+      .sort();
+    return { resolution: { ok: false, status: 'ambiguous', candidates } };
+  }
+  const ambiguous = results.flatMap((x) => (!x.r.ok && x.r.status === 'ambiguous' ? [x.r] : []));
+  if (ambiguous.length > 0) {
+    const candidates = [...new Set(ambiguous.flatMap((a) => a.candidates))].sort();
+    return { resolution: { ok: false, status: 'ambiguous', candidates } };
+  }
+  const lost = results.map((x) => (!x.r.ok && x.r.status === 'lost' ? x.r.missing : []));
+  if (lost.length === 0) {
+    return { resolution: { ok: false, status: 'lost', missing: refNames(ref) } };
+  }
+  // Names missing from every body are gone; when each body has some of them
+  // but none has all, the reference spans bodies.
+  const gone = lost.reduce((a, m) => a.filter((n) => m.includes(n)));
+  if (gone.length === 0 && lost.every((m) => m.length > 0) && bodies.length > 1) {
+    const owners = results.filter((_, i) => lost[i]!.length < refNames(ref).length);
+    return { spans: owners.map((x) => x.body.id) };
+  }
+  return { resolution: { ok: false, status: 'lost', missing: gone } };
+}
+
+/** The names a reference is written in. */
+function refNames(ref: TopoRef): string[] {
+  return 'face' in ref ? [ref.face] : [...ref.faces, ...(ref.ends ?? [])];
+}
+
+function resolveOne(ctx: Ctx, bodies: readonly Body[], id: string, ref: TopoRef): Hit {
+  return resolveAll(ctx, bodies, [{ id, ref }])[0]!;
 }
 
 function refError(
@@ -633,20 +896,20 @@ function record(
 }
 
 /**
- * The geometry of a referenced face or edge, its direction oriented by names
- * (`orientedGeometry`) and turned round when `flip` is set. `directed`: the
- * caller uses which way it points, so a direction no rule could orient is
- * worth a warning.
+ * The geometry of a referenced face or edge of any body, its direction
+ * oriented by names (`orientedGeometry`) and turned round when `flip` is set.
+ * `directed`: the caller uses which way it points, so a direction no rule
+ * could orient is worth a warning.
  */
 function geometryOf(
   ctx: Ctx,
-  body: Body,
+  bodies: readonly Body[],
   id: string,
   ref: TopoRef,
   accept: readonly SubShapeGeometry['kind'][],
   options: { flip?: boolean; directed?: boolean } = {},
 ): SubShapeGeometry {
-  const index = resolveOne(ctx, body, id, ref);
+  const { body, index } = resolveOne(ctx, needBodies(ctx, bodies), id, ref);
   const kind = 'face' in ref ? 'face' : 'edge';
   const raw = ctx.k.geometry(body.shape, { kind, index });
   if (raw === null || !accept.includes(raw.kind)) {
@@ -766,23 +1029,38 @@ export function orientedGeometry(
 // Tools: extrude, revolve, hole ------------------------------------------------------
 
 /**
- * Build a feature's tool solid where the feature puts it. `motion`: the tool
- * is for a pattern instance or mirror image that `motion` will move, so
- * lengths measured against the body (through all, up to a face) are measured
- * from where the copy will be, not from the original.
+ * Build a feature's tool solid where the feature puts it. References resolve
+ * on any body; lengths measured against the body (through all) are measured
+ * against the bodies in the feature's scope. `motion`: the tool is for a
+ * pattern instance or mirror image that `motion` will move, so those lengths
+ * are measured from where the copy will be, not from the original.
  */
-function buildTool(ctx: Ctx, body: Body | null, input: ToolInput, motion?: Transform): Tool {
+function buildTool(
+  ctx: Ctx,
+  slots: readonly Slot[],
+  scoped: readonly Slot[],
+  input: ToolInput,
+  motion?: Transform,
+): Tool {
+  const all = bodiesOf(slots);
+  const targets = bodiesOf(scoped);
   switch (input.kind) {
     case 'extrude':
-      return extrudeTool(ctx, body, input, motion);
+      return extrudeTool(ctx, all, targets, input, motion);
     case 'revolve':
-      return revolveTool(ctx, body, input);
+      return revolveTool(ctx, all, input);
     case 'hole':
-      return holeTool(ctx, body, input, motion);
+      return holeTool(ctx, targets, input, motion);
   }
 }
 
-function extrudeTool(ctx: Ctx, body: Body | null, input: ExtrudeInput, motion?: Transform): Tool {
+function extrudeTool(
+  ctx: Ctx,
+  all: readonly Body[],
+  scoped: readonly Body[],
+  input: ExtrudeInput,
+  motion?: Transform,
+): Tool {
   const { k } = ctx;
   const frame = input.profile.frame;
   const n = unit(frame.normal);
@@ -802,11 +1080,10 @@ function extrudeTool(ctx: Ctx, body: Body | null, input: ExtrudeInput, motion?: 
       start = add(frame.origin, scale(dir, -extent.distance / 2));
       break;
     case 'throughAll':
-      length = throughLength(ctx, needBody(ctx, body), at, toward, 'extent');
+      length = throughLength(ctx, needBodies(ctx, scoped), at, toward, 'extent');
       break;
     case 'upToFace': {
-      const b = needBody(ctx, body);
-      const plane = geometryOf(ctx, b, 'extent', extent.face, ['plane']);
+      const plane = geometryOf(ctx, all, 'extent', extent.face, ['plane']);
       const along = dot(toward, plane.direction);
       if (Math.abs(along) < 1e-9) {
         fail(ctx, 'invalid', `${extent.face.face} is parallel to the extrusion direction`, {
@@ -843,11 +1120,11 @@ function extrudeTool(ctx: Ctx, body: Body | null, input: ExtrudeInput, motion?: 
   return { ...made, mode: input.mode };
 }
 
-function revolveTool(ctx: Ctx, body: Body | null, input: RevolveInput): Tool {
+function revolveTool(ctx: Ctx, all: readonly Body[], input: RevolveInput): Tool {
   const { k } = ctx;
   let axis: Axis;
   if ('edge' in input.axis) {
-    const g = geometryOf(ctx, needBody(ctx, body), 'axis', input.axis.edge, ['line'], {
+    const g = geometryOf(ctx, all, 'axis', input.axis.edge, ['line'], {
       flip: input.axis.flip === true,
       directed: input.angle < TWO_PI - 1e-9,
     });
@@ -878,7 +1155,7 @@ const DEFAULT_TIP = (118 * Math.PI) / 180;
  * `bottom`, `cbore` and `cbore-floor`, `csink`, and `top` (on the sketch
  * plane; a cut removes it).
  */
-function holeTool(ctx: Ctx, body: Body | null, input: HoleInput, motion?: Transform): Tool {
+function holeTool(ctx: Ctx, scoped: readonly Body[], input: HoleInput, motion?: Transform): Tool {
   const { k } = ctx;
   const frame = input.frame;
   const n = unit(frame.normal);
@@ -927,7 +1204,7 @@ function holeTool(ctx: Ctx, body: Body | null, input: HoleInput, motion?: Transf
   } else {
     depth = throughLength(
       ctx,
-      needBody(ctx, body),
+      needBodies(ctx, scoped),
       motion ? movePoint(frame.origin, motion) : frame.origin,
       motion ? moveVector(d, motion) : d,
       'extent',
@@ -988,9 +1265,9 @@ function holeTool(ctx: Ctx, body: Body | null, input: HoleInput, motion?: Transf
   };
 }
 
-/** A hole that left no face in the body missed it: an error, not a silent no-op. */
-function missedHoles(ctx: Ctx, input: HoleInput, made: Made): void {
-  const lineage = new Set(made.faces.flatMap((f) => f.lineage));
+/** A hole that left no face in any body missed it: an error, not a silent no-op. */
+function missedHoles(ctx: Ctx, input: HoleInput, slots: readonly Slot[]): void {
+  const lineage = new Set(slots.flatMap((s) => s.made?.faces.flatMap((f) => f.lineage) ?? []));
   const missed = input.points.filter(
     (p) => !HOLE_ROLES.some((role) => lineage.has(`${input.id}:${role}:${p.id}`)),
   );
@@ -1006,28 +1283,37 @@ function missedHoles(ctx: Ctx, input: HoleInput, made: Made): void {
 const HOLE_ROLES = ['wall', 'tip', 'bottom', 'cbore', 'cbore-floor', 'csink'];
 
 /**
- * How far from `origin` along `dir` a tool must reach to leave the body:
- * past its farthest bounding box corner, plus 1 mm. (Offsets within the
- * sketch plane do not change the distance along its normal.)
+ * How far from `origin` along `dir` a tool must reach to leave the bodies:
+ * past the farthest corner of their bounding box, plus 1 mm. (Offsets within
+ * the sketch plane do not change the distance along its normal.)
  */
-function throughLength(ctx: Ctx, body: Body, origin: Vec3, dir: Vec3, field: string): number {
-  const box = ctx.k.properties(body.shape).boundingBox;
-  if (box === null) fail(ctx, 'no-body', 'the body is empty', { ref: field });
+function throughLength(
+  ctx: Ctx,
+  bodies: readonly Body[],
+  origin: Vec3,
+  dir: Vec3,
+  field: string,
+): number {
   let far = -Infinity;
-  for (const cx of [box.min[0], box.max[0]]) {
-    for (const cy of [box.min[1], box.max[1]]) {
-      for (const cz of [box.min[2], box.max[2]]) {
-        far = Math.max(far, dot(sub([cx, cy, cz], origin), dir));
+  for (const body of bodies) {
+    const box = boxOf(ctx, body.shape);
+    if (box === null) continue;
+    for (const cx of [box.min[0], box.max[0]]) {
+      for (const cy of [box.min[1], box.max[1]]) {
+        for (const cz of [box.min[2], box.max[2]]) {
+          far = Math.max(far, dot(sub([cx, cy, cz], origin), dir));
+        }
       }
     }
   }
+  if (far === -Infinity) fail(ctx, 'no-body', 'the body is empty', { ref: field });
   if (!(far > 1e-9)) {
     fail(ctx, 'invalid', 'the body lies entirely behind the sketch plane', { ref: field });
   }
   return far + 1;
 }
 
-// Combining with the body ----------------------------------------------------------------
+// Combining with the bodies ----------------------------------------------------------------
 
 /** The result of an operation on `operands`, with face names carried through its history. */
 function propagated(
@@ -1042,49 +1328,231 @@ function propagated(
   return { shape, faces: p.faces, topology, unnamed: p.unnamed };
 }
 
-/**
- * Combine tools with the body by mode: `add` fuses, `subtract` cuts,
- * `intersect` keeps the common part, `new` keeps them as separate solids of
- * one compound. Without a body, `new` (and only `new`) makes the tool the body.
- */
-function combine(ctx: Ctx, body: Body | null, tools: readonly Made[], mode: ResultMode): Made {
-  const { k } = ctx;
-  if (body === null) {
-    if (mode !== 'new') fail(ctx, 'no-body', `${ctx.id} (${mode}) needs a body`);
-    if (tools.length === 1) return tools[0]!;
-  }
-  const operands = [...(body ? [body.names.faces] : []), ...tools.map((t) => t.faces)];
-  const shapes = [...(body ? [body.shape] : []), ...tools.map((t) => t.shape)];
-  if (mode === 'new') noOverlap(ctx, shapes);
-  const kind = mode === 'add' ? 'fuse' : mode === 'subtract' ? 'cut' : 'common';
+/** One boolean of `base` with `tools`, names carried; the tools' unnamed faces stay counted. */
+function booleanOf(
+  ctx: Ctx,
+  kind: 'fuse' | 'cut' | 'common',
+  base: { shape: ShapeId; faces: readonly FaceName[] },
+  tools: readonly Made[],
+): Made {
   const result = temp(
     ctx,
-    mode === 'new' ? k.compound(shapes) : k.boolean(kind, shapes[0]!, shapes.slice(1)),
+    ctx.k.boolean(
+      kind,
+      base.shape,
+      tools.map((t) => t.shape),
+    ),
   );
-  const made = propagated(ctx, result.shape, operands, result.history);
-  if (made.topology.faces.length === 0) fail(ctx, 'empty', `${ctx.id} leaves nothing of the body`);
+  const made = propagated(
+    ctx,
+    result.shape,
+    [base.faces, ...tools.map((t) => t.faces)],
+    result.history,
+  );
   return { ...made, unnamed: [...made.unnamed, ...tools.flatMap((t) => t.unnamed)] };
 }
 
 /**
- * A part is one body until multi-body parts (M2): the solids of a `new`
- * feature's compound must not overlap each other or the body, or the
- * compound's volume counts the overlap twice. Solids that only touch are
- * fine. Checked by comparing the fused volume with the sum of the volumes.
+ * Combine tools with the bodies by mode. `new`: each tool becomes a body of
+ * its own. `add`: each tool fuses with every body in scope it touches, and
+ * bodies one tool joins merge under the id of the first of them; a tool that
+ * touches none becomes a body of its own (`detached`). `subtract` and
+ * `intersect`: each body in scope a tool reaches is cut, or cut down to the
+ * common part. Bodies whose bounding box no tool meets stay out of every
+ * boolean and keep their shapes.
  */
-function noOverlap(ctx: Ctx, shapes: readonly ShapeId[]): void {
-  if (shapes.length < 2) return;
-  const { k } = ctx;
-  const sum = shapes.reduce((total, id) => total + k.properties(id).volume, 0);
-  const fused = temp(ctx, k.boolean('fuse', shapes[0]!, shapes.slice(1), { history: false }));
-  const volume = k.properties(fused.shape).volume;
-  if (sum - volume > 1e-6 * Math.max(1, sum)) {
-    fail(
-      ctx,
-      'invalid',
-      `${ctx.id} overlaps the body (by ${(sum - volume).toPrecision(4)} mm3): a new solid must stay clear of it until parts can hold several bodies; use add to join them`,
-    );
+function combine(
+  ctx: Ctx,
+  slots: readonly Slot[],
+  scoped: readonly Slot[],
+  tools: readonly Placed[],
+  mode: ResultMode,
+): Slot[] {
+  if (mode === 'new') {
+    const out = [...slots];
+    for (const tool of tools) {
+      if (out.some((s) => s.body.id === tool.bodyId)) {
+        fail(ctx, 'invalid', `${ctx.id} would make body ${tool.bodyId}, which already exists`);
+      }
+      out.push({ body: bodyOf(tool.bodyId, tool), made: tool, created: true });
+    }
+    return out;
   }
+  if (scoped.length === 0) fail(ctx, 'no-body', `${ctx.id} (${mode}) needs a body`);
+  return mode === 'add'
+    ? fuseTools(ctx, slots, scoped, tools)
+    : cutTools(ctx, slots, scoped, tools, mode);
+}
+
+function fuseTools(
+  ctx: Ctx,
+  slots: readonly Slot[],
+  scoped: readonly Slot[],
+  tools: readonly Placed[],
+): Slot[] {
+  const { k } = ctx;
+  const n = scoped.length;
+  // Scoped bodies are nodes 0..n-1, tools n..; a tool that touches a body (or
+  // a tool that does) joins them.
+  const parent = Array.from({ length: n + tools.length }, (_, i) => i);
+  const find = (i: number): number => {
+    while (parent[i] !== i) i = parent[i] = parent[parent[i]!]!;
+    return i;
+  };
+  const unite = (a: number, b: number) => {
+    const [ra, rb] = [find(a), find(b)];
+    if (ra !== rb) parent[Math.max(ra, rb)] = Math.min(ra, rb);
+  };
+  // The common case, one tool whose box meets one body: that fuse, with
+  // history, is the result, so it costs one boolean as a one-body part did.
+  let reuse: { shape: ShapeId; history: HistoryEntry[] } | null = null;
+  for (const [j, tool] of tools.entries()) {
+    const box = boxOf(ctx, tool.shape);
+    const near = scoped.flatMap((s, i) => (overlaps(boxOf(ctx, s.body.shape), box) ? [i] : []));
+    const once = tools.length === 1 && near.length === 1;
+    for (const i of near) {
+      const body = scoped[i]!.body;
+      const fused = temp(
+        ctx,
+        k.boolean('fuse', body.shape, [tool.shape], once ? {} : { history: false }),
+      );
+      // Touching solids fuse into fewer solids than they were.
+      if (k.solids(fused.shape) < solidsOf(ctx, body.shape) + solidsOf(ctx, tool.shape)) {
+        unite(i, n + j);
+        if (once) reuse = fused;
+      }
+    }
+  }
+  // Tools that touch each other stay together (a row of overlapping copies);
+  // pairs already joined through a body need no test.
+  const touch = (a: ShapeId, b: ShapeId): boolean => {
+    const fused = temp(ctx, k.boolean('fuse', a, [b], { history: false }));
+    return k.solids(fused.shape) < solidsOf(ctx, a) + solidsOf(ctx, b);
+  };
+  for (let a = 0; a < tools.length; a++) {
+    for (let b = a + 1; b < tools.length; b++) {
+      if (find(n + a) === find(n + b)) continue;
+      if (!overlaps(boxOf(ctx, tools[a]!.shape), boxOf(ctx, tools[b]!.shape))) continue;
+      if (touch(tools[a]!.shape, tools[b]!.shape)) unite(n + a, n + b);
+    }
+  }
+
+  const out: (Slot | null)[] = [...slots];
+  const detached: Slot[] = [];
+  const groups = new Map<number, { bodies: number[]; tools: number[] }>();
+  for (let i = 0; i < n + tools.length; i++) {
+    const root = find(i);
+    const g = groups.get(root) ?? { bodies: [], tools: [] };
+    if (i < n) g.bodies.push(i);
+    else g.tools.push(i - n);
+    groups.set(root, g);
+  }
+  for (const g of groups.values()) {
+    if (g.tools.length === 0) continue;
+    if (g.bodies.length === 0) {
+      // Touching no body: one body of its own, under the first tool's id.
+      const [tool, ...others] = g.tools.map((j) => tools[j]!);
+      const id = tool!.bodyId;
+      if (out.some((s) => s?.body.id === id) || detached.some((s) => s.body.id === id)) {
+        fail(ctx, 'invalid', `${ctx.id} would make body ${id}, which already exists`);
+      }
+      let made: Made = tool!;
+      if (others.length > 0) {
+        // `booleanOf` counts the others' unnamed faces, not its base's.
+        const fused = booleanOf(ctx, 'fuse', tool!, others);
+        made = { ...fused, unnamed: [...fused.unnamed, ...tool!.unnamed] };
+      }
+      detached.push({ body: bodyOf(id, made), made, created: true });
+      continue;
+    }
+    // Bodies in creator order, then the tools: the first body's id survives.
+    const [first, ...rest] = g.bodies.map((i) => scoped[i]!);
+    const operands = [
+      ...rest.map((s) => ({ ...s.body, faces: s.body.names.faces, unnamed: [] })),
+      ...g.tools.map((j) => tools[j]!),
+    ];
+    const base = { shape: first!.body.shape, faces: first!.body.names.faces };
+    let made: Made;
+    const once = reuse as { shape: ShapeId; history: HistoryEntry[] } | null;
+    if (once !== null && operands.length === 1) {
+      const p = propagated(ctx, once.shape, [base.faces, operands[0]!.faces], once.history);
+      made = { ...p, unnamed: [...p.unnamed, ...operands[0]!.unnamed] };
+    } else {
+      made = booleanOf(ctx, 'fuse', base, operands);
+    }
+    out[slots.indexOf(first!)] = changedSlot(first!, made);
+    for (const s of rest) out[slots.indexOf(s)] = null;
+  }
+  if (detached.length > 0) {
+    const ids = detached.map((s) => s.body.id);
+    const one = ids.length === 1;
+    ctx.warnings.push({
+      featureId: ctx.id,
+      code: 'detached',
+      bodies: ids,
+      message: `${one ? 'the added solid' : 'added solids'} ${ids.join(', ')} ${one ? 'touches' : 'touch'} no body, so ${one ? 'it is a body' : 'they are bodies'} of ${one ? 'its' : 'their'} own`,
+    });
+  }
+  return [...out.filter((s): s is Slot => s !== null), ...detached];
+}
+
+function cutTools(
+  ctx: Ctx,
+  slots: readonly Slot[],
+  scoped: readonly Slot[],
+  tools: readonly Placed[],
+  mode: 'subtract' | 'intersect',
+): Slot[] {
+  const out = [...slots];
+  const toolNames = new Set(tools.flatMap((t) => t.faces.map((f) => f.name)));
+  let reached = 0;
+  for (const slot of scoped) {
+    const body = slot.body;
+    const box = boxOf(ctx, body.shape);
+    const near = tools.filter((t) => overlaps(box, boxOf(ctx, t.shape)));
+    if (near.length === 0) continue;
+    const made = booleanOf(
+      ctx,
+      mode === 'subtract' ? 'cut' : 'common',
+      { shape: body.shape, faces: body.names.faces },
+      near,
+    );
+    const faces = made.topology.faces.length;
+    if (mode === 'intersect') {
+      if (faces === 0) continue;
+    } else {
+      // A cut that reached the body left a tool face in it, or took a whole solid away.
+      const hit =
+        faces !== body.topology.faces.length ||
+        made.faces.some((f) => f.lineage.some((name) => toolNames.has(name)));
+      if (!hit) continue;
+      if (faces === 0) fail(ctx, 'empty', `${ctx.id} leaves nothing of ${body.id}`);
+    }
+    reached++;
+    out[slots.indexOf(slot)] = changedSlot(slot, made);
+  }
+  if (mode === 'intersect' && reached === 0) {
+    fail(ctx, 'empty', `${ctx.id} leaves nothing of ${scoped.map((s) => s.body.id).join(', ')}`);
+  }
+  return out;
+}
+
+/** Several bodies as one compound under the first id (`ApplyOptions.join`). */
+function join(ctx: Ctx, slots: readonly Slot[]): Slot[] {
+  if (slots.length < 2) return [...slots];
+  const joined = temp(ctx, ctx.k.compound(slots.map((s) => s.body.shape)));
+  const p = propagated(
+    ctx,
+    joined.shape,
+    slots.map((s) => s.body.names.faces),
+    joined.history,
+  );
+  const made: Made = {
+    ...p,
+    unnamed: [...p.unnamed, ...slots.flatMap((s) => s.made?.unnamed ?? [])],
+  };
+  const first = slots[0]!;
+  return [{ body: bodyOf(first.body.id, made), made, created: first.created }];
 }
 
 /** Check a result with `BRepCheck_Analyzer`; an invalid one fails the feature. */
@@ -1120,68 +1588,95 @@ function blendNamer(
   };
 }
 
-function edgeIndices(ctx: Ctx, body: Body, edges: readonly EdgeReference[]): Map<number, string> {
-  const indices = resolveAll(ctx, body, edges);
-  const refOfEdge = new Map<number, string>();
-  indices.forEach((index, i) => {
+/**
+ * The referenced edges of each body that owns some, by body id: edge index to
+ * reference id, in reference order.
+ */
+function edgesByBody(
+  ctx: Ctx,
+  slots: readonly Slot[],
+  edges: readonly EdgeReference[],
+): Map<string, Map<number, string>> {
+  const hits = resolveAll(ctx, bodiesOf(slots), edges);
+  const out = new Map<string, Map<number, string>>();
+  hits.forEach((hit, i) => {
     const id = edges[i]!.id;
-    const other = refOfEdge.get(index);
+    const refOfEdge = out.get(hit.body.id) ?? new Map<number, string>();
+    const other = refOfEdge.get(hit.index);
     if (other !== undefined) {
       fail(ctx, 'invalid', `references ${other} and ${id} resolve to the same edge`, { ref: id });
     }
-    refOfEdge.set(index, id);
+    refOfEdge.set(hit.index, id);
+    out.set(hit.body.id, refOfEdge);
   });
-  return refOfEdge;
+  return out;
 }
 
-function fillet(ctx: Ctx, body: Body, input: FilletInput): Made {
-  const refOfEdge = edgeIndices(ctx, body, input.edges);
-  const result = temp(ctx, ctx.k.fillet(body.shape, [...refOfEdge.keys()], input.radius));
-  return checked(
-    ctx,
-    propagated(
-      ctx,
-      result.shape,
-      [body.names.faces],
-      result.history,
-      blendNamer(ctx, body, 'round', refOfEdge),
-    ),
-  );
+function fillet(ctx: Ctx, slots: readonly Slot[], input: FilletInput): Slot[] {
+  const byBody = edgesByBody(ctx, slots, input.edges);
+  return slots.map((slot) => {
+    const refOfEdge = byBody.get(slot.body.id);
+    if (refOfEdge === undefined) return slot;
+    const body = slot.body;
+    const result = temp(ctx, ctx.k.fillet(body.shape, [...refOfEdge.keys()], input.radius));
+    return changedSlot(
+      slot,
+      checked(
+        ctx,
+        propagated(
+          ctx,
+          result.shape,
+          [body.names.faces],
+          result.history,
+          blendNamer(ctx, body, 'round', refOfEdge),
+        ),
+      ),
+    );
+  });
 }
 
-function chamfer(ctx: Ctx, body: Body, input: ChamferInput): Made {
-  const refOfEdge = edgeIndices(ctx, body, input.edges);
-  const edges = input.edges.map((e, i) => {
-    const edge = [...refOfEdge.keys()][i]!;
-    if (input.size.kind === 'distance') return { edge };
-    const adjacent = body.topology.edges[edge - 1]!.faces;
-    let face: number;
-    if (e.face) {
-      face = resolveOne(ctx, body, `${e.id}.face`, e.face);
-      if (!adjacent.includes(face)) {
-        fail(ctx, 'invalid', `${e.face.face} is not a face of ${refName(e.ref)}`, {
-          ref: `${e.id}.face`,
-          target: e.face.face,
-        });
+function chamfer(ctx: Ctx, slots: readonly Slot[], input: ChamferInput): Slot[] {
+  const byBody = edgesByBody(ctx, slots, input.edges);
+  const byRef = new Map(input.edges.map((e) => [e.id, e]));
+  return slots.map((slot) => {
+    const refOfEdge = byBody.get(slot.body.id);
+    if (refOfEdge === undefined) return slot;
+    const body = slot.body;
+    const edges = [...refOfEdge].map(([edge, refId]) => {
+      if (input.size.kind === 'distance') return { edge };
+      const e = byRef.get(refId)!;
+      const adjacent = body.topology.edges[edge - 1]!.faces;
+      let face: number;
+      if (e.face) {
+        face = resolveOne(ctx, [body], `${e.id}.face`, e.face).index;
+        if (!adjacent.includes(face)) {
+          fail(ctx, 'invalid', `${e.face.face} is not a face of ${refName(e.ref)}`, {
+            ref: `${e.id}.face`,
+            target: e.face.face,
+          });
+        }
+      } else {
+        face = [...adjacent].sort((p, q) =>
+          body.names.faces[p - 1]!.name < body.names.faces[q - 1]!.name ? -1 : 1,
+        )[0]!;
       }
-    } else {
-      face = [...adjacent].sort((p, q) =>
-        body.names.faces[p - 1]!.name < body.names.faces[q - 1]!.name ? -1 : 1,
-      )[0]!;
-    }
-    return { edge, face };
+      return { edge, face };
+    });
+    const result = temp(ctx, ctx.k.chamfer(body.shape, edges, input.size));
+    return changedSlot(
+      slot,
+      checked(
+        ctx,
+        propagated(
+          ctx,
+          result.shape,
+          [body.names.faces],
+          result.history,
+          blendNamer(ctx, body, 'bevel', refOfEdge),
+        ),
+      ),
+    );
   });
-  const result = temp(ctx, ctx.k.chamfer(body.shape, edges, input.size));
-  return checked(
-    ctx,
-    propagated(
-      ctx,
-      result.shape,
-      [body.names.faces],
-      result.history,
-      blendNamer(ctx, body, 'bevel', refOfEdge),
-    ),
-  );
 }
 
 /**
@@ -1189,8 +1684,17 @@ function chamfer(ctx: Ctx, body: Body, input: ChamferInput): Made {
  * the rim OCCT makes in its place, and every wall face grown from face X is
  * `<shell>:offset:X`.
  */
-function shell(ctx: Ctx, body: Body, input: ShellInput): Made {
-  const faces = resolveAll(ctx, body, input.faces);
+function shell(ctx: Ctx, slots: readonly Slot[], input: ShellInput): Slot[] {
+  const resolved = resolveAll(ctx, bodiesOf(slots), input.faces);
+  // Each body that owns a removed face is shelled; with none, every body is hollowed.
+  return slots.map((slot) => {
+    const faces = resolved.filter((r) => r.body.id === slot.body.id).map((r) => r.index);
+    if (input.faces.length > 0 && faces.length === 0) return slot;
+    return changedSlot(slot, shellBody(ctx, slot.body, faces, input));
+  });
+}
+
+function shellBody(ctx: Ctx, body: Body, faces: readonly number[], input: ShellInput): Made {
   if (new Set(faces).size !== faces.length) fail(ctx, 'invalid', 'a face is removed twice');
   if (faces.length >= body.topology.faces.length) {
     fail(ctx, 'invalid', 'a shell must keep at least one face');
@@ -1294,19 +1798,12 @@ function hollow(ctx: Ctx, body: Body, thickness: number, outward: boolean): Made
     `subtracting ${outward ? 'the body from its outward offset' : 'its inward offset'}`,
     () =>
       outward
-        ? combine(
-            ctx,
-            {
-              shape: walls.shape,
-              names: nameShape(walls.faces, walls.topology),
-              topology: walls.topology,
-            },
-            [original],
-            'subtract',
-          )
-        : combine(ctx, body, [walls], 'subtract'),
+        ? booleanOf(ctx, 'cut', walls, [original])
+        : booleanOf(ctx, 'cut', { shape: body.shape, faces: body.names.faces }, [walls]),
   );
-  // `combine` counts only its tools' unnamed faces; outward, the walls are its body.
+  if (made.topology.faces.length === 0)
+    fail(ctx, 'empty', `${ctx.id} leaves nothing of ${body.id}`);
+  // `booleanOf` counts only its tools' unnamed faces; outward, the walls are its base.
   const result: Made = outward ? { ...made, unnamed: [...made.unnamed, ...walls.unnamed] } : made;
   const expected = Math.abs(o.volume - b.volume);
   const after = k.properties(result.shape).volume;
@@ -1333,33 +1830,52 @@ function contains(
 /**
  * Instances of a pattern are named `<pattern>:i<k>/<source name>` (k from 2;
  * instance 1 is the original, which keeps its names); a mirror image is
- * `<mirror>:image/<source name>`.
+ * `<mirror>:image/<source name>`. A copy that becomes a body of its own is
+ * named after its instance (`pattern#2:i3`, `mirror#1:image`), followed by
+ * `/<source id>` when the pattern copies several bodies or features.
  */
 function instances(
   ctx: Ctx,
-  body: Body,
-  source: InstanceSource,
+  slots: readonly Slot[],
+  input: PatternInput | MirrorInput,
   motions: readonly { prefix: string; motion: Transform }[],
-): Made | null {
+): Slot[] | null {
   const { k } = ctx;
   if (motions.length === 0) return null;
+  const source = input.source;
   if (source.type === 'body') {
-    const copies = motions.map(({ prefix, motion }) => {
-      const moved = temp(ctx, k.transform(body.shape, motion));
-      const made = propagated(ctx, moved.shape, [body.names.faces], moved.history);
-      return { ...made, faces: prefixFaces(made.faces, prefix) };
-    });
-    return combine(ctx, body, copies, 'add');
+    const scoped = needBodies(ctx, inScope(ctx, slots, input.scope));
+    const copies: Placed[] = [];
+    for (const { prefix, motion } of motions) {
+      for (const slot of scoped) {
+        const body = slot.body;
+        const moved = temp(ctx, k.transform(body.shape, motion));
+        const made = propagated(ctx, moved.shape, [body.names.faces], moved.history);
+        copies.push({
+          ...made,
+          faces: prefixFaces(made.faces, prefix),
+          bodyId: scoped.length === 1 ? prefix : `${prefix}/${body.id}`,
+        });
+      }
+    }
+    return combine(ctx, slots, scoped, copies, source.mode ?? 'add');
   }
-  let current: Body = body;
-  let result: Made | null = null;
+  let current: Slot[] = [...slots];
   for (const feature of source.features) {
-    const copies: Made[] = [];
+    if (feature.kind !== 'hole' && feature.mode === 'intersect') {
+      fail(
+        ctx,
+        'unsupported',
+        `${feature.id} intersects; only new, add and subtract features can be repeated`,
+      );
+    }
+    const scoped = inScope(ctx, current, feature.scope);
+    const copies: Placed[] = [];
     let mode: ResultMode = 'add';
     for (const { prefix, motion } of motions) {
       // Rebuilt per copy: a through-all or up-to-face length is measured from
       // where this copy will be.
-      const tool = buildTool(ctx, current, feature, motion);
+      const tool = buildTool(ctx, current, scoped, feature, motion);
       mode = tool.mode;
       const moved = temp(ctx, k.transform(tool.shape, motion));
       const made = propagated(ctx, moved.shape, [tool.faces], moved.history);
@@ -1367,39 +1883,28 @@ function instances(
         ...made,
         faces: prefixFaces(made.faces, prefix),
         unnamed: [...made.unnamed, ...tool.unnamed],
+        bodyId: source.features.length === 1 ? prefix : `${prefix}/${feature.id}`,
       });
     }
-    if (mode === 'intersect') {
-      fail(
-        ctx,
-        'unsupported',
-        `${feature.id} intersects; only new, add and subtract features can be repeated`,
-      );
-    }
-    result = combine(ctx, current, copies, mode);
-    if (mode === 'subtract') missedCopies(ctx, feature, motions, result);
-    current = {
-      shape: result.shape,
-      names: nameShape(result.faces, result.topology),
-      topology: result.topology,
-    };
+    current = combine(ctx, current, scoped, copies, mode);
+    if (mode === 'subtract') missedCopies(ctx, feature, motions, current);
   }
-  return result;
+  return current;
 }
 
 /**
- * A subtracted copy that left no face in the body missed it and changed
+ * A subtracted copy that left no face in any body missed it and changed
  * nothing: a warning, not an error, since a pattern running partly off the
  * body is often meant (unlike a hole, whose every point is placed by hand).
- * Added copies that do not touch stay as separate solids and are not warned.
+ * Added copies that touch no body become bodies of their own (`detached`).
  */
 function missedCopies(
   ctx: Ctx,
   feature: ToolInput,
   motions: readonly { prefix: string }[],
-  result: Made,
+  slots: readonly Slot[],
 ): void {
-  const lineage = result.faces.flatMap((f) => f.lineage);
+  const lineage = slots.flatMap((s) => s.made?.faces.flatMap((f) => f.lineage) ?? []);
   const missed = motions
     .map((m) => m.prefix)
     .filter((prefix) => !lineage.some((n) => n.includes(`${prefix}/${feature.id}:`)));
@@ -1412,7 +1917,8 @@ function missedCopies(
   });
 }
 
-function pattern(ctx: Ctx, body: Body, input: PatternInput): Made | null {
+function pattern(ctx: Ctx, slots: readonly Slot[], input: PatternInput): Slot[] | null {
+  const all = bodiesOf(slots);
   const layout = input.layout;
   if (!Number.isInteger(layout.count) || layout.count < 1 || layout.count > MAX_PATTERN_COUNT) {
     fail(
@@ -1428,7 +1934,7 @@ function pattern(ctx: Ctx, body: Body, input: PatternInput): Made | null {
       dir = layout.direction as Vec3;
     } else {
       const { ref, flip } = layout.direction as { ref: TopoRef; flip?: boolean };
-      const g = geometryOf(ctx, body, 'direction', ref, 'face' in ref ? ['plane'] : ['line'], {
+      const g = geometryOf(ctx, all, 'direction', ref, 'face' in ref ? ['plane'] : ['line'], {
         flip: flip === true,
         directed: true,
       });
@@ -1449,7 +1955,7 @@ function pattern(ctx: Ctx, body: Body, input: PatternInput): Made | null {
       const ref = layout.axis.ref;
       const g = geometryOf(
         ctx,
-        body,
+        all,
         'axis',
         ref,
         'face' in ref ? ['cylinder', 'cone'] : ['line', 'circle'],
@@ -1467,18 +1973,18 @@ function pattern(ctx: Ctx, body: Body, input: PatternInput): Made | null {
       });
     }
   }
-  return instances(ctx, body, input.source, motions);
+  return instances(ctx, slots, input, motions);
 }
 
-function mirror(ctx: Ctx, body: Body, input: MirrorInput): Made | null {
+function mirror(ctx: Ctx, slots: readonly Slot[], input: MirrorInput): Slot[] | null {
   let plane: Plane;
   if ('face' in input.plane) {
-    const g = geometryOf(ctx, body, 'plane', input.plane, ['plane']);
+    const g = geometryOf(ctx, bodiesOf(slots), 'plane', input.plane, ['plane']);
     plane = { origin: g.origin, normal: g.direction };
   } else {
     plane = input.plane;
   }
-  return instances(ctx, body, input.source, [
+  return instances(ctx, slots, input, [
     { prefix: `${input.id}:image`, motion: { kind: 'mirror', plane } },
   ]);
 }
@@ -1611,6 +2117,22 @@ export function validateFeature(input: unknown): string | null {
     v === undefined || typeof v === 'boolean' ? null : `${name} must be a boolean`;
   const mode = (v: unknown) =>
     typeof v === 'string' && MODES.includes(v) ? null : `mode must be one of ${MODES.join(', ')}`;
+  const bodyId = (v: unknown, name: string) =>
+    typeof v === 'string' && v.length > 0 ? null : `${name} must be a non-empty body id`;
+  // Which bodies a feature acts on, and the id of the body it makes.
+  const targets = (v: Record<string, unknown>, makes: boolean): string | null => {
+    if (v.scope !== undefined) {
+      if (!Array.isArray(v.scope)) return 'scope must be an array of body ids';
+      for (const [i, id] of (v.scope as unknown[]).entries()) {
+        const bad = bodyId(id, `scope[${i}]`);
+        if (bad) return bad;
+      }
+      if (new Set(v.scope).size !== v.scope.length) return 'scope names a body twice';
+    }
+    if (v.body !== undefined)
+      return makes ? bodyId(v.body, 'body') : 'only a feature that makes a body has a body id';
+    return null;
+  };
   const refList = (
     v: unknown,
     name: string,
@@ -1648,7 +2170,9 @@ export function validateFeature(input: unknown): string | null {
     }
     return null;
   };
-  const tool = (v: Record<string, unknown>): string | null => {
+  const tool = (v: Record<string, unknown>): string | null =>
+    targets(v, v.kind !== 'hole') ?? toolShape(v);
+  const toolShape = (v: Record<string, unknown>): string | null => {
     switch (v.kind) {
       case 'extrude': {
         const e =
@@ -1711,7 +2235,11 @@ export function validateFeature(input: unknown): string | null {
   };
   const source = (v: unknown): string | null => {
     if (!isObj(v)) return 'source must be an object';
-    if (v.type === 'body') return null;
+    if (v.type === 'body') {
+      return v.mode === undefined || v.mode === 'new' || v.mode === 'add'
+        ? null
+        : 'source.mode must be new or add';
+    }
     if (v.type !== 'features' || !Array.isArray(v.features) || v.features.length === 0) {
       return 'source must be { type: "body" } or { type: "features", features: [...] }';
     }
@@ -1750,7 +2278,7 @@ export function validateFeature(input: unknown): string | null {
     case 'shell':
       return num(f.thickness, 'thickness') ?? refList(f.faces, 'faces', faceRef, false);
     case 'pattern': {
-      const e = source(f.source);
+      const e = targets(f, false) ?? source(f.source);
       if (e) return e;
       const l = f.layout;
       if (!isObj(l)) return 'layout must be an object';
@@ -1779,10 +2307,10 @@ export function validateFeature(input: unknown): string | null {
     }
     case 'import':
       return typeof f.step === 'string' || f.step instanceof Uint8Array
-        ? mode(f.mode)
+        ? (targets(f, true) ?? mode(f.mode))
         : 'step must be the bytes of a STEP file or base64 text of them';
     case 'mirror': {
-      const e = source(f.source);
+      const e = targets(f, false) ?? source(f.source);
       if (e) return e;
       const p = f.plane;
       if (isObj(p) && 'face' in p) return faceRef(p, 'plane');

@@ -147,33 +147,42 @@ class FakeKernel implements RegenKernel {
         },
       };
     }
-    return (earlier.value as { shape: number | null }).shape;
+    // A feature op's value is a body set (one body at most: regen joins them); others carry `shape`.
+    const value = earlier.value as { shape?: number | null; bodies?: { shape: number }[] };
+    return value.bodies !== undefined ? (value.bodies[0]?.shape ?? null) : (value.shape ?? null);
   }
 
   #op(op: KernelOp, results: OpResult[]): OpResult {
     switch (op.op) {
       case 'feature': {
         const id = op.feature.id;
-        if (typeof op.body === 'number' && !this.live.has(op.body)) {
+        expect(op.join).toBe(true);
+        const given = Array.isArray(op.bodies)
+          ? (op.bodies as { id: string; shape: unknown }[])
+          : null;
+        expect(given === null || given.length <= 1).toBe(true);
+        const input = given === null ? op.bodies : (given[0]?.shape ?? null);
+        if (typeof input === 'number' && !this.live.has(input)) {
           // What `applyFeature` does with an unknown body id: a normal feature result that
           // passes the id through with a `no-body` error and no names, not a failed op.
           this.featureOps.push(id);
-          this.bodies.set(id, op.body);
+          this.bodies.set(id, input);
           this.inputs.set(id, op.feature);
           const value: FeatureOutcome = {
             featureId: id,
             kind: op.feature.kind,
             ok: false,
-            shape: op.body,
-            created: false,
-            names: null,
-            errors: [{ featureId: id, code: 'no-body', message: `unknown shape id ${op.body}` }],
+            bodies: [{ id: 'part', shape: input as ShapeId, names: null, solids: 0 }],
+            created: [],
+            changed: [],
+            consumed: [],
+            errors: [{ featureId: id, code: 'no-body', message: `unknown shape id ${input}` }],
             warnings: [],
             resolved: [],
           };
           return { ok: true, op: 'feature', value, ms: 0 };
         }
-        const body = this.#shape(op.body, results);
+        const body = this.#shape(input, results);
         if (body !== null && typeof body === 'object') return body.fail;
         this.featureOps.push(id);
         this.bodies.set(id, body);
@@ -189,10 +198,14 @@ class FakeKernel implements RegenKernel {
           featureId: id,
           kind: op.feature.kind,
           ok: !failed,
-          shape,
-          created: !failed,
           // A live body always has names (the engine never reads them).
-          names: shape === null ? null : { faces: [], edges: [] },
+          bodies:
+            shape === null
+              ? []
+              : [{ id: 'part', shape, names: { faces: [], edges: [] }, solids: 1 }],
+          created: !failed && body === null ? ['part'] : [],
+          changed: !failed && body !== null ? ['part'] : [],
+          consumed: [],
           errors: b.errors ?? [],
           warnings: b.warnings ?? [],
           resolved: [],

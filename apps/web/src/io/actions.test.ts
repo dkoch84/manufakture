@@ -217,7 +217,7 @@ function kernelWithPart() {
       const results = ops.map((op) => {
         const value =
           op.op === 'feature'
-            ? { ok: true, shape: nextShape++, errors: [] }
+            ? { ok: true, bodies: [{ id: 'import', shape: nextShape++ }], errors: [] }
             : op.op === 'tessellate'
               ? box.mesh
               : op.op === 'topology'

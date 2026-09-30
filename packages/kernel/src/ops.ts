@@ -23,6 +23,7 @@ import {
   applyFeature,
   pickReference,
   resolveReferences,
+  type FeatureBody,
   type FeatureInput,
   type FeatureOutcome,
   type ReferenceReport,
@@ -44,8 +45,19 @@ import type {
   Vec3,
 } from './types';
 
-/** A live shape id, or the shape made by op number `result` earlier in the same batch. */
-export type ShapeRef = ShapeId | { result: number };
+/**
+ * A live shape id, or the shape made by op number `result` earlier in the
+ * same batch. For a `feature` op, `body` picks one of its bodies by id; without
+ * it the feature must have left exactly one body.
+ */
+export type ShapeRef = ShapeId | { result: number; body?: string };
+
+/**
+ * A part's bodies for a `feature` op: listed (each shape by `ShapeRef`), or
+ * `{ result }` for the bodies after an earlier `feature` op of the batch,
+ * whatever it merged, made or passed through.
+ */
+export type BodySetRef = readonly { id: string; shape: ShapeRef }[] | { result: number };
 
 interface OpCommon {
   /** Echoed in the result and in any failure, and stamped on the shapes the op makes. */
@@ -98,16 +110,18 @@ export type TopologyOp = OpCommon & { op: 'topology'; shape: ShapeRef };
 export type PropertiesOp = OpCommon & { op: 'properties'; shape: ShapeRef };
 export type ReleaseOp = OpCommon & { op: 'release'; shapes: readonly ShapeRef[] };
 /**
- * Apply one part feature to a body (null before the first feature): see
- * `applyFeature`. The value's `shape` is the body after the feature, which is
- * the input body itself when the feature failed or changed nothing, so a
- * later op of the batch can take `{ result }` either way. Only a new body is
- * owned by the batch (`keep: false` releases it).
+ * Apply one part feature to a part's bodies (none before the first feature):
+ * see `applyFeature`. The value's `bodies` are the bodies after the feature,
+ * the input bodies themselves when the feature failed or changed nothing, so
+ * a later op of the batch can take `{ result }` either way. Only the shapes
+ * of bodies the feature made or changed are owned by the batch (`keep:
+ * false` releases them). `join`: see `ApplyOptions`.
  */
 export type FeatureOp = OpCommon & {
   op: 'feature';
-  body: ShapeRef | null;
+  bodies: BodySetRef;
   feature: FeatureInput;
+  join?: boolean;
 };
 /** Resolve stored references on a named body. */
 export type ResolveOp = OpCommon & { op: 'resolve'; shape: ShapeRef; refs: readonly TopoRef[] };
@@ -258,10 +272,15 @@ const FIELDS: Record<OpName, [Record<string, Check>, Record<string, Check>]> = {
   // malformed feature as that feature's error and passes the body through.
   feature: [
     {
-      body: (v, p) => (v === null ? null : shapeRef(v, p)),
+      bodies: (v, p) =>
+        Array.isArray(v)
+          ? arrayOf(shape({ id: str, shape: shapeRef }))(v, p)
+          : isObject(v) && typeof v.result === 'number' && Number.isInteger(v.result)
+            ? null
+            : `${p} must be a list of { id, shape } or { result: <op index> }`,
       feature: shape({ id: str, kind: str }),
     },
-    {},
+    { join: bool },
   ],
   resolve: [{ shape: shapeRef, refs: arrayOf(topoRef) }, {}],
   pick: [{ shape: shapeRef, kind: oneOf('face', 'edge'), index: num }, {}],
@@ -295,10 +314,15 @@ export function validateOp(value: unknown): string | null {
 export interface BatchContext {
   /** The reply's name table: tessellating a named body fills its mesh's name slots from it. */
   names: NameTable;
+  /** Resolves `{ result }` body sets; without it, a `feature` op takes listed bodies only. */
+  resolveBodies?: ResolveBodies;
 }
 
 /** Resolves `ShapeRef`s against the results of the batch so far. */
 export type ResolveShape = (ref: ShapeRef, operation: string) => ShapeId;
+
+/** Resolves a `{ result }` body set against the results of the batch so far. */
+export type ResolveBodies = (ref: { result: number }, operation: string) => FeatureBody[];
 
 /** Run one validated op on the kernel. Throws KernelError. */
 export function executeOp(
@@ -355,12 +379,22 @@ export function executeOp(
       return kernel.topology(resolve(op.shape, 'topology'));
     case 'properties':
       return kernel.properties(resolve(op.shape, 'properties'));
-    case 'feature':
-      return applyFeature(
-        kernel,
-        op.body === null ? null : resolve(op.body, 'feature'),
-        op.feature,
-      );
+    case 'feature': {
+      let bodies: FeatureBody[];
+      if (Array.isArray(op.bodies)) {
+        bodies = (op.bodies as Extract<BodySetRef, readonly unknown[]>).map((b) => ({
+          id: b.id,
+          shape: resolve(b.shape, 'feature'),
+        }));
+      } else if (context?.resolveBodies !== undefined) {
+        bodies = context.resolveBodies(op.bodies as { result: number }, 'feature');
+      } else {
+        throw new KernelError('feature', 'no earlier ops to take { result } bodies from', {
+          code: 'invalid-op',
+        });
+      }
+      return applyFeature(kernel, bodies, op.feature, op.join ? { join: true } : {});
+    }
     case 'resolve':
       return { results: resolveReferences(kernel, resolve(op.shape, 'resolve'), op.refs) };
     case 'pick':
@@ -397,9 +431,38 @@ export function executeOp(
   }
 }
 
-/** The shape an op's value carries, if any. */
-export function shapeOf(value: unknown): ShapeId | null {
-  return isObject(value) && typeof value.shape === 'number' ? (value.shape as ShapeId) : null;
+/**
+ * The shape an op's value carries, if any: its `shape`, or with `body` the
+ * shape of that body of a feature outcome (without it, of its one body).
+ */
+export function shapeOf(value: unknown, body?: string): ShapeId | null {
+  if (!isObject(value)) return null;
+  if (Array.isArray(value.bodies)) {
+    const bodies = value.bodies as FeatureBody[];
+    const b =
+      body === undefined
+        ? bodies.length === 1
+          ? bodies[0]
+          : undefined
+        : bodies.find((x) => x.id === body);
+    return b === undefined ? null : b.shape;
+  }
+  return body === undefined && typeof value.shape === 'number' ? (value.shape as ShapeId) : null;
+}
+
+/** Every shape an op's value carries: its `shape`, or the shapes of a feature outcome's bodies. */
+export function shapesOf(value: unknown): ShapeId[] {
+  if (isObject(value) && Array.isArray(value.bodies)) {
+    return (value.bodies as FeatureBody[]).map((b) => b.shape);
+  }
+  const one = shapeOf(value);
+  return one === null ? [] : [one];
+}
+
+/** The bodies of a feature outcome, or null when the value is not one. */
+export function bodiesOf(value: unknown): FeatureBody[] | null {
+  if (!isObject(value) || !Array.isArray(value.bodies)) return null;
+  return (value.bodies as FeatureBody[]).map((b) => ({ id: b.id, shape: b.shape }));
 }
 
 export function failureOf(error: unknown, operation: string, featureId?: string): KernelFailure {

@@ -5,12 +5,12 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
   MAX_PATTERN_COUNT,
-  applyFeature,
   type ExtrudeInput,
   type FeatureInput,
   type RevolveInput,
 } from './features';
 import {
+  apply,
   XY,
   atZ,
   build,
@@ -173,14 +173,21 @@ describe('extrude', () => {
     expect(lean).toBeLessThan(0.6 * t);
   });
 
-  it('new with a body: a second solid in the same compound', () => {
+  it('new with a body: a second body, named after its feature', () => {
     const second: ExtrudeInput = {
       ...block('extrude#2'),
       profile: profile(XY, rectangle(100, 0, 110, 10, ['f1', 'f2', 'f3', 'f4'])),
     };
-    const { shape } = build(k, [block(), second]);
-    expectGolden(k, shape, { volume: 24000 + 2000, faces: 12, min: [0, 0, 0], max: [110, 30, 20] });
-    expect(faceNames(named(k, shape))).toContain('extrude#2:side:f3');
+    const { bodies, last } = build(k, [block(), second]);
+    expect(bodies.map((b) => b.id)).toEqual(['extrude#1', 'extrude#2']);
+    expect(last).toMatchObject({ created: ['extrude#2'], changed: [], consumed: [] });
+    expectGolden(k, bodies[1]!.shape, {
+      volume: 2000,
+      faces: 6,
+      min: [100, 0, 0],
+      max: [110, 10, 20],
+    });
+    expect(faceNames(named(k, bodies[1]!.shape))).toContain('extrude#2:side:f3');
   });
 
   it('a profile with a hole names the hole wall too', () => {
@@ -329,14 +336,14 @@ describe('revolve', () => {
 
 describe('errors are per feature and never throw', () => {
   it('reports a malformed input, a missing body and missing edge ids', () => {
-    const bad = applyFeature(k, null, { ...block(), id: 'extrude-1' });
-    expect(bad).toMatchObject({ ok: false, shape: null, created: false });
+    const bad = apply(k, null, { ...block(), id: 'extrude-1' });
+    expect(bad).toMatchObject({ ok: false, bodies: [], created: [], changed: [] });
     expect(bad.errors[0]).toMatchObject({ code: 'invalid' });
 
-    const noBody = applyFeature(k, null, { ...block(), mode: 'add' });
+    const noBody = apply(k, null, { ...block(), mode: 'add' });
     expect(noBody.errors).toMatchObject([{ code: 'no-body', featureId: 'extrude#1' }]);
 
-    const noIds = applyFeature(k, null, {
+    const noIds = apply(k, null, {
       ...block(),
       profile: {
         frame: XY,
@@ -349,7 +356,7 @@ describe('errors are per feature and never throw', () => {
 
   it('rejects sketch ids that would read as names or kernel splits', () => {
     for (const id of ['e1#2#a', 'e1:x', 'a|b', 'e1#', 'p/1', '?face3']) {
-      const out = applyFeature(k, null, {
+      const out = apply(k, null, {
         ...block(),
         profile: profile(XY, rectangle(0, 0, 1, 1, [id, 'e2', 'e3', 'e4'])),
       });
@@ -367,8 +374,8 @@ describe('errors are per feature and never throw', () => {
       mode: 'subtract',
     };
     const before = k.shapeCount;
-    const out = applyFeature(k, shape, cut);
-    expect(out).toMatchObject({ ok: false, shape, created: false });
+    const out = apply(k, shape, cut);
+    expect(out).toMatchObject({ ok: false, shape, created: [], changed: [], consumed: [] });
     expect(out.errors).toEqual([
       {
         featureId: 'extrude#2',
@@ -379,7 +386,7 @@ describe('errors are per feature and never throw', () => {
         missing: ['extrude#9:cap:end'],
       },
     ]);
-    expect(out.names).toBe(k.named(shape)!.names);
+    expect(out.bodies[0]!.names).toBe(k.named(shape)!.names);
     // Nothing leaked.
     expect(k.shapeCount).toBe(before);
   });
@@ -394,8 +401,8 @@ describe('errors are per feature and never throw', () => {
       mode: 'intersect',
     };
     const before = k.shapeCount;
-    expect(applyFeature(k, shape, away).errors).toMatchObject([{ code: 'empty' }]);
-    const zero = applyFeature(k, shape, { ...away, extent: { type: 'blind', distance: 0 } });
+    expect(apply(k, shape, away).errors).toMatchObject([{ code: 'empty' }]);
+    const zero = apply(k, shape, { ...away, extent: { type: 'blind', distance: 0 } });
     expect(zero.errors).toMatchObject([{ code: 'invalid' }]);
     expect(k.shapeCount).toBe(before);
   });
@@ -475,7 +482,7 @@ describe('fillet', () => {
 
   it('two references to one edge are an error', () => {
     const { shape } = build(k, [block()]);
-    const out = applyFeature(k, shape, {
+    const out = apply(k, shape, {
       kind: 'fillet',
       id: 'fillet#2',
       radius: 1,
@@ -544,7 +551,7 @@ describe('chamfer', () => {
 
   it('a reference face that is not on the edge is an error', () => {
     const { shape } = build(k, [block()]);
-    const out = applyFeature(
+    const out = apply(
       k,
       shape,
       chamfer({ kind: 'distances', distance: 1, distance2: 2 }, side('e3')),
@@ -733,7 +740,7 @@ describe('known-hard fillets and shells error cleanly', () => {
     it(title, () => {
       const base = build(k, [block(), ...features.slice(0, -1)]).shape;
       const before = k.shapeCount;
-      const out = applyFeature(k, base, features.at(-1)!);
+      const out = apply(k, base, features.at(-1)!);
       expect(out.ok, `OCCT accepted: ${title}`).toBe(false);
       expect(out.errors.length).toBe(1);
       expect(['kernel', 'invalid-shape', 'invalid', 'empty']).toContain(out.errors[0]!.code);
@@ -859,7 +866,7 @@ describe('hole', () => {
 
   it('a hole that misses the body is an error', () => {
     const { shape } = build(k, [block()]);
-    const out = applyFeature(k, shape, hole({ points: [{ id: 'e5', at: [100, 100] }] }));
+    const out = apply(k, shape, hole({ points: [{ id: 'e5', at: [100, 100] }] }));
     expect(out.errors).toMatchObject([{ code: 'invalid' }]);
     expect(out.errors[0]!.message).toContain('e5');
   });
@@ -972,8 +979,8 @@ describe('pattern and mirror', () => {
     expect(cap.centroid[1]).toBeCloseTo(0, 6);
   });
 
-  it('pattern of the body: moved copies fused with it', () => {
-    const { shape } = build(k, [
+  it('pattern of the body: copies clear of it become bodies of their own', () => {
+    const { bodies, last } = build(k, [
       block(),
       {
         kind: 'pattern',
@@ -982,19 +989,43 @@ describe('pattern and mirror', () => {
         layout: { type: 'linear', direction: [1, 0, 0], count: 3, spacing: 50 },
       },
     ]);
-    expectGolden(k, shape, { volume: 72000, faces: 18, min: [0, 0, 0], max: [140, 30, 20] });
-    expect(faceNames(named(k, shape))).toContain('pattern#2:i3/extrude#1:side:e1');
+    expect(bodies.map((b) => b.id)).toEqual(['extrude#1', 'pattern#2:i2', 'pattern#2:i3']);
+    expect(last.warnings).toMatchObject([
+      { code: 'detached', bodies: ['pattern#2:i2', 'pattern#2:i3'] },
+    ]);
+    expectGolden(k, bodies[2]!.shape, {
+      volume: 24000,
+      faces: 6,
+      min: [100, 0, 0],
+      max: [140, 30, 20],
+    });
+    expect(faceNames(named(k, bodies[2]!.shape))).toContain('pattern#2:i3/extrude#1:side:e1');
+    // The original is untouched: same shape id.
+    expect(bodies[0]!.shape).toBe(last.bodies[0]!.shape);
+  });
+
+  it('pattern of the body: overlapping copies fuse with it', () => {
+    const { shape } = build(k, [
+      block(),
+      {
+        kind: 'pattern',
+        id: 'pattern#2',
+        source: { type: 'body' },
+        layout: { type: 'linear', direction: [1, 0, 0], count: 3, spacing: 30 },
+      },
+    ]);
+    expect(k.properties(shape).volume).toBeCloseTo(24000 + 2 * 18000, 6);
   });
 
   it('a count of 1 changes nothing', () => {
     const base = build(k, [block()]).shape;
-    const out = applyFeature(k, base, {
+    const out = apply(k, base, {
       kind: 'pattern',
       id: 'pattern#2',
       source: { type: 'body' },
       layout: { type: 'linear', direction: [1, 0, 0], count: 1, spacing: 50 },
     });
-    expect(out).toMatchObject({ ok: true, created: false, shape: base, errors: [] });
+    expect(out).toMatchObject({ ok: true, created: [], changed: [], shape: base, errors: [] });
   });
 
   it('mirror the body about a planar face: the halves fuse at the face', () => {
@@ -1096,7 +1127,7 @@ describe('known-hard closed hollows are right or error cleanly', () => {
         it(`${title}: ${outward ? 'outward' : 'inward'}, ${thickness} mm`, () => {
           const base = build(k, features).shape;
           const before = k.shapeCount;
-          const out = applyFeature(k, base, {
+          const out = apply(k, base, {
             kind: 'shell',
             id: 'shell#3',
             thickness,
@@ -1211,7 +1242,7 @@ describe('directions taken from references are chosen by name', () => {
       const { shape } = build(k, [...base, groove()]);
       expect(k.properties(shape).volume).toBeCloseTo(before - 2 * PI, 6);
       // Flipped, it sweeps away from the block and cuts nothing.
-      const away = applyFeature(k, build(k, base).shape, groove(true));
+      const away = apply(k, build(k, base).shape, groove(true));
       expect(k.properties(away.shape!).volume).toBeCloseTo(before, 6);
     });
 
@@ -1399,7 +1430,7 @@ describe('placeholder names never escape into a body', () => {
     } as Kernel['extrude'];
     try {
       for (const draft of [undefined, 5 * DEG]) {
-        const out = applyFeature(k, null, { ...block(), ...(draft ? { draft } : {}) });
+        const out = apply(k, null, { ...block(), ...(draft ? { draft } : {}) });
         expect(out.errors, `draft ${draft}`).toMatchObject([{ code: 'unnamed' }]);
         expect(out.shape).toBeNull();
       }
@@ -1421,7 +1452,7 @@ describe('placeholder names never escape into a body', () => {
     } as Kernel['offset'];
     try {
       for (const outward of [true, false]) {
-        const out = applyFeature(k, base, {
+        const out = apply(k, base, {
           kind: 'shell',
           id: 'shell#2',
           thickness: 2,
@@ -1438,7 +1469,7 @@ describe('placeholder names never escape into a body', () => {
 
   it('references to a placeholder, however it is wrapped, are rejected', () => {
     const base = build(k, [block()]).shape;
-    const out = applyFeature(k, base, {
+    const out = apply(k, base, {
       kind: 'fillet',
       id: 'fillet#2',
       radius: 1,
@@ -1543,7 +1574,7 @@ describe('pattern and mirror copies', () => {
 
   it('pattern counts are capped', () => {
     const base = build(k, [block()]).shape;
-    const out = applyFeature(k, base, {
+    const out = apply(k, base, {
       kind: 'pattern',
       id: 'pattern#2',
       source: { type: 'body' },
@@ -1554,28 +1585,322 @@ describe('pattern and mirror copies', () => {
   });
 });
 
-describe('new bodies', () => {
-  it('a new solid that overlaps the body is an error until parts have several bodies', () => {
-    const base = build(k, [block()]).shape;
-    const before = k.shapeCount;
-    const out = applyFeature(k, base, {
-      ...block('extrude#2'),
-      profile: profile(XY, rectangle(20, 0, 60, 30, ['f1', 'f2', 'f3', 'f4'])),
-    });
-    expect(out.errors).toMatchObject([{ code: 'invalid', featureId: 'extrude#2' }]);
-    expect(out.errors[0]!.message).toContain('overlaps');
-    expect(out.shape).toBe(base);
-    expect(k.shapeCount).toBe(before);
+describe('bodies', () => {
+  /** A 40 x 30 x 20 block from x0, as its own body. */
+  const boxAt = (id: string, x0: number, mode: ExtrudeInput['mode'] = 'new'): ExtrudeInput => ({
+    ...block(id),
+    profile: profile(XY, rectangle(x0, 0, x0 + 40, 30)),
+    mode,
+  });
+  const volumeOf = (shape: ShapeId) => k.properties(shape).volume;
+  const ids = (bodies: readonly { id: string }[]) => bodies.map((b) => b.id);
+
+  it('two overlapping new boxes are two bodies, each with its own exact volume', () => {
+    const { bodies, last } = build(k, [block(), boxAt('extrude#2', 20)]);
+    expect(ids(bodies)).toEqual(['extrude#1', 'extrude#2']);
+    // Not 48,000 for one compound counting the shared 12,000 twice: 24,000 plus 24,000.
+    expect(volumeOf(bodies[0]!.shape)).toBeCloseTo(24000, 6);
+    expect(volumeOf(bodies[1]!.shape)).toBeCloseTo(24000, 6);
+    expect(last.bodies.map((b) => b.solids)).toEqual([1, 1]);
+    // Names stay unique across the overlapping bodies.
+    const all = bodies.flatMap((b) => faceNames(named(k, b.shape)));
+    expect(new Set(all).size).toBe(all.length);
   });
 
-  it('a new solid that only touches the body is fine', () => {
-    const { shape } = build(k, [
+  it('a new solid that only touches the body is a second body', () => {
+    const { bodies } = build(k, [
       block(),
       {
         ...block('extrude#2'),
         profile: profile(XY, rectangle(40, 0, 50, 30, ['f1', 'f2', 'f3', 'f4'])),
       },
     ]);
-    expect(k.properties(shape).volume).toBeCloseTo(30000, 6);
+    expect(ids(bodies)).toEqual(['extrude#1', 'extrude#2']);
+    expect(volumeOf(bodies[1]!.shape)).toBeCloseTo(6000, 6);
+  });
+
+  it('a new body takes the id it is given, and may not reuse one', () => {
+    const { bodies } = build(k, [block(), { ...boxAt('extrude#2', 100), body: 'extrude#2:b' }]);
+    expect(ids(bodies)).toEqual(['extrude#1', 'extrude#2:b']);
+    const clash = apply(k, bodies, { ...boxAt('extrude#3', 200), body: 'extrude#1' });
+    expect(clash.errors).toMatchObject([{ code: 'invalid' }]);
+    expect(clash.bodies).toMatchObject(bodies);
+  });
+
+  it('an add touching both bodies merges them under the first id, fused', () => {
+    const base = build(k, [block(), boxAt('extrude#2', 60)]).bodies;
+    const out = apply(k, base, boxAt('extrude#3', 30, 'add'));
+    expect(out.errors).toEqual([]);
+    expect(ids(out.bodies)).toEqual(['extrude#1']);
+    expect(out).toMatchObject({ created: [], changed: ['extrude#1'], consumed: ['extrude#2'] });
+    expect(volumeOf(out.shape!)).toBeCloseTo(60000, 6);
+    expect(out.bodies[0]!.solids).toBe(1);
+    // Names of all three stay unique through the merge.
+    const names = faceNames(named(k, out.shape!));
+    expect(new Set(names).size).toBe(names.length);
+    expect(names.some((n) => n.startsWith('extrude#2:'))).toBe(true);
+  });
+
+  it('an add touching one body leaves the other alone, shape id and all', () => {
+    const base = build(k, [block(), boxAt('extrude#2', 100)]).bodies;
+    const out = apply(k, base, boxAt('extrude#3', 20, 'add'));
+    expect(ids(out.bodies)).toEqual(['extrude#1', 'extrude#2']);
+    expect(out.changed).toEqual(['extrude#1']);
+    expect(out.bodies[1]!.shape).toBe(base[1]!.shape);
+    expect(volumeOf(out.bodies[0]!.shape)).toBeCloseTo(36000, 6);
+  });
+
+  it('an add touching no body is a body of its own, under the add feature id, with a warning', () => {
+    const base = build(k, [block()]).bodies;
+    const out = apply(k, base, boxAt('extrude#2', 100, 'add'));
+    expect(out.errors).toEqual([]);
+    expect(ids(out.bodies)).toEqual(['extrude#1', 'extrude#2']);
+    expect(out.created).toEqual(['extrude#2']);
+    expect(out.warnings).toMatchObject([{ code: 'detached', bodies: ['extrude#2'] }]);
+    expect(out.bodies[0]!.shape).toBe(base[0]!.shape);
+  });
+
+  it('an add with a scope ignores bodies outside it', () => {
+    const base = build(k, [block(), boxAt('extrude#2', 60)]).bodies;
+    const out = apply(k, base, { ...boxAt('extrude#3', 30, 'add'), scope: ['extrude#2'] });
+    expect(ids(out.bodies)).toEqual(['extrude#1', 'extrude#2']);
+    expect(out.changed).toEqual(['extrude#2']);
+    expect(out.bodies[0]!.shape).toBe(base[0]!.shape);
+    expect(volumeOf(out.bodies[1]!.shape)).toBeCloseTo(24000 + 30 * 30 * 20, 6);
+  });
+
+  it('a scope naming a body that does not exist is a lost reference', () => {
+    const base = build(k, [block()]).bodies;
+    const out = apply(k, base, { ...boxAt('extrude#2', 30, 'add'), scope: ['extrude#7'] });
+    expect(out.errors).toMatchObject([
+      { code: 'lost', ref: 'scope', missing: ['extrude#7'], target: 'extrude#7' },
+    ]);
+    expect(out.bodies).toMatchObject(base);
+  });
+
+  it('a cut through two bodies cuts both, and one through a body splits it into two solids', () => {
+    const base = build(k, [block(), boxAt('extrude#2', 60)]).bodies;
+    const slot: ExtrudeInput = {
+      kind: 'extrude',
+      id: 'extrude#3',
+      profile: profile(atZ(20), rectangle(20, 10, 80, 20, ['s1', 's2', 's3', 's4'])),
+      extent: { type: 'throughAll' },
+      reverse: true,
+      mode: 'subtract',
+    };
+    const cut = apply(k, base, slot);
+    expect(cut.errors).toEqual([]);
+    expect(cut.changed).toEqual(['extrude#1', 'extrude#2']);
+    for (const b of cut.bodies) expect(volumeOf(b.shape)).toBeCloseTo(24000 - 20 * 10 * 20, 6);
+
+    const split = apply(k, base.slice(0, 1), {
+      ...slot,
+      id: 'extrude#4',
+      profile: profile(atZ(20), rectangle(15, -1, 25, 31, ['s1', 's2', 's3', 's4'])),
+    });
+    expect(split.errors).toEqual([]);
+    expect(ids(split.bodies)).toEqual(['extrude#1']);
+    expect(split.bodies[0]!.solids).toBe(2);
+    expect(volumeOf(split.shape!)).toBeCloseTo(24000 - 10 * 30 * 20, 6);
+  });
+
+  it('a cut with a scope, or one that misses a body, leaves that body alone', () => {
+    const base = build(k, [block(), boxAt('extrude#2', 60)]).bodies;
+    const pinAt = (x: number, extra: Partial<ExtrudeInput> = {}): ExtrudeInput => ({
+      kind: 'extrude',
+      id: 'extrude#3',
+      profile: profile(atZ(20), circle([x, 15], 2)),
+      extent: { type: 'throughAll' },
+      reverse: true,
+      mode: 'subtract',
+      ...extra,
+    });
+    const scoped = apply(k, base, {
+      ...pinAt(20, { profile: profile(atZ(20), rectangle(20, 10, 80, 20)) }),
+      scope: ['extrude#2'],
+    });
+    expect(scoped.changed).toEqual(['extrude#2']);
+    expect(scoped.bodies[0]!.shape).toBe(base[0]!.shape);
+    const missed = apply(k, base, pinAt(80));
+    expect(missed.changed).toEqual(['extrude#2']);
+    expect(missed.bodies[0]!.shape).toBe(base[0]!.shape);
+    const nowhere = apply(k, base, pinAt(50));
+    expect(nowhere).toMatchObject({ ok: true, changed: [], created: [] });
+    expect(nowhere.bodies).toMatchObject(base);
+  });
+
+  it('an intersect acts on each body it reaches; reaching none leaves nothing', () => {
+    const base = build(k, [block(), boxAt('extrude#2', 100)]).bodies;
+    const common = apply(k, base, boxAt('extrude#3', 20, 'intersect'));
+    expect(common.changed).toEqual(['extrude#1']);
+    expect(volumeOf(common.bodies[0]!.shape)).toBeCloseTo(12000, 6);
+    expect(common.bodies[1]!.shape).toBe(base[1]!.shape);
+    const none = apply(k, base, boxAt('extrude#3', 200, 'intersect'));
+    expect(none.errors).toMatchObject([{ code: 'empty' }]);
+  });
+
+  it('a fillet on an edge of body 2 leaves body 1 unchanged, shape id and all', () => {
+    const base = build(k, [block(), boxAt('extrude#2', 20)]).bodies;
+    const out = apply(k, base, {
+      kind: 'fillet',
+      id: 'fillet#3',
+      radius: 2,
+      edges: [{ id: 'r1', ref: { faces: ['extrude#2:cap:end', 'extrude#2:side:e1'] } }],
+    });
+    expect(out.errors).toEqual([]);
+    expect(out.changed).toEqual(['extrude#2']);
+    expect(out.bodies[0]!.shape).toBe(base[0]!.shape);
+    expect(faceNames(named(k, out.bodies[1]!.shape))).toContain('fillet#3:round:r1');
+    expect(volumeOf(out.bodies[1]!.shape)).toBeCloseTo(24000 - (4 - PI) * 40, 6);
+  });
+
+  it('a fillet with edges on two bodies blends both; one edge between two bodies is invalid', () => {
+    const base = build(k, [block(), boxAt('extrude#2', 100)]).bodies;
+    const both = apply(k, base, {
+      kind: 'fillet',
+      id: 'fillet#3',
+      radius: 2,
+      edges: [
+        { id: 'r1', ref: { faces: [TOP, side('e1')] } },
+        { id: 'r2', ref: { faces: ['extrude#2:cap:end', 'extrude#2:side:e1'] } },
+      ],
+    });
+    expect(both.errors).toEqual([]);
+    expect(both.changed).toEqual(['extrude#1', 'extrude#2']);
+    const spans = apply(k, base, {
+      kind: 'fillet',
+      id: 'fillet#3',
+      radius: 2,
+      edges: [{ id: 'r1', ref: { faces: [TOP, 'extrude#2:side:e1'] } }],
+    });
+    expect(spans.errors).toMatchObject([{ code: 'invalid', ref: 'r1' }]);
+    expect(spans.errors[0]!.message).toContain('extrude#1 and extrude#2');
+    // A name on neither body is still lost, not spanning.
+    const lost = apply(k, base, {
+      kind: 'fillet',
+      id: 'fillet#3',
+      radius: 2,
+      edges: [{ id: 'r1', ref: { faces: [TOP, 'extrude#9:side:e1'] } }],
+    });
+    expect(lost.errors).toMatchObject([{ code: 'lost', missing: ['extrude#9:side:e1'] }]);
+  });
+
+  it('a shell acts on the body that owns its faces', () => {
+    const base = build(k, [block(), boxAt('extrude#2', 100)]).bodies;
+    const out = apply(k, base, {
+      kind: 'shell',
+      id: 'shell#3',
+      thickness: 2,
+      faces: [{ id: 'r1', ref: { face: 'extrude#2:cap:end' } }],
+    });
+    expect(out.errors).toEqual([]);
+    expect(out.changed).toEqual(['extrude#2']);
+    expect(out.bodies[0]!.shape).toBe(base[0]!.shape);
+    expect(volumeOf(out.bodies[1]!.shape)).toBeCloseTo(24000 - 36 * 26 * 18, 4);
+  });
+
+  it('a new body pattern gives one body per instance', () => {
+    const { bodies, last } = build(k, [
+      block(),
+      {
+        kind: 'pattern',
+        id: 'pattern#2',
+        source: { type: 'body', mode: 'new' },
+        layout: { type: 'linear', direction: [1, 0, 0], count: 3, spacing: 20 },
+      },
+    ]);
+    // Overlapping copies stay separate bodies.
+    expect(ids(bodies)).toEqual(['extrude#1', 'pattern#2:i2', 'pattern#2:i3']);
+    expect(last.created).toEqual(['pattern#2:i2', 'pattern#2:i3']);
+    for (const b of bodies) expect(volumeOf(b.shape)).toBeCloseTo(24000, 6);
+    expect(faceNames(named(k, bodies[2]!.shape))).toContain('pattern#2:i3/extrude#1:cap:end');
+  });
+
+  it('a body pattern with a scope copies only those bodies; several get /<body id> ids', () => {
+    const base = build(k, [block(), boxAt('extrude#2', 100)]).bodies;
+    const pattern = (scope?: string[]): FeatureInput => ({
+      kind: 'pattern',
+      id: 'pattern#3',
+      ...(scope ? { scope } : {}),
+      source: { type: 'body', mode: 'new' },
+      layout: { type: 'linear', direction: [0, 1, 0], count: 2, spacing: 50 },
+    });
+    expect(ids(apply(k, base, pattern(['extrude#2'])).bodies)).toEqual([
+      'extrude#1',
+      'extrude#2',
+      'pattern#3:i2',
+    ]);
+    expect(ids(apply(k, base, pattern()).bodies)).toEqual([
+      'extrude#1',
+      'extrude#2',
+      'pattern#3:i2/extrude#1',
+      'pattern#3:i2/extrude#2',
+    ]);
+  });
+
+  it('a mirror of a new feature makes a body named after the image', () => {
+    const { bodies } = build(k, [
+      block(),
+      {
+        kind: 'mirror',
+        id: 'mirror#2',
+        source: { type: 'features', features: [boxAt('extrude#1', 0)] },
+        plane: { origin: [-10, 0, 0], normal: [1, 0, 0] },
+      },
+    ]);
+    expect(ids(bodies)).toEqual(['extrude#1', 'mirror#2:image']);
+    expectGolden(k, bodies[1]!.shape, {
+      volume: 24000,
+      faces: 6,
+      min: [-60, 0, 0],
+      max: [-20, 30, 20],
+    });
+  });
+
+  it('a hole drills every body in scope it reaches, and fails only when it misses them all', () => {
+    const base = build(k, [block(), boxAt('extrude#2', 20)]).bodies;
+    const hole: FeatureInput = {
+      kind: 'hole',
+      id: 'hole#3',
+      frame: atZ(20),
+      points: [{ id: 'p1', at: [30, 15] }],
+      diameter: 4,
+      extent: { type: 'throughAll' },
+      head: { type: 'simple' },
+    };
+    const out = apply(k, base, hole);
+    expect(out.errors).toEqual([]);
+    expect(out.changed).toEqual(['extrude#1', 'extrude#2']);
+    const one = apply(k, base, { ...hole, scope: ['extrude#2'] });
+    expect(one.changed).toEqual(['extrude#2']);
+    const miss = apply(k, base, { ...hole, points: [{ id: 'p1', at: [300, 15] }] });
+    expect(miss.errors).toMatchObject([{ code: 'invalid' }]);
+  });
+
+  it('join returns the bodies as one compound under the first id', () => {
+    const base = build(k, [block()]).bodies;
+    const out = apply(k, base, boxAt('extrude#2', 20), { join: true });
+    expect(out.errors).toEqual([]);
+    expect(ids(out.bodies)).toEqual(['extrude#1']);
+    expect(out).toMatchObject({ created: [], changed: ['extrude#1'], consumed: [] });
+    expect(out.bodies[0]!.solids).toBe(2);
+    const names = faceNames(named(k, out.shape!));
+    expect(names).toContain('extrude#2:cap:end');
+    expect(names).toContain(TOP);
+  });
+
+  it('refuses a malformed body set', () => {
+    const base = build(k, [block()]).bodies;
+    const twice = apply(k, [...base, base[0]!], boxAt('extrude#2', 100));
+    expect(twice.errors).toMatchObject([{ code: 'invalid' }]);
+    const unknown = apply(
+      k,
+      [{ id: 'extrude#1', shape: 999_999 as ShapeId }],
+      boxAt('extrude#2', 100),
+    );
+    expect(unknown.errors).toMatchObject([{ code: 'no-body' }]);
+    expect(unknown.bodies).toMatchObject([{ id: 'extrude#1', names: null, solids: 0 }]);
+    const badScope = apply(k, base, { ...boxAt('extrude#2', 100, 'add'), scope: ['x', 'x'] });
+    expect(badScope.errors).toMatchObject([{ code: 'invalid' }]);
   });
 });

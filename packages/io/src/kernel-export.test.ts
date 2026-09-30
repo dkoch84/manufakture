@@ -29,9 +29,10 @@ const XY = { origin: [0, 0, 0], xDir: [1, 0, 0], normal: [0, 0, 1] } as const;
 const Y_AXIS = { origin: [0, 0, 0], direction: [0, 1, 0] } as const;
 
 function feature(input: FeatureInput): ShapeId {
-  const out = applyFeature(k, null, input);
+  const out = applyFeature(k, [], input);
   expect(out.errors).toEqual([]);
-  return out.shape!;
+  expect(out.bodies).toHaveLength(1);
+  return out.bodies[0]!.shape;
 }
 
 /** The app's demo part: a 60 x 40 x 20 block, every edge filleted at 3, a through hole of radius 8. */

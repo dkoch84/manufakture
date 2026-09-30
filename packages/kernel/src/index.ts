@@ -31,11 +31,13 @@ export {
   validateFeature,
 } from './features';
 export type {
+  ApplyOptions,
   ChamferInput,
   EdgeReference,
   ExtrudeExtent,
   ExtrudeInput,
   FaceReference,
+  FeatureBody,
   FeatureError,
   FeatureErrorCode,
   FeatureInput,
@@ -48,6 +50,7 @@ export type {
   ImportInput,
   InstanceSource,
   MirrorInput,
+  OutcomeBody,
   PatternInput,
   PatternLayout,
   ReferenceReport,
@@ -90,6 +93,7 @@ export type { HoleFit, HoleStandardSize } from './holes';
 export { validateOp } from './ops';
 export type {
   BatchContext,
+  BodySetRef,
   BooleanOp,
   BoxOp,
   CylinderOp,

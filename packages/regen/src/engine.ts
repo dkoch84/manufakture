@@ -30,6 +30,7 @@ import {
   type BatchRequest,
   type Deflection,
   type FeatureInput,
+  type FeatureOp,
   type FeatureOutcome,
   type KernelOp,
   type MeshData,
@@ -199,11 +200,26 @@ const emptyBatch = (): Batch => ({ ops: [], metas: [], shapesFrom: null });
  * feature op), and a `no-body` failure on a live body (an empty one) keeps them.
  */
 function staleBody(op: KernelOp, r: OpResult): boolean {
-  if (op.op !== 'feature' || typeof op.body !== 'number' || !r.ok) return false;
+  if (op.op !== 'feature' || !Array.isArray(op.bodies) || op.bodies.length === 0 || !r.ok) {
+    return false;
+  }
   const outcome = r.value as FeatureOutcome;
   return (
-    !outcome.created && outcome.names === null && outcome.errors.some((e) => e.code === 'no-body')
+    outcome.bodies.some((b) => b.names === null) && outcome.errors.some((e) => e.code === 'no-body')
   );
+}
+
+/**
+ * The body id regen gives the one body it carries per part. The kernel works on body sets; until
+ * regen carries them too (M2 plan, T2.1c), every feature op joins its bodies into one compound
+ * (`join`), which is what a part was before M2, and this is its id.
+ */
+const PART_BODY = 'part';
+
+/** The `bodies` of a feature op on the part's one body. */
+function bodySet(ref: BodyRef): FeatureOp['bodies'] {
+  if (ref === null) return [];
+  return typeof ref === 'number' ? [{ id: PART_BODY, shape: ref }] : { result: ref.result };
 }
 
 function emptyCounters(): RegenCounters {
@@ -662,7 +678,12 @@ export class RegenEngine {
       }
       run.counters.cacheMisses++;
       this.#usesBody(state);
-      state.batch.ops.push({ op: 'feature', body: state.body.ref, feature: t.input });
+      state.batch.ops.push({
+        op: 'feature',
+        bodies: bodySet(state.body.ref),
+        feature: t.input,
+        join: true,
+      });
       state.batch.metas.push({ type: 'feature', feature: f, key, result, started });
       state.pending.add(f.id);
       state.body.ref = { result: state.batch.ops.length - 1 };
@@ -874,8 +895,8 @@ export class RegenEngine {
         ok: outcome.ok,
         ...mapped,
         body:
-          outcome.created && outcome.shape !== null
-            ? { shape: outcome.shape, instance: reply.instance }
+          outcome.created.length + outcome.changed.length > 0 && outcome.bodies.length === 1
+            ? { shape: outcome.bodies[0]!.shape, instance: reply.instance }
             : 'passthrough',
         ms: r.ms,
       };
@@ -888,7 +909,8 @@ export class RegenEngine {
     const ref = state.body.ref;
     if (ref !== null && typeof ref === 'object') {
       const r = reply.results[ref.result]!;
-      const shape = r.ok ? (r.value as { shape?: ShapeId | null }).shape : undefined;
+      // A feature op with `join` leaves one body at most.
+      const shape = r.ok ? ((r.value as FeatureOutcome).bodies[0]?.shape ?? null) : undefined;
       if (shape === undefined) {
         state.body.ref = null;
         state.body.broken = true;
@@ -901,7 +923,7 @@ export class RegenEngine {
 
   /** The feature whose failed op made op `op`'s body input fail. */
   #failedInput(op: KernelOp, failed: ReadonlyMap<number, string>): string | undefined {
-    if (op.op !== 'feature' || op.body === null || typeof op.body !== 'object') return undefined;
-    return failed.get(op.body.result);
+    if (op.op !== 'feature' || Array.isArray(op.bodies)) return undefined;
+    return failed.get((op.bodies as { result: number }).result);
   }
 }

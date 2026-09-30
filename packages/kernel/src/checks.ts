@@ -19,9 +19,12 @@ export const vec3: Check = (v, p) =>
     : `${p} must be [number, number, number]`;
 export const shapeRef: Check = (v, p) =>
   (typeof v === 'number' && Number.isInteger(v)) ||
-  (isObject(v) && typeof v.result === 'number' && Number.isInteger(v.result))
+  (isObject(v) &&
+    typeof v.result === 'number' &&
+    Number.isInteger(v.result) &&
+    (v.body === undefined || typeof v.body === 'string'))
     ? null
-    : `${p} must be a shape id or { result: <op index> }`;
+    : `${p} must be a shape id or { result: <op index>, body? }`;
 export const arrayOf =
   (item: Check, nonEmpty = false): Check =>
   (v, p) => {

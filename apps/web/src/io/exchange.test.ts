@@ -65,7 +65,11 @@ describe('kernelExchange', () => {
 
   it('imports STEP as an import feature, registers the body and fills its names', async () => {
     const box = boxBody({ named: false });
-    const outcome = { ok: true, shape: 12, errors: [] } as unknown as FeatureOutcome;
+    const outcome = {
+      ok: true,
+      bodies: [{ id: 'import#1', shape: 12 }],
+      errors: [],
+    } as unknown as FeatureOutcome;
     const { client, sent } = scripted([
       {
         results: [ok('feature', outcome), ok('tessellate', box.mesh), ok('topology', box.topology)],
@@ -81,7 +85,7 @@ describe('kernelExchange', () => {
     expect(r.value.names).toContain('placeholder:face:1');
     expect(sent[0]!.ops[0]).toEqual({
       op: 'feature',
-      body: null,
+      bodies: [],
       feature: { kind: 'import', id: 'import#1', step: bytes, mode: 'new' },
     });
     // At the latest generation: an import must not cancel the regen in flight, which would
@@ -131,7 +135,7 @@ describe('kernelExchange', () => {
     const box = boxBody({ named: false });
     const reply = (shape: number) => ({
       results: [
-        ok('feature', { ok: true, shape, errors: [] }),
+        ok('feature', { ok: true, bodies: [{ id: 'import#1', shape }], errors: [] }),
         ok('tessellate', box.mesh),
         ok('topology', box.topology),
       ],
@@ -170,7 +174,7 @@ describe('kernelExchange', () => {
         names: [],
         generation: 7,
         results: [
-          ok('feature', { ok: true, shape: 41, errors: [] }),
+          ok('feature', { ok: true, bodies: [{ id: 'import#1', shape: 41 }], errors: [] }),
           ok('tessellate', box.mesh),
           ok('topology', box.topology),
         ],
@@ -185,7 +189,7 @@ describe('kernelExchange', () => {
   it('reports import failures without registering anything', async () => {
     const outcome = {
       ok: false,
-      shape: null,
+      bodies: [],
       errors: [{ message: 'this is not a readable STEP file' }],
     } as unknown as FeatureOutcome;
     const { client } = scripted([{ results: [ok('feature', outcome)] }, null]);

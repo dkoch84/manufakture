@@ -22,10 +22,13 @@ import type { LoadProgress } from './loader';
 import { meshBuffers } from './mesh';
 import { NameTable } from './names';
 import type { Oc } from './occt';
+import type { FeatureBody } from './features';
 import {
+  bodiesOf,
   executeOp,
   failureOf,
   shapeOf,
+  shapesOf,
   validateOp,
   type KernelOp,
   type OpResult,
@@ -389,10 +392,8 @@ export class KernelService {
         continue;
       }
       const valid = op as KernelOp;
-      const resolve = (ref: ShapeRef, operation: string): ShapeId => {
-        if (typeof ref === 'number') return ref;
-        const j = ref.result;
-        if (!(j >= 0 && j < i)) {
+      const earlierOk = (j: number, operation: string): OpResult & { ok: true } => {
+        if (!(Number.isInteger(j) && j >= 0 && j < i)) {
           throw new KernelError(operation, `{ result: ${j} } is not an earlier op of this batch`, {
             code: 'invalid-op',
           });
@@ -403,22 +404,46 @@ export class KernelService {
             code: 'dependency',
           });
         }
-        const shape = shapeOf(earlier.value);
+        return earlier;
+      };
+      const resolve = (ref: ShapeRef, operation: string): ShapeId => {
+        if (typeof ref === 'number') return ref;
+        const j = ref.result;
+        const earlier = earlierOk(j, operation);
+        const shape = shapeOf(earlier.value, ref.body);
         if (shape === null) {
-          throw new KernelError(operation, `op ${j} (${earlier.op}) made no shape`, {
+          const what =
+            ref.body !== undefined
+              ? `has no body ${ref.body}`
+              : bodiesOf(earlier.value) !== null
+                ? 'left several bodies or none: name one with { result, body }'
+                : 'made no shape';
+          throw new KernelError(operation, `op ${j} (${earlier.op}) ${what}`, {
             code: 'invalid-op',
           });
         }
         return shape;
+      };
+      const resolveBodies = (ref: { result: number }, operation: string): FeatureBody[] => {
+        const earlier = earlierOk(ref.result, operation);
+        const bodies = bodiesOf(earlier.value);
+        if (bodies === null) {
+          throw new KernelError(
+            operation,
+            `op ${ref.result} (${earlier.op}) is not a feature op: it has no bodies`,
+            { code: 'invalid-op' },
+          );
+        }
+        return bodies;
       };
       kernel.setContext({ generation, ...(featureId === undefined ? {} : { featureId }) });
       // Every shape an op makes has an id from here on; a feature op that
       // passes its input body through returns an older one, not its own.
       const mark = kernel.checkpoint();
       try {
-        const value = executeOp(kernel, valid, resolve, { names });
-        const shape = shapeOf(value);
-        if (shape !== null && shape >= mark) {
+        const value = executeOp(kernel, valid, resolve, { names, resolveBodies });
+        for (const shape of new Set(shapesOf(value))) {
+          if (shape < mark) continue;
           created.push(shape);
           if (valid.keep === false) transient.push(shape);
         }

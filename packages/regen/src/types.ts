@@ -93,6 +93,8 @@ export type RegenWarning =
       fragile: boolean;
     }
   | { code: 'missed'; message: string; instances: string[] }
+  /** An added solid touched no body, so the kernel made it a body of its own (M2 plan, decision 2). */
+  | { code: 'detached'; message: string; bodies: string[] }
   | { code: 'direction'; message: string; referenceId: string; target: string }
   | {
       /** A sketch region diagnostic of warning severity (open profile, touching loops, ...). */

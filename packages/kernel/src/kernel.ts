@@ -808,6 +808,19 @@ export class Kernel {
     return this.op('count', (s) => mapShapes(this.oc, s, this.get(shape, 'count'), kind).Extent());
   }
 
+  /** How many solids a shape holds: a body left in disjoint pieces by a cut has several. */
+  solids(shape: ShapeId): number {
+    return this.op('solids', (s) => {
+      const map = s.own(new this.oc.NCollection_IndexedMap_TopoDS_Shape_TopTools_ShapeMapHasher());
+      this.oc.TopExp.MapShapes(
+        this.get(shape, 'solids'),
+        this.oc.TopAbs_ShapeEnum.TopAbs_SOLID,
+        map,
+      );
+      return map.Extent();
+    });
+  }
+
   /** `BRepCheck_Analyzer`'s verdict alone: cheaper than `properties` when only validity matters. */
   isValid(shape: ShapeId): boolean {
     return this.op('valid', (s) => {

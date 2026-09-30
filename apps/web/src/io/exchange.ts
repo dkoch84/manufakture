@@ -133,7 +133,7 @@ export function kernelExchange(
       [
         {
           op: 'feature',
-          body: null,
+          bodies: [],
           feature: { kind: 'import', id: featureId, step: bytes, mode: 'new' },
         },
         { op: 'tessellate', shape: { result: 0 } },
@@ -145,20 +145,21 @@ export function kernelExchange(
     const [feature, mesh, topology] = reply.results;
     if (!feature.ok) return { ok: false, message: feature.error.message };
     const outcome: FeatureOutcome = feature.value;
-    if (!outcome.ok || outcome.shape === null) {
+    const shape = outcome.bodies[0]?.shape ?? null;
+    if (!outcome.ok || shape === null) {
       const why = outcome.errors.map((e) => e.message).join('; ') || 'nothing was imported';
       return { ok: false, message: `The STEP file could not be imported: ${why}` };
     }
     if (!mesh.ok || !topology.ok) {
       return {
         ok: true,
-        shape: outcome.shape,
+        shape,
         body: { ok: false, message: 'The imported body could not be meshed.' },
       };
     }
     return {
       ok: true,
-      shape: outcome.shape,
+      shape,
       body: {
         ok: true,
         value: {
