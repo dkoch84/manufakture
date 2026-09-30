@@ -1,5 +1,5 @@
-// The feature tree (Onshape style): the part's features in regen order with their icons, names
-// and statuses, and the rollback bar. Click selects a feature (Shift adds, Ctrl toggles), a
+// The feature tree (Onshape style): the part's bodies (see BodiesSection.tsx), then its features
+// in regen order with their icons, names and statuses, and the rollback bar. Click selects a feature (Shift adds, Ctrl toggles), a
 // double-click edits it, hovering highlights its faces in the viewport. Rows are dragged to
 // reorder (a move the document refuses is explained and not made), and the rollback bar is
 // dragged between rows. Every change is one core command, so Undo and Redo cover all of it.
@@ -18,6 +18,8 @@ import { useStore } from 'zustand';
 import { useModel, type ModelStore } from '../model/model';
 import type { DocumentStoreApi } from '../state/document';
 import { featureItem, isFeatureItem, selectModeFor, type SelectionStore } from '../state/selection';
+import { viewSettingsStore, type ViewSettingsStore } from '../state/viewSettings';
+import { BodiesSection } from './BodiesSection';
 import { ActionIcon, KindIcon, StatusIcon } from './icons';
 import {
   KIND_LABELS,
@@ -40,6 +42,8 @@ export interface FeatureTreeProps {
   documents: DocumentStoreApi;
   model: ModelStore;
   selection: SelectionStore;
+  /** Where hidden bodies are kept; default: the app's view settings. */
+  settings?: ViewSettingsStore;
   /** The part studio shown; default: the active one. */
   partId?: string;
   /** No changes while something else edits the document (a sketch, a feature dialog). */
@@ -71,6 +75,7 @@ export function FeatureTree({
   documents,
   model,
   selection,
+  settings = viewSettingsStore,
   partId: givenPartId,
   disabled = false,
   onEdit,
@@ -550,6 +555,14 @@ export function FeatureTree({
           </span>
         )}
       </h2>
+      <BodiesSection
+        documents={documents}
+        model={model}
+        settings={settings}
+        partId={partId}
+        disabled={disabled}
+        onMessage={setMessage}
+      />
       {rows.length === 0 ? (
         <p className="tree-empty">No features yet. Start with New sketch.</p>
       ) : (

@@ -259,3 +259,90 @@
 .tree-confirm p {
   margin: 0 0 0.4rem;
 }
+
+.bodies-section {
+  margin: 0 0 0.6rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid #e1e6ec;
+}
+
+.bodies-section h3 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0.1rem 0.25rem 0.3rem;
+  font-size: 0.8rem;
+  color: #5b6673;
+}
+
+.bodies-section .show-all {
+  font-size: 0.75rem;
+}
+
+.body-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.body-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.35rem;
+  padding: 0.2rem 0.3rem;
+  border-radius: 4px;
+}
+
+.body-row:hover {
+  background: #eef3fb;
+}
+
+.body-row.hidden .name,
+.body-row.hidden .swatch {
+  opacity: 0.45;
+}
+
+.body-row .swatch {
+  width: 1.1rem;
+  height: 1.1rem;
+  padding: 0;
+  border: 1px solid #b8c1cc;
+  border-radius: 3px;
+  background: none;
+  cursor: pointer;
+}
+
+.body-row .name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.body-row .rename {
+  flex: 1;
+  min-width: 0;
+}
+
+.body-row .solids {
+  font-size: 0.75rem;
+  color: #5b6673;
+}
+
+.body-row .material {
+  flex: 1 1 100%;
+  min-width: 0;
+  font-size: 0.75rem;
+}
+
+.body-actions {
+  display: inline-flex;
+  gap: 0.2rem;
+}
+
+.body-actions button {
+  padding: 0 0.3rem;
+  font-size: 0.72rem;
+}

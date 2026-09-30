@@ -36,7 +36,14 @@ const view = (generation: number, featureId = 'sketch#1'): RegenView => ({
   parts: [
     {
       partId: 'part#1',
-      body: boxBody({ id: 'part#1' }),
+      bodies: [
+        {
+          bodyId: 'extrude#1',
+          creator: 'extrude#1',
+          solids: 1,
+          view: boxBody({ id: 'part#1/extrude#1' }),
+        },
+      ],
       features: [
         {
           featureId,
@@ -77,7 +84,7 @@ describe('keeping the model current', () => {
     expect(s).toMatchObject({ generation: 2, pending: false, error: null, ms: 3 });
     expect(s.document).toBe(documents.getState().document);
     expect(featureResult(s, 'part#1', 'sketch#1')?.status).toBe('ok');
-    expect(modelBodies(s).map((b) => b.id)).toEqual(['part#1']);
+    expect(modelBodies(s).map((b) => b.id)).toEqual(['part#1/extrude#1']);
 
     manual.invalidate();
     expect(manual.requests).toHaveLength(3);

@@ -7,6 +7,7 @@
 import { defaultFeatureName, findPart, previewIds } from '@manufakture/core';
 import { HOLE_SIZES, type HoleFit } from '@manufakture/kernel';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { partBodies } from '../model/bodies';
 import { featureResult, type ModelStore } from '../model/model';
 import type { DocumentStoreApi } from '../state/document';
 import {
@@ -31,6 +32,10 @@ import {
   refsOf,
   removeRef,
   repeatableFeatures,
+  scopeBodies,
+  scopeOf,
+  takesScope,
+  withScope,
   type DialogKind,
   type FeatureForm,
   type HoleForm,
@@ -39,6 +44,7 @@ import {
   type RefKind,
 } from './forms';
 import type { PickOutcome } from './references';
+import { ScopePicker } from './ScopePicker';
 
 export interface DialogRequest {
   kind: DialogKind;
@@ -197,6 +203,22 @@ export function FeatureDialog({
 
   const set = <K extends string>(key: K, value: unknown) =>
     setForm((f) => ({ ...f, [key]: value }) as FeatureForm);
+
+  // The bodies a scope can name, as the last regen made them.
+  const modelParts = model.getState().parts;
+  const candidates = useMemo(
+    () =>
+      scopeBodies(
+        part,
+        index,
+        partBodies(
+          part,
+          modelParts.find((p) => p.partId === partId),
+        ),
+        scopeOf(form) ?? [],
+      ),
+    [part, index, modelParts, partId, form],
+  );
 
   const sketches = availableSketches(part, index);
   const repeatable = repeatableFeatures(part, index);
@@ -558,6 +580,19 @@ export function FeatureDialog({
           : expression('angle', 'Total angle', 'angle', form.angle),
       );
       break;
+  }
+
+  // Which bodies it acts on, when there is a choice to make.
+  if (takesScope(form) && (candidates.length > 1 || scopeOf(form) !== undefined)) {
+    body.push(
+      <ScopePicker
+        key="scope"
+        bodies={candidates}
+        scope={scopeOf(form)}
+        error={errors.scope}
+        onChange={(scope) => setForm((f) => withScope(f, scope))}
+      />,
+    );
   }
 
   return (

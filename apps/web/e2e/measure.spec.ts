@@ -64,7 +64,9 @@ test.describe('measuring the demo part', () => {
 
   test('a material gives the mass, and the display units follow the document', async ({ page }) => {
     await measured(page, 0);
-    await page.getByRole('combobox', { name: 'Material' }).selectOption('aluminium-6061');
+    await page
+      .getByRole('combobox', { name: 'Material', exact: true })
+      .selectOption('aluminium-6061');
     const volume = await page.evaluate(
       () => window.__manufakture!.measure.getState().result!.body!.volume,
     );

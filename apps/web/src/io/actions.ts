@@ -41,29 +41,43 @@ export interface ExportedFile {
 export type ActionResult<T> =
   { ok: true; value: T; message: string } | { ok: false; message: string };
 
+/** A body to export: its viewport id, and the name its object, product or file gets. */
+export interface ExportChoice {
+  id: string;
+  name: string;
+}
+
 /**
- * Export every B-rep body the kernel holds: binary STL (all bodies in one
- * file, or one file per body), 3MF (one object per body) or STEP (one
- * product per body). Mesh exports are tessellated at `tolerance` and must be
- * watertight.
+ * Export B-rep bodies: `options.bodies` (the ones the user chose, under the names given), or
+ * every part body the kernel holds. Binary STL (all bodies in one file, or one file per body),
+ * 3MF (one named object per body) or STEP (one named product per body). Mesh exports are
+ * tessellated at `tolerance` and must be watertight.
  */
 export async function exportBodies(
   exchanger: Exchanger,
   format: ExportFormat,
-  options: { tolerance?: ExportTolerancePreset; documentName?: string } = {},
+  options: {
+    tolerance?: ExportTolerancePreset;
+    documentName?: string;
+    bodies?: readonly ExportChoice[];
+  } = {},
 ): Promise<ActionResult<ExportedFile[]>> {
-  const bodies = exchanger.bodies();
+  const bodies = options.bodies ?? exchanger.bodies();
   if (bodies.length === 0) return { ok: false, message: 'There is nothing to export.' };
   const ids = bodies.map((b) => b.id);
+  const names = options.bodies ? new Map(bodies.map((b) => [b.id, b.name])) : undefined;
   const base = bodies.length === 1 ? bodies[0]!.name : (options.documentName ?? 'bodies');
   let files: ExportedFile[];
   if (format === 'step') {
-    const step = await exchanger.exportStep(ids);
+    const step = names ? await exchanger.exportStep(ids, names) : await exchanger.exportStep(ids);
     if (!step.ok) return step;
     files = [{ name: fileName(base, 'step'), bytes: step.value, type: MIME.step }];
   } else {
     const tolerance = EXPORT_TOLERANCES[options.tolerance ?? 'normal'];
-    const meshes = await exchanger.tessellate(ids, deflectionOf(tolerance));
+    const deflection = deflectionOf(tolerance);
+    const meshes = names
+      ? await exchanger.tessellate(ids, deflection, names)
+      : await exchanger.tessellate(ids, deflection);
     if (!meshes.ok) return meshes;
     try {
       files =

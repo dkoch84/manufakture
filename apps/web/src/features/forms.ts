@@ -5,6 +5,7 @@
 
 import {
   bareUnits,
+  bodyCreator,
   defaultFeatureName,
   featureDependencies,
   findPart,
@@ -38,6 +39,9 @@ import type { DialogKind } from './kinds';
 
 export type Operation = ExtrudeFeature['operation'];
 
+/** How a pattern or mirror of bodies places its copies (core's `mode`). */
+export type BodyCopyMode = NonNullable<PatternFeature['mode']>;
+
 /** A face or edge in a reference field: the reference to store, and what to show for it. */
 export interface RefItem {
   /** The core reference id when it was stored before (kept on edit), else null. */
@@ -62,6 +66,8 @@ export interface ExtrudeForm {
   reverse: boolean;
   /** Draft angle; empty for none. */
   draft: string;
+  /** The bodies it acts on (not for a new body); absent: every body. */
+  scope?: string[];
 }
 
 export interface RevolveForm {
@@ -75,6 +81,8 @@ export interface RevolveForm {
   flip: boolean;
   angle: string;
   symmetric: boolean;
+  /** The bodies it acts on (not for a new body); absent: every body. */
+  scope?: string[];
 }
 
 export interface FilletForm {
@@ -113,6 +121,8 @@ export interface HoleForm {
   headDiameter: string;
   headDepth: string;
   headAngle: string;
+  /** The bodies it cuts; absent: every body. */
+  scope?: string[];
 }
 
 export interface PatternForm {
@@ -126,6 +136,10 @@ export interface PatternForm {
   count: string;
   spacing: string;
   angle: string;
+  /** With `source: 'body'`, the bodies to copy; absent: every body. */
+  scope?: string[];
+  /** With `source: 'body'`: copies as new bodies, or fused; absent: core's default. */
+  mode?: BodyCopyMode;
 }
 
 export interface MirrorForm {
@@ -133,6 +147,10 @@ export interface MirrorForm {
   source: 'features' | 'body';
   features: string[];
   plane: RefItem[];
+  /** With `source: 'body'`, the bodies to mirror; absent: every body. */
+  scope?: string[];
+  /** With `source: 'body'`: the image as a new body, or fused; absent: core's default. */
+  mode?: BodyCopyMode;
 }
 
 export type FeatureForm =
@@ -195,6 +213,62 @@ export function refFields(form: FeatureForm): RefField[] {
     case 'mirror':
       return [{ key: 'plane', label: 'Mirror plane', accepts: ['face'], max: 1, required: true }];
   }
+}
+
+/**
+ * Whether the form, as filled now, acts on existing bodies and so has a scope: an operation other
+ * than a new body, a hole, or a pattern or mirror of bodies.
+ */
+export function takesScope(form: FeatureForm): boolean {
+  switch (form.kind) {
+    case 'extrude':
+    case 'revolve':
+      return form.operation !== 'new';
+    case 'hole':
+      return true;
+    case 'pattern':
+    case 'mirror':
+      return form.source === 'body';
+    default:
+      return false;
+  }
+}
+
+/** A body a scope can name, with the name the Bodies section shows for it. */
+export interface ScopeBody {
+  bodyId: string;
+  name: string;
+}
+
+/**
+ * The bodies a feature at `index` can act on: the part's bodies (`bodies`, as the last regen
+ * made them) whose creating feature comes before it, plus any its scope already names (a body
+ * regen no longer makes is kept, so the user can see and remove it).
+ */
+export function scopeBodies(
+  part: Part,
+  index: number,
+  bodies: readonly ScopeBody[],
+  scope: readonly string[] = [],
+): ScopeBody[] {
+  const before = new Set(part.features.slice(0, index).map((f) => f.id));
+  const out = bodies.filter((b) => before.has(bodyCreator(b.bodyId) ?? ''));
+  for (const id of scope) {
+    if (!out.some((b) => b.bodyId === id)) out.push({ bodyId: id, name: id });
+  }
+  return out;
+}
+
+/** The form's scope (absent: every body); `undefined` for kinds that have none. */
+export function scopeOf(form: FeatureForm): readonly string[] | undefined {
+  return 'scope' in form ? form.scope : undefined;
+}
+
+/** The form with its scope set (`undefined`: every body). */
+export function withScope(form: FeatureForm, scope: readonly string[] | undefined): FeatureForm {
+  const { scope: _old, ...rest } = form as FeatureForm & { scope?: string[] };
+  void _old;
+  return (scope === undefined ? rest : { ...rest, scope: [...scope] }) as FeatureForm;
 }
 
 export function refsOf(form: FeatureForm, key: string): RefItem[] {
@@ -450,6 +524,7 @@ export function formOf(
         upToFace: e.type === 'upToFace' ? items([e.face]) : [],
         reverse: feature.reverse,
         draft: text(feature.draft),
+        ...scopeField(feature.scope),
       };
     }
     case 'revolve':
@@ -464,6 +539,7 @@ export function formOf(
         flip: feature.axis.flip ?? false,
         angle: feature.angle.source,
         symmetric: feature.symmetric,
+        ...scopeField(feature.scope),
       };
     case 'fillet':
       return { kind: 'fillet', edges: items(feature.edges), radius: feature.radius.source };
@@ -498,6 +574,7 @@ export function formOf(
         headDiameter: h.type === 'simple' ? '' : h.diameter.source,
         headDepth: h.type === 'counterbore' ? h.depth.source : '',
         headAngle: h.type === 'countersink' ? h.angle.source : '90',
+        ...scopeField(feature.scope),
       };
     }
     case 'pattern': {
@@ -512,6 +589,8 @@ export function formOf(
         count: l.count.source,
         spacing: l.type === 'linear' ? l.spacing.source : '20',
         angle: l.type === 'circular' ? l.angle.source : '360',
+        ...scopeField(feature.scope),
+        ...(feature.mode !== undefined ? { mode: feature.mode } : {}),
       };
     }
     case 'mirror':
@@ -520,10 +599,16 @@ export function formOf(
         source: feature.body ? 'body' : 'features',
         features: [...feature.features],
         plane: items([feature.plane]),
+        ...scopeField(feature.scope),
+        ...(feature.mode !== undefined ? { mode: feature.mode } : {}),
       };
     default:
       return null;
   }
+}
+
+function scopeField(scope: readonly string[] | undefined): { scope?: string[] } {
+  return scope === undefined ? {} : { scope: [...scope] };
 }
 
 // Building -------------------------------------------------------------------------------
@@ -792,6 +877,7 @@ export function buildFeature(
         layout,
       };
       if (form.source === 'body') f.body = true;
+      if (form.source === 'body' && form.mode !== undefined) f.mode = form.mode;
       feature = f;
       break;
     }
@@ -806,9 +892,17 @@ export function buildFeature(
         plane: plane ?? missingFace,
       };
       if (form.source === 'body') f.body = true;
+      if (form.source === 'body' && form.mode !== undefined) f.mode = form.mode;
       feature = f;
       break;
     }
+  }
+
+  // The bodies it acts on: only where the feature acts on existing bodies at all.
+  const scope = scopeOf(form);
+  if (scope !== undefined && takesScope(form)) {
+    if (scope.length === 0) errors.scope = 'Choose at least one body.';
+    else (feature as Feature & { scope?: string[] }).scope = [...scope];
   }
 
   // Faces and edges must come from features before this one.

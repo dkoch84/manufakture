@@ -23,6 +23,8 @@ With **exactly two items selected**, **Between** adds:
 
 With nothing selected, and always at the bottom, **Body** shows the whole part: **Volume**, **Surface area**, **Centre of mass** (for a body of uniform density), **Size** (the bounding box along X, Y and Z) and the bounding box corners, **Box min** and **Box max**.
 
+In a part of several [bodies](bodies.md), **Body** is the body the selection is on, with its name (**Body: Lid**). With nothing selected, every shown body gets a section of its own, titled with its name.
+
 ## Units
 
 Every value is shown in the document's display units, the same ones the rest of the app uses. In a woodworking document set to feet and inches, lengths read `3' 4-1/2"`, rounded to the fraction the document uses; in a metric one, `1028.70 mm`. Angles follow the document's angle unit (degrees or radians).
@@ -31,7 +33,7 @@ Areas and volumes are shown in the square and cubic length unit (mm², cm³, in�
 
 ## Material and mass
 
-Pick a **Material** under Body to get the body's **Mass**. The choice is saved in the document and is one undo step, like any other change. The built-in materials, with the typical density each uses:
+Pick a **Material** under Body to get the body's **Mass**. The choice is saved in the document and is one undo step, like any other change. In a part of several bodies this is the **Part material**: the material of every body that has none of its own. A body's own material is set in the Bodies list of the feature tree, and its mass uses that one. The built-in materials, with the typical density each uses:
 
 | Material             | Typical density | Source                                                   |
 | -------------------- | --------------- | -------------------------------------------------------- |

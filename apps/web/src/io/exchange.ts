@@ -52,13 +52,19 @@ export type ExchangeResult<T> = { ok: true; value: T } | { ok: false; message: s
 export interface Exchanger {
   /** The part bodies that export writes, in scene order; never reference bodies. */
   bodies(): { id: string; name: string }[];
-  /** Tessellate bodies for a mesh export. */
+  /**
+   * Tessellate bodies for a mesh export; each is named `names.get(id)`, or its registered name.
+   */
   tessellate(
     ids: readonly string[],
     deflection: Deflection,
+    names?: ReadonlyMap<string, string>,
   ): Promise<ExchangeResult<{ name: string; mesh: MeshData }[]>>;
-  /** One STEP file of the bodies, each a named product. */
-  exportStep(ids: readonly string[]): Promise<ExchangeResult<Uint8Array>>;
+  /** One STEP file of the bodies, each a named product (`names.get(id)`, or its registered name). */
+  exportStep(
+    ids: readonly string[],
+    names?: ReadonlyMap<string, string>,
+  ): Promise<ExchangeResult<Uint8Array>>;
   /**
    * Read a STEP file into a reference body named after the import feature
    * `featureId`; the body's viewport id is `bodyId` (default: the feature id), which the app
@@ -107,14 +113,18 @@ export function kernelExchange(
   client: () => KernelClient | null,
   registry: Map<string, KernelBody>,
 ): { exchanger: Exchanger; measurer: Measurer; referencer: Referencer } {
-  const shapesOf = (ids: readonly string[]): ExchangeResult<KernelBody[]> => {
+  const shapesOf = (
+    ids: readonly string[],
+    names?: ReadonlyMap<string, string>,
+  ): ExchangeResult<KernelBody[]> => {
     const out: KernelBody[] = [];
     for (const id of ids) {
       const body = registry.get(id);
       if (!body || body.role !== 'part') {
         return { ok: false, message: `The kernel has no body ${id}.` };
       }
-      out.push(body);
+      const name = names?.get(id);
+      out.push(name === undefined ? body : { ...body, name });
     }
     return out.length === 0
       ? { ok: false, message: 'There is nothing to export.' }
@@ -188,9 +198,9 @@ export function kernelExchange(
     bodies: () =>
       [...registry].flatMap(([id, b]) => (b.role === 'part' ? [{ id, name: b.name }] : [])),
 
-    async tessellate(ids, deflection) {
+    async tessellate(ids, deflection, names) {
       const c = client();
-      const found = shapesOf(ids);
+      const found = shapesOf(ids, names);
       if (!found.ok) return found;
       if (c === null) return { ok: false, message: 'The kernel is not running.' };
       // At the current generation: an export never cancels an edit in flight.
@@ -209,9 +219,9 @@ export function kernelExchange(
       return { ok: true, value: out };
     },
 
-    async exportStep(ids) {
+    async exportStep(ids, names) {
       const c = client();
-      const found = shapesOf(ids);
+      const found = shapesOf(ids, names);
       if (!found.ok) return found;
       if (c === null) return { ok: false, message: 'The kernel is not running.' };
       const reply = await c.submit(

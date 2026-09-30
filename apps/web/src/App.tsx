@@ -26,7 +26,8 @@ import { MeasurePanel } from './measure/MeasurePanel';
 import { PART_STUDIO_PANEL_ID } from './parts/names';
 import { PartTabs } from './parts/PartTabs';
 import { measureTargets } from './measure/measurer';
-import { modelBodies, modelStore, startRegen, useModel, type ModelStore } from './model/model';
+import { partBodies as bodiesOfPart, sameOr } from './model/bodies';
+import { modelStore, startRegen, useModel, type ModelStore } from './model/model';
 import { documentStore, historyShortcut, type DocumentStoreApi } from './state/document';
 import { measureStore, type MeasureStore } from './state/measure';
 import {
@@ -35,7 +36,7 @@ import {
   selectionStore,
   type SelectionStore,
 } from './state/selection';
-import { viewSettingsStore, type ViewSettingsStore } from './state/viewSettings';
+import { hiddenBodiesOf, viewSettingsStore, type ViewSettingsStore } from './state/viewSettings';
 import { sketchFeatures, type SketchPlacements } from './sketcher/commit';
 import { lazySolver, spawnDefaultSolver, type LazySolver } from './sketcher/lazySolver';
 import { faceTarget } from './sketcher/planes';
@@ -221,7 +222,26 @@ export function App({
     [allParts, activePartId],
   );
   const modelGeneration = useModel(model, (s) => s.generation);
-  const partBodies = useMemo(() => modelBodies({ parts }), [parts]);
+  const document = useStore(documents, (s) => s.document);
+  // The active part's bodies with their names, colours and materials; hidden ones are neither
+  // drawn nor picked (view state, per document).
+  const hiddenIds = useStore(settings, (s) => hiddenBodiesOf(s, document.id));
+  const activeBodies = useMemo(
+    () => bodiesOfPart(findPart(document, activePartId), parts[0], new Set(hiddenIds)),
+    [document, activePartId, parts, hiddenIds],
+  );
+  // The same array while the shown bodies are the same objects, so a document change that
+  // changes nothing in the view does not rebuild it (state from the previous render).
+  const visibleBodies = useMemo(
+    () => activeBodies.filter((b) => !b.hidden).map((b) => b.view),
+    [activeBodies],
+  );
+  const [stableBodies, setStableBodies] = useState<readonly BodyInput[]>(visibleBodies);
+  let partBodies = stableBodies;
+  if (sameOr(stableBodies, visibleBodies) !== stableBodies) {
+    setStableBodies(visibleBodies);
+    partBodies = visibleBodies;
+  }
   // Where regen placed each sketch, for sketches on faces.
   const placements = useMemo<SketchPlacements>(() => {
     const out = new Map<string, SketchPlacement>();
@@ -249,7 +269,6 @@ export function App({
     };
   }, [loader, owned, ownedSolver]);
 
-  const document = useStore(documents, (s) => s.document);
   const sketches = useMemo(() => sketchFeatures(document, activePartId), [document, activePartId]);
   const shownImports = useMemo(() => {
     const features = findPart(document, activePartId)?.features ?? [];
@@ -534,8 +553,12 @@ export function App({
       : (loader.measurer ?? null);
   }, [loader, shownImports]);
 
+  const exportable = useMemo(
+    () => activeBodies.map((b) => ({ id: b.viewId, name: b.name, hidden: b.hidden })),
+    [activeBodies],
+  );
   const onExport = useCallback(
-    (format: ExportFormat, tolerance: ExportTolerancePreset) => {
+    (format: ExportFormat, tolerance: ExportTolerancePreset, ids: readonly string[]) => {
       const exchanger = loader.exchanger;
       if (!exchanger) {
         setIoStatus({ error: true, text: 'Export needs the geometry kernel.' });
@@ -546,7 +569,12 @@ export function App({
       // The export code (STL, 3MF with its zip library, STEP) loads on first use.
       import('./io/actions')
         .then(({ exportBodies }) =>
-          exportBodies(exchanger, format, { tolerance, documentName: document.name }),
+          exportBodies(exchanger, format, {
+            tolerance,
+            documentName: document.name,
+            // The active part's chosen bodies; a scene without regen exports what it holds.
+            ...(loader.regenerator ? { bodies: exportable.filter((b) => ids.includes(b.id)) } : {}),
+          }),
         )
         .then(
           (r) => {
@@ -558,7 +586,7 @@ export function App({
         )
         .finally(() => setIoBusy(false));
     },
-    [loader, document.name],
+    [loader, document.name, exportable],
   );
 
   const onImport = useCallback(
@@ -720,6 +748,8 @@ export function App({
     if (shownBodies === null) return;
     const refs = selected.filter(isGeometryRef);
     const bodyId = refs[0]?.bodyId ?? shownBodies[0]?.id ?? null;
+    // Nothing selected in a part of several bodies: every shown body is measured too.
+    const every = refs.length === 0 && partBodies.length > 1 ? partBodies.map((b) => b.id) : [];
     void measure.getState().measure(
       measurer,
       bodyId === null
@@ -728,9 +758,14 @@ export function App({
             bodyId,
             targets: measureTargets(refs.filter((r) => r.bodyId === bodyId)),
             revision: bodiesRevision.current,
+            ...(every.length > 0 ? { bodies: every } : {}),
           },
     );
-  }, [shownBodies, modelGeneration, selected, measurer, measure]);
+  }, [shownBodies, partBodies, modelGeneration, selected, measurer, measure]);
+  const measuredBodies = useMemo(
+    () => activeBodies.map((b) => ({ viewId: b.viewId, name: b.name, material: b.material })),
+    [activeBodies],
+  );
 
   // Registered with the viewport, like the other hooks: tests wait for the viewport hook.
   useEffect(() => {
@@ -846,6 +881,7 @@ export function App({
           </button>
           <ExportMenu
             disabled={sketching.active || ioBusy || !loader.exchanger}
+            bodies={exportable}
             onExport={onExport}
           />
           <ImportButton disabled={sketching.active || ioBusy} onFile={onImport} />
@@ -918,6 +954,7 @@ export function App({
               documents={documents}
               model={model}
               selection={selection}
+              settings={settings}
               disabled={dialog !== null}
               onEdit={onEditFeature}
             />
@@ -977,7 +1014,7 @@ export function App({
               <>
                 <VariablesPanel documents={documents} selection={selection} />
                 <SelectionPanel selection={selection} />
-                <MeasurePanel measure={measure} documents={documents} />
+                <MeasurePanel measure={measure} documents={documents} bodies={measuredBodies} />
               </>
             )}
           </div>

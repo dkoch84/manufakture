@@ -74,7 +74,7 @@ test('sketch, extrude and fillet through the UI, then cut a hole sketched on a f
   expect(await statuses(page)).toEqual({ 'sketch#1': 'ok', 'extrude#1': 'ok' });
   await expect(page.getByTestId('feature-extrude#1')).toHaveAttribute('data-status', 'ok');
   let info = await page.evaluate(() => window.__manufakture!.viewport.info());
-  expect(info.bodies.map((b) => [b.id, b.faces])).toEqual([['part#1', 6]]);
+  expect(info.bodies.map((b) => [b.id, b.faces])).toEqual([['part#1/extrude#1', 6]]);
   expect(await bodyVolume(page)).toBeCloseTo(40 * 25 * 15, 1);
 
   // 3. Fillet the top front edge, picked in the viewport.

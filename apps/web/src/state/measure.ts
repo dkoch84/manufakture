@@ -1,12 +1,13 @@
 // The measure tool's state: the latest exact measurement of the selection,
 // shared by the Measure panel and the viewport overlay that draws its
 // witness points. Requests go to the kernel through a `Measurer`; a request
-// that finishes after a newer one started is dropped.
+// that finishes after a newer one started is dropped. With nothing selected in
+// a part of several bodies, every body is measured too (`request.bodies`).
 
 import type { MeasureTarget } from '@manufakture/kernel';
 import { useStore } from 'zustand';
 import { createStore, type StoreApi } from 'zustand/vanilla';
-import type { Measurement, Measurer } from '../measure/measurer';
+import type { BodyMeasurement, Measurement, Measurer } from '../measure/measurer';
 
 export type MeasureStatus = 'idle' | 'measuring' | 'ready' | 'error' | 'unavailable';
 
@@ -15,6 +16,18 @@ export interface MeasureRequest {
   targets: readonly MeasureTarget[];
   /** Changes whenever the bodies are rebuilt, so the same targets are measured again. */
   revision: number;
+  /**
+   * More bodies to measure as a whole (volume, area, mass), in the order to show them; may
+   * include `bodyId`, whose measurement is then reused.
+   */
+  bodies?: readonly string[];
+}
+
+/** One body of `request.bodies`, measured; `body` is null when it could not be measured. */
+export interface BodyEntry {
+  bodyId: string;
+  body: BodyMeasurement | null;
+  error?: string;
 }
 
 export interface MeasureState {
@@ -23,6 +36,8 @@ export interface MeasureState {
   request: MeasureRequest | null;
   result: Measurement | null;
   error: string | null;
+  /** `request.bodies`, measured, once the whole request is. */
+  bodies: readonly BodyEntry[];
 
   /**
    * Measure `targets` on `bodyId` (always with the body's properties), or
@@ -46,6 +61,7 @@ export function createMeasureStore(): MeasureStore {
     request: null,
     result: null,
     error: null,
+    bodies: [],
 
     async measure(measurer, request) {
       const current = get();
@@ -53,28 +69,42 @@ export function createMeasureStore(): MeasureStore {
       if (sameRequest(current.request, request) && (settled || request === null)) return;
       const seq = ++sequence;
       if (request === null) {
-        set({ status: 'idle', request: null, result: null, error: null });
+        set({ status: 'idle', request: null, result: null, error: null, bodies: [] });
         return;
       }
       if (measurer === null) {
-        set({ status: 'unavailable', request, result: null, error: null });
+        set({ status: 'unavailable', request, result: null, error: null, bodies: [] });
         return;
       }
       // Keep showing the previous result until the new one arrives.
       set({ status: 'measuring', request, error: null });
       try {
-        const outcome = await measurer.measure(request.bodyId, request.targets, true);
+        const others = (request.bodies ?? []).filter((b) => b !== request.bodyId);
+        const [outcome, ...rest] = await Promise.all([
+          measurer.measure(request.bodyId, request.targets, true),
+          ...others.map((b) => measurer.measure(b, [], true)),
+        ]);
         if (seq !== sequence) return;
-        if (outcome === null) {
+        if (outcome === null || outcome === undefined || rest.some((r) => r === null)) {
           // An edit superseded it: the body is being rebuilt, and is measured again after.
-          set({ status: 'idle', request: null, result: null, error: null });
+          set({ status: 'idle', request: null, result: null, error: null, bodies: [] });
           return;
         }
-        if (outcome.ok) set({ status: 'ready', result: outcome.result, error: null });
-        else set({ status: 'error', result: null, error: outcome.message });
+        const entry = (bodyId: string, r: NonNullable<typeof outcome>): BodyEntry =>
+          r.ok ? { bodyId, body: r.result.body } : { bodyId, body: null, error: r.message };
+        const bodies = (request.bodies ?? []).map((b) =>
+          b === request.bodyId ? entry(b, outcome) : entry(b, rest[others.indexOf(b)]!),
+        );
+        if (outcome.ok) set({ status: 'ready', result: outcome.result, error: null, bodies });
+        else set({ status: 'error', result: null, error: outcome.message, bodies });
       } catch (e) {
         if (seq !== sequence) return;
-        set({ status: 'error', result: null, error: e instanceof Error ? e.message : String(e) });
+        set({
+          status: 'error',
+          result: null,
+          error: e instanceof Error ? e.message : String(e),
+          bodies: [],
+        });
       }
     },
   }));

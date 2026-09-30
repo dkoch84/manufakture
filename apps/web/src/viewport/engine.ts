@@ -130,6 +130,8 @@ type Highlight = 'none' | 'hover' | 'selected';
 
 interface BodyObjects {
   body: ViewBody;
+  /** The body's own face colour (`BodyInput.color`), or the default one. */
+  faceColor: Color;
   geometry: BufferGeometry;
   colors: BufferAttribute;
   faceState: Highlight[];
@@ -605,6 +607,7 @@ export class ViewportEngine {
         faces: b.body.faceCount,
         edges: b.body.edgeCount,
         triangles: b.body.mesh.indices.length / 3,
+        color: `#${b.faceColor.getHexString()}`,
       })),
       projection: this.stores.settings.getState().projection,
       halfHeight: this.view.halfHeight,
@@ -698,7 +701,8 @@ export class ViewportEngine {
     geometry.setAttribute('pickId', new BufferAttribute(pickIdAttribute(body), 1));
     const vertexCount = body.positions.length / 3;
     const colors = new BufferAttribute(new Uint8Array(vertexCount * 3), 3, true);
-    fillColor(colors, [0, vertexCount], COLORS.face);
+    const faceColor = body.color ? new Color(body.color) : COLORS.face;
+    fillColor(colors, [0, vertexCount], faceColor);
     geometry.setAttribute('color', colors);
     geometry.computeBoundingSphere();
 
@@ -747,6 +751,7 @@ export class ViewportEngine {
     };
     return {
       body,
+      faceColor,
       geometry,
       colors,
       faceState: new Array<Highlight>(body.faceCount).fill('none'),
@@ -853,7 +858,7 @@ export class ViewportEngine {
             ? COLORS.faceSelected
             : next === 'hover'
               ? COLORS.faceHover
-              : COLORS.face;
+              : b.faceColor;
         const list = b.body.faceVertexList.subarray(
           b.body.faceVertexOffsets[f - 1],
           b.body.faceVertexOffsets[f],

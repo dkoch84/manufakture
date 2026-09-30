@@ -14,7 +14,7 @@ import {
   formatPointIn,
   formatVolumeIn,
 } from './format';
-import type { Measurement } from './measurer';
+import type { BodyMeasurement, Measurement } from './measurer';
 
 export interface MeasureRow {
   /** Stable within the panel, for tests and React keys. */
@@ -96,6 +96,84 @@ function itemTitle(item: MeasureItemReport, n: number): string {
 export interface BodyContext {
   /** The body's material, when one is set. */
   material: Material | null;
+  /** The body section's title (default: Body), e.g. the body's name in a part of several. */
+  title?: string;
+}
+
+/** Volume, area, mass (with a material), centre of mass and bounding box of a body. */
+export function bodyRows(
+  b: BodyMeasurement,
+  units: DisplayUnits,
+  material: Material | null,
+  key: string,
+): MeasureRow[] {
+  const L = (mm: number) => formatLengthIn(mm, units);
+  const rows: MeasureRow[] = [
+    b.volume === null
+      ? {
+          key: `${key}.volume`,
+          label: 'Volume',
+          value: 'None',
+          ...(b.note ? { note: b.note } : {}),
+        }
+      : { key: `${key}.volume`, label: 'Volume', value: formatVolumeIn(b.volume, units) },
+    { key: `${key}.area`, label: 'Surface area', value: formatAreaIn(b.area, units) },
+  ];
+  const m = material;
+  if (m && b.volume !== null) {
+    rows.push({
+      key: `${key}.mass`,
+      label: 'Mass',
+      value: formatMassIn(massGrams(b.volume, m.density), units),
+      note: `Estimate: ${m.name} at a typical ${formatDensityIn(m.density, units)} (${m.source})`,
+    });
+  }
+  if (b.centerOfMass) {
+    rows.push({
+      key: `${key}.com`,
+      label: 'Centre of mass',
+      value: formatPointIn(b.centerOfMass, units),
+    });
+  }
+  if (b.boundingBox) {
+    const { min, max } = b.boundingBox;
+    rows.push(
+      {
+        key: `${key}.size`,
+        label: 'Size',
+        value: [0, 1, 2].map((i) => L(max[i]! - min[i]!)).join(' x '),
+        note: 'Bounding box, along X, Y and Z',
+      },
+      { key: `${key}.min`, label: 'Box min', value: formatPointIn(min, units) },
+      { key: `${key}.max`, label: 'Box max', value: formatPointIn(max, units) },
+    );
+  }
+  return rows;
+}
+
+/** One body of a part of several, measured as a whole, for its own section. */
+export interface BodySectionInput {
+  title: string;
+  body: BodyMeasurement | null;
+  error?: string;
+  material: Material | null;
+}
+
+/** A section per body (`body1`, `body2`, ...), titled with the body's name. */
+export function bodySections(
+  bodies: readonly BodySectionInput[],
+  units: DisplayUnits,
+): MeasureSection[] {
+  return bodies.map((b, i) => {
+    const key = `body${i + 1}`;
+    return {
+      key,
+      title: b.title,
+      rows: b.body
+        ? bodyRows(b.body, units, b.material, key)
+        : [{ key: `${key}.error`, label: 'Not measured', value: b.error ?? 'Not measured' }],
+    };
+  });
 }
 
 /** Every section for a measurement: each item, what is between two, and the body. */
@@ -145,48 +223,11 @@ export function measureSections(
   if (between.length > 0) sections.push({ key: 'between', title: 'Between', rows: between });
 
   if (result.body) {
-    const b = result.body;
-    const rows: MeasureRow[] = [
-      b.volume === null
-        ? {
-            key: 'body.volume',
-            label: 'Volume',
-            value: 'None',
-            ...(b.note ? { note: b.note } : {}),
-          }
-        : { key: 'body.volume', label: 'Volume', value: formatVolumeIn(b.volume, units) },
-      { key: 'body.area', label: 'Surface area', value: formatAreaIn(b.area, units) },
-    ];
-    const m = context.material;
-    if (m && b.volume !== null) {
-      rows.push({
-        key: 'body.mass',
-        label: 'Mass',
-        value: formatMassIn(massGrams(b.volume, m.density), units),
-        note: `Estimate: ${m.name} at a typical ${formatDensityIn(m.density, units)} (${m.source})`,
-      });
-    }
-    if (b.centerOfMass) {
-      rows.push({
-        key: 'body.com',
-        label: 'Centre of mass',
-        value: formatPointIn(b.centerOfMass, units),
-      });
-    }
-    if (b.boundingBox) {
-      const { min, max } = b.boundingBox;
-      rows.push(
-        {
-          key: 'body.size',
-          label: 'Size',
-          value: [0, 1, 2].map((i) => L(max[i]! - min[i]!)).join(' x '),
-          note: 'Bounding box, along X, Y and Z',
-        },
-        { key: 'body.min', label: 'Box min', value: formatPointIn(min, units) },
-        { key: 'body.max', label: 'Box max', value: formatPointIn(max, units) },
-      );
-    }
-    sections.push({ key: 'body', title: 'Body', rows });
+    sections.push({
+      key: 'body',
+      title: context.title ?? 'Body',
+      rows: bodyRows(result.body, units, context.material, 'body'),
+    });
   }
   return sections;
 }

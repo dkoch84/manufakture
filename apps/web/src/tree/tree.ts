@@ -4,7 +4,9 @@
 
 import {
   applyCommand,
+  bodyCreator,
   featureDependencies,
+  featureScope,
   type Command,
   type Feature,
   type FeatureKind,
@@ -61,6 +63,7 @@ export const KIND_LABELS: Record<FeatureKind, string> = {
   mirror: 'Mirror',
   extension: 'Extension',
   import: 'Import',
+  derived: 'Derived',
 };
 
 /** The part's rollback bar position: features `[0, position)` are built. */
@@ -140,6 +143,41 @@ export function dependentsOf(part: Part, featureId: string): string[] {
   return [...out];
 }
 
+/** A feature without its `scope`, for the dependencies it has for other reasons. */
+function withoutScope(feature: Feature): Feature {
+  if (!('scope' in feature)) return feature;
+  const { scope: _scope, ...rest } = feature;
+  void _scope;
+  return rest as Feature;
+}
+
+/**
+ * What deleting `featureId` takes with it: the features built from it (deleted too), and the
+ * features that only name one of its bodies in their `scope`, which keep working on their other
+ * bodies (their scope loses those entries). A feature whose scope names nothing else is deleted.
+ */
+export function deletePlan(
+  part: Part,
+  featureId: string,
+): { deleted: string[]; rescoped: Map<string, string[]> } {
+  const gone = new Set<string>([featureId]);
+  const rescoped = new Map<string, string[]>();
+  for (const f of part.features) {
+    if (gone.has(f.id)) continue;
+    const scope = featureScope(f);
+    const kept = scope.filter((b) => !gone.has(bodyCreator(b) ?? ''));
+    const other = featureDependencies(withoutScope(f)).some((d) => gone.has(d));
+    if (other || (scope.length > 0 && kept.length === 0)) {
+      gone.add(f.id);
+      rescoped.delete(f.id);
+    } else if (kept.length < scope.length) {
+      rescoped.set(f.id, kept);
+    }
+  }
+  gone.delete(featureId);
+  return { deleted: [...gone], rescoped };
+}
+
 export type Check = { ok: true; command: Command } | { ok: false; message: string };
 
 function nameOf(part: Part, id: string): string {
@@ -192,7 +230,9 @@ export function dropIndex(from: number, slot: number): number {
 
 /**
  * Deleting a feature: every feature built from it goes too (core refuses to leave a dependent
- * behind), as one undoable step. `dependents` lists what else is deleted, for the warning.
+ * behind), and so do the names, colours and materials of the bodies they made and the `scope`
+ * entries naming those bodies, as one undoable step. `dependents` lists what else is deleted,
+ * for the warning.
  */
 export function deleteFeature(
   doc: ManufaktureDocument,
@@ -202,10 +242,24 @@ export function deleteFeature(
   const part = doc.parts.find((p) => p.id === partId);
   const feature = part?.features.find((f) => f.id === featureId);
   if (!part || !feature) return null;
-  const dependents = dependentsOf(part, featureId);
+  const { deleted: dependents, rescoped } = deletePlan(part, featureId);
+  const gone = new Set([featureId, ...dependents]);
+  const commands: Command[] = [];
+  for (const [id, scope] of rescoped) {
+    const f = part.features.find((x) => x.id === id)!;
+    const edited = withoutScope(f) as Feature & { scope?: string[] };
+    if (scope.length > 0) edited.scope = scope;
+    commands.push({ type: 'editFeature', partId, feature: edited });
+  }
+  for (const b of part.bodies) {
+    const creator = bodyCreator(b.id);
+    if (creator !== undefined && gone.has(creator)) {
+      commands.push({ type: 'setBodyProps', partId, bodyId: b.id, props: {} });
+    }
+  }
   // The last first, so no deletion leaves a dependent without its dependency.
   const ids = [featureId, ...dependents].reverse();
-  const commands: Command[] = ids.map((id) => ({ type: 'deleteFeature', partId, featureId: id }));
+  commands.push(...ids.map((id): Command => ({ type: 'deleteFeature', partId, featureId: id })));
   return {
     command: commands.length === 1 ? commands[0]! : { type: 'batch', commands },
     dependents: dependents.map((d) => nameOf(part, d)),

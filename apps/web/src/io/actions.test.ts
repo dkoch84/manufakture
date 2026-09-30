@@ -75,6 +75,32 @@ describe('exportBodies', () => {
     expect(report.parsed!.objects.map((o) => o.name)).toEqual(['Bracket', 'Pin']);
   });
 
+  it('exports only the chosen bodies, under the names given', async () => {
+    const ex = fakeExchanger(['Body 1', 'Body 2', 'Body 3']);
+    const chosen = [
+      { id: 'body1', name: 'Base' },
+      { id: 'body3', name: 'Lid' },
+    ];
+    const threemf = await exportBodies(ex, '3mf', { documentName: 'Box', bodies: chosen });
+    if (!threemf.ok) throw new Error(threemf.message);
+    expect(ex.tessellate).toHaveBeenCalledWith(
+      ['body1', 'body3'],
+      expect.anything(),
+      new Map([
+        ['body1', 'Base'],
+        ['body3', 'Lid'],
+      ]),
+    );
+    expect(threemf.value[0]!.name).toBe('Box.3mf');
+    const one = await exportBodies(ex, 'step', { bodies: [chosen[1]!] });
+    if (!one.ok) throw new Error(one.message);
+    expect(one.value[0]!.name).toBe('Lid.step');
+    expect(ex.exportStep).toHaveBeenLastCalledWith(['body3'], new Map([['body3', 'Lid']]));
+    expect((await exportBodies(ex, 'stl', { bodies: [] })).message).toBe(
+      'There is nothing to export.',
+    );
+  });
+
   it('STEP comes from the kernel', async () => {
     const ex = fakeExchanger();
     const r = await exportBodies(ex, 'step');

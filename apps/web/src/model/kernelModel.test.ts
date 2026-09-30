@@ -42,7 +42,7 @@ function result(generation: number, bodies: BodyResult[]): RegenResult {
 }
 
 describe('kernelRegenerator', () => {
-  it('shows every body of a part, the first under the part id, and keeps unchanged meshes', async () => {
+  it('shows every body of a part as <part>/<body>, and keeps unchanged meshes', async () => {
     const replies = [
       result(1, [body('extrude#1', 1, true), body('extrude#2', 2, true)]),
       // Only body 2 changed.
@@ -56,21 +56,28 @@ describe('kernelRegenerator', () => {
 
     const first = (await regen.regen(doc))!;
     const part = first.parts[0]!;
-    expect(part.bodies!.map((b) => b.id)).toEqual(['part#1', 'part#1/extrude#2']);
-    expect(part.body).toBe(part.bodies![0]);
+    expect(part.bodies.map((b) => b.view.id)).toEqual(['part#1/extrude#1', 'part#1/extrude#2']);
+    expect(part.bodies.map((b) => [b.bodyId, b.creator, b.solids])).toEqual([
+      ['extrude#1', 'extrude#1', 1],
+      ['extrude#2', 'extrude#2', 1],
+    ]);
+    // Registered under the names export uses: Body <n> in a part of several bodies.
     expect([...registry]).toEqual([
-      ['part#1', { shape: 1, name: 'Part 1', role: 'part' }],
-      ['part#1/extrude#2', { shape: 2, name: 'Part 1 extrude#2', role: 'part' }],
+      ['part#1/extrude#1', { shape: 1, name: 'Body 1', role: 'part' }],
+      ['part#1/extrude#2', { shape: 2, name: 'Body 2', role: 'part' }],
     ]);
 
     const second = (await regen.regen(doc))!;
-    expect(second.parts[0]!.bodies![0]).toBe(part.bodies![0]);
-    expect(second.parts[0]!.bodies![1]).not.toBe(part.bodies![1]);
+    expect(second.parts[0]!.bodies[0]!.view).toBe(part.bodies[0]!.view);
+    expect(second.parts[0]!.bodies[1]!.view).not.toBe(part.bodies[1]!.view);
     expect(registry.get('part#1/extrude#2')!.shape).toBe(3);
 
     const third = (await regen.regen(doc))!;
-    expect(third.parts[0]!.bodies!.map((b) => b.id)).toEqual(['part#1']);
-    expect([...registry.keys()]).toEqual(['part#1']);
-    expect(viewBodyId('part#1', 'extrude#3', false)).toBe('part#1/extrude#3');
+    expect(third.parts[0]!.bodies.map((b) => b.view.id)).toEqual(['part#1/extrude#1']);
+    // The only body is named after the part.
+    expect([...registry]).toEqual([
+      ['part#1/extrude#1', { shape: 4, name: 'Part 1', role: 'part' }],
+    ]);
+    expect(viewBodyId('part#1', 'extrude#3')).toBe('part#1/extrude#3');
   });
 });

@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import type { FilletFeature, ExtrudeFeature } from '@manufakture/core';
 import { describe, expect, it, vi } from 'vitest';
 import { demoDocument } from '../model/demo';
+import { twoBodyDocument, twoBodyModel } from '../model/twoBodies.test-fixture';
 import { createModelStore } from '../model/model';
 import { createDocumentStore } from '../state/document';
 import {
@@ -226,5 +227,52 @@ describe('the pattern and mirror dialogs', () => {
     await waitFor(() => expect(screen.getByTestId('ref-plane').textContent).toContain('side:e2'));
     fireEvent.click(screen.getByTestId('dialog-ok'));
     expect(t.features().at(-1)).toMatchObject({ kind: 'mirror', body: true, features: [] });
+  });
+});
+
+describe('the Bodies scope field', () => {
+  function twoBodies(request: DialogRequest) {
+    const documents = createDocumentStore(twoBodyDocument());
+    const model = createModelStore();
+    model.setState({ parts: [twoBodyModel()] });
+    const selection = createSelectionStore();
+    render(
+      <FeatureDialog
+        request={request}
+        documents={documents}
+        model={model}
+        selection={selection}
+        resolve={vi.fn(fakeResolve)}
+        onClose={vi.fn()}
+      />,
+    );
+    return () => documents.getState().document.parts[0]!.features;
+  }
+
+  it('acts on every body by default, or on the bodies chosen', () => {
+    const features = twoBodies({ kind: 'extrude' });
+    expect(screen.getByTestId<HTMLSelectElement>('field-operation').value).toBe('add');
+    const all = screen.getByRole<HTMLInputElement>('checkbox', { name: 'All bodies' });
+    expect(all.checked).toBe(true);
+    fireEvent.click(all);
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Body 1' }));
+    fireEvent.change(screen.getByTestId('field-operation'), { target: { value: 'cut' } });
+    fireEvent.click(screen.getByTestId('dialog-ok'));
+    expect(features().at(-1)).toMatchObject({
+      kind: 'extrude',
+      operation: 'cut',
+      scope: ['extrude#3'],
+    });
+  });
+
+  it('is not offered for a new body', () => {
+    twoBodies({ kind: 'extrude' });
+    fireEvent.change(screen.getByTestId('field-operation'), { target: { value: 'new' } });
+    expect(screen.queryByTestId('field-scope')).toBeNull();
+  });
+
+  it('is not offered with one body only', () => {
+    setup({ kind: 'hole' });
+    expect(screen.queryByTestId('field-scope')).toBeNull();
   });
 });

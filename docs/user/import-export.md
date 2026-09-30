@@ -13,9 +13,11 @@ Click **Export** and pick a format:
 | **3MF**                    | A 3MF file: millimetres, one named object per body                                                                  | OrcaSlicer, Bambu Studio, PrusaSlicer, Cura     |
 | **STEP**                   | A STEP (AP214) file with the exact geometry, each body a named product; no triangles, so no tolerance applies to it | FreeCAD, Fusion, Onshape, SolidWorks, and so on |
 
-Export saves your part's bodies only. Imported reference bodies are never exported, whether they are shown or hidden by **Undo**: they belong to another file, and you already have it.
+Export saves the bodies of the part studio you are in. Imported reference bodies are never exported, whether they are shown or hidden by **Undo**: they belong to another file, and you already have it.
 
-The file downloads straight away, named after the part (or the document, when there are several bodies). The header says what was saved and how big it is.
+When the part has several [bodies](bodies.md), the menu lists them with a checkbox each: the shown ones are ticked, the hidden ones are not. Tick the bodies to export, then pick the format. Each body is written under its name from the Bodies list: an object in 3MF, a product in STEP, a file of its own in **STL, one file per body**.
+
+The file downloads straight away, named after the body (or the document, when there are several bodies). The header says what was saved and how big it is.
 
 ### Mesh tolerance
 

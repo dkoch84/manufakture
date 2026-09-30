@@ -2,6 +2,7 @@ import { DocumentStore, type ManufaktureDocument } from '@manufakture/core';
 import type { FeatureResult } from '@manufakture/regen';
 import { describe, expect, it } from 'vitest';
 import { demoDocument } from '../model/demo';
+import { SECOND_BODY, twoBodyDocument } from '../model/twoBodies.test-fixture';
 import {
   deleteFeature,
   dependentsOf,
@@ -176,6 +177,41 @@ describe('suppress, rename, delete, roll back', () => {
     const alone = deleteFeature(s.document, PART, 'extrude#2')!;
     expect(alone.dependents).toEqual([]);
     expect(alone.command.type).toBe('deleteFeature');
+  });
+
+  it('deleting a body takes its settings and its scope entries along, as one step', () => {
+    const s = store(twoBodyDocument());
+    const cut = (id: string, scope: string[]) => ({
+      ...SECOND_BODY,
+      id,
+      name: id,
+      operation: 'cut' as const,
+      scope,
+    });
+    const run = (command: Parameters<typeof s.execute>[0]) => {
+      const r = s.execute(command);
+      if (!r.ok) throw new Error(r.error.message);
+    };
+    run({
+      type: 'addFeature',
+      partId: PART,
+      feature: cut('extrude#4', ['extrude#1', 'extrude#3']),
+    });
+    run({ type: 'addFeature', partId: PART, feature: cut('extrude#5', ['extrude#3']) });
+    run({ type: 'setBodyProps', partId: PART, bodyId: 'extrude#3', props: { name: 'Lid' } });
+    const before = s.document;
+
+    const d = deleteFeature(s.document, PART, 'extrude#3')!;
+    // extrude#4 keeps cutting the first body; extrude#5 cut only this one, so it goes too.
+    expect(d.dependents).toEqual(['extrude#5']);
+    expect(s.execute(d.command, d.label).ok).toBe(true);
+    const part = s.document.parts[0]!;
+    expect(part.features.map((f) => f.id)).not.toContain('extrude#3');
+    expect(part.features.map((f) => f.id)).not.toContain('extrude#5');
+    expect(part.features.find((f) => f.id === 'extrude#4')).toMatchObject({ scope: ['extrude#1'] });
+    expect(part.bodies).toEqual([]);
+    s.undo();
+    expect(s.document).toEqual(before);
   });
 
   it('moves the rollback bar, with the end stored as null', () => {

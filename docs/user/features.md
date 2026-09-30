@@ -16,7 +16,7 @@ Only faces and edges of the part can be used; the faces of an imported reference
 
 ## The dialogs
 
-- **Extrude**: a sketch (every closed region of it) pushed out of its plane. **Result** says what happens to the part: a new body (the default for the first), added to it, removed from it (a cut) or intersected with it. **End**: a depth, a depth split evenly to both sides, through the whole part, or up to a picked flat face. **Opposite direction** flips it; the optional **Draft angle** tapers the sides.
+- **Extrude**: a sketch (every closed region of it) pushed out of its plane. **Result** says what happens to the part: a new body (the default for the first), added to it, removed from it (a cut) or intersected with it. A new body stays separate even where it overlaps another one (see [Bodies](bodies.md)). **End**: a depth, a depth split evenly to both sides, through the whole part, or up to a picked flat face. **Opposite direction** flips it; the optional **Draft angle** tapers the sides.
 - **Revolve**: a sketch turned about an axis, a line of the same sketch or a straight edge of the part. **Angle** is up to a full turn; **Symmetric** splits it to both sides.
 - **Fillet**: rounds the picked edges with a radius.
 - **Chamfer**: bevels the picked edges, by one distance, by two, or by a distance and an angle.
@@ -24,5 +24,9 @@ Only faces and edges of the part can be used; the faces of an imported reference
 - **Hole**: a hole at every chosen point of a sketch (draw them with the sketcher's **Point** tool). **Size** fills the diameter from the standard clearance holes (M3 to M12, #6 to 1/2") for the chosen fit, and the counterbore or countersink sizes for the head; pick **Custom** to type your own.
 - **Pattern**: copies of the chosen extrusions, revolves and holes (or the whole body) in a row along a picked edge or face, or around an axis. The count includes the original.
 - **Mirror**: the chosen features (or the whole body) mirrored about a picked flat face.
+
+## Bodies
+
+When the part has more than one [body](bodies.md), Extrude and Revolve (except **New body**), Hole, and Pattern or Mirror of the whole body show a **Bodies** field. **All bodies** (the default) changes every body there is at that point; untick it and choose the bodies the feature should change, and it leaves the others alone.
 
 A feature that cannot be built (a fillet wider than the faces beside the edge, for example) is still added: it shows a red cross in the tree, with the reason, and the part passes through it unchanged until it is fixed.

@@ -1,5 +1,6 @@
-// The Export menu (STL, 3MF, STEP, with the mesh tolerance) and the Import
-// button (a STEP or STL file picker), in the app header.
+// The Export menu (STL, 3MF, STEP, with the mesh tolerance and, in a part of
+// several bodies, which bodies to write: the shown ones unless changed) and the
+// Import button (a STEP or STL file picker), in the app header.
 
 import { EXPORT_TOLERANCES, type ExportTolerancePreset } from '@manufakture/io';
 import { useEffect, useRef, useState } from 'react';
@@ -24,14 +25,32 @@ function toleranceTitle(preset: ExportTolerancePreset): string {
   return `Chordal ${t.chordal} mm, angular ${degrees} degrees`;
 }
 
-export interface ExportMenuProps {
-  disabled?: boolean;
-  onExport: (format: ExportFormat, tolerance: ExportTolerancePreset) => void;
+/** A body the menu offers: its viewport id, its name, and whether it is hidden in the view. */
+export interface ExportableBody {
+  id: string;
+  name: string;
+  hidden: boolean;
 }
 
-export function ExportMenu({ disabled = false, onExport }: ExportMenuProps) {
+export interface ExportMenuProps {
+  disabled?: boolean;
+  /** The bodies of the part; with several, the menu lets the user choose (default: none known). */
+  bodies?: readonly ExportableBody[];
+  /** `ids`: the bodies chosen, in body order. */
+  onExport: (format: ExportFormat, tolerance: ExportTolerancePreset, ids: string[]) => void;
+}
+
+const NO_BODIES: readonly ExportableBody[] = [];
+
+export function ExportMenu({ disabled = false, bodies = NO_BODIES, onExport }: ExportMenuProps) {
   const [open, setOpen] = useState(false);
   const [tolerance, setTolerance] = useState<ExportTolerancePreset>('normal');
+  // The bodies chosen while the menu is open; it opens with the shown ones.
+  const [chosen, setChosen] = useState<ReadonlySet<string>>(new Set());
+  const several = bodies.length > 1;
+  const ids = several
+    ? bodies.filter((b) => chosen.has(b.id)).map((b) => b.id)
+    : bodies.map((b) => b.id);
   const root = useRef<HTMLDivElement>(null);
   // A press anywhere else closes the menu.
   useEffect(() => {
@@ -49,7 +68,10 @@ export function ExportMenu({ disabled = false, onExport }: ExportMenuProps) {
         aria-haspopup="menu"
         aria-expanded={open}
         disabled={disabled}
-        onClick={() => setOpen(!open)}
+        onClick={() => {
+          if (!open) setChosen(new Set(bodies.filter((b) => !b.hidden).map((b) => b.id)));
+          setOpen(!open);
+        }}
         title="Export the bodies as STL, 3MF or STEP"
       >
         Export
@@ -68,14 +90,36 @@ export function ExportMenu({ disabled = false, onExport }: ExportMenuProps) {
               role="menuitem"
               title={title}
               data-testid={`export-${format}`}
+              disabled={several && ids.length === 0}
               onClick={() => {
                 setOpen(false);
-                onExport(format, tolerance);
+                onExport(format, tolerance, ids);
               }}
             >
               {label}
             </button>
           ))}
+          {several && (
+            <fieldset className="io-bodies" data-testid="export-bodies">
+              <legend>Bodies</legend>
+              {bodies.map((b) => (
+                <label key={b.id} title={b.hidden ? 'Hidden in the view' : undefined}>
+                  <input
+                    type="checkbox"
+                    checked={chosen.has(b.id)}
+                    onChange={(e) => {
+                      const next = new Set(chosen);
+                      if (e.target.checked) next.add(b.id);
+                      else next.delete(b.id);
+                      setChosen(next);
+                    }}
+                  />
+                  {b.name}
+                  {b.hidden ? ' (hidden)' : ''}
+                </label>
+              ))}
+            </fieldset>
+          )}
           <label className="io-tolerance" title={toleranceTitle(tolerance)}>
             Mesh tolerance
             <select

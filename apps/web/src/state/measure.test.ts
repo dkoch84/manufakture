@@ -84,4 +84,33 @@ describe('the measure store', () => {
     // Superseded by an edit: nothing is kept, so the same request is measured again later.
     expect(store.getState()).toMatchObject({ status: 'idle', request: null });
   });
+
+  it('measures every body of a request as a whole, reusing the main body', async () => {
+    const store = createMeasureStore();
+    const volumes: Record<string, number> = { a: 10, b: 20, c: 30 };
+    const measurer: Measurer = {
+      measure: vi.fn(async (bodyId: string) => {
+        if (bodyId === 'c') return { ok: false as const, message: 'no such body' };
+        const result = twoFaces();
+        return {
+          ok: true as const,
+          result: { ...result, body: { ...result.body!, volume: volumes[bodyId]! } },
+        };
+      }),
+    };
+    await store
+      .getState()
+      .measure(measurer, { ...request(0), bodyId: 'a', bodies: ['a', 'b', 'c'] });
+    expect(measurer.measure).toHaveBeenCalledTimes(3);
+    expect(measurer.measure).toHaveBeenCalledWith('b', [], true);
+    const s = store.getState();
+    expect(s.status).toBe('ready');
+    expect(s.bodies.map((b) => [b.bodyId, b.body?.volume ?? null, b.error ?? null])).toEqual([
+      ['a', 10, null],
+      ['b', 20, null],
+      ['c', null, 'no such body'],
+    ]);
+    await store.getState().measure(measurer, null);
+    expect(store.getState().bodies).toEqual([]);
+  });
 });

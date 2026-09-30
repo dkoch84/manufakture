@@ -8,6 +8,7 @@ import {
 } from '@manufakture/core';
 import { describe, expect, it } from 'vitest';
 import { demoDocument } from '../model/demo';
+import { twoBodyDocument } from '../model/twoBodies.test-fixture';
 import {
   addRef,
   applyStandard,
@@ -19,7 +20,11 @@ import {
   refFields,
   refLabel,
   removeRef,
+  scopeBodies,
+  takesScope,
+  withScope,
   type ExtrudeForm,
+  type FeatureForm,
   type FilletForm,
   type HoleForm,
   type PatternForm,
@@ -387,5 +392,79 @@ describe('shell, revolve, hole, pattern, mirror', () => {
       ok: true,
       feature: { kind: 'mirror', plane: { id: 'r13', ref: { face: 'extrude#1:side:e2' } } },
     });
+  });
+});
+
+describe('scope', () => {
+  const bodies = [
+    { bodyId: 'extrude#1', name: 'Base' },
+    { bodyId: 'extrude#3', name: 'Lid' },
+  ];
+
+  it('is taken by operations on existing bodies only', () => {
+    const doc = twoBodyDocument();
+    const extrude = newForm('extrude', { doc, partId: PART }) as ExtrudeForm;
+    expect(extrude.operation).toBe('add');
+    expect(takesScope(extrude)).toBe(true);
+    expect(takesScope({ ...extrude, operation: 'new' })).toBe(false);
+    expect(takesScope(newForm('hole', { doc, partId: PART }))).toBe(true);
+    expect(takesScope(newForm('fillet', { doc, partId: PART }))).toBe(false);
+    const pattern = newForm('pattern', { doc, partId: PART }) as PatternForm;
+    expect(takesScope(pattern)).toBe(false);
+    expect(takesScope({ ...pattern, source: 'body' })).toBe(true);
+  });
+
+  it('stores the chosen bodies, none for all of them, and round-trips', () => {
+    const doc = twoBodyDocument();
+    const all = newForm('extrude', { doc, partId: PART, selectedFeatures: ['sketch#2'] });
+    const everyBody = build(doc, all);
+    if (!everyBody.ok) throw new Error(JSON.stringify(everyBody.errors));
+    expect('scope' in everyBody.feature).toBe(false);
+
+    const one = withScope(all, ['extrude#3']);
+    const r = build(doc, one);
+    if (!r.ok) throw new Error(JSON.stringify(r.errors));
+    expect((r.feature as { scope?: string[] }).scope).toEqual(['extrude#3']);
+    expect(formOf(r.feature)).toMatchObject({ scope: ['extrude#3'] });
+    expect(withScope(one, undefined)).not.toHaveProperty('scope');
+
+    // A new body acts on nothing that exists, so a scope left in the form is not stored.
+    const fresh = build(doc, { ...(one as ExtrudeForm), operation: 'new' });
+    if (!fresh.ok) throw new Error(JSON.stringify(fresh.errors));
+    expect('scope' in fresh.feature).toBe(false);
+
+    const none = build(doc, withScope(all, []));
+    expect(none.ok).toBe(false);
+    if (!none.ok) expect(none.errors.scope).toBe('Choose at least one body.');
+  });
+
+  it('offers the bodies made before the feature, and keeps ids its scope still names', () => {
+    const part = twoBodyDocument().parts[0]!;
+    const at = (id: string) => part.features.findIndex((f) => f.id === id);
+    expect(scopeBodies(part, part.features.length, bodies).map((b) => b.bodyId)).toEqual([
+      'extrude#1',
+      'extrude#3',
+    ]);
+    // Before extrude#3: only the first body exists there.
+    expect(scopeBodies(part, at('extrude#3'), bodies).map((b) => b.bodyId)).toEqual(['extrude#1']);
+    expect(scopeBodies(part, at('extrude#3'), bodies, ['revolve#9'])).toEqual([
+      { bodyId: 'extrude#1', name: 'Base' },
+      { bodyId: 'revolve#9', name: 'revolve#9' },
+    ]);
+  });
+
+  it('keeps the copy mode of a body pattern or mirror through an edit', () => {
+    const doc = twoBodyDocument();
+    const r = build(doc, {
+      ...(newForm('mirror', { doc, partId: PART }) as Extract<FeatureForm, { kind: 'mirror' }>),
+      source: 'body',
+      features: [],
+      plane: [face('extrude#1:side:e1')],
+      mode: 'new',
+      scope: ['extrude#3'],
+    });
+    if (!r.ok) throw new Error(JSON.stringify(r.errors));
+    expect(r.feature).toMatchObject({ body: true, mode: 'new', scope: ['extrude#3'] });
+    expect(formOf(r.feature)).toMatchObject({ mode: 'new', scope: ['extrude#3'] });
   });
 });

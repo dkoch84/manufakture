@@ -98,6 +98,12 @@ const KIND_PATHS: Record<FeatureKind, ReactNode> = {
       <path d="M2.5 11v2.5h11V11" />
     </>
   ),
+  derived: (
+    <>
+      <rect x="2.5" y="2.5" width="6" height="6" />
+      <rect x="7.5" y="7.5" width="6" height="6" strokeDasharray="1.5 1.5" />
+    </>
+  ),
 };
 
 export function KindIcon({ kind }: { kind: FeatureKind }) {

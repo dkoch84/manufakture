@@ -18,3 +18,12 @@ export const DIALOG_KINDS: readonly DialogKind[] = [
 export function isDialogKind(kind: string): kind is DialogKind {
   return (DIALOG_KINDS as readonly string[]).includes(kind);
 }
+
+/** The dialog kinds whose features can take a `scope` (which bodies they act on). */
+export const SCOPED_KINDS: readonly DialogKind[] = [
+  'extrude',
+  'revolve',
+  'hole',
+  'pattern',
+  'mirror',
+];

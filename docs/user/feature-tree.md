@@ -2,6 +2,8 @@
 
 The panel on the left lists the part's features in the order they are built: sketches, extrusions, fillets and so on, each with an icon for its kind, its name and a mark for how it built. The part is rebuilt from this list after every change, and the list shows the result.
 
+Above the features, **Bodies** lists the solids the part is made of, with their names, colours and materials and buttons to hide or isolate them (see [Bodies](bodies.md)).
+
 A new document is empty; the 3D view says so and suggests **New sketch**. While a sketch is open the tree steps aside, since nothing in it can change until the sketch is finished or cancelled.
 
 ## Status marks

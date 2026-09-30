@@ -26,7 +26,7 @@ test('loads the kernel with a progress splash, then shows an empty document with
 test('regenerates the demo document and picks a face by its real name', async ({ page }) => {
   await openScene(page, '?scene=demo', 90_000);
   const info = await page.evaluate(() => window.__manufakture!.viewport.info());
-  expect(info.bodies.map((b) => b.id)).toEqual(['part#1']);
+  expect(info.bodies.map((b) => b.id)).toEqual(['part#1/extrude#1']);
   expect(info.bodies[0]!.faces).toBeGreaterThan(10);
   expect(info.bodies[0]!.triangles).toBeGreaterThan(100);
 

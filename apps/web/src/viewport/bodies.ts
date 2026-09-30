@@ -12,6 +12,8 @@ export interface BodyInput {
   names: readonly string[];
   /** For edge and vertex picking: adjacency and vertex points. Optional. */
   topology?: Topology | null;
+  /** Face colour, `#rrggbb`; the viewport's default face colour when absent. */
+  color?: string;
 }
 
 export interface BodyVertex {

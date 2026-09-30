@@ -114,7 +114,8 @@ export async function bodyVolume(page: Page): Promise<number> {
 /** The part body's face and edge counts, as the viewport shows them. */
 export async function bodyTopology(page: Page): Promise<{ faces: number; edges: number }> {
   const info = await page.evaluate(() => window.__manufakture!.viewport.info());
-  expect(info.bodies.map((b) => b.id)).toEqual(['part#1']);
+  // One body, the first extrusion's.
+  expect(info.bodies.map((b) => b.id)).toEqual(['part#1/extrude#1']);
   return { faces: info.bodies[0]!.faces, edges: info.bodies[0]!.edges };
 }
 

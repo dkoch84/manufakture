@@ -55,6 +55,7 @@ The user guide lives in `docs/user`:
 - [Part studios](docs/user/part-studios.md): several parts in one document, as tabs
 - [Sketches](docs/user/sketcher.md): drawing, constraints and dimensions
 - [Features](docs/user/features.md): extrude, revolve, fillet, chamfer, shell, hole, pattern, mirror
+- [Bodies](docs/user/bodies.md): several bodies in a part, their names, colours and materials, hiding and exporting them
 - [The feature tree](docs/user/feature-tree.md): editing, reordering, suppressing, the rollback bar
 - [Variables](docs/user/variables.md): named values and expressions
 - [Measuring](docs/user/measure.md): exact measurements, material and mass

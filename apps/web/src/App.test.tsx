@@ -740,7 +740,14 @@ describe('App export and import', () => {
             parts: [
               {
                 partId: part.id,
-                body: boxBody({ id: part.id }),
+                bodies: [
+                  {
+                    bodyId: 'extrude#1',
+                    creator: 'extrude#1',
+                    solids: 1,
+                    view: boxBody({ id: `${part.id}/extrude#1` }),
+                  },
+                ],
                 features: part.features.map((f, index) => ({
                   featureId: f.id,
                   kind: f.kind,
@@ -767,7 +774,7 @@ describe('App export and import', () => {
       await t.answer(0);
       await waitFor(() =>
         expect(t.engine.api.setBodies).toHaveBeenLastCalledWith([
-          expect.objectContaining({ id: 'part#1' }),
+          expect.objectContaining({ id: 'part#1/extrude#1' }),
         ]),
       );
       const tree = screen.getByTestId('feature-tree');

@@ -34,7 +34,7 @@ function setup(options: { disabled?: boolean } = {}) {
     parts: [
       {
         partId: 'part#1',
-        body: null,
+        bodies: [],
         features: [
           result('sketch#1', { kind: 'sketch' }),
           result('extrude#1'),

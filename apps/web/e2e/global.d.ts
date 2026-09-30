@@ -114,7 +114,11 @@ interface Window {
         /** Milliseconds the last regen took in the worker. */
         ms: number;
         document: unknown;
-        parts: { partId: string; features: E2eFeatureResult[] }[];
+        parts: {
+          partId: string;
+          features: E2eFeatureResult[];
+          bodies: { bodyId: string; creator: string; solids: number; view: { id: string } }[];
+        }[];
       };
     };
     sketcher: {
@@ -123,7 +127,15 @@ interface Window {
     };
     document: {
       getState(): {
-        document: { parts: { id: string; name: string; features: E2eFeature[] }[] };
+        document: {
+          id: string;
+          parts: {
+            id: string;
+            name: string;
+            features: E2eFeature[];
+            bodies: { id: string; name?: string; color?: string; material?: string }[];
+          }[];
+        };
         canUndo: boolean;
         activePartId: string;
         execute(command: unknown, label?: string): { ok: boolean };
@@ -131,7 +143,13 @@ interface Window {
     };
     viewport: {
       info(): {
-        bodies: { id: string; faces: number; edges: number; triangles: number }[];
+        bodies: {
+          id: string;
+          faces: number;
+          edges: number;
+          triangles: number;
+          color: string;
+        }[];
         projection: string;
         halfHeight: number;
         animating: boolean;
@@ -158,12 +176,17 @@ interface Window {
       };
     };
     settings: {
-      getState(): { projection: string; setSection(patch: Record<string, unknown>): void };
+      getState(): {
+        projection: string;
+        setSection(patch: Record<string, unknown>): void;
+        hiddenBodies: Record<string, readonly string[]>;
+      };
     };
     measure: {
       getState(): {
         status: string;
-        request: { targets: unknown[] } | null;
+        request: { bodyId: string; targets: unknown[]; bodies?: string[] } | null;
+        bodies: { bodyId: string; body: { volume: number } | null }[];
         result: {
           distance: { value: number; from: number[]; to: number[] } | null;
           body: { volume: number } | null;

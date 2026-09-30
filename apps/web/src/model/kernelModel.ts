@@ -5,16 +5,18 @@
 // it, and every completed regen is applied here in the order the worker finished them, so the
 // mesh kept per body is always the one the latest result means.
 //
-// A part can have several bodies. Until the app shows bodies as such (M2 plan, T2.1d), the
-// part's first body (in creator order) keeps the part id as its viewport id, which is what the
-// one body of a part was before, and every other body is `<part id>/<body id>`.
+// A part can have several bodies; each has the viewport id `<part id>/<body id>` (`viewBodyId`),
+// and is registered under the name it is exported with when nothing else is asked for.
 
 import type { ManufaktureDocument } from '@manufakture/core';
 import type { RegenResult } from '@manufakture/regen';
 import type { KernelBody } from '../io/exchange';
 import type { BodyInput } from '../viewport/bodies';
 import { fillPlaceholderNames } from '../viewport/naming';
-import type { PartModel, Regenerator, RegenView } from './model';
+import { bodyName, viewBodyId } from './bodies';
+import type { ModelBody, PartModel, Regenerator, RegenView } from './model';
+
+export { viewBodyId } from './bodies';
 
 /** What the regenerator needs of the regen client. */
 export interface RegenSource {
@@ -24,11 +26,6 @@ export interface RegenSource {
 export interface KernelRegenerator extends Regenerator {
   /** Tell the listeners that the kernel lost every body. */
   invalidate(): void;
-}
-
-/** The viewport id of a part's body: the part id for its first body, `<part id>/<body id>` otherwise. */
-export function viewBodyId(partId: string, bodyId: string, first: boolean): string {
-  return first ? partId : `${partId}/${bodyId}`;
 }
 
 export function kernelRegenerator(
@@ -50,17 +47,20 @@ export function kernelRegenerator(
   const apply = (document: ManufaktureDocument, result: RegenResult): RegenView => {
     const parts: PartModel[] = [];
     for (const part of result.parts) {
-      const name = document.parts.find((p) => p.id === part.partId)?.name ?? part.partId;
+      const docPart = document.parts.find((p) => p.id === part.partId);
+      const partName = docPart?.name ?? part.partId;
       const before = bodies.get(part.partId) ?? new Map<string, BodyInput>();
       const after = new Map<string, BodyInput>();
       const ids = new Set<string>();
-      const views: BodyInput[] = [];
+      const views: ModelBody[] = [];
       part.bodies.forEach((b, i) => {
-        const id = viewBodyId(part.partId, b.bodyId, i === 0);
+        const id = viewBodyId(part.partId, b.bodyId);
         ids.add(id);
         registry.set(id, {
           shape: b.shape,
-          name: i === 0 ? name : `${name} ${b.bodyId}`,
+          name:
+            docPart?.bodies.find((p) => p.id === b.bodyId)?.name ??
+            bodyName({ name: partName }, i, part.bodies.length),
           role: 'part',
         });
         let view = b.mesh
@@ -75,7 +75,7 @@ export function kernelRegenerator(
         if (view === undefined) return;
         if (view.id !== id) view = { ...view, id };
         after.set(b.bodyId, view);
-        views.push(view);
+        views.push({ bodyId: b.bodyId, creator: b.creator, solids: b.solids, view });
       });
       forget(part.partId, ids);
       registered.set(part.partId, ids);
@@ -83,7 +83,6 @@ export function kernelRegenerator(
       parts.push({
         partId: part.partId,
         features: part.features,
-        body: views[0] ?? null,
         bodies: views,
       });
     }

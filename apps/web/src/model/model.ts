@@ -17,17 +17,27 @@ import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { DocumentStoreApi } from '../state/document';
 import type { BodyInput } from '../viewport/bodies';
 
+/** One body of a regenerated part, as the app shows it. */
+export interface ModelBody {
+  /** Regen's body id: the id of the feature that made it (`extrude#3`), or of its copy. */
+  bodyId: string;
+  /** The feature that made it. */
+  creator: string;
+  /** How many solids it holds (a cut can leave a body in several pieces). */
+  solids: number;
+  /** The body for the viewport; its id is `<part id>/<body id>` (see `viewBodyId`). */
+  view: BodyInput;
+}
+
 export interface PartModel {
   partId: string;
   /** Per feature, in document order. */
   features: readonly FeatureResult[];
-  /** The part's first body for the viewport (its id is the part id), or null when it has none. */
-  body: BodyInput | null;
   /**
-   * Every body of the part for the viewport, `body` first; absent means `body` alone. The others
-   * are `<part id>/<body id>` (see `viewBodyId`).
+   * The part's bodies after its last feature, in creator order. Bodies merged away (consumed)
+   * are not listed.
    */
-  bodies?: readonly BodyInput[];
+  bodies: readonly ModelBody[];
 }
 
 /** One completed regen, as the app uses it. */
@@ -100,7 +110,7 @@ export function featureResult(
 
 /** Every part body of the shown model, in part order, each part's bodies in creator order. */
 export function modelBodies(state: Pick<ModelState, 'parts'>): BodyInput[] {
-  return state.parts.flatMap((p) => p.bodies ?? (p.body ? [p.body] : []));
+  return state.parts.flatMap((p) => p.bodies.map((b) => b.view));
 }
 
 /** How often a dropped regen is asked for again before `startRegen` gives up until the next edit. */

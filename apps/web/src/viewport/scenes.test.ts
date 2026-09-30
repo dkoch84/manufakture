@@ -172,13 +172,14 @@ describe('kernel loader', () => {
     await loader.load(() => {});
     const doc = createDocument({ id: 'd', name: 'D' });
     const first = (await loader.regenerator!.regen(doc))!;
-    expect(first.parts[0]!.body!.id).toBe('part#1');
-    expect(first.parts[0]!.body!.topology).not.toBeNull();
+    const view = first.parts[0]!.bodies[0]!.view;
+    expect(view.id).toBe('part#1/extrude#1');
+    expect(view.topology).not.toBeNull();
     // The next result carries no mesh (unchanged): the body is kept.
     const second = (await loader.regenerator!.regen(doc))!;
-    expect(second.parts[0]!.body).toBe(first.parts[0]!.body);
-    // The part is what export writes, under the part's name.
-    expect(loader.exchanger!.bodies()).toEqual([{ id: 'part#1', name: 'Part 1' }]);
+    expect(second.parts[0]!.bodies[0]!.view).toBe(view);
+    // The part is what export writes, under the part's name (its only body).
+    expect(loader.exchanger!.bodies()).toEqual([{ id: 'part#1/extrude#1', name: 'Part 1' }]);
     fake.submit.mockImplementationOnce(
       async () =>
         ({
@@ -187,7 +188,9 @@ describe('kernel loader', () => {
           results: [{ ok: true, op: 'measure', value: { items: [], body: null } }],
         }) as never,
     );
-    expect(await loader.measurer!.measure('part#1', [], true)).toMatchObject({ ok: true });
+    expect(await loader.measurer!.measure('part#1/extrude#1', [], true)).toMatchObject({
+      ok: true,
+    });
     const [ops, generation] = fake.submit.mock.lastCall as unknown as [unknown[], number];
     expect(ops).toEqual([{ op: 'measure', shape: 1, targets: [], body: true }]);
     expect(validateOp(ops[0])).toBeNull();
@@ -238,7 +241,7 @@ describe('kernel loader', () => {
           results: [{ ok: true, op: 'pick', value: { ref } }],
         }) as never,
     );
-    expect(await loader.referencer!.reference('part#1', 'edge', 4)).toEqual({
+    expect(await loader.referencer!.reference('part#1/extrude#1', 'edge', 4)).toEqual({
       ok: true,
       value: ref,
     });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { VIEW_SETTINGS_KEY, createViewSettingsStore } from './viewSettings';
+import { VIEW_SETTINGS_KEY, createViewSettingsStore, hiddenBodiesOf } from './viewSettings';
 
 describe('view settings', () => {
   it('defaults to Onshape navigation and perspective', () => {
@@ -52,5 +52,25 @@ describe('view settings', () => {
     });
     s.getState().setSection({ position: -3 });
     expect(s.getState().section.position).toBe(0);
+  });
+
+  it('keeps hidden bodies per document, out of the stored preferences', () => {
+    const s = createViewSettingsStore();
+    const st = () => s.getState();
+    st().setBodyHidden('doc-a', 'part#1/extrude#1', true);
+    st().setBodyHidden('doc-a', 'part#1/extrude#2', true);
+    st().setBodyHidden('doc-b', 'part#1/extrude#1', true);
+    expect(hiddenBodiesOf(st(), 'doc-a')).toEqual(['part#1/extrude#1', 'part#1/extrude#2']);
+    st().setBodyHidden('doc-a', 'part#1/extrude#1', false);
+    expect(hiddenBodiesOf(st(), 'doc-a')).toEqual(['part#1/extrude#2']);
+    expect(hiddenBodiesOf(st(), 'doc-b')).toEqual(['part#1/extrude#1']);
+    // Isolating: of these bodies, only the listed ones are hidden; others are left alone.
+    st().setHiddenBodies('doc-b', ['part#1/extrude#1', 'part#1/extrude#3'], ['part#1/extrude#3']);
+    expect(hiddenBodiesOf(st(), 'doc-b')).toEqual(['part#1/extrude#3']);
+    st().setHiddenBodies('doc-b', ['part#1/extrude#3'], []);
+    expect(st().hiddenBodies['doc-b']).toBeUndefined();
+    expect(hiddenBodiesOf(st(), 'doc-c')).toEqual([]);
+    const stored = JSON.parse(localStorage.getItem(VIEW_SETTINGS_KEY) ?? '{}');
+    expect(stored.state?.hiddenBodies).toBeUndefined();
   });
 });

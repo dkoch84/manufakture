@@ -3,7 +3,7 @@ import { findMaterial } from '@manufakture/core';
 import type { MeasureResult } from '@manufakture/kernel';
 import { describe, expect, it } from 'vitest';
 import { TOP_AREA, twoFaces } from './fixtures';
-import { measureSections, sectionsText, type MeasureSection } from './rows';
+import { bodySections, measureSections, sectionsText, type MeasureSection } from './rows';
 
 const MM: DisplayUnits = { length: { unit: 'mm' }, angle: { unit: 'deg' } };
 const FT_IN: DisplayUnits = { length: { unit: 'ft-in', denominator: 16 }, angle: { unit: 'deg' } };
@@ -158,5 +158,32 @@ describe('measure sections', () => {
     const text = sectionsText(measureSections(twoFaces(), MM));
     expect(text.split('\n')).toContain('  Distance: 20.00 mm');
     expect(text.startsWith('Face 1 (plane)\n  Area: ')).toBe(true);
+  });
+
+  it('lists the bodies of a part each in its own section, with its own material', () => {
+    const body = twoFaces().body!;
+    const sections = bodySections(
+      [
+        { title: 'Base', body, material: findMaterial('pla')! },
+        { title: 'Lid', body: { ...body, volume: 1000 }, material: null },
+        { title: 'Knob', body: null, error: 'gone', material: null },
+      ],
+      MM,
+    );
+    expect(sections.map((s) => [s.key, s.title])).toEqual([
+      ['body1', 'Base'],
+      ['body2', 'Lid'],
+      ['body3', 'Knob'],
+    ]);
+    expect(values(sections)).toMatchObject({
+      'body1.volume': '44000.00 mm³',
+      'body1.mass': '54.56 g',
+      'body2.volume': '1000.00 mm³',
+      'body3.error': 'gone',
+    });
+    expect(values(sections)['body2.mass']).toBeUndefined();
+    expect(
+      measureSections(twoFaces(), MM, { material: null, title: 'Body: Lid' }).at(-1)!.title,
+    ).toBe('Body: Lid');
   });
 });
