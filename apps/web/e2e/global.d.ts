@@ -80,8 +80,33 @@ interface E2eFeatureResult {
   references: { referenceId: string; target: string; via: string; fragile: boolean }[];
 }
 
+type E2eResult<T> = { ok: true; value: T } | { ok: false; message: string };
+
+interface E2eVersion {
+  id: string;
+  name: string;
+  description: string;
+  revision: number;
+  snapshotSha256: string;
+  createdAt: string;
+}
+
 interface Window {
   __manufakture?: {
+    library: {
+      listVersions(id: string): Promise<E2eResult<E2eVersion[]>>;
+      readVersion(
+        id: string,
+        versionId: string,
+      ): Promise<E2eResult<{ version: E2eVersion; document: { name: string } }>>;
+      readRevision(
+        id: string,
+        rev: number,
+      ): Promise<E2eResult<{ document: { name: string }; revision: number; from: number }>>;
+    };
+    autosave: {
+      createVersion(meta: { name: string; description?: string }): Promise<E2eResult<E2eVersion>>;
+    };
     model: {
       getState(): {
         generation: number;

@@ -1,7 +1,18 @@
-import { applyCommand, FORMAT_VERSION, type Command } from '@manufakture/core';
+import { applyCommand, FORMAT_VERSION, serialize, type Command } from '@manufakture/core';
 import { describe, expect, it } from 'vitest';
+import { createDocumentStore } from '../state/document';
 import { MemoryBackend, type StorageBackend } from './backend';
-import { DocumentLibrary, RevisionConflict, type DocumentLocks, type LogEntry } from './library';
+import {
+  CHECKPOINT_EVERY,
+  DocumentLibrary,
+  MAX_VERSIONS,
+  RevisionConflict,
+  encodeStored,
+  type DocumentLocks,
+  type LogEntry,
+  type Version,
+} from './library';
+import { MFK_LIMITS, packMfk, unpackMfk } from './mfk';
 import {
   CrashingBackend,
   cloneBackend,
@@ -76,14 +87,17 @@ describe('DocumentLibrary', () => {
       'documents/doc-1/snapshot-00000001.json',
       'documents/doc-1/snapshot-00000002.json',
     ]);
-    // A third save drops the oldest snapshot and keeps the previous one as a spare.
+    // A fourth save drops revision 2 and keeps the previous one as a spare; revision 1 is a
+    // checkpoint, and stays.
+    await lib.save(doc);
     await lib.save(doc);
     expect(files(backend).filter((f) => f.includes('snapshot'))).toEqual([
-      'documents/doc-1/snapshot-00000002.json',
+      'documents/doc-1/snapshot-00000001.json',
       'documents/doc-1/snapshot-00000003.json',
+      'documents/doc-1/snapshot-00000004.json',
     ]);
     const head = JSON.parse(text(backend, 'documents/doc-1/head.json'));
-    expect(head).toMatchObject({ format: 'manufakture-head', revision: 3, name: 'Bracket' });
+    expect(head).toMatchObject({ format: 'manufakture-head', revision: 4, name: 'Bracket' });
     expect((await opened(lib, 'doc-1')).recovered).toBe(false);
   });
 
@@ -291,8 +305,12 @@ describe('crash safety', () => {
       `recovers from a crash at step %i (${torn ? 'torn write' : 'clean'})`,
       async (at) => {
         const { backend: base, before, after, entries } = await start();
-        // Step 4 is the cleanup after the head (a third save removes the oldest snapshot).
-        if (at === 4) await library(base).save(before);
+        // Step 4 is the cleanup after the head (a fourth save removes revision 2; revision 1
+        // is a checkpoint).
+        if (at === 4) {
+          await library(base).save(before);
+          await library(base).save(before);
+        }
         const backend = cloneBackend(base);
         const crashing = new CrashingBackend(backend, at, torn);
         const save = new DocumentLibrary(crashing, { now }).save(after, entries);
@@ -307,7 +325,7 @@ describe('crash safety', () => {
         expect(r.document).toEqual(at >= 3 ? after : before);
         expect(r.recovered).toBe(at === 3);
         const [listed] = await reloaded.list();
-        const saved = at === 4 ? 2 : 1;
+        const saved = at === 4 ? 3 : 1;
         expect(listed).toMatchObject({ name: 'Bracket', revision: at >= 3 ? saved + 1 : saved });
 
         // The next save and open work, and the log still reads.
@@ -448,6 +466,7 @@ describe('a failed save, retried in the same session', () => {
     expect(files(backend).filter((f) => !f.includes('/blobs/'))).toEqual([
       'documents/doc-1/head.json',
       'documents/doc-1/log-00000003.json',
+      'documents/doc-1/snapshot-00000001.json',
       'documents/doc-1/snapshot-00000002.json',
       'documents/doc-1/snapshot-00000003.json',
     ]);
@@ -642,5 +661,646 @@ describe('several tabs on one document', () => {
     // Reloading the newer version lets the tab save again.
     await opened(tabA, 'doc-1');
     expect(await tabA.save(mine)).toMatchObject({ revision: 3 });
+  });
+});
+
+/** A library that records what it warns about. */
+function watched(backend: MemoryBackend | CrashingBackend = new MemoryBackend()) {
+  const warnings: string[] = [];
+  let n = 0;
+  const lib = new DocumentLibrary(backend, {
+    now,
+    newId: () => `v-${++n}`,
+    locks: null,
+    warn: (m) => warnings.push(m),
+  });
+  return { lib, warnings };
+}
+
+function value<T>(r: { ok: true; value: T } | { ok: false; message: string }): T {
+  if (!r.ok) throw new Error(r.message);
+  return r.value;
+}
+
+/**
+ * Edit the demo part through a real document store and save after each step, as autosave
+ * does: feature renames, suppress toggles, undo, redo, several commands per save, and saves
+ * without commands. Returns each revision's canonical text.
+ */
+async function edit(lib: DocumentLibrary, saves: number, from = 1): Promise<Map<number, string>> {
+  const store = createDocumentStore(
+    from === 1 ? partDocument() : (await opened(lib, 'doc-1')).document,
+  );
+  const entries: LogEntry[] = [];
+  store.core.subscribe((e) => {
+    if (e.command && e.cause !== 'load') {
+      entries.push({ cause: e.cause, label: e.label, command: e.command, at: 'x' });
+    }
+  });
+  const texts = new Map<number, string>();
+  if (from === 1) {
+    await lib.save(store.getState().document);
+    texts.set(1, serialize(store.getState().document));
+  }
+  for (let rev = from + 1; rev <= from + saves - (from === 1 ? 1 : 0); rev++) {
+    const s = store.getState();
+    const fillet = s.document.parts[0]!.features.find((f) => f.id === 'fillet#1')!;
+    const step = rev % 6;
+    if (step === 0) {
+      s.execute(
+        { type: 'renameFeature', partId: 'part#1', featureId: 'fillet#1', name: `Round ${rev}` },
+        'Rename',
+      );
+    } else if (step === 1) {
+      s.execute(
+        {
+          type: 'suppressFeature',
+          partId: 'part#1',
+          featureId: 'fillet#1',
+          suppressed: !fillet.suppressed,
+        },
+        'Suppress',
+      );
+    } else if (step === 2) {
+      s.undo();
+    } else if (step === 3) {
+      s.redo();
+    } else if (step === 4) {
+      s.execute({ type: 'renameDocument', name: `Doc ${rev}` }, 'Rename document');
+      store
+        .getState()
+        .execute(
+          { type: 'renameFeature', partId: 'part#1', featureId: 'extrude#1', name: `Pad ${rev}` },
+          'Rename',
+        );
+    }
+    // Step 5 changes nothing: a save without commands.
+    await lib.save(store.getState().document, entries.splice(0));
+    texts.set(rev, serialize(store.getState().document));
+  }
+  return texts;
+}
+
+const snapshotRevisions = (backend: MemoryBackend) =>
+  files(backend)
+    .map((f) => /snapshot-(\d+)\.json$/.exec(f)?.[1])
+    .filter((r): r is string => r !== undefined)
+    .map(Number);
+
+describe('named versions', () => {
+  it('names the current revision, lists, renames and reads versions back', async () => {
+    const backend = new MemoryBackend();
+    const { lib } = watched(backend);
+    await lib.save(partDocument());
+    await lib.save(partDocument('doc-1', 'Two'), [renameEntry('Two')]);
+    const v = value(await lib.createVersion('doc-1', { name: '  First  ', description: 'Why' }));
+    const head = JSON.parse(text(backend, 'documents/doc-1/head.json'));
+    expect(v).toEqual({
+      id: 'v-1',
+      name: 'First',
+      description: 'Why',
+      revision: 2,
+      snapshotSha256: head.snapshotSha256,
+      createdAt: expect.any(String),
+    });
+    expect(head).toMatchObject({ revision: 2, versions: 1 });
+    expect(JSON.parse(text(backend, 'documents/doc-1/versions-00000001.json'))).toEqual({
+      format: 'manufakture-versions',
+      id: 'doc-1',
+      generation: 1,
+      versions: [v],
+    });
+
+    await lib.save(partDocument('doc-1', 'Three'), [renameEntry('Three')]);
+    const w = value(await lib.createVersion('doc-1', { name: 'Second' }));
+    expect(w).toMatchObject({ id: 'v-2', revision: 3, description: '' });
+    const renamed = value(await lib.renameVersion('doc-1', 'v-1', 'Renamed'));
+    expect(renamed).toEqual({ ...v, name: 'Renamed' });
+    expect(value(await library(backend).listVersions('doc-1'))).toEqual([renamed, w]);
+    // The current list is kept, and the one before as the spare.
+    expect(files(backend).filter((f) => f.includes('versions-'))).toEqual([
+      'documents/doc-1/versions-00000002.json',
+      'documents/doc-1/versions-00000003.json',
+    ]);
+
+    const read = value(await library(backend).readVersion('doc-1', 'v-1'));
+    expect(read.document).toEqual(partDocument('doc-1', 'Two'));
+    expect(await lib.readVersion('doc-1', 'nope')).toEqual({
+      ok: false,
+      message: 'There is no version "nope" of it.',
+    });
+    expect(await lib.createVersion('doc-1', { name: '  ' })).toEqual({
+      ok: false,
+      message: 'A version name must be 1 to 200 characters.',
+    });
+    expect(await lib.createVersion('doc-1', { name: 'x', description: 'd'.repeat(2001) })).toEqual({
+      ok: false,
+      message: 'A version description must be at most 2000 characters.',
+    });
+    expect(await lib.renameVersion('doc-1', 'nope', 'x')).toMatchObject({ ok: false });
+    expect(await lib.createVersion('missing', { name: 'x' })).toEqual({
+      ok: false,
+      message: 'There is no document "missing".',
+    });
+    expect(await lib.listVersions('missing')).toMatchObject({ ok: false });
+    // A document saved before versions existed has none.
+    await lib.save(partDocument('old'));
+    expect(await lib.listVersions('old')).toEqual({ ok: true, value: [] });
+  });
+
+  it('refuses to name a revision another tab saved over this one', async () => {
+    const backend = new MemoryBackend();
+    await library(backend).save(partDocument());
+    const tabA = library(backend);
+    await opened(tabA, 'doc-1');
+    await library(backend).save(partDocument('doc-1', 'From B'));
+    await expect(tabA.createVersion('doc-1', { name: 'Mine' })).rejects.toThrow(RevisionConflict);
+    expect(value(await library(backend).listVersions('doc-1'))).toEqual([]);
+  });
+
+  it('keeps the snapshot a version names through 200 later saves', async () => {
+    const backend = new MemoryBackend();
+    const { lib } = watched(backend);
+    await lib.save(partDocument());
+    await lib.save(partDocument('doc-1', 'Named'), [renameEntry('Named')]);
+    const v = value(await lib.createVersion('doc-1', { name: 'Keep' }));
+    for (let i = 0; i < 200; i++) {
+      await lib.save(partDocument('doc-1', `Later ${i}`), [renameEntry(`Later ${i}`)]);
+    }
+    expect(snapshotRevisions(backend)).toEqual([1, 2, 65, 129, 193, 201, 202]);
+    const read = value(await library(backend).readVersion('doc-1', v.id));
+    expect(read.document.name).toBe('Named');
+    expect(value(await library(backend).listVersions('doc-1'))).toEqual([v]);
+    // Even without its snapshot, the version is rebuilt from the log and checked.
+    backend.files.delete('documents/doc-1/snapshot-00000002.json');
+    expect(value(await library(backend).readVersion('doc-1', v.id)).document.name).toBe('Named');
+  });
+
+  it('refuses a version whose snapshot and log no longer give its SHA-256', async () => {
+    const backend = new MemoryBackend();
+    const { lib } = watched(backend);
+    await lib.save(partDocument());
+    await lib.save(partDocument('doc-1', 'Named'));
+    const v = value(await lib.createVersion('doc-1', { name: 'Keep' }));
+    const path = 'documents/doc-1/snapshot-00000002.json';
+    backend.files.set(
+      path,
+      new TextEncoder().encode(text(backend, path).replace('Named', 'Other')),
+    );
+    expect(await lib.readVersion('doc-1', v.id)).toEqual({
+      ok: false,
+      message: 'The saved copy of the version "Keep" is damaged.',
+    });
+  });
+});
+
+describe('crash safety of a version', () => {
+  /**
+   * A document at revision 3 with one version (A, at revision 2), its list written twice (a
+   * rename), so the next change deletes the list before the spare.
+   */
+  async function start() {
+    const backend = new MemoryBackend();
+    let n = 0;
+    const lib = new DocumentLibrary(backend, { now, locks: null, newId: () => `a-${++n}` });
+    await lib.save(partDocument());
+    await lib.save(partDocument('doc-1', 'Two'), [renameEntry('Two')]);
+    const created = value(await lib.createVersion('doc-1', { name: 'A (draft)' }));
+    const a = value(await lib.renameVersion('doc-1', created.id, 'A'));
+    await lib.save(partDocument('doc-1', 'Three'), [renameEntry('Three')]);
+    return { backend, a };
+  }
+
+  it('lists the steps: the new list, the head, then the lists before the spare go', async () => {
+    const { backend } = await start();
+    const counting = new CrashingBackend(backend);
+    await new DocumentLibrary(counting, { now, locks: null }).createVersion('doc-1', {
+      name: 'B',
+    });
+    expect(counting.ops).toEqual([
+      'write documents/doc-1/versions-00000003.json',
+      'write documents/doc-1/head.json',
+      'remove documents/doc-1/versions-00000001.json',
+    ]);
+  });
+
+  for (const torn of [false, true]) {
+    it.each([0, 1, 2])(
+      `a crash at step %i (${torn ? 'torn write' : 'clean'}) leaves the old list or the new one`,
+      async (at) => {
+        const { backend: base, a } = await start();
+        const backend = cloneBackend(base);
+        const crashing = new CrashingBackend(backend, at, torn);
+        const create = new DocumentLibrary(crashing, {
+          now,
+          locks: null,
+          newId: () => 'b',
+        }).createVersion('doc-1', { name: 'B' });
+        // Deleting the old list after the commit is best effort.
+        if (at === 2) await create;
+        else await expect(create).rejects.toThrow(/Simulated crash/);
+        expect(crashing.ops).toHaveLength(at + 1);
+
+        const reloaded = library(backend);
+        const listed = value(await reloaded.listVersions('doc-1'));
+        // The list is new once its file is complete and the head is written or torn (a torn
+        // head is recovered from the newest list that reads).
+        const isNew = at === 2 || (at === 1 && torn);
+        expect(listed.map((v) => v.name)).toEqual(isNew ? ['A', 'B'] : ['A']);
+        expect(listed[0]).toEqual(a);
+        const r = await opened(reloaded, 'doc-1');
+        expect(r.document.name).toBe('Three');
+        expect(r.revision).toBe(3);
+        expect(value(await reloaded.listVersions('doc-1'))).toEqual(listed);
+
+        // Then naming, saving and reading go on as normal.
+        const c = value(await reloaded.createVersion('doc-1', { name: 'C' }));
+        await reloaded.save(partDocument('doc-1', 'Four'), [renameEntry('Four')]);
+        const after = value(await library(backend).listVersions('doc-1'));
+        expect(after.map((v) => v.name)).toEqual([...listed.map((v) => v.name), 'C']);
+        expect(value(await library(backend).readVersion('doc-1', a.id)).document.name).toBe('Two');
+        expect(value(await library(backend).readVersion('doc-1', c.id)).document.name).toBe(
+          'Three',
+        );
+        expect((await opened(library(backend), 'doc-1')).document.name).toBe('Four');
+        expect(files(backend).filter((f) => f.includes('versions-'))).toHaveLength(2);
+      },
+    );
+  }
+
+  it('a save after a failed version change drops the stray list and keeps the old one', async () => {
+    const { backend } = await start();
+    const crashing = new CrashingBackend(backend, 1);
+    await expect(
+      new DocumentLibrary(crashing, { now, locks: null }).createVersion('doc-1', { name: 'B' }),
+    ).rejects.toThrow();
+    expect(files(backend)).toContain('documents/doc-1/versions-00000003.json');
+    const lib = library(backend);
+    await lib.save(partDocument('doc-1', 'Four'));
+    expect(files(backend).filter((f) => f.includes('versions-'))).toEqual([
+      'documents/doc-1/versions-00000001.json',
+      'documents/doc-1/versions-00000002.json',
+    ]);
+    expect(value(await lib.listVersions('doc-1')).map((v) => v.name)).toEqual(['A']);
+  });
+
+  it('without Web Locks: a save that finds a version committed just before its own commit is refused', async () => {
+    // Tab B has written its snapshot when tab A names a version; B's last look at the head
+    // must see the new list, or its head would drop it (and later prunes its snapshot).
+    const { backend } = await start();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let paused!: () => void;
+    const reached = new Promise<void>((resolve) => (paused = resolve));
+    const gated: StorageBackend = Object.assign(Object.create(backend) as MemoryBackend, {
+      async write(path: string, bytes: Uint8Array) {
+        await backend.write(path, bytes);
+        if (path.endsWith('/snapshot-00000004.json')) {
+          paused();
+          await gate;
+        }
+      },
+    });
+    // Tab A does not see B's new files yet (they are above the head, and not committed).
+    const hiding: StorageBackend = Object.assign(Object.create(backend) as MemoryBackend, {
+      async list(dir: string) {
+        return (await backend.list(dir)).filter((n) => !n.endsWith('00000004.json'));
+      },
+    });
+    const tabA = new DocumentLibrary(hiding, { now, locks: null, newId: () => 'b' });
+    const tabB = new DocumentLibrary(gated, { now, locks: null });
+    await opened(tabA, 'doc-1');
+    await opened(tabB, 'doc-1');
+    const b = tabB.save(partDocument('doc-1', 'From B'), [renameEntry('From B')]);
+    await reached;
+    const version = value(await tabA.createVersion('doc-1', { name: 'B' }));
+    release();
+    await expect(b).rejects.toThrow(RevisionConflict);
+
+    const lib = library(backend);
+    expect(value(await lib.listVersions('doc-1')).map((v) => v.name)).toEqual(['A', 'B']);
+    // Later saves keep the snapshot it names.
+    for (let i = 0; i < 3; i++) await lib.save(partDocument('doc-1', `Later ${i}`));
+    expect(value(await lib.readVersion('doc-1', version.id)).document.name).toBe('Three');
+  });
+
+  it('without Web Locks: a list another tab deleted as stale before its head named it falls back to the spare', async () => {
+    // Tab B has written versions-3 but not the head; tab A opens (nothing hidden), sees the
+    // list above the head and deletes it; then B writes the head naming the missing list.
+    const { backend, a } = await start();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let paused!: () => void;
+    const reached = new Promise<void>((resolve) => (paused = resolve));
+    const gated: StorageBackend = Object.assign(Object.create(backend) as MemoryBackend, {
+      async write(path: string, bytes: Uint8Array) {
+        await backend.write(path, bytes);
+        if (path.endsWith('/versions-00000003.json')) {
+          paused();
+          await gate;
+        }
+      },
+    });
+    const tabB = new DocumentLibrary(gated, { now, locks: null, newId: () => 'b' });
+    const creating = tabB.createVersion('doc-1', { name: 'B' });
+    await reached;
+    const { lib: tabA, warnings } = watched(backend);
+    expect((await opened(tabA, 'doc-1')).document.name).toBe('Three');
+    expect(files(backend)).not.toContain('documents/doc-1/versions-00000003.json');
+    release();
+    // B's head check passes (A changed no head): its version is lost, but not A's.
+    expect(await creating).toMatchObject({ ok: true });
+    expect(JSON.parse(text(backend, 'documents/doc-1/head.json')).versions).toBe(3);
+
+    expect(value(await tabA.listVersions('doc-1'))).toEqual([a]);
+    expect(value(await tabA.readVersion('doc-1', a.id)).document.name).toBe('Two');
+    // Saves go on, deleting no snapshot while the list is the fallback.
+    const before = snapshotRevisions(backend);
+    await tabA.save(partDocument('doc-1', 'Four'));
+    await tabA.save(partDocument('doc-1', 'Five'));
+    expect(snapshotRevisions(backend)).toEqual([...before, 4, 5]);
+    expect(warnings.at(-1)).toMatch(/version list of document doc-1 cannot be read/);
+    // The next version change writes a whole list again, above the missing one.
+    const c = value(await tabA.createVersion('doc-1', { name: 'C' }));
+    expect(value(await library(backend).listVersions('doc-1'))).toEqual([a, c]);
+    expect(JSON.parse(text(backend, 'documents/doc-1/head.json')).versions).toBe(4);
+  });
+
+  it('a save over a document with no readable head or snapshot keeps its version list', async () => {
+    const { backend } = await start();
+    for (const f of files(backend)) {
+      if (/head\.json|snapshot-/.test(f)) backend.files.delete(f);
+    }
+    const lib = library(backend);
+    await lib.save(partDocument('doc-1', 'Again'));
+    expect(files(backend)).toContain('documents/doc-1/versions-00000001.json');
+    expect(value(await lib.listVersions('doc-1')).map((v) => v.name)).toEqual(['A']);
+  });
+
+  it('keeps every snapshot when the version list cannot be read', async () => {
+    const { backend } = await start();
+    backend.files.set('documents/doc-1/versions-00000002.json', new TextEncoder().encode('{'));
+    const { lib, warnings } = watched(backend);
+    const before = snapshotRevisions(backend);
+    await lib.save(partDocument('doc-1', 'Four'));
+    await lib.save(partDocument('doc-1', 'Five'));
+    expect(snapshotRevisions(backend)).toEqual([...before, 4, 5]);
+    expect(warnings[0]).toMatch(/version list of document doc-1 cannot be read/);
+    expect(await lib.listVersions('doc-1')).toEqual({
+      ok: false,
+      message: 'Its list of versions is damaged.',
+    });
+    expect(await lib.createVersion('doc-1', { name: 'B' })).toMatchObject({ ok: false });
+  });
+});
+
+describe('replaying the log', () => {
+  it(`keeps a checkpoint every ${CHECKPOINT_EVERY} revisions and rebuilds every revision exactly`, async () => {
+    const backend = new MemoryBackend();
+    const { lib, warnings } = watched(backend);
+    const texts = await edit(lib, 140);
+    const v = value(await lib.createVersion('doc-1', { name: 'At 140' }));
+    expect(v.revision).toBe(140);
+    const more = await edit(lib, 5, 140);
+    for (const [rev, t] of more) texts.set(rev, t);
+    expect(snapshotRevisions(backend)).toEqual([1, 65, 129, 140, 144, 145]);
+
+    // Replay from a checkpoint reproduces every retained snapshot byte for byte.
+    for (const rev of snapshotRevisions(backend)) {
+      for (const from of [1, 65, 129].filter((c) => c <= rev)) {
+        const r = value(await lib.readRevision('doc-1', rev, { from }));
+        expect(r).toMatchObject({ revision: rev, from, mismatches: [] });
+        const stored = text(
+          backend,
+          `documents/doc-1/snapshot-${String(rev).padStart(8, '0')}.json`,
+        );
+        expect(encodeStored(r.document).text).toBe(stored);
+        expect(serialize(r.document)).toBe(texts.get(rev));
+      }
+    }
+    // And every revision, from the nearest retained snapshot.
+    for (const [rev, t] of texts) {
+      const r = value(await lib.readRevision('doc-1', rev));
+      expect(serialize(r.document)).toBe(t);
+      expect(rev - r.from).toBeLessThan(CHECKPOINT_EVERY);
+    }
+    expect(warnings).toEqual([]);
+    expect(await lib.readRevision('doc-1', 146)).toEqual({
+      ok: false,
+      message: 'There is no revision 146 of it.',
+    });
+    expect(await lib.readRevision('doc-1', 10, { from: 65 })).toMatchObject({ ok: false });
+    expect(value(await lib.historyStart('doc-1'))).toBe(1);
+  });
+
+  it('logs a replay that does not reproduce a retained snapshot, and goes on from it', async () => {
+    const backend = new MemoryBackend();
+    const { lib, warnings } = watched(backend);
+    const texts = await edit(lib, 70);
+    // A command whose meaning changed: revision 64's rename now says something else.
+    const path = 'documents/doc-1/log-00000064.json';
+    backend.files.set(path, new TextEncoder().encode(text(backend, path).replace(/Doc 64/g, 'Xx')));
+    const r = value(await lib.readRevision('doc-1', 69, { from: 1 }));
+    expect(r.mismatches).toEqual([65]);
+    expect(serialize(r.document)).toBe(texts.get(69));
+    expect(warnings).toEqual([
+      expect.stringMatching(/does not reproduce revision 65; the snapshot is used/),
+    ]);
+    // Between the checkpoints there is no snapshot to check against: the replay is what it is.
+    expect(value(await lib.readRevision('doc-1', 64)).document.name).toBe('Xx');
+  });
+
+  it('goes on from a later snapshot past a command that no longer applies, or says why it cannot', async () => {
+    const backend = new MemoryBackend();
+    const { lib, warnings } = watched(backend);
+    const texts = await edit(lib, 70);
+    const path = 'documents/doc-1/log-00000006.json';
+    backend.files.set(
+      path,
+      new TextEncoder().encode(text(backend, path).replace('"fillet#1"', '"fillet#9"')),
+    );
+    const r = value(await lib.readRevision('doc-1', 66, { from: 1 }));
+    expect(r.mismatches).toEqual([65]);
+    expect(serialize(r.document)).toBe(texts.get(66));
+    expect(warnings[0]).toMatch(
+      /revision 6 of document doc-1 cannot be rebuilt .*going on from revision 65/,
+    );
+    const failed = await lib.readRevision('doc-1', 7);
+    expect(failed).toMatchObject({ ok: false });
+    expect(failed.ok ? '' : failed.message).toMatch(
+      /^Revision 7 cannot be rebuilt: a logged command no longer applies at revision 6/,
+    );
+    // A damaged segment is refused the same way.
+    backend.files.set('documents/doc-1/log-00000004.json', new TextEncoder().encode('{"torn'));
+    expect(await lib.readRevision('doc-1', 5)).toEqual({
+      ok: false,
+      message: 'Revision 5 cannot be rebuilt: the command log is damaged at revision 4.',
+    });
+  });
+
+  it('a document saved before checkpoints has history from its oldest remaining snapshot', async () => {
+    const backend = new MemoryBackend();
+    const { lib } = watched(backend);
+    const texts = await edit(lib, 10);
+    // What the old pruning left: the last two snapshots only.
+    for (const rev of [1]) backend.files.delete(`documents/doc-1/snapshot-0000000${rev}.json`);
+    expect(value(await lib.historyStart('doc-1'))).toBe(9);
+    expect(await lib.readRevision('doc-1', 5)).toEqual({
+      ok: false,
+      message: 'Revision 5 is older than its history, which starts at revision 9.',
+    });
+    expect(serialize(value(await lib.readRevision('doc-1', 10)).document)).toBe(texts.get(10));
+    // Its later saves keep checkpoints from then on, and its oldest snapshot stays the root.
+    await edit(lib, 60, 10);
+    expect(snapshotRevisions(backend)).toEqual([9, 65, 69, 70]);
+    expect(value(await lib.historyStart('doc-1'))).toBe(9);
+    for (const rev of [9, 30, 64, 66]) {
+      expect(serialize(value(await lib.readRevision('doc-1', rev)).document)).toBeDefined();
+    }
+    expect(value(await lib.readRevision('doc-1', 64, { from: 9 })).mismatches).toEqual([]);
+  });
+});
+
+describe('.mfk files with versions', () => {
+  it('an export with every version a document may hold fits the entry limit of an import', () => {
+    // The document, the manifest, one entry per version, and room for the blobs.
+    expect(2 * MAX_VERSIONS).toBeLessThanOrEqual(MFK_LIMITS.maxEntries);
+  });
+
+  async function versioned() {
+    const backend = new MemoryBackend();
+    const { lib } = watched(backend);
+    await lib.save(partDocument());
+    await lib.save(await partWithImport(), [renameEntry('Imported')]);
+    const a = value(await lib.createVersion('doc-1', { name: 'With import', description: 'd' }));
+    const b = value(await lib.createVersion('doc-1', { name: 'Same revision' }));
+    await lib.save(partDocument('doc-1', 'Later'), [renameEntry('Later')]);
+    const c = value(await lib.createVersion('doc-1', { name: 'Later' }));
+    await lib.save(partDocument('doc-1', 'Current'), [renameEntry('Current')]);
+    return { backend, lib, versions: [a, b, c] };
+  }
+
+  const fields = (v: Version) => ({
+    id: v.id,
+    name: v.name,
+    description: v.description,
+    createdAt: v.createdAt,
+  });
+
+  it('round trip keeps the versions, their ids and documents', async () => {
+    const { lib, versions } = await versioned();
+    const originals = await Promise.all(
+      versions.map(async (v) => value(await lib.readVersion('doc-1', v.id)).document),
+    );
+    const plain = value(await lib.exportMfk('doc-1'));
+    expect(unpackMfk(plain.bytes)).toMatchObject({ manifest: null, versions: new Map() });
+    const exported = value(await lib.exportMfk('doc-1', { versions: true }));
+    const contents = unpackMfk(exported.bytes);
+    expect([...contents.versions.keys()]).toEqual(versions.map((v) => v.id));
+    expect(contents.blobs.size).toBe(1);
+
+    await lib.remove('doc-1');
+    const imported = value(await lib.importMfk(exported.bytes));
+    expect(imported.summary).toMatchObject({ id: 'doc-1', name: 'Current' });
+    const listed = value(await lib.listVersions('doc-1'));
+    expect(listed.map(fields)).toEqual(versions.map(fields));
+    // Two versions of one revision share one snapshot; the document is the newest revision.
+    expect(listed.map((v) => v.revision)).toEqual([1, 1, 2]);
+    for (const [i, v] of listed.entries()) {
+      expect(value(await lib.readVersion('doc-1', v.id)).document).toEqual(originals[i]);
+    }
+    expect((await opened(lib, 'doc-1')).document.name).toBe('Current');
+    expect(await lib.readLog('doc-1')).toEqual({ ok: true, value: [] });
+
+    // Its history starts over: no replay crosses from one imported revision into the next.
+    await lib.save(partDocument('doc-1', 'After'), [renameEntry('After')]);
+    for (let i = 0; i < 3; i++) await lib.save(partDocument('doc-1', `After ${i}`));
+    expect(value(await lib.readRevision('doc-1', 3)).document.name).toBe('Current');
+    expect(value(await lib.readRevision('doc-1', 4)).document.name).toBe('After');
+    for (const v of listed) expect((await lib.readVersion('doc-1', v.id)).ok).toBe(true);
+
+    // Imported again under a new id (this one is taken), the version ids stay.
+    const again = value(await lib.importMfk(exported.bytes));
+    expect(again.summary.id).toBe('v-4');
+    const copies = value(await lib.listVersions('v-4'));
+    expect(copies.map(fields)).toEqual(versions.map(fields));
+    const first = value(await lib.readVersion('v-4', copies[0]!.id)).document;
+    expect(first).toEqual({ ...originals[0], id: 'v-4' });
+  });
+
+  it('refuses to export a file with more entries than an import reads', async () => {
+    const { lib } = await versioned();
+    const max = MFK_LIMITS.maxEntries;
+    try {
+      // The document, the manifest, three versions and one blob.
+      MFK_LIMITS.maxEntries = 5;
+      expect(await lib.exportMfk('doc-1', { versions: true })).toEqual({
+        ok: false,
+        message:
+          'It holds too many versions and imported files for one .mfk file (6 entries; at most 5).',
+      });
+      MFK_LIMITS.maxEntries = 6;
+      expect((await lib.exportMfk('doc-1', { versions: true })).ok).toBe(true);
+    } finally {
+      MFK_LIMITS.maxEntries = max;
+    }
+  });
+
+  it('refuses a file whose versions do not check out, storing nothing', async () => {
+    const { lib } = await versioned();
+    const exported = unpackMfk(value(await lib.exportMfk('doc-1', { versions: true })).bytes);
+    await lib.remove('doc-1');
+    const manifest = JSON.parse(exported.manifest!);
+    const [first] = manifest.versions;
+    const repack = (m: unknown, versions = exported.versions) =>
+      packMfk(exported.document, exported.blobs, {
+        manifest: typeof m === 'string' ? m : JSON.stringify(m),
+        versions,
+      });
+    const cases: [Uint8Array, string | RegExp][] = [
+      [repack('{'), 'The file is damaged: its manifest is not valid JSON.'],
+      [repack({ ...manifest, format: 'x' }), /not one this app reads/],
+      [repack({ ...manifest, versions: 'x' }), /its list of versions is invalid/],
+      [
+        repack({ ...manifest, versions: [first, first] }),
+        'The file is damaged: its list of versions is invalid.',
+      ],
+      [
+        repack({ ...manifest, versions: [{ ...first, id: '../x' }] }),
+        /list of versions is invalid/,
+      ],
+      [repack({ ...manifest, versions: [{ ...first, revision: 0 }] }), /invalid/],
+      [repack({ ...manifest, versions: [{ ...first, createdAt: 'soon' }] }), /invalid/],
+      [repack({ ...manifest, versions: [{ ...first, name: ' padded ' }] }), /invalid/],
+      [repack({ ...manifest, versions: [{ ...first, snapshotSha256: 'ab' }] }), /invalid/],
+      [
+        repack(manifest, new Map([...exported.versions].slice(1))),
+        'The file lists the version "With import" but does not hold it.',
+      ],
+      [
+        repack(
+          manifest,
+          new Map(
+            [...exported.versions].map(([id, t]) => [id, t.replace('"Bracket"', '"Brackex"')]),
+          ),
+        ),
+        'The version "With import" in the file is damaged: its SHA-256 does not match.',
+      ],
+    ];
+    // A version of another document, with a matching SHA-256.
+    const foreign = new Map(exported.versions);
+    const other = exported.versions.get(first.id)!.replace('"id": "doc-1"', '"id": "doc-2"');
+    foreign.set(first.id, other);
+    const { sha256Hex } = await import('@manufakture/io');
+    const sha = await sha256Hex(new TextEncoder().encode(other));
+    cases.push([
+      repack({ ...manifest, versions: [{ ...first, snapshotSha256: sha }] }, foreign),
+      'The version "With import" in the file belongs to another document.',
+    ]);
+    for (const [bytes, message] of cases) {
+      const r = await lib.importMfk(bytes);
+      expect(r.ok ? 'ok' : r.message).toMatch(message);
+      expect(await lib.has('doc-1')).toBe(false);
+    }
   });
 });

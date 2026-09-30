@@ -164,6 +164,32 @@ describe('unpackMfk limits', () => {
     const r = unpackMfk(zip(files), MFK_LIMITS);
     expect(r.document).toBe('{}');
     expect([...r.blobs.keys()]).toEqual([sha('c')]);
+    expect(r).toMatchObject({ manifest: null, versions: new Map() });
+  });
+
+  it('reads the manifest and well-named version documents, within the document limit', () => {
+    const files: Zippable = {
+      'document.json': doc,
+      'manifest.json': encode('{"m":1}'),
+      'versions/v-1.json': encode('{"v":1}'),
+      'versions/../x.json': encode('no'),
+      'versions/v 2.json': encode('no'),
+      'versions/v-3.txt': encode('no'),
+      'versions/a/b.json': encode('no'),
+    };
+    const r = unpackMfk(zip(files), MFK_LIMITS);
+    expect(r.manifest).toBe('{"m":1}');
+    expect(r.versions).toEqual(new Map([['v-1', '{"v":1}']]));
+    const small: MfkLimits = { ...MFK_LIMITS, maxDocumentBytes: 6 };
+    expect(() =>
+      unpackMfk(zip({ 'document.json': doc, 'versions/v-1.json': encode('{"v":12}') }), small),
+    ).toThrow('versions/v-1.json is larger than');
+    expect(() =>
+      unpackMfk(zip({ 'document.json': doc, 'manifest.json': new Uint8Array([0xff]) })),
+    ).toThrow('manifest.json is not UTF-8 text.');
+    expect(() =>
+      packMfk('{}', new Map(), { manifest: '{}', versions: new Map([['../x', '']]) }),
+    ).toThrow('Not a version id: ../x');
   });
 
   it('counts a stored entry at the size it is copied at, and refuses one whose sizes differ', () => {

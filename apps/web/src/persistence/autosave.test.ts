@@ -251,4 +251,30 @@ describe('autosave', () => {
     await flushing;
     expect(autosave.unsaved()).toBe(false);
   });
+
+  it('names a version of what the user sees: pending changes are saved first', async () => {
+    const { documents, autosave, library, onSaved } = setup();
+    // Never stored yet: the version stores it first.
+    const first = await autosave.createVersion({ name: 'Blank' });
+    expect(first).toMatchObject({ ok: true, value: { name: 'Blank', revision: 1 } });
+    expect(onSaved).toHaveBeenCalledTimes(1);
+    documents.getState().execute(rename('Two'), 'Rename');
+    expect(autosave.status.getState().state).toBe('pending');
+    const second = await autosave.createVersion({ name: 'Named', description: 'After a rename' });
+    expect(second).toMatchObject({ ok: true, value: { name: 'Named', revision: 2 } });
+    expect(autosave.status.getState().state).toBe('saved');
+    const versions = await library.listVersions('doc-1');
+    expect(versions.ok && versions.value.map((v) => v.name)).toEqual(['Blank', 'Named']);
+    const read = await library.readVersion('doc-1', second.ok ? second.value.id : '');
+    expect(read.ok && read.value.document.name).toBe('Two');
+  });
+
+  it('records no version when the save before it fails', async () => {
+    const { documents, autosave, library, save } = setup();
+    save.mockRejectedValueOnce(new Error('The disk is full'));
+    documents.getState().execute(rename('Two'), 'Rename');
+    const r = await autosave.createVersion({ name: 'Named' });
+    expect(r).toEqual({ ok: false, message: 'The document could not be saved: The disk is full' });
+    expect(await library.has('doc-1')).toBe(false);
+  });
 });

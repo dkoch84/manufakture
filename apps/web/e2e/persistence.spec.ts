@@ -217,3 +217,51 @@ test('two tabs on one document never save over each other', async ({ page, conte
   await expect(second.getByRole('button', { name: 'From the first tab (copy)' })).toBeVisible();
   await second.close();
 });
+
+test('a named version reads back after later edits and a reload', async ({ page }) => {
+  test.setTimeout(120_000);
+  const rename = (name: string) =>
+    page.evaluate(
+      (n) =>
+        window
+          .__manufakture!.document.getState()
+          .execute({ type: 'renameDocument', name: n }, 'Rename document').ok,
+      name,
+    );
+  await page.goto('/');
+  await expect(page.getByTestId('empty-hint')).toBeVisible({ timeout: 90_000 });
+  await page.waitForFunction(() => Boolean(window.__manufakture?.autosave));
+  expect(await rename('First draft')).toBe(true);
+  await saved(page);
+
+  // There is no version UI yet: the test hook names one, as the app will.
+  const version = await page.evaluate(() =>
+    window.__manufakture!.autosave.createVersion({ name: 'Draft', description: 'Before edits' }),
+  );
+  if (!version.ok) throw new Error(version.message);
+  expect(version.value).toMatchObject({ name: 'Draft', description: 'Before edits' });
+
+  expect(await rename('Second draft')).toBe(true);
+  await saved(page);
+  const id = new URL(page.url()).searchParams.get('doc')!;
+  expect(id).toBeTruthy();
+
+  await page.reload();
+  await expect(page.getByTestId('document-name')).toHaveText('Second draft', { timeout: 90_000 });
+  await page.waitForFunction(() => Boolean(window.__manufakture?.library));
+  const read = await page.evaluate(
+    async ({ id, versionId }) => {
+      const lib = window.__manufakture!.library;
+      const versions = await lib.listVersions(id);
+      const version = await lib.readVersion(id, versionId);
+      const revision = version.ok
+        ? await lib.readRevision(id, version.value.version.revision)
+        : null;
+      return { versions, version, revision };
+    },
+    { id, versionId: version.value.id },
+  );
+  expect(read.versions).toEqual({ ok: true, value: [version.value] });
+  expect(read.version).toMatchObject({ ok: true, value: { document: { name: 'First draft' } } });
+  expect(read.revision).toMatchObject({ ok: true, value: { document: { name: 'First draft' } } });
+});

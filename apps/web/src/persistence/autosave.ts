@@ -16,7 +16,10 @@ import {
   RevisionConflict,
   type DocumentLibrary,
   type DocumentSummary,
+  type LibraryResult,
   type LogEntry,
+  type Version,
+  type VersionMeta,
 } from './library';
 
 export interface SaveStatus {
@@ -48,6 +51,12 @@ export interface Autosave {
   unsaved(): boolean;
   /** Stop listening, after saving what is pending. */
   stop(): Promise<void>;
+  /**
+   * Name the open document's current state: save what is pending first (and store the document
+   * when it never was), then record the version. Fails without recording anything when the
+   * save does.
+   */
+  createVersion(meta: VersionMeta): Promise<LibraryResult<Version>>;
 }
 
 export interface AutosaveOptions {
@@ -235,6 +244,22 @@ export function startAutosave(
       if (status.getState().documentId === id) setStatus('idle', openDocument());
     },
     unsaved: () => pending.size > 0 || saving > 0,
+    async createVersion(meta) {
+      const id = openDocument().id;
+      const saved = await flush();
+      if (!saved && pending.has(id)) {
+        return {
+          ok: false,
+          message: `The document could not be saved: ${status.getState().message ?? 'unknown error'}`,
+        };
+      }
+      try {
+        if (!(await library.has(id))) onSaved?.(await library.save(openDocument(), []));
+        return await library.createVersion(id, meta);
+      } catch (e) {
+        return { ok: false, message: e instanceof Error ? e.message : String(e) };
+      }
+    },
     async stop() {
       stopped = true;
       unsubscribe();

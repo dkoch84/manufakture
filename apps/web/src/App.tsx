@@ -408,6 +408,19 @@ export function App({
   }, [library, documents, autosaveDelays]);
   const saveStatus = useStore(autosave?.status ?? NO_SAVING);
 
+  // Test hooks for persistence (see testHooks.ts): named versions have no UI yet.
+  useEffect(() => {
+    if (!testHooksEnabled || !library || !autosave) return;
+    window.__manufakture = { ...window.__manufakture, library, autosave };
+    return () => {
+      const hooks = window.__manufakture;
+      if (!hooks) return;
+      delete hooks.library;
+      delete hooks.autosave;
+      if (Object.keys(hooks).length === 0) delete window.__manufakture;
+    };
+  }, [library, autosave]);
+
   const actions = useMemo(
     () =>
       library ? homeActions({ library, documents, autosave, show, download: downloadBytes }) : null,

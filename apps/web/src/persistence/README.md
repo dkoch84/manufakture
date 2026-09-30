@@ -11,25 +11,27 @@ is in [docs/user/files.md](../../../../docs/user/files.md).
 | `idb.ts`      | The IndexedDB fallback (one object store, path to bytes).                                          |
 | `storage.ts`  | Picks OPFS, then IndexedDB, then memory; storage estimate and `persist()`.                         |
 | `blobs.ts`    | The storage form of imported files: content-addressed blobs, checked on load.                      |
-| `library.ts`  | `DocumentLibrary`: list, open, save, rename, duplicate, delete, `.mfk` export and import.          |
+| `library.ts`  | `DocumentLibrary`: list, open, save, rename, duplicate, delete, versions, replay, `.mfk` files.    |
 | `mfk.ts`      | Packing and unpacking `.mfk` zips, with limits and a bounded inflate (loaded on first use).        |
 | `limits.ts`   | The `.mfk` file size limit, checked before a picked or dropped file is read.                       |
-| `autosave.ts` | Records the command log per document, saves after edits pause, retries failures with backoff.      |
+| `autosave.ts` | Records the command log per document, saves after edits pause, retries failures, names versions.   |
 | `imports.ts`  | Reads reference imports again when a document opens (loaded on first use).                         |
 | `url.ts`      | The open document in the page URL (`?doc=<id>`).                                                   |
 
 ## Layout
 
 ```
-documents/<id>/head.json              pointer: current revision, its SHA-256, name, dates, sizes
+documents/<id>/head.json              pointer: current revision, its SHA-256, name, dates, sizes,
+                                      and `versions: <n>`, the current version list (0: none)
 documents/<id>/snapshot-<rev>.json    the document at revision <rev>, storage form
 documents/<id>/log-<rev>.json         the commands from the previous revision to <rev>
+documents/<id>/versions-<n>.json      the named versions, the n-th write of the list
 documents/<id>/blobs/<sha256>         each imported file, once
 documents/<id>/damaged-snapshot-<rev>-<sha>.json, damaged-log-<rev>-<sha>.json
                                       a complete snapshot that did not read, and its log, kept aside
 ```
 
-`<rev>` is zero-padded to eight digits. Ids must match `[A-Za-z0-9][A-Za-z0-9_-]{0,127}`; the app
+`<rev>` and `<n>` are zero-padded to eight digits. Ids must match `[A-Za-z0-9][A-Za-z0-9_-]{0,127}`; the app
 makes UUIDs, and an imported `.mfk` with any other id gets a new one.
 
 ## Crash safety
@@ -45,7 +47,14 @@ browser, so nothing is ever overwritten in place that a pointer names. With the 
 3. writes `log-<n+1>.json`, when there are commands, with `base: n`;
 4. writes `snapshot-<n+1>.json`;
 5. writes `head.json` naming revision `n + 1` and the snapshot's SHA-256: the commit;
-6. deletes snapshots older than `n` (best effort; `n`, the previous commit, stays as the spare).
+6. deletes snapshots older than `n` (best effort; `n`, the previous commit, stays as the spare),
+   except the history: every revision a version names, every checkpoint (below), the lowest
+   retained snapshot (where the history starts), and a revision whose log segment starts a
+   history (`base: null`, see "Versions in `.mfk` files"). When the version list cannot be read,
+   nothing is deleted (logged).
+
+Step 1 also deletes version lists above the one the head names: what a version change that died
+left behind.
 
 A save over an unreadable head first recovers the head from the snapshots, then goes on as above.
 Opening takes the newest snapshot that reads completely: the JSON parses, the document migrates and
@@ -63,6 +72,12 @@ pattern matches: the next open or save then deletes the original above the head,
 stay until the document is deleted. A missing, empty or torn snapshot is not copied. The list reads heads only, so it is fast, and never writes: a document without
 a readable head is described from its newest readable snapshot (and repaired when opened), and one
 that cannot be read at all is listed as damaged (so it can be deleted).
+
+A version list follows the same rule (below): the head is its pointer too. When the head is
+missing or torn, recovery takes the newest `versions-<n>.json` that reads, and deletes the ones
+above it; so does a save when no snapshot reads either. A save checks, just before writing the
+head, that the head still names the same revision, snapshot and version list, so without Web
+Locks a version another tab named meanwhile is never dropped.
 
 `readLog` follows the chain back from the head (each segment's `base`; a revision without a
 segment was saved without commands, from the one before), and refuses a segment of the wrong shape.
@@ -83,7 +98,94 @@ says `conflict`, and the app offers to open the stored version or save this tab'
 
 `library.test.ts` crashes a save at every step, cleanly and with a torn write, then reopens the
 store with a new library and checks the document is the old or the new one and that the next save
-works.
+works; it does the same for every step of `createVersion`, checking the version list is the old
+or the new one.
+
+## Named versions
+
+A version names a stored revision for good: `{ id, name, description, revision, snapshotSha256,
+createdAt }`. Its id (a UUID) is permanent and never reused, so other documents can pin it
+(`documentId` plus `versionId`, plan decision 8); versions are storage, not document shape, and
+the file format does not change for them. `createVersion(id, { name, description })` names the
+revision the head names; autosave's `createVersion` saves what is pending first (and stores a
+document that never was), so a version is always of what the user sees. `listVersions`,
+`renameVersion` and `readVersion` go with it. There is no delete: a pinned copy lives in the
+documents that derive from it anyway.
+
+The list is one file, rewritten whole on every change:
+
+```json
+{
+  "format": "manufakture-versions",
+  "id": "<document id>",
+  "generation": 3,
+  "versions": [
+    {
+      "id": "...",
+      "name": "...",
+      "description": "",
+      "revision": 12,
+      "snapshotSha256": "...",
+      "createdAt": "..."
+    }
+  ]
+}
+```
+
+A change writes `versions-<n+1>.json` (generation `n + 1`), then the head with `versions: n + 1`
+(the commit), then deletes the lists before `n` (best effort): list `n` stays as the spare. A
+crash before the head leaves the old list (the new file lies above the head, and the next open or
+save deletes it); a torn head is recovered from the newest list that reads, which is the new one.
+Without Web Locks another tab can delete the new list as stale between its write and the head
+naming it; a head that names a missing list is then read from the newest older list that reads
+(the spare), no snapshot is pruned while that is so, and the next version change writes a whole
+list above it. Only the version named in that race is lost, never the ones before. Every record is checked field by
+field when read (and a list that would not read back is never written): names are trimmed, 1 to
+200 characters; descriptions at most 2000; ids unique; revisions positive; the SHA-256 a hash.
+
+`readVersion` reads the version's snapshot and checks it against the SHA-256 the version
+recorded. When the snapshot is gone or changed, the revision is rebuilt from the log (below) and
+the rebuilt storage form must match that SHA-256 instead; otherwise the version is reported
+damaged.
+
+## Checkpoints and replay
+
+Besides the head and the spare, a save keeps the snapshot of every revision `1 + k *
+CHECKPOINT_EVERY` (`CHECKPOINT_EVERY` is 64: revisions 1, 65, 129, ...) and of every revision a
+version names. So any revision is at most 63 log segments from a retained snapshot.
+
+`readRevision(id, rev)` takes the nearest retained snapshot at or below `rev` that reads, then
+replays each later revision's log segment through core `applyCommand` (a revision without a
+segment was saved without commands, and is its predecessor unchanged). Where a retained snapshot
+lies on the way (with `{ from }`, the replay starts at a given retained snapshot, a checkpoint say,
+and passes others), the replay is compared with it: by the SHA-256 of its storage form, and, for a
+snapshot an older format wrote, by canonical `serialize` of the two. A mismatch, or a logged
+command that no longer applies, is logged and the replay goes on from the snapshot (the result
+lists it in `mismatches`); with no snapshot to go on from, the read fails and says where. This is
+the mitigation for a later release changing what a command does: replay only ever runs between a
+snapshot and the revision asked for.
+
+`historyStart(id)` is the oldest retained snapshot that reads. A document saved before
+checkpoints existed kept only its last two snapshots, so its history starts at the older of those,
+which is then kept for good as the lowest retained snapshot.
+
+## Versions in `.mfk` files
+
+An export that would hold more entries than an import reads (`MFK_LIMITS.maxEntries`) is refused
+with a clear message rather than written. `exportMfk(id, { versions: true })` adds `manifest.json` (`{ "format": "manufakture-manifest",
+"versions": [...] }`, the records with each `snapshotSha256` that of its entry) and
+`versions/<version id>.json`, each version's document in storage form; their blobs go in
+`blobs/` with the document's. Import treats all of it as outside input and refuses the whole file
+on any fault: every record is checked as above, each must have its entry, the entry must match its
+SHA-256, read as a document (blobs checked, migrated, validated) and belong to the imported
+document. It then stores each version's document as a revision of its own (1, 2, ...; versions
+with identical documents share one), oldest first, the document itself as the newest, then the
+version list and the head. Version ids, names, descriptions and dates are kept, so pins in other
+documents still match; revisions and SHA-256s are this store's. Each of those revisions gets an
+empty log segment with `base: null`, which says no logged history leads to it, so replay never
+crosses from one imported revision into the next; step 6 keeps them. An import that dies before
+its head is written is recovered from its snapshots like any document, possibly without its
+version list.
 
 ## Blobs and the command log
 
@@ -105,4 +207,5 @@ life of the document, since logged commands can name a file the current snapshot
   a reload regenerates from the document. The layout leaves room for `documents/<id>/cache/`.
 - **Merging two tabs' changes.** A conflict is resolved by picking one version (or keeping both
   as separate documents), not by replaying one tab's commands onto the other's.
-- **Pruning.** Blobs and log segments are never pruned while the document exists.
+- **Pruning.** Blobs and log segments are never pruned while the document exists, and retained
+  snapshots (checkpoints, versions) grow with the history; the storage estimate is shown.

@@ -1,6 +1,8 @@
 // `.mfk` files: a document as one file, to move between machines. A zip holding
 // `document.json` (the document in its storage form: imports point at blobs, see blobs.ts) and
-// `blobs/<sha256>` (each imported file, once). Loaded on first use, with fflate.
+// `blobs/<sha256>` (each imported file, once). A file exported with its named versions also
+// holds `manifest.json` (the version records) and `versions/<version id>.json` (each version's
+// document, in storage form); library.ts checks what they say. Loaded on first use, with fflate.
 //
 // A file from elsewhere is untrusted. Nothing is inflated before the zip's directory is read
 // here and checked as a whole: the file's own size, the number of entries, and that every entry
@@ -13,8 +15,8 @@
 // size drops what does not fit but still decodes the whole stream, which a small file can make
 // take minutes. So a deflated entry is inflated as a stream, 64 KiB of input at a time, counting
 // its output, and refused as soon as it passes the size it claims (or if it ends short of it).
-// Only `document.json` and well-formed blob names are read; every other entry, including names
-// like `../x` or `/etc/x`, is ignored and never inflated.
+// Only `document.json`, `manifest.json`, well-formed blob names and well-formed version names are
+// read; every other entry, including names like `../x` or `/etc/x`, is ignored and never inflated.
 
 import { Inflate, zipSync, type Zippable } from 'fflate';
 import { formatBytes } from '../io/files';
@@ -22,7 +24,12 @@ import { isSha256 } from './blobs';
 import { MAX_MFK_FILE_BYTES } from './limits';
 
 export const DOCUMENT_ENTRY = 'document.json';
+export const MANIFEST_ENTRY = 'manifest.json';
 export const BLOB_PREFIX = 'blobs/';
+export const VERSION_PREFIX = 'versions/';
+
+/** `versions/<id>.json`, with an id of the shape version ids have. */
+const VERSION_ENTRY = /^versions\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\.json$/;
 
 /** Zip compression methods: the only two read. */
 const STORED = 0;
@@ -33,7 +40,7 @@ export interface MfkLimits {
   maxFileBytes: number;
   /** Entries in the zip directory, read or not. */
   maxEntries: number;
-  /** `document.json`, uncompressed. */
+  /** `document.json`, `manifest.json` and each version's document, uncompressed. */
   maxDocumentBytes: number;
   /** One blob, uncompressed. */
   maxBlobBytes: number;
@@ -58,6 +65,17 @@ export interface MfkContents {
   document: string;
   /** Blob bytes by SHA-256 name (unchecked here: the loader checks each against its import). */
   blobs: Map<string, Uint8Array>;
+  /** `manifest.json` as text, when the file has one (unchecked here). */
+  manifest: string | null;
+  /** Each `versions/<id>.json` as text, by version id (unchecked here). */
+  versions: Map<string, string>;
+}
+
+/** What a file exported with its versions holds besides the document and blobs. */
+export interface MfkExtras {
+  manifest: string;
+  /** Each version's document text, by version id. */
+  versions: ReadonlyMap<string, string>;
 }
 
 export class MfkError extends Error {
@@ -67,11 +85,24 @@ export class MfkError extends Error {
   }
 }
 
-/** Write a `.mfk`: the document text and its blobs. */
-export function packMfk(document: string, blobs: ReadonlyMap<string, Uint8Array>): Uint8Array {
-  const files: Zippable = { [DOCUMENT_ENTRY]: new TextEncoder().encode(document) };
+/** Write a `.mfk`: the document text and its blobs, and optionally its versions. */
+export function packMfk(
+  document: string,
+  blobs: ReadonlyMap<string, Uint8Array>,
+  extras?: MfkExtras,
+): Uint8Array {
+  const encoder = new TextEncoder();
+  const files: Zippable = { [DOCUMENT_ENTRY]: encoder.encode(document) };
   // Imported files are mostly STEP text, which deflates well; STL is binary, and gains less.
   for (const [sha, bytes] of blobs) files[`${BLOB_PREFIX}${sha}`] = bytes;
+  if (extras) {
+    files[MANIFEST_ENTRY] = encoder.encode(extras.manifest);
+    for (const [id, text] of extras.versions) {
+      const name = `${VERSION_PREFIX}${id}.json`;
+      if (!VERSION_ENTRY.test(name)) throw new MfkError(`Not a version id: ${id}`);
+      files[name] = encoder.encode(text);
+    }
+  }
   return zipSync(files, { level: 6 });
 }
 
@@ -222,7 +253,8 @@ export function unpackMfk(bytes: Uint8Array, limits: MfkLimits = MFK_LIMITS): Mf
   let total = 0;
   for (const entry of entries) {
     const { name, method, size, originalSize } = entry;
-    const isDocument = name === DOCUMENT_ENTRY;
+    const isDocument =
+      name === DOCUMENT_ENTRY || name === MANIFEST_ENTRY || VERSION_ENTRY.test(name);
     const isBlob = name.startsWith(BLOB_PREFIX) && isSha256(name.slice(BLOB_PREFIX.length));
     if (!isDocument && !isBlob) continue;
     if (method !== STORED && method !== DEFLATE) {
@@ -248,21 +280,30 @@ export function unpackMfk(bytes: Uint8Array, limits: MfkLimits = MFK_LIMITS): Mf
     wanted.push(entry);
   }
 
-  let document: Uint8Array | null = null;
+  let document: string | null = null;
+  let manifest: string | null = null;
   const blobs = new Map<string, Uint8Array>();
+  const versions = new Map<string, string>();
   for (const entry of wanted) {
     const data = bytes.subarray(entry.dataStart, entry.end);
     const read =
       entry.method === STORED ? data.slice() : inflateEntry(data, entry.originalSize, entry.name);
-    if (entry.name === DOCUMENT_ENTRY) document = read;
+    const version = VERSION_ENTRY.exec(entry.name)?.[1];
+    if (entry.name === DOCUMENT_ENTRY) document = utf8(read, entry.name);
+    else if (entry.name === MANIFEST_ENTRY) manifest = utf8(read, entry.name);
+    else if (version !== undefined) versions.set(version, utf8(read, entry.name));
     else blobs.set(entry.name.slice(BLOB_PREFIX.length), read);
   }
-  if (!document) throw new MfkError(`This is not a manufakture file: it has no ${DOCUMENT_ENTRY}.`);
-  let text: string;
-  try {
-    text = new TextDecoder('utf-8', { fatal: true }).decode(document);
-  } catch {
-    throw new MfkError(`${DOCUMENT_ENTRY} is not UTF-8 text.`);
+  if (document === null) {
+    throw new MfkError(`This is not a manufakture file: it has no ${DOCUMENT_ENTRY}.`);
   }
-  return { document: text, blobs };
+  return { document, blobs, manifest, versions };
+}
+
+function utf8(bytes: Uint8Array, name: string): string {
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    throw new MfkError(`${name} is not UTF-8 text.`);
+  }
 }
