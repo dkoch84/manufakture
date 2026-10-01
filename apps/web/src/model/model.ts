@@ -14,6 +14,11 @@
 // `document` stays the stored one, which is what the tree compares against. Exporting every
 // configuration regenerates other rows through the same worker: `shareRegenerator` holds the
 // open document's regens back meanwhile and builds it again when that is done.
+//
+// Viewing a past version (T2.5b) works the same way: `startView` builds the viewed document in
+// its own model store, holding the worker for as long as the view is open, so the open
+// document's model and history are not touched; when the view ends, the open document is built
+// again.
 
 import { configured, type ManufaktureDocument } from '@manufakture/core';
 import type { FeatureResult } from '@manufakture/regen';
@@ -266,5 +271,89 @@ export function shareRegenerator(inner: Regenerator): SharedRegenerator {
         for (const resolve of waiting) resolve(null);
       }
     },
+  };
+}
+
+/**
+ * A document shown read-only in place of the open one (a version or a revision from its
+ * history): its own model, built through the shared regenerator's exclusive slot, which it holds
+ * until `stop`. The open document's model stays as it was; its regens wait, and it is built
+ * again once the view ends.
+ */
+export interface ViewSession {
+  /** The viewed document, as stored (before its configuration). */
+  readonly document: ManufaktureDocument;
+  /** The viewed document's model; the open document's is a different store. */
+  readonly model: ModelStore;
+  /** End the view. Idempotent. */
+  stop(): void;
+  /**
+   * Resolves when the worker is released (after `stop`); rejects when the view could not take
+   * it (other exclusive work, such as an export, is running).
+   */
+  readonly done: Promise<void>;
+}
+
+/** Build `document` in a model of its own, holding `shared`'s worker until the view stops. */
+export function startView(shared: SharedRegenerator, document: ManufaktureDocument): ViewSession {
+  const model = createModelStore();
+  let stopped = false;
+  let release: () => void = () => undefined;
+  const ended = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const built = buildable(document);
+  const done = shared.exclusive(async (regen) => {
+    let requests = 0;
+    const request = (retries = 0) => {
+      const mine = ++requests;
+      model.setState({ available: true, pending: true });
+      regen(built.document).then(
+        (view) => {
+          if (stopped) return;
+          if (view === null) {
+            if (mine !== requests) return;
+            if (retries < MAX_REGEN_RETRIES) request(retries + 1);
+            else {
+              model.setState({
+                pending: false,
+                error: 'the kernel kept dropping the request. Go back and view it again.',
+              });
+            }
+            return;
+          }
+          if (view.generation <= model.getState().generation) return;
+          model.setState({
+            generation: view.generation,
+            document,
+            configurationError: built.error,
+            parts: view.parts,
+            ms: view.ms,
+            error: null,
+            pending: mine !== requests,
+          });
+        },
+        (e: unknown) => {
+          if (stopped) return;
+          model.setState({ error: e instanceof Error ? e.message : String(e), pending: false });
+        },
+      );
+    };
+    // A kernel recycle while viewing loses the viewed bodies too: build them again.
+    const off = shared.regenerator.onInvalidated(() => {
+      if (!stopped) request();
+    });
+    if (!stopped) request();
+    await ended;
+    off();
+  });
+  return {
+    document,
+    model,
+    stop() {
+      stopped = true;
+      release();
+    },
+    done,
   };
 }

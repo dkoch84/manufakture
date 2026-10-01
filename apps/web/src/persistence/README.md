@@ -205,6 +205,10 @@ The log is what `DocumentStore` reports: one entry per `execute`, `undo` and `re
 20 MiB import is logged by reference to the blob the snapshot already has. Blobs are kept for the
 life of the document, since logged commands can name a file the current snapshot no longer holds.
 `readLog(id)` returns the committed log with the files put back (and checked).
+`readHistory(id)` returns the same chain per revision with only each entry's `cause`, `label` and
+`at`, without reading any blob: the history panel's timeline (`src/history/`). A restore is logged
+as a core `replaceDocument` command carrying the whole document, with its files by reference like
+any other command.
 
 ## Not done
 

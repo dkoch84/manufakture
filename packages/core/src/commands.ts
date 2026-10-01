@@ -26,6 +26,7 @@ import {
   ConfigRowIdSchema,
   ConfigRowSchema,
   DisplayUnitsSchema,
+  DocumentSchema,
   FeatureSchema,
   InstanceSchema,
   InstanceSourceSchema,
@@ -296,6 +297,14 @@ export const SimpleCommandSchema = z.discriminatedUnion('type', [
     mateId,
     suppressed: z.boolean(),
   }),
+  /**
+   * History only: put a whole document in place of this one (restore a version or revision; the
+   * undo of a restore). The replacement must be this document (same `id`) and valid as a whole,
+   * assemblies and configurations included. Its inverse is `replaceDocument` of the document it
+   * replaced. Clients restoring an older state build the replacement with `restoredDocument`,
+   * which keeps the id counters from going back.
+   */
+  z.strictObject({ type: z.literal('replaceDocument'), document: DocumentSchema }),
 ]);
 
 export type SimpleCommand = z.infer<typeof SimpleCommandSchema>;
@@ -357,6 +366,16 @@ function applyUnchecked(doc: ManufaktureDocument, command: Command): CoreResult<
         document: { ...doc, units: command.units },
         inverse: { type: 'setDisplayUnits', units: doc.units },
       });
+    case 'replaceDocument': {
+      const next = command.document;
+      if (next.id !== doc.id) {
+        return fail('invalid-id', `The replacement is document "${next.id}", not "${doc.id}"`, [
+          'document',
+          'id',
+        ]);
+      }
+      return ok({ document: next, inverse: { type: 'replaceDocument', document: doc } });
+    }
     case 'renameDocument': {
       const name = command.name.trim();
       if (name.length === 0 || name.length > MAX_DOCUMENT_NAME) {
@@ -405,6 +424,44 @@ function applyUnchecked(doc: ManufaktureDocument, command: Command): CoreResult<
     default:
       return applyToPart(doc, command);
   }
+}
+
+/** Each counter at the higher of its values in `a` and `b`. */
+function maxCounters(
+  a: Readonly<Record<string, number>>,
+  b: Readonly<Record<string, number>> | undefined,
+): Record<string, number> {
+  const out: Record<string, number> = { ...a };
+  for (const [key, n] of Object.entries(b ?? {})) out[key] = Math.max(out[key] ?? 1, n);
+  return out;
+}
+
+/**
+ * The replacement a restore puts in place of `current`: `past` (an earlier version or revision of
+ * it, or one from another branch) as it was, but with `current`'s id and with every id counter
+ * (the document's, and those of each part and assembly both have) at the higher of the two
+ * values, so an id handed out after `past` is never handed out again. The result is what
+ * `replaceDocument` takes.
+ */
+export function restoredDocument(
+  current: ManufaktureDocument,
+  past: ManufaktureDocument,
+): ManufaktureDocument {
+  const parts = new Map(current.parts.map((p) => [p.id, p]));
+  const assemblies = new Map(current.assemblies.map((a) => [a.id, a]));
+  return {
+    ...past,
+    id: current.id,
+    parts: past.parts.map((p) => ({
+      ...p,
+      nextIds: maxCounters(p.nextIds, parts.get(p.id)?.nextIds),
+    })),
+    assemblies: past.assemblies.map((a) => ({
+      ...a,
+      nextIds: maxCounters(a.nextIds, assemblies.get(a.id)?.nextIds),
+    })),
+    nextIds: maxCounters(past.nextIds, current.nextIds),
+  };
 }
 
 /** Commands that add, remove, rename or move whole part studios. */

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { applyCommand, variableUsers, type Command } from './commands';
+import { applyCommand, restoredDocument, variableUsers, type Command } from './commands';
+import { serialize } from './format';
 import { isFeatureActive } from './document';
 import type { CoreErrorCode } from './result';
 import type { ChamferFeature, Feature, ManufaktureDocument, SketchFeature } from './schema';
@@ -780,5 +781,184 @@ describe('batch', () => {
 
   it('refuses an empty batch', () => {
     expectError(base(), { type: 'batch', commands: [] }, 'schema');
+  });
+});
+
+/** The bracket with a second part, an assembly showing it and a configuration row. */
+function rich(): ManufaktureDocument {
+  const doc = unwrap(
+    applyCommand(base(), {
+      type: 'batch',
+      commands: [
+        { type: 'addPart', partId: 'part#2', name: 'Lid' },
+        { type: 'addAssembly', assemblyId: 'assembly#1', name: 'Assembly 1' },
+        {
+          type: 'addInstance',
+          assemblyId: 'assembly#1',
+          instance: {
+            id: 'inst#1',
+            name: 'Bracket',
+            source: { part: PART },
+            fixed: true,
+            suppressed: false,
+            pose: { translation: [0, 0, 0], rotation: [0, 0, 0, 1] },
+          },
+        },
+        {
+          type: 'setConfigParameter',
+          parameter: { id: 'cp#1', name: 'Wall', kind: 'variable', variable: 'thickness' },
+        },
+        { type: 'setConfigRow', row: { id: 'cfg#1', name: 'Thick', values: { 'cp#1': mm('8') } } },
+        { type: 'setActiveConfiguration', rowId: 'cfg#1' },
+      ],
+    }),
+  ).document;
+  return deepFreeze(doc);
+}
+
+describe('replaceDocument', () => {
+  it('puts a whole document in place, and its inverse puts the old one back', () => {
+    const past = base();
+    const now = rich();
+    const done = unwrap(applyCommand(now, { type: 'replaceDocument', document: past }));
+    expect(serialize(done.document)).toBe(serialize(past));
+    expect(done.inverse).toEqual({ type: 'replaceDocument', document: now });
+    // Undo brings back the assemblies, parts and configurations; redo the replacement again.
+    const undone = unwrap(applyCommand(done.document, done.inverse));
+    expect(serialize(undone.document)).toBe(serialize(now));
+    const redone = unwrap(applyCommand(undone.document, undone.inverse));
+    expect(serialize(redone.document)).toBe(serialize(past));
+  });
+
+  it('is one undo step in the store, with undo and redo', () => {
+    const store = unwrap(DocumentStore.create(rich()));
+    const events: string[] = [];
+    store.subscribe((e) => events.push(`${e.cause}:${e.command?.type ?? ''}`));
+    const change = unwrap(
+      store.execute({ type: 'replaceDocument', document: base() }, 'Restore version'),
+    );
+    expect(change.assemblies.map((a) => a.status)).toEqual(['removed']);
+    expect(change.configurationsChanged).toBe(true);
+    expect(store.document.assemblies).toEqual([]);
+    expect(store.undoStack.map((e) => e.label)).toEqual(['Restore version']);
+    unwrap(store.undo());
+    expect(serialize(store.document)).toBe(serialize(rich()));
+    unwrap(store.redo());
+    expect(serialize(store.document)).toBe(serialize(base()));
+    expect(events).toEqual([
+      'execute:replaceDocument',
+      'undo:replaceDocument',
+      'redo:replaceDocument',
+    ]);
+  });
+
+  it('refuses another document', () => {
+    expectError(
+      base(),
+      { type: 'replaceDocument', document: { ...rich(), id: 'doc-2' } },
+      'invalid-id',
+    );
+  });
+
+  it('refuses a replacement that does not match the schema', () => {
+    const { nextIds: _n, ...broken } = base();
+    void _n;
+    expectError(
+      base(),
+      { type: 'replaceDocument', document: broken } as unknown as Command,
+      'schema',
+    );
+    expectError(
+      base(),
+      { type: 'replaceDocument', document: { ...base(), version: 6 } } as unknown as Command,
+      'schema',
+    );
+  });
+
+  it('refuses a replacement that is not valid as a whole', () => {
+    const doc = clone(rich());
+    // The instance shows a part the replacement does not have.
+    doc.parts = doc.parts.filter((p) => p.id === 'part#2');
+    const r = applyCommand(base(), { type: 'replaceDocument', document: doc });
+    expect(r.ok).toBe(false);
+    const dangling = clone(rich());
+    dangling.parts[0]!.nextIds = { ...dangling.parts[0]!.nextIds, extrude: 1 };
+    expect(applyCommand(base(), { type: 'replaceDocument', document: dangling }).ok).toBe(false);
+  });
+
+  it('changes nothing when the replacement is the document itself', () => {
+    const store = unwrap(DocumentStore.create(base()));
+    const change = unwrap(store.execute({ type: 'replaceDocument', document: clone(base()) }));
+    expect(change.empty).toBe(true);
+    expect(store.canUndo).toBe(false);
+  });
+
+  it('round-trips through JSON, as the op log stores it', () => {
+    const command: Command = { type: 'replaceDocument', document: rich() };
+    const read = JSON.parse(JSON.stringify(command)) as Command;
+    const done = unwrap(applyCommand(base(), read));
+    expect(serialize(done.document)).toBe(serialize(rich()));
+  });
+});
+
+describe('restoredDocument', () => {
+  it('keeps the past content with the current id, and no counter goes back', () => {
+    const past = base();
+    // Later work: a part studio, an assembly, a feature; then the feature and part are deleted.
+    const later = unwrap(
+      applyCommand(past, {
+        type: 'batch',
+        commands: [
+          { type: 'addPart', partId: 'part#2', name: 'Lid' },
+          { type: 'addAssembly', assemblyId: 'assembly#1', name: 'Assembly 1' },
+          add(chamfer()),
+        ],
+      }),
+    ).document;
+    const current = unwrap(
+      applyCommand(later, {
+        type: 'batch',
+        commands: [
+          { type: 'deletePart', partId: 'part#2' },
+          { type: 'deleteFeature', partId: PART, featureId: 'chamfer#1' },
+        ],
+      }),
+    ).document;
+    const restored = restoredDocument(current, { ...past, id: 'elsewhere', name: 'Old name' });
+    expect(restored.id).toBe(current.id);
+    expect(restored.name).toBe('Old name');
+    expect(restored.parts.map((p) => p.features)).toEqual(past.parts.map((p) => p.features));
+    expect(restored.assemblies).toEqual([]);
+    expect(restored.nextIds).toEqual(current.nextIds);
+    expect(restored.parts[0]!.nextIds).toEqual(current.parts[0]!.nextIds);
+    // So the ids handed out after the past state are not handed out again.
+    const done = unwrap(applyCommand(current, { type: 'replaceDocument', document: restored }));
+    const again = applyCommand(done.document, { type: 'addPart', partId: 'part#2', name: 'Lid' });
+    expect(again.ok).toBe(false);
+    const chamferAgain = applyCommand(done.document, add(chamfer()));
+    expect(chamferAgain.ok).toBe(false);
+  });
+
+  it('keeps counters of parts and assemblies the current document no longer has', () => {
+    const past = rich();
+    const current = unwrap(
+      applyCommand(past, {
+        type: 'batch',
+        commands: [
+          { type: 'setActiveConfiguration', rowId: null },
+          { type: 'deleteConfigRow', rowId: 'cfg#1' },
+          { type: 'deleteConfigParameter', parameterId: 'cp#1' },
+          { type: 'deleteAssembly', assemblyId: 'assembly#1' },
+          { type: 'deletePart', partId: 'part#2' },
+        ],
+      }),
+    ).document;
+    const restored = restoredDocument(current, past);
+    expect(restored.assemblies).toEqual(past.assemblies);
+    expect(restored.parts).toEqual(past.parts);
+    expect(restored.configurations).toEqual(past.configurations);
+    expect(
+      unwrap(applyCommand(current, { type: 'replaceDocument', document: restored })).document,
+    ).toEqual(restored);
   });
 });

@@ -129,6 +129,13 @@ export interface LogEntry {
   at: string;
 }
 
+/** One saved revision's log entries, as the history panel lists them (commands left out). */
+export interface LoggedRevision {
+  /** The revision these entries lead to. */
+  revision: number;
+  entries: { cause: LogEntry['cause']; label: string; at: string }[];
+}
+
 /** A document as the home screen lists it. */
 export interface DocumentSummary {
   id: string;
@@ -984,6 +991,61 @@ export class DocumentLibrary {
   }
 
   /**
+   * The log per saved revision, oldest first: each revision with the causes, labels and times of
+   * the commands that led to it, without the commands (so no imported file is read). Follows the
+   * chain of segments back from the head, as `readLog` does; a save without commands, or one
+   * whose segment is gone, is not listed. For the history panel's timeline.
+   */
+  readHistory(id: string): Promise<LibraryResult<LoggedRevision[]>> {
+    return this.#run(async () => {
+      if (!isStorableId(id)) return { ok: false, message: `There is no document "${id}".` };
+      const chain = await this.#logChain(id);
+      if (!chain.ok) return chain;
+      return {
+        ok: true,
+        value: chain.value.map((segment) => ({
+          revision: segment.revision,
+          entries: (segment.entries as LogEntry[]).map(({ cause, label, at }) => ({
+            cause,
+            label,
+            at,
+          })),
+        })),
+      };
+    });
+  }
+
+  /** The log segments that lead to the head, oldest first. */
+  async #logChain(id: string): Promise<LibraryResult<LogSegment[]>> {
+    const dir = this.#dir(id);
+    const head = await this.#head(id);
+    if (!head) return { ok: true, value: [] };
+    const present = new Set(revisions(await this.#backend.list(dir), LOG));
+    const chain: LogSegment[] = [];
+    let rev = head.revision;
+    while (rev > 0) {
+      const bytes = present.has(rev) ? await this.#backend.read(`${dir}/${logName(rev)}`) : null;
+      // A save without commands writes no segment, and started from the revision before.
+      if (!bytes) {
+        rev -= 1;
+        continue;
+      }
+      let segment: unknown;
+      try {
+        segment = JSON.parse(decoder.decode(bytes));
+      } catch {
+        segment = null;
+      }
+      if (!isLogSegment(segment, rev)) {
+        return { ok: false, message: `The command log is damaged at revision ${rev}.` };
+      }
+      chain.push(segment);
+      rev = segment.base ?? 0;
+    }
+    return { ok: true, value: chain.reverse() };
+  }
+
+  /**
    * The command log, oldest first, with imported files put back (and checked). It follows the
    * chain of segments back from the head (each names the revision it started from), so a
    * segment a failed save left behind is never part of it.
@@ -991,35 +1053,12 @@ export class DocumentLibrary {
   readLog(id: string): Promise<LibraryResult<LogEntry[]>> {
     return this.#run(async () => {
       if (!isStorableId(id)) return { ok: false, message: `There is no document "${id}".` };
-      const dir = this.#dir(id);
       const blobs = this.#blobs(id);
-      const head = await this.#head(id);
-      if (!head) return { ok: true, value: [] };
-      const present = new Set(revisions(await this.#backend.list(dir), LOG));
-      const chain: LogSegment[] = [];
-      let rev = head.revision;
-      while (rev > 0) {
-        const bytes = present.has(rev) ? await this.#backend.read(`${dir}/${logName(rev)}`) : null;
-        // A save without commands writes no segment, and started from the revision before.
-        if (!bytes) {
-          rev -= 1;
-          continue;
-        }
-        let segment: unknown;
-        try {
-          segment = JSON.parse(decoder.decode(bytes));
-        } catch {
-          segment = null;
-        }
-        if (!isLogSegment(segment, rev)) {
-          return { ok: false, message: `The command log is damaged at revision ${rev}.` };
-        }
-        chain.push(segment);
-        rev = segment.base ?? 0;
-      }
+      const chain = await this.#logChain(id);
+      if (!chain.ok) return chain;
       const out: LogEntry[] = [];
       try {
-        for (const segment of chain.reverse()) {
+        for (const segment of chain.value) {
           const entries = (await hydrateFrom(segment.entries, (sha) =>
             blobs.read(sha),
           )) as LogEntry[];

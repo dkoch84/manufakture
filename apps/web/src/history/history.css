@@ -1,0 +1,131 @@
+/* The History panel in the side panel, and the banner shown while a past state is viewed. The
+   panel's head and buttons follow the Variables panel (variables.css). */
+.history-panel h3 {
+  margin: 0.5rem 0 0.2rem;
+  font-size: 0.8rem;
+  color: #5b6673;
+}
+
+.history-panel h4 {
+  margin: 0.4rem 0 0.2rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #5b6673;
+}
+
+.history-panel button {
+  font: inherit;
+  font-size: 0.78rem;
+}
+
+.history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.history-item {
+  padding: 0.25rem 0.35rem;
+  border: 1px solid #e3e7ec;
+  border-radius: 4px;
+}
+
+.history-current {
+  border-color: #4b6cf9;
+  background: #f1f4ff;
+}
+
+.history-item-head {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.history-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.history-tag {
+  padding: 0 0.3rem;
+  border-radius: 3px;
+  background: #e6ecff;
+  color: #2b43a8;
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.history-meta,
+.history-labels,
+.history-description {
+  font-size: 0.75rem;
+  color: #5b6673;
+  overflow-wrap: anywhere;
+}
+
+.history-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0.3rem 0;
+}
+
+.history-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  font-size: 0.78rem;
+}
+
+.history-form input,
+.history-form textarea {
+  font: inherit;
+  font-size: 0.8rem;
+}
+
+.history-form-actions {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.history-error {
+  color: #a3261b;
+  font-size: 0.78rem;
+}
+
+.history-viewer {
+  padding: 0.4rem 0.75rem;
+  background: #fff8e1;
+  border-bottom: 1px solid #e8d48b;
+  font-size: 0.85rem;
+}
+
+.history-viewer-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.history-viewer-note {
+  color: #6b5a1e;
+}
+
+.history-compare {
+  margin-top: 0.2rem;
+  font-size: 0.78rem;
+  color: #4d4a3a;
+}
+
+.history-compare ul {
+  margin: 0.1rem 0 0;
+  padding-left: 1.5em;
+}

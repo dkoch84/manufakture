@@ -680,6 +680,7 @@ resulting document with `checkDocument`, and returns `{ document, inverse }` or 
 | `deleteMate`             | `assemblyId`, `mateId` (with its connectors)          | `restoreMate`                                                          |
 | `restoreMate`            | `assemblyId`, `mate`, `index` (history only)          | `restoreMate` or `deleteMate`                                          |
 | `suppressMate`           | `assemblyId`, `mateId`, `suppressed`                  | `suppressMate`                                                         |
+| `replaceDocument`        | `document` (the same `id`; history only)              | `replaceDocument` (the old document)                                   |
 | `batch`                  | `commands` (applied in order, all or nothing)         | `batch` of inverses, reversed                                          |
 
 `restoreConfigParameter` and `restoreConfigRow` are history-only in the same way: they put back a
@@ -717,6 +718,17 @@ ids to have been allocated before, so undoing a delete brings back the same ids 
 as reuse. That is its only id check: it does not apply the split rule, because the states it
 restores really existed. Everything else (dependencies, expressions, sketch consistency) is
 checked as for any command.
+
+`replaceDocument` is history-only too: it puts a whole document in place of the open one, which
+is how the app restores a version or a revision (and how undo takes a restore back). The
+replacement must have the same `id` and pass the schema and `checkDocument` as a whole, parts,
+assemblies and configurations included. It does not look at counters itself, so that its inverse
+can put back exactly what was there; a client builds the replacement with
+`restoredDocument(current, past)`, which keeps `past`'s content under `current`'s id and raises
+every counter (the document's, and each part's and assembly's that both have) to the higher of the
+two values, so no id handed out after `past` is handed out again. In the op log the command
+carries the whole document: imported files and pinned versions are stored by reference as for any
+command, so it is the feature JSON that repeats.
 
 `setBodyProps` replaces the body's whole entry with `props` (`{ name?, color?, material? }`);
 empty `props` removes the entry. Its inverse sets the old props back at the old index, or removes

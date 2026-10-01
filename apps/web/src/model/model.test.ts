@@ -9,6 +9,7 @@ import {
   featureResult,
   modelBodies,
   startRegen,
+  startView,
   type Regenerator,
   type RegenView,
 } from './model';
@@ -285,5 +286,84 @@ describe('sharing the regenerator', () => {
     off();
     manual.invalidate();
     expect(listener).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('viewing another document', () => {
+  it('builds it in its own model, leaves the open one alone, and builds that again after', async () => {
+    const documents = createDocumentStore(createDocument({ id: 'd', name: 'D' }));
+    const model = createModelStore();
+    const manual = manualRegenerator();
+    const shared = shareRegenerator(manual.regenerator);
+    startRegen(shared.regenerator, documents, model);
+    manual.requests[0]!.resolve(view(1));
+    await flush();
+    const past = createDocument({ id: 'd', name: 'Past' });
+
+    const session = startView(shared, past);
+    expect(session.model).not.toBe(model);
+    expect(manual.requests).toHaveLength(2);
+    expect(manual.requests[1]!.document).toBe(past);
+    expect(session.model.getState()).toMatchObject({ available: true, pending: true });
+    manual.requests[1]!.resolve(view(2, 'sketch#9'));
+    await flush();
+    expect(session.model.getState()).toMatchObject({
+      generation: 2,
+      pending: false,
+      document: past,
+    });
+    expect(featureResult(session.model.getState(), 'part#1', 'sketch#9')).toBeDefined();
+    // The open document's model still shows its own result.
+    expect(model.getState()).toMatchObject({ generation: 1 });
+    expect(shared.busy()).toBe(true);
+
+    // A recycle while viewing builds the viewed document again, not the open one.
+    manual.invalidate();
+    expect(manual.requests.at(-1)!.document).toBe(past);
+    manual.requests.at(-1)!.resolve(view(3, 'sketch#9'));
+    await flush();
+    expect(session.model.getState().generation).toBe(3);
+
+    const before = manual.requests.length;
+    session.stop();
+    session.stop();
+    await session.done;
+    expect(shared.busy()).toBe(false);
+    await flush();
+    // Once: the view's listener is gone, so the open document is the only one built.
+    expect(manual.requests.slice(before).map((r) => r.document)).toEqual([
+      documents.getState().document,
+    ]);
+    manual.requests.at(-1)!.resolve(view(4));
+    await flush();
+    expect(model.getState()).toMatchObject({ generation: 4, pending: false });
+    expect(session.model.getState().generation).toBe(3);
+  });
+
+  it('asks again for a dropped regen, then gives up and says so', async () => {
+    const manual = manualRegenerator();
+    const shared = shareRegenerator(manual.regenerator);
+    const session = startView(shared, createDocument({ id: 'd', name: 'D' }));
+    for (let i = 0; i < 4; i++) {
+      manual.requests.at(-1)!.resolve(null);
+      await flush();
+    }
+    expect(manual.requests).toHaveLength(4);
+    expect(session.model.getState()).toMatchObject({ pending: false });
+    expect(session.model.getState().error).toMatch(/kept dropping/);
+    session.stop();
+    await session.done;
+  });
+
+  it('refuses while an export holds the worker', async () => {
+    const manual = manualRegenerator();
+    const shared = shareRegenerator(manual.regenerator);
+    let finish!: () => void;
+    const work = shared.exclusive(() => new Promise<void>((r) => (finish = r)));
+    const session = startView(shared, createDocument({ id: 'd', name: 'D' }));
+    await expect(session.done).rejects.toThrow();
+    expect(manual.requests).toHaveLength(0);
+    finish();
+    await work;
   });
 });

@@ -32,6 +32,7 @@ export {
   applyCommand,
   partInstances,
   partParameters,
+  restoredDocument,
   rowInstances,
   variableMates,
   variableParameters,

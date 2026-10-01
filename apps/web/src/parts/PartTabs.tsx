@@ -13,9 +13,14 @@ export interface PartTabsProps {
   documents: DocumentStoreApi;
   /** No switching or changes while something else edits the part (a sketch, a dialog). */
   disabled?: boolean;
+  /**
+   * Switching tabs only: no adding, renaming, moving, duplicating or deleting (a past version
+   * shown read-only).
+   */
+  readOnly?: boolean;
 }
 
-export function PartTabs({ documents, disabled = false }: PartTabsProps) {
+export function PartTabs({ documents, disabled = false, readOnly = false }: PartTabsProps) {
   const parts = useStore(documents, (s) => s.document.parts);
   const activePartId = useStore(documents, (s) => s.activePartId);
   const [message, setMessage] = useState<string | null>(null);
@@ -89,6 +94,7 @@ export function PartTabs({ documents, disabled = false }: PartTabsProps) {
     if (step !== 0) {
       e.preventDefault();
       if (e.altKey) {
+        if (readOnly) return;
         move(id, index + step);
         return;
       }
@@ -96,7 +102,7 @@ export function PartTabs({ documents, disabled = false }: PartTabsProps) {
       if (!next) return;
       activate(next.id);
       tabRefs.current.get(next.id)?.focus();
-    } else if (e.key === 'F2') {
+    } else if (e.key === 'F2' && !readOnly) {
       e.preventDefault();
       const part = parts[index]!;
       setRenaming({ id: part.id, text: part.name });
@@ -140,14 +146,15 @@ export function PartTabs({ documents, disabled = false }: PartTabsProps) {
               tabIndex={selected ? 0 : -1}
               disabled={disabled && !selected}
               data-testid={`part-tab-${part.id}`}
-              title={`${part.name}: double-click to rename, drag to move`}
-              draggable={!disabled}
+              title={readOnly ? part.name : `${part.name}: double-click to rename, drag to move`}
+              draggable={!disabled && !readOnly}
               onClick={() => activate(part.id)}
               onDoubleClick={() => {
-                if (!disabled) setRenaming({ id: part.id, text: part.name });
+                if (!disabled && !readOnly) setRenaming({ id: part.id, text: part.name });
               }}
               onKeyDown={(e) => onKeyDown(e, part.id, index)}
               onDragStart={(e) => {
+                if (readOnly) return;
                 setDragged(part.id);
                 e.dataTransfer?.setData('text/plain', part.id);
                 if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
@@ -190,43 +197,45 @@ export function PartTabs({ documents, disabled = false }: PartTabsProps) {
           }}
         />
       )}
-      <div className="part-tab-actions">
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={add}
-          data-testid="part-add"
-          title="Add a part studio"
-          aria-label="Add a part studio"
-        >
-          +
-        </button>
-        <button
-          type="button"
-          disabled={disabled || !active}
-          onClick={() => active && setRenaming({ id: active.id, text: active.name })}
-          data-testid="part-rename"
-        >
-          Rename
-        </button>
-        <button
-          type="button"
-          disabled={disabled || !active}
-          onClick={duplicate}
-          data-testid="part-duplicate"
-        >
-          Duplicate
-        </button>
-        <button
-          type="button"
-          disabled={disabled || parts.length < 2}
-          onClick={remove}
-          data-testid="part-delete"
-          title={parts.length < 2 ? 'A document keeps at least one part studio' : undefined}
-        >
-          Delete
-        </button>
-      </div>
+      {!readOnly && (
+        <div className="part-tab-actions">
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={add}
+            data-testid="part-add"
+            title="Add a part studio"
+            aria-label="Add a part studio"
+          >
+            +
+          </button>
+          <button
+            type="button"
+            disabled={disabled || !active}
+            onClick={() => active && setRenaming({ id: active.id, text: active.name })}
+            data-testid="part-rename"
+          >
+            Rename
+          </button>
+          <button
+            type="button"
+            disabled={disabled || !active}
+            onClick={duplicate}
+            data-testid="part-duplicate"
+          >
+            Duplicate
+          </button>
+          <button
+            type="button"
+            disabled={disabled || parts.length < 2}
+            onClick={remove}
+            data-testid="part-delete"
+            title={parts.length < 2 ? 'A document keeps at least one part studio' : undefined}
+          >
+            Delete
+          </button>
+        </div>
+      )}
       {message && (
         <span className="part-tabs-error" role="alert" data-testid="part-tabs-error">
           {message}

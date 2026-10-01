@@ -1,9 +1,15 @@
 import { StrictMode } from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createDocument, findPart, type ManufaktureDocument } from '@manufakture/core';
+import {
+  applyCommand,
+  createDocument,
+  findPart,
+  type Command,
+  type ManufaktureDocument,
+} from '@manufakture/core';
 import type { FeatureResult } from '@manufakture/regen';
-import { writeBinaryStl } from '@manufakture/io';
+import { importSource, writeBinaryStl } from '@manufakture/io';
 import { App } from './App';
 import { MemoryBackend } from './persistence/backend';
 import { DocumentLibrary } from './persistence/library';
@@ -852,7 +858,12 @@ describe('App documents', () => {
 
   /** The app with a library in memory holding Alpha (a plain part) and Bravo (with an STL import). */
   async function persisted(
-    options: { initialDocumentId?: string | null; empty?: boolean; backend?: MemoryBackend } = {},
+    options: {
+      initialDocumentId?: string | null;
+      empty?: boolean;
+      backend?: MemoryBackend;
+      exchanger?: Exchanger;
+    } = {},
   ) {
     let n = 0;
     let tick = 0;
@@ -865,7 +876,7 @@ describe('App documents', () => {
       await library.save(partDocument('a', 'Alpha'));
       await library.save(await partWithImport('b'));
     }
-    const manual = manualLoader();
+    const manual = manualLoader(undefined, options.exchanger);
     const engine = fakeEngine();
     const documents = createDocumentStore(createDocument({ id: 'scratch', name: 'Scratch' }));
     render(
@@ -1030,6 +1041,271 @@ describe('App documents', () => {
     );
     const theirs = await t.library.open('a');
     expect(theirs.ok && theirs.value.document.name).toBe('Theirs');
+  });
+
+  it('names a version in the History panel, views it read-only, goes back, restores and undoes', async () => {
+    const t = await persisted({ initialDocumentId: 'a' });
+    await waitFor(() => expect(t.documents.getState().document.id).toBe('a'));
+    const rename = (name: string) =>
+      act(() => {
+        t.documents.getState().execute({ type: 'renameDocument', name }, 'Rename document');
+      });
+    const saved = () =>
+      waitFor(() => expect(screen.getByTestId('save-status').textContent).toBe('Saved'));
+    rename('Shelf');
+    await saved();
+    fireEvent.click(screen.getByTestId('open-history'));
+    await screen.findByTestId('revision-2');
+    fireEvent.click(screen.getByTestId('version-create'));
+    fireEvent.change(screen.getByTestId('version-name'), { target: { value: 'Shelf v1' } });
+    fireEvent.click(screen.getByTestId('version-save'));
+    await screen.findByTestId('version-Shelf v1');
+    rename('Later');
+    await saved();
+
+    fireEvent.click(screen.getByRole('button', { name: 'View version Shelf v1' }));
+    const banner = await screen.findByTestId('history-viewer');
+    expect(within(banner).getByTestId('history-viewer-label').textContent).toBe(
+      'Viewing Version "Shelf v1"',
+    );
+    expect(within(banner).getByTestId('history-compare').textContent).toContain(
+      'Named "Shelf" here, "Later" now.',
+    );
+    // Read-only: no feature tools, no undo, no variables; the open document is untouched.
+    expect(screen.queryByRole('toolbar', { name: 'Features' })).toBeNull();
+    expect((screen.getByRole('button', { name: 'Undo' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole('complementary', { name: 'Variables' })).toBeNull();
+    expect(t.documents.getState().document.name).toBe('Later');
+    fireEvent.click(screen.getByTestId('history-back'));
+    await waitFor(() => expect(screen.queryByTestId('history-viewer')).toBeNull());
+    expect(screen.getByRole('toolbar', { name: 'Features' })).toBeDefined();
+
+    // Two views asked for at once: only the later one is shown.
+    fireEvent.click(screen.getByRole('button', { name: 'View revision 2' }));
+    fireEvent.click(screen.getByRole('button', { name: 'View revision 3' }));
+    await waitFor(() =>
+      expect(screen.getByTestId('history-viewer-label').textContent).toBe('Viewing Revision 3'),
+    );
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.getByTestId('history-viewer-label').textContent).toBe('Viewing Revision 3');
+    fireEvent.click(screen.getByTestId('history-back'));
+    await waitFor(() => expect(screen.queryByTestId('history-viewer')).toBeNull());
+
+    fireEvent.click(screen.getByRole('button', { name: 'View version Shelf v1' }));
+    await screen.findByTestId('history-viewer');
+    fireEvent.click(screen.getByTestId('history-restore'));
+    await waitFor(() => expect(screen.queryByTestId('history-viewer')).toBeNull());
+    expect(t.documents.getState().document.name).toBe('Shelf');
+    expect(t.documents.getState().undoLabel).toBe('Restore Version "Shelf v1"');
+    await saved();
+    act(() => {
+      t.documents.getState().undo();
+    });
+    expect(t.documents.getState().document.name).toBe('Later');
+    await saved();
+    const log = await t.library.readLog('a');
+    expect(log.ok && log.value.map((e) => `${e.cause} ${e.command.type}`)).toEqual([
+      'execute renameDocument',
+      'execute renameDocument',
+      'execute replaceDocument',
+      'undo replaceDocument',
+    ]);
+  });
+
+  it('keeps the STEP bodies a view reads while another view of them is still reading', async () => {
+    // A kernel stand-in: a registry of reference bodies, STEP reads the test answers one by one,
+    // and every release recorded.
+    const registry = new Map<string, number>();
+    const released: string[] = [];
+    const reads: { bodyId: string; finish: () => void }[] = [];
+    let shapes = 0;
+    const exchanger = boxExchanger();
+    vi.mocked(exchanger.importStep).mockImplementation(
+      (_bytes, featureId, _name, bodyId) =>
+        new Promise((resolve) => {
+          const id = bodyId ?? featureId;
+          reads.push({
+            bodyId: id,
+            finish: () => {
+              registry.set(id, ++shapes);
+              resolve({ ok: true, value: boxBody({ id }) });
+            },
+          });
+        }),
+    );
+    vi.mocked(exchanger.retain).mockImplementation((ids) => {
+      const dropped = [...registry.keys()].filter((id) => !ids.has(id));
+      for (const id of dropped) registry.delete(id);
+      released.push(...dropped);
+      return dropped;
+    });
+    // Stored: revision 1 with two STEP reference imports, named as a version; revision 2 without.
+    const backend = new MemoryBackend();
+    const before = new DocumentLibrary(backend, { locks: null });
+    const step = async (id: string, name: string) => ({
+      id,
+      kind: 'import' as const,
+      name,
+      suppressed: false,
+      operation: 'reference' as const,
+      source: await importSource(
+        'step',
+        `${name}.step`,
+        new TextEncoder().encode(`ISO-10303-21; ${name}`),
+      ),
+    });
+    const added = applyCommand(partDocument('b'), {
+      type: 'batch',
+      commands: [
+        { type: 'addFeature', partId: 'part#1', feature: await step('import#1', 'X') },
+        { type: 'addFeature', partId: 'part#1', feature: await step('import#2', 'Y') },
+      ],
+    });
+    if (!added.ok) throw new Error(added.error.message);
+    await before.save(added.value.document);
+    expect((await before.createVersion('b', { name: 'Both' })).ok).toBe(true);
+    const removal: Command = {
+      type: 'batch',
+      commands: [
+        { type: 'deleteFeature', partId: 'part#1', featureId: 'import#2' },
+        { type: 'deleteFeature', partId: 'part#1', featureId: 'import#1' },
+      ],
+    };
+    const removed = applyCommand(added.value.document, removal);
+    if (!removed.ok) throw new Error(removed.error.message);
+    await before.save(removed.value.document, [
+      { cause: 'execute', label: 'Delete X and Y', command: removal, at: '2026-09-30T10:00:00Z' },
+    ]);
+
+    const t = await persisted({ backend, empty: true, initialDocumentId: 'b', exchanger });
+    await waitFor(() => expect(t.documents.getState().document.id).toBe('b'));
+    fireEvent.click(screen.getByTestId('open-history'));
+    const view = await screen.findByRole('button', { name: 'View version Both' });
+    const X = 'part#1/import#1';
+    const Y = 'part#1/import#2';
+    // View A starts reading X; view B, asked for meanwhile, reads X too.
+    fireEvent.click(view);
+    await waitFor(() => expect(reads.map((r) => r.bodyId)).toEqual([X]));
+    fireEvent.click(view);
+    await waitFor(() => expect(reads.map((r) => r.bodyId)).toEqual([X, X]));
+    // B's X lands and B goes on to Y; then A's X and A's Y land, and A, overtaken, prunes.
+    await act(async () => reads[1]!.finish());
+    await waitFor(() => expect(reads.map((r) => r.bodyId)).toEqual([X, X, Y]));
+    await act(async () => reads[0]!.finish());
+    await waitFor(() => expect(reads).toHaveLength(4));
+    await act(async () => reads[3]!.finish());
+    // B is still reading: neither of its bodies was released.
+    expect(released).toEqual([]);
+    expect(registry.has(X)).toBe(true);
+    await act(async () => reads[2]!.finish());
+    await screen.findByTestId('history-viewer');
+    await waitFor(() => expect(t.bodies()).toEqual([X, Y]));
+    expect(released).toEqual([]);
+    expect([...registry.keys()].sort()).toEqual([X, Y]);
+
+    // Back releases the view's bodies.
+    fireEvent.click(screen.getByTestId('history-back'));
+    await waitFor(() => expect(t.bodies()).toEqual([]));
+    await waitFor(() => expect([...registry.keys()]).toEqual([]));
+    expect(released.sort()).toEqual([X, Y]);
+  });
+
+  it('restores a state equal to the current one without an undo step, and says so', async () => {
+    const t = await persisted({ initialDocumentId: 'a' });
+    await waitFor(() => expect(t.documents.getState().document.id).toBe('a'));
+    fireEvent.click(screen.getByTestId('open-history'));
+    fireEvent.click(await screen.findByTestId('version-create'));
+    fireEvent.change(screen.getByTestId('version-name'), { target: { value: 'Same' } });
+    fireEvent.click(screen.getByTestId('version-save'));
+    fireEvent.click(await screen.findByRole('button', { name: 'View version Same' }));
+    await screen.findByTestId('history-viewer');
+    fireEvent.click(screen.getByTestId('history-restore'));
+    await waitFor(() => expect(screen.queryByTestId('history-viewer')).toBeNull());
+    expect(screen.getByTestId('io-status').textContent).toBe(
+      'Version "Same" is the same as the current state: nothing changed.',
+    );
+    expect(t.documents.getState().canUndo).toBe(false);
+  });
+
+  it('keeps the reference bodies of the current state through a restore and its undo', async () => {
+    // Stored: revision 1 with an STL reference import, named as a version; revision 2 without it.
+    const backend = new MemoryBackend();
+    const before = new DocumentLibrary(backend, { locks: null });
+    const withImport = await partWithImport('b');
+    await before.save(withImport);
+    const version = await before.createVersion('b', { name: 'One import' });
+    expect(version.ok).toBe(true);
+    const command = { type: 'deleteFeature', partId: 'part#1', featureId: 'import#1' } as const;
+    const r = applyCommand(withImport, command);
+    if (!r.ok) throw new Error(r.error.message);
+    await before.save(r.value.document, [
+      { cause: 'execute', label: 'Delete Cube', command, at: '2026-09-30T10:00:00.000Z' },
+    ]);
+    const t = await persisted({ backend, empty: true, initialDocumentId: 'b' });
+    await waitFor(() => expect(t.documents.getState().document.id).toBe('b'));
+    fireEvent.click(screen.getByTestId('open-history'));
+    await screen.findByTestId('version-One import');
+    // Opened after the delete, so this session never read the import: viewing the version reads
+    // it for the view, and Back drops it again.
+    expect(t.bodies()).toEqual([]);
+    fireEvent.click(screen.getByRole('button', { name: 'View version One import' }));
+    await screen.findByTestId('history-viewer');
+    await waitFor(() => expect(t.bodies()).toEqual(['part#1/import#1']));
+    fireEvent.click(screen.getByTestId('history-back'));
+    await waitFor(() => expect(screen.queryByTestId('history-viewer')).toBeNull());
+    await waitFor(() => expect(t.bodies()).toEqual([]));
+
+    // A second STL reference body, which the version does not have.
+    const mesh = boxBody({ id: 'x', min: [20, 0, 0] }).mesh;
+    const bytes = writeBinaryStl({
+      positions: new Float32Array(mesh.positions),
+      indices: new Uint32Array(mesh.indices),
+    });
+    const file = new File([bytes], 'second.stl', { type: 'model/stl' });
+    fireEvent.change(screen.getByTestId('import-input'), { target: { files: [file] } });
+    await waitFor(() => expect(t.bodies()).toEqual(['part#1/import#2']));
+
+    fireEvent.click(screen.getByRole('button', { name: 'View version One import' }));
+    await screen.findByTestId('history-viewer');
+    fireEvent.click(screen.getByTestId('history-restore'));
+    await waitFor(() => expect(screen.queryByTestId('history-viewer')).toBeNull());
+    // The version's import, not held before, is read from its file.
+    await waitFor(() => expect(t.bodies()).toEqual(['part#1/import#1']));
+    // Undo brings back the state with the second import, still drawn: its body was kept.
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+    await waitFor(() => expect(t.bodies()).toEqual(['part#1/import#2']));
+    fireEvent.click(screen.getByRole('button', { name: 'Redo' }));
+    await waitFor(() => expect(t.bodies()).toEqual(['part#1/import#1']));
+  });
+
+  it('views a version with several part studios, switching tabs but not changing them', async () => {
+    const t = await persisted({ initialDocumentId: 'a' });
+    await waitFor(() => expect(t.documents.getState().document.id).toBe('a'));
+    act(() => {
+      t.documents.getState().execute({ type: 'addPart', partId: 'part#2', name: 'Lid' }, 'Add Lid');
+    });
+    await waitFor(() => expect(screen.getByTestId('save-status').textContent).toBe('Saved'));
+    fireEvent.click(screen.getByTestId('open-history'));
+    fireEvent.click(await screen.findByTestId('version-create'));
+    fireEvent.change(screen.getByTestId('version-name'), { target: { value: 'Two tabs' } });
+    fireEvent.click(screen.getByTestId('version-save'));
+    fireEvent.click(await screen.findByRole('button', { name: 'View version Two tabs' }));
+    await screen.findByTestId('history-viewer');
+    expect((screen.getByTestId('version-create') as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByTestId('part-add')).toBeNull();
+    const first = screen.getByTestId('part-tab-part#1');
+    expect(first.getAttribute('draggable')).toBe('false');
+    fireEvent.click(first);
+    await waitFor(() =>
+      expect(screen.getByTestId('part-tab-part#1').getAttribute('aria-selected')).toBe('true'),
+    );
+    fireEvent.doubleClick(screen.getByTestId('part-tab-part#1'));
+    expect(screen.queryByTestId('part-rename-input')).toBeNull();
+    // The open document's active tab is its own.
+    expect(t.documents.getState().activePartId).toBe('part#2');
+    fireEvent.click(screen.getByTestId('history-back'));
+    await waitFor(() => expect(screen.queryByTestId('history-viewer')).toBeNull());
+    expect(screen.getByTestId('part-add')).toBeDefined();
   });
 
   it('says why a dropped .mfk file could not be read', async () => {

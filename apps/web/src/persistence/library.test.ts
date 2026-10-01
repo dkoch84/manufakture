@@ -558,6 +558,36 @@ describe('the command log', () => {
     backend.files.set(path, new TextEncoder().encode('{"torn'));
     expect(await lib.readLog('doc-1')).toMatchObject({ ok: false });
   });
+
+  it('lists the log per revision for the history, without the commands', async () => {
+    const backend = new MemoryBackend();
+    const lib = library(backend);
+    await lib.save(partDocument(), [renameEntry('One')]);
+    await lib.save(partDocument());
+    await lib.save(partDocument(), [
+      renameEntry('Three'),
+      { ...renameEntry('Two'), cause: 'undo' },
+    ]);
+    expect(await lib.readHistory('doc-1')).toEqual({
+      ok: true,
+      value: [
+        { revision: 1, entries: [{ cause: 'execute', label: 'Rename document', at: 'at One' }] },
+        {
+          revision: 3,
+          entries: [
+            { cause: 'execute', label: 'Rename document', at: 'at Three' },
+            { cause: 'undo', label: 'Rename document', at: 'at Two' },
+          ],
+        },
+      ],
+    });
+    expect(await lib.readHistory('nobody')).toEqual({ ok: true, value: [] });
+    backend.files.set('documents/doc-1/log-00000003.json', new TextEncoder().encode('{"torn'));
+    expect(await lib.readHistory('doc-1')).toEqual({
+      ok: false,
+      message: 'The command log is damaged at revision 3.',
+    });
+  });
 });
 
 describe('listing', () => {

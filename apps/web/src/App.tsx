@@ -28,7 +28,28 @@ import { PART_STUDIO_PANEL_ID } from './parts/names';
 import { PartTabs } from './parts/PartTabs';
 import { measureTargets } from './measure/measurer';
 import { partBodies as bodiesOfPart, sameOr } from './model/bodies';
-import { modelStore, shareRegenerator, startRegen, useModel, type ModelStore } from './model/model';
+import {
+  createModelStore,
+  modelStore,
+  shareRegenerator,
+  startRegen,
+  startView,
+  useModel,
+  type ModelStore,
+  type ViewSession,
+} from './model/model';
+import { HistoryPanel } from './history/HistoryPanel';
+import { ViewerBanner } from './history/ViewerBanner';
+import {
+  compareDocuments,
+  readTarget,
+  restoreCommand,
+  targetLabel,
+  referenceImportIds,
+  viewDocuments,
+  viewSettingsFor,
+  type HistoryTarget,
+} from './history/history';
 import { ConfigurationsPanel } from './configurations/ConfigurationsPanel';
 import { ConfigurationSwitcher } from './configurations/ConfigurationSwitcher';
 import { documentStore, historyShortcut, type DocumentStoreApi } from './state/document';
@@ -124,6 +145,21 @@ function hasReferenceImports(doc: ManufaktureDocument): boolean {
   );
 }
 
+/** A version or revision shown read-only in place of the open document. */
+interface Viewing {
+  /** Hidden bodies while viewing, seeded from the open document's and dropped with the view. */
+  settings: ViewSettingsStore;
+  target: HistoryTarget;
+  label: string;
+  document: ManufaktureDocument;
+  /** A read-only store of the viewed document, for the tree, the tabs and the panels. */
+  documents: DocumentStoreApi;
+  /** Its model, built in the worker beside the open document's (which stays as it is). */
+  model: ModelStore;
+  /** Null when there is no regen engine (the kernel-free test scenes). */
+  session: ViewSession | null;
+}
+
 /** The save status shown when nothing is saved (no library). */
 const NO_SAVING = createStore<SaveStatus>()(() => ({
   state: 'idle',
@@ -195,6 +231,26 @@ export function App({
   const [homeRevision, setHomeRevision] = useState(0);
   // A document just opened whose reference imports must be read again, once the kernel is up.
   const [restoreRequest, setRestoreRequest] = useState<ManufaktureDocument | null>(null);
+  // Version history: whether the panel shows, a counter that moves with every save (so the panel
+  // reads the history again), and the version or revision being viewed, if any.
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyRevision, setHistoryRevision] = useState(0);
+  const [viewing, setViewing] = useState<Viewing | null>(null);
+  const viewingRef = useRef<Viewing | null>(null);
+  // Reference import bodies of the viewed state that the open document does not hold (deleted
+  // and pruned, or never read in this session): read for the view, released when it ends. The
+  // ids being read are kept from pruning too, counted per id: two overlapping view reads of
+  // the same import each hold it until they are done.
+  const [viewImports, setViewImports] = useState<readonly ImportedBody[]>([]);
+  const viewImportsRef = useRef<readonly ImportedBody[]>([]);
+  const viewReading = useRef(new Map<string, number>());
+  // While a past state is viewed, nothing can be edited, and what the tree, the tabs, the
+  // viewport and the measure panel show is the viewed document and its model.
+  const locked = viewing !== null;
+  const shownDocuments = viewing?.documents ?? documents;
+  const shownModel = viewing?.model ?? model;
+  // Hiding a body while viewing is the view's own: the open document's hidden bodies stay.
+  const shownSettings = viewing?.settings ?? settings;
 
   // The scene's own document (the demo scene) replaces the open one once, when the scene loads.
   const openedInitial = useRef(false);
@@ -228,22 +284,27 @@ export function App({
     if (!loaded || !shared) return;
     return startRegen(shared.regenerator, documents, model);
   }, [loaded, shared, documents, model]);
-  const configurationError = useModel(model, (s) => s.configurationError);
+  const configurationError = useModel(shownModel, (s) => s.configurationError);
   // Regen builds every part studio; the viewport, the sketches and the picks see the active one.
   const activePartId = useStore(documents, (s) => s.activePartId);
-  const allParts = useModel(model, (s) => s.parts);
+  // The part studio shown: the active one, or the viewed document's while viewing.
+  const shownPartId = useStore(shownDocuments, (s) => s.activePartId);
+  const allParts = useModel(shownModel, (s) => s.parts);
   const parts = useMemo(
-    () => allParts.filter((p) => p.partId === activePartId),
-    [allParts, activePartId],
+    () => allParts.filter((p) => p.partId === shownPartId),
+    [allParts, shownPartId],
   );
-  const modelGeneration = useModel(model, (s) => s.generation);
+  const modelGeneration = useModel(shownModel, (s) => s.generation);
+  const viewPending = useModel(shownModel, (s) => s.pending);
+  const viewError = useModel(shownModel, (s) => s.error);
   const document = useStore(documents, (s) => s.document);
+  const shownDocument = useStore(shownDocuments, (s) => s.document);
   // The active part's bodies with their names, colours and materials; hidden ones are neither
   // drawn nor picked (view state, per document).
-  const hiddenIds = useStore(settings, (s) => hiddenBodiesOf(s, document.id));
+  const hiddenIds = useStore(shownSettings, (s) => hiddenBodiesOf(s, document.id));
   const activeBodies = useMemo(
-    () => bodiesOfPart(findPart(document, activePartId), parts[0], new Set(hiddenIds)),
-    [document, activePartId, parts, hiddenIds],
+    () => bodiesOfPart(findPart(shownDocument, shownPartId), parts[0], new Set(hiddenIds)),
+    [shownDocument, shownPartId, parts, hiddenIds],
   );
   // The same array while the shown bodies are the same objects, so a document change that
   // changes nothing in the view does not rebuild it (state from the previous render).
@@ -284,13 +345,16 @@ export function App({
     };
   }, [loader, owned, ownedSolver]);
 
-  const sketches = useMemo(() => sketchFeatures(document, activePartId), [document, activePartId]);
+  const sketches = useMemo(
+    () => sketchFeatures(shownDocument, shownPartId),
+    [shownDocument, shownPartId],
+  );
   const shownImports = useMemo(() => {
-    const features = findPart(document, activePartId)?.features ?? [];
-    return imports.filter(
-      (i) => i.partId === activePartId && features.some((f) => f.id === i.feature.id),
+    const features = findPart(shownDocument, shownPartId)?.features ?? [];
+    return (locked ? [...imports, ...viewImports] : imports).filter(
+      (i) => i.partId === shownPartId && features.some((f) => f.id === i.feature.id),
     );
-  }, [imports, document, activePartId]);
+  }, [imports, viewImports, locked, shownDocument, shownPartId]);
   // Forget imported bodies whose import feature can no longer come back (not
   // in the document, the undo stack or the redo stack), releasing their
   // kernel shapes. Runs on every document change, except while an import
@@ -301,6 +365,9 @@ export function App({
     if (importing.current) return;
     const { core } = documents;
     const keep = restorableImportIds(core.document, [...core.undoStack, ...core.redoStack]);
+    // And the bodies of a state being viewed.
+    for (const i of viewImportsRef.current) keep.add(importBodyId(i.partId, i.feature.id));
+    for (const id of viewReading.current.keys()) keep.add(id);
     loader.exchanger?.retain(keep);
     const kept = (i: ImportedBody) => keep.has(importBodyId(i.partId, i.feature.id));
     setImports((prev) => (prev.every(kept) ? prev : prev.filter(kept)));
@@ -328,8 +395,9 @@ export function App({
         .catch(() => undefined);
     });
   }, [loader]);
-  // A part studio that arrives with reference imports (a duplicate, or a redo that puts one
-  // back after its bodies were dropped) has no bodies for them yet: read them from its files.
+  // A part studio that arrives with reference imports (a duplicate, a redo that puts one back
+  // after its bodies were dropped, a restored version) has no bodies for them yet: read just
+  // those from their files and add them to the ones held.
   const loadedRef = useRef(loaded);
   useEffect(() => {
     loadedRef.current = loaded;
@@ -338,8 +406,11 @@ export function App({
   useEffect(() => {
     return documents.core.subscribe((event) => {
       if (event.cause === 'load' || !loadedRef.current) return;
+      // A restore (or its undo or redo) replaces the whole document: any part studio can hold a
+      // reference import not read yet. Otherwise only part studios that arrived can.
+      const whole = event.command?.type === 'replaceDocument';
       const added = new Set(
-        event.change.parts.filter((p) => p.status === 'added').map((p) => p.partId),
+        event.change.parts.filter((p) => whole || p.status === 'added').map((p) => p.partId),
       );
       if (added.size === 0) return;
       const have = new Set(importsRef.current.map((i) => importBodyId(i.partId, i.feature.id)));
@@ -499,6 +570,7 @@ export function App({
       ...autosaveDelays,
       onSaved: (summary) => {
         if (summary.id === documents.getState().document.id) showDocIdInUrl(summary.id);
+        setHistoryRevision((n) => n + 1);
         if (!askedPersistence.current && library.kind !== 'memory') {
           askedPersistence.current = true;
           void requestPersistence();
@@ -548,6 +620,178 @@ export function App({
     () =>
       library ? homeActions({ library, documents, autosave, show, download: downloadBytes }) : null,
     [library, documents, autosave, show],
+  );
+
+  // Viewing a version or a revision: read it back, build it in the worker beside the open
+  // document, and show it read-only until Back or Restore.
+  // Numbers the view requests. Each new request, Back, Restore and a change of the open
+  // document's id move it on; a request that finds it moved after an await gives up, so a
+  // superseded view never starts or keeps the worker.
+  const viewRequests = useRef(0);
+  const endView = useCallback((): Promise<void> => {
+    const v = viewingRef.current;
+    viewingRef.current = null;
+    if (!v) return Promise.resolve();
+    v.session?.stop();
+    setViewing(null);
+    // The view's own reference bodies go (unless a restore made them the document's).
+    if (viewImportsRef.current.length > 0) {
+      viewImportsRef.current = [];
+      setViewImports([]);
+      pruneImports();
+    }
+    return v.session ? v.session.done.catch(() => undefined) : Promise.resolve();
+  }, [pruneImports]);
+  const onView = useCallback(
+    async (target: HistoryTarget) => {
+      if (!library) return;
+      const mine = ++viewRequests.current;
+      const id = documents.getState().document.id;
+      const label = targetLabel(target);
+      const read = await readTarget(library, id, target);
+      if (mine !== viewRequests.current) return;
+      if (!read.ok) {
+        setIoStatus({ error: true, text: `${label} cannot be read: ${read.message}` });
+        return;
+      }
+      // Checked before endView so a read for a document no longer open does not end the current
+      // view, and again after it because the open document can change while endView waits.
+      if (documents.getState().document.id !== id) return;
+      // The view before hands the worker back first.
+      await endView();
+      if (mine !== viewRequests.current || documents.getState().document.id !== id) return;
+      let viewDocs: DocumentStoreApi;
+      try {
+        viewDocs = viewDocuments(read.value, documents.getState().activePartId);
+      } catch (e) {
+        setIoStatus({
+          error: true,
+          text: `${label} cannot be shown: ${e instanceof Error ? e.message : String(e)}`,
+        });
+        return;
+      }
+      // Its reference bodies that the open document does not hold, read from their files.
+      const held = new Set(importsRef.current.map((i) => importBodyId(i.partId, i.feature.id)));
+      const missing = new Set(referenceImportIds(read.value).filter((bodyId) => !held.has(bodyId)));
+      let extra: readonly ImportedBody[] = [];
+      if (missing.size > 0) {
+        for (const bodyId of missing) {
+          viewReading.current.set(bodyId, (viewReading.current.get(bodyId) ?? 0) + 1);
+        }
+        try {
+          const { restoreImports } = await import('./persistence/imports');
+          const r = await restoreImports(read.value, loader.exchanger ?? null, missing);
+          extra = r.bodies;
+          if (r.errors.length > 0) {
+            setIoStatus({
+              error: true,
+              text: `Could not read an import of ${label}: ${r.errors.join(' ')}`,
+            });
+          }
+        } catch (e) {
+          setIoStatus({ error: true, text: e instanceof Error ? e.message : String(e) });
+        } finally {
+          for (const bodyId of missing) {
+            const left = (viewReading.current.get(bodyId) ?? 1) - 1;
+            if (left > 0) viewReading.current.set(bodyId, left);
+            else viewReading.current.delete(bodyId);
+          }
+        }
+        if (mine !== viewRequests.current || documents.getState().document.id !== id) {
+          // Overtaken meanwhile: release what was read.
+          pruneImports();
+          return;
+        }
+      }
+      // Nothing awaits from here to recording the view, so this session is the current one.
+      const session = shared ? startView(shared, read.value) : null;
+      viewImportsRef.current = extra;
+      setViewImports(extra);
+      const v: Viewing = {
+        settings: viewSettingsFor(settings, id),
+        target,
+        label,
+        document: read.value,
+        documents: viewDocs,
+        model: session?.model ?? createModelStore(),
+        session,
+      };
+      session?.done.catch((e: unknown) => {
+        if (viewingRef.current !== v) return;
+        void endView();
+        setIoStatus({
+          error: true,
+          text: `${label} cannot be shown now: ${e instanceof Error ? e.message : String(e)}`,
+        });
+      });
+      viewingRef.current = v;
+      setViewing(v);
+      setIoStatus(null);
+    },
+    [library, documents, shared, endView, loader, settings, pruneImports],
+  );
+  const onRestore = useCallback(() => {
+    const v = viewingRef.current;
+    if (!v) return;
+    viewRequests.current += 1;
+    // The view's reference bodies become the document's: the restored state has their features,
+    // so the subscriber that reads missing imports (run by the restore) finds them held.
+    const extra = viewImportsRef.current;
+    const before = importsRef.current;
+    if (extra.length > 0) {
+      const merged = [...before, ...extra];
+      importsRef.current = merged;
+      setImports(merged);
+      viewImportsRef.current = [];
+      setViewImports([]);
+    }
+    const current = documents.getState().document;
+    const r = documents
+      .getState()
+      .execute(restoreCommand(current, v.document), `Restore ${v.label}`);
+    if (!r.ok) {
+      setIoStatus({ error: true, text: `${v.label} cannot be restored: ${r.error.message}` });
+      // Nothing changed: the view stays open, and its bodies go back to being the view's.
+      if (extra.length > 0) {
+        importsRef.current = before;
+        setImports(before);
+        viewImportsRef.current = extra;
+        setViewImports(extra);
+      }
+      return;
+    }
+    void endView();
+    // Other reference imports the restored state has and this session has not read yet are
+    // read by the part studio subscriber above, which adds them beside the ones held now.
+    setIoStatus({
+      error: false,
+      text: r.value.empty
+        ? `${v.label} is the same as the current state: nothing changed.`
+        : `Restored ${v.label}. Undo takes it back.`,
+    });
+  }, [documents, endView]);
+  // Back ends the view and any view still being read.
+  const onBack = useCallback(() => {
+    viewRequests.current += 1;
+    void endView();
+  }, [endView]);
+  // When the open document's id changes (another document is opened), any view, or view being
+  // read, ends; so does leaving the app.
+  useEffect(() => {
+    viewRequests.current += 1;
+    if (viewingRef.current && viewingRef.current.document.id !== document.id) void endView();
+  }, [document.id, endView]);
+  useEffect(() => () => viewingRef.current?.session?.stop(), []);
+  // What was selected belongs to what was shown before.
+  const shownView = useRef(viewing);
+  useEffect(() => {
+    if (shownView.current === viewing) return;
+    shownView.current = viewing;
+    selection.getState().clear();
+  }, [viewing, selection]);
+  const differences = useMemo(
+    () => (viewing ? compareDocuments(document, viewing.document) : []),
+    [viewing, document],
   );
 
   const shownBodies = useMemo(
@@ -712,7 +956,7 @@ export function App({
             setHomeRevision((n) => n + 1);
             if (!outcome.ok) setView('home');
           });
-      } else if (viewRef.current === 'editor') onImport(file);
+      } else if (viewRef.current === 'editor' && !viewingRef.current) onImport(file);
     };
     window.addEventListener('dragover', onDragOver);
     window.addEventListener('drop', onDrop);
@@ -749,6 +993,8 @@ export function App({
       const action = historyShortcut(e);
       if (!action) return;
       e.preventDefault();
+      // A past state being viewed cannot be changed; undo waits until the view ends.
+      if (viewingRef.current) return;
       const target = session.getState().active ? session.getState() : documents.getState();
       if (action === 'undo') target.undo();
       else target.redo();
@@ -902,7 +1148,7 @@ export function App({
           <div className="toolbar-group document-title">
             <button
               type="button"
-              disabled={sketching.active || dialog !== null}
+              disabled={sketching.active || dialog !== null || locked}
               onClick={() => {
                 setHomeOutcome(null);
                 void autosave?.flush();
@@ -912,6 +1158,16 @@ export function App({
               title="Your documents: open, new, rename, duplicate, delete, import and export"
             >
               Documents
+            </button>
+            <button
+              type="button"
+              aria-pressed={historyOpen}
+              disabled={sketching.active}
+              onClick={() => setHistoryOpen((open) => !open)}
+              data-testid="open-history"
+              title="Versions and the timeline of saved changes: view, compare and restore"
+            >
+              History
             </button>
             <span className="document-name" data-testid="document-name" title={document.name}>
               {document.name}
@@ -929,12 +1185,12 @@ export function App({
         <div className="toolbar-group document-actions">
           <SketchMenu
             face={face}
-            disabled={sketching.active || dialog !== null}
+            disabled={sketching.active || dialog !== null || locked}
             onPick={(target) => sketching.enter(target)}
           />
           <button
             type="button"
-            disabled={sketching.active || !canUndo}
+            disabled={sketching.active || locked || !canUndo}
             title={undoLabel ? `Undo ${undoLabel} (Ctrl+Z)` : 'Undo (Ctrl+Z)'}
             onClick={() => documents.getState().undo()}
           >
@@ -942,7 +1198,7 @@ export function App({
           </button>
           <button
             type="button"
-            disabled={sketching.active || !canRedo}
+            disabled={sketching.active || locked || !canRedo}
             title={redoLabel ? `Redo ${redoLabel} (Ctrl+Y)` : 'Redo (Ctrl+Y)'}
             onClick={() => documents.getState().redo()}
           >
@@ -950,16 +1206,16 @@ export function App({
           </button>
           <ConfigurationSwitcher
             documents={documents}
-            disabled={sketching.active || dialog !== null || exportAll !== null}
+            disabled={sketching.active || dialog !== null || exportAll !== null || locked}
           />
           <ExportMenu
-            disabled={sketching.active || ioBusy || !loader.exchanger}
+            disabled={sketching.active || ioBusy || !loader.exchanger || locked}
             bodies={exportable}
             onExport={onExport}
             configurations={shared ? configurationCount : 0}
             onExportAll={onExportAll}
           />
-          <ImportButton disabled={sketching.active || ioBusy} onFile={onImport} />
+          <ImportButton disabled={sketching.active || ioBusy || locked} onFile={onImport} />
           {exportAll && (
             <ExportProgress
               index={exportAll.index}
@@ -1002,8 +1258,19 @@ export function App({
           </button>
         </div>
       )}
-      {/* The part tools; in a sketch the sketch toolbar takes this row. */}
-      {!sketching.active && (
+      {viewing && (
+        <ViewerBanner
+          label={viewing.label}
+          differences={differences}
+          pending={viewPending}
+          error={viewError}
+          onBack={onBack}
+          onRestore={onRestore}
+        />
+      )}
+      {/* The part tools; in a sketch the sketch toolbar takes this row. While a past state is
+        viewed there is nothing to edit, so they step aside. */}
+      {!sketching.active && !locked && (
         <div className="feature-bar">
           <FeatureToolbar disabled={dialog !== null} onOpen={(kind) => setDialog({ kind })} />
         </div>
@@ -1028,17 +1295,17 @@ export function App({
           className="part-studio-panel"
           id={PART_STUDIO_PANEL_ID}
           role="tabpanel"
-          aria-labelledby={`part-tab-${activePartId}`}
+          aria-labelledby={`part-tab-${shownPartId}`}
         >
           {/* A sketch is edited on its own (the tree cannot change anything meanwhile), so the
             tree steps aside and the sketch gets the room. */}
           {!sketching.active && (
             <FeatureTree
-              documents={documents}
-              model={model}
+              documents={shownDocuments}
+              model={shownModel}
               selection={selection}
-              settings={settings}
-              disabled={dialog !== null}
+              settings={shownSettings}
+              disabled={dialog !== null || locked}
               onEdit={onEditFeature}
             />
           )}
@@ -1064,7 +1331,7 @@ export function App({
               </p>
             )}
             {viewport && !sketching.active && (
-              <MeasureOverlay viewport={viewport} measure={measure} units={document.units} />
+              <MeasureOverlay viewport={viewport} measure={measure} units={shownDocument.units} />
             )}
             {sketching.active && <SketchStatusBar session={session} />}
           </Viewport>
@@ -1095,20 +1362,45 @@ export function App({
               </Suspense>
             ) : (
               <>
-                <VariablesPanel documents={documents} selection={selection} />
-                <ConfigurationsPanel
-                  documents={documents}
-                  configurationError={configurationError}
-                  disabled={exportAll !== null}
-                />
+                {historyOpen && library && (
+                  <HistoryPanel
+                    source={library}
+                    documentId={document.id}
+                    refresh={historyRevision}
+                    createVersion={autosave ? autosave.createVersion : null}
+                    onView={(target) => void onView(target)}
+                    viewing={viewing?.target ?? null}
+                    disabled={exportAll !== null}
+                    createDisabled={locked}
+                    onClose={() => setHistoryOpen(false)}
+                  />
+                )}
+                {!locked && (
+                  <>
+                    <VariablesPanel documents={documents} selection={selection} />
+                    <ConfigurationsPanel
+                      documents={documents}
+                      configurationError={configurationError}
+                      disabled={exportAll !== null}
+                    />
+                  </>
+                )}
                 <SelectionPanel selection={selection} />
-                <MeasurePanel measure={measure} documents={documents} bodies={measuredBodies} />
+                <MeasurePanel
+                  measure={measure}
+                  documents={shownDocuments}
+                  bodies={measuredBodies}
+                />
               </>
             )}
           </div>
         </div>
       </main>
-      <PartTabs documents={documents} disabled={sketching.active || dialog !== null} />
+      <PartTabs
+        documents={shownDocuments}
+        disabled={sketching.active || dialog !== null}
+        readOnly={locked}
+      />
     </div>
   );
 }

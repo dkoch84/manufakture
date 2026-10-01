@@ -1,0 +1,271 @@
+// The History panel, in the side panel: the open document's named versions, a form to create
+// one, and the timeline of saved revisions from the command log, grouped into sessions. Each
+// version and each readable revision can be viewed; viewing, restoring and going back are the
+// app's (App.tsx, with the viewer banner). The logic is in history.ts.
+
+import { useEffect, useState, type FormEvent } from 'react';
+import type { Version } from '../persistence/library';
+import {
+  formatWhen,
+  sameTarget,
+  sessionSpan,
+  timeline,
+  type CreateVersion,
+  type HistorySource,
+  type HistoryTarget,
+  type Session,
+} from './history';
+import { VersionList } from './VersionList';
+import './history.css';
+
+export interface HistoryPanelProps {
+  source: HistorySource & { has(id: string): Promise<boolean> };
+  documentId: string;
+  /** Changes whenever the document was saved, so the panel reads the history again. */
+  refresh?: number;
+  /** Name the current state; absent when versions cannot be made (nothing is saved). */
+  createVersion?: CreateVersion | null;
+  onView: (target: HistoryTarget) => void;
+  /** What is being viewed now, if anything. */
+  viewing?: HistoryTarget | null;
+  /** Nothing can be viewed or created (a sketch, a dialog or an export is open). */
+  disabled?: boolean;
+  /** Creating a version is off (a past state is being viewed: go back first). */
+  createDisabled?: boolean;
+  onClose?: () => void;
+}
+
+type Loaded =
+  | { state: 'loading' }
+  | { state: 'error'; message: string }
+  | {
+      state: 'ready';
+      saved: boolean;
+      versions: Version[];
+      sessions: Session[];
+      start: number | null;
+    };
+
+/** How many labels a revision shows before "and n more". */
+const LABELS_SHOWN = 3;
+
+export function HistoryPanel({
+  source,
+  documentId,
+  refresh = 0,
+  createVersion = null,
+  onView,
+  viewing = null,
+  disabled = false,
+  createDisabled = false,
+  onClose,
+}: HistoryPanelProps) {
+  const [loaded, setLoaded] = useState<Loaded>({ state: 'loading' });
+  const [reload, setReload] = useState(0);
+  const [form, setForm] = useState<{ name: string; description: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        if (!(await source.has(documentId))) {
+          if (!cancelled) {
+            setLoaded({ state: 'ready', saved: false, versions: [], sessions: [], start: null });
+          }
+          return;
+        }
+        const [versions, logged, start] = await Promise.all([
+          source.listVersions(documentId),
+          source.readHistory(documentId),
+          source.historyStart(documentId),
+        ]);
+        if (cancelled) return;
+        if (!versions.ok) return setLoaded({ state: 'error', message: versions.message });
+        if (!logged.ok) return setLoaded({ state: 'error', message: logged.message });
+        const first = start.ok ? start.value : null;
+        setLoaded({
+          state: 'ready',
+          saved: true,
+          versions: versions.value,
+          sessions: timeline(logged.value, versions.value, first),
+          start: first,
+        });
+      } catch (e) {
+        if (!cancelled) {
+          setLoaded({ state: 'error', message: e instanceof Error ? e.message : String(e) });
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [source, documentId, refresh, reload]);
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!form || !createVersion) return;
+    const name = form.name.trim();
+    if (name.length === 0) {
+      setFailure('A version needs a name.');
+      return;
+    }
+    setBusy(true);
+    createVersion({ name, description: form.description.trim() })
+      .then(
+        (r) => {
+          if (r.ok) {
+            setForm(null);
+            setFailure(null);
+            setReload((n) => n + 1);
+          } else setFailure(r.message);
+        },
+        (err: unknown) => setFailure(err instanceof Error ? err.message : String(err)),
+      )
+      .finally(() => setBusy(false));
+  };
+
+  const viewingVersion = viewing?.kind === 'version' ? viewing.version.id : null;
+
+  return (
+    <aside
+      className="selection-panel history-panel"
+      aria-label="History"
+      data-testid="history-panel"
+    >
+      <div className="variables-head">
+        <h2>History</h2>
+        {createVersion && !form && (
+          <button
+            type="button"
+            data-testid="version-create"
+            disabled={disabled || createDisabled}
+            title={createDisabled ? 'Go back to the current state to name it' : undefined}
+            onClick={() => {
+              setFailure(null);
+              setForm({ name: '', description: '' });
+            }}
+          >
+            Create version
+          </button>
+        )}
+        {onClose && (
+          <button type="button" aria-label="Close history" onClick={onClose}>
+            Close
+          </button>
+        )}
+      </div>
+      {form && (
+        <form className="history-form" onSubmit={submit} data-testid="version-form">
+          <label>
+            Name
+            <input
+              data-testid="version-name"
+              value={form.name}
+              maxLength={200}
+              autoFocus
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+            />
+          </label>
+          <label>
+            Description
+            <textarea
+              data-testid="version-description"
+              value={form.description}
+              maxLength={2000}
+              rows={2}
+              onChange={(e) => setForm({ ...form, description: e.target.value })}
+            />
+          </label>
+          <div className="history-form-actions">
+            <button
+              type="submit"
+              data-testid="version-save"
+              disabled={busy || disabled || createDisabled}
+            >
+              {busy ? 'Saving...' : 'Save version'}
+            </button>
+            <button type="button" disabled={busy} onClick={() => setForm(null)}>
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+      {failure && (
+        <p className="history-error" role="alert" data-testid="history-error">
+          {failure}
+        </p>
+      )}
+      {loaded.state === 'loading' && <p className="field-note">Reading the history...</p>}
+      {loaded.state === 'error' && (
+        <p className="history-error" role="alert">
+          The history cannot be read: {loaded.message}
+        </p>
+      )}
+      {loaded.state === 'ready' && (
+        <>
+          <h3>Versions</h3>
+          <VersionList
+            versions={loaded.versions}
+            currentId={viewingVersion}
+            disabled={disabled}
+            onPick={(version) => onView({ kind: 'version', version })}
+          />
+          <h3>Timeline</h3>
+          {!loaded.saved && <p className="field-note">Nothing is saved yet.</p>}
+          {loaded.saved && loaded.sessions.length === 0 && (
+            <p className="field-note">No changes are logged yet.</p>
+          )}
+          {loaded.sessions.map((session) => (
+            // A revision is in one session only, so its oldest revision names it uniquely.
+            <section key={session.revisions.at(-1)!.revision} className="history-session">
+              <h4>{sessionSpan(session)}</h4>
+              <ul className="history-list">
+                {session.revisions.map((r) => {
+                  const target: HistoryTarget = { kind: 'revision', revision: r.revision };
+                  const shown = sameTarget(viewing, target);
+                  const more = r.labels.length - LABELS_SHOWN;
+                  return (
+                    <li
+                      key={r.revision}
+                      className={shown ? 'history-item history-current' : 'history-item'}
+                      data-testid={`revision-${r.revision}`}
+                    >
+                      <div className="history-item-head">
+                        <span className="history-name">Revision {r.revision}</span>
+                        {r.versions.map((v) => (
+                          <span key={v.id} className="history-tag" title={v.description}>
+                            {v.name}
+                          </span>
+                        ))}
+                        <button
+                          type="button"
+                          disabled={disabled || shown || !r.readable}
+                          title={
+                            r.readable
+                              ? undefined
+                              : 'Saved before the history kept this revision: it cannot be read back.'
+                          }
+                          aria-label={`View revision ${r.revision}`}
+                          onClick={() => onView(target)}
+                        >
+                          View
+                        </button>
+                      </div>
+                      <div className="history-meta">{formatWhen(r.at)}</div>
+                      <div className="history-labels">
+                        {r.labels.slice(0, LABELS_SHOWN).join('; ')}
+                        {more > 0 && ` and ${more} more`}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          ))}
+        </>
+      )}
+    </aside>
+  );
+}
