@@ -179,6 +179,41 @@ describe('mates as uses', () => {
   });
 });
 
+describe('print setups as uses', () => {
+  it('lists a threshold and an item orientation that read a variable, labelled by setup', () => {
+    const doc = boxDocument();
+    const r = applyCommand(doc, {
+      type: 'addPrintSetup',
+      setup: {
+        id: 'print#1',
+        name: 'Plate',
+        printer: 'bambu-a1-mini',
+        nozzle: 0.4,
+        thresholds: { minWall: mm('#h / 10') },
+        items: [
+          {
+            id: 'item#1',
+            part: 'part#1',
+            orientation: { kind: 'rotate', x: mm('#w * 1 deg / 1 mm'), y: mm('0'), z: mm('0') },
+          },
+        ],
+      },
+    });
+    if (!r.ok) throw new Error(r.error.message);
+    const rows = variableRows(r.value.document);
+    expect(rows.find((x) => x.name === 'h')!.uses).toContainEqual({
+      key: 's:print#1:thresholds.minWall',
+      label: 'Plate: Minimum wall',
+      featureId: null,
+    });
+    expect(rows.find((x) => x.name === 'w')!.uses).toContainEqual({
+      key: 's:print#1:items.0.orientation.x',
+      label: 'Plate: item#1: Rotation about X',
+      featureId: null,
+    });
+  });
+});
+
 describe('adding and editing', () => {
   it('adds a variable, writing the unit into a bare length', () => {
     const doc = boxDocument();

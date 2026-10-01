@@ -23,7 +23,7 @@ import {
 ```ts
 interface ManufaktureDocument {
   format: 'manufakture';
-  version: 7; // file format version, FORMAT_VERSION
+  version: 8; // file format version, FORMAT_VERSION
   namingScheme: 1; // topological naming scheme version (T0.5), NAMING_SCHEME
   id: string;
   name: string;
@@ -31,6 +31,7 @@ interface ManufaktureDocument {
   variables: Variable[]; // { name, expression: StoredExpression }, in display order
   parts: Part[];
   assemblies: Assembly[]; // instances of parts placed by mates, in tab order (since version 7)
+  print: PrintData; // print setups: what to print, on which printer, oriented how (since version 8)
   configurations?: Configurations; // the configuration table; absent: none (since version 5)
   nextIds: Record<string, number>; // document-level counters: `part` (since version 4), `cp`, `cfg`, `assembly`
 }
@@ -54,7 +55,7 @@ interface BodyProps {
 ```
 
 `createDocument({ id, name, units? })` makes an empty document with one part, `part#1`, no
-assemblies, and `nextIds: { part: 2 }`. Core never invents document ids; pass a UUID or similar.
+assemblies, an empty print section (`createPrintData()`), and `nextIds: { part: 2 }`. Core never invents document ids; pass a UUID or similar.
 
 ### Bodies
 
@@ -278,6 +279,92 @@ What an assembly uses cannot be removed under it:
 `featureExpressions`; `mateIds`, `mateConnectors`, `mateInstances`, `isPinnedSource` and
 `instancePart` are the other generic views, in `src/features.ts`.
 
+### Print setups
+
+A document holds print setups (since version 8, [ADR 0012](../../docs/adr/0012-3d-printing.md)
+decisions 1 and 2): which bodies to print, on which printer and nozzle, oriented how, with which
+printability thresholds.
+
+```ts
+interface PrintData {
+  setups: PrintSetup[];
+  nextIds: Record<string, number>; // `print`, `item`, `r`; only ever increase
+}
+
+interface PrintSetup {
+  id: 'print#1'; // from print.nextIds.print
+  name: string;
+  printer: string; // a printer table id, 'bambu-a1-mini'; PRINTER_ID_PATTERN, checked at use
+  nozzle: number; // mm, positive, at most MAX_NOZZLE (10)
+  thresholds?: {
+    overhang?: StoredExpression; // angle from vertical (60 deg is OrcaSlicer's 30 from horizontal)
+    minWall?: StoredExpression; // lengths from here on
+    minGap?: StoredExpression;
+    minHole?: StoredExpression;
+    teardrop?: StoredExpression; // horizontal holes above this diameter are flagged
+  }; // absent: every default from the printer and nozzle; present: sets at least one
+  items: PrintItem[];
+}
+
+interface PrintItem {
+  id: 'item#1'; // from print.nextIds.item
+  part: string; // a part id of this document
+  body?: string; // a body id of that part; absent: every body of the part
+  orientation:
+    | { kind: 'asModelled' }
+    | { kind: 'layFlat'; face: FaceReference; turn?: StoredExpression } // face down, then a turn about z
+    | { kind: 'rotate'; x: StoredExpression; y: StoredExpression; z: StoredExpression }; // fixed x, y, z
+  copies?: number; // 1 to MAX_PRINT_COPIES (1000); absent: one
+}
+```
+
+**Why it is not a feature.** A setup changes no geometry: it chooses bodies, a printer and an
+orientation. In the feature tree it would sit in regen order and dirty every regen after it, and
+it would belong to one part while an item may print bodies of several. So it is document state
+beside `parts` and `assemblies`, like M5's CAM setups will be. Regen never reads it, and
+`diffDocuments` reports print edits in `printChanged` and `print`, never in `parts`. Nothing
+derived from a setup is stored (ADR 0004 decision 1): no analysis, no transformed meshes, no
+exports; `packages/print` computes those from the setup and regen's results.
+
+**Print references never block modelling.** An item's `body` and a `layFlat` face name geometry
+of the item's part, resolved when the print workspace uses the setup. Deleting, suppressing or
+changing the feature that made either is always allowed; the workspace then reports the item as
+`reference-lost` and offers a re-pick. Validation checks only that they are well formed (a body id
+whose creator `bodyCreator` can read, a `FaceReference`), never that they exist. Likewise the
+printer id is checked against the printer table (`packages/print`, which core does not import)
+only at use, so the table grows without a format change and a document naming a printer this
+build does not know still loads.
+
+**Ids.** Setups are `print#n`, items `item#n` and `layFlat` face references `r<n>`, all from
+`print.nextIds` (`previewIds(doc.print.nextIds, 'item')`), never reused, and separate from every
+part's counters: a print `r3` and a part's `r3` are different references. Setup and item ids have
+at most 15 digits; there are no split pieces in the print section.
+
+Validation refuses: an id at or past its counter, used twice anywhere in the print section, or a
+split piece; an item of a part that does not exist; a threshold or orientation expression that
+does not parse or names an unknown variable. The schema refuses an unknown key, a printer id that
+is not lower-case letters, digits, `.`, `_` and `-` (at most 64), a nozzle that is not positive or
+above `MAX_NOZZLE`, empty `thresholds`, a `layFlat` without a face or on an edge, copies that are
+not a whole number from 1 to `MAX_PRINT_COPIES`, and more than `MAX_PRINT_ITEMS` (10,000) setups
+or items per setup.
+
+What a setup uses:
+
+- `deletePart` refuses while a print item prints the part (`dependency`; `blockers` lists
+  `<setup id>/<item id>`, as `partPrintItems(doc, partId)` does). Only the part blocks; the body
+  and face an item names never do.
+- `deleteVariable` refuses while a threshold or an orientation angle reads the variable
+  (`variableUsers` lists the setup id; `variablePrintSetups(doc, name)` the setups).
+  `renameVariable` and `inlineVariable` rewrite those expressions with `editPrintSetup` and
+  `editPrintItem`. `variableUses` lists each as a `print` use
+  (`{ kind: 'print', setupId, itemId?, path, expected }`, `path` from the setup), after the mates.
+
+`printSetupExpressions(setup)` lists a setup's expressions with the kind each expects (thresholds,
+then items); `printThresholdExpressions`, `printItemExpressions`, `printSetupIds` and
+`printItemIds` are the other generic views, in `src/features.ts`. `createPrintSetup(id, name,
+printer, nozzle)` makes a setup with no items and default thresholds, and `findPrintSetup(doc,
+id)` finds one.
+
 ### Materials
 
 `MATERIALS` (`src/materials.ts`) is the built-in table: PLA, PETG, ABS, pine, oak, plywood, MDF,
@@ -330,7 +417,8 @@ variable or a feature reads it (`variableUsers` lists them).
 `batch` command (one undo step):
 
 - `variableUses(doc, name)` lists each direct use: another variable, or a feature field with its
-  path and expected kind (and `constraintId` for a sketch dimension).
+  path and expected kind (and `constraintId` for a sketch dimension); then mates, print setups and
+  configurations (see Assemblies, Print setups and Configurations).
 - `renameVariable(doc, from, to, expression?)` renames in place and rewrites every reference as
   `#to` (found by the parser, so `#width` is untouched when renaming `w`).
 - `inlineVariable(doc, name, literal)` writes `literal` into every use, parenthesised inside a
@@ -351,6 +439,7 @@ Ids are permanent and never reused, including after deletion (ADR 0004 decision 
 | sketch split pieces | `<id>#a`, `#b` | none: named from `<id>` |
 
 Assemblies have their own counters, per assembly (see Assemblies): `inst`, `mate`, `mc` and `r`.
+The print section has its own too (see Print setups): `print`, `item` and `r`.
 
 All counters are per part, so sub-ids are unique across the part, not only within one feature.
 Entities are `e` and constraints `k` because T0.5 face names use sketch entity ids after `side:`
@@ -680,6 +769,14 @@ resulting document with `checkDocument`, and returns `{ document, inverse }` or 
 | `deleteMate`             | `assemblyId`, `mateId` (with its connectors)          | `restoreMate`                                                          |
 | `restoreMate`            | `assemblyId`, `mate`, `index` (history only)          | `restoreMate` or `deleteMate`                                          |
 | `suppressMate`           | `assemblyId`, `mateId`, `suppressed`                  | `suppressMate`                                                         |
+| `addPrintSetup`          | `setup` (fresh ids, items included), `index?`         | `deletePrintSetup`                                                     |
+| `editPrintSetup`         | `setupId`, fields to change (below)                   | `editPrintSetup` (the old values)                                      |
+| `deletePrintSetup`       | `setupId` (with its items)                            | `restorePrintSetup`                                                    |
+| `restorePrintSetup`      | `setup`, `index` (history only)                       | `deletePrintSetup`                                                     |
+| `addPrintItem`           | `setupId`, `item` (fresh ids), `index?`               | `deletePrintItem`                                                      |
+| `editPrintItem`          | `setupId`, `item` (by id; new ids fresh)              | `restorePrintItem` (old state)                                         |
+| `deletePrintItem`        | `setupId`, `itemId`                                   | `restorePrintItem`                                                     |
+| `restorePrintItem`       | `setupId`, `item`, `index` (history only)             | `restorePrintItem` or `deletePrintItem`                                |
 | `replaceDocument`        | `document` (the same `id`; history only)              | `replaceDocument` (the old document)                                   |
 | `batch`                  | `commands` (applied in order, all or nothing)         | `batch` of inverses, reversed                                          |
 
@@ -696,8 +793,9 @@ with the same ids, since ids are per part, counters, rollback bar, material and 
 `deletePart` refuses the document's last part (`last-part`), refuses while a suppression
 configuration parameter names a feature of the part (`dependency`, the parameter ids in
 `blockers`; `partParameters(doc, partId)` lists them): delete the parameter in the same batch,
-and refuses while an assembly instance shows the part (`dependency`, `<assembly id>/<instance id>`
-in `blockers`; `partInstances(doc, partId)` lists them).
+refuses while an assembly instance shows the part (`dependency`, `<assembly id>/<instance id>`
+in `blockers`; `partInstances(doc, partId)` lists them), and refuses while a print item prints
+it (`dependency`, `<setup id>/<item id>` in `blockers`; `partPrintItems(doc, partId)`).
 
 Assemblies: `addAssembly` takes an `assembly#n` from the document's `nextIds.assembly`, like
 `addPart`. `addInstance` and `addMate` allocate from the assembly's `nextIds` and refuse an id
@@ -712,6 +810,15 @@ values. `setPoses`
 changes the poses of several instances in one undo step; it is what a drag or a mate dialog
 commits.
 
+Print setups: `addPrintSetup` allocates the setup's id and every id inside it (items and their
+face references) from `print.nextIds` and refuses one handed out before (`id-reused`), as
+`addPrintItem` does for one item. `editPrintSetup` changes only the fields it is given (`name`,
+trimmed, 1 to 200 characters; `printer`; `nozzle`; `thresholds`, with `null` for the defaults),
+and its inverse gives exactly those fields their old values. `editPrintItem` replaces an item by
+id, and the ids it introduces must be fresh: re-picking a `layFlat` face takes a new `r<n>`.
+`restorePrintSetup` and `restorePrintItem` are the history-only counterparts. None of them looks
+at geometry, and no part or feature command looks at print references (see Print setups).
+
 `restoreFeature` is a history-only command: it is what undo and redo use to put a feature state
 back, and clients must not use it to edit. Unlike `addFeature` and `editFeature`, it requires its
 ids to have been allocated before, so undoing a delete brings back the same ids without counting
@@ -725,8 +832,8 @@ replacement must have the same `id` and pass the schema and `checkDocument` as a
 assemblies and configurations included. It does not look at counters itself, so that its inverse
 can put back exactly what was there; a client builds the replacement with
 `restoredDocument(current, past)`, which keeps `past`'s content under `current`'s id and raises
-every counter (the document's, and each part's and assembly's that both have) to the higher of the
-two values, so no id handed out after `past` is handed out again. In the op log the command
+every counter (the document's, the print section's, and each part's and assembly's that both
+have) to the higher of the two values, so no id handed out after `past` is handed out again. In the op log the command
 carries the whole document: imported files and pinned versions are stored by reference as for any
 command, so it is the feature JSON that repeats.
 
@@ -803,6 +910,13 @@ after a committed drag, so nothing regenerates and nothing needs solving again. 
 never lists a part in `parts`; an instance's geometry changes when its part does, which `parts`
 reports.
 
+Print setups never dirty a regen (ADR 0012 decision 1). `printChanged` says the print section
+changed: a setup or item added, removed or edited, setups reordered, or a threshold or orientation
+reading a changed variable (also through the active configuration row). `print.setups` lists the
+added, removed and changed setup ids and `print.reordered` whether their order changed. A print
+edit adds nothing to `parts`, so it has no `firstAffectedIndex`; the print workspace re-checks the
+setups listed, and re-checks every setup when `parts` reports a part it prints.
+
 ## File format
 
 `serialize(doc)` writes canonical JSON: keys in schema order (records such as `nextIds` and a row's
@@ -837,7 +951,8 @@ solids in one compound (`v3-two-bodies.json`) regenerates the same solids, now a
 (`extrude#1` and `extrude#2`). The test migrates `src/fixtures/v0-bracket.json` to exactly
 `v1-bracket.json`, that to exactly `v2-bracket.json`, that to exactly `v3-bracket.json` and that
 to exactly `v4-bracket.json` and that to exactly `v5-bracket.json` and that to exactly
-`v6-bracket.json` and that to exactly `v7-bracket.json`, and `v3-two-bodies.json` to
+`v6-bracket.json` and that to exactly `v7-bracket.json` and that to exactly `v8-bracket.json`,
+and `v3-two-bodies.json` to
 exactly `v4-two-bodies.json`. Version 5 added the optional configuration table; `migrateV4ToV5`
 only bumps the version, since a version 4 document has none and an absent counter starts at 1.
 Version 6 added the `derived` feature kind and the optional `mode` of a pattern or mirror of
@@ -846,7 +961,10 @@ and an absent `mode` is `add`; `v5-bracket.json` migrates to exactly `v6-bracket
 added assemblies and the vertex reference; `migrateV6ToV7` adds `assemblies: []` right after
 `parts` (where a saved file has it) and changes nothing else, since a version 6 document has no
 assembly and an absent `assembly` counter starts at 1; `v6-bracket.json` migrates to exactly
-`v7-bracket.json`.
+`v7-bracket.json`. Version 8 added print setups (ADR 0012); `migrateV7ToV8` adds
+`print: { setups: [], nextIds: {} }` right after `assemblies` (where a saved file has it) and
+changes nothing else, since a version 7 document has no setups and every print counter starts at
+1; `v7-bracket.json` migrates to exactly `v8-bracket.json`.
 
 To change the file shape:
 
@@ -857,7 +975,7 @@ To change the file shape:
 
 ## Where this deviates from ADR 0004's first cut
 
-- **Added fields.** The document has `id`, `name`, `nextIds`, `assemblies` and an optional `configurations`; a part has `name`,
+- **Added fields.** The document has `id`, `name`, `nextIds`, `assemblies`, `print` and an optional `configurations`; a part has `name`,
   `rollbackIndex`, an optional `material` (the default for its bodies) and `bodies`;
   every feature has `name` and `suppressed`. The ADR's shape was a first cut that expected feature kinds
   to add their own fields.

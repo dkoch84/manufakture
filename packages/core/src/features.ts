@@ -8,6 +8,8 @@ import type {
   Mate,
   MateConnector,
   PartInstanceSource,
+  PrintItem,
+  PrintSetup,
   Reference,
   SketchConstraint,
   SketchEntity,
@@ -382,4 +384,70 @@ export function instanceMates(assembly: Assembly, instanceId: string): string[] 
   return assembly.mates
     .filter((m) => m.a.instance === instanceId || m.b.instance === instanceId)
     .map((m) => m.id);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Print setups (since version 8): generic views of setups and items, as above for mates.
+
+/** Every id a print item owns: its own and its `layFlat` face reference's (`r<n>`). */
+export function printItemIds(item: PrintItem): string[] {
+  return item.orientation.kind === 'layFlat' ? [item.id, item.orientation.face.id] : [item.id];
+}
+
+/** Every id a print setup owns: its own, then each item's (`printItemIds`), in item order. */
+export function printSetupIds(setup: PrintSetup): string[] {
+  return [setup.id, ...setup.items.flatMap(printItemIds)];
+}
+
+/** The order thresholds are listed in, with the kind each one expects. */
+const THRESHOLDS = [
+  ['overhang', 'angle'],
+  ['minWall', 'length'],
+  ['minGap', 'length'],
+  ['minHole', 'length'],
+  ['teardrop', 'length'],
+] as const;
+
+/** A setup's threshold expressions, with paths from the setup (`['thresholds', 'minWall']`). */
+export function printThresholdExpressions(setup: PrintSetup): ExpressionSite[] {
+  const out: ExpressionSite[] = [];
+  for (const [key, expected] of THRESHOLDS) {
+    const expression = setup.thresholds?.[key];
+    if (expression !== undefined) out.push({ path: ['thresholds', key], expression, expected });
+  }
+  return out;
+}
+
+/**
+ * An item's orientation expressions (all angles), with paths from the item
+ * (`['orientation', 'turn']`, `['orientation', 'x']`).
+ */
+export function printItemExpressions(item: PrintItem): ExpressionSite[] {
+  const o = item.orientation;
+  if (o.kind === 'layFlat') {
+    return o.turn === undefined
+      ? []
+      : [{ path: ['orientation', 'turn'], expression: o.turn, expected: 'angle' }];
+  }
+  if (o.kind === 'rotate') {
+    return (['x', 'y', 'z'] as const).map((axis) => ({
+      path: ['orientation', axis],
+      expression: o[axis],
+      expected: 'angle' as const,
+    }));
+  }
+  return [];
+}
+
+/**
+ * Every expression in a setup, with paths from the setup: thresholds, then each item's
+ * (`['items', 2, 'orientation', 'turn']`).
+ */
+export function printSetupExpressions(setup: PrintSetup): ExpressionSite[] {
+  return [
+    ...printThresholdExpressions(setup),
+    ...setup.items.flatMap((item, i) =>
+      printItemExpressions(item).map((site) => ({ ...site, path: ['items', i, ...site.path] })),
+    ),
+  ];
 }

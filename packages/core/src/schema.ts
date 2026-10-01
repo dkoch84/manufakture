@@ -28,7 +28,7 @@ import { MATERIAL_IDS } from './materials';
  */
 
 /** The file format version this code reads and writes. Bump it only together with a migration. */
-export const FORMAT_VERSION = 7;
+export const FORMAT_VERSION = 8;
 /** The topological naming scheme version (T0.5) that stored references are written in. */
 export const NAMING_SCHEME = 1;
 export const FORMAT_TAG = 'manufakture';
@@ -1218,6 +1218,125 @@ export const AssemblySchema = z.strictObject({
   nextIds: z.record(z.string(), z.int().min(1)),
 });
 
+// ---------------------------------------------------------------------------------------------
+// Print setups (since version 8; ADR 0012 decisions 1 and 2). Document state, not features: a
+// setup changes no geometry, so it is outside every feature list and never dirties a regen.
+
+/** Document print-level `nextIds` keys: setups (`print#n`) and items (`item#n`); references use `r`. */
+export const PRINT_SETUP_COUNTER = 'print';
+export const PRINT_ITEM_COUNTER = 'item';
+/**
+ * Setup and item ids: `<counter>#n` with at most 15 digits, so every `n` and the counter past it
+ * stay exact integers. Their face references use `ReferenceIdSchema` (`r<n>`), counted by the
+ * print section's own `nextIds.r`, a namespace separate from every part's.
+ */
+export const PRINT_SETUP_ID_PATTERN = /^print#[1-9][0-9]{0,14}$/;
+export const PRINT_ITEM_ID_PATTERN = /^item#[1-9][0-9]{0,14}$/;
+/**
+ * A printer id: lower-case letters, digits, `.`, `_` and `-`, at most 64 characters
+ * (`bambu-a1-mini`). It names a row of the printer table in `packages/print`, which is checked
+ * when a setup is used, never here: the table grows without a format change, and a document
+ * naming a printer this build does not know still loads (ADR 0012 decision 2).
+ */
+export const PRINTER_ID_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+/** The most setups a document, and items a setup, may hold; bounds what a crafted file costs. */
+export const MAX_PRINT_ITEMS = 10_000;
+/** The most copies of one item. */
+export const MAX_PRINT_COPIES = 1000;
+/**
+ * The largest nozzle, in millimetres. Real FDM nozzles are 0.2 to 1.2 mm; the bound only keeps a
+ * crafted value sane. Whether the printer is sold with that nozzle is checked at use.
+ */
+export const MAX_NOZZLE = 10;
+
+export const PrintSetupIdSchema = counted(PRINT_SETUP_ID_PATTERN, 'print#1');
+export const PrintItemIdSchema = counted(PRINT_ITEM_ID_PATTERN, 'item#1');
+export const PrinterIdSchema = z
+  .string()
+  .regex(PRINTER_ID_PATTERN, 'Expected a printer id like "bambu-a1-mini"');
+
+/**
+ * Printability thresholds, as expressions. `overhang` is an angle from vertical (ADR 0012
+ * decision 6: 60 degrees from vertical is OrcaSlicer's 30 from horizontal); the others are
+ * lengths: the thinnest wall, the narrowest gap, the smallest hole, and the diameter above which
+ * a horizontal hole is flagged for a teardrop. Each one absent takes its default from the printer
+ * and nozzle; an entry sets at least one (no thresholds at all is an absent `thresholds`).
+ */
+export const PrintThresholdsSchema = z
+  .strictObject({
+    overhang: StoredExpressionSchema.exactOptional(),
+    minWall: StoredExpressionSchema.exactOptional(),
+    minGap: StoredExpressionSchema.exactOptional(),
+    minHole: StoredExpressionSchema.exactOptional(),
+    teardrop: StoredExpressionSchema.exactOptional(),
+  })
+  .check((ctx) => {
+    if (Object.values(ctx.value).every((v) => v === undefined)) {
+      ctx.issues.push({
+        code: 'custom',
+        message: 'thresholds set at least one value; leave them out for the defaults',
+        input: ctx.value,
+        path: [],
+      });
+    }
+  });
+
+/**
+ * How an item sits on the bed. `asModelled`: as it is in the part. `layFlat`: the planar face
+ * `face` turned down onto the bed, then a turn about z by `turn` (absent: none). `rotate`: angles
+ * about the fixed x, y and z axes, in that order (`packages/print` documents the convention).
+ * The bed placement after that (lowest point to z = 0) is computed, never stored.
+ */
+export const PrintOrientationSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('asModelled') }),
+  z.strictObject({
+    kind: z.literal('layFlat'),
+    face: FaceReferenceSchema,
+    turn: StoredExpressionSchema.exactOptional(),
+  }),
+  z.strictObject({
+    kind: z.literal('rotate'),
+    x: StoredExpressionSchema,
+    y: StoredExpressionSchema,
+    z: StoredExpressionSchema,
+  }),
+]);
+
+/**
+ * One thing to print: a part of this document, one of its bodies or all of them, oriented, and
+ * how many copies. The body and the face are names regen resolves; whether they still exist is a
+ * print workspace result (`reference-lost`), never a load or command error (ADR 0012 decision 2).
+ */
+export const PrintItemSchema = z.strictObject({
+  id: PrintItemIdSchema,
+  /** A part id of this document. */
+  part: z.string().min(1).max(MAX_PART_ID_LENGTH),
+  /** A body id of that part; absent: every body of the part. */
+  body: BodyIdSchema.exactOptional(),
+  orientation: PrintOrientationSchema,
+  /** Absent: one. */
+  copies: z.int().min(1).max(MAX_PRINT_COPIES).exactOptional(),
+});
+
+/** A print setup: a printer, a nozzle, optional thresholds and the items to print. */
+export const PrintSetupSchema = z.strictObject({
+  id: PrintSetupIdSchema,
+  name: featureName,
+  printer: PrinterIdSchema,
+  /** The nozzle diameter, in millimetres. */
+  nozzle: z.number().positive().max(MAX_NOZZLE),
+  /** Absent: every threshold from the printer and nozzle defaults. */
+  thresholds: PrintThresholdsSchema.exactOptional(),
+  items: z.array(PrintItemSchema).max(MAX_PRINT_ITEMS),
+});
+
+/** The print section (README, "Print setups"). Since version 8. */
+export const PrintDataSchema = z.strictObject({
+  setups: z.array(PrintSetupSchema).max(MAX_PRINT_ITEMS),
+  /** Next number per id counter (`print`, `item`, `r`). Only ever increases. */
+  nextIds: z.record(z.string(), z.int().min(1)),
+});
+
 export const DocumentSchema = z.strictObject({
   format: z.literal(FORMAT_TAG),
   version: z.literal(FORMAT_VERSION),
@@ -1229,6 +1348,8 @@ export const DocumentSchema = z.strictObject({
   parts: z.array(PartSchema).min(1),
   /** Assemblies of this document's parts and of pinned parts, in tab order. Since version 7. */
   assemblies: z.array(AssemblySchema).max(MAX_ASSEMBLY_ITEMS),
+  /** Print setups: what to print, on which printer, oriented how. Since version 8. */
+  print: PrintDataSchema,
   /** The configuration table; absent when the document has none. Since version 5. */
   configurations: ConfigurationsSchema.exactOptional(),
   /**
@@ -1313,4 +1434,9 @@ export type MateKind = z.infer<typeof MateKindSchema>;
 export type MateLimits = z.infer<typeof MateLimitsSchema>;
 export type Mate = z.infer<typeof MateSchema>;
 export type Assembly = z.infer<typeof AssemblySchema>;
+export type PrintThresholds = z.infer<typeof PrintThresholdsSchema>;
+export type PrintOrientation = z.infer<typeof PrintOrientationSchema>;
+export type PrintItem = z.infer<typeof PrintItemSchema>;
+export type PrintSetup = z.infer<typeof PrintSetupSchema>;
+export type PrintData = z.infer<typeof PrintDataSchema>;
 export type ManufaktureDocument = z.infer<typeof DocumentSchema>;

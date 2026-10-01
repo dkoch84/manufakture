@@ -2,13 +2,29 @@
 // inlining one (replacing each reference with a literal, then deleting it). Both return one
 // `batch` command, so each is a single undo step, checked once at the end like any batch.
 // Configurations count as uses: a parameter that configures a variable, and a row value that
-// mentions one. So do mates: a connector offset or a limit that reads a variable.
+// mentions one. So do mates: a connector offset or a limit that reads a variable; and print
+// setups: a threshold or an item's orientation angle.
 
 import { isValidVariableName } from '@manufakture/units';
 import { variableParameters, type Command, type SimpleCommand } from './commands';
-import { featureExpressions, mateExpressions, type ExpressionKind } from './features';
+import {
+  featureExpressions,
+  mateExpressions,
+  printItemExpressions,
+  printSetupExpressions,
+  printThresholdExpressions,
+  type ExpressionKind,
+} from './features';
 import { fail, ok, type CoreResult } from './result';
-import type { ConfigRow, Feature, ManufaktureDocument, Mate, StoredExpression } from './schema';
+import type {
+  ConfigRow,
+  Feature,
+  ManufaktureDocument,
+  Mate,
+  PrintItem,
+  PrintThresholds,
+  StoredExpression,
+} from './schema';
 import { expressionReferences } from './validate';
 
 /** One place that reads a variable directly: another variable, or a feature's field. */
@@ -32,6 +48,18 @@ export type VariableUse =
       path: readonly (string | number)[];
       expected: ExpressionKind;
     }
+  /**
+   * A print setup's threshold (`thresholds.overhang`, with no `itemId`) or one of its items'
+   * orientation angles (`orientation.turn`, with the item's id). `path` is from the setup:
+   * `['items', 2, 'orientation', 'turn']` for an item's.
+   */
+  | {
+      kind: 'print';
+      setupId: string;
+      itemId?: string;
+      path: readonly (string | number)[];
+      expected: ExpressionKind;
+    }
   /** A configuration parameter that configures the variable (it names it, not an expression). */
   | { kind: 'parameter'; parameterId: string }
   /** A configuration row whose value for `parameterId` mentions the variable. */
@@ -44,8 +72,8 @@ function mentions(expression: StoredExpression, name: string): boolean {
 
 /**
  * Every direct use of variable `name`, in document order: variables, then features, then mates
- * (assembly by assembly, in creation order), then configuration parameters that configure it,
- * then configuration row values that mention it.
+ * (assembly by assembly, in creation order), then print setups (thresholds, then items), then
+ * configuration parameters that configure it, then configuration row values that mention it.
  */
 export function variableUses(doc: ManufaktureDocument, name: string): VariableUse[] {
   const out: VariableUse[] = [];
@@ -84,6 +112,19 @@ export function variableUses(doc: ManufaktureDocument, name: string): VariableUs
           expected: site.expected,
         });
       }
+    }
+  }
+  for (const setup of doc.print.setups) {
+    for (const site of printSetupExpressions(setup)) {
+      if (!mentions(site.expression, name)) continue;
+      const use: VariableUse = {
+        kind: 'print',
+        setupId: setup.id,
+        path: site.path,
+        expected: site.expected,
+      };
+      if (site.path[0] === 'items') use.itemId = setup.items[site.path[1] as number]!.id;
+      out.push(use);
     }
   }
   for (const p of variableParameters(doc, name)) out.push({ kind: 'parameter', parameterId: p.id });
@@ -134,8 +175,8 @@ function replaceAt<T>(value: T, path: readonly (string | number)[], next: unknow
 
 /**
  * The commands that rewrite every expression reading `name` with `rewrite` (variables other
- * than `name` itself, then features, then mates, then configuration rows), without deleting or
- * adding anything.
+ * than `name` itself, then features, then mates, then print setups and items, then
+ * configuration rows), without deleting or adding anything.
  */
 function rewriteUses(
   doc: ManufaktureDocument,
@@ -171,6 +212,28 @@ function rewriteUses(
         next = replaceAt(next, site.path, { ...site.expression, source });
       }
       if (next !== mate) commands.push({ type: 'editMate', assemblyId: assembly.id, mate: next });
+    }
+  }
+  for (const setup of doc.print.setups) {
+    let thresholds: PrintThresholds | undefined = setup.thresholds;
+    for (const site of printThresholdExpressions(setup)) {
+      if (!mentions(site.expression, name)) continue;
+      const source = rewrite(site.expression.source);
+      if (source === null) continue;
+      thresholds = replaceAt(thresholds, site.path.slice(1), { ...site.expression, source });
+    }
+    if (thresholds !== setup.thresholds) {
+      commands.push({ type: 'editPrintSetup', setupId: setup.id, thresholds: thresholds! });
+    }
+    for (const item of setup.items) {
+      let next: PrintItem = item;
+      for (const site of printItemExpressions(item)) {
+        if (!mentions(site.expression, name)) continue;
+        const source = rewrite(site.expression.source);
+        if (source === null) continue;
+        next = replaceAt(next, site.path, { ...site.expression, source });
+      }
+      if (next !== item) commands.push({ type: 'editPrintItem', setupId: setup.id, item: next });
     }
   }
   for (const row of doc.configurations?.rows ?? []) {

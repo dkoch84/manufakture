@@ -148,6 +148,19 @@ const MATE_FIELD_LABELS: Record<string, string> = Object.fromEntries([
   }),
 ]);
 
+/** Print setup fields, by path from the setup (thresholds) or from the item (orientation). */
+const PRINT_FIELD_LABELS: Record<string, string> = {
+  'thresholds.overhang': 'Overhang angle',
+  'thresholds.minWall': 'Minimum wall',
+  'thresholds.minGap': 'Minimum gap',
+  'thresholds.minHole': 'Minimum hole',
+  'thresholds.teardrop': 'Teardrop above',
+  'orientation.turn': 'Turn',
+  'orientation.x': 'Rotation about X',
+  'orientation.y': 'Rotation about Y',
+  'orientation.z': 'Rotation about Z',
+};
+
 /** What a use is called in the table. */
 export function labelOfUse(doc: ManufaktureDocument, use: VariableUse): string {
   if (use.kind === 'variable') return `#${use.name}`;
@@ -164,6 +177,13 @@ export function labelOfUse(doc: ManufaktureDocument, use: VariableUse): string {
     const mate = assembly?.mates.find((m) => m.id === use.mateId);
     const where = `${assembly?.name ?? use.assemblyId}: ${mate?.name ?? use.mateId}`;
     return `${where}: ${MATE_FIELD_LABELS[use.path.join('.')] ?? use.path.join('.')}`;
+  }
+  if (use.kind === 'print') {
+    const setup = doc.print.setups.find((x) => x.id === use.setupId);
+    const where = setup?.name ?? use.setupId;
+    const field =
+      PRINT_FIELD_LABELS[use.path.slice(use.itemId ? 2 : 0).join('.')] ?? use.path.join('.');
+    return use.itemId ? `${where}: ${use.itemId}: ${field}` : `${where}: ${field}`;
   }
   const feature = findPart(doc, use.partId)?.features.find((f) => f.id === use.featureId);
   const name = feature?.name ?? use.featureId;
@@ -183,7 +203,9 @@ function usesOf(doc: ManufaktureDocument, name: string): UseRow[] {
             ? `r:${u.rowId}:${u.parameterId}`
             : u.kind === 'mate'
               ? `m:${u.assemblyId}/${u.mateId}:${u.path.join('.')}`
-              : `f:${u.featureId}:${u.path.join('.')}`,
+              : u.kind === 'print'
+                ? `s:${u.setupId}:${u.path.join('.')}`
+                : `f:${u.featureId}:${u.path.join('.')}`,
     label: labelOfUse(doc, u),
     featureId: u.kind === 'feature' ? u.featureId : null,
   }));

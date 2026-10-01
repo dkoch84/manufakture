@@ -11,6 +11,7 @@ import {
   migrateV4ToV5,
   migrateV5ToV6,
   migrateV6ToV7,
+  migrateV7ToV8,
   type Migration,
 } from './migrations';
 import type { CoreErrorCode } from './result';
@@ -26,6 +27,7 @@ import v4TwoBodies from './fixtures/v4-two-bodies.json';
 import v5Bracket from './fixtures/v5-bracket.json';
 import v6Bracket from './fixtures/v6-bracket.json';
 import v7Bracket from './fixtures/v7-bracket.json';
+import v8Bracket from './fixtures/v8-bracket.json';
 
 /** One fixture per older file version; `migrates every older version` checks this is complete. */
 const FIXTURES: Record<number, unknown> = {
@@ -36,6 +38,7 @@ const FIXTURES: Record<number, unknown> = {
   4: v4Bracket,
   5: v5Bracket,
   6: v6Bracket,
+  7: v7Bracket,
 };
 
 function load(value: unknown): ManufaktureDocument {
@@ -46,7 +49,7 @@ describe('serialize and deserialize', () => {
   const documents: [string, () => ManufaktureDocument][] = [
     ['an empty document', () => createDocument({ id: 'd', name: 'Empty' })],
     ['the bracket', bracket],
-    ['the current fixture', () => load(v7Bracket)],
+    ['the current fixture', () => load(v8Bracket)],
     ['the two-body fixture', () => load(v4TwoBodies)],
     [
       'a document with body props and a scope',
@@ -179,20 +182,20 @@ describe('serialize and deserialize', () => {
     expect(serialize(unwrap(deserialize(serialize(shuffled))).document)).toBe(serialize(doc));
     expect(
       serialize(doc).startsWith(
-        '{\n  "format": "manufakture",\n  "version": 7,\n  "namingScheme": 1,',
+        '{\n  "format": "manufakture",\n  "version": 8,\n  "namingScheme": 1,',
       ),
     ).toBe(true);
   });
 
   it('refuses to serialize an invalid document', () => {
     const doc = clone(bracket()) as unknown as { version: number };
-    doc.version = 8;
+    doc.version = 9;
     expect(() => serialize(doc as unknown as ManufaktureDocument)).toThrow(/Cannot serialize/);
   });
 });
 
 describe('loading errors', () => {
-  const current = () => clone(v7Bracket) as Record<string, unknown>;
+  const current = () => clone(v8Bracket) as Record<string, unknown>;
   const cases: [string, string | (() => unknown), CoreErrorCode, RegExp?][] = [
     ['not JSON', '{ "format": ', 'json'],
     ['an array', '[]', 'format'],
@@ -248,13 +251,14 @@ describe('loading errors', () => {
   it('never modifies the value it is given, even a newer one', () => {
     for (const value of [
       clone(v0Bracket),
-      { ...clone(v7Bracket), version: 99 },
+      { ...clone(v8Bracket), version: 99 },
       clone(v1Bracket),
       clone(v3Bracket),
       clone(v4Bracket),
       clone(v5Bracket),
       clone(v6Bracket),
       clone(v7Bracket),
+      clone(v8Bracket),
     ]) {
       const frozen = deepFreeze(value);
       const snapshot = JSON.stringify(frozen);
@@ -264,7 +268,7 @@ describe('loading errors', () => {
   });
 
   it('reports schema problems with paths', () => {
-    const d = clone(v7Bracket) as { variables: { expression: unknown }[] };
+    const d = clone(v8Bracket) as { variables: { expression: unknown }[] };
     d.variables[0]!.expression = 6;
     const r = parseDocument(d);
     expect(r.ok).toBe(false);
@@ -284,11 +288,12 @@ describe('migrations', () => {
     expect(migrateV4ToV5.migrate(clone(v4Bracket) as Record<string, unknown>)).toEqual(v5Bracket);
     expect(migrateV5ToV6.migrate(clone(v5Bracket) as Record<string, unknown>)).toEqual(v6Bracket);
     expect(migrateV6ToV7.migrate(clone(v6Bracket) as Record<string, unknown>)).toEqual(v7Bracket);
+    expect(migrateV7ToV8.migrate(clone(v7Bracket) as Record<string, unknown>)).toEqual(v8Bracket);
     const loaded = unwrap(parseDocument(v0Bracket));
     expect(loaded.from).toEqual({ version: 0, namingScheme: 1 });
     expect(loaded.migrated).toBe(true);
-    expect(loaded.document).toEqual(load(v7Bracket));
-    expect(JSON.parse(serialize(loaded.document))).toEqual(v7Bracket);
+    expect(loaded.document).toEqual(load(v8Bracket));
+    expect(JSON.parse(serialize(loaded.document))).toEqual(v8Bracket);
   });
 
   it('v1 to v2 changes only the version: a version 1 part has no material', () => {
@@ -340,6 +345,7 @@ describe('migrations', () => {
       ...v4TwoBodies,
       version: FORMAT_VERSION,
       assemblies: [],
+      print: { setups: [], nextIds: {} },
     });
   });
 
@@ -400,6 +406,35 @@ describe('migrations', () => {
       format: 'manufakture',
       version: 7,
       assemblies: [],
+    });
+  });
+
+  it('v7 to v8 adds an empty print section after the assemblies, and changes nothing else', () => {
+    const migrated = migrateV7ToV8.migrate(clone(v7Bracket) as Record<string, unknown>);
+    expect(migrated).toEqual({
+      ...clone(v7Bracket),
+      version: 8,
+      print: { setups: [], nextIds: {} },
+    });
+    const keys = Object.keys(migrated);
+    expect(keys.indexOf('print')).toBe(keys.indexOf('assemblies') + 1);
+    const loaded = unwrap(parseDocument(v7Bracket));
+    expect(loaded.from.version).toBe(7);
+    expect(loaded.migrated).toBe(true);
+    expect(loaded.document).toEqual(load(v8Bracket));
+    expect(loaded.document.print).toEqual({ setups: [], nextIds: {} });
+    expect(serialize(loaded.document)).toBe(serialize(load(v8Bracket)));
+    expect(JSON.parse(serialize(loaded.document))).toEqual(v8Bracket);
+  });
+
+  it('v7 to v8 replaces a print key a version 7 file cannot have had', () => {
+    const odd = { ...clone(v7Bracket), print: 'junk' } as Record<string, unknown>;
+    expect(migrateV7ToV8.migrate(odd).print).toEqual({ setups: [], nextIds: {} });
+    const noAssemblies = { format: 'manufakture', version: 7 } as Record<string, unknown>;
+    expect(migrateV7ToV8.migrate(noAssemblies)).toEqual({
+      format: 'manufakture',
+      version: 8,
+      print: { setups: [], nextIds: {} },
     });
   });
 

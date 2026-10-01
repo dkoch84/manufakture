@@ -237,6 +237,49 @@ describe('DocumentLibrary', () => {
     expect(read).toEqual({ ok: true, value: entries });
   });
 
+  it('saves the print section and logged print commands unchanged (ADR 0012, format v8)', async () => {
+    const backend = new MemoryBackend();
+    const lib = library(backend);
+    const doc = partDocument();
+    await lib.save(doc);
+    const add: Command = {
+      type: 'addPrintSetup',
+      setup: {
+        id: 'print#1',
+        name: 'Plate',
+        printer: 'bambu-a1-mini',
+        nozzle: 0.4,
+        thresholds: { overhang: { source: '55', lengthUnit: 'mm', angleUnit: 'deg' } },
+        items: [
+          {
+            id: 'item#1',
+            part: 'part#1',
+            orientation: {
+              kind: 'layFlat',
+              face: { id: 'r1', ref: { face: 'extrude#1:cap:start' } },
+            },
+            copies: 2,
+          },
+        ],
+      },
+    };
+    const printed = unwrapDoc(applyCommand(doc, add));
+    const entries: LogEntry[] = [
+      { cause: 'execute', label: 'Add print setup', command: add, at: '2026-09-26T12:00:00.000Z' },
+    ];
+    await lib.save(printed, entries);
+    // Nothing in storage filters top-level document keys: the section is in the snapshot as is.
+    const snapshot = JSON.parse(text(backend, 'documents/doc-1/snapshot-00000002.json'));
+    expect(snapshot.print).toEqual(printed.print);
+    expect((await opened(library(backend), 'doc-1')).document).toEqual(printed);
+    expect(await library(backend).readLog('doc-1')).toEqual({ ok: true, value: entries });
+    // And through a .mfk file, out and back in.
+    const exported = value(await lib.exportMfk('doc-1'));
+    await lib.remove('doc-1');
+    value(await lib.importMfk(exported.bytes));
+    expect((await opened(lib, 'doc-1')).document).toEqual(printed);
+  });
+
   it('keeps a logged import even once the document no longer holds it', async () => {
     const backend = new MemoryBackend();
     const lib = library(backend);

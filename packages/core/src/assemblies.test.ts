@@ -1187,6 +1187,7 @@ describe('saving', () => {
       'variables',
       'parts',
       'assemblies',
+      'print',
       'nextIds',
     ]);
   });

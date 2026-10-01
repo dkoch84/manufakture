@@ -10,6 +10,9 @@ import {
   isPinnedSource,
   mateExpressions,
   mateIds,
+  printItemIds,
+  printSetupExpressions,
+  printSetupIds,
 } from './features';
 import { PART_COUNTER, parseAnyId, peekCounter } from './ids';
 import { fail, ok, schemaError, type CoreResult } from './result';
@@ -35,6 +38,10 @@ import {
   MaterialIdSchema,
   PartSchema,
   PoseSchema,
+  PrintItemSchema,
+  PrintSetupSchema,
+  PrintThresholdsSchema,
+  PrinterIdSchema,
   StoredExpressionSchema,
   type Assembly,
   type BodyProps,
@@ -48,6 +55,9 @@ import {
   type Mate,
   type Part,
   type Pose,
+  type PrintData,
+  type PrintItem,
+  type PrintSetup,
 } from './schema';
 import { createAssembly, createPart } from './document';
 import { checkDocument, expressionVariableNames } from './validate';
@@ -67,12 +77,16 @@ export const MAX_PART_NAME = 200;
 export const PART_ID_PATTERN = /^part#[1-9][0-9]*$/;
 /** Longest assembly name `addAssembly` and `renameAssembly` accept. */
 export const MAX_ASSEMBLY_NAME = 200;
+/** Longest print setup name `editPrintSetup` accepts (as for features). */
+export const MAX_PRINT_SETUP_NAME = 200;
 
 const partId = z.string().min(1);
 const assemblyId = z.string().min(1).max(32);
 const instanceId = z.string().min(1).max(32);
 const mateId = z.string().min(1).max(32);
 const featureId = z.string().min(1);
+const setupId = z.string().min(1).max(32);
+const itemId = z.string().min(1).max(32);
 const index = z.int().min(0);
 
 export const SimpleCommandSchema = z.discriminatedUnion('type', [
@@ -201,8 +215,9 @@ export const SimpleCommandSchema = z.discriminatedUnion('type', [
   /** Rename a part studio (trimmed, 1 to 200 characters). */
   z.strictObject({ type: z.literal('renamePart'), partId, name: z.string() }),
   /**
-   * Remove a part studio. Refused for the last one, and while a configuration parameter
-   * suppresses one of its features.
+   * Remove a part studio. Refused for the last one, while a configuration parameter
+   * suppresses one of its features, while an assembly instance shows it, and while a print item
+   * prints it.
    */
   z.strictObject({ type: z.literal('deletePart'), partId }),
   /**
@@ -297,6 +312,51 @@ export const SimpleCommandSchema = z.discriminatedUnion('type', [
     mateId,
     suppressed: z.boolean(),
   }),
+  /**
+   * Add a print setup at `index` (default: last). Its id, its items' ids and their references'
+   * ids must be fresh (`print#n`, `item#n`, `r<n>` from `print.nextIds`). Since version 8.
+   */
+  z.strictObject({
+    type: z.literal('addPrintSetup'),
+    setup: PrintSetupSchema,
+    index: index.optional(),
+  }),
+  /**
+   * Change a setup's name, printer, nozzle or thresholds (`null`: the defaults). Absent fields
+   * stay. Items are edited with the item commands.
+   */
+  z.strictObject({
+    type: z.literal('editPrintSetup'),
+    setupId,
+    name: z.string().exactOptional(),
+    printer: PrinterIdSchema.exactOptional(),
+    nozzle: PrintSetupSchema.shape.nozzle.exactOptional(),
+    thresholds: PrintThresholdsSchema.nullable().exactOptional(),
+  }),
+  /** Remove a print setup with its items. Nothing refers to a setup. */
+  z.strictObject({ type: z.literal('deletePrintSetup'), setupId }),
+  /** History only: put a deleted setup back at `index` (its ids were allocated before). */
+  z.strictObject({ type: z.literal('restorePrintSetup'), setup: PrintSetupSchema, index }),
+  /**
+   * Add an item to a setup at `index` (default: last). Its id and its face reference's id must be
+   * fresh (`item#n`, `r<n>` from `print.nextIds`); the part must exist. The body and face are not
+   * checked against the part: what they name may change or go, and the print workspace reports it.
+   */
+  z.strictObject({
+    type: z.literal('addPrintItem'),
+    setupId,
+    item: PrintItemSchema,
+    index: index.optional(),
+  }),
+  /** Replace an item's inputs, by id. Ids it introduces must be fresh. */
+  z.strictObject({ type: z.literal('editPrintItem'), setupId, item: PrintItemSchema }),
+  /** Remove an item from a setup. */
+  z.strictObject({ type: z.literal('deletePrintItem'), setupId, itemId }),
+  /**
+   * History only: put an item state back, replacing the item with the same id (at `index`) or
+   * inserting it at `index`. Its ids must have been allocated before.
+   */
+  z.strictObject({ type: z.literal('restorePrintItem'), setupId, item: PrintItemSchema, index }),
   /**
    * History only: put a whole document in place of this one (restore a version or revision; the
    * undo of a restore). The replacement must be this document (same `id`) and valid as a whole,
@@ -421,6 +481,15 @@ function applyUnchecked(doc: ManufaktureDocument, command: Command): CoreResult<
     case 'restoreMate':
     case 'suppressMate':
       return applyToAssembly(doc, command);
+    case 'addPrintSetup':
+    case 'editPrintSetup':
+    case 'deletePrintSetup':
+    case 'restorePrintSetup':
+    case 'addPrintItem':
+    case 'editPrintItem':
+    case 'deletePrintItem':
+    case 'restorePrintItem':
+      return applyToPrint(doc, command);
     default:
       return applyToPart(doc, command);
   }
@@ -439,9 +508,9 @@ function maxCounters(
 /**
  * The replacement a restore puts in place of `current`: `past` (an earlier version or revision of
  * it, or one from another branch) as it was, but with `current`'s id and with every id counter
- * (the document's, and those of each part and assembly both have) at the higher of the two
- * values, so an id handed out after `past` is never handed out again. The result is what
- * `replaceDocument` takes.
+ * (the document's, the print section's, and those of each part and assembly both have) at the
+ * higher of the two values, so an id handed out after `past` is never handed out again. The
+ * result is what `replaceDocument` takes.
  */
 export function restoredDocument(
   current: ManufaktureDocument,
@@ -460,6 +529,7 @@ export function restoredDocument(
       ...a,
       nextIds: maxCounters(a.nextIds, assemblies.get(a.id)?.nextIds),
     })),
+    print: { ...past.print, nextIds: maxCounters(past.print.nextIds, current.print.nextIds) },
     nextIds: maxCounters(past.nextIds, current.nextIds),
   };
 }
@@ -1237,6 +1307,15 @@ function applyToParts(doc: ManufaktureDocument, command: PartsCommand): CoreResu
           { blockers: instances },
         );
       }
+      const items = partPrintItems(doc, command.partId);
+      if (items.length > 0) {
+        return fail(
+          'dependency',
+          `Cannot delete ${command.partId}: print ${items.length === 1 ? 'item' : 'items'} ${items.join(', ')} ${items.length === 1 ? 'prints' : 'print'} it`,
+          ['partId'],
+          { blockers: items },
+        );
+      }
       const parts = doc.parts.slice();
       const [old] = parts.splice(i.value, 1);
       return done(parts, { type: 'restorePart', part: old!, index: i.value });
@@ -1614,6 +1693,243 @@ function applyAssemblyCommand(
   }
 }
 
+/**
+ * Print items, in any setup, that print part `partId`, as `<setup id>/<item id>`. Only the part
+ * blocks a delete; the bodies and faces an item names never do (ADR 0012 decision 2).
+ */
+export function partPrintItems(doc: ManufaktureDocument, partId: string): string[] {
+  const out: string[] = [];
+  for (const setup of doc.print.setups) {
+    for (const item of setup.items) {
+      if (item.part === partId) out.push(`${setup.id}/${item.id}`);
+    }
+  }
+  return out;
+}
+
+type PrintCommand = Extract<
+  SimpleCommand,
+  {
+    type:
+      | 'addPrintSetup'
+      | 'editPrintSetup'
+      | 'deletePrintSetup'
+      | 'restorePrintSetup'
+      | 'addPrintItem'
+      | 'editPrintItem'
+      | 'deletePrintItem'
+      | 'restorePrintItem';
+  }
+>;
+
+/**
+ * Commands on the print section. Ids come from `print.nextIds` with the same rules as a part's:
+ * `fresh` for add and edit, `restore` for history. Nothing here looks at geometry, so no print
+ * command can be refused because of what a body or face reference names.
+ */
+function applyToPrint(doc: ManufaktureDocument, command: PrintCommand): CoreResult<Applied> {
+  const print = doc.print;
+  const done = (changes: Partial<PrintData>, inverse: Command) =>
+    ok<Applied>({ document: { ...doc, print: { ...print, ...changes } }, inverse });
+  const findSetup = (id: string): CoreResult<number> => {
+    const i = print.setups.findIndex((x) => x.id === id);
+    return i < 0 ? fail('not-found', `No print setup "${id}"`, ['setupId']) : ok(i);
+  };
+  const withSetup = (si: number, setup: PrintSetup): PrintSetup[] => {
+    const setups = print.setups.slice();
+    setups[si] = setup;
+    return setups;
+  };
+
+  switch (command.type) {
+    case 'addPrintSetup':
+    case 'restorePrintSetup': {
+      const setup = command.setup;
+      if (print.setups.some((x) => x.id === setup.id)) {
+        return fail('duplicate', `Print setup "${setup.id}" already exists`, ['setup', 'id']);
+      }
+      const restore = command.type === 'restorePrintSetup';
+      const ids = allocate(
+        print.nextIds,
+        printSetupIds(setup),
+        restore ? { type: 'restore' } : { type: 'fresh', before: [], after: [] },
+      );
+      if (!ids.ok) return ids;
+      const setups = insertAt(
+        print.setups,
+        setup,
+        command.index ?? print.setups.length,
+        'print setups',
+      );
+      if (!setups.ok) return setups;
+      return done(
+        { setups: setups.value, nextIds: ids.value },
+        { type: 'deletePrintSetup', setupId: setup.id },
+      );
+    }
+
+    case 'editPrintSetup': {
+      const si = findSetup(command.setupId);
+      if (!si.ok) return si;
+      const old = print.setups[si.value]!;
+      let next: PrintSetup = old;
+      const inverse: Extract<SimpleCommand, { type: 'editPrintSetup' }> = {
+        type: 'editPrintSetup',
+        setupId: old.id,
+      };
+      if (command.name !== undefined) {
+        const name = command.name.trim();
+        if (name.length === 0 || name.length > MAX_PRINT_SETUP_NAME) {
+          return fail(
+            'invalid-name',
+            `A print setup name must be 1 to ${MAX_PRINT_SETUP_NAME} characters`,
+            ['name'],
+          );
+        }
+        next = { ...next, name };
+        inverse.name = old.name;
+      }
+      if (command.printer !== undefined) {
+        next = { ...next, printer: command.printer };
+        inverse.printer = old.printer;
+      }
+      if (command.nozzle !== undefined) {
+        next = { ...next, nozzle: command.nozzle };
+        inverse.nozzle = old.nozzle;
+      }
+      if (command.thresholds !== undefined) {
+        const { thresholds: _thresholds, ...rest } = next;
+        void _thresholds;
+        next = command.thresholds === null ? rest : { ...rest, thresholds: command.thresholds };
+        inverse.thresholds = old.thresholds ?? null;
+      }
+      return done({ setups: withSetup(si.value, next) }, inverse);
+    }
+
+    case 'deletePrintSetup': {
+      const si = findSetup(command.setupId);
+      if (!si.ok) return si;
+      const setups = print.setups.slice();
+      const [old] = setups.splice(si.value, 1);
+      return done({ setups }, { type: 'restorePrintSetup', setup: old!, index: si.value });
+    }
+
+    case 'addPrintItem':
+    case 'editPrintItem':
+    case 'deletePrintItem':
+    case 'restorePrintItem': {
+      const si = findSetup(command.setupId);
+      if (!si.ok) return si;
+      const r = applyPrintItemCommand(print, print.setups[si.value]!, command);
+      if (!r.ok) return r;
+      return done(
+        { setups: withSetup(si.value, r.value.setup), nextIds: r.value.nextIds },
+        r.value.inverse,
+      );
+    }
+  }
+}
+
+function applyPrintItemCommand(
+  print: PrintData,
+  setup: PrintSetup,
+  command: Extract<
+    PrintCommand,
+    { type: 'addPrintItem' | 'editPrintItem' | 'deletePrintItem' | 'restorePrintItem' }
+  >,
+): CoreResult<{ setup: PrintSetup; nextIds: Record<string, number>; inverse: Command }> {
+  const { setupId } = command;
+  const done = (items: PrintItem[], inverse: Command, nextIds = print.nextIds) =>
+    ok({ setup: { ...setup, items }, nextIds, inverse });
+  const findItem = (id: string): CoreResult<number> => {
+    const i = setup.items.findIndex((x) => x.id === id);
+    return i < 0
+      ? fail('not-found', `No item "${id}" in print setup ${setup.id}`, ['itemId'])
+      : ok(i);
+  };
+
+  switch (command.type) {
+    case 'addPrintItem': {
+      const item = command.item;
+      // Item ids are unique across setups; validation reports a clash with another setup's.
+      if (setup.items.some((x) => x.id === item.id)) {
+        return fail('duplicate', `Print item "${item.id}" already exists`, ['item', 'id']);
+      }
+      const ids = allocate(print.nextIds, printItemIds(item), {
+        type: 'fresh',
+        before: [],
+        after: [],
+      });
+      if (!ids.ok) return ids;
+      const items = insertAt(setup.items, item, command.index ?? setup.items.length, 'items');
+      if (!items.ok) return items;
+      return done(items.value, { type: 'deletePrintItem', setupId, itemId: item.id }, ids.value);
+    }
+
+    case 'editPrintItem': {
+      const item = command.item;
+      const i = findItem(item.id);
+      if (!i.ok) return i;
+      const old = setup.items[i.value]!;
+      const before = printItemIds(old);
+      const after = printItemIds(item);
+      const ids = allocate(print.nextIds, introducedIds(before, after), {
+        type: 'fresh',
+        before,
+        after,
+      });
+      if (!ids.ok) return ids;
+      const items = setup.items.slice();
+      items[i.value] = item;
+      return done(
+        items,
+        { type: 'restorePrintItem', setupId, item: old, index: i.value },
+        ids.value,
+      );
+    }
+
+    case 'restorePrintItem': {
+      const item = command.item;
+      const existing = setup.items.findIndex((x) => x.id === item.id);
+      if (existing >= 0) {
+        if (existing !== command.index) {
+          return fail('invalid-index', `${item.id} is at ${existing}, not ${command.index}`, [
+            'index',
+          ]);
+        }
+        const old = setup.items[existing]!;
+        const ids = allocate(print.nextIds, introducedIds(printItemIds(old), printItemIds(item)), {
+          type: 'restore',
+        });
+        if (!ids.ok) return ids;
+        const items = setup.items.slice();
+        items[existing] = item;
+        return done(items, { type: 'restorePrintItem', setupId, item: old, index: existing });
+      }
+      const ids = allocate(print.nextIds, printItemIds(item), { type: 'restore' });
+      if (!ids.ok) return ids;
+      const items = insertAt(setup.items, item, command.index, 'items');
+      if (!items.ok) return items;
+      return done(items.value, { type: 'deletePrintItem', setupId, itemId: item.id });
+    }
+
+    case 'deletePrintItem': {
+      const i = findItem(command.itemId);
+      if (!i.ok) return i;
+      const items = setup.items.slice();
+      const [old] = items.splice(i.value, 1);
+      return done(items, { type: 'restorePrintItem', setupId, item: old!, index: i.value });
+    }
+  }
+}
+
+/** Print setups whose expressions (thresholds, item orientations) mention variable `name`. */
+export function variablePrintSetups(doc: ManufaktureDocument, name: string): PrintSetup[] {
+  return doc.print.setups.filter((setup) =>
+    printSetupExpressions(setup).some((s) => expressionVariableNames(s.expression).includes(name)),
+  );
+}
+
 /** Mates whose expressions (connector offsets, limits) mention variable `name`, by mate. */
 export function variableMates(
   doc: ManufaktureDocument,
@@ -1641,9 +1957,10 @@ export function variableParameters(
 }
 
 /**
- * Variables, features, mates, configuration parameters and configuration rows that use variable
- * `name`: expressions that mention it (a mate as `<assembly id>/<mate id>`), parameters that
- * configure it, and rows with a value that mentions it.
+ * Variables, features, mates, print setups, configuration parameters and configuration rows that
+ * use variable `name`: expressions that mention it (a mate as `<assembly id>/<mate id>`, a print
+ * setup by its id, for its thresholds and its items' orientations), parameters that configure it,
+ * and rows with a value that mentions it.
  */
 export function variableUsers(doc: ManufaktureDocument, name: string): string[] {
   const users: string[] = [];
@@ -1659,6 +1976,7 @@ export function variableUsers(doc: ManufaktureDocument, name: string): string[] 
   for (const { assemblyId, mate } of variableMates(doc, name)) {
     users.push(`${assemblyId}/${mate.id}`);
   }
+  for (const setup of variablePrintSetups(doc, name)) users.push(setup.id);
   for (const p of variableParameters(doc, name)) users.push(p.id);
   for (const row of doc.configurations?.rows ?? []) {
     const mentions = Object.values(row.values).some(

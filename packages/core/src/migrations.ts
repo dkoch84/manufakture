@@ -159,6 +159,27 @@ export const migrateV6ToV7: Migration = {
   },
 };
 
+/**
+ * Version 8 added print setups (ADR 0012 decision 1). A version 7 document has none, so it gets
+ * an empty print section, `print: { setups: [], nextIds: {} }`, right after `assemblies` as in a
+ * freshly saved file; nothing else changes, and every print counter starts at 1.
+ */
+export const migrateV7ToV8: Migration = {
+  from: 7,
+  to: 8,
+  description: 'Add print setups',
+  migrate(doc) {
+    const out: JsonObject = {};
+    for (const [k, v] of Object.entries(doc)) {
+      if (k === 'print') continue;
+      out[k] = k === 'version' ? 8 : v;
+      if (k === 'assemblies') out.print = { setups: [], nextIds: {} };
+    }
+    if (!('print' in out)) out.print = { setups: [], nextIds: {} };
+    return out;
+  },
+};
+
 /** File format migrations, in order: `FORMAT_MIGRATIONS[i]` goes from version i to i + 1. */
 export const FORMAT_MIGRATIONS: readonly Migration[] = [
   migrateV0ToV1,
@@ -168,6 +189,7 @@ export const FORMAT_MIGRATIONS: readonly Migration[] = [
   migrateV4ToV5,
   migrateV5ToV6,
   migrateV6ToV7,
+  migrateV7ToV8,
 ];
 
 /**

@@ -16,6 +16,9 @@ import {
   mateConnectors,
   mateExpressions,
   mateIds,
+  printItemExpressions,
+  printItemIds,
+  printThresholdExpressions,
 } from './features';
 import { PART_COUNTER, parseAnyId, parseFeatureId, parseSubId, peekCounter } from './ids';
 import { fail, ok, type CoreError, type CoreResult } from './result';
@@ -30,6 +33,7 @@ import {
   type Feature,
   type ManufaktureDocument,
   type Part,
+  type PrintData,
   type SketchFeature,
   type StoredExpression,
   type Variable,
@@ -799,6 +803,71 @@ function checkAssembly(
   });
 }
 
+/**
+ * The print section (ADR 0012 decisions 1 and 2): every id in it (setups, items, face
+ * references) allocated by `print.nextIds` and used once; every item names a part of this
+ * document; every expression parses and names existing variables. Deliberately not checked: that
+ * an item's body or `layFlat` face still exists, or that the printer is in the printer table.
+ * Those are print workspace results (`reference-lost`, an unknown printer), so deleting or
+ * changing what they name is never blocked; the schema has already checked they are well formed.
+ */
+function checkPrint(
+  print: PrintData,
+  partIds: ReadonlySet<string>,
+  variables: ReadonlySet<string>,
+  out: CoreError[],
+): void {
+  const seen = new Set<string>();
+  const checkId = (id: string, path: readonly (string | number)[]) => {
+    const parsed = parseAnyId(id);
+    if (parsed && (parsed.split !== '' || parsed.n >= peekCounter(print.nextIds, parsed.counter))) {
+      out.push({
+        code: 'invalid-id',
+        message:
+          parsed.split !== ''
+            ? `Id "${id}" in the print setups is a split piece; print setups have none`
+            : `Print id "${id}" was never allocated (next is ${previewId(parsed.counter, peekCounter(print.nextIds, parsed.counter))})`,
+        path,
+        blockers: [id],
+      });
+    }
+    if (seen.has(id)) {
+      out.push({
+        code: 'duplicate',
+        message: `Id "${id}" is used twice in the print setups`,
+        path,
+        blockers: [id],
+      });
+    }
+    seen.add(id);
+  };
+
+  print.setups.forEach((setup, si) => {
+    const spath = ['print', 'setups', si];
+    checkId(setup.id, [...spath, 'id']);
+    for (const site of printThresholdExpressions(setup)) {
+      checkExpression(site.expression, [...spath, ...site.path], variables, out);
+    }
+    setup.items.forEach((item, ii) => {
+      const ipath = [...spath, 'items', ii];
+      // In the order `printItemIds` lists them.
+      const idPaths = [['id'], ['orientation', 'face', 'id']];
+      printItemIds(item).forEach((id, k) => checkId(id, [...ipath, ...idPaths[k]!]));
+      if (!partIds.has(item.part)) {
+        out.push({
+          code: 'dependency',
+          message: `Print item ${item.id} of ${setup.id} prints part ${item.part}, which does not exist`,
+          path: [...ipath, 'part'],
+          blockers: [item.part],
+        });
+      }
+      for (const site of printItemExpressions(item)) {
+        checkExpression(site.expression, [...ipath, ...site.path], variables, out);
+      }
+    });
+  });
+}
+
 /** `<counter>#n` for an assembly-level counter, `<prefix>n` for a reference prefix. */
 function previewId(counter: string, n: number): string {
   return counter.length === 1 ? `${counter}${n}` : `${counter}#${n}`;
@@ -847,6 +916,7 @@ export function validateDocument(doc: ManufaktureDocument): CoreError[] {
     );
     checkAssembly(assembly, ai, partIds, rowIds, variables, out);
   });
+  checkPrint(doc.print, partIds, variables, out);
   return out;
 }
 

@@ -1,6 +1,6 @@
 import { applyConfigurationRow, configurationRow } from './configurations';
-import { featureExpressions, mateExpressions } from './features';
-import type { Assembly, ManufaktureDocument, Part, Variable } from './schema';
+import { featureExpressions, mateExpressions, printSetupExpressions } from './features';
+import type { Assembly, ManufaktureDocument, Part, PrintData, Variable } from './schema';
 import { expressionVariableNames } from './validate';
 
 /**
@@ -40,6 +40,25 @@ export interface DocumentChange {
    * shows changes when its part does, which `parts` reports.
    */
   readonly assemblies: readonly AssemblyChange[];
+  /**
+   * The print section changed: a setup or item was added, removed or edited, or a threshold or
+   * orientation reads a changed variable. Never a regen trigger: print setups change no
+   * geometry, so a print edit adds nothing to `parts` and has no `firstAffectedIndex` (ADR 0012
+   * decision 1). The print workspace re-checks the setups `print` lists.
+   */
+  readonly printChanged: boolean;
+  readonly print: PrintChange;
+}
+
+/**
+ * Print setups that changed, by id. `changed` lists setups whose name, printer, nozzle,
+ * thresholds or items changed, or whose expressions read a changed variable (also through other
+ * variables, or through the active configuration row).
+ */
+export interface PrintChange {
+  readonly setups: ItemChanges;
+  /** The relative order of setups present in both documents changed. */
+  readonly reordered: boolean;
 }
 
 /** Added, removed and changed items of one kind in an assembly, by id. */
@@ -319,6 +338,33 @@ function diffAssemblies(
   return out;
 }
 
+function diffPrint(prev: PrintData, next: PrintData, vars: ReadonlySet<string>): PrintChange {
+  const ps = new Map(prev.setups.map((x) => [x.id, x]));
+  const nIds = new Set(next.setups.map((x) => x.id));
+  const readsChanged = (setup: PrintData['setups'][number]) =>
+    vars.size > 0 &&
+    printSetupExpressions(setup).some((s) =>
+      expressionVariableNames(s.expression).some((n) => vars.has(n)),
+    );
+  const pCommon = prev.setups.filter((x) => nIds.has(x.id)).map((x) => x.id);
+  const nCommon = next.setups.filter((x) => ps.has(x.id)).map((x) => x.id);
+  return {
+    setups: {
+      added: next.setups.filter((x) => !ps.has(x.id)).map((x) => x.id),
+      removed: prev.setups.filter((x) => !nIds.has(x.id)).map((x) => x.id),
+      changed: next.setups
+        .filter((x) => ps.has(x.id) && (!deepEqual(ps.get(x.id), x) || readsChanged(x)))
+        .map((x) => x.id),
+    },
+    reordered: pCommon.some((id, i) => nCommon[i] !== id),
+  };
+}
+
+function printTouched(change: PrintChange): boolean {
+  const { added, removed, changed } = change.setups;
+  return change.reordered || added.length + removed.length + changed.length > 0;
+}
+
 function diffRaw(prev: ManufaktureDocument, next: ManufaktureDocument): DocumentChange {
   const variables = diffVariables(prev.variables, next.variables);
   const vars = affectedVariables(next.variables, [
@@ -347,6 +393,7 @@ function diffRaw(prev: ManufaktureDocument, next: ManufaktureDocument): Document
   }
   for (const p of prev.parts) if (!nParts.has(p.id)) parts.push(diffPart(p, undefined, vars));
   const assemblies = diffAssemblies(prev, next, vars);
+  const print = diffPrint(prev.print, next.print, vars);
   const nameChanged = prev.name !== next.name;
   const unitsChanged = !deepEqual(prev.units, next.units);
   const empty =
@@ -363,6 +410,9 @@ function diffRaw(prev: ManufaktureDocument, next: ManufaktureDocument): Document
     variables,
     parts,
     assemblies,
+    // The counters alone can differ (a restore keeps the higher ones): still a print change.
+    printChanged: printTouched(print) || !deepEqual(prev.print, next.print),
+    print,
   };
 }
 
@@ -455,5 +505,10 @@ export function diffDocuments(
     },
     parts,
     assemblies,
+    printChanged: raw.printChanged || configured.printChanged,
+    print: {
+      setups: mergeItems(raw.print.setups, configured.print.setups),
+      reordered: raw.print.reordered || configured.print.reordered,
+    },
   };
 }

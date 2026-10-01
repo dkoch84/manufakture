@@ -8,6 +8,8 @@ import {
   type Feature,
   type ManufaktureDocument,
   type Part,
+  type PrintData,
+  type PrintSetup,
   type StoredExpression,
 } from './schema';
 
@@ -37,6 +39,7 @@ export function createDocument(options: NewDocumentOptions): ManufaktureDocument
     variables: [],
     parts: [createPart(DEFAULT_PART_ID, 'Part 1')],
     assemblies: [],
+    print: createPrintData(),
     nextIds: { part: 2 },
   };
 }
@@ -48,6 +51,21 @@ export function createPart(id: string, name: string): Part {
 /** An empty assembly: no instances, no mates, fresh counters. */
 export function createAssembly(id: string, name: string): Assembly {
   return { id, name, instances: [], mates: [], nextIds: {} };
+}
+
+/** An empty print section: no setups, fresh counters. */
+export function createPrintData(): PrintData {
+  return { setups: [], nextIds: {} };
+}
+
+/** A print setup with no items and default thresholds. */
+export function createPrintSetup(
+  id: string,
+  name: string,
+  printer: string,
+  nozzle: number,
+): PrintSetup {
+  return { id, name, printer, nozzle, items: [] };
 }
 
 /**
@@ -73,6 +91,10 @@ export function findPart(doc: ManufaktureDocument, partId: string): Part | undef
 
 export function findAssembly(doc: ManufaktureDocument, assemblyId: string): Assembly | undefined {
   return doc.assemblies.find((a) => a.id === assemblyId);
+}
+
+export function findPrintSetup(doc: ManufaktureDocument, setupId: string): PrintSetup | undefined {
+  return doc.print.setups.find((s) => s.id === setupId);
 }
 
 export function findFeature(part: Part, featureId: string): Feature | undefined {
