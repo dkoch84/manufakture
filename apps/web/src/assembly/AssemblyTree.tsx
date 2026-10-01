@@ -2,17 +2,21 @@
 // assembly's degrees of freedom (or why they cannot be counted), its instances (fix and unfix,
 // suppress, delete) and its mates, each with what the last solve said of it: ok, redundant,
 // conflicting (with the explanation, and the mate to blame marked), an error regen found (a
-// connector to re-pick), or suppressed. Every change is one undoable command.
+// connector to re-pick), or suppressed. An instance whose source has a configuration table can be
+// built in any of its rows (T2.4c). Every change is one undoable command.
 
 import type { Command } from '@manufakture/core';
 import type { AssemblyResult } from '@manufakture/regen';
 import { useState } from 'react';
 import { useStore } from 'zustand';
+import { ConfigurationPicker } from '../features/ConfigurationPicker';
 import type { DocumentStoreApi } from '../state/document';
 import {
   MATE_KIND_LABELS,
   assemblySummary,
   instanceBlockers,
+  instanceRowCommand,
+  instanceRows,
   mateRows,
   sourceLabel,
   type MateRowStatus,
@@ -82,6 +86,7 @@ export function AssemblyTree({
             const r = result?.instances.find((x) => x.instanceId === inst.id);
             const problem = r?.errors[0]?.message ?? r?.warnings[0]?.message ?? null;
             const usedBy = blockers.get(inst.id) ?? [];
+            const rowChoice = instanceRows(doc, inst.source);
             return (
               <li
                 key={inst.id}
@@ -97,6 +102,19 @@ export function AssemblyTree({
                   <span className="assembly-item-message" role="note">
                     {problem}
                   </span>
+                )}
+                {rowChoice && (
+                  <ConfigurationPicker
+                    rows={rowChoice.rows}
+                    value={rowChoice.value}
+                    defaultLabel={rowChoice.defaultLabel}
+                    testId={`instance-configuration-${inst.id}`}
+                    disabled={disabled}
+                    onChange={(row) => {
+                      const { command, label } = instanceRowCommand(assemblyId, inst, row, doc);
+                      run(command, label);
+                    }}
+                  />
                 )}
                 <span className="assembly-item-actions">
                   <button

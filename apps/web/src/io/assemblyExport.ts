@@ -136,7 +136,21 @@ function partNames(
   }
   const pinned = model.sources.find((x) => x.key === source.source);
   if (!pinned) return null;
-  const name = `${pinned.documentName} (${pinned.versionName})`;
+  // A part of this document in another configuration row: named like the part, with the row.
+  const part = pinned.local ? findPart(doc, pinned.partId) : undefined;
+  if (part) {
+    const name = pinned.row === undefined ? part.name : `${part.name} (${pinned.row.name})`;
+    return {
+      part: name,
+      body: (bodyId) => {
+        const own = part.bodies.find((b) => b.id === bodyId)?.name;
+        const index = pinned.bodies.findIndex((b) => b.bodyId === bodyId);
+        return own ?? bodyName({ name }, Math.max(index, 0), pinned.bodies.length);
+      },
+    };
+  }
+  const row = pinned.row === undefined ? '' : `, ${pinned.row.name}`;
+  const name = `${pinned.documentName} (${pinned.versionName}${row})`;
   return {
     part: name,
     body: (bodyId) =>

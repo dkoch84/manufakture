@@ -207,8 +207,9 @@ canonical JSON of
 - for a derived feature: its `derive` input with each source body's id and key in place of its
   shape id, so it is keyed by what the source built, not by where it lives in the arena;
 - for a feature of a derived part's source: the source document's naming scheme and a
-  `namespace` (`sourceNamespace`: the pin's `sha256` and part id) besides the usual fields, so
-  every derived feature of one pinned part, in any part and in any regen, shares its entries;
+  `namespace` (`sourceNamespace`: the pin's `sha256`, part id and the configuration row it is
+  built in, if any) besides the usual fields, so every derived feature and instance of one pinned
+  part in one row, in any part and in any regen, shares its entries;
 - for a sketch: the solver build (`DEFAULT_SOLVER_BUILD`, the pinned planegcs release; pass
   `solverBuild` to override), its definition without the display name, its evaluated dimension
   values, and its plane (the placement, or the keys of the bodies the face may lie on plus the
@@ -286,6 +287,17 @@ version as canonical JSON text. Regen builds it in four steps (`src/derived.ts`,
    and a source with no bodies is `no-body`. The kernel names the copies `<id>:from/<source
 body id>` and their faces `<id>:from/<source face name>` (kernel README, "Derived bodies"),
    which core's name parser reads as depending on the derived feature only.
+
+**Configuration rows.** A source is built in a row of its document's configuration table (T2.4c;
+core README, "Configurations"): the row `source.configuration` names, else the row the source
+document had active when it was pinned, which is how that document shows itself; with neither, the
+document as stored. Opening the pin applies the row with core's `configured`, once per hash and
+row. A named row the source does not have is a `source` error on `['source', 'configuration']`
+naming the row id, and so is a named row that cannot be applied; nothing of the source is built.
+An active row that cannot be applied leaves the document as stored, as the source's own app does.
+The row is part of the namespace and of the nesting walk (a row can suppress or unsuppress a
+derived feature of the source), so two rows of one pin are two builds with entries of their own,
+and changing a derived feature's row is a new build of the source in that row.
 
 **Updating a pin** (a new `source` with another version) is a new `sha256`, so a new namespace:
 the source is built afresh, while a fillet on a derived edge keeps its reference, which names
@@ -375,10 +387,30 @@ pair with a `cancelled` report and the pairs found so far; bodies lost to a recy
 report (check again after the next regen). A request older than the newest regen, or for an
 assembly the last regen does not have, is null.
 
-**Configuration rows** (`source.configuration`) are not applied yet (T2.4c): the instance shows the
-part as it is, with a `configuration` warning. Instance sources are grouped by
-`instanceSourceKey`, which T2.4c extends with the row, so two instances at two rows get two builds
-and their bodies two keys; the connector cache already keys on body keys.
+**Configuration rows** (`source.configuration`, T2.4c). Instance sources are grouped by
+`instanceSourceKey`, which ends in `:row:<row id>` when the instance names a row, so two instances
+at two rows get two builds and their bodies two keys (the connector cache keys on body keys
+already). A part of this document with no row, or in the row the document is built in (its active
+row: the app regenerates `configured(document)`), is the part's own `PartResult`. In any other row
+it is built again from the stored document in that row, once per regen for every instance in it.
+The app passes the stored document as `RegenOptions.stored` (`regen(document, stored)` on the
+client; `solveAssembly` takes it too) whenever it applied the active row, because a row leaves out
+the parameters it does not set and those must keep the stored value, not the active row's;
+without `stored` the document passed is taken as the stored one. The row's document is kept per
+stored document object and row, so a regen of the same stored document configures nothing again.
+Such a part is
+reported in `RegenResult.sources` under `part:<part id>:row:<row id>` with `row` set and empty
+document and version fields. It is built in the document's own cache namespace: a feature's key
+holds its evaluated inputs, so whatever the row leaves as it is shares its entries with the part's
+own build (as switching the active row does), and only what the row changes is built again; failed
+features of it are a `derived-source` warning on the instance, since no part studio shows that
+build. A pinned part in a row is built as a derived source in that row (see Derived parts) and
+keyed `source:<sha256>:<part id>:row:<row id>`. A row the document does not have, or one that
+cannot be applied, is a `source` error on the instance on `['source', 'configuration']`, naming
+the row. The one exception is an instance naming the active row when the app could not apply it:
+the instance is then the part's own build, which the app makes from the document as stored (and
+says so in its configuration message), so it shows the part as stored rather than failing. Every `SourceResult` carries the part's name (`partName`) and, when one is applied, the
+row (`row: { id, name }`), for the app's labels and export names.
 
 ## Errors, warnings, statuses
 
@@ -435,7 +467,7 @@ interface RegenResult {
   names: string[]; // one name table for every mesh in the result
   parts: PartResult[]; // per part: features, dirty, bodies, consumed
   assemblies?: AssemblyResult[]; // per assembly (always set by the engine; see Assemblies)
-  sources?: SourceResult[]; // pinned parts instances show: key, pin details, bodies with meshes
+  sources?: SourceResult[]; // pinned parts and parts in another row that instances show: key, pin details, partName, row, bodies with meshes
   counters: RegenCounters; // featureOps, otherOps, batches, solves, cacheHits, cacheMisses
   ms: number;
 }
@@ -550,7 +582,7 @@ pnpm --filter @manufakture/regen test
 - Assemblies (`engine.test.ts`, "assemblies", against the scripted kernel): frames found once
   per body and a pose-only change re-solved with no kernel op; frames kept across a recycle; a lost
   connector, a limit that does not evaluate and suppression per mate, the lost mate leaving its
-  instance free; rollback and configuration warnings and a pinned instance's source; drags
+  instance free; rollback warnings, a pinned instance's source and a row its source lacks; drags
   coalesced, answered while the kernel is busy, dropped when stale, stopped at a slider limit.
   With the real kernel (`integration.test.ts`): a lid hinged on a box resolves to the expected
   transform (DOF 1), follows an edit of the lid's depth with only the lid's frame found again, and
@@ -568,7 +600,21 @@ pnpm --filter @manufakture/regen test
   candidate, no boolean), then the lid turned a quarter turn down into the box by its stored pose,
   solved on the hinge, overlapping by 4000 mm3 with the overlap's mesh streamed ahead of the
   report; a stop before the first pair; a check superseded by a regen; nothing left in the kernel.
-- `derived.test.ts` also checks that a source whose reading throws is a `source` error.
+- Configuration rows (`engine.test.ts`, against the scripted kernel): instances of a part in
+  another row build only what the row changes (the fillet again, the sketch and extrude from the
+  cache), once for every instance in that row, reported once in `sources`; an unchanged regen
+  builds nothing, and building the document in that row makes those instances the part itself,
+  all cache hits; a row the document does not have is a `source` error naming it; a pinned source
+  in the row it names, else its active row, else as stored, and a row it lacks fails before
+  anything is built; a pinned instance in a row gets a source of its own. With the real kernel
+  (`integration.test.ts`): two instances of the shelf board at 600 and 1000 mm have exactly those
+  volumes (and the 600 mm row is the part's own build, the same body key), and a shelf board
+  derived at row 800 mm has the exact volume, then 1000 mm after its row is changed. With an
+  active row applied and the stored document passed, an instance in a row that leaves a
+  parameter out gets the stored value: the same body as the document built in that row, unlike
+  configuring the active-row document.
+- `derived.test.ts` also checks that a source whose reading throws is a `source` error, and how a
+  source opens in a row (once per hash and row, the namespace, a missing row).
 
 ## Deviations and gaps
 

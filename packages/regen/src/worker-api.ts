@@ -42,7 +42,7 @@ export interface RegenWorkerApi extends KernelWorkerApi {
    */
   regen(
     document: ManufaktureDocument,
-    options: { generation: number },
+    options: { generation: number; stored?: ManufaktureDocument },
   ): Promise<RegenResult | null>;
   /**
    * Solve an assembly of `document` for a preview (a mate dialog, before OK), at the client's
@@ -52,7 +52,7 @@ export interface RegenWorkerApi extends KernelWorkerApi {
   solveAssembly(
     document: ManufaktureDocument,
     assemblyId: string,
-    options: { generation: number },
+    options: { generation: number; stored?: ManufaktureDocument },
   ): Promise<AssemblyResult | null>;
   /**
    * One step of dragging an instance of an assembly of the last regen, at the client's current
@@ -123,13 +123,19 @@ export function createRegenWorkerApi(options: RegenWorkerApiOptions): RegenWorke
     stats: () => kernelApi.stats(),
     leaks: () => kernelApi.leaks(),
 
-    async regen(document, { generation }) {
-      const result = await (await engineFor()).regen(document, { generation });
+    async regen(document, { generation, stored }) {
+      const result = await (
+        await engineFor()
+      ).regen(document, stored === undefined ? { generation } : { generation, stored });
       return result === null ? null : Comlink.transfer(result, regenTransferables(result));
     },
 
-    async solveAssembly(document, assemblyId, { generation }) {
-      return (await engineFor()).solveAssembly(document, assemblyId, { generation });
+    async solveAssembly(document, assemblyId, { generation, stored }) {
+      return (await engineFor()).solveAssembly(
+        document,
+        assemblyId,
+        stored === undefined ? { generation } : { generation, stored },
+      );
     },
 
     async dragInstance(assemblyId, instanceId, target, { generation }) {

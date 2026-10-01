@@ -94,6 +94,8 @@ interface E2eAssemblyResult {
   instances: {
     instanceId: string;
     status: string;
+    /** The part (by id) or source (by key) whose bodies it shows. */
+    source: { part: string } | { source: string };
     transform: E2ePose;
     bodies: string[];
     errors: { code: string; message: string }[];
@@ -141,6 +143,8 @@ interface Window {
         ms: number;
         document: unknown;
         assemblies: E2eAssemblyResult[];
+        /** Parts instances show apart from the document's own: pinned, or in another row. */
+        sources: { key: string; partId: string }[];
         parts: {
           partId: string;
           features: E2eFeatureResult[];

@@ -18,13 +18,14 @@ import {
 function manualRegenerator() {
   const requests: {
     document: ManufaktureDocument;
+    stored: ManufaktureDocument | undefined;
     resolve: (v: RegenView | null) => void;
     reject: (e: Error) => void;
   }[] = [];
   const listeners = new Set<() => void>();
   const regenerator: Regenerator = {
-    regen: (document) =>
-      new Promise((resolve, reject) => requests.push({ document, resolve, reject })),
+    regen: (document, stored) =>
+      new Promise((resolve, reject) => requests.push({ document, stored, resolve, reject })),
     onInvalidated: (l) => {
       listeners.add(l);
       return () => listeners.delete(l);
@@ -211,10 +212,32 @@ describe('building the active configuration', () => {
     const built = manual.requests[0]!.document;
     expect(built).not.toBe(documents.getState().document);
     expect(built.variables[0]!.expression.source).toBe('80 mm');
+    // The stored document goes along, for instances in other rows.
+    expect(manual.requests[0]!.stored).toBe(documents.getState().document);
     manual.requests[0]!.resolve(view(1));
     await flush();
     expect(model.getState().document).toBe(documents.getState().document);
     expect(model.getState().configurationError).toBeNull();
+  });
+
+  it('views a past version in its active row with the stored document alongside', async () => {
+    const manual = manualRegenerator();
+    const shared = shareRegenerator(manual.regenerator);
+    const past = configuredDocument(true);
+    const session = startView(shared, past);
+    await flush();
+    const request = manual.requests.at(-1)!;
+    expect(request.document).not.toBe(past);
+    expect(request.document.variables[0]!.expression.source).toBe('80 mm');
+    expect(request.stored).toBe(past);
+    session.stop();
+    await session.done;
+    // With no active row there is nothing to configure, so no stored document either.
+    const plain = startView(shared, configuredDocument(false));
+    await flush();
+    expect(manual.requests.at(-1)!.stored).toBeUndefined();
+    plain.stop();
+    await plain.done;
   });
 
   it('builds a document with no active row as it is', () => {

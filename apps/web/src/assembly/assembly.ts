@@ -41,6 +41,14 @@ import type {
   InterferenceReport,
   MateResult,
 } from '@manufakture/regen';
+import {
+  configurationRows,
+  defaultRowLabel,
+  pinnedDocument,
+  rowName,
+  withRow,
+  type RowChoice,
+} from '../features/derived';
 import { checkExpression } from '../features/forms';
 import { bodyColor, instanceViewId, parseInstanceViewId } from '../model/bodies';
 import type { ModelState } from '../model/model';
@@ -142,7 +150,8 @@ export function assemblyBodies(
         ? model.parts.find((p) => p.partId === (inst.source as { part: string }).part)?.bodies
         : model.sources.find((x) => x.key === (inst.source as { source: string }).source)?.bodies;
     if (!source) continue;
-    const part = 'part' in inst.source ? findPart(doc, inst.source.part) : undefined;
+    // Body colours are the part's own for a part of this document, in any row.
+    const part = 'part' in stored.source ? findPart(doc, stored.source.part) : undefined;
     source.forEach((b, i) => {
       if (!inst.bodies.includes(b.bodyId)) return;
       const props = part?.bodies.find((p) => p.id === b.bodyId);
@@ -661,11 +670,75 @@ export function uniqueName(base: string, taken: readonly string[]): string {
   for (let n = 1; ; n++) if (!used.has(`${base} ${n}`)) return `${base} ${n}`;
 }
 
-/** What an instance shows, for the list: its part, or the pinned part with its version. */
+/**
+ * What an instance shows, for the list: its part, or the pinned part with its version, and the
+ * configuration row it names: "Board (1000 mm)".
+ */
 export function sourceLabel(doc: ManufaktureDocument, source: InstanceSource): string {
-  if ('part' in source) return findPart(doc, source.part)?.name ?? source.part;
+  const row = source.configuration;
+  if ('part' in source) {
+    const name = findPart(doc, source.part)?.name ?? source.part;
+    return row === undefined ? name : `${name} (${rowName(doc, row)})`;
+  }
   const pin = source as DerivedSource;
-  return `${pin.partId} of ${pin.documentName} at ${pin.versionName}`;
+  const label = `${pin.partId} of ${pin.documentName} at ${pin.versionName}`;
+  return row === undefined ? label : `${label} (${rowName(sourceDocument(doc, pin), row)})`;
+}
+
+// Configuration rows (T2.4c) -----------------------------------------------------------------
+
+const pinned = new WeakMap<DerivedSource, ManufaktureDocument | null>();
+
+/** The document an instance's source is a part of: this one, or the pinned version (read once). */
+export function sourceDocument(
+  doc: ManufaktureDocument,
+  source: InstanceSource,
+): ManufaktureDocument | null {
+  if ('part' in source) return doc;
+  const pin = source as DerivedSource;
+  let read = pinned.get(pin);
+  if (read === undefined) {
+    read = pinnedDocument(pin);
+    pinned.set(pin, read);
+  }
+  return read;
+}
+
+/**
+ * The rows an instance can be built in (its source document's), what its default is, and the
+ * row it names; null when the source has no rows and the instance names none.
+ */
+export function instanceRows(
+  doc: ManufaktureDocument,
+  source: InstanceSource,
+): { rows: RowChoice[]; defaultLabel: string; value: string | undefined } | null {
+  const from = sourceDocument(doc, source);
+  const rows = configurationRows(from);
+  const value = source.configuration;
+  if (rows.length === 0 && value === undefined) return null;
+  return { rows, defaultLabel: defaultRowLabel(from), value };
+}
+
+/** The command that builds instance `instance` in row `row` (undefined: its default). */
+export function instanceRowCommand(
+  assemblyId: string,
+  instance: Instance,
+  row: string | undefined,
+  doc: ManufaktureDocument,
+): { command: Command; label: string } {
+  const from = sourceDocument(doc, instance.source);
+  return {
+    command: {
+      type: 'editInstance',
+      assemblyId,
+      instanceId: instance.id,
+      source: withRow(instance.source, row),
+    },
+    label:
+      row === undefined
+        ? `Build ${instance.name} in its default configuration`
+        : `Build ${instance.name} in ${rowName(from, row)}`,
+  };
 }
 
 // The mates list -----------------------------------------------------------------------------

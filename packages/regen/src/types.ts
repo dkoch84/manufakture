@@ -133,9 +133,7 @@ export type RegenWarning =
    */
   | { code: 'derived-source'; message: string; features: string[] }
   /** An instance shows its part as regenerated, and the part's rollback bar is not at its end. */
-  | { code: 'rollback'; message: string; partId: string }
-  /** An instance names a configuration row, which regen does not apply yet (T2.4c). */
-  | { code: 'configuration'; message: string; row: string };
+  | { code: 'rollback'; message: string; partId: string };
 
 /** How one reference of a feature resolved (ADR 0004 decision 6: recomputed, never stored). */
 export interface ReferenceResolution {
@@ -242,8 +240,9 @@ export interface RegenResult {
   /** Per assembly, in document order: instance transforms and mate diagnostics (empty without). */
   assemblies: AssemblyResult[];
   /**
-   * Pinned parts of other documents that instances show, with their bodies (and meshes, as for
-   * parts); empty when no instance shows one.
+   * Parts that instances show other than as the document's own parts are built: pinned parts of
+   * other documents, and parts of this document in another configuration row. With their bodies
+   * (and meshes, as for parts); empty when no instance shows one.
    */
   sources: SourceResult[];
   counters: RegenCounters;
@@ -319,15 +318,25 @@ export interface AssemblyResult {
   ms: number;
 }
 
-/** A pinned part of another document that instances show. */
+/**
+ * A part that instances show, built apart from the document's own parts: a pinned part of another
+ * document (keyed `source:<sha256>:<part id>`, plus `:row:<row id>` when the instance names a row),
+ * or a part of this document in a configuration row other than the active one
+ * (`part:<part id>:row:<row id>`).
+ */
 export interface SourceResult {
   /** `InstanceResult.source.source`. */
   key: string;
+  /** The pinned document and version; empty strings for a part of this document. */
   documentId: string;
   documentName: string;
   versionId: string;
   versionName: string;
   partId: string;
+  /** The part's name in its document. */
+  partName: string;
+  /** The configuration row it is built in; absent: the document as it is. */
+  row?: { id: string; name: string };
   /** Every body of the part at that version, as for a part of this document. */
   bodies: BodyResult[];
 }

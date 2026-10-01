@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { DerivedFeature, ManufaktureDocument } from '@manufakture/core';
 import { describe, expect, it, vi } from 'vitest';
 import { demoDocument } from '../model/demo';
@@ -7,6 +7,7 @@ import { twoBodyDocument } from '../model/twoBodies.test-fixture';
 import { createDocumentStore } from '../state/document';
 import { createSelectionStore } from '../state/selection';
 import {
+  apply,
   derivedOf,
   deriving,
   fakeLibrary,
@@ -224,5 +225,69 @@ describe('the derived part dialog', () => {
       versionId: 'v-2',
       versionName: '8 mm',
     });
+  });
+
+  it('builds a derived part in a configuration row of its source, offering what that row has', async () => {
+    // The source with a table: row One suppresses its second body.
+    let source = bracket('Bracket 6');
+    for (const command of [
+      {
+        type: 'setConfigParameter',
+        parameter: {
+          id: 'cp#1',
+          name: 'Second',
+          kind: 'suppression',
+          partId: 'part#1',
+          featureId: 'extrude#3',
+        },
+      },
+      { type: 'setConfigRow', row: { id: 'cfg#1', name: 'Both', values: { 'cp#1': false } } },
+      { type: 'setConfigRow', row: { id: 'cfg#2', name: 'One', values: { 'cp#1': true } } },
+    ] as const) {
+      source = apply(source, command);
+    }
+    const feature = await derivedOf(source, V1);
+    const t = setup({ kind: 'derived', featureId: 'derived#1' }, { doc: deriving(feature) });
+    const picker = screen.getByTestId('field-configuration') as HTMLSelectElement;
+    expect(Array.from(picker.options, (o) => o.text)).toEqual([
+      'Default (as stored)',
+      'Both',
+      'One',
+    ]);
+    expect(picker.value).toBe('');
+    const boxes = () => within(screen.getByTestId('field-bodies')).getAllByRole('checkbox').length;
+    // Each body to choose, below All bodies.
+    const all = () =>
+      within(screen.getByTestId('field-bodies')).getByRole('checkbox', { name: 'All bodies' });
+    fireEvent.click(all());
+    expect(boxes()).toBe(3);
+    fireEvent.click(all());
+    // In row One the suppressed body is not offered; the pin itself is unchanged.
+    fireEvent.change(picker, { target: { value: 'cfg#2' } });
+    fireEvent.click(all());
+    expect(boxes()).toBe(2);
+    fireEvent.click(all());
+    fireEvent.click(screen.getByTestId('dialog-ok'));
+    await waitFor(() => expect(t.onClose).toHaveBeenCalled());
+    const saved = (t.features()[0] as DerivedFeature).source;
+    expect(saved).toEqual({ ...feature.source, configuration: 'cfg#2' });
+
+    // Back to the default: no row named.
+    cleanup();
+    const again = setup(
+      { kind: 'derived', featureId: 'derived#1' },
+      { doc: t.documents.getState().document },
+    );
+    expect(screen.getByTestId('field-configuration')).toHaveProperty('value', 'cfg#2');
+    fireEvent.change(screen.getByTestId('field-configuration'), { target: { value: '' } });
+    fireEvent.click(screen.getByTestId('dialog-ok'));
+    await waitFor(() => expect(again.onClose).toHaveBeenCalled());
+    expect('configuration' in (again.features()[0] as DerivedFeature).source).toBe(false);
+  });
+
+  it('offers no configuration choice for a source without rows', async () => {
+    const feature = await derivedOf(bracket('Bracket 6'), V1);
+    setup({ kind: 'derived', featureId: 'derived#1' }, { doc: deriving(feature) });
+    expect(screen.queryByTestId('field-configuration')).toBeNull();
   });
 });

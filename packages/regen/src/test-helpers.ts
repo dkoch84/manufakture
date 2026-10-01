@@ -263,6 +263,44 @@ export function derivedOf(
   };
 }
 
+/**
+ * `doc` with a configuration table: one parameter (`cp#1`) for `variable` and one row per value,
+ * `cfg#1`, `cfg#2`, ... in order, each named by its value. No row is active.
+ */
+export function withRows(
+  doc: ManufaktureDocument,
+  variable: string,
+  values: readonly string[],
+): ManufaktureDocument {
+  return apply(
+    doc,
+    {
+      type: 'setConfigParameter',
+      parameter: { id: 'cp#1', name: variable, kind: 'variable', variable },
+    },
+    ...values.map((v, i): Command => ({
+      type: 'setConfigRow',
+      row: { id: `cfg#${i + 1}`, name: v, values: { 'cp#1': mm(v) } },
+    })),
+  );
+}
+
+/**
+ * A shelf board: a `#width` x 200 mm rectangle extruded 18 mm, in rows `cfg#1` (600 mm),
+ * `cfg#2` (800 mm) and `cfg#3` (1000 mm), none active (the stored width is 600 mm).
+ */
+export function shelfBoard(): ManufaktureDocument {
+  return withRows(
+    build([
+      setVariable('width', '600'),
+      add(rectangle('sketch#1', { width: 'width', depth: '200' })),
+      add(extrude('extrude#1', 'sketch#1', '18')),
+    ]),
+    'width',
+    ['600mm', '800mm', '1000mm'],
+  );
+}
+
 // Assemblies -----------------------------------------------------------------------------------
 
 export const IDENTITY_POSE: Pose = { translation: [0, 0, 0], rotation: [0, 0, 0, 1] };

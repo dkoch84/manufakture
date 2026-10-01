@@ -59,7 +59,7 @@ const RETRIES = 1;
  */
 export async function exportConfigurations(
   exchanger: Exchanger,
-  regen: (document: ManufaktureDocument) => Promise<RegenView | null>,
+  regen: (document: ManufaktureDocument, stored?: ManufaktureDocument) => Promise<RegenView | null>,
   request: ConfigurationExportRequest,
 ): Promise<ConfigurationExportResult> {
   const { document, partId, format, skip = new Set<string>(), signal } = request;
@@ -92,7 +92,8 @@ export async function exportConfigurations(
     }
     let view: RegenView | null = null;
     for (let attempt = 0; attempt <= RETRIES && view === null; attempt++) {
-      view = await regen(variant.value);
+      // The stored document goes along, so instances in other rows are configured from it.
+      view = await regen(variant.value, document);
       if (signal?.aborted) return finish(true);
     }
     if (view === null) {

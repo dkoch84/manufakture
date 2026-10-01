@@ -2,13 +2,15 @@
 // back from the library, its imports and pins inline, and hashing its canonical text), the bodies
 // a source part offers, the derived part dialog's form and the command it builds, and the update
 // of a pin to another version. The pinned-part picker (PinnedPartPicker.tsx) and the feature tree
-// use the same pieces, and so will assembly instances of pinned parts (T2.3e).
+// use the same pieces, and so do assembly instances of pinned parts (T2.3e). A derived part and an
+// instance can name a configuration row of their source (T2.4c): the row helpers are here too.
 
 import {
   MAX_DERIVED_BYTES,
   MAX_DERIVED_DEPTH,
   bareUnits,
   bodyCreator,
+  configured,
   defaultFeatureName,
   deserialize,
   findPart,
@@ -164,6 +166,57 @@ export function sourceBodies(doc: ManufaktureDocument, partId: string, depth = 0
     if (at !== undefined && isFeatureActive(part, at)) add(b.id, b.id);
   }
   return out;
+}
+
+// Configuration rows (T2.4c) ---------------------------------------------------------------------
+
+/** A configuration row to choose: its id and name. */
+export interface RowChoice {
+  id: string;
+  name: string;
+}
+
+/** The configuration rows of a source document, in table order. */
+export function configurationRows(doc: ManufaktureDocument | null): RowChoice[] {
+  return (doc?.configurations?.rows ?? []).map((r) => ({ id: r.id, name: r.name }));
+}
+
+/**
+ * What a derived part or an instance that names no row shows: the row the source has active
+ * ("Default (Wide)"), or the document as it is ("Default (as stored)").
+ */
+export function defaultRowLabel(doc: ManufaktureDocument | null): string {
+  const active = doc?.configurations?.active ?? null;
+  const name = active === null ? undefined : doc?.configurations?.rows.find((r) => r.id === active);
+  return `Default (${name ? name.name : 'as stored'})`;
+}
+
+/** The name of row `rowId` of `doc`, or the id when it has no such row. */
+export function rowName(doc: ManufaktureDocument | null, rowId: string): string {
+  return doc?.configurations?.rows.find((r) => r.id === rowId)?.name ?? rowId;
+}
+
+/** `source` built in row `row` (`undefined`: the default, no row named). */
+export function withRow<S extends { configuration?: string }>(
+  source: S,
+  row: string | undefined,
+): S {
+  const { configuration: _old, ...rest } = source;
+  void _old;
+  return (row === undefined ? rest : { ...rest, configuration: row }) as S;
+}
+
+/**
+ * `doc` as a source shows it in `row` (the active row when none is named), for what the dialog
+ * offers of it (bodies a row suppresses are not offered); `doc` itself when it cannot be applied
+ * (regen says why on the feature).
+ */
+export function sourceInRow(
+  doc: ManufaktureDocument,
+  row: string | undefined,
+): ManufaktureDocument {
+  const r = configured(doc, row);
+  return r.ok ? r.value : doc;
 }
 
 /** The part studios of a source document, for the part choice. */

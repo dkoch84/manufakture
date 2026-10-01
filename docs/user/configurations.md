@@ -46,6 +46,16 @@ The header shows the progress (`Exporting configuration 2 of 3 (800)...`) with a
 
 Which bodies are written follows the [Export menu](import-export.md): the bodies ticked there, and hidden bodies are left out. A configuration in which a feature fails, or in which there is nothing left to write, is skipped and named in the message; the others are still exported. **STL, one file per body** is not offered for every configuration, since each configuration gives one file.
 
+## Configurations in derived parts and assemblies
+
+A [derived part](derived.md) and an [assembly](assemblies.md) instance can each be built in any configuration of their source. The derived part dialog has a **Configuration** list once the chosen version has configurations, and in an assembly every instance whose part has configurations shows the same list under its name in the assembly's tree. So one shelf board part can give an assembly a 600 mm board and a 1000 mm board side by side.
+
+**Default** is the first choice. For a part of another document it is the configuration that was shown in that document when the version was made (the list says which, for example **Default (800)**), or the document's own values when none was (**Default (as stored)**). For a part of this document it is the configuration shown in the header, so it follows the switcher. Choosing a configuration by name fixes it: the instance or derived part stays in that configuration whatever is shown.
+
+Each instance in a configuration other than the shown one is built separately. Features the configuration does not change are built once and shared, so this costs only what the configuration changes. A configuration a source no longer has (you deleted it in the source and then updated the version) is an error on the derived part or instance that names it; pick another. A configuration of this document that an instance uses cannot be deleted while it does.
+
+Changing the configuration is one step for Undo, like any other edit.
+
 ## Deleting or inlining a configured variable
 
 A variable a parameter configures is in use, so it cannot simply be deleted. The Variables panel offers to replace its uses with its value, and warns first that the table configures it: replacing it deletes the parameter and every configuration's value for it, so every configuration then gets the document's own value. The button says so too (**Replace with value, delete it and its parameter**). Undo brings the variable, the parameter and the values back.

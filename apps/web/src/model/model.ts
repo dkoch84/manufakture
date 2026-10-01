@@ -51,15 +51,26 @@ export interface PartModel {
 }
 
 /**
- * A pinned part of another document that assembly instances show (regen's `SourceResult`), with
- * its bodies ready for the viewport like a part's.
+ * A part that assembly instances show apart from the document's own parts (regen's
+ * `SourceResult`): a pinned part of another document, or a part of this one in another
+ * configuration row. With its bodies ready for the viewport like a part's.
  */
 export interface SourceModel {
-  /** `source:<sha256>:<part id>`, as `InstanceResult.source.source` names it. */
+  /**
+   * As `InstanceResult.source.source` names it: `source:<sha256>:<part id>` for a pinned part,
+   * `part:<part id>:row:<row id>` for a part of this document in a row (either may end in a row).
+   */
   key: string;
   partId: string;
+  /** Empty for a part of this document. */
   documentName: string;
   versionName: string;
+  /** The part's name in its document; absent from older fixtures. */
+  partName?: string;
+  /** The configuration row it is built in, when one is applied. */
+  row?: { id: string; name: string };
+  /** A part of this document (in another row), not a pinned one. */
+  local?: true;
   bodies: readonly ModelBody[];
 }
 
@@ -76,8 +87,12 @@ export interface RegenView {
 
 /** Turns documents into regen views; the kernel scene loader provides one. */
 export interface Regenerator {
-  /** Regenerate `document`. Resolves to null when a newer regen superseded it. */
-  regen(document: ManufaktureDocument): Promise<RegenView | null>;
+  /**
+   * Regenerate `document`. Resolves to null when a newer regen superseded it. `stored`: the
+   * document as stored, when `document` is it with its active configuration row applied
+   * (instances in other rows are configured from it; see `buildable`).
+   */
+  regen(document: ManufaktureDocument, stored?: ManufaktureDocument): Promise<RegenView | null>;
   /**
    * `listener` runs when every body the kernel held is gone (a recycle): the current document
    * must be regenerated again. Returns the unsubscribe function.
@@ -200,7 +215,11 @@ export function startRegen(
     const mine = ++requests;
     model.setState({ available: true, pending: true });
     const built = buildable(document);
-    regenerator.regen(built.document).then(
+    const pending =
+      built.document === document
+        ? regenerator.regen(built.document)
+        : regenerator.regen(built.document, document);
+    pending.then(
       (view) => {
         if (stopped) return;
         if (view === null) {
@@ -264,11 +283,10 @@ export interface SharedRegenerator {
   busy(): boolean;
   /**
    * Run `work`, which regenerates what it likes with `regen`, with the worker to itself. Refused
-   * (rejects) while other exclusive work runs.
+   * (rejects) while other exclusive work runs. `regen` takes the stored document as
+   * `Regenerator.regen` does.
    */
-  exclusive<T>(
-    work: (regen: (document: ManufaktureDocument) => Promise<RegenView | null>) => Promise<T>,
-  ): Promise<T>;
+  exclusive<T>(work: (regen: Regenerator['regen']) => Promise<T>): Promise<T>;
 }
 
 export function shareRegenerator(inner: Regenerator): SharedRegenerator {
@@ -277,8 +295,10 @@ export function shareRegenerator(inner: Regenerator): SharedRegenerator {
   const listeners = new Set<() => void>();
   return {
     regenerator: {
-      regen(document) {
-        if (!running) return inner.regen(document);
+      regen(document, stored) {
+        if (!running) {
+          return stored === undefined ? inner.regen(document) : inner.regen(document, stored);
+        }
         return new Promise((resolve) => held.push(resolve));
       },
       onInvalidated(listener) {
@@ -295,7 +315,9 @@ export function shareRegenerator(inner: Regenerator): SharedRegenerator {
       if (running) throw new Error('Another export is running.');
       running = true;
       try {
-        return await work((document) => inner.regen(document));
+        return await work((document, stored) =>
+          stored === undefined ? inner.regen(document) : inner.regen(document, stored),
+        );
       } finally {
         running = false;
         const waiting = held;
@@ -341,7 +363,10 @@ export function startView(shared: SharedRegenerator, document: ManufaktureDocume
     const request = (retries = 0) => {
       const mine = ++requests;
       model.setState({ available: true, pending: true });
-      regen(built.document).then(
+      // As `startRegen` does: instances in other rows are configured from the stored document.
+      const pending =
+        built.document === document ? regen(built.document) : regen(built.document, document);
+      pending.then(
         (view) => {
           if (stopped) return;
           if (view === null) {

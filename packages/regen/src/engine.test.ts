@@ -5,6 +5,7 @@
 import { createHash } from 'node:crypto';
 import {
   MAX_DERIVED_DEPTH,
+  configured,
   serialize,
   type Command,
   type DerivedFeature,
@@ -58,6 +59,8 @@ import {
   setVariable,
   statuses,
   twoBodies,
+  unwrap,
+  withRows,
 } from './test-helpers';
 
 interface Behaviour {
@@ -1588,7 +1591,7 @@ describe('assemblies', () => {
     expect(second.instances.map((x) => x.bodies)).toEqual([['extrude#2'], ['extrude#1']]);
   });
 
-  it('warns when an instance shows a rolled-back part or names a configuration row', async () => {
+  it('warns when an instance shows a rolled-back part, and fails one in a row its source lacks', async () => {
     const { engine } = setup();
     const doc = apply(
       twoInstances(),
@@ -1605,13 +1608,14 @@ describe('assemblies', () => {
       expect.objectContaining({ code: 'rollback', partId: LID }),
     ]);
     expect(asm.instances[1]!.bodies).toEqual(['extrude#1']);
-    // A pinned part, in a row that is not applied yet: shown as it is, from its own build.
+    // A pinned part in a row its document does not have: an error naming the row.
     const pinned = asm.instances[2]!;
-    expect(pinned.warnings).toEqual([
-      expect.objectContaining({ code: 'configuration', row: 'cfg#4' }),
-    ]);
-    expect(pinned.source).toEqual({ source: result.sources![0]!.key });
-    expect(result.sources![0]!.bodies.map((b) => b.bodyId)).toEqual(['extrude#1']);
+    expect(pinned).toMatchObject({
+      status: 'error',
+      errors: [{ code: 'source', field: ['source', 'configuration'] }],
+    });
+    expect(pinned.errors[0]!.message).toMatch(/has no configuration row cfg#4/);
+    expect(result.sources).toEqual([]);
   });
 
   it('starts the next drag from the last regen again after a drag that was not committed', async () => {
@@ -1718,5 +1722,228 @@ describe('assemblies', () => {
     const next = await regen(engine, apply(doc, setVariable('radius', '4mm')));
     expect(await engine.interference(ASSEMBLY, { generation })).toBeNull();
     expect(await engine.interference('assembly#9', { generation: next.generation })).toBeNull();
+  });
+});
+
+describe('configuration rows of instances and derived sources', () => {
+  /** The block in rows `cfg#1` (radius 3 mm, as stored) and `cfg#2` (5 mm), none active. */
+  const radii = () => withRows(block(), 'radius', ['3mm', '5mm']);
+  const radius = (kernel: FakeKernel) =>
+    (kernel.inputs.get('fillet#1') as Extract<FeatureInput, { kind: 'fillet' }>).radius;
+  const KEY = `part:${PART}:row:cfg#2`;
+
+  function rowInstances(doc: ManufaktureDocument): ManufaktureDocument {
+    return apply(
+      doc,
+      { type: 'addAssembly', assemblyId: ASSEMBLY, name: 'A' },
+      { type: 'addInstance', assemblyId: ASSEMBLY, instance: instance('inst#1', { part: PART }) },
+      {
+        type: 'addInstance',
+        assemblyId: ASSEMBLY,
+        instance: instance('inst#2', { part: PART, configuration: 'cfg#2' }),
+      },
+      {
+        type: 'addInstance',
+        assemblyId: ASSEMBLY,
+        instance: instance('inst#3', { part: PART, configuration: 'cfg#2' }),
+      },
+    );
+  }
+
+  /**
+   * The block with instances in rows: row A (`cfg#1`, active) sets #width and #radius, row B
+   * (`cfg#2`) sets only #width, so in B the radius is the stored 3 mm.
+   */
+  function partialRows(): ManufaktureDocument {
+    return rowInstances(
+      apply(
+        block(),
+        {
+          type: 'setConfigParameter',
+          parameter: { id: 'cp#1', name: 'W', kind: 'variable', variable: 'width' },
+        },
+        {
+          type: 'setConfigParameter',
+          parameter: { id: 'cp#2', name: 'R', kind: 'variable', variable: 'radius' },
+        },
+        {
+          type: 'setConfigRow',
+          row: { id: 'cfg#1', name: 'A', values: { 'cp#1': mm('60'), 'cp#2': mm('5mm') } },
+        },
+        { type: 'setConfigRow', row: { id: 'cfg#2', name: 'B', values: { 'cp#1': mm('50') } } },
+        { type: 'setActiveConfiguration', rowId: 'cfg#1' },
+      ),
+    );
+  }
+
+  it('builds a part again for instances in another row, sharing what the row leaves alone', async () => {
+    const { kernel, engine } = setup();
+    const doc = rowInstances(radii());
+    const first = await regen(engine, doc);
+    // The part, then only the fillet again at 5 mm: the sketch and extrude keys are the same.
+    expect(kernel.featureOps).toEqual(['extrude#1', 'fillet#1', 'fillet#1']);
+    expect(radius(kernel)).toBe(5);
+    const asm = first.assemblies![0]!;
+    expect(asm.instances.map((x) => [x.status, x.source, x.bodies])).toEqual([
+      ['ok', { part: PART }, ['extrude#1']],
+      ['ok', { source: KEY }, ['extrude#1']],
+      ['ok', { source: KEY }, ['extrude#1']],
+    ]);
+    // Reported once for both instances, with its own body key and mesh.
+    expect(first.sources).toHaveLength(1);
+    expect(first.sources[0]).toMatchObject({
+      key: KEY,
+      documentId: '',
+      partId: PART,
+      partName: doc.parts[0]!.name,
+      row: { id: 'cfg#2', name: '5mm' },
+    });
+    const own = first.parts[0]!.bodies[0]!;
+    const inRow = first.sources[0]!.bodies[0]!;
+    expect(inRow.bodyKey).not.toBe(own.bodyKey);
+    expect(inRow.meshChanged).toBe(true);
+
+    // Nothing changed: nothing built, no mesh sent again.
+    const again = await regen(engine, apply(doc, setVariable('unrelated', '1')));
+    expect(again.counters).toMatchObject({ featureOps: 0, cacheMisses: 0 });
+    expect(again.sources[0]!.bodies[0]!.meshChanged).toBe(false);
+
+    // The document built in cfg#2, as the app builds it: those instances are the part itself,
+    // all from the cache.
+    const active = unwrap(
+      configured(apply(doc, { type: 'setActiveConfiguration', rowId: 'cfg#2' })),
+    );
+    const switched = await regen(engine, active);
+    expect(switched.counters.featureOps).toBe(0);
+    expect(switched.sources).toEqual([]);
+    expect(switched.assemblies![0]!.instances.map((x) => x.source)).toEqual([
+      { part: PART },
+      { part: PART },
+      { part: PART },
+    ]);
+  });
+
+  it('configures an instance in another row from the stored document, not from the active row', async () => {
+    const { kernel, engine } = setup();
+    const stored = partialRows();
+    // As the app builds it: the document in its active row, with the stored one alongside.
+    const r = (await engine.regen(unwrap(configured(stored)), { stored }))!;
+    expect(r.sources.map((x) => x.key)).toEqual([KEY]);
+    const inB = r.sources[0]!.bodies[0]!.bodyKey;
+    // The same body as the document built in row B on its own.
+    const direct = await regen(engine, unwrap(configured(stored, 'cfg#2')));
+    expect(direct.parts[0]!.bodies[0]!.bodyKey).toBe(inB);
+    expect(radius(kernel)).toBe(3);
+    // Configured from the active-row document instead, it would inherit A's 5 mm radius.
+    const inherited = (await engine.regen(unwrap(configured(stored))))!;
+    expect(inherited.sources[0]!.bodies[0]!.bodyKey).not.toBe(inB);
+    // A new active-row document from the same stored one builds nothing new.
+    const again = (await engine.regen(unwrap(configured(stored)), { stored }))!;
+    expect(again.sources[0]!.bodies[0]!.bodyKey).toBe(inB);
+    expect(again.counters.featureOps).toBe(0);
+  });
+
+  it('previews a solve with the stored document alongside, as a regen does', async () => {
+    const { kernel, engine } = setup();
+    const stored = partialRows();
+    const active = unwrap(configured(stored));
+    // A regen without it: row B inherits row A's 5 mm radius (what the app must not do).
+    const r = (await engine.regen(active))!;
+    expect(radius(kernel)).toBe(5);
+    const ops = kernel.featureOps.length;
+    // The mate dialog's preview, with it: row B is built from the stored 3 mm radius.
+    const preview = (await engine.solveAssembly(active, ASSEMBLY, {
+      generation: r.generation,
+      stored,
+    }))!;
+    expect(preview.instances.map((x) => x.status)).toEqual(['ok', 'ok', 'ok']);
+    expect(kernel.featureOps.slice(ops)).toEqual(['fillet#1']);
+    expect(radius(kernel)).toBe(3);
+  });
+
+  it('fails an instance in a row this document does not have, naming the row', async () => {
+    const { engine } = setup();
+    const doc = rowInstances(radii());
+    // Load refuses this; regen still has to say what is wrong.
+    const assembly = doc.assemblies[0]!;
+    const broken: ManufaktureDocument = {
+      ...doc,
+      assemblies: [
+        {
+          ...assembly,
+          instances: assembly.instances.map((x) =>
+            x.id === 'inst#3' ? { ...x, source: { part: PART, configuration: 'cfg#9' } } : x,
+          ),
+        },
+      ],
+    };
+    const r = await regen(engine, broken);
+    const failed = r.assemblies![0]!.instances[2]!;
+    expect(failed).toMatchObject({
+      status: 'error',
+      errors: [{ code: 'source', field: ['source', 'configuration'] }],
+    });
+    expect(failed.errors[0]!.message).toMatch(/no configuration row cfg#9/);
+    expect(r.assemblies![0]!.instances[0]!.status).toBe('ok');
+  });
+
+  it('builds a pinned source in the row the pin names, else in its active row', async () => {
+    const { kernel, engine } = setup();
+    const named = await regen(
+      engine,
+      holding(derivedOf('derived#1', { ...pin(radii()), configuration: 'cfg#2' })),
+    );
+    expect(statuses(named)).toEqual({ 'derived#1': 'ok' });
+    expect(kernel.featureOps).toEqual(['extrude#1', 'fillet#1', 'derived#1']);
+    expect(radius(kernel)).toBe(5);
+
+    // No row named: the row the source had active.
+    const active = apply(radii(), { type: 'setActiveConfiguration', rowId: 'cfg#2' });
+    await regen(engine, holding(derivedOf('derived#1', pin(active))));
+    expect(radius(kernel)).toBe(5);
+    // No row at all: as stored.
+    await regen(engine, holding(derivedOf('derived#1', pin(radii()))));
+    expect(radius(kernel)).toBe(3);
+
+    // A row the source does not have: an error naming it, and nothing built.
+    const ops = kernel.featureOps.length;
+    const missing = await regen(
+      engine,
+      holding(derivedOf('derived#1', { ...pin(radii()), configuration: 'cfg#7' })),
+    );
+    expect(missing.parts[0]!.features[0]).toMatchObject({
+      status: 'error',
+      errors: [{ code: 'source', field: ['source', 'configuration'] }],
+    });
+    expect(missing.parts[0]!.features[0]!.errors[0]!.message).toMatch(
+      /Source at One has no configuration row cfg#7/,
+    );
+    expect(kernel.featureOps.length).toBe(ops);
+  });
+
+  it('gives a pinned instance in a row a source of its own, keyed by the row', async () => {
+    const { engine } = setup();
+    const source = pin(radii());
+    const doc = apply(
+      radii(),
+      { type: 'addAssembly', assemblyId: ASSEMBLY, name: 'A' },
+      { type: 'addInstance', assemblyId: ASSEMBLY, instance: instance('inst#1', source) },
+      {
+        type: 'addInstance',
+        assemblyId: ASSEMBLY,
+        instance: instance('inst#2', { ...source, configuration: 'cfg#2' }),
+      },
+    );
+    const r = await regen(engine, doc);
+    const plain = `source:${source.sha256}:${PART}`;
+    expect(r.assemblies![0]!.instances.map((x) => x.source)).toEqual([
+      { source: plain },
+      { source: `${plain}:row:cfg#2` },
+    ]);
+    expect(r.sources.map((x) => [x.key, x.row])).toEqual([
+      [plain, undefined],
+      [`${plain}:row:cfg#2`, { id: 'cfg#2', name: '5mm' }],
+    ]);
+    expect(r.sources[0]!.bodies[0]!.bodyKey).not.toBe(r.sources[1]!.bodies[0]!.bodyKey);
   });
 });

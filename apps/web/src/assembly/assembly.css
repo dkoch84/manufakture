@@ -196,3 +196,17 @@
   stroke-width: 2;
   stroke-linejoin: round;
 }
+
+.assembly-list .configuration-picker {
+  flex-basis: 100%;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+  font-size: 0.75rem;
+}
+
+.assembly-list .configuration-picker select {
+  font: inherit;
+  padding: 0.05rem 0.2rem;
+}

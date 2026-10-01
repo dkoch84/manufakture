@@ -2,7 +2,8 @@
 // bodies of it to bring in, where they go (a translation and a rotation, as expressions), and how
 // they combine with the part's own bodies. OK applies it as one core command (one undo step);
 // Cancel or Escape leaves the document alone. Editing an existing derived part keeps its pin
-// unless **Change source or version** picks another. The logic is in derived.ts.
+// unless **Change source or version** picks another. **Configuration** picks a row of the source
+// document's configuration table to build it in (T2.4c). The logic is in derived.ts.
 
 import { defaultFeatureName, findPart, previewIds, type DerivedFeature } from '@manufakture/core';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -13,13 +14,18 @@ import type { ModelStore } from '../model/model';
 import { evaluateVariables } from '../sketcher/values';
 import type { DocumentStoreApi } from '../state/document';
 import { KIND_LABELS } from '../tree/tree';
+import { ConfigurationPicker } from './ConfigurationPicker';
 import {
   buildDerived,
+  configurationRows,
+  defaultRowLabel,
   derivedFormOf,
   newDerivedForm,
   pinLabel,
   pinnedDocument,
   sourceBodies,
+  sourceInRow,
+  withRow,
   type DerivedForm,
   type PinLibrary,
   type PinnedPart,
@@ -77,12 +83,24 @@ export function DerivedDialog({
   const [changing, setChanging] = useState(!existing);
   const [picked, setPicked] = useState<PinnedPart | null>(null);
   const [existingDoc] = useState(() => (existing ? pinnedDocument(existing.source) : null));
-  const sourceDoc = picked?.document ?? (form.source === existing?.source ? existingDoc : null);
+  // The existing pin's document while the pin is the same version (its row may differ).
+  const sourceDoc =
+    picked?.document ??
+    (form.source !== null && form.source.sha256 === existing?.source.sha256 ? existingDoc : null);
 
   const onPicked = (pin: PinnedPart | null) => {
     setPicked(pin);
     setForm((f) => {
-      const next = pin?.source ?? existing?.source ?? null;
+      const row = f.source?.configuration;
+      let next = pin?.source ?? (existing ? withRow(existing.source, row) : null);
+      // A row the newly picked version does not have is dropped: back to its default.
+      if (
+        pin &&
+        next?.configuration !== undefined &&
+        !configurationRows(pin.document).some((r) => r.id === next!.configuration)
+      ) {
+        next = withRow(next, undefined);
+      }
       // Another document or part studio: its bodies are other bodies.
       const same =
         f.source !== null &&
@@ -139,14 +157,15 @@ export function DerivedDialog({
     onClose();
   };
 
+  const row = form.source?.configuration;
   const bodyChoices = useMemo(() => {
     if (!sourceDoc || !form.source) return [];
-    const offered = sourceBodies(sourceDoc, form.source.partId);
+    const offered = sourceBodies(sourceInRow(sourceDoc, row), form.source.partId);
     for (const b of form.bodies ?? []) {
       if (!offered.some((o) => o.bodyId === b)) offered.push({ bodyId: b, name: b });
     }
     return offered;
-  }, [sourceDoc, form.source, form.bodies]);
+  }, [sourceDoc, form.source, form.bodies, row]);
 
   const modelParts = model.getState().parts;
   const scopeChoices = useMemo(
@@ -262,6 +281,16 @@ export function DerivedDialog({
           <p className="field-error" data-testid="field-source-error">
             {errors.source}
           </p>
+        )}
+        {form.source && sourceDoc && (
+          <ConfigurationPicker
+            rows={configurationRows(sourceDoc)}
+            value={row}
+            defaultLabel={defaultRowLabel(sourceDoc)}
+            onChange={(next) =>
+              setForm((f) => (f.source ? { ...f, source: withRow(f.source, next) } : f))
+            }
+          />
         )}
         {form.source && sourceDoc && (
           <ScopePicker

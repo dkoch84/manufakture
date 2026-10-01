@@ -28,12 +28,18 @@ export class RegenClient extends KernelClient {
    * hears of it through `onRestarted` and asks again. A regen that completed is always returned,
    * even when a newer request was made meanwhile: the engine reports each changed mesh once (to
    * the regen that built it), so a caller that drops a completed result must not rely on
-   * `meshChanged` afterwards.
+   * `meshChanged` afterwards. `stored`: the document as stored when `document` has its active
+   * configuration row applied (`RegenOptions.stored`).
    */
-  regen(document: ManufaktureDocument): Promise<RegenResult | null> {
+  regen(document: ManufaktureDocument, stored?: ManufaktureDocument): Promise<RegenResult | null> {
     const generation = this.nextGeneration();
+    // Sent in one message, `stored` costs only what the row changed: parts and features the row
+    // leaves alone are the same objects in both, and structured clone copies them once.
     return this.droppable(
-      this.worker<RegenWorkerApi>().regen(document, { generation }) as Promise<RegenResult | null>,
+      this.worker<RegenWorkerApi>().regen(
+        document,
+        stored === undefined ? { generation } : { generation, stored },
+      ) as Promise<RegenResult | null>,
     ).then((result) => result ?? null);
   }
 
@@ -42,11 +48,18 @@ export class RegenClient extends KernelClient {
    * a regen). A mate dialog shows the result, then commits the mate and the solved poses of the
    * instances that `moved` in one `batch`. Null when superseded or when the worker was stopped.
    */
-  solveAssembly(document: ManufaktureDocument, assemblyId: string): Promise<AssemblyResult | null> {
+  solveAssembly(
+    document: ManufaktureDocument,
+    assemblyId: string,
+    stored?: ManufaktureDocument,
+  ): Promise<AssemblyResult | null> {
+    const generation = this.latestGeneration;
     return this.droppable(
-      this.worker<RegenWorkerApi>().solveAssembly(document, assemblyId, {
-        generation: this.latestGeneration,
-      }) as Promise<AssemblyResult | null>,
+      this.worker<RegenWorkerApi>().solveAssembly(
+        document,
+        assemblyId,
+        stored === undefined ? { generation } : { generation, stored },
+      ) as Promise<AssemblyResult | null>,
     ).then((result) => result ?? null);
   }
 

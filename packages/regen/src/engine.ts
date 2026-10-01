@@ -36,17 +36,21 @@ import {
   type DragTarget,
   type MateInput,
 } from '@manufakture/assembly';
-import type {
-  Assembly,
-  BodyPropsFields,
-  DerivedFeature,
-  DerivedSource,
-  DocumentChange,
-  Feature,
-  ImportSource,
-  ManufaktureDocument,
-  Part,
-  Pose,
+import {
+  configurationRow,
+  configured,
+  type Assembly,
+  type BodyPropsFields,
+  type ConfigRow,
+  type CoreResult,
+  type DerivedFeature,
+  type DerivedSource,
+  type DocumentChange,
+  type Feature,
+  type ImportSource,
+  type ManufaktureDocument,
+  type Part,
+  type Pose,
 } from '@manufakture/core';
 import {
   frameOnPlane,
@@ -99,7 +103,7 @@ import {
   solverInput,
   type MateValues,
 } from './assembly';
-import { DerivedSources, carriedProps, effectiveProps, sourceNamespace, tooDeep } from './derived';
+import { DerivedSources, carriedProps, describeSource, effectiveProps, tooDeep } from './derived';
 import { mapFailure, mapOutcome, planeReport } from './errors';
 import {
   bodyUse,
@@ -121,6 +125,7 @@ import type {
   FeatureResult,
   InstanceInterference,
   InstanceResult,
+  InstanceSourceRef,
   InterferenceReport,
   MateResult,
   PartResult,
@@ -179,6 +184,13 @@ export interface RegenOptions {
   /** The document before this edit and the store's change, to find the dirty subgraph faster. */
   previous?: ManufaktureDocument;
   change?: DocumentChange;
+  /**
+   * The document as stored, when `document` is it with its active configuration row applied
+   * (the app regenerates `configured(stored)`). Instances of its parts in other rows are built
+   * from `configured(stored, row)`, so a parameter their row leaves out keeps the stored value,
+   * not the active row's. Absent: `document` is the stored document.
+   */
+  stored?: ManufaktureDocument;
 }
 
 export interface AssemblyOptions {
@@ -188,6 +200,8 @@ export interface AssemblyOptions {
    * the newest regen resolves to null.
    */
   generation?: number;
+  /** As for `RegenOptions.stored`. */
+  stored?: ManufaktureDocument;
 }
 
 export interface EngineStats extends RegenCounters {
@@ -254,6 +268,8 @@ interface Run {
   versions: KeyVersions;
   /** Source parts of derived features built in this regen, by `sourceNamespace`. */
   sources: Map<string, PartState>;
+  /** The document as stored, which instances in other rows are configured from. */
+  stored: ManufaktureDocument;
 }
 
 /** Where a part is built: the document being regenerated, or a derived part's source. */
@@ -321,11 +337,17 @@ const slotOf = (partId: string, bodyId: string): string => `${partId}\n${bodyId}
 /** The key `#reported` and the mesh batch use for a body of a pinned source an instance shows. */
 const sourceSlot = (key: string, bodyId: string): string => `source\n${key}\n${bodyId}`;
 
-/** What `#assemble` found: results, drag states, the pinned sources shown, the frames used. */
+/** What a `SourceResult` says about where its bodies come from. */
+type SourceInfo = Omit<SourceResult, 'key' | 'bodies'>;
+
+/**
+ * What `#assemble` found: results, drag states, the parts shown that are not the document's own
+ * builds (pinned parts, and parts of this document in another configuration row), the frames used.
+ */
 interface Assembled {
   results: AssemblyResult[];
   states: Map<string, DragState>;
-  sources: Map<string, { source: DerivedSource; state: PartState }>;
+  sources: Map<string, { info: SourceInfo; state: PartState }>;
   connectorKeys: Set<string>;
 }
 
@@ -410,6 +432,14 @@ export class RegenEngine {
   readonly #checkedSources = new WeakMap<ImportSource, boolean>();
   /** Pinned sources of derived features: checked, read and measured for depth once each. */
   readonly #derived = new DerivedSources();
+  /**
+   * Stored documents in a configuration row other than their active one, for instances that show
+   * a part in that row: by the stored document object (an edit makes a new one) and row id.
+   */
+  readonly #rowDocuments = new WeakMap<
+    ManufaktureDocument,
+    Map<string, CoreResult<ManufaktureDocument>>
+  >();
   #latest = 0;
   #chain: Promise<unknown> = Promise.resolve();
   #instance: number | null = null;
@@ -514,7 +544,7 @@ export class RegenEngine {
       return null;
     }
     const t0 = now();
-    const run = this.#newRun(generation, document);
+    const run = this.#newRun(generation, document, options.stored);
     const result = await this.#attempt(run, () => this.#regenOnce(run, document, options));
     if (result === null) return null;
     result.ms = now() - t0;
@@ -522,9 +552,14 @@ export class RegenEngine {
     return result;
   }
 
-  #newRun(generation: number, document: ManufaktureDocument): Run {
+  #newRun(
+    generation: number,
+    document: ManufaktureDocument,
+    stored: ManufaktureDocument = document,
+  ): Run {
     return {
       generation,
+      stored,
       counters: emptyCounters(),
       used: new Set(),
       instance: this.#instance,
@@ -709,13 +744,9 @@ export class RegenEngine {
       bodies: bodyResults(state, (id) => slotOf(state.part.id, id)),
       consumed: state.consumed,
     }));
-    const sources: SourceResult[] = [...assembled.sources].map(([key, { source, state }]) => ({
+    const sources: SourceResult[] = [...assembled.sources].map(([key, { info, state }]) => ({
       key,
-      documentId: source.documentId,
-      documentName: source.documentName,
-      versionId: source.versionId,
-      versionName: source.versionName,
-      partId: source.partId,
+      ...info,
       bodies: bodyResults(state, (id) => sourceSlot(key, id)),
     }));
     this.#reported = reported;
@@ -1026,7 +1057,10 @@ export class RegenEngine {
     run: Run,
     source: DerivedSource,
     depth: number,
-  ): Promise<{ ok: true; state: PartState; where: string } | { ok: false; errors: RegenError[] }> {
+  ): Promise<
+    | { ok: true; state: PartState; where: string; row: ConfigRow | null }
+    | { ok: false; errors: RegenError[] }
+  > {
     const opened = await this.#derived.open(source);
     this.#checkStale(run);
     if (!opened.ok) return { ok: false, errors: [opened.error] };
@@ -1034,10 +1068,9 @@ export class RegenEngine {
     this.#checkStale(run);
     if (!fits) return { ok: false, errors: [tooDeep(source)] };
 
-    const ns = sourceNamespace(source);
+    const { document, part, row, namespace: ns } = opened;
     let built = run.sources.get(ns);
     if (built === undefined) {
-      const { document, part } = opened;
       built = await this.#buildPart(run, part, document, evaluateVariables(document.variables), {
         ns,
         depth,
@@ -1045,7 +1078,7 @@ export class RegenEngine {
       });
       run.sources.set(ns, built);
     }
-    const where = `${source.documentName || source.documentId} at ${source.versionName || source.versionId}`;
+    const where = describeSource(source, row);
     if (built.broken) {
       return {
         ok: false,
@@ -1058,7 +1091,7 @@ export class RegenEngine {
         ],
       };
     }
-    return { ok: true, state: built, where };
+    return { ok: true, state: built, where, row };
   }
 
   /**
@@ -1093,7 +1126,9 @@ export class RegenEngine {
     if (!document.assemblies.some((a) => a.id === assemblyId)) {
       return Promise.reject(new TypeError(`the document has no assembly ${assemblyId}`));
     }
-    const task = this.#chain.then(() => this.#solveOnly(document, assemblyId, generation));
+    const task = this.#chain.then(() =>
+      this.#solveOnly(document, assemblyId, generation, options.stored),
+    );
     this.#chain = task.catch(() => undefined);
     return task;
   }
@@ -1308,12 +1343,13 @@ export class RegenEngine {
     document: ManufaktureDocument,
     assemblyId: string,
     generation: number,
+    stored: ManufaktureDocument | undefined,
   ): Promise<AssemblyResult | null> {
     if (generation < this.#latest) {
       this.#stats.superseded++;
       return null;
     }
-    const run = this.#newRun(generation, document);
+    const run = this.#newRun(generation, document, stored);
     return this.#attempt(run, async () => {
       const variables = evaluateVariables(document.variables);
       const states = new Map<string, PartState>();
@@ -1362,25 +1398,38 @@ export class RegenEngine {
     };
     for (const assembly of document.assemblies) {
       if (only !== undefined && assembly.id !== only) continue;
-      out.results.push(await this.#assembly(run, assembly, variables, partFor, out));
+      out.results.push(await this.#assembly(run, document, assembly, variables, partFor, out));
     }
     return out;
   }
 
-  /** The bodies an instance's source part has, built if needed, with its warnings. */
+  /**
+   * The bodies an instance's source part has, built if needed, with its warnings and where the
+   * result reports them (`ref`). A part of this document in the row the document is built in (or
+   * with no row) is that part's own build; in another row it is built again from the document in
+   * that row and reported as a source. A pinned part is built in its row like a derived source.
+   */
   async #instanceSource(
     run: Run,
+    document: ManufaktureDocument,
     source: Assembly['instances'][number]['source'],
     partFor: (partId: string) => Promise<PartState | undefined>,
     out: Assembled,
   ): Promise<
-    { ok: true; state: PartState; warnings: RegenWarning[] } | { ok: false; errors: RegenError[] }
+    | { ok: true; state: PartState; warnings: RegenWarning[]; ref: InstanceSourceRef }
+    | { ok: false; errors: RegenError[] }
   > {
     const warnings: RegenWarning[] = [];
     let state: PartState;
     let where: string;
+    let ref: InstanceSourceRef;
     if ('part' in source) {
-      const found = await partFor(source.part);
+      const row = source.configuration;
+      const own = row === undefined || row === (document.configurations?.active ?? null);
+      const found = own
+        ? await partFor(source.part)
+        : await this.#partInRow(run, source.part, row, out);
+      if (found !== undefined && 'errors' in found) return { ok: false, errors: found.errors };
       if (found === undefined) {
         return {
           ok: false,
@@ -1406,13 +1455,34 @@ export class RegenEngine {
         };
       }
       state = found;
-      where = `Part ${found.part.name}`;
+      if (own) {
+        where = `Part ${found.part.name}`;
+        ref = { part: source.part };
+      } else {
+        const name = configurationRow(document, row)?.name ?? row;
+        where = `Part ${found.part.name} in configuration ${name}`;
+        ref = { source: instanceSourceKey(source) };
+        warnings.push(...sourceFailures(state, where, 'the instance shows what'));
+      }
     } else {
       const got = await this.#pinnedBuild(run, source, 1);
       if (!got.ok) return got;
       state = got.state;
       where = `Part ${state.part.name} of ${got.where}`;
-      out.sources.set(instanceSourceKey(source), { source, state });
+      const key = instanceSourceKey(source);
+      ref = { source: key };
+      out.sources.set(key, {
+        info: {
+          documentId: source.documentId,
+          documentName: source.documentName,
+          versionId: source.versionId,
+          versionName: source.versionName,
+          partId: source.partId,
+          partName: state.part.name,
+          ...(got.row === null ? {} : { row: { id: got.row.id, name: got.row.name } }),
+        },
+        state,
+      });
       warnings.push(...sourceFailures(state, got.where, 'the instance shows what'));
     }
     const bar = state.part.rollbackIndex;
@@ -1423,14 +1493,62 @@ export class RegenEngine {
         message: `${where} is rolled back to before feature ${bar + 1} of ${state.part.features.length}: the instance shows it as regenerated so far`,
       });
     }
-    if (source.configuration !== undefined) {
-      warnings.push({
-        code: 'configuration',
-        row: source.configuration,
-        message: `The instance names configuration row ${source.configuration}, which is not applied yet: it shows the part as it is`,
-      });
+    return { ok: true, state, warnings, ref };
+  }
+
+  /**
+   * Part `partId` of this document built in configuration row `rowId`, once per regen for every
+   * instance that shows it there. It is built from the stored document in that row
+   * (`configured(run.stored, rowId)`; never from `document`, which may have the active row
+   * applied already, whose values a partial row would inherit) in the document's own cache
+   * namespace: its features' keys hold their evaluated inputs, so whatever
+   * the row leaves as it is shares its entries with the part's own build (as switching the active
+   * row does), and what the row changes has entries of its own. Undefined when the document has no
+   * such part.
+   */
+  async #partInRow(
+    run: Run,
+    partId: string,
+    rowId: string,
+    out: Assembled,
+  ): Promise<PartState | { errors: RegenError[] } | undefined> {
+    const key = instanceSourceKey({ part: partId, configuration: rowId });
+    const known = out.sources.get(key);
+    if (known !== undefined) return known.state;
+    const stored = run.stored;
+    let byRow = this.#rowDocuments.get(stored);
+    if (byRow === undefined) this.#rowDocuments.set(stored, (byRow = new Map()));
+    let variant = byRow.get(rowId);
+    if (variant === undefined) byRow.set(rowId, (variant = configured(stored, rowId)));
+    const row = configurationRow(stored, rowId);
+    if (!variant.ok || row === undefined) {
+      const message =
+        row === undefined
+          ? `This document has no configuration row ${rowId}; pick another row`
+          : `Configuration ${row.name} (${rowId}) cannot be applied: ${variant.ok ? '' : variant.error.message}`;
+      return { errors: [{ code: 'source', field: ['source', 'configuration'], message }] };
     }
-    return { ok: true, state, warnings };
+    const doc = variant.value;
+    const part = doc.parts.find((p) => p.id === partId);
+    if (part === undefined) return undefined;
+    const state = await this.#buildPart(run, part, doc, evaluateVariables(doc.variables), {
+      ns: null,
+      depth: 0,
+      versions: run.versions,
+    });
+    out.sources.set(key, {
+      info: {
+        documentId: '',
+        documentName: '',
+        versionId: '',
+        versionName: '',
+        partId,
+        partName: part.name,
+        row: { id: row.id, name: row.name },
+      },
+      state,
+    });
+    return state;
   }
 
   /** A connector frame's cache key: the body it is on (by content) and what it names. */
@@ -1440,6 +1558,7 @@ export class RegenEngine {
 
   async #assembly(
     run: Run,
+    document: ManufaktureDocument,
     assembly: Assembly,
     variables: VariableValues,
     partFor: (partId: string) => Promise<PartState | undefined>,
@@ -1456,12 +1575,13 @@ export class RegenEngine {
       result.instances.push(r);
       instances.set(x.id, r);
       if (x.suppressed) continue;
-      const src = await this.#instanceSource(run, x.source, partFor, out);
+      const src = await this.#instanceSource(run, document, x.source, partFor, out);
       if (!src.ok) {
         r.status = 'error';
         r.errors = src.errors;
         continue;
       }
+      r.source = src.ref;
       r.warnings.push(...src.warnings);
       const all = src.state.bodies;
       if (all.length === 0) {

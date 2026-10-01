@@ -49,7 +49,10 @@ function fakeKernel(options: { two?: boolean; failOn?: string; drop?: number } =
   let width = 0;
   let generation = 0;
   let drops = options.drop ?? 0;
-  const regen = vi.fn(async (doc: ManufaktureDocument): Promise<RegenView | null> => {
+  // Takes the stored document too, as the export passes it.
+  const regen = vi.fn<
+    (doc: ManufaktureDocument, stored?: ManufaktureDocument) => Promise<RegenView | null>
+  >(async (doc) => {
     if (drops > 0) {
       drops--;
       return null;
@@ -100,8 +103,9 @@ describe('exporting every configuration', () => {
     const k = fakeKernel();
     const progress: string[] = [];
     const onFile = vi.fn();
+    const document = shelf();
     const r = await exportConfigurations(k.exchanger, k.regen, {
-      document: shelf(),
+      document,
       partId: 'part#1',
       format: '3mf',
       onProgress: (p) => progress.push(`${p.index + 1}/${p.count} ${p.row.name}`),
@@ -124,6 +128,8 @@ describe('exporting every configuration', () => {
       'cfg#2',
       'cfg#3',
     ]);
+    // With the stored document alongside, for instances in other rows.
+    expect(k.regen.mock.calls.every(([, stored]) => stored === document)).toBe(true);
     const sizes = r.files.map((f) => {
       const report = validate3mf(f.bytes);
       expect(report.problems).toEqual([]);

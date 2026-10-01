@@ -107,6 +107,56 @@ describe('AssemblyTree', () => {
   });
 });
 
+describe('configuration rows of instances', () => {
+  const mm = (source: string) => ({ source, lengthUnit: 'mm' as const, angleUnit: 'deg' as const });
+
+  it('builds an instance in a row of its part, as one undoable command', () => {
+    const doc = apply(
+      twoInstances(),
+      { type: 'setVariable', name: 'width', expression: mm('600') },
+      {
+        type: 'setConfigParameter',
+        parameter: { id: 'cp#1', name: 'Width', kind: 'variable', variable: 'width' },
+      },
+      { type: 'setConfigRow', row: { id: 'cfg#1', name: '600 mm', values: { 'cp#1': mm('600') } } },
+      {
+        type: 'setConfigRow',
+        row: { id: 'cfg#2', name: '1000 mm', values: { 'cp#1': mm('1000') } },
+      },
+    );
+    const documents = createDocumentStore(doc);
+    render(
+      <AssemblyTree documents={documents} assemblyId={A} result={result()} onEditMate={vi.fn()} />,
+    );
+    const select = () => screen.getByTestId('instance-configuration-inst#2') as HTMLSelectElement;
+    expect(Array.from(select().options, (o) => o.text)).toEqual([
+      'Default (as stored)',
+      '600 mm',
+      '1000 mm',
+    ]);
+    fireEvent.change(select(), { target: { value: 'cfg#2' } });
+    const lid = () => documents.getState().document.assemblies[0]!.instances[1]!;
+    expect(lid().source).toEqual({ part: 'part#2', configuration: 'cfg#2' });
+    expect(documents.getState().undoLabel).toBe('Build Lid 1 in 1000 mm');
+    expect(screen.getByTestId('instance-inst#2').textContent).toContain('Lid (1000 mm)');
+    expect(select().value).toBe('cfg#2');
+    fireEvent.change(select(), { target: { value: '' } });
+    expect(lid().source).toEqual({ part: 'part#2' });
+    act(() => {
+      documents.getState().undo();
+    });
+    expect(lid().source).toEqual({ part: 'part#2', configuration: 'cfg#2' });
+  });
+
+  it('offers no row for a part of a document without a table', () => {
+    const documents = createDocumentStore(twoInstances());
+    render(
+      <AssemblyTree documents={documents} assemblyId={A} result={result()} onEditMate={vi.fn()} />,
+    );
+    expect(screen.queryByTestId('instance-configuration-inst#1')).toBeNull();
+  });
+});
+
 describe('InsertPanel', () => {
   it('inserts part studios of the document, one undoable command each', () => {
     const documents = createDocumentStore(twoInstances());

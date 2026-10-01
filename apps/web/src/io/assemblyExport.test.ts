@@ -148,6 +148,46 @@ describe('assemblyExportPlan', () => {
     ]);
   });
 
+  it('names a part in another configuration row after the part and the row, a pinned one after its version and row', () => {
+    const { doc } = threeInstances();
+    const body = {
+      bodyId: 'extrude#1',
+      creator: 'extrude#1',
+      solids: 1,
+      view: boxBody({ id: 'x/extrude#1' }),
+    };
+    const wide = {
+      key: 'part:part#1:row:cfg#2',
+      partId: 'part#1',
+      documentName: '',
+      versionName: '',
+      partName: 'Box',
+      row: { id: 'cfg#2', name: 'Wide' },
+      local: true as const,
+      bodies: [body],
+    };
+    const pinned = {
+      key: 'source:abc:part#1:row:cfg#1',
+      partId: 'part#1',
+      documentName: 'Hinge',
+      versionName: 'v2',
+      row: { id: 'cfg#1', name: 'Small' },
+      bodies: [body],
+    };
+    const solved = result({
+      instances: [
+        instanceResult('inst#1', 'part#1'),
+        instanceResult('inst#2', 'part#1', { source: { source: wide.key } }),
+        instanceResult('inst#3', 'part#1', { source: { source: pinned.key } }),
+      ],
+    });
+    const m = model([solved]);
+    const p = plan(doc, { ...m, sources: [wide, pinned] });
+    // Each row is a part of its own.
+    expect(p.parts.map((x) => x.name)).toEqual(['Box', 'Box (Wide)', 'Hinge (v2, Small)']);
+    expect(p.instances.map((i) => i.part)).toEqual([0, 1, 2]);
+  });
+
   it('refuses an assembly that is unknown, unsolved or has nothing to write', () => {
     const { doc, model: m } = threeInstances();
     expect(assemblyExportPlan(doc, 'assembly#9', m).message).toBe(

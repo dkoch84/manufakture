@@ -2,7 +2,7 @@ import { MAX_DERIVED_DEPTH, deserialize, featureIdsInName, type Part } from '@ma
 import { derivedName } from '@manufakture/kernel';
 import { describe, expect, it, vi } from 'vitest';
 import { DerivedSources, carriedProps, effectiveProps, sourceNamespace } from './derived';
-import { PART, add, block, build, derivedOf, pin, pinText } from './test-helpers';
+import { PART, add, block, build, derivedOf, pin, pinText, withRows } from './test-helpers';
 
 // The real `deserialize`, wrapped so one test can make it throw.
 vi.mock('@manufakture/core', async (original) => {
@@ -82,6 +82,33 @@ describe('DerivedSources', () => {
     expect(first.ok && kept.ok && first.document === kept.document).toBe(true);
     expect(again.ok && first.ok && again.document !== first.document).toBe(true);
     expect(sourceNamespace(source)).toBe(`${source.sha256}\n${PART}`);
+  });
+
+  it('opens a source in the row it names, else its active row, each once, under a namespace per row', async () => {
+    const sources = new DerivedSources();
+    const doc = withRows(block(), 'radius', ['3mm', '5mm']);
+    const source = { ...pin(doc), configuration: 'cfg#2' };
+    const opened = await sources.open(source);
+    if (!opened.ok) throw new Error(opened.error.message);
+    expect(opened.row).toMatchObject({ id: 'cfg#2', name: '5mm' });
+    expect(opened.namespace).toBe(`${source.sha256}\n${PART}\ncfg#2`);
+    expect(opened.document.variables.find((v) => v.name === 'radius')!.expression.source).toBe(
+      '5mm',
+    );
+    const again = await sources.open({ ...source });
+    expect(again.ok && again.document === opened.document).toBe(true);
+    // No row named and none active: the document as stored, under the plain namespace.
+    const plain = await sources.open(pin(doc));
+    expect(plain).toMatchObject({ ok: true, row: null, namespace: sourceNamespace(pin(doc)) });
+    // A row it does not have.
+    expect(await sources.open({ ...source, configuration: 'cfg#5' })).toMatchObject({
+      ok: false,
+      error: {
+        code: 'source',
+        field: ['source', 'configuration'],
+        message: expect.stringMatching(/has no configuration row cfg#5/),
+      },
+    });
   });
 
   it('measures nesting without building, and a source it cannot open counts as one level', async () => {

@@ -39,6 +39,7 @@ import {
   mm,
   pin,
   setVariable,
+  shelfBoard,
   statuses,
   twoBodies,
   unwrap,
@@ -813,6 +814,68 @@ describe('assemblies with the real kernel', () => {
     // The engine still reports the committed document: the next regen of it sends no mesh.
     const next = (await engine.regen(doc))!;
     expect(next.sources![0]!.bodies[0]!.meshChanged).toBe(false);
+    await engine.dispose();
+    await service.idle();
+    expect(service.leaks()).toEqual([]);
+  });
+});
+
+describe('configuration rows with the real kernel', () => {
+  /** The shelf board's volume at a width: 200 mm deep, 18 mm thick. */
+  const board = (width: number) => width * 200 * 18;
+
+  it('gives two instances of one part at two rows two bodies of the right sizes', async () => {
+    const engine = new RegenEngine({ kernel: service, solver });
+    const doc = apply(
+      shelfBoard(),
+      { type: 'addAssembly', assemblyId: ASSEMBLY, name: 'Shelves' },
+      {
+        type: 'addInstance',
+        assemblyId: ASSEMBLY,
+        instance: instance('inst#1', { part: PART, configuration: 'cfg#1' }, { fixed: true }),
+      },
+      {
+        type: 'addInstance',
+        assemblyId: ASSEMBLY,
+        instance: instance('inst#2', { part: PART, configuration: 'cfg#3' }),
+      },
+    );
+    const r = (await engine.regen(doc))!;
+    const [narrow, wide] = r.assemblies![0]!.instances;
+    expect(narrow).toMatchObject({ status: 'ok', source: { source: `part:${PART}:row:cfg#1` } });
+    expect(wide).toMatchObject({ status: 'ok', source: { source: `part:${PART}:row:cfg#3` } });
+    const shapeOf = (key: string) => r.sources!.find((x) => x.key === key)!.bodies[0]!;
+    const a = shapeOf(`part:${PART}:row:cfg#1`);
+    const b = shapeOf(`part:${PART}:row:cfg#3`);
+    expect(a.mesh).not.toBeNull();
+    expect(b.mesh).not.toBeNull();
+    expect(await volume(engine, a.shape)).toBeCloseTo(board(600), 3);
+    expect(await volume(engine, b.shape)).toBeCloseTo(board(1000), 3);
+    // The part itself, as stored (600 mm), is the same build as row cfg#1: the same body.
+    expect(r.parts[0]!.bodies[0]!.bodyKey).toBe(a.bodyKey);
+    await engine.dispose();
+    await service.idle();
+    expect(service.leaks()).toEqual([]);
+  });
+
+  it('derives a shelf board at row 800 mm with the exact volume', async () => {
+    const engine = new RegenEngine({ kernel: service, solver });
+    const source = { ...pin(shelfBoard()), configuration: 'cfg#2' };
+    const doc = build([add(derivedOf('derived#1', source))]);
+    const r = (await engine.regen(doc))!;
+    expect(statuses(r)).toEqual({ 'derived#1': 'ok' });
+    const body = r.parts[0]!.bodies[0]!;
+    expect(body.bodyId).toBe('derived#1:from/extrude#1');
+    expect(await volume(engine, body.shape)).toBeCloseTo(board(800), 3);
+    // Another row of the same pin: a build of its own.
+    const wider = (await engine.regen(
+      apply(doc, {
+        type: 'editFeature',
+        partId: PART,
+        feature: derivedOf('derived#1', { ...source, configuration: 'cfg#3' }),
+      }),
+    ))!;
+    expect(await volume(engine, wider.parts[0]!.bodies[0]!.shape)).toBeCloseTo(board(1000), 3);
     await engine.dispose();
     await service.idle();
     expect(service.leaks()).toEqual([]);

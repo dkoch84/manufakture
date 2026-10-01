@@ -48,14 +48,15 @@ import { evaluateField, pathKey, type VariableValues } from './values';
 
 /**
  * The key an instance's source is built under: `part:<part id>` for a part of this document,
- * `source:<sha256>:<part id>` for a pinned part. Instances with equal keys show the same bodies,
- * so each source is built once per regen. T2.4c appends the configuration row (`:row:<id>`)
- * when it builds rows, so two instances at two rows get two builds; nothing else keys on it.
+ * `source:<sha256>:<part id>` for a pinned part, each followed by `:row:<row id>` when the
+ * instance names a configuration row. Instances with equal keys show the same bodies, so each
+ * source is built once per regen in each row, and two instances at two rows get two builds.
  */
 export function instanceSourceKey(source: InstanceSource): string {
+  const row = source.configuration === undefined ? '' : `:row:${source.configuration}`;
   return isPinnedSource(source)
-    ? `source:${source.sha256}:${source.partId}`
-    : `part:${(source as { part: string }).part}`;
+    ? `source:${source.sha256}:${source.partId}${row}`
+    : `part:${(source as { part: string }).part}${row}`;
 }
 
 /** What the kernel's `connector` op finds a connector's frame on, in kernel form. */
@@ -383,7 +384,7 @@ export function emptyMateResult(mate: Mate): MateResult {
   };
 }
 
-/** An instance's result before it is solved. */
+/** An instance's result before it is solved (the engine sets `source` to where it was built). */
 export function emptyInstanceResult(
   id: string,
   source: InstanceSource,

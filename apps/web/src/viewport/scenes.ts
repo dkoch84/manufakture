@@ -14,7 +14,7 @@ import { kernelExchange, type Exchanger, type KernelBody, type Referencer } from
 import type { Measurer } from '../measure/measurer';
 import { demoDocument } from '../model/demo';
 import { kernelRegenerator } from '../model/kernelModel';
-import type { Regenerator } from '../model/model';
+import { buildable, type Regenerator } from '../model/model';
 import { testHooksEnabled } from '../testHooks';
 import type { BodyInput } from './bodies';
 import { fillPlaceholderNames } from './naming';
@@ -126,8 +126,15 @@ export function kernelLoader(
   const { exchanger, measurer, referencer } = kernelExchange(() => client, registry);
   const regenerator = kernelRegenerator(() => client, registry);
   const assembler: Assembler = {
-    solve: (document, assemblyId) =>
-      client === null ? Promise.resolve(null) : client.solveAssembly(document, assemblyId),
+    // Built as a regen builds it: in the active configuration row, rows of instances from the
+    // stored document.
+    solve: (document, assemblyId) => {
+      if (client === null) return Promise.resolve(null);
+      const built = buildable(document).document;
+      return built === document
+        ? client.solveAssembly(document, assemblyId)
+        : client.solveAssembly(built, assemblyId, document);
+    },
     drag: (assemblyId, instanceId, target) =>
       client === null ? Promise.resolve(null) : client.dragInstance(assemblyId, instanceId, target),
     endDrag: (assemblyId) => void client?.endDrag(assemblyId).catch(() => undefined),

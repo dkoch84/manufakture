@@ -122,6 +122,7 @@ describe('kernelRegenerator', () => {
               versionId: 'v-1',
               versionName: 'v1',
               partId: 'part#1',
+              partName: 'Knob',
               bodies: [body('extrude#1', 7, meshed)],
             },
           ]

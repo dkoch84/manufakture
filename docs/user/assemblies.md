@@ -15,6 +15,8 @@ In an assembly tab the feature toolbar gives way to **Insert**, **Mate** and **I
 - **Part studios of this document**: **Insert** adds an instance of that part studio, at the origin. Insert the same part studio as often as you need; the instances are numbered ("Lid 1", "Lid 2").
 - **A part of another document, at a version**: choose a document, one of its named versions (or **Create version now**), and a part studio, exactly as for a [derived part](derived.md), then **Insert**. The version travels inside your document, so the instance still shows after the other document changes or is deleted; to take a newer version, insert again.
 
+When an instance's part has [configurations](configurations.md), its row in the tree has a **Configuration** list: **Default** (the configuration shown in the header for a part of this document, or the one the version was made in for a part of another document), or any configuration by name. Two instances of one shelf board part can so be a 600 mm and a 1000 mm board. The row's description names the configuration ("Board (1000 mm)"), and changing it is one step for **Undo**. Mates stay on the faces they were picked on, since faces keep their names in every configuration; a mate on a face that a configuration suppresses becomes an error, as after any edit that removes it.
+
 The first instance of an assembly is **fixed**: it stays where it is, and the others are mated to it. **Fix** and **Unfix** in the tree change that for any instance. **Suppress** takes an instance out of the assembly without deleting it (its mates are suppressed with it). **Delete** is offered once no mate connects the instance any more; delete its mates first.
 
 ## Mating
@@ -72,7 +74,7 @@ Volumes are shown in the document's units. Only pairs whose bounding boxes overl
 
 ## Exporting
 
-**Export** in an assembly tab saves the whole assembly as STL, 3MF or STEP, each part written once and placed where its instances are; see [Exporting an assembly](import-export.md#exporting-an-assembly).
+**Export** in an assembly tab saves the whole assembly as STL, 3MF or STEP, each part written once and placed where its instances are (a part in two configurations is two parts, named after the configuration: "Board (600 mm)"); see [Exporting an assembly](import-export.md#exporting-an-assembly).
 
 ## How it is solved
 

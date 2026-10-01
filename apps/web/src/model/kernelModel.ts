@@ -8,8 +8,9 @@
 // A part can have several bodies; each has the viewport id `<part id>/<body id>` (`viewBodyId`),
 // and is registered under the name it is exported with when nothing else is asked for.
 //
-// Pinned parts that assembly instances show (`RegenResult.sources`) keep their meshes the same
-// way, by source key. Every body an instance shows is registered under its instance view id
+// Pinned parts that assembly instances show, and parts of this document in another configuration
+// row (`RegenResult.sources`), keep their meshes the same way, by source key. Every body an
+// instance shows is registered under its instance view id
 // (`<assembly id>/<instance id>/<body id>`) with its source body's shape, so a pick on an
 // instance can be turned into a stored reference like a pick on a part (the shape is in the
 // part's own coordinates, which is what references and connectors name).
@@ -26,7 +27,7 @@ export { viewBodyId } from './bodies';
 
 /** What the regenerator needs of the regen client. */
 export interface RegenSource {
-  regen(document: ManufaktureDocument): Promise<RegenResult | null>;
+  regen(document: ManufaktureDocument, stored?: ManufaktureDocument): Promise<RegenResult | null>;
 }
 
 export interface KernelRegenerator extends Regenerator {
@@ -116,12 +117,16 @@ export function kernelRegenerator(
         ),
       });
     }
-    // Pinned parts that instances show, kept by source key like parts by part id.
+    // Pinned parts (and parts in another configuration row) that instances show, kept by
+    // source key like parts by part id.
     const sources: SourceModel[] = result.sources.map((src) => ({
       key: src.key,
       partId: src.partId,
       documentName: src.documentName,
       versionName: src.versionName,
+      partName: src.partName,
+      ...(src.row === undefined ? {} : { row: src.row }),
+      ...(src.documentId === '' ? { local: true as const } : {}),
       bodies: views(result.names, src.key, (bodyId) => `${src.key}/${bodyId}`, src.bodies),
     }));
     // Parts and sources that are gone.
@@ -171,10 +176,10 @@ export function kernelRegenerator(
   };
 
   return {
-    async regen(document) {
+    async regen(document, stored) {
       const c = client();
       if (c === null) return null;
-      const result = await c.regen(document);
+      const result = await (stored === undefined ? c.regen(document) : c.regen(document, stored));
       if (result === null) return null;
       // Completed results arrive in the order the worker finished them, which is generation
       // order; an older one arriving late would carry meshes the newer one already reported.
