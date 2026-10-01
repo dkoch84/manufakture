@@ -14,7 +14,7 @@ Milestones 1 (a printable part) and 2 (multi-body parts and assemblies) are done
 - a feature tree with a rollback bar, editing, reordering and undo;
 - exact measurements: distances, angles, radii, areas, volume and mass;
 - export to STL, 3MF and STEP, and import of STEP and STL as reference bodies;
-- local-first storage: saving as you go, a documents list, and `.mfk` import and export.
+- local-first storage: saving as you go, a documents list, and `.mfk` import and export;
 - parts of several bodies, each with its own name and material, and several part studios in a document;
 - named versions and branches in a document's history, with viewing, comparing and restoring;
 - configurations: a table of parameter rows that makes variants of a part;
