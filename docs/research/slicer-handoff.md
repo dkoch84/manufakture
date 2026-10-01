@@ -1,7 +1,7 @@
 # Slicer hand-off and 3MF interop: research for M3
 
 - Status: research, input to the [M3 plan](../plans/m3.md)
-- Date: 2026-09-26
+- Date: 2026-09-26; command-line checks added 2026-10-01 ([section 6](#6-verified))
 - Question: how does a local-first web app (no server until M7, [product decisions](../decisions/0000-product-decisions.md)) get a part into OrcaSlicer, Bambu Studio or PrusaSlicer with as few steps as possible, and what must its 3MF contain so that parts, names and colours arrive intact?
 
 ## Method and conventions
@@ -94,23 +94,23 @@ What happens in the browser when a page navigates to a custom scheme matters for
 Read from [`src/libslic3r/Format/bbs_3mf.cpp`](https://github.com/OrcaSlicer/OrcaSlicer/blob/v2.4.2/src/libslic3r/Format/bbs_3mf.cpp) (checked unless marked):
 
 - **Colours: object-level colour groups, literal prefix `m`.** The reader matches the element names `m:colorgroup` and `m:color` as literal strings (raw tag names, prefix included), so the materials namespace must be declared with the prefix `m`. For each group it records a colour (`m_group_id_to_color[group] = color`), so a group with several colours keeps only its **last** one. After loading it numbers the distinct colours 1, 2, 3 in group order and sets each object's `extruder` from its object-level `pid`. `pindex` and per-triangle `pid`, `p1` to `p3` are not used. So: **one colour group per distinct colour, one colour in each, and `pid` on the object** is what Orca turns into filament slots.
-- **Filament colours are not taken from the file** as far as the loader shows: the colour decides the slot number, not the slot's colour (unverified; the spike checks it).
+- **Filament colours are not taken from the file** as far as the loader shows: the colour decides the slot number, not the slot's colour. **Confirmed on the command line** (section 6: after loading, the project keeps Orca's one default filament colour); what the GUI shows is T3.0d's check.
 - **Bambu and Orca project files are detected by metadata.** A file whose `Application` metadata starts with `BambuStudio-` or `OrcaSlicer-`, or that carries an `OrcaSlicer` metadata entry, is treated as a Bambu-format project: its `Metadata/model_settings.config` must then be valid ("Archive does not contain a valid model config" otherwise) and its project settings are loaded. **A third-party file must not claim one of those application names**; ours says `manufakture`.
-- **For other producers' files**, Orca still parses `Metadata/model_settings.config` when present, ignoring errors, and it splits an object with several build items into one object per item, and names a lone object after the file. Whether per-object `extruder` metadata from `model_settings.config` is applied for a non-Bambu file was not established (unverified).
+- **For other producers' files**, Orca still parses `Metadata/model_settings.config` when present, ignoring errors, and it splits an object with several build items into one object per item, and names a lone object after the file. Per-object `extruder` metadata from `model_settings.config` **is applied** for a non-Bambu file (confirmed on the command line, fixture 05 in section 6). The split is lossy: every copy after the first loses its name and its colour (fixture 08).
 - **`Metadata/model_settings.config`**, for reference, is XML: `<config>` with `<object id>` entries holding `<metadata key value>` (`name`, `extruder`) and `<part id subtype>` entries (normal part, modifier, negative part) with their own metadata; `<plate>` entries with `<model_instance>` items; and `<assemble>` items. Tag names from the constants in `bbs_3mf.cpp`; the full grammar was not read.
 - **Other files in the package** Orca reads when present: `Metadata/project_settings.config` (the whole project configuration), `Metadata/slice_info.config`, `Metadata/plate_N.png` thumbnails, and embedded presets (`Metadata/filament_settings_N.config` and so on).
 
 ### Bambu Studio 2.8.2
 
-[`src/libslic3r/Format/bbs_3mf.cpp`](https://github.com/bambulab/BambuStudio/blob/v02.08.02.61/src/libslic3r/Format/bbs_3mf.cpp) shares Orca's design and goes further (checked): each colour group keeps **all** its colours, every distinct colour gets a filament number, an object's `pid` with `pindex` picks its colour, and for files from other producers each triangle's `pid`, `p1`, `p2`, `p3` is read into per-triangle colour data. So Bambu Studio can take per-face colours from a plain 3MF; how it shows them (painted regions, or a mapping dialog) was not tried (unverified). One colour group per colour with `pindex="0"` reads the same in Bambu Studio and Orca.
+[`src/libslic3r/Format/bbs_3mf.cpp`](https://github.com/bambulab/BambuStudio/blob/v02.08.02.61/src/libslic3r/Format/bbs_3mf.cpp) shares Orca's design and goes further (checked): each colour group keeps **all** its colours, every distinct colour gets a filament number, an object's `pid` with `pindex` picks its colour, and for files from other producers each triangle's `pid`, `p1`, `p2`, `p3` is read into per-triangle colour data. So Bambu Studio can take per-face colours from a plain 3MF; how it shows them (painted regions, or a mapping dialog) was not tried (unverified). The reader hands them to its caller as per-volume colour data rather than applying them, and the command line does not apply them (fixture 04 in section 6: no painted triangles, the face prints in the object's slot); the GUI is T3.0d's check. `pindex` on the object does pick the slot (confirmed, fixture 04). One colour group per colour with `pindex="0"` reads the same in Bambu Studio and Orca.
 
 ### PrusaSlicer 2.9.6
 
-[`src/libslic3r/Format/3mf.cpp`](https://github.com/prusa3d/PrusaSlicer/blob/version_2.9.6/src/libslic3r/Format/3mf.cpp) has no reader for colour groups or base materials (searched for `colorgroup`, `basematerials`, `displaycolor`: none; checked). Per-volume extruders and volume types come only from its own `Metadata/Slic3r_PE_model.config`. It reads core components, nested ones included, and `p:path`. So a manufakture 3MF with colour groups loads in PrusaSlicer with correct geometry and names and no colours; the `interop` CI job already slices our 3MF with PrusaSlicer and will catch it if the extension markup ever breaks loading.
+[`src/libslic3r/Format/3mf.cpp`](https://github.com/prusa3d/PrusaSlicer/blob/version_2.9.6/src/libslic3r/Format/3mf.cpp) has no reader for colour groups or base materials (searched for `colorgroup`, `basematerials`, `displaycolor`: none; checked). Per-volume extruders and volume types come only from its own `Metadata/Slic3r_PE_model.config`. It reads core components, nested ones included, and `p:path`, but **not as parts of one object**: a components object is an alias, and each mesh object it reaches becomes an object of its own, named after the mesh object, the components object's name dropped (`_create_object_instance`; refuted on the command line with fixtures 03 and 07, section 6). So a manufakture 3MF with colour groups loads in PrusaSlicer with correct geometry and names and no colours; the `interop` CI job already slices our 3MF with PrusaSlicer and will catch it if the extension markup ever breaks loading.
 
 ### Several bodies as one object
 
-A multi-colour print of one design (a sign with inlaid letters, a part with a coloured label) is several bodies that belong together. In 3MF core that is one object with `<components>`, each component a mesh object. PrusaSlicer reads components as parts of one object (checked, above). How Orca and Bambu Studio map a third-party component object's parts and their per-part colours to volumes and extruders was not traced to the end (unverified); the spike loads such a file in both. Note that `packages/io`'s `parse3mf` refuses components today, so reading our own output back needs that lifted.
+A multi-colour print of one design (a sign with inlaid letters, a part with a coloured label) is several bodies that belong together. In 3MF core that is one object with `<components>`, each component a mesh object. PrusaSlicer does **not** keep components as parts of one object: it makes each component its own object (refuted, see above and section 6). Orca and Bambu Studio keep one object with one part per component, but without help they name the parts after the object (`Two boxes`, `Two boxes_2`) and print every part in the object's slot, ignoring the parts' colour groups; with a `Metadata/model_settings.config` naming the parts and giving each its `extruder`, both keep the names and the slots (confirmed on the command line, fixtures 03 and 07, section 6). `packages/io`'s `parse3mf` reads components since T2.3f.
 
 ## 4. Bambu Lab build volumes
 
@@ -127,7 +127,7 @@ For the bed-fit check, from OrcaSlicer's printer profiles ([`resources/profiles/
 | H2D, H2D Pro            | 350 x 320           | 325 (from `002`) | left nozzle 0 to 325 in x, right nozzle 25 to 350; per-nozzle heights 320 and 325 (`002`) |
 | X2D                     | 256 x 256           | 261              | left nozzle full bed, right nozzle 20.5 to 256 in x; heights 261 and 256                  |
 
-The X1 and P1 heights of 250 mm are what the profiles inherit from `fdm_machine_common.json`; Bambu Lab's marketing figure for those printers is 256 mm (unverified here). The check should use the profile value, since that is what the slicer enforces. On the two-nozzle H2D and X2D a part printed with both nozzles must fit the overlap of the two areas.
+The X1 and P1 heights of 250 mm are what the profiles inherit from `fdm_machine_common.json`; Bambu Lab's marketing figure for those printers is 256 mm (unverified here). The check should use the profile value, since that is what the slicer enforces: OrcaSlicer's and Bambu Studio's command lines both apply 250 mm for the X1 Carbon (section 6). On the two-nozzle H2D and X2D a part printed with both nozzles must fit the overlap of the two areas.
 
 The same profiles give process defaults the printability checks should start from (OrcaSlicer [`PrintConfig.cpp`](https://github.com/OrcaSlicer/OrcaSlicer/blob/v2.4.2/src/libslic3r/PrintConfig.cpp) and [`fdm_process_common.json`](https://github.com/OrcaSlicer/OrcaSlicer/blob/v2.4.2/resources/profiles/BBL/process/fdm_process_common.json), checked): support `support_threshold_angle` 30 degrees, measured as the **slope from horizontal** ("Support will be generated for overhangs whose slope angle is below the threshold"; 30 degrees from horizontal is 60 degrees from vertical); line width 0.42 mm for a 0.4 mm nozzle; `min_feature_size` 25% of the nozzle diameter ("Model features that are thinner than this value will not be printed"); `min_bead_width` 85%.
 
@@ -138,8 +138,197 @@ Elephant foot compensation matters for fits (T3.2g in the plan): `elefant_foot_c
 1. **M3 hands off by download.** "Open in slicer" exports a slicer-ready 3MF (section 3) with a clear file name and downloads it, then shows a short, dismissible panel for the chosen slicer: how to open it from the browser's download list, how to make the slicer the default for `.3mf` (Orca's `associate_3mf` on Windows), and Chrome's "always open" choice if the spike confirms it for `.3mf`. The chosen slicer is remembered with the view settings. This works everywhere, needs no server and uploads nothing.
 2. **No custom-scheme launch in M3.** There is no URL we could give the slicer (section 2), so a button that navigates to `orcaslicer://` would at best open an empty slicer. It is not built.
 3. **Write standard 3MF that Orca and Bambu Studio map to filaments.** Keep the core package and add: the materials namespace with the prefix `m`; one `m:colorgroup` per distinct body colour with a single `m:color`; `pid` and `pindex="0"` on each object; build items with transforms for print orientation and placement on the bed. No `requiredextensions` for the colours, so a consumer that ignores them still loads the geometry. Do not write `Application` values that impersonate Bambu Studio or OrcaSlicer. The production extension is not needed.
-4. **Decide the rest by evidence.** Whether several bodies go out as one component object, and whether a `Metadata/model_settings.config` (per-object extruder, plates) helps third-party files, is decided by the spike's load matrix in OrcaSlicer 2.4.2, Bambu Studio 2.8.2 and PrusaSlicer 2.9.6. Where OrcaSlicer's command line can load a file and write it back as a project 3MF (`--export-3mf`, `--slice`, defined in `PrintConfig.cpp`, checked), the resulting `model_settings.config` is a machine-readable record of what Orca made of our file; that is the basis for an optional CI check next to the existing `interop` job.
+4. **Decide the rest by evidence.** Whether several bodies go out as one component object, and whether a `Metadata/model_settings.config` (per-object extruder, plates) helps third-party files, is decided by the spike's load matrix in OrcaSlicer 2.4.2, Bambu Studio 2.8.2 and PrusaSlicer 2.9.6. Where OrcaSlicer's command line can load a file and write it back as a project 3MF (`--export-3mf`, `--slice`, defined in `PrintConfig.cpp`, checked), the resulting `model_settings.config` is a machine-readable record of what Orca made of our file; that is the basis for an optional CI check next to the existing `interop` job. The command-line results and a provisional call are in section 6.
 5. **For M7, an optional hosted hand-off.** Once a server exists: upload the 3MF only after the user asks, to a short-lived unguessable https URL whose path ends in `.3mf`, then navigate to `orcaslicer://open?file=<url-encoded URL>` (no prompt in Orca) or `bambustudio://open?file=` (one trust prompt), always with the download offered next to it. PrusaSlicer would need our domain allowlisted by Prusa; self-hosted instances never would be, so it keeps the download path.
+
+## 6. Verified
+
+Command-line checks from the M3 spike (T3.0a), run on 2026-10-01. The GUI and browser checks are T3.0d's; their empty tables and the checklist are at the end of this section.
+
+### Setup
+
+| Program      | Version reported          | Build used                                                                                                                                          |
+| ------------ | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| OrcaSlicer   | `OrcaSlicer-2.4.2`        | upstream `OrcaSlicer_Linux_AppImage_Ubuntu2404_V2.4.2.AppImage`, SHA-256 `d12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd`         |
+| Bambu Studio | `BambuStudio-02.08.02.61` | upstream `BambuStudio_ubuntu24.04-v02.08.02.61-20260820225108.AppImage`, SHA-256 `d501b103fac5424513ec0e8d6bc145fb30719de2c7d94d7320d723740c81a7fd` |
+| PrusaSlicer  | `PrusaSlicer-2.9.6+arch5` | Arch Linux package `prusa-slicer` 2.9.6-5 (upstream publishes no Linux build of 2.9.6 on GitHub; Flathub only)                                      |
+
+- **Operating system.** Arch Linux, x86_64, kernel 7.2.7, in a container with no display server, no GPU and no system-wide install of any slicer: the AppImages were unpacked with `--appimage-extract` (no FUSE), and the shared libraries they expect from the host were unpacked from Arch packages into a directory on `LD_LIBRARY_PATH`. Node 26.10.
+- **Printer.** Bambu Lab X1 Carbon, 0.4 mm nozzle, profile `Bambu Lab X1 Carbon 0.4 nozzle`, process `0.20mm Standard @BBL X1C`, two filament slots of `Bambu PLA Basic @BBL X1C` coloured `#FF0000` and `#0000FF` (as an AMS would hold them). The profiles were read from each install at run time; none is in this repository.
+- **Bambu Studio** was not in the plan for this task; its command line takes the same flags and profiles as OrcaSlicer's, so the same script ran it at no extra cost, and it answers some of T3.0d's questions early. PrusaSlicer ran with its built-in defaults (one extruder), as in the `interop` CI job.
+
+### The fixtures
+
+Committed in `packages/io/src/fixtures/slicers/` and built by `packages/io/scripts/slicer-fixtures.ts` (`pnpm --filter @manufakture/io fixtures:slicers`); `fixtures.test.ts` next to them checks that the files are what the script builds, that each is a valid core 3MF, and that 01 is what `write3mf` writes. Every fixture is a red box (20 x 20 x 10 mm) and a blue box (30 x 15 x 8 mm) side by side near the middle of a 256 mm bed; every one says `Application` `manufakture`.
+
+| Fixture                            | Holds                                                                                                                                                             |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `01-core.3mf`                      | what `write3mf` writes today: two mesh objects, two build items, no colours                                                                                       |
+| `02-colorgroups.3mf`               | decision 12 of the plan: one `m:colorgroup` per colour holding one `m:color`, `pid` and `pindex="0"` on each object                                               |
+| `03-components.3mf`                | 02's two coloured mesh objects, and one object "Two boxes" made of both as components; one build item                                                             |
+| `04-pindex-triangles.3mf`          | one colour group holding both colours: the red box `pindex="0"`, the blue box `pindex="1"`, and the red box's top face (two triangles) blue by `pid` and `p1`     |
+| `05-model-settings.3mf`            | 01 (no colour groups) plus a minimal `Metadata/model_settings.config`: per object, `name` and `extruder` 1 or 2                                                   |
+| `06-transforms.3mf`                | 02 with both boxes modelled at the origin; the red box's build item turns it 90 degrees about x (it then stands 20 mm tall) and moves it, the blue one's moves it |
+| `07-components-model-settings.3mf` | 03 plus a `model_settings.config` naming the components object and giving each part (by component object id) its `name` and `extruder`                            |
+| `08-instances.3mf`                 | not in the plan's list: 02's two objects at the origin, the blue box placed twice by two build items, as an assembly export (T2.3f) writes a part placed twice    |
+
+### How the matrix was run
+
+`packages/io/scripts/orca-matrix.ts` (`pnpm --filter @manufakture/io orca:matrix`; `ORCA_CMD`, `ORCA_PROFILES` and `ORCA_OUT` select the program, its profiles and the output directory) runs every fixture twice and reads back what the slicer wrote:
+
+- **load**: `--arrange 0 --export-3mf project.3mf <fixture>`, no profiles: what the slicer makes of the file;
+- **slice**: the same plus `--slice 0 --load-settings "<printer>;<process>" --load-filaments "<slot 1>;<slot 2>"` for the X1 Carbon.
+
+From each project 3MF it reads `Metadata/model_settings.config` (objects, parts, names, `extruder` per object and part), the placed meshes (each object's world bounding box through its component and build-item transforms), `slice_info.config` (filament slots the plate uses), `project_settings.config` (slot colours) and the G-code (which slot each object is printed with: the `M620 S<n>A` slot selection before each object block). PrusaSlicer ran by hand: `prusa-slicer --export-gcode` and `--export-3mf` per fixture, reading objects and volumes from `Metadata/Slic3r_PE_model.config` and the top layer from the G-code.
+
+### Command-line matrix
+
+Positions are world bounding boxes in mm, min to max. The load and slice runs agreed on every object, name, slot and position, so one row covers both; "slices" means exit status 0, `return_code` 0 and a G-code file.
+
+| Fixture | OrcaSlicer 2.4.2                                                                                                                                                                                                      | Bambu Studio 2.8.2                                                                      | PrusaSlicer 2.9.6                                                        |
+| ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| 01      | 2 objects "Red box", "Blue box", one part each named after it; both slot 1; positions as written (90,120,0 to 110,140,10 and 130,122.5,0 to 160,137.5,8); slices with 1 filament                                      | same as Orca                                                                            | 2 objects, named; slices                                                 |
+| 02      | 2 objects, named; red slot 1, blue slot 2; positions as written; slices with both filaments, the G-code printing red in slot 1 and blue in slot 2                                                                     | same as Orca                                                                            | 2 objects, named, no colours (one extruder); slices                      |
+| 03      | 1 object "Two boxes", parts named "Two boxes" and "Two boxes_2" (the mesh names are lost); the object in slot 1 and no slot on the parts, so both boxes print in slot 1; positions as written; slices with 1 filament | same as Orca                                                                            | 2 objects "Red box", "Blue box"; the name "Two boxes" is dropped; slices |
+| 04      | 2 objects, named; **both slot 1** (`pindex` ignored: one group gives one slot); top face not painted; slices with 1 filament                                                                                          | red slot 1, **blue slot 2** (`pindex` honoured); top face not painted, prints in slot 1 | 2 objects, named; slices                                                 |
+| 05      | 2 objects, named; red slot 1, blue slot 2 from `model_settings.config`; slices with both filaments                                                                                                                    | same as Orca                                                                            | 2 objects, named; `model_settings.config` ignored; slices                |
+| 06      | red box 90,125,0 to 110,135,20: turned onto its side and moved as the item says; blue as written; slots 1 and 2; slices with both filaments                                                                           | same as Orca                                                                            | 2 objects; slices, top layer at 19.85 mm (the red box stands 20 mm tall) |
+| 07      | 1 object "Two boxes", parts **"Red box" slot 1 and "Blue box" slot 2**; positions as written; slices, the one object printed with both filaments                                                                      | same as Orca (both filaments used)                                                      | 2 objects "Red box", "Blue box", no colours; slices                      |
+| 08      | 3 objects: "Red box" slot 1, "Blue box" slot 2 at y 122.5, and a copy at y 150 with an **empty name and slot 1**: the object is split per build item, and the copy loses its name and its colour; slices              | same as Orca                                                                            | 3 objects "Red box", "Blue box", "Blue box", named; slices               |
+
+Across every fixture:
+
+- **Slot colours never come from the file.** After a load, the project holds one filament in the slicer's default colour (`#F2754E` in Orca, `#00AE42` in Bambu Studio), whatever colours the file declares; in the slice runs the slots are the colours the command line gave. The file's colours only decide slot numbers.
+- **Nothing was repaired or rejected**: no run logged a warning about the model, and every mesh came back with `mesh_stat` all zero (no edges fixed, no facets removed or reversed).
+- **Third-party files stay third-party.** No fixture was taken for a Bambu project, including 05 and 07 with their `model_settings.config` (no "valid model config" error, no project settings loaded).
+- Both CLIs resolved the X1 Carbon profile to a printable area of 256 x 256 mm, height 250 mm, excluded area 0 to 18 by 0 to 28 mm, `support_threshold_angle` 30, `line_width` 0.42, `min_feature_size` 25% and `elefant_foot_compensation` 0.15 for `0.20mm Standard @BBL X1C`, which confirms section 4's X1 Carbon row and process defaults as the slicers apply them.
+
+### Claims settled
+
+| Claim (section)                                                                                     | Result                                                                                                                          |
+| --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| Orca turns object-level colour groups (prefix `m`) into filament slots (3)                          | **confirmed** (02, 06); other prefixes not tried                                                                                |
+| Orca ignores `pindex` and per-triangle `pid`, `p1` to `p3` (3)                                      | **confirmed** (04: both objects slot 1, no painted triangles)                                                                   |
+| Orca takes no filament colours from the file (3, was unverified)                                    | **confirmed** on the command line, Bambu Studio too; the GUI is T3.0d's                                                         |
+| Orca applies `model_settings.config` per-object `extruder` for a non-Bambu file (3, was unverified) | **confirmed** (05); per-part `name` and `extruder` too (07)                                                                     |
+| Orca splits an object with several build items into one object per item (3)                         | **confirmed** (08), and found lossy: copies after the first lose their name and colour                                          |
+| How Orca and Bambu Studio map a component object's parts and colours (3, was unverified)            | **settled** (03, 07): one object, parts named after the object, part colours ignored, unless `model_settings.config` names them |
+| Bambu Studio: `pid` with `pindex` picks the slot (3)                                                | **confirmed** (04)                                                                                                              |
+| Bambu Studio takes per-face colours from a plain 3MF (3, display unverified)                        | **not on the command line** (04: no painted triangles); the reader passes them to the GUI, so T3.0d checks there                |
+| PrusaSlicer reads no colour groups (3)                                                              | **confirmed** (no extruder in what it writes back)                                                                              |
+| PrusaSlicer reads components as parts of one object (3)                                             | **refuted** (03, 07): each component becomes an object of its own; the source agrees (`_create_object_instance`)                |
+| OrcaSlicer's `--export-3mf` and `--slice` can record what Orca made of a file (5)                   | **confirmed**: headless, under a second per run                                                                                 |
+| X1 Carbon build volume and process defaults from the profiles (4)                                   | **confirmed** as both CLIs apply them                                                                                           |
+
+Not settled here, since a command line cannot show them: everything in sections 1 and 2 (URL schemes, `file://` through Orca's downloader, browser behaviour, Bambu Studio's Windows scheme registration), Chrome's "always open" for `.3mf`, Orca's `.3mf` association on Windows, and how the GUIs show what the CLIs loaded. Those are T3.0d's, below. Bambu Lab's marketing height of 256 mm for the X1 (section 4) stays unverified and does not matter: the slicers enforce 250.
+
+### What the command line needs, for T3.3c
+
+- **No display.** Neither CLI needs X11, Wayland or xvfb to load, slice and export. Without OpenGL they skip plate thumbnails and say so: Orca in a stray `00000.log` in the working directory ("glfwInit return error ... OpenGL context unavailable; skip thumbnail generating"), Bambu Studio in its log output ("Wayland: Failed to connect to display"). PrusaSlicer 2.9.6's `--export-gcode` did not need a display either; the `interop` job's `xvfb-run` is harmless.
+- **The GUI's libraries all the same.** The binaries link GTK 3, WebKitGTK 4.1, libsoup 3, GStreamer, Mesa (GL, EGL, GLX, GLU, OpenGL), X11 (with SM, ICE, Xext), xkbcommon, Wayland, Pango, HarfBuzz, ATK, Cairo, gdk-pixbuf, fontconfig and libmspack (31 libraries missing on a bare system for Orca), so a CI image needs them installed even though no window opens. Bambu Studio's `AppRun` overwrites `LD_LIBRARY_PATH` with its own `bin/`, so run its binary directly with both on the path.
+- **A locale.** Run with `LC_ALL=C` where no locale is generated (the AppImages' `AppRun` does this; calling the binaries directly aborts with `locale::facet::_S_create_c_locale name not valid`, PrusaSlicer stops with "An error occured while setting up locale").
+- **No first-run setup.** No profile wizard, data directory or login; a writable `HOME` is enough. Orca and Bambu Studio write `result.json` (status, `return_code`, error text) into the output directory, and into the working directory even for `--help`. A failed slice exits non-zero (156 here) with `return_code` -100.
+- **Flattened profiles.** `--load-settings` and `--load-filaments` do **not** resolve a system profile's `inherits` chain: given `Bambu Lab X1 Carbon 0.4 nozzle.json` the CLI applies only that file's keys and leaves the rest at built-in defaults (a 200 x 200 x 100 mm bed, one filament colour). The script merges each profile with its parents first.
+- **One `filament_colour` per filament.** Two filaments loaded without a colour each leave the project with one filament colour, and slicing a two-colour model then fails with "Grouping error: PLA can not be placed in the right nozzle" (the filament map is sized by the colour list). Setting `filament_colour` in each flattened filament profile fixes it. `--filament-colour "#FF0000;#0000FF"` on the command line crashed Orca 2.4.2 (segmentation fault, exit 139).
+- **`--arrange 0`.** By default the CLI arranges the plate, moving every object; positions are only comparable with arranging off.
+
+### Provisional recommendation for T3.3a
+
+From the matrix (Orca and Bambu Studio agree everywhere except `pindex`, where Orca is the weaker):
+
+1. **Write one mesh object per placed body**, with the colour groups of decision 12 and build-item transforms (fixtures 02 and 06). Names, slots and positions arrive intact in Orca and Bambu Studio, PrusaSlicer loads the geometry and names, and nothing Bambu-specific is written. Where an assembly places a part several times, write each placement as its own object (the mesh repeated) rather than one object with several build items: 08 shows Orca and Bambu Studio splitting such an object and dropping the name and colour of every copy after the first.
+2. **No components without `model_settings.config`.** A bare components object (03) is worse than separate objects in every slicer: Orca and Bambu Studio lose the body names and print every body in one slot, and PrusaSlicer splits it anyway and drops its name. T2.3f's `export3mfAssembly` writes the structure of 03 (without colour groups) for a part of several bodies and the structure of 08 for a part placed twice, so T3.3a should change both.
+3. **Components with a minimal `model_settings.config` only for a part of several bodies that must stay one object** (a sign with inlaid letters, bodies that touch): 07 is the only shape that keeps one object with named parts and a slot per part in Orca and Bambu Studio. Write only `<object id>` with `name` and `extruder`, and `<part id="<component object id>" subtype="normal_part">` with `name` and `extruder`: no plates, no matrices, no `Application` claim, no project settings. PrusaSlicer then shows separate named objects, which is what it shows for 02 too. If T3.0d finds the GUIs treat 07 differently from their CLIs, T3.3a falls back to item 1 for such parts.
+4. **`model_settings.config` is not needed for separate objects**: 05 gives the same slots as 02 in both slicers, so colour groups alone carry the slot.
+5. **No `pindex` other than 0 and no per-triangle colours**: Orca ignores both (04), and per-face colour is not on M3's list.
+
+### GUI matrix (T3.0d)
+
+To be filled by T3.0d, one table per slicer, on at least one operating system. Write `same as CLI` where the GUI matches the command-line row above, and the difference otherwise.
+
+**OrcaSlicer 2.4.2** (operating system: ...; date: ...)
+
+| Fixture | Dialogs and warnings, verbatim | Object list: objects, parts, names | Slot per object and part | Position on the plate | Slot colours after load | Slices? Filaments in the preview | Differs from CLI? |
+| ------- | ------------------------------ | ---------------------------------- | ------------------------ | --------------------- | ----------------------- | -------------------------------- | ----------------- |
+| 01      |                                |                                    |                          |                       |                         |                                  |                   |
+| 02      |                                |                                    |                          |                       |                         |                                  |                   |
+| 03      |                                |                                    |                          |                       |                         |                                  |                   |
+| 04      |                                |                                    |                          |                       |                         |                                  |                   |
+| 05      |                                |                                    |                          |                       |                         |                                  |                   |
+| 06      |                                |                                    |                          |                       |                         |                                  |                   |
+| 07      |                                |                                    |                          |                       |                         |                                  |                   |
+| 08      |                                |                                    |                          |                       |                         |                                  |                   |
+
+**Bambu Studio 2.8.2** (operating system: ...; date: ...)
+
+| Fixture | Dialogs and warnings, verbatim | Object list: objects, parts, names | Slot per object and part | Position on the plate | Slot colours after load | Slices? Filaments in the preview | Differs from CLI? |
+| ------- | ------------------------------ | ---------------------------------- | ------------------------ | --------------------- | ----------------------- | -------------------------------- | ----------------- |
+| 01      |                                |                                    |                          |                       |                         |                                  |                   |
+| 02      |                                |                                    |                          |                       |                         |                                  |                   |
+| 03      |                                |                                    |                          |                       |                         |                                  |                   |
+| 04      |                                |                                    |                          |                       |                         |                                  |                   |
+| 05      |                                |                                    |                          |                       |                         |                                  |                   |
+| 06      |                                |                                    |                          |                       |                         |                                  |                   |
+| 07      |                                |                                    |                          |                       |                         |                                  |                   |
+| 08      |                                |                                    |                          |                       |                         |                                  |                   |
+
+**PrusaSlicer 2.9.6** (operating system: ...; date: ...)
+
+| Fixture | Dialogs and warnings, verbatim | Object list: objects, parts, names | Extruder per object and part | Position on the plate | Slices? | Differs from CLI? |
+| ------- | ------------------------------ | ---------------------------------- | ---------------------------- | --------------------- | ------- | ----------------- |
+| 01      |                                |                                    |                              |                       |         |                   |
+| 02      |                                |                                    |                              |                       |         |                   |
+| 03      |                                |                                    |                              |                       |         |                   |
+| 04      |                                |                                    |                              |                       |         |                   |
+| 05      |                                |                                    |                              |                       |         |                   |
+| 06      |                                |                                    |                              |                       |         |                   |
+| 07      |                                |                                    |                              |                       |         |                   |
+| 08      |                                |                                    |                              |                       |         |                   |
+
+**Hand-off** (operating system, browser versions: ...; date: ...)
+
+| Check                                                                       | Chrome | Firefox | Notes |
+| --------------------------------------------------------------------------- | ------ | ------- | ----- |
+| `.3mf` download: is "Always open files of this type" (or similar) offered?  |        |         |       |
+| After choosing it, does the next `.3mf` download open in the slicer?        |        |         |       |
+| Any download warning (Safe Browsing or similar), verbatim                   |        |         |       |
+| `orcaslicer://open?file=<https URL>`: browser prompt, verbatim              |        |         |       |
+| ... does Orca open and load the file? Download folder needed?               |        |         |       |
+| `orcaslicer://open?file=<file:// URL>`: does Orca load a local file?        |        |         |       |
+| `bambustudio://open?file=<https URL>`: trust prompt, verbatim, and result   |        |         |       |
+| `prusaslicer://open?file=<https URL>`: notification, verbatim               |        |         |       |
+| Unregistered scheme (`notaslicer://open`): what the user sees               |        |         |       |
+| Windows: OrcaSlicer's "associate .3mf" preference, then double-click a file |        |         |       |
+
+### Checklist for T3.0d
+
+Before starting:
+
+1. Install OrcaSlicer 2.4.2, Bambu Studio 2.8.2 (02.08.02.61) and PrusaSlicer 2.9.6 from their GitHub releases (PrusaSlicer on Linux from Flathub), plus current Chrome and Firefox. Note the operating system and every version in the table headings above.
+2. Get the eight fixtures from `packages/io/src/fixtures/slicers/` at the commit that added this section (or rebuild them: `pnpm --filter @manufakture/io fixtures:slicers`; the test fails if they differ).
+3. In OrcaSlicer and Bambu Studio, select the printer **Bambu Lab X1 Carbon, 0.4 mm nozzle**, with four filament slots set to colours that are **neither red nor blue** (for example white, black, grey, yellow), so a colour taken from the file stands out. In PrusaSlicer, use any single-extruder printer profile; if a multi-material profile is at hand, note it.
+
+For each slicer, for each fixture 01 to 08, starting from a new empty project each time:
+
+4. Open the fixture with File, Import (in Orca and Bambu Studio, "Import 3MF/STL/STEP..."; if asked whether to open it as a project or import geometry, choose the default and write the question down verbatim). Also try one fixture by drag and drop and note any difference.
+5. Copy every dialog, warning or repair prompt word for word into "Dialogs and warnings".
+6. In the object list, write down every object and its parts (expand them) with their names exactly as shown, including empty names.
+7. Write down the filament slot (or extruder) shown for each object and each part.
+8. Select each object and read its position (Object manipulation: X, Y, Z) or describe where it sits; note whether the slicer centred or arranged the objects instead of keeping the file's positions (01 to 05, 07: side by side near the bed centre; 06: the red box standing 20 mm tall; 08: two blue boxes one behind the other).
+9. Write down the colours of the filament slots after loading: unchanged, or changed (to what), or slots added.
+10. For 04 in Bambu Studio and Orca: is the red box's top face shown blue (painted), or does a colour mapping dialog appear?
+11. Slice the plate. Note success or the error verbatim, and the filaments listed in the preview's legend.
+12. Compare with the command-line matrix row and fill in "Differs from CLI?".
+
+Hand-off, in Chrome and in Firefox:
+
+13. Download a `.3mf` (a fixture from the repository's file view with "Download raw file", or an export from the app). In the browser's download bubble or list, look for "Always open files of this type" (Chrome) or "Always open similar files" (Firefox); note whether it is offered, choose it, download again and note what opens.
+14. Put `02-colorgroups.3mf` on a public static https host (any static hosting that serves the file with a URL ending in `.3mf`). Make a local HTML page with three links: `orcaslicer://open?file=<URL-encoded https URL>`, `bambustudio://open?file=<same>` and `prusaslicer://open?file=<same>`, and click each. Note each browser prompt and each slicer's response word for word (Orca: does it ask for a download folder? Bambu Studio: the trust prompt; PrusaSlicer: the refusal notification), and whether the loaded model matches the GUI import above.
+15. Repeat Orca's link with a `file://` URL of a local copy (`orcaslicer://open?file=file%3A%2F%2F%2F<absolute path>`) and note whether Orca loads it.
+16. Click a link with a scheme no program registered (`notaslicer://open`) and note what each browser shows, if anything.
+17. On Windows: in OrcaSlicer's preferences, turn on associating `.3mf` files with OrcaSlicer, then double-click a fixture in Explorer and note what opens.
+
+Where the results go: fill the four tables above, mark each remaining "unverified" in sections 1 to 3 that a check settled as confirmed or refuted, and confirm or revise the provisional recommendation above with the evidence. If the revision changes what T3.3a writes and T3.3a has already landed, file the change as a follow-up task to T3.3a.
 
 ## Sources
 

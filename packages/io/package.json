@@ -9,7 +9,9 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run --root ../.. --project packages packages/io"
+    "test": "vitest run --root ../.. --project packages packages/io",
+    "fixtures:slicers": "node scripts/slicer-fixtures.ts",
+    "orca:matrix": "node scripts/orca-matrix.ts"
   },
   "dependencies": {
     "fflate": "^0.8.3"
