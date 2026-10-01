@@ -17,6 +17,7 @@ Product decisions (license, local-first storage, target machines, what comes fir
 - [0009: Sync model: a server-ordered command log, validated by core, rebased on the client](0009-sync-model.md). Proposed.
 - [0010: Scripting sandbox: QuickJS in WebAssembly, inside the regen worker, with no capabilities](0010-scripting-sandbox.md). Proposed.
 - [0011: Fonts: one bundled OFL font (Inter Bold), user fonts stored in the document](0011-fonts.md). Accepted.
+- [0012: 3D printing: a document-level print section, a print package and worker, standard 3MF by download](0012-3d-printing.md). Accepted.
 
 ## Adding an ADR
 
