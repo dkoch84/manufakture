@@ -51,6 +51,7 @@ import {
   propagateFaces,
   refName,
   resolve,
+  sweepRegionOrder,
   vertexName,
   type EdgeRef,
   type FaceName,
@@ -114,14 +115,26 @@ interface MakesBody extends Scoped {
   body?: string;
 }
 
-/**
- * A resolved sketch region: the kernel's `profile` input. Every entity must
- * carry its sketch edge id (`e2`, a sketch split `e2#a`, or a region piece
- * `e2#1`), which names the face it sweeps.
- */
-export interface SketchProfile {
-  frame: Frame;
+/** One region of a profile: the outer loop first, then its holes. */
+export interface ProfileRegion {
   loops: readonly ProfileLoop[];
+}
+
+/**
+ * Resolved sketch regions on one plane: the kernel's `profile` input, as the
+ * loops of one region or as several regions, each with its holes. Every
+ * entity must carry its sketch edge id (`e2`, a sketch split `e2#a`, or a
+ * region piece `e2#1`), which names the face it sweeps. An id is unique within
+ * a region; two regions may share one (the edge between adjacent regions,
+ * whose faces the sweep fuses away).
+ */
+export type SketchProfile =
+  | { frame: Frame; loops: readonly ProfileLoop[] }
+  | { frame: Frame; regions: readonly ProfileRegion[] };
+
+/** The regions of a profile, each as its loops (outer first), in input order. */
+export function profileRegions(profile: SketchProfile): (readonly ProfileLoop[])[] {
+  return 'regions' in profile ? profile.regions.map((r) => r.loops) : [profile.loops];
 }
 
 export type ExtrudeExtent =
@@ -1209,22 +1222,142 @@ function extrudeTool(
     }
   }
   if (!(length > 0)) fail(ctx, 'invalid', 'the extrusion distance must be positive');
-  const profile = temp(ctx, { shape: k.profile({ ...frame, origin: start }, input.profile.loops) });
-  const prism = temp(ctx, k.extrude(profile.shape, scale(dir, length)));
-  const topology = k.topology(prism.shape);
-  const born = nameSweep(input.id, prism, topology);
-  let made: Made = { shape: prism.shape, faces: born.faces, topology, unnamed: born.unnamed };
-  if (input.draft !== undefined && input.draft !== 0) {
-    const sides = Object.values(prism.sideIds);
-    const drafted = temp(
-      ctx,
-      k.draft(prism.shape, sides, dir, input.draft, { origin: frame.origin, normal: dir }),
-    );
-    const after = propagated(ctx, drafted.shape, [made.faces], drafted.history);
-    // Faces the sweep could not name stay unnamed through the draft.
-    made = { ...after, unnamed: [...after.unnamed, ...made.unnamed] };
+  const groups = sweepRegions(ctx, input.profile, (loops, region) => {
+    const profile = temp(ctx, { shape: k.profile({ ...frame, origin: start }, loops) });
+    const prism = temp(ctx, k.extrude(profile.shape, scale(dir, length)));
+    const topology = k.topology(prism.shape);
+    const born = nameSweep(input.id, prism, topology, region === undefined ? {} : { region });
+    return { shape: prism.shape, faces: born.faces, topology, unnamed: born.unnamed };
+  });
+  if (input.draft === undefined || input.draft === 0) {
+    return { ...gatherTools(ctx, groups), mode: input.mode };
   }
-  return { ...made, mode: input.mode };
+  const draft = input.draft;
+  // Drafted per group, after the regions in it are joined: drafting each region's prism on its
+  // own would tilt the side two adjacent regions share in opposite ways, leaving a V-groove
+  // between them and two solids. The sides are every face that is not a cap (a plane across
+  // `dir`); after the join that is exactly the outside of the joined regions.
+  const drafted = groups.map((made): Made => {
+    const sides = made.topology.faces
+      .filter((f) => !(f.surface === 'plane' && Math.abs(dot(f.normal!, dir)) > 1 - 1e-9))
+      .map((f) => f.index);
+    const result = temp(
+      ctx,
+      k.draft(made.shape, sides, dir, draft, { origin: frame.origin, normal: dir }),
+    );
+    const after = propagated(ctx, result.shape, [made.faces], result.history);
+    // Faces the sweep could not name stay unnamed through the draft.
+    return { ...after, unnamed: [...after.unnamed, ...made.unnamed] };
+  });
+  // Separate groups the draft grows into each other (a negative draft, or the half of a
+  // symmetric extent below the neutral plane) would otherwise overlap in one compound: group
+  // and fuse again, so they become one solid with the volume of their union.
+  const joined = drafted.length === 1 ? drafted : groupTools(ctx, drafted);
+  return { ...gatherTools(ctx, joined), mode: input.mode };
+}
+
+/**
+ * Sweep every region of a profile on its own and group the results: the
+ * groups, gathered by `gatherTools`, are the tool. One region is swept as is
+ * (`<id>:cap:start`, `<id>:cap:end`). Several are numbered by
+ * `sweepRegionOrder` and their caps named `<id>:cap:start#k` and
+ * `<id>:cap:end#k`; sides keep `<id>:side:<edge id>`. Regions whose
+ * solids' bounding boxes meet (adjacent regions, glyphs that touch, a revolve
+ * whose regions sweep through each other) are fused in one boolean per group
+ * of such regions, with coplanar neighbours unified, so a cap or side that
+ * runs across several regions is one face named `(A+B)`; separate groups stay
+ * apart, one shape each.
+ */
+function sweepRegions(
+  ctx: Ctx,
+  profile: SketchProfile,
+  sweep: (loops: readonly ProfileLoop[], region: number | undefined) => Made,
+): Made[] {
+  const regions = profileRegions(profile);
+  if (regions.length === 1) return [sweep(regions[0]!, undefined)];
+  const order = sweepRegionOrder(
+    regions.map((loops) => loops.map((l) => l.entities.map((e) => e.id ?? ''))),
+  );
+  const made = order.map((i, k) => {
+    try {
+      return sweep(regions[i]!, k + 1);
+    } catch (error) {
+      // Say which region a bad loop is in: `loop 0` alone is ambiguous with several.
+      if (
+        !(error instanceof KernelError) ||
+        error.operation !== 'profile' ||
+        error.code === 'fatal'
+      )
+        throw error;
+      throw new KernelError('profile', `region ${i}: ${error.detail}`, {
+        code: error.code,
+        ...(error.occtType === undefined ? {} : { occtType: error.occtType }),
+        ...(error.occtMessage === undefined ? {} : { occtMessage: error.occtMessage }),
+        ...(error.featureId === undefined ? {} : { featureId: error.featureId }),
+      });
+    }
+  });
+  return groupTools(ctx, made);
+}
+
+/**
+ * Group solids whose bounding boxes meet and fuse each group (unified) into one
+ * shape; a solid that meets no other is its own group. Groups in order of their
+ * first member.
+ */
+function groupTools(ctx: Ctx, made: readonly Made[]): Made[] {
+  const { k } = ctx;
+  const parent = made.map((_, i) => i);
+  const find = (i: number): number => {
+    while (parent[i] !== i) i = parent[i] = parent[parent[i]!]!;
+    return i;
+  };
+  for (let a = 0; a < made.length; a++) {
+    for (let b = a + 1; b < made.length; b++) {
+      if (!overlaps(boxOf(ctx, made[a]!.shape), boxOf(ctx, made[b]!.shape))) continue;
+      const [ra, rb] = [find(a), find(b)];
+      if (ra !== rb) parent[Math.max(ra, rb)] = Math.min(ra, rb);
+    }
+  }
+  // Groups in order of their first member, members in order.
+  const groups = new Map<number, Made[]>();
+  made.forEach((m, i) => {
+    const root = find(i);
+    groups.set(root, [...(groups.get(root) ?? []), m]);
+  });
+  return [...groups.values()].map((members): Made => {
+    if (members.length === 1) return members[0]!;
+    const [first, ...rest] = members;
+    const fused = temp(
+      ctx,
+      k.boolean(
+        'fuse',
+        first!.shape,
+        rest.map((m) => m.shape),
+        { simplify: true },
+      ),
+    );
+    const p = propagated(
+      ctx,
+      fused.shape,
+      members.map((m) => m.faces),
+      fused.history,
+    );
+    return { ...p, unnamed: [...p.unnamed, ...members.flatMap((m) => m.unnamed)] };
+  });
+}
+
+/** Gather groups into one tool: a single group as is, several in a compound. */
+function gatherTools(ctx: Ctx, joined: readonly Made[]): Made {
+  if (joined.length === 1) return joined[0]!;
+  const compound = temp(ctx, ctx.k.compound(joined.map((m) => m.shape)));
+  const p = propagated(
+    ctx,
+    compound.shape,
+    joined.map((m) => m.faces),
+    compound.history,
+  );
+  return { ...p, unnamed: [...p.unnamed, ...joined.flatMap((m) => m.unnamed)] };
 }
 
 function revolveTool(ctx: Ctx, all: readonly Body[], input: RevolveInput): Tool {
@@ -1241,17 +1374,14 @@ function revolveTool(ctx: Ctx, all: readonly Body[], input: RevolveInput): Tool 
   }
   let frame = input.profile.frame;
   if (input.symmetric) frame = rotateFrame(frame, axis, -Math.min(input.angle, TWO_PI) / 2);
-  const profile = temp(ctx, { shape: k.profile(frame, input.profile.loops) });
-  const made = temp(ctx, k.revolve(profile.shape, axis, input.angle));
-  const topology = k.topology(made.shape);
-  const born = nameSweep(input.id, made, topology);
-  return {
-    shape: made.shape,
-    faces: born.faces,
-    topology,
-    unnamed: born.unnamed,
-    mode: input.mode,
-  };
+  const groups = sweepRegions(ctx, input.profile, (loops, region) => {
+    const profile = temp(ctx, { shape: k.profile(frame, loops) });
+    const swept = temp(ctx, k.revolve(profile.shape, axis, input.angle));
+    const topology = k.topology(swept.shape);
+    const born = nameSweep(input.id, swept, topology, region === undefined ? {} : { region });
+    return { shape: swept.shape, faces: born.faces, topology, unnamed: born.unnamed };
+  });
+  return { ...gatherTools(ctx, groups), mode: input.mode };
 }
 
 const DEFAULT_TIP = (118 * Math.PI) / 180;
@@ -2509,20 +2639,32 @@ export function validateFeature(input: unknown): string | null {
     }
     return null;
   };
+  const loops = (v: unknown, name: string) => {
+    if (!Array.isArray(v) || v.length === 0) return `${name} must be a non-empty array`;
+    for (const [li, loop] of (v as unknown[]).entries()) {
+      if (!isObj(loop) || !Array.isArray(loop.entities) || loop.entities.length === 0) {
+        return `${name}[${li}] must have entities`;
+      }
+      for (const [i, entity] of (loop.entities as unknown[]).entries()) {
+        const bad = isObj(entity) ? invalidSketchId(entity.id) : 'an entity must be an object';
+        if (bad) return `${name}[${li}].entities[${i}]: ${bad}`;
+      }
+    }
+    return null;
+  };
   const profile = (v: unknown) => {
     if (!isObj(v)) return 'profile must be an object';
     const e = frame(v.frame, 'profile.frame');
     if (e) return e;
-    if (!Array.isArray(v.loops) || v.loops.length === 0)
-      return 'profile.loops must be a non-empty array';
-    for (const [li, loop] of (v.loops as unknown[]).entries()) {
-      if (!isObj(loop) || !Array.isArray(loop.entities) || loop.entities.length === 0) {
-        return `profile.loops[${li}] must have entities`;
-      }
-      for (const [i, entity] of (loop.entities as unknown[]).entries()) {
-        const bad = isObj(entity) ? invalidSketchId(entity.id) : 'an entity must be an object';
-        if (bad) return `profile.loops[${li}].entities[${i}]: ${bad}`;
-      }
+    if (v.regions === undefined) return loops(v.loops, 'profile.loops');
+    if (v.loops !== undefined) return 'profile has both loops and regions: give one';
+    if (!Array.isArray(v.regions) || v.regions.length === 0)
+      return 'profile.regions must be a non-empty array';
+    for (const [ri, region] of (v.regions as unknown[]).entries()) {
+      const bad = isObj(region)
+        ? loops(region.loops, `profile.regions[${ri}].loops`)
+        : `profile.regions[${ri}] must be an object`;
+      if (bad) return bad;
     }
     return null;
   };

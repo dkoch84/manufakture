@@ -6,6 +6,9 @@
 // Faces are named where they are born and carried through every later
 // operation by history:
 //   extrude#1:cap:start, extrude#1:cap:end   the caps of an extrusion (or revolve)
+//   extrude#1:cap:start#2                    the start cap of region 2 of a profile of several
+//                                            regions, regions ordered by their outer loop's
+//                                            edge ids (`sweepRegionOrder`; fragile)
 //   extrude#1:side:e2                        the face swept by sketch edge e2
 //   fillet#3:round:r1                        the face a fillet made from its reference r1
 //   fillet#3:round:A&B                       a round OCCT added along a tangent chain,
@@ -248,14 +251,45 @@ export interface SweepFaces {
 }
 
 /**
+ * The order in which the regions of a profile of several regions are numbered
+ * (`cap:start#k`, k from 1): by the edge ids of each region's outer loop,
+ * sorted and compared as lists by code unit, then by every edge id of the
+ * region, then by input order. Edge ids name sketch geometry, so the order
+ * survives moving or resizing a region and changes only when regions are
+ * added, removed or rebuilt from other edges. `regions[i]` is region i's
+ * loops' edge ids, outer loop first. Returns the input indices in order.
+ */
+export function sweepRegionOrder(regions: readonly (readonly (readonly string[])[])[]): number[] {
+  const compare = (a: readonly string[], b: readonly string[]): number => {
+    for (let i = 0; i < Math.min(a.length, b.length); i++) {
+      if (a[i] !== b[i]) return a[i]! < b[i]! ? -1 : 1;
+    }
+    return a.length - b.length;
+  };
+  const keys = regions.map((loops) => ({
+    outer: [...(loops[0] ?? [])].sort(),
+    all: loops.flat().sort(),
+  }));
+  return regions
+    .map((_, i) => i)
+    .sort(
+      (p, q) =>
+        compare(keys[p]!.outer, keys[q]!.outer) || compare(keys[p]!.all, keys[q]!.all) || p - q,
+    );
+}
+
+/**
  * Name the faces of a fresh sweep (extrusion or revolution). Returns the
  * names and the faces nothing named, which a correct sweep does not have.
+ * `roles.region`: the sweep is region k (from 1) of a profile of several, so
+ * its caps are `<cap>:start#k` and `<cap>:end#k`, pieces of `<cap>:start` and
+ * `<cap>:end` (positional, so fragile); sides are named as for one region.
  */
 export function nameSweep(
   feature: string,
   faces: SweepFaces,
   topology: Topology,
-  roles: { cap?: string; side?: string } = {},
+  roles: { cap?: string; side?: string; region?: number } = {},
 ): { faces: FaceName[]; unnamed: number[] } {
   const out: (FaceName | undefined)[] = new Array(topology.faces.length);
   const set = (index: number, face: FaceName) => {
@@ -265,8 +299,9 @@ export function nameSweep(
   };
   const cap = roles.cap ?? 'cap';
   const side = roles.side ?? 'side';
-  if (faces.capStart > 0) set(faces.capStart, bornFace(feature, cap, 'start'));
-  if (faces.capEnd > 0) set(faces.capEnd, bornFace(feature, cap, 'end'));
+  const piece = roles.region === undefined ? '' : `#${roles.region}`;
+  if (faces.capStart > 0) set(faces.capStart, bornFace(feature, cap, `start${piece}`));
+  if (faces.capEnd > 0) set(faces.capEnd, bornFace(feature, cap, `end${piece}`));
   for (const [id, index] of Object.entries(faces.sideIds)) set(index, bornFace(feature, side, id));
   return fill(out);
 }

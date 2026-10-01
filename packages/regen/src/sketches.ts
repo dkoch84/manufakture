@@ -160,7 +160,11 @@ export function selectRegions(
   return { ok: true, regions: picks };
 }
 
-/** The kernel profile of a sketch's selected region. The kernel takes one region per feature. */
+/**
+ * The kernel profile of a sketch's selected regions: one region's loops as they are, several as
+ * `regions`, each with its holes, in region id order (the kernel numbers their caps by its own
+ * edge id order, so the order here does not change any name).
+ */
 export function profileOf(
   sketchId: string,
   sketch: SketchResult,
@@ -179,16 +183,8 @@ export function profileOf(
       },
     };
   }
-  if (regions.length > 1) {
-    return {
-      ok: false,
-      error: {
-        code: 'unsupported',
-        field: ['profile'],
-        message: `The profile has ${regions.length} separate regions; one feature builds one region for now (pick one)`,
-      },
-    };
-  }
-  const p = regionProfile(regions[0]!, sketch.placement);
-  return { ok: true, profile: { frame: p.frame, loops: p.loops } };
+  const profiles = regions.map((r) => regionProfile(r, sketch.placement));
+  const frame = profiles[0]!.frame;
+  if (profiles.length === 1) return { ok: true, profile: { frame, loops: profiles[0]!.loops } };
+  return { ok: true, profile: { frame, regions: profiles.map((p) => ({ loops: p.loops })) } };
 }

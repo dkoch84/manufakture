@@ -159,7 +159,7 @@ dirty but a cache hit).
 | Core                                 | Kernel                                                                                      |
 | ------------------------------------ | ------------------------------------------------------------------------------------------- |
 | `operation` new, add, cut, intersect | `mode` new, add, subtract, intersect                                                        |
-| `profile` (sketch, entities?)        | one region's `regionProfile` loops on the sketch placement, every entity tagged by edge id  |
+| `profile` (sketch, entities?)        | each selected region's `regionProfile` loops on the sketch placement, entities by edge id   |
 | extrude `extent`, `reverse`, `draft` | the same, distances in mm, draft in radians; `upToFace` as a `FaceRef`                      |
 | revolve `sketchLine` axis            | a model-space `Axis` from the line's start to its end; core's `flip: true` negates it       |
 | revolve `edge` axis                  | `{ edge, flip }`, oriented by the kernel's naming rules                                     |
@@ -189,8 +189,18 @@ region diagnostics of warning severity (open profiles, touching loops) are warni
 **Profiles.** Without `entities` a profile is every filled region. With `entities` it is every
 region or void whose outer loop runs only along listed entities: a rectangle's four lines pick the
 rectangle with its holes, and adding a hole's circle picks the disk too. Listed entities that are
-gone are a `reference-lost` error on `profile`. The kernel builds one region per feature, so a
-profile that selects several separate regions fails with `unsupported`.
+gone are a `reference-lost` error on `profile`. One selected region goes to the kernel as its
+loops (`{ frame, loops }`, unchanged from M1, so cache keys of existing documents stay put); several
+go as `{ frame, regions }`, each region with its holes, in region id order. The kernel sweeps every
+region, fuses the ones that touch and numbers their caps `<id>:cap:start#k` and `<id>:cap:end#k` by
+edge id (kernel README, "Several regions"), so one extrude of a sketch with three separate regions
+is one body of three solids with every region's faces. A `draft` is applied after the regions are
+joined, so touching regions taper as one outline (a draft of a Bezier side fails). Separate regions
+that a draft grows into each other (a negative draft, or the lower half of a `symmetric` extent
+under a positive one) are fused after the draft, so the body stays one valid solid with the volume
+of their union rather than two overlapping ones. An `add`
+fuses its whole tool into the body it meets: regions that miss the body become extra solids of
+it, not `detached` bodies.
 
 ## Cache
 
@@ -625,7 +635,9 @@ pnpm --filter @manufakture/regen test
   one, so each is flushed on its own (in the worker, a batch costs no structured clone).
 - **Detached bodies.** An `add` that touches no body used to stay in the part's one compound; it is
   now a body of its own (with a `detached` warning), so such an M1 document shows two bodies.
-- **One region per profile**, a kernel limit (see above).
+- **Caps of several regions are fragile.** With several regions, the caps are numbered pieces
+  (`cap:end#2`), renumbered when a region is added or removed; a reference to one resolves with a
+  `fragile` warning. Pick a side face, or a single region, where a stable reference matters.
 - **Hole points** must be point entities.
 - **Extension features** change no geometry yet; they are `ok` with an `extension` warning.
 - **Imports.** A STEP import with operation `new`, `add`, `cut` or `intersect` is a kernel feature

@@ -69,8 +69,10 @@ export const entity: Check = (v, p) => {
       return shape({ center: vec2, start: vec2, end: vec2 }, { clockwise: bool, id: str })(v, p);
     case 'circle':
       return shape({ center: vec2, radius: num }, { id: str })(v, p);
+    case 'bezier':
+      return shape({ points: arrayOf(vec2, true) }, { id: str })(v, p);
     default:
-      return `${p}.kind must be line, arc or circle`;
+      return `${p}.kind must be line, arc, circle or bezier`;
   }
 };
 

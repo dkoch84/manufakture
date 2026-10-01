@@ -7,9 +7,16 @@ import type {
   RevolveFeature,
   SketchFeature,
 } from '@manufakture/core';
-import type { FeatureInput, RevolveInput, ShapeId } from '@manufakture/kernel';
+import {
+  applyFeature,
+  type FeatureInput,
+  type Kernel,
+  type RevolveInput,
+  type ShapeId,
+} from '@manufakture/kernel';
+import { createNodeKernel } from '@manufakture/kernel/node';
 import { XZ_PLANE, type SketchEntity } from '@manufakture/sketch';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { profileOf, selectRegions, sketchOutcome, type SketchResult } from './sketches';
 import { extrude, mm, rectangle } from './test-helpers';
 import { referenceIdOf, translateFeature } from './translate';
@@ -61,10 +68,9 @@ describe('profiles', () => {
   it('uses every filled region by default, with its holes', () => {
     const s = solved([...rect, hole]);
     const p = profileOf('sketch#1', s, undefined);
-    expect(p.ok && p.profile.loops.map((l) => l.entities.map((e) => e.id))).toEqual([
-      ['e1', 'e2', 'e3', 'e4'],
-      ['e9'],
-    ]);
+    expect(
+      p.ok && 'loops' in p.profile && p.profile.loops.map((l) => l.entities.map((e) => e.id)),
+    ).toEqual([['e1', 'e2', 'e3', 'e4'], ['e9']]);
   });
 
   it('picks regions whose outer loop runs along the listed entities', () => {
@@ -75,11 +81,13 @@ describe('profiles', () => {
     });
     const both = selectRegions(s, ['e1', 'e2', 'e3', 'e4', 'e9']);
     expect(both.ok && both.regions).toHaveLength(2);
-    expect(profileOf('sketch#1', s, ['e1', 'e2', 'e3', 'e4', 'e9'])).toMatchObject({
-      ok: false,
-      error: { code: 'unsupported' },
-    });
-    expect(profileOf('sketch#1', s, ['e9'])).toMatchObject({ ok: true });
+    // The rectangle with its hole, and the disk in the hole: two regions.
+    const two = profileOf('sketch#1', s, ['e1', 'e2', 'e3', 'e4', 'e9']);
+    expect(two.ok && 'regions' in two.profile && two.profile.regions).toEqual([
+      { loops: [{ entities: expect.any(Array) }, { entities: expect.any(Array) }] },
+      { loops: [{ entities: expect.any(Array) }] },
+    ]);
+    expect(profileOf('sketch#1', s, ['e9'])).toMatchObject({ ok: true, profile: { loops: [{}] } });
   });
 
   it('reports listed entities the sketch no longer has as a lost reference', () => {
@@ -91,6 +99,75 @@ describe('profiles', () => {
       ok: false,
       error: { code: 'invalid' },
     });
+  });
+});
+
+describe('several regions through the kernel', () => {
+  let k: Kernel;
+
+  beforeAll(async () => {
+    k = await createNodeKernel();
+  }, 60_000);
+
+  const triangle: SketchEntity[] = [
+    { id: 't1', kind: 'line', construction: false, start: [60, 0], end: [80, 0] },
+    { id: 't2', kind: 'line', construction: false, start: [80, 0], end: [60, 20] },
+    { id: 't3', kind: 'line', construction: false, start: [60, 20], end: [60, 0] },
+  ];
+  const disk: SketchEntity = { ...hole, center: [-20, 15], radius: 5 };
+
+  /** Translate and build `feature` on `sketch`; returns the one body, released by the caller. */
+  function build(feature: Feature, sketch: SketchResult) {
+    const t = translate(feature, sketch, { 'extent.distance': 5 });
+    if (!t.ok) throw new Error(t.errors.map((e) => e.message).join('; '));
+    const out = applyFeature(k, [], t.input);
+    expect(out.errors).toEqual([]);
+    expect(out.bodies).toHaveLength(1);
+    const body = out.bodies[0]!;
+    return {
+      body,
+      names: body.names!.faces.map((f) => f.name).sort(),
+      props: k.properties(body.shape),
+    };
+  }
+
+  it("builds three separate regions as one body with every region's faces", () => {
+    const r = build(extrude('extrude#1', 'sketch#1', '5'), solved([...rect, disk, ...triangle]));
+    try {
+      expect(r.props.valid).toBe(true);
+      expect(r.body.solids).toBe(3);
+      expect(r.props.volume).toBeCloseTo((40 * 30 + Math.PI * 25 + 200) * 5, 6);
+      // Regions numbered by their edge ids: the rectangle (e1..e4), the disk (e9), the triangle.
+      expect(r.names).toEqual(
+        [
+          ...['e1', 'e2', 'e3', 'e4', 'e9', 't1', 't2', 't3'].map((e) => `extrude#1:side:${e}`),
+          ...[1, 2, 3].flatMap((i) => [`extrude#1:cap:start#${i}`, `extrude#1:cap:end#${i}`]),
+        ].sort(),
+      );
+    } finally {
+      k.release(r.body.shape);
+    }
+  });
+
+  it('builds a region and the disk in its hole as one solid', () => {
+    const r = build(
+      {
+        ...extrude('extrude#1', 'sketch#1', '5'),
+        profile: { sketch: 'sketch#1', entities: ['e1', 'e2', 'e3', 'e4', 'e9'] },
+      },
+      solved([...rect, hole]),
+    );
+    try {
+      expect(r.props.valid).toBe(true);
+      expect(r.body.solids).toBe(1);
+      expect(r.props.volume).toBeCloseTo(40 * 30 * 5, 6);
+      expect(r.names.filter((n) => n.includes(':cap:'))).toEqual([
+        '(extrude#1:cap:end#1+extrude#1:cap:end#2)',
+        '(extrude#1:cap:start#1+extrude#1:cap:start#2)',
+      ]);
+    } finally {
+      k.release(r.body.shape);
+    }
   });
 });
 

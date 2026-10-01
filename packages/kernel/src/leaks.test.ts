@@ -314,6 +314,142 @@ describe('embind objects', () => {
     expect(tracker.liveNames()).toEqual([]);
   });
 
+  it('several regions and Bezier edges leave only the bodies, on success and on failure', () => {
+    const square = (x: number, ids: string[]): ProfileLoop => {
+      const pts: [number, number][] = [
+        [x, 0],
+        [x + 4, 0],
+        [x + 4, 4],
+        [x, 4],
+      ];
+      return {
+        entities: pts.map((start, i) => ({
+          kind: 'line',
+          id: ids[i]!,
+          start,
+          end: pts[(i + 1) % 4]!,
+        })),
+      };
+    };
+    const arch: ProfileLoop = {
+      entities: [
+        {
+          kind: 'bezier',
+          id: 'b1',
+          points: [
+            [20, 0],
+            [25, 10],
+            [30, 0],
+          ],
+        },
+        { kind: 'line', id: 'b2', start: [30, 0], end: [20, 0] },
+      ],
+    };
+    const features: FeatureInput[] = [
+      // Two adjacent squares (sharing a2) fused, and a Bezier arch apart: one body of 2 solids.
+      {
+        kind: 'extrude',
+        id: 'extrude#1',
+        profile: {
+          frame: XY,
+          regions: [
+            { loops: [square(0, ['a1', 'a2', 'a3', 'a4'])] },
+            { loops: [square(4, ['b1', 'b2', 'b3', 'a2'])] },
+            { loops: [arch] },
+          ],
+        },
+        extent: { type: 'blind', distance: 2 },
+        mode: 'new',
+      },
+      // The adjacent squares again, drafted once after the fuse.
+      {
+        kind: 'extrude',
+        id: 'extrude#2',
+        profile: {
+          frame: { ...XY, origin: [0, 20, 0] },
+          regions: [
+            { loops: [square(0, ['a1', 'a2', 'a3', 'a4'])] },
+            { loops: [square(4, ['b1', 'b2', 'b3', 'a2'])] },
+          ],
+        },
+        extent: { type: 'blind', distance: 2 },
+        draft: 0.05,
+        mode: 'new',
+      },
+      // Fails: a draft cannot tilt the Bezier side.
+      {
+        kind: 'extrude',
+        id: 'extrude#3',
+        profile: { frame: { ...XY, origin: [0, 40, 0] }, loops: [arch] },
+        extent: { type: 'blind', distance: 2 },
+        draft: 0.05,
+        mode: 'new',
+      },
+      // Fails: region 1 does not close.
+      {
+        kind: 'extrude',
+        id: 'extrude#4',
+        profile: {
+          frame: { ...XY, origin: [0, 60, 0] },
+          regions: [
+            { loops: [square(0, ['a1', 'a2', 'a3', 'a4'])] },
+            {
+              loops: [
+                {
+                  entities: [
+                    { kind: 'line', id: 'c1', start: [10, 0], end: [14, 0] },
+                    { kind: 'line', id: 'c2', start: [14, 0], end: [14, 4] },
+                    { kind: 'line', id: 'c3', start: [14, 4], end: [10, 1] },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        extent: { type: 'blind', distance: 2 },
+        mode: 'new',
+      },
+      // Two regions revolved through each other: fused.
+      {
+        kind: 'revolve',
+        id: 'revolve#5',
+        profile: {
+          frame: { origin: [100, 0, 0], xDir: [1, 0, 0], normal: [0, -1, 0] },
+          regions: [
+            { loops: [square(2, ['a1', 'a2', 'a3', 'a4'])] },
+            { loops: [square(-7, ['b1', 'b2', 'b3', 'b4'])] },
+          ],
+        },
+        axis: { origin: [100, 0, 0], direction: [0, 0, 1] },
+        angle: 2 * Math.PI,
+        mode: 'new',
+      },
+      // Two squares 0.1 apart that a negative draft grows into each other: drafted per group,
+      // then fused again.
+      {
+        kind: 'extrude',
+        id: 'extrude#6',
+        profile: {
+          frame: { ...XY, origin: [0, 80, 0] },
+          regions: [
+            { loops: [square(0, ['a1', 'a2', 'a3', 'a4'])] },
+            { loops: [square(4.1, ['b1', 'b2', 'b3', 'b4'])] },
+          ],
+        },
+        extent: { type: 'blind', distance: 2 },
+        draft: -0.1,
+        mode: 'new',
+      },
+    ];
+    const run = chain(features);
+    expect(run.errors).toEqual(['extrude#3: kernel', 'extrude#4: invalid']);
+    expect(run.set.map((b) => b.id)).toEqual(['extrude#1', 'extrude#2', 'revolve#5', 'extrude#6']);
+    expect(k.solids(run.set[3]!.shape)).toBe(1);
+    expect(k.shapeCount).toBe(4);
+    for (const b of run.set) expect(k.release(b.shape)).toBe(true);
+    expect(tracker.liveNames()).toEqual([]);
+  });
+
   it('derive copies, fuses and cuts without leaking; the sources are left alone', () => {
     const block = (id: string, x: number, mode: 'new' | 'add' | 'subtract'): FeatureInput => ({
       kind: 'extrude',

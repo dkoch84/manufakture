@@ -33,11 +33,33 @@ function dist2(a: Vec2, b: Vec2): number {
 }
 
 function startOf(e: ProfileEntity): Vec2 | null {
-  return e.kind === 'circle' ? null : e.start;
+  if (e.kind === 'circle') return null;
+  return e.kind === 'bezier' ? e.points[0]! : e.start;
 }
 
 function endOf(e: ProfileEntity): Vec2 | null {
-  return e.kind === 'circle' ? null : e.end;
+  if (e.kind === 'circle') return null;
+  return e.kind === 'bezier' ? e.points[e.points.length - 1]! : e.end;
+}
+
+/** The point at `t` in [0, 1] on a Bezier with control points `points` (de Casteljau). */
+export function bezierAt(points: readonly Vec2[], t: number): Vec2 {
+  let p = points.map((q): Vec2 => [q[0], q[1]]);
+  while (p.length > 1) {
+    p = p
+      .slice(1)
+      .map((q, i): Vec2 => [p[i]![0] + (q[0] - p[i]![0]) * t, p[i]![1] + (q[1] - p[i]![1]) * t]);
+  }
+  return p[0]!;
+}
+
+/**
+ * A closed loop: a circle, or a cubic Bezier that ends where it starts. (A closed quadratic
+ * runs out to its control point and back, so it bounds no area.)
+ */
+function closesAlone(e: ProfileEntity, tol: number): boolean {
+  if (e.kind === 'circle') return true;
+  return e.kind === 'bezier' && e.points.length === 4 && dist2(startOf(e)!, endOf(e)!) <= tol;
 }
 
 /** Sample points along a loop in order, for its signed area. */
@@ -46,6 +68,8 @@ function samples(loop: ProfileLoop): Vec2[] {
   for (const e of loop.entities) {
     if (e.kind === 'line') {
       out.push(e.start);
+    } else if (e.kind === 'bezier') {
+      for (let k = 0; k < 8; k++) out.push(bezierAt(e.points, k / 8));
     } else if (e.kind === 'circle') {
       // Built counter-clockwise about the frame normal.
       for (let k = 0; k < 8; k++) {
@@ -97,6 +121,19 @@ function checkLoop(loop: ProfileLoop, index: number): void {
     if (e.kind === 'circle') {
       if (!(e.radius > 0)) throw invalid(`loop ${index}: circle radius must be positive`);
       scale = Math.max(scale, e.radius);
+    } else if (e.kind === 'bezier') {
+      const n = e.points.length;
+      if (!(n >= 2 && n <= 4)) {
+        throw invalid(`loop ${index}: a Bezier needs 2 to 4 control points (it has ${n})`);
+      }
+      const first = e.points[0]!;
+      let reach = 0;
+      for (const p of e.points) {
+        scale = Math.max(scale, Math.abs(p[0]), Math.abs(p[1]));
+        reach = Math.max(reach, dist2(first, p));
+      }
+      scale = Math.max(scale, reach);
+      if (reach === 0) throw invalid(`loop ${index}: zero-length Bezier`);
     } else {
       scale = Math.max(scale, Math.abs(e.start[0]), Math.abs(e.start[1]), dist2(e.start, e.end));
       if (dist2(e.start, e.end) === 0 && e.kind === 'line') {
@@ -113,7 +150,13 @@ function checkLoop(loop: ProfileLoop, index: number): void {
     }
   }
   const tol = CLOSURE_TOLERANCE * Math.max(1, scale);
-  for (let i = 0; i < entities.length && entities.length > 1; i++) {
+  if (entities.length === 1) {
+    if (!closesAlone(entities[0]!, tol)) {
+      throw invalid(`loop ${index}: a single ${entities[0]!.kind} cannot close a loop`);
+    }
+    return;
+  }
+  for (let i = 0; i < entities.length; i++) {
     const end = endOf(entities[i]!)!;
     const next = startOf(entities[(i + 1) % entities.length]!)!;
     if (dist2(end, next) > tol) {
@@ -121,9 +164,6 @@ function checkLoop(loop: ProfileLoop, index: number): void {
         `loop ${index}: entity ${i} does not end where entity ${(i + 1) % entities.length} starts`,
       );
     }
-  }
-  if (entities.length === 1 && entities[0]!.kind !== 'circle') {
-    throw invalid(`loop ${index}: a single ${entities[0]!.kind} cannot close a loop`);
   }
 }
 
@@ -188,6 +228,27 @@ export function buildProfile(
         if (e.kind === 'line') {
           maker = s.own(
             new oc.BRepBuilderAPI_MakeEdge(vertices[i]!, vertices[(i + 1) % vertices.length]!),
+          );
+        } else if (e.kind === 'bezier') {
+          // The end poles are put exactly on the loop's vertices: the check above allows a gap
+          // of up to 1e-7 of the loop's size between this Bezier's end and the next entity's
+          // start, but making an edge between two vertices needs about 1e-7 absolute. So the
+          // last pole is the next entity's start, or the first pole when it closes on itself.
+          const n = e.points.length;
+          const last =
+            entities.length === 1 ? e.points[0]! : startOf(entities[(i + 1) % entities.length]!)!;
+          const poles = s.own(new oc.NCollection_Array1_gp_Pnt(1, n));
+          e.points.forEach((p, k) => poles.SetValue(k + 1, pnt(at(k === n - 1 ? last : p))));
+          const curve = s.own(new oc.Geom_BezierCurve(poles));
+          // A Bezier that closes a loop on its own makes its own vertex, like a circle.
+          maker = s.own(
+            entities.length === 1
+              ? new oc.BRepBuilderAPI_MakeEdge(curve)
+              : new oc.BRepBuilderAPI_MakeEdge(
+                  curve,
+                  vertices[i]!,
+                  vertices[(i + 1) % vertices.length]!,
+                ),
           );
         } else if (e.kind === 'circle') {
           const ax2 = s.own(new oc.gp_Ax2(pnt(at(e.center)), dir(normal), dir(x)));

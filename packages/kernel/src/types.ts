@@ -211,8 +211,10 @@ export interface Frame {
 /**
  * One entity of a closed profile loop, in frame coordinates. In a loop of
  * several entities each one must end where the next starts. A circle is a
- * loop on its own. Arcs run counter-clockwise about the frame normal from
- * `start` to `end` unless `clockwise` is set.
+ * loop on its own, and so may be a Bezier that ends where it starts. Arcs run
+ * counter-clockwise about the frame normal from `start` to `end` unless
+ * `clockwise` is set. A Bezier has 2 to 4 control points (a line, a quadratic,
+ * a cubic): it starts at the first and ends at the last.
  *
  * `id` is an optional tag, unique within the profile (the sketch edge id of a
  * region, `e2` or `e2#1`). The kernel does not interpret it; extrude reports
@@ -222,6 +224,7 @@ export type ProfileEntity = { id?: string } & (
   | { kind: 'line'; start: Vec2; end: Vec2 }
   | { kind: 'arc'; center: Vec2; start: Vec2; end: Vec2; clockwise?: boolean }
   | { kind: 'circle'; center: Vec2; radius: number }
+  | { kind: 'bezier'; points: readonly Vec2[] }
 );
 
 /**

@@ -188,7 +188,7 @@ describe('errors are data', () => {
     expect(messages[2]).toMatch(/op\.size must be \[number, number, number\]/);
     expect(messages[3]).toMatch(/op\.featureId must be a string/);
     expect(messages[4]).toMatch(/op\.shape must be a shape id/);
-    expect(messages[5]).toMatch(/kind must be line, arc or circle/);
+    expect(messages[5]).toMatch(/kind must be line, arc, circle or bezier/);
     expect(reply.results[6]).toMatchObject({ ok: true, op: 'box', featureId: 'box#1' });
     expect(service.kernel.shapeCount).toBe(before);
   });

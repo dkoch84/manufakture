@@ -29,6 +29,7 @@ export {
   orientedGeometry,
   pickReference,
   pickVertex,
+  profileRegions,
   resolveReferences,
   resolveVertex,
   sketchFrame,
@@ -60,6 +61,7 @@ export type {
   OutcomeBody,
   PatternInput,
   PatternLayout,
+  ProfileRegion,
   ReferenceReport,
   ResolvedRef,
   ResultMode,
@@ -86,6 +88,7 @@ export {
   resolveEdge,
   resolveFace,
   splitParent,
+  sweepRegionOrder,
   threadFace,
 } from './naming';
 export type {
