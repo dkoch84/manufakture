@@ -1,10 +1,11 @@
 // Imported files and pinned versions, stored once by content. An `import` feature carries its
 // file as base64 in the document (core README, "Imported geometry"), and a `derived` feature
-// carries the pinned source document as JSON text (core README, "Derived parts"); in storage and
-// in `.mfk` files that content moves to a content-addressed blob keyed by the SHA-256 the
-// feature already stores, and the feature's `source` keeps everything but `data`. The same
-// rewrite applies to logged commands, so a 20 MiB file, or a pinned version, is stored once
-// however many snapshots and commands mention it.
+// carries the pinned source document as JSON text (core README, "Derived parts"), as does an
+// assembly instance of a pinned part (core README, "Assemblies"); in storage and in `.mfk` files
+// that content moves to a content-addressed blob keyed by the SHA-256 the source already stores,
+// and the `source` keeps everything but `data`. The same rewrite applies to logged commands, so
+// a 20 MiB file, or a pinned version, is stored once however many snapshots and commands mention
+// it, and a version pinned by a derived feature and an instance alike is one blob.
 //
 // A blob is the bytes the hash is of: an import's file, or the UTF-8 text of a pinned document.
 // In the `blobs` maps below both travel as base64, so `BlobStore.put` and `.mfk` packing treat
@@ -27,17 +28,52 @@ const SHA256 = /^[0-9a-f]{64}$/;
 /** Whether `s` is a lower-case hex SHA-256, the only names blobs have. */
 export const isSha256 = (s: string): boolean => SHA256.test(s);
 
-/** Which kind of feature a source belongs to: an import (a file) or a derived part (a pin). */
-type SourceKind = 'import' | 'derived';
+/**
+ * What a source belongs to: an import (a file), a derived part (a pin), or an assembly instance
+ * of a pinned part (a pin, stored exactly like a derived part's).
+ */
+type SourceKind = 'import' | 'derived' | 'instance';
 
 /**
- * An import or derived feature (in a document or a command): `{ id, kind, source }`. Null for
- * anything else.
+ * Whether `source` is a pinned version's source (core `DerivedSourceSchema`): the shape a derived
+ * feature's and a pinned instance's `source` share. An instance of a part of the same document
+ * (`{ part, configuration? }`) is not one, and has no blob.
+ */
+function isPinnedSource(source: Json): boolean {
+  return (
+    typeof source.documentId === 'string' &&
+    typeof source.versionId === 'string' &&
+    typeof source.partId === 'string'
+  );
+}
+
+/**
+ * A source that holds a blob, and what it belongs to: an import or derived feature (in a
+ * document or a command, `{ id, kind, source }`), or a pinned source anywhere else, which is an
+ * instance's (`{ id, source }` in an assembly or an `addInstance`, or the `source` of an
+ * `editInstance`; instances have no `kind`). Null for anything else.
  */
 function blobSource(o: Json): { kind: SourceKind; source: Json } | null {
-  if ((o.kind !== 'import' && o.kind !== 'derived') || typeof o.id !== 'string') return null;
-  return isObject(o.source) ? { kind: o.kind, source: o.source } : null;
+  if (!isObject(o.source)) return null;
+  if (o.kind === 'import' || o.kind === 'derived') {
+    return typeof o.id === 'string' ? { kind: o.kind, source: o.source } : null;
+  }
+  return isPinnedSource(o.source) ? { kind: 'instance', source: o.source } : null;
 }
+
+/** How errors name a source of each kind with a bad SHA-256. */
+const NO_SHA256: Record<SourceKind, string> = {
+  import: 'An imported file has no valid SHA-256',
+  derived: 'A derived part has no valid SHA-256',
+  instance: 'A pinned instance has no valid SHA-256',
+};
+
+/** How errors name a stored source of each kind that names no blob. */
+const NO_BLOB: Record<SourceKind, string> = {
+  import: 'An imported file names no valid blob',
+  derived: 'A derived part names no valid blob',
+  instance: 'A pinned instance names no valid blob',
+};
 
 /** What a stored import or derived source points at: its blob and what it was. */
 export interface BlobRef {
@@ -45,7 +81,7 @@ export interface BlobRef {
   size: number;
   /** The imported file's name; for a derived source, the pinned version and its document. */
   fileName: string;
-  /** Set for a derived source's pinned version; absent for an imported file. */
+  /** Set for a pinned version (a derived part's or an instance's); absent for an imported file. */
   derived?: true;
 }
 
@@ -76,8 +112,8 @@ function mapSources(
 }
 
 /**
- * The storage form of `value` (a document's JSON, or a command): every import's and derived
- * source's `data` taken out, and the bytes it held by SHA-256, as base64. Throws on a source
+ * The storage form of `value` (a document's JSON, or a command): every import's and pinned
+ * source's `data` taken out (a derived feature's or an instance's), and the bytes it held by SHA-256, as base64. Throws on a source
  * whose `sha256` is not a hash.
  */
 export function externalize(value: unknown): { value: unknown; blobs: Map<string, string> } {
@@ -85,13 +121,7 @@ export function externalize(value: unknown): { value: unknown; blobs: Map<string
   const out = mapSources(value, (source, kind) => {
     if (typeof source.data !== 'string') return source;
     const sha = source.sha256;
-    if (typeof sha !== 'string' || !isSha256(sha)) {
-      throw new Error(
-        kind === 'import'
-          ? 'An imported file has no valid SHA-256'
-          : 'A derived part has no valid SHA-256',
-      );
-    }
+    if (typeof sha !== 'string' || !isSha256(sha)) throw new Error(NO_SHA256[kind]);
     blobs.set(sha, kind === 'import' ? source.data : toBase64(encoder.encode(source.data)));
     const { data: _data, ...rest } = source;
     void _data;
@@ -100,7 +130,11 @@ export function externalize(value: unknown): { value: unknown; blobs: Map<string
   return { value: out, blobs };
 }
 
-/** The blobs a stored value needs: every import and derived source without `data`. */
+/**
+ * The blobs a stored value needs: every import and pinned source (a derived feature's or an
+ * instance's) without `data`. A source with `data` inline (a document stored before instances
+ * moved out, or a plain document) needs none.
+ */
 export function blobRefs(value: unknown): BlobRef[] {
   const refs = new Map<string, BlobRef>();
   mapSources(value, (source, kind) => {
@@ -110,13 +144,7 @@ export function blobRefs(value: unknown): BlobRef[] {
         kind === 'import'
           ? source.fileName
           : `"${String(source.versionName)}" of ${String(source.documentName)}`;
-      if (typeof sha256 !== 'string' || !isSha256(sha256)) {
-        throw new Error(
-          kind === 'import'
-            ? 'An imported file names no valid blob'
-            : 'A derived part names no valid blob',
-        );
-      }
+      if (typeof sha256 !== 'string' || !isSha256(sha256)) throw new Error(NO_BLOB[kind]);
       if (typeof size !== 'number' || !Number.isInteger(size) || size < 0) {
         throw new Error(
           kind === 'import'
@@ -129,7 +157,7 @@ export function blobRefs(value: unknown): BlobRef[] {
         size,
         fileName: typeof fileName === 'string' ? fileName : '',
       };
-      if (kind === 'derived') ref.derived = true;
+      if (kind !== 'import') ref.derived = true;
       // One blob is one set of bytes, however it is used; an import's name reads best in errors.
       if (!refs.has(sha256) || kind === 'import') refs.set(sha256, ref);
     }
@@ -140,8 +168,8 @@ export function blobRefs(value: unknown): BlobRef[] {
 
 /**
  * `value` with each source's `data` put back from `blobs` (base64 by SHA-256): an import's as the
- * base64 text itself, a derived source's as the UTF-8 text the bytes hold. A derived blob that is
- * not UTF-8 is left out, so the source stays without `data` and fails to load.
+ * base64 text itself, a pinned source's (derived or instance) as the UTF-8 text the bytes hold. A
+ * pinned blob that is not UTF-8 is left out, so the source stays without `data` and fails to load.
  */
 export function hydrate(value: unknown, blobs: ReadonlyMap<string, string>): unknown {
   return mapSources(value, (source, kind) => {

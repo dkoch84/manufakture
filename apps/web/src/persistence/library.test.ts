@@ -15,11 +15,13 @@ import {
 import { MFK_LIMITS, packMfk, unpackMfk } from './mfk';
 import {
   CrashingBackend,
+  assemblyWithPinnedInstance,
   cloneBackend,
   emptyDocument,
   partDocument,
   partWithDerived,
   partWithImport,
+  pinnedInstance,
   stlImport,
   unwrapDoc,
 } from './test-fixtures';
@@ -141,6 +143,39 @@ describe('DocumentLibrary', () => {
     const snapshot = text(backend, 'documents/doc-1/snapshot-00000002.json');
     expect(JSON.parse(snapshot).parts[0].features.at(-1).source.data).toBeUndefined();
     expect((await opened(library(backend), 'doc-1')).document).toEqual(doc);
+  });
+
+  it("stores an instance's pinned version once, for snapshots and logged commands", async () => {
+    const backend = new MemoryBackend();
+    const lib = library(backend);
+    const doc = await assemblyWithPinnedInstance();
+    const before = unwrapDoc(
+      applyCommand(emptyDocument('doc-1', 'Assembling'), {
+        type: 'addAssembly',
+        assemblyId: 'assembly#1',
+        name: 'Box',
+      }),
+    );
+    await lib.save(before);
+    const instance = await pinnedInstance();
+    if (!('documentId' in instance.source)) throw new Error('expected a pinned source');
+    const pin = instance.source;
+    const add: Command = { type: 'addInstance', assemblyId: 'assembly#1', instance };
+    const entries: LogEntry[] = [{ cause: 'execute', label: 'Insert', command: add, at: 'x' }];
+    await lib.save(doc, entries);
+    await lib.save(doc);
+    const blobPath = `documents/doc-1/blobs/${pin.sha256}`;
+    expect(files(backend).filter((f) => f.includes('/blobs/'))).toEqual([blobPath]);
+    expect(new TextDecoder().decode(backend.files.get(blobPath)!)).toBe(pin.data);
+    for (const path of [
+      'documents/doc-1/snapshot-00000002.json',
+      'documents/doc-1/snapshot-00000003.json',
+      'documents/doc-1/log-00000002.json',
+    ]) {
+      expect(text(backend, path)).not.toContain(JSON.stringify(pin.data));
+    }
+    expect((await opened(library(backend), 'doc-1')).document).toEqual(doc);
+    expect(await library(backend).readLog('doc-1')).toEqual({ ok: true, value: entries });
   });
 
   it('refuses a blob that does not match its SHA-256 or is missing', async () => {

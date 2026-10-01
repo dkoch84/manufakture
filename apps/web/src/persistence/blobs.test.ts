@@ -2,13 +2,23 @@ import { fromBase64, sha256Hex, toBase64 } from '@manufakture/io';
 import { describe, expect, it } from 'vitest';
 import { MemoryBackend } from './backend';
 import { BlobStore, blobRefs, externalize, hydrate, hydrateFrom, isSha256 } from './blobs';
-import { deserialize, type DerivedFeature } from '@manufakture/core';
 import {
+  applyCommand,
+  deserialize,
+  type DerivedFeature,
+  type DerivedSource,
+  type Instance,
+  type ManufaktureDocument,
+} from '@manufakture/core';
+import {
+  assemblyWithPinnedInstance,
   cubeStl,
   derivedFeature,
   partWithDerived,
   partWithImport,
+  pinnedInstance,
   stlImport,
+  unwrapDoc,
 } from './test-fixtures';
 
 describe('externalize and hydrate', () => {
@@ -162,6 +172,115 @@ describe('derived sources', () => {
     const sha = 'a'.repeat(64);
     const stored = { id: 'derived#1', kind: 'derived', source: { sha256: sha, size: 1 } };
     expect(hydrate(stored, new Map([[sha, toBase64(new Uint8Array([0xff]))]]))).toEqual(stored);
+  });
+});
+
+describe('pinned instances', () => {
+  const instanceSource = (doc: unknown, i = 0) =>
+    (doc as ManufaktureDocument).assemblies[0]!.instances[i]!.source as DerivedSource;
+
+  it("moves an instance's pinned version out like a derived part's, and puts it back", async () => {
+    const doc = await assemblyWithPinnedInstance();
+    const source = instanceSource(doc);
+    const { value, blobs } = externalize(doc);
+    const stored = instanceSource(value);
+    expect('data' in stored).toBe(false);
+    const { data: _data, ...rest } = source;
+    void _data;
+    expect(stored).toEqual(rest);
+    expect(JSON.stringify(value)).not.toContain('"format": "manufakture"');
+    expect([...blobs.keys()]).toEqual([source.sha256]);
+    expect(new TextDecoder().decode(fromBase64(blobs.get(source.sha256)!))).toBe(source.data);
+    // Counted as a blob the document needs, so it is read, checked and kept.
+    expect(blobRefs(value)).toEqual([
+      {
+        sha256: source.sha256,
+        size: source.size,
+        fileName: '"Release 1" of Bracket',
+        derived: true,
+      },
+    ]);
+    expect(hydrate(value, blobs)).toEqual(doc);
+    const bytes = new TextEncoder().encode(source.data);
+    expect(await hydrateFrom(value, async () => bytes)).toEqual(doc);
+    await expect(hydrateFrom(value, async () => null)).rejects.toThrow(
+      'The pinned version "Release 1" of Bracket is missing.',
+    );
+  });
+
+  it('stores a version pinned by a derived feature and an instance once', async () => {
+    let doc = await partWithDerived();
+    doc = unwrapDoc(
+      applyCommand(doc, { type: 'addAssembly', assemblyId: 'assembly#1', name: 'Box' }),
+    );
+    doc = unwrapDoc(
+      applyCommand(doc, {
+        type: 'addInstance',
+        assemblyId: 'assembly#1',
+        instance: await pinnedInstance(),
+      }),
+    );
+    const feature = doc.parts[0]!.features.at(-1) as DerivedFeature;
+    expect(instanceSource(doc).sha256).toBe(feature.source.sha256);
+    const { value, blobs } = externalize(doc);
+    expect(blobs.size).toBe(1);
+    expect(blobRefs(value)).toHaveLength(1);
+    expect(hydrate(value, blobs)).toEqual(doc);
+  });
+
+  it('moves pins out of logged addInstance, editInstance and replaceDocument commands', async () => {
+    const instance = await pinnedInstance();
+    const pin = instance.source as DerivedSource;
+    const commands = [
+      { type: 'addInstance', assemblyId: 'assembly#1', instance },
+      { type: 'editInstance', assemblyId: 'assembly#1', instanceId: 'inst#1', source: pin },
+      { type: 'replaceDocument', document: await assemblyWithPinnedInstance() },
+      { type: 'batch', commands: [{ type: 'addInstance', assemblyId: 'assembly#1', instance }] },
+    ];
+    for (const command of commands) {
+      const { value, blobs } = externalize(command);
+      expect([...blobs.keys()]).toEqual([pin.sha256]);
+      expect(JSON.stringify(value)).not.toContain('"format": "manufakture"');
+      expect(blobRefs(value).map((r) => r.sha256)).toEqual([pin.sha256]);
+      expect(hydrate(value, blobs)).toEqual(command);
+    }
+  });
+
+  it('leaves an instance of a part of the same document alone', () => {
+    const instance: Instance = {
+      id: 'inst#1',
+      name: 'Instance 1',
+      source: { part: 'part#1', configuration: 'cfg#1' },
+      fixed: true,
+      suppressed: false,
+      pose: { translation: [0, 0, 0], rotation: [0, 0, 0, 1] },
+    };
+    const command = { type: 'addInstance', assemblyId: 'assembly#1', instance };
+    expect(externalize(command)).toEqual({ value: command, blobs: new Map() });
+    expect(blobRefs(command)).toEqual([]);
+  });
+
+  it("opens a document stored with an instance's pinned version inline", async () => {
+    // Stored before pinned instances moved out: no blob needed, none read, nothing changed.
+    const doc = await assemblyWithPinnedInstance();
+    const legacy: unknown = JSON.parse(JSON.stringify(doc));
+    expect(blobRefs(legacy)).toEqual([]);
+    expect(hydrate(legacy, new Map())).toEqual(doc);
+    expect(
+      await hydrateFrom(legacy, async () => {
+        throw new Error('no blob should be read');
+      }),
+    ).toEqual(doc);
+    // Saved again, it moves out.
+    expect(externalize(legacy).blobs.size).toBe(1);
+  });
+
+  it('refuses a pinned instance whose sha256 could name a path', () => {
+    const source = { documentId: 'd', versionId: 'v', partId: 'part#1', sha256: '../x' };
+    const bad = { id: 'inst#1', source: { ...source, data: '{}' } };
+    expect(() => externalize(bad)).toThrow('A pinned instance has no valid SHA-256');
+    const missing = { id: 'inst#1', source: { ...source, size: 2 } };
+    expect(() => blobRefs(missing)).toThrow('A pinned instance names no valid blob');
   });
 });
 

@@ -201,8 +201,14 @@ left out, and a plain document with the data inline is accepted too.
 
 A `derived` feature (core README, "Derived parts") is stored the same way: its `source.data` is
 the pinned version's document as JSON text, and the blob is that text's UTF-8 bytes, which is
-what the source's `sha256` and `size` describe. So each pinned version is one blob per document,
-however many derived features, snapshots and commands pin it, and loading checks it like a file.
+what the source's `sha256` and `size` describe. An assembly instance of a pinned part carries the
+same source (core README, "Assemblies") and is stored the same way; instances have no `kind`, so
+`blobs.ts` knows a pinned source by its shape (`documentId`, `versionId`, `partId`), wherever it
+sits: in an assembly, an `addInstance`, the `source` of an `editInstance`, or a document a
+`replaceDocument` carries. So each pinned version is one blob per document, however many derived
+features, instances, snapshots and commands pin it, and loading checks it like a file. A document
+stored with an instance's pin inline (before instances moved out) needs no blob and loads as it
+is; its next save moves the pin out.
 
 The log is what `DocumentStore` reports: one entry per `execute`, `undo` and `redo`, as
 `{ cause, label, command, at }`. Commands go through the same rewrite, so an `addFeature` of a

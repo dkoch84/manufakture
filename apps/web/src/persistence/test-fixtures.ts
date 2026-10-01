@@ -6,6 +6,7 @@ import {
   serialize,
   type DerivedFeature,
   type ImportFeature,
+  type Instance,
   type ManufaktureDocument,
 } from '@manufakture/core';
 import { importSource, sha256Hex, writeBinaryStl } from '@manufakture/io';
@@ -99,6 +100,39 @@ export async function partWithDerived(id = 'doc-1'): Promise<ManufaktureDocument
   const feature = await derivedFeature();
   return unwrapDoc(
     applyCommand(emptyDocument(id, 'Deriving'), { type: 'addFeature', partId: 'part#1', feature }),
+  );
+}
+
+/** An instance (`inst#n`) of the pinned version `derivedFeature` pins, at the origin. */
+export async function pinnedInstance(id = 'inst#1'): Promise<Instance> {
+  return {
+    id,
+    name: `Instance ${id.slice(5)}`,
+    source: (await derivedFeature()).source,
+    fixed: false,
+    suppressed: false,
+    pose: { translation: [0, 0, 0], rotation: [0, 0, 0, 1] },
+  };
+}
+
+/**
+ * An empty document with an assembly (`assembly#1`) placing the pinned version `derivedFeature`
+ * pins, as `inst#1`.
+ */
+export async function assemblyWithPinnedInstance(id = 'doc-1'): Promise<ManufaktureDocument> {
+  const doc = unwrapDoc(
+    applyCommand(emptyDocument(id, 'Assembling'), {
+      type: 'addAssembly',
+      assemblyId: 'assembly#1',
+      name: 'Box',
+    }),
+  );
+  return unwrapDoc(
+    applyCommand(doc, {
+      type: 'addInstance',
+      assemblyId: 'assembly#1',
+      instance: await pinnedInstance(),
+    }),
   );
 }
 
