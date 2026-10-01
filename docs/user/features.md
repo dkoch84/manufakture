@@ -1,6 +1,6 @@
 # Features
 
-The row under the header holds the part features: **Extrude**, **Revolve**, **Fillet**, **Chamfer**, **Shell**, **Hole**, **Pattern** and **Mirror**. Each opens its dialog in the side panel. A new feature goes in at the rollback bar of the [feature tree](feature-tree.md); a double-click on a feature in the tree opens the same dialog to change it.
+The row under the header holds the part features: **Extrude**, **Revolve**, **Fillet**, **Chamfer**, **Shell**, **Hole**, **Pattern**, **Mirror** and **Thread**. Each opens its dialog in the side panel. A new feature goes in at the rollback bar of the [feature tree](feature-tree.md); a double-click on a feature in the tree opens the same dialog to change it.
 
 **OK** (or Enter in a field) applies the dialog as one step for Undo; **Cancel** (or Escape) leaves the part as it was. When something is missing or wrong, the dialog stays open and says what, next to the field.
 
@@ -24,6 +24,7 @@ Only faces and edges of the part can be used; the faces of an imported reference
 - **Hole**: a hole at every chosen point of a sketch (draw them with the sketcher's **Point** tool). **Size** fills the diameter from the standard clearance holes (M3 to M12, #6 to 1/2") for the chosen fit, and the counterbore or countersink sizes for the head; pick **Custom** to type your own. Besides the ISO fits, **Printed fit: press**, **slip** and **sliding** size the hole as the screw's nominal size plus `#fit_press`, `#fit_slip` or `#fit_sliding` (see [Fits for printed parts](fits.md)).
 - **Pattern**: copies of the chosen extrusions, revolves and holes (or the whole body) in a row along a picked edge or face, or around an axis. The count includes the original.
 - **Mirror**: the chosen features (or the whole body) mirrored about a picked flat face.
+- **Thread**: an ISO metric or UNC screw thread on a picked round face, external on a shaft or internal in a hole, modelled (a real helical thread) or cosmetic (the cylinder resized, the thread drawn). The size list offers only the sizes that fit the face; the clearance starts as `#fit_slip`. See [Threads](threads.md).
 
 ## Bodies
 

@@ -1,5 +1,10 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import type { FilletFeature, ExtrudeFeature } from '@manufakture/core';
+import type {
+  ExtrudeFeature,
+  FilletFeature,
+  ManufaktureDocument,
+  ThreadFeature,
+} from '@manufakture/core';
 import { describe, expect, it, vi } from 'vitest';
 import { demoDocument } from '../model/demo';
 import { twoBodyDocument, twoBodyModel } from '../model/twoBodies.test-fixture';
@@ -27,10 +32,16 @@ async function fakeResolve(geo: GeometryRef, accepts: readonly RefKind[]): Promi
 
 function setup(
   request: DialogRequest,
-  options: { preselect?: GeometryRef[]; features?: string[] } = {},
+  options: {
+    preselect?: GeometryRef[];
+    features?: string[];
+    document?: ManufaktureDocument;
+    model?: (model: ReturnType<typeof createModelStore>) => void;
+  } = {},
 ) {
-  const documents = createDocumentStore(demoDocument());
+  const documents = createDocumentStore(options.document ?? demoDocument());
   const model = createModelStore();
+  options.model?.(model);
   const selection = createSelectionStore();
   if (options.preselect) selection.getState().select(options.preselect);
   if (options.features) selection.getState().select(options.features.map(featureItem));
@@ -314,5 +325,104 @@ describe('the Bodies scope field', () => {
   it('is not offered with one body only', () => {
     setup({ kind: 'hole' });
     expect(screen.queryByTestId('field-scope')).toBeNull();
+  });
+});
+
+/** The model with the boss `extrude#2:side:e5` as a 6 mm shaft. */
+function shaftModel(model: ReturnType<typeof createModelStore>) {
+  model.setState({
+    parts: [
+      {
+        partId: 'part#1',
+        features: [],
+        bodies: [
+          {
+            bodyId: 'extrude#1',
+            creator: 'extrude#1',
+            solids: 1,
+            view: {
+              id: 'part#1/extrude#1',
+              names: ['extrude#2:side:e5'],
+              mesh: { faceNames: new Uint32Array([0]), edgeNames: new Uint32Array() },
+              topology: {
+                faces: [
+                  {
+                    index: 1,
+                    surface: 'cylinder',
+                    centroid: [0, 0, 0],
+                    area: 1,
+                    normal: null,
+                    axis: [0, 0, 1],
+                    radius: 3,
+                    axisOrigin: [0, 0, 0],
+                    hole: false,
+                  },
+                ],
+                edges: [],
+                vertices: [],
+              },
+            } as never,
+          },
+        ],
+      },
+    ],
+  });
+}
+
+describe('the thread dialog', () => {
+  it('offers the sizes that fit the picked cylinder, starting from its likely one', async () => {
+    const t = setup({ kind: 'thread' });
+    // The model has the boss as a 6 mm shaft.
+    shaftModel(t.model);
+    expect(screen.getByRole('dialog', { name: 'Thread: Thread 1' })).toBeTruthy();
+    act(() =>
+      t.selection.getState().click(geometryRef('face', 'part#1', 'extrude#2:side:e5'), 'replace'),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId('field-cylinder').textContent).toContain('A shaft 6 mm across'),
+    );
+    const size = screen.getByTestId('field-size') as HTMLSelectElement;
+    await waitFor(() => expect(size.value).toBe('M6'));
+    const offered = Array.from(size.options, (o) => o.value);
+    expect(offered).toContain('M6');
+    expect(offered).not.toContain('M3');
+    fireEvent.change(screen.getByTestId('field-representation'), { target: { value: 'cosmetic' } });
+    fireEvent.click(screen.getByTestId('dialog-ok'));
+    expect(t.onClose).toHaveBeenCalled();
+    expect(t.features().at(-1)).toMatchObject({
+      id: 'thread#1',
+      kind: 'thread',
+      face: { ref: { face: 'extrude#2:side:e5' } },
+      length: 'full',
+      standard: { system: 'iso-metric', size: 'M6' },
+      representation: 'cosmetic',
+    });
+    expect(t.documents.getState().undoLabel).toBe('Add Thread 1');
+  });
+
+  it("keeps an edited thread's size that no longer fits, saying so", async () => {
+    const doc = demoDocument();
+    const thread: ThreadFeature = {
+      id: 'thread#1',
+      kind: 'thread',
+      name: 'Thread 1',
+      suppressed: false,
+      face: { id: 'r20', ref: { face: 'extrude#2:side:e5' } },
+      length: 'full',
+      standard: { system: 'iso-metric', size: 'M3' },
+      hand: 'right',
+      clearance: { source: '0.2', lengthUnit: 'mm', angleUnit: 'deg' },
+      representation: 'modelled',
+    };
+    const part = doc.parts[0]!;
+    part.features.push(thread);
+    part.nextIds = { ...part.nextIds, thread: 2, r: Math.max(part.nextIds.r ?? 1, 21) };
+    setup({ kind: 'thread', featureId: 'thread#1' }, { document: doc, model: shaftModel });
+    await waitFor(() =>
+      expect(screen.getByTestId('field-cylinder').textContent).toContain('A shaft 6 mm across'),
+    );
+    const size = screen.getByTestId('field-size') as HTMLSelectElement;
+    expect(size.value).toBe('M3');
+    expect(size.selectedOptions[0]!.textContent).toContain('(does not fit)');
   });
 });

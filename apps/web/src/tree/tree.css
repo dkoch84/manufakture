@@ -101,6 +101,13 @@
   font: inherit;
 }
 
+.feature-row .detail {
+  flex: none;
+  color: #5b6673;
+  font-size: 0.85em;
+  white-space: nowrap;
+}
+
 .feature-row.status-suppressed .name,
 .feature-row.status-rolled-back .name {
   color: #8a94a1;

@@ -52,6 +52,7 @@ import {
   refName,
   resolve,
   sweepRegionOrder,
+  threadFace as threadFaceName,
   vertexName,
   type EdgeRef,
   type FaceName,
@@ -62,7 +63,15 @@ import {
   type TopoRef,
   type Via,
 } from './naming';
-import { threadProblem, threadSolid, type ThreadGeometry } from './threads';
+import {
+  threadLimits,
+  threadProblem,
+  threadSolid,
+  type ThreadEnd,
+  type ThreadGeometry,
+  type ThreadHand,
+  type ThreadSide,
+} from './threads';
 import type {
   Axis,
   ChamferSize,
@@ -349,6 +358,74 @@ export interface ThreadInput extends Scoped, ThreadGeometry {
   id: string;
 }
 
+/** How a thread on a face is built: real helical geometry, or the cylinder only resized. */
+export type ThreadRepresentation = 'modelled' | 'cosmetic';
+
+/**
+ * A thread on a picked cylindrical face (core's `thread` feature, M3 plan T3.2f; ADR 0012
+ * decision 9): the kernel resolves the axis, side, radius and extent from the face, so regen
+ * passes the standard's sizes and the user's choices only. It acts on the body owning the face
+ * (like a fillet), so it takes no scope: the `ThreadInput` form cuts every body in scope, which
+ * would thread a coaxial body too.
+ *
+ * - The side is the face's: a hole (material outside) gets an internal thread, a shaft an
+ *   external one.
+ * - `start`: a circular edge of the face, at the end the thread starts from. Absent: the end
+ *   the face's axis points to by its naming rule (`orientedGeometry`: toward its first
+ *   neighbour by name at an end: a lone extruded cylinder's `cap:end`, since it sorts first).
+ * - Each end of the thread at a free end of the cylinder (its neighbours there are flat faces
+ *   facing away from the cylinder: a shaft's tip, a hole's mouth) is chamfered; any other end
+ *   is closed, so the groove never cuts into what the cylinder meets (a bolt's head, a blind
+ *   hole's bottom, or a thread shorter than the face).
+ * - The phase is set from where the start lies on the axis line, so two coaxial threads of the
+ *   same pitch and hand mate wherever each starts (a bolt and a nut threaded apart).
+ * - `cosmetic` builds no thread: the whole face is resized to the tap drill (internal) or the
+ *   major diameter less twice the clearance (external), its new faces named
+ *   `<id>:thread:cosmetic` (the cylinder) and `cosmetic-start`, `cosmetic-end` (the steps at its
+ *   ends, where it meets the rest of the body), and the outcome reports the thread for display.
+ * - A cylinder outside the radii the size can be cut into (`threadLimits`) fails with `invalid`
+ *   on `face`, naming the range, whatever the representation.
+ */
+export interface ThreadFaceInput {
+  kind: 'thread';
+  id: string;
+  face: FaceReference;
+  start?: EdgeReference;
+  /** From the start along the face, mm; `full`: the whole face. */
+  length: number | 'full';
+  /** The standard's basic major diameter and pitch, and its tap drill diameter, mm. */
+  major: number;
+  pitch: number;
+  tapDrill: number;
+  hand?: ThreadHand;
+  /** Radial clearance, mm (default 0): `ThreadGeometry.clearance`. */
+  clearance?: number;
+  /** Default `modelled`. */
+  representation?: ThreadRepresentation;
+  /** The size as the user knows it (`M6`), for messages. */
+  label?: string;
+}
+
+/** What a thread on a face was built as: for display (helix lines) and for the feature tree. */
+export interface ThreadReport {
+  /** The body threaded. */
+  bodyId: string;
+  side: ThreadSide;
+  representation: ThreadRepresentation;
+  /** `origin`: on the axis where the thread starts; `direction`: along it, unit. */
+  axis: Axis;
+  /** The cylinder's radius after the feature (a cosmetic thread's resized one). */
+  radius: number;
+  length: number;
+  major: number;
+  pitch: number;
+  hand: ThreadHand;
+  /** `ThreadGeometry.phase`, radians. */
+  phase: number;
+  start: ThreadEnd;
+  end: ThreadEnd;
+}
+
 export type FeatureInput =
   | ExtrudeInput
   | RevolveInput
@@ -360,7 +437,8 @@ export type FeatureInput =
   | MirrorInput
   | ImportInput
   | DeriveInput
-  | ThreadInput;
+  | ThreadInput
+  | ThreadFaceInput;
 
 export type FeatureKind = FeatureInput['kind'];
 
@@ -460,6 +538,8 @@ export interface FeatureOutcome {
   errors: FeatureError[];
   warnings: FeatureWarning[];
   resolved: ResolvedRef[];
+  /** A thread on a face that built: what it built (`ThreadReport`). */
+  thread?: ThreadReport;
 }
 
 // Engine --------------------------------------------------------------------------
@@ -516,6 +596,8 @@ interface Ctx {
   /** Bounding boxes and solid counts by shape id, computed once per feature. */
   boxes: Map<ShapeId, Box | null>;
   solids: Map<ShapeId, number>;
+  /** Set by a thread on a face. */
+  thread?: ThreadReport;
 }
 
 const TWO_PI = 2 * Math.PI;
@@ -626,6 +708,7 @@ export function applyFeature(
       errors: [],
       warnings: ctx.warnings,
       resolved: ctx.resolved,
+      ...(ctx.thread ? { thread: ctx.thread } : {}),
     };
   } catch (error) {
     keep.clear();
@@ -706,7 +789,7 @@ function run(ctx: Ctx, slots: readonly Slot[], input: FeatureInput): Slot[] | nu
       return combine(ctx, slots, scoped, deriveTools(ctx, input), input.mode);
     }
     case 'thread':
-      return thread(ctx, slots, input);
+      return 'face' in input ? threadOnFace(ctx, slots, input) : thread(ctx, slots, input);
   }
 }
 
@@ -731,6 +814,310 @@ function thread(ctx: Ctx, slots: readonly Slot[], input: ThreadInput): Slot[] {
   }
   for (const slot of changed) checked(ctx, slot.made!);
   return after;
+}
+
+/** How far a point may lie from an end of a cylinder and still be at it, mm. */
+const END_TOL = 1e-4;
+/** Below this, a cosmetic thread leaves the cylinder as it is, mm. */
+const RESIZE_TOL = 1e-4;
+
+/** The face's cylinder, as a thread on it sees it. */
+interface ThreadFace {
+  slot: Slot;
+  index: number;
+  target: string;
+  side: ThreadSide;
+  radius: number;
+  /** The axis as OCCT stores it: a point on it and its unit direction. */
+  o: Vec3;
+  n: Vec3;
+  /** The face's extent along `n` from `o`. */
+  lo: number;
+  hi: number;
+}
+
+function resolveThreadFace(ctx: Ctx, slots: readonly Slot[], input: ThreadFaceInput): ThreadFace {
+  const { body, index } = resolveOne(
+    ctx,
+    bodiesOf(needBodies(ctx, slots)),
+    input.face.id,
+    input.face.ref,
+  );
+  const slot = slots.find((x) => x.body.id === body.id)!;
+  const target = refName(input.face.ref);
+  const info = body.topology.faces[index - 1];
+  const raw = ctx.k.geometry(body.shape, { kind: 'face', index });
+  if (
+    info === undefined ||
+    raw === null ||
+    raw.kind !== 'cylinder' ||
+    typeof info.radius !== 'number' ||
+    typeof info.hole !== 'boolean'
+  ) {
+    fail(ctx, 'invalid', `${target} is not a cylindrical face: a thread needs a shaft or a hole`, {
+      ref: input.face.id,
+      target,
+    });
+  }
+  const n = unit(raw.direction);
+  const o = raw.origin;
+  const along = (p: Vec3) => dot(sub(p, o), n);
+  const edges = body.topology.edges.filter((e) => e.faces.includes(index));
+  const ts = edges.flatMap((e) => [
+    along(e.midpoint),
+    ...e.vertices.map((v) => along(body.topology.vertices[v - 1]!.point)),
+  ]);
+  const lo = Math.min(...ts);
+  const hi = Math.max(...ts);
+  if (!(hi - lo > END_TOL)) {
+    fail(ctx, 'invalid', `${target} has no length along its axis`, { ref: input.face.id, target });
+  }
+  return {
+    slot,
+    index,
+    target,
+    side: info.hole ? 'internal' : 'external',
+    radius: info.radius,
+    o,
+    n,
+    lo,
+    hi,
+  };
+}
+
+/**
+ * Whether the cylinder ends freely at `t` along its axis: every face it meets there is flat and
+ * faces `out`, away from the cylinder (a shaft's tip, a hole's mouth in a face of the part), so
+ * the thread can run out through it.
+ */
+function freeEnd(body: Body, c: ThreadFace, t: number, out: Vec3): boolean {
+  const topo = body.topology;
+  const along = (p: Vec3) => dot(sub(p, c.o), c.n);
+  const at = topo.edges.filter(
+    (e) =>
+      e.faces.includes(c.index) &&
+      !e.seam &&
+      [e.midpoint, ...e.vertices.map((v) => topo.vertices[v - 1]!.point)].every(
+        (p) => Math.abs(along(p) - t) < END_TOL,
+      ),
+  );
+  const neighbours = [...new Set(at.flatMap((e) => e.faces))].filter((f) => f !== c.index);
+  return (
+    neighbours.length > 0 &&
+    neighbours.every((f) => {
+      const face = topo.faces[f - 1];
+      return face?.surface === 'plane' && face.normal !== null && dot(face.normal, out) > 1 - 1e-6;
+    })
+  );
+}
+
+/**
+ * A helix's phase such that coaxial threads of one pitch and hand share it wherever each starts:
+ * the groove runs as if it had started at the point of the axis line nearest the origin, along
+ * the line's canonical direction (its largest component positive). See `frameOf` in
+ * threads.ts: the groove's angle at `z` along `n` is `phase + h 2 pi z / P`, measured from the
+ * reference direction (which a turned-round axis keeps) toward `n x` it (which turns round).
+ */
+function absolutePhase(origin: Vec3, n: Vec3, pitch: number, hand: ThreadHand): number {
+  const big = Math.max(...n.map(Math.abs));
+  const i = n.findIndex((c) => Math.abs(c) > big - 1e-6);
+  const sign = n[i]! > 0 ? 1 : -1;
+  const u = scale(n, sign);
+  const s0 = dot(origin, u);
+  const h = hand === 'left' ? -1 : 1;
+  const turns = (s0 / pitch) % 1;
+  return sign * h * 2 * Math.PI * turns;
+}
+
+function fmtMm(v: number): string {
+  return String(Math.round(v * 1000) / 1000);
+}
+
+/** A thread on a picked face: resolved here, then modelled (`thread`) or cosmetic. */
+function threadOnFace(ctx: Ctx, slots: readonly Slot[], input: ThreadFaceInput): Slot[] {
+  const c = resolveThreadFace(ctx, slots, input);
+  const body = c.slot.body;
+  const faceRef = { ref: input.face.id, target: c.target };
+  // Which end it starts at.
+  let atLo: boolean;
+  if (input.start !== undefined) {
+    const hit = resolveOne(ctx, [body], input.start.id, input.start.ref);
+    const edge = body.topology.edges[hit.index - 1]!;
+    const t = dot(sub(edge.midpoint, c.o), c.n);
+    const target = refName(input.start.ref);
+    if (
+      !edge.faces.includes(c.index) ||
+      Math.min(Math.abs(t - c.lo), Math.abs(t - c.hi)) > END_TOL
+    ) {
+      fail(ctx, 'invalid', `the start ${target} is not an end edge of ${c.target}`, {
+        ref: input.start.id,
+        target,
+      });
+    }
+    atLo = Math.abs(t - c.lo) <= Math.abs(t - c.hi);
+  } else {
+    const raw: SubShapeGeometry = { kind: 'cylinder', origin: c.o, direction: c.n };
+    const oriented = orientedGeometry(body.names, body.topology, 'face', c.index, raw);
+    if (oriented === null) {
+      ctx.warnings.push({
+        featureId: ctx.id,
+        code: 'direction',
+        ref: input.face.id,
+        target: c.target,
+        message: `no naming rule tells which end of ${c.target} the thread starts at, so an edit may move it: pick the start edge`,
+      });
+    }
+    atLo = dot((oriented ?? raw).direction, c.n) < 0;
+  }
+  const n = atLo ? c.n : scale(c.n, -1);
+  const extent = c.hi - c.lo;
+  const t0 = atLo ? c.lo : c.hi;
+  const origin = add(c.o, scale(c.n, t0));
+  const length = input.length === 'full' ? extent : input.length;
+  if (length > extent + END_TOL) {
+    fail(
+      ctx,
+      'invalid',
+      `the thread is ${fmtMm(length)} mm long, but ${c.target} is ${fmtMm(extent)} mm long`,
+      faceRef,
+    );
+  }
+  const reaches = length >= extent - END_TOL;
+  const startFree = freeEnd(body, c, t0, scale(n, -1));
+  const endFree = reaches && freeEnd(body, c, atLo ? c.hi : c.lo, n);
+  const hand = input.hand ?? 'right';
+  const clearance = input.clearance ?? 0;
+  const label = input.label ?? `${fmtMm(input.major)} x ${fmtMm(input.pitch)} mm`;
+  const limits = threadLimits(c.side, input.major, input.pitch, clearance);
+  if (!(c.radius >= limits.min - 1e-6 && c.radius <= limits.max + 1e-6)) {
+    const what = c.side === 'external' ? 'a shaft' : 'a hole';
+    fail(
+      ctx,
+      'invalid',
+      `${label} (${c.side}) needs ${what} ${fmtMm(2 * limits.min)} to ${fmtMm(2 * limits.max)} mm across; ${c.target} is ${fmtMm(2 * c.radius)} mm`,
+      faceRef,
+    );
+  }
+  const representation = input.representation ?? 'modelled';
+  const g: ThreadGeometry = {
+    side: c.side,
+    axis: { origin, direction: n },
+    radius: c.radius,
+    major: input.major,
+    pitch: input.pitch,
+    length: Math.min(length, extent),
+    hand,
+    clearance,
+    start: startFree ? 'chamfer' : 'closed',
+    end: endFree ? 'chamfer' : 'closed',
+    phase: absolutePhase(origin, n, input.pitch, hand),
+  };
+  const report = (radius: number): ThreadReport => ({
+    bodyId: body.id,
+    side: c.side,
+    representation,
+    axis: { origin, direction: n },
+    radius,
+    length: g.length,
+    major: g.major,
+    pitch: g.pitch,
+    hand,
+    phase: g.phase!,
+    start: g.start!,
+    end: g.end!,
+  });
+
+  if (representation === 'cosmetic') {
+    const radius = c.side === 'internal' ? input.tapDrill / 2 : input.major / 2 - clearance;
+    if (!(radius > 0))
+      fail(ctx, 'invalid', `${label}: the resized cylinder has no radius`, faceRef);
+    ctx.thread = report(radius);
+    if (Math.abs(radius - c.radius) < RESIZE_TOL) return [...slots];
+    const loFree = atLo ? startFree : endFree || freeEnd(body, c, c.lo, scale(c.n, -1));
+    const hiFree = atLo ? endFree || freeEnd(body, c, c.hi, c.n) : startFree;
+    const { tools, mode } = cosmeticTools(
+      ctx,
+      c,
+      radius,
+      n,
+      { lo: loFree, hi: hiFree },
+      input.pitch,
+    );
+    const after = combine(ctx, slots, [c.slot], tools, mode);
+    for (const slot of after) if (slot.made !== null) checked(ctx, slot.made);
+    return after;
+  }
+
+  const problem = threadProblem(g);
+  if (problem !== null) fail(ctx, 'invalid', `${label}: ${problem}`, faceRef);
+  const tools: Placed[] = threadSolid(ctx.k, input.id, g).map((t) => {
+    ctx.temps.push(t.shape);
+    return { ...t, unnamed: [], bodyId: input.id };
+  });
+  const after = combine(ctx, slots, [c.slot], tools, 'subtract');
+  const prefix = `${input.id}:thread:`;
+  const changed = after.filter((slot) => slot.made !== null);
+  if (!changed.some((slot) => slot.made!.faces.some((f) => f.name.startsWith(prefix)))) {
+    fail(ctx, 'invalid', `${input.id} does not touch ${c.target}: no thread was cut`, faceRef);
+  }
+  for (const slot of changed) checked(ctx, slot.made!);
+  ctx.thread = report(c.radius);
+  return after;
+}
+
+/**
+ * The tools that resize a cylinder to `radius` over its whole length: a cylinder or a tube
+ * between the two radii, cut (the cylinder shrinks outside, grows inside) or added. A cut tool
+ * runs past a free end, so no sliver is left; an added one stops at the ends, so nothing sticks
+ * out. A tube's face on the old radius coincides with the old face, so no face of the tool
+ * reaches into the rest of the body.
+ */
+function cosmeticTools(
+  ctx: Ctx,
+  c: ThreadFace,
+  radius: number,
+  forward: Vec3,
+  free: { lo: boolean; hi: boolean },
+  pitch: number,
+): { tools: Placed[]; mode: ResultMode } {
+  const { k } = ctx;
+  const grows = radius > c.radius;
+  const cut = c.side === 'external' ? !grows : grows;
+  const margin = Math.max(pitch, 0.5);
+  const lo = c.lo - (cut && free.lo ? margin : 0);
+  const hi = c.hi + (cut && free.hi ? margin : 0);
+  const at = add(c.o, scale(c.n, lo));
+  const h = hi - lo;
+  // External cut and internal fill: a tube from the new radius to the old; external growth: a
+  // tube from the old radius out; internal growth: a solid cylinder.
+  let shape: ShapeId;
+  if (c.side === 'internal' && grows) {
+    shape = temp(ctx, { shape: k.cylinder(radius, h, at, c.n) }).shape;
+  } else {
+    const inner = Math.min(radius, c.radius);
+    const outer = Math.max(radius, c.radius);
+    const o = temp(ctx, { shape: k.cylinder(outer, h, at, c.n) }).shape;
+    const i = temp(ctx, { shape: k.cylinder(inner, h + 2, sub(at, c.n), c.n) }).shape;
+    shape = temp(ctx, k.boolean('cut', o, [i], { history: false })).shape;
+  }
+  const topology = k.topology(shape);
+  const id = ctx.id;
+  const faces = topology.faces.map((f) => {
+    if (f.surface === 'cylinder') {
+      return threadFaceName(
+        id,
+        Math.abs((f.radius ?? 0) - radius) < 1e-6 ? 'cosmetic' : 'cosmetic-old',
+      );
+    }
+    const first = dot(sub(f.centroid, c.o), c.n) < (lo + hi) / 2;
+    // `first` is the end at `lo`; the thread's start is there when it runs along `c.n`.
+    const atStart = first === dot(forward, c.n) > 0;
+    return threadFaceName(id, atStart ? 'cosmetic-start' : 'cosmetic-end');
+  });
+  return {
+    tools: [{ shape, faces, topology, unnamed: [], bodyId: id }],
+    mode: cut ? 'subtract' : 'add',
+  };
 }
 
 /**
@@ -2826,8 +3213,46 @@ export function validateFeature(input: unknown): string | null {
       }
       return null;
     }
-    case 'thread':
-      return targets(f, false) ?? threadProblem(f as unknown as ThreadGeometry);
+    case 'thread': {
+      if (!('face' in f)) return targets(f, false) ?? threadProblem(f as unknown as ThreadGeometry);
+      if (f.scope !== undefined || f.body !== undefined) {
+        return 'a thread on a face acts on the body that owns it: it has no scope or body id';
+      }
+      const ref = (v: unknown, name: string, check: typeof faceRef) =>
+        !isObj(v)
+          ? `${name} must be a reference`
+          : (invalidSketchId(v.id, false) ?? check(v.ref, `${name}.ref`));
+      const e =
+        ref(f.face, 'face', faceRef) ??
+        (f.start === undefined ? null : ref(f.start, 'start', edgeRef));
+      if (e) return e;
+      if (f.length !== 'full' && !(typeof f.length === 'number' && f.length > 0)) {
+        return "length must be a positive number or 'full'";
+      }
+      for (const key of ['major', 'pitch', 'tapDrill'] as const) {
+        if (!(typeof f[key] === 'number' && Number.isFinite(f[key]) && f[key] > 0)) {
+          return `${key} must be a positive number`;
+        }
+      }
+      if (
+        f.clearance !== undefined &&
+        !(typeof f.clearance === 'number' && Number.isFinite(f.clearance) && f.clearance >= 0)
+      ) {
+        return 'clearance must be a number of at least 0';
+      }
+      if (f.hand !== undefined && f.hand !== 'right' && f.hand !== 'left') {
+        return 'hand must be right or left';
+      }
+      if (
+        f.representation !== undefined &&
+        f.representation !== 'modelled' &&
+        f.representation !== 'cosmetic'
+      ) {
+        return 'representation must be modelled or cosmetic';
+      }
+      if (f.label !== undefined && typeof f.label !== 'string') return 'label must be a string';
+      return null;
+    }
     case 'import':
       return typeof f.step === 'string' || f.step instanceof Uint8Array
         ? (targets(f, true) ?? mode(f.mode))

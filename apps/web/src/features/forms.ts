@@ -5,6 +5,7 @@
 
 import {
   bareUnits,
+  DEFAULT_UNITS,
   bodyCreator,
   defaultFeatureName,
   featureDependencies,
@@ -29,8 +30,15 @@ import {
   type ShellFeature,
   type SketchFeature,
   type StoredExpression,
+  type ThreadFeature,
 } from '@manufakture/core';
-import { HOLE_SIZES, holeSize, type HoleFit } from '@manufakture/kernel';
+import {
+  HOLE_SIZES,
+  holeSize,
+  threadSize,
+  type HoleFit,
+  type ThreadSystem,
+} from '@manufakture/kernel';
 import type { FitKind } from '@manufakture/print';
 import { evaluate, evaluateQuantity, fromMillimetres, fromRadians } from '@manufakture/units';
 import { parsePrintedFit, printedFitDiameter } from '../variables/fits';
@@ -166,6 +174,24 @@ export interface MirrorForm {
   mode?: BodyCopyMode;
 }
 
+export interface ThreadForm {
+  kind: 'thread';
+  /** The cylinder: a shaft's or a hole's round face. */
+  face: RefItem[];
+  /** The end it starts from (a circular edge of the face); none: the default end. */
+  start: RefItem[];
+  system: ThreadSystem;
+  /** A size of the kernel's thread table, or empty before one is chosen. */
+  size: string;
+  /** The whole face, or `length` from the start. */
+  full: boolean;
+  length: string;
+  hand: ThreadFeature['hand'];
+  /** Diametral clearance. */
+  clearance: string;
+  representation: ThreadFeature['representation'];
+}
+
 export type FeatureForm =
   | ExtrudeForm
   | RevolveForm
@@ -174,7 +200,8 @@ export type FeatureForm =
   | ShellForm
   | HoleForm
   | PatternForm
-  | MirrorForm;
+  | MirrorForm
+  | ThreadForm;
 
 /** A reference field of a form: which key holds it and what it takes. */
 export interface RefField {
@@ -225,6 +252,23 @@ export function refFields(form: FeatureForm): RefField[] {
       ];
     case 'mirror':
       return [{ key: 'plane', label: 'Mirror plane', accepts: ['face'], max: 1, required: true }];
+    case 'thread':
+      return [
+        {
+          key: 'face',
+          label: 'Cylinder (a shaft or a hole)',
+          accepts: ['face'],
+          max: 1,
+          required: true,
+        },
+        {
+          key: 'start',
+          label: 'Start edge (optional)',
+          accepts: ['edge'],
+          max: 1,
+          required: false,
+        },
+      ];
   }
 }
 
@@ -466,7 +510,31 @@ export function newForm(kind: FormKind, ctx: FormContext): FeatureForm {
         angle: angleText(2 * Math.PI, units),
       };
     }
+    case 'thread':
+      return {
+        kind,
+        face: [],
+        start: [],
+        system: 'iso-metric',
+        size: '',
+        full: true,
+        length: len(10),
+        hand: 'right',
+        clearance: defaultClearance(ctx.doc),
+        representation: 'modelled',
+      };
   }
+}
+
+/** The name of the fit variable a thread's clearance starts from (ADR 0012 decision 10). */
+export const THREAD_FIT_VARIABLE = 'fit_slip';
+/** The clearance a thread starts with when the document has no `#fit_slip`, mm. */
+export const DEFAULT_THREAD_CLEARANCE = 0.2;
+
+/** `#fit_slip` when the document has it, else a constant in the display units. */
+export function defaultClearance(doc: ManufaktureDocument): string {
+  if (doc.variables.some((v) => v.name === THREAD_FIT_VARIABLE)) return `#${THREAD_FIT_VARIABLE}`;
+  return lengthText(DEFAULT_THREAD_CLEARANCE, doc.units);
 }
 
 /** The fields a standard hole size sets: its diameter and head sizes, in the display units. */
@@ -532,11 +600,13 @@ function refItems(refs: readonly Reference[], lost: ReadonlySet<string>): RefIte
 
 /**
  * The form of an existing feature, or null for kinds without a dialog. `lost` lists reference
- * ids regen could not resolve, so the dialog asks for them again.
+ * ids regen could not resolve, so the dialog asks for them again. `units`: the document's, for
+ * defaults the feature does not store (a full-length thread's length, should it be unchecked).
  */
 export function formOf(
   feature: Feature,
   lost: ReadonlySet<string> = new Set(),
+  units: DisplayUnits = DEFAULT_UNITS,
 ): FeatureForm | null {
   const items = (refs: readonly Reference[]) => refItems(refs, lost);
   switch (feature.kind) {
@@ -630,6 +700,19 @@ export function formOf(
         plane: items([feature.plane]),
         ...scopeField(feature.scope),
         ...(feature.mode !== undefined ? { mode: feature.mode } : {}),
+      };
+    case 'thread':
+      return {
+        kind: 'thread',
+        face: items([feature.face]),
+        start: feature.start ? items([feature.start]) : [],
+        system: feature.standard.system,
+        size: feature.standard.size,
+        full: feature.length === 'full',
+        length: feature.length === 'full' ? lengthText(10, units) : feature.length.source,
+        hand: feature.hand,
+        clearance: feature.clearance.source,
+        representation: feature.representation,
       };
     default:
       return null;
@@ -923,6 +1006,35 @@ export function buildFeature(
       };
       if (form.source === 'body') f.body = true;
       if (form.source === 'body' && form.mode !== undefined) f.mode = form.mode;
+      feature = f;
+      break;
+    }
+    case 'thread': {
+      const face = refs<FaceRef>('face', form.face)[0];
+      if (form.face.length === 0) errors.face = 'Pick the round face of a shaft or a hole.';
+      if (form.size === '') errors.size = 'Choose a size.';
+      else if (!threadSize(form.system, form.size)) {
+        errors.size = `${form.size} is not a size of this standard.`;
+      }
+      const f: ThreadFeature = {
+        ...base,
+        kind: 'thread',
+        face: face ?? missingFace,
+        length: form.full ? 'full' : expr('length', form.length, 'length', { positive: true }),
+        standard: { system: form.system, size: form.size || 'M6' },
+        hand: form.hand,
+        clearance: expr('clearance', form.clearance, 'length', { nonNegative: true }),
+        representation: form.representation,
+      };
+      const start = form.start[0];
+      if (start !== undefined) {
+        if (isFace(start)) errors.start = 'The start is an edge of the face.';
+        else f.start = reference<EdgeRef>(start) as NonNullable<ThreadFeature['start']>;
+        const startFaces = 'faces' in start.ref ? start.ref.faces : [];
+        if (face && !isFace(start) && !startFaces.includes(face.ref.face)) {
+          errors.start = 'Pick an edge at an end of the threaded face.';
+        }
+      }
       feature = f;
       break;
     }

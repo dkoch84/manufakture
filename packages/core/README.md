@@ -549,13 +549,15 @@ union is discriminated by `kind`.
 | `extension` | a later domain feature: `extension` type (`print.brim`), `schemaVersion`, `dependsOn`, `references`, `expressions`, opaque JSON `params`                                                                                                                               |
 | `import`    | `source` (the imported file: `format` `step` or `stl`, `fileName`, `size`, `sha256`, base64 `data`), `operation` (`reference`, `new`, `add`, `cut`, `intersect`)                                                                                                       |
 | `derived`   | `source` (the pinned version: `documentId`, `documentName`, `versionId`, `versionName`, `partId`, optional `configuration`, `size`, `sha256`, text `data`), optional `bodies`, `placement` (`translation`, `rotation`), `operation` (`new`, `add`, `cut`, `intersect`) |
+| `thread`    | `face` (a cylinder), optional `start` (a circular edge of it), `length` (an expression or `'full'`), `standard` (`system` `iso-metric` or `unc`, `size`), `hand` (`right`, `left`), `clearance` (diametral), `representation` (`modelled`, `cosmetic`)                 |
 
 A `profile` is `{ sketch, entities? }`: the sketch feature and the entities bounding the chosen
 regions (absent: every closed region). Extrude extents are `blind`, `symmetric` (total depth,
 centred), `throughAll` and `upToFace`.
 
 Extrude, revolve, import, hole, derived, and pattern and mirror with `body: true`, also take an
-optional `scope` (since version 4; see Bodies).
+optional `scope` (since version 4; see Bodies). A thread acts on the body owning its face and
+takes none.
 
 The kernel implements these as `applyFeature` inputs (`packages/kernel`, Part features). Unequal
 chamfers measure `distance` on the reference face of each edge, the adjacent face whose name sorts
@@ -575,6 +577,23 @@ loads and fails only that pattern at regen, where the user can fix it.
 `extension` is the extension point: core validates its dependencies, references and
 expressions like any other feature's, and leaves `params` to the domain package that owns the
 type.
+
+### Threads
+
+A `thread` feature (since version 10; [ADR 0012](../../docs/adr/0012-3d-printing.md) decision 9)
+threads a cylindrical face: a shaft gets an external thread, a hole an internal one, told apart by
+the side of the face the material is on. It acts on the body that owns the face, like a fillet,
+so it has no `scope`. `start` is a circular edge of the face, the end the thread starts from
+(absent: the end at the face's first neighbour by name, the top of a lone extruded cylinder,
+whose `cap:end` sorts before `cap:start`; the schema refuses an edge that is not on the face); `length` runs from there, or
+`'full'` for the whole face. `standard.size` names a size of the kernel's thread table
+(`THREAD_SIZES`: `M6`, `#10-24`, `1/4-20`, UNC sizes with or without their threads per inch).
+Core does not check it: regen refuses a size it does not know, so adding sizes never changes the
+format (ADR 0012 decision 14). `clearance` is diametral, like the fit variables (`#fit_slip`), and
+the app defaults it to `#fit_slip` when the document has that variable. `representation` is
+`modelled` (real helical geometry) or `cosmetic` (the cylinder resized to the tap drill or to the
+major diameter less the clearance, the thread only drawn); regen and the kernel build both
+(`packages/regen/README.md`, "Threads").
 
 ### Imported geometry
 
@@ -1021,7 +1040,8 @@ solids in one compound (`v3-two-bodies.json`) regenerates the same solids, now a
 `v1-bracket.json`, that to exactly `v2-bracket.json`, that to exactly `v3-bracket.json` and that
 to exactly `v4-bracket.json` and that to exactly `v5-bracket.json` and that to exactly
 `v6-bracket.json` and that to exactly `v7-bracket.json` and that to exactly `v8-bracket.json`
-and that to exactly `v9-bracket.json`, and `v3-two-bodies.json` to
+and that to exactly `v9-bracket.json` and that to exactly `v10-bracket.json`, and
+`v3-two-bodies.json` to
 exactly `v4-two-bodies.json`. Version 5 added the optional configuration table; `migrateV4ToV5`
 only bumps the version, since a version 4 document has none and an absent counter starts at 1.
 Version 6 added the `derived` feature kind and the optional `mode` of a pattern or mirror of
@@ -1037,7 +1057,9 @@ changes nothing else, since a version 7 document has no setups and every print c
 `outline` sketch entity (ADR 0012 decisions 7 and 8); `migrateV8ToV9` adds `fonts: []` right
 after `print` (where a saved file has it) and changes nothing else, since a version 8 document has
 no text and the `font` counter starts at 1; `v8-bracket.json` migrates to exactly
-`v9-bracket.json`.
+`v9-bracket.json`. Version 10 added the `thread` feature kind (ADR 0012 decision 9);
+`migrateV9ToV10` only bumps the version, since a version 9 part has no threads;
+`v9-bracket.json` migrates to exactly `v10-bracket.json`.
 
 To change the file shape:
 

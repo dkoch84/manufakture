@@ -28,6 +28,7 @@ import { useSourceVersions } from './sourceVersions';
 import { ActionIcon, KindIcon, StatusIcon } from './icons';
 import {
   KIND_LABELS,
+  featureDetail,
   STATUS_LABELS,
   deleteFeature,
   dropIndex,
@@ -464,6 +465,11 @@ export function FeatureTree({
           />
         ) : (
           <span className="name">{f.name}</span>
+        )}
+        {featureDetail(f) !== null && (
+          <span className="detail" data-testid={`detail-${f.id}`}>
+            {featureDetail(f)}
+          </span>
         )}
         <button
           type="button"

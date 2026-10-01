@@ -30,6 +30,7 @@ import {
   type HoleForm,
   type PatternForm,
   type RefItem,
+  type ThreadForm,
 } from './forms';
 
 const PART = 'part#1';
@@ -528,5 +529,110 @@ describe('scope', () => {
     if (!r.ok) throw new Error(JSON.stringify(r.errors));
     expect(r.feature).toMatchObject({ body: true, mode: 'new', scope: ['extrude#3'] });
     expect(formOf(r.feature)).toMatchObject({ mode: 'new', scope: ['extrude#3'] });
+  });
+});
+
+describe('thread', () => {
+  const cylinder = face('extrude#2:side:e5');
+  const rim: RefItem = {
+    id: null,
+    ref: { faces: ['extrude#2:cap:end', 'extrude#2:side:e5'] },
+    label: 'rim',
+  };
+
+  it('starts with the slip fit variable when the document has it, else a constant', () => {
+    const doc = demoDocument();
+    expect(newForm('thread', { doc, partId: PART })).toMatchObject({
+      kind: 'thread',
+      face: [],
+      start: [],
+      system: 'iso-metric',
+      size: '',
+      full: true,
+      hand: 'right',
+      clearance: '0.2',
+      representation: 'modelled',
+    });
+    const fits = applyCommand(doc, insertFitVariables(doc).command!);
+    if (!fits.ok) throw new Error(fits.error.message);
+    expect(newForm('thread', { doc: fits.value.document, partId: PART })).toMatchObject({
+      clearance: '#fit_slip',
+    });
+  });
+
+  it('takes a face, then optionally a start edge', () => {
+    const form = newForm('thread', { doc: demoDocument(), partId: PART });
+    expect(refFields(form).map((f) => [f.key, f.accepts, f.required])).toEqual([
+      ['face', ['face'], true],
+      ['start', ['edge'], false],
+    ]);
+    expect(takesScope(form)).toBe(false);
+  });
+
+  it('builds a thread on the picked face, round-trips it and checks its fields', () => {
+    const doc = demoDocument();
+    const empty = newForm('thread', { doc, partId: PART }) as ThreadForm;
+    expect(build(doc, empty)).toMatchObject({
+      ok: false,
+      errors: { face: expect.any(String), size: expect.any(String) },
+    });
+    const form = {
+      ...empty,
+      face: [cylinder],
+      start: [rim],
+      size: 'M6',
+      full: false,
+      length: '8',
+      hand: 'left' as const,
+      representation: 'cosmetic' as const,
+    };
+    const r = build(doc, form);
+    if (!r.ok) throw new Error(JSON.stringify(r.errors));
+    expect(r.feature).toMatchObject({
+      id: 'thread#1',
+      kind: 'thread',
+      name: 'Thread 1',
+      face: { ref: { face: 'extrude#2:side:e5' } },
+      start: { ref: { faces: ['extrude#2:cap:end', 'extrude#2:side:e5'] } },
+      length: { source: '8' },
+      standard: { system: 'iso-metric', size: 'M6' },
+      hand: 'left',
+      clearance: { source: '0.2' },
+      representation: 'cosmetic',
+    });
+    expect(r.command.type).toBe('addFeature');
+    const back = formOf(r.feature);
+    expect(back).toMatchObject({ face: [{ ref: cylinder.ref }], size: 'M6', full: false });
+    const again = build(apply(doc, r.feature), back!, r.feature);
+    expect(again.ok && again.feature).toEqual(r.feature);
+  });
+
+  it('reads a full-length thread back with its default length in display units', () => {
+    const doc = demoDocument();
+    const form = { ...(newForm('thread', { doc, partId: PART }) as ThreadForm), face: [cylinder] };
+    const r = build(doc, { ...form, size: 'M6' });
+    if (!r.ok) throw new Error(JSON.stringify(r.errors));
+    expect(r.feature).toMatchObject({ length: 'full' });
+    expect(formOf(r.feature)).toMatchObject({ full: true, length: '10' });
+    const inch = { length: { unit: 'in' }, angle: { unit: 'deg' } } as const;
+    expect(formOf(r.feature, new Set(), inch)).toMatchObject({ full: true, length: '0.394' });
+  });
+
+  it('refuses an unknown size, a negative clearance and a start edge off the face', () => {
+    const doc = demoDocument();
+    const form = { ...(newForm('thread', { doc, partId: PART }) as ThreadForm), face: [cylinder] };
+    expect(build(doc, { ...form, size: 'M7' })).toMatchObject({
+      ok: false,
+      errors: { size: expect.any(String) },
+    });
+    expect(build(doc, { ...form, size: 'M6', clearance: '-0.1' })).toMatchObject({
+      ok: false,
+      errors: { clearance: expect.any(String) },
+    });
+    const stray = { ...rim, ref: { faces: ['extrude#1:cap:end', 'extrude#1:side:e1'] } };
+    expect(build(doc, { ...form, size: 'M6', start: [stray] })).toMatchObject({
+      ok: false,
+      errors: { start: expect.any(String) },
+    });
   });
 });

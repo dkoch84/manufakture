@@ -10,7 +10,7 @@
 // async, and it stores what can outlive the instance (statuses, sketch results, and later a
 // serialized B-rep to restore the body from). See the README.
 
-import type { ShapeId } from '@manufakture/kernel';
+import type { ShapeId, ThreadReport } from '@manufakture/kernel';
 import { hashValue } from './hash';
 import type { SketchResult } from './sketches';
 import type { ReferenceResolution, RegenError, RegenWarning } from './types';
@@ -78,6 +78,8 @@ export interface CacheEntry {
   outcome?: CachedOutcome;
   /** Sketches: the solved sketch. */
   sketch?: SketchResult;
+  /** Threads on a face: what the kernel built (`FeatureResult.thread`). */
+  thread?: ThreadReport;
   /** What building it cost, in milliseconds. */
   ms: number;
 }

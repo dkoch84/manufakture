@@ -162,6 +162,23 @@ describe('featureDependencies', () => {
       },
       ['extrude#1'],
     ],
+    [
+      'thread on a face, from an edge',
+      {
+        id: 'thread#1',
+        kind: 'thread',
+        name: 'T',
+        suppressed: false,
+        face: { id: 'r3', ref: { face: 'extrude#2:side:e5' } },
+        start: { id: 'r4', ref: { faces: ['extrude#2:side:e5', 'fillet#1:round:r2'] } },
+        length: 'full',
+        standard: { system: 'iso-metric', size: 'M6' },
+        hand: 'right',
+        clearance: mm('0.2'),
+        representation: 'modelled',
+      },
+      ['extrude#2', 'fillet#1'],
+    ],
   ];
   it.each(cases)('%s', (_label, feature, deps) => {
     expect(featureDependencies(feature)).toEqual(deps);
@@ -248,6 +265,41 @@ describe('featureExpressions', () => {
         ['layout.count', 'number'],
         ['layout.angle', 'angle'],
       ],
+    ],
+    [
+      'thread of a length',
+      {
+        id: 'thread#1',
+        kind: 'thread',
+        name: 'T',
+        suppressed: false,
+        face: { id: 'r3', ref: { face: 'extrude#2:side:e5' } },
+        length: mm('8'),
+        standard: { system: 'iso-metric', size: 'M6' },
+        hand: 'right',
+        clearance: mm('fit_slip'),
+        representation: 'modelled',
+      },
+      [
+        ['length', 'length'],
+        ['clearance', 'length'],
+      ],
+    ],
+    [
+      'full-length thread',
+      {
+        id: 'thread#1',
+        kind: 'thread',
+        name: 'T',
+        suppressed: false,
+        face: { id: 'r3', ref: { face: 'extrude#2:side:e5' } },
+        length: 'full',
+        standard: { system: 'unc', size: '#10' },
+        hand: 'left',
+        clearance: mm('0.2'),
+        representation: 'cosmetic',
+      },
+      [['clearance', 'length']],
     ],
     [
       'extension, in key order',

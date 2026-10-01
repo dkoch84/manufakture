@@ -14,6 +14,7 @@ const TITLES: Record<DialogKind, string> = {
   hole: 'Drill holes at sketch points',
   pattern: 'Repeat features or the body in a row or around an axis',
   mirror: 'Mirror features or the body about a face',
+  thread: 'Thread a shaft or a hole (pick its round face)',
   derived: 'Insert the bodies of a part from a version of a document',
 };
 

@@ -68,7 +68,10 @@ export type {
   RevolveInput,
   ShellInput,
   SketchProfile,
+  ThreadFaceInput,
   ThreadInput,
+  ThreadReport,
+  ThreadRepresentation,
   ToolInput,
   VertexRef,
 } from './features';

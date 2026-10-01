@@ -81,6 +81,7 @@ function fakeEngine() {
     requestRender: vi.fn(),
     setBuildVolume: vi.fn(),
     setShading: vi.fn(),
+    setThreadLines: vi.fn(),
     frameBox: vi.fn(),
     dispose: vi.fn(),
   };

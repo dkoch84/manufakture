@@ -13,6 +13,7 @@ import {
   type MirrorFeature,
   type PatternFeature,
   type RevolveFeature,
+  type ThreadFeature,
 } from '@manufakture/core';
 import type {
   EdgeRef,
@@ -24,9 +25,11 @@ import type {
   InstanceSource,
   ResultMode,
   RevolveInput,
+  ThreadFaceInput,
   TopoRef,
   ToolInput,
 } from '@manufakture/kernel';
+import { threadSize } from '@manufakture/kernel';
 import { sketchDirectionToWorld, sketchToWorld } from '@manufakture/sketch';
 import { profileOf, type SketchResult } from './sketches';
 import type { RegenError } from './types';
@@ -271,6 +274,53 @@ function holeInput(ctx: TranslateContext, f: Extract<Feature, { kind: 'hole' }>)
 }
 
 /**
+ * A thread on a face: the size from the kernel's table (an unknown one is `invalid` on
+ * `standard.size`), the length and the clearance evaluated. Core's clearance is diametral, like
+ * the fit variables; the kernel's is radial, so it gets half. Everything about the face (axis,
+ * side, radius, the range of radii the size can be cut into, the ends) is the kernel's to
+ * resolve, since only the kernel sees the body (`ThreadFaceInput`).
+ */
+function threadInput(ctx: TranslateContext, f: ThreadFeature): ThreadFaceInput {
+  const size = threadSize(f.standard.system, f.standard.size);
+  if (size === undefined) {
+    const system = f.standard.system === 'unc' ? 'UNC' : 'ISO metric coarse';
+    throw new Failed([
+      {
+        code: 'invalid',
+        field: ['standard', 'size'],
+        message: `${f.standard.size} is not an ${system} thread size this version knows`,
+      },
+    ]);
+  }
+  const clearance = value(ctx, 'clearance');
+  if (!(clearance >= 0)) {
+    throw new Failed([
+      { code: 'invalid', field: ['clearance'], message: 'The clearance must not be negative' },
+    ]);
+  }
+  let length: number | 'full' = 'full';
+  if (f.length !== 'full') {
+    length = value(ctx, 'length');
+    positive(length, ['length'], 'The length');
+  }
+  const input: ThreadFaceInput = {
+    kind: 'thread',
+    id: f.id,
+    face: { id: f.face.id, ref: faceRef(f.face.ref) },
+    length,
+    major: size.major,
+    pitch: size.pitch,
+    tapDrill: size.tapDrill,
+    hand: f.hand,
+    clearance: clearance / 2,
+    representation: f.representation,
+    label: size.size,
+  };
+  if (f.start !== undefined) input.start = { id: f.start.id, ref: edgeRef(f.start.ref) };
+  return input;
+}
+
+/**
  * A STEP import that joins the body: the kernel reads the file (the document's base64 text, passed
  * as is) and names its faces `import#k:face:<n>`. A reference import, and every STL import (a
  * mesh, always a reference), is not part of the body: the engine keeps it out of the kernel.
@@ -439,6 +489,8 @@ function translateInput(f: Feature, ctx: TranslateContext): FeatureInput {
         mode: MODES[f.operation],
       };
     }
+    case 'thread':
+      return threadInput(ctx, f);
     case 'sketch':
     case 'extension':
       throw new Error(`${f.kind} features are not kernel features`);

@@ -157,21 +157,22 @@ dirty but a cache hit).
 
 `translateFeature` (`src/translate.ts`) turns a core feature into a kernel input:
 
-| Core                                 | Kernel                                                                                      |
-| ------------------------------------ | ------------------------------------------------------------------------------------------- |
-| `operation` new, add, cut, intersect | `mode` new, add, subtract, intersect                                                        |
-| `profile` (sketch, entities?)        | each selected region's `regionProfile` loops on the sketch placement, entities by edge id   |
-| extrude `extent`, `reverse`, `draft` | the same, distances in mm, draft in radians; `upToFace` as a `FaceRef`                      |
-| revolve `sketchLine` axis            | a model-space `Axis` from the line's start to its end; core's `flip: true` negates it       |
-| revolve `edge` axis                  | `{ edge, flip }`, oriented by the kernel's naming rules                                     |
-| fillet, chamfer, shell references    | `{ id, ref }` with the stored names; chamfer `secondDistance` / `angle` pick the size kind  |
-| hole `sketch`, `points`              | the sketch placement as the frame, each point entity's solved position                      |
-| pattern, mirror `features`           | the source features' own kernel inputs (extrudes, revolves, holes); `body: true` the body   |
-| pattern, mirror `body: true`, `mode` | `source: { type: 'body', mode }`; no `mode` when the document has none (the kernel's `add`) |
-| `derived`                            | `derive` of the pinned source part's bodies (see Derived parts); placement in mm, radians   |
-| pattern `count`                      | checked here: a whole number, 1 to `MAX_PATTERN_COUNT`, however it was computed             |
-| `scope`                              | the same list; an entry that is not a body at that point is `reference-lost` on `scope`     |
-| body id of a `new` or `add` feature  | `body`: the feature's own id (M2 plan, decision 1)                                          |
+| Core                                 | Kernel                                                                                                         |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| `operation` new, add, cut, intersect | `mode` new, add, subtract, intersect                                                                           |
+| `profile` (sketch, entities?)        | each selected region's `regionProfile` loops on the sketch placement, entities by edge id                      |
+| extrude `extent`, `reverse`, `draft` | the same, distances in mm, draft in radians; `upToFace` as a `FaceRef`                                         |
+| revolve `sketchLine` axis            | a model-space `Axis` from the line's start to its end; core's `flip: true` negates it                          |
+| revolve `edge` axis                  | `{ edge, flip }`, oriented by the kernel's naming rules                                                        |
+| fillet, chamfer, shell references    | `{ id, ref }` with the stored names; chamfer `secondDistance` / `angle` pick the size kind                     |
+| hole `sketch`, `points`              | the sketch placement as the frame, each point entity's solved position                                         |
+| pattern, mirror `features`           | the source features' own kernel inputs (extrudes, revolves, holes); `body: true` the body                      |
+| pattern, mirror `body: true`, `mode` | `source: { type: 'body', mode }`; no `mode` when the document has none (the kernel's `add`)                    |
+| `derived`                            | `derive` of the pinned source part's bodies (see Derived parts); placement in mm, radians                      |
+| pattern `count`                      | checked here: a whole number, 1 to `MAX_PATTERN_COUNT`, however it was computed                                |
+| `scope`                              | the same list; an entry that is not a body at that point is `reference-lost` on `scope`                        |
+| body id of a `new` or `add` feature  | `body`: the feature's own id (M2 plan, decision 1)                                                             |
+| `thread`                             | `ThreadFaceInput`: `face`, `start`, the size's diameters from `THREAD_SIZES`, half the clearance (see Threads) |
 
 **Numbers.** Variables are evaluated once per regen, in dependency order, in the units each was
 stored with (`evaluateVariables`; they have no declared kind). Every feature expression is
@@ -203,6 +204,12 @@ under a positive one) are fused after the draft, so the body stays one valid sol
 of their union rather than two overlapping ones. An `add`
 fuses its whole tool into the body it meets: regions that miss the body become extra solids of
 it, not `detached` bodies.
+
+### Threads
+
+A `thread` feature (core README, "Threads"; ADR 0012 decision 9) translates to the kernel's thread on a face (`ThreadFaceInput`, kernel README, "Threads"): the face and start references as stored, the size's basic major diameter, pitch and tap drill from the kernel's `THREAD_SIZES` (a size it does not know is `invalid` on `['standard', 'size']`), the length in mm or `full`, and **half** the clearance, since core's clearance is diametral like the fit variables and the kernel's is radial (a negative one is `invalid` on `['clearance']`). Everything that needs the body is resolved in the kernel: the axis, side, radius and extent of the face, the ends, and the range check, so a cylinder the size cannot be cut into fails with `invalid` on the face's reference id, naming the range (`M6 (external) needs a shaft 4.988 to 8 mm across; extrude#2:side:e2 is 10 mm`). A cosmetic thread resizes the whole face (to the tap drill inside, the major diameter less the clearance outside) and builds no helix.
+
+A thread acts on the body owning its face, like a fillet: in the graph it reads and changes only that body (`bodyUse` and `actsOn` treat it as a fillet), and the kernel input has no scope, so a coaxial body (a nut on the bolt) is never cut. The kernel's `ThreadReport` (the body, the axis from the start, the radius after the feature, length, pitch, hand, phase, representation, how each end was finished) is kept in the cache entry and returned as `FeatureResult.thread` on a build and on a cache hit alike; the app draws cosmetic threads from it. Threads are the slowest features to build (about a second for 20 mm of M6), and the per-feature cache keeps them from rebuilding on an edit that does not reach them (`threads.test.ts` checks it).
 
 ## Text
 

@@ -33,6 +33,7 @@ export type ViewportApi = Pick<
   | 'requestRender'
   | 'setBuildVolume'
   | 'setShading'
+  | 'setThreadLines'
   | 'frameBox'
   | 'dispose'
 >;

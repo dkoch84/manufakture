@@ -1,16 +1,16 @@
-// The feature dialogs: extrude, revolve, fillet, chamfer, shell, hole, pattern and mirror (and
-// the derived part, which has a dialog of its own: DerivedDialog.tsx). One
+// The feature dialogs: extrude, revolve, fillet, chamfer, shell, hole, pattern, mirror and thread
+// (and the derived part, which has a dialog of its own: DerivedDialog.tsx). One
 // panel edits one feature, new or existing; faces and edges are picked in the viewport into the
 // active reference field; OK applies the whole dialog as one core command (one undo step), and
 // Cancel or Escape leaves the document alone. The dialog takes focus when it opens (so Escape
 // works at once) and gives it back to where it was when it closes. The form logic is in forms.ts.
 
 import { defaultFeatureName, findPart, previewIds } from '@manufakture/core';
-import { HOLE_SIZES } from '@manufakture/kernel';
+import { HOLE_SIZES, threadSize } from '@manufakture/kernel';
 import { FIT_DESCRIPTIONS, FIT_KINDS, FIT_VARIABLES } from '@manufakture/print';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { partBodies } from '../model/bodies';
-import { featureResult, type ModelStore } from '../model/model';
+import { featureResult, modelBodies, type ModelStore } from '../model/model';
 import type { DocumentStoreApi } from '../state/document';
 import {
   isGeometryRef,
@@ -28,6 +28,7 @@ import {
   applyStandard,
   availableSketches,
   buildFeature,
+  checkExpression,
   formOf,
   lostReferences,
   newForm,
@@ -47,12 +48,22 @@ import {
   type Operation,
   type RefField,
   type RefKind,
+  type ThreadForm,
 } from './forms';
 import type { CreateVersion } from '../history/history';
 import type { PinLibrary } from './derived';
 import { DerivedDialog } from './DerivedDialog';
 import type { PickOutcome } from './references';
 import { ScopePicker } from './ScopePicker';
+import {
+  bestSize,
+  cylinderLabel,
+  pickedCylinder,
+  sizeFits,
+  sizeLabel,
+  threadSizesFor,
+  type PickedCylinder,
+} from './threads';
 
 export interface DialogRequest {
   kind: DialogKind;
@@ -134,7 +145,7 @@ function PartFeatureDialog({
       const result = featureResult(model.getState(), partId, existing.id);
       const lost = lostReferences(result?.errors ?? []);
       if (request.repick) lost.add(request.repick);
-      return formOf(existing, lost) ?? newForm(request.kind, { doc, partId });
+      return formOf(existing, lost, units) ?? newForm(request.kind, { doc, partId });
     }
     const selectedFeatures = selection
       .getState()
@@ -218,6 +229,45 @@ function PartFeatureDialog({
       if (inside && opener instanceof HTMLElement && opener.isConnected) opener.focus();
     };
   }, []);
+
+  // A thread: the picked cylinder as the last regen made it, and the clearance as typed (mm), so
+  // the size list offers only sizes that can be cut into it.
+  const threadFace = form.kind === 'thread' ? form.face[0]?.ref : undefined;
+  // Editing a thread, its own face may be gone from the model (a cosmetic thread renames it): the
+  // cylinder its last regen reported stands in for it.
+  const cylinder = useMemo<PickedCylinder | null>(() => {
+    if (threadFace === undefined || !('face' in threadFace)) return null;
+    const picked = pickedCylinder(modelBodies(model.getState()), threadFace.face);
+    if (picked !== null || !existing) return picked;
+    const built = featureResult(model.getState(), partId, existing.id)?.thread;
+    return built ? { side: built.side, radius: built.radius } : null;
+  }, [threadFace, model, existing, partId]);
+  const threadClearance = form.kind === 'thread' ? form.clearance : '';
+  const clearanceMm = useMemo(() => {
+    const r = checkExpression(threadClearance, 'length', units, variables, { nonNegative: true });
+    return r.ok ? r.value : 0;
+  }, [threadClearance, units, variables]);
+  // A newly picked cylinder that the chosen size does not fit gets the size it was most likely
+  // made for. Not the face an edited thread opened with: its stored size stays, shown as not
+  // fitting, until the user picks a size or another face.
+  const sizedFace = useRef<string | undefined>(
+    existing && threadFace !== undefined && 'face' in threadFace ? threadFace.face : undefined,
+  );
+  useEffect(() => {
+    if (cylinder === null) return;
+    const face = threadFace !== undefined && 'face' in threadFace ? threadFace.face : undefined;
+    if (face === sizedFace.current) return;
+    sizedFace.current = face;
+    setForm((f) => {
+      if (f.kind !== 'thread') return f;
+      const chosen = f.size === '' ? undefined : threadSize(f.system, f.size);
+      if (chosen && sizeFits(chosen, cylinder, clearanceMm)) return f;
+      const best = bestSize(f.system, cylinder, clearanceMm);
+      return best ? { ...f, size: best.size } : f;
+    });
+    // Only when the cylinder changes: a size the user then picks stays.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cylinder]);
 
   const apply = () => {
     const current = documents.getState().document;
@@ -632,6 +682,89 @@ function PartFeatureDialog({
           : expression('angle', 'Total angle', 'angle', form.angle),
       );
       break;
+  }
+
+  if (form.kind === 'thread') {
+    const t = form;
+    const thread = (patch: Partial<ThreadForm>) =>
+      setForm((f) => ({ ...(f as ThreadForm), ...patch }));
+    const sizes = threadSizesFor(t.system, cylinder, clearanceMm);
+    const options: [string, string][] = sizes.map((x) => [x.size, sizeLabel(x)]);
+    if (t.size !== '' && !sizes.some((x) => x.size === t.size)) {
+      const known = threadSize(t.system, t.size);
+      options.unshift([t.size, `${known ? sizeLabel(known) : t.size} (does not fit)`]);
+    }
+    if (t.size === '') options.unshift(['', options.length > 0 ? 'Choose a size' : 'No size fits']);
+    body.push(
+      refField('face'),
+      cylinder !== null ? (
+        <p key="cylinder" className="field-note" data-testid="field-cylinder">
+          {cylinderLabel(cylinder)}: {cylinder.side === 'external' ? 'an external' : 'an internal'}{' '}
+          thread.
+        </p>
+      ) : threadFace !== undefined ? (
+        <p key="cylinder" className="field-note" data-testid="field-cylinder">
+          Not the round face of a shaft or a hole as the part is now: pick another face.
+        </p>
+      ) : null,
+      <Select
+        key="system"
+        label="Standard"
+        name="system"
+        value={t.system}
+        options={[
+          ['iso-metric', 'ISO metric coarse'],
+          ['unc', 'UNC'],
+        ]}
+        onChange={(v) => {
+          const system = v as ThreadForm['system'];
+          const best = cylinder ? bestSize(system, cylinder, clearanceMm) : undefined;
+          thread({ system, size: best?.size ?? '' });
+        }}
+      />,
+      <Select
+        key="size"
+        label="Size"
+        name="size"
+        value={t.size}
+        options={options}
+        error={errors.size}
+        onChange={(v) => thread({ size: v })}
+      />,
+      <Check
+        key="full"
+        label="The whole length of the face"
+        checked={t.full}
+        onChange={(v) => thread({ full: v })}
+      />,
+    );
+    if (!t.full) body.push(expression('length', 'Length', 'length', t.length));
+    body.push(
+      refField('start'),
+      <Select
+        key="hand"
+        label="Hand"
+        name="hand"
+        value={t.hand}
+        options={[
+          ['right', 'Right hand'],
+          ['left', 'Left hand'],
+        ]}
+        onChange={(v) => thread({ hand: v as ThreadForm['hand'] })}
+      />,
+      expression('clearance', 'Clearance (across)', 'length', t.clearance, true),
+      <Select
+        key="representation"
+        label="Representation"
+        name="representation"
+        value={t.representation}
+        options={[
+          ['modelled', 'Modelled (real thread)'],
+          ['cosmetic', 'Cosmetic (resized, drawn)'],
+        ]}
+        onChange={(v) => thread({ representation: v as ThreadForm['representation'] })}
+      />,
+    );
   }
 
   // Which bodies it acts on, when there is a choice to make.

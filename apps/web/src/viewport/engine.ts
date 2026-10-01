@@ -146,6 +146,7 @@ const COLORS = {
   edgeHover: new Color(0x3d8bff),
   edgeSelected: new Color(0x0b5cff),
   cap: new Color(0xe0875e),
+  thread: new Color(0x7a4f12),
 };
 
 type Highlight = 'none' | 'hover' | 'selected';
@@ -265,6 +266,10 @@ export class ViewportEngine {
   private readonly selectedEdgeMaterial: LineMaterial;
   private readonly hoverEdges = new LineSegments2(new LineSegmentsGeometry());
   private readonly selectedEdges = new LineSegments2(new LineSegmentsGeometry());
+  /** Cosmetic threads' helix lines (threadLines.ts), depth-tested over the faces. */
+  private readonly threadMaterial: LineMaterial;
+  private readonly threadLines = new LineSegments2(new LineSegmentsGeometry());
+  private threadLineCount = 0;
   private readonly vertexMarkers: Points<BufferGeometry, PointsMaterial>;
   /** The print workspace's shading materials (printView.ts) and the current mode. */
   private readonly overhangMaterial: ShaderMaterial;
@@ -386,6 +391,12 @@ export class ViewportEngine {
     this.hoverEdges.renderOrder = 6;
     this.selectedEdges.renderOrder = 5;
     this.scene.add(this.selectedEdges, this.hoverEdges);
+    this.threadMaterial = lineMaterial(COLORS.thread, 1.5);
+    this.threadLines.material = this.threadMaterial;
+    this.threadLines.renderOrder = 4;
+    this.threadLines.visible = false;
+    this.threadLines.frustumCulled = false;
+    this.scene.add(this.threadLines);
 
     this.vertexMarkers = new Points(
       new BufferGeometry(),
@@ -515,6 +526,21 @@ export class ViewportEngine {
     this.updateSceneSphere();
     if (volume) this.fitAll(false);
     this.invalidate(true);
+  }
+
+  /**
+   * Draw polylines over the model (cosmetic threads' helices, in world coordinates), replacing
+   * the ones drawn before; none clears them. Depth-tested, so the model hides what lies behind it.
+   */
+  setThreadLines(lines: readonly (readonly Vec3[])[]): void {
+    const positions: number[] = [];
+    for (const line of lines) {
+      for (let i = 1; i < line.length; i++) positions.push(...line[i - 1]!, ...line[i]!);
+    }
+    if (positions.length === 0 && this.threadLineCount === 0) return;
+    setSegments(this.threadLines, positions);
+    this.threadLineCount = lines.length;
+    this.invalidate();
   }
 
   /** Colour faces by overhang class or wall thickness (the print workspace); null: normally. */
@@ -756,6 +782,7 @@ export class ViewportEngine {
       })),
       shading: this.shading?.kind ?? 'normal',
       buildVolume: this.volume !== null,
+      threadLines: this.threadLineCount,
       projection: this.stores.settings.getState().projection,
       halfHeight: this.view.halfHeight,
       animating: this.transition !== null || this.wheelZoom !== null,
@@ -826,6 +853,7 @@ export class ViewportEngine {
       this.edgeMaterial,
       this.hoverEdgeMaterial,
       this.selectedEdgeMaterial,
+      this.threadMaterial,
       this.vertexMarkers.material,
       this.grid.material,
       this.cap.material,
@@ -834,6 +862,7 @@ export class ViewportEngine {
     this.vertexMarkers.material.map?.dispose();
     this.hoverEdges.geometry.dispose();
     this.selectedEdges.geometry.dispose();
+    this.threadLines.geometry.dispose();
     this.vertexMarkers.geometry.dispose();
     this.grid.geometry.dispose();
     this.cap.geometry.dispose();
@@ -1343,7 +1372,12 @@ export class ViewportEngine {
     this.width = w;
     this.height = h;
     this.renderer.setSize(w, h, false);
-    for (const m of [this.edgeMaterial, this.hoverEdgeMaterial, this.selectedEdgeMaterial]) {
+    for (const m of [
+      this.edgeMaterial,
+      this.hoverEdgeMaterial,
+      this.selectedEdgeMaterial,
+      this.threadMaterial,
+    ]) {
       m.resolution.set(w, h);
     }
     (

@@ -10,6 +10,7 @@ export type DialogKind =
   | 'hole'
   | 'pattern'
   | 'mirror'
+  | 'thread'
   | 'derived';
 
 /** The kinds edited through a feature form (forms.ts); a derived part has a dialog of its own. */
@@ -24,6 +25,7 @@ export const DIALOG_KINDS: readonly DialogKind[] = [
   'hole',
   'pattern',
   'mirror',
+  'thread',
   'derived',
 ];
 

@@ -35,6 +35,18 @@ const holeFeature = () => ({
   head: { type: 'simple' as const },
 });
 
+const threadFeature = () => ({
+  id: 'thread#1',
+  kind: 'thread' as const,
+  ...common,
+  face: { id: 'r8', ref: { face: 'extrude#2:side:e5' } },
+  length: 'full' as const,
+  standard: { system: 'iso-metric' as const, size: 'M6' },
+  hand: 'right' as const,
+  clearance: mm('fit_slip'),
+  representation: 'modelled' as const,
+});
+
 /** One valid example of every feature kind. */
 const validFeatures: Feature[] = [
   rectangleSketch(),
@@ -271,6 +283,20 @@ const validFeatures: Feature[] = [
     operation: 'add',
     scope: ['extrude#2'],
   },
+  threadFeature(),
+  {
+    ...threadFeature(),
+    id: 'thread#2',
+    start: {
+      id: 'r9',
+      ref: { faces: ['extrude#2:cap:end', 'extrude#2:side:e5'] },
+    },
+    length: mm('8'),
+    standard: { system: 'unc', size: '1/4-20' },
+    hand: 'left',
+    clearance: mm('0.2'),
+    representation: 'cosmetic',
+  },
 ];
 
 describe('FeatureSchema', () => {
@@ -377,6 +403,38 @@ describe('FeatureSchema', () => {
       'hole with an unknown fit',
       { ...holeFeature(), standard: { size: 'M5', fit: 'snug' } },
       'standard.fit',
+    ],
+    [
+      'thread with an unknown system',
+      { ...threadFeature(), standard: { system: 'bsw', size: 'M6' } },
+      'standard.system',
+    ],
+    [
+      'thread with an empty size',
+      { ...threadFeature(), standard: { system: 'unc', size: '' } },
+      'standard.size',
+    ],
+    [
+      'thread with a length that is neither an expression nor full',
+      { ...threadFeature(), length: 'all' },
+      'length',
+    ],
+    ['thread with an unknown hand', { ...threadFeature(), hand: 'both' }, 'hand'],
+    [
+      'thread with an unknown representation',
+      { ...threadFeature(), representation: 'drawn' },
+      'representation',
+    ],
+    ['thread with a scope', { ...threadFeature(), scope: ['extrude#1'] }, ''],
+    [
+      'thread on an edge',
+      { ...threadFeature(), face: { id: 'r8', ref: { faces: ['a', 'b'] } } },
+      'face.ref.face',
+    ],
+    [
+      'thread starting from an edge of another face',
+      { ...threadFeature(), start: { id: 'r9', ref: { faces: ['a', 'b'] } } },
+      'start',
     ],
     [
       'fillet with a face reference',

@@ -49,6 +49,8 @@ export function featureReferences(feature: Feature): Reference[] {
     case 'import':
     case 'derived':
       return [];
+    case 'thread':
+      return feature.start === undefined ? [feature.face] : [feature.face, feature.start];
   }
 }
 
@@ -264,6 +266,10 @@ export function featureExpressions(feature: Feature): ExpressionSite[] {
       for (const key of Object.keys(feature.expressions).sort()) {
         add(['expressions', key], feature.expressions[key], 'any');
       }
+      break;
+    case 'thread':
+      if (feature.length !== 'full') add(['length'], feature.length, 'length');
+      add(['clearance'], feature.clearance, 'length');
       break;
   }
   return out;

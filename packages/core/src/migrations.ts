@@ -201,6 +201,19 @@ export const migrateV8ToV9: Migration = {
   },
 };
 
+/**
+ * Version 10 added the `thread` feature kind (ADR 0012 decision 9). Nothing in a version 9 file
+ * changes: it has no threads.
+ */
+export const migrateV9ToV10: Migration = {
+  from: 9,
+  to: 10,
+  description: 'Add the thread feature kind',
+  migrate(doc) {
+    return { ...doc, version: 10 };
+  },
+};
+
 /** File format migrations, in order: `FORMAT_MIGRATIONS[i]` goes from version i to i + 1. */
 export const FORMAT_MIGRATIONS: readonly Migration[] = [
   migrateV0ToV1,
@@ -212,6 +225,7 @@ export const FORMAT_MIGRATIONS: readonly Migration[] = [
   migrateV6ToV7,
   migrateV7ToV8,
   migrateV8ToV9,
+  migrateV9ToV10,
 ];
 
 /**

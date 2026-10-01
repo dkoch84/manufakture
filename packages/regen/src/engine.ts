@@ -1811,6 +1811,7 @@ export class RegenEngine {
     result.errors = entry.errors;
     result.warnings = entry.warnings;
     result.references = entry.references;
+    if (entry.thread !== undefined) result.thread = entry.thread;
     result.ms = now() - started;
   }
 

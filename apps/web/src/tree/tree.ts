@@ -64,7 +64,19 @@ export const KIND_LABELS: Record<FeatureKind, string> = {
   extension: 'Extension',
   import: 'Import',
   derived: 'Derived',
+  thread: 'Thread',
 };
+
+/**
+ * A short note the row shows after the name, or null: a thread's size, with its hand when left
+ * and its representation when cosmetic (`M6`, `1/4-20 LH, cosmetic`).
+ */
+export function featureDetail(feature: Feature): string | null {
+  if (feature.kind !== 'thread') return null;
+  const parts = [feature.standard.size + (feature.hand === 'left' ? ' LH' : '')];
+  if (feature.representation === 'cosmetic') parts.push('cosmetic');
+  return parts.join(', ');
+}
 
 /** The part's rollback bar position: features `[0, position)` are built. */
 export function rollbackPosition(part: Part): number {

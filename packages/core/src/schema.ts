@@ -30,7 +30,7 @@ import { MATERIAL_IDS } from './materials';
  */
 
 /** The file format version this code reads and writes. Bump it only together with a migration. */
-export const FORMAT_VERSION = 9;
+export const FORMAT_VERSION = 10;
 /** The topological naming scheme version (T0.5) that stored references are written in. */
 export const NAMING_SCHEME = 1;
 export const FORMAT_TAG = 'manufakture';
@@ -997,6 +997,60 @@ export const DerivedFeatureSchema = z
   })
   .check(checkScopeOperation);
 
+// ---------------------------------------------------------------------------------------------
+// Threads (since version 10; ADR 0012 decision 9)
+
+/** The thread standards: ISO metric coarse and UNC (the kernel's `THREAD_SIZES`). */
+export const ThreadSystemSchema = z.enum(['iso-metric', 'unc']);
+export const ThreadHandSchema = z.enum(['right', 'left']);
+/** `modelled`: real helical geometry; `cosmetic`: the cylinder resized, the thread only drawn. */
+export const ThreadRepresentationSchema = z.enum(['modelled', 'cosmetic']);
+/** The longest thread size name (`M6`, `#10-24`, `1/4-20`). */
+export const MAX_THREAD_SIZE_LENGTH = 32;
+
+/**
+ * A thread on a cylindrical face: a shaft (external) or a hole (internal), told apart by which
+ * side of the face the material is on. It acts on the body that owns the face, like a fillet,
+ * so it has no scope. The size is a name of the kernel's thread table; regen refuses one it does
+ * not know, so adding sizes never changes the format. Since version 10.
+ */
+export const ThreadFeatureSchema = z
+  .strictObject({
+    ...base('thread'),
+    /** The cylinder to thread. */
+    face: FaceReferenceSchema,
+    /**
+     * A circular edge of the face: the end the thread starts from. Absent: the end nearer the
+     * face's first neighbour by name (`cap:end` before `cap:start`: a lone extruded cylinder starts
+     * at its top).
+     */
+    start: EdgeReferenceSchema.exactOptional(),
+    /** How far along the face the thread runs from its start; `full`: the whole face. */
+    length: z.union([StoredExpressionSchema, z.literal('full')]),
+    standard: z.strictObject({
+      system: ThreadSystemSchema,
+      size: z.string().min(1).max(MAX_THREAD_SIZE_LENGTH),
+    }),
+    hand: ThreadHandSchema,
+    /**
+     * Diametral printing clearance, like the fit variables (`#fit_slip`): the thread is this much
+     * smaller across (external) or larger (internal) than the basic profile.
+     */
+    clearance: StoredExpressionSchema,
+    representation: ThreadRepresentationSchema,
+  })
+  .check((ctx) => {
+    const { face, start } = ctx.value;
+    if (start !== undefined && !start.ref.faces.includes(face.ref.face)) {
+      ctx.issues.push({
+        code: 'custom',
+        message: 'the start edge must be an edge of the threaded face',
+        input: start,
+        path: ['start'],
+      });
+    }
+  });
+
 export const FeatureSchema = z.discriminatedUnion('kind', [
   SketchFeatureSchema,
   ExtrudeFeatureSchema,
@@ -1010,6 +1064,7 @@ export const FeatureSchema = z.discriminatedUnion('kind', [
   ExtensionFeatureSchema,
   ImportFeatureSchema,
   DerivedFeatureSchema,
+  ThreadFeatureSchema,
 ]);
 
 export const FEATURE_KINDS = [
@@ -1025,6 +1080,7 @@ export const FEATURE_KINDS = [
   'extension',
   'import',
   'derived',
+  'thread',
 ] as const;
 
 // ---------------------------------------------------------------------------------------------
@@ -1568,6 +1624,10 @@ export type DerivedSource = z.infer<typeof DerivedSourceSchema>;
 export type DerivedPlacement = z.infer<typeof DerivedPlacementSchema>;
 export type DerivedFeature = z.infer<typeof DerivedFeatureSchema>;
 export type BodyCopyMode = z.infer<typeof BodyCopyModeSchema>;
+export type ThreadSystem = z.infer<typeof ThreadSystemSchema>;
+export type ThreadHand = z.infer<typeof ThreadHandSchema>;
+export type ThreadRepresentation = z.infer<typeof ThreadRepresentationSchema>;
+export type ThreadFeature = z.infer<typeof ThreadFeatureSchema>;
 export type Feature = z.infer<typeof FeatureSchema>;
 export type FeatureKind = Feature['kind'];
 export type Variable = z.infer<typeof VariableSchema>;

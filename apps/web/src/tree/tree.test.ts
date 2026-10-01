@@ -7,6 +7,7 @@ import {
   deleteFeature,
   dependentsOf,
   dropIndex,
+  featureDetail,
   firstChanged,
   moveFeature,
   renameFeature,
@@ -224,5 +225,27 @@ describe('suppress, rename, delete, roll back', () => {
     expect(part().rollbackIndex).toBe(2);
     const end = setRollback(part(), 99)!;
     expect(end.command).toEqual({ type: 'setRollback', partId: PART, index: null });
+  });
+});
+
+describe('featureDetail', () => {
+  it("shows a thread's size, a left hand and a cosmetic representation", () => {
+    const thread = {
+      id: 'thread#1',
+      kind: 'thread',
+      name: 'Thread 1',
+      suppressed: false,
+      face: { id: 'r9', ref: { face: 'extrude#2:side:e5' } },
+      length: 'full',
+      standard: { system: 'iso-metric', size: 'M6' },
+      hand: 'right',
+      clearance: { source: '0.2', lengthUnit: 'mm', angleUnit: 'deg' },
+      representation: 'modelled',
+    } as const;
+    expect(featureDetail(thread)).toBe('M6');
+    expect(featureDetail({ ...thread, hand: 'left', representation: 'cosmetic' })).toBe(
+      'M6 LH, cosmetic',
+    );
+    expect(featureDetail(demoDocument().parts[0]!.features[0]!)).toBeNull();
   });
 });

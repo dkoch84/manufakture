@@ -104,6 +104,12 @@ const KIND_PATHS: Record<FeatureKind, ReactNode> = {
       <rect x="7.5" y="7.5" width="6" height="6" strokeDasharray="1.5 1.5" />
     </>
   ),
+  thread: (
+    <>
+      <path d="M5 2v12M11 2v12" />
+      <path d="M5 4l6-1.5M5 7l6-1.5M5 10l6-1.5M5 13l6-1.5" />
+    </>
+  ),
 };
 
 export function KindIcon({ kind }: { kind: FeatureKind }) {

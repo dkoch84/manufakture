@@ -12,7 +12,7 @@ import type {
   Residual,
 } from '@manufakture/assembly';
 import type { BodyPropsFields, FeatureKind, Pose, Vec3 } from '@manufakture/core';
-import type { MeshData, ShapeId, Topology, Via } from '@manufakture/kernel';
+import type { MeshData, ShapeId, ThreadReport, Topology, Via } from '@manufakture/kernel';
 import type { OutlineShape, RegionDiagnosticCode, SketchPlacement } from '@manufakture/sketch';
 import type { UnitsError } from '@manufakture/units';
 
@@ -191,6 +191,12 @@ export interface FeatureResult {
    * too, placed in the sketch, so the app draws text as regen built it (T3.2d).
    */
   outlines?: OutlineShape[];
+  /**
+   * Threads only, when built: what the kernel built (the body, the axis from the start, the
+   * cylinder's radius after it, length, pitch, hand, representation), so the app can draw a
+   * cosmetic thread's helix and the tree can show the size.
+   */
+  thread?: ThreadReport;
 }
 
 /** One body of a part after the last feature (M2 plan, decision 1: named after its creator). */

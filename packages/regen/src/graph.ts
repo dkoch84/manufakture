@@ -40,6 +40,7 @@ export const BODY_KINDS: ReadonlySet<Feature['kind']> = new Set([
   'pattern',
   'mirror',
   'derived',
+  'thread',
 ]);
 
 export function isBodyFeature(feature: Feature): boolean {
@@ -99,6 +100,7 @@ export function bodyUse(
     }
     case 'fillet':
     case 'chamfer':
+    case 'thread':
       return { all: false, scope: [], refs };
     case 'shell':
       return { all: feature.faces.length === 0, scope: [], refs };
@@ -218,7 +220,7 @@ interface StaticBody extends RoutedBody {
 
 /**
  * The bodies a feature acts on (changes), as far as the document says: the bodies in its scope,
- * or every body without one; for fillets, chamfers and shells the bodies owning their
+ * or every body without one; for fillets, chamfers, shells and threads the bodies owning their
  * references. `read` is what `routeBodies` gave; a `new` feature changes none (it adds a body).
  */
 function actsOn(
@@ -243,6 +245,7 @@ function actsOn(
     case 'fillet':
     case 'chamfer':
     case 'shell':
+    case 'thread':
       return { ids: [...read], merges: false };
     case 'pattern':
     case 'mirror': {

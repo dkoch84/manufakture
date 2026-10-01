@@ -8,6 +8,7 @@ import type {
   FeatureWarning,
   KernelFailure,
   ReferenceReport,
+  ThreadReport,
 } from '@manufakture/kernel';
 import { referenceIdOf } from './translate';
 import type { LastResolved, ReferenceResolution, RegenError, RegenWarning } from './types';
@@ -74,12 +75,21 @@ export function mapKernelWarning(feature: Feature, w: FeatureWarning): RegenWarn
   }
 }
 
-/** What a regen keeps of a `FeatureOutcome`: never its name table, which stays in the worker. */
+/**
+ * What a regen keeps of a `FeatureOutcome`: never its name table, which stays in the worker. A
+ * thread's report (what it built, for display) is kept as it is.
+ */
 export function mapOutcome(
   feature: Feature,
   outcome: FeatureOutcome,
-): { errors: RegenError[]; warnings: RegenWarning[]; references: ReferenceResolution[] } {
+): {
+  errors: RegenError[];
+  warnings: RegenWarning[];
+  references: ReferenceResolution[];
+  thread?: ThreadReport;
+} {
   return {
+    ...(outcome.thread === undefined ? {} : { thread: outcome.thread }),
     errors: outcome.errors.map((e) => mapKernelError(feature, e)),
     warnings: outcome.warnings.map((w) => mapKernelWarning(feature, w)),
     references: outcome.resolved.map((r) => ({
