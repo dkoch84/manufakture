@@ -1,0 +1,19 @@
+{
+  "name": "@manufakture/text",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "GPL-3.0-or-later",
+  "exports": {
+    ".": "./src/index.ts",
+    "./fonts/Inter-Bold.ttf": "./fonts/Inter-Bold.ttf"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --root ../.. --project packages packages/text"
+  },
+  "dependencies": {
+    "@manufakture/sketch": "workspace:*",
+    "opentype.js": "2.0.0"
+  }
+}

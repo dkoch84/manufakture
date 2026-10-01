@@ -10,13 +10,13 @@ Units are millimetres and radians throughout ([ADR 0005](../../docs/adr/0005-uni
 
 ## Entry points
 
-| Import                         | What                                                                                                       |
-| ------------------------------ | ---------------------------------------------------------------------------------------------------------- |
-| `@manufakture/sketch/model`    | The data model only: types and pure helpers, no solver code at runtime                                     |
-| `@manufakture/sketch/geometry` | Everything but the solver: model, ids, splitting, placement, regions, fills, validation; loads no planegcs |
-| `@manufakture/sketch/rpc`      | `connectSolver` / `serveSolver`, the worker protocol, without the solver                                   |
-| `@manufakture/sketch`          | Everything: the above plus the solver and its service                                                      |
-| `@manufakture/sketch/worker`   | The solver worker entry (see [Worker](#worker))                                                            |
+| Import                         | What                                                                                                           |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| `@manufakture/sketch/model`    | The data model only: types and pure helpers, no solver code at runtime                                         |
+| `@manufakture/sketch/geometry` | Everything but the solver: model, ids, splitting, placement, regions, fills, outlines, validation; no planegcs |
+| `@manufakture/sketch/rpc`      | `connectSolver` / `serveSolver`, the worker protocol, without the solver                                       |
+| `@manufakture/sketch`          | Everything: the above plus the solver and its service                                                          |
+| `@manufakture/sketch/worker`   | The solver worker entry (see [Worker](#worker))                                                                |
 
 `packages/core` stores sketches with the types from `/model`; a test checks that `model.ts` only
 has type imports, so holding a sketch never loads planegcs. The app imports `/geometry` and `/rpc`,
@@ -326,6 +326,99 @@ further where other geometry comes closer to an arc than its chord (a corner jus
 tangent hole), holes are bridged into the outline, and the polygon is ear clipped. It is meant for
 highlights, not for export: cost grows quadratically with the number of flattened points.
 
+## Outlines
+
+`outlineRegions(path, options?)` (`src/outline.ts`) turns a path of lines and quadratic and cubic
+Beziers into closed region loops. It is written for glyph outlines (`packages/text`) and SVG paths
+(M5's import) alike and knows about neither: a path is plain data.
+
+```ts
+const path: PathCommand[] = [
+  { kind: 'moveTo', to: [0, 0] },
+  { kind: 'lineTo', to: [10, 0] },
+  { kind: 'quadTo', control: [12, 5], to: [10, 10] },
+  { kind: 'cubicTo', control1: [7, 12], control2: [3, 12], to: [0, 10] },
+  { kind: 'close' },
+];
+const { regions, issues } = outlineRegions(path);
+regions[0].outer.segments; // lines and Beziers, counter-clockwise
+regions[0].holes; // clockwise loops
+```
+
+**Contours.** Each `moveTo` starts a contour, counted from 0 (a bare `moveTo` counts and draws
+nothing). A contour that does not end where it started is closed with a straight segment, with an
+`open-contour` warning unless the path said `close`. Drawing after `close` continues from the
+contour's start, as in SVG. Segments shorter than the tolerance are dropped (glyphs often start with
+a zero-length line), ends that agree within it are joined exactly, and a Bezier whose control points
+lie on its chord becomes a line. A contour that encloses no area is ignored (`empty-contour`).
+
+**Fill rule and nesting.** The fill rule is `nonzero` (TrueType and CFF glyphs) unless
+`fillRule: 'evenodd'` is asked for. When no contours cross or touch, every contour has one winding
+number outside it and one inside it, and it is kept when exactly one side is filled: outer loops
+(fill inside) run counter-clockwise, holes (fill outside) clockwise, and each hole goes under the
+smallest outer loop around it. A contour with fill on both sides, such as a same-direction contour
+inside another under `nonzero`, bounds nothing and is dropped. An island inside a hole is a region of
+its own.
+
+**Overlaps are merged.** Contours that cross or touch, which every composite glyph with an accent,
+bar or slash component has (`Ç`, `Ð`, `Ø` in Inter Bold), as do variable-font instances and
+overlapping SVG shapes, are merged: every segment is cut where another meets it (lines and Beziers
+intersected by subdivision, collinear overlaps by their ends), each piece is kept when the fill rule
+gives fill on exactly one side of it, turned so the fill is on its left, and the pieces are chained
+into loops, taking the sharpest left turn where several leave one point, so loops that touch at a
+point stay two simple loops. Beziers are cut exactly (de Casteljau), so merged loops are still lines
+and Beziers. A shared edge between two filled shapes disappears, and a contour drawn twice counts
+once. The result carries a `merged` issue (severity `info`) naming the contours involved. Merging
+gives up only on curves that partly run on top of each other (a Bezier and a piece of the same
+curve); the path is then refused with a `crossing` error and no regions, never passed on as
+overlapping loops.
+
+**Segment sources.** Every segment says where it came from: `contour`, `index` (the drawing
+command within the contour, from 0, not counting the `moveTo`; a closing segment gets the next
+index), `split` (its position among the pieces merging cut the command into, else 0), `piece` (its
+position among the lines and arcs `arcs` made of it, else 0) and `reversed` (it runs against the
+command). The first four are unique within a result and stable as long as the path is, so a caller
+can build edge names from them (T3.2c builds glyph edge ids from them). `split` and `piece` are
+positional, so names that use them are fragile in the T0.5 sense. A loop's `contour` is its
+contour's index, or the lowest of the contours merged into it; regions are ordered by it.
+
+**Areas.** `loop.area` is the loop's signed area, exact for lines, Beziers (Green's theorem with
+three-point Gauss-Legendre, exact for cubics) and arcs; `outlineRegionArea(region)` subtracts the
+holes. `loopArea(segments)` takes any loop of segments.
+
+**Arcs.** With `arcs: { tolerance }`, every Bezier of the result is replaced by circular arcs and
+lines within that tolerance (an arc through the piece's ends and midpoint, checked at 31 points, the
+piece halved until it fits; flat pieces become lines), for consumers that take lines and arcs only.
+Arcs are `{ center, start, end, clockwise }` in loop order. The tests check the two-sided distance
+between each Bezier and its replacement against the tolerance on dense samples.
+
+**Tolerance.** `tolerance` (default 1e-6 times the path's extent, at least 1e-9, as
+`detectRegions`) decides which points are one and which segments are degenerate. `flattenSegment`
+gives a polyline of any segment, for drawing. `tolerance`, `arcs.tolerance` and `flattenSegment`'s
+tolerance must be finite and above 0; anything else throws a `RangeError` (a caller's mistake, not the path's).
+
+**Limits.** Merging and the crossing test grow faster than linearly (640 bars all crossing each other
+took 26 s to merge), and paths come from user fonts and SVG files, so every call is bounded. A path
+of more than `MAX_OUTLINE_COMMANDS` (100,000) commands is refused up front; past that, every step
+draws on a budget of `MAX_OUTLINE_WORK` (250 million elementary steps: a chord or segment test, a
+polygon vertex a winding count visits, an arc fit, weighted by cost) and flattening may make at most
+`MAX_OUTLINE_POINTS` (1,000,000) vertices, which bounds memory. Running out of either gives a
+`too-complex` error and no regions, in about a second or less on a desktop (the 640 bars now fail in
+0.8 s). The most demanding glyph of Inter Bold up to U+024F (`ø`, merged, then turned into arcs)
+takes 7.9 million steps and 30,000 vertices, a thirtieth of the budget; 120 bars through one point
+or twenty overlapping circles still merge.
+Callers run `outlineRegions` on untrusted paths in a worker with a time limit all the same
+(`packages/text`'s README, "Untrusted fonts").
+
+| Issue           | Severity | Meaning                                                             |
+| --------------- | -------- | ------------------------------------------------------------------- |
+| `crossing`      | error    | contours overlap in a way that cannot be merged; no regions         |
+| `not-finite`    | error    | a coordinate is NaN or infinite; no regions                         |
+| `too-complex`   | error    | the path is over the command, work or vertex limit; no regions      |
+| `open-contour`  | warning  | a contour without `close` ended away from its start; closed         |
+| `empty-contour` | warning  | a contour encloses no area; ignored                                 |
+| `merged`        | info     | contours that crossed or touched were merged; `contours` lists them |
+
 ## Performance
 
 Measured in Node by `src/latency.test.ts` on one coupled 50-entity system (the T0.4 chain of ten
@@ -350,4 +443,8 @@ between updates), dragging, the service's coalescing and recovery from an out-of
 the RPC over a `MessageChannel`. Region tests (`regions.test.ts`, `region-profile.test.ts`,
 `region-mesh.test.ts`) cover the cases in [Regions](#regions), fills whose triangles add up to the
 flattened region, and 60 random grid-snapped rectangle sets whose faces must tile exactly the area
-their outlines enclose.
+their outlines enclose. `outline.test.ts` covers loops, winding, nesting, clean-up, merging
+(crossing and touching contours, a bar through a ring, a figure eight, curves crossing lines,
+duplicates, and the refusal of coincident curves), the limits (hundreds of crossing contours, too
+many commands or vertices, an arc tolerance too fine to fit, invalid tolerances), exact areas, and
+the arc approximation's distance to the Beziers both ways.

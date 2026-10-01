@@ -1,7 +1,7 @@
-// The sketch package without its solver: the data model, ids, splitting, placement, regions and
-// region fills, validation. Pure TypeScript with no planegcs at runtime, so the app's main bundle
-// (drawing, snapping, region fills, placement maths) loads none of the solver's glue; the solver
-// runs in its worker (`./worker`), reached through `./rpc`.
+// The sketch package without its solver: the data model, ids, splitting, placement, regions,
+// region fills, outlines (paths to region loops), validation. Pure TypeScript with no planegcs at
+// runtime, so the app's main bundle (drawing, snapping, region fills, placement maths) loads none
+// of the solver's glue; the solver runs in its worker (`./worker`), reached through `./rpc`.
 
 export * from './model';
 export {
@@ -54,6 +54,24 @@ export {
   type FillDeflection,
   type RegionFill,
 } from './region-mesh';
+export {
+  MAX_OUTLINE_COMMANDS,
+  MAX_OUTLINE_POINTS,
+  MAX_OUTLINE_WORK,
+  bezierPoint,
+  flattenSegment,
+  loopArea,
+  outlineRegionArea,
+  outlineRegions,
+  type OutlineIssue,
+  type OutlineIssueCode,
+  type OutlineLoop,
+  type OutlineOptions,
+  type OutlineRegion,
+  type OutlineResult,
+  type OutlineSegment,
+  type PathCommand,
+} from './outline';
 export {
   evaluateValues,
   pointKey,
