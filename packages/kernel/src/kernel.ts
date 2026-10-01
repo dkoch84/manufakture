@@ -14,7 +14,14 @@
 
 import type { TopoDS_Edge, TopoDS_Face, TopoDS_Shape } from 'libcascade/single/init';
 import { KernelError, isFatalWasmError } from './errors';
-import { MAX_STEP_BYTES, decodeBase64, readStep, writeStep } from './exchange';
+import {
+  MAX_STEP_BYTES,
+  decodeBase64,
+  readStep,
+  writeStep,
+  writeStepAssembly,
+  type StepAssemblyLayout,
+} from './exchange';
 import { collectHistory, resultMaps, type HistorySource, type ResultMaps } from './history';
 import { interferenceOf, type PlacedItem } from './interference';
 import { tessellate } from './mesh';
@@ -927,23 +934,26 @@ export class Kernel {
 
   /**
    * One AP214 STEP file of the given shapes, each a top-level product with
-   * its name (see exchange.ts). Lengths in millimetres.
+   * its name; with `assembly`, an assembly of them: each part once, each
+   * instance a placed component (see exchange.ts). Lengths in millimetres.
    */
-  exportStep(bodies: readonly { shape: ShapeId; name: string }[]): Uint8Array {
-    return this.op('exportStep', (s) =>
-      writeStep(
-        this.oc,
-        s,
-        bodies.map((b) => {
-          if (typeof b.name !== 'string' || b.name.length === 0) {
-            throw new KernelError('exportStep', 'every body needs a name', {
-              code: 'invalid-argument',
-            });
-          }
-          return { shape: this.get(b.shape, 'exportStep'), name: b.name };
-        }),
-      ),
-    );
+  exportStep(
+    bodies: readonly { shape: ShapeId; name: string }[],
+    assembly?: StepAssemblyLayout,
+  ): Uint8Array {
+    return this.op('exportStep', (s) => {
+      const resolved = bodies.map((b) => {
+        if (typeof b.name !== 'string' || b.name.length === 0) {
+          throw new KernelError('exportStep', 'every body needs a name', {
+            code: 'invalid-argument',
+          });
+        }
+        return { shape: this.get(b.shape, 'exportStep'), name: b.name };
+      });
+      return assembly === undefined
+        ? writeStep(this.oc, s, resolved)
+        : writeStepAssembly(this.oc, s, resolved, assembly);
+    });
   }
 
   /**

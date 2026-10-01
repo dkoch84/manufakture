@@ -1136,16 +1136,28 @@ export function App({
       }
       setIoBusy(true);
       setIoStatus({ error: false, text: 'Exporting...' });
-      // The export code (STL, 3MF with its zip library, STEP) loads on first use.
-      import('./io/actions')
-        .then(({ exportBodies }) =>
-          exportBodies(exchanger, format, {
-            tolerance,
-            documentName: document.name,
-            // The active part's chosen bodies; a scene without regen exports what it holds.
-            ...(loader.regenerator ? { bodies: exportable.filter((b) => ids.includes(b.id)) } : {}),
-          }),
-        )
+      // The export code (STL, 3MF with its zip library, STEP) loads on first use. An assembly is
+      // exported whole, its parts placed where the last regen solved its instances.
+      (assemblyId !== null
+        ? import('./io/assemblyExport').then(({ assemblyExportPlan, exportAssembly }) => {
+            const plan = assemblyExportPlan(shownDocument, assemblyId, {
+              parts: allParts,
+              assemblies: modelAssemblies,
+              sources: modelSources,
+            });
+            return plan.ok ? exportAssembly(exchanger, format, plan.value, { tolerance }) : plan;
+          })
+        : import('./io/actions').then(({ exportBodies }) =>
+            exportBodies(exchanger, format, {
+              tolerance,
+              documentName: document.name,
+              // The active part's chosen bodies; a scene without regen exports what it holds.
+              ...(loader.regenerator
+                ? { bodies: exportable.filter((b) => ids.includes(b.id)) }
+                : {}),
+            }),
+          )
+      )
         .then(
           (r) => {
             if (r.ok) for (const f of r.value) downloadBytes(f.bytes, f.name, f.type);
@@ -1156,7 +1168,16 @@ export function App({
         )
         .finally(() => setIoBusy(false));
     },
-    [loader, document.name, exportable],
+    [
+      loader,
+      document.name,
+      exportable,
+      assemblyId,
+      shownDocument,
+      allParts,
+      modelAssemblies,
+      modelSources,
+    ],
   );
 
   // Every configuration, one file per row, each from its own regen; the files download as they
@@ -1536,9 +1557,8 @@ export function App({
             disabled={sketching.active || dialog !== null || exportAll !== null || locked}
           />
           <ExportMenu
-            disabled={
-              sketching.active || ioBusy || !loader.exchanger || locked || assemblyId !== null
-            }
+            disabled={sketching.active || ioBusy || !loader.exchanger || locked}
+            assembly={assemblyId !== null}
             bodies={exportable}
             onExport={onExport}
             configurations={shared ? configurationCount : 0}

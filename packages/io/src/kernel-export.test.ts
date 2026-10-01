@@ -1,7 +1,8 @@
 // Real kernel meshes through the export path: every body the kernel makes
 // welds into a watertight mesh (seams, poles and apexes included) at every
 // tolerance preset, its volume approaches the exact B-rep volume as the
-// tolerance tightens, and the STL and 3MF written from it read back intact.
+// tolerance tightens, and the STL and 3MF written from it read back intact,
+// for an assembly too (each body meshed once, instances placed).
 
 import { applyFeature, type FeatureInput, type Kernel, type ShapeId } from '@manufakture/kernel';
 import { createNodeKernel } from '@manufakture/kernel/node';
@@ -10,14 +11,17 @@ import {
   EXPORT_TOLERANCES,
   deflectionOf,
   export3mf,
+  export3mfAssembly,
   exportMesh,
   exportStl,
+  exportStlAssembly,
+  type ExportAssembly,
   type ExportTolerancePreset,
 } from './export';
 import { checkManifold } from './manifold';
 import { meshProperties } from './mesh';
 import { parseStl } from './stl';
-import { validate3mf } from './threemf';
+import { buildMeshes, validate3mf } from './threemf';
 
 let k: Kernel;
 
@@ -185,5 +189,40 @@ describe('STL and 3MF from kernel bodies', () => {
     );
     expect(() => deflectionOf({ chordal: 0, angular: 0.1 })).toThrow(RangeError);
     k.release(box);
+  });
+});
+
+describe('an assembly from kernel bodies', () => {
+  it('3MF and STL: the demo part meshed once, placed twice, watertight, at the placements', () => {
+    const part = demoPart();
+    const deflection = deflectionOf(EXPORT_TOLERANCES.normal);
+    const assembly: ExportAssembly = {
+      bodies: [{ name: 'Demo part', mesh: k.mesh(part, deflection) }],
+      parts: [{ name: 'Demo part', bodies: [0] }],
+      instances: [
+        { part: 0, name: 'Left', placement: { translation: [0, 0, 0], rotation: [0, 0, 0, 1] } },
+        {
+          part: 0,
+          name: 'Right',
+          // A quarter turn about z, then 100 mm along x.
+          placement: { translation: [100, 0, 0], rotation: [0, 0, Math.SQRT1_2, Math.SQRT1_2] },
+        },
+      ],
+    };
+    const exact = k.properties(part).volume;
+    const r = validate3mf(export3mfAssembly(assembly));
+    expect(r.problems).toEqual([]);
+    expect(r.parsed!.objects).toHaveLength(1);
+    expect(r.parsed!.items).toHaveLength(2);
+    const built = buildMeshes(r.parsed!);
+    const right = meshProperties(built[1]!.mesh);
+    expect(right.volume / exact).toBeCloseTo(1, 2);
+    // The block is 60 x 40 about the origin; turned, 40 x 60 about (100, 0).
+    right.boundingBox!.min.forEach((v, i) => expect(v).toBeCloseTo([80, -30, 0][i]!, 3));
+    right.boundingBox!.max.forEach((v, i) => expect(v).toBeCloseTo([120, 30, 20][i]!, 3));
+
+    const stl = parseStl(exportStlAssembly(assembly).bytes);
+    expect(meshProperties(stl.mesh).volume / (2 * exact)).toBeCloseTo(1, 2);
+    k.release(part);
   });
 });

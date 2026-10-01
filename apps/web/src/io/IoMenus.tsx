@@ -1,8 +1,9 @@
 // The Export menu (STL, 3MF, STEP, with the mesh tolerance and, in a part of
 // several bodies, which bodies to write: the shown ones unless changed; a hidden
-// body is never written unless ticked), the choice to export every configuration
-// with its progress, and the Import button (a STEP or STL file picker), in the
-// app header.
+// body is never written unless ticked; in an assembly, the whole assembly with
+// its parts placed), the choice to export every configuration with its
+// progress, and the Import button (a STEP or STL file picker), in the app
+// header.
 
 import { EXPORT_TOLERANCES, type ExportTolerancePreset } from '@manufakture/io';
 import { useEffect, useRef, useState } from 'react';
@@ -16,6 +17,13 @@ const FORMATS: readonly [ExportFormat, string, string][] = [
   ['stl-each', 'STL, one file per body', 'Binary STL, a file for each body'],
   ['3mf', '3MF', '3MF for slicers: millimetres, one named object per body'],
   ['step', 'STEP', 'STEP AP214: the exact B-rep, one named product per body'],
+];
+
+/** In an assembly: the whole assembly, each part once and placed per instance; one file. */
+const ASSEMBLY_FORMATS: readonly [ExportFormat, string, string][] = [
+  ['stl', 'STL', 'Binary STL, every instance placed, in one file'],
+  ['3mf', '3MF', '3MF for slicers: one object per part, placed once per instance'],
+  ['step', 'STEP', 'STEP AP214 assembly: each part once, every instance a placed component'],
 ];
 
 const TOLERANCE_LABELS: Record<ExportTolerancePreset, string> = {
@@ -32,6 +40,11 @@ function toleranceTitle(preset: ExportTolerancePreset): string {
 
 export interface ExportMenuProps {
   disabled?: boolean;
+  /**
+   * The tab is an assembly: the menu exports it whole (no body choice, no one file per body, no
+   * configurations).
+   */
+  assembly?: boolean;
   /** The bodies of the part; with several, the menu lets the user choose (default: none known). */
   bodies?: readonly ExportableBody[];
   /** `ids`: the bodies chosen, in body order. */
@@ -53,11 +66,14 @@ const NO_TICKS: ReadonlyMap<string, boolean> = new Map();
 
 export function ExportMenu({
   disabled = false,
-  bodies = NO_BODIES,
+  assembly = false,
+  bodies: givenBodies = NO_BODIES,
   onExport,
-  configurations = 0,
+  configurations: givenConfigurations = 0,
   onExportAll,
 }: ExportMenuProps) {
+  const bodies = assembly ? NO_BODIES : givenBodies;
+  const configurations = assembly ? 0 : givenConfigurations;
   const [open, setOpen] = useState(false);
   const [tolerance, setTolerance] = useState<ExportTolerancePreset>('normal');
   // The ticks the user changed while the menu is open; every other body follows its visibility,
@@ -91,7 +107,11 @@ export function ExportMenu({
           if (!open) setTicks(new Map());
           setOpen(!open);
         }}
-        title="Export the bodies as STL, 3MF or STEP"
+        title={
+          assembly
+            ? 'Export the assembly as STL, 3MF or STEP'
+            : 'Export the bodies as STL, 3MF or STEP'
+        }
       >
         Export
       </button>
@@ -102,7 +122,7 @@ export function ExportMenu({
           aria-label="Export format"
           onKeyDown={(e) => e.key === 'Escape' && setOpen(false)}
         >
-          {FORMATS.map(([format, label, title]) => (
+          {(assembly ? ASSEMBLY_FORMATS : FORMATS).map(([format, label, title]) => (
             <button
               key={format}
               type="button"

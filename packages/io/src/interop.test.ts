@@ -1,6 +1,6 @@
 // Interoperability with other programs, when they are installed: FreeCAD
 // reopens our STEP (volume, face count, bounding box) and PrusaSlicer's CLI
-// slices our 3MF and STL (OrcaSlicer's CLI takes other flags, so it is not
+// slices our 3MF and STL, an assembly's included (OrcaSlicer's CLI takes other flags, so it is not
 // picked up; OrcaSlicer itself is checked by hand, see
 // docs/user/import-export.md). Each check is
 // skipped when its program is missing, so local runs need neither; the
@@ -20,7 +20,15 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { EXPORT_TOLERANCES, deflectionOf, export3mf, exportStl } from './export';
+import {
+  EXPORT_TOLERANCES,
+  deflectionOf,
+  export3mf,
+  export3mfAssembly,
+  exportStl,
+  exportStlAssembly,
+  type ExportAssembly,
+} from './export';
 
 function command(envName: string, candidates: string[]): string[] | null {
   const given = process.env[envName]?.trim();
@@ -95,6 +103,35 @@ describe.skipIf(!slicer)('a slicer slices our files', () => {
     const mesh = k.mesh(part, deflectionOf(EXPORT_TOLERANCES.normal));
     const file = join(dir, 'demo.stl');
     writeFileSync(file, exportStl([{ name: 'Demo part', mesh }])[0]!.bytes);
+    slice(file, 20);
+  });
+});
+
+describe.skipIf(!slicer)('a slicer slices our assembly files', () => {
+  /** The demo part twice: as it is, and turned a quarter about z next to it, both on the bed. */
+  const assembly = (): ExportAssembly => ({
+    bodies: [{ name: 'Demo part', mesh: k.mesh(part, deflectionOf(EXPORT_TOLERANCES.normal)) }],
+    parts: [{ name: 'Demo part', bodies: [0] }],
+    instances: [
+      { part: 0, name: 'Left', placement: { translation: [0, 0, 0], rotation: [0, 0, 0, 1] } },
+      {
+        part: 0,
+        name: 'Right',
+        // x 10..70, y 10..50 turns to x -50..-10, y 10..70; then x 80..120.
+        placement: { translation: [130, 0, 0], rotation: [0, 0, Math.SQRT1_2, Math.SQRT1_2] },
+      },
+    ],
+  });
+
+  it('3MF with two placed instances', () => {
+    const file = join(dir, 'assembly.3mf');
+    writeFileSync(file, export3mfAssembly(assembly()));
+    slice(file, 20);
+  });
+
+  it('STL of the placed instances merged', () => {
+    const file = join(dir, 'assembly.stl');
+    writeFileSync(file, exportStlAssembly(assembly()).bytes);
     slice(file, 20);
   });
 });

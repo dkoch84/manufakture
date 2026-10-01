@@ -51,6 +51,32 @@ describe('the Export menu', () => {
     expect(onExport).toHaveBeenCalledWith('3mf', 'normal', ['b']);
   });
 
+  it('in an assembly exports it whole: no body choice, one file, no configurations', () => {
+    const onExport = vi.fn();
+    render(
+      <ExportMenu
+        assembly
+        bodies={[body('a'), body('b', true)]}
+        configurations={3}
+        onExportAll={vi.fn()}
+        onExport={onExport}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Export' }).title).toBe(
+      'Export the assembly as STL, 3MF or STEP',
+    );
+    open();
+    expect(screen.getAllByRole('menuitem').map((m) => m.textContent)).toEqual([
+      'STL',
+      '3MF',
+      'STEP',
+    ]);
+    expect(screen.queryByRole('checkbox')).toBeNull();
+    expect(screen.queryByTestId('export-every-configuration')).toBeNull();
+    fireEvent.click(item('3mf'));
+    expect(onExport).toHaveBeenCalledWith('3mf', 'normal', []);
+  });
+
   it('says so when no body is ticked', () => {
     render(<ExportMenu bodies={[body('a', true), body('b', true)]} onExport={vi.fn()} />);
     open();

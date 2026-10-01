@@ -168,5 +168,6 @@ export type {
 } from './service';
 export { createKernelWorkerApi } from './worker-api';
 export type { InitReport, KernelWorkerApi, WorkerApiOptions } from './worker-api';
+export type { StepAssemblyLayout, StepPose } from './exchange';
 export { MAX_STEP_BYTES } from './exchange';
 export { DEFAULT_INTERFERENCE_TOLERANCE } from './interference';

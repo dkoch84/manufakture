@@ -17,6 +17,7 @@
 import type {
   Deflection,
   EdgeRef,
+  ExportStepOp,
   FaceRef,
   FeatureOutcome,
   KernelOp,
@@ -50,6 +51,23 @@ export interface KernelBody {
 
 export type ExchangeResult<T> = { ok: true; value: T } | { ok: false; message: string };
 
+/**
+ * An assembly over the bodies of a STEP export (the kernel's `exportStep` op with `assembly`):
+ * parts name the bodies by index in the ids, instances name the parts and place them.
+ */
+export interface StepAssembly {
+  name: string;
+  parts: readonly { name: string; bodies: readonly number[] }[];
+  instances: readonly {
+    part: number;
+    name: string;
+    pose: {
+      translation: readonly [number, number, number];
+      rotation: readonly [number, number, number, number];
+    };
+  }[];
+}
+
 export interface Exchanger {
   /** The part bodies that export writes, in scene order; never reference bodies. */
   bodies(): { id: string; name: string }[];
@@ -61,10 +79,14 @@ export interface Exchanger {
     deflection: Deflection,
     names?: ReadonlyMap<string, string>,
   ): Promise<ExchangeResult<{ name: string; mesh: MeshData }[]>>;
-  /** One STEP file of the bodies, each a named product (`names.get(id)`, or its registered name). */
+  /**
+   * One STEP file of the bodies, each a named product (`names.get(id)`, or its registered name);
+   * with `assembly`, an assembly of them: each part once, each instance a placed component.
+   */
   exportStep(
     ids: readonly string[],
     names?: ReadonlyMap<string, string>,
+    assembly?: StepAssembly,
   ): Promise<ExchangeResult<Uint8Array>>;
   /**
    * Read a STEP file into a reference body named after the import feature
@@ -225,20 +247,17 @@ export function kernelExchange(
       return { ok: true, value: out };
     },
 
-    async exportStep(ids, names) {
+    async exportStep(ids, names, assembly) {
       const c = client();
       const found = shapesOf(ids, names);
       if (!found.ok) return found;
       if (c === null) return { ok: false, message: 'The kernel is not running.' };
-      const reply = await c.submit(
-        [
-          {
-            op: 'exportStep',
-            bodies: found.value.map((b) => ({ shape: b.shape, name: b.name })),
-          },
-        ] as const,
-        c.latestGeneration,
-      );
+      const op: ExportStepOp & { assembly?: StepAssembly } = {
+        op: 'exportStep',
+        bodies: found.value.map((b) => ({ shape: b.shape, name: b.name })),
+      };
+      if (assembly !== undefined) op.assembly = assembly;
+      const reply = await c.submit([op] as const, c.latestGeneration);
       if (reply === null || reply.status !== 'done') return { ok: false, message: DROPPED };
       const [r] = reply.results;
       if (!r.ok) return { ok: false, message: `STEP export failed: ${r.error.message}` };

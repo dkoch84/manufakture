@@ -4,8 +4,14 @@
 
 import { checkManifold, type ManifoldReport } from './manifold';
 import { mergeMeshes, weld, type NamedMesh, type TriangleSoup, type TriMesh } from './mesh';
+import { placementMatrix, transformMesh, type Placement } from './placement';
 import { writeBinaryStl } from './stl';
-import { write3mf, type ThreeMfWriteOptions } from './threemf';
+import {
+  write3mf,
+  type ThreeMfBuildItem,
+  type ThreeMfObjectInput,
+  type ThreeMfWriteOptions,
+} from './threemf';
 
 /**
  * Export-time tessellation tolerances, the kernel's `Deflection`: `chordal`
@@ -94,6 +100,101 @@ export function export3mf(
   options: ThreeMfWriteOptions = {},
 ): Uint8Array {
   return write3mf(bodies.map(exportMesh), options);
+}
+
+/**
+ * An assembly to export: the bodies of its parts, each meshed once in its part's coordinates,
+ * the parts (by body index), and the instances placing them.
+ */
+export interface ExportAssembly {
+  bodies: readonly ExportBody[];
+  /** Each part's name and its bodies, by index in `bodies`. */
+  parts: readonly { name: string; bodies: readonly number[] }[];
+  /** Each instance: its part (by index in `parts`), its name and where it is. */
+  instances: readonly { part: number; name: string; placement: Placement }[];
+}
+
+/** Why `assembly` cannot be exported, or null; every body and part must be used. */
+function assemblyProblem(assembly: ExportAssembly): string | null {
+  const { bodies, parts, instances } = assembly;
+  if (instances.length === 0) return 'the assembly has no instances';
+  const owner = new Set<number>();
+  for (const [p, part] of parts.entries()) {
+    if (part.bodies.length === 0) return `part ${p} has no bodies`;
+    for (const b of part.bodies) {
+      if (!Number.isInteger(b) || b < 0 || b >= bodies.length || owner.has(b)) {
+        return `part ${p}: body ${b} is not in the list, or in another part`;
+      }
+      owner.add(b);
+    }
+  }
+  if (owner.size !== bodies.length) return 'every body must belong to a part';
+  const used = new Set<number>();
+  for (const i of instances) {
+    if (!Number.isInteger(i.part) || i.part < 0 || i.part >= parts.length) {
+      return `instance ${i.name} names part ${i.part}, which is not in the list`;
+    }
+    used.add(i.part);
+  }
+  if (used.size !== parts.length) return 'every part needs an instance';
+  return null;
+}
+
+/**
+ * A 3MF package of an assembly: one mesh object per body (welded and checked once, however many
+ * instances show it); a part of one body is that object, named after the part, and a part of
+ * several bodies is an object of components (its bodies, unmoved) named after the part; one
+ * build item per instance, placed by its transform.
+ */
+export function export3mfAssembly(
+  assembly: ExportAssembly,
+  options: Omit<ThreeMfWriteOptions, 'items'> = {},
+): Uint8Array {
+  const why = assemblyProblem(assembly);
+  if (why !== null) throw new RangeError(why);
+  const meshes = assembly.bodies.map(exportMesh);
+  const objects: ThreeMfObjectInput[] = [];
+  const partObject = assembly.parts.map((part) => {
+    if (part.bodies.length === 1) {
+      objects.push({ name: part.name, mesh: meshes[part.bodies[0]!]!.mesh });
+      return objects.length - 1;
+    }
+    const first = objects.length;
+    for (const b of part.bodies) objects.push(meshes[b]!);
+    objects.push({
+      name: part.name,
+      components: part.bodies.map((_, k) => ({ object: first + k })),
+    });
+    return objects.length - 1;
+  });
+  const items: ThreeMfBuildItem[] = assembly.instances.map((i) => ({
+    object: partObject[i.part]!,
+    transform: placementMatrix(i.placement),
+  }));
+  return write3mf(objects, { ...options, items });
+}
+
+/**
+ * One binary STL of an assembly: every instance's bodies moved into place and merged (STL has
+ * no instances or transforms). Each body is welded and checked once.
+ */
+export function exportStlAssembly(
+  assembly: ExportAssembly,
+  options: { fileName?: string } = {},
+): StlFile {
+  const why = assemblyProblem(assembly);
+  if (why !== null) throw new RangeError(why);
+  const meshes = assembly.bodies.map(exportMesh);
+  const placed: TriMesh[] = [];
+  for (const i of assembly.instances) {
+    const m = placementMatrix(i.placement);
+    for (const b of assembly.parts[i.part]!.bodies) placed.push(transformMesh(meshes[b]!.mesh, m));
+  }
+  const name = options.fileName ?? 'assembly';
+  return {
+    name: fileName(name, 'stl'),
+    bytes: writeBinaryStl(mergeMeshes(placed), { header: name }),
+  };
 }
 
 /** Longest base name `fileName` returns, in UTF-8 bytes (file systems allow 255 with the extension). */

@@ -1,12 +1,19 @@
 // STEP export and import against the real libcascade, in Node: round trips
 // (volume, face count, bounding box), product names and units in the file,
 // the `import` feature (fragile face names, booleans against the body), the
-// `exportStep` and `importStep` ops through the service, and no leaked
-// embind objects. One instance per describe block that needs its own.
+// `exportStep` and `importStep` ops through the service, assemblies (each
+// part once, instances as located components, read back through XCAF), and
+// no leaked embind objects. One instance per describe block that needs its own.
 
 import { beforeAll, describe, expect, it } from 'vitest';
 import { KernelError } from './errors';
-import { MAX_STEP_BYTES } from './exchange';
+import {
+  MAX_STEP_BYTES,
+  stepAssemblyProblem,
+  writeStepAssembly,
+  type StepAssemblyLayout,
+  type StepPose,
+} from './exchange';
 import { type ExtrudeInput, type ImportInput } from './features';
 import {
   apply,
@@ -22,9 +29,11 @@ import {
 import { Kernel } from './kernel';
 import { isPositional, pickFace, resolveFace } from './naming';
 import { createNodeInstance, createNodeKernel, createNodeService } from './node';
+import { withScope, type Oc } from './occt';
 import { collectTransferables, type KernelService } from './service';
 import { track, type Tracker } from './track';
-import type { ShapeId } from './types';
+import type { ShapeId, Vec3 } from './types';
+import type { TopoDS_Shape } from 'libcascade/single/init';
 
 let k: Kernel;
 
@@ -306,6 +315,65 @@ describe('the exportStep and importStep ops', () => {
       'invalid-argument',
     ]);
   });
+
+  it('exports an assembly: two boxes from one batch, one product placed twice', async () => {
+    const assembly: StepAssemblyLayout = {
+      name: 'Pair',
+      parts: [{ name: 'Cube', bodies: [0] }],
+      instances: [
+        { part: 0, name: 'Cube 1', pose: { translation: [0, 0, 0], rotation: [0, 0, 0, 1] } },
+        { part: 0, name: 'Cube 2', pose: { translation: [20, 0, 0], rotation: [0, 0, 0, 1] } },
+      ],
+    };
+    const reply = await service.run({
+      generation: ++generation,
+      ops: [
+        { op: 'box', size: [10, 10, 10], keep: false },
+        { op: 'exportStep', bodies: [{ shape: { result: 0 }, name: 'Cube body' }], assembly },
+        {
+          op: 'exportStep',
+          bodies: [{ shape: { result: 0 }, name: 'Cube body' }],
+          assembly: { ...assembly, instances: [] },
+        },
+        { op: 'exportStep', bodies: [{ shape: { result: 0 }, name: 'x' }], assembly: 7 as never },
+      ],
+    });
+    expect(reply.results.map((r) => (r.ok ? 'ok' : r.error.code))).toEqual([
+      'ok',
+      'ok',
+      'invalid-argument',
+      'invalid-op',
+    ]);
+    const data = (reply.results[1] as { value: { data: Uint8Array } }).value.data;
+    expect(collectTransferables(reply)).toContain(data.buffer);
+    const read = readAssembly(service.kernel.oc, data);
+    expect(read.components).toHaveLength(2);
+    expect(read.components[0]!.referred).toBe(read.components[1]!.referred);
+    expectMatrix(read.components[1]!.matrix, assembly.instances[1]!.pose);
+    expect(service.stats().shapeCount).toBe(0);
+  });
+
+  it('Kernel.exportStep writes the same assembly as writeStepAssembly', () => {
+    const box = k.box(10, 20, 30);
+    const bodies = [{ shape: box, name: 'Box body' }];
+    const layout: StepAssemblyLayout = {
+      name: 'Two boxes',
+      parts: [{ name: 'Box', bodies: [0] }],
+      instances: [
+        { part: 0, name: 'Box 1', pose: { translation: [0, 0, 0], rotation: [0, 0, 0, 1] } },
+        { part: 0, name: 'Box 2', pose: { translation: [0, 50, 0], rotation: [0, 0, 0, 1] } },
+      ],
+    };
+    const step = text(k.exportStep(bodies, layout));
+    expect(
+      [...step.matchAll(/NEXT_ASSEMBLY_USAGE_OCCURRENCE\('[^']*','([^']*)'/g)].map((m) => m[1]),
+    ).toEqual(['Box 1', 'Box 2']);
+    const back = k.importStep(k.exportStep(bodies, layout));
+    expect(k.properties(back).volume).toBeCloseTo(2 * 6000, 6);
+    expect(() => k.exportStep(bodies, { ...layout, parts: [] })).toThrow(KernelError);
+    k.release(back);
+    k.release(box);
+  });
 });
 
 describe('no leaks', () => {
@@ -389,5 +457,299 @@ describe('no leaks', () => {
     // the file or the model would add megabytes per cycle.
     expect(tk.heapBytes() - warm).toBeLessThan(32 * 1024 * 1024);
     tk.release(box);
+  });
+});
+
+// Assemblies ---------------------------------------------------------------------------------
+
+/** The arena's shape for an id (what `Kernel.exportStep` resolves before writing). */
+function shapeOf(kernel: Kernel, id: ShapeId): TopoDS_Shape {
+  return (kernel as unknown as { get(id: ShapeId, op: string): TopoDS_Shape }).get(id, 'test');
+}
+
+function writeAssembly(
+  kernel: Kernel,
+  bodies: readonly { shape: ShapeId; name: string }[],
+  layout: StepAssemblyLayout,
+): Uint8Array {
+  return withScope(kernel.oc, (s) =>
+    writeStepAssembly(
+      kernel.oc,
+      s,
+      bodies.map((b) => ({ shape: shapeOf(kernel, b.shape), name: b.name })),
+      layout,
+    ),
+  );
+}
+
+/** A unit quaternion turning `angle` radians about the unit axis `axis`. */
+function turn(axis: Vec3, angle: number): StepPose['rotation'] {
+  const h = Math.sin(angle / 2);
+  return [axis[0] * h, axis[1] * h, axis[2] * h, Math.cos(angle / 2)];
+}
+
+/** A pose's 3 x 4 matrix (rows of rotation and translation), as `gp_Trsf.Value` gives it. */
+function matrixOf(pose: StepPose): number[][] {
+  const [x, y, z, w] = pose.rotation;
+  const t = pose.translation;
+  return [
+    [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w), t[0]],
+    [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w), t[1]],
+    [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y), t[2]],
+  ];
+}
+
+interface ReadComponent {
+  /** The tag of the label of the shape it places: equal tags, one product. */
+  referred: number;
+  matrix: number[][];
+  /** Components of the shape it places (0 for a simple shape). */
+  subComponents: number;
+}
+
+/**
+ * Read a STEP file back with XCAF (`STEPCAFControl_Reader`) and list the components of its one
+ * top-level assembly: which shape each places and where.
+ */
+function readAssembly(oc: Oc, bytes: Uint8Array): { roots: number; components: ReadComponent[] } {
+  return withScope(oc, (s) => {
+    const path = '/tmp/assembly-read.step';
+    oc.FS.writeFile(path, bytes);
+    const format = s.own(new oc.TCollection_ExtendedString('MDTV-XCAF'));
+    const doc = s.own(new oc.TDocStd_Document(format));
+    s.own(oc.XCAFApp_Application.GetApplication()).InitDocument(doc);
+    const main = s.own(doc.Main());
+    const reader = s.own(new oc.STEPCAFControl_Reader());
+    try {
+      expect(reader.ReadFile(path)).toBe(oc.IFSelect_ReturnStatus.IFSelect_RetDone);
+      expect(reader.Transfer(doc, s.own(new oc.Message_ProgressRange()))).toBe(true);
+      const tool = s.own(oc.XCAFDoc_DocumentTool.ShapeTool(main));
+      const free = s.own(new oc.NCollection_Sequence_TDF_Label());
+      tool.GetFreeShapes(free);
+      const root = s.own(free.Value(1));
+      expect(oc.XCAFDoc_ShapeTool.IsAssembly(root)).toBe(true);
+      const list = s.own(new oc.NCollection_Sequence_TDF_Label());
+      oc.XCAFDoc_ShapeTool.GetComponents(root, list, false);
+      const components: ReadComponent[] = [];
+      for (let i = 1; i <= list.Length(); i++) {
+        const component = s.own(list.Value(i));
+        const referred = s.own(new oc.TDF_Label());
+        expect(oc.XCAFDoc_ShapeTool.GetReferredShape(component, referred)).toBe(true);
+        const trsf = s.own(s.own(oc.XCAFDoc_ShapeTool.GetLocation(component)).Transformation());
+        components.push({
+          referred: referred.Tag(),
+          matrix: [1, 2, 3].map((r) => [1, 2, 3, 4].map((c) => trsf.Value(r, c))),
+          subComponents: oc.XCAFDoc_ShapeTool.NbComponents(referred, false),
+        });
+      }
+      return { roots: free.Length(), components };
+    } finally {
+      oc.FS.unlink(path);
+      s.own(main.Root()).ForgetAllAttributes(true);
+      reader.ChangeReader().ClearShapes();
+      s.own(reader.ChangeReader().WS()).ClearData(1);
+    }
+  });
+}
+
+function expectMatrix(actual: number[][], pose: StepPose): void {
+  const expected = matrixOf(pose);
+  actual.forEach((row, r) => row.forEach((v, c) => expect(v).toBeCloseTo(expected[r]![c]!, 9)));
+}
+
+describe('STEP assemblies', () => {
+  const near: StepPose = { translation: [100, 0, 0], rotation: [0, 0, 0, 1] };
+  const turned: StepPose = { translation: [0, 50, 10], rotation: turn([0, 0, 1], Math.PI / 2) };
+  const twoBoxes = (box: ShapeId): [{ shape: ShapeId; name: string }[], StepAssemblyLayout] => [
+    [{ shape: box, name: 'Box body' }],
+    {
+      name: 'Two boxes',
+      parts: [{ name: 'Box', bodies: [0] }],
+      instances: [
+        { part: 0, name: 'Box <1>', pose: near },
+        { part: 0, name: 'Box <2>', pose: turned },
+      ],
+    },
+  ];
+
+  it('writes each part once and each instance as a placed occurrence of it', () => {
+    const box = k.box(10, 20, 30);
+    const step = text(writeAssembly(k, ...twoBoxes(box)));
+    expect(step).toContain("FILE_SCHEMA(('AUTOMOTIVE_DESIGN");
+    const products = [...step.matchAll(/PRODUCT\('([^']*)'/g)].map((m) => m[1]);
+    expect(products.sort()).toEqual(['Box', 'Two boxes']);
+    const occurrences = [...step.matchAll(/NEXT_ASSEMBLY_USAGE_OCCURRENCE\('[^']*','([^']*)'/g)];
+    expect(occurrences.map((m) => m[1])).toEqual(['Box <1>', 'Box <2>']);
+    k.release(box);
+  });
+
+  it('round trips two instances of one part with their two placements', () => {
+    const box = k.box(10, 20, 30);
+    const bytes = writeAssembly(k, ...twoBoxes(box));
+
+    // Through XCAF: one assembly, two components, both the same product, each placed.
+    const read = readAssembly(k.oc, bytes);
+    expect(read.roots).toBe(1);
+    expect(read.components).toHaveLength(2);
+    expect(read.components[0]!.referred).toBe(read.components[1]!.referred);
+    expect(read.components.map((c) => c.subComponents)).toEqual([0, 0]);
+    expectMatrix(read.components[0]!.matrix, near);
+    expectMatrix(read.components[1]!.matrix, turned);
+
+    // As geometry: two solids where the placements put them.
+    const back = k.importStep(bytes);
+    const p = k.properties(back);
+    expect(k.solids(back)).toBe(2);
+    expect(p.volume).toBeCloseTo(2 * 6000, 6);
+    const bbox = k.measure(back, [], { body: true }).body!.boundingBox!;
+    // Near: x 100..110, y 0..20, z 0..30. Turned a quarter about z: x -20..0, y 50..60, z 10..40.
+    bbox.min.forEach((v, i) => expect(v).toBeCloseTo([-20, 0, 0][i]!, 6));
+    bbox.max.forEach((v, i) => expect(v).toBeCloseTo([110, 60, 40][i]!, 6));
+    k.release(back);
+    k.release(box);
+  });
+
+  it('writes a part of several bodies as a sub-assembly of named bodies', () => {
+    const plate = k.box(40, 40, 5);
+    const pin = k.cylinder(3, 20, [20, 20, 5]);
+    const lid = k.box(40, 40, 2);
+    const bytes = writeAssembly(
+      k,
+      [
+        { shape: plate, name: 'Plate' },
+        { shape: pin, name: 'Pin' },
+        { shape: lid, name: 'Lid body' },
+      ],
+      {
+        name: 'Fixture',
+        parts: [
+          { name: 'Base', bodies: [0, 1] },
+          { name: 'Lid', bodies: [2] },
+        ],
+        instances: [
+          { part: 0, name: 'Base <1>', pose: { translation: [0, 0, 0], rotation: [0, 0, 0, 1] } },
+          { part: 1, name: 'Lid <1>', pose: { translation: [0, 0, 30], rotation: [0, 0, 0, 1] } },
+        ],
+      },
+    );
+    const step = text(bytes);
+    const products = [...step.matchAll(/PRODUCT\('([^']*)'/g)].map((m) => m[1]);
+    expect(products.sort()).toEqual(['Base', 'Fixture', 'Lid', 'Pin', 'Plate']);
+    const read = readAssembly(k.oc, bytes);
+    expect(read.roots).toBe(1);
+    expect(read.components.map((c) => c.subComponents)).toEqual([2, 0]);
+    const back = k.importStep(bytes);
+    const p = k.properties(back);
+    expect(k.solids(back)).toBe(3);
+    expect(p.volume).toBeCloseTo(40 * 40 * 5 + Math.PI * 9 * 20 + 40 * 40 * 2, 6);
+    const bbox = k.measure(back, [], { body: true }).body!.boundingBox!;
+    expect(bbox.max[2]).toBeCloseTo(32, 6);
+    for (const id of [plate, pin, lid, back]) k.release(id);
+  });
+
+  it('refuses a layout that does not describe an assembly of the bodies', () => {
+    const pose: StepPose = { translation: [0, 0, 0], rotation: [0, 0, 0, 1] };
+    const good: StepAssemblyLayout = {
+      name: 'A',
+      parts: [{ name: 'P', bodies: [0] }],
+      instances: [{ part: 0, name: 'P <1>', pose }],
+    };
+    expect(stepAssemblyProblem(good, 1)).toBeNull();
+    const bad: [Partial<StepAssemblyLayout> | null, number, RegExp][] = [
+      [null, 1, /must be an object/],
+      [{ ...good, name: '' }, 1, /needs a name/],
+      [{ ...good, parts: [] }, 1, /no parts/],
+      [{ ...good, instances: [] }, 1, /no instances/],
+      [{ ...good, parts: [{ name: 'P', bodies: [] }] }, 1, /part 0 has no bodies/],
+      [{ ...good, parts: [{ name: 'P', bodies: [1] }] }, 1, /body 1, which is not/],
+      [{ ...good, parts: [{ name: 'P', bodies: [0] }] }, 2, /every body must belong/],
+      [
+        {
+          ...good,
+          parts: [
+            { name: 'P', bodies: [0] },
+            { name: 'Q', bodies: [0] },
+          ],
+        },
+        1,
+        /body 0 is in parts 0 and 1/,
+      ],
+      [
+        {
+          ...good,
+          parts: [
+            { name: 'P', bodies: [0] },
+            { name: 'Q', bodies: [1] },
+          ],
+        },
+        2,
+        /every part needs an instance/,
+      ],
+      [{ ...good, instances: [{ part: 3, name: 'x', pose }] }, 1, /part 3, which is not/],
+      [{ ...good, instances: [{ part: 0, name: '', pose }] }, 1, /instance 0 needs a name/],
+      [
+        {
+          ...good,
+          instances: [{ part: 0, name: 'x', pose: { ...pose, translation: [0, NaN, 0] } }],
+        },
+        1,
+        /needs a pose/,
+      ],
+      [
+        { ...good, instances: [{ part: 0, name: 'x', pose: { ...pose, rotation: [0, 0, 0, 2] } }] },
+        1,
+        /not a unit quaternion/,
+      ],
+    ];
+    for (const [layout, count, why] of bad) {
+      expect(stepAssemblyProblem(layout as StepAssemblyLayout, count)).toMatch(why);
+    }
+    const box = k.box(1, 1, 1);
+    let error: unknown = null;
+    try {
+      writeAssembly(k, [{ shape: box, name: 'B' }], { ...good, instances: [] });
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(KernelError);
+    expect((error as KernelError).code).toBe('invalid-argument');
+    k.release(box);
+  });
+});
+
+describe('STEP assemblies leak nothing', () => {
+  let tracker: Tracker;
+  let tk: Kernel;
+
+  beforeAll(async () => {
+    tracker = track(await createNodeInstance());
+    tk = new Kernel(tracker.oc);
+  }, 60_000);
+
+  it('deletes every temporary of an assembly export', () => {
+    const a = tk.box(10, 20, 30);
+    const b = tk.cylinder(2, 5);
+    tracker.reset();
+    const layout: StepAssemblyLayout = {
+      name: 'A',
+      parts: [{ name: 'P', bodies: [0, 1] }],
+      instances: [
+        { part: 0, name: 'P <1>', pose: { translation: [1, 2, 3], rotation: [0, 0, 0, 1] } },
+        { part: 0, name: 'P <2>', pose: { translation: [0, 0, 0], rotation: turn([1, 0, 0], 1) } },
+      ],
+    };
+    const bytes = writeAssembly(
+      tk,
+      [
+        { shape: a, name: 'A body' },
+        { shape: b, name: 'B body' },
+      ],
+      layout,
+    );
+    expect(bytes.length).toBeGreaterThan(0);
+    expect(tracker.created()).toBeGreaterThan(10);
+    expect(tracker.liveNames()).toEqual([]);
+    tk.release(a);
+    tk.release(b);
   });
 });

@@ -70,6 +70,10 @@ Letting go records where everything ended up as one step, so **Undo** puts it ba
 
 Volumes are shown in the document's units. Only pairs whose bounding boxes overlap are intersected, so a spread-out assembly is checked quickly whatever its size.
 
+## Exporting
+
+**Export** in an assembly tab saves the whole assembly as STL, 3MF or STEP, each part written once and placed where its instances are; see [Exporting an assembly](import-export.md#exporting-an-assembly).
+
 ## How it is solved
 
 Mates are solved in the background, in the same worker that builds the part studios, so the editor stays responsive while an assembly is solved or dragged. Assemblies that are trees of mates (each instance hanging off a fixed one, as most are) are placed exactly; a closed loop of mates (a four-bar linkage) is solved numerically from where the instances were last. That is why the poses are saved: they choose between the solutions of a loop, and they are where a mate that cannot be solved leaves its instances.

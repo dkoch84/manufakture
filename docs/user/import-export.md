@@ -1,6 +1,6 @@
 # Importing and exporting
 
-**Export** in the header saves the model's bodies as a file for a slicer or another CAD program. **Import** brings a STEP or STL file in as a reference body. Both need the geometry kernel, so they are available once the model has loaded.
+**Export** in the header saves the model's bodies (or a whole assembly) as a file for a slicer or another CAD program. **Import** brings a STEP or STL file in as a reference body. Both need the geometry kernel, so they are available once the model has loaded.
 
 ## Export
 
@@ -20,6 +20,18 @@ When the part has several [bodies](bodies.md), the menu lists them with a checkb
 In a document with [configurations](configurations.md), **Every configuration** in the menu exports one file per configuration.
 
 The file downloads straight away, named after the body (or the document, when there are several bodies). The header says what was saved and how big it is.
+
+### Exporting an assembly
+
+In an [assembly](assemblies.md) tab, **Export** saves the whole assembly, every part where its instances are, in one file named after the assembly:
+
+| Format   | What you get                                                                                                                                                                                 |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **STL**  | One binary STL file with every instance's bodies moved into place                                                                                                                            |
+| **3MF**  | One object per part, written once, and the build places it once per instance; a part of several bodies is one object made of its bodies                                                      |
+| **STEP** | A STEP assembly: each part once, as a product named after the part (a part of several bodies is a sub-assembly of its bodies), and each instance a placed component named after the instance |
+
+Two instances of a part are two placements of one part in 3MF and STEP, not two copies, so a CAD program lists the part once. Suppressed instances are left out, and so are instances that could not be built (the header names them). The positions are those of the last solve: a drag that is still going on is not exported. There is no **STL, one file per body** and no **Every configuration** in an assembly. Colours, materials and print plates are not written yet.
 
 ### Mesh tolerance
 

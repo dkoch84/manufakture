@@ -19,6 +19,7 @@ import {
   type Check,
 } from './checks';
 import { KernelError, type KernelFailure } from './errors';
+import type { StepAssemblyLayout } from './exchange';
 import {
   applyFeature,
   connectorFrame,
@@ -165,10 +166,15 @@ export type MeasureOp = OpCommon & {
   body?: boolean;
 };
 
-/** One AP214 STEP file of the shapes, each a named top-level product. */
+/**
+ * One AP214 STEP file of the shapes, each a named top-level product; with `assembly`, an
+ * assembly of them instead: each part (bodies by index in `bodies`) once, each instance a
+ * placed component (see exchange.ts).
+ */
 export type ExportStepOp = OpCommon & {
   op: 'exportStep';
   bodies: readonly { shape: ShapeRef; name: string }[];
+  assembly?: StepAssemblyLayout;
 };
 /** Read a STEP file (bytes, or base64 text) into a new, unnamed shape. */
 export type ImportStepOp = OpCommon & { op: 'importStep'; data: Uint8Array | string };
@@ -345,7 +351,11 @@ const FIELDS: Record<OpName, [Record<string, Check>, Record<string, Check>]> = {
   ],
   pick: [{ shape: shapeRef, kind: oneOf('face', 'edge', 'vertex'), index: num }, {}],
   measure: [{ shape: shapeRef, targets: arrayOf(measureTarget) }, { body: bool }],
-  exportStep: [{ bodies: arrayOf(shape({ shape: shapeRef, name: str }), true) }, {}],
+  // The assembly's parts and instances are checked by the kernel (`stepAssemblyProblem`).
+  exportStep: [
+    { bodies: arrayOf(shape({ shape: shapeRef, name: str }), true) },
+    { assembly: (v, p) => (isObject(v) ? null : `${p} must be an object`) },
+  ],
   importStep: [
     {
       data: (v, p) =>
@@ -489,6 +499,7 @@ export function executeOp(
       return {
         data: kernel.exportStep(
           op.bodies.map((b) => ({ shape: resolve(b.shape, 'exportStep'), name: b.name })),
+          op.assembly,
         ),
       };
     case 'importStep':

@@ -28,16 +28,30 @@ export {
   CORE_NAMESPACE,
   MODEL_PATH,
   ThreeMfParseError,
+  buildMeshes,
   parse3mf,
   validate3mf,
   write3mf,
   type ModelUnit,
   type ParsedThreeMf,
+  type ThreeMfBuildItem,
+  type ThreeMfComponent,
+  type ThreeMfComponentsInput,
   type ThreeMfItem,
   type ThreeMfObject,
+  type ThreeMfObjectInput,
   type ThreeMfReport,
   type ThreeMfWriteOptions,
 } from './threemf';
+export {
+  IDENTITY_MATRIX,
+  composeMatrices,
+  matrixDeterminant,
+  placementMatrix,
+  transformMesh,
+  type Matrix3x4,
+  type Placement,
+} from './placement';
 export { decodeStepString, isStep, sniffFormat, stepProductNames, type FileFormat } from './step';
 export { fromBase64, importSource, sha256Hex, toBase64, type ImportSourceData } from './encoding';
 export {
@@ -46,9 +60,12 @@ export {
   NotWatertightError,
   deflectionOf,
   export3mf,
+  export3mfAssembly,
   exportMesh,
   exportStl,
+  exportStlAssembly,
   fileName,
+  type ExportAssembly,
   type ExportBody,
   type ExportTolerance,
   type ExportTolerancePreset,
