@@ -7,14 +7,20 @@
 //
 // A part can have several bodies; each has the viewport id `<part id>/<body id>` (`viewBodyId`),
 // and is registered under the name it is exported with when nothing else is asked for.
+//
+// Pinned parts that assembly instances show (`RegenResult.sources`) keep their meshes the same
+// way, by source key. Every body an instance shows is registered under its instance view id
+// (`<assembly id>/<instance id>/<body id>`) with its source body's shape, so a pick on an
+// instance can be turned into a stored reference like a pick on a part (the shape is in the
+// part's own coordinates, which is what references and connectors name).
 
 import type { ManufaktureDocument } from '@manufakture/core';
-import type { RegenResult } from '@manufakture/regen';
+import type { BodyResult, RegenResult } from '@manufakture/regen';
 import type { KernelBody } from '../io/exchange';
 import type { BodyInput } from '../viewport/bodies';
 import { fillPlaceholderNames } from '../viewport/naming';
-import { bodyName, viewBodyId } from './bodies';
-import type { ModelBody, PartModel, Regenerator, RegenView } from './model';
+import { bodyName, instanceViewId, viewBodyId } from './bodies';
+import type { ModelBody, PartModel, Regenerator, RegenView, SourceModel } from './model';
 
 export { viewBodyId } from './bodies';
 
@@ -26,6 +32,13 @@ export interface RegenSource {
 export interface KernelRegenerator extends Regenerator {
   /** Tell the listeners that the kernel lost every body. */
   invalidate(): void;
+}
+
+/** The registry key the instance bodies are tracked under (no part id looks like it). */
+const ASSEMBLIES = '\u0000assemblies';
+
+function byId(list: readonly BodyResult[]): Map<string, BodyResult> {
+  return new Map(list.map((b) => [b.bodyId, b]));
 }
 
 export function kernelRegenerator(
@@ -44,15 +57,41 @@ export function kernelRegenerator(
     for (const id of registered.get(partId) ?? []) if (!keep.has(id)) registry.delete(id);
   };
 
+  /** The bodies of one part or source as viewport bodies, keeping meshes of unchanged ones. */
+  const views = (
+    names: readonly string[],
+    key: string,
+    idOf: (bodyId: string) => string,
+    list: readonly BodyResult[],
+  ) => {
+    const before = bodies.get(key) ?? new Map<string, BodyInput>();
+    const after = new Map<string, BodyInput>();
+    const out: ModelBody[] = [];
+    for (const b of list) {
+      const id = idOf(b.bodyId);
+      let view = b.mesh
+        ? {
+            id,
+            mesh: b.mesh,
+            // Every slot of a regen body has a name; this only guards against a gap.
+            names: fillPlaceholderNames(b.mesh, names),
+            topology: b.topology,
+          }
+        : before.get(b.bodyId);
+      if (view === undefined) continue;
+      if (view.id !== id) view = { ...view, id };
+      after.set(b.bodyId, view);
+      out.push({ bodyId: b.bodyId, creator: b.creator, solids: b.solids, view });
+    }
+    bodies.set(key, after);
+    return out;
+  };
   const apply = (document: ManufaktureDocument, result: RegenResult): RegenView => {
     const parts: PartModel[] = [];
     for (const part of result.parts) {
       const docPart = document.parts.find((p) => p.id === part.partId);
       const partName = docPart?.name ?? part.partId;
-      const before = bodies.get(part.partId) ?? new Map<string, BodyInput>();
-      const after = new Map<string, BodyInput>();
       const ids = new Set<string>();
-      const views: ModelBody[] = [];
       part.bodies.forEach((b, i) => {
         const id = viewBodyId(part.partId, b.bodyId);
         ids.add(id);
@@ -63,38 +102,72 @@ export function kernelRegenerator(
             bodyName({ name: partName }, i, part.bodies.length),
           role: 'part',
         });
-        let view = b.mesh
-          ? {
-              id,
-              mesh: b.mesh,
-              // Every slot of a regen body has a name; this only guards against a gap.
-              names: fillPlaceholderNames(b.mesh, result.names),
-              topology: b.topology,
-            }
-          : before.get(b.bodyId);
-        if (view === undefined) return;
-        if (view.id !== id) view = { ...view, id };
-        after.set(b.bodyId, view);
-        views.push({ bodyId: b.bodyId, creator: b.creator, solids: b.solids, view });
       });
       forget(part.partId, ids);
       registered.set(part.partId, ids);
-      bodies.set(part.partId, after);
       parts.push({
         partId: part.partId,
         features: part.features,
-        bodies: views,
+        bodies: views(
+          result.names,
+          part.partId,
+          (bodyId) => viewBodyId(part.partId, bodyId),
+          part.bodies,
+        ),
       });
     }
-    // Parts that are gone from the document.
+    // Pinned parts that instances show, kept by source key like parts by part id.
+    const sources: SourceModel[] = result.sources.map((src) => ({
+      key: src.key,
+      partId: src.partId,
+      documentName: src.documentName,
+      versionName: src.versionName,
+      bodies: views(result.names, src.key, (bodyId) => `${src.key}/${bodyId}`, src.bodies),
+    }));
+    // Parts and sources that are gone.
+    const kept = new Set([...result.parts.map((p) => p.partId), ...sources.map((x) => x.key)]);
     for (const id of [...bodies.keys()]) {
-      if (!result.parts.some((p) => p.partId === id)) {
+      if (!kept.has(id)) {
         forget(id);
         registered.delete(id);
         bodies.delete(id);
       }
     }
-    return { generation: result.generation, parts, ms: result.ms };
+    // The bodies instances show, by instance view id, with the shape of their source's body.
+    const shapes = new Map<string, Map<string, BodyResult>>();
+    for (const p of result.parts) shapes.set(`part:${p.partId}`, byId(p.bodies));
+    for (const x of result.sources) shapes.set(`source:${x.key}`, byId(x.bodies));
+    const instanceIds = new Set<string>();
+    for (const assembly of result.assemblies) {
+      const docAssembly = document.assemblies.find((a) => a.id === assembly.assemblyId);
+      for (const inst of assembly.instances) {
+        const from =
+          'part' in inst.source
+            ? shapes.get(`part:${inst.source.part}`)
+            : shapes.get(`source:${inst.source.source}`);
+        const name = docAssembly?.instances.find((x) => x.id === inst.instanceId)?.name;
+        for (const bodyId of inst.bodies) {
+          const b = from?.get(bodyId);
+          if (!b) continue;
+          const id = instanceViewId(assembly.assemblyId, inst.instanceId, bodyId);
+          instanceIds.add(id);
+          registry.set(id, {
+            shape: b.shape,
+            name: inst.bodies.length === 1 ? (name ?? id) : `${name ?? id} ${bodyId}`,
+            role: 'part',
+          });
+        }
+      }
+    }
+    forget(ASSEMBLIES, instanceIds);
+    registered.set(ASSEMBLIES, instanceIds);
+    return {
+      generation: result.generation,
+      parts,
+      assemblies: result.assemblies,
+      sources,
+      ms: result.ms,
+    };
   };
 
   return {

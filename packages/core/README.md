@@ -271,8 +271,8 @@ What an assembly uses cannot be removed under it:
   `instanceMates(assembly, id)` lists them). Delete the mates first in the same `batch`.
 - `deleteVariable` refuses while a connector offset or a limit reads the variable (`variableUsers`
   lists `<assembly id>/<mate id>`, and `variableMates(doc, name)` the mates). `renameVariable` and
-  `inlineVariable` rewrite those expressions with `editMate`. `variableUses` does not list them
-  yet.
+  `inlineVariable` rewrite those expressions with `editMate`. `variableUses` lists each as a
+  `mate` use (`{ kind: 'mate', assemblyId, mateId, path, expected }`), after the features.
 
 `mateExpressions(mate)` lists a mate's expressions with the kind each expects, like
 `featureExpressions`; `mateIds`, `mateConnectors`, `mateInstances`, `isPinnedSource` and

@@ -28,7 +28,7 @@ import {
 } from './schema';
 import { DocumentStore } from './store';
 import { validateDocument } from './validate';
-import { inlineVariable, renameVariable } from './variables';
+import { inlineVariable, renameVariable, variableUses } from './variables';
 import { PART, bracket, clone, deepFreeze, mm, unwrap } from './test-helpers';
 
 /** Assemblies (format v7): schema, validation, commands and their inverses, blocking, changes. */
@@ -1017,6 +1017,22 @@ describe('blocking across the document', () => {
       mate: hinge({ limits: { max: mm('swing') } }),
     }).document;
     expect(variableUsers(doc, 'swing')).toEqual(['assembly#1/mate#1']);
+    // And as uses, which the variables table labels: after the features that read it.
+    expect(variableUses(doc, 'swing')).toEqual([
+      {
+        kind: 'mate',
+        assemblyId: A,
+        mateId: 'mate#1',
+        path: ['limits', 'max'],
+        expected: 'angle',
+      },
+    ]);
+    expect(variableUses(doc, 'thickness').map((u) => u.kind)).toEqual(['feature', 'mate']);
+    expect(variableUses(doc, 'thickness')[1]).toMatchObject({
+      kind: 'mate',
+      path: ['b', 'offset', 'translation', 2],
+      expected: 'length',
+    });
     expect(
       mateExpressions(assembly(doc).mates[0]!).map((s) => [s.path.join('.'), s.expected]),
     ).toEqual([

@@ -61,6 +61,7 @@ The user guide lives in `docs/user`:
 - [Configurations](docs/user/configurations.md): variants in a table, switching them, exporting every one
 - [Version history](docs/user/history.md): named versions, the timeline, viewing and restoring a past state
 - [Derived parts](docs/user/derived.md): a part from a version of another document, placed, and updated to newer versions
+- [Assemblies](docs/user/assemblies.md): instances of parts, mates between them, dragging within their freedom
 - [Measuring](docs/user/measure.md): exact measurements, material and mass
 - [The 3D viewport](docs/user/viewport.md): mouse, views, selection and section view
 - [Importing and exporting](docs/user/import-export.md): STL, 3MF, STEP, and checking a 3MF in a slicer

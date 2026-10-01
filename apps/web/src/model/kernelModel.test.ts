@@ -1,7 +1,7 @@
 // The regen worker's per-body results as the app's part bodies: viewport ids, meshes kept while
 // a body is unchanged, and the registry used for measuring, exporting and picking.
 
-import { createDocument } from '@manufakture/core';
+import { applyCommand, createDocument } from '@manufakture/core';
 import type { ShapeId } from '@manufakture/kernel';
 import type { BodyResult, RegenResult } from '@manufakture/regen';
 import { describe, expect, it } from 'vitest';
@@ -29,6 +29,8 @@ function result(generation: number, bodies: BodyResult[]): RegenResult {
     generation,
     names: [...box.names],
     parts: [{ partId: 'part#1', features: [], dirty: [], bodies, consumed: [] }],
+    assemblies: [],
+    sources: [],
     counters: {
       featureOps: 0,
       otherOps: 0,
@@ -79,5 +81,78 @@ describe('kernelRegenerator', () => {
       ['part#1/extrude#1', { shape: 4, name: 'Part 1', role: 'part' }],
     ]);
     expect(viewBodyId('part#1', 'extrude#3')).toBe('part#1/extrude#3');
+  });
+
+  it('keeps pinned sources like parts, and registers every instance body with its source shape', async () => {
+    const instance = (id: string, source: { part: string } | { source: string }) => ({
+      instanceId: id,
+      status: 'ok' as const,
+      source,
+      bodies: ['extrude#1'],
+      transform: { translation: [0, 0, 0] as const, rotation: [0, 0, 0, 1] as const },
+      moved: false,
+      errors: [],
+      warnings: [],
+    });
+    const withAssembly = (generation: number, meshed: boolean, sources = true): RegenResult => ({
+      ...result(generation, [body('extrude#1', 1, meshed)]),
+      assemblies: [
+        {
+          assemblyId: 'assembly#1',
+          outcome: 'solved',
+          dof: 12,
+          instances: [
+            instance('inst#1', { part: 'part#1' }),
+            ...(sources ? [instance('inst#2', { source: 'source:abc:part#1' })] : []),
+          ],
+          mates: [],
+          redundant: [],
+          conflicting: [],
+          issues: [],
+          warnings: [],
+          ms: 0,
+        },
+      ],
+      sources: sources
+        ? [
+            {
+              key: 'source:abc:part#1',
+              documentId: 'other',
+              documentName: 'Knobs',
+              versionId: 'v-1',
+              versionName: 'v1',
+              partId: 'part#1',
+              bodies: [body('extrude#1', 7, meshed)],
+            },
+          ]
+        : [],
+    });
+    const replies = [withAssembly(1, true), withAssembly(2, false), withAssembly(3, false, false)];
+    const registry = new Map<string, KernelBody>();
+    const regen = kernelRegenerator(() => ({ regen: async () => replies.shift()! }), registry);
+    let doc = createDocument({ id: 'd', name: 'D' });
+    const r = applyCommand(doc, { type: 'addAssembly', assemblyId: 'assembly#1', name: 'A' });
+    if (!r.ok) throw new Error(r.error.message);
+    doc = r.value.document;
+
+    const first = (await regen.regen(doc))!;
+    expect(first.assemblies).toHaveLength(1);
+    expect(first.sources!.map((x) => [x.key, x.documentName, x.versionName])).toEqual([
+      ['source:abc:part#1', 'Knobs', 'v1'],
+    ]);
+    const sourceView = first.sources![0]!.bodies[0]!.view;
+    expect(sourceView.id).toBe('source:abc:part#1/extrude#1');
+    expect(registry.get('assembly#1/inst#1/extrude#1')).toMatchObject({ shape: 1, role: 'part' });
+    expect(registry.get('assembly#1/inst#2/extrude#1')).toMatchObject({ shape: 7, role: 'part' });
+
+    // Unchanged: the source keeps its mesh.
+    const second = (await regen.regen(doc))!;
+    expect(second.sources![0]!.bodies[0]!.view).toBe(sourceView);
+
+    // The pinned instance is gone: so are its registration and its source's meshes.
+    const third = (await regen.regen(doc))!;
+    expect(third.sources).toEqual([]);
+    expect(registry.has('assembly#1/inst#2/extrude#1')).toBe(false);
+    expect(registry.has('assembly#1/inst#1/extrude#1')).toBe(true);
   });
 });

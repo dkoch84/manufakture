@@ -2,8 +2,7 @@
 // inlining one (replacing each reference with a literal, then deleting it). Both return one
 // `batch` command, so each is a single undo step, checked once at the end like any batch.
 // Configurations count as uses: a parameter that configures a variable, and a row value that
-// mentions one. Mate connector offsets and limits are rewritten too, but not listed by
-// `variableUses` (whose entries the app's variables table labels); `variableUsers` lists them.
+// mentions one. So do mates: a connector offset or a limit that reads a variable.
 
 import { isValidVariableName } from '@manufakture/units';
 import { variableParameters, type Command, type SimpleCommand } from './commands';
@@ -25,6 +24,14 @@ export type VariableUse =
       /** For a sketch dimension: the constraint's id. */
       constraintId?: string;
     }
+  /** A mate's connector offset or limit (`a.offset.translation.0`, `limits.max`). */
+  | {
+      kind: 'mate';
+      assemblyId: string;
+      mateId: string;
+      path: readonly (string | number)[];
+      expected: ExpressionKind;
+    }
   /** A configuration parameter that configures the variable (it names it, not an expression). */
   | { kind: 'parameter'; parameterId: string }
   /** A configuration row whose value for `parameterId` mentions the variable. */
@@ -36,8 +43,9 @@ function mentions(expression: StoredExpression, name: string): boolean {
 }
 
 /**
- * Every direct use of variable `name`, in document order: variables, then features, then
- * configuration parameters that configure it, then configuration row values that mention it.
+ * Every direct use of variable `name`, in document order: variables, then features, then mates
+ * (assembly by assembly, in creation order), then configuration parameters that configure it,
+ * then configuration row values that mention it.
  */
 export function variableUses(doc: ManufaktureDocument, name: string): VariableUse[] {
   const out: VariableUse[] = [];
@@ -61,6 +69,20 @@ export function variableUses(doc: ManufaktureDocument, name: string): VariableUs
           if (c) use.constraintId = c.id;
         }
         out.push(use);
+      }
+    }
+  }
+  for (const assembly of doc.assemblies) {
+    for (const mate of assembly.mates) {
+      for (const site of mateExpressions(mate)) {
+        if (!mentions(site.expression, name)) continue;
+        out.push({
+          kind: 'mate',
+          assemblyId: assembly.id,
+          mateId: mate.id,
+          path: site.path,
+          expected: site.expected,
+        });
       }
     }
   }

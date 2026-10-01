@@ -239,17 +239,13 @@ export interface RegenResult {
   /** Name table for every mesh in this result (ADR 0007 decision 7). */
   names: string[];
   parts: PartResult[];
-  /**
-   * Per assembly, in document order: instance transforms and mate diagnostics. The engine always
-   * sets it (an empty list without assemblies); optional only so results built by hand before
-   * assemblies existed still type-check.
-   */
-  assemblies?: AssemblyResult[];
+  /** Per assembly, in document order: instance transforms and mate diagnostics (empty without). */
+  assemblies: AssemblyResult[];
   /**
    * Pinned parts of other documents that instances show, with their bodies (and meshes, as for
-   * parts). Always set by the engine, like `assemblies`.
+   * parts); empty when no instance shows one.
    */
-  sources?: SourceResult[];
+  sources: SourceResult[];
   counters: RegenCounters;
   ms: number;
 }

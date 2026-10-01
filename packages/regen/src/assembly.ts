@@ -152,22 +152,40 @@ export function mateValues(mate: Mate, variables: VariableValues): MateValues {
 }
 
 /**
- * One report for a connector from the reports of every body of its instance's part (names are
- * unique across a part's bodies, so at most one finds it): the one that found it, else an
- * ambiguity, else the loss with the fewest missing names.
+ * One report for a connector from the reports of every body its instance shows. Names are unique
+ * across a part's bodies, so normally at most one body finds it, but descendants are not: a face
+ * split since may live on in two bodies. So an exact match wins over any other; else a single
+ * match by another rule (descendant, ancestor, ends, ordinal); several equally good matches on
+ * different bodies are an ambiguity naming those bodies; then an ambiguity within one body; then
+ * the loss with the fewest missing names.
  */
-export function pickReport(reports: readonly ConnectorReport[]): ConnectorReport | undefined {
-  const found = reports.find((r) => r.ok);
-  if (found !== undefined) return found;
-  const ambiguous = reports.find((r) => !r.ok && r.status === 'ambiguous');
-  if (ambiguous !== undefined) return ambiguous;
-  const lost = reports.filter(
-    (r): r is Extract<ConnectorReport, { status: 'lost' }> => !r.ok && r.status === 'lost',
+export function pickReport(
+  reports: readonly { bodyId: string; report: ConnectorReport }[],
+): ConnectorReport | undefined {
+  const found = reports.filter(
+    (r): r is { bodyId: string; report: Extract<ConnectorReport, { ok: true }> } => r.report.ok,
   );
+  const exact = found.filter((r) => r.report.via === 'exact');
+  const best = exact.length > 0 ? exact : found;
+  if (best.length === 1) return best[0]!.report;
+  if (best.length > 1) {
+    const bodies = best.map((r) => r.bodyId).sort();
+    return {
+      ok: false,
+      status: 'ambiguous',
+      candidates: bodies,
+      message: `it matches geometry on ${bodies.length} bodies (${bodies.join(', ')})`,
+    };
+  }
+  const ambiguous = reports.find((r) => !r.report.ok && r.report.status === 'ambiguous');
+  if (ambiguous !== undefined) return ambiguous.report;
+  const lost = reports
+    .map((r) => r.report)
+    .filter((r): r is Extract<ConnectorReport, { status: 'lost' }> => !r.ok && r.status === 'lost');
   if (lost.length > 0) {
     return lost.reduce((a, b) => (b.missing.length < a.missing.length ? b : a));
   }
-  return reports[0];
+  return reports[0]?.report;
 }
 
 /** Why a connector has no frame, as an error on its mate with a re-pick prompt. */

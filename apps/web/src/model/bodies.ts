@@ -33,6 +33,22 @@ export function viewBodyId(partId: string, bodyId: string): string {
   return `${partId}/${bodyId}`;
 }
 
+/**
+ * The viewport id of a body an assembly instance shows: `<assembly id>/<instance id>/<body id>`
+ * (M2 plan, T2.3e). The body id is the source part's (it may hold `/`, as derived bodies do).
+ */
+export function instanceViewId(assemblyId: string, instanceId: string, bodyId: string): string {
+  return `${assemblyId}/${instanceId}/${bodyId}`;
+}
+
+/** The assembly, instance and body an instance view id names; null for any other id. */
+export function parseInstanceViewId(
+  id: string,
+): { assemblyId: string; instanceId: string; bodyId: string } | null {
+  const m = /^(assembly#[0-9]+)\/(inst#[0-9]+)\/(.+)$/.exec(id);
+  return m ? { assemblyId: m[1]!, instanceId: m[2]!, bodyId: m[3]! } : null;
+}
+
 /** A body of the active part, with everything the tree, the viewport and export show of it. */
 export interface PartBody {
   /** Regen's body id (`extrude#1`). */

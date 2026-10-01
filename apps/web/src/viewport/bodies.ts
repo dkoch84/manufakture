@@ -1,7 +1,18 @@
 // Display-side preparation of a kernel mesh: the lookup tables the viewport
-// needs for highlighting and picking, built once per mesh.
+// needs for highlighting and picking, built once per mesh. Several bodies may
+// show the same mesh (the instances of a part in an assembly, each with its
+// own transform): the tables are shared, only pick ids and bounds are theirs.
 
 import type { MeshData, Topology, Vec3 } from '@manufakture/kernel';
+
+/**
+ * A rigid placement of a body: `p_world = R p_local + translation`, `rotation`
+ * a unit quaternion `[x, y, z, w]` (core's and the solver's `Pose`).
+ */
+export interface BodyTransform {
+  translation: readonly [number, number, number];
+  rotation: readonly [number, number, number, number];
+}
 
 /** What the viewport is given for one body. */
 export interface BodyInput {
@@ -14,6 +25,11 @@ export interface BodyInput {
   topology?: Topology | null;
   /** Face colour, `#rrggbb`; the viewport's default face colour when absent. */
   color?: string;
+  /**
+   * Where the body is drawn: its mesh, topology and picks stay in the body's own
+   * coordinates, and this places them (an assembly instance). Absent: as is.
+   */
+  transform?: BodyTransform;
 }
 
 export interface BodyVertex {
@@ -116,8 +132,36 @@ export function splitSharedVertices(mesh: MeshData): DisplayMesh {
   return { positions, normals, indices, vertexFaces: faces };
 }
 
+/** What `prepareBody` computes from a mesh and topology alone, shared by every body showing them. */
+type Prepared = Omit<ViewBody, keyof BodyInput | 'pickBase' | 'pickCount' | 'bounds'> & {
+  localBounds: { min: Vec3; max: Vec3 } | null;
+};
+
+const preparedMeshes = new WeakMap<MeshData, WeakMap<object, Prepared>>();
+const NO_TOPOLOGY = {};
+
+function preparedFor(input: BodyInput): Prepared {
+  let byTopology = preparedMeshes.get(input.mesh);
+  if (!byTopology) preparedMeshes.set(input.mesh, (byTopology = new WeakMap()));
+  const key = input.topology ?? NO_TOPOLOGY;
+  let out = byTopology.get(key);
+  if (!out) byTopology.set(key, (out = prepareMesh(input.mesh, input.topology ?? null)));
+  return out;
+}
+
 export function prepareBody(input: BodyInput, pickBase: number): ViewBody {
-  const { mesh } = input;
+  const prepared = preparedFor(input);
+  const { localBounds, ...shared } = prepared;
+  return {
+    ...input,
+    ...shared,
+    pickBase,
+    pickCount: shared.faceCount + shared.edgeCount + shared.vertices.length,
+    bounds: localBounds && transformBounds(localBounds, input.transform),
+  };
+}
+
+function prepareMesh(mesh: MeshData, topology: Topology | null): Prepared {
   const faceCount = mesh.faceRanges.length / 2;
   const edgeCount = mesh.edgeRanges.length / 2;
   const display = splitSharedVertices(mesh);
@@ -155,12 +199,10 @@ export function prepareBody(input: BodyInput, pickBase: number): ViewBody {
     }
   }
 
-  const topology = input.topology ?? null;
   const vertices = topology
     ? topology.vertices.map((v) => ({ index: v.index, point: v.point, faces: v.faces }))
     : [];
   return {
-    ...input,
     faceCount,
     edgeCount,
     positions: display.positions,
@@ -171,14 +213,62 @@ export function prepareBody(input: BodyInput, pickBase: number): ViewBody {
     faceVertexList,
     faceVertexStart,
     faceVertexEnd,
-    pickBase,
-    pickCount: faceCount + edgeCount + vertices.length,
     segments,
     segmentEdges,
     edgeFaces: topology ? topology.edges.map((e) => e.faces) : null,
     vertices,
-    bounds: boundsOf(mesh.positions),
+    localBounds: boundsOf(mesh.positions),
   };
+}
+
+/** A point of a body in world coordinates. */
+export function transformPoint(t: BodyTransform | undefined, p: ArrayLike<number>): Vec3 {
+  if (!t) return [p[0]!, p[1]!, p[2]!];
+  const [x, y, z, w] = t.rotation;
+  const [px, py, pz] = [p[0]!, p[1]!, p[2]!];
+  // v + 2w (q x v) + 2 q x (q x v), q the vector part.
+  const cx = y * pz - z * py;
+  const cy = z * px - x * pz;
+  const cz = x * py - y * px;
+  const dx = y * cz - z * cy;
+  const dy = z * cx - x * cz;
+  const dz = x * cy - y * cx;
+  return [
+    px + 2 * (w * cx + dx) + t.translation[0],
+    py + 2 * (w * cy + dy) + t.translation[1],
+    pz + 2 * (w * cz + dz) + t.translation[2],
+  ];
+}
+
+/** A world point in a body's own coordinates (the inverse of `transformPoint`). */
+export function untransformPoint(t: BodyTransform | undefined, p: ArrayLike<number>): Vec3 {
+  if (!t) return [p[0]!, p[1]!, p[2]!];
+  const [x, y, z, w] = t.rotation;
+  const local = [p[0]! - t.translation[0], p[1]! - t.translation[1], p[2]! - t.translation[2]];
+  return transformPoint({ translation: [0, 0, 0], rotation: [-x, -y, -z, w] }, local);
+}
+
+/** The world box around a body's own box placed by `t`. */
+export function transformBounds(
+  b: { min: Vec3; max: Vec3 },
+  t: BodyTransform | undefined,
+): { min: Vec3; max: Vec3 } {
+  if (!t) return b;
+  const min = [Infinity, Infinity, Infinity];
+  const max = [-Infinity, -Infinity, -Infinity];
+  for (let k = 0; k < 8; k++) {
+    const corner = [
+      k & 1 ? b.max[0] : b.min[0],
+      k & 2 ? b.max[1] : b.min[1],
+      k & 4 ? b.max[2] : b.min[2],
+    ];
+    const q = transformPoint(t, corner);
+    for (let a = 0; a < 3; a++) {
+      min[a] = Math.min(min[a]!, q[a]!);
+      max[a] = Math.max(max[a]!, q[a]!);
+    }
+  }
+  return { min: [min[0]!, min[1]!, min[2]!], max: [max[0]!, max[1]!, max[2]!] };
 }
 
 /** Prepare several bodies with consecutive pick id ranges. */

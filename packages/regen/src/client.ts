@@ -61,6 +61,14 @@ export class RegenClient extends KernelClient {
     ).then((result) => result ?? null);
   }
 
+  /**
+   * A drag that ends without `setPoses` (cancelled, or nothing moved): the worker forgets where
+   * its steps left the instances, so the next drag starts from what the screen shows.
+   */
+  endDrag(assemblyId: string): Promise<void> {
+    return this.droppable(this.worker<RegenWorkerApi>().endDrag(assemblyId)).then(() => undefined);
+  }
+
   regenStats(): Promise<EngineStats> {
     return this.worker<RegenWorkerApi>().regenStats() as Promise<EngineStats>;
   }

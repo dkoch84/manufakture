@@ -3,7 +3,16 @@
 
 import { applyCommand, findPart } from '@manufakture/core';
 import { describe, expect, it } from 'vitest';
-import { BODY_PALETTE, bodyName, bodyPropsCommand, partBodies, sameOr, viewBodyId } from './bodies';
+import {
+  BODY_PALETTE,
+  bodyName,
+  bodyPropsCommand,
+  instanceViewId,
+  parseInstanceViewId,
+  partBodies,
+  sameOr,
+  viewBodyId,
+} from './bodies';
 import { twoBodyDocument, twoBodyModel } from './twoBodies.test-fixture';
 
 describe('partBodies', () => {
@@ -100,5 +109,18 @@ describe('helpers', () => {
     expect(sameOr(a, [1, 2])).toBe(a);
     expect(sameOr(a, [1, 3])).toEqual([1, 3]);
     expect(sameOr(null, a)).toBe(a);
+  });
+});
+
+describe('instance view ids', () => {
+  it('name a body an instance shows, and read back, body ids with slashes included', () => {
+    const id = instanceViewId('assembly#2', 'inst#3', 'derived#1:from/extrude#1');
+    expect(id).toBe('assembly#2/inst#3/derived#1:from/extrude#1');
+    expect(parseInstanceViewId(id)).toEqual({
+      assemblyId: 'assembly#2',
+      instanceId: 'inst#3',
+      bodyId: 'derived#1:from/extrude#1',
+    });
+    expect(parseInstanceViewId(viewBodyId('part#1', 'extrude#1'))).toBeNull();
   });
 });

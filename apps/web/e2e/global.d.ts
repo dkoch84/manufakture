@@ -82,6 +82,32 @@ interface E2eFeatureResult {
 
 type E2eResult<T> = { ok: true; value: T } | { ok: false; message: string };
 
+interface E2ePose {
+  translation: [number, number, number];
+  rotation: [number, number, number, number];
+}
+
+interface E2eAssemblyResult {
+  assemblyId: string;
+  outcome: string;
+  dof: number | null;
+  instances: {
+    instanceId: string;
+    status: string;
+    transform: E2ePose;
+    bodies: string[];
+    errors: { code: string; message: string }[];
+  }[];
+  mates: { mateId: string; status: string; coordinates: number[] }[];
+}
+
+interface E2eAssembly {
+  id: string;
+  name: string;
+  instances: { id: string; name: string; fixed: boolean; pose: E2ePose; source: unknown }[];
+  mates: { id: string; name: string; kind: string }[];
+}
+
 interface E2eVersion {
   id: string;
   name: string;
@@ -114,6 +140,7 @@ interface Window {
         /** Milliseconds the last regen took in the worker. */
         ms: number;
         document: unknown;
+        assemblies: E2eAssemblyResult[];
         parts: {
           partId: string;
           features: E2eFeatureResult[];
@@ -135,9 +162,11 @@ interface Window {
             features: E2eFeature[];
             bodies: { id: string; name?: string; color?: string; material?: string }[];
           }[];
+          assemblies: E2eAssembly[];
         };
         canUndo: boolean;
         activePartId: string;
+        activeAssemblyId: string | null;
         execute(command: unknown, label?: string): { ok: boolean };
       };
     };
@@ -181,6 +210,9 @@ interface Window {
         setSection(patch: Record<string, unknown>): void;
         hiddenBodies: Record<string, readonly string[]>;
       };
+    };
+    assemblyUi: {
+      getState(): { poses: ReadonlyMap<string, E2ePose>; panel: unknown };
     };
     measure: {
       getState(): {

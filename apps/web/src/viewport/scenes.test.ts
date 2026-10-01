@@ -110,6 +110,8 @@ function fakeKernel(options: KernelClientOptions, fail = false) {
             consumed: [],
           },
         ],
+        assemblies: [],
+        sources: [],
         counters: {
           featureOps: 0,
           otherOps: 0,

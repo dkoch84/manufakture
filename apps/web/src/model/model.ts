@@ -21,7 +21,7 @@
 // again.
 
 import { configured, type ManufaktureDocument } from '@manufakture/core';
-import type { FeatureResult } from '@manufakture/regen';
+import type { AssemblyResult, FeatureResult } from '@manufakture/regen';
 import { useStore } from 'zustand';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { DocumentStoreApi } from '../state/document';
@@ -50,10 +50,27 @@ export interface PartModel {
   bodies: readonly ModelBody[];
 }
 
+/**
+ * A pinned part of another document that assembly instances show (regen's `SourceResult`), with
+ * its bodies ready for the viewport like a part's.
+ */
+export interface SourceModel {
+  /** `source:<sha256>:<part id>`, as `InstanceResult.source.source` names it. */
+  key: string;
+  partId: string;
+  documentName: string;
+  versionName: string;
+  bodies: readonly ModelBody[];
+}
+
 /** One completed regen, as the app uses it. */
 export interface RegenView {
   generation: number;
   parts: readonly PartModel[];
+  /** Per assembly: instance transforms and mate diagnostics. Absent: none. */
+  assemblies?: readonly AssemblyResult[];
+  /** Pinned parts the instances show. Absent: none. */
+  sources?: readonly SourceModel[];
   ms: number;
 }
 
@@ -88,6 +105,10 @@ export interface ModelState {
    */
   configurationError: string | null;
   parts: readonly PartModel[];
+  /** Per assembly of the document, in document order (T2.3c). */
+  assemblies: readonly AssemblyResult[];
+  /** Pinned parts of other documents that instances show. */
+  sources: readonly SourceModel[];
   ms: number;
 }
 
@@ -102,6 +123,8 @@ export function createModelStore(): ModelStore {
     document: null,
     configurationError: null,
     parts: [],
+    assemblies: [],
+    sources: [],
     ms: 0,
   }));
 }
@@ -122,6 +145,14 @@ export function featureResult(
   return state.parts
     .find((p) => p.partId === partId)
     ?.features.find((f) => f.featureId === featureId);
+}
+
+/** The regen result of one assembly, if the shown model has it. */
+export function assemblyResult(
+  state: Pick<ModelState, 'assemblies'>,
+  assemblyId: string,
+): AssemblyResult | undefined {
+  return state.assemblies.find((a) => a.assemblyId === assemblyId);
 }
 
 /** Every part body of the shown model, in part order, each part's bodies in creator order. */
@@ -190,6 +221,8 @@ export function startRegen(
           document,
           configurationError: built.error,
           parts: view.parts,
+          assemblies: view.assemblies ?? [],
+          sources: view.sources ?? [],
           ms: view.ms,
           error: null,
           pending: document !== latest,
@@ -328,6 +361,8 @@ export function startView(shared: SharedRegenerator, document: ManufaktureDocume
             document,
             configurationError: built.error,
             parts: view.parts,
+            assemblies: view.assemblies ?? [],
+            sources: view.sources ?? [],
             ms: view.ms,
             error: null,
             pending: mine !== requests,

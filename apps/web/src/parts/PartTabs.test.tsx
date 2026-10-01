@@ -142,6 +142,40 @@ describe('PartTabs', () => {
     expect(ids()).toEqual(['part#1', 'part#3', 'part#2']);
   });
 
+  it('adds assemblies as tabs after the part studios, switches, renames and deletes them', () => {
+    const { documents, names } = setup();
+    fireEvent.click(screen.getByTestId('assembly-add'));
+    expect(documents.getState().activeAssemblyId).toBe('assembly#1');
+    expect(documents.getState().undoLabel).toBe('Add Assembly 1');
+    const assemblyTab = () => screen.getByTestId('assembly-tab-assembly#1');
+    expect(assemblyTab().getAttribute('aria-selected')).toBe('true');
+    expect(tab('part#1').getAttribute('aria-selected')).toBe('false');
+    expect(assemblyTab().getAttribute('aria-controls')).toBe(PART_STUDIO_PANEL_ID);
+    // Assemblies cannot be duplicated; they can be deleted even beside a single part studio.
+    expect(button(screen.getByTestId('part-duplicate')).disabled).toBe(true);
+    expect(button(screen.getByTestId('part-delete')).disabled).toBe(false);
+
+    // Arrow keys run over part studios and assemblies alike.
+    fireEvent.keyDown(assemblyTab(), { key: 'ArrowLeft' });
+    expect(documents.getState().activeAssemblyId).toBeNull();
+    fireEvent.keyDown(tab('part#1'), { key: 'ArrowRight' });
+    expect(documents.getState().activeAssemblyId).toBe('assembly#1');
+
+    fireEvent.doubleClick(assemblyTab());
+    const input = screen.getByTestId('part-rename-input');
+    fireEvent.change(input, { target: { value: 'Chest' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(names()).toEqual(['Demo part', '\u29c9 Chest']);
+    expect(documents.getState().undoLabel).toBe('Rename Assembly 1 to Chest');
+
+    fireEvent.click(screen.getByTestId('part-delete'));
+    expect(documents.getState().document.assemblies).toEqual([]);
+    expect(documents.getState().activeAssemblyId).toBeNull();
+    expect(tab('part#1').getAttribute('aria-selected')).toBe('true');
+    act(() => void documents.getState().undo());
+    expect(documents.getState().activeAssemblyId).toBe('assembly#1');
+  });
+
   it('changes nothing while disabled', () => {
     const documents = createDocumentStore(demoDocument());
     documents.getState().execute({ type: 'addPart', partId: 'part#2', name: 'Two' });

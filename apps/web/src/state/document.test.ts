@@ -62,6 +62,63 @@ describe('the document store', () => {
   });
 });
 
+describe('the active tab', () => {
+  it('opens a new assembly, keeps the part studio to go back to, and follows undo and redo', () => {
+    const store = createDocumentStore(createDocument({ id: 'd', name: 'D' }));
+    const s = () => store.getState();
+    expect(s().activeAssemblyId).toBeNull();
+    s().execute({ type: 'addAssembly', assemblyId: 'assembly#1', name: 'Assembly 1' });
+    expect(s()).toMatchObject({ activeAssemblyId: 'assembly#1', activePartId: 'part#1' });
+    // Back to the part studio, then an assembly edit undone from there shows the assembly.
+    expect(s().setActivePart('part#1')).toBe(true);
+    expect(s().activeAssemblyId).toBeNull();
+    s().execute({ type: 'renameAssembly', assemblyId: 'assembly#1', name: 'Box' });
+    s().execute(addVariable('a'));
+    s().undo();
+    expect(s().activeAssemblyId).toBeNull();
+    s().undo();
+    expect(s().activeAssemblyId).toBe('assembly#1');
+    // A part studio added from anywhere becomes the tab.
+    s().execute({ type: 'addPart', partId: 'part#2', name: 'Part 2' });
+    expect(s()).toMatchObject({ activeAssemblyId: null, activePartId: 'part#2' });
+    // Undoing the part's addition goes back to the part studio before it, not the assembly.
+    s().undo();
+    expect(s()).toMatchObject({ activeAssemblyId: null, activePartId: 'part#1' });
+    expect(s().setActiveAssembly('assembly#9')).toBe(false);
+    expect(s().setActiveAssembly('assembly#1')).toBe(true);
+    // The assembly is deleted: its tab goes, the part studio shows.
+    s().execute({ type: 'deleteAssembly', assemblyId: 'assembly#1' });
+    expect(s().activeAssemblyId).toBeNull();
+    s().undo();
+    expect(s().activeAssemblyId).toBe('assembly#1');
+    s().load(createDocument({ id: 'e', name: 'E' }));
+    expect(s().activeAssemblyId).toBeNull();
+  });
+});
+
+describe('undo and redo from an assembly tab', () => {
+  it('edit part, switch to assembly, undo shows the part studio, redo too', () => {
+    const store = createDocumentStore(createDocument({ id: 'd', name: 'D' }));
+    const s = () => store.getState();
+    s().execute({ type: 'addAssembly', assemblyId: 'assembly#1', name: 'Assembly 1' });
+    s().setActivePart('part#1');
+    s().execute({ type: 'renamePart', partId: 'part#1', name: 'Box' });
+    expect(s().setActiveAssembly('assembly#1')).toBe(true);
+    s().undo();
+    expect(s().document.parts[0]!.name).toBe('Part 1');
+    expect(s()).toMatchObject({ activeAssemblyId: null, activePartId: 'part#1' });
+    s().setActiveAssembly('assembly#1');
+    s().redo();
+    expect(s().document.parts[0]!.name).toBe('Box');
+    expect(s()).toMatchObject({ activeAssemblyId: null, activePartId: 'part#1' });
+    // A change that touches neither leaves the assembly tab as it is.
+    s().execute(addVariable('a'));
+    s().setActiveAssembly('assembly#1');
+    s().undo();
+    expect(s().activeAssemblyId).toBe('assembly#1');
+  });
+});
+
 describe('the undo and redo shortcuts', () => {
   const key = (
     k: string,

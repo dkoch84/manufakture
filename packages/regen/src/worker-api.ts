@@ -53,6 +53,8 @@ export interface RegenWorkerApi extends KernelWorkerApi {
     target: DragTarget,
     options: { generation: number },
   ): Promise<DragResult | null>;
+  /** A drag that was not committed: the next one starts from the last regen again. */
+  endDrag(assemblyId: string): Promise<void>;
   /** Cumulative engine counters. */
   regenStats(): Promise<EngineStats>;
 }
@@ -106,6 +108,10 @@ export function createRegenWorkerApi(options: RegenWorkerApiOptions): RegenWorke
 
     async dragInstance(assemblyId, instanceId, target, { generation }) {
       return (await engineFor()).drag(assemblyId, instanceId, target, { generation });
+    },
+
+    async endDrag(assemblyId) {
+      (await engineFor()).endDrag(assemblyId);
     },
 
     async regenStats() {

@@ -23,6 +23,7 @@ import {
   applyFeature,
   connectorFrame,
   pickReference,
+  pickVertex,
   resolveReferences,
   type ConnectorInference,
   type ConnectorOrigin,
@@ -31,6 +32,7 @@ import {
   type FeatureInput,
   type FeatureOutcome,
   type ReferenceReport,
+  type VertexRef,
 } from './features';
 import { DEFAULT_DEFLECTION, type BooleanKind, type Kernel } from './kernel';
 import type { MeasureResult, MeasureTarget } from './measure';
@@ -137,11 +139,14 @@ export type ConnectorOp = OpCommon & {
   shape: ShapeRef;
   connectors: readonly { origin: ConnectorOrigin; inference: ConnectorInference }[];
 };
-/** The reference a click on face or edge `index` of a named body is stored as. */
+/**
+ * The reference a click on face, edge or vertex `index` of a named body is stored as: a
+ * `FaceRef`, an `EdgeRef`, or for a vertex the `VertexRef` a mate connector stores.
+ */
 export type PickOp = OpCommon & {
   op: 'pick';
   shape: ShapeRef;
-  kind: 'face' | 'edge';
+  kind: 'face' | 'edge' | 'vertex';
   index: number;
 };
 
@@ -207,7 +212,7 @@ export interface OpValues {
   feature: FeatureOutcome;
   resolve: { results: ReferenceReport[] };
   connector: { results: ConnectorReport[] };
-  pick: { ref: TopoRef | null };
+  pick: { ref: TopoRef | VertexRef | null };
   measure: MeasureResult;
   /** `data` is transferred. */
   exportStep: { data: Uint8Array };
@@ -307,7 +312,7 @@ const FIELDS: Record<OpName, [Record<string, Check>, Record<string, Check>]> = {
     },
     {},
   ],
-  pick: [{ shape: shapeRef, kind: oneOf('face', 'edge'), index: num }, {}],
+  pick: [{ shape: shapeRef, kind: oneOf('face', 'edge', 'vertex'), index: num }, {}],
   measure: [{ shape: shapeRef, targets: arrayOf(measureTarget) }, { body: bool }],
   exportStep: [{ bodies: arrayOf(shape({ shape: shapeRef, name: str }), true) }, {}],
   importStep: [
@@ -427,8 +432,12 @@ export function executeOp(
         results: op.connectors.map((c) => connectorFrame(kernel, id, c.origin, c.inference)),
       };
     }
-    case 'pick':
-      return { ref: pickReference(kernel, resolve(op.shape, 'pick'), op.kind, op.index) };
+    case 'pick': {
+      const id = resolve(op.shape, 'pick');
+      if (op.kind !== 'vertex') return { ref: pickReference(kernel, id, op.kind, op.index) };
+      const named = kernel.has(id) ? kernel.named(id) : null;
+      return { ref: named === null ? null : pickVertex(named.names, named.topology, op.index) };
+    }
     case 'measure':
       return kernel.measure(
         resolve(op.shape, 'measure'),

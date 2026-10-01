@@ -1,10 +1,23 @@
 import { sketchToWorld } from '@manufakture/sketch/geometry';
 import type { SketchPlacement, Vec2 } from '@manufakture/sketch/model';
-import { findPart, type DerivedSource, type ManufaktureDocument } from '@manufakture/core';
+import {
+  findPart,
+  type DerivedSource,
+  type ManufaktureDocument,
+  type Pose,
+} from '@manufakture/core';
+import type { AssemblyResult } from '@manufakture/regen';
 import type { ExportTolerancePreset } from '@manufakture/io';
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from 'zustand';
 import { createStore } from 'zustand/vanilla';
+import { assemblyBodies, instanceOf, type ConnectorChoice } from './assembly/assembly';
+import { AssemblyTree } from './assembly/AssemblyTree';
+import { ConnectorOverlay } from './assembly/ConnectorOverlay';
+import { instanceDrag } from './assembly/drag';
+import { InsertPanel } from './assembly/InsertPanel';
+import { MateDialog } from './assembly/MateDialog';
+import { createAssemblyUiStore, type AssemblyUiStore } from './assembly/state';
 import { homeActions, openedMessage, type ActionOutcome } from './home/actions';
 import { HomeScreen } from './home/HomeScreen';
 import { startAutosave, type Autosave, type SaveStatus } from './persistence/autosave';
@@ -99,6 +112,7 @@ import './io/io.css';
 import './tree/tree.css';
 import './features/features.css';
 import './parts/parts.css';
+import './assembly/assembly.css';
 
 const defaultSolver = () => lazySolver(spawnDefaultSolver);
 
@@ -140,6 +154,8 @@ export interface AppProps {
   initialDocumentId?: string | null;
   /** Autosave delays, for tests. */
   autosaveDelays?: { delayMs: number; maxDelayMs: number };
+  /** The assembly workspace's panels and shown poses; the app makes its own by default. */
+  assemblyUi?: AssemblyUiStore;
 }
 
 /** Whether `doc` has imported reference bodies, which live outside regen and must be read again. */
@@ -195,7 +211,10 @@ export function App({
   library: libraryPromise = null,
   initialDocumentId,
   autosaveDelays,
+  assemblyUi: givenAssemblyUi,
 }: AppProps) {
+  const [ownAssemblyUi] = useState(createAssemblyUiStore);
+  const assemblyUi = givenAssemblyUi ?? ownAssemblyUi;
   // A loader starts nothing until `load`, so the initialiser running twice
   // under StrictMode leaves nothing behind.
   const [{ loader, owned }] = useState(() =>
@@ -325,6 +344,27 @@ export function App({
     () => activeBodies.filter((b) => !b.hidden).map((b) => b.view),
     [activeBodies],
   );
+  // The assembly tab shown instead of the part studio, if any: its instances share the part
+  // bodies' meshes, each placed by its solved transform (or a drag's or a preview's pose).
+  const assemblyId = useStore(shownDocuments, (s) => s.activeAssemblyId);
+  const modelAssemblies = useModel(shownModel, (s) => s.assemblies);
+  const modelSources = useModel(shownModel, (s) => s.sources);
+  const assemblyPanel = useStore(assemblyUi, (s) => s.panel);
+  const assemblyMessage = useStore(assemblyUi, (s) => s.message);
+  const shownPoses = useStore(assemblyUi, (s) => (s.posesFor === assemblyId ? s.poses : null));
+  const instanceBodies = useMemo(
+    () =>
+      assemblyId === null
+        ? []
+        : assemblyBodies(
+            shownDocument,
+            assemblyId,
+            { parts: allParts, assemblies: modelAssemblies, sources: modelSources },
+            shownPoses ?? undefined,
+          ),
+    [assemblyId, shownDocument, allParts, modelAssemblies, modelSources, shownPoses],
+  );
+  const assemblyResult = modelAssemblies.find((a) => a.assemblyId === assemblyId);
   const [stableBodies, setStableBodies] = useState<readonly BodyInput[]>(visibleBodies);
   let partBodies = stableBodies;
   if (sameOr(stableBodies, visibleBodies) !== stableBodies) {
@@ -560,7 +600,9 @@ export function App({
           if (opened.ok) {
             show(opened.value.document, { stored: true, branch: on });
             if (wanted === id && initialPartId !== null) {
-              documents.getState().setActivePart(initialPartId);
+              // The tab it names: a part studio, or an assembly.
+              const state = documents.getState();
+              if (!state.setActivePart(initialPartId)) state.setActiveAssembly(initialPartId);
             }
             // Recovered or migrated: say so, as the home screen does.
             const note = openedMessage(opened.value, true);
@@ -585,18 +627,35 @@ export function App({
     })();
   }, [libraryPromise, loader, initialDocumentId, show, documents, initialPartId]);
 
-  // The URL names the active part studio (none for the first), once the document is open.
+  // The URL names the active tab (none for the first part studio), once the document is open:
+  // a part studio, or an assembly by its id in the same parameter (a part studio is tried first).
+  const activeAssemblyId = useStore(documents, (s) => s.activeAssemblyId);
   useEffect(() => {
     if (!docReady) return;
-    showPartIdInUrl(document.parts[0]?.id === activePartId ? null : activePartId);
-  }, [docReady, document, activePartId]);
-  // What was selected belongs to the part studio shown before.
-  const shownPart = useRef(activePartId);
+    showPartIdInUrl(
+      activeAssemblyId ?? (document.parts[0]?.id === activePartId ? null : activePartId),
+    );
+  }, [docReady, document, activePartId, activeAssemblyId]);
+  // What was selected belongs to the tab shown before; so do an assembly's panels and poses.
+  const shownTab = useRef(`${activePartId}\n${activeAssemblyId ?? ''}`);
   useEffect(() => {
-    if (shownPart.current === activePartId) return;
-    shownPart.current = activePartId;
+    const tab = `${activePartId}\n${activeAssemblyId ?? ''}`;
+    if (shownTab.current === tab) return;
+    shownTab.current = tab;
     selection.getState().clear();
-  }, [activePartId, selection]);
+    assemblyUi.getState().close();
+    assemblyUi.getState().clearPoses();
+    assemblyUi.getState().setMessage(null);
+  }, [activePartId, activeAssemblyId, selection, assemblyUi]);
+  // Poses a drag or a mate committed are shown until the model has caught up with them.
+  const modelDocument = useModel(model, (s) => s.document);
+  const modelPending = useModel(model, (s) => s.pending);
+  const posesUntil = useStore(assemblyUi, (s) => s.until);
+  useEffect(() => {
+    if (posesUntil !== null && !modelPending && modelDocument === document) {
+      assemblyUi.getState().clearPoses();
+    }
+  }, [posesUntil, modelPending, modelDocument, document, assemblyUi]);
 
   // Autosave the open document; ask once for persistent storage after the first save.
   const askedPersistence = useRef(false);
@@ -963,11 +1022,72 @@ export function App({
     () =>
       bodies === null
         ? null
-        : partBodies.length === 0 && shownImports.length === 0
-          ? bodies
-          : [...bodies, ...partBodies, ...shownImports.map((i) => i.body)],
-    [bodies, partBodies, shownImports],
+        : assemblyId !== null
+          ? instanceBodies.length === 0
+            ? bodies
+            : [...bodies, ...instanceBodies]
+          : partBodies.length === 0 && shownImports.length === 0
+            ? bodies
+            : [...bodies, ...partBodies, ...shownImports.map((i) => i.body)],
+    [bodies, partBodies, shownImports, assemblyId, instanceBodies],
   );
+  // Dragging instances of the assembly shown, through the regen worker; not while viewing.
+  const instanceBodiesRef = useRef(instanceBodies);
+  useEffect(() => {
+    instanceBodiesRef.current = instanceBodies;
+  }, [instanceBodies]);
+  const dragging = assemblyId !== null && !locked && loader.assembler !== undefined;
+  useEffect(() => {
+    const assembler = loader.assembler;
+    if (!viewport || !dragging || !assembler) return;
+    viewport.setObjectDrag(
+      instanceDrag({
+        viewport,
+        assembler,
+        assemblyId: () => documents.getState().activeAssemblyId,
+        document: () => documents.getState().document,
+        transformOf: (instanceId) => {
+          const asm = documents.getState().activeAssemblyId;
+          return instanceBodiesRef.current.find(
+            (b) => asm !== null && instanceOf(b.id, asm) === instanceId,
+          )?.transform as Pose | undefined;
+        },
+        show: (asm, poses) => assemblyUi.getState().show(asm, poses),
+        done: (asm, poses, label) => {
+          const ui = assemblyUi.getState();
+          if (poses === null) {
+            ui.clearPoses();
+            return;
+          }
+          const r = documents
+            .getState()
+            .execute({ type: 'setPoses', assemblyId: asm, poses }, label);
+          if (r.ok) ui.holdUntil(documents.getState().document);
+          else {
+            ui.clearPoses();
+            ui.setMessage(r.error.message);
+          }
+        },
+        refuse: (message) => assemblyUi.getState().setMessage(message),
+      }),
+    );
+    return () => viewport.setObjectDrag(null);
+  }, [viewport, dragging, loader, documents, assemblyUi]);
+  // The Mate dialog's preview and connectors.
+  const onMatePreview = useCallback(
+    (result: AssemblyResult | null) => {
+      const asm = documents.getState().activeAssemblyId;
+      if (result === null || asm === null) {
+        assemblyUi.getState().clearPoses();
+        return;
+      }
+      assemblyUi
+        .getState()
+        .show(asm, new Map(result.instances.map((x) => [x.instanceId, x.transform])));
+    },
+    [documents, assemblyUi],
+  );
+  const [mateConnectors, setMateConnectors] = useState<readonly (ConnectorChoice | null)[]>([]);
   const measurer = useMemo(() => {
     const meshes = new Map(
       shownImports.flatMap((i) => (i.mesh ? [[i.body.id, i.mesh] as const] : [])),
@@ -1226,6 +1346,11 @@ export function App({
   }, [shownBodies, modelGeneration]);
   useEffect(() => {
     if (shownBodies === null) return;
+    // An assembly is not measured (yet): its instances are placed, the kernel's bodies are not.
+    if (assemblyId !== null) {
+      void measure.getState().measure(measurer, null);
+      return;
+    }
     const refs = selected.filter(isGeometryRef);
     const bodyId = refs[0]?.bodyId ?? shownBodies[0]?.id ?? null;
     // Nothing selected in a part of several bodies: every shown body is measured too.
@@ -1241,7 +1366,7 @@ export function App({
             ...(every.length > 0 ? { bodies: every } : {}),
           },
     );
-  }, [shownBodies, partBodies, modelGeneration, selected, measurer, measure]);
+  }, [shownBodies, partBodies, modelGeneration, selected, measurer, measure, assemblyId]);
   const measuredBodies = useMemo(
     () => activeBodies.map((b) => ({ viewId: b.viewId, name: b.name, material: b.material })),
     [activeBodies],
@@ -1250,14 +1375,15 @@ export function App({
   // Registered with the viewport, like the other hooks: tests wait for the viewport hook.
   useEffect(() => {
     if (!testHooksEnabled || !viewport) return;
-    window.__manufakture = { ...window.__manufakture, measure };
+    window.__manufakture = { ...window.__manufakture, measure, assemblyUi };
     return () => {
       const hooks = window.__manufakture;
       if (!hooks) return;
       delete hooks.measure;
+      delete hooks.assemblyUi;
       if (Object.keys(hooks).length === 0) delete window.__manufakture;
     };
-  }, [viewport, measure]);
+  }, [viewport, measure, assemblyUi]);
 
   const canUndo = useStore(documents, (s) => s.canUndo);
   const canRedo = useStore(documents, (s) => s.canRedo);
@@ -1360,7 +1486,7 @@ export function App({
         <div className="toolbar-group document-actions">
           <SketchMenu
             face={face}
-            disabled={sketching.active || dialog !== null || locked}
+            disabled={sketching.active || dialog !== null || locked || assemblyId !== null}
             onPick={(target) => sketching.enter(target)}
           />
           <button
@@ -1384,13 +1510,18 @@ export function App({
             disabled={sketching.active || dialog !== null || exportAll !== null || locked}
           />
           <ExportMenu
-            disabled={sketching.active || ioBusy || !loader.exchanger || locked}
+            disabled={
+              sketching.active || ioBusy || !loader.exchanger || locked || assemblyId !== null
+            }
             bodies={exportable}
             onExport={onExport}
             configurations={shared ? configurationCount : 0}
             onExportAll={onExportAll}
           />
-          <ImportButton disabled={sketching.active || ioBusy || locked} onFile={onImport} />
+          <ImportButton
+            disabled={sketching.active || ioBusy || locked || assemblyId !== null}
+            onFile={onImport}
+          />
           {exportAll && (
             <ExportProgress
               index={exportAll.index}
@@ -1447,9 +1578,40 @@ export function App({
       )}
       {/* The part tools; in a sketch the sketch toolbar takes this row. While a past state is
         viewed there is nothing to edit, so they step aside. */}
-      {!sketching.active && !locked && (
+      {!sketching.active && !locked && assemblyId === null && (
         <div className="feature-bar">
           <FeatureToolbar disabled={dialog !== null} onOpen={(kind) => setDialog({ kind })} />
+        </div>
+      )}
+      {!locked && assemblyId !== null && (
+        <div className="feature-bar">
+          <div className="assembly-toolbar" role="toolbar" aria-label="Assembly">
+            <button
+              type="button"
+              aria-pressed={assemblyPanel?.kind === 'insert'}
+              disabled={assemblyPanel?.kind === 'mate'}
+              data-testid="assembly-insert"
+              title="Insert a part studio of this document, or a part of another at a version"
+              onClick={() => assemblyUi.getState().open({ kind: 'insert' })}
+            >
+              Insert
+            </button>
+            <button
+              type="button"
+              aria-pressed={assemblyPanel?.kind === 'mate'}
+              disabled={assemblyPanel?.kind === 'mate'}
+              data-testid="assembly-mate"
+              title="Mate two instances by a connector on each"
+              onClick={() => assemblyUi.getState().open({ kind: 'mate', mateId: null })}
+            >
+              Mate
+            </button>
+            {assemblyMessage && (
+              <span className="io-status io-error" role="alert" data-testid="assembly-message">
+                {assemblyMessage}
+              </span>
+            )}
+          </div>
         </div>
       )}
       {sketching.active && (
@@ -1472,11 +1634,22 @@ export function App({
           className="part-studio-panel"
           id={PART_STUDIO_PANEL_ID}
           role="tabpanel"
-          aria-labelledby={`part-tab-${shownPartId}`}
+          aria-labelledby={
+            assemblyId !== null ? `assembly-tab-${assemblyId}` : `part-tab-${shownPartId}`
+          }
         >
           {/* A sketch is edited on its own (the tree cannot change anything meanwhile), so the
             tree steps aside and the sketch gets the room. */}
-          {!sketching.active && (
+          {assemblyId !== null && (
+            <AssemblyTree
+              documents={shownDocuments}
+              assemblyId={assemblyId}
+              result={assemblyResult}
+              disabled={locked || assemblyPanel?.kind === 'mate'}
+              onEditMate={(mateId) => assemblyUi.getState().open({ kind: 'mate', mateId })}
+            />
+          )}
+          {!sketching.active && assemblyId === null && (
             <FeatureTree
               documents={shownDocuments}
               model={shownModel}
@@ -1503,13 +1676,29 @@ export function App({
                 highlighted={hoveredFeature}
               />
             )}
-            {shownBodies.length === 0 && !sketching.active && (
+            {viewport && assemblyId !== null && (
+              <ConnectorOverlay
+                viewport={viewport}
+                selection={selection}
+                assemblyId={assemblyId}
+                bodies={instanceBodies}
+                chosen={assemblyPanel?.kind === 'mate' ? mateConnectors : []}
+              />
+            )}
+            {assemblyId !== null && instanceBodies.length === 0 && (
+              <p className="viewport-hint" data-testid="assembly-hint">
+                {shownDocument.assemblies.find((a) => a.id === assemblyId)?.instances.length
+                  ? 'Placing the instances...'
+                  : 'An empty assembly. Insert a part studio, then mate the instances.'}
+              </p>
+            )}
+            {assemblyId === null && shownBodies.length === 0 && !sketching.active && (
               <p className="viewport-hint" data-testid="empty-hint">
                 Nothing here yet. Start with <strong>New sketch</strong>: pick a plane, draw a
                 closed shape, then extrude it.
               </p>
             )}
-            {viewport && !sketching.active && (
+            {viewport && !sketching.active && assemblyId === null && (
               <MeasureOverlay viewport={viewport} measure={measure} units={shownDocument.units} />
             )}
             {sketching.active && <SketchStatusBar session={session} />}
@@ -1521,6 +1710,33 @@ export function App({
                 <h2>Sketch selection</h2>
                 <SketchSelectionList session={session} />
               </aside>
+            ) : assemblyId !== null && !locked && assemblyPanel?.kind === 'mate' ? (
+              <MateDialog
+                key={`${assemblyId}/${assemblyPanel.mateId ?? 'new'}`}
+                documents={documents}
+                assemblyId={assemblyId}
+                mateId={assemblyPanel.mateId}
+                selection={selection}
+                bodies={instanceBodies}
+                assembler={loader.assembler}
+                referencer={loader.referencer}
+                onPreview={onMatePreview}
+                onConnectors={setMateConnectors}
+                onClose={(committed) => {
+                  const ui = assemblyUi.getState();
+                  if (committed) ui.holdUntil(committed);
+                  else ui.clearPoses();
+                  ui.close();
+                }}
+              />
+            ) : assemblyId !== null && !locked && assemblyPanel?.kind === 'insert' ? (
+              <InsertPanel
+                documents={documents}
+                assemblyId={assemblyId}
+                library={library}
+                createVersion={autosave ? autosave.createVersion : null}
+                onClose={() => assemblyUi.getState().close()}
+              />
             ) : dialog ? (
               <Suspense
                 fallback={
@@ -1570,11 +1786,13 @@ export function App({
                   </>
                 )}
                 <SelectionPanel selection={selection} />
-                <MeasurePanel
-                  measure={measure}
-                  documents={shownDocuments}
-                  bodies={measuredBodies}
-                />
+                {assemblyId === null && (
+                  <MeasurePanel
+                    measure={measure}
+                    documents={shownDocuments}
+                    bodies={measuredBodies}
+                  />
+                )}
               </>
             )}
           </div>
@@ -1582,7 +1800,7 @@ export function App({
       </main>
       <PartTabs
         documents={shownDocuments}
-        disabled={sketching.active || dialog !== null}
+        disabled={sketching.active || dialog !== null || assemblyPanel?.kind === 'mate'}
         readOnly={locked}
       />
     </div>

@@ -329,6 +329,8 @@ interface Assembled {
 interface DragState {
   generation: number;
   input: AssemblyInput;
+  /** Where the regen left the instances: what `endDrag` puts `input` back to. */
+  solved: AssemblyInput['instances'];
   stored: ReadonlyMap<string, Pose>;
 }
 
@@ -1090,6 +1092,21 @@ export class RegenEngine {
     });
   }
 
+  /**
+   * End a drag of `assemblyId` that was not committed (cancelled, or nothing moved): the next
+   * drag starts from where the last regen left the instances again, not from where the last
+   * step did. A step not started yet is dropped (resolves to null). A committed drag needs no
+   * call: its `setPoses` regen replaces the state.
+   */
+  endDrag(assemblyId: string): void {
+    if (this.#pendingDrag?.assemblyId === assemblyId) {
+      this.#pendingDrag.resolve(null);
+      this.#pendingDrag = null;
+    }
+    const state = this.#assemblyStates.get(assemblyId);
+    if (state) state.input = { instances: state.solved, mates: state.input.mates };
+  }
+
   #currentGeneration(options: AssemblyOptions): number {
     if (options.generation !== undefined) {
       if (!Number.isSafeInteger(options.generation)) {
@@ -1310,9 +1327,9 @@ export class RegenEngine {
         });
         continue;
       }
-      partBodies.set(x.id, all);
       const listed = x.bodies;
       if (listed === undefined) {
+        partBodies.set(x.id, all);
         r.bodies = all.map((b) => b.id);
         continue;
       }
@@ -1326,7 +1343,10 @@ export class RegenEngine {
           message: `Part ${src.state.part.name} has no body ${missing.join(', ')} (merged into another, or never made): re-pick the bodies`,
         });
       }
-      r.bodies = all.filter((b) => listed.includes(b.id)).map((b) => b.id);
+      // Connectors sit on what the instance shows: a face of a body it hides is not its own.
+      const shown = all.filter((b) => listed.includes(b.id));
+      r.bodies = shown.map((b) => b.id);
+      if (shown.length > 0) partBodies.set(x.id, shown);
     }
 
     // Mates: what each needs, then the connector frames not found before, in one batch.
@@ -1408,13 +1428,11 @@ export class RegenEngine {
       const poses: Pose[] = [];
       (['a', 'b'] as const).forEach((side, i) => {
         const c = mate[side];
-        const reports = partBodies
-          .get(c.instance)!
-          .map((b) => {
-            const key = this.#connectorKey(b, connectorOrigin(c), c.inference);
-            return this.#connectors.get(key) ?? uncached.get(key);
-          })
-          .filter((x): x is ConnectorReport => x !== undefined);
+        const reports = partBodies.get(c.instance)!.flatMap((b) => {
+          const key = this.#connectorKey(b, connectorOrigin(c), c.inference);
+          const report = this.#connectors.get(key) ?? uncached.get(key);
+          return report === undefined ? [] : [{ bodyId: b.id, report }];
+        });
         const report = pickReport(reports);
         if (report === undefined || !report.ok) {
           m.errors.push(connectorError(mate, side, report));
@@ -1440,12 +1458,11 @@ export class RegenEngine {
     const report = solve(input);
     applyReport(result, report, stored);
     result.ms = now() - started;
+    const solved = input.instances.map((x) => ({ ...x, pose: report.poses[x.id] ?? x.pose }));
     out.states.set(assembly.id, {
       generation: run.generation,
-      input: {
-        instances: input.instances.map((x) => ({ ...x, pose: report.poses[x.id] ?? x.pose })),
-        mates,
-      },
+      input: { instances: solved, mates },
+      solved,
       stored,
     });
     return result;

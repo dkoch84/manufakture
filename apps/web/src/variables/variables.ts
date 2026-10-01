@@ -135,6 +135,19 @@ const FIELD_LABELS: Record<string, string> = {
   'layout.angle': 'Total angle',
 };
 
+/** Mate fields by path: connector offsets (on either connector) and limits. */
+const MATE_FIELD_LABELS: Record<string, string> = Object.fromEntries([
+  ['limits.min', 'Minimum'],
+  ['limits.max', 'Maximum'],
+  ...(['a', 'b'] as const).flatMap((side) => {
+    const which = side === 'a' ? 'first' : 'second';
+    return ['X', 'Y', 'Z'].flatMap((axis, i) => [
+      [`${side}.offset.translation.${i}`, `Offset ${axis} of the ${which} connector`],
+      [`${side}.offset.rotation.${i}`, `Rotation about ${axis} of the ${which} connector`],
+    ]);
+  }),
+]);
+
 /** What a use is called in the table. */
 export function labelOfUse(doc: ManufaktureDocument, use: VariableUse): string {
   if (use.kind === 'variable') return `#${use.name}`;
@@ -145,6 +158,12 @@ export function labelOfUse(doc: ManufaktureDocument, use: VariableUse): string {
   if (use.kind === 'row') {
     const row = doc.configurations?.rows.find((x) => x.id === use.rowId);
     return `Configuration ${row?.name ?? use.rowId}`;
+  }
+  if (use.kind === 'mate') {
+    const assembly = doc.assemblies.find((a) => a.id === use.assemblyId);
+    const mate = assembly?.mates.find((m) => m.id === use.mateId);
+    const where = `${assembly?.name ?? use.assemblyId}: ${mate?.name ?? use.mateId}`;
+    return `${where}: ${MATE_FIELD_LABELS[use.path.join('.')] ?? use.path.join('.')}`;
   }
   const feature = findPart(doc, use.partId)?.features.find((f) => f.id === use.featureId);
   const name = feature?.name ?? use.featureId;
@@ -162,7 +181,9 @@ function usesOf(doc: ManufaktureDocument, name: string): UseRow[] {
           ? `p:${u.parameterId}`
           : u.kind === 'row'
             ? `r:${u.rowId}:${u.parameterId}`
-            : `f:${u.featureId}:${u.path.join('.')}`,
+            : u.kind === 'mate'
+              ? `m:${u.assemblyId}/${u.mateId}:${u.path.join('.')}`
+              : `f:${u.featureId}:${u.path.join('.')}`,
     label: labelOfUse(doc, u),
     featureId: u.kind === 'feature' ? u.featureId : null,
   }));

@@ -69,7 +69,7 @@ A batch is a list of ops and gets one reply (ADR 0007, decision 3). An op can us
 | `feature`    | `bodies` (`{ id, shape }` list, or `{ result }`), `feature`                 | `FeatureOutcome`: the bodies after the feature, their names, errors, warnings (see Part features)  |
 | `resolve`    | `shape` (a named body), `refs` (`FaceRef` / `EdgeRef`)                      | `{ results }`: per reference its `Resolution` plus the face or edge geometry                       |
 | `connector`  | `shape` (a named body), `connectors` (`{ origin, inference }`)              | `{ results }`: per connector its frame or why there is none (Mate connectors)                      |
-| `pick`       | `shape` (a named body), `kind` (`face`, `edge`), `index`                    | `{ ref }`: the `FaceRef` / `EdgeRef` a click there is stored as, or null                           |
+| `pick`       | `shape` (a named body), `kind` (`face`, `edge`, `vertex`), `index`          | `{ ref }`: the `FaceRef` / `EdgeRef` / `VertexRef` a click there is stored as, or null             |
 | `measure`    | `shape`, `targets` (`{ kind, name }` or `{ kind, index }`), `body?`         | `MeasureResult`: per target its exact values, distance and angle of two, body properties (Measure) |
 | `exportStep` | `bodies` (`{ shape, name }`, at least one)                                  | `{ data }`: one AP214 STEP file, transferred (STEP exchange)                                       |
 | `importStep` | `data` (the file's bytes, or base64 text of them)                           | `{ shape }`: a new shape without names, a compound when the file has several roots                 |

@@ -1,4 +1,9 @@
-import { DocumentStore, applyCommand, type ManufaktureDocument } from '@manufakture/core';
+import {
+  DocumentStore,
+  applyCommand,
+  type Command,
+  type ManufaktureDocument,
+} from '@manufakture/core';
 import { dirtyFeaturesOf } from '@manufakture/regen';
 import { angleQuantity, evaluate, lengthQuantity, numberQuantity } from '@manufakture/units';
 import { describe, expect, it } from 'vitest';
@@ -106,6 +111,70 @@ describe('the table', () => {
       type: null,
       value: null,
       error: 'Division by zero',
+    });
+  });
+});
+
+describe('mates as uses', () => {
+  it('lists a connector offset and a limit that read a variable, labelled by assembly and mate', () => {
+    let doc = boxDocument();
+    const commands: Command[] = [
+      { type: 'addAssembly', assemblyId: 'assembly#1', name: 'Box' },
+      ...['inst#1', 'inst#2'].map((id): Command => ({
+        type: 'addInstance',
+        assemblyId: 'assembly#1',
+        instance: {
+          id,
+          name: id,
+          source: { part: 'part#1' },
+          fixed: id === 'inst#1',
+          suppressed: false,
+          pose: { translation: [0, 0, 0], rotation: [0, 0, 0, 1] },
+        },
+      })),
+      {
+        type: 'addMate',
+        assemblyId: 'assembly#1',
+        mate: {
+          id: 'mate#1',
+          name: 'Drawer',
+          kind: 'slider',
+          a: {
+            id: 'mc#1',
+            instance: 'inst#1',
+            inference: 'centroid',
+            origin: { id: 'r1', ref: { face: 'extrude#1:cap:end' } },
+          },
+          b: {
+            id: 'mc#2',
+            instance: 'inst#2',
+            inference: 'centroid',
+            origin: { id: 'r2', ref: { face: 'extrude#1:cap:start' } },
+            offset: {
+              translation: [mm('0'), mm('0'), mm('#h')],
+              rotation: [mm('0'), mm('0'), mm('0')],
+            },
+          },
+          suppressed: false,
+          limits: { max: mm('#w') },
+        },
+      },
+    ];
+    for (const c of commands) {
+      const r = applyCommand(doc, c);
+      if (!r.ok) throw new Error(r.error.message);
+      doc = r.value.document;
+    }
+    const rows = variableRows(doc);
+    expect(rows.find((r) => r.name === 'h')!.uses).toContainEqual({
+      key: 'm:assembly#1/mate#1:b.offset.translation.2',
+      label: 'Box: Drawer: Offset Z of the second connector',
+      featureId: null,
+    });
+    expect(rows.find((r) => r.name === 'w')!.uses).toContainEqual({
+      key: 'm:assembly#1/mate#1:limits.max',
+      label: 'Box: Drawer: Maximum',
+      featureId: null,
     });
   });
 });

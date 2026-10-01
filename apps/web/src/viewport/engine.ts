@@ -10,6 +10,12 @@
 //
 // Rendering is on demand: a frame is drawn only when something changed, so an
 // idle viewport costs nothing.
+//
+// A body may have a transform (an assembly instance): its objects are placed by
+// it, and bodies showing the same mesh share its vertex buffers and edge lines,
+// each keeping only its own colours and pick ids. Picks still return the name in
+// the body's own mesh, so a transform never changes what a click names. A
+// change of transforms alone (a drag, a solve) moves the objects in place.
 
 import {
   AmbientLight,
@@ -24,6 +30,7 @@ import {
   AlwaysStencilFunc,
   IncrementWrapStencilOp,
   LineSegments,
+  Matrix4,
   Mesh,
   MeshBasicMaterial,
   MeshStandardMaterial,
@@ -36,6 +43,7 @@ import {
   PlaneGeometry,
   Points,
   PointsMaterial,
+  Quaternion,
   CanvasTexture,
   ReplaceStencilOp,
   Scene,
@@ -44,6 +52,7 @@ import {
   WebGLRenderer,
   type Camera,
   type Material,
+  type Object3D,
   type ShaderMaterial,
 } from 'three';
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
@@ -64,9 +73,12 @@ import {
   edgePickIds,
   pickIdAttribute,
   prepareBodies,
+  transformBounds,
+  transformPoint,
   vertexPickPoints,
   unionBounds,
   type BodyInput,
+  type BodyTransform,
   type ViewBody,
 } from './bodies';
 import { gridCenter, gridLevels } from './grid';
@@ -130,6 +142,8 @@ type Highlight = 'none' | 'hover' | 'selected';
 
 interface BodyObjects {
   body: ViewBody;
+  /** `body.transform` as a matrix (identity without one), for projecting picks and highlights. */
+  matrix: Matrix4;
   /** The body's own face colour (`BodyInput.color`), or the default one. */
   faceColor: Color;
   geometry: BufferGeometry;
@@ -180,6 +194,19 @@ export interface EngineStores {
 export interface CanvasPoint {
   x: number;
   y: number;
+}
+
+/**
+ * Moves things with a left-button drag while hover and selection keep working (the assembly
+ * workspace drags instances). Asked when a left-button press first moves past the click slop;
+ * a click that does not move is a selection click as always.
+ */
+export interface ObjectDrag {
+  /** A drag starts at `p` (the press) over `ref` (null: nothing). Return true to take it. */
+  start(ref: GeometryRef | null, p: CanvasPoint): boolean;
+  move(p: CanvasPoint): void;
+  /** The release; `p` null when the drag was cancelled. */
+  end(p: CanvasPoint | null): void;
 }
 
 /**
@@ -263,7 +290,10 @@ export class ViewportEngine {
     onCube: boolean;
     /** Depth of the grabbed model point, measured when a pan starts. */
     panScale: number | null;
+    /** The object drag took this press. */
+    object: boolean;
   } | null = null;
+  private objectDrag: ObjectDrag | null = null;
   private benchmark: ((now: number) => void) | null = null;
   private delegate: PointerDelegate | null = null;
   /** The delegate took the current press. */
@@ -391,18 +421,16 @@ export class ViewportEngine {
   // Public API -------------------------------------------------------------------------
 
   setBodies(inputs: readonly BodyInput[], fit = true): void {
+    // Instances that only moved (a drag, a solve) are moved in place: no rebuild, no refit.
+    if (this.onlyMoved(inputs)) {
+      this.setTransforms(new Map(inputs.map((b) => [b.id, b.transform])));
+      return;
+    }
     this.clearBodies();
     const prepared = prepareBodies(inputs);
-    this.bodies = prepared.map((body) => this.buildBody(body));
-    const bounds = unionBounds(prepared);
-    if (bounds) {
-      const min = new Vector3(...bounds.min);
-      const max = new Vector3(...bounds.max);
-      this.sceneSphere = {
-        center: min.clone().add(max).multiplyScalar(0.5),
-        radius: Math.max(min.distanceTo(max) / 2, 1e-3),
-      };
-    }
+    const shared = new Map<ViewBody['mesh'], SharedBuffers>();
+    this.bodies = prepared.map((body) => this.buildBody(body, shared));
+    this.updateSceneSphere();
     // New edge objects start visible: apply Show edges and the section to them.
     this.applySettings(this.stores.settings.getState());
     this.refreshHighlights();
@@ -410,6 +438,50 @@ export class ViewportEngine {
     this.stores.selection.getState().prune((item) => !isGeometryRef(item) || this.resolves(item));
     if (fit) this.fitAll(false);
     this.invalidate(true);
+  }
+
+  /**
+   * Move bodies to new transforms (by body id; undefined: none), without rebuilding them or
+   * moving the camera. Ids the viewport does not show are ignored.
+   */
+  setTransforms(transforms: ReadonlyMap<string, BodyTransform | undefined>): void {
+    let changed = false;
+    for (const b of this.bodies) {
+      if (!transforms.has(b.body.id)) continue;
+      const t = transforms.get(b.body.id);
+      if (sameTransform(t, b.body.transform)) continue;
+      const { transform: _old, ...rest } = b.body;
+      void _old;
+      b.body = t ? { ...rest, transform: t } : rest;
+      if (b.body.bounds) b.body.bounds = transformBounds(localBoundsOf(b), t);
+      this.place(b);
+      changed = true;
+    }
+    if (!changed) return;
+    // Fitting frames the bodies where they are now; the camera itself stays.
+    this.updateSceneSphere();
+    this.applySection(this.stores.settings.getState().section);
+    this.refreshHighlights();
+    this.invalidate(true);
+  }
+
+  /** Take left-button drags for moving things (null: none). */
+  setObjectDrag(drag: ObjectDrag | null): void {
+    if (this.drag?.object) this.objectDrag?.end(null);
+    if (this.drag) this.drag.object = false;
+    this.objectDrag = drag;
+  }
+
+  /** The nearest visible model point under a canvas point (CSS pixels), or null. */
+  surfacePoint(x: number, y: number): Vec3 | null {
+    const p = this.surfacePointAt(x, y);
+    return p ? [p.x, p.y, p.z] : null;
+  }
+
+  /** The unit direction from the view's target towards the eye. */
+  viewDirection(): Vec3 {
+    const e = eyeDirection(this.currentView().orientation);
+    return [e.x, e.y, e.z];
   }
 
   setStandardView(name: StandardView, animate = true): void {
@@ -467,15 +539,18 @@ export class ViewportEngine {
         for (let s = 0; s < body.segmentEdges.length; s++) {
           if (body.segmentEdges[s] !== e) continue;
           const p = body.segments.subarray(s * 6, s * 6 + 6);
-          if (points.length === 0) points.push([p[0]!, p[1]!, p[2]!]);
-          points.push([p[3]!, p[4]!, p[5]!]);
+          if (points.length === 0) points.push(transformPoint(body.transform, p.subarray(0, 3)));
+          points.push(transformPoint(body.transform, p.subarray(3, 6)));
         }
         if (ref && points.length > 0)
           out.push({ bodyId: body.id, kind: 'edge', name: ref.name, points });
       }
       for (const v of body.vertices) {
         const ref = hitToRef(views, { kind: 'vertex', body: i, index: v.index });
-        if (ref) out.push({ bodyId: body.id, kind: 'vertex', name: ref.name, points: [v.point] });
+        if (ref) {
+          const points = [transformPoint(body.transform, v.point)];
+          out.push({ bodyId: body.id, kind: 'vertex', name: ref.name, points });
+        }
       }
     });
     return out;
@@ -658,6 +733,7 @@ export class ViewportEngine {
 
   dispose(): void {
     this.disposed = true;
+    this.objectDrag = null;
     cancelAnimationFrame(this.frameHandle);
     this.resizeObserver?.disconnect();
     this.detachEvents();
@@ -692,12 +768,26 @@ export class ViewportEngine {
 
   // Bodies ------------------------------------------------------------------------------
 
-  private buildBody(body: ViewBody): BodyObjects {
+  private buildBody(body: ViewBody, sharing: Map<ViewBody['mesh'], SharedBuffers>): BodyObjects {
     const { mesh } = body;
+    let shared = sharing.get(mesh);
+    if (!shared) {
+      const edgeGeometry = new LineSegmentsGeometry();
+      if (body.segments.length > 0) edgeGeometry.setPositions(body.segments);
+      shared = {
+        position: new BufferAttribute(body.positions, 3),
+        normal: new BufferAttribute(body.normals, 3),
+        index: new BufferAttribute(body.indices, 1),
+        edgeGeometry,
+        segments: new BufferAttribute(body.segments, 3),
+        vertexPoints: null,
+      };
+      sharing.set(mesh, shared);
+    }
     const geometry = new BufferGeometry();
-    geometry.setAttribute('position', new BufferAttribute(body.positions, 3));
-    geometry.setAttribute('normal', new BufferAttribute(body.normals, 3));
-    geometry.setIndex(new BufferAttribute(body.indices, 1));
+    geometry.setAttribute('position', shared.position);
+    geometry.setAttribute('normal', shared.normal);
+    geometry.setIndex(shared.index);
     geometry.setAttribute('pickId', new BufferAttribute(pickIdAttribute(body), 1));
     const vertexCount = body.positions.length / 3;
     const colors = new BufferAttribute(new Uint8Array(vertexCount * 3), 3, true);
@@ -720,19 +810,19 @@ export class ViewportEngine {
       make(this.pickMaterial, 0, this.pickScene),
     ];
 
-    const edgeGeometry = new LineSegmentsGeometry();
-    if (body.segments.length > 0) edgeGeometry.setPositions(body.segments);
+    const edgeGeometry = shared.edgeGeometry;
     const edges = new LineSegments2(edgeGeometry, this.edgeMaterial);
     edges.renderOrder = 4;
     this.scene.add(edges);
 
     const pickEdgeGeometry = new BufferGeometry();
-    pickEdgeGeometry.setAttribute('position', new BufferAttribute(body.segments, 3));
+    pickEdgeGeometry.setAttribute('position', shared.segments);
     pickEdgeGeometry.setAttribute('pickId', new BufferAttribute(edgePickIds(body), 1));
     const pickEdges = new LineSegments(pickEdgeGeometry, this.pickEdgeMaterial);
     const points = vertexPickPoints(body);
+    shared.vertexPoints ??= new BufferAttribute(points.positions, 3);
     const pickVertexGeometry = new BufferGeometry();
-    pickVertexGeometry.setAttribute('position', new BufferAttribute(points.positions, 3));
+    pickVertexGeometry.setAttribute('position', shared.vertexPoints);
     pickVertexGeometry.setAttribute('pickId', new BufferAttribute(points.ids, 1));
     const pickVertices = new Points(pickVertexGeometry, this.pickVertexMaterial);
     // The pick window is a few pixels wide: culling against it saves nothing
@@ -749,8 +839,9 @@ export class ViewportEngine {
       });
       return map;
     };
-    return {
+    const objects: BodyObjects = {
       body,
+      matrix: new Matrix4(),
       faceColor,
       geometry,
       colors,
@@ -766,19 +857,71 @@ export class ViewportEngine {
       screenVertices: new Float32Array(body.vertices.length * 2),
       screenVersion: -1,
     };
+    this.place(objects);
+    return objects;
+  }
+
+  /** The sphere fitting frames: around every body's box, where the body is now. */
+  private updateSceneSphere(): void {
+    const bounds = unionBounds(this.bodies.map((b) => b.body));
+    if (!bounds) return;
+    const min = new Vector3(...bounds.min);
+    const max = new Vector3(...bounds.max);
+    this.sceneSphere = {
+      center: min.clone().add(max).multiplyScalar(0.5),
+      radius: Math.max(min.distanceTo(max) / 2, 1e-3),
+    };
+  }
+
+  /** Put a body's objects where its transform says, and forget its projected picks. */
+  private place(b: BodyObjects): void {
+    const t = b.body.transform;
+    if (t) {
+      b.matrix.compose(
+        new Vector3(...t.translation),
+        new Quaternion(...t.rotation),
+        new Vector3(1, 1, 1),
+      );
+    } else b.matrix.identity();
+    const objects: Object3D[] = [...b.meshes, b.edges, b.pickEdges, b.pickVertices];
+    for (const o of objects) {
+      o.matrixAutoUpdate = false;
+      o.matrix.copy(b.matrix);
+      o.updateMatrixWorld(true);
+    }
+    b.screenVersion = -1;
+  }
+
+  /** Whether `inputs` are the bodies shown now, in order, with only transforms changed. */
+  private onlyMoved(inputs: readonly BodyInput[]): boolean {
+    if (inputs.length === 0 || inputs.length !== this.bodies.length) return false;
+    if (!inputs.some((b) => b.transform)) return false;
+    return inputs.every((input, i) => {
+      const b = this.bodies[i]!.body;
+      return (
+        input.id === b.id &&
+        input.mesh === b.mesh &&
+        input.names === b.names &&
+        (input.topology ?? null) === (b.topology ?? null) &&
+        input.color === b.color
+      );
+    });
   }
 
   private clearBodies(): void {
+    // Instances share edge geometry: dispose each once.
+    const edgeGeometries = new Set<LineSegmentsGeometry>();
     for (const b of this.bodies) {
       for (const m of b.meshes) m.removeFromParent();
       b.edges.removeFromParent();
       b.pickEdges.removeFromParent();
       b.pickVertices.removeFromParent();
       b.geometry.dispose();
-      b.edgeGeometry.dispose();
+      edgeGeometries.add(b.edgeGeometry);
       b.pickEdges.geometry.dispose();
       b.pickVertices.geometry.dispose();
     }
+    for (const g of edgeGeometries) g.dispose();
     this.bodies = [];
   }
 
@@ -827,7 +970,7 @@ export class ViewportEngine {
         const v = body.body.vertices[index - 1];
         if (v)
           vertexPoints.push({
-            p: v.point,
+            p: transformPoint(body.body.transform, v.point),
             c: h === 'hover' ? COLORS.edgeHover : COLORS.edgeSelected,
           });
       }
@@ -1111,10 +1254,18 @@ export class ViewportEngine {
     b.screenVersion = this.cameraVersion;
     const camera: Camera = this.activeCamera();
     const v = new Vector3();
+    const c = new Vector3();
     const clipped = (x: number, y: number, z: number) =>
-      this.clipPlanes.length > 0 && this.clipPlane.distanceToPoint(v.set(x, y, z)) < 0;
+      this.clipPlanes.length > 0 && this.clipPlane.distanceToPoint(c.set(x, y, z)) < 0;
+    const m = b.body.transform ? b.matrix : null;
+    const toWorld = (x: number, y: number, z: number) =>
+      m ? v.set(x, y, z).applyMatrix4(m) : v.set(x, y, z);
+    const clippedAt = (x: number, y: number, z: number) => {
+      const w = toWorld(x, y, z);
+      return clipped(w.x, w.y, w.z);
+    };
     const project = (x: number, y: number, z: number, out: Float32Array, o: number) => {
-      v.set(x, y, z).project(camera);
+      toWorld(x, y, z).project(camera);
       if (v.z < -1 || v.z > 1) {
         out[o] = NaN;
         return;
@@ -1127,8 +1278,8 @@ export class ViewportEngine {
     for (let s = 0; s < b.body.segmentEdges.length; s++) {
       const i = s * 6;
       if (
-        clipped(seg[i]!, seg[i + 1]!, seg[i + 2]!) &&
-        clipped(seg[i + 3]!, seg[i + 4]!, seg[i + 5]!)
+        clippedAt(seg[i]!, seg[i + 1]!, seg[i + 2]!) &&
+        clippedAt(seg[i + 3]!, seg[i + 4]!, seg[i + 5]!)
       ) {
         out[s * 4] = NaN;
         continue;
@@ -1139,7 +1290,7 @@ export class ViewportEngine {
     }
     b.body.vertices.forEach((vertex, i) => {
       const [x, y, z] = vertex.point;
-      if (clipped(x, y, z)) b.screenVertices[i * 2] = NaN;
+      if (clippedAt(x, y, z)) b.screenVertices[i * 2] = NaN;
       else project(x, y, z, b.screenVertices, i * 2);
     });
   }
@@ -1182,6 +1333,7 @@ export class ViewportEngine {
     on('pointermove', (e) => this.onPointerMove(e));
     on('pointerup', (e) => this.onPointerUp(e));
     on('pointercancel', () => {
+      if (this.drag?.object) this.objectDrag?.end(null);
       this.drag = null;
       this.delegated = false;
     });
@@ -1242,6 +1394,7 @@ export class ViewportEngine {
       action: 'none',
       onCube: this.cube.contains(this.width, p.x, p.y),
       panScale: null,
+      object: false,
     };
   }
 
@@ -1258,7 +1411,28 @@ export class ViewportEngine {
       if (this.delegate && !this.cube.contains(this.width, p.x, p.y)) this.delegate.move(e, p);
       return;
     }
-    if (Math.hypot(p.x - drag.startX, p.y - drag.startY) > CLICK_SLOP_PX) drag.moved = true;
+    if (drag.object) {
+      this.objectDrag?.move(p);
+      return;
+    }
+    if (!drag.moved && Math.hypot(p.x - drag.startX, p.y - drag.startY) > CLICK_SLOP_PX) {
+      drag.moved = true;
+      // A plain left-button drag off the view cube may move an object instead.
+      const preset = PRESETS[this.stores.settings.getState().preset];
+      if (
+        this.objectDrag &&
+        !drag.onCube &&
+        e.buttons === 1 &&
+        dragAction(preset, e.buttons, modifiersOf(e)) === 'none'
+      ) {
+        const start = { x: drag.startX, y: drag.startY };
+        if (this.objectDrag.start(this.pickAt(start.x, start.y), start)) {
+          drag.object = true;
+          this.objectDrag.move(p);
+          return;
+        }
+      }
+    }
     // Until the pointer leaves the click slop, nothing moves; then the whole
     // distance from the press applies, so a drag never loses its first pixels.
     if (!drag.moved) return;
@@ -1301,6 +1475,10 @@ export class ViewportEngine {
     this.drag = null;
     if (this.canvas.hasPointerCapture(e.pointerId)) this.canvas.releasePointerCapture(e.pointerId);
     this.hoverPending = true;
+    if (drag.object) {
+      this.objectDrag?.end(this.local(e));
+      return;
+    }
     if (drag.moved || e.button !== 0) return;
     const p = this.local(e);
     if (drag.onCube) {
@@ -1396,10 +1574,40 @@ function fillColor(
 }
 
 function appendEdgeSegments(body: ViewBody, edge: number, out: number[]): void {
+  const t = body.transform;
   for (let s = 0; s < body.segmentEdges.length; s++) {
     if (body.segmentEdges[s] !== edge) continue;
-    for (let k = 0; k < 6; k++) out.push(body.segments[s * 6 + k]!);
+    if (!t) {
+      for (let k = 0; k < 6; k++) out.push(body.segments[s * 6 + k]!);
+      continue;
+    }
+    out.push(...transformPoint(t, body.segments.subarray(s * 6, s * 6 + 3)));
+    out.push(...transformPoint(t, body.segments.subarray(s * 6 + 3, s * 6 + 6)));
   }
+}
+
+/** Buffers of one mesh that every body showing it shares (instances of a part). */
+interface SharedBuffers {
+  position: BufferAttribute;
+  normal: BufferAttribute;
+  index: BufferAttribute;
+  edgeGeometry: LineSegmentsGeometry;
+  segments: BufferAttribute;
+  vertexPoints: BufferAttribute | null;
+}
+
+function sameTransform(a: BodyTransform | undefined, b: BodyTransform | undefined): boolean {
+  if (!a || !b) return a === b;
+  return (
+    a.translation.every((v, i) => v === b.translation[i]) &&
+    a.rotation.every((v, i) => v === b.rotation[i])
+  );
+}
+
+/** A body's box in its own coordinates. */
+function localBoundsOf(b: BodyObjects): { min: Vec3; max: Vec3 } {
+  const box = b.geometry.boundingBox ?? (b.geometry.computeBoundingBox(), b.geometry.boundingBox!);
+  return { min: [box.min.x, box.min.y, box.min.z], max: [box.max.x, box.max.y, box.max.z] };
 }
 
 function setSegments(lines: LineSegments2, positions: number[]): void {

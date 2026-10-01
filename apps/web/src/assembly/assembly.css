@@ -1,0 +1,151 @@
+/* The assembly workspace: its toolbar, tree, panels and connector marks. */
+
+.assembly-toolbar {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.assembly-tree h3 {
+  font-size: 0.8rem;
+  margin: 0.75rem 0.25rem 0.25rem;
+  color: #3d4652;
+}
+
+.assembly-summary {
+  margin: 0 0.25rem 0.5rem;
+  padding: 0.3rem 0.45rem;
+  border-radius: 4px;
+  background: #eef3f8;
+}
+
+.assembly-summary.conflict {
+  background: #fdecea;
+  color: #8a1c12;
+}
+
+.assembly-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.assembly-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.15rem 0.4rem;
+  padding: 0.3rem 0.25rem;
+  border-bottom: 1px solid #edf0f3;
+}
+
+.assembly-list li.suppressed .assembly-item-name {
+  color: #8a94a1;
+  text-decoration: line-through;
+}
+
+.assembly-item-name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.assembly-badge {
+  font-weight: normal;
+  color: #5b6673;
+}
+
+.assembly-item-source {
+  color: #5b6673;
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}
+
+.assembly-item-message {
+  flex-basis: 100%;
+  font-size: 0.75rem;
+  color: #8a1c12;
+}
+
+.assembly-item-actions {
+  display: flex;
+  flex-basis: 100%;
+  gap: 0.25rem;
+}
+
+.assembly-item-actions button {
+  font: inherit;
+  font-size: 0.75rem;
+  padding: 0.05rem 0.4rem;
+}
+
+.mate-status {
+  font-size: 0.75rem;
+  color: #1d6b35;
+}
+
+.mate-row.status-redundant .mate-status,
+.mate-row.status-suppressed .mate-status,
+.mate-row.status-pending .mate-status {
+  color: #5b6673;
+}
+
+.mate-row.status-conflicting .mate-status,
+.mate-row.status-error .mate-status,
+.mate-row.status-invalid .mate-status,
+.mate-row.blamed .mate-status {
+  color: #b42318;
+  font-weight: 600;
+}
+
+.mate-adjust {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.75rem;
+  align-items: center;
+}
+
+.mate-connector-label {
+  margin: 0.25rem 0;
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}
+
+.mate-preview {
+  margin: 0.5rem 0;
+  font-size: 0.8rem;
+  color: #3d4652;
+}
+
+.insert-parts {
+  list-style: none;
+  margin: 0 0 0.5rem;
+  padding: 0;
+}
+
+.insert-parts li {
+  margin: 0.2rem 0;
+}
+
+.connector-hover {
+  fill: #ffffff;
+  stroke: #0b5cff;
+  stroke-width: 2.5;
+}
+
+.connector-chosen {
+  fill: #0b5cff;
+  stroke: #ffffff;
+  stroke-width: 2;
+}
+
+.connector-label {
+  font-size: 11px;
+  font-weight: 600;
+  fill: #0b3d99;
+  paint-order: stroke;
+  stroke: #ffffff;
+  stroke-width: 3px;
+}
+
+.assembly-tab-icon {
+  color: #5b6673;
+}

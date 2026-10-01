@@ -16,6 +16,8 @@ Every part studio is kept built, whichever tab is active, so switching tabs rebu
 
 While a sketch or a feature dialog is open, the other tabs cannot be chosen: finish or cancel it first.
 
+[Assemblies](assemblies.md) have tabs too, after the part studios; **+ Assembly** adds one.
+
 ## Adding, renaming, moving and removing
 
 | Action    | How                                                                                                                                     |

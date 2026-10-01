@@ -190,11 +190,17 @@ describe('feature ops', () => {
       { op: 'feature', bodies: [], feature: block, keep: false },
       { op: 'pick', shape: { result: 0 }, kind: 'face', index: 1 },
       { op: 'pick', shape: { result: 0 }, kind: 'edge', index: 1 },
+      { op: 'pick', shape: { result: 0 }, kind: 'vertex', index: 1 },
     ]);
     const face = value<{ ref: unknown }>(again.results[1]!).ref;
     const edge = value<{ ref: { faces: string[] } }>(again.results[2]!).ref;
     expect(face).toEqual({ face: expect.stringMatching(/^extrude#1:/) });
     expect(edge.faces).toHaveLength(2);
+    // A block corner: the three faces around it, sorted, and no ordinal (no other vertex has them).
+    const vertex = value<{ ref: { faces: string[]; ordinal?: number } }>(again.results[3]!).ref;
+    expect(vertex.faces).toHaveLength(3);
+    expect(vertex.faces).toEqual([...vertex.faces].sort());
+    expect(vertex.ordinal).toBeUndefined();
   });
 
   it('meshes of raw shapes stay unnamed', async () => {

@@ -23,6 +23,7 @@ import type {
   MeshData,
   ShapeId,
   Topology,
+  VertexRef,
 } from '@manufakture/kernel';
 import type { KernelClient } from '@manufakture/kernel/client';
 import type { Measurer } from '../measure/measurer';
@@ -100,6 +101,11 @@ export interface Referencer {
     kind: 'face' | 'edge',
     index: number,
   ): Promise<ExchangeResult<FaceRef | EdgeRef>>;
+  /**
+   * The `VertexRef` a mate connector stores for vertex `index` (1-based) of a body: the sorted
+   * names of the faces around it, with an ordinal only when another vertex has the same faces.
+   */
+  vertex?(bodyId: string, index: number): Promise<ExchangeResult<VertexRef>>;
 }
 
 const DROPPED = 'The kernel dropped the request; try again.';
@@ -327,7 +333,26 @@ export function kernelExchange(
       if (r.value.ref === null) {
         return { ok: false, message: `That ${kind} has no stable name to refer to.` };
       }
-      return { ok: true, value: r.value.ref };
+      return { ok: true, value: r.value.ref as FaceRef | EdgeRef };
+    },
+    async vertex(bodyId, index) {
+      const c = client();
+      const entry = registry.get(bodyId);
+      if (c === null || !entry || entry.role !== 'part') {
+        return { ok: false, message: 'Only vertices of the parts can be referenced.' };
+      }
+      const reply = await c.submit(
+        [{ op: 'pick', shape: entry.shape, kind: 'vertex', index }] as const,
+        c.latestGeneration,
+      );
+      if (reply === null || reply.status !== 'done') return { ok: false, message: DROPPED };
+      const [r] = reply.results;
+      if (!r.ok) return { ok: false, message: r.error.message };
+      const ref = r.value.ref;
+      if (ref === null || !('faces' in ref) || 'ends' in ref) {
+        return { ok: false, message: 'That vertex has no stable name to refer to.' };
+      }
+      return { ok: true, value: ref as VertexRef };
     },
   };
 

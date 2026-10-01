@@ -1509,6 +1509,60 @@ describe('assemblies', () => {
     expect(suppressed.instances[2]).toMatchObject({ status: 'suppressed', bodies: [] });
   });
 
+  it('finds connectors only on the bodies an instance shows, and calls a match on two bodies ambiguous', async () => {
+    const { kernel, engine } = setup();
+    const doc = apply(
+      twoBodies(),
+      { type: 'addAssembly', assemblyId: ASSEMBLY, name: 'A' },
+      {
+        type: 'addInstance',
+        assemblyId: ASSEMBLY,
+        instance: instance('inst#1', { part: PART }, { fixed: true, bodies: ['extrude#2'] }),
+      },
+      { type: 'addInstance', assemblyId: ASSEMBLY, instance: instance('inst#2', { part: PART }) },
+      {
+        type: 'addMate',
+        assemblyId: ASSEMBLY,
+        mate: mate(
+          'mate#1',
+          'fastened',
+          centroid('mc#1', 'inst#1', 'r1', 'extrude#2:cap:end'),
+          centroid('mc#2', 'inst#2', 'r2', 'extrude#1:cap:start'),
+        ),
+      },
+    );
+    const first = (await regen(engine, doc)).assemblies![0]!;
+    // One op per body. inst#1 hides extrude#1, so its connector is looked for on extrude#2
+    // alone; inst#2 shows both bodies, and the fake kernel finds every name exactly on each:
+    // that is ambiguous.
+    expect(kernel.connectorOps).toEqual([
+      ['extrude#2:cap:end', 'extrude#1:cap:start'],
+      ['extrude#1:cap:start'],
+    ]);
+    expect(first.mates[0]).toMatchObject({
+      status: 'error',
+      errors: [
+        {
+          code: 'reference-ambiguous',
+          referenceId: 'r2',
+          candidates: ['extrude#1', 'extrude#2'],
+          message: expect.stringMatching(/2 bodies .*re-pick it$/),
+        },
+      ],
+    });
+    expect(first.mates[0]!.connectors[0].reference?.via).toBe('exact');
+
+    const narrowed = apply(doc, {
+      type: 'editInstance',
+      assemblyId: ASSEMBLY,
+      instanceId: 'inst#2',
+      bodies: ['extrude#1'],
+    });
+    const second = (await regen(engine, narrowed)).assemblies![0]!;
+    expect(second.mates[0]).toMatchObject({ status: 'ok', errors: [] });
+    expect(second.instances.map((x) => x.bodies)).toEqual([['extrude#2'], ['extrude#1']]);
+  });
+
   it('warns when an instance shows a rolled-back part or names a configuration row', async () => {
     const { engine } = setup();
     const doc = apply(
@@ -1533,6 +1587,31 @@ describe('assemblies', () => {
     ]);
     expect(pinned.source).toEqual({ source: result.sources![0]!.key });
     expect(result.sources![0]!.bodies.map((b) => b.bodyId)).toEqual(['extrude#1']);
+  });
+
+  it('starts the next drag from the last regen again after a drag that was not committed', async () => {
+    const { engine } = setup();
+    const doc = twoInstances([
+      { type: 'addInstance', assemblyId: ASSEMBLY, instance: instance('inst#3', { part: LID }) },
+    ]);
+    const { generation } = await regen(engine, doc);
+    // A free instance turned a quarter turn about Z by a pose target.
+    const turned = {
+      translation: [0, 0, 0] as const,
+      rotation: [0, 0, Math.SQRT1_2, Math.SQRT1_2] as const,
+    };
+    const first = await engine.drag(ASSEMBLY, 'inst#3', turned, { generation });
+    expect(first!.transforms['inst#3']!.rotation[2]).toBeCloseTo(Math.SQRT1_2, 9);
+    // Not committed: the next drag (a move only) starts from the unturned instance.
+    engine.endDrag(ASSEMBLY);
+    const point = { point: [0, 0, 0] as const, position: [5, 0, 0] as const };
+    const next = await engine.drag(ASSEMBLY, 'inst#3', point, { generation });
+    expect(next!.transforms['inst#3']!.rotation).toEqual([0, 0, 0, 1]);
+    expect(next!.transforms['inst#3']!.translation[0]).toBeCloseTo(5, 9);
+    // A step not started yet is dropped.
+    const pending = engine.drag(ASSEMBLY, 'inst#3', turned, { generation });
+    engine.endDrag(ASSEMBLY);
+    expect(await pending).toBeNull();
   });
 
   it('coalesces drags, answers from the last regen without the kernel, and drops stale ones', async () => {

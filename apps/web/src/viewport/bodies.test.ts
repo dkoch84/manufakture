@@ -1,6 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import type { MeshData } from '@manufakture/kernel';
-import { boundsOf, pickIdAttribute, prepareBody, splitSharedVertices, unionBounds } from './bodies';
+import {
+  boundsOf,
+  pickIdAttribute,
+  prepareBodies,
+  prepareBody,
+  splitSharedVertices,
+  transformBounds,
+  transformPoint,
+  unionBounds,
+  untransformPoint,
+  type BodyTransform,
+} from './bodies';
 import { boxBody } from './testMeshes';
 
 describe('prepareBody', () => {
@@ -116,5 +127,44 @@ describe('vertices shared between faces', () => {
     expect(list(1)).toEqual([3, 4, 5]);
     expect(body.faceVertexStart[1]).toBe(3);
     expect(body.faceVertexEnd[1]).toBe(6);
+  });
+});
+
+describe('bodies with transforms (assembly instances)', () => {
+  // A quarter turn about Z, then up 10.
+  const turn: BodyTransform = {
+    translation: [0, 0, 10],
+    rotation: [0, 0, Math.SQRT1_2, Math.SQRT1_2],
+  };
+  const near = (a: readonly number[], b: readonly number[]) =>
+    a.forEach((v, i) => expect(v).toBeCloseTo(b[i]!, 9));
+
+  it('places points, and takes them back', () => {
+    near(transformPoint(turn, [1, 0, 0]), [0, 1, 10]);
+    near(transformPoint(turn, [0, 2, 3]), [-2, 0, 13]);
+    near(untransformPoint(turn, [0, 1, 10]), [1, 0, 0]);
+    expect(transformPoint(undefined, [1, 2, 3])).toEqual([1, 2, 3]);
+  });
+
+  it('bounds a placed body where it is', () => {
+    const b = transformBounds({ min: [0, 0, 0], max: [4, 2, 1] }, turn);
+    near(b.min, [-2, 0, 10]);
+    near(b.max, [0, 4, 11]);
+  });
+
+  it('shares the tables of one mesh between its instances, each with its pick ids and bounds', () => {
+    const box = boxBody({ size: [4, 2, 1] });
+    const [a, b] = prepareBodies([
+      { ...box, id: 'assembly#1/inst#1/box' },
+      { ...box, id: 'assembly#1/inst#2/box', transform: turn },
+    ]);
+    expect(b!.positions).toBe(a!.positions);
+    expect(b!.faceVertexList).toBe(a!.faceVertexList);
+    expect(b!.segments).toBe(a!.segments);
+    expect(b!.pickBase).toBe(a!.pickBase + a!.pickCount);
+    near(a!.bounds!.max, [4, 2, 1]);
+    near(b!.bounds!.min, [-2, 0, 10]);
+    // Picks stay in the body's own mesh: a pick id names the same face on either instance.
+    expect(pickIdAttribute(b!)[0]! - b!.pickBase).toBe(pickIdAttribute(a!)[0]! - a!.pickBase);
   });
 });

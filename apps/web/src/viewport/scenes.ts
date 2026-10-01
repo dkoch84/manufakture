@@ -9,6 +9,7 @@ import type { ManufaktureDocument } from '@manufakture/core';
 import type { LoadProgress } from '@manufakture/kernel';
 import type { KernelClientOptions } from '@manufakture/kernel/client';
 import { spawnRegenWorker, type RegenClient } from '@manufakture/regen/client';
+import type { Assembler } from '../assembly/assembly';
 import { kernelExchange, type Exchanger, type KernelBody, type Referencer } from '../io/exchange';
 import type { Measurer } from '../measure/measurer';
 import { demoDocument } from '../model/demo';
@@ -42,6 +43,8 @@ export interface SceneLoader {
   exchanger?: Exchanger;
   /** Picking references to store (the kernel's minimal edge refs); absent for kernel-free scenes. */
   referencer?: Referencer;
+  /** Assembly previews and drags in the regen worker; absent for kernel-free scenes. */
+  assembler?: Assembler;
   /** A document the scene opens with (the demo scene); the app loads it once the scene is loaded. */
   initialDocument?: ManufaktureDocument;
 }
@@ -122,6 +125,13 @@ export function kernelLoader(
   const registry = new Map<string, KernelBody>();
   const { exchanger, measurer, referencer } = kernelExchange(() => client, registry);
   const regenerator = kernelRegenerator(() => client, registry);
+  const assembler: Assembler = {
+    solve: (document, assemblyId) =>
+      client === null ? Promise.resolve(null) : client.solveAssembly(document, assemblyId),
+    drag: (assemblyId, instanceId, target) =>
+      client === null ? Promise.resolve(null) : client.dragInstance(assemblyId, instanceId, target),
+    endDrag: (assemblyId) => void client?.endDrag(assemblyId).catch(() => undefined),
+  };
   const loader = loaderFrom(
     { label: 'Starting the geometry kernel', fraction: null },
     async (report) => {
@@ -146,6 +156,7 @@ export function kernelLoader(
     measurer,
     exchanger,
     referencer,
+    assembler,
     ...(options.initialDocument ? { initialDocument: options.initialDocument } : {}),
   };
 }

@@ -84,7 +84,11 @@ document change and after every recycle or restart, applies a result only when i
 the one shown, and asks again, up to three times, when its newest regen comes back null. The
 client's `regen` sends the document and a generation only, not the store's previous document and
 change, so in the app the engine finds the dirty subgraph by comparing with the document of its
-last completed regen (see below).
+last completed regen (see below). For assemblies, `kernelRegenerator` keeps the meshes of pinned
+sources like those of parts and registers every body an instance shows under
+`<assembly id>/<instance id>/<body id>` with its source body's shape, so a pick on an instance
+becomes a stored reference like a pick on a part; the assembly workspace previews mates with
+`RegenClient.solveAssembly` and drags instances with `dragInstance` (the loader's `assembler`).
 
 **Decision: the sketch solver runs in the regen worker, in-process**, as a `SolverService` loading planegcs on the first sketch solve, instead of on a `MessageChannel` port to the solver worker (ADR 0007 decision 2, amended there):
 
@@ -311,9 +315,12 @@ After the parts, every assembly of the document is placed (`src/assembly.ts`, th
    `derived-source` warning. The instance shows the bodies it lists (`bodies`; absent: all), and a
    listed body the part no longer has is `reference-lost` on `bodies`. Instances reuse their
    source's body meshes: no copies, no meshes per instance.
-2. **Connector frames.** Each connector of an unsuppressed mate is found on the bodies of its
-   instance's part by the kernel's `connector` op (kernel README, "Mate connectors"), one op per
-   body for every frame not found before, in one batch. Frames are cached in the engine by body key
+2. **Connector frames.** Each connector of an unsuppressed mate is found on the bodies its
+   instance shows (a body the instance hides is not looked at) by the kernel's `connector` op
+   (kernel README, "Mate connectors"), one op per body for every frame not found before, in one
+   batch. Of the bodies' reports (`pickReport`), an exact match wins over any other rule; several
+   equally good matches on different bodies (a face split into two bodies since) are
+   `reference-ambiguous` with the body ids as candidates, never a silent pick of one. Frames are cached in the engine by body key
    and reference: plain data, valid for as long as the body is the same (a recycle does not lose
    them), kept for the frames the last regen used. So an unchanged assembly, and a pose-only change
    (core's `posesOnly`), costs no kernel op at all; an edit of one part finds only the frames on
@@ -344,7 +351,9 @@ coalesced: a step that has not started when a newer one arrives resolves to null
 latest target is solved (the engine yields to the event loop before each step, so pointer moves
 queued behind it replace it). A step older than the newest regen, or for an assembly the last regen
 does not have, is null too. `DragResult.moved` lists the instances whose pose now differs from the
-document's: commit them with `setPoses` on release, never per step.
+document's: commit them with `setPoses` on release, never per step. A drag that commits nothing (cancelled,
+or nothing moved) calls `endDrag(assemblyId)` (`RegenClient.endDrag`), so the next drag starts
+from the last regen's poses again rather than from where the last step left them.
 
 **Configuration rows** (`source.configuration`) are not applied yet (T2.4c): the instance shows the
 part as it is, with a `configuration` warning. Instance sources are grouped by

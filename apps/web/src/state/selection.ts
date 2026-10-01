@@ -24,6 +24,11 @@ export const GEOMETRY_KINDS: readonly GeometryKind[] = ['face', 'edge', 'vertex'
 /** A face, edge or vertex of a body, by name. */
 export interface GeometryRef extends SelectableItem {
   kind: GeometryKind;
+  /**
+   * The viewport body it is on: `<part id>/<body id>` in a part studio, or
+   * `<assembly id>/<instance id>/<body id>` for a body an assembly instance
+   * shows (the name is the part's, wherever the instance is placed).
+   */
   bodyId: string;
   /** The naming layer's name for the sub-shape. */
   name: string;
