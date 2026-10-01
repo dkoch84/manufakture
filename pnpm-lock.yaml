@@ -139,6 +139,12 @@ importers:
         specifier: 3.0.2
         version: 3.0.2
 
+  packages/print:
+    devDependencies:
+      '@manufakture/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+
   packages/regen:
     dependencies:
       '@manufakture/assembly':
