@@ -381,7 +381,7 @@ export function assertOutsideRepo(out: string, repoRoot: string): void {
 }
 
 /** The command's install directory's `resources/profiles`, for an extracted AppImage. */
-function defaultProfiles(orca: string[]): string {
+export function defaultProfiles(orca: string[]): string {
   const bin = spawnSync('sh', ['-c', `command -v "${orca[0]}"`], { encoding: 'utf8' });
   const path = realpathSync(bin.stdout.trim() || orca[0]!);
   for (const base of [dirname(path), dirname(dirname(path))]) {
@@ -389,6 +389,23 @@ function defaultProfiles(orca: string[]): string {
     if (existsSync(p)) return p;
   }
   throw new Error(`no resources/profiles next to ${path}; set ORCA_PROFILES`);
+}
+
+/**
+ * The version the command reports (`OrcaSlicer-2.4.2`), or undefined when it does not start (a
+ * missing library, say). Orca writes a result.json into the working directory even for --help,
+ * so give it a scratch `cwd`.
+ */
+export function orcaVersion(orca: string[], cwd: string): string | undefined {
+  return spawnSync(orca[0]!, [...orca.slice(1), '--help'], {
+    cwd,
+    encoding: 'utf8',
+    timeout: 60_000,
+    env: { ...process.env, LC_ALL: 'C' },
+  })
+    .stdout?.split('\n')
+    .find((line) => /^\w+-\d/.test(line))
+    ?.replace(/:$/, '');
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
@@ -404,15 +421,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
         .filter((f) => f.endsWith('.3mf'))
         .sort()
         .map((f) => join(fixturesDir, f));
-  // Orca writes a result.json into the working directory even for --help.
-  const version = spawnSync(orca[0]!, [...orca.slice(1), '--help'], {
-    cwd: out,
-    encoding: 'utf8',
-    env: { ...process.env, LC_ALL: 'C' },
-  })
-    .stdout?.split('\n')
-    .find((line) => /^\w+-\d/.test(line))
-    ?.replace(/:$/, '');
+  const version = orcaVersion(orca, out);
   const report = { version, profiles, out, results: runMatrix(fixtures, orca, profiles, out) };
   writeFileSync(join(out, 'matrix.json'), JSON.stringify(report, null, 2));
   console.log(JSON.stringify(report, null, 2));

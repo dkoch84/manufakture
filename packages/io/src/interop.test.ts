@@ -1,11 +1,16 @@
 // Interoperability with other programs, when they are installed: FreeCAD
 // reopens our STEP (volume, face count, bounding box) and PrusaSlicer's CLI
-// slices our 3MF and STL, an assembly's included, and a coloured, oriented 3MF in both layouts
-// (OrcaSlicer's CLI takes other flags, so it is not picked up here; scripts/orca-matrix.ts runs
-// it on the slicer fixtures, see the README). Each check is
-// skipped when its program is missing, so local runs need neither; the
-// `interop` CI job installs them. Commands can be overridden with FREECADCMD
-// and SLICER_CMD (whitespace-separated, e.g. `xvfb-run -a prusa-slicer`).
+// slices our 3MF and STL, an assembly's included, and a coloured, oriented 3MF in both layouts.
+// OrcaSlicer's CLI (M3 plan, T3.3c) loads what export3mfAssembly writes and the slicer fixtures
+// (src/fixtures/slicers/), writes each back as a project 3MF and slices it for a Bambu Lab X1
+// Carbon with two filament slots, through scripts/orca-matrix.ts; the names and filament slots
+// it records in Metadata/model_settings.config, the positions and the G-code's slots must be
+// what docs/research/slicer-handoff.md section 6 found. Each check is
+// skipped when its program is missing (or, for OrcaSlicer, does not start), so local runs need
+// none of them; the `interop` CI job installs them. Commands can be overridden with FREECADCMD,
+// SLICER_CMD and ORCA_CMD (whitespace-separated, e.g. `xvfb-run -a prusa-slicer`, or
+// `<dir>/squashfs-root/AppRun` for an extracted OrcaSlicer AppImage; ORCA_PROFILES names its
+// `resources/profiles` when they are not next to the command).
 // Set INTEROP_KEEP=1 to keep the files it writes.
 //
 // INTEROP_BRACKET_DIR points at the M1 bracket as the app exported it in the browser
@@ -16,10 +21,31 @@
 import type { Kernel, ShapeId } from '@manufakture/kernel';
 import { createNodeKernel } from '@manufakture/kernel/node';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import {
+  assertOutsideRepo,
+  defaultProfiles,
+  orcaVersion,
+  placedBounds,
+  runMatrix,
+  type FixtureResult,
+  type OrcaObject,
+  type OrcaRun,
+} from '../scripts/orca-matrix';
 import {
   EXPORT_TOLERANCES,
   deflectionOf,
@@ -29,6 +55,8 @@ import {
   exportStlAssembly,
   type ExportAssembly,
 } from './export';
+import { boxMesh } from './test-helpers';
+import { validate3mf } from './threemf';
 
 function command(envName: string, candidates: string[]): string[] | null {
   const given = process.env[envName]?.trim();
@@ -42,6 +70,27 @@ function command(envName: string, candidates: string[]): string[] | null {
 
 const freecad = command('FREECADCMD', ['freecadcmd', 'FreeCADCmd']);
 const slicer = command('SLICER_CMD', ['prusa-slicer', 'PrusaSlicer']);
+const orca = orcaSlicer();
+
+/**
+ * OrcaSlicer's command, version and profiles, or why it is skipped: not installed, does not
+ * start (a missing library, say: the job skips rather than fails), or no profiles found.
+ */
+function orcaSlicer(): { cmd: string[]; version: string; profiles: string } | { skipped: string } {
+  const cmd = command('ORCA_CMD', ['orca-slicer', 'OrcaSlicer']);
+  if (!cmd) return { skipped: 'not found' };
+  const probe = mkdtempSync(join(tmpdir(), 'manufakture-orca-probe-'));
+  try {
+    const version = orcaVersion(cmd, probe);
+    if (!version) return { skipped: `${cmd.join(' ')} does not start` };
+    const profiles = process.env.ORCA_PROFILES?.trim() || defaultProfiles(cmd);
+    return { cmd, version, profiles };
+  } catch (e) {
+    return { skipped: String(e) };
+  } finally {
+    rmSync(probe, { recursive: true, force: true });
+  }
+}
 
 let k: Kernel;
 let dir: string;
@@ -51,7 +100,8 @@ beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), 'manufakture-interop-'));
   console.log(
     `interop: FreeCAD ${freecad ? freecad.join(' ') : 'not found, skipped'}; ` +
-      `slicer ${slicer ? slicer.join(' ') : 'not found, skipped'}`,
+      `slicer ${slicer ? slicer.join(' ') : 'not found, skipped'}; ` +
+      `OrcaSlicer ${'cmd' in orca ? `${orca.version} (${orca.cmd.join(' ')})` : `${orca.skipped}, skipped`}`,
   );
   if (!freecad && !slicer) return;
   k = await createNodeKernel();
@@ -263,4 +313,297 @@ describe.skipIf(!bracket)('the M1 bracket as the app exported it', () => {
     writeFileSync(to, readFileSync(join(bracket!.dir, name)));
     return to;
   }
+});
+
+// OrcaSlicer (see the top of this file).
+
+/** What OrcaSlicer must record for an object: its name and slot, and its parts' when it has some. */
+interface OrcaExpected {
+  name: string;
+  /** The `extruder` (1-based filament slot) in model_settings.config. */
+  slot: number;
+  /** For a components object: each part's name and slot, the parts printing in their own slots. */
+  parts?: { name: string; slot: number }[];
+}
+
+const SLOT_RED = { slot: 1 };
+const SLOT_BLUE = { slot: 2 };
+
+/**
+ * The slicer fixtures whose OrcaSlicer 2.4.2 results the export relies on (section 6 of the
+ * research note). 03, 04 and 08 are layouts the writer avoids (components without
+ * model_settings.config, `pindex`, an object placed twice), so they only have to load and slice.
+ */
+const FIXTURE_EXPECTED: Record<string, OrcaExpected[] | null> = {
+  '01-core.3mf': [
+    { name: 'Red box', ...SLOT_RED },
+    { name: 'Blue box', ...SLOT_RED },
+  ],
+  '02-colorgroups.3mf': [
+    { name: 'Red box', ...SLOT_RED },
+    { name: 'Blue box', ...SLOT_BLUE },
+  ],
+  '03-components.3mf': null,
+  '04-pindex-triangles.3mf': null,
+  '05-model-settings.3mf': [
+    { name: 'Red box', ...SLOT_RED },
+    { name: 'Blue box', ...SLOT_BLUE },
+  ],
+  '06-transforms.3mf': [
+    { name: 'Red box', ...SLOT_RED },
+    { name: 'Blue box', ...SLOT_BLUE },
+  ],
+  '07-components-model-settings.3mf': [
+    {
+      name: 'Two boxes',
+      ...SLOT_RED,
+      parts: [
+        { name: 'Red box', ...SLOT_RED },
+        { name: 'Blue box', ...SLOT_BLUE },
+      ],
+    },
+  ],
+  '08-instances.3mf': null,
+};
+
+/** The X1 Carbon's printable area and the corner it excludes at the bed origin, mm. */
+const X1C_BED = 256;
+const X1C_EXCLUDED = { x: 18, y: 28 };
+
+/**
+ * A red box and a blue box as one part, as the export writes it (T3.3a): an object per body,
+ * placed twice (once as modelled, once turned a quarter about x), or one components object.
+ * Everything sits near the middle of the bed, clear of the X1 Carbon's excluded corner.
+ */
+function twoColourJig(oneObject: boolean): ExportAssembly {
+  return {
+    bodies: [
+      { name: 'Red box', mesh: boxMesh([0, 0, 0], [20, 20, 10]), color: '#ff0000' },
+      { name: 'Blue box', mesh: boxMesh([25, 0, 0], [30, 15, 8]), color: '#0000ff' },
+    ],
+    parts: [{ name: 'Jig', bodies: [0, 1], oneObject }],
+    instances: oneObject
+      ? [{ part: 0, name: 'Jig', placement: { translation: [90, 110, 0], rotation: [0, 0, 0, 1] } }]
+      : [
+          {
+            part: 0,
+            name: 'Jig',
+            placement: { translation: [90, 110, 0], rotation: [0, 0, 0, 1] },
+          },
+          {
+            part: 0,
+            name: 'Jig 2',
+            // (x, y, z) to (x, -z, y): the boxes stand on their sides, y 170..180.
+            placement: {
+              translation: [90, 180, 0],
+              rotation: [Math.SQRT1_2, 0, 0, Math.SQRT1_2],
+            },
+          },
+        ],
+  };
+}
+
+/** Our exports for the load check: file name, bytes, and what OrcaSlicer must record. */
+function ourExports(): { file: string; bytes: Uint8Array; expected: OrcaExpected[] }[] {
+  return [
+    {
+      file: 'jig-objects.3mf',
+      bytes: export3mfAssembly(twoColourJig(false), { title: 'Two-colour jig' }),
+      // Two bodies, so each object is named after its body; each placement its own objects.
+      expected: [
+        { name: 'Red box', ...SLOT_RED },
+        { name: 'Blue box', ...SLOT_BLUE },
+        { name: 'Red box', ...SLOT_RED },
+        { name: 'Blue box', ...SLOT_BLUE },
+      ],
+    },
+    {
+      file: 'jig-one-object.3mf',
+      bytes: export3mfAssembly(twoColourJig(true), { title: 'Two-colour jig' }),
+      expected: [
+        {
+          name: 'Jig',
+          ...SLOT_RED,
+          parts: [
+            { name: 'Red box', ...SLOT_RED },
+            { name: 'Blue box', ...SLOT_BLUE },
+          ],
+        },
+      ],
+    },
+  ];
+}
+
+/**
+ * The 3MF with its materials namespace bound to another prefix (`mat:colorgroup`): still a valid
+ * 3MF, but OrcaSlicer 2.4.2 reads colour groups by the prefix `m` and puts every object in slot 1.
+ * The deliberately broken input the check must fail on.
+ */
+function withMaterialsPrefix(bytes: Uint8Array, prefix: string): Uint8Array {
+  const files = unzipSync(bytes);
+  const model = strFromU8(files['3D/3dmodel.model']!)
+    .replace('xmlns:m=', `xmlns:${prefix}=`)
+    .replace(/<(\/?)m:/g, `<$1${prefix}:`);
+  files['3D/3dmodel.model'] = strToU8(model);
+  return zipSync(files, { level: 6 });
+}
+
+type Bounds = NonNullable<OrcaObject['bounds']>;
+
+const boundsKey = (b: Bounds | null) =>
+  b ? [...b.min, ...b.max].map((v) => (Math.round(v * 100) / 100 + 0).toFixed(2)).join(' ') : '-';
+
+/** What is wrong with what OrcaSlicer made of a file; empty when all is as expected. */
+function orcaProblems(
+  result: FixtureResult,
+  expected: OrcaExpected[] | null,
+  input: Uint8Array,
+): string[] {
+  const problems: string[] = [];
+  const ran = (label: string, run: OrcaRun) => {
+    if (run.status !== 0 || run.result?.return_code !== 0) {
+      problems.push(
+        `${label}: exit ${run.status}, ${run.result?.error_string ?? 'no result.json'}\n${run.tail ?? ''}`,
+      );
+      return false;
+    }
+    if (run.objects.length === 0) problems.push(`${label}: no model_settings.config objects`);
+    return true;
+  };
+  const loaded = ran('load', result.load);
+  const sliced = ran('slice', result.slice);
+  if (sliced && result.slice.gcodeSlots === null) problems.push('slice: no G-code');
+  if (!expected) return problems;
+
+  const summary = (
+    o: Omit<OrcaExpected, 'parts'> & { parts?: OrcaExpected['parts'] | undefined },
+  ) =>
+    `${o.name} slot ${o.slot}` +
+    (o.parts ? ` [${o.parts.map((p) => `${p.name} slot ${p.slot}`).join(', ')}]` : '');
+  const want = expected.map(summary).sort();
+  // Positions as the file places them: the runs do not arrange the plate.
+  const wantBounds = [...placedBounds(unzipSync(input)).values()].map(boundsKey).sort();
+  for (const [label, run] of [
+    ['load', result.load],
+    ['slice', result.slice],
+  ] as const) {
+    if (label === 'load' ? !loaded : !sliced) continue;
+    const got = run.objects
+      .map((o) =>
+        summary({
+          name: o.name,
+          slot: Number(o.extruder),
+          // Plain objects have one part named after them with no slot of its own.
+          parts: expected.some((e) => e.name === o.name && e.parts)
+            ? o.parts.map((p) => ({ name: p.name, slot: Number(p.extruder) }))
+            : undefined,
+        }),
+      )
+      .sort();
+    if (JSON.stringify(got) !== JSON.stringify(want)) {
+      problems.push(`${label}: objects ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
+    }
+    const gotBounds = run.objects.map((o) => boundsKey(o.bounds)).sort();
+    if (JSON.stringify(gotBounds) !== JSON.stringify(wantBounds)) {
+      problems.push(
+        `${label}: positions ${JSON.stringify(gotBounds)}, want ${JSON.stringify(wantBounds)}`,
+      );
+    }
+  }
+  if (sliced && result.slice.gcodeSlots !== null) {
+    // Each object printed with its own slot, or its parts' slots.
+    const wantSlots: Record<string, number[]> = {};
+    for (const o of expected) {
+      const slots = new Set([
+        ...(wantSlots[o.name] ?? []),
+        ...(o.parts?.map((p) => p.slot) ?? [o.slot]),
+      ]);
+      wantSlots[o.name] = [...slots].sort((a, b) => a - b);
+    }
+    const got = result.slice.gcodeSlots;
+    const sorted = (r: Record<string, number[]> | string) =>
+      typeof r === 'string' ? r : JSON.stringify(Object.entries(r).sort());
+    if (sorted(got) !== sorted(wantSlots)) {
+      problems.push(
+        `slice: G-code slots ${JSON.stringify(got)}, want ${JSON.stringify(wantSlots)}`,
+      );
+    }
+    const usedSlots = [...new Set(Object.values(wantSlots).flat())].sort((a, b) => a - b);
+    if (JSON.stringify(result.slice.filamentsUsed) !== JSON.stringify(usedSlots)) {
+      problems.push(
+        `slice: filaments used ${JSON.stringify(result.slice.filamentsUsed)}, want ${JSON.stringify(usedSlots)}`,
+      );
+    }
+  }
+  return problems;
+}
+
+/** Whether a placed box overlaps the X1 Carbon's excluded corner or leaves its bed. */
+function offBed(b: Bounds): boolean {
+  const inCorner = b.min[0]! < X1C_EXCLUDED.x && b.min[1]! < X1C_EXCLUDED.y;
+  return inCorner || b.min[0]! < 0 || b.min[1]! < 0 || b.max[0]! > X1C_BED || b.max[1]! > X1C_BED;
+}
+
+describe.skipIf(!('cmd' in orca))('OrcaSlicer loads and slices our 3MF', () => {
+  const fixturesDir = fileURLToPath(new URL('./fixtures/slicers/', import.meta.url));
+  const fixtures = readdirSync(fixturesDir)
+    .filter((f) => f.endsWith('.3mf'))
+    .sort();
+  const ours = ourExports();
+  const broken = withMaterialsPrefix(readFileSync(join(fixturesDir, '02-colorgroups.3mf')), 'mat');
+  const results = new Map<string, FixtureResult>();
+
+  beforeAll(() => {
+    if (!('cmd' in orca)) return;
+    // The flattened profiles are the slicer's AGPL data: never inside the repository.
+    const out = join(dir, 'orca');
+    assertOutsideRepo(out, fileURLToPath(new URL('../../../', import.meta.url)));
+    const inputs = join(out, 'inputs');
+    mkdirSync(inputs, { recursive: true });
+    const files = [
+      ...fixtures.map((f) => join(fixturesDir, f)),
+      ...ours.map(({ file, bytes }) => {
+        writeFileSync(join(inputs, file), bytes);
+        return join(inputs, file);
+      }),
+    ];
+    writeFileSync(join(inputs, 'broken-prefix.3mf'), broken);
+    files.push(join(inputs, 'broken-prefix.3mf'));
+    for (const r of runMatrix(files, orca.cmd, orca.profiles, out)) results.set(r.fixture, r);
+  }, 600_000);
+
+  it('has an expectation for every slicer fixture', () => {
+    expect(fixtures).toEqual(Object.keys(FIXTURE_EXPECTED).sort());
+  });
+
+  it.each(fixtures)('fixture %s', (file) => {
+    const problems = orcaProblems(
+      results.get(file)!,
+      FIXTURE_EXPECTED[file] ?? null,
+      readFileSync(join(fixturesDir, file)),
+    );
+    expect(problems).toEqual([]);
+  });
+
+  it.each(ours.map((o) => o.file))('our export %s', (file) => {
+    const { bytes, expected } = ours.find((o) => o.file === file)!;
+    expect(validate3mf(bytes).problems).toEqual([]);
+    const result = results.get(file)!;
+    expect(orcaProblems(result, expected, bytes)).toEqual([]);
+    for (const o of result.slice.objects) {
+      expect(offBed(o.bounds!), `${o.name} ${boundsKey(o.bounds)}`).toBe(false);
+    }
+  });
+
+  it('fails a colour group under another prefix (a deliberately broken fixture)', () => {
+    // A valid 3MF to us; OrcaSlicer prints both boxes in slot 1, and the check says so.
+    expect(validate3mf(broken).problems).toEqual([]);
+    const problems = orcaProblems(
+      results.get('broken-prefix.3mf')!,
+      FIXTURE_EXPECTED['02-colorgroups.3mf']!,
+      broken,
+    );
+    expect(problems.join('\n')).toMatch(/load: objects .*Blue box slot 1/);
+    expect(problems.join('\n')).toMatch(/slice: G-code slots/);
+  });
 });
