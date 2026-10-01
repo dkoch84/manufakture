@@ -244,13 +244,13 @@ describe('the print-analysis worker', () => {
     let yields = 0;
     let cancelSeenAt = -1;
     const CANCEL_AT = 100;
-    let client: PrintAnalysisClient | undefined;
     const { api, sent } = recording({
       chunk: 8,
       slice: 0,
       yieldNow: async () => {
         yields++;
-        if (yields === CANCEL_AT) void client!.cancel();
+        // Only runs during analyze(), after `client` below is initialised.
+        if (yields === CANCEL_AT) void client.cancel();
         await base();
       },
     });
@@ -259,7 +259,7 @@ describe('the print-analysis worker', () => {
       cancelSeenAt = yields;
       await cancel(generation);
     };
-    client = connected(api).client;
+    const client = connected(api).client;
     // 19,200 triangles in chunks of 8: 2400 yields, well past the 1000 a starved port would wait.
     const reply = await client.analyze(
       [{ id: 'a', mesh: gridBox([0, 0, 0], [20, 20, 3], 40) }],
