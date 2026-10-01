@@ -31,7 +31,9 @@ import {
   type StoredExpression,
 } from '@manufakture/core';
 import { HOLE_SIZES, holeSize, type HoleFit } from '@manufakture/kernel';
-import { evaluate, fromMillimetres, fromRadians } from '@manufakture/units';
+import type { FitKind } from '@manufakture/print';
+import { evaluate, evaluateQuantity, fromMillimetres, fromRadians } from '@manufakture/units';
+import { parsePrintedFit, printedFitDiameter } from '../variables/fits';
 import { evaluateVariables, type Variables } from '../sketcher/values';
 
 export { DIALOG_KINDS, isDialogKind, type DialogKind, type FormKind } from './kinds';
@@ -41,6 +43,17 @@ export type Operation = ExtrudeFeature['operation'];
 
 /** How a pattern or mirror of bodies places its copies (core's `mode`). */
 export type BodyCopyMode = NonNullable<PatternFeature['mode']>;
+
+/**
+ * A hole's fit: an ISO 273 clearance fit of the size tables, or a printed fit, whose diameter is
+ * the screw's nominal size plus `#fit_press`, `#fit_slip` or `#fit_sliding` (ADR 0012 decision 10).
+ */
+export type HoleFormFit = HoleFit | FitKind;
+
+const ISO_FITS: readonly string[] = ['close', 'normal', 'loose'];
+export function isIsoFit(fit: HoleFormFit): fit is HoleFit {
+  return ISO_FITS.includes(fit);
+}
 
 /** A face or edge in a reference field: the reference to store, and what to show for it. */
 export interface RefItem {
@@ -113,7 +126,7 @@ export interface HoleForm {
   points: string[];
   /** A size of `HOLE_SIZES`, or empty for a custom diameter. */
   standard: string;
-  fit: HoleFit;
+  fit: HoleFormFit;
   diameter: string;
   extent: 'blind' | 'throughAll';
   depth: string;
@@ -459,7 +472,7 @@ export function newForm(kind: FormKind, ctx: FormContext): FeatureForm {
 /** The fields a standard hole size sets: its diameter and head sizes, in the display units. */
 export function standardFields(
   size: string,
-  fit: HoleFit,
+  fit: HoleFormFit,
   units: DisplayUnits,
 ): Pick<HoleForm, 'standard' | 'diameter' | 'headDiameter' | 'headDepth' | 'headAngle'> {
   const s = holeSize(size);
@@ -468,7 +481,9 @@ export function standardFields(
   }
   return {
     standard: s.size,
-    diameter: lengthText(s.clearance[fit], units),
+    diameter: isIsoFit(fit)
+      ? lengthText(s.clearance[fit], units)
+      : printedFitDiameter(s.nominal, fit, units),
     headDiameter: lengthText(s.counterbore.diameter, units),
     headDepth: lengthText(s.counterbore.depth, units),
     headAngle: angleText(s.countersink.angle, units),
@@ -492,6 +507,19 @@ export function applyStandard(form: HoleForm, units: DisplayUnits): HoleForm {
 }
 
 const text = (e: StoredExpression | undefined) => e?.source ?? '';
+
+/**
+ * The standard size and printed fit of a diameter written as `<nominal> + #fit_<kind>`, when the
+ * nominal is a standard screw size; otherwise null (a custom diameter).
+ */
+function printedFitOf(diameter: StoredExpression): { size: string; fit: FitKind } | null {
+  const p = parsePrintedFit(diameter.source);
+  if (!p) return null;
+  const q = evaluateQuantity(p.nominal, diameter);
+  if (!q.ok) return null;
+  const size = HOLE_SIZES.find((s) => Math.abs(s.nominal - q.value.value) < 1e-3);
+  return size ? { size: size.size, fit: p.fit } : null;
+}
 
 function refItems(refs: readonly Reference[], lost: ReadonlySet<string>): RefItem[] {
   return refs.map((r) => ({
@@ -561,12 +589,13 @@ export function formOf(
       };
     case 'hole': {
       const h = feature.head;
+      const printed = feature.standard ? null : printedFitOf(feature.diameter);
       return {
         kind: 'hole',
         sketch: feature.sketch,
         points: [...feature.points],
-        standard: feature.standard?.size ?? '',
-        fit: feature.standard?.fit ?? 'normal',
+        standard: feature.standard?.size ?? printed?.size ?? '',
+        fit: feature.standard?.fit ?? printed?.fit ?? 'normal',
         diameter: feature.diameter.source,
         extent: feature.extent.type,
         depth: feature.extent.type === 'blind' ? feature.extent.depth.source : '10',
@@ -839,7 +868,8 @@ export function buildFeature(
             : { type: 'throughAll' },
         head,
       };
-      if (form.standard !== '' && holeSize(form.standard)) {
+      // A printed fit is not one of core's standard fits: the diameter carries it.
+      if (form.standard !== '' && holeSize(form.standard) && isIsoFit(form.fit)) {
         f.standard = { size: form.standard, fit: form.fit };
       }
       feature = f;

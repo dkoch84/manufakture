@@ -20,6 +20,7 @@ import type { Referencer } from '../io/exchange';
 import { evaluateVariables } from '../sketcher/values';
 import type { DocumentStoreApi } from '../state/document';
 import { isGeometryRef, itemKey, type SelectionStore } from '../state/selection';
+import { fitsFirst } from '../variables/fits';
 import type { BodyInput } from '../viewport/bodies';
 import {
   INFERENCE_LABELS,
@@ -328,6 +329,7 @@ export function MateDialog({
               kind="length"
               units={doc.units}
               variables={variables}
+              names={fitsFirst(Object.keys(variables))}
               error={errors[`offset.${axis}`]}
               testId={`mate-offset-${axis}`}
             />

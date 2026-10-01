@@ -63,6 +63,7 @@ The user guide lives in `docs/user`:
 - [Bodies](docs/user/bodies.md): several bodies in a part, their names, colours and materials, hiding and exporting them
 - [The feature tree](docs/user/feature-tree.md): editing, reordering, suppressing, the rollback bar
 - [Variables](docs/user/variables.md): named values and expressions
+- [Fits for printed parts](docs/user/fits.md): press, slip and sliding clearances as variables, and the fit-test coupon
 - [Configurations](docs/user/configurations.md): variants in a table, switching them, exporting every one
 - [Version history](docs/user/history.md): named versions, the timeline, viewing and restoring a past state
 - [Derived parts](docs/user/derived.md): a part from a version of another document, placed, and updated to newer versions

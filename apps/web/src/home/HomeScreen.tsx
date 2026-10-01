@@ -1,6 +1,6 @@
-// The home screen: the documents stored in this browser, most recent first, with new, open,
-// rename, duplicate, export (.mfk), delete and import (file picker, or a file dropped anywhere
-// on the page), and how much storage they use.
+// The home screen: the documents stored in this browser, most recent first, with new (an empty
+// document or the fit-test coupon template), open, rename, duplicate, export (.mfk), delete and
+// import (file picker, or a file dropped anywhere on the page), and how much storage they use.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { formatBytes } from '../io/files';
@@ -97,6 +97,15 @@ export function HomeScreen({
         <div className="home-actions">
           <button type="button" disabled={busy} onClick={() => void run(actions.create)}>
             New document
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            data-testid="new-coupon"
+            title="A new document with pegs and a row of holes at stepped clearances, to measure your printer's fits"
+            onClick={() => void run(actions.createCoupon)}
+          >
+            New fit-test coupon
           </button>
           <button type="button" disabled={busy} onClick={() => input.current?.click()}>
             Import .mfk

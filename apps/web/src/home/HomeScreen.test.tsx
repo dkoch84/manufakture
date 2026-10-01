@@ -134,6 +134,16 @@ describe('HomeScreen', () => {
     );
   });
 
+  it('creates a fit-test coupon and lists it', async () => {
+    const t = await setup('empty');
+    fireEvent.click(screen.getByTestId('new-coupon'));
+    await waitFor(() =>
+      expect(screen.getByTestId('home-status').textContent).toMatch(/^Created Fit-test coupon/),
+    );
+    expect(t.show).toHaveBeenCalledTimes(1);
+    expect(await rows()).toEqual(['Fit-test coupon']);
+  });
+
   it('warns that memory storage keeps nothing', async () => {
     const library = new DocumentLibrary(new MemoryBackend());
     const documents = createDocumentStore(emptyDocument('scratch'));

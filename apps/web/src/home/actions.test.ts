@@ -51,6 +51,19 @@ describe('home actions', () => {
     expect((await library.list()).map((d) => d.id)).toContain(id);
   });
 
+  it('creates a fit-test coupon from the template, saved and opened', async () => {
+    const { actions, library, shown, documents } = await setup();
+    const r = await actions.createCoupon();
+    expect(r.ok).toBe(true);
+    expect(r.message).toMatch(/^Created Fit-test coupon: print it/);
+    const doc = shown[0]!.doc;
+    expect(shown[0]!.stored).toBe(true);
+    expect(doc.name).toBe('Fit-test coupon');
+    expect(documents.getState().document.variables.map((v) => v.name)).toEqual(['peg_d']);
+    expect(doc.print.setups[0]?.printer).toBe('bambu-x1c');
+    expect((await library.list()).map((d) => d.id)).toContain(doc.id);
+  });
+
   it('renames a closed document in the library, and the open one through an undoable command', async () => {
     const { actions, library, documents } = await setup();
     expect(await actions.rename('b', 'Bravo')).toEqual({ ok: true, message: 'Renamed to Bravo.' });
@@ -134,6 +147,7 @@ describe('home actions', () => {
     expect(exported.ok).toBe(true);
     expect(await actions.open('b')).toEqual(stopped);
     expect(await actions.create()).toEqual(stopped);
+    expect(await actions.createCoupon()).toEqual(stopped);
     expect(await actions.duplicate('a')).toEqual(stopped);
     expect(await actions.exportFile('a')).toEqual(stopped);
     const bytes = download.mock.calls[0]![0] as Uint8Array;

@@ -1,6 +1,6 @@
 // @manufakture/print: printability checks for FDM printing (plan M3, T3.1b). Pure functions on
 // plain data: the printer table, orientation transforms, overhang classes and bed fit. No kernel
-// or DOM dependency at run time; mesh and box shapes are the kernel's types.
+// or DOM dependency at run time; mesh and box shapes are the kernel's types. Fit defaults (T3.2g).
 
 export {
   PRINTERS,
@@ -56,3 +56,30 @@ export {
   rotateDirection,
 } from './geometry';
 export type { Mat3, Placement, Quat, Vec2, Vec3 } from './geometry';
+
+export {
+  COUPON_CLEARANCES,
+  FIT_DESCRIPTIONS,
+  FIT_KINDS,
+  FIT_TABLE,
+  FIT_VARIABLES,
+  HEAT_SET_INSERTS,
+  REFERENCE_NOZZLE,
+  SCREW_SIZES,
+  SELF_TAPPING_HOLES,
+  fitDefaults,
+  heatSetInsert,
+  printerFamily,
+  selfTappingHole,
+} from './fits';
+export type {
+  FitClearances,
+  FitDefaults,
+  FitKind,
+  FitProvenance,
+  FitRow,
+  HeatSetInsert,
+  PrinterFamily,
+  ScrewSize,
+  SelfTappingHole,
+} from './fits';

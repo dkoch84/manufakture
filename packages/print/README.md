@@ -2,8 +2,9 @@
 
 Printability checks for FDM printing (M3 plan, T3.1b): the printer table, the transform a print
 item's orientation stands for, overhang classes per triangle and per face, and whether a placed
-body fits a printer. Pure TypeScript with no runtime dependency. It reads the kernel's `MeshData`,
-`Placement` and `BoundingBox` shapes as types only, so it runs in a worker or in Node unchanged.
+body fits a printer; and the fit defaults (T3.2g). Pure TypeScript with no runtime dependency. It
+reads the kernel's `MeshData`, `Placement` and `BoundingBox` shapes as types only, so it runs in a
+worker or in Node unchanged.
 
 Lengths are millimetres and angles radians, as everywhere else (`@manufakture/units`). Nothing in
 this package is stored in a document: core stores the printer id, the nozzle, the orientation and
@@ -158,6 +159,50 @@ The x and y overshoots are measured against the bounds of the usable area, which
 rectangular areas of every built-in printer; `fits` itself tests the footprint's corners against
 the polygon. When the nozzle areas do not overlap at all, the usable area is empty and nothing
 fits.
+
+## Fits
+
+```ts
+import {
+  fitDefaults,
+  FIT_VARIABLES,
+  HEAT_SET_INSERTS,
+  COUPON_CLEARANCES,
+} from '@manufakture/print';
+
+fitDefaults({ printer: 'bambu-x1c', nozzle: 0.4 });
+// { family: 'bambu-lab', nozzle: 0.4, clearances: { press: 0.1, slip: 0.2, sliding: 0.4 },
+//   provenance: 'placeholder', basis: 'table', source: '...' }
+FIT_VARIABLES.slip; // 'fit_slip': the variable the app writes it to
+```
+
+Default **diametral** clearances (hole = pin + clearance) for press, slip and sliding fits, per
+printer family and nozzle (ADR 0012 decision 10). The app writes them as the document variables
+`#fit_press`, `#fit_slip` and `#fit_sliding` (**Insert fit variables**), so this package only
+supplies starting values; nothing here is stored.
+
+- `FIT_TABLE` has a row per family and nozzle. Today: `generic` and `bambu-lab` (every Bambu Lab
+  printer, `printerFamily`), both at 0.4 mm: press 0.1, slip 0.2, sliding 0.4 mm. They are
+  **placeholders** (`provenance: 'placeholder'`): typical community values, estimates not measured
+  on any printer, until T3.2h prints the fit-test coupon and replaces them with measured values
+  and their source.
+- `fitDefaults({ printer, nozzle })`: the row for the printer's family and the nozzle. An unknown
+  or absent printer is `generic`; an absent nozzle is the printer's default (or 0.4). A nozzle
+  with no row scales the family's 0.4 mm row by `nozzle / 0.4`, rounded to 0.01 mm
+  (`basis: 'scaled'`): 0.15, 0.3 and 0.6 mm at a 0.6 mm nozzle.
+- `COUPON_CLEARANCES`: the fit-test coupon's steps, 0.0 to 0.5 mm by 0.05 mm (hole 1 to 11).
+
+Real clearances depend on the printer, nozzle, filament and slicer settings (OrcaSlicer 2.4.2's
+BBL `fdm_process_single_0.20.json` sets `elefant_foot_compensation` to 0.15 mm), so the user docs
+([fits.md](../../docs/user/fits.md)) present these as starting points.
+
+**Inserts and screws, M2 to M5.** `HEAT_SET_INSERTS` copies CNC Kitchen's comparison table for its
+standard-length inserts (hole D3, insert diameter D1, length L, minimum wall W), as reproduced on
+3DJake's product page for each size, read on 2026-10-01 (`verified: true`, `source` per row).
+Other brands differ. `SELF_TAPPING_HOLES` are **unverified** (`verified: false`): no vendor table
+for machine screws threading into printed plastic was found, so each is the ISO coarse-thread tap
+drill (nominal minus pitch) as a starting point. `heatSetInsert(size)` and
+`selfTappingHole(size)` look a size up.
 
 ## Tests
 

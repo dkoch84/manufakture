@@ -12,6 +12,7 @@ import {
   type GeometryRef,
 } from '../state/selection';
 import { FeatureDialog, type DialogRequest } from './FeatureDialog';
+import { insertFitVariables } from '../variables/fits';
 import { refLabel, type RefKind } from './forms';
 import type { PickOutcome } from './references';
 
@@ -201,6 +202,45 @@ describe('the hole dialog', () => {
     // Sketch 2 has a circle but no points.
     fireEvent.click(screen.getByTestId('dialog-ok'));
     expect(screen.getByTestId('field-points').textContent).toContain('has no points');
+  });
+
+  it('offers printed fits next to the ISO fits, and suggests the fit variables first', () => {
+    const t = setup({ kind: 'hole' }, { features: ['sketch#2'] });
+    const fit = screen.getByTestId('field-fit') as HTMLSelectElement;
+    expect(Array.from(fit.options, (o) => o.value)).toEqual([
+      'close',
+      'normal',
+      'loose',
+      'press',
+      'slip',
+      'sliding',
+    ]);
+    fireEvent.change(screen.getByTestId('field-standard'), { target: { value: 'M3' } });
+    fireEvent.change(fit, { target: { value: 'slip' } });
+    const diameter = screen.getByTestId('field-diameter') as HTMLInputElement;
+    expect(diameter.value).toBe('3 mm + #fit_slip');
+    expect(screen.getByTestId('field-fit-note').textContent).toContain('Insert fit variables');
+
+    // A variable added before the fit variables is still listed after them.
+    const store = t.documents.getState();
+    act(() => {
+      const w = { source: '1 mm', lengthUnit: 'mm', angleUnit: 'deg' } as const;
+      store.execute({ type: 'setVariable', name: 'w', expression: w }, 'Add w');
+      const r = insertFitVariables(t.documents.getState().document);
+      t.documents.getState().execute(r.command!, r.label);
+    });
+    fireEvent.change(fit, { target: { value: 'sliding' } });
+    expect(screen.getByTestId('field-fit-note').textContent).toContain('moves freely');
+    fireEvent.change(diameter, { target: { value: '3 + #' } });
+    diameter.setSelectionRange(5, 5);
+    fireEvent.select(diameter);
+    const options = within(screen.getByTestId('field-diameter-options')).getAllByRole('option');
+    expect(options.map((o) => o.querySelector('.expr-option-name')?.textContent)).toEqual([
+      '#fit_press',
+      '#fit_slip',
+      '#fit_sliding',
+      '#w',
+    ]);
   });
 });
 

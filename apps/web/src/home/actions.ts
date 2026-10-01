@@ -17,6 +17,7 @@ import {
 } from '../persistence/library';
 import { MAX_MFK_FILE_BYTES } from '../persistence/limits';
 import { newDocument, type DocumentStoreApi } from '../state/document';
+import { couponDocument } from './coupon';
 
 export const MFK_MIME = 'application/vnd.manufakture+zip';
 
@@ -55,6 +56,8 @@ export interface HomeActions {
   list(): Promise<DocumentSummary[]>;
   open(id: string): Promise<ActionOutcome>;
   create(): Promise<ActionOutcome>;
+  /** A new fit-test coupon document (coupon.ts), opened like a new document. */
+  createCoupon(): Promise<ActionOutcome>;
   rename(id: string, name: string): Promise<ActionOutcome>;
   duplicate(id: string): Promise<ActionOutcome>;
   remove(id: string): Promise<ActionOutcome>;
@@ -148,6 +151,20 @@ export function homeActions(host: HomeHost): HomeActions {
       await library.create(doc);
       host.show(doc, { stored: true });
       return { ok: true, message: `Created ${doc.name}.` };
+    },
+
+    async createCoupon() {
+      const stop = await saveFirst();
+      if (stop) return stop;
+      const doc = couponDocument();
+      await library.create(doc);
+      host.show(doc, { stored: true });
+      return {
+        ok: true,
+        message:
+          `Created ${doc.name}: print it, then set #fit_press, #fit_slip and #fit_sliding from ` +
+          'the holes that fit (hole 1 is next to the marker; each hole adds 0.05 mm).',
+      };
     },
 
     async rename(id, name) {

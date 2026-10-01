@@ -2,7 +2,12 @@
 .variables-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.variables-head h2 {
+  margin-right: auto;
 }
 
 .variables-head button,

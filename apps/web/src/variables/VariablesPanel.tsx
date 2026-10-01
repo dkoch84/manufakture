@@ -1,7 +1,8 @@
 // The Variables panel: the document's variables table. Each variable has a name, an expression
 // (which may read other variables), a type and its value in the display units, and lists where it
 // is used. Adding, editing (renaming included) and deleting are one undo step each; a variable in
-// use cannot simply be deleted, but its uses can take its current value first. The logic is in
+// use cannot simply be deleted, but its uses can take its current value first. Insert fit
+// variables adds #fit_press, #fit_slip and #fit_sliding in one step (fits.ts). The logic is in
 // variables.ts.
 
 import { useMemo, useState } from 'react';
@@ -9,6 +10,7 @@ import { useStore } from 'zustand';
 import { ExpressionField } from '../components/ExpressionField';
 import type { DocumentStoreApi } from '../state/document';
 import { featureItem, type SelectionStore } from '../state/selection';
+import { insertFitVariables } from './fits';
 import {
   VARIABLE_TYPES,
   checkDraft,
@@ -63,6 +65,17 @@ export function VariablesPanel({ documents, selection }: VariablesPanelProps) {
   const configured = useMemo(() => configuredVariablesInfo(doc), [doc]);
   const [editing, setEditing] = useState<Editing | null>(null);
   const [blocked, setBlocked] = useState<Blocked | null>(null);
+  const [fitStatus, setFitStatus] = useState<{ ok: boolean; message: string } | null>(null);
+
+  const insertFits = () => {
+    const r = insertFitVariables(doc);
+    const done = r.command ? documents.getState().execute(r.command, r.label) : null;
+    setFitStatus(
+      done && !done.ok
+        ? { ok: false, message: done.error.message }
+        : { ok: true, message: r.message },
+    );
+  };
 
   const startEdit = (name: string | null) => {
     setBlocked(null);
@@ -124,7 +137,25 @@ export function VariablesPanel({ documents, selection }: VariablesPanelProps) {
         >
           Add
         </button>
+        <button
+          type="button"
+          data-testid="variable-insert-fits"
+          disabled={editing !== null}
+          title="Add #fit_press, #fit_slip and #fit_sliding: clearances for printed fits, from the print setup's printer and nozzle"
+          onClick={insertFits}
+        >
+          Insert fit variables
+        </button>
       </div>
+      {fitStatus && (
+        <p
+          className={fitStatus.ok ? 'field-note' : 'field-error'}
+          role="status"
+          data-testid="variable-fits-status"
+        >
+          {fitStatus.message}
+        </p>
+      )}
       {rows.length === 0 && editing === null && (
         <p className="field-note">
           Name a value once and use it anywhere a number goes: type <code>#</code> and its name.

@@ -18,6 +18,8 @@ The **Variables** panel is at the top of the side panel (it steps aside while a 
 
 **Add** or **Save** (or Enter) applies it; **Cancel** (or Escape) leaves the table as it was. Each change is one step for Undo.
 
+**Insert fit variables** adds `#fit_press`, `#fit_slip` and `#fit_sliding`, clearances for printed parts, in one step and without touching any that already exist: see [Fits for printed parts](fits.md).
+
 ### Bare numbers get their unit
 
 A plain number typed for a length or angle variable gets the unit written in: `40` becomes `40 mm` in a millimetre document, `40 in` in an inch or feet-and-inches document, and `45` becomes `45 deg`. An expression without units gets parentheses: `2 * #n` becomes `(2 * #n) mm`. This keeps the variable's meaning fixed: a length is a length in every field that reads it, whatever units that field was typed in. Expressions that already come to a length or angle (`25 mm`, `#d - 10`, `3' 4-1/2"`) are kept exactly as typed.

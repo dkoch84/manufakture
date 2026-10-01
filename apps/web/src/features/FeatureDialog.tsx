@@ -6,7 +6,8 @@
 // works at once) and gives it back to where it was when it closes. The form logic is in forms.ts.
 
 import { defaultFeatureName, findPart, previewIds } from '@manufakture/core';
-import { HOLE_SIZES, type HoleFit } from '@manufakture/kernel';
+import { HOLE_SIZES } from '@manufakture/kernel';
+import { FIT_DESCRIPTIONS, FIT_KINDS, FIT_VARIABLES } from '@manufakture/print';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { partBodies } from '../model/bodies';
 import { featureResult, type ModelStore } from '../model/model';
@@ -21,6 +22,7 @@ import {
 import { ExpressionField } from '../components/ExpressionField';
 import { evaluateVariables } from '../sketcher/values';
 import { KIND_LABELS } from '../tree/tree';
+import { fitsFirst } from '../variables/fits';
 import {
   addRef,
   applyStandard,
@@ -41,6 +43,7 @@ import {
   type FeatureForm,
   type FormKind,
   type HoleForm,
+  type HoleFormFit,
   type Operation,
   type RefField,
   type RefKind,
@@ -123,6 +126,8 @@ function PartFeatureDialog({
   const units = doc.units;
   const variables = useMemo(() => evaluateVariables(doc), [doc]);
   const variableNames = useMemo(() => doc.variables.map((v) => v.name), [doc]);
+  // Fields that take a clearance offer the fit variables first (ADR 0012 decision 10).
+  const fitNames = useMemo(() => fitsFirst(variableNames), [variableNames]);
 
   const [form, setForm] = useState<FeatureForm>(() => {
     if (existing) {
@@ -258,6 +263,7 @@ function PartFeatureDialog({
     label: string,
     kind: 'length' | 'angle' | 'number',
     value: string,
+    suggestFits = false,
   ) => (
     <ExpressionField
       key={key}
@@ -267,7 +273,7 @@ function PartFeatureDialog({
       kind={kind}
       units={units}
       variables={variables}
-      names={variableNames}
+      names={suggestFits ? fitNames : variableNames}
       error={errors[key]}
       onChange={(v) => set(key, v)}
     />
@@ -488,6 +494,8 @@ function PartFeatureDialog({
         />,
       );
       if (form.standard !== '') {
+        const printed = FIT_KINDS.find((k) => k === form.fit);
+        const missing = printed && !variableNames.includes(FIT_VARIABLES[printed]);
         body.push(
           <Select
             key="fit"
@@ -498,13 +506,26 @@ function PartFeatureDialog({
               ['close', 'Close'],
               ['normal', 'Normal'],
               ['loose', 'Loose'],
+              ...FIT_KINDS.map((k): [string, string] => [
+                k,
+                `Printed fit: ${k} (#${FIT_VARIABLES[k]})`,
+              ]),
             ]}
-            onChange={(v) => hole({ fit: v as HoleFit })}
+            onChange={(v) => hole({ fit: v as HoleFormFit })}
           />,
         );
+        if (printed) {
+          body.push(
+            <p key="fit-note" className="field-note" data-testid="field-fit-note">
+              {missing
+                ? `#${FIT_VARIABLES[printed]} is not in the variables table yet: use Insert fit variables in the Variables panel.`
+                : `The nominal size plus #${FIT_VARIABLES[printed]} (${printed}: ${FIT_DESCRIPTIONS[printed]}).`}
+            </p>,
+          );
+        }
       }
       body.push(
-        expression('diameter', 'Diameter', 'length', form.diameter),
+        expression('diameter', 'Diameter', 'length', form.diameter, true),
         <Select
           key="extent"
           label="End"
@@ -533,7 +554,7 @@ function PartFeatureDialog({
         />,
       );
       if (form.head !== 'simple') {
-        body.push(expression('headDiameter', 'Head diameter', 'length', form.headDiameter));
+        body.push(expression('headDiameter', 'Head diameter', 'length', form.headDiameter, true));
       }
       if (form.head === 'counterbore') {
         body.push(expression('headDepth', 'Head depth', 'length', form.headDepth));

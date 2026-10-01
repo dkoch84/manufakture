@@ -8,6 +8,7 @@ import {
 } from '@manufakture/core';
 import { describe, expect, it } from 'vitest';
 import { demoDocument } from '../model/demo';
+import { insertFitVariables } from '../variables/fits';
 import { twoBodyDocument } from '../model/twoBodies.test-fixture';
 import {
   addRef,
@@ -343,6 +344,67 @@ describe('shell, revolve, hole, pattern, mirror', () => {
     expect(build(noPoints, onDemo)).toMatchObject({
       errors: { points: expect.stringContaining('has no points') },
     });
+  });
+
+  it('offers printed fits: the nominal size plus a fit variable, read back on edit', () => {
+    let doc = apply(sketchOnly(), {
+      id: 'extrude#1',
+      kind: 'extrude',
+      name: 'Extrude 1',
+      suppressed: false,
+      profile: { sketch: 'sketch#1' },
+      operation: 'new',
+      extent: { type: 'blind', distance: { source: '5', lengthUnit: 'mm', angleUnit: 'deg' } },
+      reverse: false,
+    });
+    const form = newForm('hole', { doc, partId: PART, selectedFeatures: ['sketch#1'] }) as HoleForm;
+    const slip = applyStandard({ ...form, standard: 'M3', fit: 'slip' }, MM);
+    expect(slip.diameter).toBe('3 mm + #fit_slip');
+    // Without the variable the diameter does not evaluate.
+    expect(build(doc, slip)).toMatchObject({ ok: false, errors: { diameter: expect.any(String) } });
+
+    const fits = insertFitVariables(doc);
+    const added = applyCommand(doc, fits.command!);
+    if (!added.ok) throw new Error(added.error.message);
+    doc = added.value.document;
+    const r = build(doc, slip);
+    if (!r.ok) throw new Error(JSON.stringify(r.errors));
+    const hole = r.feature as HoleFeature;
+    expect(hole.diameter.source).toBe('3 mm + #fit_slip');
+    // Core's standard fits are ISO 273 only: a printed fit lives in the diameter.
+    expect(hole.standard).toBeUndefined();
+    expect(formOf(hole, new Set())).toMatchObject({ standard: 'M3', fit: 'slip' });
+    // A custom diameter that only looks similar stays custom.
+    const odd = { ...hole, diameter: { ...hole.diameter, source: '3.3 mm + #fit_slip' } };
+    expect(formOf(odd, new Set())).toMatchObject({ standard: '', fit: 'normal' });
+  });
+
+  it('reads printed fits back on edit in an inch document', () => {
+    const inch = { length: { unit: 'in' }, angle: { unit: 'deg' } } as const;
+    const form = newForm('hole', {
+      doc: sketchOnly(),
+      partId: PART,
+      selectedFeatures: ['sketch#1'],
+    }) as HoleForm;
+    for (const [size, fit] of [
+      ['M3', 'slip'],
+      ['M4', 'press'],
+    ] as const) {
+      const f = applyStandard({ ...form, standard: size, fit }, inch);
+      expect(f.diameter).toMatch(/^\d\.\d+ in \+ #fit_/);
+      const hole: HoleFeature = {
+        id: 'hole#1',
+        kind: 'hole',
+        name: 'Hole 1',
+        suppressed: false,
+        sketch: 'sketch#1',
+        points: ['e5'],
+        diameter: { source: f.diameter, lengthUnit: 'in', angleUnit: 'deg' },
+        extent: { type: 'throughAll' },
+        head: { type: 'simple' },
+      };
+      expect(formOf(hole, new Set())).toMatchObject({ standard: size, fit });
+    }
   });
 
   it('patterns the selected features along a picked direction, or the whole body', () => {

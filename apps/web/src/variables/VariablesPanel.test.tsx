@@ -198,4 +198,24 @@ describe('the Variables panel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Delete #d' }));
     expect(screen.queryByTestId('variable-inline-warning')).toBeNull();
   });
+
+  it('inserts the fit variables in one undo step, and a second time changes nothing', () => {
+    const t = setup();
+    fireEvent.click(screen.getByTestId('variable-insert-fits'));
+    expect(t.variables()).toMatchObject({
+      fit_press: '0.1 mm',
+      fit_slip: '0.2 mm',
+      fit_sliding: '0.4 mm',
+    });
+    expect(screen.getByTestId('variable-fit_slip-value').textContent).toBe('0.20 mm');
+    expect(screen.getByTestId('variable-fits-status').textContent).toMatch(/starting points/);
+    expect(t.documents.getState().undoLabel).toBe('Insert fit variables');
+
+    fireEvent.click(screen.getByTestId('variable-insert-fits'));
+    expect(screen.getByTestId('variable-fits-status').textContent).toMatch(/already in the table/);
+    expect(t.documents.getState().undoLabel).toBe('Insert fit variables');
+
+    t.documents.getState().undo();
+    expect(Object.keys(t.variables())).toEqual(['w', 'd', 'h', 'r']);
+  });
 });
