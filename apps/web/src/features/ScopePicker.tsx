@@ -12,6 +12,9 @@ export interface ScopePickerProps {
   error?: string | undefined;
   disabled?: boolean;
   onChange: (scope: readonly string[] | undefined) => void;
+  /** The field's title (default "Bodies") and test id (default `field-scope`). */
+  legend?: string;
+  testId?: string;
 }
 
 export function ScopePicker({
@@ -20,11 +23,13 @@ export function ScopePicker({
   error,
   disabled = false,
   onChange,
+  legend = 'Bodies',
+  testId = 'field-scope',
 }: ScopePickerProps) {
   const all = scope === undefined;
   return (
-    <fieldset className="dialog-field checks scope-field" data-testid="field-scope">
-      <legend>Bodies</legend>
+    <fieldset className="dialog-field checks scope-field" data-testid={testId}>
+      <legend>{legend}</legend>
       <label className="dialog-check">
         <input
           type="checkbox"

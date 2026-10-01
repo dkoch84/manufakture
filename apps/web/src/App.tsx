@@ -1,6 +1,6 @@
 import { sketchToWorld } from '@manufakture/sketch/geometry';
 import type { SketchPlacement, Vec2 } from '@manufakture/sketch/model';
-import { findPart, type ManufaktureDocument } from '@manufakture/core';
+import { findPart, type DerivedSource, type ManufaktureDocument } from '@manufakture/core';
 import type { ExportTolerancePreset } from '@manufakture/io';
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from 'zustand';
@@ -78,6 +78,7 @@ import {
 import { SketchMenu } from './sketcher/SketchPanels';
 import { FeatureTree } from './tree/FeatureTree';
 import type { DialogRequest } from './features/FeatureDialog';
+import { openSourceAt } from './features/derived';
 import { FeatureToolbar } from './features/FeatureToolbar';
 import type { RefKind } from './features/forms';
 import { isDialogKind } from './features/kinds';
@@ -775,6 +776,24 @@ export function App({
     },
     [library, documents, shared, endView, loader, settings, pruneImports],
   );
+  // A derived part's Open source: its source document, read-only at the pinned version.
+  const onOpenSource = useCallback(
+    (source: DerivedSource) => {
+      if (!library || !actions) return;
+      void openSourceAt(
+        {
+          currentId: () => documents.getState().document.id,
+          open: (id) => actions.open(id),
+          listVersions: (id) => library.listVersions(id),
+          view: (version) => onView({ kind: 'version', version }),
+        },
+        source,
+      ).then((r) => {
+        if (!r.ok) setIoStatus({ error: true, text: r.message });
+      });
+    },
+    [library, actions, documents, onView],
+  );
   const onRestore = useCallback(() => {
     const v = viewingRef.current;
     if (!v) return;
@@ -1465,6 +1484,8 @@ export function App({
               settings={shownSettings}
               disabled={dialog !== null || locked}
               onEdit={onEditFeature}
+              library={library}
+              onOpenSource={onOpenSource}
             />
           )}
           <Viewport
@@ -1515,6 +1536,8 @@ export function App({
                   model={model}
                   selection={selection}
                   resolve={resolveReference}
+                  library={library}
+                  createVersion={autosave ? autosave.createVersion : null}
                   onClose={() => setDialog(null)}
                 />
               </Suspense>

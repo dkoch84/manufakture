@@ -14,7 +14,11 @@ const TITLES: Record<DialogKind, string> = {
   hole: 'Drill holes at sketch points',
   pattern: 'Repeat features or the body in a row or around an axis',
   mirror: 'Mirror features or the body about a face',
+  derived: 'Insert the bodies of a part from a version of a document',
 };
+
+/** Button text where the tree's kind label is too short to say what the tool does. */
+const BUTTON_TEXT: Partial<Record<DialogKind, string>> = { derived: 'Derived part' };
 
 export function FeatureToolbar({
   disabled,
@@ -34,7 +38,7 @@ export function FeatureToolbar({
           onClick={() => onOpen(kind)}
         >
           <KindIcon kind={kind} />
-          {KIND_LABELS[kind]}
+          {BUTTON_TEXT[kind] ?? KIND_LABELS[kind]}
         </button>
       ))}
     </div>

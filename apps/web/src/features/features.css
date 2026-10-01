@@ -149,3 +149,47 @@
   border-radius: 4px;
   padding: 0.2rem 0.9rem;
 }
+
+/* The derived part dialog: the pin, the source picker and the placement. */
+.derived-pin {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.pin-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.pin-picker[disabled] {
+  opacity: 0.7;
+}
+
+.pin-versions > button,
+.pin-create button,
+.derived-pin button {
+  align-self: flex-start;
+  font: inherit;
+}
+
+.pin-create {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.3rem;
+}
+
+.pin-create label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.derived-placement {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.35rem;
+}

@@ -1,4 +1,5 @@
-// The feature dialogs: extrude, revolve, fillet, chamfer, shell, hole, pattern and mirror. One
+// The feature dialogs: extrude, revolve, fillet, chamfer, shell, hole, pattern and mirror (and
+// the derived part, which has a dialog of its own: DerivedDialog.tsx). One
 // panel edits one feature, new or existing; faces and edges are picked in the viewport into the
 // active reference field; OK applies the whole dialog as one core command (one undo step), and
 // Cancel or Escape leaves the document alone. The dialog takes focus when it opens (so Escape
@@ -38,11 +39,15 @@ import {
   withScope,
   type DialogKind,
   type FeatureForm,
+  type FormKind,
   type HoleForm,
   type Operation,
   type RefField,
   type RefKind,
 } from './forms';
+import type { CreateVersion } from '../history/history';
+import type { PinLibrary } from './derived';
+import { DerivedDialog } from './DerivedDialog';
 import type { PickOutcome } from './references';
 import { ScopePicker } from './ScopePicker';
 
@@ -64,6 +69,10 @@ export interface FeatureDialogProps {
   /** The part studio the feature is in; default: the active one when the dialog opens. */
   partId?: string;
   onClose: () => void;
+  /** Where a derived part's source is chosen from; without it, derived parts cannot be made. */
+  library?: PinLibrary | null;
+  /** Name the open document's current state (a derived part pinning a version of it). */
+  createVersion?: CreateVersion | null;
 }
 
 const OPERATIONS: readonly [Operation, string][] = [
@@ -73,7 +82,29 @@ const OPERATIONS: readonly [Operation, string][] = [
   ['intersect', 'Intersect'],
 ];
 
-export function FeatureDialog({
+export function FeatureDialog(props: FeatureDialogProps) {
+  const { request, library = null, createVersion = null, ...rest } = props;
+  if (request.kind === 'derived') {
+    return (
+      <DerivedDialog
+        {...rest}
+        request={{
+          kind: 'derived',
+          ...(request.featureId !== undefined ? { featureId: request.featureId } : {}),
+        }}
+        library={library}
+        createVersion={createVersion}
+      />
+    );
+  }
+  return <PartFeatureDialog {...rest} request={{ ...request, kind: request.kind }} />;
+}
+
+type PartFeatureDialogProps = Omit<FeatureDialogProps, 'request' | 'library' | 'createVersion'> & {
+  request: DialogRequest & { kind: FormKind };
+};
+
+function PartFeatureDialog({
   request,
   documents,
   model,
@@ -81,7 +112,7 @@ export function FeatureDialog({
   resolve,
   partId: givenPartId,
   onClose,
-}: FeatureDialogProps) {
+}: PartFeatureDialogProps) {
   // The part is fixed for the dialog's life: the tabs are disabled while it is open.
   const [partId] = useState(() => givenPartId ?? documents.getState().activePartId);
   const doc = documents.getState().document;

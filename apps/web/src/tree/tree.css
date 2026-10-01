@@ -346,3 +346,72 @@
   padding: 0 0.3rem;
   font-size: 0.72rem;
 }
+
+/* A derived part: its source and version on a line of its own under the row. */
+.feature-row.derived {
+  flex-wrap: wrap;
+}
+
+.feature-row.derived .row-actions {
+  top: 0.2rem;
+  transform: none;
+}
+
+.derived-source {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+  padding-left: 1.4rem;
+  font-size: 0.75rem;
+  color: #5b6673;
+}
+
+.derived-from {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.derived-update-available {
+  padding: 0 0.3rem;
+  border-radius: 3px;
+  background: #fff3d6;
+  color: #7a5200;
+  font-weight: 600;
+}
+
+.derived-missing {
+  color: #8a94a1;
+  font-style: italic;
+}
+
+.derived-actions {
+  display: inline-flex;
+  gap: 0.2rem;
+}
+
+.derived-actions button,
+.derived-versions > button {
+  font: inherit;
+  padding: 0 0.35rem;
+  border: 1px solid #c2cad3;
+  border-radius: 3px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.derived-actions button:disabled {
+  color: #8a94a1;
+  cursor: default;
+}
+
+.derived-versions {
+  flex-basis: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.25rem 0;
+}

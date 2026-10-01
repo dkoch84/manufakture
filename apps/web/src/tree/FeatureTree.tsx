@@ -2,9 +2,11 @@
 // in regen order with their icons, names and statuses, and the rollback bar. Click selects a feature (Shift adds, Ctrl toggles), a
 // double-click edits it, hovering highlights its faces in the viewport. Rows are dragged to
 // reorder (a move the document refuses is explained and not made), and the rollback bar is
-// dragged between rows. Every change is one core command, so Undo and Redo cover all of it.
+// dragged between rows. Every change is one core command, so Undo and Redo cover all of it. A
+// derived part shows its source and version under its row, with Update and Open source
+// (DerivedSource.tsx).
 
-import { findPart, type Command } from '@manufakture/core';
+import { findPart, type Command, type DerivedSource } from '@manufakture/core';
 import {
   useEffect,
   useMemo,
@@ -19,7 +21,10 @@ import { useModel, type ModelStore } from '../model/model';
 import type { DocumentStoreApi } from '../state/document';
 import { featureItem, isFeatureItem, selectModeFor, type SelectionStore } from '../state/selection';
 import { viewSettingsStore, type ViewSettingsStore } from '../state/viewSettings';
+import type { PinLibrary } from '../features/derived';
 import { BodiesSection } from './BodiesSection';
+import { DerivedSourceLine } from './DerivedSource';
+import { useSourceVersions } from './sourceVersions';
 import { ActionIcon, KindIcon, StatusIcon } from './icons';
 import {
   KIND_LABELS,
@@ -50,6 +55,10 @@ export interface FeatureTreeProps {
   disabled?: boolean;
   /** Open a feature for editing; `repick` names a reference to pick again. */
   onEdit: (featureId: string, options?: { repick?: string }) => void;
+  /** Where derived parts' sources are: for Update available and Update. */
+  library?: PinLibrary | null;
+  /** Open a derived part's source document, read-only at the pinned version. */
+  onOpenSource?: (source: DerivedSource) => void;
 }
 
 type Drag =
@@ -79,6 +88,8 @@ export function FeatureTree({
   partId: givenPartId,
   disabled = false,
   onEdit,
+  library = null,
+  onOpenSource,
 }: FeatureTreeProps) {
   const activePartId = useStore(documents, (s) => s.activePartId);
   const partId = givenPartId ?? activePartId;
@@ -99,6 +110,14 @@ export function FeatureTree({
     return treeRows(part, results, { available, built, current: document });
   }, [part, parts, partId, available, built, document]);
   const bar = part ? rollbackPosition(part) : 0;
+  // The version lists of the derived parts' source documents, for Update available.
+  const [sourcesRead, setSourcesRead] = useState(0);
+  const sourceIds = useMemo(
+    () =>
+      (part?.features ?? []).flatMap((f) => (f.kind === 'derived' ? [f.source.documentId] : [])),
+    [part],
+  );
+  const sourceVersions = useSourceVersions(library, sourceIds, sourcesRead);
   const selectedIds = useMemo(
     () => new Set(selected.filter(isFeatureItem).map((i) => i.id)),
     [selected],
@@ -389,6 +408,7 @@ export function FeatureTree({
     const tipId = `feature-tip-${f.id.replace('#', '-')}`;
     const classes = [
       'feature-row',
+      f.kind === 'derived' ? 'derived' : '',
       `status-${row.status}`,
       isSelected ? 'selected' : '',
       row.stale ? 'stale' : '',
@@ -511,6 +531,19 @@ export function FeatureTree({
             <ActionIcon name="delete" />
           </button>
         </span>
+        {f.kind === 'derived' && (
+          <DerivedSourceLine
+            feature={f}
+            partId={partId}
+            versions={library ? sourceVersions.get(f.source.documentId) : undefined}
+            library={library}
+            disabled={disabled}
+            run={run}
+            onMessage={setMessage}
+            onUpdated={() => setSourcesRead((n) => n + 1)}
+            onOpenSource={onOpenSource}
+          />
+        )}
         {tip === f.id && (
           <div
             className="feature-tip"

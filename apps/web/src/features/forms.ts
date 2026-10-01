@@ -34,8 +34,8 @@ import { HOLE_SIZES, holeSize, type HoleFit } from '@manufakture/kernel';
 import { evaluate, fromMillimetres, fromRadians } from '@manufakture/units';
 import { evaluateVariables, type Variables } from '../sketcher/values';
 
-export { DIALOG_KINDS, isDialogKind, type DialogKind } from './kinds';
-import type { DialogKind } from './kinds';
+export { DIALOG_KINDS, isDialogKind, type DialogKind, type FormKind } from './kinds';
+import type { FormKind } from './kinds';
 
 export type Operation = ExtrudeFeature['operation'];
 
@@ -366,7 +366,7 @@ function angleText(rad: number, units: DisplayUnits): string {
 }
 
 /** A new feature's form, filled from the selection where it helps. */
-export function newForm(kind: DialogKind, ctx: FormContext): FeatureForm {
+export function newForm(kind: FormKind, ctx: FormContext): FeatureForm {
   const part = findPart(ctx.doc, ctx.partId)!;
   const units = ctx.doc.units;
   const bar = barOf(part);

@@ -2,7 +2,18 @@
 // use, so the toolbar and the feature tree can name them without loading the forms.
 
 export type DialogKind =
-  'extrude' | 'revolve' | 'fillet' | 'chamfer' | 'shell' | 'hole' | 'pattern' | 'mirror';
+  | 'extrude'
+  | 'revolve'
+  | 'fillet'
+  | 'chamfer'
+  | 'shell'
+  | 'hole'
+  | 'pattern'
+  | 'mirror'
+  | 'derived';
+
+/** The kinds edited through a feature form (forms.ts); a derived part has a dialog of its own. */
+export type FormKind = Exclude<DialogKind, 'derived'>;
 
 export const DIALOG_KINDS: readonly DialogKind[] = [
   'extrude',
@@ -13,6 +24,7 @@ export const DIALOG_KINDS: readonly DialogKind[] = [
   'hole',
   'pattern',
   'mirror',
+  'derived',
 ];
 
 export function isDialogKind(kind: string): kind is DialogKind {
@@ -26,4 +38,5 @@ export const SCOPED_KINDS: readonly DialogKind[] = [
   'hole',
   'pattern',
   'mirror',
+  'derived',
 ];
