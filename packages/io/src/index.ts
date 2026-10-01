@@ -26,7 +26,9 @@ export {
 } from './stl';
 export {
   CORE_NAMESPACE,
+  MATERIALS_NAMESPACE,
   MODEL_PATH,
+  MODEL_SETTINGS_PATH,
   ThreeMfParseError,
   buildMeshes,
   parse3mf,
@@ -35,12 +37,16 @@ export {
   type ModelUnit,
   type ParsedThreeMf,
   type ThreeMfBuildItem,
+  type ThreeMfBuiltMesh,
+  type ThreeMfColorGroup,
   type ThreeMfComponent,
   type ThreeMfComponentsInput,
   type ThreeMfItem,
+  type ThreeMfMeshInput,
   type ThreeMfObject,
   type ThreeMfObjectInput,
   type ThreeMfReport,
+  type ThreeMfSettingsObject,
   type ThreeMfWriteOptions,
 } from './threemf';
 export {

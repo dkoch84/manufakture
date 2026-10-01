@@ -203,7 +203,7 @@ describe('assemblyExportPlan', () => {
 });
 
 describe('exportAssembly', () => {
-  it('3MF: an object per part, meshed once, a placed build item per instance', async () => {
+  it('3MF: meshed once, an object per body per instance, each placed by its build item', async () => {
     const { doc, model: m } = threeInstances();
     const ex = fakeExchanger();
     const r = await exportAssembly(ex, '3mf', plan(doc, m), { tolerance: 'fine' });
@@ -217,8 +217,8 @@ describe('exportAssembly', () => {
     expect(r.message).toMatch(/^Exported Assembly 1\.3mf \(.*\): 3 instances of 2 parts\.$/);
     const report = validate3mf(r.value[0]!.bytes);
     expect(report.problems).toEqual([]);
-    expect(report.parsed!.objects.map((o) => o.name)).toEqual(['Box', 'Lid']);
-    expect(report.parsed!.items.map((i) => i.objectId)).toEqual([1, 2, 1]);
+    expect(report.parsed!.objects.map((o) => o.name)).toEqual(['Box', 'Lid', 'Box']);
+    expect(report.parsed!.items.map((i) => i.objectId)).toEqual([1, 2, 3]);
     const built = buildMeshes(report.parsed!);
     const turned = meshProperties(built[2]!.mesh).boundingBox!;
     // The 40 x 30 box turned a quarter about z: x -30..0, y 0..40; then 100 along x.

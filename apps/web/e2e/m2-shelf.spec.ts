@@ -737,20 +737,20 @@ test('8. the assembly exported as STEP, 3MF and STL', async () => {
     'Drawer 1',
   ]);
 
-  // 3MF: each part one object (the shelf's bodies objects of their own, as its components), a
-  // build item per instance with its placement.
+  // 3MF: an object per body per instance (the shelf's four bodies, each support twice, the
+  // drawer), each placed by its own build item.
   const threemf = await download(page, '3mf');
   expect(threemf.name).toBe('Assembly 1.3mf');
   const report = validate3mf(threemf.bytes);
   expect(report.problems).toEqual([]);
   expect(report.parsed!.objects.map((o) => o.name)).toEqual([
     ...BODY_NAMES,
-    'Shelf (800 mm)',
+    'Support',
     'Support',
     'Drawer',
   ]);
-  expect(report.parsed!.items.map((i) => i.objectId)).toEqual([5, 6, 6, 7]);
-  // The build, components resolved: the shelf's four bodies, then each support and the drawer.
+  expect(report.parsed!.items.map((i) => i.objectId)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+  // The build: the shelf's four bodies, then each support and the drawer.
   const meshes = buildMeshes(report.parsed!);
   expect(meshes.map((m) => m.name)).toEqual([...BODY_NAMES, 'Support', 'Support', 'Drawer']);
   const built = meshes.map((m) => meshProperties(m.mesh));

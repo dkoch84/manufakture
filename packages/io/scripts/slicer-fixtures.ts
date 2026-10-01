@@ -1,11 +1,11 @@
 // The slicer interop fixtures (M3 plan, T3.0a): small 3MF packages that each try one way of
 // writing a two-body model (a red box and a blue box), so the slicers' command lines and GUIs
 // can be asked what they make of it. They are written here by hand, not by `write3mf`, because
-// most of them hold markup the writer does not produce (yet): colour groups, components with
-// colours, per-triangle colours, Bambu's `Metadata/model_settings.config`. The first fixture is
-// what `write3mf` writes today; `src/fixtures/slicers/fixtures.test.ts` checks that it still
-// matches, that every fixture is a valid core 3MF, and that the committed files are what this
-// script builds.
+// some hold markup the writer never produces (per-triangle colours, a bare components object, a
+// `model_settings.config` beside plain objects, one object placed twice). Since T3.3a the writer
+// produces 01 (no colours), 02, 06 and 07 byte for byte, the layouts the slicers keep;
+// `src/fixtures/slicers/fixtures.test.ts` checks that, that every fixture is a valid 3MF, and
+// that the committed files are what this script builds.
 //
 //   node scripts/slicer-fixtures.ts           (from packages/io) writes src/fixtures/slicers/
 //   pnpm --filter @manufakture/io fixtures:slicers

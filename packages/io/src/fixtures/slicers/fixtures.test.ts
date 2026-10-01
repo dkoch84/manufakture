@@ -13,6 +13,8 @@ import {
   MODEL_SETTINGS_PATH,
   RED,
   RED_BOX,
+  ROTATED_TRANSFORM,
+  TRANSLATED_TRANSFORM,
   buildSlicerFixtures,
 } from '../../../scripts/slicer-fixtures';
 import { meshProperties } from '../../mesh';
@@ -157,6 +159,84 @@ describe('slicer fixtures', () => {
     );
     expect(seven).toContain('<object id="5">');
     expect(seven).toContain('<part id="4" subtype="normal_part">');
+  });
+
+  it('parse with their colours, pids and settings', () => {
+    const colours = (file: string) =>
+      parse3mf(byFile.get(file)!.bytes).objects.map((o) => [
+        o.id,
+        o.name,
+        o.pid,
+        o.pindex,
+        o.color,
+      ]);
+    expect(colours('01-core.3mf')).toEqual([
+      [1, 'Red box', null, null, null],
+      [2, 'Blue box', null, null, null],
+    ]);
+    expect(colours('02-colorgroups.3mf')).toEqual([
+      [3, 'Red box', 1, 0, RED],
+      [4, 'Blue box', 2, 0, BLUE],
+    ]);
+    expect(colours('04-pindex-triangles.3mf')).toEqual([
+      [2, 'Red box', 1, 0, RED],
+      [3, 'Blue box', 1, 1, BLUE],
+    ]);
+    expect(parse3mf(byFile.get('04-pindex-triangles.3mf')!.bytes).colorGroups).toEqual([
+      { id: 1, colors: [RED, BLUE], namespace: MATERIALS_NS },
+    ]);
+    expect(parse3mf(byFile.get('05-model-settings.3mf')!.bytes).modelSettings).toEqual([
+      { id: 1, metadata: { name: 'Red box', extruder: '1' }, parts: [] },
+      { id: 2, metadata: { name: 'Blue box', extruder: '2' }, parts: [] },
+    ]);
+    const seven = parse3mf(byFile.get('07-components-model-settings.3mf')!.bytes);
+    expect(seven.modelSettings![0]!.parts.map((p) => [p.id, p.metadata])).toEqual([
+      [3, { name: 'Red box', extruder: '1' }],
+      [4, { name: 'Blue box', extruder: '2' }],
+    ]);
+    expect(buildMeshes(seven).map((m) => [m.name, m.color])).toEqual([
+      ['Red box', RED],
+      ['Blue box', BLUE],
+    ]);
+  });
+
+  // The layouts the matrix found to work (research note, section 6, "Provisional
+  // recommendation"): write3mf writes them byte for byte, so the slicers' results carry over.
+  describe('write3mf writes the layouts the slicers keep', () => {
+    /** The fixture script's zip date (local fields, see the script). */
+    const modified = new Date(2026, 0, 1, 0, 0, 0);
+    const red = { name: RED_BOX.name, mesh: boxMesh(RED_BOX.min, RED_BOX.size), color: RED };
+    const blue = { name: BLUE_BOX.name, mesh: boxMesh(BLUE_BOX.min, BLUE_BOX.size), color: BLUE };
+    const matrix = (t: string) => t.split(' ').map(Number);
+
+    it('02: one colour group per colour, pid and pindex 0 on each object', () => {
+      expect(write3mf([red, blue], { modified })).toEqual(byFile.get('02-colorgroups.3mf')!.bytes);
+    });
+
+    it('06: objects at the origin, placed (and the red box turned) by their build items', () => {
+      const bytes = write3mf(
+        [
+          { ...red, mesh: boxMesh([0, 0, 0], RED_BOX.size) },
+          { ...blue, mesh: boxMesh([0, 0, 0], BLUE_BOX.size) },
+        ],
+        {
+          modified,
+          items: [
+            { object: 0, transform: matrix(ROTATED_TRANSFORM) },
+            { object: 1, transform: matrix(TRANSLATED_TRANSFORM) },
+          ],
+        },
+      );
+      expect(bytes).toEqual(byFile.get('06-transforms.3mf')!.bytes);
+    });
+
+    it('07: a components object with the model_settings.config naming its parts and slots', () => {
+      const bytes = write3mf(
+        [red, blue, { name: 'Two boxes', components: [{ object: 0 }, { object: 1 }] }],
+        { modified, items: [{ object: 2 }] },
+      );
+      expect(bytes).toEqual(byFile.get('07-components-model-settings.3mf')!.bytes);
+    });
   });
 
   it('never claim to be written by Bambu Studio or OrcaSlicer', () => {

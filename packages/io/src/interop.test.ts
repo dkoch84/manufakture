@@ -1,8 +1,8 @@
 // Interoperability with other programs, when they are installed: FreeCAD
 // reopens our STEP (volume, face count, bounding box) and PrusaSlicer's CLI
-// slices our 3MF and STL, an assembly's included (OrcaSlicer's CLI takes other flags, so it is not
-// picked up; OrcaSlicer itself is checked by hand, see
-// docs/user/import-export.md). Each check is
+// slices our 3MF and STL, an assembly's included, and a coloured, oriented 3MF in both layouts
+// (OrcaSlicer's CLI takes other flags, so it is not picked up here; scripts/orca-matrix.ts runs
+// it on the slicer fixtures, see the README). Each check is
 // skipped when its program is missing, so local runs need neither; the
 // `interop` CI job installs them. Commands can be overridden with FREECADCMD
 // and SLICER_CMD (whitespace-separated, e.g. `xvfb-run -a prusa-slicer`).
@@ -133,6 +133,50 @@ describe.skipIf(!slicer)('a slicer slices our assembly files', () => {
     const file = join(dir, 'assembly.stl');
     writeFileSync(file, exportStlAssembly(assembly()).bytes);
     slice(file, 20);
+  });
+});
+
+describe.skipIf(!slicer)('a slicer slices our coloured, oriented files', () => {
+  /**
+   * The demo part (red) and a peg beside it (blue) as one part, stood on its side: a quarter
+   * turn about x takes the part's 40 mm depth to its height, and a move puts it back on the bed.
+   */
+  const assembly = (oneObject: boolean): ExportAssembly => {
+    const deflection = deflectionOf(EXPORT_TOLERANCES.normal);
+    const peg = k.box(10, 10, 30, [80, 10, 0]);
+    const bodies = [
+      { name: 'Demo part', mesh: k.mesh(part, deflection), color: '#ff0000' },
+      { name: 'Peg', mesh: k.mesh(peg, deflection), color: '#0000ff' },
+    ];
+    k.release(peg);
+    return {
+      bodies,
+      parts: [{ name: 'Jig', bodies: [0, 1], oneObject }],
+      instances: [
+        {
+          part: 0,
+          name: 'Jig',
+          // (x, y, z) to (x, -z, y), then down 10 (z 0..40) and towards the middle of the bed,
+          // clear of the excluded corner some printers have near the origin.
+          placement: {
+            translation: [60, 120, -10],
+            rotation: [Math.SQRT1_2, 0, 0, Math.SQRT1_2],
+          },
+        },
+      ],
+    };
+  };
+
+  it('3MF with an object per body, colour groups and a turned build item', () => {
+    const file = join(dir, 'coloured.3mf');
+    writeFileSync(file, export3mfAssembly(assembly(false), { title: 'Coloured jig' }));
+    slice(file, 40);
+  });
+
+  it('3MF with a components object and its model_settings.config', () => {
+    const file = join(dir, 'coloured-one-object.3mf');
+    writeFileSync(file, export3mfAssembly(assembly(true), { title: 'Coloured jig' }));
+    slice(file, 40);
   });
 });
 

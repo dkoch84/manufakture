@@ -1,8 +1,8 @@
 // Exporting an assembly (M2 plan, T2.3f): its parts placed where regen solved its instances.
-// Each part is written once, however many instances show it: STEP as an assembly of located
-// components (the kernel's XCAF writer), 3MF as one object per body with one build item per
-// instance, STL as every instance's meshes moved into place and merged. Kept free of React, like
-// `actions.ts`.
+// Each part is meshed once, however many instances show it: STEP as an assembly of located
+// components (the kernel's XCAF writer), 3MF as an object per body per instance, each placed by
+// its own build item (io README, "3MF"), STL as every instance's meshes moved into place and
+// merged. Kept free of React, like `actions.ts`.
 //
 // The kernel holds every instance body under its instance view id (`<assembly>/<instance>/<body>`,
 // all sharing their part's shape), so a part is meshed or written through its first instance.

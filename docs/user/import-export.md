@@ -28,10 +28,10 @@ In an [assembly](assemblies.md) tab, **Export** saves the whole assembly, every 
 | Format   | What you get                                                                                                                                                                                 |
 | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **STL**  | One binary STL file with every instance's bodies moved into place                                                                                                                            |
-| **3MF**  | One object per part, written once, and the build places it once per instance; a part of several bodies is one object made of its bodies                                                      |
+| **3MF**  | Each instance written out on its own: every body of every instance is a separate object at the instance's position, named after the part (or after the body, in a part of several bodies)    |
 | **STEP** | A STEP assembly: each part once, as a product named after the part (a part of several bodies is a sub-assembly of its bodies), and each instance a placed component named after the instance |
 
-Two instances of a part are two placements of one part in 3MF and STEP, not two copies, so a CAD program lists the part once. Suppressed instances are left out, and so are instances that could not be built (the header names them). The positions are those of the last solve: a drag that is still going on is not exported. There is no **STL, one file per body** and no **Every configuration** in an assembly. Colours, materials and print plates are not written yet.
+In 3MF, two instances of a part are two copies of its mesh, so a slicer lists each copy as an object of its own and every copy keeps its name. (A 3MF that places one object twice would be smaller, but OrcaSlicer and Bambu Studio split such an object into copies and drop the name of every copy after the first.) In STEP, two instances of a part are two placements of one part, not two copies, so a CAD program lists the part once. Suppressed instances are left out, and so are instances that could not be built (the header names them). The positions are those of the last solve: a drag that is still going on is not exported. There is no **STL, one file per body** and no **Every configuration** in an assembly. Colours, materials and print plates are not written yet.
 
 ### Mesh tolerance
 

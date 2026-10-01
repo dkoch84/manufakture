@@ -67,26 +67,121 @@ const assembly = (): ExportAssembly => ({
 });
 
 describe('assembly exports', () => {
-  it('3MF: each body once, a part of several bodies as components, an item per instance', () => {
+  it('3MF: an object per body per instance, each placed by its own build item', () => {
     const r = validate3mf(export3mfAssembly(assembly(), { title: 'Fixture' }));
     expect(r.problems).toEqual([]);
     const parsed = r.parsed!;
     expect(parsed.metadata.Title).toBe('Fixture');
-    expect(parsed.objects.map((o) => [o.id, o.name, o.components.map((c) => c.objectId)])).toEqual([
-      [1, 'Plate', []],
-      [2, 'Peg', []],
-      [3, 'Base', [1, 2]],
-      [4, 'Lid', []],
+    // A part of several bodies: its bodies by their names; a part of one: the part's name.
+    expect(parsed.objects.map((o) => [o.id, o.name, o.components.length])).toEqual([
+      [1, 'Plate', 0],
+      [2, 'Peg', 0],
+      [3, 'Plate', 0],
+      [4, 'Peg', 0],
+      [5, 'Lid', 0],
     ]);
+    expect(parsed.modelSettings).toBeNull();
     // The first base is unmoved: no transform is written for it.
     expect(parsed.items.map((i) => [i.objectId, i.transform === null])).toEqual([
-      [3, true],
+      [1, true],
+      [2, true],
       [3, false],
       [4, false],
+      [5, false],
     ]);
+    expect(parsed.items[2]!.transform).toEqual(parsed.items[3]!.transform);
     const built = buildMeshes(parsed);
     const volume = built.reduce((v, m) => v + meshProperties(m.mesh).volume, 0);
     expect(volume).toBeCloseTo(2 * (200 + 24) + 100, 3);
+    const turnedPlate = meshProperties(built[2]!.mesh).boundingBox!;
+    turnedPlate.min.forEach((v, i) => expect(v).toBeCloseTo([90, 0, 0][i]!, 4));
+  });
+
+  it('3MF: body colours become colour groups, one per colour, shared by every copy', () => {
+    const a = assembly();
+    const coloured: ExportAssembly = {
+      ...a,
+      bodies: [
+        { ...a.bodies[0]!, color: '#1f77b4' },
+        { ...a.bodies[1]!, color: '#d62728' },
+        { ...a.bodies[2]!, color: '#1f77b4' },
+      ],
+    };
+    const r = validate3mf(export3mfAssembly(coloured));
+    expect(r.problems).toEqual([]);
+    const parsed = r.parsed!;
+    expect(parsed.colorGroups.map((g) => [g.id, g.colors])).toEqual([
+      [1, ['#1F77B4']],
+      [2, ['#D62728']],
+    ]);
+    expect(parsed.objects.map((o) => [o.name, o.pid, o.pindex])).toEqual([
+      ['Plate', 1, 0],
+      ['Peg', 2, 0],
+      ['Plate', 1, 0],
+      ['Peg', 2, 0],
+      ['Lid', 1, 0],
+    ]);
+    expect(buildMeshes(parsed).map((m) => m.color)).toEqual([
+      '#1F77B4',
+      '#D62728',
+      '#1F77B4',
+      '#D62728',
+      '#1F77B4',
+    ]);
+  });
+
+  it('3MF: a part kept as one object is a components object per instance, with its settings', () => {
+    const a = assembly();
+    const together: ExportAssembly = {
+      ...a,
+      bodies: [
+        { ...a.bodies[0]!, color: '#ff0000' },
+        { ...a.bodies[1]!, color: '#0000ff' },
+        a.bodies[2]!,
+      ],
+      parts: [{ ...a.parts[0]!, oneObject: true }, a.parts[1]!],
+    };
+    const r = validate3mf(export3mfAssembly(together));
+    expect(r.problems).toEqual([]);
+    const parsed = r.parsed!;
+    // Groups 1 and 2, then per base instance two mesh objects and the base; then the lid.
+    expect(parsed.objects.map((o) => [o.id, o.name, o.components.map((c) => c.objectId)])).toEqual([
+      [3, 'Plate', []],
+      [4, 'Peg', []],
+      [5, 'Base', [3, 4]],
+      [6, 'Plate', []],
+      [7, 'Peg', []],
+      [8, 'Base', [6, 7]],
+      [9, 'Lid', []],
+    ]);
+    expect(parsed.items.map((i) => i.objectId)).toEqual([5, 8, 9]);
+    expect(
+      parsed.modelSettings!.map((o) => [
+        o.id,
+        o.metadata,
+        o.parts.map((p) => [p.id, p.metadata.name, p.metadata.extruder]),
+      ]),
+    ).toEqual([
+      [
+        5,
+        { name: 'Base', extruder: '1' },
+        [
+          [3, 'Plate', '1'],
+          [4, 'Peg', '2'],
+        ],
+      ],
+      [
+        8,
+        { name: 'Base', extruder: '1' },
+        [
+          [6, 'Plate', '1'],
+          [7, 'Peg', '2'],
+        ],
+      ],
+      [9, { name: 'Lid' }, []],
+    ]);
+    const built = buildMeshes(parsed);
+    expect(built.map((m) => m.name)).toEqual(['Plate', 'Peg', 'Plate', 'Peg', 'Lid']);
     const turnedPlate = meshProperties(built[2]!.mesh).boundingBox!;
     turnedPlate.min.forEach((v, i) => expect(v).toBeCloseTo([90, 0, 0][i]!, 4));
   });

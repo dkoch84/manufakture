@@ -9,6 +9,7 @@ import { writeBinaryStl } from './stl';
 import {
   write3mf,
   type ThreeMfBuildItem,
+  type ThreeMfMeshInput,
   type ThreeMfObjectInput,
   type ThreeMfWriteOptions,
 } from './threemf';
@@ -46,6 +47,8 @@ export interface ExportBody {
   name: string;
   /** A kernel mesh (`MeshData`) or any triangle soup, wound counter-clockwise from outside. */
   mesh: TriangleSoup;
+  /** `#rrggbb`; 3MF writes it as the object's colour (STL has none). */
+  color?: string;
 }
 
 export class NotWatertightError extends Error {
@@ -94,12 +97,18 @@ export function exportStl(
   }));
 }
 
-/** A 3MF package with one object per body, named after it, in millimetres. */
+/** A 3MF package with one object per body, named and coloured after it, in millimetres. */
 export function export3mf(
   bodies: readonly ExportBody[],
   options: ThreeMfWriteOptions = {},
 ): Uint8Array {
-  return write3mf(bodies.map(exportMesh), options);
+  return write3mf(bodies.map(meshInput), options);
+}
+
+/** A body welded and checked, with its colour, as `write3mf` takes it. */
+function meshInput(body: ExportBody): ThreeMfMeshInput {
+  const named = exportMesh(body);
+  return body.color === undefined ? named : { ...named, color: body.color };
 }
 
 /**
@@ -108,8 +117,12 @@ export function export3mf(
  */
 export interface ExportAssembly {
   bodies: readonly ExportBody[];
-  /** Each part's name and its bodies, by index in `bodies`. */
-  parts: readonly { name: string; bodies: readonly number[] }[];
+  /**
+   * Each part's name and its bodies, by index in `bodies`. `oneObject` keeps a part of several
+   * bodies as one 3MF object with a part per body (a sign with inlaid letters, bodies that touch)
+   * instead of an object per body; see `export3mfAssembly`.
+   */
+  parts: readonly { name: string; bodies: readonly number[]; oneObject?: boolean }[];
   /** Each instance: its part (by index in `parts`), its name and where it is. */
   instances: readonly { part: number; name: string; placement: Placement }[];
 }
@@ -141,10 +154,19 @@ function assemblyProblem(assembly: ExportAssembly): string | null {
 }
 
 /**
- * A 3MF package of an assembly: one mesh object per body (welded and checked once, however many
- * instances show it); a part of one body is that object, named after the part, and a part of
- * several bodies is an object of components (its bodies, unmoved) named after the part; one
- * build item per instance, placed by its transform.
+ * A 3MF package of an assembly, laid out the way OrcaSlicer, Bambu Studio and PrusaSlicer all
+ * keep names, colours and positions (docs/research/slicer-handoff.md, section 6): every body
+ * is welded and checked once, then written once per instance that shows it, as a mesh object of
+ * its own (in its part's coordinates, with its colour) placed by a build item at the instance's
+ * transform. The object is named after the part when the part has one body, after the body
+ * otherwise. One object placed by several build items is avoided on purpose: those slicers split
+ * it and drop the name and colour of every copy after the first.
+ *
+ * A part of several bodies marked `oneObject` is instead written, per instance, as its bodies'
+ * mesh objects plus one components object named after the part (placed by the build item), with
+ * the `Metadata/model_settings.config` `write3mf` adds for components, so the slicers show one
+ * object with a named part per body, each in its colour's slot. PrusaSlicer shows the bodies as
+ * separate objects either way.
  */
 export function export3mfAssembly(
   assembly: ExportAssembly,
@@ -152,25 +174,28 @@ export function export3mfAssembly(
 ): Uint8Array {
   const why = assemblyProblem(assembly);
   if (why !== null) throw new RangeError(why);
-  const meshes = assembly.bodies.map(exportMesh);
+  const meshes = assembly.bodies.map(meshInput);
   const objects: ThreeMfObjectInput[] = [];
-  const partObject = assembly.parts.map((part) => {
-    if (part.bodies.length === 1) {
-      objects.push({ name: part.name, mesh: meshes[part.bodies[0]!]!.mesh });
-      return objects.length - 1;
+  const items: ThreeMfBuildItem[] = [];
+  for (const instance of assembly.instances) {
+    const part = assembly.parts[instance.part]!;
+    const transform = placementMatrix(instance.placement);
+    if (part.oneObject && part.bodies.length > 1) {
+      const first = objects.length;
+      for (const b of part.bodies) objects.push(meshes[b]!);
+      objects.push({
+        name: part.name,
+        components: part.bodies.map((_, k) => ({ object: first + k })),
+      });
+      items.push({ object: objects.length - 1, transform });
+      continue;
     }
-    const first = objects.length;
-    for (const b of part.bodies) objects.push(meshes[b]!);
-    objects.push({
-      name: part.name,
-      components: part.bodies.map((_, k) => ({ object: first + k })),
-    });
-    return objects.length - 1;
-  });
-  const items: ThreeMfBuildItem[] = assembly.instances.map((i) => ({
-    object: partObject[i.part]!,
-    transform: placementMatrix(i.placement),
-  }));
+    for (const b of part.bodies) {
+      const body = meshes[b]!;
+      objects.push(part.bodies.length === 1 ? { ...body, name: part.name } : body);
+      items.push({ object: objects.length - 1, transform });
+    }
+  }
   return write3mf(objects, { ...options, items });
 }
 

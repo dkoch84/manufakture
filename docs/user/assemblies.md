@@ -74,7 +74,7 @@ Volumes are shown in the document's units. Only pairs whose bounding boxes overl
 
 ## Exporting
 
-**Export** in an assembly tab saves the whole assembly as STL, 3MF or STEP, each part written once and placed where its instances are (a part in two configurations is two parts, named after the configuration: "Board (600 mm)"); see [Exporting an assembly](import-export.md#exporting-an-assembly).
+**Export** in an assembly tab saves the whole assembly as STL, 3MF or STEP, every part placed where its instances are (a part in two configurations is two parts, named after the configuration: "Board (600 mm)"). STEP writes each part once and places it per instance; 3MF writes each instance's bodies as objects of their own, so a slicer lists every copy by name; see [Exporting an assembly](import-export.md#exporting-an-assembly).
 
 ## How it is solved
 

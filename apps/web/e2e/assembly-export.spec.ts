@@ -177,13 +177,13 @@ test('an assembly exports to STL, 3MF and STEP with each part once and placed', 
       ['inst#3', 0],
     ]);
 
-  // 3MF: an object per part, a build item per instance, placed.
+  // 3MF: an object per body per instance, each placed by its own build item.
   const threemf = await exportAs(page, '3mf');
   expect(threemf.name).toBe('Assembly 1.3mf');
   const report = validate3mf(threemf.bytes);
   expect(report.problems).toEqual([]);
-  expect(report.parsed!.objects.map((o) => o.name)).toEqual(['Box', 'Lid']);
-  expect(report.parsed!.items.map((i) => i.objectId)).toEqual([1, 1, 2]);
+  expect(report.parsed!.objects.map((o) => o.name)).toEqual(['Box', 'Box', 'Lid']);
+  expect(report.parsed!.items.map((i) => i.objectId)).toEqual([1, 2, 3]);
   const built = buildMeshes(report.parsed!).map((m) => meshProperties(m.mesh));
   near(built[0]!.boundingBox!.min, [0, 0, 0]);
   near(built[0]!.boundingBox!.max, [40, 30, 20]);

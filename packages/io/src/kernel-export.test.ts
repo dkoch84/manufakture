@@ -193,7 +193,7 @@ describe('STL and 3MF from kernel bodies', () => {
 });
 
 describe('an assembly from kernel bodies', () => {
-  it('3MF and STL: the demo part meshed once, placed twice, watertight, at the placements', () => {
+  it('3MF and STL: the demo part meshed once, written per placement, watertight, in place', () => {
     const part = demoPart();
     const deflection = deflectionOf(EXPORT_TOLERANCES.normal);
     const assembly: ExportAssembly = {
@@ -212,8 +212,9 @@ describe('an assembly from kernel bodies', () => {
     const exact = k.properties(part).volume;
     const r = validate3mf(export3mfAssembly(assembly));
     expect(r.problems).toEqual([]);
-    expect(r.parsed!.objects).toHaveLength(1);
-    expect(r.parsed!.items).toHaveLength(2);
+    // One object per placement (slicers split an object placed twice and lose the copy's name).
+    expect(r.parsed!.objects.map((o) => o.name)).toEqual(['Demo part', 'Demo part']);
+    expect(r.parsed!.items.map((i) => i.objectId)).toEqual([1, 2]);
     const built = buildMeshes(r.parsed!);
     const right = meshProperties(built[1]!.mesh);
     expect(right.volume / exact).toBeCloseTo(1, 2);
