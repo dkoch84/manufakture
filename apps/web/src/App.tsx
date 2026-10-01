@@ -407,9 +407,10 @@ export function App({
     };
   }, [loader, owned, ownedSolver]);
 
+  // A part studio's sketches belong to its own view: an assembly tab draws none.
   const sketches = useMemo(
-    () => sketchFeatures(shownDocument, shownPartId),
-    [shownDocument, shownPartId],
+    () => (assemblyId === null ? sketchFeatures(shownDocument, shownPartId) : []),
+    [assemblyId, shownDocument, shownPartId],
   );
   const shownImports = useMemo(() => {
     const features = findPart(shownDocument, shownPartId)?.features ?? [];

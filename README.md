@@ -6,7 +6,7 @@ The aim is the openness of FreeCAD with the usability of Onshape: sketch, constr
 
 ## Status
 
-Milestone 1 (a printable part) is done. It all runs in the browser: there is no account and no server, and documents are kept locally and move between machines as `.mfk` files. What works today:
+Milestones 1 (a printable part) and 2 (multi-body parts and assemblies) are done. It all runs in the browser: there is no account and no server, and documents are kept locally and move between machines as `.mfk` files. What works today:
 
 - sketches with dimensions and constraints, solved as you draw;
 - extrude, revolve, fillet, chamfer, shell, holes (standard clearance, counterbore and countersink sizes), patterns and mirror;
@@ -15,10 +15,15 @@ Milestone 1 (a printable part) is done. It all runs in the browser: there is no 
 - exact measurements: distances, angles, radii, areas, volume and mass;
 - export to STL, 3MF and STEP, and import of STEP and STL as reference bodies;
 - local-first storage: saving as you go, a documents list, and `.mfk` import and export.
+- parts of several bodies, each with its own name and material, and several part studios in a document;
+- named versions and branches in a document's history, with viewing, comparing and restoring;
+- configurations: a table of parameter rows that makes variants of a part;
+- derived parts: a part of another document at a named version, updated when you choose;
+- assemblies: instances of parts, mates, dragging, an interference check, and export to STEP, 3MF and STL.
 
-Not there yet: multi-body parts, assemblies, and the domain tools for 3D printing, woodworking, CNC and construction (see the plans in `docs/plans`).
+Not there yet: the domain tools for 3D printing, woodworking, CNC and construction (see the plans in `docs/plans`).
 
-[docs/m1-acceptance.md](docs/m1-acceptance.md) walks through the milestone's acceptance part, a bracket, and lists the automated checks behind each step.
+[docs/m1-acceptance.md](docs/m1-acceptance.md) walks through the milestone's acceptance part, a bracket, and lists the automated checks behind each step. [docs/m2-acceptance.md](docs/m2-acceptance.md) does the same for M2: a wall shelf with a derived bracket, assembled.
 
 ## Quick start
 

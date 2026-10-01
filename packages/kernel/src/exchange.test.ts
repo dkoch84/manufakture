@@ -635,6 +635,9 @@ describe('STEP assemblies', () => {
     const step = text(bytes);
     const products = [...step.matchAll(/PRODUCT\('([^']*)'/g)].map((m) => m[1]);
     expect(products.sort()).toEqual(['Base', 'Fixture', 'Lid', 'Pin', 'Plate']);
+    // The bodies' occurrences inside the part are named after the bodies, not OCCT label entries.
+    const occurrences = [...step.matchAll(/NEXT_ASSEMBLY_USAGE_OCCURRENCE\('[^']*','([^']*)'/g)];
+    expect(occurrences.map((m) => m[1]).sort()).toEqual(['Base <1>', 'Lid <1>', 'Pin', 'Plate']);
     const read = readAssembly(k.oc, bytes);
     expect(read.roots).toBe(1);
     expect(read.components.map((c) => c.subComponents)).toEqual([2, 0]);

@@ -113,7 +113,9 @@ export function writeStepAssembly(
       setName(oc, s, label, part.name);
       for (const index of part.bodies) {
         const body = addBody(oc, s, tool, bodies[index]!);
-        s.own(tool.AddComponent(label, body, identity));
+        // The occurrence carries the body's name too, or readers show OCCT's label entry.
+        const component = s.own(tool.AddComponent(label, body, identity));
+        setName(oc, s, component, bodies[index]!.name);
       }
       return label;
     });
