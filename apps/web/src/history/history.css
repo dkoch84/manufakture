@@ -129,3 +129,33 @@
   margin: 0.1rem 0 0;
   padding-left: 1.5em;
 }
+
+/* The branch switcher, next to the document name. */
+.branch-switcher {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.8rem;
+}
+
+.branch-switcher select,
+.branch-switcher button,
+.branch-switcher input {
+  font: inherit;
+}
+
+.branch-form {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.history-branch {
+  font-size: 0.75rem;
+  color: #5b6673;
+}
+
+.history-branch-form {
+  margin-top: 0.3rem;
+}

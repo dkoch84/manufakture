@@ -48,3 +48,33 @@ export function showPartIdInUrl(id: string | null): void {
   const next = withPartId(window.location.href, id);
   if (next !== window.location.href) window.history.replaceState(window.history.state, '', next);
 }
+
+// The open branch (`?branch=<id>`), next to `doc`, so a reload opens the same branch. Left out
+// for the main branch, so every URL from before branches still means what it did.
+
+export const BRANCH_PARAM = 'branch';
+
+/**
+ * The branch id the URL names, or null (the main branch). Unchecked, as the page was given it:
+ * the library refuses any id that is not a stored branch's (`isBranchId`, then the branch list)
+ * without repeating it, so the value is never used as a path or shown.
+ */
+export function branchFromSearch(search: string): string | null {
+  const id = new URLSearchParams(search).get(BRANCH_PARAM);
+  return id && id.length > 0 ? id : null;
+}
+
+/** `href` naming branch `id` (or none, the main branch, when null), other parameters kept. */
+export function withBranch(href: string, id: string | null): string {
+  const url = new URL(href);
+  if (id === null) url.searchParams.delete(BRANCH_PARAM);
+  else url.searchParams.set(BRANCH_PARAM, id);
+  return url.toString();
+}
+
+/** Point the current history entry at branch `id` (null: main), without a reload. */
+export function showBranchInUrl(id: string | null): void {
+  if (typeof window === 'undefined') return;
+  const next = withBranch(window.location.href, id);
+  if (next !== window.location.href) window.history.replaceState(window.history.state, '', next);
+}

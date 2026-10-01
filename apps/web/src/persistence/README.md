@@ -4,28 +4,32 @@ Local-first storage (ADR 0004 decision 8, product decision 1): documents live in
 JSON document is the source of truth, and everything derived is rebuilt by regen. The user's view
 is in [docs/user/files.md](../../../../docs/user/files.md).
 
-| File          | What                                                                                               |
-| ------------- | -------------------------------------------------------------------------------------------------- |
-| `backend.ts`  | `StorageBackend`: read, write, remove, removeTree, list on slash paths. `MemoryBackend` for tests. |
-| `opfs.ts`     | The Origin Private File System backend, probed before use.                                         |
-| `idb.ts`      | The IndexedDB fallback (one object store, path to bytes).                                          |
-| `storage.ts`  | Picks OPFS, then IndexedDB, then memory; storage estimate and `persist()`.                         |
-| `blobs.ts`    | The storage form of imported files and pinned versions: content-addressed blobs, checked on load.  |
-| `library.ts`  | `DocumentLibrary`: list, open, save, rename, duplicate, delete, versions, replay, `.mfk` files.    |
-| `mfk.ts`      | Packing and unpacking `.mfk` zips, with limits and a bounded inflate (loaded on first use).        |
-| `limits.ts`   | The `.mfk` file size limit, checked before a picked or dropped file is read.                       |
-| `autosave.ts` | Records the command log per document, saves after edits pause, retries failures, names versions.   |
-| `imports.ts`  | Reads reference imports again when a document opens (loaded on first use).                         |
-| `url.ts`      | The open document in the page URL (`?doc=<id>`).                                                   |
+| File          | What                                                                                                |
+| ------------- | --------------------------------------------------------------------------------------------------- |
+| `backend.ts`  | `StorageBackend`: read, write, remove, removeTree, list on slash paths. `MemoryBackend` for tests.  |
+| `opfs.ts`     | The Origin Private File System backend, probed before use.                                          |
+| `idb.ts`      | The IndexedDB fallback (one object store, path to bytes).                                           |
+| `storage.ts`  | Picks OPFS, then IndexedDB, then memory; storage estimate and `persist()`.                          |
+| `blobs.ts`    | The storage form of imported files and pinned versions: content-addressed blobs, checked on load.   |
+| `library.ts`  | `DocumentLibrary`: list, open, save, rename, duplicate, delete, versions, branches, replay, `.mfk`. |
+| `mfk.ts`      | Packing and unpacking `.mfk` zips, with limits and a bounded inflate (loaded on first use).         |
+| `limits.ts`   | The `.mfk` file size limit, checked before a picked or dropped file is read.                        |
+| `autosave.ts` | Records the command log per document, saves after edits pause, retries failures, names versions.    |
+| `imports.ts`  | Reads reference imports again when a document opens (loaded on first use).                          |
+| `url.ts`      | The open document, branch and part studio in the page URL (`?doc=<id>&branch=<id>&part=<id>`).      |
 
 ## Layout
 
 ```
 documents/<id>/head.json              pointer: current revision, its SHA-256, name, dates, sizes,
-                                      and `versions: <n>`, the current version list (0: none)
+                                      `versions: <n>`, the current version list (0: none), and
+                                      `branches: <n>`, the current branch list (0: none)
 documents/<id>/snapshot-<rev>.json    the document at revision <rev>, storage form
 documents/<id>/log-<rev>.json         the commands from the previous revision to <rev>
 documents/<id>/versions-<n>.json      the named versions, the n-th write of the list
+documents/<id>/branches-<n>.json      the branches besides main, the n-th write of the list
+documents/<id>/branches/<b>/head.json, snapshot-<rev>.json, log-<rev>.json, damaged-*
+                                      branch <b>: its own head, snapshots and log
 documents/<id>/blobs/<sha256>         each imported file and pinned version, once
 documents/<id>/damaged-snapshot-<rev>-<sha>.json, damaged-log-<rev>-<sha>.json
                                       a complete snapshot that did not read, and its log, kept aside
@@ -209,6 +213,99 @@ life of the document, since logged commands can name a file the current snapshot
 `at`, without reading any blob: the history panel's timeline (`src/history/`). A restore is logged
 as a core `replaceDocument` command carrying the whole document, with its files by reference like
 any other command.
+
+## Branches
+
+The document's own directory is its **main** branch (`MAIN_BRANCH`, `"main"`), so a document saved
+before branches existed is its main branch with no migration, and a URL without `branch` opens it.
+Every other branch lives in `branches/<branch id>/` (a UUID) with its own `head.json`,
+`snapshot-<rev>.json` and `log-<rev>.json`, under exactly the rules above: its own revision
+numbers (starting at 1), checkpoints, spare, replay, recovery and quarantine. A branch's head
+names no lists (`versions` and `branches` are 0 there). What the branches share is the
+document's: `blobs/` (blobs are never pruned, so no branch can lose one another needs), the
+version list, and the branch list, both committed by the **main** head.
+
+Every operation that reads or writes one branch takes it as an argument, and without one it is
+the main branch: `open(id, branch)`, `save(doc, entries, branch)`, `readHistory`, `readLog`,
+`readRevision` (`{ branch }`), `historyStart`, `createVersion`, `rename`, `duplicate` and
+`exportMfk` (`{ branch }`). The library keeps no "current branch": the app does, and passes it.
+Autosave records the branch with each change when the change is made (its `branch` option, read
+from the app) and saves and names versions on that branch, so an edit made while the app switches
+branches lands on the branch it was made on, and an edit on a branch deleted meanwhile is refused
+(`BranchDeleted`) rather than saved onto main. The home screen acts on the main branch of any
+document, except the open one, which it duplicates as it is open. `listVersions(id)` lists
+every branch's versions (a version records its branch, and `readVersion` reads from it, so a pin
+needs no branch); `listVersions(id, branch)` filters. The revision known per tab
+(`RevisionConflict`) is kept per branch, so saving one branch never conflicts with another tab
+saving a different one. A failure because the branch is not there carries `noBranch: true`, and
+never repeats the branch id it was given (it may come from a URL).
+
+What it costs: an operation on a branch other than main also reads the main head and the branch
+list (to check the branch exists), and its save reads the version list (to keep the snapshots
+its versions name) and checks the branch list a second time just before writing its head (for
+browsers without locks, where another tab may have deleted the branch meanwhile; the save then
+throws `BranchDeleted` and its head is never written), so a branch save does a handful more
+small reads than a save of main, and no more writes.
+
+The branch list, `branches-<n>.json`, follows the version list's rule exactly (a new file, then
+the main head naming it, the list before kept as the spare; recovery from a torn head takes the
+newest list that reads):
+
+```json
+{
+  "format": "manufakture-branches",
+  "id": "<document id>",
+  "generation": 2,
+  "branches": [{ "id": "...", "name": "...", "fromVersion": "<version id>", "createdAt": "..." }]
+}
+```
+
+A branch exists only while the committed list names it: `open`, `save` and the other operations
+refuse a branch it does not name, and a save to one that another tab deleted throws
+`BranchDeleted` (a `RevisionConflict`, so autosave shows the conflict and the tab can keep its
+version as a copy). Names are trimmed, 1 to 200 characters, unique, never "Main"; at most
+`MAX_BRANCHES` (100) besides main.
+
+- `createBranch(id, fromVersion, name)` reads the version (of any branch, checked against its
+  SHA-256), then writes, in order: the branch's directory (deleting whatever an earlier attempt
+  left there), its `snapshot-00000001.json` (blobs are already stored), its `head.json`, then the
+  branch list `n+1`, then the main head naming it (the commit). A crash before the commit leaves a
+  directory no list names: never opened, and deleted by the next `createBranch` or `deleteBranch`
+  (`#dropOrphans`, skipped when the list was read from the spare, where a real branch could look
+  unnamed). The new branch's history starts at revision 1, with no log leading to it.
+  Without Web Locks another tab's branch change could take the new directory for an orphan
+  between its writes and this commit; so after the commit the branch's head is read again, and
+  the snapshot and head are written again when it is gone. Orphan cleanup also never deletes a
+  directory that a version names, whatever the branch list says (it may be lost: see below), and
+  deletes nothing when the version list cannot be read.
+- `renameBranch(id, branch, name)` writes a new list and commits it.
+- `deleteBranch(id, branch)` commits a list without it, then removes its directory (best effort;
+  a leftover directory is an orphan as above). Main cannot be deleted or renamed. A branch that a
+  version names cannot be deleted: versions are kept for good and other documents may pin them.
+- `listBranches(id)`: main first (`MAIN_BRANCH_NAME`, "Main"), then the list, oldest first.
+
+The per-document Web Lock covers every branch: one lock name per document, so a save on one
+branch and a branch change on another never interleave. A crash on one branch writes nothing in
+another's directory, and a branch save writes nothing in main's except new blobs; a branch change
+writes only the list and the main head, whose revision and snapshot stay the same.
+`library-branches.test.ts` crashes a branch save, a main save, `createBranch`, `renameBranch`,
+`deleteBranch` and `createVersion` on a branch at every step, cleanly and torn, and checks that
+every other branch is byte for byte as it was, the crashed one is its old or its new state, and
+the next change works; it saves two branches alternately past two checkpoints and reads every
+revision of each back; it races a branch save against a delete in another tab without locks; and
+it opens, versions and branches a document whose head was written before versions and branches
+existed, checking that reading it rewrites nothing.
+
+`.mfk` export is of one branch's document (`exportMfk(id, { branch })`); with `versions`, the
+versions of every branch go in, and an import stores them all as revisions of main (the `branch`
+field is dropped). Branches themselves are not exported. Merging is not done (it needs the op-log
+replay that sync brings); restoring a version of one branch on another (`replaceDocument`) is how
+work moves between them.
+
+A release from before branches reads a document with branches as its main branch, and ignores
+the `branches` field of the head; if it saves the document, it writes a head without it, so the
+branches are no longer listed (their directories stay; the next branch change deletes those no
+version names, and keeps the others so their versions still read).
 
 ## Not done
 

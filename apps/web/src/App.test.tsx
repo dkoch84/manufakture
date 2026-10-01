@@ -1,5 +1,5 @@
 import { StrictMode } from 'react';
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   applyCommand,
@@ -1110,6 +1110,168 @@ describe('App documents', () => {
       'execute replaceDocument',
       'undo replaceDocument',
     ]);
+  });
+
+  it('branches from a version in the viewer, works on the branch, switches back and reloads both', async () => {
+    const backend = new MemoryBackend();
+    const t = await persisted({ initialDocumentId: 'a', backend });
+    await waitFor(() => expect(t.documents.getState().document.id).toBe('a'));
+    const rename = (name: string) =>
+      act(() => {
+        t.documents.getState().execute({ type: 'renameDocument', name }, 'Rename document');
+      });
+    const saved = () =>
+      waitFor(() => expect(screen.getByTestId('save-status').textContent).toBe('Saved'));
+    // A document with one branch shows the switcher with main alone.
+    const select = () => screen.getByTestId('branch-select') as HTMLSelectElement;
+    await waitFor(() => expect([...select().options].map((o) => o.textContent)).toEqual(['Main']));
+    rename('Six');
+    await saved();
+    fireEvent.click(screen.getByTestId('open-history'));
+    await screen.findByTestId('revision-2');
+    fireEvent.click(screen.getByTestId('version-create'));
+    fireEvent.change(screen.getByTestId('version-name'), { target: { value: '6 mm' } });
+    fireEvent.click(screen.getByTestId('version-save'));
+    await screen.findByTestId('version-6 mm');
+    rename('Eight');
+    await saved();
+
+    // Branch is offered for a version, not for a revision.
+    fireEvent.click(screen.getByRole('button', { name: 'View revision 2' }));
+    await screen.findByTestId('history-viewer');
+    expect(screen.queryByTestId('history-branch')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'View version 6 mm' }));
+    await waitFor(() =>
+      expect(screen.getByTestId('history-viewer-label').textContent).toBe('Viewing Version "6 mm"'),
+    );
+    fireEvent.click(screen.getByTestId('history-branch'));
+    fireEvent.change(screen.getByTestId('branch-name'), { target: { value: 'Ten' } });
+    fireEvent.click(screen.getByTestId('branch-create'));
+    await waitFor(() => expect(screen.queryByTestId('history-viewer')).toBeNull());
+    expect(t.documents.getState().document.name).toBe('Six');
+    // The branch's own history: nothing logged yet, so undo has nothing to take back.
+    expect(t.documents.getState().undoLabel).toBeNull();
+    await waitFor(() => expect(select().selectedOptions[0]!.textContent).toBe('Ten'));
+    const branchId = select().value;
+    expect(window.location.search).toBe(`?doc=a&branch=${branchId}`);
+    expect(screen.getByTestId('io-status').textContent).toBe(
+      'Created the branch Ten from Version "6 mm"; changes now go to it.',
+    );
+    expect(screen.getByTestId('history-branch-name').textContent).toBe('Ten');
+
+    rename('Ten mm');
+    await saved();
+    const reader = () => new DocumentLibrary(backend, { locks: null });
+    const onBranch = await reader().open('a', branchId);
+    expect(onBranch.ok && onBranch.value.document.name).toBe('Ten mm');
+    const onMain = await reader().open('a');
+    expect(onMain.ok && onMain.value.document.name).toBe('Eight');
+    await screen.findByTestId('revision-2');
+    expect(screen.queryByTestId('revision-3')).toBeNull();
+    // A version on the branch; main's shows tagged with its branch.
+    expect(screen.getByTestId('version-branch-6 mm').textContent).toBe('Main');
+    fireEvent.click(screen.getByTestId('version-create'));
+    fireEvent.change(screen.getByTestId('version-name'), { target: { value: '10 mm' } });
+    fireEvent.click(screen.getByTestId('version-save'));
+    await screen.findByTestId('version-10 mm');
+    expect(screen.queryByTestId('version-branch-10 mm')).toBeNull();
+
+    // Back to main: its state and history; the URL names no branch.
+    fireEvent.change(select(), { target: { value: 'main' } });
+    await waitFor(() => expect(t.documents.getState().document.name).toBe('Eight'));
+    expect(window.location.search).toBe('?doc=a');
+    await screen.findByTestId('revision-3');
+    rename('Eight again');
+    await saved();
+    const mainAgain = await reader().open('a');
+    expect(mainAgain.ok && mainAgain.value.document.name).toBe('Eight again');
+    const branchStill = await reader().open('a', branchId);
+    expect(branchStill.ok && branchStill.value.document.name).toBe('Ten mm');
+
+    // A version of the branch restores onto main (no merging: its whole state, one undo step).
+    await waitFor(() => expect(screen.getByTestId('version-branch-10 mm').textContent).toBe('Ten'));
+    fireEvent.click(screen.getByRole('button', { name: 'View version 10 mm' }));
+    await screen.findByTestId('history-viewer');
+    fireEvent.click(screen.getByTestId('history-restore'));
+    await waitFor(() => expect(t.documents.getState().document.name).toBe('Ten mm'));
+    await saved();
+    const restored = await reader().open('a');
+    expect(restored.ok && restored.value.document.name).toBe('Ten mm');
+    act(() => {
+      t.documents.getState().undo();
+    });
+    await saved();
+    cleanup();
+
+    // Reload on the branch: the URL opens it.
+    window.history.replaceState(null, '', `/?doc=a&branch=${branchId}`);
+    const again = await persisted({ backend, empty: true });
+    await waitFor(() => expect(again.documents.getState().document.name).toBe('Ten mm'));
+    await waitFor(() => expect(select().selectedOptions[0]!.textContent).toBe('Ten'));
+  });
+
+  it('renames and deletes a branch from the switcher; a link to a deleted branch opens main', async () => {
+    const backend = new MemoryBackend();
+    const setupLib = new DocumentLibrary(backend, { locks: null, newId: () => 'b-1' });
+    await setupLib.save(partDocument('a', 'Alpha'));
+    const v = await setupLib.createVersion('a', { name: 'Base' });
+    if (!v.ok) throw new Error(v.message);
+    const created = await setupLib.createBranch('a', v.value.id, 'Wide');
+    expect(created.ok).toBe(true);
+    window.history.replaceState(null, '', '/?doc=a&branch=b-1');
+    const t = await persisted({ backend, empty: true });
+    const select = () => screen.getByTestId('branch-select') as HTMLSelectElement;
+    await waitFor(() => expect(select().value).toBe('b-1'));
+    expect(window.location.search).toBe('?doc=a&branch=b-1');
+
+    fireEvent.click(screen.getByTestId('branch-rename'));
+    fireEvent.change(screen.getByTestId('branch-rename-name'), { target: { value: 'Wider' } });
+    fireEvent.click(screen.getByTestId('branch-rename-save'));
+    await waitFor(() => expect(select().selectedOptions[0]!.textContent).toBe('Wider'));
+
+    fireEvent.click(screen.getByTestId('branch-delete'));
+    fireEvent.click(screen.getByTestId('branch-delete-confirm'));
+    await waitFor(() => expect(select().value).toBe('main'));
+    expect([...select().options].map((o) => o.textContent)).toEqual(['Main']);
+    expect(window.location.search).toBe('?doc=a');
+    expect(screen.getByTestId('io-status').textContent).toBe(
+      'Deleted the branch Wider; this is the main branch.',
+    );
+    expect(t.documents.getState().document.name).toBe('Alpha');
+    cleanup();
+
+    window.history.replaceState(null, '', '/?doc=a&branch=b-1');
+    const again = await persisted({ backend, empty: true });
+    await waitFor(() => expect(again.documents.getState().document.name).toBe('Alpha'));
+    expect(screen.getByTestId('io-status').textContent).toBe(
+      'The branch in the link cannot be opened (There is no such branch.); this is the main branch.',
+    );
+    await waitFor(() => expect(window.location.search).toBe('?doc=a'));
+  });
+
+  it('opens main for a link whose branch is malformed, never repeating it; `main` is main', async () => {
+    const backend = new MemoryBackend();
+    const setupLib = new DocumentLibrary(backend, { locks: null });
+    await setupLib.save(partDocument('a', 'Alpha'));
+    for (const odd of ['../a', '<img src=x onerror=alert(1)>', 'x'.repeat(5000), 'a/b', ' ']) {
+      window.history.replaceState(null, '', `/?doc=a&branch=${encodeURIComponent(odd)}`);
+      const t = await persisted({ backend, empty: true });
+      await waitFor(() => expect(t.documents.getState().document.name).toBe('Alpha'));
+      const status = screen.getByTestId('io-status').textContent ?? '';
+      expect(status).toBe(
+        'The branch in the link cannot be opened (There is no such branch.); this is the main branch.',
+      );
+      await waitFor(() => expect(window.location.search).toBe('?doc=a'));
+      expect(backend.files.has('documents/a/branches')).toBe(false);
+      expect([...backend.files.keys()].some((f) => f.includes('/branches/'))).toBe(false);
+      cleanup();
+    }
+    // Naming the main branch outright opens it, quietly, and the link loses the parameter.
+    window.history.replaceState(null, '', '/?doc=a&branch=main');
+    const t = await persisted({ backend, empty: true });
+    await waitFor(() => expect(t.documents.getState().document.name).toBe('Alpha'));
+    await waitFor(() => expect(window.location.search).toBe('?doc=a'));
+    expect(screen.queryByTestId('io-status')?.textContent ?? '').not.toMatch(/branch/);
   });
 
   it('keeps the STEP bodies a view reads while another view of them is still reading', async () => {

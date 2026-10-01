@@ -15,6 +15,8 @@ export interface VersionListProps {
   /** The version shown or chosen now, marked and not offered again. */
   currentId?: string | null;
   disabled?: boolean;
+  /** A tag shown beside a version's name (the branch it was made on), or null for none. */
+  tagOf?: ((version: Version) => string | null) | undefined;
 }
 
 export function VersionList({
@@ -23,6 +25,7 @@ export function VersionList({
   pickLabel = 'View',
   currentId = null,
   disabled = false,
+  tagOf,
 }: VersionListProps) {
   if (versions.length === 0) {
     return (
@@ -33,29 +36,37 @@ export function VersionList({
   }
   return (
     <ul className="history-list" data-testid="version-list">
-      {[...versions].reverse().map((v) => (
-        <li
-          key={v.id}
-          className={v.id === currentId ? 'history-item history-current' : 'history-item'}
-          data-testid={`version-${v.name}`}
-        >
-          <div className="history-item-head">
-            <span className="history-name">{v.name}</span>
-            <button
-              type="button"
-              disabled={disabled || v.id === currentId}
-              onClick={() => onPick(v)}
-              aria-label={`${pickLabel} version ${v.name}`}
-            >
-              {pickLabel}
-            </button>
-          </div>
-          <div className="history-meta">
-            {formatWhen(v.createdAt)}, revision {v.revision}
-          </div>
-          {v.description && <div className="history-description">{v.description}</div>}
-        </li>
-      ))}
+      {[...versions].reverse().map((v) => {
+        const tag = tagOf?.(v) ?? null;
+        return (
+          <li
+            key={v.id}
+            className={v.id === currentId ? 'history-item history-current' : 'history-item'}
+            data-testid={`version-${v.name}`}
+          >
+            <div className="history-item-head">
+              <span className="history-name">{v.name}</span>
+              {tag && (
+                <span className="history-tag" data-testid={`version-branch-${v.name}`}>
+                  {tag}
+                </span>
+              )}
+              <button
+                type="button"
+                disabled={disabled || v.id === currentId}
+                onClick={() => onPick(v)}
+                aria-label={`${pickLabel} version ${v.name}`}
+              >
+                {pickLabel}
+              </button>
+            </div>
+            <div className="history-meta">
+              {formatWhen(v.createdAt)}, revision {v.revision}
+            </div>
+            {v.description && <div className="history-description">{v.description}</div>}
+          </li>
+        );
+      })}
     </ul>
   );
 }

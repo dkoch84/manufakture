@@ -224,7 +224,86 @@ describe('the viewer banner', () => {
     expect(screen.getByTestId('history-compare').textContent).toBe('Same as the current state.');
     expect(screen.getByText('Building it...')).toBeDefined();
     expect(screen.getByRole('alert').textContent).toContain('the kernel failed');
+    // Branch asks for a name first.
     fireEvent.click(screen.getByTestId('history-branch'));
-    expect(onBranch).toHaveBeenCalledTimes(1);
+    expect(onBranch).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByTestId('branch-name'), { target: { value: '  Wider  ' } });
+    fireEvent.click(screen.getByTestId('branch-create'));
+    expect(onBranch).toHaveBeenCalledWith('Wider');
+  });
+
+  it('keeps the branch form open with the reason when branching fails', async () => {
+    const onBranch = vi.fn(async () => 'There is a branch called "Main" already.');
+    render(
+      <ViewerBanner
+        label='Version "6 mm"'
+        differences={[]}
+        onBack={() => undefined}
+        onRestore={() => undefined}
+        onBranch={onBranch}
+        branchName="6 mm"
+      />,
+    );
+    fireEvent.click(screen.getByTestId('history-branch'));
+    expect((screen.getByTestId('branch-name') as HTMLInputElement).value).toBe('6 mm');
+    fireEvent.change(screen.getByTestId('branch-name'), { target: { value: ' ' } });
+    fireEvent.click(screen.getByTestId('branch-create'));
+    expect(screen.getByTestId('branch-error').textContent).toBe('A branch needs a name.');
+    expect(onBranch).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByTestId('branch-name'), { target: { value: 'Main' } });
+    fireEvent.click(screen.getByTestId('branch-create'));
+    await waitFor(() =>
+      expect(screen.getByTestId('branch-error').textContent).toBe(
+        'There is a branch called "Main" already.',
+      ),
+    );
+    expect(screen.getByTestId('branch-name')).toBeDefined();
+  });
+});
+
+describe('the History panel on a branch', () => {
+  it('shows the branch’s own versions and timeline, and views its revisions on it', async () => {
+    const lib = await stored();
+    const version = await lib.createVersion('doc-1', { name: 'Base' });
+    if (!version.ok) throw new Error(version.message);
+    const branched = await lib.createBranch('doc-1', version.value.id, 'Wide');
+    if (!branched.ok) throw new Error(branched.message);
+    const b = branched.value.id;
+    expect((await lib.open('doc-1', b)).ok).toBe(true);
+    const [next, e] = rename(partDocument('doc-1', 'Three'), 'Wide one');
+    await lib.save(next, [e], b);
+    const onBranchVersion = await lib.createVersion('doc-1', { name: 'On the branch' }, b);
+    expect(onBranchVersion.ok).toBe(true);
+
+    const onView = vi.fn();
+    const { rerender } = render(
+      <HistoryPanel source={lib} documentId="doc-1" branch={b} branchName="Wide" onView={onView} />,
+    );
+    await screen.findByTestId('revision-2');
+    expect(screen.getByTestId('history-branch-name').textContent).toBe('Wide');
+    expect(screen.queryByTestId('revision-3')).toBeNull();
+    // Every branch's versions, another branch's tagged with it; the timeline marks this one's.
+    expect(screen.getByTestId('version-On the branch')).toBeDefined();
+    expect(screen.queryByTestId('version-branch-On the branch')).toBeNull();
+    expect(screen.getByTestId('version-branch-Base').textContent).toBe('Main');
+    expect(screen.getByTestId('revision-2').textContent).toContain('On the branch');
+    fireEvent.click(screen.getByRole('button', { name: 'View revision 2' }));
+    expect(onView).toHaveBeenCalledWith({ kind: 'revision', revision: 2, branch: b });
+
+    rerender(
+      <HistoryPanel
+        source={lib}
+        documentId="doc-1"
+        branch="main"
+        branches={[{ id: 'main', name: 'Main', fromVersion: null, createdAt: '' }, branched.value]}
+        onView={onView}
+      />,
+    );
+    await screen.findByTestId('revision-3');
+    expect(screen.queryByTestId('history-branch-name')).toBeNull();
+    expect(screen.queryByTestId('version-branch-Base')).toBeNull();
+    expect(screen.getByTestId('version-branch-On the branch').textContent).toBe('Wide');
+    expect(screen.getByTestId('revision-3').textContent).toContain('Base');
+    expect(screen.getByTestId('revision-2').textContent).not.toContain('On the branch');
   });
 });

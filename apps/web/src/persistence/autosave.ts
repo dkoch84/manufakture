@@ -8,11 +8,16 @@
 // next change, or on `flush`. A save refused because another tab saved the document meanwhile
 // (a `RevisionConflict`) is not retried: the status says `conflict` until the user chooses
 // (reload the newer version, or keep this tab's version as a copy) and the app calls `forget`.
+//
+// Changes wait per document and branch: each change is recorded with the branch the open
+// document was on when it was made (the `branch` option), and saved to that branch, so a change
+// made while the app switches branches never lands on the other one.
 
 import type { ChangeEvent, ManufaktureDocument } from '@manufakture/core';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { DocumentStoreApi } from '../state/document';
 import {
+  MAIN_BRANCH,
   RevisionConflict,
   type DocumentLibrary,
   type DocumentSummary,
@@ -68,12 +73,20 @@ export interface AutosaveOptions {
   /** After every successful save. */
   onSaved?: (summary: DocumentSummary) => void;
   now?: () => Date;
+  /** The branch the open document is on now (default: always main). */
+  branch?: () => string;
 }
 
 interface Pending {
   document: ManufaktureDocument;
   entries: LogEntry[];
+  /** The branch the changes were made on, and are saved to. */
+  branch: string;
 }
+
+/** The key of a document's branch in the maps below. */
+const keyOf = (id: string, branch: string) => `${id}\u0000${branch}`;
+const isOf = (key: string, id: string) => key.startsWith(`${id}\u0000`);
 
 export function startAutosave(
   documents: DocumentStoreApi,
@@ -87,6 +100,7 @@ export function startAutosave(
     maxRetryMs = 60_000,
     onSaved,
     now = () => new Date(),
+    branch: branchNow = () => MAIN_BRANCH,
   } = options;
   const openDocument = () => documents.core.document;
   const status = createStore<SaveStatus>()(() => ({
@@ -95,12 +109,13 @@ export function startAutosave(
     documentId: openDocument().id,
     documentName: openDocument().name,
   }));
-  /** Changes not saved yet, by document id, in the order they came. */
+  /** Changes not saved yet, by document and branch (`keyOf`), in the order they came. */
   const pending = new Map<string, Pending>();
-  /** Documents being deleted: a failed save of one is not kept for another attempt. */
+  /** Documents being deleted (by id): a failed save of one is not kept for another attempt. */
   const deleted = new Set<string>();
-  /** Documents another tab saved meanwhile: not saved again until `forget`. */
+  /** Branches of documents (`keyOf`) another tab saved meanwhile: not saved until `forget`. */
   const conflicted = new Set<string>();
+  const pendingFor = (id: string) => [...pending.keys()].some((k) => isOf(k, id));
   /** Changes a flush has taken whose save has not finished yet. */
   let saving = 0;
   let failures = 0;
@@ -110,45 +125,61 @@ export function startAutosave(
   let retry: ReturnType<typeof setTimeout> | null = null;
   let inFlight: Promise<unknown> = Promise.resolve();
 
+  /** The branch the status is about (it is shown for the open document's branch only). */
+  let statusBranch = branchNow();
   const setStatus = (
     state: SaveStatus['state'],
     doc: ManufaktureDocument,
     message = null as string | null,
-  ) => status.setState({ state, message, documentId: doc.id, documentName: doc.name });
+    branch = branchNow(),
+  ) => {
+    statusBranch = branch;
+    status.setState({ state, message, documentId: doc.id, documentName: doc.name });
+  };
 
   const clearTimers = () => {
     for (const t of [quiet, deadline, retry]) if (t !== null) clearTimeout(t);
     quiet = deadline = retry = null;
   };
 
-  /** Save `take`, the pending changes of document `id`; false when that failed. */
-  const saveOne = async (id: string, take: Pending): Promise<boolean> => {
+  /** Save `take`, the pending changes of one document's branch (`key`); false when that failed. */
+  const saveOne = async (key: string, take: Pending): Promise<boolean> => {
+    const id = take.document.id;
     // Deleted after the flush took its changes, before their turn: the save would bring it back.
     if (deleted.has(id)) {
       saving -= 1;
       return true;
     }
-    const shown = () => openDocument().id === id || status.getState().documentId === id;
-    if (shown()) setStatus('saving', take.document);
+    // Whether the status is about this document's branch: open now, or what it shows already.
+    const shown = () =>
+      (openDocument().id === id && branchNow() === take.branch) ||
+      (status.getState().documentId === id && statusBranch === take.branch);
+    if (shown()) setStatus('saving', take.document, null, take.branch);
     try {
-      const summary = await library.save(take.document, take.entries);
+      const summary = await library.save(take.document, take.entries, take.branch);
       if (shown()) {
-        const newer = pending.get(id);
-        setStatus(newer ? 'pending' : 'saved', newer?.document ?? take.document);
+        const newer = pending.get(key);
+        setStatus(newer ? 'pending' : 'saved', newer?.document ?? take.document, null, take.branch);
       }
       onSaved?.(summary);
       return true;
     } catch (e) {
       if (deleted.has(id)) return true;
       // Keep the changes (their log entries first) for the next attempt, beside any newer ones.
-      const newer = pending.get(id);
-      pending.set(id, {
+      const newer = pending.get(key);
+      pending.set(key, {
         document: newer?.document ?? take.document,
         entries: [...take.entries, ...(newer?.entries ?? [])],
+        branch: take.branch,
       });
       const message = e instanceof Error ? e.message : String(e);
-      if (e instanceof RevisionConflict) conflicted.add(id);
-      setStatus(e instanceof RevisionConflict ? 'conflict' : 'error', take.document, message);
+      if (e instanceof RevisionConflict) conflicted.add(key);
+      setStatus(
+        e instanceof RevisionConflict ? 'conflict' : 'error',
+        take.document,
+        message,
+        take.branch,
+      );
       return false;
     } finally {
       saving -= 1;
@@ -171,13 +202,13 @@ export function startAutosave(
   const flush = (): Promise<boolean> => {
     clearTimers();
     // What is pending now; a document in conflict keeps its changes until `forget`.
-    const batch = [...pending].filter(([id]) => !conflicted.has(id));
+    const batch = [...pending].filter(([key]) => !conflicted.has(key));
     const blocked = pending.size > batch.length;
-    for (const [id] of batch) pending.delete(id);
+    for (const [key] of batch) pending.delete(key);
     saving += batch.length;
     const run = inFlight.then(async () => {
       let ok = !blocked;
-      for (const [id, take] of batch) if (!(await saveOne(id, take))) ok = false;
+      for (const [key, take] of batch) if (!(await saveOne(key, take))) ok = false;
       if (ok) failures = 0;
       else scheduleRetry();
       return ok;
@@ -200,32 +231,36 @@ export function startAutosave(
       // pending changes of the ones before.
       deleted.delete(doc.id);
       void flush();
-      setStatus(pending.has(doc.id) ? 'pending' : 'idle', doc);
+      setStatus(pendingFor(doc.id) ? 'pending' : 'idle', doc);
       return;
     }
     if (!event.command) return;
     deleted.delete(doc.id);
+    // The branch the change is made on, read now: a switch that completes later does not move it.
+    const branch = branchNow();
+    const key = keyOf(doc.id, branch);
     const entry: LogEntry = {
       cause: event.cause,
       label: event.label,
       command: event.command,
       at: now().toISOString(),
     };
-    pending.set(doc.id, {
+    pending.set(key, {
       document: doc,
-      entries: [...(pending.get(doc.id)?.entries ?? []), entry],
+      entries: [...(pending.get(key)?.entries ?? []), entry],
+      branch,
     });
     const current = status.getState();
     const failing =
       current.documentId === doc.id && (current.state === 'error' || current.state === 'conflict');
     if (!failing) setStatus('pending', doc);
-    if (!conflicted.has(doc.id)) schedule();
+    if (!conflicted.has(key)) schedule();
   };
   const unsubscribe = documents.core.subscribe(onChange);
 
   const drop = (id: string) => {
-    pending.delete(id);
-    conflicted.delete(id);
+    for (const key of [...pending.keys()]) if (isOf(key, id)) pending.delete(key);
+    for (const key of [...conflicted]) if (isOf(key, id)) conflicted.delete(key);
     if (pending.size === 0) {
       clearTimers();
       failures = 0;
@@ -246,16 +281,17 @@ export function startAutosave(
     unsaved: () => pending.size > 0 || saving > 0,
     async createVersion(meta) {
       const id = openDocument().id;
+      const branch = branchNow();
       const saved = await flush();
-      if (!saved && pending.has(id)) {
+      if (!saved && pending.has(keyOf(id, branch))) {
         return {
           ok: false,
           message: `The document could not be saved: ${status.getState().message ?? 'unknown error'}`,
         };
       }
       try {
-        if (!(await library.has(id))) onSaved?.(await library.save(openDocument(), []));
-        return await library.createVersion(id, meta);
+        if (!(await library.has(id))) onSaved?.(await library.save(openDocument(), [], branch));
+        return await library.createVersion(id, meta, branch);
       } catch (e) {
         return { ok: false, message: e instanceof Error ? e.message : String(e) };
       }

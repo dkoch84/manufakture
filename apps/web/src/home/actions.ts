@@ -9,6 +9,7 @@ import type { ManufaktureDocument } from '@manufakture/core';
 import { formatBytes, readFileBytes } from '../io/files';
 import type { Autosave } from '../persistence/autosave';
 import {
+  MAIN_BRANCH,
   packDocument,
   type DocumentLibrary,
   type DocumentSummary,
@@ -40,9 +41,14 @@ export interface HomeHost {
    */
   show(
     document: ManufaktureDocument,
-    options: { stored: boolean; migrated?: boolean; stayHome?: boolean },
+    options: { stored: boolean; migrated?: boolean; stayHome?: boolean; branch?: string },
   ): void;
   download(bytes: Uint8Array, fileName: string, type: string): void;
+  /**
+   * The branch the open document is on (default: main). Only the open document's actions use
+   * it; every other document is acted on as its main branch.
+   */
+  branch?: () => string;
 }
 
 export interface HomeActions {
@@ -88,6 +94,7 @@ export function openedMessage(opened: Opened, quiet = false): string | null {
 export function homeActions(host: HomeHost): HomeActions {
   const { library, documents } = host;
   const currentId = () => documents.getState().document.id;
+  const currentBranch = () => host.branch?.() ?? MAIN_BRANCH;
 
   /**
    * Save every pending change. Null when that worked (or there is no autosave); otherwise the
@@ -144,7 +151,10 @@ export function homeActions(host: HomeHost): HomeActions {
     },
 
     async rename(id, name) {
-      if (id === currentId()) {
+      // The open document on Main: renamed as an undoable command, which autosave saves. Open on
+      // another branch, it is Main that is renamed (the home screen lists Main's name), in the
+      // library; the branch keeps its own name.
+      if (id === currentId() && currentBranch() === MAIN_BRANCH) {
         const r = documents.getState().execute({ type: 'renameDocument', name }, 'Rename document');
         if (!r.ok) return failed(r.error.message);
         const stop = await saveFirst();
@@ -158,7 +168,8 @@ export function homeActions(host: HomeHost): HomeActions {
     async duplicate(id) {
       const stop = await settle(id);
       if (stop) return stop;
-      const r = await library.duplicate(id);
+      // The open document is copied as it is open: its branch. Any other one: its main branch.
+      const r = await library.duplicate(id, id === currentId() ? currentBranch() : MAIN_BRANCH);
       return r.ok ? { ok: true, message: `Made ${r.value.name}.` } : failed(r.message);
     },
 
@@ -206,11 +217,30 @@ export function homeActions(host: HomeHost): HomeActions {
 
     async reloadNewer() {
       const id = currentId();
-      const opened = await library.open(id);
+      // The branch it is open on: the newer version is that branch's. When another tab deleted
+      // that branch, its main branch opens instead; this tab's changes are dropped either way.
+      let branch = currentBranch();
+      let opened = await library.open(id, branch);
+      let gone = false;
+      if (!opened.ok && opened.noBranch && branch !== MAIN_BRANCH) {
+        gone = true;
+        branch = MAIN_BRANCH;
+        opened = await library.open(id, branch);
+      }
       if (!opened.ok) return failed(opened.message);
       host.autosave?.forget(id);
-      host.show(opened.value.document, { stored: true, migrated: opened.value.migrated });
-      return { ok: true, message: `Opened the newer version of ${opened.value.document.name}.` };
+      host.show(opened.value.document, {
+        stored: true,
+        migrated: opened.value.migrated,
+        branch,
+      });
+      const name = opened.value.document.name;
+      return {
+        ok: true,
+        message: gone
+          ? `Its branch was deleted in another tab or window, so this is the main branch of ${name}; the changes made here were dropped.`
+          : `Opened the newer version of ${name}.`,
+      };
     },
 
     async keepAsCopy() {

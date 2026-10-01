@@ -9,7 +9,14 @@
 //   snapshot-<rev>.json     the document at revision <rev>, in storage form (blobs.ts)
 //   log-<rev>.json          the commands that led from the previous revision to <rev>
 //   versions-<n>.json       the named versions, the n-th time the list was written
+//   branches-<n>.json       the branches besides main, the n-th time the list was written
 //   blobs/<sha256>          each imported file, once
+//   branches/<branch>/      a branch's own head.json, snapshot-<rev>.json and log-<rev>.json
+//
+// The document directory itself is the main branch, so a document saved before branches existed
+// is its main branch unchanged. Every other branch keeps its own head, snapshots and log in
+// `branches/<branch id>/`, under the same rules; the blobs, the version list (each version
+// records its branch) and the branch list are the document's, committed by the main head.
 //
 // A save never overwrites a file anything points at. It first deletes what an earlier failed
 // save left above the head, then writes, in order: new blobs, the log segment,
@@ -31,8 +38,9 @@
 // aside as `damaged-snapshot-<rev>-<sha>.json` and `damaged-log-<rev>-<sha>.json`, names nothing
 // else matches, so they stay until the document is deleted.
 //
-// Several tabs may have one document open. Every operation on a document holds a Web Lock named
-// after it (where the browser has Web Locks), so two tabs never interleave their files, and a
+// Several tabs may have one document open. Every operation on a document (on any of its
+// branches) holds a Web Lock named after it (where the browser has Web Locks), so two tabs never
+// interleave their files, and a
 // save refuses (`RevisionConflict`) when the head has moved past the revision this library last
 // opened or saved: another tab saved in between, and overwriting would silently drop its work.
 
@@ -54,11 +62,25 @@ const HEAD = 'head.json';
 const SNAPSHOT = /^snapshot-(\d{1,12})\.json$/;
 const LOG = /^log-(\d{1,12})\.json$/;
 const VERSIONS = /^versions-(\d{1,12})\.json$/;
+const BRANCHES = /^branches-(\d{1,12})\.json$/;
+/** The directory, in a document's, that holds the branches besides main. */
+const BRANCH_DIR = 'branches';
 
 const pad = (rev: number) => String(rev).padStart(8, '0');
 const snapshotName = (rev: number) => `snapshot-${pad(rev)}.json`;
 const logName = (rev: number) => `log-${pad(rev)}.json`;
 const versionsName = (n: number) => `versions-${pad(n)}.json`;
+const branchesName = (n: number) => `branches-${pad(n)}.json`;
+
+/**
+ * The main branch: the document's own directory. Every operation that takes a branch means this
+ * one when given none (see each method for the exceptions).
+ */
+export const MAIN_BRANCH = 'main';
+/** What the main branch is called; it cannot be renamed or deleted. */
+export const MAIN_BRANCH_NAME = 'Main';
+/** Branches one document holds at most, besides main. */
+export const MAX_BRANCHES = 100;
 
 /**
  * A save keeps the snapshot of every revision `1 + k * CHECKPOINT_EVERY` (1, 65, 129, ...), so
@@ -82,6 +104,9 @@ const damagedName = (kind: 'snapshot' | 'log', rev: number, sha256: string) =>
 /** Document ids that are safe as directory names; the app makes UUIDs. */
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 export const isStorableId = (id: string): boolean => SAFE_ID.test(id);
+/** Branch ids: main, or one safe as a directory name (the app makes UUIDs). */
+export const isBranchId = (branch: string): boolean =>
+  typeof branch === 'string' && SAFE_ID.test(branch);
 
 /** The Web Locks API as the library uses it: `navigator.locks`, or a stand-in in tests. */
 export interface DocumentLocks {
@@ -118,7 +143,34 @@ export class RevisionConflict extends Error {
   }
 }
 
-export type LibraryResult<T> = { ok: true; value: T } | { ok: false; message: string };
+/**
+ * A save refused because its branch was deleted (in another tab, say) since this library opened
+ * it. Nothing was written; like any conflict, the tab can keep its version as a copy.
+ */
+export class BranchDeleted extends RevisionConflict {
+  readonly branch: string;
+
+  constructor(documentId: string, branch: string, expected: number) {
+    super(documentId, 0, expected);
+    this.name = 'BranchDeleted';
+    this.message =
+      'Its branch was deleted in another tab or window, so the changes made here were not ' +
+      'saved to it.';
+    this.branch = branch;
+  }
+}
+
+export type LibraryResult<T> =
+  | { ok: true; value: T }
+  | {
+      ok: false;
+      message: string;
+      /** Set when what failed is that the branch asked for does not exist (or was deleted). */
+      noBranch?: true;
+    };
+
+/** The failure for a branch that is not there; never echoes the id it was given. */
+const NO_BRANCH = { ok: false, message: 'There is no such branch.', noBranch: true } as const;
 
 /** One step of the command log, as the document store ran it. */
 export interface LogEntry {
@@ -172,7 +224,15 @@ interface Head {
   savedAt: string;
   /** Which `versions-<n>.json` is current; 0 (or absent, before versions existed): none. */
   versions: number;
+  /**
+   * Which `branches-<n>.json` is current; 0 (or absent, before branches existed): none. Only the
+   * main branch's head names lists; a branch's head has 0 for both.
+   */
+  branches: number;
 }
+
+/** The two lists a main head commits: how many times each was written. */
+type Lists = Pick<Head, 'versions' | 'branches'>;
 
 /**
  * A named version: a revision given a name, kept for good. Its id is permanent, so other
@@ -187,19 +247,24 @@ export interface Version {
   snapshotSha256: string;
   /** ISO 8601. */
   createdAt: string;
+  /** The branch whose revision it names; absent: the main branch. */
+  branch?: string;
+}
+
+/** A branch of a document: its own head, history and versions, beside the main branch. */
+export interface Branch {
+  /** MAIN_BRANCH, or a UUID: the directory under `branches/`, and `?branch=` in the URL. */
+  id: string;
+  name: string;
+  /** The version it was branched from; null for the main branch. */
+  fromVersion: string | null;
+  /** ISO 8601. */
+  createdAt: string;
 }
 
 export interface VersionMeta {
   name: string;
   description?: string;
-}
-
-interface VersionsFile {
-  format: 'manufakture-versions';
-  id: string;
-  /** Which write of the list this is: the `<n>` in its name. */
-  generation: number;
-  versions: Version[];
 }
 
 /** A revision read back, possibly rebuilt by replaying the log. */
@@ -242,8 +307,9 @@ function parseHead(bytes: Uint8Array | null, id: string): Head | null {
       typeof h.blobBytes === 'number' &&
       typeof h.createdAt === 'string' &&
       typeof h.savedAt === 'string' &&
-      (h.versions === undefined || (Number.isInteger(h.versions) && h.versions >= 0));
-    return valid ? ({ ...h, versions: h.versions ?? 0 } as Head) : null;
+      (h.versions === undefined || (Number.isInteger(h.versions) && h.versions >= 0)) &&
+      (h.branches === undefined || (Number.isInteger(h.branches) && h.branches >= 0));
+    return valid ? ({ ...h, versions: h.versions ?? 0, branches: h.branches ?? 0 } as Head) : null;
   } catch {
     return null;
   }
@@ -315,7 +381,7 @@ function versionMeta(meta: VersionMeta): { name: string; description: string } |
  */
 function parseVersion(v: unknown): Version | null {
   if (!isRecord(v)) return null;
-  const { id, name, description, revision, snapshotSha256, createdAt } = v;
+  const { id, name, description, revision, snapshotSha256, createdAt, branch } = v;
   if (typeof id !== 'string' || !VERSION_ID.test(id)) return null;
   if (typeof name !== 'string' || typeof description !== 'string') return null;
   const meta = versionMeta({ name, description });
@@ -324,6 +390,9 @@ function parseVersion(v: unknown): Version | null {
   if (typeof snapshotSha256 !== 'string' || !isSha256(snapshotSha256)) return null;
   if (typeof createdAt !== 'string' || createdAt.length > 64 || Number.isNaN(Date.parse(createdAt)))
     return null;
+  // Main is recorded by leaving the field out, as versions made before branches are.
+  if (branch !== undefined && (typeof branch !== 'string' || !isBranchId(branch))) return null;
+  if (branch === MAIN_BRANCH) return null;
   return {
     id,
     name,
@@ -331,7 +400,48 @@ function parseVersion(v: unknown): Version | null {
     revision: revision as number,
     snapshotSha256,
     createdAt,
+    ...(branch === undefined ? {} : { branch }),
   };
+}
+
+/** The branch a version names a revision of. */
+export const versionBranch = (v: Pick<Version, 'branch'>): string => v.branch ?? MAIN_BRANCH;
+
+/** A branch's name as given: trimmed, 1 to MAX_DOCUMENT_NAME characters. */
+function branchName(name: unknown): string | null {
+  const trimmed = typeof name === 'string' ? name.trim() : '';
+  return trimmed.length > 0 && trimmed.length <= MAX_DOCUMENT_NAME ? trimmed : null;
+}
+
+/** One branch record, checked field by field. Null when anything is off. */
+function parseBranch(v: unknown): Branch | null {
+  if (!isRecord(v)) return null;
+  const { id, name, fromVersion, createdAt } = v;
+  if (typeof id !== 'string' || !isBranchId(id) || id === MAIN_BRANCH) return null;
+  if (typeof name !== 'string' || branchName(name) !== name) return null;
+  if (typeof fromVersion !== 'string' || !VERSION_ID.test(fromVersion)) return null;
+  if (typeof createdAt !== 'string' || createdAt.length > 64 || Number.isNaN(Date.parse(createdAt)))
+    return null;
+  return { id, name, fromVersion, createdAt };
+}
+
+/**
+ * A list of branch records (main left out): each valid, ids and names unique (and none named
+ * as main), at most MAX_BRANCHES. Null otherwise.
+ */
+function parseBranches(value: unknown): Branch[] | null {
+  if (!Array.isArray(value) || value.length > MAX_BRANCHES) return null;
+  const out: Branch[] = [];
+  const ids = new Set<string>();
+  const names = new Set<string>([MAIN_BRANCH_NAME]);
+  for (const v of value) {
+    const branch = parseBranch(v);
+    if (!branch || ids.has(branch.id) || names.has(branch.name)) return null;
+    ids.add(branch.id);
+    names.add(branch.name);
+    out.push(branch);
+  }
+  return out;
 }
 
 /** A list of version records: each valid, ids unique, at most MAX_VERSIONS. Null otherwise. */
@@ -348,8 +458,47 @@ export function parseVersions(value: unknown): Version[] | null {
   return out;
 }
 
-/** `versions-<n>.json` of document `id`, or null when it is missing, torn or of the wrong shape. */
-function parseVersionsFile(bytes: Uint8Array | null, id: string, n: number): Version[] | null {
+/**
+ * A list the main head commits by number: the named versions (`versions-<n>.json`) or the
+ * branches (`branches-<n>.json`). Both follow one rule: the n-th write of the list is a new
+ * file, then the head naming it is the commit.
+ */
+interface ListKind<T> {
+  /** The head's field naming the current list, and the file's field holding the items. */
+  field: keyof Lists;
+  pattern: RegExp;
+  file: (n: number) => string;
+  format: string;
+  parse: (value: unknown) => T[] | null;
+  /** For messages: "Its list of <noun> is damaged." */
+  noun: string;
+}
+
+const VERSION_LIST: ListKind<Version> = {
+  field: 'versions',
+  pattern: VERSIONS,
+  file: versionsName,
+  format: 'manufakture-versions',
+  parse: parseVersions,
+  noun: 'versions',
+};
+
+const BRANCH_LIST: ListKind<Branch> = {
+  field: 'branches',
+  pattern: BRANCHES,
+  file: branchesName,
+  format: 'manufakture-branches',
+  parse: parseBranches,
+  noun: 'branches',
+};
+
+/** List file `n` of document `id`, or null when it is missing, torn or of the wrong shape. */
+function parseListFile<T>(
+  kind: ListKind<T>,
+  bytes: Uint8Array | null,
+  id: string,
+  n: number,
+): T[] | null {
   if (!bytes) return null;
   let v: unknown;
   try {
@@ -357,29 +506,41 @@ function parseVersionsFile(bytes: Uint8Array | null, id: string, n: number): Ver
   } catch {
     return null;
   }
-  if (!isRecord(v) || v.format !== 'manufakture-versions' || v.id !== id || v.generation !== n)
-    return null;
-  return parseVersions(v.versions);
+  if (!isRecord(v) || v.format !== kind.format || v.id !== id || v.generation !== n) return null;
+  return kind.parse(v[kind.field]);
 }
 
-/** A version list as read: which one (`n`, 0 for none) and what it holds. */
-type VersionsRead =
+/** List file `n` of document `id` holding `items`, as written. */
+function listFile<T>(kind: ListKind<T>, id: string, n: number, items: readonly T[]): Uint8Array {
+  const file = { format: kind.format, id, generation: n, [kind.field]: items };
+  return encoder.encode(`${JSON.stringify(file, null, 2)}\n`);
+}
+
+/** A list as read: which one (`n`, 0 for none) and what it holds. */
+type ListRead<T> =
   | {
       ok: true;
       n: number;
-      versions: Version[];
-      /** The list `n` is missing and this is an older one: versions may be missing from it. */
+      items: T[];
+      /** The list `n` is missing and this is an older one: items may be missing from it. */
       fallback?: boolean;
     }
   | { ok: false; message: string };
 
-/** Whether `name` is a snapshot or log above `rev`, or a version list above `versions`. */
-function isStale(name: string, rev: number, versions: number): boolean {
+/** Whether `name` is a snapshot or log above `rev`, or a list above the one `lists` names. */
+function isStale(name: string, rev: number, lists: Lists): boolean {
   const later = (SNAPSHOT.exec(name) ?? LOG.exec(name))?.[1];
   if (later !== undefined) return Number(later) > rev;
-  const list = VERSIONS.exec(name)?.[1];
-  return list !== undefined && Number(list) > versions;
+  const versions = VERSIONS.exec(name)?.[1];
+  if (versions !== undefined) return Number(versions) > lists.versions;
+  const branches = BRANCHES.exec(name)?.[1];
+  return branches !== undefined && Number(branches) > lists.branches;
 }
+
+const NO_LISTS: Lists = { versions: 0, branches: 0 };
+
+/** How a warning names a branch: nothing for main, " (branch <id>)" for the others. */
+const onBranch = (branch: string) => (branch === MAIN_BRANCH ? '' : ` (branch ${branch})`);
 
 /** Why a stored or imported document could not be read. */
 export interface DecodeFailure {
@@ -508,11 +669,14 @@ export class DocumentLibrary {
   readonly #blobStores = new Map<string, BlobStore>();
   /** Operations run one at a time, so two saves never interleave their files. */
   #queue: Promise<unknown> = Promise.resolve();
-  /** Per document: the revision this library last opened or saved (what it builds on). */
+  /**
+   * Per document and branch (`#key`): the revision this library last opened or saved (what it
+   * builds on).
+   */
   readonly #known = new Map<string, number>();
   /**
-   * Per document: the snapshot this library last wrote, committed or not (its own work), and the
-   * log entries written with it.
+   * Per document and branch: the snapshot this library last wrote, committed or not (its own
+   * work), and the log entries written with it.
    */
   readonly #written = new Map<
     string,
@@ -543,9 +707,17 @@ export class DocumentLibrary {
     return this.#locks ? this.#locks.request(`manufakture-document-${id}`, op) : op();
   }
 
-  #dir(id: string): string {
+  /** The directory of document `id`'s branch `branch`: the document's own one for main. */
+  #dir(id: string, branch: string = MAIN_BRANCH): string {
     if (!isStorableId(id)) throw new Error(`Cannot store a document with the id "${id}"`);
-    return `${ROOT}/${id}`;
+    if (branch === MAIN_BRANCH) return `${ROOT}/${id}`;
+    if (!isBranchId(branch)) throw new Error(`Cannot store a branch with the id "${branch}"`);
+    return `${ROOT}/${id}/${BRANCH_DIR}/${branch}`;
+  }
+
+  /** The key of a document's branch in the per-branch maps. */
+  #key(id: string, branch: string): string {
+    return branch === MAIN_BRANCH ? id : `${id}/${branch}`;
   }
 
   #blobs(id: string): BlobStore {
@@ -557,8 +729,8 @@ export class DocumentLibrary {
     return store;
   }
 
-  async #head(id: string): Promise<Head | null> {
-    return parseHead(await this.#backend.read(`${this.#dir(id)}/${HEAD}`), id);
+  async #head(id: string, branch: string = MAIN_BRANCH): Promise<Head | null> {
+    return parseHead(await this.#backend.read(`${this.#dir(id, branch)}/${HEAD}`), id);
   }
 
   /**
@@ -619,20 +791,38 @@ export class DocumentLibrary {
    * library then builds on that revision: its next save of the document conflicts if another
    * tab saves in between.
    */
-  open(id: string): Promise<LibraryResult<Opened>> {
+  open(id: string, branch: string = MAIN_BRANCH): Promise<LibraryResult<Opened>> {
     return this.#run(async () => {
       if (!isStorableId(id)) return { ok: false, message: `There is no document "${id}".` };
+      if (!isBranchId(branch)) return NO_BRANCH;
       return this.#locked(id, async () => {
-        const opened = await this.#open(id);
-        if (opened.ok) this.#known.set(id, opened.value.revision);
+        if (branch !== MAIN_BRANCH) {
+          const listed = await this.#branch(id, branch);
+          if (!listed.ok) return listed;
+        }
+        const opened = await this.#open(id, branch);
+        if (opened.ok) this.#known.set(this.#key(id, branch), opened.value.revision);
         return opened;
       });
     });
   }
 
+  /**
+   * Branch `branch` (not main) of document `id`, as the branch list records it: refused when
+   * the list does not name it (never made, deleted, or made by a change that did not commit).
+   */
+  async #branch(id: string, branch: string): Promise<LibraryResult<Branch>> {
+    const names = await this.#backend.list(this.#dir(id));
+    if (names.length === 0) return { ok: false, message: `There is no document "${id}".` };
+    const listed = await this.#readList(BRANCH_LIST, id, await this.#head(id), names);
+    if (!listed.ok) return listed;
+    const found = listed.items.find((b) => b.id === branch);
+    return found ? { ok: true, value: found } : NO_BRANCH;
+  }
+
   /** The newest revision that reads completely; changes nothing. */
-  async #find(id: string): Promise<FindResult> {
-    const dir = this.#dir(id);
+  async #find(id: string, branch: string = MAIN_BRANCH): Promise<FindResult> {
+    const dir = this.#dir(id, branch);
     const names = await this.#backend.list(dir);
     const snapshots = revisions(names, SNAPSHOT);
     if (snapshots.length === 0) {
@@ -642,7 +832,7 @@ export class DocumentLibrary {
           names.length === 0 ? `There is no document "${id}".` : 'No saved copy of it can be read.',
       };
     }
-    const head = await this.#head(id);
+    const head = await this.#head(id, branch);
     const blobs = this.#blobs(id);
     let firstError: string | null = null;
     const damaged: Found['damaged'] = [];
@@ -683,29 +873,40 @@ export class DocumentLibrary {
   }
 
   /** `#find`, then repair the head when it does not name what was found, and tidy up. */
-  async #open(id: string): Promise<LibraryResult<Opened>> {
-    const r = await this.#find(id);
+  async #open(id: string, branch: string = MAIN_BRANCH): Promise<LibraryResult<Opened>> {
+    const r = await this.#find(id, branch);
     if (!r.ok) return r;
     const { rev, bytes, document, migrated, head, names, mismatch, damaged } = r.found;
     // Keep what is about to be passed over: the originals are deleted below once they lie
     // above the head.
-    for (const d of damaged) await this.#quarantine(id, d, names);
+    for (const d of damaged) await this.#quarantine(id, branch, d, names);
+    const where = onBranch(branch);
     if (mismatch) {
       this.#warn(
-        `manufakture: revision ${rev} of document ${id} does not match the SHA-256 its head ` +
-          'records, but reads as a valid document; it is used, and the head is corrected.',
+        `manufakture: revision ${rev} of document ${id}${where} does not match the SHA-256 its ` +
+          'head records, but reads as a valid document; it is used, and the head is corrected.',
       );
     }
     const recovered = head?.revision !== rev || mismatch;
-    // The version list the head names; without a head, the newest one that reads (a list is
-    // complete before the head naming it is written, so a torn head leaves the new one).
-    const listed = await this.#versions(id, head, names);
-    const versions = listed.ok ? listed.n : (head?.versions ?? 0);
-    if (recovered) await this.#repair(id, rev, bytes, document, head, versions);
+    // The lists the main head names; without a head, the newest ones that read (a list is
+    // complete before the head naming it is written, so a torn head leaves the new one). A
+    // branch's head names none.
+    const lists = branch === MAIN_BRANCH ? await this.#lists(id, head, names) : NO_LISTS;
+    if (recovered) await this.#repair(id, branch, rev, bytes, document, head, lists);
     // Only what lies above both the head and the revision found: never the snapshot the head
     // named (even when it could not be read) or anything below it.
-    await this.#dropAbove(id, Math.max(rev, head?.revision ?? rev), names, versions);
+    await this.#dropAbove(id, branch, Math.max(rev, head?.revision ?? rev), names, lists);
     return { ok: true, value: { document, migrated, recovered, revision: rev } };
+  }
+
+  /** Which lists the main head commits: as it names them, else the newest that read. */
+  async #lists(id: string, head: Head | null, names: readonly string[]): Promise<Lists> {
+    const versions = await this.#readList(VERSION_LIST, id, head, names);
+    const branches = await this.#readList(BRANCH_LIST, id, head, names);
+    return {
+      versions: versions.ok ? versions.n : (head?.versions ?? 0),
+      branches: branches.ok ? branches.n : (head?.branches ?? 0),
+    };
   }
 
   /**
@@ -714,10 +915,11 @@ export class DocumentLibrary {
    */
   async #quarantine(
     id: string,
+    branch: string,
     damaged: Found['damaged'][number],
     names: readonly string[],
   ): Promise<void> {
-    const dir = this.#dir(id);
+    const dir = this.#dir(id, branch);
     const sha = await sha256Hex(damaged.bytes);
     const snapshotCopy = damagedName('snapshot', damaged.rev, sha);
     if (names.includes(snapshotCopy)) return;
@@ -728,7 +930,8 @@ export class DocumentLibrary {
     // The snapshot last: its copy existing means both are kept.
     await this.#backend.write(`${dir}/${snapshotCopy}`, damaged.bytes);
     this.#warn(
-      `manufakture: revision ${damaged.rev} of document ${id} is complete but cannot be read ` +
+      `manufakture: revision ${damaged.rev} of document ${id}${onBranch(branch)} is complete ` +
+        'but cannot be read ' +
         `(${damaged.message}); it is kept as ${snapshotCopy}.`,
     );
   }
@@ -736,13 +939,14 @@ export class DocumentLibrary {
   /** Point the head at `rev`, the snapshot recovered. */
   async #repair(
     id: string,
+    branch: string,
     rev: number,
     snapshot: Uint8Array,
     doc: ManufaktureDocument,
     old: Head | null,
-    versions: number,
+    lists: Lists,
   ): Promise<void> {
-    const dir = this.#dir(id);
+    const dir = this.#dir(id, branch);
     const now = this.#now().toISOString();
     const head: Head = {
       format: 'manufakture-head',
@@ -754,7 +958,7 @@ export class DocumentLibrary {
       blobBytes: blobRefs(JSON.parse(decoder.decode(snapshot))).reduce((n, r) => n + r.size, 0),
       createdAt: old?.createdAt ?? now,
       savedAt: old?.savedAt ?? now,
-      versions,
+      ...lists,
     };
     await this.#backend.write(
       `${dir}/${HEAD}`,
@@ -763,64 +967,70 @@ export class DocumentLibrary {
   }
 
   /**
-   * Delete the logs and snapshots above revision `rev`, and the version lists above `versions`:
-   * what a save or a version change that died left behind.
+   * Delete the logs and snapshots above revision `rev`, and the lists above the ones `lists`
+   * names: what a save or a list change that died left behind.
    */
   async #dropAbove(
     id: string,
+    branch: string,
     rev: number,
     names: readonly string[],
-    versions: number,
+    lists: Lists,
   ): Promise<void> {
-    const dir = this.#dir(id);
+    const dir = this.#dir(id, branch);
     for (const name of names) {
-      if (isStale(name, rev, versions)) await this.#backend.remove(`${dir}/${name}`);
+      if (isStale(name, rev, lists)) await this.#backend.remove(`${dir}/${name}`);
     }
   }
 
   /**
-   * The version list the head names (`n` is its number); without a head, the newest list that
-   * reads. Changes nothing.
+   * The list of `kind` the main head names (`n` is its number); without a head, the newest list
+   * that reads. Changes nothing.
    */
-  async #versions(id: string, head: Head | null, names?: readonly string[]): Promise<VersionsRead> {
+  async #readList<T>(
+    kind: ListKind<T>,
+    id: string,
+    head: Head | null,
+    names?: readonly string[],
+  ): Promise<ListRead<T>> {
     const dir = this.#dir(id);
+    const read = async (n: number) =>
+      parseListFile(kind, await this.#backend.read(`${dir}/${kind.file(n)}`), id, n);
     if (head) {
-      if (head.versions === 0) return { ok: true, n: 0, versions: [] };
-      const bytes = await this.#backend.read(`${dir}/${versionsName(head.versions)}`);
-      const versions = parseVersionsFile(bytes, id, head.versions);
-      if (versions) return { ok: true, n: head.versions, versions };
-      if (bytes) return { ok: false, message: 'Its list of versions is damaged.' };
+      const n = head[kind.field];
+      if (n === 0) return { ok: true, n: 0, items: [] };
+      const bytes = await this.#backend.read(`${dir}/${kind.file(n)}`);
+      const items = parseListFile(kind, bytes, id, n);
+      if (items) return { ok: true, n, items };
+      if (bytes) return { ok: false, message: `Its list of ${kind.noun} is damaged.` };
       // Missing: without Web Locks, another tab can delete a list as stale between its write
       // and the head naming it. The spare (the list before) is kept for that; read the newest
       // older list that reads, still as list `n`, so the next change writes above it.
-      const older = revisions(names ?? (await this.#backend.list(dir)), VERSIONS).filter(
-        (m) => m < head.versions,
+      const older = revisions(names ?? (await this.#backend.list(dir)), kind.pattern).filter(
+        (m) => m < n,
       );
       for (const m of older) {
-        const list = parseVersionsFile(
-          await this.#backend.read(`${dir}/${versionsName(m)}`),
-          id,
-          m,
-        );
-        if (list) return { ok: true, n: head.versions, versions: list, fallback: true };
+        const list = await read(m);
+        if (list) return { ok: true, n, items: list, fallback: true };
       }
-      return { ok: false, message: 'Its list of versions is missing.' };
+      return { ok: false, message: `Its list of ${kind.noun} is missing.` };
     }
-    for (const n of revisions(names ?? (await this.#backend.list(dir)), VERSIONS)) {
-      const versions = parseVersionsFile(
-        await this.#backend.read(`${dir}/${versionsName(n)}`),
-        id,
-        n,
-      );
-      if (versions) return { ok: true, n, versions };
+    for (const n of revisions(names ?? (await this.#backend.list(dir)), kind.pattern)) {
+      const items = await read(n);
+      if (items) return { ok: true, n, items };
     }
-    return { ok: true, n: 0, versions: [] };
+    return { ok: true, n: 0, items: [] };
   }
 
   /** Whether revision `rev`'s log segment starts a history (`base: null`): nothing leads to it. */
-  async #isRoot(id: string, rev: number, names: readonly string[]): Promise<boolean> {
+  async #isRoot(
+    id: string,
+    branch: string,
+    rev: number,
+    names: readonly string[],
+  ): Promise<boolean> {
     if (!names.includes(logName(rev))) return false;
-    const bytes = await this.#backend.read(`${this.#dir(id)}/${logName(rev)}`);
+    const bytes = await this.#backend.read(`${this.#dir(id, branch)}/${logName(rev)}`);
     if (!bytes) return false;
     try {
       const segment: unknown = JSON.parse(decoder.decode(bytes));
@@ -831,48 +1041,70 @@ export class DocumentLibrary {
   }
 
   /**
-   * Save `doc` as a new revision, with `entries` (the commands since the last save) as its log
-   * segment. Throws when storage fails; the previous revision is then still there. Throws a
-   * `RevisionConflict`, having written nothing, when another tab saved the document since this
-   * library last opened or saved it.
+   * Save `doc` as a new revision of branch `branch` (default: main), with `entries` (the
+   * commands since the last save) as its log segment. Throws when storage fails; the previous revision is then still there. Throws a
+   * `RevisionConflict`, having written nothing, when another tab saved the branch since this
+   * library last opened or saved it, and a `BranchDeleted` when the branch is gone.
    */
-  save(doc: ManufaktureDocument, entries: readonly LogEntry[] = []): Promise<DocumentSummary> {
-    return this.#run(() => this.#locked(doc.id, () => this.#save(doc, entries)));
+  save(
+    doc: ManufaktureDocument,
+    entries: readonly LogEntry[] = [],
+    branch?: string,
+  ): Promise<DocumentSummary> {
+    const on = branch ?? MAIN_BRANCH;
+    return this.#run(() => this.#locked(doc.id, () => this.#save(doc, entries, on)));
   }
 
-  /** Whether `head` commits the snapshot this library itself last wrote. */
-  #ours(id: string, head: Head): boolean {
-    const w = this.#written.get(id);
+  /** Whether `head` commits the snapshot this library itself last wrote on the branch. */
+  #ours(id: string, branch: string, head: Head): boolean {
+    const w = this.#written.get(this.#key(id, branch));
     return w?.revision === head.revision && w.sha256 === head.snapshotSha256;
   }
 
-  #checkRevision(id: string, head: Head | null): void {
-    const known = this.#known.get(id);
-    if (head && known !== undefined && head.revision !== known && !this.#ours(id, head)) {
+  #checkRevision(id: string, branch: string, head: Head | null): void {
+    const known = this.#known.get(this.#key(id, branch));
+    if (head && known !== undefined && head.revision !== known && !this.#ours(id, branch, head)) {
       throw new RevisionConflict(id, head.revision, known);
     }
   }
 
-  async #save(doc: ManufaktureDocument, entries: readonly LogEntry[]): Promise<DocumentSummary> {
+  async #save(
+    doc: ManufaktureDocument,
+    entries: readonly LogEntry[],
+    branch: string = MAIN_BRANCH,
+  ): Promise<DocumentSummary> {
     const id = doc.id;
-    const dir = this.#dir(id);
+    const key = this.#key(id, branch);
+    const main = branch === MAIN_BRANCH;
+    const dir = this.#dir(id, branch);
+    if (!main) {
+      // Never write a branch the list does not name: it was deleted (and the files written
+      // would be an orphan the next branch change deletes).
+      const listed = await this.#branch(id, branch);
+      if (!listed.ok) {
+        if (listed.noBranch) {
+          throw new BranchDeleted(id, branch, this.#known.get(key) ?? 0);
+        }
+        throw new Error(listed.message);
+      }
+    }
     let names = await this.#backend.list(dir);
-    let head = await this.#head(id);
+    let head = await this.#head(id, branch);
     if (!head && revisions(names, SNAPSHOT).length > 0) {
       // A damaged or missing head over saved copies: recover it first, so the save builds on
       // (and keeps) the last good revision rather than guessing.
-      await this.#open(id);
+      await this.#open(id, branch);
       names = await this.#backend.list(dir);
-      head = await this.#head(id);
+      head = await this.#head(id, branch);
     }
-    this.#checkRevision(id, head);
+    this.#checkRevision(id, branch, head);
 
     // This library's previous save committed (its head is there) but reported a failure, say
     // the head write threw after the bytes landed: the caller retries with those commands first,
     // and they are logged already.
     let fresh = entries;
-    const written = this.#written.get(id);
-    if (head && written && head.revision !== this.#known.get(id) && this.#ours(id, head)) {
+    const written = this.#written.get(key);
+    if (head && written && head.revision !== this.#known.get(key) && this.#ours(id, branch, head)) {
       const logged = written.entries;
       if (logged.length > 0 && logged.every((e, i) => fresh[i] === e)) {
         fresh = fresh.slice(logged.length);
@@ -881,25 +1113,24 @@ export class DocumentLibrary {
 
     // Whatever lies above the head is from a save that did not finish (this library's own
     // failed attempt, when it retries): delete it, so the log holds each command once. The same
-    // for version lists above the one the head names. Without a head (and no snapshot that
-    // reads), the newest list that reads is kept and named by the new head: never lost.
-    let versions = head?.versions ?? 0;
-    if (head) {
-      const stale = names.filter((n) => isStale(n, head.revision, head.versions));
-      for (const name of stale) await this.#backend.remove(`${dir}/${name}`);
-      names = names.filter((n) => !stale.includes(n));
-    } else {
-      const kept = await this.#versions(id, null, names);
-      versions = kept.ok ? kept.n : 0;
-      const stale = names.filter((n) => {
-        const list = VERSIONS.exec(n)?.[1];
-        return list !== undefined && Number(list) > versions;
-      });
-      for (const name of stale) await this.#backend.remove(`${dir}/${name}`);
-      names = names.filter((n) => !stale.includes(n));
-    }
+    // for lists above the ones the head names. Without a head (and no snapshot that reads), the
+    // newest lists that read are kept and named by the new head: never lost. A branch's
+    // directory holds no lists.
+    let lists: Lists = head ? { versions: head.versions, branches: head.branches } : NO_LISTS;
+    if (!head && main) lists = await this.#lists(id, null, names);
+    const stale = names.filter((n) => isStale(n, head?.revision ?? Infinity, lists));
+    for (const name of stale) await this.#backend.remove(`${dir}/${name}`);
+    names = names.filter((n) => !stale.includes(n));
     // The revisions the versions name are kept below (step 6); read before anything is written.
-    const listed = head ? await this.#versions(id, head, names) : null;
+    // The version list is the document's, in the main directory, whichever branch this is.
+    const listed = head
+      ? await this.#readList(
+          VERSION_LIST,
+          id,
+          main ? head : await this.#head(id),
+          main ? names : undefined,
+        )
+      : null;
     const rev = head
       ? head.revision + 1
       : Math.max(0, ...revisions(names, SNAPSHOT), ...revisions(names, LOG)) + 1;
@@ -926,17 +1157,28 @@ export class DocumentLibrary {
     const snapshot = encoder.encode(stored.text);
     const snapshotSha256 = await sha256Hex(snapshot);
     await this.#backend.write(`${dir}/${snapshotName(rev)}`, snapshot);
-    this.#written.set(id, { revision: rev, sha256: snapshotSha256, entries: fresh });
+    this.#written.set(key, { revision: rev, sha256: snapshotSha256, entries: fresh });
 
-    // Without locks another tab may have committed meanwhile (a save, or a version list whose
-    // head this one would overwrite): look again before the commit.
-    const current = await this.#head(id);
+    // Without locks another tab may have committed meanwhile (a save, or a list whose head this
+    // one would overwrite): look again before the commit.
+    const current = await this.#head(id, branch);
     if (
       (current?.revision ?? null) !== (head?.revision ?? null) ||
       (current?.snapshotSha256 ?? null) !== (head?.snapshotSha256 ?? null) ||
-      (current?.versions ?? null) !== (head?.versions ?? null)
+      (current?.versions ?? null) !== (head?.versions ?? null) ||
+      (current?.branches ?? null) !== (head?.branches ?? null)
     ) {
       throw new RevisionConflict(id, current?.revision ?? 0, head?.revision ?? 0);
+    }
+    // The same for the branch itself: without locks another tab may have deleted it since the
+    // check above, and committed that before removing its directory. A head written now would
+    // land in a directory no list names, and the save would look done while the next branch
+    // change deletes it.
+    if (!main) {
+      const still = await this.#branch(id, branch);
+      if (!still.ok && still.noBranch) {
+        throw new BranchDeleted(id, branch, this.#known.get(key) ?? 0);
+      }
     }
 
     const now = this.#now().toISOString();
@@ -950,26 +1192,27 @@ export class DocumentLibrary {
       blobBytes: stored.blobBytes,
       createdAt: head?.createdAt ?? now,
       savedAt: now,
-      versions,
+      ...lists,
     };
     await this.#backend.write(
       `${dir}/${HEAD}`,
       encoder.encode(`${JSON.stringify(next, null, 2)}\n`),
     );
-    this.#known.set(id, rev);
+    this.#known.set(key, rev);
 
     // The new revision is committed. The one the head named before stays as the spare; older
     // snapshots go, except the history: what a version names, the checkpoints, and a revision
     // nothing leads to (the first of an imported history). Best effort.
-    if (head) await this.#prune(id, head.revision, names, listed).catch(() => undefined);
+    if (head) await this.#prune(id, branch, head.revision, names, listed).catch(() => undefined);
     return summaryOf(next);
   }
 
   async #prune(
     id: string,
+    branch: string,
     spare: number,
     names: readonly string[],
-    listed: VersionsRead | null,
+    listed: ListRead<Version> | null,
   ): Promise<void> {
     if (listed && (!listed.ok || listed.fallback)) {
       this.#warn(
@@ -977,15 +1220,18 @@ export class DocumentLibrary {
       );
       return;
     }
-    const named = new Set(listed?.versions.map((v) => v.revision) ?? []);
-    const dir = this.#dir(id);
+    // Only this branch's versions name revisions in this directory.
+    const named = new Set(
+      (listed?.items ?? []).filter((v) => versionBranch(v) === branch).map((v) => v.revision),
+    );
+    const dir = this.#dir(id, branch);
     const all = revisions(names, SNAPSHOT);
     // The lowest retained snapshot is where the history starts: a document saved before
     // checkpoints existed keeps it past its first checkpoint.
     const root = Math.min(...all);
     for (const old of all) {
       if (old >= spare || old === root || isCheckpoint(old) || named.has(old)) continue;
-      if (await this.#isRoot(id, old, names)) continue;
+      if (await this.#isRoot(id, branch, old, names)) continue;
       await this.#backend.remove(`${dir}/${snapshotName(old)}`).catch(() => undefined);
     }
   }
@@ -994,12 +1240,15 @@ export class DocumentLibrary {
    * The log per saved revision, oldest first: each revision with the causes, labels and times of
    * the commands that led to it, without the commands (so no imported file is read). Follows the
    * chain of segments back from the head, as `readLog` does; a save without commands, or one
-   * whose segment is gone, is not listed. For the history panel's timeline.
+   * whose segment is gone, is not listed. For the history panel's timeline. Of branch `branch`
+   * (default: main).
    */
-  readHistory(id: string): Promise<LibraryResult<LoggedRevision[]>> {
+  readHistory(id: string, branch?: string): Promise<LibraryResult<LoggedRevision[]>> {
+    const on = branch ?? MAIN_BRANCH;
     return this.#run(async () => {
       if (!isStorableId(id)) return { ok: false, message: `There is no document "${id}".` };
-      const chain = await this.#logChain(id);
+      if (!isBranchId(on)) return NO_BRANCH;
+      const chain = await this.#logChain(id, on);
       if (!chain.ok) return chain;
       return {
         ok: true,
@@ -1015,10 +1264,10 @@ export class DocumentLibrary {
     });
   }
 
-  /** The log segments that lead to the head, oldest first. */
-  async #logChain(id: string): Promise<LibraryResult<LogSegment[]>> {
-    const dir = this.#dir(id);
-    const head = await this.#head(id);
+  /** The log segments that lead to the branch's head, oldest first. */
+  async #logChain(id: string, branch: string): Promise<LibraryResult<LogSegment[]>> {
+    const dir = this.#dir(id, branch);
+    const head = await this.#head(id, branch);
     if (!head) return { ok: true, value: [] };
     const present = new Set(revisions(await this.#backend.list(dir), LOG));
     const chain: LogSegment[] = [];
@@ -1048,13 +1297,15 @@ export class DocumentLibrary {
   /**
    * The command log, oldest first, with imported files put back (and checked). It follows the
    * chain of segments back from the head (each names the revision it started from), so a
-   * segment a failed save left behind is never part of it.
+   * segment a failed save left behind is never part of it. Of branch `branch` (default: main).
    */
-  readLog(id: string): Promise<LibraryResult<LogEntry[]>> {
+  readLog(id: string, branch?: string): Promise<LibraryResult<LogEntry[]>> {
+    const on = branch ?? MAIN_BRANCH;
     return this.#run(async () => {
       if (!isStorableId(id)) return { ok: false, message: `There is no document "${id}".` };
+      if (!isBranchId(on)) return NO_BRANCH;
       const blobs = this.#blobs(id);
-      const chain = await this.#logChain(id);
+      const chain = await this.#logChain(id, on);
       if (!chain.ok) return chain;
       const out: LogEntry[] = [];
       try {
@@ -1072,32 +1323,52 @@ export class DocumentLibrary {
   }
 
   /**
-   * Name the stored document's current revision: records `{ id, name, description, revision,
-   * snapshotSha256, createdAt }` in a new version list, committed by the head like a save. The
-   * snapshot it names is then kept for good. The caller saves first (autosave's
-   * `createVersion` does); a library that knows the document refuses with `RevisionConflict`
-   * when another tab saved it meanwhile, since the version would name that tab's work.
+   * Name the stored document's current revision on branch `branch` (default: main): records
+   * `{ id, name, description, revision, snapshotSha256, createdAt, branch }` in a new version list, committed by the main head like
+   * a save. The snapshot it names is then kept for good. The caller saves first (autosave's
+   * `createVersion` does); a library that knows the branch refuses with `RevisionConflict` when
+   * another tab saved it meanwhile, since the version would name that tab's work.
    */
-  createVersion(id: string, meta: VersionMeta): Promise<LibraryResult<Version>> {
+  createVersion(id: string, meta: VersionMeta, branch?: string): Promise<LibraryResult<Version>> {
+    const on = branch ?? MAIN_BRANCH;
     return this.#run(async () => {
       if (!isStorableId(id)) return { ok: false, message: `There is no document "${id}".` };
+      if (!isBranchId(on)) return NO_BRANCH;
       const checked = versionMeta(meta);
       if (typeof checked === 'string') return { ok: false, message: checked };
-      return this.#locked(id, () =>
-        this.#changeVersions(id, (versions, head) => {
-          if (versions.length >= MAX_VERSIONS) {
-            return `A document holds at most ${MAX_VERSIONS} versions.`;
-          }
-          const version: Version = {
-            id: this.#newId(),
-            ...checked,
-            revision: head.revision,
-            snapshotSha256: head.snapshotSha256,
-            createdAt: this.#now().toISOString(),
-          };
-          return { versions: [...versions, version], result: version };
-        }),
-      );
+      return this.#locked(id, async () => {
+        let named: Head | null = null;
+        if (on !== MAIN_BRANCH) {
+          const listed = await this.#branch(id, on);
+          if (!listed.ok) return listed;
+          // Open first: it repairs the branch's head and deletes what a failed save left.
+          const opened = await this.#open(id, on);
+          if (!opened.ok) return opened;
+          named = await this.#head(id, on);
+          if (!named) return { ok: false, message: 'Its head cannot be read.' };
+          this.#checkRevision(id, on, named);
+        }
+        return this.#changeList(
+          VERSION_LIST,
+          id,
+          (versions, head) => {
+            if (versions.length >= MAX_VERSIONS) {
+              return `A document holds at most ${MAX_VERSIONS} versions.`;
+            }
+            const at = named ?? head;
+            const version: Version = {
+              id: this.#newId(),
+              ...checked,
+              revision: at.revision,
+              snapshotSha256: at.snapshotSha256,
+              createdAt: this.#now().toISOString(),
+              ...(on === MAIN_BRANCH ? {} : { branch: on }),
+            };
+            return { items: [...versions, version], result: version };
+          },
+          on === MAIN_BRANCH,
+        );
+      });
     });
   }
 
@@ -1106,90 +1377,97 @@ export class DocumentLibrary {
     return this.#run(async () => {
       if (!isStorableId(id)) return { ok: false, message: `There is no document "${id}".` };
       return this.#locked(id, () =>
-        this.#changeVersions(id, (versions) => {
-          const at = versions.findIndex((v) => v.id === versionId);
-          if (at < 0) return `There is no version "${versionId}" of it.`;
-          const checked = versionMeta({ name, description: versions[at]!.description });
-          if (typeof checked === 'string') return checked;
-          const renamed = { ...versions[at]!, name: checked.name };
-          return {
-            versions: versions.map((v, i) => (i === at ? renamed : v)),
-            result: renamed,
-          };
-        }),
+        this.#changeList(
+          VERSION_LIST,
+          id,
+          (versions) => {
+            const at = versions.findIndex((v) => v.id === versionId);
+            if (at < 0) return `There is no version "${versionId}" of it.`;
+            const checked = versionMeta({ name, description: versions[at]!.description });
+            if (typeof checked === 'string') return checked;
+            const renamed = { ...versions[at]!, name: checked.name };
+            return {
+              items: versions.map((v, i) => (i === at ? renamed : v)),
+              result: renamed,
+            };
+          },
+          true,
+        ),
       );
     });
   }
 
   /**
-   * Write a changed version list: `versions-<n+1>.json`, then the head naming it (the commit),
-   * then delete the older lists (best effort). Holds the document lock.
+   * Write a changed list of `kind`: list `n+1`, then the main head naming it (the commit), then
+   * delete the older lists (best effort). Holds the document lock. `checkMain`: refuse with
+   * `RevisionConflict` when another tab saved the main branch since this library opened it.
    */
-  async #changeVersions<T>(
+  async #changeList<T, R>(
+    kind: ListKind<T>,
     id: string,
-    change: (
-      versions: readonly Version[],
-      head: Head,
-    ) => string | { versions: Version[]; result: T },
-  ): Promise<LibraryResult<T>> {
+    change: (items: readonly T[], head: Head) => string | { items: T[]; result: R },
+    checkMain: boolean,
+    after?: (items: readonly T[], read: ListRead<T> & { ok: true }) => Promise<void>,
+  ): Promise<LibraryResult<R>> {
     // Open first: it repairs the head and deletes what a failed change left above it.
     const opened = await this.#open(id);
     if (!opened.ok) return opened;
     const dir = this.#dir(id);
     const head = await this.#head(id);
     if (!head) return { ok: false, message: 'Its head cannot be read.' };
-    this.#checkRevision(id, head);
-    const listed = await this.#versions(id, head);
+    if (checkMain) this.#checkRevision(id, MAIN_BRANCH, head);
+    const listed = await this.#readList(kind, id, head);
     if (!listed.ok) return listed;
-    const changed = change(listed.versions, head);
+    const changed = change(listed.items, head);
     if (typeof changed === 'string') return { ok: false, message: changed };
     // Never write a list that would not read back (a new id that is taken, say).
-    if (!parseVersions(changed.versions)) {
-      return { ok: false, message: 'The version list would not be valid.' };
+    if (!kind.parse(changed.items)) {
+      return { ok: false, message: `The list of ${kind.noun} would not be valid.` };
     }
-    const n = head.versions + 1;
-    const file: VersionsFile = {
-      format: 'manufakture-versions',
-      id,
-      generation: n,
-      versions: changed.versions,
-    };
-    await this.#backend.write(
-      `${dir}/${versionsName(n)}`,
-      encoder.encode(`${JSON.stringify(file, null, 2)}\n`),
-    );
+    const n = head[kind.field] + 1;
+    await this.#backend.write(`${dir}/${kind.file(n)}`, listFile(kind, id, n, changed.items));
     // Without locks another tab may have committed meanwhile: look again before the commit.
     const current = await this.#head(id);
     if (
       current?.revision !== head.revision ||
       current.snapshotSha256 !== head.snapshotSha256 ||
-      current.versions !== head.versions
+      current.versions !== head.versions ||
+      current.branches !== head.branches
     ) {
       throw new RevisionConflict(id, current?.revision ?? 0, head.revision);
     }
-    const next: Head = { ...head, versions: n };
+    const next: Head = { ...head, [kind.field]: n };
     await this.#backend.write(
       `${dir}/${HEAD}`,
       encoder.encode(`${JSON.stringify(next, null, 2)}\n`),
     );
     // The list before stays as the spare: without Web Locks another tab may have deleted this
     // one as stale before the head named it, and reading then falls back to the spare.
-    for (const old of revisions(await this.#backend.list(dir), VERSIONS)) {
+    for (const old of revisions(await this.#backend.list(dir), kind.pattern)) {
       if (old < n - 1)
-        await this.#backend.remove(`${dir}/${versionsName(old)}`).catch(() => undefined);
+        await this.#backend.remove(`${dir}/${kind.file(old)}`).catch(() => undefined);
     }
+    if (after) await after(changed.items, listed).catch(() => undefined);
     return { ok: true, value: changed.result };
   }
 
-  /** The document's named versions, oldest first. Only reads. */
-  listVersions(id: string): Promise<LibraryResult<Version[]>> {
+  /**
+   * The document's named versions, oldest first: every branch's when `branch` is not given (a
+   * version names its own branch, so a pin needs no branch), else that branch's. Only reads.
+   */
+  listVersions(id: string, branch?: string): Promise<LibraryResult<Version[]>> {
     return this.#run(async () => {
       if (!isStorableId(id)) return { ok: false, message: `There is no document "${id}".` };
       return this.#locked(id, async () => {
         const names = await this.#backend.list(this.#dir(id));
         if (names.length === 0) return { ok: false, message: `There is no document "${id}".` };
-        const listed = await this.#versions(id, await this.#head(id), names);
-        return listed.ok ? { ok: true, value: listed.versions } : listed;
+        const listed = await this.#readList(VERSION_LIST, id, await this.#head(id), names);
+        if (!listed.ok) return listed;
+        const items =
+          branch === undefined
+            ? listed.items
+            : listed.items.filter((v) => versionBranch(v) === branch);
+        return { ok: true, value: items };
       });
     });
   }
@@ -1206,9 +1484,9 @@ export class DocumentLibrary {
     return this.#run(async () => {
       if (!isStorableId(id)) return { ok: false, message: `There is no document "${id}".` };
       return this.#locked(id, async () => {
-        const listed = await this.#versions(id, await this.#head(id));
+        const listed = await this.#readList(VERSION_LIST, id, await this.#head(id));
         if (!listed.ok) return listed;
-        const version = listed.versions.find((v) => v.id === versionId);
+        const version = listed.items.find((v) => v.id === versionId);
         if (!version) return { ok: false, message: `There is no version "${versionId}" of it.` };
         return this.#readVersion(id, version);
       });
@@ -1219,12 +1497,14 @@ export class DocumentLibrary {
     id: string,
     version: Version,
   ): Promise<LibraryResult<{ version: Version; document: ManufaktureDocument }>> {
-    const bytes = await this.#backend.read(`${this.#dir(id)}/${snapshotName(version.revision)}`);
+    const branch = versionBranch(version);
+    const dir = this.#dir(id, branch);
+    const bytes = await this.#backend.read(`${dir}/${snapshotName(version.revision)}`);
     if (bytes && (await sha256Hex(bytes)) === version.snapshotSha256) {
       const stored = await this.#decodeSnapshot(id, bytes);
       if (stored) return { ok: true, value: { version, document: stored } };
     }
-    const rebuilt = await this.#readRevision(id, version.revision);
+    const rebuilt = await this.#readRevision(id, branch, version.revision);
     if (rebuilt.ok) {
       const text = encodeStored(rebuilt.value.document).text;
       if ((await sha256Hex(encoder.encode(text))) === version.snapshotSha256) {
@@ -1243,9 +1523,10 @@ export class DocumentLibrary {
 
   async #readSnapshot(
     id: string,
+    branch: string,
     rev: number,
   ): Promise<{ bytes: Uint8Array; document: ManufaktureDocument } | null> {
-    const bytes = await this.#backend.read(`${this.#dir(id)}/${snapshotName(rev)}`);
+    const bytes = await this.#backend.read(`${this.#dir(id, branch)}/${snapshotName(rev)}`);
     if (!bytes) return null;
     const document = await this.#decodeSnapshot(id, bytes);
     return document ? { bytes, document } : null;
@@ -1258,31 +1539,40 @@ export class DocumentLibrary {
    * the replay (by its SHA-256, and by canonical `serialize` when the snapshot was written in an
    * older format); on a mismatch, or a command that no longer applies, the replay is logged and
    * goes on from the snapshot. A revision whose log segment starts a history (`base: null`)
-   * cannot be replayed into.
+   * cannot be replayed into. Of branch `options.branch` (default: main): each branch's revisions are its own.
    */
   readRevision(
     id: string,
     rev: number,
-    options: { from?: number } = {},
+    options: { from?: number; branch?: string } = {},
   ): Promise<LibraryResult<ReadRevision>> {
+    const on = options.branch ?? MAIN_BRANCH;
     return this.#run(async () => {
       if (!isStorableId(id)) return { ok: false, message: `There is no document "${id}".` };
-      return this.#locked(id, () => this.#readRevision(id, rev, options.from));
+      if (!isBranchId(on)) return NO_BRANCH;
+      return this.#locked(id, async () => {
+        if (on !== MAIN_BRANCH) {
+          const listed = await this.#branch(id, on);
+          if (!listed.ok) return listed;
+        }
+        return this.#readRevision(id, on, rev, options.from);
+      });
     });
   }
 
   async #readRevision(
     id: string,
+    branch: string,
     rev: number,
     from?: number,
   ): Promise<LibraryResult<ReadRevision>> {
-    const dir = this.#dir(id);
-    let head = await this.#head(id);
+    const dir = this.#dir(id, branch);
+    let head = await this.#head(id, branch);
     if (!head) {
       // Repair it first, as opening does.
-      const opened = await this.#open(id);
+      const opened = await this.#open(id, branch);
       if (!opened.ok) return opened;
-      head = await this.#head(id);
+      head = await this.#head(id, branch);
       if (!head) return { ok: false, message: 'Its head cannot be read.' };
     }
     if (!Number.isSafeInteger(rev) || rev < 1 || rev > head.revision) {
@@ -1299,14 +1589,14 @@ export class DocumentLibrary {
     }
     let start: { rev: number; document: ManufaktureDocument } | null = null;
     for (const s of candidates) {
-      const stored = await this.#readSnapshot(id, s);
+      const stored = await this.#readSnapshot(id, branch, s);
       if (stored) {
         start = { rev: s, document: stored.document };
         break;
       }
     }
     if (!start) {
-      const first = await this.#historyStart(id, names);
+      const first = await this.#historyStart(id, branch, names);
       return {
         ok: false,
         message:
@@ -1321,12 +1611,13 @@ export class DocumentLibrary {
     const mismatches: number[] = [];
     let doc = start.document;
     for (let k = start.rev + 1; k <= rev; k++) {
-      const step = await this.#replay(id, k, doc, logs);
+      const step = await this.#replay(id, branch, k, doc, logs);
       if (kept.has(k)) {
-        const stored = await this.#readSnapshot(id, k);
+        const stored = await this.#readSnapshot(id, branch, k);
         if (stored && !(step.ok && (await sameStored(step.document, stored)))) {
           this.#warn(
-            `manufakture: replaying the log of document ${id} does not reproduce revision ${k}` +
+            `manufakture: replaying the log of document ${id}${onBranch(branch)} does not ` +
+              `reproduce revision ${k}` +
               `${step.ok ? '' : ` (${step.message})`}; the snapshot is used.`,
           );
           mismatches.push(k);
@@ -1341,14 +1632,15 @@ export class DocumentLibrary {
       // Go on from the next retained snapshot that reads, if there is one before `rev`.
       let resumed: { rev: number; document: ManufaktureDocument } | null = null;
       for (const r of [...kept].filter((r) => r > k).sort((a, b) => a - b)) {
-        const stored = await this.#readSnapshot(id, r);
+        const stored = await this.#readSnapshot(id, branch, r);
         if (stored) {
           resumed = { rev: r, document: stored.document };
           break;
         }
       }
       this.#warn(
-        `manufakture: revision ${k} of document ${id} cannot be rebuilt (${step.message})` +
+        `manufakture: revision ${k} of document ${id}${onBranch(branch)} cannot be rebuilt ` +
+          `(${step.message})` +
           (resumed ? `; going on from revision ${resumed.rev}.` : '.'),
       );
       if (!resumed) {
@@ -1364,13 +1656,14 @@ export class DocumentLibrary {
   /** Revision `rev` from revision `rev - 1`: its log segment's commands applied to `doc`. */
   async #replay(
     id: string,
+    branch: string,
     rev: number,
     doc: ManufaktureDocument,
     logs: ReadonlySet<number>,
   ): Promise<{ ok: true; document: ManufaktureDocument } | { ok: false; message: string }> {
     // A save without commands writes no segment: the document did not change.
     if (!logs.has(rev)) return { ok: true, document: doc };
-    const bytes = await this.#backend.read(`${this.#dir(id)}/${logName(rev)}`);
+    const bytes = await this.#backend.read(`${this.#dir(id, branch)}/${logName(rev)}`);
     let segment: unknown;
     try {
       segment = bytes ? JSON.parse(decoder.decode(bytes)) : null;
@@ -1406,13 +1699,17 @@ export class DocumentLibrary {
 
   /**
    * The oldest revision that can be read back: the oldest retained snapshot that reads. A
-   * document saved before snapshots were kept as history starts at its oldest remaining one.
+   * document saved before snapshots were kept as history starts at its oldest remaining one. Of
+   * branch `branch` (default: main).
    */
-  historyStart(id: string): Promise<LibraryResult<number>> {
+  historyStart(id: string, branch?: string): Promise<LibraryResult<number>> {
+    const on = branch ?? MAIN_BRANCH;
     return this.#run(async () => {
       if (!isStorableId(id)) return { ok: false, message: `There is no document "${id}".` };
+      if (!isBranchId(on)) return NO_BRANCH;
       return this.#locked(id, async () => {
-        const first = await this.#historyStart(id, await this.#backend.list(this.#dir(id)));
+        const names = await this.#backend.list(this.#dir(id, on));
+        const first = await this.#historyStart(id, on, names);
         return first === null
           ? { ok: false, message: 'No saved copy of it can be read.' }
           : { ok: true, value: first };
@@ -1420,19 +1717,33 @@ export class DocumentLibrary {
     });
   }
 
-  async #historyStart(id: string, names: readonly string[]): Promise<number | null> {
+  async #historyStart(
+    id: string,
+    branch: string,
+    names: readonly string[],
+  ): Promise<number | null> {
     for (const rev of revisions(names, SNAPSHOT).reverse()) {
-      if (await this.#readSnapshot(id, rev)) return rev;
+      if (await this.#readSnapshot(id, branch, rev)) return rev;
     }
     return null;
   }
 
-  /** Rename a stored document, as a logged `renameDocument` command. */
-  rename(id: string, name: string): Promise<LibraryResult<DocumentSummary>> {
+  /**
+   * Rename a stored document, as a logged `renameDocument` command on branch `branch` (default:
+   * main). The list of documents shows the
+   * main branch's name.
+   */
+  rename(id: string, name: string, branch?: string): Promise<LibraryResult<DocumentSummary>> {
+    const on = branch ?? MAIN_BRANCH;
     return this.#run(async () => {
       if (!isStorableId(id)) return { ok: false, message: `There is no document "${id}".` };
+      if (!isBranchId(on)) return NO_BRANCH;
       return this.#locked(id, async () => {
-        const opened = await this.#open(id);
+        if (on !== MAIN_BRANCH) {
+          const listed = await this.#branch(id, on);
+          if (!listed.ok) return listed;
+        }
+        const opened = await this.#open(id, on);
         if (!opened.ok) return opened;
         const command: Command = { type: 'renameDocument', name };
         const applied = applyCommand(opened.value.document, command);
@@ -1444,17 +1755,28 @@ export class DocumentLibrary {
           at: this.#now().toISOString(),
         };
         // It builds on what it just read, under the lock.
-        this.#known.set(id, opened.value.revision);
-        return { ok: true, value: await this.#save(applied.value.document, [entry]) };
+        this.#known.set(this.#key(id, on), opened.value.revision);
+        return { ok: true, value: await this.#save(applied.value.document, [entry], on) };
       });
     });
   }
 
-  /** A copy under a new id, named "<name> (copy)", with its own files and no history. */
-  duplicate(id: string): Promise<LibraryResult<DocumentSummary>> {
+  /**
+   * A copy under a new id, named "<name> (copy)", with its own files and no history or
+   * branches: of branch `branch` (default: main).
+   */
+  duplicate(id: string, branch?: string): Promise<LibraryResult<DocumentSummary>> {
+    const on = branch ?? MAIN_BRANCH;
     return this.#run(async () => {
       if (!isStorableId(id)) return { ok: false, message: `There is no document "${id}".` };
-      const opened = await this.#locked(id, () => this.#open(id));
+      if (!isBranchId(on)) return NO_BRANCH;
+      const opened = await this.#locked(id, async (): Promise<LibraryResult<Opened>> => {
+        if (on !== MAIN_BRANCH) {
+          const listed = await this.#branch(id, on);
+          if (!listed.ok) return listed;
+        }
+        return this.#open(id, on);
+      });
       if (!opened.ok) return opened;
       return { ok: true, value: (await this.#saveCopy(opened.value.document)).summary };
     });
@@ -1476,7 +1798,7 @@ export class DocumentLibrary {
   ): Promise<{ summary: DocumentSummary; document: ManufaktureDocument }> {
     const name = `${doc.name} (copy)`.slice(0, MAX_DOCUMENT_NAME);
     const document = { ...doc, id: this.#newId(), name };
-    const summary = await this.#locked(document.id, () => this.#save(document, []));
+    const summary = await this.#locked(document.id, () => this.#save(document, [], MAIN_BRANCH));
     return { summary, document };
   }
 
@@ -1518,20 +1840,14 @@ export class DocumentLibrary {
     for (const { version, document } of ordered) {
       const stored = encodeStored({ ...document, id });
       if (last?.text !== stored.text) last = { text: stored.text, ...(await write(stored)) };
-      records.push({ ...version, revision: rev, snapshotSha256: last.sha256 });
+      // Branches are not exported: every imported version is a revision of the main branch.
+      const record: Version = { ...version, revision: rev, snapshotSha256: last.sha256 };
+      delete record.branch;
+      records.push(record);
     }
     const stored = encodeStored(doc);
     const written = await write(stored);
-    const file: VersionsFile = {
-      format: 'manufakture-versions',
-      id,
-      generation: 1,
-      versions: records,
-    };
-    await this.#backend.write(
-      `${dir}/${versionsName(1)}`,
-      encoder.encode(`${JSON.stringify(file, null, 2)}\n`),
-    );
+    await this.#backend.write(`${dir}/${versionsName(1)}`, listFile(VERSION_LIST, id, 1, records));
     const now = this.#now().toISOString();
     const head: Head = {
       format: 'manufakture-head',
@@ -1544,6 +1860,7 @@ export class DocumentLibrary {
       createdAt: now,
       savedAt: now,
       versions: 1,
+      branches: 0,
     };
     await this.#backend.write(
       `${dir}/${HEAD}`,
@@ -1553,46 +1870,277 @@ export class DocumentLibrary {
     return summaryOf(head);
   }
 
-  /** Delete a document and everything stored with it. */
+  /** Delete a document and everything stored with it, every branch included. */
   remove(id: string): Promise<void> {
     if (!isStorableId(id)) return Promise.reject(new Error(`Cannot delete a document "${id}"`));
     return this.#run(() =>
       this.#locked(id, async () => {
         await this.#backend.removeTree(this.#dir(id));
         this.#blobStores.delete(id);
-        this.#known.delete(id);
-        this.#written.delete(id);
+        for (const map of [this.#known, this.#written]) {
+          for (const key of [...map.keys()]) {
+            if (key === id || key.startsWith(`${id}/`)) map.delete(key);
+          }
+        }
       }),
     );
   }
 
-  /** A new, empty-history document saved as revision 1. */
+  /** A new, empty-history document saved as revision 1 of its main branch. */
   create(doc: ManufaktureDocument): Promise<DocumentSummary> {
-    return this.save(doc, []);
+    return this.save(doc, [], MAIN_BRANCH);
+  }
+
+  /** The document's branches: main first, then the others, oldest first. Only reads. */
+  listBranches(id: string): Promise<LibraryResult<Branch[]>> {
+    return this.#run(async () => {
+      if (!isStorableId(id)) return { ok: false, message: `There is no document "${id}".` };
+      return this.#locked(id, async () => {
+        const names = await this.#backend.list(this.#dir(id));
+        if (names.length === 0) return { ok: false, message: `There is no document "${id}".` };
+        const head = await this.#head(id);
+        const listed = await this.#readList(BRANCH_LIST, id, head, names);
+        if (!listed.ok) return listed;
+        const main: Branch = {
+          id: MAIN_BRANCH,
+          name: MAIN_BRANCH_NAME,
+          fromVersion: null,
+          createdAt: head?.createdAt ?? '',
+        };
+        return { ok: true, value: [main, ...listed.items] };
+      });
+    });
   }
 
   /**
-   * The document as a `.mfk` file (see mfk.ts); with `versions`, its named versions and their
-   * documents go in too (the manifest), so pins in other documents still resolve after an import.
+   * A new branch of document `id`, starting from version `fromVersion` (of any branch): its
+   * directory gets that version's document as revision 1 and a head, then the branch list
+   * naming it is committed by the main head. A crash before that commit leaves a directory no
+   * list names, which the next branch change deletes. The new branch is not opened.
+   */
+  createBranch(id: string, fromVersion: string, name: string): Promise<LibraryResult<Branch>> {
+    return this.#run(async () => {
+      if (!isStorableId(id)) return { ok: false, message: `There is no document "${id}".` };
+      const checked = branchName(name);
+      if (checked === null) {
+        return {
+          ok: false,
+          message: `A branch name must be 1 to ${MAX_DOCUMENT_NAME} characters.`,
+        };
+      }
+      return this.#locked(id, async () => {
+        const opened = await this.#open(id);
+        if (!opened.ok) return opened;
+        const versions = await this.#readList(VERSION_LIST, id, await this.#head(id));
+        if (!versions.ok) return versions;
+        const version = versions.items.find((v) => v.id === fromVersion);
+        if (!version) return { ok: false, message: `There is no version "${fromVersion}" of it.` };
+        const branches = await this.#readList(BRANCH_LIST, id, await this.#head(id));
+        if (!branches.ok) return branches;
+        const problem = branchProblem(branches.items, checked);
+        if (problem) return { ok: false, message: problem };
+        if (branches.items.length >= MAX_BRANCHES) {
+          return { ok: false, message: `A document holds at most ${MAX_BRANCHES} branches.` };
+        }
+        const read = await this.#readVersion(id, version);
+        if (!read.ok) return read;
+
+        const branch: Branch = {
+          id: this.#newId(),
+          name: checked,
+          fromVersion: version.id,
+          createdAt: this.#now().toISOString(),
+        };
+        if (!isBranchId(branch.id) || branch.id === MAIN_BRANCH) {
+          return { ok: false, message: 'The new branch has no usable id.' };
+        }
+        // Its directory first, whole: whatever an earlier attempt left there goes.
+        const dir = this.#dir(id, branch.id);
+        await this.#backend.removeTree(dir);
+        const stored = encodeStored(read.value.document);
+        const blobs = this.#blobs(id);
+        for (const [sha, data] of stored.blobs) await blobs.put(sha, data);
+        const snapshot = encoder.encode(stored.text);
+        await this.#backend.write(`${dir}/${snapshotName(1)}`, snapshot);
+        const head: Head = {
+          format: 'manufakture-head',
+          id,
+          name: read.value.document.name,
+          revision: 1,
+          snapshotSha256: await sha256Hex(snapshot),
+          snapshotBytes: snapshot.length,
+          blobBytes: stored.blobBytes,
+          createdAt: branch.createdAt,
+          savedAt: branch.createdAt,
+          ...NO_LISTS,
+        };
+        await this.#backend.write(
+          `${dir}/${HEAD}`,
+          encoder.encode(`${JSON.stringify(head, null, 2)}\n`),
+        );
+        const r = await this.#changeList(
+          BRANCH_LIST,
+          id,
+          (items) => {
+            const again = branchProblem(items, checked);
+            if (again) return again;
+            return { items: [...items, branch], result: branch };
+          },
+          false,
+          (items, listed) => this.#dropOrphans(id, items, listed),
+        );
+        if (!r.ok) return r;
+        // Without Web Locks another tab's branch change may have taken this directory for an
+        // orphan between its writes and the commit: write it again if its head is gone.
+        if (!(await this.#head(id, branch.id))) {
+          this.#warn(`manufakture: branch ${branch.id} of document ${id} was written again.`);
+          await this.#backend.write(`${dir}/${snapshotName(1)}`, snapshot);
+          await this.#backend.write(
+            `${dir}/${HEAD}`,
+            encoder.encode(`${JSON.stringify(head, null, 2)}\n`),
+          );
+        }
+        this.#known.set(this.#key(id, branch.id), 1);
+        return r;
+      });
+    });
+  }
+
+  /** Rename branch `branch` (not main). */
+  renameBranch(id: string, branch: string, name: string): Promise<LibraryResult<Branch>> {
+    return this.#run(async () => {
+      if (!isStorableId(id)) return { ok: false, message: `There is no document "${id}".` };
+      if (branch === MAIN_BRANCH) {
+        return { ok: false, message: 'The main branch cannot be renamed.' };
+      }
+      const checked = branchName(name);
+      if (checked === null) {
+        return {
+          ok: false,
+          message: `A branch name must be 1 to ${MAX_DOCUMENT_NAME} characters.`,
+        };
+      }
+      return this.#locked(id, () =>
+        this.#changeList(
+          BRANCH_LIST,
+          id,
+          (items) => {
+            const at = items.findIndex((b) => b.id === branch);
+            if (at < 0) return 'There is no such branch.';
+            const problem = branchProblem(
+              items.filter((b) => b.id !== branch),
+              checked,
+            );
+            if (problem) return problem;
+            const renamed = { ...items[at]!, name: checked };
+            return { items: items.map((b, i) => (i === at ? renamed : b)), result: renamed };
+          },
+          false,
+        ),
+      );
+    });
+  }
+
+  /**
+   * Delete branch `branch` (not main): the branch list without it is committed by the main
+   * head, then its directory goes (best effort; a directory no list names is deleted by the
+   * next branch change). A branch that a version names is kept: versions are for good, and
+   * other documents may pin them.
+   */
+  deleteBranch(id: string, branch: string): Promise<LibraryResult<void>> {
+    return this.#run(async () => {
+      if (!isStorableId(id)) return { ok: false, message: `There is no document "${id}".` };
+      if (branch === MAIN_BRANCH) {
+        return { ok: false, message: 'The main branch cannot be deleted.' };
+      }
+      return this.#locked(id, async () => {
+        const opened = await this.#open(id);
+        if (!opened.ok) return opened;
+        const versions = await this.#readList(VERSION_LIST, id, await this.#head(id));
+        if (!versions.ok) return versions;
+        const named = versions.items.filter((v) => v.branch === branch);
+        if (named.length > 0) {
+          return {
+            ok: false,
+            message:
+              `It has ${named.length === 1 ? 'a named version' : `${named.length} named versions`}` +
+              ', which are kept for good, so it cannot be deleted.',
+          };
+        }
+        const r = await this.#changeList(
+          BRANCH_LIST,
+          id,
+          (items) =>
+            items.some((b) => b.id === branch)
+              ? { items: items.filter((b) => b.id !== branch), result: undefined }
+              : 'There is no such branch.',
+          false,
+          (items, listed) => this.#dropOrphans(id, items, listed),
+        );
+        if (!r.ok) return r;
+        const key = this.#key(id, branch);
+        this.#known.delete(key);
+        this.#written.delete(key);
+        return r;
+      });
+    });
+  }
+
+  /**
+   * Delete the branch directories the committed list `items` does not name: a branch deleted,
+   * or one whose creation died before its commit. Not when the list was read from the spare (a
+   * branch named only in the missing list would look unnamed), and never a branch a version
+   * names, even when no list does (a list lost to a release from before branches, or rebuilt
+   * without a head): its snapshots are what that version, and the pins on it, read. Nothing is
+   * deleted when the version list cannot be read.
+   */
+  async #dropOrphans(
+    id: string,
+    items: readonly Branch[],
+    read: ListRead<Branch> & { ok: true },
+  ): Promise<void> {
+    if (read.fallback) return;
+    const versions = await this.#readList(VERSION_LIST, id, await this.#head(id));
+    if (!versions.ok || versions.fallback) return;
+    const keep = new Set([
+      ...items.map((b) => b.id),
+      ...versions.items.map((v) => versionBranch(v)),
+    ]);
+    const root = `${this.#dir(id)}/${BRANCH_DIR}`;
+    for (const name of await this.#backend.list(root)) {
+      if (!keep.has(name) && isBranchId(name)) await this.#backend.removeTree(`${root}/${name}`);
+    }
+  }
+
+  /**
+   * The document as a `.mfk` file (see mfk.ts), of branch `options.branch` (default: main); with
+   * `versions`, its named versions (of every branch) and their documents go in too (the
+   * manifest), so pins in other documents still resolve after an import.
    */
   exportMfk(
     id: string,
-    options: { versions?: boolean } = {},
+    options: { versions?: boolean; branch?: string } = {},
   ): Promise<LibraryResult<{ name: string; bytes: Uint8Array }>> {
+    const on = options.branch ?? MAIN_BRANCH;
     return this.#run(async () => {
       if (!isStorableId(id)) return { ok: false, message: `There is no document "${id}".` };
+      if (!isBranchId(on)) return NO_BRANCH;
       const read = await this.#locked(
         id,
         async (): Promise<
           LibraryResult<{ document: ManufaktureDocument; versions: PackedVersion[] }>
         > => {
-          const opened = await this.#open(id);
+          if (on !== MAIN_BRANCH) {
+            const listed = await this.#branch(id, on);
+            if (!listed.ok) return listed;
+          }
+          const opened = await this.#open(id, on);
           if (!opened.ok) return opened;
           const versions: PackedVersion[] = [];
           if (options.versions) {
-            const listed = await this.#versions(id, await this.#head(id));
+            const listed = await this.#readList(VERSION_LIST, id, await this.#head(id));
             if (!listed.ok) return listed;
-            for (const v of listed.versions) {
+            for (const v of listed.items) {
               const r = await this.#readVersion(id, v);
               if (!r.ok) return r;
               versions.push(r.value);
@@ -1648,12 +2196,20 @@ export class DocumentLibrary {
         const taken = (await this.#backend.list(this.#dir(wanted.id))).length > 0;
         // A new id is a fresh UUID: nothing else can hold it.
         const target = taken ? { ...wanted, id: this.#newId() } : wanted;
-        if (versions.length === 0) return this.#save(target, []);
+        if (versions.length === 0) return this.#save(target, [], MAIN_BRANCH);
         return this.#saveImported(target, versions);
       });
       return { ok: true, value: { summary, migrated: decoded.migrated } };
     });
   }
+}
+
+/** Why a branch cannot be called `name` among `others` (main included), or null. */
+function branchProblem(others: readonly Branch[], name: string): string | null {
+  if (name === MAIN_BRANCH_NAME || others.some((b) => b.name === name)) {
+    return `There is a branch called "${name}" already.`;
+  }
+  return null;
 }
 
 /** A version with its document, as a `.mfk` carries it. */

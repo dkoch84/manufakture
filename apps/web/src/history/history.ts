@@ -21,11 +21,15 @@ import {
   type ViewSettingsStore,
 } from '../state/viewSettings';
 
-/** What the history needs of the document library. */
+/**
+ * What the history needs of the document library. The branch arguments are optional: without
+ * one, `listVersions` lists every branch's versions (a version names its own branch) and the
+ * others mean the branch the library has the document open on (main when none).
+ */
 export interface HistorySource {
-  listVersions(id: string): Promise<LibraryResult<Version[]>>;
-  readHistory(id: string): Promise<LibraryResult<LoggedRevision[]>>;
-  historyStart(id: string): Promise<LibraryResult<number>>;
+  listVersions(id: string, branch?: string): Promise<LibraryResult<Version[]>>;
+  readHistory(id: string, branch?: string): Promise<LibraryResult<LoggedRevision[]>>;
+  historyStart(id: string, branch?: string): Promise<LibraryResult<number>>;
   readVersion(
     id: string,
     versionId: string,
@@ -33,15 +37,19 @@ export interface HistorySource {
   readRevision(
     id: string,
     rev: number,
+    options?: { branch?: string },
   ): Promise<LibraryResult<{ document: ManufaktureDocument; revision: number }>>;
 }
 
 /** Name the open document's current state (autosave's `createVersion`: it saves first). */
 export type CreateVersion = (meta: VersionMeta) => Promise<LibraryResult<Version>>;
 
-/** Something in the history that can be viewed: a named version, or a saved revision. */
+/**
+ * Something in the history that can be viewed: a named version (which knows its branch), or a
+ * saved revision of a branch (`branch` absent: the one the library has open).
+ */
 export type HistoryTarget =
-  { kind: 'version'; version: Version } | { kind: 'revision'; revision: number };
+  { kind: 'version'; version: Version } | { kind: 'revision'; revision: number; branch?: string };
 
 /** How the viewer's banner and the restore's undo label name a target. */
 export function targetLabel(target: HistoryTarget): string {
@@ -53,9 +61,9 @@ export function targetLabel(target: HistoryTarget): string {
 /** Whether two targets are the same version or revision. */
 export function sameTarget(a: HistoryTarget | null, b: HistoryTarget | null): boolean {
   if (!a || !b || a.kind !== b.kind) return false;
-  return a.kind === 'version'
-    ? a.version.id === (b as { version: Version }).version.id
-    : a.revision === (b as { revision: number }).revision;
+  if (a.kind === 'version') return a.version.id === (b as { version: Version }).version.id;
+  const other = b as { revision: number; branch?: string };
+  return a.revision === other.revision && a.branch === other.branch;
 }
 
 /** The document a target names, read back from the library (checked there). */
@@ -69,7 +77,9 @@ export async function readTarget(
       const r = await source.readVersion(documentId, target.version.id);
       return r.ok ? { ok: true, value: r.value.document } : r;
     }
-    const r = await source.readRevision(documentId, target.revision);
+    const r = await (target.branch === undefined
+      ? source.readRevision(documentId, target.revision)
+      : source.readRevision(documentId, target.revision, { branch: target.branch }));
     return r.ok ? { ok: true, value: r.value.document } : r;
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : String(e) };

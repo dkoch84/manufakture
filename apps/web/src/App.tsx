@@ -8,11 +8,13 @@ import { createStore } from 'zustand/vanilla';
 import { homeActions, openedMessage, type ActionOutcome } from './home/actions';
 import { HomeScreen } from './home/HomeScreen';
 import { startAutosave, type Autosave, type SaveStatus } from './persistence/autosave';
-import type { DocumentLibrary } from './persistence/library';
+import { MAIN_BRANCH, type Branch, type DocumentLibrary } from './persistence/library';
 import { requestPersistence, storageInfo } from './persistence/storage';
 import {
+  branchFromSearch,
   docIdFromSearch,
   partIdFromSearch,
+  showBranchInUrl,
   showDocIdInUrl,
   showPartIdInUrl,
 } from './persistence/url';
@@ -38,6 +40,7 @@ import {
   type ModelStore,
   type ViewSession,
 } from './model/model';
+import { BranchSwitcher } from './history/BranchSwitcher';
 import { HistoryPanel } from './history/HistoryPanel';
 import { ViewerBanner } from './history/ViewerBanner';
 import {
@@ -224,6 +227,15 @@ export function App({
   } | null>(null);
   // Persistence: the library once open, autosave, and which screen shows.
   const [library, setLibrary] = useState<DocumentLibrary | null>(null);
+  // The open document's branch (main for a document never branched, or not saved), its
+  // branches as the library lists them (null: none to show), and a counter that moves when
+  // the list changes, so it is read again.
+  // A store, so autosave and the home actions read it when a change is made: `show` sets it at
+  // once, so an edit made while a switch is in flight is saved to the branch it was made on.
+  const [branchStore] = useState(() => createStore<{ id: string }>()(() => ({ id: MAIN_BRANCH })));
+  const branch = useStore(branchStore, (s) => s.id);
+  const [branches, setBranches] = useState<readonly Branch[] | null>(null);
+  const [branchesRevision, setBranchesRevision] = useState(0);
   const [autosave, setAutosave] = useState<Autosave | null>(null);
   const [docReady, setDocReady] = useState(libraryPromise === null);
   const [view, setView] = useState<'editor' | 'home'>('editor');
@@ -455,16 +467,24 @@ export function App({
   }, [documents, loader, pruneImports]);
   // Open a document in the editor: the imported reference bodies of the one before are
   // dropped (feature ids repeat across documents), and this one's are read again from its files.
+  // A stored document shows on the branch it was opened on (main unless `branch` says).
   const show = useCallback(
-    (doc: ManufaktureDocument, options: { stored: boolean; stayHome?: boolean }) => {
+    (
+      doc: ManufaktureDocument,
+      options: { stored: boolean; stayHome?: boolean; branch?: string },
+    ) => {
       loader.exchanger?.retain(new Set());
       setImports([]);
       documents.getState().load(doc);
       setRestoreRequest(hasReferenceImports(doc) ? doc : null);
+      const on = options.stored ? (options.branch ?? MAIN_BRANCH) : MAIN_BRANCH;
+      branchStore.setState({ id: on });
+      setBranchesRevision((n) => n + 1);
       showDocIdInUrl(options.stored ? doc.id : null);
+      showBranchInUrl(options.stored && on !== MAIN_BRANCH ? on : null);
       if (!options.stayHome) setView('editor');
     },
-    [loader, documents],
+    [loader, documents, branchStore],
   );
   const restoring = useRef<ManufaktureDocument | null>(null);
   useEffect(() => {
@@ -519,21 +539,36 @@ export function App({
         return;
       }
       if (!loader.initialDocument) {
-        const wanted =
-          initialDocumentId !== undefined
-            ? initialDocumentId
-            : docIdFromSearch(window.location.search);
+        const fromUrl = initialDocumentId === undefined;
+        const wanted = fromUrl ? docIdFromSearch(window.location.search) : initialDocumentId;
+        // The branch the URL names, with its document; none means the main branch.
+        const wantedBranch =
+          fromUrl && wanted !== null ? branchFromSearch(window.location.search) : null;
         const id = wanted ?? (await lib.list()).find((d) => d.damaged === undefined)?.id ?? null;
         if (id !== null) {
-          const opened = await lib.open(id);
+          let on = wantedBranch ?? MAIN_BRANCH;
+          let opened = await lib.open(id, on);
+          let gone: string | null = null;
+          if (!opened.ok && wantedBranch !== null) {
+            // A branch deleted since the link was made: its document, on main. The message never
+            // repeats the id from the link.
+            gone = opened.message;
+            on = MAIN_BRANCH;
+            opened = await lib.open(id);
+          }
           if (opened.ok) {
-            show(opened.value.document, { stored: true });
+            show(opened.value.document, { stored: true, branch: on });
             if (wanted === id && initialPartId !== null) {
               documents.getState().setActivePart(initialPartId);
             }
             // Recovered or migrated: say so, as the home screen does.
             const note = openedMessage(opened.value, true);
-            if (note) setIoStatus({ error: false, text: note });
+            if (gone !== null) {
+              setIoStatus({
+                error: true,
+                text: `The branch in the link cannot be opened (${gone}); this is the main branch.`,
+              });
+            } else if (note) setIoStatus({ error: false, text: note });
           } else {
             showDocIdInUrl(null);
             setHomeOutcome({
@@ -568,6 +603,7 @@ export function App({
     if (!library) return;
     const auto = startAutosave(documents, library, {
       ...autosaveDelays,
+      branch: () => branchStore.getState().id,
       onSaved: (summary) => {
         if (summary.id === documents.getState().document.id) showDocIdInUrl(summary.id);
         setHistoryRevision((n) => n + 1);
@@ -600,7 +636,7 @@ export function App({
       window.removeEventListener('beforeunload', onBeforeUnload);
       void auto.stop();
     };
-  }, [library, documents, autosaveDelays]);
+  }, [library, documents, autosaveDelays, branchStore]);
   const saveStatus = useStore(autosave?.status ?? NO_SAVING);
 
   // Test hooks for persistence (see testHooks.ts): named versions have no UI yet.
@@ -618,8 +654,17 @@ export function App({
 
   const actions = useMemo(
     () =>
-      library ? homeActions({ library, documents, autosave, show, download: downloadBytes }) : null,
-    [library, documents, autosave, show],
+      library
+        ? homeActions({
+            library,
+            documents,
+            autosave,
+            show,
+            download: downloadBytes,
+            branch: () => branchStore.getState().id,
+          })
+        : null,
+    [library, documents, autosave, show, branchStore],
   );
 
   // Viewing a version or a revision: read it back, build it in the worker beside the open
@@ -793,6 +838,107 @@ export function App({
     () => (viewing ? compareDocuments(document, viewing.document) : []),
     [viewing, document],
   );
+
+  // Branches: the open document's, read again when it is saved (the first save stores it) or
+  // its list changes. Null while it is not stored, so no switcher shows.
+  const storedOnce = historyRevision > 0;
+  useEffect(() => {
+    if (!library) return;
+    let cancelled = false;
+    void (async () => {
+      const r = (await library.has(document.id)) ? await library.listBranches(document.id) : null;
+      if (!cancelled) setBranches(r?.ok ? r.value : null);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [library, document.id, branch, branchesRevision, storedOnce]);
+
+  /**
+   * Save what is pending on the open branch; null when that worked, else why not. Switching
+   * branches never carries one branch's unsaved changes onto another.
+   */
+  const saveBranchFirst = useCallback(async (): Promise<string | null> => {
+    if (!autosave || (await autosave.flush())) return null;
+    const { message } = autosave.status.getState();
+    return `The changes made here are not saved (${message ?? 'the save failed'}), so the branch was not changed.`;
+  }, [autosave]);
+
+  /** Open branch `target` of the open document in the editor. Null when it worked. */
+  const openBranch = useCallback(
+    async (target: string, done?: string): Promise<string | null> => {
+      if (!library) return 'Nothing is saved here.';
+      const id = documents.getState().document.id;
+      const stop = await saveBranchFirst();
+      if (stop) return stop;
+      viewRequests.current += 1;
+      await endView();
+      const opened = await library.open(id, target);
+      if (!opened.ok) return `The branch cannot be opened: ${opened.message}`;
+      if (documents.getState().document.id !== id) return null;
+      show(opened.value.document, { stored: true, branch: target });
+      setIoStatus(done ? { error: false, text: done } : null);
+      return null;
+    },
+    [library, documents, saveBranchFirst, endView, show],
+  );
+  const onSwitchBranch = useCallback(
+    (target: string) => {
+      const name = branches?.find((b) => b.id === target)?.name ?? target;
+      void openBranch(target, `Switched to the branch ${name}.`).then((failure) => {
+        if (failure) setIoStatus({ error: true, text: failure });
+      });
+    },
+    [openBranch, branches],
+  );
+  const onRenameBranch = useCallback(
+    async (target: string, name: string): Promise<string | null> => {
+      if (!library) return 'Nothing is saved here.';
+      const r = await library.renameBranch(documents.getState().document.id, target, name);
+      setBranchesRevision((n) => n + 1);
+      return r.ok ? null : r.message;
+    },
+    [library, documents],
+  );
+  const onDeleteBranch = useCallback(
+    async (target: string): Promise<string | null> => {
+      if (!library) return 'Nothing is saved here.';
+      const id = documents.getState().document.id;
+      const name = branches?.find((b) => b.id === target)?.name ?? target;
+      // Its pending changes are saved first (they would otherwise be retried onto a branch that
+      // is gone), then it goes, then main opens. Main always: the deleted branch was the open one
+      // (the switcher offers Delete for the open branch only).
+      const stop = await saveBranchFirst();
+      if (stop) return stop;
+      const r = await library.deleteBranch(id, target);
+      setBranchesRevision((n) => n + 1);
+      if (!r.ok) return r.message;
+      return openBranch(MAIN_BRANCH, `Deleted the branch ${name}; this is the main branch.`);
+    },
+    [library, documents, branches, saveBranchFirst, openBranch],
+  );
+  // Branch from the version viewed: the new branch opens in the editor.
+  const onBranchFrom = useCallback(
+    async (name: string): Promise<string | null> => {
+      const v = viewingRef.current;
+      if (!library || !v || v.target.kind !== 'version') return null;
+      const id = documents.getState().document.id;
+      const stop = await saveBranchFirst();
+      if (stop) return stop;
+      const r = await library.createBranch(id, v.target.version.id, name);
+      if (!r.ok) return r.message;
+      setBranchesRevision((n) => n + 1);
+      const failure = await openBranch(
+        r.value.id,
+        `Created the branch ${r.value.name} from ${v.label}; changes now go to it.`,
+      );
+      if (failure) setIoStatus({ error: true, text: failure });
+      return null;
+    },
+    [library, documents, saveBranchFirst, openBranch],
+  );
+  const branchName =
+    branch === MAIN_BRANCH ? undefined : (branches?.find((b) => b.id === branch)?.name ?? branch);
 
   const shownBodies = useMemo(
     () =>
@@ -1172,6 +1318,16 @@ export function App({
             <span className="document-name" data-testid="document-name" title={document.name}>
               {document.name}
             </span>
+            {branches && (
+              <BranchSwitcher
+                branches={branches}
+                current={branch}
+                onSwitch={onSwitchBranch}
+                onRename={onRenameBranch}
+                onDelete={onDeleteBranch}
+                disabled={sketching.active || dialog !== null || locked || exportAll !== null}
+              />
+            )}
             <span
               className={failing ? 'save-status save-error' : 'save-status'}
               role={failing ? 'alert' : 'status'}
@@ -1266,6 +1422,8 @@ export function App({
           error={viewError}
           onBack={onBack}
           onRestore={onRestore}
+          onBranch={viewing.target.kind === 'version' && library ? onBranchFrom : undefined}
+          branchName={viewing.target.kind === 'version' ? viewing.target.version.name : ''}
         />
       )}
       {/* The part tools; in a sketch the sketch toolbar takes this row. While a past state is
@@ -1366,6 +1524,9 @@ export function App({
                   <HistoryPanel
                     source={library}
                     documentId={document.id}
+                    branch={branch}
+                    branchName={branchName}
+                    branches={branches}
                     refresh={historyRevision}
                     createVersion={autosave ? autosave.createVersion : null}
                     onView={(target) => void onView(target)}

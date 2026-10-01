@@ -1,10 +1,18 @@
 // The History panel, in the side panel: the open document's named versions, a form to create
 // one, and the timeline of saved revisions from the command log, grouped into sessions. Each
 // version and each readable revision can be viewed; viewing, restoring and going back are the
-// app's (App.tsx, with the viewer banner). The logic is in history.ts.
+// app's (App.tsx, with the viewer banner). With a `branch`, the timeline is that branch's own;
+// the versions are every branch's, each tagged with its branch when it is not this one, so a
+// version of another branch can be viewed and restored here. The logic is in history.ts.
 
 import { useEffect, useState, type FormEvent } from 'react';
-import type { Version } from '../persistence/library';
+import {
+  MAIN_BRANCH,
+  MAIN_BRANCH_NAME,
+  versionBranch,
+  type Branch,
+  type Version,
+} from '../persistence/library';
 import {
   formatWhen,
   sameTarget,
@@ -21,6 +29,14 @@ import './history.css';
 export interface HistoryPanelProps {
   source: HistorySource & { has(id: string): Promise<boolean> };
   documentId: string;
+  /**
+   * The branch whose history it shows, and its name (shown when it is not the main one). Absent:
+   * the source's default, as before branches.
+   */
+  branch?: string | undefined;
+  branchName?: string | undefined;
+  /** The document's branches, to name the branch of a version made on another one. */
+  branches?: readonly Branch[] | null | undefined;
   /** Changes whenever the document was saved, so the panel reads the history again. */
   refresh?: number;
   /** Name the current state; absent when versions cannot be made (nothing is saved). */
@@ -52,6 +68,9 @@ const LABELS_SHOWN = 3;
 export function HistoryPanel({
   source,
   documentId,
+  branch,
+  branchName,
+  branches = null,
   refresh = 0,
   createVersion = null,
   onView,
@@ -76,20 +95,33 @@ export function HistoryPanel({
           }
           return;
         }
-        const [versions, logged, start] = await Promise.all([
-          source.listVersions(documentId),
-          source.readHistory(documentId),
-          source.historyStart(documentId),
-        ]);
+        const [versions, logged, start] = await Promise.all(
+          branch === undefined
+            ? ([
+                source.listVersions(documentId),
+                source.readHistory(documentId),
+                source.historyStart(documentId),
+              ] as const)
+            : ([
+                source.listVersions(documentId),
+                source.readHistory(documentId, branch),
+                source.historyStart(documentId, branch),
+              ] as const),
+        );
         if (cancelled) return;
         if (!versions.ok) return setLoaded({ state: 'error', message: versions.message });
         if (!logged.ok) return setLoaded({ state: 'error', message: logged.message });
         const first = start.ok ? start.value : null;
+        // The timeline marks this branch's versions only: its revisions are its own.
+        const here =
+          branch === undefined
+            ? versions.value
+            : versions.value.filter((v) => versionBranch(v) === branch);
         setLoaded({
           state: 'ready',
           saved: true,
           versions: versions.value,
-          sessions: timeline(logged.value, versions.value, first),
+          sessions: timeline(logged.value, here, first),
           start: first,
         });
       } catch (e) {
@@ -101,7 +133,7 @@ export function HistoryPanel({
     return () => {
       cancelled = true;
     };
-  }, [source, documentId, refresh, reload]);
+  }, [source, documentId, branch, refresh, reload]);
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -136,6 +168,11 @@ export function HistoryPanel({
     >
       <div className="variables-head">
         <h2>History</h2>
+        {branchName && (
+          <span className="history-branch" data-testid="history-branch-name">
+            {branchName}
+          </span>
+        )}
         {createVersion && !form && (
           <button
             type="button"
@@ -211,6 +248,16 @@ export function HistoryPanel({
             currentId={viewingVersion}
             disabled={disabled}
             onPick={(version) => onView({ kind: 'version', version })}
+            tagOf={
+              branch === undefined
+                ? undefined
+                : (v) => {
+                    const of = versionBranch(v);
+                    if (of === branch) return null;
+                    const name = branches?.find((b) => b.id === of)?.name;
+                    return of === MAIN_BRANCH ? MAIN_BRANCH_NAME : (name ?? 'Another branch');
+                  }
+            }
           />
           <h3>Timeline</h3>
           {!loaded.saved && <p className="field-note">Nothing is saved yet.</p>}
@@ -223,7 +270,10 @@ export function HistoryPanel({
               <h4>{sessionSpan(session)}</h4>
               <ul className="history-list">
                 {session.revisions.map((r) => {
-                  const target: HistoryTarget = { kind: 'revision', revision: r.revision };
+                  const target: HistoryTarget =
+                    branch === undefined
+                      ? { kind: 'revision', revision: r.revision }
+                      : { kind: 'revision', revision: r.revision, branch };
                   const shown = sameTarget(viewing, target);
                   const more = r.labels.length - LABELS_SHOWN;
                   return (

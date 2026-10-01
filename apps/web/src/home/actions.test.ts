@@ -267,4 +267,90 @@ describe('home actions', () => {
     t.documents.getState().execute({ type: 'renameDocument', name: 'Agreed' }, 'Rename document');
     expect(await t.autosave.flush()).toBe(true);
   });
+
+  describe('on a branch of the open document', () => {
+    async function onBranch() {
+      const backend = new MemoryBackend();
+      const ids = ['v-1', 'b-1', 'copy-1'];
+      const library = new DocumentLibrary(backend, { newId: () => ids.shift()!, locks: null });
+      await library.save(partDocument('a', 'Alpha'));
+      const version = await library.createVersion('a', { name: 'Base' });
+      if (!version.ok) throw new Error(version.message);
+      const branch = await library.createBranch('a', version.value.id, 'Wide');
+      if (!branch.ok) throw new Error(branch.message);
+      await library.save(partDocument('a', 'Alpha on main'), []);
+      let current = 'main';
+      const documents = createDocumentStore(emptyDocument('scratch'));
+      const autosave = startAutosave(documents, library, {
+        delayMs: 10_000,
+        maxDelayMs: 10_000,
+        branch: () => current,
+      });
+      const actions = homeActions({
+        library,
+        documents,
+        autosave,
+        show: (doc, options) => {
+          current = options.branch ?? 'main';
+          documents.getState().load(doc);
+        },
+        download: vi.fn(),
+        branch: () => current,
+      });
+      const opened = await library.open('a', 'b-1');
+      if (!opened.ok) throw new Error(opened.message);
+      current = 'b-1';
+      documents.getState().load(opened.value.document);
+      return { backend, library, documents, autosave, actions, branch: () => current };
+    }
+
+    it('renames Main, not the branch it is open on', async () => {
+      const t = await onBranch();
+      expect(await t.actions.rename('a', 'Renamed main')).toEqual({
+        ok: true,
+        message: 'Renamed to Renamed main.',
+      });
+      // The open branch is untouched, in the editor and in storage; nothing waits to be saved.
+      expect(t.documents.getState().document.name).toBe('Alpha');
+      expect(t.documents.getState().undoLabel).toBeNull();
+      expect(t.autosave.unsaved()).toBe(false);
+      const reader = new DocumentLibrary(t.backend, { locks: null });
+      const main = await reader.open('a');
+      expect(main.ok && main.value.document.name).toBe('Renamed main');
+      const branch = await reader.open('a', 'b-1');
+      expect(branch.ok && branch.value.document.name).toBe('Alpha');
+      expect((await t.actions.list())[0]).toMatchObject({ id: 'a', name: 'Renamed main' });
+    });
+
+    it('duplicates the open document as it is open, on its branch', async () => {
+      const t = await onBranch();
+      const r = await t.actions.duplicate('a');
+      expect(r).toEqual({ ok: true, message: 'Made Alpha (copy).' });
+      const copy = await t.library.open('copy-1');
+      expect(copy.ok && copy.value.document.name).toBe('Alpha (copy)');
+    });
+
+    it('a branch deleted in another tab: Load the newer version opens main and drops the changes', async () => {
+      const t = await onBranch();
+      t.documents.getState().execute({ type: 'renameDocument', name: 'Mine' }, 'Rename document');
+      const other = new DocumentLibrary(t.backend, { locks: null });
+      expect((await other.deleteBranch('a', 'b-1')).ok).toBe(true);
+      expect(await t.autosave.flush()).toBe(false);
+      expect(t.autosave.status.getState().state).toBe('conflict');
+      expect(await t.actions.reloadNewer()).toEqual({
+        ok: true,
+        message:
+          'Its branch was deleted in another tab or window, so this is the main branch of ' +
+          'Alpha on main; the changes made here were dropped.',
+      });
+      expect(t.branch()).toBe('main');
+      expect(t.documents.getState().document.name).toBe('Alpha on main');
+      expect(t.autosave.unsaved()).toBe(false);
+      // Edits from here go to main.
+      t.documents.getState().execute({ type: 'renameDocument', name: 'Main again' }, 'Rename');
+      expect(await t.autosave.flush()).toBe(true);
+      const main = await other.open('a');
+      expect(main.ok && main.value.document.name).toBe('Main again');
+    });
+  });
 });

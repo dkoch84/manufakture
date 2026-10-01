@@ -277,4 +277,87 @@ describe('autosave', () => {
     expect(r).toEqual({ ok: false, message: 'The document could not be saved: The disk is full' });
     expect(await library.has('doc-1')).toBe(false);
   });
+
+  describe('on branches', () => {
+    /** doc-1 stored as "One" with version A, and the branch b-1 from it. */
+    async function branched() {
+      const backend = new MemoryBackend();
+      const ids = ['v-1', 'b-1', 'v-2'];
+      const library = new DocumentLibrary(backend, { locks: null, newId: () => ids.shift()! });
+      await library.save(emptyDocument('doc-1', 'One'));
+      const version = await library.createVersion('doc-1', { name: 'A' });
+      if (!version.ok) throw new Error(version.message);
+      const created = await library.createBranch('doc-1', version.value.id, 'Try');
+      if (!created.ok) throw new Error(created.message);
+      let current = 'main';
+      const documents = createDocumentStore(emptyDocument('doc-1', 'One'));
+      const autosave = startAutosave(documents, library, {
+        delayMs: 500,
+        maxDelayMs: 2000,
+        branch: () => current,
+      });
+      const reader = () => new DocumentLibrary(backend, { locks: null });
+      const nameOn = async (branch: string) => {
+        const r = await reader().open('doc-1', branch);
+        return r.ok ? r.value.document.name : r.message;
+      };
+      return {
+        backend,
+        library,
+        documents,
+        autosave,
+        nameOn,
+        setBranch: (b: string) => (current = b),
+      };
+    }
+
+    it('saves an edit made during a branch switch to the branch it was made on', async () => {
+      const { library, documents, autosave, nameOn, setBranch } = await branched();
+      documents.getState().execute(rename('Main edit'), 'Rename');
+      // The switch has opened the branch in the library, but not shown it yet.
+      const opened = await library.open('doc-1', 'b-1');
+      if (!opened.ok) throw new Error(opened.message);
+      documents.getState().execute(rename('During the switch'), 'Rename');
+      // Shown: from now on, edits are the branch's.
+      setBranch('b-1');
+      documents.getState().load(opened.value.document);
+      documents.getState().execute(rename('On the branch'), 'Rename');
+      expect(await autosave.flush()).toBe(true);
+      expect(await nameOn('main')).toBe('During the switch');
+      expect(await nameOn('b-1')).toBe('On the branch');
+      const mainLog = await library.readLog('doc-1');
+      expect(mainLog.ok && mainLog.value.map((e) => e.command)).toEqual([
+        rename('Main edit'),
+        rename('During the switch'),
+      ]);
+      const branchLog = await library.readLog('doc-1', 'b-1');
+      expect(branchLog.ok && branchLog.value.map((e) => e.command)).toEqual([
+        rename('On the branch'),
+      ]);
+      // A version is of the branch the document is on.
+      const version = await autosave.createVersion({ name: 'B' });
+      expect(version).toMatchObject({ ok: true, value: { branch: 'b-1', revision: 2 } });
+    });
+
+    it('refuses an edit made on a branch deleted meanwhile, without saving it onto main', async () => {
+      const { library, documents, autosave, nameOn, setBranch } = await branched();
+      const opened = await library.open('doc-1', 'b-1');
+      if (!opened.ok) throw new Error(opened.message);
+      setBranch('b-1');
+      documents.getState().load(opened.value.document);
+      documents.getState().execute(rename('Lost'), 'Rename');
+      const deleted = await library.deleteBranch('doc-1', 'b-1');
+      expect(deleted.ok).toBe(true);
+      setBranch('main');
+      expect(await autosave.flush()).toBe(false);
+      expect(autosave.status.getState()).toMatchObject({
+        state: 'conflict',
+        message: expect.stringMatching(/^Its branch was deleted/) as string,
+      });
+      expect(await nameOn('main')).toBe('One');
+      // Dropping it (the user reloads the stored version) clears the conflict.
+      autosave.forget('doc-1');
+      expect(autosave.unsaved()).toBe(false);
+    });
+  });
 });
