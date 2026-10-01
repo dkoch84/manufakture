@@ -143,6 +143,10 @@ importers:
         version: 3.0.2
 
   packages/print:
+    dependencies:
+      comlink:
+        specifier: ^4.4.2
+        version: 4.4.2
     devDependencies:
       '@manufakture/kernel':
         specifier: workspace:*

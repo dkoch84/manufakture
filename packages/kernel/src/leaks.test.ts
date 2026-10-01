@@ -542,8 +542,19 @@ describe('embind objects', () => {
 
   it('each operation on its own leaves only its result', () => {
     const box = k.box(10, 10, 10);
+    // A block with a hole: its cylinder takes topology's axisOrigin and hole branch.
+    const drill = k.cylinder(2, 12, [5, 5, -1]);
+    const holed = k.boolean('cut', box, [drill]).shape;
     const ops: Array<[string, () => unknown]> = [
       ['topology', () => k.topology(box)],
+      [
+        'topology of a cylinder (a block with a hole)',
+        () => {
+          const hole = k.topology(holed).faces.find((f) => f.surface === 'cylinder');
+          expect(hole?.hole).toBe(true);
+          expect(hole?.axisOrigin).not.toBeNull();
+        },
+      ],
       ['properties', () => k.properties(box)],
       ['mesh', () => k.mesh(box)],
       ['count', () => k.count(box, 'edge')],
@@ -574,7 +585,7 @@ describe('embind objects', () => {
       fn();
       expect(tracker.liveNames(), name).toEqual([]);
     }
-    k.release(box);
+    for (const id of [box, drill, holed]) k.release(id);
   });
 
   it('failures delete everything too: argument errors, OCCT exceptions, builder failures', () => {

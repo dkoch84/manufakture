@@ -391,6 +391,37 @@ describe('an internal M5 cut into a hole at the minor diameter', () => {
   }, 60_000);
 });
 
+describe('the facts T3.1c reads from a threaded hole', () => {
+  it('the cylindrical thread faces share the line of the crest strips, which are holes', () => {
+    // T3.1c's thread rule: a hole group whose axis coincides, as a line, with the axis of a
+    // cylindrical `:thread:` face is a threaded hole. Golden: every root turn and every crest
+    // strip of an internal M5 lies on the hole's axis (x = y = 0) to 1e-9 mm, the strips are
+    // holes, and so is each root (material outside it).
+    const body = only(
+      thread(block(5, M5.minor / 2, 0, 8, 'hole#3'), {
+        side: 'internal',
+        radius: M5.minor / 2,
+        major: M5.major,
+        pitch: M5.pitch,
+        length: 8,
+      }),
+    );
+    const named = body.names.faces.map((f, i) => ({ name: f.name, face: body.topology.faces[i]! }));
+    const roots = named.filter((f) => f.name.includes(':thread:') && f.face.surface === 'cylinder');
+    const strips = named.filter((f) => f.name.startsWith('hole#3:side:h1'));
+    expect(roots.length).toBeGreaterThan(0);
+    expect(strips.length).toBeGreaterThan(0);
+    for (const f of [...roots, ...strips]) {
+      const o = f.face.axisOrigin!;
+      const d = f.face.axis!;
+      // Distance of the origin from the z axis, and the axis direction along z (either sign).
+      expect(Math.hypot(o[0], o[1])).toBeLessThan(1e-9);
+      expect(Math.hypot(d[0], d[1])).toBeLessThan(1e-12);
+      expect(f.face.hole).toBe(true);
+    }
+  }, 60_000);
+});
+
 describe('ends, trim and names', () => {
   it('closed ends stop inside the cylinder; chamfers cut both ends', () => {
     const closed = only(

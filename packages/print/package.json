@@ -5,11 +5,16 @@
   "type": "module",
   "license": "GPL-3.0-or-later",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./client": "./src/client.ts",
+    "./worker": "./src/worker.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run --root ../.. --project packages packages/print"
+  },
+  "dependencies": {
+    "comlink": "^4.4.2"
   },
   "devDependencies": {
     "@manufakture/kernel": "workspace:*"

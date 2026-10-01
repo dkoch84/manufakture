@@ -1,6 +1,7 @@
 // @manufakture/print: printability checks for FDM printing (plan M3, T3.1b). Pure functions on
 // plain data: the printer table, orientation transforms, overhang classes and bed fit. No kernel
 // or DOM dependency at run time; mesh and box shapes are the kernel's types. Fit defaults (T3.2g).
+// Wall thickness, gaps, small holes and teardrops, and the print-analysis worker's API (T3.1c).
 
 export {
   PRINTERS,
@@ -83,3 +84,62 @@ export type {
   ScrewSize,
   SelfTappingHole,
 } from './fits';
+
+export {
+  DEFAULT_MIN_GAP,
+  DEFAULT_TEARDROP,
+  MIN_HOLE_NOZZLES,
+  MIN_WALL_LINES,
+  printThresholds,
+} from './thresholds';
+export type { PrintThresholds } from './thresholds';
+
+export {
+  DEFAULT_MAX_SPLIT,
+  DEFAULT_RANGE,
+  DEFAULT_SPACING,
+  GRAZING_ANGLE,
+  LENGTH_TOLERANCE,
+  RAY_OFFSET,
+  THICKNESS_FLAGS,
+  ThicknessJob,
+  analyzeThickness,
+} from './thickness';
+export type {
+  BodyThickness,
+  FaceThickness,
+  ThicknessBody,
+  ThicknessIssue,
+  ThicknessIssueKind,
+  ThicknessMesh,
+  ThicknessOptions,
+  ThicknessResult,
+} from './thickness';
+
+export {
+  AXIS_ANGLE_TOLERANCE,
+  AXIS_DISTANCE_TOLERANCE,
+  DIAMETER_TOLERANCE,
+  HORIZONTAL_TOLERANCE,
+  RADIUS_TOLERANCE,
+  THREAD_SEGMENT,
+  analyzeHoles,
+  isThreadFace,
+  lineAngle,
+  pointLineDistance,
+  sameLine,
+} from './features';
+export type { CylinderGroup, FaceNameSource, HoleIssue, HoleOptions, HoleReport } from './features';
+
+export { TriangleBvh } from './bvh';
+export type { RayHit } from './bvh';
+
+export { createPrintWorkerApi, replyTransferables } from './worker-api';
+export type {
+  PrintAnalysisBody,
+  PrintAnalysisBodyResult,
+  PrintAnalysisReply,
+  PrintAnalysisRequest,
+  PrintWorkerApi,
+  PrintWorkerApiOptions,
+} from './worker-api';

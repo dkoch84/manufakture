@@ -2,9 +2,10 @@
 
 Printability checks for FDM printing (M3 plan, T3.1b): the printer table, the transform a print
 item's orientation stands for, overhang classes per triangle and per face, and whether a placed
-body fits a printer; and the fit defaults (T3.2g). Pure TypeScript with no runtime dependency. It
-reads the kernel's `MeshData`, `Placement` and `BoundingBox` shapes as types only, so it runs in a
-worker or in Node unchanged.
+body fits a printer; the fit defaults (T3.2g); and wall thickness, gaps, small holes and teardrops
+with the print-analysis worker that runs the ray casting (T3.1c). Pure TypeScript; its one runtime
+dependency is Comlink, for the worker. It reads the kernel's `MeshData`, `Topology`, `Placement`
+and `BoundingBox` shapes as types only, so it runs in a worker or in Node unchanged.
 
 Lengths are millimetres and angles radians, as everywhere else (`@manufakture/units`). Nothing in
 this package is stored in a document: core stores the printer id, the nozzle, the orientation and
@@ -204,8 +205,197 @@ for machine screws threading into printed plastic was found, so each is the ISO 
 drill (nominal minus pitch) as a starting point. `heatSetInsert(size)` and
 `selfTappingHole(size)` look a size up.
 
+## Thresholds
+
+```ts
+printThresholds(0.4); // { minFeature: 0.1, minWall: 0.84, minGap: 0.2, minHole: 0.8, teardrop: 3 }
+printThresholds(0.4, { minWall: 1.2 }); // a setup's own values win
+```
+
+The numbers a setup's `thresholds` expressions evaluate to, defaulting from the nozzle (ADR 0012
+decision 3). Only `minFeature` is a slicer value: OrcaSlicer's `min_feature_size`, 25% of the
+nozzle. The rest are **estimates**, editable per setup:
+
+| Threshold    | Default                                     | At a 0.4 mm nozzle |
+| ------------ | ------------------------------------------- | ------------------ |
+| `minFeature` | 25% of the nozzle (OrcaSlicer)              | 0.1 mm             |
+| `minWall`    | two line widths ("at least two perimeters") | 0.84 mm            |
+| `minGap`     | 0.2 mm (the fit presets may inform it)      | 0.2 mm             |
+| `minHole`    | two nozzle diameters                        | 0.8 mm             |
+| `teardrop`   | 3 mm (below it a hole's top bridges)        | 3 mm               |
+
+## Wall thickness and gaps
+
+```ts
+const r = analyzeThickness(
+  [
+    { mesh, placement },
+    { mesh: other, placement: p2 },
+  ],
+  {
+    thresholds: printThresholds(0.4),
+  },
+);
+r.bodies[0].thickness; // Float32Array: per triangle, its thinnest sample (mm), Infinity beyond range
+r.bodies[0].gap; // Float32Array: per triangle, its narrowest gap (mm)
+r.bodies[0].flags; // Uint8Array: THICKNESS_FLAGS bits (belowMinFeature 1, thinWall 2, narrowGap 4)
+r.bodies[0].faces; // per B-rep face (slot i is face i + 1): min thickness, min gap, area per class
+r.issues; // { kind, body, face, value, area }: one per face and class with any area
+```
+
+For sample points on every triangle a ray goes inward along -normal through the **same body's**
+mesh, and the distance to the first surface it leaves the material through is the wall thickness
+there. A ray outward along +normal gives the gap: the distance to the first surface it enters
+material through, of the same body or **any other body** of the setup (bodies are placed first, so
+gaps between the items of a setup count). Each body's triangles sit in a bounding volume
+hierarchy (`TriangleBvh`, below).
+
+- **Samples**: the centroid of every triangle; a triangle longer than `spacing` (1 mm) is cut into
+  k x k congruent pieces, k up to `maxSplit` (8), and each piece's centroid stands for its share
+  of the area. The ray direction is the vertex normals interpolated at the sample (radial on a
+  tessellated cylinder, so thin curved shells read right), or the triangle's own normal when they
+  cancel out.
+- **Classes** per sample, exclusive: thinner than `minFeature` (`belowMinFeature`: not printed at
+  all), else thinner than `minWall` (`thinWall`); and, separately, a gap narrower than `minGap`
+  (`narrowGap`). "Thinner" is strict, with `LENGTH_TOLERANCE` = 1e-4 mm: a wall within it of a
+  threshold is at the threshold and not flagged. The tolerance covers the float32 positions of
+  `MeshData` (about 1e-5 mm at 100 mm from the origin) and nothing a printer could resolve.
+- **Range**: distances are measured up to `range` (10 mm); farther walls and open space read as
+  `Infinity`. Every threshold is far below it.
+- **Near edges**: rays start `RAY_OFFSET` (1e-4 mm) inside or outside the surface, added back to
+  the distance, and hits on surfaces within `GRAZING_ANGLE` (3 degrees) of parallel to the ray are
+  passed over, so a ray from beside a right-angled edge does not read the neighbouring face as a
+  wall. A truly acute edge (a knife edge) still reads thin near its tip, which it is.
+- Thickness is measured along the normal, so it is the wall's thickness where walls are roughly
+  parallel; a thin fin is found from its sides, not from its end. Bodies that touch (a gap of 0)
+  are not a narrow gap.
+
+`ThicknessJob` is the same analysis in steps (`step(n)` runs n more triangles), which is how the
+worker yields between chunks.
+
+**The BVH is our own.** The plan named `three-mesh-bvh` (MIT) as the default. It works on a
+three.js `BufferGeometry` with `three` as a peer dependency, which the worker would load only to
+wrap arrays it already has; and the one query needed (the nearest hit along a ray, on a triangle
+facing a given way, skipping the ray's own triangle) is a page of code. `TriangleBvh` is built
+top-down with a binned surface area heuristic (12 bins, leaves of up to 4 triangles), stores
+vertices as float64 in BVH order and traverses nearest child first. No dependency, so no lockfile
+churn and no licence to check beyond Comlink's.
+
+## Holes and pins
+
+```ts
+const report = analyzeHoles(topology, {
+  placement, // the item's orientation, for "horizontal"
+  thresholds: printThresholds(0.4),
+  names: { faceNames: mesh.faceNames, names: reply.names }, // for the thread rule
+});
+report.groups; // holes and pins: { side, faces, radius, diameter, axis, origin, horizontal }
+report.issues; // { kind: 'smallHole', faces, diameter, minimum } | { kind: 'teardrop', faces, diameter, teardrop }
+report.threaded; // groups on a thread's axis: not checked
+report.partial; // fillet rounds, rounded corners, slot ends: not checked
+```
+
+Exact facts from the B-rep (`FaceInfo.radius`, `axis`, `axisOrigin`, `hole`, T3.1c's kernel
+step), never from the mesh. Cheap, so it runs on the main thread (ADR 0012 decision 5).
+
+- **Grouping.** A slot or cross hole that cuts a bore splits its cylinder into several faces, so
+  cylindrical faces with the same side (all holes or all pins), the same radius (within 1e-6 mm)
+  and the same axis **as a line** are one hole or pin. Directions match when the angle between
+  the lines, `atan2(|a x b|, |a . b|)` (sign ignored, accurate near zero), is at most 1e-9 rad;
+  axes coincide when one face's `axisOrigin` is within 1e-6 mm of the other's line. Grouping looks
+  only at the axis, the radius and the side, so **two separate bores in line with the same radius
+  are one hole** (two holes either side of a gap, say): it cannot tell them apart without
+  adjacency, and every check gives both the same answer anyway. A hole and a pin on one axis, or a
+  counterbore and its hole, are separate groups.
+- **Partial cylinders.** A fillet round, a rounded corner or a slot end is a cylinder too (a
+  concave fillet even reads as a hole). When the topology has edges and vertices, a group counts
+  only if its faces go more than half way round: a face with a seam edge goes all the way, and
+  otherwise the boundary points (edge midpoints and vertices) must leave no gap of half a turn
+  about the axis. Others go to `partial`. A faces-only topology cannot tell, and every group counts.
+- **`smallHole`**: a hole whose diameter is below `minHole`. A diameter within
+  `DIAMETER_TOLERANCE` = 1e-6 mm of the minimum is at it and not flagged, so a 0.8 mm hole whose
+  radius comes back as 0.39999999 is fine. Pins are listed, never flagged: a thin pin is a thin
+  wall, which the thickness check finds.
+- **`teardrop`**: a hole whose axis lies within 1 degree of the bed plane after the orientation,
+  with a diameter above `teardrop` by more than 1e-6 mm: it needs a teardrop or support. Its top
+  is an overhang anyway, which the overhang check shows; the flag says what to do about it. One
+  flag per hole, listing all its faces.
+- **Threaded holes are not holes.** A face whose name contains `:thread:` (T3.2e's
+  `<id>:thread:<part>`, also under a pattern or mirror prefix such as
+  `pattern#6:i2/thread#5:thread:root`) is never a hole or pin itself, and a group whose axis
+  coincides, as a line within the tolerances above, with the axis of a **cylindrical** `:thread:`
+  face goes to `threaded` and is not checked. So the crest strips a modelled internal thread
+  leaves of its hole (named after the hole) are neither a small hole nor a teardrop. **The axis
+  rule is the one in use**: the plan's fallback (skipping groups that share an edge with a
+  `:thread:` face) is not needed, since T3.2e's goldens show every modelled thread has
+  cylindrical faces on its axis (the root of every turn, and the crest when trimmed), and a kernel
+  golden checks that those roots and the crest strips share the hole's line. A cosmetic thread
+  adds no thread faces and leaves a cylinder at the tap drill size, which is found like any hole.
+  The rule goes by the axis, not by the face, so it also skips a plain hole that lies in line
+  with a tapped one: in a clamp, the clearance hole in one jaw coaxial with the threaded hole in
+  the other is reported under `threaded` and not checked, even though it is a hole of its own.
+  Names come from the mesh's `faceNames` slots and the reply's name table, since `Topology` holds
+  none; without names no face is a thread face.
+
+## The print-analysis worker
+
+```ts
+import { createPrintAnalysisClient } from '@manufakture/print/client';
+
+const client = createPrintAnalysisClient(); // no worker yet: it starts on the first analysis
+const reply = await client.analyze(
+  [{ id: 'part#1/body#1', mesh, placement }], // copied into the worker
+  printThresholds(0.4),
+);
+// null when a newer analyze (or cancel, or terminate) superseded it
+// { status: 'done', bodies: [{ id, thickness, gap, flags, faces, samples }], issues, ms }
+// { status: 'failed', message } for a malformed mesh
+client.cancel();
+client.terminate();
+```
+
+The fourth worker context (ADR 0012 decision 5; ADR 0007, amended by T3.1c). `PrintWorkerApi`
+(`src/worker-api.ts`) has one coarse call, `analyze(request)`, for every body of a setup at once,
+and `cancel(generation?)`; the entry is `@manufakture/print/worker`, the main-thread side
+`@manufakture/print/client` (`PrintAnalysisClient` lives apart from the spawn, in
+`analysis-client.ts`, since Vite bundles the worker of any module containing a
+`new Worker(new URL(...))` call).
+
+- **Lazy.** The client starts its worker on the first `analyze`, so a document with no print
+  setup never starts it. `terminate` stops it; the next `analyze` starts a new one.
+- **Generations.** Every request carries one, and a newer request supersedes every older one. The
+  analysis runs in chunks of 1024 triangles and yields to the event loop at least every 8 ms, so a
+  newer request or `cancel` arriving meanwhile is seen and the stale one returns `cancelled`
+  (the client resolves it to `null`). The yield (`createYield`) is a real macrotask, chosen in
+  React's scheduler's order: `setImmediate` in Node, a message posted on a private
+  `MessageChannel` in browsers, `setTimeout(r, 0)` where neither exists. Node gets `setImmediate`
+  because a woken Node `MessagePort` drains up to 1000 messages at once, so a chain of channel
+  yields would hold off a `cancel` for about 1000 yields (about 8 s). Browsers get the channel
+  because they clamp nested timers to at least 4 ms, which would idle the worker about 4 ms per
+  8 ms slice. Neither promises strict ordering: a newer request or `cancel` is seen within about
+  one slice, which `worker.test.ts` checks with a cancel sent after 100 yields.
+  Debouncing after regens and orientation changes is the caller's (T3.1d).
+- **Errors are data**: a malformed mesh is a `failed` reply, never an exception through Comlink.
+- **Transfer.** Input meshes are copied (the main thread keeps drawing them); the reply's
+  `thickness`, `gap` and `flags` arrays are transferred (`replyTransferables`).
+- **Budget.** The plan's target is a 200,000-triangle body in under a second in the worker (an
+  estimate to measure). `worker.test.ts` measures a 202,800-triangle plate through a
+  `MessageChannel`, request copy and reply transfer included, and logs the time against the
+  1 s target. It took about 440 ms alone in a development container (2026-10-01) and up to
+  about 1050 ms with the rest of the suite running in parallel, so the test fails only above
+  4000 ms (`BUDGET_MS`, as in the kernel's thread timing test): headroom for loaded CI runners,
+  while still catching a regression of several times.
+
 ## Tests
 
 `pnpm --filter @manufakture/print test`. The meshes are built by hand in `src/test-helpers.ts`
 with the kernel's layout (vertices per face, normals in a `Float32Array`), and the answers are
-computed by hand.
+computed by hand. `thickness.test.ts` and `features.test.ts` cover the T3.1c acceptance list (a
+1 mm wall, a 0.3 mm fin, a 0.1 mm slot between two bodies and in one body, the hole and teardrop
+boundaries with their 1e-6 mm tolerance, the split 4.2 mm hole, parallel and in-line bores, the
+thread rule on a hand-built topology with names, with and without a pattern prefix).
+`kernel-meshes.test.ts` runs the Node kernel: the M1 bracket at 6 mm has no thickness issues, a
+0.8 mm tube wall reads 0.8 on the `fine` export mesh, the bracket's holes (and its fillet as
+`partial`), and a real modelled M5 thread in a horizontal hole. `worker.test.ts` runs the worker
+API through Comlink on a `MessageChannel`: lazy start, a transferred reply, supersession, cancel,
+a failed mesh, terminate, and the budget.

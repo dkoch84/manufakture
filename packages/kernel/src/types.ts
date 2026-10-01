@@ -244,10 +244,25 @@ export interface FaceInfo {
   area: number;
   /** Outward normal, planes only. */
   normal: Vec3 | null;
-  /** Axis direction, cylinders only. */
+  /**
+   * Axis direction, cylinders only, unit length, as OCCT stores it: its sign carries no meaning
+   * (two faces of one hole may point either way). Read `hole` for the side.
+   */
   axis: Vec3 | null;
   /** Cylinders only. */
   radius: number | null;
+  /**
+   * A point on the axis, cylinders only (the location of the cylinder's frame), so that coaxial
+   * faces can be told from parallel ones. `topology()` always sets it; optional only so that
+   * hand-built `FaceInfo` values from before T3.1c stay valid.
+   */
+  axisOrigin?: Vec3 | null;
+  /**
+   * Cylinders only: true when the face's outward normal points toward the axis (material outside
+   * the cylinder: a hole), false when it points away (a pin or boss). Sign-corrected for reversed
+   * faces and left-handed (mirrored) frames. Set by `topology()` like `axisOrigin`.
+   */
+  hole?: boolean | null;
 }
 
 export interface EdgeInfo {

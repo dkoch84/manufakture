@@ -1,6 +1,6 @@
 # 0007: Worker protocol: Comlink, coarse calls, errors as data, named meshes
 
-- Status: accepted, amended 2026-09-26
+- Status: accepted, amended 2026-09-26 and 2026-10-01
 - Date: 2026-09-26
 
 ## Context
@@ -159,3 +159,16 @@ Decision 2 hands the kernel worker a `MessageChannel` port to the solver worker,
 - regen solves are stateless and never touch the interactive sessions (decision 4 already said so), and a planegcs abort is contained by `SolverService`, which replaces its instance without touching the kernel's.
 
 The cost is planegcs's 0.5 MB `.wasm` instantiated in both workers. Decision 1 still holds for interactive sketching: drags and dimension edits run in the solver worker, never behind a regen. The engine takes any `solve` implementation (`createRegenWorkerApi({ solver })`), so a port can come back without changing it. Details are in `packages/regen/README.md`, "The worker".
+
+## Amendment: a fourth context, the print-analysis worker (T3.1c, #1042)
+
+[ADR 0012](0012-3d-printing.md), decision 5, adds a **print-analysis worker** next to the three contexts of decision 1: wall thickness and gap ray casting for 3D printing, which needs nothing from OCCT and is too slow for the main thread (the plan's budget is under a second for a 200,000-triangle body). It is not the kernel worker, where it would queue behind regens and recycles, and not M5's CAM worker. This amendment records how it follows this ADR; the reasons for having it are ADR 0012's.
+
+- **Decision 1.** Four contexts: the main thread, the kernel worker (with the regen engine and, per the amendment above, the regen solver), the solver worker, and the print-analysis worker (`packages/print`, pure TypeScript with its own bounding volume hierarchy, no `.wasm`). It is started lazily, by the first analysis a print workspace asks for (`PrintAnalysisClient`), so a document with no print setup never starts it, and it holds no state between calls.
+- **Decision 2.** One Comlink interface, `PrintWorkerApi`, defined in `packages/print` (`src/worker-api.ts`); the entry is `@manufakture/print/worker` and the main-thread side `@manufakture/print/client`. Nothing crosses the boundary but plain data and typed arrays.
+- **Decision 3.** One coarse call per setup and analysis, `analyze`, carrying every body of the setup with its placement and the thresholds, never one call per body or triangle.
+- **Decision 4.** Every request carries a `generation`; a newer one supersedes every older one still running. The analysis runs in chunks and yields to the event loop between them (every 8 ms by default), so the worker sees a newer request or a `cancel` and the stale call returns `cancelled`; the client drops stale replies and resolves them to `null`. JavaScript cannot be interrupted mid-chunk, so a chunk is the unit of cancellation, as one feature operation is in the kernel worker. Debouncing after a regen or an orientation change is the main thread's.
+- **Decision 5.** Expected failures (a malformed mesh) come back as a `failed` reply with a message, never as exceptions through Comlink.
+- **Decision 6, with one difference.** Replies are transferred: per body, the per-triangle `thickness` and `gap` (`Float32Array`) and `flags` (`Uint8Array`) go through `Comlink.transfer`, and the worker keeps no copy. Input meshes go the other way and are **copied**, not transferred, because the main thread keeps drawing them and regen keeps none (ADR 0012, decision 5). For the budget test's 200,000-triangle body that is about 5.6 MB of structured clone per analysis, which the measured time includes.
+
+Details are in `packages/print/README.md`, "The print-analysis worker".

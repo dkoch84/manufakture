@@ -1,6 +1,7 @@
 // The synchronous kernel against the real libcascade, in Node. One instance
 // for the whole file: init costs about half a second.
 
+import type { TopoDS_Shape } from 'libcascade/single/init';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { KernelError } from './errors';
 import { DEFAULT_DEFLECTION, type Kernel } from './kernel';
@@ -664,6 +665,107 @@ describe('topology', () => {
       }
       // The case under test really occurs.
       expect(leftHanded).toBeGreaterThan(0);
+    }));
+
+  it('cylinders: axisOrigin lies on the axis and hole tells a hole from a boss', () =>
+    scoped(() => {
+      const oc = k.oc;
+      const raw = (id: ShapeId) =>
+        (k as unknown as { get(id: ShapeId, op: string): TopoDS_Shape }).get(id, 'test');
+      /** Per cylindrical face: its info, and how OCCT stores it (orientation, frame handedness). */
+      const cylinders = (id: ShapeId) =>
+        withScope(oc, (s) => {
+          const shape = raw(id);
+          const t = topologyOf(oc, s, shape);
+          const map = s.own(new oc.NCollection_IndexedMap_TopoDS_Shape_TopTools_ShapeMapHasher());
+          oc.TopExp.MapShapes(shape, oc.TopAbs_ShapeEnum.TopAbs_FACE, map);
+          return t.faces
+            .filter((f) => f.surface === 'cylinder')
+            .map((f) =>
+              withScope(oc, (fs) => {
+                const face = fs.own(oc.TopoDS.Face(fs.own(map.FindKey(f.index))));
+                const adaptor = fs.own(new oc.BRepAdaptor_Surface(face, true));
+                return {
+                  face: f,
+                  reversed: face.Orientation() === oc.TopAbs_Orientation.TopAbs_REVERSED,
+                  direct: fs.own(adaptor.Cylinder()).Direct(),
+                };
+              }),
+            );
+        });
+      /** Distance from a point to the vertical line through (x, y). */
+      const offAxis = (p: Vec3, x: number, y: number) => Math.hypot(p[0] - x, p[1] - y);
+
+      // A 20 x 20 x 10 block with a hole of radius 3 at (5, 10) and a boss of radius 2 at
+      // (15, 10) standing 5 above its top.
+      const block = k.box(20, 20, 10);
+      const holed = k.boolean('cut', block, [k.cylinder(3, 20, [5, 10, -5])]).shape;
+      const part = k.boolean('fuse', holed, [k.cylinder(2, 10, [15, 10, 5])]).shape;
+      const mirrored = k.transform(part, {
+        kind: 'mirror',
+        plane: { origin: [0, 0, 0], normal: [1, 0, 0] },
+      }).shape;
+
+      const seen = new Set<string>();
+      for (const [id, sx] of [
+        [part, 1],
+        [mirrored, -1],
+      ] as const) {
+        const faces = cylinders(id);
+        expect(faces).toHaveLength(2);
+        for (const { face: f, reversed, direct } of faces) {
+          const isHole = Math.abs(f.radius! - 3) < 1e-9;
+          const [cx, cy] = isHole ? [5 * sx, 10] : [15 * sx, 10];
+          expect(f.hole).toBe(isHole);
+          expect(offAxis(f.axisOrigin!, cx, cy)).toBeLessThan(1e-9);
+          expect(Math.abs(f.axis![2])).toBeCloseTo(1, 12);
+          // The centroid of a whole cylindrical face lies on its axis; the face is a full turn.
+          expect(offAxis(f.centroid, cx, cy)).toBeLessThan(1e-6);
+          seen.add(`${isHole ? 'hole' : 'boss'} ${sx < 0 ? 'mirrored' : 'as built'}`);
+          seen.add(`${reversed ? 'reversed' : 'forward'} ${direct ? 'right' : 'left'}-handed`);
+        }
+      }
+      expect([...seen].sort()).toEqual(
+        expect.arrayContaining([
+          'boss as built',
+          'boss mirrored',
+          'hole as built',
+          'hole mirrored',
+          // The cases under test really occur: a reversed face (the cut's hole wall) and a
+          // left-handed frame (the mirror).
+          'reversed right-handed',
+        ]),
+      );
+      expect([...seen].some((c) => c.endsWith('left-handed'))).toBe(true);
+
+      // One cylindrical face on its own, then the same face stored reversed: a reversed face's
+      // outward normal points toward the axis, so it reads as a hole.
+      withScope(oc, (s) => {
+        const ax2 = s.own(
+          new oc.gp_Ax2(s.own(new oc.gp_Pnt(1, 2, 3)), s.own(new oc.gp_Dir(0, 1, 0))),
+        );
+        const cyl = s.own(new oc.gp_Cylinder(s.own(new oc.gp_Ax3(ax2)), 4));
+        const face = s.own(s.own(new oc.BRepBuilderAPI_MakeFace(cyl, 0, 2 * Math.PI, 0, 5)).Face());
+        const flipped = s.own(face.Reversed());
+        const [forward] = topologyOf(oc, s, face).faces;
+        const [back] = topologyOf(oc, s, flipped).faces;
+        expect(forward!.hole).toBe(false);
+        expect(back!.hole).toBe(true);
+        for (const f of [forward!, back!]) {
+          expectVec(f.axisOrigin!, [1, 2, 3]);
+          expectVec(f.axis!, [0, 1, 0]);
+          expect(f.radius).toBeCloseTo(4, 12);
+        }
+        expect(flipped.Orientation()).toBe(oc.TopAbs_Orientation.TopAbs_REVERSED);
+      });
+    }));
+
+  it('non-cylindrical faces have no axisOrigin and no hole flag', () =>
+    scoped(() => {
+      for (const f of k.topology(k.box(1, 2, 3)).faces) {
+        expect(f.axisOrigin).toBeNull();
+        expect(f.hole).toBeNull();
+      }
     }));
 
   it('cylinder: a seam edge lists its face once, a closed edge has one vertex', () =>

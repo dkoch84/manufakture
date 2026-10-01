@@ -1,8 +1,24 @@
 // The topology query (ADR 0007, decision 9; T0.5 recommendation 3). Goes
 // through embind per sub-shape; ADR 0002 moves it into a C++ helper later.
 
-import type { TopoDS_Edge, TopoDS_Face, TopoDS_Shape, TopoDS_Vertex } from 'libcascade/single/init';
-import { mapShapes, Scope, shapeEnum, toVec3, withScope, type Oc, type ShapeList } from './occt';
+import type {
+  BRepAdaptor_Surface,
+  TopoDS_Edge,
+  TopoDS_Face,
+  TopoDS_Shape,
+  TopoDS_Vertex,
+} from 'libcascade/single/init';
+import {
+  cross,
+  dot,
+  mapShapes,
+  Scope,
+  shapeEnum,
+  toVec3,
+  withScope,
+  type Oc,
+  type ShapeList,
+} from './occt';
 import type { EdgeInfo, FaceInfo, SubShapeKind, Topology, Vec3, VertexInfo } from './types';
 
 export function topologyOf(oc: Oc, s: Scope, body: TopoDS_Shape): Topology {
@@ -43,6 +59,8 @@ export function topologyOf(oc: Oc, s: Scope, body: TopoDS_Shape): Topology {
       let normal: Vec3 | null = null;
       let axis: Vec3 | null = null;
       let radius: number | null = null;
+      let axisOrigin: Vec3 | null = null;
+      let hole: boolean | null = null;
       if (type === oc.GeomAbs_SurfaceType.GeomAbs_Plane) {
         // The surface normal is XDirection ^ YDirection of the plane's frame:
         // the axis for a right-handed frame, its opposite for a left-handed
@@ -53,8 +71,11 @@ export function topologyOf(oc: Oc, s: Scope, body: TopoDS_Shape): Topology {
         normal = [sign * d[0], sign * d[1], sign * d[2]];
       } else if (type === oc.GeomAbs_SurfaceType.GeomAbs_Cylinder) {
         const cyl = fs.own(adaptor.Cylinder());
-        axis = toVec3(fs.own(fs.own(cyl.Axis()).Direction()));
+        const ax1 = fs.own(cyl.Axis());
+        axis = toVec3(fs.own(ax1.Direction()));
+        axisOrigin = toVec3(fs.own(ax1.Location()));
         radius = cyl.Radius();
+        hole = cylinderIsHole(fs, adaptor, axisOrigin, axis, cyl.Direct(), reversed);
       }
       faces.push({
         index: i,
@@ -64,6 +85,8 @@ export function topologyOf(oc: Oc, s: Scope, body: TopoDS_Shape): Topology {
         normal,
         axis,
         radius,
+        axisOrigin,
+        hole,
       });
     });
   }
@@ -116,4 +139,39 @@ export function topologyOf(oc: Oc, s: Scope, body: TopoDS_Shape): Topology {
     });
   }
   return { faces, edges, vertices };
+}
+
+/**
+ * Whether a cylindrical face is a hole: its outward normal points toward the axis. The surface
+ * normal of a cylinder is radial, outward from the axis for a right-handed frame and inward for a
+ * left-handed one (a mirrored cylinder); a reversed face flips it once more, as for planes. The
+ * result is checked against the surface itself: at the middle of the face's parameter range, the
+ * normal `D1U x D1V` (flipped for a reversed face) is compared with the direction from the axis
+ * to the point. The two agree for every valid cylinder; when the evaluation is degenerate (a
+ * zero radius), the frame rule alone decides.
+ */
+function cylinderIsHole(
+  s: Scope,
+  adaptor: BRepAdaptor_Surface,
+  origin: Vec3,
+  axis: Vec3,
+  direct: boolean,
+  reversed: boolean,
+): boolean {
+  const outwardFromAxis = direct !== reversed;
+  const u = (adaptor.FirstUParameter() + adaptor.LastUParameter()) / 2;
+  const v = (adaptor.FirstVParameter() + adaptor.LastVParameter()) / 2;
+  const d1 = adaptor.EvalD1(u, v);
+  const point = toVec3(s.own(d1.Point));
+  const n = cross(toVec3(s.own(d1.D1U)), toVec3(s.own(d1.D1V)));
+  const rel: Vec3 = [point[0] - origin[0], point[1] - origin[1], point[2] - origin[2]];
+  const along = dot(rel, axis) / dot(axis, axis);
+  const radial: Vec3 = [
+    rel[0] - along * axis[0],
+    rel[1] - along * axis[1],
+    rel[2] - along * axis[2],
+  ];
+  const side = dot(n, radial) * (reversed ? -1 : 1);
+  if (!Number.isFinite(side) || side === 0) return !outwardFromAxis;
+  return side < 0;
 }

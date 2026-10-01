@@ -12,7 +12,7 @@ Product decisions (license, local-first storage, target machines, what comes fir
 - [0004: Document format: a versioned JSON feature list, with names as references](0004-document-format.md). Accepted.
 - [0005: Units: millimetres and radians inside, per-document display units outside](0005-units.md). Accepted.
 - [0006: Licensing: GPL-3.0-or-later, and what we may depend on](0006-licensing.md). Accepted, amended 2026-10-01 (fonts, by 0011).
-- [0007: Worker protocol: Comlink, coarse calls, errors as data, named meshes](0007-worker-protocol.md). Accepted, amended 2026-09-26.
+- [0007: Worker protocol: Comlink, coarse calls, errors as data, named meshes](0007-worker-protocol.md). Accepted, amended 2026-09-26 and 2026-10-01 (the print-analysis worker).
 - [0008: Assembly mate solver: our own joint-coordinate solver in TypeScript](0008-assembly-mate-solver.md). Accepted.
 - [0009: Sync model: a server-ordered command log, validated by core, rebased on the client](0009-sync-model.md). Proposed.
 - [0010: Scripting sandbox: QuickJS in WebAssembly, inside the regen worker, with no capabilities](0010-scripting-sandbox.md). Proposed.
