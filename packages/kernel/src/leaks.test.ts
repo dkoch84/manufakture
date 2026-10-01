@@ -7,6 +7,7 @@ import { KernelError } from './errors';
 import { applyFeature, type DeriveInput, type FeatureBody, type FeatureInput } from './features';
 import { Kernel } from './kernel';
 import { createNodeInstance } from './node';
+import { threadSolid, type ThreadGeometry } from './threads';
 import { track, type Tracker } from './track';
 import type { Frame, ProfileLoop, ShapeId } from './types';
 
@@ -33,6 +34,69 @@ const outline: ProfileLoop = {
   ],
 };
 const hole: ProfileLoop = { entities: [{ kind: 'circle', center: [8, 10], radius: 3 }] };
+
+/** An M3 internal thread in a block, with a crest trim and both ends chamfered. */
+const THREAD: ThreadGeometry = {
+  side: 'internal',
+  axis: { origin: [0, 0, 0], direction: [0, 0, 1] },
+  radius: 1.1,
+  major: 3,
+  pitch: 0.5,
+  length: 4,
+  clearance: 0.1,
+  start: 'chamfer',
+  end: 'chamfer',
+};
+
+/** A block with a hole, threaded: returns the shapes left alive (the threaded block). */
+function threadedBlock(kernel: Kernel = k): ShapeId[] {
+  const made = applyFeature(kernel, [], {
+    kind: 'extrude',
+    id: 'extrude#1',
+    profile: {
+      frame: XY,
+      loops: [
+        {
+          entities: [
+            { kind: 'line', id: 'e1', start: [-4, -4], end: [4, -4] },
+            { kind: 'line', id: 'e2', start: [4, -4], end: [4, 4] },
+            { kind: 'line', id: 'e3', start: [4, 4], end: [-4, 4] },
+            { kind: 'line', id: 'e4', start: [-4, 4], end: [-4, -4] },
+          ],
+        },
+        { entities: [{ kind: 'circle', id: 'h1', center: [0, 0], radius: 1.1 }] },
+      ],
+    },
+    extent: { type: 'blind', distance: 4 },
+    mode: 'new',
+  });
+  expect(made.errors).toEqual([]);
+  const out = applyFeature(kernel, made.bodies, { kind: 'thread', id: 'thread#2', ...THREAD });
+  expect(out.errors).toEqual([]);
+  kernel.release(made.bodies[0]!.shape);
+  return out.bodies.map((b) => b.shape);
+}
+
+/**
+ * Bytes of wasm heap in use: the memory's size less what the allocator can still hand out in
+ * 64 KiB blocks before the memory grows. Coarse (64 KiB, and fragmentation counts as used), but
+ * unlike `heapBytes` it moves with every allocation. It grows the memory, so call it once per
+ * instance.
+ */
+function heapInUse(kernel: Kernel): number {
+  const oc = kernel.oc as unknown as {
+    wasmMemory: WebAssembly.Memory;
+    _emscripten_builtin_malloc(size: number): number;
+    _emscripten_builtin_free(ptr: number): void;
+  };
+  const size = 65536;
+  const start = oc.wasmMemory.buffer.byteLength;
+  const blocks: number[] = [];
+  while (oc.wasmMemory.buffer.byteLength === start)
+    blocks.push(oc._emscripten_builtin_malloc(size));
+  for (const b of blocks) oc._emscripten_builtin_free(b);
+  return start - (blocks.length - 1) * size;
+}
 
 /** A small feature tree: profile, extrude, cut, fillet, then every query. */
 function regen(): ShapeId[] {
@@ -492,6 +556,21 @@ describe('embind objects', () => {
     expect(tracker.liveNames()).toEqual([]);
   });
 
+  it('threads leave only the bodies: groove, crest trim and chamfers, on success and failure', () => {
+    const [block] = threadedBlock();
+    // Only the threaded block is alive; every tool and temporary is gone.
+    expect(k.shapeCount).toBe(1);
+    expect(tracker.liveNames().every((n) => n.startsWith('TopoDS_'))).toBe(true);
+    expect(k.release(block!)).toBe(true);
+    expect(tracker.liveNames()).toEqual([]);
+    // The tools on their own, then a geometry OCCT is never asked to build.
+    tracker.reset();
+    for (const t of threadSolid(k, 'thread#2', THREAD)) expect(k.release(t.shape)).toBe(true);
+    expect(() => k.thread({ ...THREAD, radius: 1 })).toThrow(KernelError);
+    expect(tracker.liveNames()).toEqual([]);
+    expect(k.shapeCount).toBe(0);
+  });
+
   it('releaseSince frees a whole regen', () => {
     const mark = k.checkpoint();
     regen();
@@ -510,6 +589,24 @@ describe('heap', () => {
     expect(k.shapeCount).toBe(0);
     expect(k.heapBytes()).toBe(before);
   }, 60_000);
+
+  it('repeated threads with release leak a bounded amount of heap', async () => {
+    // A thread's tools are built face by face and cut with B-spline flanks; libcascade's empty
+    // destructors keep part of each builder and boolean (ADR 0002), which instance recycling
+    // bounds. `heapBytes` only moves in large steps, so the heap in use is measured, once per
+    // fresh instance (probing twice in one instance is not repeatable): after 2 and after 12
+    // threaded blocks. Measured: about 0.65 MB per threaded block (0.2 MB of it the tools,
+    // 0.3 MB the cut), now that `BRepCheck_Analyzer` is cleared before delete (it kept about
+    // 1 MB per check of such a body, which made it 3 MB).
+    const inUseAfter = async (n: number) => {
+      const fresh = new Kernel(await createNodeInstance());
+      for (let i = 0; i < n; i++) for (const id of threadedBlock(fresh)) fresh.release(id);
+      expect(fresh.shapeCount).toBe(0);
+      return heapInUse(fresh);
+    };
+    const perThread = ((await inUseAfter(12)) - (await inUseAfter(2))) / 10;
+    expect(perThread).toBeLessThan(1.5 * 2 ** 20);
+  }, 120_000);
 
   it('repeated interference checks do not grow the wasm heap', () => {
     const block = k.box(10, 10, 10);

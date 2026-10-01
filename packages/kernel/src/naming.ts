@@ -224,6 +224,21 @@ export function importedFace(feature: string, index: number): FaceName {
   return { name, lineage: [name], fragile: true };
 }
 
+/**
+ * A face of thread `feature`'s tools: `<feature>:thread:<part>`, and for the parts that come per
+ * turn (root, flanks, the groove's opening) `<feature>:thread:<part>:<turn>`, turns counted from
+ * the thread's start (`thread#5:thread:root:3`). Turn numbers are fixed by construction, not by
+ * position in the shape, so the names are not fragile and a length change keeps every turn
+ * before the end. A per-turn name descends from the part's turnless name, so a reference to
+ * `thread#5:thread:root` finds the root of a one-turn thread.
+ */
+export function threadFace(feature: string, part: string, turn: number | null = null): FaceName {
+  const whole = `${feature}:thread:${part}`;
+  if (turn === null) return { name: whole, lineage: [whole], fragile: false };
+  const name = `${whole}:${turn}`;
+  return { name, lineage: [name, whole], fragile: false };
+}
+
 export interface SweepFaces {
   /** 0 when the sweep has no such cap (a full revolution). */
   capStart: number;

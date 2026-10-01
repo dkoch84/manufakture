@@ -66,6 +66,7 @@ export type {
   RevolveInput,
   ShellInput,
   SketchProfile,
+  ThreadInput,
   ToolInput,
   VertexRef,
 } from './features';
@@ -85,6 +86,7 @@ export {
   resolveEdge,
   resolveFace,
   splitParent,
+  threadFace,
 } from './naming';
 export type {
   EdgeName,
@@ -99,6 +101,29 @@ export type {
 } from './naming';
 export { HOLE_SIZES, clearanceDiameter, holeSize } from './holes';
 export type { HoleFit, HoleStandardSize } from './holes';
+export {
+  THREAD_SIZES,
+  threadLimits,
+  threadProblem,
+  threadProfile,
+  threadSize,
+  threadSolid,
+  threadTurns,
+} from './threads';
+export type {
+  ThreadEnd,
+  ThreadFacePart,
+  ThreadGeometry,
+  ThreadHand,
+  ThreadLimits,
+  ThreadPart,
+  ThreadProfile,
+  ThreadSide,
+  ThreadStandardSize,
+  ThreadSystem,
+  ThreadTool,
+  ThreadTools,
+} from './threads';
 export { validateOp } from './ops';
 export type {
   BatchContext,

@@ -61,6 +61,7 @@ import {
   type TopoRef,
   type Via,
 } from './naming';
+import { threadProblem, threadSolid, type ThreadGeometry } from './threads';
 import type {
   Axis,
   ChamferSize,
@@ -323,6 +324,18 @@ export interface DeriveInput extends Scoped {
   mode: ResultMode;
 }
 
+/**
+ * A modelled thread (M3 plan, decision 9), cut as a helical groove from the bodies in scope it
+ * reaches, with every face named `<id>:thread:<part>` (per turn `<id>:thread:<part>:<turn>`; see
+ * `src/threads.ts`). The geometry is given resolved: the axis, side and radius of the cylinder,
+ * and the standard's diameter and pitch. Resolving them from a picked cylindrical face is the
+ * thread feature's wiring in regen (M3 plan, T3.2f).
+ */
+export interface ThreadInput extends Scoped, ThreadGeometry {
+  kind: 'thread';
+  id: string;
+}
+
 export type FeatureInput =
   | ExtrudeInput
   | RevolveInput
@@ -333,7 +346,8 @@ export type FeatureInput =
   | PatternInput
   | MirrorInput
   | ImportInput
-  | DeriveInput;
+  | DeriveInput
+  | ThreadInput;
 
 export type FeatureKind = FeatureInput['kind'];
 
@@ -678,7 +692,32 @@ function run(ctx: Ctx, slots: readonly Slot[], input: FeatureInput): Slot[] | nu
       const scoped = inScope(ctx, slots, input.scope);
       return combine(ctx, slots, scoped, deriveTools(ctx, input), input.mode);
     }
+    case 'thread':
+      return thread(ctx, slots, input);
   }
+}
+
+/**
+ * Cut a thread's tools (the groove, a crest trim and end chamfers) from every body in scope they
+ * reach, in one boolean per body. A thread that leaves no thread face in any body missed it; a
+ * result that fails `BRepCheck_Analyzer` fails the feature.
+ */
+function thread(ctx: Ctx, slots: readonly Slot[], input: ThreadInput): Slot[] {
+  const scoped = needBodies(ctx, inScope(ctx, slots, input.scope));
+  const problem = threadProblem(input);
+  if (problem !== null) fail(ctx, 'invalid', problem);
+  const tools: Placed[] = threadSolid(ctx.k, input.id, input).map((t) => {
+    ctx.temps.push(t.shape);
+    return { ...t, unnamed: [], bodyId: input.id };
+  });
+  const after = combine(ctx, slots, scoped, tools, 'subtract');
+  const prefix = `${input.id}:thread:`;
+  const changed = after.filter((slot) => slot.made !== null);
+  if (!changed.some((slot) => slot.made!.faces.some((f) => f.name.startsWith(prefix)))) {
+    fail(ctx, 'invalid', `${input.id} does not touch the body: no thread was cut`);
+  }
+  for (const slot of changed) checked(ctx, slot.made!);
+  return after;
 }
 
 /**
@@ -2645,6 +2684,8 @@ export function validateFeature(input: unknown): string | null {
       }
       return null;
     }
+    case 'thread':
+      return targets(f, false) ?? threadProblem(f as unknown as ThreadGeometry);
     case 'import':
       return typeof f.step === 'string' || f.step instanceof Uint8Array
         ? (targets(f, true) ?? mode(f.mode))

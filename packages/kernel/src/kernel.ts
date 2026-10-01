@@ -34,6 +34,7 @@ import {
 import { mapShapes, norm, Scope, toVec3, type Oc, type ShapeList } from './occt';
 import type { Names } from './naming';
 import { buildProfile } from './profile';
+import { buildThread, type ThreadGeometry, type ThreadTools } from './threads';
 import { topologyOf } from './topology';
 import type {
   Axis,
@@ -985,6 +986,24 @@ export class Kernel {
         bytes = data;
       }
       return this.store('importStep', readStep(this.oc, s, bytes));
+    });
+  }
+
+  /**
+   * The tools of a modelled thread (`src/threads.ts`): the helical groove, and a crest trim and
+   * end chamfers when the geometry needs them, each with the thread part of every face. The
+   * `thread` feature subtracts them; `threadSolid` names them. Bad geometry is
+   * `invalid-argument`.
+   */
+  thread(input: ThreadGeometry): ThreadTools {
+    return this.op('thread', (s) => {
+      const built = buildThread(this.oc, s, input);
+      // The scope owns what was built; the arena keeps its own handles on the same B-reps.
+      const tools = built.map((t) => ({
+        shape: this.store('thread', t.shape.Oriented(t.shape.Orientation())),
+        faces: t.faces,
+      }));
+      return { tools };
     });
   }
 

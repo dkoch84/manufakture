@@ -47,6 +47,19 @@ export function releaseOwned(oc: Oc, item: Deletable): void {
     (o.Reset as () => void).call(o);
   } else if (name === 'BRepOffsetAPI_DraftAngle') {
     (o.Clear as () => void).call(o);
+  } else if (name === 'BRepCheck_Analyzer') {
+    // Keeps a result per sub-shape it checked (about 0.6 MB for a threaded M6 rod); checking
+    // an empty compound instead drops them. A null shape would throw.
+    const empty = new oc.TopoDS_Compound();
+    const builder = new oc.BRep_Builder();
+    try {
+      builder.MakeCompound(empty);
+      (o.Init as (s: unknown, geomControls: boolean) => void).call(o, empty, false);
+    } finally {
+      empty.Nullify();
+      empty.delete();
+      builder.delete();
+    }
   } else if (name === 'BRepExtrema_DistShapeShape') {
     // Holds both input shapes; loading null shapes drops their handles.
     const empty = new oc.TopoDS_Shape();
