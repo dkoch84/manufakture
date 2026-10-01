@@ -25,7 +25,7 @@ import type { TopoDS_Shape } from 'libcascade/single/init';
 import { isObject } from './checks';
 import { KernelError } from './errors';
 import type { Oc, Scope } from './occt';
-import type { Vec3 } from './types';
+import type { Placement } from './types';
 
 let scratch = 0;
 
@@ -68,11 +68,8 @@ export function writeStep(oc: Oc, s: Scope, bodies: readonly StepBody[]): Uint8A
   });
 }
 
-/** A rigid placement: a unit quaternion `[x, y, z, w]` and a translation, local to world. */
-export interface StepPose {
-  translation: Vec3;
-  rotation: readonly [number, number, number, number];
-}
+/** An instance's placement in a STEP assembly: the kernel's rigid `Placement`, local to world. */
+export type StepPose = Placement;
 
 /**
  * An assembly over a list of bodies (the `exportStep` op's `bodies`): the parts, each written

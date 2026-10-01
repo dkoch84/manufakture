@@ -18,11 +18,12 @@ import {
   type ExportAssembly,
   type ExportTolerancePreset,
 } from '@manufakture/io';
+import type { StepAssemblyLayout } from '@manufakture/kernel';
 import type { AssemblyResult } from '@manufakture/regen';
 import { bodyName, instanceViewId } from '../model/bodies';
 import type { ModelState } from '../model/model';
 import type { ActionResult, ExportChoice, ExportFormat, ExportedFile } from './actions';
-import type { Exchanger, StepAssembly } from './exchange';
+import type { Exchanger } from './exchange';
 import { MIME, formatBytes } from './files';
 
 /** What an assembly export writes, worked out from the document and the last regen. */
@@ -184,7 +185,7 @@ export async function exportAssembly(
   const names = new Map(plan.bodies.map((b) => [b.id, b.name]));
   let file: ExportedFile;
   if (format === 'step') {
-    const layout: StepAssembly = {
+    const layout: StepAssemblyLayout = {
       name: plan.name,
       parts: plan.parts,
       instances: plan.instances,

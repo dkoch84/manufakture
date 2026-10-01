@@ -23,6 +23,7 @@ import type {
   KernelOp,
   MeshData,
   ShapeId,
+  StepAssemblyLayout,
   Topology,
   VertexRef,
 } from '@manufakture/kernel';
@@ -51,23 +52,6 @@ export interface KernelBody {
 
 export type ExchangeResult<T> = { ok: true; value: T } | { ok: false; message: string };
 
-/**
- * An assembly over the bodies of a STEP export (the kernel's `exportStep` op with `assembly`):
- * parts name the bodies by index in the ids, instances name the parts and place them.
- */
-export interface StepAssembly {
-  name: string;
-  parts: readonly { name: string; bodies: readonly number[] }[];
-  instances: readonly {
-    part: number;
-    name: string;
-    pose: {
-      translation: readonly [number, number, number];
-      rotation: readonly [number, number, number, number];
-    };
-  }[];
-}
-
 export interface Exchanger {
   /** The part bodies that export writes, in scene order; never reference bodies. */
   bodies(): { id: string; name: string }[];
@@ -86,7 +70,7 @@ export interface Exchanger {
   exportStep(
     ids: readonly string[],
     names?: ReadonlyMap<string, string>,
-    assembly?: StepAssembly,
+    assembly?: StepAssemblyLayout,
   ): Promise<ExchangeResult<Uint8Array>>;
   /**
    * Read a STEP file into a reference body named after the import feature
@@ -252,7 +236,7 @@ export function kernelExchange(
       const found = shapesOf(ids, names);
       if (!found.ok) return found;
       if (c === null) return { ok: false, message: 'The kernel is not running.' };
-      const op: ExportStepOp & { assembly?: StepAssembly } = {
+      const op: ExportStepOp = {
         op: 'exportStep',
         bodies: found.value.map((b) => ({ shape: b.shape, name: b.name })),
       };
