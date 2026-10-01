@@ -19,23 +19,42 @@
 // namespace of its own (`derived.ts`), then its bodies are copied in by a kernel `derive` op.
 // Every derived feature of one pinned part in a regen shares that one build.
 //
+// Assemblies: after the parts, each assembly's instances are given the bodies of their part (or
+// of a pinned part, built like a derived feature's source), their mate connectors are found on
+// those bodies by `connector` ops (cached by body key and reference), and the mate solver of
+// `packages/assembly` places them (`assembly.ts`). Drags reuse the last regen's solver input and
+// never touch the kernel.
+//
 // Cancellation: every regen has a generation. A newer regen cancels the kernel batches of the
 // older one (`KernelService.cancel`) and the older one stops at its next await, returning null.
 // Regens run one at a time, so they never race on the cache.
 
+import {
+  drag as dragAssembly,
+  solve,
+  type AssemblyInput,
+  type DragTarget,
+  type MateInput,
+} from '@manufakture/assembly';
 import type {
+  Assembly,
   BodyPropsFields,
   DerivedFeature,
+  DerivedSource,
   DocumentChange,
   Feature,
   ImportSource,
   ManufaktureDocument,
   Part,
+  Pose,
 } from '@manufakture/core';
 import {
   frameOnPlane,
+  yieldToEventLoop,
   type BatchReply,
   type BatchRequest,
+  type ConnectorOp,
+  type ConnectorReport,
   type Deflection,
   type FeatureInput,
   type FeatureOutcome,
@@ -60,6 +79,24 @@ import {
   type FeatureCache,
   type KeyVersions,
 } from './cache';
+import {
+  applyReport,
+  connectorError,
+  connectorOrigin,
+  connectorPose,
+  connectorResolution,
+  dragResult,
+  emptyAssemblyResult,
+  emptyInstanceResult,
+  emptyMateResult,
+  framePose,
+  instanceSourceKey,
+  mateInput,
+  mateValues,
+  pickReport,
+  solverInput,
+  type MateValues,
+} from './assembly';
 import { DerivedSources, carriedProps, effectiveProps, sourceNamespace, tooDeep } from './derived';
 import { mapFailure, mapOutcome, planeReport } from './errors';
 import {
@@ -70,18 +107,24 @@ import {
   routeBodies,
   type RoutedBody,
 } from './graph';
+import { stableStringify } from './hash';
 import { importSourceMatches, keyInput } from './imports';
 import { explicitPlacement, solveSketch, type RegenSolver, type SketchResult } from './sketches';
 import { faceRef, translateFeature } from './translate';
 import type {
+  AssemblyResult,
   BodyResult,
   ConsumedBody,
+  DragResult,
   FeatureResult,
+  InstanceResult,
+  MateResult,
   PartResult,
   RegenCounters,
   RegenError,
   RegenResult,
   RegenWarning,
+  SourceResult,
 } from './types';
 import { evaluateFeature, evaluateVariables, type VariableValues } from './values';
 
@@ -132,6 +175,15 @@ export interface RegenOptions {
   /** The document before this edit and the store's change, to find the dirty subgraph faster. */
   previous?: ManufaktureDocument;
   change?: DocumentChange;
+}
+
+export interface AssemblyOptions {
+  /**
+   * The generation the request belongs to: the client's current one (regen README,
+   * "Cancellation"), so it never cancels a regen. Default: the newest seen. A request older than
+   * the newest regen resolves to null.
+   */
+  generation?: number;
 }
 
 export interface EngineStats extends RegenCounters {
@@ -262,6 +314,54 @@ function staleBody(op: KernelOp, r: OpResult): boolean {
 /** The key `#reported` and the mesh batch use for a body of a part. */
 const slotOf = (partId: string, bodyId: string): string => `${partId}\n${bodyId}`;
 
+/** The key `#reported` and the mesh batch use for a body of a pinned source an instance shows. */
+const sourceSlot = (key: string, bodyId: string): string => `source\n${key}\n${bodyId}`;
+
+/** What `#assemble` found: results, drag states, the pinned sources shown, the frames used. */
+interface Assembled {
+  results: AssemblyResult[];
+  states: Map<string, DragState>;
+  sources: Map<string, { source: DerivedSource; state: PartState }>;
+  connectorKeys: Set<string>;
+}
+
+/** What a drag of an assembly starts from: the last regen's solver input and stored poses. */
+interface DragState {
+  generation: number;
+  input: AssemblyInput;
+  stored: ReadonlyMap<string, Pose>;
+}
+
+interface PendingDrag {
+  assemblyId: string;
+  instanceId: string;
+  target: DragTarget;
+  generation: number;
+  resolve: (result: DragResult | null) => void;
+  reject: (error: unknown) => void;
+}
+
+/**
+ * The warning for features of a pinned source that failed: what uses it is what the source
+ * built without them (`consequence` names the user: "the derived bodies are").
+ */
+function sourceFailures(built: PartState, where: string, consequence: string): RegenWarning[] {
+  const failed = built.part.features
+    .filter((x) => {
+      const s = built.results.get(x.id)?.status;
+      return s === 'error' || s === 'upstream-error';
+    })
+    .map((x) => x.id);
+  if (failed.length === 0) return [];
+  return [
+    {
+      code: 'derived-source',
+      features: failed,
+      message: `${failed.length === 1 ? 'A feature' : `${failed.length} features`} of ${where} failed (${failed.join(', ')}): ${consequence} it built without ${failed.length === 1 ? 'it' : 'them'}`,
+    },
+  ];
+}
+
 function emptyCounters(): RegenCounters {
   return { featureOps: 0, otherOps: 0, batches: 0, solves: 0, cacheHits: 0, cacheMisses: 0 };
 }
@@ -290,6 +390,16 @@ export class RegenEngine {
   #reported = new Map<string, string>();
   readonly #stats: EngineStats = { ...emptyCounters(), regens: 0, superseded: 0, retries: 0 };
   readonly #unsubscribe: (() => void) | undefined;
+  /**
+   * Connector frames by body key and reference (`#connectorKey`): plain data, valid for as long
+   * as the body key is, whatever the kernel instance. Kept for the frames the last regen used.
+   */
+  #connectors = new Map<string, ConnectorReport>();
+  /** Per assembly id, what drags start from: set by every completed regen. */
+  #assemblyStates = new Map<string, DragState>();
+  /** The newest drag not started yet; a newer one replaces it (latest target wins). */
+  #pendingDrag: PendingDrag | null = null;
+  #dragging = false;
 
   constructor(options: RegenEngineOptions) {
     this.#kernel = options.kernel;
@@ -374,7 +484,16 @@ export class RegenEngine {
       return null;
     }
     const t0 = now();
-    const run: Run = {
+    const run = this.#newRun(generation, document);
+    const result = await this.#attempt(run, () => this.#regenOnce(run, document, options));
+    if (result === null) return null;
+    result.ms = now() - t0;
+    this.#stats.regens++;
+    return result;
+  }
+
+  #newRun(generation: number, document: ManufaktureDocument): Run {
+    return {
       generation,
       counters: emptyCounters(),
       used: new Set(),
@@ -386,12 +505,16 @@ export class RegenEngine {
       },
       sources: new Map(),
     };
+  }
+
+  /**
+   * Run `body`, starting over (at most twice) when kernel shapes it used were lost to a recycle.
+   * Null when a newer regen superseded it.
+   */
+  async #attempt<T>(run: Run, body: () => Promise<T>): Promise<T | null> {
     for (let attempt = 0; ; attempt++) {
       try {
-        const result = await this.#regenOnce(run, document, options);
-        result.ms = now() - t0;
-        this.#stats.regens++;
-        return result;
+        return await body();
       } catch (error) {
         if (error instanceof Superseded) {
           this.#stats.superseded++;
@@ -467,16 +590,19 @@ export class RegenEngine {
       built.push({ state, features, dirty });
     }
 
+    // Assemblies, after the parts they show.
+    const partStates = new Map(built.map(({ state }) => [state.part.id, state]));
+    const assembled = await this.#assemble(run, document, variables, async (id) =>
+      partStates.get(id),
+    );
+
     // Every body must come from the kernel instance of the latest reply: a part built only from
     // cache hits can hold a shape id from before a recycle that landed during another part's
     // batch. Its tessellation would fail, or worse, a later pick or measure would.
-    for (const { state } of built) {
-      for (const b of state.bodies) {
-        if (b.instance !== null && run.instance !== null && b.instance !== run.instance) {
-          throw new StaleShapes(run.instance);
-        }
-      }
-    }
+    this.#checkInstances(run, [
+      ...built.map((b) => b.state),
+      ...[...assembled.sources.values()].map((x) => x.state),
+    ]);
 
     // Meshes (and topologies, for edge adjacency, vertices and face planes) of the bodies that
     // changed since the last completed regen, in one batch, so they share one name table.
@@ -487,6 +613,17 @@ export class RegenEngine {
     for (const { state } of built) {
       for (const b of finalBodies(state)) {
         const slot = slotOf(state.part.id, b.id);
+        if (this.#reported.get(slot) === b.key) continue;
+        const op: TessellateOp = { op: 'tessellate', shape: b.shape };
+        if (this.#deflection !== undefined) op.deflection = this.#deflection;
+        batch.ops.push(op, { op: 'topology', shape: b.shape });
+        batch.metas.push({ type: 'mesh', slot }, { type: 'topology', slot });
+        this.#usesBodies(batch, [b]);
+      }
+    }
+    for (const [key, { state }] of assembled.sources) {
+      for (const b of finalBodies(state)) {
+        const slot = sourceSlot(key, b.id);
         if (this.#reported.get(slot) === b.key) continue;
         const op: TessellateOp = { op: 'tessellate', shape: b.shape };
         if (this.#deflection !== undefined) op.deflection = this.#deflection;
@@ -507,7 +644,7 @@ export class RegenEngine {
         if (!r.ok) {
           if (r.error.code === 'unknown-shape') throw new StaleShapes(reply.instance);
           throw new Error(
-            `${meta.type} of ${meta.slot.replace('\n', ' body ')} failed: ${r.error.message}`,
+            `${meta.type} of ${meta.slot.replaceAll('\n', ' body ')} failed: ${r.error.message}`,
           );
         }
         if (meta.type === 'mesh') meshes.set(meta.slot, r.value as MeshData);
@@ -518,9 +655,9 @@ export class RegenEngine {
 
     // Completed: this is now the state the next edit is compared with.
     const reported = new Map<string, string>();
-    const parts: PartResult[] = built.map(({ state, features, dirty }) => {
-      const bodies = finalBodies(state).map((b): BodyResult => {
-        const slot = slotOf(state.part.id, b.id);
+    const bodyResults = (state: PartState, slotFor: (bodyId: string) => string) =>
+      finalBodies(state).map((b): BodyResult => {
+        const slot = slotFor(b.id);
         reported.set(slot, b.key);
         const inherited = carriedProps(state.part, b.id, state.inherited.get(b.id));
         return {
@@ -535,15 +672,41 @@ export class RegenEngine {
           topology: topologies.get(slot) ?? null,
         };
       });
-      return { partId: state.part.id, features, dirty, bodies, consumed: state.consumed };
-    });
+    const parts: PartResult[] = built.map(({ state, features, dirty }) => ({
+      partId: state.part.id,
+      features,
+      dirty,
+      bodies: bodyResults(state, (id) => slotOf(state.part.id, id)),
+      consumed: state.consumed,
+    }));
+    const sources: SourceResult[] = [...assembled.sources].map(([key, { source, state }]) => ({
+      key,
+      documentId: source.documentId,
+      documentName: source.documentName,
+      versionId: source.versionId,
+      versionName: source.versionName,
+      partId: source.partId,
+      bodies: bodyResults(state, (id) => sourceSlot(key, id)),
+    }));
     this.#reported = reported;
     this.#lastDocument = document;
+    this.#assemblyStates = assembled.states;
+    for (const key of this.#connectors.keys()) {
+      if (!assembled.connectorKeys.has(key)) this.#connectors.delete(key);
+    }
     this.#derived.retain();
     const dropped = await this.#cache.retain(run.used);
     await this.#releaseEntries(dropped);
     this.#addStats(run.counters);
-    return { generation: run.generation, names, parts, counters: run.counters, ms: 0 };
+    return {
+      generation: run.generation,
+      names,
+      parts,
+      assemblies: assembled.results,
+      sources,
+      counters: run.counters,
+      ms: 0,
+    };
   }
 
   async #releaseEntries(entries: readonly CacheEntry[]): Promise<void> {
@@ -783,37 +946,9 @@ export class RegenEngine {
       }
     | { ok: false; errors: RegenError[] }
   > {
-    const opened = await this.#derived.open(f.source);
-    this.#checkStale(run);
-    if (!opened.ok) return { ok: false, errors: [opened.error] };
-    const fits = await this.#derived.fits(f.source, state.depth + 1);
-    this.#checkStale(run);
-    if (!fits) return { ok: false, errors: [tooDeep(f.source)] };
-
-    const ns = sourceNamespace(f.source);
-    let built = run.sources.get(ns);
-    if (built === undefined) {
-      const { document, part } = opened;
-      built = await this.#buildPart(run, part, document, evaluateVariables(document.variables), {
-        ns,
-        depth: state.depth + 1,
-        versions: { ...run.versions, namingScheme: document.namingScheme },
-      });
-      run.sources.set(ns, built);
-    }
-    const where = `${f.source.documentName || f.source.documentId} at ${f.source.versionName || f.source.versionId}`;
-    if (built.broken) {
-      return {
-        ok: false,
-        errors: [
-          {
-            code: 'source',
-            field: ['source'],
-            message: `The kernel failed while building ${where}; nothing of it can be derived`,
-          },
-        ],
-      };
-    }
+    const source = await this.#pinnedBuild(run, f.source, state.depth + 1);
+    if (!source.ok) return source;
+    const { state: built, where } = source;
     const all = built.bodies;
     if (f.bodies !== undefined) {
       const missing = f.bodies.filter((id) => !all.some((b) => b.id === id));
@@ -844,26 +979,476 @@ export class RegenEngine {
         ],
       };
     }
-    const failed = built.part.features
-      .filter((x) => {
-        const s = built.results.get(x.id)?.status;
-        return s === 'error' || s === 'upstream-error';
-      })
-      .map((x) => x.id);
-    const warnings: RegenWarning[] =
-      failed.length === 0
-        ? []
-        : [
-            {
-              code: 'derived-source',
-              features: failed,
-              message: `${failed.length === 1 ? 'A feature' : `${failed.length} features`} of ${where} failed (${failed.join(', ')}): the derived bodies are what it built without ${failed.length === 1 ? 'it' : 'them'}`,
-            },
-          ];
+    const warnings = sourceFailures(built, where, 'the derived bodies are');
     const props = new Map(
       bodies.map((b) => [b.id, effectiveProps(built.part, b.id, built.inherited.get(b.id))]),
     );
     return { ok: true, bodies, warnings, props };
+  }
+
+  /**
+   * A pinned part of another document, built in this kernel: its data checked and read, its
+   * nesting checked against `MAX_DERIVED_DEPTH` before anything is built (`depth`: 1 for a source
+   * of this document), then its part regenerated under its own cache namespace, once per regen
+   * for every derived feature and instance of that part.
+   */
+  async #pinnedBuild(
+    run: Run,
+    source: DerivedSource,
+    depth: number,
+  ): Promise<{ ok: true; state: PartState; where: string } | { ok: false; errors: RegenError[] }> {
+    const opened = await this.#derived.open(source);
+    this.#checkStale(run);
+    if (!opened.ok) return { ok: false, errors: [opened.error] };
+    const fits = await this.#derived.fits(source, depth);
+    this.#checkStale(run);
+    if (!fits) return { ok: false, errors: [tooDeep(source)] };
+
+    const ns = sourceNamespace(source);
+    let built = run.sources.get(ns);
+    if (built === undefined) {
+      const { document, part } = opened;
+      built = await this.#buildPart(run, part, document, evaluateVariables(document.variables), {
+        ns,
+        depth,
+        versions: { ...run.versions, namingScheme: document.namingScheme },
+      });
+      run.sources.set(ns, built);
+    }
+    const where = `${source.documentName || source.documentId} at ${source.versionName || source.versionId}`;
+    if (built.broken) {
+      return {
+        ok: false,
+        errors: [
+          {
+            code: 'source',
+            field: ['source'],
+            message: `The kernel failed while building ${where}; nothing of it can be used`,
+          },
+        ],
+      };
+    }
+    return { ok: true, state: built, where };
+  }
+
+  /**
+   * Throw `StaleShapes` when a body of these parts holds a shape id from another kernel instance
+   * than the latest reply's (a recycle landed between a cache hit and now).
+   */
+  #checkInstances(run: Run, states: readonly PartState[]): void {
+    for (const state of states) {
+      for (const b of state.bodies) {
+        if (b.instance !== null && run.instance !== null && b.instance !== run.instance) {
+          throw new StaleShapes(run.instance);
+        }
+      }
+    }
+  }
+
+  // Assemblies ---------------------------------------------------------------------------------
+
+  /**
+   * Solve `assemblyId` of `document` for a preview (a mate dialog shows the result before OK):
+   * the parts its instances show are built through the cache (all hits when only the assembly
+   * changed), connectors found, and the assembly solved. Nothing is reported to later regens and
+   * drags keep the last regen's state. Null when a newer regen superseded it.
+   */
+  solveAssembly(
+    document: ManufaktureDocument,
+    assemblyId: string,
+    options: AssemblyOptions = {},
+  ): Promise<AssemblyResult | null> {
+    const generation = this.#currentGeneration(options);
+    if (generation < this.#latest) return Promise.resolve(null);
+    if (!document.assemblies.some((a) => a.id === assemblyId)) {
+      return Promise.reject(new TypeError(`the document has no assembly ${assemblyId}`));
+    }
+    const task = this.#chain.then(() => this.#solveOnly(document, assemblyId, generation));
+    this.#chain = task.catch(() => undefined);
+    return task;
+  }
+
+  /**
+   * One step of dragging `instanceId` of `assemblyId` toward `target`, from where the last step
+   * (or the last regen) left the assembly. Drags are coalesced: a drag not started when a newer
+   * one arrives resolves to null, and only the latest target is solved. Also null when the
+   * request is older than the newest regen, or the last regen has no such assembly. Needs no
+   * kernel work, so it never waits for a regen.
+   */
+  drag(
+    assemblyId: string,
+    instanceId: string,
+    target: DragTarget,
+    options: AssemblyOptions = {},
+  ): Promise<DragResult | null> {
+    const generation = this.#currentGeneration(options);
+    if (generation < this.#latest) return Promise.resolve(null);
+    return new Promise((resolve, reject) => {
+      this.#pendingDrag?.resolve(null);
+      this.#pendingDrag = { assemblyId, instanceId, target, generation, resolve, reject };
+      void this.#runDrags();
+    });
+  }
+
+  #currentGeneration(options: AssemblyOptions): number {
+    if (options.generation !== undefined) {
+      if (!Number.isSafeInteger(options.generation)) {
+        throw new TypeError('a generation must be an integer');
+      }
+      return options.generation;
+    }
+    const seen = this.#kernel.stats?.().generation ?? 0;
+    return Math.max(this.#latest, Number.isFinite(seen) ? seen : 0);
+  }
+
+  async #runDrags(): Promise<void> {
+    if (this.#dragging) return;
+    this.#dragging = true;
+    try {
+      while (this.#pendingDrag !== null) {
+        // Let targets already queued behind this one arrive and replace it.
+        await yieldToEventLoop();
+        const next = this.#pendingDrag;
+        this.#pendingDrag = null;
+        if (next === null) break;
+        try {
+          next.resolve(this.#dragNow(next));
+        } catch (error) {
+          next.reject(error);
+        }
+      }
+    } finally {
+      this.#dragging = false;
+    }
+  }
+
+  #dragNow(request: PendingDrag): DragResult | null {
+    const state = this.#assemblyStates.get(request.assemblyId);
+    if (request.generation < this.#latest || state === undefined) return null;
+    if (request.generation < state.generation) return null;
+    const report = dragAssembly(state.input, request.instanceId, request.target);
+    // The next step starts where this one ended.
+    state.input = {
+      instances: state.input.instances.map((x) => ({ ...x, pose: report.poses[x.id] ?? x.pose })),
+      mates: state.input.mates,
+    };
+    return dragResult(
+      request.generation,
+      request.assemblyId,
+      request.instanceId,
+      report,
+      state.stored,
+    );
+  }
+
+  async #solveOnly(
+    document: ManufaktureDocument,
+    assemblyId: string,
+    generation: number,
+  ): Promise<AssemblyResult | null> {
+    if (generation < this.#latest) {
+      this.#stats.superseded++;
+      return null;
+    }
+    const run = this.#newRun(generation, document);
+    return this.#attempt(run, async () => {
+      const variables = evaluateVariables(document.variables);
+      const states = new Map<string, PartState>();
+      const assembled = await this.#assemble(
+        run,
+        document,
+        variables,
+        async (id) => {
+          let state = states.get(id);
+          const part = document.parts.find((p) => p.id === id);
+          if (state === undefined && part !== undefined) {
+            state = await this.#buildPart(run, part, document, variables, {
+              ns: null,
+              depth: 0,
+              versions: run.versions,
+            });
+            states.set(id, state);
+          }
+          return state;
+        },
+        assemblyId,
+      );
+      this.#checkInstances(run, [
+        ...states.values(),
+        ...[...assembled.sources.values()].map((x) => x.state),
+      ]);
+      this.#checkStale(run);
+      this.#addStats(run.counters);
+      return assembled.results[0]!;
+    });
+  }
+
+  /** Every assembly of `document` (or only `only`), after the parts. */
+  async #assemble(
+    run: Run,
+    document: ManufaktureDocument,
+    variables: VariableValues,
+    partFor: (partId: string) => Promise<PartState | undefined>,
+    only?: string,
+  ): Promise<Assembled> {
+    const out: Assembled = {
+      results: [],
+      states: new Map(),
+      sources: new Map(),
+      connectorKeys: new Set(),
+    };
+    for (const assembly of document.assemblies) {
+      if (only !== undefined && assembly.id !== only) continue;
+      out.results.push(await this.#assembly(run, assembly, variables, partFor, out));
+    }
+    return out;
+  }
+
+  /** The bodies an instance's source part has, built if needed, with its warnings. */
+  async #instanceSource(
+    run: Run,
+    source: Assembly['instances'][number]['source'],
+    partFor: (partId: string) => Promise<PartState | undefined>,
+    out: Assembled,
+  ): Promise<
+    { ok: true; state: PartState; warnings: RegenWarning[] } | { ok: false; errors: RegenError[] }
+  > {
+    const warnings: RegenWarning[] = [];
+    let state: PartState;
+    let where: string;
+    if ('part' in source) {
+      const found = await partFor(source.part);
+      if (found === undefined) {
+        return {
+          ok: false,
+          errors: [
+            {
+              code: 'source',
+              field: ['source', 'part'],
+              message: `This document has no part ${source.part}`,
+            },
+          ],
+        };
+      }
+      if (found.broken) {
+        return {
+          ok: false,
+          errors: [
+            {
+              code: 'upstream',
+              upstream: [],
+              message: `The kernel failed while building part ${source.part}; it has no bodies to show`,
+            },
+          ],
+        };
+      }
+      state = found;
+      where = `Part ${found.part.name}`;
+    } else {
+      const got = await this.#pinnedBuild(run, source, 1);
+      if (!got.ok) return got;
+      state = got.state;
+      where = `Part ${state.part.name} of ${got.where}`;
+      out.sources.set(instanceSourceKey(source), { source, state });
+      warnings.push(...sourceFailures(state, got.where, 'the instance shows what'));
+    }
+    const bar = state.part.rollbackIndex;
+    if (bar !== null && bar < state.part.features.length) {
+      warnings.push({
+        code: 'rollback',
+        partId: state.part.id,
+        message: `${where} is rolled back to before feature ${bar + 1} of ${state.part.features.length}: the instance shows it as regenerated so far`,
+      });
+    }
+    if (source.configuration !== undefined) {
+      warnings.push({
+        code: 'configuration',
+        row: source.configuration,
+        message: `The instance names configuration row ${source.configuration}, which is not applied yet: it shows the part as it is`,
+      });
+    }
+    return { ok: true, state, warnings };
+  }
+
+  /** A connector frame's cache key: the body it is on (by content) and what it names. */
+  #connectorKey(body: LiveBody, origin: unknown, inference: string): string {
+    return `${body.key}\n${stableStringify([origin, inference])}`;
+  }
+
+  async #assembly(
+    run: Run,
+    assembly: Assembly,
+    variables: VariableValues,
+    partFor: (partId: string) => Promise<PartState | undefined>,
+    out: Assembled,
+  ): Promise<AssemblyResult> {
+    const result = emptyAssemblyResult(assembly.id);
+    const stored = new Map(assembly.instances.map((x) => [x.id, x.pose]));
+
+    // Instances: the bodies of their source part (connectors resolve on any of them).
+    const instances = new Map<string, InstanceResult>();
+    const partBodies = new Map<string, LiveBody[]>();
+    for (const x of assembly.instances) {
+      const r = emptyInstanceResult(x.id, x.source, x.pose, x.suppressed);
+      result.instances.push(r);
+      instances.set(x.id, r);
+      if (x.suppressed) continue;
+      const src = await this.#instanceSource(run, x.source, partFor, out);
+      if (!src.ok) {
+        r.status = 'error';
+        r.errors = src.errors;
+        continue;
+      }
+      r.warnings.push(...src.warnings);
+      const all = src.state.bodies;
+      if (all.length === 0) {
+        r.status = 'error';
+        r.errors.push({
+          code: 'no-body',
+          field: ['source'],
+          message: `Part ${src.state.part.name} has no bodies to show`,
+        });
+        continue;
+      }
+      partBodies.set(x.id, all);
+      const listed = x.bodies;
+      if (listed === undefined) {
+        r.bodies = all.map((b) => b.id);
+        continue;
+      }
+      const missing = listed.filter((id) => !all.some((b) => b.id === id));
+      if (missing.length > 0) {
+        r.status = 'error';
+        r.errors.push({
+          code: 'reference-lost',
+          referenceId: 'bodies',
+          missing,
+          message: `Part ${src.state.part.name} has no body ${missing.join(', ')} (merged into another, or never made): re-pick the bodies`,
+        });
+      }
+      r.bodies = all.filter((b) => listed.includes(b.id)).map((b) => b.id);
+    }
+
+    // Mates: what each needs, then the connector frames not found before, in one batch.
+    const started = now();
+    const work: { mate: Assembly['mates'][number]; result: MateResult; values: MateValues }[] = [];
+    const wanted = new Map<LiveBody, { key: string; op: ConnectorOp['connectors'][number] }[]>();
+    for (const mate of assembly.mates) {
+      const m = emptyMateResult(mate);
+      result.mates.push(m);
+      if (mate.suppressed) continue;
+      const ends = [mate.a.instance, mate.b.instance];
+      const off = ends.find((id) => instances.get(id)?.status === 'suppressed');
+      if (off !== undefined) {
+        m.status = 'suppressed';
+        m.message = `Instance ${off} is suppressed, so ${mate.id} is not solved`;
+        continue;
+      }
+      const broken = ends.filter((id) => !partBodies.has(id));
+      if (broken.length > 0) {
+        m.status = 'error';
+        m.errors.push({
+          code: 'upstream',
+          upstream: broken,
+          message: `Instance ${broken.join(' and ')} could not be built, so ${mate.id} is not solved`,
+        });
+        continue;
+      }
+      const values = mateValues(mate, variables);
+      if (values.errors.length > 0) {
+        m.status = 'error';
+        m.errors = values.errors;
+        continue;
+      }
+      for (const side of ['a', 'b'] as const) {
+        const c = mate[side];
+        for (const body of partBodies.get(c.instance)!) {
+          const origin = connectorOrigin(c);
+          const key = this.#connectorKey(body, origin, c.inference);
+          out.connectorKeys.add(key);
+          if (this.#connectors.has(key)) continue;
+          const list = wanted.get(body) ?? [];
+          if (!list.some((x) => x.key === key))
+            list.push({ key, op: { origin, inference: c.inference } });
+          wanted.set(body, list);
+        }
+      }
+      work.push({ mate, result: m, values });
+    }
+    /** Reports of this regen that are not cached (the op failed as a whole). */
+    const uncached = new Map<string, ConnectorReport>();
+    if (wanted.size > 0) {
+      const batch = emptyBatch();
+      const lists = [...wanted];
+      for (const [body, list] of lists) {
+        batch.ops.push({ op: 'connector', shape: body.shape, connectors: list.map((x) => x.op) });
+      }
+      this.#usesBodies(
+        batch,
+        lists.map(([body]) => body),
+      );
+      const reply = await this.#submit(run, batch.ops);
+      run.counters.otherOps += batch.ops.length;
+      this.#checkLive(batch, reply);
+      lists.forEach(([, list], j) => {
+        const r = reply.results[j]!;
+        list.forEach((x, i) => {
+          if (r.ok) {
+            this.#connectors.set(x.key, (r.value as { results: ConnectorReport[] }).results[i]!);
+          } else {
+            uncached.set(x.key, { ok: false, status: 'no-body', message: r.error.message });
+          }
+        });
+      });
+    }
+
+    // Frames, then the solve.
+    const mates: MateInput[] = [];
+    for (const { mate, result: m, values } of work) {
+      const poses: Pose[] = [];
+      (['a', 'b'] as const).forEach((side, i) => {
+        const c = mate[side];
+        const reports = partBodies
+          .get(c.instance)!
+          .map((b) => {
+            const key = this.#connectorKey(b, connectorOrigin(c), c.inference);
+            return this.#connectors.get(key) ?? uncached.get(key);
+          })
+          .filter((x): x is ConnectorReport => x !== undefined);
+        const report = pickReport(reports);
+        if (report === undefined || !report.ok) {
+          m.errors.push(connectorError(mate, side, report));
+          return;
+        }
+        const found = connectorResolution(mate, side, report);
+        const frame = connectorPose(framePose(report.frame), c, values.offsets[side]);
+        m.connectors[i]!.reference = found.reference;
+        m.connectors[i]!.frame = frame;
+        m.warnings.push(...found.warnings);
+        poses.push(frame);
+      });
+      if (m.errors.length > 0) {
+        m.status = 'error';
+        continue;
+      }
+      mates.push(mateInput(mate, poses[0]!, poses[1]!, values));
+    }
+    const input = solverInput(
+      assembly.instances.filter((x) => !x.suppressed),
+      mates,
+    );
+    const report = solve(input);
+    applyReport(result, report, stored);
+    result.ms = now() - started;
+    out.states.set(assembly.id, {
+      generation: run.generation,
+      input: {
+        instances: input.instances.map((x) => ({ ...x, pose: report.poses[x.id] ?? x.pose })),
+        mates,
+      },
+      stored,
+    });
+    return result;
   }
 
   /**

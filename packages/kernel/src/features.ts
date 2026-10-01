@@ -34,12 +34,14 @@ import { KernelError } from './errors';
 import type { Kernel, NamedShape } from './kernel';
 import {
   bornFace,
+  comparePoints,
   deriveFaces,
   describeFailure,
   edgeFacesName,
   importedFace,
   invalidFeatureId,
   invalidSketchId,
+  isPositional,
   isUnnamed,
   nameShape,
   nameSweep,
@@ -72,6 +74,7 @@ import type {
   Transform,
   Vec2,
   Vec3,
+  VertexInfo,
 } from './types';
 
 // Inputs --------------------------------------------------------------------------
@@ -2113,6 +2116,273 @@ export function sketchFrame(
   const { geometry: _geometry, ...resolution } = report!;
   void _geometry;
   return { ok: true, frame: frameOnPlane(g.origin, g.direction), resolution };
+}
+
+// Mate connectors ---------------------------------------------------------------------------
+
+/**
+ * A vertex by the sorted names of the faces around it (`vertexName` joins them by `&`), with an
+ * ordinal only when two vertices share the same faces (1-based, by position, always fragile).
+ */
+export interface VertexRef {
+  faces: string[];
+  ordinal?: number;
+}
+
+/**
+ * The point a mate connector sits on, picked on its origin: a face's `centroid`; the `centre`
+ * of a circular edge or of a cylindrical, conical or spherical face; an edge's `midpoint`; a
+ * `vertex`.
+ */
+export type ConnectorInference = 'centroid' | 'centre' | 'midpoint' | 'vertex';
+
+/** What a connector is found on: a face for `centroid`, a face or an edge for `centre`, ... */
+export type ConnectorOrigin = FaceRef | EdgeRef | VertexRef;
+
+/**
+ * A connector frame on a named body, or why there is none. `oriented` is false when no naming
+ * rule decided which way z points (OCCT's direction, or the world axes, were used), so an edit
+ * may turn it round: worth a warning, and a `flip` if it points the wrong way.
+ */
+export type ConnectorReport =
+  | {
+      ok: true;
+      frame: Frame;
+      kind: 'face' | 'edge' | 'vertex';
+      index: number;
+      via: Via;
+      fragile: boolean;
+      oriented: boolean;
+    }
+  | { ok: false; status: 'lost'; missing: string[]; message: string }
+  | { ok: false; status: 'ambiguous'; candidates: string[]; message: string }
+  | { ok: false; status: 'no-body' | 'unsuitable'; message: string };
+
+const CONNECTOR_INFERENCES: readonly string[] = ['centroid', 'centre', 'midpoint', 'vertex'];
+
+/** The name a connector origin is written as, for messages. */
+export function connectorTarget(origin: ConnectorOrigin, inference: ConnectorInference): string {
+  if (inference === 'vertex' && 'faces' in origin) return origin.faces.join('&');
+  return refName(origin as TopoRef);
+}
+
+/**
+ * The frame of a mate connector on a named body (kernel README, "Mate connectors"): the point
+ * `inference` picks on `origin`, with z along the geometry's oriented direction (as the
+ * features orient it, see "Directions") and x world X projected square to z (world Y when z is
+ * along X), like `frameOnPlane`. Positions are in the body's coordinates.
+ *
+ * - `centroid` (a face): the face's centroid; z the outward normal of a plane, the oriented
+ *   axis of a cylinder or cone.
+ * - `centre`: a circular edge's centre, z the outward normal of a planar face of the edge
+ *   square to the circle (the first by name), else the circle's normal oriented by names; a
+ *   cylinder's or cone's axis at the height of the face's centroid, z the oriented axis; a
+ *   sphere's centre with the world axes.
+ * - `midpoint` (an edge): the middle of the edge; z along a straight edge's oriented
+ *   direction, or a circular edge's z as for `centre`.
+ * - `vertex`: the vertex, with the world axes.
+ *
+ * Other geometry (a spline face's centroid, an ellipse's midpoint) takes the world axes with
+ * `oriented: false`; a `centre` on something with no centre (a plane, a straight edge) is
+ * `unsuitable`. Never throws for a reference that does not resolve: that is a report.
+ */
+export function connectorFrame(
+  k: Kernel,
+  body: ShapeId,
+  origin: ConnectorOrigin,
+  inference: ConnectorInference,
+): ConnectorReport {
+  const target = connectorTarget(origin, inference);
+  const named = k.has(body) ? k.named(body) : null;
+  if (named === null) {
+    return { ok: false, status: 'no-body', message: `shape ${body} has no names` };
+  }
+  if (!CONNECTOR_INFERENCES.includes(inference)) {
+    return { ok: false, status: 'unsuitable', message: `unknown inference ${String(inference)}` };
+  }
+  const { names, topology } = named;
+  const isFace = 'face' in origin;
+  if (inference === 'vertex' ? isFace : inference === 'centroid' ? !isFace : false) {
+    const want = inference === 'vertex' ? 'a vertex' : 'a face';
+    return { ok: false, status: 'unsuitable', message: `${target} is not ${want}` };
+  }
+  if (inference === 'midpoint' && isFace) {
+    return { ok: false, status: 'unsuitable', message: `${target} is not an edge` };
+  }
+
+  const r =
+    inference === 'vertex'
+      ? resolveVertex(names, topology, origin as VertexRef)
+      : resolve(names, topology, origin as TopoRef);
+  if (!r.ok) {
+    if (r.status === 'ambiguous') {
+      return {
+        ok: false,
+        status: 'ambiguous',
+        candidates: r.candidates,
+        message: describeFailure(target, r),
+      };
+    }
+    const message =
+      inference === 'vertex' && r.missing.length === 0
+        ? `${target} is lost: its faces all still exist but no longer meet at a vertex`
+        : describeFailure(target, r);
+    return { ok: false, status: 'lost', missing: r.missing, message };
+  }
+  const kind = inference === 'vertex' ? 'vertex' : isFace ? 'face' : 'edge';
+  const found = { kind, index: r.index, via: r.via, fragile: r.fragile } as const;
+  const done = (point: Vec3, z: Vec3 | null, oriented = true): ConnectorReport => ({
+    ok: true,
+    frame: connectorAxes(point, z ?? [0, 0, 1]),
+    ...found,
+    oriented: z !== null && oriented,
+  });
+  const world = (point: Vec3, rule: boolean): ConnectorReport => ({
+    ok: true,
+    frame: connectorAxes(point, [0, 0, 1]),
+    ...found,
+    oriented: rule,
+  });
+
+  if (kind === 'vertex') return world(topology.vertices[r.index - 1]!.point, true);
+
+  const raw = k.geometry(body, { kind, index: r.index });
+  const oriented = raw === null ? null : orientedGeometry(names, topology, kind, r.index, raw);
+  const axis = oriented ?? raw;
+
+  if (kind === 'face') {
+    const face = topology.faces[r.index - 1]!;
+    const g = raw?.kind;
+    if (inference === 'centroid') {
+      if (g === 'plane' || g === 'cylinder' || g === 'cone') {
+        return done(face.centroid, axis!.direction, oriented !== null);
+      }
+      return world(face.centroid, false);
+    }
+    // centre
+    if (g === 'cylinder' || g === 'cone') {
+      const d = unit(axis!.direction);
+      const at = add(axis!.origin, scale(d, dot(sub(face.centroid, axis!.origin), d)));
+      return done(at, d, oriented !== null);
+    }
+    if (g === 'sphere') return world(raw!.origin, true);
+    return {
+      ok: false,
+      status: 'unsuitable',
+      message: `${target} has no centre: pick a circular edge or a cylindrical, conical or spherical face`,
+    };
+  }
+
+  // An edge.
+  const edge = topology.edges[r.index - 1]!;
+  if (raw?.kind === 'circle') {
+    // A planar face the circle lies in (its normal along the circle's) decides first: a hole's
+    // rim points out of the face it is drilled in, a boss's rim out of its top.
+    const byName = [...new Set(edge.faces)].sort((p, q) => {
+      const a = names.faces[p - 1]?.name ?? '';
+      const b = names.faces[q - 1]?.name ?? '';
+      return a < b ? -1 : a > b ? 1 : 0;
+    });
+    let z: Vec3 | null = null;
+    for (const f of byName) {
+      const n = topology.faces[f - 1]!.normal;
+      if (n !== null && norm(cross(n, raw.direction)) < 1e-6) {
+        z = unit(n);
+        break;
+      }
+    }
+    const point = inference === 'centre' ? raw.origin : edge.midpoint;
+    if (z !== null) return done(point, z);
+    return done(point, axis!.direction, oriented !== null);
+  }
+  if (inference === 'centre') {
+    return {
+      ok: false,
+      status: 'unsuitable',
+      message: `${target} has no centre: pick a circular edge or a cylindrical, conical or spherical face`,
+    };
+  }
+  if (raw?.kind === 'line') return done(edge.midpoint, axis!.direction, oriented !== null);
+  return world(edge.midpoint, false);
+}
+
+/** A frame at `origin` with normal `z` and x from world X (world Y when z runs along X). */
+function connectorAxes(origin: Vec3, z: Vec3): Frame {
+  const { xDir, normal } = frameOnPlane([0, 0, 0], z);
+  return { origin, xDir, normal };
+}
+
+/**
+ * Resolve a vertex by the names of the faces around it: exact names first, then faces
+ * descending from them (a face split or merged since), with `ordinal` only choosing among
+ * several. A vertex around faces that all exist but no longer meet is `lost` with nothing
+ * missing.
+ */
+export function resolveVertex(names: Names, topology: Topology, ref: VertexRef): Resolution {
+  const wanted = [...new Set(ref.faces)].sort();
+  const unnamed = wanted.filter(isUnnamed);
+  if (unnamed.length > 0) return { ok: false, status: 'lost', missing: unnamed };
+  const around = (v: VertexInfo) => [...new Set(v.faces)].map((f) => names.faces[f - 1]!);
+  let via: Via = 'exact';
+  let candidates = topology.vertices
+    .filter((v) => {
+      const have = around(v)
+        .map((f) => f.name)
+        .sort();
+      return have.length === wanted.length && have.every((n, i) => n === wanted[i]);
+    })
+    .map((v) => v.index);
+  if (candidates.length === 0) {
+    via = 'descendant';
+    candidates = topology.vertices
+      .filter((v) => {
+        const have = around(v);
+        return (
+          have.length === wanted.length &&
+          wanted.every((w) => have.some((f) => f.lineage.includes(w)))
+        );
+      })
+      .map((v) => v.index);
+  }
+  const fragile = wanted.some(isPositional);
+  if (candidates.length === 0) {
+    const missing = wanted.filter((w) => !names.faces.some((f) => f.lineage.includes(w)));
+    return { ok: false, status: 'lost', missing };
+  }
+  if (candidates.length > 1 && ref.ordinal !== undefined) {
+    const ordered = [...candidates].sort((p, q) =>
+      comparePoints(topology.vertices[p - 1]!.point, topology.vertices[q - 1]!.point),
+    );
+    const pick = ordered[ref.ordinal - 1];
+    if (pick !== undefined) return { ok: true, index: pick, via: 'ordinal', fragile: true };
+  }
+  if (candidates.length === 1) return { ok: true, index: candidates[0]!, via, fragile };
+  return {
+    ok: false,
+    status: 'ambiguous',
+    candidates: candidates.map((v) => vertexName(names.faces, topology, v)).sort(),
+  };
+}
+
+/**
+ * The reference a click on vertex `index` of a body is stored as: the sorted names of the faces
+ * around it, with an ordinal only when another vertex has the same faces; null when a face
+ * around it has no real name.
+ */
+export function pickVertex(names: Names, topology: Topology, index: number): VertexRef | null {
+  const v = topology.vertices[index - 1];
+  if (v === undefined) return null;
+  const faces = [...new Set(v.faces.map((f) => names.faces[f - 1]!.name))].sort();
+  if (faces.some(isUnnamed)) return null;
+  const key = faces.join('&');
+  const same = topology.vertices
+    .filter((w) => vertexName(names.faces, topology, w.index) === key)
+    .map((w) => w.index);
+  if (same.length <= 1) return { faces };
+  const ordered = same.sort((p, q) =>
+    comparePoints(topology.vertices[p - 1]!.point, topology.vertices[q - 1]!.point),
+  );
+  return { faces, ordinal: ordered.indexOf(index) + 1 };
 }
 
 // Validation --------------------------------------------------------------------------------

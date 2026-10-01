@@ -10,7 +10,16 @@ import { wasmPath } from '@manufakture/kernel/node';
 import * as Comlink from 'comlink';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { RegenClient } from './client';
-import { apply, block, setVariable, statuses, twoBodies } from './test-helpers';
+import {
+  ASSEMBLY,
+  apply,
+  block,
+  boxAndLid,
+  hinge,
+  setVariable,
+  statuses,
+  twoBodies,
+} from './test-helpers';
 import type { RegenResult } from './types';
 import { createRegenWorkerApi } from './worker-api';
 
@@ -214,5 +223,50 @@ describe('the regen worker', () => {
     expect(after.counters.featureOps).toBe(2);
     const stats = await client.regenStats();
     expect(stats.regens).toBeGreaterThanOrEqual(4);
+  });
+
+  it('solves an assembly preview and coalesces drags at the current generation, without cancelling a regen', async () => {
+    const doc = boxAndLid();
+    const result = (await client.regen(doc))!;
+    const asm = result.assemblies![0]!;
+    expect(asm).toMatchObject({ outcome: 'solved', dof: 1 });
+    expect(asm.instances[1]!.transform.translation[2]).toBeCloseTo(20, 9);
+
+    // A preview with the hinge's lid connector turned a quarter turn: the lid swings round.
+    const turned = apply(doc, {
+      type: 'editMate',
+      assemblyId: ASSEMBLY,
+      mate: hinge({ rotate: 1 }),
+    });
+    const preview = (await client.solveAssembly(turned, ASSEMBLY))!;
+    expect(preview).toMatchObject({ assemblyId: ASSEMBLY, outcome: 'solved', dof: 1 });
+    expect(preview.instances[1]!.moved).toBe(true);
+    // The preview neither took a generation nor changed what the worker reports.
+    expect(client.latestGeneration).toBe(result.generation);
+
+    // A burst of pointer moves: only the latest target is solved.
+    const open = { point: [20, 0, 5] as const, position: [20, 35, 50] as const };
+    const steps = await Promise.all([
+      client.dragInstance(ASSEMBLY, 'inst#2', { point: [20, 0, 5], position: [20, 10, 40] }),
+      client.dragInstance(ASSEMBLY, 'inst#2', { point: [20, 0, 5], position: [20, 20, 45] }),
+      client.dragInstance(ASSEMBLY, 'inst#2', open),
+    ]);
+    expect(steps.slice(0, 2)).toEqual([null, null]);
+    const last = steps[2]!;
+    expect(last).toMatchObject({ generation: result.generation, moved: ['inst#2'] });
+    expect(last.target.reached).toBe(true);
+    expect(last.transforms['inst#2']!.rotation[0]).toBeCloseTo(-Math.SQRT1_2, 9);
+
+    // Committing the drag is a pose-only edit: the regen sends no mesh and keeps the lid there.
+    const committed = apply(doc, {
+      type: 'setPoses',
+      assemblyId: ASSEMBLY,
+      poses: Object.fromEntries(last.moved.map((id) => [id, last.transforms[id]!])),
+    });
+    const after = (await client.regen(committed))!;
+    expect(after.parts.every((p) => p.bodies.every((b) => !b.meshChanged))).toBe(true);
+    const lid = after.assemblies![0]!.instances[1]!;
+    expect(lid.moved).toBe(false);
+    expect(lid.transform.rotation[0]).toBeCloseTo(-Math.SQRT1_2, 9);
   });
 });

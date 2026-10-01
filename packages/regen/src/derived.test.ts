@@ -1,8 +1,14 @@
-import { MAX_DERIVED_DEPTH, featureIdsInName, type Part } from '@manufakture/core';
+import { MAX_DERIVED_DEPTH, deserialize, featureIdsInName, type Part } from '@manufakture/core';
 import { derivedName } from '@manufakture/kernel';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { DerivedSources, carriedProps, effectiveProps, sourceNamespace } from './derived';
 import { PART, add, block, build, derivedOf, pin, pinText } from './test-helpers';
+
+// The real `deserialize`, wrapped so one test can make it throw.
+vi.mock('@manufakture/core', async (original) => {
+  const actual = await original<typeof import('@manufakture/core')>();
+  return { ...actual, deserialize: vi.fn(actual.deserialize) };
+});
 
 describe('derived names as core reads them', () => {
   // Whatever the source name, the kernel's derived form depends on the deriving feature only.
@@ -42,6 +48,21 @@ describe('DerivedSources', () => {
     const a = await sources.open(good);
     const b = await sources.open({ ...good });
     expect(a.ok && b.ok && a.document === b.document).toBe(true);
+  });
+
+  it('turns a source whose reading throws into a data error, not a failed regen', async () => {
+    vi.mocked(deserialize).mockImplementationOnce(() => {
+      throw new TypeError('a migration met a shape it did not expect');
+    });
+    const opened = await new DerivedSources().open(pin(block()));
+    expect(opened).toMatchObject({
+      ok: false,
+      error: {
+        code: 'source',
+        field: ['source', 'data'],
+        message: expect.stringMatching(/cannot be read: a migration met a shape/),
+      },
+    });
   });
 
   it('refuses a size that does not match, and forgets documents a regen did not use', async () => {

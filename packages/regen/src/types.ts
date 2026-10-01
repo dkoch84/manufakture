@@ -3,7 +3,15 @@
 // its arena id, and its mesh when it changed). Everything is plain data, so a reply can
 // cross the worker boundary (ADR 0007); mesh buffers are transferred.
 
-import type { BodyPropsFields, FeatureKind, Vec3 } from '@manufakture/core';
+import type {
+  AssemblyIssue,
+  AssemblyWarning,
+  MateGroup,
+  MateStatus,
+  Outcome,
+  Residual,
+} from '@manufakture/assembly';
+import type { BodyPropsFields, FeatureKind, Pose, Vec3 } from '@manufakture/core';
 import type { MeshData, ShapeId, Topology, Via } from '@manufakture/kernel';
 import type { RegionDiagnosticCode, SketchPlacement } from '@manufakture/sketch';
 import type { UnitsError } from '@manufakture/units';
@@ -123,7 +131,11 @@ export type RegenWarning =
    * Features of a derived part's source failed (or could not be built) at that version: the
    * derived bodies are what the source built without them. `features` lists them in order.
    */
-  | { code: 'derived-source'; message: string; features: string[] };
+  | { code: 'derived-source'; message: string; features: string[] }
+  /** An instance shows its part as regenerated, and the part's rollback bar is not at its end. */
+  | { code: 'rollback'; message: string; partId: string }
+  /** An instance names a configuration row, which regen does not apply yet (T2.4c). */
+  | { code: 'configuration'; message: string; row: string };
 
 /** How one reference of a feature resolved (ADR 0004 decision 6: recomputed, never stored). */
 export interface ReferenceResolution {
@@ -227,6 +239,116 @@ export interface RegenResult {
   /** Name table for every mesh in this result (ADR 0007 decision 7). */
   names: string[];
   parts: PartResult[];
+  /**
+   * Per assembly, in document order: instance transforms and mate diagnostics. The engine always
+   * sets it (an empty list without assemblies); optional only so results built by hand before
+   * assemblies existed still type-check.
+   */
+  assemblies?: AssemblyResult[];
+  /**
+   * Pinned parts of other documents that instances show, with their bodies (and meshes, as for
+   * parts). Always set by the engine, like `assemblies`.
+   */
+  sources?: SourceResult[];
   counters: RegenCounters;
   ms: number;
+}
+
+// Assemblies -------------------------------------------------------------------------------
+
+/** Where an instance's bodies are in a result: a part of this document, or a pinned source. */
+export type InstanceSourceRef = { part: string } | { source: string };
+
+export interface InstanceResult {
+  instanceId: string;
+  /** `error`: its source could not be built, or bodies it lists are gone; see `errors`. */
+  status: 'ok' | 'error' | 'suppressed';
+  /** The `PartResult` (by part id) or `SourceResult` (by key) whose bodies it shows. */
+  source: InstanceSourceRef;
+  /** The body ids it shows, in the source's creator order; their meshes are the source's. */
+  bodies: string[];
+  /** The solved pose (instance coordinates to world); the stored pose when suppressed. */
+  transform: Pose;
+  /** The solved pose differs from the pose stored in the document. */
+  moved: boolean;
+  errors: RegenError[];
+  warnings: RegenWarning[];
+}
+
+/** One connector of a mate, as regen found it. */
+export interface ConnectorResult {
+  connectorId: string;
+  instanceId: string;
+  /** In the instance's coordinates, with flip, rotate and offset applied; null when not found. */
+  frame: Pose | null;
+  /** How its origin resolved; null when it did not. */
+  reference: ReferenceResolution | null;
+}
+
+export interface MateResult {
+  mateId: string;
+  /**
+   * The solver's status, or `error` when regen could not give it to the solver (a connector
+   * that does not resolve, an expression that does not evaluate, an instance that failed): the
+   * mate is left out, so its instances are free of it, and `errors` says why.
+   */
+  status: MateStatus | 'error';
+  /** Free coordinates: revolute [angle], slider [distance], ...; empty when not solved. */
+  coordinates: number[];
+  /** Between the two connectors after the solve; null when not solved. */
+  residual: Residual | null;
+  connectors: [ConnectorResult, ConnectorResult];
+  errors: RegenError[];
+  warnings: RegenWarning[];
+  /** The solver's message for anything but `ok`. */
+  message?: string;
+}
+
+export interface AssemblyResult {
+  assemblyId: string;
+  /** The solver's outcome over the mates that reached it. */
+  outcome: Outcome;
+  /** Remaining degrees of freedom; null while mates conflict. */
+  dof: number | null;
+  /** In the assembly's order. */
+  instances: InstanceResult[];
+  /** In creation order. */
+  mates: MateResult[];
+  redundant: MateGroup[];
+  conflicting: MateGroup[];
+  issues: AssemblyIssue[];
+  warnings: AssemblyWarning[];
+  message?: string;
+  /** Milliseconds for connectors and the solve. */
+  ms: number;
+}
+
+/** A pinned part of another document that instances show. */
+export interface SourceResult {
+  /** `InstanceResult.source.source`. */
+  key: string;
+  documentId: string;
+  documentName: string;
+  versionId: string;
+  versionName: string;
+  partId: string;
+  /** Every body of the part at that version, as for a part of this document. */
+  bodies: BodyResult[];
+}
+
+/** One step of a drag (`dragInstance`). */
+export interface DragResult {
+  generation: number;
+  assemblyId: string;
+  instanceId: string;
+  outcome: Outcome;
+  /** Every solved instance's pose after the step (suppressed instances are not solved). */
+  transforms: Record<string, Pose>;
+  /** Instances whose pose now differs from the document's: what `setPoses` commits on release. */
+  moved: string[];
+  /** How far the dragged instance ended from the target. */
+  target: Residual & { reached: boolean };
+  dof: number | null;
+  warnings: AssemblyWarning[];
+  message?: string;
 }

@@ -6,7 +6,9 @@ The regeneration engine: turns a core document (`packages/core`) into geometry t
 `FeatureInput`, caches each feature's result, and reports per feature a status, errors, warnings,
 reference resolutions and timing, plus every final body's mesh and one name table for the
 viewport. A part carries a set of bodies (M2 plan, decisions 1 to 3), and an edit rebuilds only the
-features of the bodies it touches.
+features of the bodies it touches. After the parts, it places the instances of every assembly with
+the mate solver of `packages/assembly` ([ADR 0008](../../docs/adr/0008-assembly-mate-solver.md)),
+and it answers assembly previews and drags (see Assemblies).
 
 ```ts
 import { RegenEngine } from '@manufakture/regen';
@@ -20,6 +22,8 @@ const engine = new RegenEngine({
 
 const result = await engine.regen(document, { generation }); // null when superseded
 store.subscribe((event) => engine.update(event)); // uses the event's previous document and change
+const preview = await engine.solveAssembly(draft, 'assembly#1', { generation }); // a mate dialog
+const step = await engine.drag('assembly#1', 'inst#2', target, { generation }); // coalesced
 ```
 
 That is the engine's own API, as tests and a custom host use it. apps/web does not construct an
@@ -31,7 +35,8 @@ calls `RegenClient.regen(document)` (see "The worker").
 **Decision: the engine runs in the kernel worker, and the main thread makes one `regen` call per
 user intent** ([ADR 0007](../../docs/adr/0007-worker-protocol.md), decisions 1 and 3). Inside the
 worker it drives the kernel through `KernelService`'s batch API in-process: `feature` ops with
-`applyFeature` semantics on the bodies each feature reads, plus `resolve` and `tessellate`. The next
+`applyFeature` semantics on the bodies each feature reads, plus `resolve`, `connector` and
+`tessellate`. The next
 feature's cache key depends on what the previous one did to the body set (which bodies it made,
 changed or merged away), so every `feature` op is its own batch; in the worker a batch costs no
 structured clone.
@@ -64,7 +69,7 @@ service (`@manufakture/kernel/node`) and the real solver directly.
 | `@manufakture/regen/worker` | worker entry | `Comlink.expose` of the regen worker API, with the kernel's `.wasm` imported as a `?url` asset |
 | `@manufakture/regen/client` | main thread  | `spawnRegenWorker()`, `RegenClient`                                                            |
 
-`createRegenWorkerApi` (`src/worker-api.ts`) builds the kernel's worker API (`createKernelWorkerApi`: loading with progress, batches, release, cancel, recycle, stats), waits for its service, creates the engine next to it and adds `regen(document, { generation })` and `regenStats()`. Mesh buffers are marked with `regenTransferables(result)`; nothing else heavy crosses. `RegenClient` extends the kernel's `KernelClient` (imported from `@manufakture/kernel/kernel-client`, so the kernel's own worker entry is not bundled), so every request of every kind (a regen, a `pick`, a `measure`, an export) takes its generation from the one sequence the client keeps. The service cancels by generation whoever sent a batch (see Cancellation), so a regen cancels older requests, and a pick or measure sent at the client's current generation never cancels a regen. Only a regen may take a new generation: any other batch that did (a STEP import, say) would cancel the regen in flight, which then resolves to null with nothing reporting in its place, so the app sends every other batch at `latestGeneration` and releases shapes with `KernelClient.release`, outside the batch queue. The app's `startRegen` also asks again when its newest regen comes back null. A pending regen resolves to null when the worker is restarted or terminated, like a pending submit. `RegenClient.regen` returns every regen the worker completed, even when a newer request came meanwhile: the engine reports a changed mesh once, to the regen that built it, so a caller that dropped completed results would lose meshes.
+`createRegenWorkerApi` (`src/worker-api.ts`) builds the kernel's worker API (`createKernelWorkerApi`: loading with progress, batches, release, cancel, recycle, stats), waits for its service, creates the engine next to it and adds `regen(document, { generation })`, `solveAssembly(document, assemblyId, { generation })`, `dragInstance(assemblyId, instanceId, target, { generation })` and `regenStats()`. `RegenClient.solveAssembly` and `RegenClient.dragInstance` send the client's current generation (`latestGeneration`), never a new one, so neither cancels a regen. Mesh buffers are marked with `regenTransferables(result)`; nothing else heavy crosses. `RegenClient` extends the kernel's `KernelClient` (imported from `@manufakture/kernel/kernel-client`, so the kernel's own worker entry is not bundled), so every request of every kind (a regen, a `pick`, a `measure`, an export) takes its generation from the one sequence the client keeps. The service cancels by generation whoever sent a batch (see Cancellation), so a regen cancels older requests, and a pick or measure sent at the client's current generation never cancels a regen. Only a regen may take a new generation: any other batch that did (a STEP import, say) would cancel the regen in flight, which then resolves to null with nothing reporting in its place, so the app sends every other batch at `latestGeneration` and releases shapes with `KernelClient.release`, outside the batch queue. The app's `startRegen` also asks again when its newest regen comes back null. A pending regen resolves to null when the worker is restarted or terminated, like a pending submit. `RegenClient.regen` returns every regen the worker completed, even when a newer request came meanwhile: the engine reports a changed mesh once, to the regen that built it, so a caller that dropped completed results would lose meshes.
 
 After a recycle every body is gone. The engine only forgets (its hook runs inside the service's queue, where nothing may be submitted); the main thread hears of it through the kernel's `recycled` status and asks for a regen of its current document (apps/web `kernelLoader`). A worker restart is handled the same way, through the client's `onRestarted` option. Imported STEP reference bodies are not part of a regen, so the app reads them again from the files their import features store.
 
@@ -252,8 +257,9 @@ version as canonical JSON text. Regen builds it in four steps (`src/derived.ts`,
    checked once per source object, as for imported files. The text is read with core's
    `deserialize`, which migrates an older format in memory; a newer format, text that is not a
    document, and a `partId` the document does not have are each a `source` error on the feature
-   (`field` `['source', 'sha256']`, `['source', 'data']` or `['source', 'partId']`). A read
-   document is kept by hash while regens use it, so an edit elsewhere never parses it again.
+   (`field` `['source', 'sha256']`, `['source', 'data']` or `['source', 'partId']`); so is text on
+   which reading throws, which never fails the regen. A read document is kept by hash while
+   regens use it, so an edit elsewhere never parses it again.
 2. **Check the nesting, before building anything.** A source may derive from another source, and
    so on. Regen walks the chain (the active, unsuppressed derived features of each part it would
    build), opening each source but building none, and refuses one that nests deeper than
@@ -289,6 +295,61 @@ source build and the derive. Source bodies take part in the stale-shape check li
 batch reads (see Cache), and a derive whose source shape is unknown fails with `no-body` on
 `sources`, which the engine treats as stale too: the regen restarts, rebuilding the source on
 the new instance, and nothing built on the dead shapes is cached.
+
+## Assemblies
+
+After the parts, every assembly of the document is placed (`src/assembly.ts`, the engine's
+`#assembly`), in four steps:
+
+1. **What each instance shows.** A part of this document is its `PartResult`, as regenerated, the
+   rollback bar included; when the bar is not at the end the instance has a `rollback` warning. A
+   pinned part of another document is opened, depth-checked and built exactly like a derived
+   feature's source (see Derived parts), and shared with any derived feature of the same pin; its
+   bodies, with meshes, are reported once in `RegenResult.sources` under the key
+   `source:<sha256>:<part id>`, which the instance names (`InstanceResult.source`). A source that
+   cannot be built is a `source` error on the instance; features of it that failed are a
+   `derived-source` warning. The instance shows the bodies it lists (`bodies`; absent: all), and a
+   listed body the part no longer has is `reference-lost` on `bodies`. Instances reuse their
+   source's body meshes: no copies, no meshes per instance.
+2. **Connector frames.** Each connector of an unsuppressed mate is found on the bodies of its
+   instance's part by the kernel's `connector` op (kernel README, "Mate connectors"), one op per
+   body for every frame not found before, in one batch. Frames are cached in the engine by body key
+   and reference: plain data, valid for as long as the body is the same (a recycle does not lose
+   them), kept for the frames the last regen used. So an unchanged assembly, and a pose-only change
+   (core's `posesOnly`), costs no kernel op at all; an edit of one part finds only the frames on
+   its bodies again. `flip`, `rotate` and the evaluated `offset` are applied to the frame in regen.
+3. **Errors per mate.** A connector that does not resolve (`reference-lost`, `reference-ambiguous`
+   with its candidates, `invalid` for a point the inference cannot take), an offset or limit that
+   does not evaluate (`expression`), or an instance that could not be built (`upstream`) makes the
+   mate `error`, with a message ending in "re-pick it" for references. Such a mate never reaches the
+   solver, so its instances are free of it and the rest of the assembly still solves (M2 plan,
+   T2.3c risks). A suppressed mate, and a mate on a suppressed instance, is `suppressed`.
+   Suppressed instances are not solved and keep their stored pose.
+4. **The solve.** Instances with their stored poses (the seeds, ADR 0008 decision 3) and the mates
+   that got both frames, in creation order, go to `solve`. Its report fills `AssemblyResult`: the
+   outcome, DOF, redundant and conflicting groups (blaming the newest mate), issues and warnings,
+   and per mate the solver's status, free coordinates and residual. Per instance, the solved
+   `transform` and `moved`, whether it differs from the stored pose.
+
+**Previews.** `solveAssembly(document, assemblyId)` runs the same steps on a document that has not
+been committed (a mate dialog, before OK): the parts are built through the cache, so when only the
+assembly changed they are all hits, and nothing is reported to later regens (no meshes, no
+`#reported` change, drags keep the last regen's state). The dialog then commits the mate and the
+poses of the instances that `moved` in one `batch`.
+
+**Drags.** `drag(assemblyId, instanceId, target)` (`dragInstance` on the worker) is one step of a
+pointer drag: the solver's `drag` on the solver input the last regen built, seeded with where the
+previous step left the instances. It needs no kernel work, so it never waits for a regen. Steps are
+coalesced: a step that has not started when a newer one arrives resolves to null, and only the
+latest target is solved (the engine yields to the event loop before each step, so pointer moves
+queued behind it replace it). A step older than the newest regen, or for an assembly the last regen
+does not have, is null too. `DragResult.moved` lists the instances whose pose now differs from the
+document's: commit them with `setPoses` on release, never per step.
+
+**Configuration rows** (`source.configuration`) are not applied yet (T2.4c): the instance shows the
+part as it is, with a `configuration` warning. Instance sources are grouped by
+`instanceSourceKey`, which T2.4c extends with the row, so two instances at two rows get two builds
+and their bodies two keys; the connector cache already keys on body keys.
 
 ## Errors, warnings, statuses
 
@@ -344,6 +405,8 @@ interface RegenResult {
   generation: number;
   names: string[]; // one name table for every mesh in the result
   parts: PartResult[]; // per part: features, dirty, bodies, consumed
+  assemblies?: AssemblyResult[]; // per assembly (always set by the engine; see Assemblies)
+  sources?: SourceResult[]; // pinned parts instances show: key, pin details, bodies with meshes
   counters: RegenCounters; // featureOps, otherOps, batches, solves, cacheHits, cacheMisses
   ms: number;
 }
@@ -368,6 +431,26 @@ interface BodyResult {
   inherited?: BodyPropsFields; // derived bodies: name, colour, material from the source
 }
 ```
+
+```ts
+interface AssemblyResult {
+  assemblyId: string;
+  outcome: 'solved' | 'conflicting' | 'invalid'; // the solver's
+  dof: number | null; // null while mates conflict
+  instances: InstanceResult[]; // status, source ({ part } or { source: key }), bodies, transform, moved
+  mates: MateResult[]; // status (the solver's, or `error`), coordinates, residual, connectors, errors
+  redundant: MateGroup[];
+  conflicting: MateGroup[]; // { mates, blame, message }: blame is the newest mate
+  issues: AssemblyIssue[];
+  warnings: AssemblyWarning[]; // outside-limits, ...
+  message?: string;
+  ms: number;
+}
+```
+
+A `MateResult`'s `connectors` give each connector's frame in its instance's coordinates (after
+flip, rotate and offset) and how its origin resolved, for drawing connectors and re-pick prompts.
+Sources' body meshes follow the same once-per-change rule as parts' and are transferred too.
 
 A body's `mesh` is sent only when it differs from the one last reported under that part and body
 id (`meshChanged`), so an edit to one body sends one mesh; its name slots index `names`. Its
@@ -434,6 +517,21 @@ pnpm --filter @manufakture/regen test
   `#thickness` is 8 mm; the fillet resolves `exact` to the same named edge, and the volume and the
   round's extent are checked at both versions. A cut with the derived bracket, with a recycle
   forced between the source build and the derive; nothing leaks.
+
+- Assemblies (`engine.test.ts`, "assemblies", against the scripted kernel): frames found once
+  per body and a pose-only change re-solved with no kernel op; frames kept across a recycle; a lost
+  connector, a limit that does not evaluate and suppression per mate, the lost mate leaving its
+  instance free; rollback and configuration warnings and a pinned instance's source; drags
+  coalesced, answered while the kernel is busy, dropped when stale, stopped at a slider limit.
+  With the real kernel (`integration.test.ts`): a lid hinged on a box resolves to the expected
+  transform (DOF 1), follows an edit of the lid's depth with only the lid's frame found again, and
+  a burst of drags opens it 90 degrees about the hinge; a lost connector is a `reference-lost` mate
+  error with a re-pick prompt and the lid free (DOF 6); a fastened mate contradicting the hinge is
+  a conflict blaming it (and without its offset agrees, DOF 0); a pinned instance's bodies come
+  with meshes in `sources`, and a preview solve places it without reporting anything; nothing
+  leaks. Through the worker (`worker-api.test.ts`): a preview, coalesced drags at the current
+  generation, and committing the drag as a pose-only regen that sends no mesh.
+- `derived.test.ts` also checks that a source whose reading throws is a `source` error.
 
 ## Deviations and gaps
 

@@ -181,7 +181,18 @@ type OpenedDocument =
   { ok: true; document: ManufaktureDocument } | { ok: false; newer: boolean; message: string };
 
 function read(data: string): OpenedDocument {
-  const loaded = deserialize(data);
+  // A pin is data from elsewhere: whatever reading it throws (a migration meeting a shape it
+  // does not expect) is an error on the feature, never a failed regen.
+  let loaded: ReturnType<typeof deserialize>;
+  try {
+    loaded = deserialize(data);
+  } catch (error) {
+    return {
+      ok: false,
+      newer: false,
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
   if (!loaded.ok) {
     const newer = loaded.error.code === 'version' && /newer/.test(loaded.error.message);
     return { ok: false, newer, message: loaded.error.message };

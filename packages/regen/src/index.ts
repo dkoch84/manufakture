@@ -6,6 +6,7 @@ export const packageName = '@manufakture/regen';
 export {
   RegenEngine,
   type EngineStats,
+  type AssemblyOptions,
   type RegenEngineOptions,
   type RegenKernel,
   type RegenOptions,
@@ -70,6 +71,13 @@ export {
   type TranslateContext,
   type Translation,
 } from './translate';
+export {
+  connectorOrigin,
+  connectorPose,
+  framePose,
+  instanceSourceKey,
+  posesDiffer,
+} from './assembly';
 export { mapFailure, mapKernelError, mapKernelWarning, mapOutcome } from './errors';
 export { hashString, hashValue, stableStringify } from './hash';
 export { regenTransferables } from './transfer';

@@ -12,6 +12,7 @@ import {
   type DerivedFeature,
   type ImportFeature,
   type ManufaktureDocument,
+  type Pose,
 } from '@manufakture/core';
 import type { KernelService, MeshData, ShapeId } from '@manufakture/kernel';
 import { createNodeService } from '@manufakture/kernel/node';
@@ -19,12 +20,22 @@ import { createSolverService, type SolverService } from '@manufakture/sketch';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { RegenEngine, type RegenKernel } from './engine';
 import {
+  ASSEMBLY,
+  IDENTITY_POSE,
+  LID,
+  PART,
   add,
   apply,
   block,
+  boxAndLid,
   build,
+  centroid,
   derivedOf,
   fillet,
+  hinge,
+  instance,
+  mate,
+  midpoint,
   mm,
   pin,
   setVariable,
@@ -573,6 +584,235 @@ describe('derived parts with the real kernel', () => {
       blockVolume(40, 30, 3) - bracketVolume(6),
       3,
     );
+    await engine.dispose();
+    await service.idle();
+    expect(service.leaks()).toEqual([]);
+  });
+});
+
+describe('assemblies with the real kernel', () => {
+  /** The service, recording the op of every batch sent. */
+  function recording(): { kernel: RegenKernel; ops: string[] } {
+    const ops: string[] = [];
+    const kernel: RegenKernel = {
+      run: (request) => {
+        ops.push(...request.ops.map((o) => o.op));
+        return service.run(request);
+      },
+      release: (shapes) => service.release(shapes),
+      cancel: (generation) => service.cancel(generation),
+      onRecycle: (hook) => service.onRecycle(hook),
+      stats: () => service.stats(),
+    };
+    return { kernel, ops };
+  }
+
+  const near = (a: readonly number[], b: readonly number[], tol = 1e-6) =>
+    a.every((v, i) => Math.abs(v - b[i]!) <= tol);
+
+  /** Where a pose takes a point. */
+  function place(pose: Pose, p: [number, number, number]): number[] {
+    const [x, y, z, w] = pose.rotation;
+    const [px, py, pz] = p;
+    // v + 2w (q x v) + 2 q x (q x v)
+    const cx = y * pz - z * py;
+    const cy = z * px - x * pz;
+    const cz = x * py - y * px;
+    const dx = y * cz - z * cy;
+    const dy = z * cx - x * cz;
+    const dz = x * cy - y * cx;
+    return [
+      px + 2 * (w * cx + dx) + pose.translation[0],
+      py + 2 * (w * cy + dy) + pose.translation[1],
+      pz + 2 * (w * cz + dz) + pose.translation[2],
+    ];
+  }
+
+  it('hinges a lid on a box, follows an edit of the lid, and finds the frames only once', async () => {
+    const { kernel, ops } = recording();
+    const engine = new RegenEngine({ kernel, solver });
+    const doc = boxAndLid();
+    const first = (await engine.regen(doc))!;
+    const asm = first.assemblies![0]!;
+    expect(asm).toMatchObject({ assemblyId: ASSEMBLY, outcome: 'solved', dof: 1 });
+    const [box, lid] = asm.instances;
+    expect(box).toMatchObject({ status: 'ok', source: { part: PART }, bodies: ['extrude#1'] });
+    expect(box!.transform).toEqual(IDENTITY_POSE);
+    // The lid lies on the box: its back bottom edge on the box's back top edge, angle 0.
+    expect(lid).toMatchObject({ status: 'ok', source: { part: LID }, moved: true });
+    expect(near(lid!.transform.translation, [0, 0, 20])).toBe(true);
+    expect(near(lid!.transform.rotation, [0, 0, 0, 1])).toBe(true);
+    const hingeResult = asm.mates[0]!;
+    expect(hingeResult).toMatchObject({ mateId: 'mate#1', status: 'ok', errors: [] });
+    expect(hingeResult.coordinates[0]).toBeCloseTo(0, 9);
+    expect(hingeResult.connectors.map((c) => c.reference?.via)).toEqual(['exact', 'exact']);
+    // The box's connector: the middle of its top back edge, z along the edge (cap:end x side:e3
+    // = +z x +y = -x), x from world Y.
+    expect(near(hingeResult.connectors[0].frame!.translation, [20, 30, 20])).toBe(true);
+    // One connector op per body.
+    expect(ops.filter((o) => o === 'connector')).toHaveLength(2);
+
+    // The same document again: no kernel work for the assembly at all.
+    ops.length = 0;
+    const again = (await engine.regen(doc))!;
+    expect(ops.filter((o) => o === 'connector')).toEqual([]);
+    expect(again.assemblies![0]!.instances[1]!.transform).toEqual(lid!.transform);
+
+    // A deeper lid: its back edge moves, and so does the lid; only the lid's frame is found again.
+    ops.length = 0;
+    const deeper = (await engine.regen(apply(doc, setVariable('lidDepth', '35'))))!;
+    expect(ops.filter((o) => o === 'connector')).toHaveLength(1);
+    const moved = deeper.assemblies![0]!.instances[1]!;
+    expect(near(moved.transform.translation, [0, -5, 20])).toBe(true);
+    expect(near(place(moved.transform, [20, 35, 0]), [20, 30, 20])).toBe(true);
+    await engine.dispose();
+  });
+
+  it('drags the lid open about the hinge, coalescing a burst of targets', async () => {
+    const engine = new RegenEngine({ kernel: service, solver });
+    const doc = boxAndLid();
+    const result = (await engine.regen(doc))!;
+    const generation = result.generation;
+    // The lid's front top edge (local 20, 0, 5), turned 90 degrees up about the hinge.
+    const open = { point: [20, 0, 5] as const, position: [20, 35, 50] as const };
+    const burst = [
+      engine.drag(
+        ASSEMBLY,
+        'inst#2',
+        { point: [20, 0, 5], position: [20, 10, 40] },
+        { generation },
+      ),
+      engine.drag(
+        ASSEMBLY,
+        'inst#2',
+        { point: [20, 0, 5], position: [20, 20, 45] },
+        { generation },
+      ),
+      engine.drag(ASSEMBLY, 'inst#2', open, { generation }),
+    ];
+    const [a, b, c] = await Promise.all(burst);
+    expect(a).toBeNull();
+    expect(b).toBeNull();
+    expect(c).toMatchObject({ assemblyId: ASSEMBLY, instanceId: 'inst#2', moved: ['inst#2'] });
+    expect(c!.target.reached).toBe(true);
+    const pose = c!.transforms['inst#2']!;
+    // The hinge stays put and the front edge is where it was dragged.
+    expect(near(place(pose, [20, 30, 0]), [20, 30, 20])).toBe(true);
+    expect(near(place(pose, [20, 0, 5]), [20, 35, 50])).toBe(true);
+    expect(near(pose.rotation, [-Math.SQRT1_2, 0, 0, Math.SQRT1_2])).toBe(true);
+    // The next step starts from there: a target it already reached moves nothing more.
+    const d = (await engine.drag(ASSEMBLY, 'inst#2', open, { generation }))!;
+    expect(near(d.transforms['inst#2']!.translation, pose.translation)).toBe(true);
+    // A newer regen makes an older drag stale.
+    await engine.regen(apply(doc, setVariable('lidDepth', '31')));
+    expect(await engine.drag(ASSEMBLY, 'inst#2', open, { generation })).toBeNull();
+    await engine.dispose();
+  });
+
+  it('makes a lost connector an error on its mate, leaving the lid free, with a re-pick prompt', async () => {
+    const engine = new RegenEngine({ kernel: service, solver });
+    const lostHinge = hinge();
+    lostHinge.b = midpoint('mc#2', 'inst#2', 'r2', ['extrude#1:cap:start', 'extrude#1:side:e9'], {
+      flip: true,
+    });
+    const doc = apply(boxAndLid(), { type: 'editMate', assemblyId: ASSEMBLY, mate: lostHinge });
+    const asm = (await engine.regen(doc))!.assemblies![0]!;
+    const m = asm.mates[0]!;
+    expect(m.status).toBe('error');
+    expect(m.errors).toEqual([
+      expect.objectContaining({
+        code: 'reference-lost',
+        referenceId: 'r2',
+        missing: ['extrude#1:side:e9'],
+        message: expect.stringMatching(/re-pick it$/),
+      }),
+    ]);
+    expect(m.connectors[0].frame).not.toBeNull();
+    expect(m.connectors[1].frame).toBeNull();
+    // The lid keeps its stored pose and is free: 6 degrees of freedom, not a failed assembly.
+    expect(asm.outcome).toBe('solved');
+    expect(asm.dof).toBe(6);
+    expect(asm.instances[1]!.transform).toEqual(IDENTITY_POSE);
+    expect(asm.instances[1]!.moved).toBe(false);
+    await engine.dispose();
+  });
+
+  it('blames the newest mate when a fastened mate contradicts the hinge', async () => {
+    const engine = new RegenEngine({ kernel: service, solver });
+    // Fasten the lid's bottom 10 mm above the box's top: the hinge holds it on the box.
+    const fastened = mate(
+      'mate#2',
+      'fastened',
+      centroid('mc#3', 'inst#1', 'r3', 'extrude#1:cap:end'),
+      centroid('mc#4', 'inst#2', 'r4', 'extrude#1:cap:start', {
+        flip: true,
+        offset: {
+          translation: [mm('0'), mm('0'), mm('-10')],
+          rotation: [mm('0'), mm('0'), mm('0')],
+        },
+      }),
+    );
+    const doc = apply(boxAndLid(), { type: 'addMate', assemblyId: ASSEMBLY, mate: fastened });
+    const asm = (await engine.regen(doc))!.assemblies![0]!;
+    expect(asm.outcome).toBe('conflicting');
+    expect(asm.dof).toBeNull();
+    expect(asm.conflicting).toEqual([
+      expect.objectContaining({ mates: ['mate#1', 'mate#2'], blame: 'mate#2' }),
+    ]);
+    expect(asm.mates.map((m) => m.status)).toEqual(['conflicting', 'conflicting']);
+    // The same mate without the offset agrees with the hinge at angle 0: it only takes its DOF.
+    const agrees = apply(boxAndLid(), {
+      type: 'addMate',
+      assemblyId: ASSEMBLY,
+      mate: {
+        ...fastened,
+        b: centroid('mc#4', 'inst#2', 'r4', 'extrude#1:cap:start', { flip: true }),
+      },
+    });
+    const ok = (await engine.regen(agrees))!.assemblies![0]!;
+    expect(ok).toMatchObject({ outcome: 'solved', dof: 0 });
+    await engine.dispose();
+  });
+
+  it('shows an instance of a pinned part, with its meshes, and previews a solve without reporting', async () => {
+    const engine = new RegenEngine({ kernel: service, solver });
+    const source = pin(boxAndLid(), LID);
+    const doc = apply(boxAndLid(), {
+      type: 'addInstance',
+      assemblyId: ASSEMBLY,
+      instance: instance('inst#3', source),
+    });
+    const r = (await engine.regen(doc))!;
+    const key = `source:${source.sha256}:${LID}`;
+    expect(r.sources).toHaveLength(1);
+    expect(r.sources![0]).toMatchObject({ key, partId: LID, documentName: 'Source' });
+    expect(r.sources![0]!.bodies.map((b) => [b.bodyId, b.meshChanged, b.mesh !== null])).toEqual([
+      ['extrude#1', true, true],
+    ]);
+    const pinned = r.assemblies![0]!.instances[2]!;
+    expect(pinned).toMatchObject({ status: 'ok', source: { source: key }, bodies: ['extrude#1'] });
+    // Unmated: 6 more degrees of freedom.
+    expect(r.assemblies![0]!.dof).toBe(7);
+
+    // A preview with the pinned lid fastened on the box top: solved, and nothing reported.
+    const preview = apply(doc, {
+      type: 'addMate',
+      assemblyId: ASSEMBLY,
+      mate: mate(
+        'mate#2',
+        'fastened',
+        centroid('mc#3', 'inst#1', 'r3', 'extrude#1:cap:end'),
+        centroid('mc#4', 'inst#3', 'r4', 'extrude#1:cap:start', { flip: true }),
+      ),
+    });
+    const solved = (await engine.solveAssembly(preview, ASSEMBLY, { generation: r.generation }))!;
+    expect(solved).toMatchObject({ outcome: 'solved', dof: 1 });
+    const placed = solved.instances[2]!;
+    expect(placed.moved).toBe(true);
+    expect(near(placed.transform.translation, [0, 0, 20])).toBe(true);
+    // The engine still reports the committed document: the next regen of it sends no mesh.
+    const next = (await engine.regen(doc))!;
+    expect(next.sources![0]!.bodies[0]!.meshChanged).toBe(false);
     await engine.dispose();
     await service.idle();
     expect(service.leaks()).toEqual([]);

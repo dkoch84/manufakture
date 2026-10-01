@@ -7,6 +7,7 @@
 // awaits every solve before its next kernel op, so a solver in another worker would add a round
 // trip per sketch and a dependency on that worker's lifetime, and buy no parallelism.
 
+import type { DragTarget } from '@manufakture/assembly';
 import type { ManufaktureDocument } from '@manufakture/core';
 import {
   createKernelWorkerApi,
@@ -19,7 +20,7 @@ import * as Comlink from 'comlink';
 import { RegenEngine, type EngineStats, type RegenEngineOptions } from './engine';
 import type { RegenSolver } from './sketches';
 import { regenTransferables } from './transfer';
-import type { RegenResult } from './types';
+import type { AssemblyResult, DragResult, RegenResult } from './types';
 
 export interface RegenWorkerApi extends KernelWorkerApi {
   /**
@@ -31,6 +32,27 @@ export interface RegenWorkerApi extends KernelWorkerApi {
     document: ManufaktureDocument,
     options: { generation: number },
   ): Promise<RegenResult | null>;
+  /**
+   * Solve an assembly of `document` for a preview (a mate dialog, before OK), at the client's
+   * current generation so it never cancels a regen. The parts are built through the cache; no
+   * meshes. Null when a newer regen superseded it.
+   */
+  solveAssembly(
+    document: ManufaktureDocument,
+    assemblyId: string,
+    options: { generation: number },
+  ): Promise<AssemblyResult | null>;
+  /**
+   * One step of dragging an instance of an assembly of the last regen, at the client's current
+   * generation. Coalesced: a step not started when a newer one arrives resolves to null, and
+   * only the latest target is solved. Null too when a newer regen was requested.
+   */
+  dragInstance(
+    assemblyId: string,
+    instanceId: string,
+    target: DragTarget,
+    options: { generation: number },
+  ): Promise<DragResult | null>;
   /** Cumulative engine counters. */
   regenStats(): Promise<EngineStats>;
 }
@@ -76,6 +98,14 @@ export function createRegenWorkerApi(options: RegenWorkerApiOptions): RegenWorke
     async regen(document, { generation }) {
       const result = await (await engineFor()).regen(document, { generation });
       return result === null ? null : Comlink.transfer(result, regenTransferables(result));
+    },
+
+    async solveAssembly(document, assemblyId, { generation }) {
+      return (await engineFor()).solveAssembly(document, assemblyId, { generation });
+    },
+
+    async dragInstance(assemblyId, instanceId, target, { generation }) {
+      return (await engineFor()).drag(assemblyId, instanceId, target, { generation });
     },
 
     async regenStats() {

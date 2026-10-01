@@ -12,7 +12,11 @@ import {
   type ExtrudeFeature,
   type Feature,
   type FilletFeature,
+  type Instance,
   type ManufaktureDocument,
+  type Mate,
+  type MateConnector,
+  type Pose,
   type SketchFeature,
   type SketchPlane,
   type StoredExpression,
@@ -257,4 +261,118 @@ export function derivedOf(
     operation: 'new',
     ...extra,
   };
+}
+
+// Assemblies -----------------------------------------------------------------------------------
+
+export const IDENTITY_POSE: Pose = { translation: [0, 0, 0], rotation: [0, 0, 0, 1] };
+export const LID = 'part#2';
+export const ASSEMBLY = 'assembly#1';
+
+/** A part-studio feature for a part other than `PART`. */
+export function addTo(partId: string, feature: Feature): Command {
+  return { type: 'addFeature', partId, feature };
+}
+
+export function instance(
+  id: string,
+  source: Instance['source'],
+  extra: Partial<Instance> = {},
+): Instance {
+  return {
+    id,
+    name: id,
+    source,
+    fixed: false,
+    suppressed: false,
+    pose: IDENTITY_POSE,
+    ...extra,
+  };
+}
+
+/** A connector at the midpoint of the edge between two faces. */
+export function midpoint(
+  id: string,
+  instanceId: string,
+  refId: string,
+  faces: [string, string],
+  extra: Partial<MateConnector> = {},
+): MateConnector {
+  return {
+    id,
+    instance: instanceId,
+    inference: 'midpoint',
+    origin: { id: refId, ref: { faces: [...faces].sort() } },
+    ...extra,
+  } as MateConnector;
+}
+
+/** A connector at the centroid of a face. */
+export function centroid(
+  id: string,
+  instanceId: string,
+  refId: string,
+  face: string,
+  extra: Partial<MateConnector> = {},
+): MateConnector {
+  return {
+    id,
+    instance: instanceId,
+    inference: 'centroid',
+    origin: { id: refId, ref: { face } },
+    ...extra,
+  } as MateConnector;
+}
+
+export function mate(
+  id: string,
+  kind: Mate['kind'],
+  a: MateConnector,
+  b: MateConnector,
+  extra: Partial<Mate> = {},
+): Mate {
+  return { id, name: id, kind, a, b, suppressed: false, ...extra };
+}
+
+/**
+ * A box and a lid, with the hinge along their back edges: part#1 is a 40 x 30 x 20 box, part#2
+ * a 40 x `lidDepth` x 5 lid (both rectangles from the origin: e1 front, e2 right, e3 back, e4
+ * left). Assembly#1 holds the box (inst#1, fixed) and the lid (inst#2, at the origin), and
+ * mate#1, a revolute between the box's top back edge and the lid's bottom back edge, flipped so
+ * the lid lies on the box at angle 0.
+ */
+export function boxAndLid(): ManufaktureDocument {
+  return build([
+    setVariable('lidDepth', '30'),
+    add(rectangle('sketch#1', { width: '40', depth: '30' })),
+    add(extrude('extrude#1', 'sketch#1', '20')),
+    { type: 'addPart', partId: LID, name: 'Lid' },
+    addTo(LID, rectangle('sketch#1', { width: '40', depth: 'lidDepth' })),
+    addTo(LID, extrude('extrude#1', 'sketch#1', '5')),
+    { type: 'addAssembly', assemblyId: ASSEMBLY, name: 'Box' },
+    {
+      type: 'addInstance',
+      assemblyId: ASSEMBLY,
+      instance: instance('inst#1', { part: PART }, { fixed: true }),
+    },
+    { type: 'addInstance', assemblyId: ASSEMBLY, instance: instance('inst#2', { part: LID }) },
+    {
+      type: 'addMate',
+      assemblyId: ASSEMBLY,
+      mate: hinge(),
+    },
+  ]);
+}
+
+/** The hinge of `boxAndLid`: a revolute between the back edges. */
+export function hinge(extra: Partial<MateConnector> = {}): Mate {
+  return mate(
+    'mate#1',
+    'revolute',
+    midpoint('mc#1', 'inst#1', 'r1', ['extrude#1:cap:end', 'extrude#1:side:e3']),
+    midpoint('mc#2', 'inst#2', 'r2', ['extrude#1:cap:start', 'extrude#1:side:e3'], {
+      flip: true,
+      ...extra,
+    }),
+  );
 }

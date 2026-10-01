@@ -141,6 +141,9 @@ importers:
 
   packages/regen:
     dependencies:
+      '@manufakture/assembly':
+        specifier: workspace:*
+        version: link:../assembly
       '@manufakture/core':
         specifier: workspace:*
         version: link:../core

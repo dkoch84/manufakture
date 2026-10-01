@@ -23,15 +23,22 @@ export type {
 export {
   MAX_PATTERN_COUNT,
   applyFeature,
+  connectorFrame,
+  connectorTarget,
   frameOnPlane,
   orientedGeometry,
   pickReference,
+  pickVertex,
   resolveReferences,
+  resolveVertex,
   sketchFrame,
   validateFeature,
 } from './features';
 export type {
   ChamferInput,
+  ConnectorInference,
+  ConnectorOrigin,
+  ConnectorReport,
   DeriveInput,
   EdgeReference,
   ExtrudeExtent,
@@ -60,6 +67,7 @@ export type {
   ShellInput,
   SketchProfile,
   ToolInput,
+  VertexRef,
 } from './features';
 export {
   UNNAMED_PREFIX,
@@ -97,6 +105,7 @@ export type {
   BodySetRef,
   BooleanOp,
   BoxOp,
+  ConnectorOp,
   CylinderOp,
   ExportStepOp,
   ExtrudeOp,

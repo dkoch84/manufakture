@@ -18,6 +18,7 @@ import {
 import type {
   BatchReply,
   BatchRequest,
+  ConnectorReport,
   FeatureError,
   FeatureInput,
   FeatureOutcome,
@@ -34,14 +35,20 @@ import { RegenEngine, type RegenKernel } from './engine';
 import { importSourceMatches, keyInput } from './imports';
 import type { RegenSolver } from './sketches';
 import {
+  ASSEMBLY,
+  LID,
   PART,
   add,
+  addTo,
   apply,
   block,
   build,
+  centroid,
   derivedOf,
   extrude,
   fillet,
+  instance,
+  mate,
   mm,
   pin,
   pinText,
@@ -78,6 +85,8 @@ class FakeKernel implements RegenKernel {
   readonly released: number[] = [];
   readonly cancels: number[] = [];
   readonly behaviours = new Map<string, Behaviour>();
+  /** Connector origins asked for, one entry per `connector` op (the names, in order). */
+  readonly connectorOps: string[][] = [];
   gate: Promise<void> | null = null;
   onRun: (() => void) | null = null;
 
@@ -298,6 +307,30 @@ class FakeKernel implements RegenKernel {
           },
           ms: 0,
         };
+      }
+      case 'connector': {
+        const body = this.#shape(op.shape, results);
+        if (body !== null && typeof body === 'object') return body.fail;
+        const names = op.connectors.map((c) =>
+          'face' in c.origin ? c.origin.face : c.origin.faces.join('&'),
+        );
+        this.connectorOps.push(names);
+        // Every connector sits at the origin of the part with the world axes; a name with
+        // `gone` in it is lost.
+        const reports: ConnectorReport[] = names.map((name): ConnectorReport =>
+          name.includes('gone')
+            ? { ok: false, status: 'lost', missing: [name], message: `${name} is lost` }
+            : {
+                ok: true,
+                frame: { origin: [0, 0, 0], xDir: [1, 0, 0], normal: [0, 0, 1] },
+                kind: 'face',
+                index: 1,
+                via: 'exact',
+                fragile: false,
+                oriented: true,
+              },
+        );
+        return { ok: true, op: 'connector', value: { results: reports }, ms: 0 };
       }
       case 'tessellate': {
         const body = this.#shape(op.shape, results);
@@ -1343,5 +1376,194 @@ describe('derived features', () => {
     );
     expect(again.counters).toMatchObject({ featureOps: 0, cacheMisses: 0 });
     expect(statuses(again)).toEqual({ 'derived#1': 'ok' });
+  });
+});
+
+describe('assemblies', () => {
+  const connectorOps = (kernel: FakeKernel) => kernel.connectorOps.length;
+  /** The block (part#1) and a second part studio with the same block; two instances. */
+  function twoInstances(more: Command[] = []): ManufaktureDocument {
+    let doc = apply(block(), { type: 'addPart', partId: LID, name: 'Lid' });
+    for (const f of block().parts[0]!.features) doc = apply(doc, addTo(LID, f));
+    return apply(
+      doc,
+      { type: 'addAssembly', assemblyId: ASSEMBLY, name: 'A' },
+      {
+        type: 'addInstance',
+        assemblyId: ASSEMBLY,
+        instance: instance('inst#1', { part: PART }, { fixed: true }),
+      },
+      { type: 'addInstance', assemblyId: ASSEMBLY, instance: instance('inst#2', { part: LID }) },
+      {
+        type: 'addMate',
+        assemblyId: ASSEMBLY,
+        mate: mate(
+          'mate#1',
+          'slider',
+          centroid('mc#1', 'inst#1', 'r1', 'extrude#1:cap:end'),
+          centroid('mc#2', 'inst#2', 'r2', 'extrude#1:cap:start'),
+          { limits: { min: mm('0'), max: mm('50') } },
+        ),
+      },
+      ...more,
+    );
+  }
+
+  it('finds connector frames once, and re-solves a pose-only change with no kernel op', async () => {
+    const { kernel, engine } = setup();
+    const doc = twoInstances();
+    const first = await regen(engine, doc);
+    expect(first.assemblies).toHaveLength(1);
+    expect(first.assemblies![0]).toMatchObject({ outcome: 'solved', dof: 1 });
+    expect(first.assemblies![0]!.mates[0]).toMatchObject({ status: 'ok', coordinates: [0] });
+    // One op per body, each with the one connector on it.
+    expect(kernel.connectorOps).toEqual([['extrude#1:cap:end'], ['extrude#1:cap:start']]);
+    expect(first.sources).toEqual([]);
+
+    // Move the slider's instance along the slider: committed poses change, nothing else.
+    const lifted = apply(doc, {
+      type: 'setPoses',
+      assemblyId: ASSEMBLY,
+      poses: { 'inst#2': { translation: [0, 0, 30], rotation: [0, 0, 0, 1] } },
+    });
+    const before = kernel.featureOps.length;
+    const second = await regen(engine, lifted);
+    expect(kernel.featureOps.length).toBe(before);
+    expect(connectorOps(kernel)).toBe(2);
+    const asm = second.assemblies![0]!;
+    expect(asm.instances[1]!.transform.translation).toEqual([0, 0, 30]);
+    expect(asm.instances[1]!.moved).toBe(false);
+    expect(asm.mates[0]!.coordinates[0]).toBeCloseTo(30, 9);
+  });
+
+  it('keeps frames across a recycle: they are plain data keyed by body content', async () => {
+    const { kernel, engine } = setup();
+    const doc = twoInstances();
+    await regen(engine, doc);
+    kernel.recycle();
+    const after = await regen(engine, apply(doc, setVariable('radius', '3mm')));
+    expect(after.assemblies![0]!.mates[0]!.status).toBe('ok');
+    expect(connectorOps(kernel)).toBe(2);
+  });
+
+  it('reports a lost connector, a limit that does not evaluate, and suppression per mate', async () => {
+    const { engine } = setup();
+    const doc = twoInstances([
+      {
+        type: 'addInstance',
+        assemblyId: ASSEMBLY,
+        instance: instance('inst#3', { part: LID }),
+      },
+      {
+        type: 'addMate',
+        assemblyId: ASSEMBLY,
+        mate: mate(
+          'mate#2',
+          'fastened',
+          centroid('mc#3', 'inst#1', 'r3', 'extrude#1:side:gone'),
+          centroid('mc#4', 'inst#3', 'r4', 'extrude#1:cap:start'),
+        ),
+      },
+    ]);
+    const lost = (await regen(engine, doc)).assemblies![0]!;
+    expect(lost.mates[1]).toMatchObject({
+      mateId: 'mate#2',
+      status: 'error',
+      errors: [
+        {
+          code: 'reference-lost',
+          referenceId: 'r3',
+          missing: ['extrude#1:side:gone'],
+          message: expect.stringMatching(/re-pick it$/),
+        },
+      ],
+    });
+    // inst#3 is free of the lost mate: the rest still solves.
+    expect(lost).toMatchObject({ outcome: 'solved', dof: 7 });
+
+    const badLimit = apply(doc, {
+      type: 'editMate',
+      assemblyId: ASSEMBLY,
+      mate: mate(
+        'mate#1',
+        'slider',
+        centroid('mc#1', 'inst#1', 'r1', 'extrude#1:cap:end'),
+        centroid('mc#2', 'inst#2', 'r2', 'extrude#1:cap:start'),
+        { limits: { max: { source: '30deg', lengthUnit: 'mm', angleUnit: 'deg' } } },
+      ),
+    });
+    const limited = (await regen(engine, badLimit)).assemblies![0]!;
+    expect(limited.mates[0]).toMatchObject({
+      status: 'error',
+      errors: [{ code: 'expression', field: ['limits', 'max'] }],
+    });
+
+    const off = apply(
+      doc,
+      { type: 'suppressMate', assemblyId: ASSEMBLY, mateId: 'mate#1', suppressed: true },
+      { type: 'editInstance', assemblyId: ASSEMBLY, instanceId: 'inst#3', suppressed: true },
+    );
+    const suppressed = (await regen(engine, off)).assemblies![0]!;
+    expect(suppressed.mates.map((m) => m.status)).toEqual(['suppressed', 'suppressed']);
+    expect(suppressed.mates[1]!.message).toMatch(/inst#3 is suppressed/);
+    expect(suppressed.instances[2]).toMatchObject({ status: 'suppressed', bodies: [] });
+  });
+
+  it('warns when an instance shows a rolled-back part or names a configuration row', async () => {
+    const { engine } = setup();
+    const doc = apply(
+      twoInstances(),
+      { type: 'setRollback', partId: LID, index: 2 },
+      {
+        type: 'addInstance',
+        assemblyId: ASSEMBLY,
+        instance: instance('inst#3', { ...pin(block()), configuration: 'cfg#4' }),
+      },
+    );
+    const result = await regen(engine, doc);
+    const asm = result.assemblies![0]!;
+    expect(asm.instances[1]!.warnings).toEqual([
+      expect.objectContaining({ code: 'rollback', partId: LID }),
+    ]);
+    expect(asm.instances[1]!.bodies).toEqual(['extrude#1']);
+    // A pinned part, in a row that is not applied yet: shown as it is, from its own build.
+    const pinned = asm.instances[2]!;
+    expect(pinned.warnings).toEqual([
+      expect.objectContaining({ code: 'configuration', row: 'cfg#4' }),
+    ]);
+    expect(pinned.source).toEqual({ source: result.sources![0]!.key });
+    expect(result.sources![0]!.bodies.map((b) => b.bodyId)).toEqual(['extrude#1']);
+  });
+
+  it('coalesces drags, answers from the last regen without the kernel, and drops stale ones', async () => {
+    const { kernel, engine } = setup();
+    const doc = twoInstances();
+    const r = await regen(engine, doc);
+    const generation = r.generation;
+    // Hold the kernel: a drag must not wait for it.
+    let release!: () => void;
+    kernel.gate = new Promise((resolve) => (release = resolve));
+    const running = engine.regen(apply(doc, setVariable('radius', '4mm')));
+    const at = (z: number) => ({
+      translation: [0, 0, z] as const,
+      rotation: [0, 0, 0, 1] as const,
+    });
+    // The regen above made these stale: nothing to answer.
+    expect(await engine.drag(ASSEMBLY, 'inst#2', at(10), { generation })).toBeNull();
+    release();
+    kernel.gate = null;
+    const next = (await running)!;
+    const g = next.generation;
+    const steps = [10, 20, 80].map((z) =>
+      engine.drag(ASSEMBLY, 'inst#2', at(z), { generation: g }),
+    );
+    const [a, b, c] = await Promise.all(steps);
+    expect(a).toBeNull();
+    expect(b).toBeNull();
+    // The slider stops at its 50 mm limit.
+    expect(c).toMatchObject({ instanceId: 'inst#2', moved: ['inst#2'] });
+    expect(c!.transforms['inst#2']!.translation[2]).toBeCloseTo(50, 9);
+    expect(c!.target.reached).toBe(false);
+    expect(await engine.drag('assembly#9', 'inst#2', at(1), { generation: g })).toBeNull();
   });
 });

@@ -21,8 +21,12 @@ import {
 import { KernelError, type KernelFailure } from './errors';
 import {
   applyFeature,
+  connectorFrame,
   pickReference,
   resolveReferences,
+  type ConnectorInference,
+  type ConnectorOrigin,
+  type ConnectorReport,
   type FeatureBody,
   type FeatureInput,
   type FeatureOutcome,
@@ -124,6 +128,15 @@ export type FeatureOp = OpCommon & {
 };
 /** Resolve stored references on a named body. */
 export type ResolveOp = OpCommon & { op: 'resolve'; shape: ShapeRef; refs: readonly TopoRef[] };
+/**
+ * Mate connector frames on a named body (`connectorFrame`): one report per connector, in order.
+ * An origin that does not resolve is a report, not a failed op.
+ */
+export type ConnectorOp = OpCommon & {
+  op: 'connector';
+  shape: ShapeRef;
+  connectors: readonly { origin: ConnectorOrigin; inference: ConnectorInference }[];
+};
 /** The reference a click on face or edge `index` of a named body is stored as. */
 export type PickOp = OpCommon & {
   op: 'pick';
@@ -165,6 +178,7 @@ export type KernelOp =
   | ReleaseOp
   | FeatureOp
   | ResolveOp
+  | ConnectorOp
   | PickOp
   | MeasureOp
   | ExportStepOp
@@ -192,6 +206,7 @@ export interface OpValues {
   release: ReleaseResult;
   feature: FeatureOutcome;
   resolve: { results: ReferenceReport[] };
+  connector: { results: ConnectorReport[] };
   pick: { ref: TopoRef | null };
   measure: MeasureResult;
   /** `data` is transferred. */
@@ -221,6 +236,7 @@ const OP_NAMES: ReadonlySet<string> = new Set<OpName>([
   'release',
   'feature',
   'resolve',
+  'connector',
   'pick',
   'measure',
   'exportStep',
@@ -282,6 +298,15 @@ const FIELDS: Record<OpName, [Record<string, Check>, Record<string, Check>]> = {
     {},
   ],
   resolve: [{ shape: shapeRef, refs: arrayOf(topoRef) }, {}],
+  connector: [
+    {
+      shape: shapeRef,
+      connectors: arrayOf(
+        shape({ origin: topoRef, inference: oneOf('centroid', 'centre', 'midpoint', 'vertex') }),
+      ),
+    },
+    {},
+  ],
   pick: [{ shape: shapeRef, kind: oneOf('face', 'edge'), index: num }, {}],
   measure: [{ shape: shapeRef, targets: arrayOf(measureTarget) }, { body: bool }],
   exportStep: [{ bodies: arrayOf(shape({ shape: shapeRef, name: str }), true) }, {}],
@@ -396,6 +421,12 @@ export function executeOp(
     }
     case 'resolve':
       return { results: resolveReferences(kernel, resolve(op.shape, 'resolve'), op.refs) };
+    case 'connector': {
+      const id = resolve(op.shape, 'connector');
+      return {
+        results: op.connectors.map((c) => connectorFrame(kernel, id, c.origin, c.inference)),
+      };
+    }
     case 'pick':
       return { ref: pickReference(kernel, resolve(op.shape, 'pick'), op.kind, op.index) };
     case 'measure':
