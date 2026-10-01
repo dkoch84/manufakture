@@ -28,9 +28,8 @@ import { fromMillimetres } from '@manufakture/units';
 export const FIT_VARIABLE_NAMES: readonly string[] = FIT_KINDS.map((k) => FIT_VARIABLES[k]);
 
 /**
- * The print setup the fit values come from: `setupId` when given and present, else the
- * document's first setup (there is no active-setup choice outside the print workspace yet), or
- * none.
+ * The print setup the fit values come from: `setupId` when given and present (the print
+ * workspace's active setup), else the document's first setup, or none.
  */
 export function fitSetup(doc: ManufaktureDocument, setupId?: string): PrintSetup | undefined {
   return (setupId ? findPrintSetup(doc, setupId) : undefined) ?? doc.print.setups[0];

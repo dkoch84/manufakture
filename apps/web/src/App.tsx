@@ -44,6 +44,12 @@ import { MeasureOverlay } from './measure/MeasureOverlay';
 import { MeasurePanel } from './measure/MeasurePanel';
 import { PART_STUDIO_PANEL_ID } from './parts/names';
 import { PartTabs } from './parts/PartTabs';
+import type { PrintAnalyzer } from './print/analysis';
+import { PrintPanel } from './print/PrintPanel';
+import { PrintToolbar } from './print/PrintToolbar';
+import { spawnPrintAnalyzer } from './print/spawn';
+import { activeSetup, createPrintUiStore, type PrintUiStore } from './print/state';
+import { usePrintWorkspace } from './print/usePrintWorkspace';
 import { measureTargets } from './measure/measurer';
 import { partBodies as bodiesOfPart, sameOr } from './model/bodies';
 import {
@@ -116,6 +122,7 @@ import './tree/tree.css';
 import './features/features.css';
 import './parts/parts.css';
 import './assembly/assembly.css';
+import './print/print.css';
 
 const defaultSolver = () => lazySolver(spawnDefaultSolver);
 
@@ -159,6 +166,13 @@ export interface AppProps {
   autosaveDelays?: { delayMs: number; maxDelayMs: number };
   /** The assembly workspace's panels and shown poses; the app makes its own by default. */
   assemblyUi?: AssemblyUiStore;
+  /** The print workspace's state (open, active setup, shading); the app makes its own by default. */
+  printUi?: PrintUiStore;
+  /**
+   * Makes the print-analysis worker's client (default: the worker, started on the first
+   * analysis, so a document never printed never starts it). Null: walls and gaps are not checked.
+   */
+  createPrintAnalyzer?: () => PrintAnalyzer | null;
 }
 
 /** Whether `doc` has imported reference bodies, which live outside regen and must be read again. */
@@ -215,9 +229,16 @@ export function App({
   initialDocumentId,
   autosaveDelays,
   assemblyUi: givenAssemblyUi,
+  printUi: givenPrintUi,
+  createPrintAnalyzer = spawnPrintAnalyzer,
 }: AppProps) {
   const [ownAssemblyUi] = useState(createAssemblyUiStore);
   const assemblyUi = givenAssemblyUi ?? ownAssemblyUi;
+  const [ownPrintUi] = useState(createPrintUiStore);
+  const printUi = givenPrintUi ?? ownPrintUi;
+  // The print-analysis client starts its worker on the first analysis, not here.
+  const [printAnalyzer] = useState(createPrintAnalyzer);
+  useEffect(() => () => printAnalyzer?.terminate(), [printAnalyzer]);
   // A loader starts nothing until `load`, so the initialiser running twice
   // under StrictMode leaves nothing behind.
   const [{ loader, owned }] = useState(() =>
@@ -286,6 +307,9 @@ export function App({
   const shownModel = viewing?.model ?? model;
   // Hiding a body while viewing is the view's own: the open document's hidden bodies stay.
   const shownSettings = viewing?.settings ?? settings;
+  // The print workspace shows the open document's setups; a past state viewed has none to edit.
+  const printOpen = useStore(printUi, (s) => s.open);
+  const printing = printOpen && !locked;
 
   // The scene's own document (the demo scene) replaces the open one once, when the scene loads.
   const openedInitial = useRef(false);
@@ -409,8 +433,8 @@ export function App({
 
   // A part studio's sketches belong to its own view: an assembly tab draws none.
   const sketches = useMemo(
-    () => (assemblyId === null ? sketchFeatures(shownDocument, shownPartId) : []),
-    [assemblyId, shownDocument, shownPartId],
+    () => (assemblyId === null && !printing ? sketchFeatures(shownDocument, shownPartId) : []),
+    [assemblyId, shownDocument, shownPartId, printing],
   );
   const shownImports = useMemo(() => {
     const features = findPart(shownDocument, shownPartId)?.features ?? [];
@@ -647,16 +671,16 @@ export function App({
     );
   }, [docReady, document, activePartId, activeAssemblyId]);
   // What was selected belongs to the tab shown before; so do an assembly's panels and poses.
-  const shownTab = useRef(`${activePartId}\n${activeAssemblyId ?? ''}`);
+  const shownTab = useRef(`${activePartId}\n${activeAssemblyId ?? ''}\n${printing}`);
   useEffect(() => {
-    const tab = `${activePartId}\n${activeAssemblyId ?? ''}`;
+    const tab = `${activePartId}\n${activeAssemblyId ?? ''}\n${printing}`;
     if (shownTab.current === tab) return;
     shownTab.current = tab;
     selection.getState().clear();
     assemblyUi.getState().close();
     assemblyUi.getState().clearPoses();
     assemblyUi.getState().setMessage(null);
-  }, [activePartId, activeAssemblyId, selection, assemblyUi]);
+  }, [activePartId, activeAssemblyId, printing, selection, assemblyUi]);
   // Poses a drag or a mate committed are shown until the model has caught up with them.
   const modelDocument = useModel(model, (s) => s.document);
   const modelPending = useModel(model, (s) => s.pending);
@@ -1028,18 +1052,34 @@ export function App({
   const branchName =
     branch === MAIN_BRANCH ? undefined : (branches?.find((b) => b.id === branch)?.name ?? branch);
 
+  // The print workspace: the active setup's items, oriented on the printer's bed.
+  const print = usePrintWorkspace({
+    open: printing,
+    documents,
+    printUi,
+    selection,
+    viewport,
+    parts: allParts,
+    exchanger: loader.exchanger ?? null,
+    analyzer: printAnalyzer,
+  });
+  const printSetupId = useStore(printUi, (s) => s.setupId);
+  const fitSetupId = activeSetup(document, printSetupId)?.id;
+
   const shownBodies = useMemo(
     () =>
       bodies === null
         ? null
-        : assemblyId !== null
-          ? instanceBodies.length === 0
-            ? bodies
-            : [...bodies, ...instanceBodies]
-          : partBodies.length === 0 && shownImports.length === 0
-            ? bodies
-            : [...bodies, ...partBodies, ...shownImports.map((i) => i.body)],
-    [bodies, partBodies, shownImports, assemblyId, instanceBodies],
+        : printing
+          ? print.bodies
+          : assemblyId !== null
+            ? instanceBodies.length === 0
+              ? bodies
+              : [...bodies, ...instanceBodies]
+            : partBodies.length === 0 && shownImports.length === 0
+              ? bodies
+              : [...bodies, ...partBodies, ...shownImports.map((i) => i.body)],
+    [bodies, partBodies, shownImports, assemblyId, instanceBodies, printing, print.bodies],
   );
   // Dragging instances of the assembly shown, through the regen worker; not while viewing.
   const instanceBodiesRef = useRef(instanceBodies);
@@ -1395,7 +1435,8 @@ export function App({
   useEffect(() => {
     if (shownBodies === null) return;
     // An assembly is not measured (yet): its instances are placed, the kernel's bodies are not.
-    if (assemblyId !== null) {
+    // Nor is the print view, whose bodies are copies placed on the bed.
+    if (assemblyId !== null || printing) {
       void measure.getState().measure(measurer, null);
       return;
     }
@@ -1414,7 +1455,7 @@ export function App({
             ...(every.length > 0 ? { bodies: every } : {}),
           },
     );
-  }, [shownBodies, partBodies, modelGeneration, selected, measurer, measure, assemblyId]);
+  }, [shownBodies, partBodies, modelGeneration, selected, measurer, measure, assemblyId, printing]);
   const measuredBodies = useMemo(
     () => activeBodies.map((b) => ({ viewId: b.viewId, name: b.name, material: b.material })),
     [activeBodies],
@@ -1532,9 +1573,21 @@ export function App({
           </div>
         )}
         <div className="toolbar-group document-actions">
+          <button
+            type="button"
+            aria-pressed={printing}
+            disabled={sketching.active || dialog !== null || locked}
+            data-testid="open-print"
+            title="The print workspace: printer, orientation on the bed, and what may print badly"
+            onClick={() => printUi.getState().setOpen(!printOpen)}
+          >
+            Print
+          </button>
           <SketchMenu
             face={face}
-            disabled={sketching.active || dialog !== null || locked || assemblyId !== null}
+            disabled={
+              sketching.active || dialog !== null || locked || assemblyId !== null || printing
+            }
             onPick={(target) => sketching.enter(target)}
           />
           <button
@@ -1625,12 +1678,17 @@ export function App({
       )}
       {/* The part tools; in a sketch the sketch toolbar takes this row. While a past state is
         viewed there is nothing to edit, so they step aside. */}
-      {!sketching.active && !locked && assemblyId === null && (
+      {printing && !sketching.active && (
+        <div className="feature-bar">
+          <PrintToolbar documents={documents} printUi={printUi} resolved={print.resolved} />
+        </div>
+      )}
+      {!sketching.active && !locked && !printing && assemblyId === null && (
         <div className="feature-bar">
           <FeatureToolbar disabled={dialog !== null} onOpen={(kind) => setDialog({ kind })} />
         </div>
       )}
-      {!locked && assemblyId !== null && (
+      {!locked && !printing && assemblyId !== null && (
         <div className="feature-bar">
           <div className="assembly-toolbar" role="toolbar" aria-label="Assembly">
             <button
@@ -1701,7 +1759,7 @@ export function App({
         >
           {/* A sketch is edited on its own (the tree cannot change anything meanwhile), so the
             tree steps aside and the sketch gets the room. */}
-          {assemblyId !== null && (
+          {assemblyId !== null && !printing && (
             <AssemblyTree
               documents={shownDocuments}
               assemblyId={assemblyId}
@@ -1710,7 +1768,7 @@ export function App({
               onEditMate={(mateId) => assemblyUi.getState().open({ kind: 'mate', mateId })}
             />
           )}
-          {!sketching.active && assemblyId === null && (
+          {!sketching.active && !printing && assemblyId === null && (
             <FeatureTree
               documents={shownDocuments}
               model={shownModel}
@@ -1737,7 +1795,7 @@ export function App({
                 highlighted={hoveredFeature}
               />
             )}
-            {viewport && assemblyId !== null && (
+            {viewport && assemblyId !== null && !printing && (
               <ConnectorOverlay
                 viewport={viewport}
                 selection={selection}
@@ -1746,23 +1804,28 @@ export function App({
                 chosen={assemblyPanel?.kind === 'mate' ? mateConnectors : []}
               />
             )}
-            {viewport && assemblyId !== null && highlightedPair !== null && (
+            {viewport && assemblyId !== null && !printing && highlightedPair !== null && (
               <InterferenceOverlay viewport={viewport} mesh={highlightedPair.mesh} />
             )}
-            {assemblyId !== null && instanceBodies.length === 0 && (
+            {assemblyId !== null && !printing && instanceBodies.length === 0 && (
               <p className="viewport-hint" data-testid="assembly-hint">
                 {shownDocument.assemblies.find((a) => a.id === assemblyId)?.instances.length
                   ? 'Placing the instances...'
                   : 'An empty assembly. Insert a part studio, then mate the instances.'}
               </p>
             )}
-            {assemblyId === null && shownBodies.length === 0 && !sketching.active && (
+            {printing && shownBodies.length === 0 && (
+              <p className="viewport-hint" data-testid="print-hint">
+                Nothing on the bed yet. Add a setup and an item in the Print panel.
+              </p>
+            )}
+            {assemblyId === null && !printing && shownBodies.length === 0 && !sketching.active && (
               <p className="viewport-hint" data-testid="empty-hint">
                 Nothing here yet. Start with <strong>New sketch</strong>: pick a plane, draw a
                 closed shape, then extrude it.
               </p>
             )}
-            {viewport && !sketching.active && assemblyId === null && (
+            {viewport && !sketching.active && !printing && assemblyId === null && (
               <MeasureOverlay viewport={viewport} measure={measure} units={shownDocument.units} />
             )}
             {sketching.active && <SketchStatusBar session={session} />}
@@ -1774,6 +1837,23 @@ export function App({
                 <h2>Sketch selection</h2>
                 <SketchSelectionList session={session} />
               </aside>
+            ) : printing ? (
+              <>
+                <PrintPanel
+                  documents={documents}
+                  printUi={printUi}
+                  parts={allParts}
+                  resolved={print.resolved}
+                  issues={print.issues}
+                  analysis={print.analysis}
+                  onIssue={print.onIssue}
+                />
+                <VariablesPanel
+                  documents={documents}
+                  selection={selection}
+                  printSetupId={fitSetupId}
+                />
+              </>
             ) : assemblyId !== null && !locked && assemblyPanel?.kind === 'mate' ? (
               <MateDialog
                 key={`${assemblyId}/${assemblyPanel.mateId ?? 'new'}`}
@@ -1850,7 +1930,11 @@ export function App({
                 )}
                 {!locked && (
                   <>
-                    <VariablesPanel documents={documents} selection={selection} />
+                    <VariablesPanel
+                      documents={documents}
+                      selection={selection}
+                      printSetupId={fitSetupId}
+                    />
                     <ConfigurationsPanel
                       documents={documents}
                       configurationError={configurationError}

@@ -302,6 +302,28 @@ export function compareDocuments(
         ?.name ?? id;
     lines.push(`Assemblies that differ: ${listOf(assemblies.map((a) => name(a.assemblyId)))}.`);
   }
+  if (change.printChanged) {
+    const setupName = (id: string) =>
+      (
+        viewed.print.setups.find((s) => s.id === id) ??
+        current.print.setups.find((s) => s.id === id)
+      )?.name ?? id;
+    const p = change.print.setups;
+    if (p.added.length > 0)
+      lines.push(`Print setups only here: ${listOf(p.added.map(setupName))}.`);
+    if (p.removed.length > 0) {
+      lines.push(`Print setups only in the current state: ${listOf(p.removed.map(setupName))}.`);
+    }
+    if (p.changed.length > 0)
+      lines.push(`Print setups that differ: ${listOf(p.changed.map(setupName))}.`);
+    if (p.added.length + p.removed.length + p.changed.length === 0) {
+      lines.push(
+        change.print.reordered
+          ? 'Print setups are in a different order.'
+          : 'Print settings differ.',
+      );
+    }
+  }
   if (change.configurationsChanged) lines.push('The configuration table differs.');
   if (change.unitsChanged) lines.push('Display units differ.');
   return lines;

@@ -119,8 +119,31 @@ interface E2eVersion {
   createdAt: string;
 }
 
+interface E2eBox {
+  min: [number, number, number];
+  max: [number, number, number];
+}
+
+interface E2ePrintItem {
+  item: { id: string; orientation: { kind: string } };
+  status: string;
+  message: string | null;
+  copies: {
+    copy: number;
+    placement: E2ePose;
+    box: E2eBox;
+  }[];
+  fit: { fits: boolean; overshoot: { x: number; y: number; z: number }; box: E2eBox } | null;
+}
+
 interface Window {
   __manufakture?: {
+    print?: {
+      resolved(): { setup: { id: string; printer: string }; items: E2ePrintItem[] } | null;
+      issues(): { key: string; kind: string; itemId: string; worst: string }[];
+      analysis(): { running: boolean; reply: unknown; message: string | null };
+      meshesSettled(): boolean;
+    };
     library: {
       listVersions(id: string): Promise<E2eResult<E2eVersion[]>>;
       readVersion(
@@ -186,7 +209,11 @@ interface Window {
         projection: string;
         halfHeight: number;
         animating: boolean;
+        shading: string;
+        buildVolume: boolean;
       };
+      setViewDirection(dir: readonly [number, number, number], animate?: boolean): void;
+      frameBox(box: E2eBox, animate?: boolean): void;
       projectToClient(p: readonly [number, number, number]): { x: number; y: number };
       setStandardView(
         view: 'front' | 'back' | 'left' | 'right' | 'top' | 'bottom' | 'iso',

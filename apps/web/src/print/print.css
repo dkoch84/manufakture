@@ -1,0 +1,260 @@
+/* The print workspace: its toolbar, side panel, items, issues and legend. */
+
+.print-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.print-toolbar-gap {
+  width: 0.75rem;
+}
+
+.print-shading {
+  display: flex;
+  gap: 0;
+}
+
+.print-shading button {
+  border-radius: 0;
+}
+
+.print-shading button:first-child {
+  border-radius: 4px 0 0 4px;
+}
+
+.print-shading button:last-child {
+  border-radius: 0 4px 4px 0;
+}
+
+.print-shading button[aria-checked='true'] {
+  background: #dbe7ff;
+  border-color: #4d8dff;
+}
+
+.print-hint {
+  color: #1d4ea8;
+  font-size: 0.8rem;
+}
+
+.print-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.print-head h2 {
+  margin-right: auto;
+}
+
+.print-setup {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.35rem;
+  margin: 0.5rem 0;
+}
+
+.print-field {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.print-field > span {
+  flex: 0 0 4rem;
+  color: #3d4652;
+}
+
+.print-field input,
+.print-field select {
+  flex: 1;
+  min-width: 0;
+}
+
+.print-delete-setup {
+  justify-self: start;
+}
+
+.print-fit {
+  margin: 0.25rem 0;
+  padding: 0.3rem 0.45rem;
+  border-radius: 4px;
+  background: #e8f5e9;
+  color: #1e5b24;
+}
+
+.print-fit.print-fit-fails {
+  background: #fdecea;
+  color: #8a1c12;
+}
+
+.print-fit-note {
+  margin: 0.25rem 0;
+  padding: 0.3rem 0.45rem;
+  border-radius: 4px;
+  background: #fff8e1;
+  color: #6b4e00;
+}
+
+.print-thresholds {
+  margin: 0.5rem 0;
+}
+
+.print-thresholds summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.print-threshold {
+  margin: 0.35rem 0;
+}
+
+.print-items h3,
+.print-issues h3 {
+  font-size: 0.8rem;
+  margin: 0.75rem 0 0.25rem;
+  color: #3d4652;
+}
+
+.print-item-list,
+.print-issue-list,
+.print-legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.print-item {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem 0.4rem;
+  padding: 0.3rem 0.25rem;
+  border-bottom: 1px solid #edf0f3;
+}
+
+.print-item.active {
+  background: #f1f6ff;
+}
+
+.print-item-pick {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  flex-basis: 100%;
+  border: none;
+  background: none;
+  padding: 0;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.print-item-name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.print-item-orientation {
+  color: #5b6673;
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}
+
+.print-item-message {
+  flex-basis: 100%;
+  font-size: 0.75rem;
+  color: #8a1c12;
+}
+
+.print-item-pending {
+  color: #5b6673;
+}
+
+.print-item-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.75rem;
+}
+
+.print-item-actions label {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+.print-item-actions input[type='number'] {
+  width: 3.5rem;
+}
+
+.print-add-item {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.4rem;
+}
+
+.print-checking {
+  font-weight: normal;
+  color: #5b6673;
+}
+
+.print-issue {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.1rem 0.5rem;
+  width: 100%;
+  margin: 0.15rem 0;
+  padding: 0.3rem 0.45rem;
+  border: 1px solid #edf0f3;
+  border-radius: 4px;
+  background: #fff;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.print-issue[aria-pressed='true'] {
+  border-color: #4d8dff;
+  background: #f1f6ff;
+}
+
+.print-issue-title {
+  font-weight: 600;
+}
+
+.print-issue-worst {
+  font-variant-numeric: tabular-nums;
+  color: #8a1c12;
+}
+
+.print-issue-detail {
+  grid-column: 1 / -1;
+  color: #5b6673;
+  font-size: 0.75rem;
+}
+
+.print-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+  margin-top: 0.5rem;
+  font-size: 0.75rem;
+}
+
+.print-legend li {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.print-swatch {
+  display: inline-block;
+  width: 0.8rem;
+  height: 0.8rem;
+  border-radius: 2px;
+  border: 1px solid rgb(0 0 0 / 15%);
+}

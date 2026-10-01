@@ -1,15 +1,17 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
-import { applyCommand } from '@manufakture/core';
+import { applyCommand, createPrintSetup } from '@manufakture/core';
 import { describe, expect, it } from 'vitest';
 import { createDocumentStore } from '../state/document';
 import { createSelectionStore } from '../state/selection';
 import { boxDocument } from './box.test-fixture';
 import { VariablesPanel } from './VariablesPanel';
 
-function setup(doc = boxDocument()) {
+function setup(doc = boxDocument(), printSetupId?: string) {
   const documents = createDocumentStore(doc);
   const selection = createSelectionStore();
-  render(<VariablesPanel documents={documents} selection={selection} />);
+  render(
+    <VariablesPanel documents={documents} selection={selection} printSetupId={printSetupId} />,
+  );
   const variables = () =>
     Object.fromEntries(
       documents.getState().document.variables.map((v) => [v.name, v.expression.source]),
@@ -217,5 +219,25 @@ describe('the Variables panel', () => {
 
     t.documents.getState().undo();
     expect(Object.keys(t.variables())).toEqual(['w', 'd', 'h', 'r']);
+  });
+
+  it("takes the fit values from the print workspace's active setup", () => {
+    let doc = boxDocument();
+    for (const [id, name, nozzle] of [
+      ['print#1', 'Plate 1', 0.4],
+      ['print#2', 'Big nozzle', 0.6],
+    ] as const) {
+      const r = applyCommand(doc, {
+        type: 'addPrintSetup',
+        setup: createPrintSetup(id, name, 'bambu-x1c', nozzle),
+      });
+      if (!r.ok) throw new Error(r.error.message);
+      doc = r.value.document;
+    }
+    const t = setup(doc, 'print#2');
+    fireEvent.click(screen.getByTestId('variable-insert-fits'));
+    // The 0.4 mm clearances scaled to a 0.6 mm nozzle, not the first setup's.
+    expect(t.variables()).toMatchObject({ fit_slip: '0.3 mm' });
+    expect(screen.getByTestId('variable-fits-status').textContent).toContain('(Big nozzle)');
   });
 });

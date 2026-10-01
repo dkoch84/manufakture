@@ -34,6 +34,11 @@ export interface VariablesPanelProps {
   documents: DocumentStoreApi;
   /** Clicking a use selects its feature here, when given. */
   selection?: SelectionStore;
+  /**
+   * The print setup Insert fit variables takes its printer and nozzle from: the print
+   * workspace's active setup. Absent: the document's first setup.
+   */
+  printSetupId?: string | undefined;
 }
 
 interface Editing {
@@ -58,7 +63,7 @@ interface Blocked {
   warning: string | null;
 }
 
-export function VariablesPanel({ documents, selection }: VariablesPanelProps) {
+export function VariablesPanel({ documents, selection, printSetupId }: VariablesPanelProps) {
   const doc = useStore(documents, (s) => s.document);
   const table = useMemo(() => evaluateTable(doc.variables), [doc]);
   const rows = useMemo(() => variableRows(doc, table), [doc, table]);
@@ -68,7 +73,7 @@ export function VariablesPanel({ documents, selection }: VariablesPanelProps) {
   const [fitStatus, setFitStatus] = useState<{ ok: boolean; message: string } | null>(null);
 
   const insertFits = () => {
-    const r = insertFitVariables(doc);
+    const r = insertFitVariables(doc, printSetupId);
     const done = r.command ? documents.getState().execute(r.command, r.label) : null;
     setFitStatus(
       done && !done.ok

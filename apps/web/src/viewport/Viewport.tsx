@@ -31,6 +31,9 @@ export type ViewportApi = Pick<
   | 'viewDirection'
   | 'onViewChange'
   | 'requestRender'
+  | 'setBuildVolume'
+  | 'setShading'
+  | 'frameBox'
   | 'dispose'
 >;
 

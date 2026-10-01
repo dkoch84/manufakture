@@ -79,6 +79,9 @@ function fakeEngine() {
     viewDirection: vi.fn(() => [0, 0, 1]),
     onViewChange: vi.fn(() => () => {}),
     requestRender: vi.fn(),
+    setBuildVolume: vi.fn(),
+    setShading: vi.fn(),
+    frameBox: vi.fn(),
     dispose: vi.fn(),
   };
   const factory: EngineFactory = vi.fn(() => api as unknown as ViewportApi);
@@ -1704,5 +1707,110 @@ describe('App assemblies', () => {
     expect(screen.queryByTestId('interference-panel')).toBeNull();
     expect(screen.queryByTestId('interference-overlay')).toBeNull();
     expect(t.selection.getState().selected).toEqual([]);
+  });
+});
+
+describe('App print workspace', () => {
+  it("shows the setup's items on the bed with the build volume and shading, and closes again", async () => {
+    let generation = 0;
+    const regenerator: Regenerator = {
+      regen: async (document) => ({
+        generation: ++generation,
+        ms: 1,
+        parts: document.parts.map((p) => ({
+          partId: p.id,
+          features: [],
+          bodies: [
+            {
+              bodyId: 'extrude#1',
+              creator: 'extrude#1',
+              solids: 1,
+              view: boxBody({ id: `${p.id}/extrude#1`, min: [0, 0, 5] }),
+            },
+          ],
+        })),
+      }),
+      onInvalidated: () => () => undefined,
+    };
+    // A thin wall on face 1 of every body asked about.
+    const analyzer = {
+      analyze: vi.fn(async (bodies: { id: string }[]) => ({
+        status: 'done' as const,
+        generation: 1,
+        bodies: bodies.map((b) => ({
+          id: b.id,
+          thickness: new Float32Array(12).fill(0.5),
+          gap: new Float32Array(12),
+          flags: new Uint8Array(12),
+          faces: [],
+          samples: 12,
+        })),
+        issues: [{ kind: 'thinWall' as const, body: 0, face: 1, value: 0.5, area: 100 }],
+        ms: 1,
+      })),
+      cancel: vi.fn(async () => undefined),
+      terminate: vi.fn(),
+    };
+    const engine = fakeEngine();
+    const documents = createDocumentStore(createDocument({ id: 'doc', name: 'Test' }));
+    render(
+      <App
+        loader={{ load: async () => [], dispose: vi.fn(), regenerator }}
+        createEngine={engine.factory}
+        selection={createSelectionStore()}
+        settings={createViewSettingsStore()}
+        documents={documents}
+        sketchSession={createSketchSession(immediateSolver({ dof: 0 }).solver)}
+        measure={createMeasureStore()}
+        model={createModelStore()}
+        createPrintAnalyzer={() => analyzer}
+      />,
+    );
+    const shownIds = () =>
+      (engine.api.setBodies.mock.calls.at(-1)![0] as BodyInput[]).map((b) => b.id);
+    await waitFor(() => expect(shownIds()).toEqual(['part#1/extrude#1']));
+    expect(engine.api.setBuildVolume).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId('open-print'));
+    expect(screen.getByTestId('print-panel')).toBeTruthy();
+    expect(screen.queryByTestId('feature-tree')).toBeNull();
+    fireEvent.click(screen.getByTestId('print-add-setup'));
+    fireEvent.click(screen.getByTestId('print-add-item'));
+    await waitFor(() => expect(shownIds()).toEqual(['print:item#1:0:part#1/extrude#1']));
+    const placed = (engine.api.setBodies.mock.calls.at(-1)![0] as BodyInput[])[0]!;
+    // Centred on the X1 Carbon's bed and dropped onto it.
+    expect(placed.transform?.translation).toEqual([123, 123, -5]);
+    expect(engine.api.setBuildVolume).toHaveBeenLastCalledWith(
+      expect.objectContaining({ height: 250 }),
+    );
+    expect(engine.api.setShading).toHaveBeenLastCalledWith(
+      expect.objectContaining({ kind: 'overhang' }),
+    );
+    fireEvent.click(screen.getByTestId('print-shading-thickness'));
+    expect(engine.api.setShading).toHaveBeenLastCalledWith(
+      expect.objectContaining({ kind: 'thickness', minWall: 0.84 }),
+    );
+    // Walls and gaps in the worker, once the edits have stopped.
+    await waitFor(() => expect(analyzer.analyze).toHaveBeenCalledTimes(1), { timeout: 2000 });
+    const thin = await screen.findByTestId('print-issue-thinWall');
+
+    // Clicking an issue while lay flat is armed selects its faces, and is not the pick.
+    fireEvent.click(screen.getByTestId('print-lay-flat'));
+    expect(screen.getByTestId('print-lay-flat-hint')).toBeTruthy();
+    fireEvent.click(thin);
+    expect(screen.queryByTestId('print-lay-flat-hint')).toBeNull();
+    const item = () => documents.getState().document.print.setups[0]!.items[0]!;
+    expect(item().orientation.kind).toBe('asModelled');
+
+    expect(analyzer.cancel).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId('open-print'));
+    // Closing the workspace cancels the analysis.
+    expect(analyzer.cancel).toHaveBeenCalled();
+    await waitFor(() => expect(shownIds()).toEqual(['part#1/extrude#1']));
+    expect(engine.api.setBuildVolume).toHaveBeenLastCalledWith(null);
+    expect(engine.api.setShading).toHaveBeenLastCalledWith(null);
+    expect(screen.queryByTestId('print-panel')).toBeNull();
+    // The setup is the document's, one undo step each.
+    expect(documents.getState().document.print.setups[0]!.items).toHaveLength(1);
   });
 });

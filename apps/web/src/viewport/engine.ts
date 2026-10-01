@@ -25,6 +25,7 @@ import {
   DecrementWrapStencilOp,
   DirectionalLight,
   DoubleSide,
+  LineBasicMaterial,
   FrontSide,
   BackSide,
   AlwaysStencilFunc,
@@ -82,6 +83,15 @@ import {
   type ViewBody,
 } from './bodies';
 import { gridCenter, gridLevels } from './grid';
+import {
+  buildVolumeBounds,
+  buildVolumeSegments,
+  createOverhangMaterial,
+  createThicknessMaterial,
+  thicknessAttribute,
+  type BuildVolume,
+  type ViewShading,
+} from './printView';
 import { createGridMaterial, createPickMaterial, createSilhouetteMaterial } from './materials';
 import { PLACEHOLDER_PREFIX, nameFromFeature } from './naming';
 import {
@@ -256,6 +266,16 @@ export class ViewportEngine {
   private readonly hoverEdges = new LineSegments2(new LineSegmentsGeometry());
   private readonly selectedEdges = new LineSegments2(new LineSegmentsGeometry());
   private readonly vertexMarkers: Points<BufferGeometry, PointsMaterial>;
+  /** The print workspace's shading materials (printView.ts) and the current mode. */
+  private readonly overhangMaterial: ShaderMaterial;
+  private readonly thicknessMaterial: ShaderMaterial;
+  private shading: ViewShading | null = null;
+  /** The printer's build volume (print workspace), its key to tell a new one, and its bounds. */
+  private volume: {
+    key: string;
+    objects: LineSegments<BufferGeometry, LineBasicMaterial>[];
+    bounds: { min: Vec3; max: Vec3 } | null;
+  } | null = null;
 
   private bodies: BodyObjects[] = [];
   private view: ViewState = {
@@ -329,6 +349,8 @@ export class ViewportEngine {
       side: FrontSide,
     });
     this.silhouetteMaterial = createSilhouetteMaterial(this.clipPlanes, COLORS.edge);
+    this.overhangMaterial = createOverhangMaterial(this.clipPlanes);
+    this.thicknessMaterial = createThicknessMaterial(this.clipPlanes);
     this.pickMaterial = createPickMaterial(this.clipPlanes);
     this.pickEdgeMaterial = createPickMaterial(this.clipPlanes, 'lines');
     this.pickVertexMaterial = createPickMaterial(this.clipPlanes, 'points');
@@ -430,6 +452,7 @@ export class ViewportEngine {
     const prepared = prepareBodies(inputs);
     const shared = new Map<ViewBody['mesh'], SharedBuffers>();
     this.bodies = prepared.map((body) => this.buildBody(body, shared));
+    this.applyShading();
     this.updateSceneSphere();
     // New edge objects start visible: apply Show edges and the section to them.
     this.applySettings(this.stores.settings.getState());
@@ -463,6 +486,53 @@ export class ViewportEngine {
     this.applySection(this.stores.settings.getState().section);
     this.refreshHighlights();
     this.invalidate(true);
+  }
+
+  /**
+   * Draw a printer's build volume (the print workspace), or none. A volume other than the one
+   * shown is framed with the bodies; the same one again changes nothing.
+   */
+  setBuildVolume(volume: BuildVolume | null): void {
+    const key = volume === null ? '' : JSON.stringify(volume);
+    if ((this.volume?.key ?? '') === key) return;
+    this.clearVolume();
+    if (volume) {
+      const { frame, excluded } = buildVolumeSegments(volume);
+      const lines = (positions: Float32Array, color: number, order: number) => {
+        const g = new BufferGeometry();
+        g.setAttribute('position', new BufferAttribute(positions, 3));
+        const l = new LineSegments(g, new LineBasicMaterial({ color }));
+        l.renderOrder = order;
+        this.scene.add(l);
+        return l;
+      };
+      this.volume = {
+        key,
+        objects: [lines(frame, 0x5b6673, 8), lines(excluded, 0xd0453b, 9)],
+        bounds: buildVolumeBounds(volume),
+      };
+    }
+    this.updateSceneSphere();
+    if (volume) this.fitAll(false);
+    this.invalidate(true);
+  }
+
+  /** Colour faces by overhang class or wall thickness (the print workspace); null: normally. */
+  setShading(shading: ViewShading | null): void {
+    this.shading = shading;
+    this.applyShading();
+    this.invalidate();
+  }
+
+  /** Frame a box (world coordinates), keeping the view direction. */
+  frameBox(box: { min: Vec3; max: Vec3 }, animate = true): void {
+    const min = new Vector3(...box.min);
+    const max = new Vector3(...box.max);
+    const sphere = {
+      center: min.clone().add(max).multiplyScalar(0.5),
+      radius: Math.max(min.distanceTo(max) / 2, 1),
+    };
+    this.goTo(fitSphere(this.currentView(), sphere, this.aspect(), 1.6), animate);
   }
 
   /** Take left-button drags for moving things (null: none). */
@@ -684,6 +754,8 @@ export class ViewportEngine {
         triangles: b.body.mesh.indices.length / 3,
         color: `#${b.faceColor.getHexString()}`,
       })),
+      shading: this.shading?.kind ?? 'normal',
+      buildVolume: this.volume !== null,
       projection: this.stores.settings.getState().projection,
       halfHeight: this.view.halfHeight,
       animating: this.transition !== null || this.wheelZoom !== null,
@@ -739,10 +811,13 @@ export class ViewportEngine {
     this.detachEvents();
     for (const u of this.unsubscribe) u();
     this.clearBodies();
+    this.clearVolume();
     this.cube.dispose();
     const materials: Material[] = [
       this.faceMaterial,
       this.silhouetteMaterial,
+      this.overhangMaterial,
+      this.thicknessMaterial,
       this.pickMaterial,
       this.pickEdgeMaterial,
       this.pickVertexMaterial,
@@ -861,9 +936,27 @@ export class ViewportEngine {
     return objects;
   }
 
-  /** The sphere fitting frames: around every body's box, where the body is now. */
+  /** The sphere fitting frames: around every body's box, where the body is now, and the volume. */
   private updateSceneSphere(): void {
-    const bounds = unionBounds(this.bodies.map((b) => b.body));
+    let bounds = unionBounds(this.bodies.map((b) => b.body));
+    const volume = this.volume?.bounds ?? null;
+    if (volume) {
+      const b = bounds;
+      bounds = b
+        ? {
+            min: [
+              Math.min(b.min[0], volume.min[0]),
+              Math.min(b.min[1], volume.min[1]),
+              Math.min(b.min[2], volume.min[2]),
+            ],
+            max: [
+              Math.max(b.max[0], volume.max[0]),
+              Math.max(b.max[1], volume.max[1]),
+              Math.max(b.max[2], volume.max[2]),
+            ],
+          }
+        : volume;
+    }
     if (!bounds) return;
     const min = new Vector3(...bounds.min);
     const max = new Vector3(...bounds.max);
@@ -906,6 +999,44 @@ export class ViewportEngine {
         input.color === b.color
       );
     });
+  }
+
+  private clearVolume(): void {
+    for (const o of this.volume?.objects ?? []) {
+      o.removeFromParent();
+      o.geometry.dispose();
+      o.material.dispose();
+    }
+    this.volume = null;
+  }
+
+  /** Put the shading's material (and the thickness values) on every body's faces. */
+  private applyShading(): void {
+    const s = this.shading;
+    if (s?.kind === 'overhang') {
+      this.overhangMaterial.uniforms.uThreshold!.value = s.threshold;
+      this.overhangMaterial.uniforms.uBand!.value = s.band;
+    } else if (s?.kind === 'thickness') {
+      const u = this.thicknessMaterial.uniforms;
+      u.uMinFeature!.value = s.minFeature;
+      u.uMinWall!.value = s.minWall;
+      u.uRange!.value = Math.max(s.minWall * 3, s.minFeature + 1e-3);
+    }
+    const material =
+      s?.kind === 'overhang'
+        ? this.overhangMaterial
+        : s?.kind === 'thickness'
+          ? this.thicknessMaterial
+          : this.faceMaterial;
+    for (const b of this.bodies) {
+      b.meshes[2]!.material = material;
+      if (s?.kind === 'thickness') {
+        b.geometry.setAttribute(
+          'thickness',
+          thicknessAttribute(b.body.indices, b.body.positions.length / 3, s.values.get(b.body.id)),
+        );
+      }
+    }
   }
 
   private clearBodies(): void {

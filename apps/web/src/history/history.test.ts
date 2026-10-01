@@ -1,4 +1,4 @@
-import { applyCommand, serialize, type Command } from '@manufakture/core';
+import { applyCommand, createPrintSetup, serialize, type Command } from '@manufakture/core';
 import { describe, expect, it } from 'vitest';
 import { MemoryBackend } from '../persistence/backend';
 import { DocumentLibrary, type LoggedRevision, type Version } from '../persistence/library';
@@ -188,6 +188,29 @@ describe('comparing with the current state', () => {
       `Features only in the current state: ${last.name}.`,
     ]);
     expect(compareDocuments(viewed, current)).toEqual([`Features only here: ${last.name}.`]);
+  });
+
+  it('lists print setups added, removed and changed, which change no geometry', () => {
+    const add = (doc: typeof current, id: string, name: string) =>
+      unwrapDoc(
+        applyCommand(doc, {
+          type: 'addPrintSetup',
+          setup: createPrintSetup(id, name, 'bambu-x1c', 0.4),
+        }),
+      );
+    const withPlate = add(current, 'print#1', 'Plate 1');
+    expect(compareDocuments(current, withPlate)).toEqual(['Print setups only here: Plate 1.']);
+    expect(compareDocuments(withPlate, current)).toEqual([
+      'Print setups only in the current state: Plate 1.',
+    ]);
+    const onMini = unwrapDoc(
+      applyCommand(withPlate, {
+        type: 'editPrintSetup',
+        setupId: 'print#1',
+        printer: 'bambu-a1-mini',
+      }),
+    );
+    expect(compareDocuments(withPlate, onMini)).toEqual(['Print setups that differ: Plate 1.']);
   });
 });
 

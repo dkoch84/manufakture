@@ -16,7 +16,7 @@ Clearances here are **diametral**: the hole is the peg's diameter plus the clear
 
 In the **Variables** panel, **Insert fit variables** adds `#fit_press`, `#fit_slip` and `#fit_sliding` to the table, all three in one step for Undo.
 
-- The values come from the document's print setup: its printer and nozzle. Every Bambu Lab printer shares the same defaults for now; a 0.2, 0.6 or 0.8 mm nozzle scales them in proportion to the nozzle (0.15, 0.3 and 0.6 mm at 0.6 mm). A document with no print setup gets the 0.4 mm defaults. The message under the button says which it used.
+- The values come from a print setup's printer and nozzle: the setup open in the [Print workspace](printing.md), or else the document's first setup. Every Bambu Lab printer shares the same defaults for now; a 0.2, 0.6 or 0.8 mm nozzle scales them in proportion to the nozzle (0.15, 0.3 and 0.6 mm at 0.6 mm). A document with no print setup gets the 0.4 mm defaults. The message under the button says which it used.
 - A variable that is already in the table is **never overwritten**: only the missing ones are added. Pressing the button again when all three exist changes nothing. So once you have put your measured values in, inserting again is harmless.
 
 They are ordinary variables: edit them in the table like any other, use them in any expression (`#peg_d + #fit_sliding`, `#fit_slip / 2` for a radius), and every feature that reads them follows when you change them.
