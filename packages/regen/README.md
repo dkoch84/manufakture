@@ -68,6 +68,7 @@ service (`@manufakture/kernel/node`) and the real solver directly.
 | --------------------------- | ------------ | ---------------------------------------------------------------------------------------------- |
 | `@manufakture/regen`        | worker, Node | the engine, graph, translation, cache, `createRegenWorkerApi`                                  |
 | `@manufakture/regen/worker` | worker entry | `Comlink.expose` of the regen worker API, with the kernel's `.wasm` imported as a `?url` asset |
+| `src/text-worker.ts`        | text worker  | the text worker the regen worker starts for outlines (see Text)                                |
 | `@manufakture/regen/client` | main thread  | `spawnRegenWorker()`, `RegenClient`                                                            |
 
 `createRegenWorkerApi` (`src/worker-api.ts`) builds the kernel's worker API (`createKernelWorkerApi`: loading with progress, batches, release, cancel, recycle, stats), waits for its service, creates the engine next to it and adds `regen(document, { generation })`, `solveAssembly(document, assemblyId, { generation })`, `dragInstance(assemblyId, instanceId, target, { generation })`, `interference(assemblyId, { generation, mesh?, tolerance? }, onPair?)`, `cancelInterference(assemblyId)` and `regenStats()`. `RegenClient.solveAssembly`, `RegenClient.dragInstance` and `RegenClient.interference` send the client's current generation (`latestGeneration`), never a new one, so none of them cancels a regen. `interference`'s `onPair` is a `Comlink.proxy` passed as an argument of its own (Comlink only looks for proxies in top-level arguments); each pair's mesh buffers are transferred with it. Mesh buffers are marked with `regenTransferables(result)`; nothing else heavy crosses. `RegenClient` extends the kernel's `KernelClient` (imported from `@manufakture/kernel/kernel-client`, so the kernel's own worker entry is not bundled), so every request of every kind (a regen, a `pick`, a `measure`, an export) takes its generation from the one sequence the client keeps. The service cancels by generation whoever sent a batch (see Cancellation), so a regen cancels older requests, and a pick or measure sent at the client's current generation never cancels a regen. Only a regen may take a new generation: any other batch that did (a STEP import, say) would cancel the regen in flight, which then resolves to null with nothing reporting in its place, so the app sends every other batch at `latestGeneration` and releases shapes with `KernelClient.release`, outside the batch queue. The app's `startRegen` also asks again when its newest regen comes back null. A pending regen resolves to null when the worker is restarted or terminated, like a pending submit. `RegenClient.regen` returns every regen the worker completed, even when a newer request came meanwhile: the engine reports a changed mesh once, to the regen that built it, so a caller that dropped completed results would lose meshes.
@@ -184,7 +185,8 @@ then split into regions (`detectRegions`). An explicit plane is normalised with
 and turned into a frame with the kernel's `frameOnPlane` (exactly what `sketchFrame` does), and a
 fragile or non-exact resolution is a warning on the sketch. A conflict fails the sketch with the
 solver's conflicting and redundant constraint ids; redundant constraints alone are a warning;
-region diagnostics of warning severity (open profiles, touching loops) are warnings.
+region diagnostics of warning severity (open profiles, touching loops) are warnings. A sketch with
+outline entities (text) has them expanded after the solve, before region detection: see Text.
 
 **Profiles.** Without `entities` a profile is every filled region. With `entities` it is every
 region or void whose outer loop runs only along listed entities: a rectangle's four lines pick the
@@ -201,6 +203,105 @@ under a positive one) are fused after the draft, so the body stays one valid sol
 of their union rather than two overlapping ones. An `add`
 fuses its whole tool into the body it meets: regions that miss the body become extra solids of
 it, not `detached` bodies.
+
+## Text
+
+Outline entities (ADR 0012 decision 7) are expanded at every regen of their sketch, after the
+solve has placed their anchors (`expandOutlines` in `src/sketches.ts`): each text is laid out in
+its font and its glyphs turned into region loops by the **text outliner**, placed at the anchor and
+angle (`placeOutline`), and handed to `detectRegions` with the sketch's own curves, which cuts
+letter-shaped holes in the face around a text and makes the letters (and the counters of letters
+inside a face) regions (sketch README, "Outline entities"). Construction outlines are expanded too
+but bound nothing. A sketch's `FeatureResult.outlines` (and `SketchResult.outlines`) carry every
+outline's placed loops, so the app draws text as regen built it (T3.2d). Glyph geometry never
+reaches the solver.
+
+- **Values.** `size` (the cap height), `letterSpacing` and `lineSpacing` are the feature's
+  expressions (core's `featureExpressions`), evaluated with the rest; a size that is not above 0 is
+  `invalid` on `entities.<i>.source.size`.
+- **Fonts** come from the document's `fonts` (for a derived part's source, from the source
+  document's). A bundled font is fetched by `packages/text` and checked against the SHA-256 it
+  ships with; when that is not the SHA-256 the document recorded (an app update changed the file),
+  the text is built with the shipped font and a `font-changed` warning. A user font's base64 bytes
+  are checked against its stored size and SHA-256 before they are parsed.
+- **Errors.** A font that cannot be read is a `font` error (`fontId`, field
+  `entities.<i>.source.font`, message "This font could not be read (name): why"), and a glyph that
+  cannot be read or converted is `invalid` on `entities.<i>.source.text`; either fails the sketch,
+  so its extrusions are upstream errors, rather than leave letters out silently. Characters the
+  font has no glyph for (`missing`), kerning that could not be read and glyph loops that touch are
+  `text` warnings.
+- **The text outliner** (`src/text.ts`) is a `TextOutliner`: one `outline(request, { signal,
+budget })` per outline entity, the request carrying the font (a bundled id, or a user file's
+  base64 text), the string, the evaluated size and spacings and the alignment, the reply the glyph
+  regions (`outlinePartsRegions`, per glyph, glyphs that overlap merged) or a failure. The engine
+  takes one as `text`.
+- **The default outliner is for Node and bundled fonts only.** Without `text`, the engine uses
+  `createTextOutliner()` (`src/text-engine.ts`, loaded on the first text, so a host that passes
+  its own never loads opentype.js). It parses fonts **in the calling thread with no time limit**, so
+  it **refuses user (`file`) fonts** ("user fonts are read only in the text worker, under a time
+  limit"). A browser host must pass `createWatchdogOutliner` (the regen worker does, below). A Node
+  host that trusts its fonts (a test, a command-line tool) can pass
+  `createTextOutliner({ allowFileFonts: true })`; pass a `fetchImpl` that reads files there, since
+  Node's `fetch` cannot load the bundled font's `file:` URL.
+- **The watchdog.** User fonts are attack surface, and not every cost of reading one can be bounded
+  from outside the parser (a CFF font's subroutine fan-out inside opentype.js; ADR 0011's
+  amendment). So the regen worker (`worker.ts`) passes `createWatchdogOutliner(spawnTextWorker)`:
+  every request runs in a **text worker** of its own (`src/text-worker.ts`, a nested worker started
+  on the first text), one at a time, under a `Watchdog` (`src/watchdog.ts`) with a time limit of
+  `TEXT_TIME_LIMIT_MS` (10 s) per request. A font is **loaded** by a request of its own the first
+  time a worker needs it (the bundled font's fetch, or a user font's bytes, transferred, and the
+  parse), and each text is **laid out** by another, so a timeout says which was slow:
+  - a load that passes the limit, or kills the worker (out of memory, a crash), is "This font could
+    not be read (name): reading it took longer than 10000 ms" (or "ran out of memory or
+    crashed"), the same `font` error as a damaged file. A user font that does so is remembered and
+    not tried again, so one hostile font costs the time limit once, not once per text. A
+    **bundled** font is never remembered as failed for the session: its 420 KB fetch runs under
+    the limit, and a slow network must cost one regen, not the session. Within the regen it is
+    remembered on the regen's `TextBudget`, so the other texts in it fail at once with the same
+    message and the regen spends the time limit at most once per font;
+  - a layout that passes the limit fails that text alone: "this text could not be laid out in
+    time", `invalid` on `entities.<i>.source.text`. The font is not blamed;
+  - a worker that **could not be started** (the constructor threw, or it died or timed out before
+    it said `{ ready: true }`, which `serveText` posts first) blames nothing and is not remembered
+    for the session; the regen's `TextBudget` remembers it, so the regen's other texts fail at once
+    without starting another.
+
+  Either way the worker is terminated and the next request starts a new one. The text worker keeps
+  fonts loaded by key (eight, least recently used out); a font it let go is loaded again. `Watchdog`
+  is generic (`{ id, request }` in, `{ id, reply }` out, over anything shaped like a `Worker`); its
+  tests drive real `worker_threads` workers that hang, throw and run out of memory.
+
+- **Time budgets.** On top of the per-request limit, each regen has a `TextBudget`: the texts of
+  one font (loading it included) may take `TEXT_FONT_BUDGET_MS` (10 s) in all, so a font whose
+  every text takes just under the limit fails once its texts have used it up (a user font then
+  stays failed for the session; a bundled one fails for that regen only), and all the texts of
+  the regen may take `TEXT_REGEN_BUDGET_MS` (30 s), past which the remaining texts fail ("this
+  text was not laid out: the document's texts took longer than 30000 ms in all"). The budget is
+  checked before a text and charged after it, so a text that starts just under a budget may still
+  run its whole time limit: a font can take up to about 20 s, and a regen's texts up to about 40 s.
+- **Cancelling.** The engine checks for a newer regen between the outline entities of a sketch,
+  and a newer regen aborts the running one's signal: the watchdog terminates the text worker if it
+  is laying out that regen's text (a request still queued never runs), and the superseded regen
+  returns null at once instead of waiting out the time limit. A cancelled request is not a font
+  failure.
+- **Not cached.** A failure that may not repeat (a bundled font that could not be fetched in time,
+  a worker that could not be started, a time budget used up, a user font whose bytes do not match
+  their SHA-256) marks the sketch's result `transient`: it is reported but not cached, so the next
+  regen tries again. A user font whose bytes do not match the SHA-256 the document claims is not
+  remembered by the text worker either, so a damaged or hostile document cannot block the real
+  font with that SHA-256.
+- **Size limits.** A text may make at most `MAX_TEXT_LOOPS` (50,000) loops, `MAX_TEXT_CURVES`
+  (500,000) curves and `MAX_TEXT_POINTS` (1,500,000) points, checked in the text worker; past any,
+  the text fails as too complex. The texts of a sketch may place `MAX_SKETCH_OUTLINE_CURVES`
+  (500,000) curves in all, checked by `expandOutlines`. For scale, 10,000 characters of Latin text
+  in Inter Bold (core's limit for all of a sketch's texts) make about 12,000 loops, 167,000 curves
+  and 448,000 points; real text never comes near, and a hostile font whose glyphs have thousands of
+  contours is stopped before its loops reach `detectRegions`, whose own work for outlines is
+  bounded too (sketch README, "Outline entities").
+- **Cost.** Layout and outlines take about 0.13 ms per glyph, region detection adds little (10,000
+  characters in a plate: about 1.3 s and 130 ms; 1000 characters: about 145 ms and 30 ms, logged
+  by `text.test.ts`); the kernel's sweeps dominate (kernel README, "Several regions"). Core caps a
+  text at 1000 characters and a sketch's texts at 10,000.
 
 ## Cache
 
@@ -222,8 +323,10 @@ canonical JSON of
   part in one row, in any part and in any regen, shares its entries;
 - for a sketch: the solver build (`DEFAULT_SOLVER_BUILD`, the pinned planegcs release; pass
   `solverBuild` to override), its definition without the display name, its evaluated dimension
-  values, and its plane (the placement, or the keys of the bodies the face may lie on plus the
-  face reference).
+  values (text sizes and spacings among them), and its plane (the placement, or the keys of the
+  bodies the face may lie on plus the face reference); a sketch with text adds the fonts it uses
+  (`sketchFontKey`: each font's id and SHA-256, and for a bundled font the SHA-256 of the file
+  this build ships under its id, so a changed bundled file is a cache miss).
 
 Equal keys mean equal results, so entries are never invalidated by hand. Failures are cached too
 (they are just as deterministic), so an unrelated edit does not retry a failing fillet. An entry
@@ -436,9 +539,9 @@ mapped back to the id of the reference that field holds), a message ending in "r
 reference's `lastResolved` hint when it has one. Missing sketch geometry (a profile entity, an axis
 line, a hole point) is `reference-lost` on `profile`, `axis` or `points`. Kernel warnings map the
 same way: `reference` (with `via` and `fragile`, for `ends`, `descendant`, `ancestor`, ordinal and
-fragile resolutions), `missed` and `direction`. Regen adds `expression`, `sketch`, `upstream` and
-`source` errors, and `sketch`, `redundant`, `extension`, `reference-body` and `derived-source`
-warnings.
+fragile resolutions), `missed` and `direction`. Regen adds `expression`, `sketch`, `upstream`,
+`source` and `font` errors, and `sketch`, `redundant`, `extension`, `reference-body`,
+`derived-source`, `text` and `font-changed` warnings.
 
 **Propagation.** A failed feature is skipped: the kernel passes the bodies through, so independent
 later features still build on them. A feature naming a failed, suppressed or upstream-errored feature
@@ -458,7 +561,9 @@ and are reported `rolled-back`.
 the engine or the kernel has seen). A regen whose generation is not newer than one already
 requested resolves to null at once. A newer regen cancels the running one's kernel batches, which
 the service abandons between ops (releasing what they made); the older regen stops at its next
-await and resolves to null.
+await and resolves to null. Text is cancelled the same way: the older regen's signal is aborted,
+which stops the text it is laying out (terminating the text worker), and it checks for a newer
+regen between texts ("Text", Cancelling).
 
 `KernelService.cancel(generation)` cancels every batch up to that generation, whoever sent it:
 generations are one sequence shared by every client of the kernel (ADR 0007 decision 4), not one
@@ -571,6 +676,30 @@ pnpm --filter @manufakture/regen test
   (detached in the worker), a measure at the current generation next to regens, a newer regen
   superseding an older one, a regen after a recycle rebuilding on the new instance, and a mesh per
   body, transferred, sent only for the body an edit changed.
+- `text.test.ts`: the in-process outliner on the bundled font (glyph regions equal to converting
+  each glyph alone, missing characters), user fonts by bytes (loaded once, a SHA-256 mismatch and a
+  file that is not a font failing as "this font could not be read", a mismatch not remembered so
+  the real font with that SHA-256 still loads, user fonts refused unless the host opts in), the
+  time budget per font and per regen, the size limits, the `Watchdog` on real `worker_threads`
+  workers (one worker for queued requests; a hang terminated at the time limit and a new worker
+  for the next request; a throw and an out-of-memory death reported as crashed), the watchdog
+  outliner (a font loaded once per worker and a user font's bytes sent with it, again after a
+  restart; a font that hangs failing once and never retried; a text that hangs failing alone; a
+  font whose texts use up its budget failed for the session; a bundled font whose fetch hangs, and
+  a worker that cannot be started or dies before it is ready, not remembered for the session but
+  for the regen: six texts in a hanging bundled font cost one load and one worker; the budget
+  checked again before a font a worker let go is loaded a second time; an aborted signal
+  terminating the worker), and the cost of a 1000-character text (logged).
+- `text-regen.test.ts`: text through the engine with the real kernel and solver: a plate with "OK"
+  in it, the plate extruded by its lines (letter-shaped holes, the counter of the "O" kept) and the
+  letters by the text, volumes against areas computed glyph by glyph from the font; a new string
+  and a new `#size` rebuilding (the letters' area scaling with the square of the size), an
+  unchanged document served from the cache; a sketch on a glyph's side face resolving with a
+  fragile warning; a missing character as a `text` warning; an unreadable user font as a `font`
+  error with the extrusions upstream errors; a bundled font of another SHA-256 as a
+  `font-changed` warning and a cache miss; a newer regen aborting the text in flight (the older
+  regen null at once); the stale check between the texts of a sketch; a transient text failure
+  not cached; and a sketch whose texts place more curves than allowed refused.
 - `integration.test.ts`: the real kernel (node harness) and the real planegcs solver, driven by a
   `DocumentStore`. A sketch, an extrude and a fillet whose radius variable nothing else reads:
   editing the variable sends exactly one `feature` op (the fillet) with the sketch and extrude from
@@ -639,6 +768,14 @@ pnpm --filter @manufakture/regen test
   (`cap:end#2`), renumbered when a region is added or removed; a reference to one resolves with a
   `fragile` warning. Pick a side face, or a single region, where a stable reference matters.
 - **Hole points** must be point entities.
+- **Glyph faces are fragile.** A text's side faces are named after positional glyph edge ids
+  (`extrude#2:side:e5.g3.c0.s12#1`), so a reference to one resolves with a `fragile` warning, and
+  editing the text can renumber them (ADR 0012 decision 7).
+- **The text worker** is a worker started by the regen worker (a nested dedicated worker). A
+  browser without nested workers cannot start it; the text then fails as a font that could not be
+  read ("the text worker could not be started"), not remembered and not cached. Node hosts use the
+  in-process outliner, which has no time limit and so reads bundled fonts only unless the host
+  opts in (`allowFileFonts`).
 - **Extension features** change no geometry yet; they are `ok` with an `extension` warning.
 - **Imports.** A STEP import with operation `new`, `add`, `cut` or `intersect` is a kernel feature
   like an extrusion: it is translated to the kernel's `import` input with the document's base64

@@ -211,4 +211,25 @@ describe('stroke widths of the bundled font (ADR 0011, decision 3)', () => {
     // The thinnest stroke, the crossbar of "e", needs 6.7 mm.
     expect((wall * font.capHeight) / 188).toBeCloseTo(6.66, 2);
   });
+
+  it('converts every glyph up to U+024F (Latin Extended-B), merging the ogonek of "Ų"', () => {
+    const failed: string[] = [];
+    const merged: string[] = [];
+    for (let code = 0x20; code <= 0x24f; code++) {
+      const char = String.fromCodePoint(code);
+      const layout = layoutText(font, char, { size: 10 });
+      if (layout.missing.length > 0 || layout.glyphs[0]!.path.length === 0) continue;
+      const result = outlineRegions(layout.glyphs[0]!.path);
+      const problems = result.issues.filter((i) => i.code !== 'merged');
+      if (problems.length > 0 || result.regions.length === 0) failed.push(char);
+      else if (result.issues.length > 0) merged.push(char);
+    }
+    expect(failed).toEqual([]);
+    // "Ų" (U+0172) was refused as a crossing before T3.2c: its ogonek leaves the bowl at a
+    // shallow angle, and a short piece by the crossing was read from the wrong side.
+    expect(merged).toContain('Ų');
+    const u = outlineRegions(layoutText(font, 'Ų', { size: 10 }).glyphs[0]!.path);
+    expect(u.regions).toHaveLength(1);
+    expect(u.regions[0]!.holes).toHaveLength(0);
+  });
 });

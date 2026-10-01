@@ -36,19 +36,32 @@ Entities carry the coordinates of their last solve. They are the solver's starti
 decide which solution the sketch settles into ([ADR 0004](../../docs/adr/0004-document-format.md),
 decision 1); the constraints are what define the sketch.
 
-| Entity   | Fields                                                                     |
-| -------- | -------------------------------------------------------------------------- |
-| `point`  | `position`                                                                 |
-| `line`   | `start`, `end` (a line owns its endpoints, as in FreeCAD)                  |
-| `circle` | `center`, `radius`                                                         |
-| `arc`    | `center`, `start`, `end`, counter-clockwise; radius and angles are derived |
+| Entity    | Fields                                                                     |
+| --------- | -------------------------------------------------------------------------- |
+| `point`   | `position`                                                                 |
+| `line`    | `start`, `end` (a line owns its endpoints, as in FreeCAD)                  |
+| `circle`  | `center`, `radius`                                                         |
+| `arc`     | `center`, `start`, `end`, counter-clockwise; radius and angles are derived |
+| `outline` | `anchor`, `angle`, `source`: closed shapes (text) placed at the anchor     |
 
 Every entity has an `id` and a `construction` flag. Construction geometry is solved like any
 other and never becomes a profile edge.
 
+An **outline** ([ADR 0012](../../docs/adr/0012-3d-printing.md) decision 7) is closed shapes from a
+`source`, placed at `anchor` and turned by `angle` (radians, counter-clockwise from the sketch x
+axis) about it. The only source so far is text, `{ kind: 'text', text, font, size, align:
+{ horizontal, vertical }, letterSpacing?, lineSpacing? }` (core README, "Sketch data"; M5 adds an
+`svg` source). To the solver an outline is its anchor and nothing else: two unknowns, referenced
+as `{ entity, at: 'anchor' }`, so constraints place a text like a point (`coordinateCount` is 2,
+`packCoordinates` packs the anchor). `angle` and the source are carried through unchanged, and the
+glyphs are never solved: regen lays the text out after the solve and hands its loops to
+`detectRegions` (see [Outline entities](#outline-entities)). An outline is never a curve to a
+constraint (`horizontal`, `pointOnObject`, `tangent`... refuse it), cannot be split, and its id
+takes no split suffix, since its glyph edge ids are built on it.
+
 Constraints refer to points with a `PointRef`: `{ entity: 'p1' }` for a point entity, or
-`{ entity: 'l1', at: 'start' | 'end' }` for a line, `'center'` for a circle, and any of the three
-for an arc. Three built-ins are always available: `SKETCH_ORIGIN` (`@origin`, a point) and
+`{ entity: 'l1', at: 'start' | 'end' }` for a line, `'center'` for a circle, any of the three
+for an arc, and `'anchor'` for an outline. Three built-ins are always available: `SKETCH_ORIGIN` (`@origin`, a point) and
 `SKETCH_X_AXIS` / `SKETCH_Y_AXIS` (`@x-axis`, `@y-axis`, lines). They are fixed and cost no DOF.
 
 | Constraint           | Fields                                          | Notes                                       |
@@ -265,9 +278,14 @@ are `voids`, and an island inside a hole is a region again. Overlapping outlines
 connected outline, so their faces are all regions (two overlapping rectangles give three), which is
 what a user picking faces expects; the even-odd rule applies to separate nested outlines.
 
+With `outlines` (`detectRegions(entities, { outlines })`, the placed loops of the sketch's outline
+entities, see [Outline entities](#outline-entities)), text joins the regions too; outline entities
+themselves are never curves of the graph.
+
 A region's `outer` loop runs counter-clockwise and its `holes` clockwise. A loop that touches itself
 or a hole at a single point (a hole tangent to the outline) is split there, so a touching hole is a
-hole; it gets a `touching` warning, because OCCT may refuse such a face.
+hole; it gets a `touching` warning: the kernel builds such a face, but the solid it makes is not
+manifold at that point (BRepCheck reports it), which slicers may not accept.
 
 **Edge ids.** Every curve of a loop carries `edgeId`, the name its side face gets on extrusion
 (`extrude#3:side:<edgeId>`, T0.5). It is the entity id when the regions use the entity in one
@@ -298,20 +316,22 @@ reported as `ambiguous-id`. Ids are unique across `regions` and `voids`.
 **Diagnostics.** Each has a `code`, a `severity`, a readable `message`, the `entityIds` involved and,
 where it helps, `points`.
 
-| Code            | Severity | Meaning                                                               |
-| --------------- | -------- | --------------------------------------------------------------------- |
-| `open-profile`  | warning  | connected geometry that encloses nothing; `points` are its open ends  |
-| `dangling-edge` | warning  | an entity that bounds no region, although what it touches does        |
-| `overlap`       | warning  | two entities on top of each other; the smaller id keeps the edge      |
-| `touching`      | warning  | loops of one region touch at a point; the kernel may refuse the face  |
-| `degenerate`    | warning  | zero length or radius, or an arc whose end is off its circle; ignored |
-| `overhang`      | info     | part of an entity runs past where it meets other geometry             |
-| `crossing`      | info     | two entities cross between their ends; `points` are the crossings     |
-| `ambiguous-id`  | info     | faces numbered by position because their ids collided                 |
+| Code              | Severity | Meaning                                                               |
+| ----------------- | -------- | --------------------------------------------------------------------- |
+| `open-profile`    | warning  | connected geometry that encloses nothing; `points` are its open ends  |
+| `dangling-edge`   | warning  | an entity that bounds no region, although what it touches does        |
+| `overlap`         | warning  | two entities on top of each other; the smaller id keeps the edge      |
+| `touching`        | warning  | loops of one region touch at a point; the solid is not manifold there |
+| `degenerate`      | warning  | zero length or radius, or an arc whose end is off its circle; ignored |
+| `overhang`        | info     | part of an entity runs past where it meets other geometry             |
+| `crossing`        | info     | two entities cross between their ends; `points` are the crossings     |
+| `ambiguous-id`    | info     | faces numbered by position because their ids collided                 |
+| `outline-overlap` | warning  | a text overlaps other geometry or text, or is too complex to check    |
 
 **To the kernel.** `regionProfile(region, placement)` gives the kernel's `profile` input as plain data
 (`frame`, then `loops`, outer first, each entity tagged with its `id` = edge id; arcs traversed
-against their entity are `clockwise`) plus an `edges` map from edge id to `{ entityId, fragile }`.
+against their entity are `clockwise`; a glyph's curves are `bezier` entities of 3 or 4 points, the
+kernel's T3.2a profile entity) plus an `edges` map from edge id to `{ entityId, fragile }`.
 The kernel's extrude reports the side face of every tagged entity in `sideIds`, so the regen engine
 names `extrude#3:side:<edgeId>` without matching geometry. This package does not import the kernel;
 the kernel's `regions.test.ts` builds a checked-in fixture of such profiles in OCCT, and
@@ -323,8 +343,10 @@ region with its holes for hover highlighting: `positions` (world xyz, `Float32Ar
 (`Uint32Array`, counter-clockwise about the placement normal), `normal` and `area`. Arcs are
 flattened within a linear and angular deflection (default 0.05 mm, 0.25 rad), chords are split
 further where other geometry comes closer to an arc than its chord (a corner just inside a circle, a
-tangent hole), holes are bridged into the outline, and the polygon is ear clipped. It is meant for
-highlights, not for export: cost grows quadratically with the number of flattened points.
+tangent hole), holes are bridged into the outline, and the polygon is ear clipped. Beziers (glyphs)
+are flattened within the linear deflection. It is meant for highlights, not for export: cost grows
+quadratically with the number of flattened points. `loopPolygon(loop, deflection)` gives any
+region loop as a closed polygon, for containment tests and drawing.
 
 ## Outlines
 
@@ -350,7 +372,9 @@ nothing). A contour that does not end where it started is closed with a straight
 `open-contour` warning unless the path said `close`. Drawing after `close` continues from the
 contour's start, as in SVG. Segments shorter than the tolerance are dropped (glyphs often start with
 a zero-length line), ends that agree within it are joined exactly, and a Bezier whose control points
-lie on its chord becomes a line. A contour that encloses no area is ignored (`empty-contour`).
+lie on its chord becomes a line. A contour that encloses no area is ignored (`empty-contour`). A
+Bezier that closes on itself (a contour drawn as one curve) is cut in half, the halves `split` 0
+and 1 of its command, so no segment starts where it ends.
 
 **Fill rule and nesting.** The fill rule is `nonzero` (TrueType and CFF glyphs) unless
 `fillRule: 'evenodd'` is asked for. When no contours cross or touch, every contour has one winding
@@ -361,13 +385,21 @@ inside another under `nonzero`, bounds nothing and is dropped. An island inside 
 its own.
 
 **Overlaps are merged.** Contours that cross or touch, which every composite glyph with an accent,
-bar or slash component has (`Ç`, `Ð`, `Ø` in Inter Bold), as do variable-font instances and
-overlapping SVG shapes, are merged: every segment is cut where another meets it (lines and Beziers
-intersected by subdivision, collinear overlaps by their ends), each piece is kept when the fill rule
-gives fill on exactly one side of it, turned so the fill is on its left, and the pieces are chained
-into loops, taking the sharpest left turn where several leave one point, so loops that touch at a
-point stay two simple loops. Beziers are cut exactly (de Casteljau), so merged loops are still lines
-and Beziers. A shared edge between two filled shapes disappears, and a contour drawn twice counts
+bar, slash or ogonek component has (`Ç`, `Ð`, `Ø`, `Ų` in Inter Bold), as do variable-font
+instances and overlapping SVG shapes, are merged: every segment is cut where another meets it
+(lines and Beziers intersected by subdivision, collinear overlaps by their ends), each piece is kept
+when the fill rule gives fill on exactly one side of it, turned so the fill is on its left, and the
+pieces are chained into loops, taking the sharpest left turn where several leave one point. The
+fill on each side is read just off the piece's middle, closer than any other curve comes there
+(half the clearance to the nearest other command, at most 1e-5 times the extent): a short piece
+next to a shallow crossing, such as where the ogonek of `Ų` leaves the bowl, has the other curve
+within a hair of it, and the fixed offset used before T3.2c read the wrong side and refused the
+glyph. A chain that comes back through a point it passed (a hole touching the outline there) is
+split at that point into simple loops, the hole a hole, with a `touching` warning: the kernel
+refuses the pinched wire, and builds the split loops to the right volume, but the solid is
+non-manifold where they touch and BRepCheck reports it as such (`packages/kernel/test/outlines.test.ts`).
+Two outlines that touch at a corner stay two loops. Beziers are cut exactly (de Casteljau), so merged loops are still lines and
+Beziers. A shared edge between two filled shapes disappears, and a contour drawn twice counts
 once. The result carries a `merged` issue (severity `info`) naming the contours involved. Merging
 gives up only on curves that partly run on top of each other (a Bezier and a piece of the same
 curve); the path is then refused with a `crossing` error and no regions, never passed on as
@@ -415,9 +447,79 @@ Callers run `outlineRegions` on untrusted paths in a worker with a time limit al
 | `crossing`      | error    | contours overlap in a way that cannot be merged; no regions         |
 | `not-finite`    | error    | a coordinate is NaN or infinite; no regions                         |
 | `too-complex`   | error    | the path is over the command, work or vertex limit; no regions      |
+| `touching`      | warning  | merged loops touch at a point (`point`): split, non-manifold there  |
 | `open-contour`  | warning  | a contour without `close` ended away from its start; closed         |
 | `empty-contour` | warning  | a contour encloses no area; ignored                                 |
 | `merged`        | info     | contours that crossed or touched were merged; `contours` lists them |
+
+### Several paths
+
+`outlinePartsRegions(paths, options?)` converts the glyphs of a text (or any list of paths) at
+once. Paths whose bounding boxes overlap are converted together, so glyphs that really overlap
+(touching after kerning, a script font's joins) are merged into one outline; every other path is
+converted on its own, which keeps the cost of merging to the glyphs that need it. Every segment,
+loop and issue says which path (`part`) and which of its contours it comes from, contours counted
+within each path as `outlineRegions` counts them; each group is one `outlineRegions` call with its
+own limits.
+
+### Outline entities
+
+`placeOutline(entity, glyphs, result)` (`src/outline-entity.ts`) places the result of
+`outlinePartsRegions` for an outline entity: every point turned by the entity's `angle` and moved
+to its `anchor`, and every curve named. `glyphs[part]` is the glyph's position in the text (line
+breaks counted), and edge ids are positional, built from the entity id, the glyph, the contour,
+the drawing command and, as T0.5's final positional piece, the piece merging cut it into:
+`e5.g3.c0.s12#1` (`outlineEdgeId`). The `#<digits>` makes every face built on a glyph edge
+**fragile**, like an imported face: editing the text renumbers them, and a reference to one
+resolves with a warning (ADR 0012 decision 7). The result is a list of `OutlineShape`s, one per
+region (`key` `e5.g3.c0` from its outer loop's contour, `#k` when merging made several loops of
+one contour), each with its holes (keyed the same way).
+
+`detectRegions(entities, { outlines })` then joins them to the sketch's own faces:
+
+- every outline region is a **region**, whatever its nesting depth, with the shape's key as its id;
+- an outline that lies cleanly inside a face (crossing none of its loops, enclosing no other
+  geometry, overlapping no other outline) cuts a hole of its shape in that face, so a plate with a
+  text in it is the plate with letter-shaped holes plus the letters;
+- the **counters** of such letters (the inside of an "O") become faces of the same kind as that
+  face, id `<hole key>/counter`, with `selectedWith` set to the face's outer-loop entities: listing
+  the plate's lines selects the plate and its counters (a stencil keeps them), listing the text
+  selects the letters alone, and listing both selects the whole plate;
+- an outline that crosses or encloses other geometry, or overlaps another outline, is kept as it
+  is, cuts no hole, gets no counters, and gets an `outline-overlap` warning naming what it meets
+  (the kernel fuses whatever is extruded together).
+
+Glyph loops never reach the solver or the planar graph, so the region detection of the sketch's
+own curves costs what it did. The outline tests are bounded, since a text's loops come from a
+font, which may be hostile:
+
+- an outline is compared with the sketch's loops and with **other entities'** outlines only where
+  their bounding boxes meet (a sweep by x per pair of entities whose boxes meet; the glyphs of one
+  text are never compared with each other), and two outlines' segments only where they lie near
+  each other (a grid over the overlap of their boxes), so two interleaved combs of 64,000 segments
+  each are checked in about 0.1 s rather than 13 s;
+- which other outline holds a glyph's first point is looked up on a grid of the outlines' boxes,
+  not by scanning every hole cut so far: 40,000 glyphs in one plate take about 0.13 s. A glyph in
+  another glyph's counter (earlier or later in the text) cuts its hole in that counter, not in the
+  face the other went into;
+- loops are flattened to polygons only after their points are counted and paid for, and all
+  flattening together may make at most `MAX_OUTLINE_POLYGON_POINTS` (4 million) points, lowered
+  per call by `RegionOptions.outlinePoints` in tests, so a text of many finely curved Beziers
+  falls back as below instead of running out of memory. The flattening tolerance counts Bezier
+  control points in the sketch's extent, as `outlineRegions` does, so it is never finer here;
+- all of it draws on a work budget, `MAX_OUTLINE_PLACEMENT_WORK` (100 million steps: a polygon
+  vertex flattened or visited, a segment pair tested, a grid cell filled, a pair of boxes
+  compared), lowered per call by `RegionOptions.outlineWork` in tests. Ten thousand characters of
+  Inter Bold in a plate spend under two million; running it out takes about 0.6 s. When it runs
+  out (or the points do), no outline cuts a hole: every outline entity is kept as it is with an
+  `outline-overlap` warning ("too complex to check against ...") naming what its box meets, the
+  result an overlapping text gets, never a wrong hole.
+
+Regen also caps what a text may make before it gets here (regen README, "Text", Size limits).
+Measured in `packages/regen/src/text.test.ts` (logged, not asserted) for 1000 characters of
+Inter Bold in 20 lines inside a rectangle (821 glyphs drawn, 857 outline regions, 1195 regions in
+all) on a desktop machine: layout and outlines about 145 ms, region detection about 30 ms; 10,000
+characters in 125 lines (8572 outline regions, 11,962 loops) take about 1.3 s and 130 ms.
 
 ## Performance
 
@@ -443,8 +545,13 @@ between updates), dragging, the service's coalescing and recovery from an out-of
 the RPC over a `MessageChannel`. Region tests (`regions.test.ts`, `region-profile.test.ts`,
 `region-mesh.test.ts`) cover the cases in [Regions](#regions), fills whose triangles add up to the
 flattened region, and 60 random grid-snapped rectangle sets whose faces must tile exactly the area
-their outlines enclose. `outline.test.ts` covers loops, winding, nesting, clean-up, merging
-(crossing and touching contours, a bar through a ring, a figure eight, curves crossing lines,
-duplicates, and the refusal of coincident curves), the limits (hundreds of crossing contours, too
-many commands or vertices, an arc tolerance too fine to fit, invalid tolerances), exact areas, and
-the arc approximation's distance to the Beziers both ways.
+their outlines enclose. `outline.test.ts` covers loops, winding, nesting, clean-up (a contour of
+one closed Bezier included), merging (crossing and touching contours, a bar through a ring, a
+figure eight, curves crossing lines, a hole touching its outline, a short piece by a shallow
+crossing, duplicates, and the refusal of coincident curves), the limits (hundreds of crossing
+contours, too many commands or vertices, an arc tolerance too fine to fit, invalid tolerances),
+exact areas, and the arc approximation's distance to the Beziers both ways.
+`outline-entity.test.ts` covers the outline entity in the solver and validation,
+`outlinePartsRegions`, `placeOutline`'s placement and names, and text joining the regions: letter
+holes and counters in a plate, a text alone and in a void, a text that crosses or encloses other
+geometry, two texts that overlap, and Bezier profile entities and fills.

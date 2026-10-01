@@ -6,6 +6,7 @@
   "license": "GPL-3.0-or-later",
   "exports": {
     ".": "./src/index.ts",
+    "./bundled": "./src/bundled.ts",
     "./fonts/Inter-Bold.ttf": "./fonts/Inter-Bold.ttf"
   },
   "scripts": {

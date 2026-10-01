@@ -6,8 +6,11 @@
 //
 // A bundled font's id is stable for its family and weight; its SHA-256 changes
 // only when the file is deliberately updated, which documents detect (T3.2c).
+//
+// This module does not load the font parser: `@manufakture/text/bundled` imports it
+// alone, for code that needs the metadata but parses no font (the regen worker).
 
-import { fontSha256 } from './font';
+import { fontSha256 } from './sha256';
 
 export interface BundledFont {
   /** Stable id documents record: `{ kind: 'bundled', id, sha256 }`. */

@@ -2,6 +2,8 @@
 // so they are valid and their id counters are real.
 
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import {
   applyCommand,
   createDocument,
@@ -23,6 +25,10 @@ import {
 } from '@manufakture/core';
 
 export const PART = 'part#1';
+
+/** Node's fetch cannot read `file:` URLs: the bundled font read from disk (`fetchImpl`). */
+export const fromDisk = async (url: URL): Promise<Response> =>
+  new Response(readFileSync(fileURLToPath(url)));
 
 export function mm(source: string | number): StoredExpression {
   return { source: String(source), lengthUnit: 'mm', angleUnit: 'deg' };

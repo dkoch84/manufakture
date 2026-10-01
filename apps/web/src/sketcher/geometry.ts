@@ -76,6 +76,8 @@ export function pointPosition(index: EntityIndex, ref: PointRef): Vec2 | null {
           : ref.at === 'center'
             ? e.center
             : null;
+    case 'outline':
+      return ref.at === 'anchor' ? e.anchor : null;
   }
 }
 
@@ -99,6 +101,8 @@ export function entityVertices(e: SketchEntity): Vertex[] {
       return [v('center', e.center)];
     case 'arc':
       return [v('start', e.start), v('end', e.end), v('center', e.center)];
+    case 'outline':
+      return [v('anchor', e.anchor)];
   }
 }
 
@@ -167,6 +171,9 @@ export function closestOnEntity(e: SketchEntity, p: Vec2): Vec2 {
       }
       return distance(p, e.start) <= distance(p, e.end) ? e.start : e.end;
     }
+    case 'outline':
+      // Picked by its anchor until the sketcher draws text (T3.2d).
+      return e.anchor;
   }
 }
 
@@ -194,6 +201,9 @@ export function tessellate(e: SketchEntity, maxStep = Math.PI / 36): Vec2[] {
       pts[pts.length - 1] = e.end;
       return pts;
     }
+    case 'outline':
+      // Text is drawn from regen's loops (T3.2d), not from the entity.
+      return [e.anchor];
   }
 }
 
@@ -325,6 +335,8 @@ export function curveAnchor(e: SketchEntity): Vec2 {
       const r = arcRadius(e);
       return [e.center[0] + r * Math.cos(a), e.center[1] + r * Math.sin(a)];
     }
+    case 'outline':
+      return e.anchor;
   }
 }
 

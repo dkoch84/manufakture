@@ -31,6 +31,7 @@ export {
   PART_ID_PATTERN,
   SimpleCommandSchema,
   applyCommand,
+  fontUsers,
   partInstances,
   partParameters,
   partPrintItems,
@@ -87,6 +88,7 @@ export {
   migrateV5ToV6,
   migrateV6ToV7,
   migrateV7ToV8,
+  migrateV8ToV9,
   type JsonObject,
   type Migration,
 } from './migrations';

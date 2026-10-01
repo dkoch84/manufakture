@@ -11,7 +11,9 @@ import type { Region, RegionCurve, RegionLoop } from './regions';
 export type RegionProfileEntity =
   | { kind: 'line'; id: string; start: Vec2; end: Vec2 }
   | { kind: 'arc'; id: string; center: Vec2; start: Vec2; end: Vec2; clockwise: boolean }
-  | { kind: 'circle'; id: string; center: Vec2; radius: number };
+  | { kind: 'circle'; id: string; center: Vec2; radius: number }
+  /** 3 (quadratic) or 4 (cubic) control points: the kernel's Bezier profile entity (T3.2a). */
+  | { kind: 'bezier'; id: string; points: Vec2[] };
 
 export interface RegionProfileLoop {
   entities: RegionProfileEntity[];
@@ -48,6 +50,8 @@ function entityOf(c: RegionCurve): RegionProfileEntity {
       };
     case 'circle':
       return { kind: 'circle', id: c.edgeId, center: c.center, radius: c.radius };
+    case 'bezier':
+      return { kind: 'bezier', id: c.edgeId, points: [...c.points] };
   }
 }
 

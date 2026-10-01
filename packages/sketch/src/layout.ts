@@ -6,6 +6,7 @@
 //   line     sx sy ex ey
 //   circle   cx cy r
 //   arc      cx cy sx sy ex ey startAngle endAngle r
+//   outline  ax ay (its anchor; the outline's angle and geometry are not unknowns)
 //
 // Arc angles and radius are derived from the stored points when a layout is
 // built; `arc_rules` keeps them consistent while solving.
@@ -57,7 +58,7 @@ const ORIGIN_INDEX: PointIndex = [0, 1];
 const X_END_INDEX: PointIndex = [2, 3];
 const Y_END_INDEX: PointIndex = [4, 5];
 
-const SIZES = { point: 2, line: 4, circle: 3, arc: 9 } as const;
+const SIZES = { point: 2, line: 4, circle: 3, arc: 9, outline: 2 } as const;
 
 /** Arc start and end angles from its points: end > start, both from atan2. */
 export function arcAngles(center: Vec2, start: Vec2, end: Vec2): [number, number] {
@@ -80,6 +81,9 @@ export function buildLayout(entities: readonly SketchEntity[]): Layout {
     switch (e.kind) {
       case 'point':
         values.set(e.position, base);
+        break;
+      case 'outline':
+        values.set(e.anchor, base);
         break;
       case 'line':
         values.set([...e.start, ...e.end], base);
@@ -118,6 +122,7 @@ export function pointIndex(layout: Layout, ref: PointRef): PointIndex {
   const at = (offset: number): PointIndex => [base + offset, base + offset + 1];
   switch (entity.kind) {
     case 'point':
+    case 'outline':
       return at(0);
     case 'line':
       return ref.at === 'end' ? at(2) : at(0);
@@ -143,6 +148,8 @@ export function curveOf(layout: Layout, id: string): Curve {
       return { kind: 'arc', c: at(0), s: at(2), e: at(4), a1: base + 6, a2: base + 7, r: base + 8 };
     case 'point':
       throw new Error(`'${id}' is a point, not a curve`);
+    case 'outline':
+      throw new Error(`'${id}' is an outline, not a curve`);
   }
 }
 
@@ -165,6 +172,8 @@ export function readEntities(layout: Layout, params: ArrayLike<number>): SketchE
     switch (e.kind) {
       case 'point':
         return { ...e, position: v(0) };
+      case 'outline':
+        return { ...e, anchor: v(0) };
       case 'line':
         return { ...e, start: v(0), end: v(2) };
       case 'circle':

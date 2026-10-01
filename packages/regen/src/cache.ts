@@ -19,7 +19,7 @@ import type { ReferenceResolution, RegenError, RegenWarning } from './types';
  * Bump with any change to regen or feature code that can change a feature's output, so results
  * computed by older code are never served (ADR 0004 decision 8).
  */
-export const REGEN_IMPLEMENTATION_VERSION = 2;
+export const REGEN_IMPLEMENTATION_VERSION = 3;
 
 /**
  * The kernel build the results come from. The kernel package does not export a build identity

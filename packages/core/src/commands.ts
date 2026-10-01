@@ -30,10 +30,15 @@ import {
   ConfigRowSchema,
   DisplayUnitsSchema,
   DocumentSchema,
+  FONT_COUNTER,
+  FONT_ID_PATTERN,
   FeatureSchema,
+  FontIdSchema,
+  FontSchema,
   InstanceSchema,
   InstanceSourceSchema,
   MateSchema,
+  MAX_FONT_TOTAL_BYTES,
   MAX_INSTANCE_NAME,
   MaterialIdSchema,
   PartSchema,
@@ -43,12 +48,14 @@ import {
   PrintThresholdsSchema,
   PrinterIdSchema,
   StoredExpressionSchema,
+  fontBytes,
   type Assembly,
   type BodyProps,
   type BodyPropsFields,
   type ConfigParameter,
   type ConfigRow,
   type Configurations,
+  type DocumentFont,
   type Feature,
   type Instance,
   type ManufaktureDocument,
@@ -358,6 +365,15 @@ export const SimpleCommandSchema = z.discriminatedUnion('type', [
    */
   z.strictObject({ type: z.literal('restorePrintItem'), setupId, item: PrintItemSchema, index }),
   /**
+   * Add a font at `index` (default: last). Its id must be a fresh `font#n` from the document's
+   * `nextIds.font`; a font with the same bytes (SHA-256) may not be added twice. Since version 9.
+   */
+  z.strictObject({ type: z.literal('addFont'), font: FontSchema, index: index.optional() }),
+  /** Remove a font. Refused while an outline of any sketch uses it. */
+  z.strictObject({ type: z.literal('deleteFont'), fontId: FontIdSchema }),
+  /** History only: put a deleted font back at `index` (its id was allocated before). */
+  z.strictObject({ type: z.literal('restoreFont'), font: FontSchema, index }),
+  /**
    * History only: put a whole document in place of this one (restore a version or revision; the
    * undo of a restore). The replacement must be this document (same `id`) and valid as a whole,
    * assemblies and configurations included. Its inverse is `replaceDocument` of the document it
@@ -490,6 +506,10 @@ function applyUnchecked(doc: ManufaktureDocument, command: Command): CoreResult<
     case 'deletePrintItem':
     case 'restorePrintItem':
       return applyToPrint(doc, command);
+    case 'addFont':
+    case 'deleteFont':
+    case 'restoreFont':
+      return applyToFonts(doc, command);
     default:
       return applyToPart(doc, command);
   }
@@ -1462,6 +1482,101 @@ function applyToAssemblies(
       const assemblies = insertAt(doc.assemblies, a, command.index, 'assemblies');
       if (!assemblies.ok) return assemblies;
       return done(assemblies.value, { type: 'deleteAssembly', assemblyId: a.id });
+    }
+  }
+}
+
+/**
+ * The outlines that use font `fontId`, as `<part id>/<sketch id>/<entity id>`, in document
+ * order: what blocks deleting the font.
+ */
+export function fontUsers(doc: ManufaktureDocument, fontId: string): string[] {
+  const out: string[] = [];
+  for (const part of doc.parts) {
+    for (const f of part.features) {
+      if (f.kind !== 'sketch') continue;
+      for (const e of f.entities) {
+        if (e.kind === 'outline' && e.source.font === fontId)
+          out.push(`${part.id}/${f.id}/${e.id}`);
+      }
+    }
+  }
+  return out;
+}
+
+type FontsCommand = Extract<SimpleCommand, { type: 'addFont' | 'deleteFont' | 'restoreFont' }>;
+
+/** A failure when adding `font` would take the document's fonts past `MAX_FONT_TOTAL_BYTES`. */
+function fontsTooBig(doc: ManufaktureDocument, font: DocumentFont): CoreResult<never> | null {
+  const total = fontBytes([...doc.fonts, font]);
+  if (total <= MAX_FONT_TOTAL_BYTES) return null;
+  const mib = (n: number) => `${(n / (1024 * 1024)).toFixed(1)} MiB`;
+  return fail(
+    'schema',
+    `The document's fonts would hold ${mib(total)}; at most ${mib(MAX_FONT_TOTAL_BYTES)} of fonts are allowed: delete a font first`,
+    ['font', 'source', 'size'],
+  );
+}
+
+function applyToFonts(doc: ManufaktureDocument, command: FontsCommand): CoreResult<Applied> {
+  const done = (fonts: DocumentFont[], inverse: Command, nextIds = doc.nextIds) =>
+    ok<Applied>({ document: { ...doc, fonts, nextIds }, inverse });
+  const sameBytes = (font: DocumentFont) =>
+    doc.fonts.find((f) => f.id !== font.id && f.source.sha256 === font.source.sha256);
+
+  switch (command.type) {
+    case 'addFont': {
+      const { font } = command;
+      if (!FONT_ID_PATTERN.test(font.id)) {
+        return fail('invalid-id', `"${font.id}" is not a font id (font#n)`, ['font', 'id'], {
+          blockers: [font.id],
+        });
+      }
+      if (doc.fonts.some((f) => f.id === font.id)) {
+        return fail('duplicate', `Font "${font.id}" already exists`, ['font', 'id']);
+      }
+      const twin = sameBytes(font);
+      if (twin) {
+        return fail('duplicate', `The document already has this font, as ${twin.id}`, ['font'], {
+          blockers: [twin.id],
+        });
+      }
+      const tooBig = fontsTooBig(doc, font);
+      if (tooBig) return tooBig;
+      const ids = allocateDocumentId(doc, FONT_COUNTER, font.id, 'fresh');
+      if (!ids.ok) return ids;
+      const fonts = insertAt(doc.fonts, font, command.index ?? doc.fonts.length, 'fonts');
+      if (!fonts.ok) return fonts;
+      return done(fonts.value, { type: 'deleteFont', fontId: font.id }, ids.value);
+    }
+
+    case 'deleteFont': {
+      const i = doc.fonts.findIndex((f) => f.id === command.fontId);
+      if (i < 0) return fail('not-found', `No font "${command.fontId}"`, ['fontId']);
+      const users = fontUsers(doc, command.fontId);
+      if (users.length > 0) {
+        return fail(
+          'dependency',
+          `Font ${command.fontId} is used by ${users.join(', ')}: change or delete those texts first`,
+          ['fontId'],
+          { blockers: users },
+        );
+      }
+      const fonts = doc.fonts.slice();
+      const [old] = fonts.splice(i, 1);
+      return done(fonts, { type: 'restoreFont', font: old!, index: i });
+    }
+
+    case 'restoreFont': {
+      const { font } = command;
+      if (doc.fonts.some((f) => f.id === font.id)) {
+        return fail('duplicate', `Font "${font.id}" already exists`, ['font', 'id']);
+      }
+      const ids = allocateDocumentId(doc, FONT_COUNTER, font.id, 'restore');
+      if (!ids.ok) return ids;
+      const fonts = insertAt(doc.fonts, font, command.index, 'fonts');
+      if (!fonts.ok) return fonts;
+      return done(fonts.value, { type: 'deleteFont', fontId: font.id });
     }
   }
 }

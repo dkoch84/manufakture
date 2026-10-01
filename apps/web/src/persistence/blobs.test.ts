@@ -11,14 +11,17 @@ import {
   type ManufaktureDocument,
 } from '@manufakture/core';
 import {
+  BUNDLED_FONT,
   assemblyWithPinnedInstance,
   cubeStl,
   derivedFeature,
   partWithDerived,
+  partWithFonts,
   partWithImport,
   pinnedInstance,
   stlImport,
   unwrapDoc,
+  userFont,
 } from './test-fixtures';
 
 describe('externalize and hydrate', () => {
@@ -281,6 +284,58 @@ describe('pinned instances', () => {
     expect(() => externalize(bad)).toThrow('A pinned instance has no valid SHA-256');
     const missing = { id: 'inst#1', source: { ...source, size: 2 } };
     expect(() => blobRefs(missing)).toThrow('A pinned instance names no valid blob');
+  });
+});
+
+describe('user fonts', () => {
+  it('moves a user font out like an imported file, leaves a bundled one alone, and puts it back', async () => {
+    const doc = await partWithFonts();
+    const font = doc.fonts[1]!;
+    if (font.source.kind !== 'file') throw new Error('expected a file font');
+    const { value, blobs } = externalize(doc);
+    const stored = value as ManufaktureDocument;
+    expect(stored.fonts[0]).toEqual(BUNDLED_FONT);
+    expect('data' in stored.fonts[1]!.source).toBe(false);
+    expect([...blobs]).toEqual([[font.source.sha256, font.source.data]]);
+    expect(blobRefs(value)).toEqual([
+      { sha256: font.source.sha256, size: font.source.size, fileName: 'Label.otf', font: true },
+    ]);
+    expect(hydrate(value, blobs)).toEqual(doc);
+    const bytes = fromBase64(font.source.data);
+    expect(await hydrateFrom(value, async () => bytes)).toEqual(doc);
+    await expect(hydrateFrom(value, async () => null)).rejects.toThrow(
+      'The font file Label.otf is missing.',
+    );
+  });
+
+  it('moves fonts out of logged addFont and restoreFont commands, one blob per file', async () => {
+    const font = await userFont();
+    const command = {
+      type: 'batch',
+      commands: [
+        { type: 'addFont', font },
+        { type: 'restoreFont', font: { ...font, id: 'font#3' }, index: 0 },
+      ],
+    };
+    const { value, blobs } = externalize(command);
+    expect(blobs.size).toBe(1);
+    expect(JSON.stringify(value)).not.toContain(font.source.kind === 'file' && font.source.data);
+    expect(hydrate(value, blobs)).toEqual(command);
+  });
+
+  it('takes only font ids core accepts (at most 15 digits) as fonts', async () => {
+    const font = await userFont();
+    const long = { ...font, id: 'font#1234567890123456' };
+    // Not a font: left as it is, its bytes inline.
+    expect(externalize(long).blobs.size).toBe(0);
+    expect(externalize({ ...font, id: 'font#123456789012345' }).blobs.size).toBe(1);
+  });
+
+  it('refuses a font file whose sha256 could name a path', () => {
+    const bad = { id: 'font#2', source: { kind: 'file', sha256: '../x', data: 'AA==' } };
+    expect(() => externalize(bad)).toThrow('A font file has no valid SHA-256');
+    const missing = { id: 'font#2', source: { kind: 'file', sha256: '../x', size: 1 } };
+    expect(() => blobRefs(missing)).toThrow('A font file names no valid blob');
   });
 });
 

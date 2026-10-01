@@ -18,7 +18,8 @@ export async function sha256Hex(bytes: Uint8Array): Promise<string> {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-function decodeBase64(text: string): Uint8Array | null {
+/** The bytes base64 `text` holds, or null when it is not base64. */
+export function decodeBase64(text: string): Uint8Array | null {
   let binary: string;
   try {
     binary = atob(text);

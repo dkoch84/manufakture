@@ -267,6 +267,25 @@ describe('outlineRegions: cleaning up', () => {
     expect(issues.map((i) => [i.code, i.contours])).toEqual([['empty-contour', [0]]]);
   });
 
+  it('keeps a contour drawn as one closed Bezier, cut in two halves', () => {
+    // A teardrop: one cubic from the origin back to it.
+    const { regions, issues } = outlineRegions([M(0, 0), C(10, 10, -10, 10, 0, 0), Z]);
+    expect(issues).toEqual([]);
+    expect(regions).toHaveLength(1);
+    const outer = regions[0]!.outer;
+    expect(outer.segments.map((s) => [s.kind, s.index, s.split])).toEqual([
+      ['bezier', 0, 0],
+      ['bezier', 0, 1],
+    ]);
+    expectClosed(outer);
+    // The area of the closed cubic: 3/20 (x1 y2 - x2 y1) for a loop from the origin.
+    expect(outer.area).toBeCloseTo((3 / 20) * (10 * 10 - -10 * 10), 9);
+    // A quadratic that closes on itself runs out and back along one line: it encloses nothing.
+    const quad = outlineRegions([M(0, 0), Q(5, -10, 0, 0), Z]);
+    expect(quad.regions).toHaveLength(0);
+    expect(quad.issues.map((i) => i.code)).toEqual(['empty-contour']);
+  });
+
   it('accepts an empty path', () => {
     expect(outlineRegions([])).toEqual({ regions: [], issues: [] });
   });
@@ -322,6 +341,50 @@ describe('outlineRegions: merging overlaps', () => {
         (s) => s.kind === 'line' && !(s.start[0] === 10 && s.end[0] === 10),
       ),
     ).toBe(true);
+  });
+
+  it('splits a loop that comes back through a point: a hole touching the outline there', () => {
+    // A diamond hole with a corner on the square's bottom edge, and a triangle hole in its corner.
+    for (const hole of [
+      [M(5, 0), L(3, 3), L(5, 6), L(7, 3), Z],
+      [M(0, 0), L(2, 4), L(4, 2), Z],
+    ]) {
+      const { regions, issues } = outlineRegions([...rect(0, 0, 10, 10), ...hole]);
+      expect(issues.map((i) => i.code)).toEqual(['merged', 'touching']);
+      expect(issues[1]!.severity).toBe('warning');
+      expect(issues[1]!.point).toEqual(hole[0]!.kind === 'moveTo' ? hole[0]!.to : null);
+      expect(regions).toHaveLength(1);
+      const [region] = regions;
+      expect(region!.outer.area).toBeCloseTo(100, 9);
+      expect(region!.holes).toHaveLength(1);
+      expect(region!.holes[0]!.area).toBeLessThan(0);
+      loops(region!).forEach(expectClosed);
+      // Every loop passes each point once.
+      for (const loop of loops(region!)) {
+        const starts = loop.segments.map((s) => start(s).join(','));
+        expect(new Set(starts).size).toBe(starts.length);
+      }
+    }
+  });
+
+  it('reads the fill of a short piece next to a shallow crossing from the right side ("Ų")', () => {
+    // A slanted edge crosses the bar's top at x = 5 at a shallow angle, with a vertex
+    // 0.001 past the crossing: the piece between them stays within 1e-5 of the bar's edge.
+    const slant = (x: number): Vec2 => [x, 0.9 + 0.02 * x];
+    const path = [
+      ...rect(0, 0, 10, 1),
+      M(...slant(0)),
+      L(...slant(5.001)),
+      L(...slant(10)),
+      L(10, 2),
+      L(0, 2),
+      Z,
+    ];
+    const { regions, issues } = outlineRegions(path);
+    expect(issues.map((i) => i.code)).toEqual(['merged']);
+    expect(regions).toHaveLength(1);
+    expect(outlineRegionArea(regions[0]!)).toBeCloseTo(20 - 0.5 * 0.1 * 5 * 2 + 0.5 * 0.1 * 5, 6);
+    expectClosed(regions[0]!.outer);
   });
 
   it('fills both lobes of a figure eight under nonzero', () => {

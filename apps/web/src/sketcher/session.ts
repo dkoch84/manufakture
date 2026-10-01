@@ -826,6 +826,8 @@ function movePoint(e: SketchEntity, at: PointRef['at'], delta: Vec2): SketchEnti
       if (at === 'end') return { ...e, end: add(e.end, delta) };
       if (at === 'center') return { ...e, center: add(e.center, delta) };
       return e;
+    case 'outline':
+      return at === 'anchor' ? { ...e, anchor: add(e.anchor, delta) } : e;
   }
 }
 
@@ -848,6 +850,8 @@ function moveEntity(e: SketchEntity, delta: Vec2, at: Vec2, grab: Vec2): SketchE
         start: add(e.start, delta),
         end: add(e.end, delta),
       };
+    case 'outline':
+      return { ...e, anchor: add(e.anchor, delta) };
   }
 }
 

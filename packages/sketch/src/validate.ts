@@ -34,6 +34,7 @@ const POSITIONS: Record<EntityKind, readonly (string | undefined)[]> = {
   line: ['start', 'end'],
   circle: ['center'],
   arc: ['start', 'end', 'center'],
+  outline: ['anchor'],
 };
 
 /** A key identifying a point reference: `e1`, `e2.start`. */
@@ -104,6 +105,11 @@ function geometryProblem(e: SketchEntity): string | null {
       const r = Math.hypot(e.start[0] - e.center[0], e.start[1] - e.center[1]);
       return r > MIN_SIZE ? null : 'Arc radius must be positive';
     }
+    case 'outline':
+      if (!finite2(e.anchor) || !Number.isFinite(e.angle))
+        return 'Outline anchor and angle must be finite';
+      // Edge ids are built on the entity id (`<id>.g<glyph>...`), which allows no split suffix.
+      return e.id.includes('#') ? 'An outline cannot be a split piece' : null;
   }
 }
 
@@ -116,7 +122,7 @@ function accepts(want: Want, kind: EntityKind): boolean {
     case 'round':
       return kind === 'circle' || kind === 'arc';
     case 'lineOrRound':
-      return kind !== 'point';
+      return kind === 'line' || kind === 'circle' || kind === 'arc';
     default:
       return kind === want;
   }
@@ -127,6 +133,7 @@ const WANT_TEXT: Record<Want, string> = {
   line: 'a line',
   circle: 'a circle',
   arc: 'an arc',
+  outline: 'an outline',
   curve: 'a line or an arc',
   round: 'a circle or an arc',
   lineOrRound: 'a line, circle or arc',

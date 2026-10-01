@@ -164,16 +164,19 @@ export function loadFont(
       `The font file is ${(bytes.byteLength / 1048576).toFixed(1)} MiB; the limit is ${(maxBytes / 1048576).toFixed(0)} MiB.`,
     );
   }
-  const sfnt = readSfnt(bytes);
+  // A private copy, read by everything here from now on: opentype.js, the kerning
+  // reader and the glyph checker all keep views into the bytes and read them lazily,
+  // so a caller that reused or changed its buffer later would change the font.
+  const own = bytes.slice();
+  const sfnt = readSfnt(own);
   if ('code' in sfnt) throw new FontError(sfnt.code, sfnt.message);
 
   let font: OpentypeFont;
   try {
-    // A private copy: opentype.js keeps views into the buffer it is given, and
-    // the tables it should not read are hidden in the copy's directory.
-    const copy = bytes.slice();
-    hideTables(copy);
-    font = parse(copy.buffer, { lowMemory: true });
+    // The tables opentype.js should not read are hidden in the copy's directory;
+    // the table data, which the kerning reader and the glyph checker use, is unchanged.
+    hideTables(own);
+    font = parse(own.buffer, { lowMemory: true });
   } catch (error) {
     throw new FontError('malformed', `The font file could not be read: ${describe(error)}`, {
       cause: error,
@@ -196,7 +199,7 @@ export function loadFont(
   let kerning: Kerning = NO_KERNING;
   const gpos = sfnt.tables.get('GPOS');
   try {
-    kerning = (gpos && readGposKerning(bytes, gpos)) ?? NO_KERNING;
+    kerning = (gpos && readGposKerning(own, gpos)) ?? NO_KERNING;
   } catch (error) {
     warnings.push(`The font's GPOS kerning could not be read and is not used: ${describe(error)}`);
   }
@@ -233,7 +236,7 @@ export function loadFont(
     if (value !== undefined) Object.assign(info, { [key]: value });
   }
 
-  const check = sfnt.flavor === 'truetype' ? glyphChecker(bytes, sfnt.tables) : () => null;
+  const check = sfnt.flavor === 'truetype' ? glyphChecker(own, sfnt.tables) : () => null;
   const glyph = (char: string): Glyph | null => {
     let g: Glyph | null;
     try {
@@ -296,9 +299,4 @@ function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** Lower-case hex SHA-256 of a font file, as documents record it (ADR 0011). */
-export async function fontSha256(data: ArrayBuffer | Uint8Array): Promise<string> {
-  const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
-  const digest = await crypto.subtle.digest('SHA-256', bytes as Uint8Array<ArrayBuffer>);
-  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
-}
+export { fontSha256 } from './sha256';

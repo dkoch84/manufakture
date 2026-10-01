@@ -20,6 +20,7 @@ import {
   emptyDocument,
   partDocument,
   partWithDerived,
+  partWithFonts,
   partWithImport,
   pinnedInstance,
   stlImport,
@@ -278,6 +279,31 @@ describe('DocumentLibrary', () => {
     await lib.remove('doc-1');
     value(await lib.importMfk(exported.bytes));
     expect((await opened(lib, 'doc-1')).document).toEqual(printed);
+  });
+
+  it('saves a user font as a blob and opens the document with it (format v9)', async () => {
+    const backend = new MemoryBackend();
+    const lib = library(backend);
+    const doc = await partWithFonts();
+    const font = doc.fonts[1]!;
+    if (font.source.kind !== 'file') throw new Error('expected a file font');
+    await lib.save(doc);
+    // The snapshot holds the font without its bytes; the bytes are one blob under their hash.
+    const snapshot = JSON.parse(text(backend, 'documents/doc-1/snapshot-00000001.json'));
+    expect(snapshot.fonts[0]).toEqual(doc.fonts[0]);
+    expect(snapshot.fonts[1].source).toEqual({
+      kind: 'file',
+      fileName: 'Label.otf',
+      size: font.source.size,
+      sha256: font.source.sha256,
+    });
+    expect(files(backend).filter((f) => f.endsWith(font.source.sha256))).toHaveLength(1);
+    expect((await opened(library(backend), 'doc-1')).document).toEqual(doc);
+    // And through a .mfk file, out and back in.
+    const exported = value(await lib.exportMfk('doc-1'));
+    await lib.remove('doc-1');
+    value(await lib.importMfk(exported.bytes));
+    expect((await opened(lib, 'doc-1')).document).toEqual(doc);
   });
 
   it('keeps a logged import even once the document no longer holds it', async () => {

@@ -5,6 +5,7 @@ import {
   NAMING_SCHEME,
   type Assembly,
   type DisplayUnits,
+  type DocumentFont,
   type Feature,
   type ManufaktureDocument,
   type Part,
@@ -40,6 +41,7 @@ export function createDocument(options: NewDocumentOptions): ManufaktureDocument
     parts: [createPart(DEFAULT_PART_ID, 'Part 1')],
     assemblies: [],
     print: createPrintData(),
+    fonts: [],
     nextIds: { part: 2 },
   };
 }
@@ -91,6 +93,10 @@ export function findPart(doc: ManufaktureDocument, partId: string): Part | undef
 
 export function findAssembly(doc: ManufaktureDocument, assemblyId: string): Assembly | undefined {
   return doc.assemblies.find((a) => a.id === assemblyId);
+}
+
+export function findFont(doc: ManufaktureDocument, fontId: string): DocumentFont | undefined {
+  return doc.fonts.find((f) => f.id === fontId);
 }
 
 export function findPrintSetup(doc: ManufaktureDocument, setupId: string): PrintSetup | undefined {

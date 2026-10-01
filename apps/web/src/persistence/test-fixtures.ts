@@ -5,11 +5,13 @@ import {
   createDocument,
   serialize,
   type DerivedFeature,
+  type DocumentFont,
   type ImportFeature,
   type Instance,
   type ManufaktureDocument,
+  type OutlineEntity,
 } from '@manufakture/core';
-import { importSource, sha256Hex, writeBinaryStl } from '@manufakture/io';
+import { importSource, sha256Hex, toBase64, writeBinaryStl } from '@manufakture/io';
 import { demoDocument } from '../model/demo';
 import { boxBody } from '../viewport/testMeshes';
 import { MemoryBackend, type StorageBackend } from './backend';
@@ -54,6 +56,71 @@ export async function partWithImport(id = 'doc-1'): Promise<ManufaktureDocument>
   const feature = await stlImport();
   return unwrapDoc(
     applyCommand(partDocument(id), { type: 'addFeature', partId: 'part#1', feature }),
+  );
+}
+
+/**
+ * A font a user added, as the document stores it: `bytes` (persistence never parses them; any
+ * bytes stand in for a font file) as base64 with their size and SHA-256.
+ */
+export async function userFont(
+  bytes: Uint8Array = cubeStl(12),
+  id = 'font#2',
+  fileName = 'Label.otf',
+): Promise<DocumentFont> {
+  return {
+    id,
+    family: 'Label',
+    style: 'Regular',
+    source: {
+      kind: 'file',
+      fileName,
+      size: bytes.length,
+      sha256: await sha256Hex(bytes),
+      data: toBase64(bytes),
+    },
+  };
+}
+
+/** The bundled font as a document records it: by id and SHA-256, no bytes. */
+export const BUNDLED_FONT: DocumentFont = {
+  id: 'font#1',
+  family: 'Inter',
+  style: 'Bold',
+  source: {
+    kind: 'bundled',
+    id: 'inter-bold',
+    sha256: '288316099b1e0a47a4716d159098005eef7c0066921f34e3200393dbdb01947f',
+  },
+};
+
+/** The demo part with the bundled font and a user font, and a text in that user font. */
+export async function partWithFonts(id = 'doc-1'): Promise<ManufaktureDocument> {
+  let doc = partDocument(id);
+  doc = unwrapDoc(applyCommand(doc, { type: 'addFont', font: BUNDLED_FONT }));
+  doc = unwrapDoc(applyCommand(doc, { type: 'addFont', font: await userFont() }));
+  const part = doc.parts[0]!;
+  const sketch = part.features.find((f) => f.kind === 'sketch')!;
+  const text: OutlineEntity = {
+    id: `e${part.nextIds.e ?? 1}`,
+    kind: 'outline',
+    construction: false,
+    anchor: [0, 0],
+    angle: 0,
+    source: {
+      kind: 'text',
+      text: 'M3',
+      font: 'font#2',
+      size: mm('5'),
+      align: { horizontal: 'left', vertical: 'baseline' },
+    },
+  };
+  return unwrapDoc(
+    applyCommand(doc, {
+      type: 'editFeature',
+      partId: part.id,
+      feature: { ...sketch, entities: [...sketch.entities, text] },
+    }),
   );
 }
 

@@ -142,7 +142,13 @@ export interface OutlineRegion {
 }
 
 export type OutlineIssueCode =
-  'crossing' | 'merged' | 'not-finite' | 'too-complex' | 'open-contour' | 'empty-contour';
+  | 'crossing'
+  | 'merged'
+  | 'touching'
+  | 'not-finite'
+  | 'too-complex'
+  | 'open-contour'
+  | 'empty-contour';
 
 export interface OutlineIssue {
   code: OutlineIssueCode;
@@ -151,7 +157,7 @@ export interface OutlineIssue {
   message: string;
   /** The contours involved, by position in the path. */
   contours: number[];
-  /** Where contours meet, for `crossing`. */
+  /** Where contours meet, for `crossing`; where loops touch, for `touching`. */
   point?: Vec2;
 }
 
@@ -437,7 +443,19 @@ function readContours(
     raw.forEach((points, i) => {
       const source = { contour: index, index: i, split: 0, piece: 0, reversed: false };
       const segment = toSegment(points, source, tolerance);
-      if (segment) segments.push(segment);
+      if (!segment) return;
+      if (
+        segment.kind === 'bezier' &&
+        distance(points[0]!, points[points.length - 1]!) <= tolerance
+      ) {
+        // A Bezier that closes on itself (a contour drawn as one curve) is cut in half, so
+        // no segment starts where it ends: chaining, the crossing test and the kernel's
+        // edges all need two distinct ends. The halves are pieces 0 and 1 of the command.
+        const [left, right] = splitBezier(points, 0.5);
+        segments.push({ ...segment, points: left }, { ...segment, split: 1, points: right });
+        return;
+      }
+      segments.push(segment);
     });
     contours.push({ index, segments, polygon: [], area: 0 });
     raw = [];
@@ -845,6 +863,54 @@ function toEdge(segment: OutlineSegment): Edge {
   };
 }
 
+function segmentStart(segment: OutlineSegment): Vec2 {
+  return segment.kind === 'bezier' ? segment.points[0]! : segment.start;
+}
+
+/**
+ * Splits a closed loop of segments where it passes through one point twice
+ * (within `snap`), so every part is a simple loop; each part is joined exactly
+ * (its first segment starts where its last ends). A loop that never comes back
+ * through a point is returned as it is, as the only part.
+ */
+function splitPinchedLoop(
+  segments: readonly OutlineSegment[],
+  snap: number,
+  budget: Budget,
+  pinches: Vec2[],
+): OutlineSegment[][] {
+  const parts: OutlineSegment[][] = [];
+  const stack: OutlineSegment[] = [];
+  for (const segment of segments) {
+    budget.spend(stack.length + 1);
+    const start = segmentStart(segment);
+    // The latest earlier segment starting here closes a loop: the stretch since it.
+    let at = -1;
+    for (let i = stack.length - 1; i >= 0; i--) {
+      if (distance(segmentStart(stack[i]!), start) <= snap) {
+        at = i;
+        break;
+      }
+    }
+    if (at >= 0) {
+      parts.push(stack.splice(at));
+      pinches.push(start);
+    }
+    stack.push(segment);
+  }
+  if (stack.length > 0) parts.push(stack);
+  if (parts.length === 1) return parts;
+  return parts.map((part) =>
+    part.map((segment, k) => {
+      const end = segmentEnd(part[(k + part.length - 1) % part.length]!);
+      if (segment.kind === 'bezier') {
+        return { ...segment, points: [end, ...segment.points.slice(1)] };
+      }
+      return { ...segment, start: end };
+    }),
+  );
+}
+
 /**
  * Merges contours that cross or touch into loops around the filled area. Throws
  * `MergeError` when it cannot (coincident curves, loops that do not close).
@@ -855,6 +921,7 @@ function mergeContours(
   tolerance: number,
   extent: number,
   budget: Budget,
+  touching: Vec2[],
 ): OutlineLoop[] {
   const segments = contours.flatMap((c) => c.segments);
   const boxes = segments.map((s) => boxOf(controlPoints(s)));
@@ -922,27 +989,57 @@ function mergeContours(
 
   // Keep the pieces with fill on exactly one side, turned to have it on their left.
   const fine = Math.max(tolerance / 10, extent * RELATIVE_FINE_FLATTENING);
+  // The fine polygons, and their chords with the command each comes from.
+  const fineChords: { a: Vec2; b: Vec2; source: string }[] = [];
   const polygons = contours.map((c) => {
     const out: Vec2[] = [];
     for (const s of c.segments) {
       const p = controlPoints(s);
       const n = bezierChordCount(p, fine, MAX_FINE_CHORDS);
       budget.flattened(n);
-      for (let k = 0; k < n; k++) out.push(bezierPoint(p, k / n));
+      const source = `${s.contour},${s.index}`;
+      for (let k = 0; k < n; k++) {
+        fineChords.push({ a: bezierPoint(p, k / n), b: bezierPoint(p, (k + 1) / n), source });
+        out.push(fineChords[fineChords.length - 1]!.a);
+      }
     }
     return out;
   });
   const vertices = polygons.reduce((sum, polygon) => sum + polygon.length, 0);
   const windingAt = (p: Vec2) => polygons.reduce((w, polygon) => w + winding(polygon, p), 0);
+  /** Distance from `p` to the nearest chord of another command than `source`. */
+  const clearance = (p: Vec2, source: string, limit: number) => {
+    let best = limit;
+    for (const c of fineChords) {
+      if (c.source === source) continue;
+      if (
+        Math.min(c.a[0], c.b[0]) - best > p[0] ||
+        Math.max(c.a[0], c.b[0]) + best < p[0] ||
+        Math.min(c.a[1], c.b[1]) - best > p[1] ||
+        Math.max(c.a[1], c.b[1]) + best < p[1]
+      ) {
+        continue;
+      }
+      const { t } = chordOffset(p, c.a, c.b);
+      const q = t <= 0 ? c.a : t >= 1 ? c.b : bezierPoint([c.a, c.b], t);
+      best = Math.min(best, distance(p, q));
+    }
+    return best;
+  };
   const edges: Edge[] = [];
   for (const piece of pieces) {
-    budget.spend(2 * vertices + edges.length);
+    budget.spend(3 * vertices + edges.length);
     const p = controlPoints(piece);
     const mid = bezierPoint(p, 0.5);
     const chord: Vec2 = [p[p.length - 1]![0] - p[0]![0], p[p.length - 1]![1] - p[0]![1]];
     const [dx, dy] = unit(bezierTangent(p, 0.5), chord);
     const length = Math.hypot(chord[0], chord[1]);
-    const offset = Math.min(extent * 1e-5, Math.max(length * 0.05, fine * 20));
+    // Probe each side a little off the piece, closer than any other curve comes: a short
+    // piece next to a shallow crossing (an ogonek leaving the bowl of "Ų") has the other
+    // curve within a hair of it, and a probe past that curve reads the wrong side's fill.
+    const wanted = Math.min(extent * 1e-5, Math.max(length * 0.05, fine * 20));
+    const room = clearance(mid, `${piece.contour},${piece.index}`, wanted * 2);
+    const offset = Math.min(wanted, Math.max(room / 2, fine * 2));
     const left = filled(windingAt([mid[0] - dy * offset, mid[1] + dx * offset]));
     const right = filled(windingAt([mid[0] + dy * offset, mid[1] - dx * offset]));
     if (left === right) continue;
@@ -1004,17 +1101,18 @@ function mergeContours(
       }
       return segment;
     });
-    const area = loopArea(loopSegments);
-    if (Math.abs(area) <= tolerance * extent) continue;
-    // A loop, not Math.min(...spread): a loop can have more segments than the
-    // engine allows arguments.
-    let contour = Infinity;
-    for (const s of loopSegments) contour = Math.min(contour, s.contour);
-    loops.push({
-      contour,
-      segments: loopSegments,
-      area,
-    });
+    // A chain that comes back through a point it passed (a hole touching the outline
+    // there) is split into simple loops at that point: the kernel refuses a pinched wire.
+    const parts = splitPinchedLoop(loopSegments, snap, budget, touching);
+    for (const part of parts) {
+      const area = loopArea(part);
+      if (Math.abs(area) <= tolerance * extent) continue;
+      // A loop, not Math.min(...spread): a loop can have more segments than the
+      // engine allows arguments.
+      let contour = Infinity;
+      for (const s of part) contour = Math.min(contour, s.contour);
+      loops.push({ contour, segments: part, area });
+    }
   }
   return loops;
 }
@@ -1221,10 +1319,11 @@ function convert(
 
   const filled = (w: number) => (evenOdd ? w % 2 !== 0 : w !== 0);
   let loops: OutlineLoop[];
+  const touching: Vec2[] = [];
   const crossing = findCrossing(contours, tolerance, budget);
   if (crossing) {
     try {
-      loops = mergeContours(contours, filled, tolerance, extent, budget);
+      loops = mergeContours(contours, filled, tolerance, extent, budget, touching);
     } catch (error) {
       if (!(error instanceof MergeError)) throw error;
       issues.push({
@@ -1245,6 +1344,16 @@ function convert(
       message: 'Contours that cross or touch were merged into one outline.',
       contours: [...merged].sort((a, b) => a - b),
     });
+    if (touching.length > 0) {
+      issues.push({
+        code: 'touching',
+        severity: 'warning',
+        message:
+          'Loops of the outline touch at a single point; they are kept as separate loops, but a solid made from them is non-manifold there.',
+        contours: [...merged].sort((a, b) => a - b),
+        point: touching[0]!,
+      });
+    }
   } else {
     // Disjoint contours: every point of a contour has the same winding number with
     // respect to the others, so its outside's winding is that number, and its
@@ -1309,4 +1418,192 @@ function convert(
     };
   });
   return { regions: result, issues };
+}
+
+// Several paths --------------------------------------------------------------------------
+
+/** A segment of `outlinePartsRegions`: `contour` counts within its own path, `part`. */
+export type OutlinePartSegment = OutlineSegment & {
+  /** The path it comes from, by position in the list. */
+  part: number;
+};
+
+export interface OutlinePartLoop {
+  /** The path and contour of the loop (the lowest, when contours were merged into it). */
+  part: number;
+  contour: number;
+  segments: OutlinePartSegment[];
+  area: number;
+}
+
+export interface OutlinePartRegion {
+  outer: OutlinePartLoop;
+  holes: OutlinePartLoop[];
+}
+
+export type OutlinePartIssue = Omit<OutlineIssue, 'contours'> & {
+  /** The paths involved. */
+  parts: number[];
+  /** The contours involved, as `[part, contour]`. */
+  contours: [number, number][];
+};
+
+export interface OutlinePartsResult {
+  /** Ordered by the outer loop's path, then contour. */
+  regions: OutlinePartRegion[];
+  issues: OutlinePartIssue[];
+}
+
+/** How many contours `outlineRegions` counts in a path (bare `moveTo`s included). */
+function contourCount(path: readonly PathCommand[]): number {
+  let count = 0;
+  let open = false;
+  let closed = false;
+  const finish = () => {
+    if (!open) return;
+    count++;
+    open = false;
+    closed = false;
+  };
+  for (const command of path) {
+    if (command.kind === 'moveTo') {
+      finish();
+      open = true;
+      continue;
+    }
+    if (command.kind === 'close') {
+      closed = true;
+      continue;
+    }
+    open = true;
+    if (closed) {
+      finish();
+      open = true;
+    }
+  }
+  finish();
+  return count;
+}
+
+function pathBox(path: readonly PathCommand[]): Box | null {
+  const points: Vec2[] = [];
+  for (const c of path) {
+    if (c.kind === 'close') continue;
+    points.push(c.to);
+    if (c.kind === 'quadTo') points.push(c.control);
+    if (c.kind === 'cubicTo') points.push(c.control1, c.control2);
+  }
+  return points.length > 0 ? boxOf(points) : null;
+}
+
+/**
+ * Turns several paths (the glyphs of a text) into region loops at once. Paths whose bounding
+ * boxes overlap are converted together, so where they really overlap (glyphs that touch after
+ * kerning, a script font's joins) they are merged into one outline; every other path is
+ * converted on its own, which keeps the cost of merging to the paths that need it. Segments,
+ * loops and issues say which path (`part`) and which of its contours they come from; contours
+ * are counted within each path as `outlineRegions` counts them. Each group of paths is one
+ * `outlineRegions` call with its own limits; the options apply to every group.
+ */
+export function outlinePartsRegions(
+  paths: readonly (readonly PathCommand[])[],
+  options: OutlineOptions = {},
+): OutlinePartsResult {
+  const boxes = paths.map(pathBox);
+  // Group overlapping boxes: sweep by left edge, union what meets.
+  const parent = paths.map((_, i) => i);
+  const find = (i: number): number => {
+    while (parent[i] !== i) {
+      parent[i] = parent[parent[i]!]!;
+      i = parent[i]!;
+    }
+    return i;
+  };
+  const order = paths.map((_, i) => i).filter((i) => boxes[i] !== null);
+  order.sort((a, b) => boxes[a]!.minX - boxes[b]!.minX || a - b);
+  const active: number[] = [];
+  for (const i of order) {
+    const box = boxes[i]!;
+    for (let k = active.length - 1; k >= 0; k--) {
+      if (boxes[active[k]!]!.maxX < box.minX) active.splice(k, 1);
+    }
+    for (const j of active) {
+      const other = boxes[j]!;
+      if (other.maxY < box.minY || other.minY > box.maxY) continue;
+      parent[find(i)] = find(j);
+    }
+    active.push(i);
+  }
+  const groups = new Map<number, number[]>();
+  for (const i of order.sort((a, b) => a - b)) {
+    const root = find(i);
+    groups.set(root, [...(groups.get(root) ?? []), i]);
+  }
+
+  const regions: OutlinePartRegion[] = [];
+  const issues: OutlinePartIssue[] = [];
+  for (const members of [...groups.values()].sort((a, b) => a[0]! - b[0]!)) {
+    // Every path starts a contour of its own: one that draws before any moveTo starts at the
+    // origin, as it would alone.
+    const offsets: number[] = [];
+    const combined: PathCommand[] = [];
+    let total = 0;
+    for (const i of members) {
+      const path = paths[i]!;
+      const own: PathCommand[] =
+        path[0]?.kind === 'moveTo' ? [...path] : [{ kind: 'moveTo', to: [0, 0] }, ...path];
+      offsets.push(total);
+      total += contourCount(own);
+      combined.push(...own);
+    }
+    const locate = (contour: number): [number, number] => {
+      let k = 0;
+      while (k + 1 < members.length && offsets[k + 1]! <= contour) k++;
+      return [members[k]!, contour - offsets[k]!];
+    };
+    const result = outlineRegions(combined, options);
+    const loop = (l: OutlineLoop): OutlinePartLoop => {
+      const [part, contour] = locate(l.contour);
+      return {
+        part,
+        contour,
+        area: l.area,
+        segments: l.segments.map((s) => {
+          const [p, c] = locate(s.contour);
+          return { ...s, part: p, contour: c };
+        }),
+      };
+    };
+    for (const r of result.regions)
+      regions.push({ outer: loop(r.outer), holes: r.holes.map(loop) });
+    for (const issue of result.issues) {
+      const contours = issue.contours.map(locate);
+      const parts = [...new Set(contours.map(([p]) => p))].sort((a, b) => a - b);
+      issues.push({ ...issue, contours, parts: parts.length > 0 ? parts : [...members] });
+    }
+  }
+  regions.sort((a, b) => a.outer.part - b.outer.part || a.outer.contour - b.outer.contour);
+  return { regions, issues };
+}
+
+/** How big an `outlinePartsRegions` result is: what callers cap before placing it. */
+export interface OutlinePartsSize {
+  /** Outer loops and holes. */
+  loops: number;
+  /** Segments of every loop. */
+  curves: number;
+  /** Points of every segment: two per line or arc, the control points of a Bezier. */
+  points: number;
+}
+
+export function outlinePartsSize(result: OutlinePartsResult): OutlinePartsSize {
+  const size: OutlinePartsSize = { loops: 0, curves: 0, points: 0 };
+  for (const region of result.regions) {
+    for (const loop of [region.outer, ...region.holes]) {
+      size.loops++;
+      size.curves += loop.segments.length;
+      for (const s of loop.segments) size.points += s.kind === 'bezier' ? s.points.length : 2;
+    }
+  }
+  return size;
 }

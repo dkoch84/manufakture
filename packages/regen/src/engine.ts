@@ -46,6 +46,7 @@ import {
   type DerivedFeature,
   type DerivedSource,
   type DocumentChange,
+  type DocumentFont,
   type Feature,
   type ImportSource,
   type ManufaktureDocument,
@@ -73,6 +74,7 @@ import {
   type Topology,
 } from '@manufakture/kernel';
 import type { SketchPlacement } from '@manufakture/sketch';
+import { bundledFont } from '@manufakture/text/bundled';
 import {
   DEFAULT_KERNEL_BUILD,
   DEFAULT_SOLVER_BUILD,
@@ -115,7 +117,14 @@ import {
 } from './graph';
 import { stableStringify } from './hash';
 import { importSourceMatches, keyInput } from './imports';
-import { explicitPlacement, solveSketch, type RegenSolver, type SketchResult } from './sketches';
+import {
+  explicitPlacement,
+  sketchFontKey,
+  solveSketch,
+  type RegenSolver,
+  type SketchResult,
+} from './sketches';
+import { TextBudget, lazyTextOutliner, type TextOutliner } from './text';
 import { faceRef, translateFeature } from './translate';
 import type {
   AssemblyResult,
@@ -167,6 +176,15 @@ export interface RegenEngineOptions {
   solverBuild?: string;
   /** Tessellation of the final bodies. */
   deflection?: Partial<Deflection>;
+  /**
+   * Lays out the text of outline entities. Default: `createTextOutliner()` (loaded on the first
+   * text), in this thread with no time limit and refusing user fonts, which suits Node and
+   * bundled fonts only. A browser host must pass `createWatchdogOutliner` (the regen worker does,
+   * `worker.ts`): untrusted fonts need a worker of their own under a time limit (ADR 0011's
+   * amendment). A Node host that trusts its fonts can pass
+   * `createTextOutliner({ allowFileFonts: true })`.
+   */
+  text?: TextOutliner;
   /**
    * The kernel recycled its instance, so every cached body is gone. The host should regen the
    * current document again (the next regen rebuilds; nothing is lost but time).
@@ -261,6 +279,10 @@ interface Batch {
 
 interface Run {
   generation: number;
+  /** Aborted when a newer regen supersedes this run: stops the text it is laying out. */
+  abort: AbortController;
+  /** The time this run's texts may take (`TextBudget`). */
+  text: TextBudget;
   counters: RegenCounters;
   used: Set<string>;
   /** Kernel instance of the latest reply. */
@@ -284,6 +306,8 @@ interface BuildScope {
 
 interface PartState extends BuildScope {
   part: Part;
+  /** The fonts of the document the part is in, which its sketches' outlines use. */
+  fonts: readonly DocumentFont[];
   /** The bodies after the features so far, in creator order. */
   bodies: LiveBody[];
   /** Bodies merged away so far. */
@@ -422,6 +446,7 @@ export class RegenEngine {
   readonly #cache: FeatureCache;
   readonly #kernelBuild: string;
   readonly #solverBuild: string;
+  readonly #text: TextOutliner;
   readonly #deflection: Partial<Deflection> | undefined;
   readonly #onRecycled: (() => void) | undefined;
   /**
@@ -441,6 +466,8 @@ export class RegenEngine {
     Map<string, CoreResult<ManufaktureDocument>>
   >();
   #latest = 0;
+  /** The run in progress (or the last one), whose text a newer regen aborts. */
+  #running: Run | null = null;
   #chain: Promise<unknown> = Promise.resolve();
   #instance: number | null = null;
   #lastDocument: ManufaktureDocument | null = null;
@@ -467,6 +494,7 @@ export class RegenEngine {
     this.#cache = options.cache ?? new MemoryCache();
     this.#kernelBuild = options.kernelBuild ?? DEFAULT_KERNEL_BUILD;
     this.#solverBuild = options.solverBuild ?? DEFAULT_SOLVER_BUILD;
+    this.#text = options.text ?? lazyTextOutliner();
     this.#deflection = options.deflection;
     this.#onRecycled = options.onKernelRecycled;
     this.#unsubscribe = options.kernel.onRecycle?.(() => {
@@ -506,8 +534,9 @@ export class RegenEngine {
     if (generation <= this.#latest) return Promise.resolve(null);
     const older = this.#latest;
     this.#latest = generation;
-    // Abandon the running regen's batches at the kernel's next op.
+    // Abandon the running regen's batches at the kernel's next op, and its text at once.
     if (older > 0) this.#kernel.cancel(older);
+    if (this.#running && this.#running.generation < generation) this.#running.abort.abort();
     const task = this.#chain.then(() => this.#regen(document, generation, options));
     this.#chain = task.catch(() => undefined);
     return task;
@@ -557,8 +586,11 @@ export class RegenEngine {
     document: ManufaktureDocument,
     stored: ManufaktureDocument = document,
   ): Run {
-    return {
+    // Runs go one at a time on the chain: the newest is the one running.
+    this.#running = {
       generation,
+      abort: new AbortController(),
+      text: new TextBudget(),
       stored,
       counters: emptyCounters(),
       used: new Set(),
@@ -570,6 +602,7 @@ export class RegenEngine {
       },
       sources: new Map(),
     };
+    return this.#running;
   }
 
   /**
@@ -811,6 +844,7 @@ export class RegenEngine {
     const state: PartState = {
       ...scope,
       part,
+      fonts: document.fonts,
       bodies: [],
       consumed: [],
       broken: false,
@@ -1804,11 +1838,14 @@ export class RegenEngine {
       f.plane.type === 'plane'
         ? { placement: explicitPlacement(f.plane) }
         : { bodies: owners.map((b) => [b.id, b.key]), ref: f.plane.face.ref };
+    const fonts = sketchFontKey(f, state.fonts, (id) => bundledFont(id)?.sha256);
     const key = this.#key(state, {
       solver: this.#solverBuild,
       sketch: definition,
       values: [...values.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
       plane,
+      // Only sketches with text have fonts in their key, so other keys stay as they were.
+      ...(fonts.length > 0 ? { fonts } : {}),
     });
     run.used.add(key);
     const hit = await this.#cache.get(key);
@@ -1817,6 +1854,7 @@ export class RegenEngine {
       this.#fill(result, hit, started);
       result.cached = true;
       if (hit.sketch) result.placement = hit.sketch.placement;
+      if (hit.sketch && hit.sketch.outlines.length > 0) result.outlines = hit.sketch.outlines;
       if (hit.ok && hit.sketch) state.sketches.set(f.id, hit.sketch);
       else state.unavailable.set(f.id, 'error');
       return;
@@ -1826,7 +1864,10 @@ export class RegenEngine {
     let placement: SketchPlacement;
     const warnings: RegenWarning[] = [];
     const references: FeatureResult['references'] = [];
-    const store = async (entry: Omit<CacheEntry, 'key' | 'featureId' | 'type' | 'ms'>) => {
+    const store = async (
+      entry: Omit<CacheEntry, 'key' | 'featureId' | 'type' | 'ms'>,
+      uncached = false,
+    ) => {
       const full: CacheEntry = {
         key,
         featureId: f.id,
@@ -1834,7 +1875,7 @@ export class RegenEngine {
         ms: now() - started,
         ...entry,
       };
-      await this.#cache.set(key, full);
+      if (!uncached) await this.#cache.set(key, full);
       this.#fill(result, full, started);
       if (!full.ok) state.unavailable.set(f.id, 'error');
     };
@@ -1898,14 +1939,27 @@ export class RegenEngine {
     }
 
     run.counters.solves++;
-    const solved = await solveSketch(this.#solver, f, placement, variables);
+    const solved = await solveSketch(this.#solver, f, placement, variables, {
+      fonts: state.fonts,
+      values,
+      outliner: this.#text,
+      signal: run.abort.signal,
+      budget: run.text,
+      checkStale: () => this.#checkStale(run),
+    });
     this.#checkStale(run);
     if (!solved.ok) {
-      await store({ ok: false, errors: solved.errors, warnings, references });
+      // A failure that may not repeat (a bundled font fetched too slowly, a time budget used
+      // up) is reported but not cached, so the next regen tries again.
+      await store(
+        { ok: false, errors: solved.errors, warnings, references },
+        solved.transient === true,
+      );
       return;
     }
     state.sketches.set(f.id, solved.sketch);
     result.placement = solved.sketch.placement;
+    if (solved.sketch.outlines.length > 0) result.outlines = solved.sketch.outlines;
     await store({
       ok: true,
       errors: [],

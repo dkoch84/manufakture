@@ -202,6 +202,13 @@ export function featureExpressions(feature: Feature): ExpressionSite[] {
           );
         }
       });
+      // A text's size and spacing (since version 9): evaluated by regen, never by the solver.
+      feature.entities.forEach((e, i) => {
+        if (e.kind !== 'outline') return;
+        add(['entities', i, 'source', 'size'], e.source.size, 'length');
+        add(['entities', i, 'source', 'letterSpacing'], e.source.letterSpacing, 'length');
+        add(['entities', i, 'source', 'lineSpacing'], e.source.lineSpacing, 'number');
+      });
       break;
     case 'extrude':
       if (feature.extent.type === 'blind' || feature.extent.type === 'symmetric') {

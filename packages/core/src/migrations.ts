@@ -180,6 +180,27 @@ export const migrateV7ToV8: Migration = {
   },
 };
 
+/**
+ * Version 9 added fonts and the `outline` sketch entity (ADR 0012 decisions 7 and 8). A version 8
+ * document has neither, so it gets an empty font list, `fonts: []`, right after `print` as in a
+ * freshly saved file; nothing else changes, and the font counter starts at 1.
+ */
+export const migrateV8ToV9: Migration = {
+  from: 8,
+  to: 9,
+  description: 'Add fonts',
+  migrate(doc) {
+    const out: JsonObject = {};
+    for (const [k, v] of Object.entries(doc)) {
+      if (k === 'fonts') continue;
+      out[k] = k === 'version' ? 9 : v;
+      if (k === 'print') out.fonts = [];
+    }
+    if (!('fonts' in out)) out.fonts = [];
+    return out;
+  },
+};
+
 /** File format migrations, in order: `FORMAT_MIGRATIONS[i]` goes from version i to i + 1. */
 export const FORMAT_MIGRATIONS: readonly Migration[] = [
   migrateV0ToV1,
@@ -190,6 +211,7 @@ export const FORMAT_MIGRATIONS: readonly Migration[] = [
   migrateV5ToV6,
   migrateV6ToV7,
   migrateV7ToV8,
+  migrateV8ToV9,
 ];
 
 /**

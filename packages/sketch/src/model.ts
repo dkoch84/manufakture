@@ -63,7 +63,51 @@ export interface ArcEntity extends EntityBase {
   end: Vec2;
 }
 
-export type SketchEntity = PointEntity | LineEntity | CircleEntity | ArcEntity;
+/** Where an outline sits relative to its anchor (`packages/text`'s layout options). */
+export interface OutlineAlign {
+  /** Each line's advance box: starts at (`left`), is centred on (`center`) or ends at (`right`) the anchor. */
+  horizontal: 'left' | 'center' | 'right';
+  /** The first baseline (`baseline`), the first line's cap height (`top`), or the middle of the block (`middle`). */
+  vertical: 'baseline' | 'middle' | 'top';
+}
+
+/**
+ * Text set in a font of the document. Laid out by `packages/text` at every regen: one glyph per
+ * code point, the font's kerning, no other shaping.
+ */
+export interface TextOutlineSource {
+  kind: 'text';
+  /** The string; line breaks start new lines. Core caps its length (`MAX_OUTLINE_TEXT`). */
+  text: string;
+  /** A font of the document, by id (`font#n`). */
+  font: string;
+  /** Cap height (the height of "H"), a length. */
+  size: StoredExpression;
+  align: OutlineAlign;
+  /** Extra space between neighbouring glyphs of a line, a length; absent: none. */
+  letterSpacing?: StoredExpression;
+  /** Baseline distance as a multiple of the font's line height, a plain number; absent: 1. */
+  lineSpacing?: StoredExpression;
+}
+
+/** What an outline is drawn from. M5 adds an `svg` source to this union (ADR 0012 decision 7). */
+export type OutlineSource = TextOutlineSource;
+
+/**
+ * Closed outlines from a source (text, later SVG), placed at `anchor` and turned by `angle`
+ * (radians, counter-clockwise from the sketch x axis) about it. The anchor is a point the
+ * solver moves like a point entity and constraints reference as `{ entity, at: 'anchor' }`;
+ * `angle` is stored as placed and never solved, and the outline's own geometry is never solved
+ * either: regen expands it into region loops after the solve (ADR 0012 decision 7).
+ */
+export interface OutlineEntity extends EntityBase {
+  kind: 'outline';
+  anchor: Vec2;
+  angle: number;
+  source: OutlineSource;
+}
+
+export type SketchEntity = PointEntity | LineEntity | CircleEntity | ArcEntity | OutlineEntity;
 export type EntityKind = SketchEntity['kind'];
 
 // References ----------------------------------------------------------------
@@ -77,12 +121,13 @@ export const SKETCH_X_AXIS = '@x-axis';
 export const SKETCH_Y_AXIS = '@y-axis';
 export const BUILTIN_IDS: readonly string[] = [SKETCH_ORIGIN, SKETCH_X_AXIS, SKETCH_Y_AXIS];
 
-export type PointPosition = 'start' | 'end' | 'center';
+export type PointPosition = 'start' | 'end' | 'center' | 'anchor';
 export type EndPosition = 'start' | 'end';
 
 /**
  * A point of the sketch: a point entity (no `at`), or a vertex of a line
- * (`start`, `end`), circle (`center`) or arc (`start`, `end`, `center`).
+ * (`start`, `end`), circle (`center`) or arc (`start`, `end`, `center`), or
+ * the anchor of an outline (`anchor`).
  */
 export interface PointRef {
   entity: string;
@@ -330,10 +375,11 @@ export interface DragResult {
   message?: string;
 }
 
-/** Numbers per entity in `DragResult.coordinates`: point 2, line 4, circle 3, arc 6. */
+/** Numbers per entity in `DragResult.coordinates`: point 2, line 4, circle 3, arc 6, outline 2. */
 export function coordinateCount(kind: EntityKind): number {
   switch (kind) {
     case 'point':
+    case 'outline':
       return 2;
     case 'line':
       return 4;
@@ -346,7 +392,7 @@ export function coordinateCount(kind: EntityKind): number {
 
 /**
  * Pack entity coordinates: point `x y`; line `sx sy ex ey`; circle `cx cy r`;
- * arc `cx cy sx sy ex ey`.
+ * arc `cx cy sx sy ex ey`; outline `ax ay` (its anchor).
  */
 export function packCoordinates(entities: readonly SketchEntity[]): Float64Array {
   const out = new Float64Array(entities.reduce((n, e) => n + coordinateCount(e.kind), 0));
@@ -355,11 +401,13 @@ export function packCoordinates(entities: readonly SketchEntity[]): Float64Array
     const values =
       e.kind === 'point'
         ? e.position
-        : e.kind === 'line'
-          ? [...e.start, ...e.end]
-          : e.kind === 'circle'
-            ? [...e.center, e.radius]
-            : [...e.center, ...e.start, ...e.end];
+        : e.kind === 'outline'
+          ? e.anchor
+          : e.kind === 'line'
+            ? [...e.start, ...e.end]
+            : e.kind === 'circle'
+              ? [...e.center, e.radius]
+              : [...e.center, ...e.start, ...e.end];
     out.set(values, i);
     i += values.length;
   }
@@ -385,6 +433,8 @@ export function applyCoordinates(
     switch (e.kind) {
       case 'point':
         return { ...e, position: v() };
+      case 'outline':
+        return { ...e, anchor: v() };
       case 'line': {
         const start = v();
         return { ...e, start, end: v() };

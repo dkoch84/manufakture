@@ -328,6 +328,8 @@ export function pointAt(entities: readonly SketchEntity[], ref: PointRef): Vec2 
       return e.center;
     case 'arc':
       return ref.at === 'start' ? e.start : ref.at === 'end' ? e.end : e.center;
+    case 'outline':
+      return e.anchor;
   }
 }
 

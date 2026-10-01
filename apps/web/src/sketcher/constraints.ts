@@ -224,7 +224,7 @@ export function constraintGlyphs(
           const e = index.get(c.a);
           at(
             c,
-            e && e.kind !== 'point' && e.kind !== 'circle'
+            e && (e.kind === 'line' || e.kind === 'arc')
               ? c.at[0] === 'start'
                 ? e.start
                 : e.end

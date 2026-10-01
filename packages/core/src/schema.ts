@@ -1,4 +1,6 @@
 import type {
+  OutlineAlign,
+  OutlineSource,
   PointRef,
   SketchConstraint,
   SketchEntity,
@@ -28,7 +30,7 @@ import { MATERIAL_IDS } from './materials';
  */
 
 /** The file format version this code reads and writes. Bump it only together with a migration. */
-export const FORMAT_VERSION = 8;
+export const FORMAT_VERSION = 9;
 /** The topological naming scheme version (T0.5) that stored references are written in. */
 export const NAMING_SCHEME = 1;
 export const FORMAT_TAG = 'manufakture';
@@ -64,6 +66,15 @@ export const ConfigParameterIdSchema = z
 export const ConfigRowIdSchema = z
   .string()
   .regex(CONFIG_ROW_ID_PATTERN, 'Expected a configuration row id like "cfg#1"');
+
+/** The document-level `nextIds` key for font ids (`font#n`). Since version 9. */
+export const FONT_COUNTER = 'font';
+/** A font id: `font#n` with at most 15 digits, counted by the document's `nextIds.font`. */
+export const FONT_ID_PATTERN = /^font#[1-9][0-9]{0,14}$/;
+export const FontIdSchema = z
+  .string()
+  .max(32, { abort: true })
+  .regex(FONT_ID_PATTERN, 'Expected a font id like "font#1"');
 
 /**
  * A body id: the id of the feature that made the body, alone (`extrude#3`) or followed by a
@@ -224,6 +235,57 @@ export const VertexReferenceSchema = z.strictObject({
 // the last solved values, in millimetres, in the sketch plane's 2D frame. They seed the solver;
 // the constraints define the sketch.
 
+/**
+ * The most code points the text of one outline may have, and all the outlines of one sketch
+ * together. Layout and kerning cost grow with the text, and the string comes from the document,
+ * so the caps bound what a crafted file costs to regenerate. A part label is tens of characters.
+ */
+export const MAX_OUTLINE_TEXT = 1000;
+export const MAX_SKETCH_OUTLINE_TEXT = 10_000;
+
+/** The number of code points in `s` (a lone surrogate counts as one). */
+export function codePointLength(s: string): number {
+  let n = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c >= 0xd800 && c <= 0xdbff && i + 1 < s.length) {
+      const d = s.charCodeAt(i + 1);
+      if (d >= 0xdc00 && d <= 0xdfff) i++;
+    }
+    n++;
+  }
+  return n;
+}
+
+export const OutlineAlignSchema = z.strictObject({
+  horizontal: z.enum(['left', 'center', 'right']),
+  vertical: z.enum(['baseline', 'middle', 'top']),
+}) satisfies z.ZodType<OutlineAlign>;
+
+/**
+ * What an outline is drawn from (ADR 0012 decision 7). `text`: a string in a font of the
+ * document, `size` its cap height (a length), `letterSpacing` a length, `lineSpacing` a multiple
+ * of the font's line height (a plain number). M5 adds an `svg` source.
+ */
+export const OutlineSourceSchema = z.discriminatedUnion('kind', [
+  z.strictObject({
+    kind: z.literal('text'),
+    text: z
+      .string()
+      // Two UTF-16 units per code point at most: the cheap bound first.
+      .max(2 * MAX_OUTLINE_TEXT, { abort: true })
+      .refine(
+        (t) => codePointLength(t) <= MAX_OUTLINE_TEXT,
+        `A text holds at most ${MAX_OUTLINE_TEXT} characters`,
+      ),
+    font: FontIdSchema,
+    size: StoredExpressionSchema,
+    align: OutlineAlignSchema,
+    letterSpacing: StoredExpressionSchema.exactOptional(),
+    lineSpacing: StoredExpressionSchema.exactOptional(),
+  }),
+]) satisfies z.ZodType<OutlineSource>;
+
 const construction = z.boolean();
 
 export const SketchEntitySchema = z.discriminatedUnion('kind', [
@@ -256,6 +318,19 @@ export const SketchEntitySchema = z.discriminatedUnion('kind', [
     start: Point2Schema,
     end: Point2Schema,
   }),
+  /**
+   * Closed outlines from a source (text), placed at `anchor` and turned by `angle` (radians,
+   * counter-clockwise) about it. The anchor is solved like a point; the rest is not. Since
+   * version 9.
+   */
+  z.strictObject({
+    id: EntityIdSchema,
+    kind: z.literal('outline'),
+    construction,
+    anchor: Point2Schema,
+    angle: finite,
+    source: OutlineSourceSchema,
+  }),
 ]) satisfies z.ZodType<SketchEntity>;
 
 /** Fixed geometry every sketch can reference. The `@` keeps them apart from entity ids. */
@@ -269,12 +344,13 @@ const sketchRef = z.union([EntityIdSchema, z.enum(SKETCH_BUILTINS)]);
 
 /**
  * A point of the sketch: a point entity or the origin (no `at`), or a vertex of a line
- * (`start`, `end`), a circle (`center`) or an arc (`start`, `end`, `center`).
+ * (`start`, `end`), a circle (`center`) or an arc (`start`, `end`, `center`), or the anchor
+ * of an outline (`anchor`, since version 9).
  */
 export const PointRefSchema = z.strictObject({
   entity: sketchRef,
   // `exactOptional`: absent, never `undefined`, as the sketch type says (exactOptionalPropertyTypes).
-  at: z.enum(['start', 'end', 'center']).exactOptional(),
+  at: z.enum(['start', 'end', 'center', 'anchor']).exactOptional(),
 }) satisfies z.ZodType<PointRef>;
 
 const id = ConstraintIdSchema;
@@ -701,30 +777,36 @@ export const ExtensionFeatureSchema = z.strictObject({
 export const MAX_IMPORT_BYTES = 20 * 1024 * 1024;
 const MAX_IMPORT_BASE64 = Math.ceil(MAX_IMPORT_BYTES / 3) * 4;
 
+/** The check that base64 `data` holds exactly `size` bytes (imports, user fonts). */
+function checkDataSize(ctx: z.core.ParsePayload<{ data: string; size: number }>): void {
+  const { data, size } = ctx.value;
+  const padding = data.endsWith('==') ? 2 : data.endsWith('=') ? 1 : 0;
+  if (data.length % 4 !== 0 || (data.length / 4) * 3 - padding !== size) {
+    ctx.issues.push({
+      code: 'custom',
+      message: `data does not hold ${size} bytes`,
+      input: data,
+      path: ['data'],
+    });
+  }
+}
+
+const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/, 'Expected a lower-case hex SHA-256');
+const base64Schema = z
+  .string()
+  .max(MAX_IMPORT_BASE64, { abort: true })
+  .regex(/^[A-Za-z0-9+/]*={0,2}$/, 'Expected base64 text');
+
 export const ImportSourceSchema = z
   .strictObject({
     format: z.enum(['step', 'stl']),
     /** The file's name when it was imported, for display. */
     fileName: z.string().min(1).max(255),
     size: z.int().min(1).max(MAX_IMPORT_BYTES),
-    sha256: z.string().regex(/^[0-9a-f]{64}$/, 'Expected a lower-case hex SHA-256'),
-    data: z
-      .string()
-      .max(MAX_IMPORT_BASE64, { abort: true })
-      .regex(/^[A-Za-z0-9+/]*={0,2}$/, 'Expected base64 text'),
+    sha256: sha256Schema,
+    data: base64Schema,
   })
-  .check((ctx) => {
-    const { data, size } = ctx.value;
-    const padding = data.endsWith('==') ? 2 : data.endsWith('=') ? 1 : 0;
-    if (data.length % 4 !== 0 || (data.length / 4) * 3 - padding !== size) {
-      ctx.issues.push({
-        code: 'custom',
-        message: `data does not hold ${size} bytes`,
-        input: data,
-        path: ['data'],
-      });
-    }
-  });
+  .check(checkDataSize);
 
 /**
  * How an import joins the part. `reference` keeps it aside as a reference body (shown, measured,
@@ -757,6 +839,63 @@ export const ImportFeatureSchema = z
       });
     }
   });
+
+// ---------------------------------------------------------------------------------------------
+// Fonts (since version 9; ADR 0011, ADR 0012 decision 8)
+
+/** The most fonts a document may hold; bounds what a crafted file costs to check. */
+export const MAX_FONTS = 1000;
+/**
+ * The most bytes the user fonts of one document may hold in all (64 MiB, the sum of their
+ * `size`): with `MAX_FONTS` alone, a document could claim 1000 fonts of up to 20 MiB each. A
+ * family of a dozen styles takes a few MiB; this leaves room for several families and a
+ * large CJK font or two.
+ */
+export const MAX_FONT_TOTAL_BYTES = 64 * 1024 * 1024;
+
+/** The bytes the user fonts of a font list hold in all (bundled fonts hold none). */
+export function fontBytes(fonts: readonly { source: { kind: string; size?: number } }[]): number {
+  let total = 0;
+  for (const f of fonts) if (f.source.kind === 'file') total += f.source.size ?? 0;
+  return total;
+}
+/** A bundled font's id in `packages/text` (`inter-bold`): lower-case letters, digits and `-`. */
+export const BUNDLED_FONT_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
+
+/**
+ * Where a font's bytes are. `bundled`: a font that ships with the app, by its stable id and the
+ * SHA-256 of the file the text was made with; no bytes, and a different file under that id is
+ * detected (a warning, and a cache miss), never a silent change of geometry. `file`: a TTF or
+ * OTF file the user added, stored like an imported file (base64 `data`, moved to a blob by
+ * persistence), with its `fileName`, `size` (at most `MAX_IMPORT_BYTES`) and SHA-256.
+ */
+export const FontSourceSchema = z.discriminatedUnion('kind', [
+  z.strictObject({
+    kind: z.literal('bundled'),
+    id: z.string().regex(BUNDLED_FONT_ID_PATTERN, 'Expected a bundled font id like "inter-bold"'),
+    sha256: sha256Schema,
+  }),
+  z
+    .strictObject({
+      kind: z.literal('file'),
+      fileName: z.string().min(1).max(255),
+      size: z.int().min(1).max(MAX_IMPORT_BYTES),
+      sha256: sha256Schema,
+      data: base64Schema,
+    })
+    .check(checkDataSize),
+]);
+
+/**
+ * A font of the document: an id outlines name it by (`font#n`, never reused), the family and
+ * style read from the font when it was added (for display), and where its bytes are.
+ */
+export const FontSchema = z.strictObject({
+  id: FontIdSchema,
+  family: z.string().min(1).max(200),
+  style: z.string().min(1).max(200),
+  source: FontSourceSchema,
+});
 
 /**
  * The largest pinned source a derived feature may store: the UTF-8 length of `source.data`, in
@@ -1350,12 +1489,26 @@ export const DocumentSchema = z.strictObject({
   assemblies: z.array(AssemblySchema).max(MAX_ASSEMBLY_ITEMS),
   /** Print setups: what to print, on which printer, oriented how. Since version 8. */
   print: PrintDataSchema,
+  /** The fonts the document's outlines use, bundled or added by the user. Since version 9. */
+  fonts: z
+    .array(FontSchema)
+    .max(MAX_FONTS)
+    .check((ctx) => {
+      const total = fontBytes(ctx.value);
+      if (total > MAX_FONT_TOTAL_BYTES) {
+        ctx.issues.push({
+          code: 'custom',
+          message: `the document's fonts hold ${total} bytes; at most ${MAX_FONT_TOTAL_BYTES} are allowed`,
+          input: total,
+        });
+      }
+    }),
   /** The configuration table; absent when the document has none. Since version 5. */
   configurations: ConfigurationsSchema.exactOptional(),
   /**
    * Next number per document-level id counter (`part`, giving `part#n`; `cp` and `cfg`, giving
-   * configuration parameter and row ids; `assembly`, giving `assembly#n`). Only ever increases,
-   * so an id is never reused. Since version 4.
+   * configuration parameter and row ids; `assembly`, giving `assembly#n`; `font`, giving
+   * `font#n`). Only ever increases, so an id is never reused. Since version 4.
    */
   nextIds: z.record(z.string(), z.int().min(1)),
 });
@@ -1370,6 +1523,9 @@ export type {
   ConstraintKind,
   EndPosition,
   LineEntity,
+  OutlineAlign,
+  OutlineEntity,
+  OutlineSource,
   PointEntity,
   PointPosition,
   PointRef,
@@ -1377,6 +1533,7 @@ export type {
   SketchEntity,
   SketchPlacement,
   StoredExpression,
+  TextOutlineSource,
   Vec2,
   Vec3,
 } from '@manufakture/sketch/model';
@@ -1439,4 +1596,6 @@ export type PrintOrientation = z.infer<typeof PrintOrientationSchema>;
 export type PrintItem = z.infer<typeof PrintItemSchema>;
 export type PrintSetup = z.infer<typeof PrintSetupSchema>;
 export type PrintData = z.infer<typeof PrintDataSchema>;
+export type FontSource = z.infer<typeof FontSourceSchema>;
+export type DocumentFont = z.infer<typeof FontSchema>;
 export type ManufaktureDocument = z.infer<typeof DocumentSchema>;

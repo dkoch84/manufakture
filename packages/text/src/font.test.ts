@@ -75,6 +75,20 @@ describe('loadFont', () => {
     expect(font.info.family).toBe('Inter');
   });
 
+  it("reads only its own copy: changing the caller's buffer afterwards changes nothing", () => {
+    const bytes = interBytes();
+    const font = loadFont(bytes);
+    const before = inter();
+    const a = before.glyph('A')!.index;
+    const v = before.glyph('V')!.index;
+    // Kerning and glyphs are read lazily, after loadFont returned.
+    bytes.fill(0);
+    expect(font.kerning(a, v)).toBe(before.kerning(a, v));
+    expect(font.kerning(a, v)).not.toBe(0);
+    expect(font.glyph('Q')!.getBoundingBox()).toEqual(before.glyph('Q')!.getBoundingBox());
+    expect(font.warnings).toEqual([]);
+  });
+
   it('kerns pairs as HarfBuzz does, from GPOS including its Extension lookups', () => {
     // Reference values: HarfBuzz (uharfbuzz) shaping each pair with kern on and off; the
     // first glyph's advance difference. Checked over all 11,881 pairs of printable ASCII

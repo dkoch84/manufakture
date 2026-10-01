@@ -2,6 +2,12 @@
 // (`PathCommand[]` from `@manufakture/sketch`), which `outlineRegions` turns
 // into region loops. Pure TypeScript; parse fonts in a worker.
 
+// opentype.js ships no types. The declarations of the part this package uses must reach every
+// program that compiles these sources (regen, the app), not only this package's own, and an
+// ambient module declaration cannot be imported: so a reference, here at the entry point.
+// eslint-disable-next-line @typescript-eslint/triple-slash-reference
+/// <reference path="./opentype.d.ts" />
+
 export {
   BUNDLED_FONTS,
   DEFAULT_FONT_ID,

@@ -27,6 +27,7 @@
 // Units are millimetres; everything is plain data.
 
 import type { SketchEntity, Vec2 } from './model';
+import { bezierPoint } from './outline';
 
 const TAU = 2 * Math.PI;
 /** Directions leaving a vertex closer than this (radians) are ordered by curvature. */
@@ -54,10 +55,15 @@ interface RegionEdgeInfo {
   reversed: boolean;
 }
 
-/** One stretch of an entity along a region loop, in loop order. Arcs turn clockwise when `reversed`. */
+/**
+ * One stretch of an entity along a region loop, in loop order. Arcs turn clockwise when
+ * `reversed`. Beziers come only from outline entities (glyphs): 3 (quadratic) or 4 (cubic)
+ * control points, the first `start` and the last `end`.
+ */
 export type RegionCurve = RegionEdgeInfo &
   (
     | { kind: 'line'; start: Vec2; end: Vec2 }
+    | { kind: 'bezier'; points: Vec2[]; start: Vec2; end: Vec2 }
     | { kind: 'arc'; center: Vec2; radius: number; start: Vec2; end: Vec2 }
     | {
         kind: 'circle';
@@ -86,10 +92,38 @@ export interface Region {
   holes: RegionLoop[];
   /** Enclosed area: the outer loop's minus the holes'. */
   area: number;
-  /** How many other loops enclose it: even for regions, odd for voids. */
+  /**
+   * How many other loops enclose it: even for regions, odd for voids. Outline regions (the
+   * letters of a text) are always regions, whatever their depth.
+   */
   depth: number;
   /** Every entity on any of its loops, sorted. */
   entityIds: string[];
+  /**
+   * Set on the counter of an outline (the inside of an "O") that lies in another face: the
+   * entities that select it, which are that face's (its outer loop's), not the outline's. So
+   * listing a plate's lines picks the plate with letter-shaped holes and the counters, and
+   * listing the text picks the letters alone. Sorted.
+   */
+  selectedWith?: string[];
+}
+
+/**
+ * One region of an outline entity (a glyph, or glyphs merged where they overlap), placed in the
+ * sketch: `placeOutline` makes them from `outlinePartsRegions`. Its curves are lines and
+ * Beziers whose `entityId` is the outline's.
+ */
+export interface OutlineShape {
+  /** The outline entity. */
+  entityId: string;
+  /** Unique within the sketch: `<entity id>.g<glyph>.c<contour>` of the outer loop's first contour. */
+  key: string;
+  /** The key needed a positional `#k` to be unique (merging split one contour into several loops). */
+  fragile: boolean;
+  /** Counter-clockwise. */
+  outer: RegionLoop;
+  /** Clockwise, each with the key of its contour (for the counter's region id). */
+  holes: (RegionLoop & { key: string })[];
 }
 
 export type RegionDiagnosticCode =
@@ -108,7 +142,13 @@ export type RegionDiagnosticCode =
   /** A loop touches itself or another loop of the same region at a single point. */
   | 'touching'
   /** Two faces got the same id; they are numbered by position. */
-  | 'ambiguous-id';
+  | 'ambiguous-id'
+  /**
+   * An outline (text) crosses other sketch geometry or another outline, or encloses some: its
+   * regions are kept as they are and overlap the others' (the kernel fuses what is extruded
+   * together), and it cuts no hole in the face around it.
+   */
+  | 'outline-overlap';
 
 export interface RegionDiagnostic {
   code: RegionDiagnosticCode;
@@ -133,6 +173,22 @@ export interface SketchRegions {
 export interface RegionOptions {
   /** Coincidence tolerance in millimetres (default 1e-6 times the sketch extent, at least 1e-6). */
   tolerance?: number;
+  /**
+   * The regions of the sketch's non-construction outline entities, placed (`placeOutline`).
+   * Outline entities themselves are not curves of the planar graph; without this they bound
+   * nothing.
+   */
+  outlines?: readonly OutlineShape[];
+  /**
+   * The work budget for joining `outlines` to the faces (default `MAX_OUTLINE_PLACEMENT_WORK`);
+   * lower it in tests.
+   */
+  outlineWork?: number;
+  /**
+   * Most polygon points for flattening the faces and `outlines` (default
+   * `MAX_OUTLINE_POLYGON_POINTS`); lower it in tests.
+   */
+  outlinePoints?: number;
 }
 
 // Curves ----------------------------------------------------------------------------
@@ -166,6 +222,8 @@ function makeCurve(e: SketchEntity, index: number, tol: number): Curve | string 
   switch (e.kind) {
     case 'point':
       return 'a point bounds nothing';
+    case 'outline':
+      return 'an outline is not a curve';
     case 'line': {
       if (!finite2(e.start) || !finite2(e.end)) return 'coordinates are not finite';
       const length = dist(e.start, e.end);
@@ -598,7 +656,9 @@ export function detectRegions(
   options: RegionOptions = {},
 ): SketchRegions {
   const diagnostics: RegionDiagnostic[] = [];
-  const candidates = entities.filter((e) => !e.construction && e.kind !== 'point');
+  const candidates = entities.filter(
+    (e) => !e.construction && e.kind !== 'point' && e.kind !== 'outline',
+  );
 
   let extent = 0;
   for (const e of candidates) {
@@ -611,6 +671,19 @@ export function detectRegions(
             ? [...e.center, ...e.start, ...e.end]
             : [];
     for (const v of coords) if (Number.isFinite(v)) extent = Math.max(extent, Math.abs(v));
+  }
+  // Control points too, as the outline's own flattening does (`outlineRegions`), so the outlines
+  // are never flattened here more finely than they were there.
+  for (const shape of options.outlines ?? []) {
+    for (const c of shape.outer.curves) {
+      const coords =
+        c.kind === 'bezier'
+          ? c.points.flat()
+          : c.kind === 'line'
+            ? c.start
+            : [...c.start, ...c.center, c.radius];
+      for (const v of coords) if (Number.isFinite(v)) extent = Math.max(extent, Math.abs(v));
+    }
   }
   const tol = options.tolerance ?? RELATIVE_TOLERANCE * Math.max(1, 2 * extent);
 
@@ -1095,8 +1168,751 @@ export function detectRegions(
       (region.depth % 2 === 0 ? regions : voids).push(region);
     });
   }
+  if (options.outlines && options.outlines.length > 0) {
+    addOutlines(
+      options.outlines,
+      regions,
+      voids,
+      diagnostics,
+      Math.max(tol, extent * 1e-5),
+      options.outlineWork ?? MAX_OUTLINE_PLACEMENT_WORK,
+      options.outlinePoints ?? MAX_OUTLINE_POLYGON_POINTS,
+    );
+  }
   const byId = (a: Region, b: Region) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
   regions.sort(byId);
   voids.sort(byId);
   return { regions, voids, diagnostics, tolerance: tol };
+}
+
+// Outlines ----------------------------------------------------------------------------
+
+/** Chords per Bezier so that none is further than `deflection` from the curve (at most 256). */
+function bezierChords(points: readonly Vec2[], deflection: number): number {
+  const degree = points.length - 1;
+  if (degree < 2) return 1;
+  let d = 0;
+  for (let i = 0; i + 2 < points.length; i++) {
+    const a = points[i]!;
+    const b = points[i + 1]!;
+    const c = points[i + 2]!;
+    d = Math.max(d, Math.hypot(a[0] - 2 * b[0] + c[0], a[1] - 2 * b[1] + c[1]));
+  }
+  const n = Math.ceil(Math.sqrt((degree * (degree - 1) * d) / (8 * deflection)));
+  return Math.min(256, Math.max(1, n));
+}
+
+/** How an arc or circle is flattened: its start angle, signed sweep and chord count. */
+function arcChords(
+  c: Extract<RegionCurve, { kind: 'arc' | 'circle' }>,
+  deflection: number,
+): { a0: number; sweep: number; n: number } {
+  const sense = c.reversed ? -1 : 1;
+  const a0 = Math.atan2(c.start[1] - c.center[1], c.start[0] - c.center[0]);
+  let sweep = TAU;
+  if (c.kind === 'arc') {
+    const a1 = Math.atan2(c.end[1] - c.center[1], c.end[0] - c.center[0]);
+    sweep = mod((a1 - a0) * sense, TAU) || TAU;
+  }
+  const step = deflection < c.radius ? 2 * Math.acos(1 - deflection / c.radius) : Math.PI / 2;
+  const n = Math.min(1024, Math.max(2, Math.ceil(sweep / Math.max(step, 1e-3))));
+  return { a0, sweep: sense * sweep, n };
+}
+
+/** How many points `loopPolygon` makes of a loop, counted without making them. */
+export function loopPolygonSize(loop: RegionLoop, deflection: number): number {
+  let size = 0;
+  for (const c of loop.curves) {
+    if (c.kind === 'line') size += 1;
+    else if (c.kind === 'bezier') size += bezierChords(c.points, deflection);
+    else size += arcChords(c, deflection).n;
+  }
+  return size;
+}
+
+/**
+ * A region loop as a closed polygon (the last point joins the first), every curve flattened to
+ * chords no further than `deflection` from it. For containment and crossing tests, and drawing.
+ * `loopPolygonSize` says how many points it makes.
+ */
+export function loopPolygon(loop: RegionLoop, deflection: number): Vec2[] {
+  const out: Vec2[] = [];
+  for (const c of loop.curves) {
+    if (c.kind === 'line') {
+      out.push(c.start);
+    } else if (c.kind === 'bezier') {
+      const n = bezierChords(c.points, deflection);
+      for (let k = 0; k < n; k++) out.push(bezierPoint(c.points, k / n));
+    } else {
+      const { a0, sweep, n } = arcChords(c, deflection);
+      for (let k = 0; k < n; k++) {
+        const a = a0 + (sweep * k) / n;
+        out.push([c.center[0] + c.radius * Math.cos(a), c.center[1] + c.radius * Math.sin(a)]);
+      }
+    }
+  }
+  return out;
+}
+
+type Box = readonly [number, number, number, number];
+
+function polygonBox(polygon: readonly Vec2[]): Box {
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  for (const [x, y] of polygon) {
+    x0 = Math.min(x0, x);
+    y0 = Math.min(y0, y);
+    x1 = Math.max(x1, x);
+    y1 = Math.max(y1, y);
+  }
+  return [x0, y0, x1, y1];
+}
+
+/** Whether `p` is inside a closed polygon (nonzero winding; points on it count as either). */
+function insidePolygon(polygon: readonly Vec2[], p: Vec2): boolean {
+  let w = 0;
+  for (let i = 0; i < polygon.length; i++) {
+    const a = polygon[i]!;
+    const b = polygon[(i + 1) % polygon.length]!;
+    const side = cross(sub(b, a), sub(p, a));
+    if (a[1] <= p[1]) {
+      if (b[1] > p[1] && side > 0) w++;
+    } else if (b[1] <= p[1] && side < 0) {
+      w--;
+    }
+  }
+  return w !== 0;
+}
+
+/** Whether two segments come within `tol` of each other. */
+function segmentsMeet(a0: Vec2, a1: Vec2, b0: Vec2, b1: Vec2, tol: number): boolean {
+  const near = (p: Vec2, s0: Vec2, s1: Vec2) => {
+    const d = sub(s1, s0);
+    const len2 = dot(d, d);
+    const t = len2 === 0 ? 0 : Math.min(1, Math.max(0, dot(sub(p, s0), d) / len2));
+    return dist(p, [s0[0] + t * d[0], s0[1] + t * d[1]]) <= tol;
+  };
+  const o1 = cross(sub(a1, a0), sub(b0, a0));
+  const o2 = cross(sub(a1, a0), sub(b1, a0));
+  const o3 = cross(sub(b1, b0), sub(a0, b0));
+  const o4 = cross(sub(b1, b0), sub(a1, b0));
+  if (((o1 > 0 && o2 < 0) || (o1 < 0 && o2 > 0)) && ((o3 > 0 && o4 < 0) || (o3 < 0 && o4 > 0))) {
+    return true;
+  }
+  return near(a0, b0, b1) || near(a1, b0, b1) || near(b0, a0, a1) || near(b1, a0, a1);
+}
+
+/**
+ * Elementary steps `detectRegions` may spend joining outlines to the sketch's faces: a polygon
+ * vertex flattened or visited by a winding count, a segment pair tested, a grid cell filled, a
+ * pair of shapes or boxes compared. Past it, every outline is kept as it is with an
+ * `outline-overlap` warning (see `addOutlines`). Ten thousand characters of Inter Bold in a plate
+ * (12k loops) spend under two million; running the whole budget out takes about 0.6 s.
+ */
+export const MAX_OUTLINE_PLACEMENT_WORK = 100_000_000;
+
+/**
+ * Most polygon points `addOutlines` may make flattening the faces' loops and the outlines (about
+ * 64 bytes each, so a few hundred megabytes at most). Past it, as past the work budget, every
+ * outline is kept as it is with an `outline-overlap` warning. Ten thousand characters of Inter
+ * Bold make well under a million.
+ */
+export const MAX_OUTLINE_POLYGON_POINTS = 4_000_000;
+
+/** Thrown when `addOutlines` runs out of its work budget. */
+class OutOfWork extends Error {}
+
+/** What `addOutlines` may still spend. */
+class Work {
+  left: number;
+  constructor(budget: number) {
+    this.left = budget;
+  }
+  spend(steps: number): void {
+    this.left -= steps;
+    if (this.left < 0) throw new OutOfWork('out of work');
+  }
+}
+
+/** Pairs below this many segment tests are tested directly; above it, through a grid. */
+const DIRECT_PAIRS = 4096;
+/** Most cells of one grid (a grid keeps only the cells something lies in). */
+const MAX_GRID_CELLS = 1 << 20;
+
+/** Whether the outlines of two closed polygons cross or touch (within `tol`). */
+function polygonsMeet(
+  a: readonly Vec2[],
+  b: readonly Vec2[],
+  tol: number,
+  work: Work,
+  aBox: Box = polygonBox(a),
+  bBox: Box = polygonBox(b),
+): boolean {
+  const n = a.length;
+  const m = b.length;
+  if (n * m <= DIRECT_PAIRS) {
+    work.spend(n * m);
+    for (let i = 0; i < n; i++) {
+      const a0 = a[i]!;
+      const a1 = a[(i + 1) % n]!;
+      for (let j = 0; j < m; j++) {
+        if (segmentsNear(a0, a1, b[j]!, b[(j + 1) % m]!, tol)) return true;
+      }
+    }
+    return false;
+  }
+  // Only segments in the overlap of the two boxes can meet: index b's there on a grid and look
+  // a's up in it, so two large outlines whose boxes overlap cost what lies near each other.
+  const x0 = Math.max(aBox[0], bBox[0]) - tol;
+  const y0 = Math.max(aBox[1], bBox[1]) - tol;
+  const x1 = Math.min(aBox[2], bBox[2]) + tol;
+  const y1 = Math.min(aBox[3], bBox[3]) + tol;
+  if (x0 > x1 || y0 > y1) return false;
+  const segBox = (p: readonly Vec2[], i: number): Box => {
+    const s0 = p[i]!;
+    const s1 = p[(i + 1) % p.length]!;
+    return [
+      Math.min(s0[0], s1[0]),
+      Math.min(s0[1], s1[1]),
+      Math.max(s0[0], s1[0]),
+      Math.max(s0[1], s1[1]),
+    ];
+  };
+  const inOverlap = (box: Box) => box[0] <= x1 && box[2] >= x0 && box[1] <= y1 && box[3] >= y0;
+  work.spend(n + m);
+  const bs: number[] = [];
+  for (let j = 0; j < m; j++) if (inOverlap(segBox(b, j))) bs.push(j);
+  if (bs.length === 0) return false;
+  const as: number[] = [];
+  for (let i = 0; i < n; i++) if (inOverlap(segBox(a, i))) as.push(i);
+  if (as.length === 0) return false;
+  const w = Math.max(x1 - x0, Number.MIN_VALUE);
+  const h = Math.max(y1 - y0, Number.MIN_VALUE);
+  const [cols, rows] = gridSize(Math.max(as.length, bs.length), w, h);
+  const col = (x: number) => Math.min(cols - 1, Math.max(0, Math.floor(((x - x0) / w) * cols)));
+  const row = (y: number) => Math.min(rows - 1, Math.max(0, Math.floor(((y - y0) / h) * rows)));
+  const cells = new Map<number, number[]>();
+  for (const j of bs) {
+    const box = segBox(b, j);
+    const c0 = col(box[0] - tol);
+    const c1 = col(box[2] + tol);
+    const r0 = row(box[1] - tol);
+    const r1 = row(box[3] + tol);
+    work.spend((c1 - c0 + 1) * (r1 - r0 + 1));
+    for (let r = r0; r <= r1; r++) {
+      for (let c = c0; c <= c1; c++) {
+        const k = r * cols + c;
+        const list = cells.get(k);
+        if (list) list.push(j);
+        else cells.set(k, [j]);
+      }
+    }
+  }
+  // Each pair is tested once, however many cells the two share.
+  const seen = new Int32Array(m).fill(-1);
+  for (const i of as) {
+    const box = segBox(a, i);
+    const a0 = a[i]!;
+    const a1 = a[(i + 1) % n]!;
+    const c0 = col(box[0]);
+    const c1 = col(box[2]);
+    const r0 = row(box[1]);
+    const r1 = row(box[3]);
+    work.spend((c1 - c0 + 1) * (r1 - r0 + 1));
+    for (let r = r0; r <= r1; r++) {
+      for (let c = c0; c <= c1; c++) {
+        const list = cells.get(r * cols + c);
+        if (!list) continue;
+        work.spend(list.length);
+        for (const j of list) {
+          if (seen[j] === i) continue;
+          seen[j] = i;
+          if (segmentsNear(a0, a1, b[j]!, b[(j + 1) % m]!, tol)) return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+/** `segmentsMeet` after a box test of the two segments. */
+function segmentsNear(a0: Vec2, a1: Vec2, b0: Vec2, b1: Vec2, tol: number): boolean {
+  if (Math.max(b0[0], b1[0]) < Math.min(a0[0], a1[0]) - tol) return false;
+  if (Math.min(b0[0], b1[0]) > Math.max(a0[0], a1[0]) + tol) return false;
+  if (Math.max(b0[1], b1[1]) < Math.min(a0[1], a1[1]) - tol) return false;
+  if (Math.min(b0[1], b1[1]) > Math.max(a0[1], a1[1]) + tol) return false;
+  return segmentsMeet(a0, a1, b0, b1, tol);
+}
+
+const insidePoint = (box: Box, p: Vec2) =>
+  p[0] >= box[0] && p[0] <= box[2] && p[1] >= box[1] && p[1] <= box[3];
+
+const boxMeets = (a: Box, b: Box, tol: number) =>
+  a[0] <= b[2] + tol && b[0] <= a[2] + tol && a[1] <= b[3] + tol && b[1] <= a[3] + tol;
+
+/** A loop run the other way round: curves in reverse order, each reversed. */
+function reverseLoop(loop: RegionLoop): RegionLoop {
+  const curves = [...loop.curves].reverse().map((c): RegionCurve => {
+    const reversed = !c.reversed;
+    switch (c.kind) {
+      case 'line':
+        return { ...c, reversed, start: c.end, end: c.start };
+      case 'bezier':
+        return { ...c, reversed, points: [...c.points].reverse(), start: c.end, end: c.start };
+      case 'arc':
+        return { ...c, reversed, start: c.end, end: c.start };
+      case 'circle':
+        return { ...c, reversed };
+    }
+  });
+  return { curves, area: -loop.area };
+}
+
+/**
+ * Grid columns and rows for about `count` items over a `w` by `h` area: about `count` cells in
+ * all, shaped like the area, so a long line of text gets a long row of cells.
+ */
+function gridSize(count: number, w: number, h: number): [number, number] {
+  const n = Math.max(1, Math.min(count, MAX_GRID_CELLS));
+  const aspect = w > 0 && h > 0 ? w / h : 1;
+  const clamp = (v: number) => Math.min(n, Math.max(1, Math.ceil(v)));
+  return [clamp(Math.sqrt(n * aspect)), clamp(Math.sqrt(n / aspect))];
+}
+
+/** A bounding box of a loop from its curves' ends, control points and arc circles (no flattening). */
+function loopBox(loop: RegionLoop): Box {
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  const add = (p: Vec2, r = 0) => {
+    x0 = Math.min(x0, p[0] - r);
+    y0 = Math.min(y0, p[1] - r);
+    x1 = Math.max(x1, p[0] + r);
+    y1 = Math.max(y1, p[1] + r);
+  };
+  for (const c of loop.curves) {
+    if (c.kind === 'line') {
+      add(c.start);
+      add(c.end);
+    } else if (c.kind === 'bezier') {
+      for (const p of c.points) add(p);
+    } else {
+      add(c.center, c.radius);
+    }
+  }
+  return [x0, y0, x1, y1];
+}
+
+const unionBox = (a: Box, b: Box): Box => [
+  Math.min(a[0], b[0]),
+  Math.min(a[1], b[1]),
+  Math.max(a[2], b[2]),
+  Math.max(a[3], b[3]),
+];
+
+/**
+ * Boxes on a grid, for "which boxes hold this point". A box over more than `WIDE_CELLS` cells
+ * goes on a list every query reads instead.
+ */
+class BoxGrid {
+  readonly #cells = new Map<number, number[]>();
+  readonly #wide: number[] = [];
+  readonly #bounds: Box;
+  readonly #cols: number;
+  readonly #rows: number;
+
+  constructor(boxes: readonly Box[], work: Work) {
+    let bounds: Box = [Infinity, Infinity, -Infinity, -Infinity];
+    for (const b of boxes) bounds = unionBox(bounds, b);
+    this.#bounds = bounds;
+    [this.#cols, this.#rows] = gridSize(boxes.length, bounds[2] - bounds[0], bounds[3] - bounds[1]);
+    work.spend(boxes.length);
+    boxes.forEach((b, i) => {
+      const c0 = this.#col(b[0]);
+      const c1 = this.#col(b[2]);
+      const r0 = this.#row(b[1]);
+      const r1 = this.#row(b[3]);
+      const count = (c1 - c0 + 1) * (r1 - r0 + 1);
+      if (count > WIDE_CELLS) {
+        this.#wide.push(i);
+        return;
+      }
+      work.spend(count);
+      for (let r = r0; r <= r1; r++) {
+        for (let c = c0; c <= c1; c++) {
+          const k = r * this.#cols + c;
+          const list = this.#cells.get(k);
+          if (list) list.push(i);
+          else this.#cells.set(k, [i]);
+        }
+      }
+    });
+  }
+
+  #col(x: number): number {
+    const w = this.#bounds[2] - this.#bounds[0];
+    if (!(w > 0)) return 0;
+    return Math.min(
+      this.#cols - 1,
+      Math.max(0, Math.floor(((x - this.#bounds[0]) / w) * this.#cols)),
+    );
+  }
+
+  #row(y: number): number {
+    const h = this.#bounds[3] - this.#bounds[1];
+    if (!(h > 0)) return 0;
+    return Math.min(
+      this.#rows - 1,
+      Math.max(0, Math.floor(((y - this.#bounds[1]) / h) * this.#rows)),
+    );
+  }
+
+  /** Indices of the boxes that may hold `p` (a superset), each once. */
+  near(p: Vec2, work: Work): readonly number[] {
+    const list = this.#cells.get(this.#row(p[1]) * this.#cols + this.#col(p[0])) ?? [];
+    work.spend(list.length + this.#wide.length);
+    return this.#wide.length === 0 ? list : [...list, ...this.#wide];
+  }
+}
+
+/** Cells a box may cover in a `BoxGrid` before it goes on the list every query reads. */
+const WIDE_CELLS = 64;
+
+/**
+ * Adds the regions of outline entities to the faces of the planar graph. An outline that lies
+ * cleanly inside a face (crossing none of its loops, enclosing no other geometry, overlapping no
+ * other outline) cuts a hole of its shape in that face, and each of its counters becomes a face
+ * of the same kind (region or void), selected with that face's entities. An outline that
+ * crosses or encloses other geometry is kept as it is, with an `outline-overlap` warning. Every
+ * outline region is a region.
+ *
+ * The tests are bounded: outlines are compared with other entities' outlines only where their
+ * boxes meet (a sweep by x), segments of two outlines only where they lie near each other (a
+ * grid), and the work as a whole by `budget` (`MAX_OUTLINE_PLACEMENT_WORK`). When the budget runs
+ * out, no outline cuts a hole and every outline entity gets an `outline-overlap` warning naming
+ * what its box meets: the result is the one an overlapping text gets, never a wrong hole.
+ */
+function addOutlines(
+  shapes: readonly OutlineShape[],
+  regions: Region[],
+  voids: Region[],
+  diagnostics: RegionDiagnostic[],
+  deflection: number,
+  budget: number,
+  maxPoints: number = MAX_OUTLINE_POLYGON_POINTS,
+): void {
+  const tol = deflection;
+  const work = new Work(budget);
+  /** Where an outline may cut its hole: a face of the graph, or a counter of another outline. */
+  type Host = { region: Region; filled: boolean };
+  type Face = Host & {
+    outer: Vec2[];
+    box: Box;
+    holes: Vec2[][];
+    holeBoxes: Box[];
+  };
+  const shapeArea = (i: number) => Math.abs(shapes[i]!.outer.area);
+  const inside = (polygon: readonly Vec2[], p: Vec2) => {
+    work.spend(polygon.length);
+    return insidePolygon(polygon, p);
+  };
+
+  // Every outline entity, in order of first appearance, with the box of its shapes.
+  const entityOrder: string[] = [];
+  const entityBox = new Map<string, Box>();
+  for (const shape of shapes) {
+    const box = loopBox(shape.outer);
+    const known = entityBox.get(shape.entityId);
+    if (!known) entityOrder.push(shape.entityId);
+    entityBox.set(shape.entityId, known ? unionBox(known, box) : box);
+  }
+
+  const meets = new Map<number, Set<string>>();
+  const mark = (i: number, ids: Iterable<string>) => {
+    const set = meets.get(i) ?? new Set<string>();
+    for (const id of ids) set.add(id);
+    meets.set(i, set);
+  };
+  let faces: Face[] = [];
+  // Per shape, the faces it may cut a hole in, and the innermost other shape whose outer loop
+  // holds its first point with the counter (hole index) of that shape it lies in, or -1 when it
+  // lies in no counter. An outline in another's counter cuts no hole in the face that one went
+  // into, but cuts one in that counter.
+  const candidates: Face[][] = shapes.map(() => []);
+  const container: ({ shape: number; counter: number } | null)[] = shapes.map(() => null);
+  let exhausted = false;
+  try {
+    // Counted (and paid for) before it is made: a text of many finely flattened Beziers must run
+    // out of work or points, not out of memory.
+    let points = 0;
+    const flatten = (loop: RegionLoop) => {
+      const size = loopPolygonSize(loop, deflection);
+      work.spend(size);
+      points += size;
+      if (points > maxPoints) throw new OutOfWork('too many points');
+      return loopPolygon(loop, deflection);
+    };
+    faces = [
+      ...regions.map((r) => ({ r, filled: true })),
+      ...voids.map((r) => ({ r, filled: false })),
+    ].map(({ r, filled }) => {
+      const outer = flatten(r.outer);
+      const holes = r.holes.map(flatten);
+      return {
+        region: r,
+        filled,
+        outer,
+        box: polygonBox(outer),
+        holes,
+        holeBoxes: holes.map(polygonBox),
+      };
+    });
+    const graphLoops = faces.flatMap((f) => [
+      { polygon: f.outer, box: f.box, loop: f.region.outer },
+      ...f.holes.map((polygon, k) => ({
+        polygon,
+        box: f.holeBoxes[k]!,
+        loop: f.region.holes[k]!,
+      })),
+    ]);
+    const placed = shapes.map((shape) => {
+      const outer = flatten(shape.outer);
+      return { shape, outer, box: polygonBox(outer) };
+    });
+    const counterPolygons = new Map<string, Vec2[]>();
+    const counterPolygon = (j: number, k: number) => {
+      const key = `${j}/${k}`;
+      let polygon = counterPolygons.get(key);
+      if (!polygon) {
+        polygon = flatten(shapes[j]!.holes[k]!);
+        counterPolygons.set(key, polygon);
+      }
+      return polygon;
+    };
+
+    // Outlines in the way of the sketch's own geometry.
+    placed.forEach((s, i) => {
+      for (const g of graphLoops) {
+        work.spend(1);
+        if (!boxMeets(s.box, g.box, tol)) continue;
+        if (
+          polygonsMeet(s.outer, g.polygon, tol, work, s.box, g.box) ||
+          inside(s.outer, g.polygon[0]!)
+        ) {
+          mark(
+            i,
+            g.loop.curves.map((c) => c.entityId),
+          );
+        }
+      }
+    });
+
+    // Outlines of different entities in each other's way: a sweep by x over each pair of
+    // entities whose boxes meet, comparing a shape with the other entity's shapes it overlaps.
+    const byEntity = new Map<string, number[]>();
+    placed.forEach((s, i) => {
+      const list = byEntity.get(s.shape.entityId);
+      if (list) list.push(i);
+      else byEntity.set(s.shape.entityId, [i]);
+    });
+    const left = (i: number) => placed[i]!.box[0];
+    for (const list of byEntity.values()) {
+      work.spend(list.length);
+      list.sort((a, b) => left(a) - left(b) || a - b);
+    }
+    const pair = (i: number, j: number) => {
+      const a = placed[i]!;
+      const b = placed[j]!;
+      if (
+        polygonsMeet(a.outer, b.outer, tol, work, a.box, b.box) ||
+        inside(a.outer, b.outer[0]!) ||
+        inside(b.outer, a.outer[0]!)
+      ) {
+        mark(i, [b.shape.entityId]);
+        mark(j, [a.shape.entityId]);
+      }
+    };
+    for (let p = 0; p < entityOrder.length; p++) {
+      for (let q = p + 1; q < entityOrder.length; q++) {
+        work.spend(1);
+        const ea = entityOrder[p]!;
+        const eb = entityOrder[q]!;
+        if (!boxMeets(entityBox.get(ea)!, entityBox.get(eb)!, tol)) continue;
+        const lists = [byEntity.get(ea)!, byEntity.get(eb)!];
+        const at = [0, 0];
+        const active: number[][] = [[], []];
+        while (at[0]! < lists[0]!.length || at[1]! < lists[1]!.length) {
+          const side =
+            at[1]! >= lists[1]!.length ||
+            (at[0]! < lists[0]!.length && left(lists[0]![at[0]!]!) <= left(lists[1]![at[1]!]!))
+              ? 0
+              : 1;
+          const i = lists[side]![at[side]!++]!;
+          const box = placed[i]!.box;
+          const other = 1 - side;
+          work.spend(active[other]!.length + 1);
+          active[other] = active[other]!.filter((j) => placed[j]!.box[2] + tol >= box[0]);
+          for (const j of active[other]!) {
+            const jb = placed[j]!.box;
+            if (jb[3] < box[1] - tol || jb[1] > box[3] + tol) continue;
+            pair(i, j);
+          }
+          active[side]!.push(i);
+        }
+      }
+    }
+
+    // Where each outline that is in nobody's way would cut its hole.
+    const grid = new BoxGrid(
+      placed.map((s) => s.box),
+      work,
+    );
+    placed.forEach((s, i) => {
+      if (meets.has(i)) return;
+      const probe = s.outer[0]!;
+      for (const f of faces) {
+        work.spend(1);
+        if (!insidePoint(f.box, probe) || !inside(f.outer, probe)) continue;
+        let inHole = false;
+        for (let k = 0; k < f.holes.length && !inHole; k++) {
+          work.spend(1);
+          inHole = insidePoint(f.holeBoxes[k]!, probe) && inside(f.holes[k]!, probe);
+        }
+        if (!inHole) candidates[i]!.push(f);
+      }
+      if (candidates[i]!.length === 0) return;
+      // Every other shape, earlier or later: the outer loops of one text nest (its glyphs do not
+      // cross), so the innermost one holding the probe is the one with the smallest area.
+      let innermost = -1;
+      for (const j of grid.near(probe, work)) {
+        if (j === i || meets.has(j) || !insidePoint(placed[j]!.box, probe)) continue;
+        if (innermost >= 0 && shapeArea(j) >= shapeArea(innermost)) continue;
+        if (inside(placed[j]!.outer, probe)) innermost = j;
+      }
+      if (innermost < 0) return;
+      let counter = -1;
+      const holes = shapes[innermost]!.holes;
+      for (let k = 0; k < holes.length && counter < 0; k++) {
+        if (inside(counterPolygon(innermost, k), probe)) counter = k;
+      }
+      container[i] = { shape: innermost, counter };
+    });
+  } catch (error) {
+    if (!(error instanceof OutOfWork)) throw error;
+    exhausted = true;
+  }
+
+  if (exhausted) {
+    // Every outline is kept as it is; each entity is reported with what its box meets.
+    const graphBoxes = [...regions, ...voids].flatMap((r) =>
+      [r.outer, ...r.holes].map((loop) => ({ box: loopBox(loop), loop })),
+    );
+    for (const id of [...entityOrder].sort()) {
+      const box = entityBox.get(id)!;
+      const others = new Set<string>();
+      for (const other of entityOrder) {
+        if (other !== id && boxMeets(box, entityBox.get(other)!, tol)) others.add(other);
+      }
+      for (const g of graphBoxes) {
+        if (!boxMeets(box, g.box, tol)) continue;
+        for (const c of g.loop.curves) if (c.entityId !== id) others.add(c.entityId);
+      }
+      const named = [...others].sort();
+      diagnostics.push({
+        code: 'outline-overlap',
+        severity: 'warning',
+        message:
+          named.length > 0
+            ? `'${id}' is too complex to check against ${named.map((o) => `'${o}'`).join(', ')}; its regions overlap them and cut no hole in the face around them`
+            : `'${id}' is too complex to place in the sketch's faces; its regions cut no hole in the face around them`,
+        entityIds: [id, ...named].sort(),
+      });
+    }
+  } else {
+    const byEntity = new Map<string, Set<string>>();
+    for (const [i, ids] of meets) {
+      const id = shapes[i]!.entityId;
+      const set = byEntity.get(id) ?? new Set<string>();
+      for (const other of ids) if (other !== id) set.add(other);
+      byEntity.set(id, set);
+    }
+    for (const id of [...byEntity.keys()].sort()) {
+      const others = [...byEntity.get(id)!].sort();
+      diagnostics.push({
+        code: 'outline-overlap',
+        severity: 'warning',
+        message: `'${id}' crosses or encloses ${others.map((o) => `'${o}'`).join(', ')}; its regions that do overlap them and cut no hole in the face around them`,
+        entityIds: [id, ...others].sort(),
+      });
+    }
+  }
+
+  // Hosts are chosen outermost first, so a shape's container has its host (and counters) when
+  // the shape comes to choose: by outer area, largest first (a container is larger than what it
+  // holds), then by order.
+  const hosts: (Host | null)[] = shapes.map(() => null);
+  const counters: Host[][] = shapes.map(() => []);
+  const order = shapes.map((_, i) => i);
+  order.sort((a, b) => shapeArea(b) - shapeArea(a) || a - b);
+  for (const i of order) {
+    const shape = shapes[i]!;
+    const holes = shape.holes.map(({ curves, area }) => ({ curves, area }));
+    let face: Host | null = null;
+    if (!exhausted && !meets.has(i)) {
+      const within = container[i];
+      if (within && hosts[within.shape]) {
+        // In a counter of an outline that cut its hole: a hole in that counter, if it lies in one.
+        face = within.counter >= 0 ? (counters[within.shape]![within.counter] ?? null) : null;
+      } else {
+        // Not in the faces any outline around it went into (whose hole it lies in).
+        const taken = new Set<Host>();
+        let w = within;
+        for (let n = 0; w && n < shapes.length; n++, w = container[w.shape]) {
+          const h = hosts[w.shape];
+          if (h) taken.add(h);
+        }
+        for (const f of candidates[i]!) {
+          if (taken.has(f)) continue;
+          if (face !== null && Math.abs(f.region.area) >= Math.abs(face.region.area)) continue;
+          face = f;
+        }
+      }
+    }
+    hosts[i] = face;
+    const holeArea = holes.reduce((a, h) => a + Math.abs(h.area), 0);
+    regions.push({
+      id: shape.key,
+      fragile: shape.fragile,
+      outer: shape.outer,
+      holes,
+      area: shape.outer.area - holeArea,
+      depth: face ? face.region.depth + 1 : 0,
+      entityIds: [shape.entityId],
+    });
+    if (!face) continue;
+    const host = face.region;
+    host.holes.push(reverseLoop(shape.outer));
+    host.area -= Math.abs(shape.outer.area);
+    if (!host.entityIds.includes(shape.entityId))
+      host.entityIds = [...host.entityIds, shape.entityId].sort();
+    const selectedWith =
+      host.selectedWith ?? [...new Set(host.outer.curves.map((c) => c.entityId))].sort();
+    for (const hole of shape.holes) {
+      const counter: Region = {
+        id: `${hole.key}/counter`,
+        fragile: shape.fragile,
+        outer: reverseLoop(hole),
+        holes: [],
+        area: Math.abs(hole.area),
+        depth: host.depth + 2,
+        entityIds: [shape.entityId],
+        selectedWith,
+      };
+      (face.filled ? regions : voids).push(counter);
+      counters[i]!.push({ region: counter, filled: face.filled });
+    }
+  }
 }

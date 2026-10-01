@@ -48,6 +48,13 @@ export interface DocumentChange {
    */
   readonly printChanged: boolean;
   readonly print: PrintChange;
+  /**
+   * The font list changed (a font added or removed; since version 9). Never a regen trigger by
+   * itself: a font's bytes never change under its id and a font in use cannot be removed, so
+   * only an outline that starts or stops using a font changes geometry, and its sketch's part
+   * reports that.
+   */
+  readonly fontsChanged: boolean;
 }
 
 /**
@@ -413,6 +420,7 @@ function diffRaw(prev: ManufaktureDocument, next: ManufaktureDocument): Document
     // The counters alone can differ (a restore keeps the higher ones): still a print change.
     printChanged: printTouched(print) || !deepEqual(prev.print, next.print),
     print,
+    fontsChanged: !deepEqual(prev.fonts, next.fonts),
   };
 }
 

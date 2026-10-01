@@ -26,7 +26,10 @@ import {
   ASSEMBLY_COUNTER,
   CONFIG_PARAMETER_COUNTER,
   CONFIG_ROW_COUNTER,
+  FONT_COUNTER,
+  MAX_SKETCH_OUTLINE_TEXT,
   SKETCH_ORIGIN,
+  codePointLength,
   type Assembly,
   type ConfigRow,
   type Configurations,
@@ -175,6 +178,7 @@ const VERTICES: Record<string, readonly string[]> = {
   line: ['start', 'end'],
   circle: ['center'],
   arc: ['start', 'end', 'center'],
+  outline: ['anchor'],
 };
 
 /**
@@ -185,9 +189,39 @@ const VERTICES: Record<string, readonly string[]> = {
 function checkSketch(
   sketch: SketchFeature,
   path: readonly (string | number)[],
+  fontIds: ReadonlySet<string>,
   out: CoreError[],
 ): void {
   const entities = new Map(sketch.entities.map((e) => [e.id, e]));
+  let text = 0;
+  sketch.entities.forEach((e, ei) => {
+    if (e.kind !== 'outline') return;
+    const epath = [...path, 'entities', ei];
+    if (e.id.includes('#')) {
+      // Glyph edge ids are built on the entity id, which therefore takes no split suffix.
+      out.push({
+        code: 'invalid-id',
+        message: `Outline ${e.id} cannot be a split piece`,
+        path: [...epath, 'id'],
+      });
+    }
+    if (!fontIds.has(e.source.font)) {
+      out.push({
+        code: 'dependency',
+        message: `Outline ${e.id} uses font ${e.source.font}, which the document does not have`,
+        path: [...epath, 'source', 'font'],
+        blockers: [e.source.font],
+      });
+    }
+    text += codePointLength(e.source.text);
+  });
+  if (text > MAX_SKETCH_OUTLINE_TEXT) {
+    out.push({
+      code: 'sketch',
+      message: `The texts of ${sketch.id} hold ${text} characters together; a sketch holds at most ${MAX_SKETCH_OUTLINE_TEXT}`,
+      path: [...path, 'entities'],
+    });
+  }
   sketch.constraints.forEach((c, ci) => {
     const cpath = [...path, 'constraints', ci];
     for (const t of constraintTargets(c)) {
@@ -372,7 +406,13 @@ function checkDuplicates(
   });
 }
 
-function checkPart(part: Part, pi: number, variables: ReadonlySet<string>, out: CoreError[]): void {
+function checkPart(
+  part: Part,
+  pi: number,
+  variables: ReadonlySet<string>,
+  fontIds: ReadonlySet<string>,
+  out: CoreError[],
+): void {
   const ppath = ['parts', pi];
   const index = new Map<string, number>();
   const subIds = new Set<string>();
@@ -467,7 +507,7 @@ function checkPart(part: Part, pi: number, variables: ReadonlySet<string>, out: 
     const scope = featureScope(f);
     checkDuplicates(scope, `the scope of ${f.id}`, [...fpath, 'scope'], out);
     scope.forEach((body, si) => checkBodyId(part, index, body, fi, [...fpath, 'scope', si], out));
-    if (f.kind === 'sketch') checkSketch(f, fpath, out);
+    if (f.kind === 'sketch') checkSketch(f, fpath, fontIds, out);
     // Source body ids name bodies of the source document: only duplicates are checked here.
     if (f.kind === 'derived' && f.bodies !== undefined) {
       checkDuplicates(f.bodies, `the bodies ${f.id} derives`, [...fpath, 'bodies'], out);
@@ -877,6 +917,17 @@ function previewId(counter: string, n: number): string {
 export function validateDocument(doc: ManufaktureDocument): CoreError[] {
   const out: CoreError[] = [];
   const variables = checkVariables(doc.variables, out);
+  const fontIds = new Set<string>();
+  doc.fonts.forEach((font, i) => {
+    checkAllocated(font.id, FONT_COUNTER, doc.nextIds, 'Font', ['fonts', i, 'id'], out);
+    fontIds.add(font.id);
+  });
+  checkUnique(
+    doc.fonts.map((f) => f.id),
+    'Font id',
+    (i) => ['fonts', i, 'id'],
+    out,
+  );
   const partIds = new Set<string>();
   doc.parts.forEach((part, pi) => {
     const parsed = parseFeatureId(part.id);
@@ -895,7 +946,7 @@ export function validateDocument(doc: ManufaktureDocument): CoreError[] {
       });
     }
     partIds.add(part.id);
-    checkPart(part, pi, variables, out);
+    checkPart(part, pi, variables, fontIds, out);
   });
   checkConfigurations(doc, variables, out);
   checkUnique(

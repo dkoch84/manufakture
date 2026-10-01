@@ -18,6 +18,7 @@
     "@manufakture/core": "workspace:*",
     "@manufakture/kernel": "workspace:*",
     "@manufakture/sketch": "workspace:*",
+    "@manufakture/text": "workspace:*",
     "@manufakture/units": "workspace:*",
     "comlink": "^4.4.2",
     "libcascade": "3.0.2"

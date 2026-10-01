@@ -42,7 +42,9 @@ file, the required tables, and the character map: opentype.js expands every rang
 subtable into one entry per code point, so one damaged byte cost it 3 s in testing and a hostile
 range could cost far more. Subtables of format 4, 12, 13 and 14 are bounds-checked and refused when
 they map more than `MAX_CMAP_CODE_POINTS` (0x40000) code points. The parser then runs on a private
-copy inside a try/catch, with the layout and variation tables hidden from it (`GSUB`, `GPOS`,
+copy inside a try/catch (the kerning reader and the glyph checker read the same copy, lazily, so
+a caller that reuses or changes its buffer afterwards changes nothing), with the layout and
+variation tables hidden from it (`GSUB`, `GPOS`,
 `GDEF`, `fvar`, `gvar` and others are renamed in the copy's directory): this package applies no
 substitutions and reads kerning itself, opentype.js 2.0.0 throws on GSUB lookups it does not know
 (Inter's has one), and a variable font is used at its default instance, which is what `glyf` holds.
@@ -141,8 +143,10 @@ limit of its own. So callers must run `loadFont`, `layoutText` and `outlineRegio
 `@manufakture/sketch`) for a user font **in a worker with a time limit, and terminate the worker when
 the limit passes**, rather than wait for it. A timeout, or the worker dying out of memory, must reach
 the user as "this font could not be read", the same as a `FontError`, and the font is not used. The
-watchdog is part of the regen worker's font handling (T3.2c); this package assumes it. The limits
-here keep every font that is merely damaged or oversized well inside it, with a clear message.
+watchdog is part of the regen worker's font handling (T3.2c): regen runs this package in a text
+worker of its own under a `Watchdog` with a 10 s limit (`packages/regen/src/text.ts` and
+`watchdog.ts`; regen README, "Text"); this package assumes it. The limits here keep every font that
+is merely damaged or oversized well inside it, with a clear message.
 
 ## Bundled font
 
@@ -164,6 +168,11 @@ font is far above Vite's 4 KiB inlining limit), and a file URL in Node. `fetchBu
 fetches it and checks the bytes against the recorded SHA-256, so a damaged or substituted asset
 fails rather than changing geometry. `INTER_BOLD` carries the id, names, version, size, SHA-256,
 SPDX identifier and copyright line that documents record (T3.2c).
+
+The metadata and the fetch are also importable alone as `@manufakture/text/bundled`
+(`src/bundled.ts`, with `fontSha256` from `src/sha256.ts`), which does not load opentype.js: the
+regen engine needs a bundled font's SHA-256 for its cache keys but parses fonts only in the text
+worker, so its own bundle stays free of the parser.
 
 ### Checks (ADR 0011, decision 3), 2026-10-01
 
@@ -204,11 +213,12 @@ Run on the file in this directory by `bundled.test.ts`, which repeats them on ev
 ## Tests
 
 `vitest run --project packages packages/text` runs everything in Node against the bundled font:
-`font.test.ts` (names, embedding permissions, kerning against HarfBuzz values, every refusal, a
-damaged GPOS, the cmap cap, random damage), `kerning.test.ts` (crafted GPOS tables whose work
+`font.test.ts` (names, embedding permissions, kerning against HarfBuzz values, a caller's buffer
+changed after loading, every refusal, a damaged GPOS, the cmap cap, random damage), `kerning.test.ts` (crafted GPOS tables whose work
 multiplies, each refused or deduplicated in milliseconds), `glyf.test.ts` (hand-built fonts with
 exponential composites, too-deep nesting, cycles, a glyph of 5,000 contours, the cap-height
 fallback, a font without `post`), `layout.test.ts` ("O" is one region with a hole, "i"
 two regions, the control points of "O" against fontTools' reading of the glyf table, cap-height
 scaling, missing glyphs, advance widths, kerning, letter and line spacing, alignment) and
-`bundled.test.ts` (the checks above).
+`bundled.test.ts` (the checks above, and every glyph up to U+024F converting cleanly: `Ų`, whose
+ogonek leaves the bowl at a shallow angle, was refused as a crossing until T3.2c fixed the merge).

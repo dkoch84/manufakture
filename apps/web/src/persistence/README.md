@@ -4,19 +4,19 @@ Local-first storage (ADR 0004 decision 8, product decision 1): documents live in
 JSON document is the source of truth, and everything derived is rebuilt by regen. The user's view
 is in [docs/user/files.md](../../../../docs/user/files.md).
 
-| File          | What                                                                                                |
-| ------------- | --------------------------------------------------------------------------------------------------- |
-| `backend.ts`  | `StorageBackend`: read, write, remove, removeTree, list on slash paths. `MemoryBackend` for tests.  |
-| `opfs.ts`     | The Origin Private File System backend, probed before use.                                          |
-| `idb.ts`      | The IndexedDB fallback (one object store, path to bytes).                                           |
-| `storage.ts`  | Picks OPFS, then IndexedDB, then memory; storage estimate and `persist()`.                          |
-| `blobs.ts`    | The storage form of imported files and pinned versions: content-addressed blobs, checked on load.   |
-| `library.ts`  | `DocumentLibrary`: list, open, save, rename, duplicate, delete, versions, branches, replay, `.mfk`. |
-| `mfk.ts`      | Packing and unpacking `.mfk` zips, with limits and a bounded inflate (loaded on first use).         |
-| `limits.ts`   | The `.mfk` file size limit, checked before a picked or dropped file is read.                        |
-| `autosave.ts` | Records the command log per document, saves after edits pause, retries failures, names versions.    |
-| `imports.ts`  | Reads reference imports again when a document opens (loaded on first use).                          |
-| `url.ts`      | The open document, branch and part studio in the page URL (`?doc=<id>&branch=<id>&part=<id>`).      |
+| File          | What                                                                                                          |
+| ------------- | ------------------------------------------------------------------------------------------------------------- |
+| `backend.ts`  | `StorageBackend`: read, write, remove, removeTree, list on slash paths. `MemoryBackend` for tests.            |
+| `opfs.ts`     | The Origin Private File System backend, probed before use.                                                    |
+| `idb.ts`      | The IndexedDB fallback (one object store, path to bytes).                                                     |
+| `storage.ts`  | Picks OPFS, then IndexedDB, then memory; storage estimate and `persist()`.                                    |
+| `blobs.ts`    | The storage form of imported files, user fonts and pinned versions: content-addressed blobs, checked on load. |
+| `library.ts`  | `DocumentLibrary`: list, open, save, rename, duplicate, delete, versions, branches, replay, `.mfk`.           |
+| `mfk.ts`      | Packing and unpacking `.mfk` zips, with limits and a bounded inflate (loaded on first use).                   |
+| `limits.ts`   | The `.mfk` file size limit, checked before a picked or dropped file is read.                                  |
+| `autosave.ts` | Records the command log per document, saves after edits pause, retries failures, names versions.              |
+| `imports.ts`  | Reads reference imports again when a document opens (loaded on first use).                                    |
+| `url.ts`      | The open document, branch and part studio in the page URL (`?doc=<id>&branch=<id>&part=<id>`).                |
 
 ## Layout
 
@@ -30,7 +30,7 @@ documents/<id>/versions-<n>.json      the named versions, the n-th write of the 
 documents/<id>/branches-<n>.json      the branches besides main, the n-th write of the list
 documents/<id>/branches/<b>/head.json, snapshot-<rev>.json, log-<rev>.json, damaged-*
                                       branch <b>: its own head, snapshots and log
-documents/<id>/blobs/<sha256>         each imported file and pinned version, once
+documents/<id>/blobs/<sha256>         each imported file, user font and pinned version, once
 documents/<id>/damaged-snapshot-<rev>-<sha>.json, damaged-log-<rev>-<sha>.json
                                       a complete snapshot that did not read, and its log, kept aside
 ```
@@ -209,6 +209,14 @@ sits: in an assembly, an `addInstance`, the `source` of an `editInstance`, or a 
 features, instances, snapshots and commands pin it, and loading checks it like a file. A document
 stored with an instance's pin inline (before instances moved out) needs no blob and loads as it
 is; its next save moves the pin out.
+
+A font the user added to a document (core README, "Fonts"; since format version 9) is stored like
+an imported file: the entry in `fonts` (`{ id: 'font#n', family, style, source: { kind: 'file',
+fileName, size, sha256, data } }`) loses `data`, and the font file's bytes go to `blobs/<sha256>`,
+checked against `size` and `sha256` on load ("The font file Label.otf is damaged"). `blobs.ts`
+knows one by its id (`font#n`) and its `file` source, wherever it sits: in the document's `fonts`,
+or in a logged `addFont` or `restoreFont`. A bundled font (`source.kind: 'bundled'`) holds no
+bytes and has no blob.
 
 The log is what `DocumentStore` reports: one entry per `execute`, `undo` and `redo`, as
 `{ cause, label, command, at }`. Commands go through the same rewrite, so an `addFeature` of a

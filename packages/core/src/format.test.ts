@@ -12,6 +12,7 @@ import {
   migrateV5ToV6,
   migrateV6ToV7,
   migrateV7ToV8,
+  migrateV8ToV9,
   type Migration,
 } from './migrations';
 import type { CoreErrorCode } from './result';
@@ -28,6 +29,7 @@ import v5Bracket from './fixtures/v5-bracket.json';
 import v6Bracket from './fixtures/v6-bracket.json';
 import v7Bracket from './fixtures/v7-bracket.json';
 import v8Bracket from './fixtures/v8-bracket.json';
+import v9Bracket from './fixtures/v9-bracket.json';
 
 /** One fixture per older file version; `migrates every older version` checks this is complete. */
 const FIXTURES: Record<number, unknown> = {
@@ -39,6 +41,7 @@ const FIXTURES: Record<number, unknown> = {
   5: v5Bracket,
   6: v6Bracket,
   7: v7Bracket,
+  8: v8Bracket,
 };
 
 function load(value: unknown): ManufaktureDocument {
@@ -49,7 +52,7 @@ describe('serialize and deserialize', () => {
   const documents: [string, () => ManufaktureDocument][] = [
     ['an empty document', () => createDocument({ id: 'd', name: 'Empty' })],
     ['the bracket', bracket],
-    ['the current fixture', () => load(v8Bracket)],
+    ['the current fixture', () => load(v9Bracket)],
     ['the two-body fixture', () => load(v4TwoBodies)],
     [
       'a document with body props and a scope',
@@ -182,20 +185,20 @@ describe('serialize and deserialize', () => {
     expect(serialize(unwrap(deserialize(serialize(shuffled))).document)).toBe(serialize(doc));
     expect(
       serialize(doc).startsWith(
-        '{\n  "format": "manufakture",\n  "version": 8,\n  "namingScheme": 1,',
+        '{\n  "format": "manufakture",\n  "version": 9,\n  "namingScheme": 1,',
       ),
     ).toBe(true);
   });
 
   it('refuses to serialize an invalid document', () => {
     const doc = clone(bracket()) as unknown as { version: number };
-    doc.version = 9;
+    doc.version = 10;
     expect(() => serialize(doc as unknown as ManufaktureDocument)).toThrow(/Cannot serialize/);
   });
 });
 
 describe('loading errors', () => {
-  const current = () => clone(v8Bracket) as Record<string, unknown>;
+  const current = () => clone(v9Bracket) as Record<string, unknown>;
   const cases: [string, string | (() => unknown), CoreErrorCode, RegExp?][] = [
     ['not JSON', '{ "format": ', 'json'],
     ['an array', '[]', 'format'],
@@ -251,7 +254,7 @@ describe('loading errors', () => {
   it('never modifies the value it is given, even a newer one', () => {
     for (const value of [
       clone(v0Bracket),
-      { ...clone(v8Bracket), version: 99 },
+      { ...clone(v9Bracket), version: 99 },
       clone(v1Bracket),
       clone(v3Bracket),
       clone(v4Bracket),
@@ -259,6 +262,7 @@ describe('loading errors', () => {
       clone(v6Bracket),
       clone(v7Bracket),
       clone(v8Bracket),
+      clone(v9Bracket),
     ]) {
       const frozen = deepFreeze(value);
       const snapshot = JSON.stringify(frozen);
@@ -268,7 +272,7 @@ describe('loading errors', () => {
   });
 
   it('reports schema problems with paths', () => {
-    const d = clone(v8Bracket) as { variables: { expression: unknown }[] };
+    const d = clone(v9Bracket) as { variables: { expression: unknown }[] };
     d.variables[0]!.expression = 6;
     const r = parseDocument(d);
     expect(r.ok).toBe(false);
@@ -289,11 +293,12 @@ describe('migrations', () => {
     expect(migrateV5ToV6.migrate(clone(v5Bracket) as Record<string, unknown>)).toEqual(v6Bracket);
     expect(migrateV6ToV7.migrate(clone(v6Bracket) as Record<string, unknown>)).toEqual(v7Bracket);
     expect(migrateV7ToV8.migrate(clone(v7Bracket) as Record<string, unknown>)).toEqual(v8Bracket);
+    expect(migrateV8ToV9.migrate(clone(v8Bracket) as Record<string, unknown>)).toEqual(v9Bracket);
     const loaded = unwrap(parseDocument(v0Bracket));
     expect(loaded.from).toEqual({ version: 0, namingScheme: 1 });
     expect(loaded.migrated).toBe(true);
-    expect(loaded.document).toEqual(load(v8Bracket));
-    expect(JSON.parse(serialize(loaded.document))).toEqual(v8Bracket);
+    expect(loaded.document).toEqual(load(v9Bracket));
+    expect(JSON.parse(serialize(loaded.document))).toEqual(v9Bracket);
   });
 
   it('v1 to v2 changes only the version: a version 1 part has no material', () => {
@@ -346,6 +351,7 @@ describe('migrations', () => {
       version: FORMAT_VERSION,
       assemblies: [],
       print: { setups: [], nextIds: {} },
+      fonts: [],
     });
   });
 
@@ -424,7 +430,6 @@ describe('migrations', () => {
     expect(loaded.document).toEqual(load(v8Bracket));
     expect(loaded.document.print).toEqual({ setups: [], nextIds: {} });
     expect(serialize(loaded.document)).toBe(serialize(load(v8Bracket)));
-    expect(JSON.parse(serialize(loaded.document))).toEqual(v8Bracket);
   });
 
   it('v7 to v8 replaces a print key a version 7 file cannot have had', () => {
@@ -435,6 +440,31 @@ describe('migrations', () => {
       format: 'manufakture',
       version: 8,
       print: { setups: [], nextIds: {} },
+    });
+  });
+
+  it('v8 to v9 adds an empty font list after the print section, and changes nothing else', () => {
+    const migrated = migrateV8ToV9.migrate(clone(v8Bracket) as Record<string, unknown>);
+    expect(migrated).toEqual({ ...clone(v8Bracket), version: 9, fonts: [] });
+    const keys = Object.keys(migrated);
+    expect(keys.indexOf('fonts')).toBe(keys.indexOf('print') + 1);
+    const loaded = unwrap(parseDocument(v8Bracket));
+    expect(loaded.from.version).toBe(8);
+    expect(loaded.migrated).toBe(true);
+    expect(loaded.document).toEqual(load(v9Bracket));
+    expect(loaded.document.fonts).toEqual([]);
+    expect(serialize(loaded.document)).toBe(serialize(load(v9Bracket)));
+    expect(JSON.parse(serialize(loaded.document))).toEqual(v9Bracket);
+  });
+
+  it('v8 to v9 replaces a fonts key a version 8 file cannot have had', () => {
+    const odd = { ...clone(v8Bracket), fonts: 'junk' } as Record<string, unknown>;
+    expect(migrateV8ToV9.migrate(odd).fonts).toEqual([]);
+    const noPrint = { format: 'manufakture', version: 8 } as Record<string, unknown>;
+    expect(migrateV8ToV9.migrate(noPrint)).toEqual({
+      format: 'manufakture',
+      version: 9,
+      fonts: [],
     });
   });
 

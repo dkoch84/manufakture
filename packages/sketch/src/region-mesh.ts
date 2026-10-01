@@ -8,6 +8,7 @@
 
 import type { Vec2, Vec3 } from './model';
 import { placementFrame, type SketchPlacement } from './placement';
+import { flattenSegment } from './outline';
 import type { Region, RegionLoop } from './regions';
 
 export interface FillDeflection {
@@ -59,6 +60,26 @@ function flatten(loop: RegionLoop, deflection: FillDeflection): Flat {
     if (c.kind === 'line') {
       points.push(c.start);
       arcs.push(null);
+      continue;
+    }
+    if (c.kind === 'bezier') {
+      // Glyph curves: chords within the linear deflection, starting exactly at the start.
+      const chord = flattenSegment(
+        {
+          kind: 'bezier',
+          points: c.points,
+          contour: 0,
+          index: 0,
+          split: 0,
+          piece: 0,
+          reversed: false,
+        },
+        deflection.linear,
+      );
+      for (const p of chord.slice(0, -1)) {
+        points.push(p);
+        arcs.push(null);
+      }
       continue;
     }
     const sense = c.reversed ? -1 : 1;

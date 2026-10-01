@@ -54,15 +54,51 @@ export {
   type VariableValues,
 } from './values';
 export {
+  MAX_SKETCH_OUTLINE_CURVES,
+  expandOutlines,
   explicitPlacement,
   profileOf,
   selectRegions,
+  sketchFontKey,
   sketchOutcome,
   solveSketch,
+  type OutlineContext,
+  type OutlineExpansion,
   type RegenSolver,
   type SketchResult,
   type SolveOutcome,
 } from './sketches';
+export {
+  MAX_TEXT_CURVES,
+  MAX_TEXT_LOOPS,
+  MAX_TEXT_POINTS,
+  TEXT_FONT_BUDGET_MS,
+  TEXT_REGEN_BUDGET_MS,
+  TEXT_TIME_LIMIT_MS,
+  TextBudget,
+  TextCancelled,
+  createWatchdogOutliner,
+  lazyTextOutliner,
+  unreadableFont,
+  type TextCallOptions,
+  type TextFontRef,
+  type TextOutliner,
+  type TextReply,
+  type TextRequest,
+  type WatchdogOutlinerOptions,
+  type WireFont,
+  type WireReply,
+  type WireRequest,
+} from './text';
+export {
+  TextEngine,
+  createTextOutliner,
+  serveText,
+  textTooComplex,
+  type TextEngineOptions,
+  type TextOutlinerOptions,
+} from './text-engine';
+export { Watchdog, WatchdogError, type WatchdogOptions, type WorkerLike } from './watchdog';
 export {
   edgeRef,
   faceRef,

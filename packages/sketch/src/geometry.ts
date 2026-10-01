@@ -29,7 +29,11 @@ export {
   type SketchPlacement,
 } from './placement';
 export {
+  MAX_OUTLINE_PLACEMENT_WORK,
+  MAX_OUTLINE_POLYGON_POINTS,
   detectRegions,
+  loopPolygon,
+  type OutlineShape,
   type Region,
   type RegionCurve,
   type RegionDiagnostic,
@@ -61,9 +65,17 @@ export {
   bezierPoint,
   flattenSegment,
   loopArea,
+  outlinePartsRegions,
+  outlinePartsSize,
   outlineRegionArea,
   outlineRegions,
   type OutlineIssue,
+  type OutlinePartIssue,
+  type OutlinePartLoop,
+  type OutlinePartRegion,
+  type OutlinePartSegment,
+  type OutlinePartsResult,
+  type OutlinePartsSize,
   type OutlineIssueCode,
   type OutlineLoop,
   type OutlineOptions,
@@ -72,6 +84,7 @@ export {
   type OutlineSegment,
   type PathCommand,
 } from './outline';
+export { outlineEdgeId, placeOutline } from './outline-entity';
 export {
   evaluateValues,
   pointKey,

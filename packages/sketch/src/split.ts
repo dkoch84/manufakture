@@ -35,6 +35,8 @@ export function splitEntity(entity: SketchEntity, at: Vec2 | readonly Vec2[]): S
   switch (entity.kind) {
     case 'point':
       throw new Error(`Cannot split point '${id}'`);
+    case 'outline':
+      throw new Error(`Cannot split outline '${id}'`);
     case 'line': {
       const [sx, sy] = entity.start;
       const dx = entity.end[0] - sx;

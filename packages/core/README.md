@@ -23,7 +23,7 @@ import {
 ```ts
 interface ManufaktureDocument {
   format: 'manufakture';
-  version: 8; // file format version, FORMAT_VERSION
+  version: 9; // file format version, FORMAT_VERSION
   namingScheme: 1; // topological naming scheme version (T0.5), NAMING_SCHEME
   id: string;
   name: string;
@@ -32,8 +32,9 @@ interface ManufaktureDocument {
   parts: Part[];
   assemblies: Assembly[]; // instances of parts placed by mates, in tab order (since version 7)
   print: PrintData; // print setups: what to print, on which printer, oriented how (since version 8)
+  fonts: DocumentFont[]; // the fonts texts use, bundled or added by the user (since version 9)
   configurations?: Configurations; // the configuration table; absent: none (since version 5)
-  nextIds: Record<string, number>; // document-level counters: `part` (since version 4), `cp`, `cfg`, `assembly`
+  nextIds: Record<string, number>; // document-level counters: `part` (since version 4), `cp`, `cfg`, `assembly`, `font`
 }
 
 interface Part {
@@ -55,7 +56,7 @@ interface BodyProps {
 ```
 
 `createDocument({ id, name, units? })` makes an empty document with one part, `part#1`, no
-assemblies, an empty print section (`createPrintData()`), and `nextIds: { part: 2 }`. Core never invents document ids; pass a UUID or similar.
+assemblies, an empty print section (`createPrintData()`), no fonts, and `nextIds: { part: 2 }`. Core never invents document ids; pass a UUID or similar.
 
 ### Bodies
 
@@ -365,6 +366,46 @@ then items); `printThresholdExpressions`, `printItemExpressions`, `printSetupIds
 printer, nozzle)` makes a setup with no items and default thresholds, and `findPrintSetup(doc,
 id)` finds one.
 
+### Fonts
+
+A document lists the fonts its texts use (since version 9; [ADR 0011](../../docs/adr/0011-fonts.md),
+[ADR 0012](../../docs/adr/0012-3d-printing.md) decision 8). A text (an `outline` sketch entity,
+see Sketch data) names its font by id.
+
+```ts
+interface DocumentFont {
+  id: 'font#1'; // from the document's nextIds.font; never reused
+  family: string; // 'Inter', read from the font when it was added; display only
+  style: string; // 'Bold'
+  source:
+    | { kind: 'bundled'; id: string; sha256: string } // 'inter-bold' and the file's SHA-256
+    | { kind: 'file'; fileName: string; size: number; sha256: string; data: string }; // base64
+}
+```
+
+- **Bundled** fonts ship with the app (`packages/text`): the document records the id and the
+  SHA-256 of the file the text was made with, and no bytes. A build whose file under that id has
+  another hash still builds the text, with a warning, and misses the regen cache: an app update
+  never changes geometry silently.
+- **User** fonts (TTF or OTF) are stored like imported files: base64 `data`, at most
+  `MAX_IMPORT_BYTES` (20 MiB), with the lower-case hex SHA-256 of the bytes, checked by regen
+  before the font is read. Persistence moves the bytes to a content-addressed blob
+  (`apps/web/src/persistence/README.md`). What the file is allowed to be used for is the user's
+  business (ADR 0011 decision 7); the app shows its embedding permissions when it is added.
+
+A document holds at most `MAX_FONTS` (1000) fonts, and its user fonts at most
+`MAX_FONT_TOTAL_BYTES` (64 MiB) in all, the sum of their `size`: the count alone would let a
+document claim 1000 fonts of 20 MiB each. A family of a dozen styles takes a few MiB, so the limit
+leaves room for several families and a large CJK font or two. The schema refuses a document past
+it, and `addFont` refuses a font that would take the document past it (`schema`, "The document's
+fonts would hold ... MiB").
+
+Validation checks that font ids are allocated and unique and that every outline's font is in the
+list. `addFont` refuses a second copy of the same bytes (same SHA-256), and `deleteFont` refuses a
+font an outline still uses (`fontUsers(doc, id)` lists them as `<part>/<sketch>/<entity>`), so a
+font never disappears from under a text. `findFont(doc, id)` finds one. Fonts change no geometry
+by themselves, so `diffDocuments` reports `fontsChanged` apart from the parts.
+
 ### Materials
 
 `MATERIALS` (`src/materials.ts`) is the built-in table: PLA, PETG, ABS, pine, oak, plywood, MDF,
@@ -615,16 +656,17 @@ solved values, in millimetres in the sketch plane's 2D frame: they seed the solv
 solution the sketch settles into; the constraints define it. The plane is an explicit
 `{ origin, normal, xDir }` (the sketch package's `SketchPlacement`) or a face reference.
 
-| Entity   | Fields                                                          |
-| -------- | --------------------------------------------------------------- |
-| `point`  | `position`                                                      |
-| `line`   | `start`, `end` (lines own their endpoints, FreeCAD style)       |
-| `circle` | `center`, `radius`                                              |
-| `arc`    | `center`, `start`, `end` (counter-clockwise; radius is derived) |
+| Entity    | Fields                                                                     |
+| --------- | -------------------------------------------------------------------------- |
+| `point`   | `position`                                                                 |
+| `line`    | `start`, `end` (lines own their endpoints, FreeCAD style)                  |
+| `circle`  | `center`, `radius`                                                         |
+| `arc`     | `center`, `start`, `end` (counter-clockwise; radius is derived)            |
+| `outline` | `anchor`, `angle` (radians), `source` (since version 9; a text, see below) |
 
 Every entity also has `id` and `construction`. Constraints name geometry in two ways: a curve is
 an entity id, and a point is a `PointRef { entity, at? }`, where `at` is `start` or `end` (lines,
-arcs) or `center` (circles, arcs) and is absent for a point entity. The built-ins `@origin` (a
+arcs), `center` (circles, arcs) or `anchor` (outlines) and is absent for a point entity. The built-ins `@origin` (a
 point), `@x-axis` and `@y-axis` (curves) can be named too.
 
 | Constraint                               | Fields                                                        |
@@ -648,10 +690,34 @@ same sketch and that every point reference names a vertex its entity has
 (`constraintTargets(constraint)` lists them). Whether a constraint makes geometric sense, and how
 it maps onto planegcs, is the sketch package's business.
 
+**Outlines** ([ADR 0012](../../docs/adr/0012-3d-printing.md) decision 7) are closed shapes from a
+source, placed at `anchor` and turned by `angle` about it. The anchor is solved like a point, so
+constraints can place a text; `angle` and the shape are not solved. Regen lays the source out and
+turns it into regions at every regen. One source kind exists so far (M5 adds `svg`):
+
+```ts
+source: {
+  kind: 'text';
+  text: string; // line breaks start lines; at most MAX_OUTLINE_TEXT (1000) code points
+  font: string; // a font id of the document, 'font#1'
+  size: StoredExpression; // cap height (the height of "H"), a length
+  align: { horizontal: 'left' | 'center' | 'right'; vertical: 'baseline' | 'middle' | 'top' };
+  letterSpacing?: StoredExpression; // a length; absent: 0
+  lineSpacing?: StoredExpression; // a multiple of the font's line height, a number; absent: 1
+}
+```
+
+The text of all outlines of one sketch together is capped at `MAX_SKETCH_OUTLINE_TEXT` (10,000
+code points): layout and kerning cost grow with it, and the string comes from the document. An
+outline's id takes no split suffix (its glyph edge ids are built on it). `featureExpressions`
+lists `size`, `letterSpacing` and `lineSpacing` at `['entities', i, 'source', ...]`, so they are
+checked, renamed and inlined like any other expression.
+
 ### One source of truth for sketch types
 
 The sketch data types are defined once, in `@manufakture/sketch/model`: `SketchEntity` (and
-`PointEntity`, `LineEntity`, `CircleEntity`, `ArcEntity`), `SketchConstraint`, `ConstraintKind`,
+`PointEntity`, `LineEntity`, `CircleEntity`, `ArcEntity`, `OutlineEntity` with its
+`OutlineSource`, `TextOutlineSource` and `OutlineAlign`), `SketchConstraint`, `ConstraintKind`,
 `PointRef`, `PointPosition`, `EndPosition`, `SketchPlacement`, `StoredExpression`, `Vec2` and
 `Vec3`. Core imports them with `import type` only and re-exports them, so
 `import type { SketchEntity } from '@manufakture/core'` is the same type as the sketch package's;
@@ -726,59 +792,62 @@ Every change is a command: a plain, JSON-serializable object. `applyCommand(doc,
 validates the command against `CommandSchema`, applies it without mutating `doc`, checks the
 resulting document with `checkDocument`, and returns `{ document, inverse }` or a `CoreError`.
 
-| Command                  | Fields                                                | Inverse                                                                |
-| ------------------------ | ----------------------------------------------------- | ---------------------------------------------------------------------- |
-| `addFeature`             | `partId`, `feature`, `index?` (default: rollback bar) | `deleteFeature`                                                        |
-| `editFeature`            | `partId`, `feature` (same id and kind)                | `restoreFeature` (old state)                                           |
-| `deleteFeature`          | `partId`, `featureId`                                 | `restoreFeature`                                                       |
-| `restoreFeature`         | `partId`, `feature`, `index`, `rollbackIndex`         | `restoreFeature` or `deleteFeature`                                    |
-| `reorderFeature`         | `partId`, `featureId`, `index` (final position)       | `reorderFeature`                                                       |
-| `suppressFeature`        | `partId`, `featureId`, `suppressed`                   | `suppressFeature`                                                      |
-| `renameFeature`          | `partId`, `featureId`, `name` (trimmed)               | `renameFeature`                                                        |
-| `setRollback`            | `partId`, `index` (`null`: after the last)            | `setRollback`                                                          |
-| `setVariable`            | `name`, `expression`, `index?` (for a new one)        | `setVariable` or `deleteVariable`                                      |
-| `deleteVariable`         | `name`                                                | `setVariable` at the old index                                         |
-| `setDisplayUnits`        | `units`                                               | `setDisplayUnits`                                                      |
-| `setMaterial`            | `partId`, `material` (a material id, `null` clears)   | `setMaterial` (the old one or null)                                    |
-| `setBodyProps`           | `partId`, `bodyId`, `props`, `index?` (for a new one) | `setBodyProps` (the old props)                                         |
-| `renameDocument`         | `name` (trimmed, 1 to 200 characters)                 | `renameDocument` (the old name)                                        |
-| `setConfigParameter`     | `parameter` (by id: new or replaced), `index?`        | `setConfigParameter` or `deleteConfigParameter`                        |
-| `deleteConfigParameter`  | `parameterId` (its row values go too)                 | `restoreConfigParameter`, plus `setConfigRow` per row that had a value |
-| `restoreConfigParameter` | `parameter`, `index` (history only)                   | `deleteConfigParameter`                                                |
-| `setConfigRow`           | `row` (by id: new or replaced), `index?`              | `setConfigRow` or `deleteConfigRow`                                    |
-| `deleteConfigRow`        | `rowId` (the active row: none is active after)        | `restoreConfigRow`, plus `setActiveConfiguration` if it was active     |
-| `restoreConfigRow`       | `row`, `index` (history only)                         | `deleteConfigRow`                                                      |
-| `setActiveConfiguration` | `rowId` (`null`: none)                                | `setActiveConfiguration`                                               |
-| `addPart`                | `partId` (a fresh `part#n`), `name`, `index?`         | `deletePart`                                                           |
-| `renamePart`             | `partId`, `name` (trimmed, 1 to 200 characters)       | `renamePart` (the old name)                                            |
-| `deletePart`             | `partId` (not the last part)                          | `restorePart`                                                          |
-| `restorePart`            | `part`, `index` (history only)                        | `deletePart`                                                           |
-| `reorderParts`           | `partId`, `index` (final position)                    | `reorderParts`                                                         |
-| `duplicatePart`          | `sourcePartId`, `partId` (fresh), `name`, `index?`    | `deletePart`                                                           |
-| `addAssembly`            | `assemblyId` (a fresh `assembly#n`), `name`, `index?` | `deleteAssembly`                                                       |
-| `renameAssembly`         | `assemblyId`, `name` (trimmed, 1 to 200 characters)   | `renameAssembly` (the old name)                                        |
-| `deleteAssembly`         | `assemblyId` (with its instances and mates)           | `restoreAssembly`                                                      |
-| `restoreAssembly`        | `assembly`, `index` (history only)                    | `deleteAssembly`                                                       |
-| `addInstance`            | `assemblyId`, `instance` (a fresh `inst#n`; last)     | `deleteInstance`                                                       |
-| `editInstance`           | `assemblyId`, `instanceId`, fields to change (below)  | `editInstance` (the old values)                                        |
-| `setPoses`               | `assemblyId`, `poses` (by instance id; one step)      | `setPoses` (the old poses)                                             |
-| `deleteInstance`         | `assemblyId`, `instanceId` (not while mated)          | `restoreInstance`                                                      |
-| `restoreInstance`        | `assemblyId`, `instance`, `index` (history only)      | `deleteInstance`                                                       |
-| `addMate`                | `assemblyId`, `mate` (fresh ids; goes last)           | `deleteMate`                                                           |
-| `editMate`               | `assemblyId`, `mate` (by id; new ids fresh)           | `restoreMate` (old state)                                              |
-| `deleteMate`             | `assemblyId`, `mateId` (with its connectors)          | `restoreMate`                                                          |
-| `restoreMate`            | `assemblyId`, `mate`, `index` (history only)          | `restoreMate` or `deleteMate`                                          |
-| `suppressMate`           | `assemblyId`, `mateId`, `suppressed`                  | `suppressMate`                                                         |
-| `addPrintSetup`          | `setup` (fresh ids, items included), `index?`         | `deletePrintSetup`                                                     |
-| `editPrintSetup`         | `setupId`, fields to change (below)                   | `editPrintSetup` (the old values)                                      |
-| `deletePrintSetup`       | `setupId` (with its items)                            | `restorePrintSetup`                                                    |
-| `restorePrintSetup`      | `setup`, `index` (history only)                       | `deletePrintSetup`                                                     |
-| `addPrintItem`           | `setupId`, `item` (fresh ids), `index?`               | `deletePrintItem`                                                      |
-| `editPrintItem`          | `setupId`, `item` (by id; new ids fresh)              | `restorePrintItem` (old state)                                         |
-| `deletePrintItem`        | `setupId`, `itemId`                                   | `restorePrintItem`                                                     |
-| `restorePrintItem`       | `setupId`, `item`, `index` (history only)             | `restorePrintItem` or `deletePrintItem`                                |
-| `replaceDocument`        | `document` (the same `id`; history only)              | `replaceDocument` (the old document)                                   |
-| `batch`                  | `commands` (applied in order, all or nothing)         | `batch` of inverses, reversed                                          |
+| Command                  | Fields                                                        | Inverse                                                                |
+| ------------------------ | ------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `addFeature`             | `partId`, `feature`, `index?` (default: rollback bar)         | `deleteFeature`                                                        |
+| `editFeature`            | `partId`, `feature` (same id and kind)                        | `restoreFeature` (old state)                                           |
+| `deleteFeature`          | `partId`, `featureId`                                         | `restoreFeature`                                                       |
+| `restoreFeature`         | `partId`, `feature`, `index`, `rollbackIndex`                 | `restoreFeature` or `deleteFeature`                                    |
+| `reorderFeature`         | `partId`, `featureId`, `index` (final position)               | `reorderFeature`                                                       |
+| `suppressFeature`        | `partId`, `featureId`, `suppressed`                           | `suppressFeature`                                                      |
+| `renameFeature`          | `partId`, `featureId`, `name` (trimmed)                       | `renameFeature`                                                        |
+| `setRollback`            | `partId`, `index` (`null`: after the last)                    | `setRollback`                                                          |
+| `setVariable`            | `name`, `expression`, `index?` (for a new one)                | `setVariable` or `deleteVariable`                                      |
+| `deleteVariable`         | `name`                                                        | `setVariable` at the old index                                         |
+| `setDisplayUnits`        | `units`                                                       | `setDisplayUnits`                                                      |
+| `setMaterial`            | `partId`, `material` (a material id, `null` clears)           | `setMaterial` (the old one or null)                                    |
+| `setBodyProps`           | `partId`, `bodyId`, `props`, `index?` (for a new one)         | `setBodyProps` (the old props)                                         |
+| `renameDocument`         | `name` (trimmed, 1 to 200 characters)                         | `renameDocument` (the old name)                                        |
+| `setConfigParameter`     | `parameter` (by id: new or replaced), `index?`                | `setConfigParameter` or `deleteConfigParameter`                        |
+| `deleteConfigParameter`  | `parameterId` (its row values go too)                         | `restoreConfigParameter`, plus `setConfigRow` per row that had a value |
+| `restoreConfigParameter` | `parameter`, `index` (history only)                           | `deleteConfigParameter`                                                |
+| `setConfigRow`           | `row` (by id: new or replaced), `index?`                      | `setConfigRow` or `deleteConfigRow`                                    |
+| `deleteConfigRow`        | `rowId` (the active row: none is active after)                | `restoreConfigRow`, plus `setActiveConfiguration` if it was active     |
+| `restoreConfigRow`       | `row`, `index` (history only)                                 | `deleteConfigRow`                                                      |
+| `setActiveConfiguration` | `rowId` (`null`: none)                                        | `setActiveConfiguration`                                               |
+| `addPart`                | `partId` (a fresh `part#n`), `name`, `index?`                 | `deletePart`                                                           |
+| `renamePart`             | `partId`, `name` (trimmed, 1 to 200 characters)               | `renamePart` (the old name)                                            |
+| `deletePart`             | `partId` (not the last part)                                  | `restorePart`                                                          |
+| `restorePart`            | `part`, `index` (history only)                                | `deletePart`                                                           |
+| `reorderParts`           | `partId`, `index` (final position)                            | `reorderParts`                                                         |
+| `duplicatePart`          | `sourcePartId`, `partId` (fresh), `name`, `index?`            | `deletePart`                                                           |
+| `addAssembly`            | `assemblyId` (a fresh `assembly#n`), `name`, `index?`         | `deleteAssembly`                                                       |
+| `renameAssembly`         | `assemblyId`, `name` (trimmed, 1 to 200 characters)           | `renameAssembly` (the old name)                                        |
+| `deleteAssembly`         | `assemblyId` (with its instances and mates)                   | `restoreAssembly`                                                      |
+| `restoreAssembly`        | `assembly`, `index` (history only)                            | `deleteAssembly`                                                       |
+| `addInstance`            | `assemblyId`, `instance` (a fresh `inst#n`; last)             | `deleteInstance`                                                       |
+| `editInstance`           | `assemblyId`, `instanceId`, fields to change (below)          | `editInstance` (the old values)                                        |
+| `setPoses`               | `assemblyId`, `poses` (by instance id; one step)              | `setPoses` (the old poses)                                             |
+| `deleteInstance`         | `assemblyId`, `instanceId` (not while mated)                  | `restoreInstance`                                                      |
+| `restoreInstance`        | `assemblyId`, `instance`, `index` (history only)              | `deleteInstance`                                                       |
+| `addMate`                | `assemblyId`, `mate` (fresh ids; goes last)                   | `deleteMate`                                                           |
+| `editMate`               | `assemblyId`, `mate` (by id; new ids fresh)                   | `restoreMate` (old state)                                              |
+| `deleteMate`             | `assemblyId`, `mateId` (with its connectors)                  | `restoreMate`                                                          |
+| `restoreMate`            | `assemblyId`, `mate`, `index` (history only)                  | `restoreMate` or `deleteMate`                                          |
+| `suppressMate`           | `assemblyId`, `mateId`, `suppressed`                          | `suppressMate`                                                         |
+| `addPrintSetup`          | `setup` (fresh ids, items included), `index?`                 | `deletePrintSetup`                                                     |
+| `editPrintSetup`         | `setupId`, fields to change (below)                           | `editPrintSetup` (the old values)                                      |
+| `deletePrintSetup`       | `setupId` (with its items)                                    | `restorePrintSetup`                                                    |
+| `restorePrintSetup`      | `setup`, `index` (history only)                               | `deletePrintSetup`                                                     |
+| `addPrintItem`           | `setupId`, `item` (fresh ids), `index?`                       | `deletePrintItem`                                                      |
+| `editPrintItem`          | `setupId`, `item` (by id; new ids fresh)                      | `restorePrintItem` (old state)                                         |
+| `deletePrintItem`        | `setupId`, `itemId`                                           | `restorePrintItem`                                                     |
+| `restorePrintItem`       | `setupId`, `item`, `index` (history only)                     | `restorePrintItem` or `deletePrintItem`                                |
+| `addFont`                | `font` (a fresh `font#n`; not the same bytes twice), `index?` | `deleteFont`                                                           |
+| `deleteFont`             | `fontId` (refused while an outline uses it)                   | `restoreFont`                                                          |
+| `restoreFont`            | `font`, `index` (history only)                                | `deleteFont`                                                           |
+| `replaceDocument`        | `document` (the same `id`; history only)                      | `replaceDocument` (the old document)                                   |
+| `batch`                  | `commands` (applied in order, all or nothing)                 | `batch` of inverses, reversed                                          |
 
 `restoreConfigParameter` and `restoreConfigRow` are history-only in the same way: they put back a
 deleted parameter or row under its old id, which must have been allocated before, while
@@ -951,8 +1020,8 @@ solids in one compound (`v3-two-bodies.json`) regenerates the same solids, now a
 (`extrude#1` and `extrude#2`). The test migrates `src/fixtures/v0-bracket.json` to exactly
 `v1-bracket.json`, that to exactly `v2-bracket.json`, that to exactly `v3-bracket.json` and that
 to exactly `v4-bracket.json` and that to exactly `v5-bracket.json` and that to exactly
-`v6-bracket.json` and that to exactly `v7-bracket.json` and that to exactly `v8-bracket.json`,
-and `v3-two-bodies.json` to
+`v6-bracket.json` and that to exactly `v7-bracket.json` and that to exactly `v8-bracket.json`
+and that to exactly `v9-bracket.json`, and `v3-two-bodies.json` to
 exactly `v4-two-bodies.json`. Version 5 added the optional configuration table; `migrateV4ToV5`
 only bumps the version, since a version 4 document has none and an absent counter starts at 1.
 Version 6 added the `derived` feature kind and the optional `mode` of a pattern or mirror of
@@ -964,7 +1033,11 @@ assembly and an absent `assembly` counter starts at 1; `v6-bracket.json` migrate
 `v7-bracket.json`. Version 8 added print setups (ADR 0012); `migrateV7ToV8` adds
 `print: { setups: [], nextIds: {} }` right after `assemblies` (where a saved file has it) and
 changes nothing else, since a version 7 document has no setups and every print counter starts at
-1; `v7-bracket.json` migrates to exactly `v8-bracket.json`.
+1; `v7-bracket.json` migrates to exactly `v8-bracket.json`. Version 9 added fonts and the
+`outline` sketch entity (ADR 0012 decisions 7 and 8); `migrateV8ToV9` adds `fonts: []` right
+after `print` (where a saved file has it) and changes nothing else, since a version 8 document has
+no text and the `font` counter starts at 1; `v8-bracket.json` migrates to exactly
+`v9-bracket.json`.
 
 To change the file shape:
 

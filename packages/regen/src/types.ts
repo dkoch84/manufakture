@@ -13,7 +13,7 @@ import type {
 } from '@manufakture/assembly';
 import type { BodyPropsFields, FeatureKind, Pose, Vec3 } from '@manufakture/core';
 import type { MeshData, ShapeId, Topology, Via } from '@manufakture/kernel';
-import type { RegionDiagnosticCode, SketchPlacement } from '@manufakture/sketch';
+import type { OutlineShape, RegionDiagnosticCode, SketchPlacement } from '@manufakture/sketch';
 import type { UnitsError } from '@manufakture/units';
 
 /**
@@ -88,6 +88,18 @@ export type RegenError =
   | { code: 'upstream'; message: string; upstream: string[] }
   | {
       /**
+       * A font an outline uses could not be read: damaged or hostile, or reading it timed out or
+       * ran out of memory in the text worker (ADR 0011's amendment). The text is not built.
+       */
+      code: 'font';
+      message: string;
+      /** The font's id in the document. */
+      fontId: string;
+      /** The outline's `source.font`. */
+      field: FieldPath;
+    }
+  | {
+      /**
        * A derived part's pinned source cannot be built: its data does not match its SHA-256, it
        * is not a readable document, it was saved by a newer version, it has no such part, or it
        * nests derived parts deeper than `MAX_DERIVED_DEPTH`. `field` is the part of `source` at
@@ -133,7 +145,17 @@ export type RegenWarning =
    */
   | { code: 'derived-source'; message: string; features: string[] }
   /** An instance shows its part as regenerated, and the part's rollback bar is not at its end. */
-  | { code: 'rollback'; message: string; partId: string };
+  | { code: 'rollback'; message: string; partId: string }
+  /**
+   * A text built with something to look at: characters its font has no glyph for (`missing`,
+   * left out), kerning that could not be read, glyph loops that touch at a point.
+   */
+  | { code: 'text'; message: string; entityId: string; missing?: string[] }
+  /**
+   * A bundled font is not the file the document's text was made with (an app update changed
+   * it): the text is built with the font this build ships, and may look different.
+   */
+  | { code: 'font-changed'; message: string; fontId: string };
 
 /** How one reference of a feature resolved (ADR 0004 decision 6: recomputed, never stored). */
 export interface ReferenceResolution {
@@ -164,6 +186,11 @@ export interface FeatureResult {
    * body before it), so the app can draw and edit it in the frame regen solved it in.
    */
   placement?: SketchPlacement;
+  /**
+   * Sketches with outline entities only: the loops of every outline (text), construction ones
+   * too, placed in the sketch, so the app draws text as regen built it (T3.2d).
+   */
+  outlines?: OutlineShape[];
 }
 
 /** One body of a part after the last feature (M2 plan, decision 1: named after its creator). */
