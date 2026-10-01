@@ -8,7 +8,8 @@
 // returns the name in the part's own mesh, so what a click names never depends on where the
 // instance is.
 //
-// Solves and drags run in the regen worker (`Assembler`); nothing here solves anything.
+// Solves, drags and interference checks run in the regen worker (`Assembler`); nothing here
+// solves anything.
 
 import {
   ASSEMBLY_COUNTER,
@@ -33,7 +34,13 @@ import {
   type VertexRef,
 } from '@manufakture/core';
 import type { Vec3 } from '@manufakture/kernel';
-import type { AssemblyResult, DragResult, MateResult } from '@manufakture/regen';
+import type {
+  AssemblyResult,
+  DragResult,
+  InstanceInterference,
+  InterferenceReport,
+  MateResult,
+} from '@manufakture/regen';
 import { checkExpression } from '../features/forms';
 import { bodyColor, instanceViewId, parseInstanceViewId } from '../model/bodies';
 import type { ModelState } from '../model/model';
@@ -56,6 +63,17 @@ export interface Assembler {
   ): Promise<DragResult | null>;
   /** A drag that was not committed: the next one starts from the last regen's poses again. */
   endDrag?(assemblyId: string): void;
+  /**
+   * Which instances overlap, and by how much, as the last regen placed them: on demand, in the
+   * worker. Each overlapping pair goes to `onPair` as it is found, with the overlap's mesh. Null
+   * when a regen superseded the check, or the worker is gone.
+   */
+  interference?(
+    assemblyId: string,
+    onPair: (pair: InstanceInterference) => void,
+  ): Promise<InterferenceReport | null>;
+  /** Stop a running check before its next pair (it then reports `cancelled`). */
+  cancelInterference?(assemblyId: string): void;
 }
 
 export type MateKind = Mate['kind'];

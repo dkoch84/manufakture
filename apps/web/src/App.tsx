@@ -16,6 +16,9 @@ import { AssemblyTree } from './assembly/AssemblyTree';
 import { ConnectorOverlay } from './assembly/ConnectorOverlay';
 import { instanceDrag } from './assembly/drag';
 import { InsertPanel } from './assembly/InsertPanel';
+import { instanceFaces, pairKey } from './assembly/interference';
+import { InterferenceOverlay } from './assembly/InterferenceOverlay';
+import { InterferencePanel } from './assembly/InterferencePanel';
 import { MateDialog } from './assembly/MateDialog';
 import { createAssemblyUiStore, type AssemblyUiStore } from './assembly/state';
 import { homeActions, openedMessage, type ActionOutcome } from './home/actions';
@@ -95,7 +98,7 @@ import { openSourceAt } from './features/derived';
 import { FeatureToolbar } from './features/FeatureToolbar';
 import type { RefKind } from './features/forms';
 import { isDialogKind } from './features/kinds';
-import type { GeometryRef } from './state/selection';
+import type { GeometryRef, SelectableItem } from './state/selection';
 import { useSketchShortcuts } from './sketcher/shortcuts';
 import { useSketching } from './sketcher/useSketching';
 import { VariablesPanel } from './variables/VariablesPanel';
@@ -365,6 +368,12 @@ export function App({
     [assemblyId, shownDocument, allParts, modelAssemblies, modelSources, shownPoses],
   );
   const assemblyResult = modelAssemblies.find((a) => a.assemblyId === assemblyId);
+  // The pair the Interference panel highlights: both instances selected, the overlap outlined.
+  const highlightedPair = useStore(assemblyUi, (s) =>
+    s.highlight === null || s.interference?.assemblyId !== assemblyId
+      ? null
+      : (s.interference.pairs.find((p) => pairKey(p) === s.highlight) ?? null),
+  );
   const [stableBodies, setStableBodies] = useState<readonly BodyInput[]>(visibleBodies);
   let partBodies = stableBodies;
   if (sameOr(stableBodies, visibleBodies) !== stableBodies) {
@@ -1036,6 +1045,23 @@ export function App({
   useEffect(() => {
     instanceBodiesRef.current = instanceBodies;
   }, [instanceBodies]);
+  // A pair picked in the Interference panel: both instances are selected (their faces recoloured
+  // in place); picking none again clears the selection it made.
+  const pairSelection = useRef<readonly SelectableItem[] | null>(null);
+  useEffect(() => {
+    const sel = selection.getState();
+    if (highlightedPair !== null && assemblyId !== null) {
+      const faces = instanceFaces(instanceBodiesRef.current, assemblyId, [
+        highlightedPair.a,
+        highlightedPair.b,
+      ]);
+      sel.select(faces);
+      pairSelection.current = selection.getState().selected;
+    } else if (pairSelection.current !== null) {
+      if (sel.selected === pairSelection.current) sel.clear();
+      pairSelection.current = null;
+    }
+  }, [highlightedPair, assemblyId, selection]);
   const dragging = assemblyId !== null && !locked && loader.assembler !== undefined;
   useEffect(() => {
     const assembler = loader.assembler;
@@ -1606,6 +1632,20 @@ export function App({
             >
               Mate
             </button>
+            <button
+              type="button"
+              aria-pressed={assemblyPanel?.kind === 'interference'}
+              disabled={assemblyPanel?.kind === 'mate'}
+              data-testid="assembly-interference"
+              title="List the pairs of instances that overlap, with the overlap's volume"
+              onClick={() =>
+                assemblyPanel?.kind === 'interference'
+                  ? assemblyUi.getState().close()
+                  : assemblyUi.getState().open({ kind: 'interference' })
+              }
+            >
+              Interference
+            </button>
             {assemblyMessage && (
               <span className="io-status io-error" role="alert" data-testid="assembly-message">
                 {assemblyMessage}
@@ -1685,6 +1725,9 @@ export function App({
                 chosen={assemblyPanel?.kind === 'mate' ? mateConnectors : []}
               />
             )}
+            {viewport && assemblyId !== null && highlightedPair !== null && (
+              <InterferenceOverlay viewport={viewport} mesh={highlightedPair.mesh} />
+            )}
             {assemblyId !== null && instanceBodies.length === 0 && (
               <p className="viewport-hint" data-testid="assembly-hint">
                 {shownDocument.assemblies.find((a) => a.id === assemblyId)?.instances.length
@@ -1728,6 +1771,15 @@ export function App({
                   else ui.clearPoses();
                   ui.close();
                 }}
+              />
+            ) : assemblyId !== null && !locked && assemblyPanel?.kind === 'interference' ? (
+              <InterferencePanel
+                documents={documents}
+                assemblyId={assemblyId}
+                assemblyUi={assemblyUi}
+                assembler={loader.assembler}
+                result={assemblyResult}
+                onClose={() => assemblyUi.getState().close()}
               />
             ) : assemblyId !== null && !locked && assemblyPanel?.kind === 'insert' ? (
               <InsertPanel

@@ -36,7 +36,7 @@ import {
   type ReleaseResult,
   type ShapeRef,
 } from './ops';
-import type { MeshData, ShapeId, ShapeRecord } from './types';
+import type { InterferenceResult, MeshData, ShapeId, ShapeRecord } from './types';
 
 export interface BatchRequest<T extends readonly KernelOp[] = readonly KernelOp[]> {
   /**
@@ -163,6 +163,11 @@ export function collectTransferables(reply: BatchReply): ArrayBuffer[] {
     if (r.ok && r.op === 'tessellate') out.push(...meshBuffers(r.value as MeshData));
     if (r.ok && r.op === 'exportStep')
       out.push((r.value as { data: Uint8Array }).data.buffer as ArrayBuffer);
+    if (r.ok && r.op === 'interference') {
+      for (const p of (r.value as InterferenceResult).pairs) {
+        if (p.mesh) out.push(...meshBuffers(p.mesh));
+      }
+    }
   }
   return out;
 }

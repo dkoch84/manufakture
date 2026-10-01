@@ -23,6 +23,7 @@ import type {
   FeatureInput,
   FeatureOutcome,
   FeatureWarning,
+  InterferenceResult,
   KernelOp,
   MeshData,
   OpResult,
@@ -87,6 +88,8 @@ class FakeKernel implements RegenKernel {
   readonly behaviours = new Map<string, Behaviour>();
   /** Connector origins asked for, one entry per `connector` op (the names, in order). */
   readonly connectorOps: string[][] = [];
+  /** Every `interference` op run. */
+  readonly interferenceOps: Extract<KernelOp, { op: 'interference' }>[] = [];
   gate: Promise<void> | null = null;
   onRun: (() => void) | null = null;
 
@@ -343,6 +346,28 @@ class FakeKernel implements RegenKernel {
         if (body !== null && typeof body === 'object') return body.fail;
         const topology = { faces: [], edges: [], vertices: [] };
         return { ok: true, op: 'topology', value: topology, ms: 0 };
+      }
+      case 'interference': {
+        this.interferenceOps.push(op);
+        for (const item of op.items) {
+          for (const ref of item.shapes) {
+            const body = this.#shape(ref, results);
+            if (body !== null && typeof body === 'object') return body.fail;
+          }
+        }
+        // Every pair is a candidate; a checked pair overlaps by the sum of its x translations.
+        const n = op.items.length;
+        const all: [number, number][] = [];
+        for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) all.push([i, j]);
+        const pairs = (op.pairs ?? all).map(([a, b]) => [a, b] as [number, number]);
+        const x = (i: number) => op.items[i]!.transform?.translation[0] ?? 0;
+        const value: InterferenceResult = {
+          candidates: pairs,
+          booleans: op.prefilterOnly ? 0 : pairs.length,
+          pairs: op.prefilterOnly ? [] : pairs.map(([a, b]) => ({ a, b, volume: x(a) + x(b) })),
+          failures: [],
+        };
+        return { ok: true, op: 'interference', value, ms: 0 };
       }
       default:
         throw new Error(`fake kernel: no ${op.op}`);
@@ -1644,5 +1669,54 @@ describe('assemblies', () => {
     expect(c!.transforms['inst#2']!.translation[2]).toBeCloseTo(50, 9);
     expect(c!.target.reached).toBe(false);
     expect(await engine.drag('assembly#9', 'inst#2', at(1), { generation: g })).toBeNull();
+  });
+  it('checks interference only on demand: the prefilter, then one batch per candidate pair', async () => {
+    const { kernel, engine } = setup();
+    const doc = twoInstances([
+      { type: 'addInstance', assemblyId: ASSEMBLY, instance: instance('inst#3', { part: LID }) },
+      {
+        type: 'addInstance',
+        assemblyId: ASSEMBLY,
+        instance: instance('inst#4', { part: LID }, { suppressed: true }),
+      },
+    ]);
+    const { generation } = await regen(engine, doc);
+    // A regen never checks interference.
+    expect(kernel.interferenceOps).toEqual([]);
+
+    const found: string[] = [];
+    const report = (await engine.interference(ASSEMBLY, {
+      generation,
+      onPair: (p) => void found.push(`${p.a}/${p.b}`),
+    }))!;
+    // The suppressed instance is left out; each instance's bodies are the regen's live shapes.
+    expect(report.instances).toEqual(['inst#1', 'inst#2', 'inst#3']);
+    const [pre, ...pairs] = kernel.interferenceOps;
+    expect(pre!.prefilterOnly).toBe(true);
+    expect(pre!.items).toHaveLength(3);
+    for (const item of pre!.items) {
+      expect(item.shapes).toHaveLength(1);
+      expect(kernel.live.has(item.shapes[0] as number)).toBe(true);
+    }
+    expect(pairs.map((op) => op.pairs)).toEqual([[[0, 1]], [[0, 2]], [[1, 2]]]);
+    expect(report).toMatchObject({ status: 'done', candidates: 3, booleans: 3, failures: [] });
+    expect(found).toEqual(['inst#1/inst#2', 'inst#1/inst#3', 'inst#2/inst#3']);
+    expect(report.pairs.every((p) => p.mesh === null)).toBe(true);
+
+    // Where a drag in progress has an instance is where it is checked.
+    const moved = { translation: [7, 0, 0] as const, rotation: [0, 0, 0, 1] as const };
+    await engine.drag(ASSEMBLY, 'inst#3', moved, { generation });
+    kernel.interferenceOps.length = 0;
+    const dragged = (await engine.interference(ASSEMBLY, { generation }))!;
+    expect(kernel.interferenceOps[0]!.items[2]!.transform!.translation[0]).toBeCloseTo(7, 9);
+    expect(dragged.pairs.map((p) => p.volume)).toEqual([0, 7, 7].map((v) => expect.closeTo(v, 9)));
+
+    // Shapes lost to a recycle: stale, check again after the next regen.
+    kernel.recycle();
+    expect((await engine.interference(ASSEMBLY, { generation }))!.status).toBe('stale');
+    // Stale requests and unknown assemblies: nothing.
+    const next = await regen(engine, apply(doc, setVariable('radius', '4mm')));
+    expect(await engine.interference(ASSEMBLY, { generation })).toBeNull();
+    expect(await engine.interference('assembly#9', { generation: next.generation })).toBeNull();
   });
 });

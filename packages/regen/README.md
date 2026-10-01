@@ -8,7 +8,7 @@ reference resolutions and timing, plus every final body's mesh and one name tabl
 viewport. A part carries a set of bodies (M2 plan, decisions 1 to 3), and an edit rebuilds only the
 features of the bodies it touches. After the parts, it places the instances of every assembly with
 the mate solver of `packages/assembly` ([ADR 0008](../../docs/adr/0008-assembly-mate-solver.md)),
-and it answers assembly previews and drags (see Assemblies).
+and it answers assembly previews, drags and interference checks (see Assemblies).
 
 ```ts
 import { RegenEngine } from '@manufakture/regen';
@@ -24,6 +24,7 @@ const result = await engine.regen(document, { generation }); // null when supers
 store.subscribe((event) => engine.update(event)); // uses the event's previous document and change
 const preview = await engine.solveAssembly(draft, 'assembly#1', { generation }); // a mate dialog
 const step = await engine.drag('assembly#1', 'inst#2', target, { generation }); // coalesced
+const clash = await engine.interference('assembly#1', { generation, onPair }); // on demand
 ```
 
 That is the engine's own API, as tests and a custom host use it. apps/web does not construct an
@@ -69,7 +70,7 @@ service (`@manufakture/kernel/node`) and the real solver directly.
 | `@manufakture/regen/worker` | worker entry | `Comlink.expose` of the regen worker API, with the kernel's `.wasm` imported as a `?url` asset |
 | `@manufakture/regen/client` | main thread  | `spawnRegenWorker()`, `RegenClient`                                                            |
 
-`createRegenWorkerApi` (`src/worker-api.ts`) builds the kernel's worker API (`createKernelWorkerApi`: loading with progress, batches, release, cancel, recycle, stats), waits for its service, creates the engine next to it and adds `regen(document, { generation })`, `solveAssembly(document, assemblyId, { generation })`, `dragInstance(assemblyId, instanceId, target, { generation })` and `regenStats()`. `RegenClient.solveAssembly` and `RegenClient.dragInstance` send the client's current generation (`latestGeneration`), never a new one, so neither cancels a regen. Mesh buffers are marked with `regenTransferables(result)`; nothing else heavy crosses. `RegenClient` extends the kernel's `KernelClient` (imported from `@manufakture/kernel/kernel-client`, so the kernel's own worker entry is not bundled), so every request of every kind (a regen, a `pick`, a `measure`, an export) takes its generation from the one sequence the client keeps. The service cancels by generation whoever sent a batch (see Cancellation), so a regen cancels older requests, and a pick or measure sent at the client's current generation never cancels a regen. Only a regen may take a new generation: any other batch that did (a STEP import, say) would cancel the regen in flight, which then resolves to null with nothing reporting in its place, so the app sends every other batch at `latestGeneration` and releases shapes with `KernelClient.release`, outside the batch queue. The app's `startRegen` also asks again when its newest regen comes back null. A pending regen resolves to null when the worker is restarted or terminated, like a pending submit. `RegenClient.regen` returns every regen the worker completed, even when a newer request came meanwhile: the engine reports a changed mesh once, to the regen that built it, so a caller that dropped completed results would lose meshes.
+`createRegenWorkerApi` (`src/worker-api.ts`) builds the kernel's worker API (`createKernelWorkerApi`: loading with progress, batches, release, cancel, recycle, stats), waits for its service, creates the engine next to it and adds `regen(document, { generation })`, `solveAssembly(document, assemblyId, { generation })`, `dragInstance(assemblyId, instanceId, target, { generation })`, `interference(assemblyId, { generation, mesh?, tolerance? }, onPair?)`, `cancelInterference(assemblyId)` and `regenStats()`. `RegenClient.solveAssembly`, `RegenClient.dragInstance` and `RegenClient.interference` send the client's current generation (`latestGeneration`), never a new one, so none of them cancels a regen. `interference`'s `onPair` is a `Comlink.proxy` passed as an argument of its own (Comlink only looks for proxies in top-level arguments); each pair's mesh buffers are transferred with it. Mesh buffers are marked with `regenTransferables(result)`; nothing else heavy crosses. `RegenClient` extends the kernel's `KernelClient` (imported from `@manufakture/kernel/kernel-client`, so the kernel's own worker entry is not bundled), so every request of every kind (a regen, a `pick`, a `measure`, an export) takes its generation from the one sequence the client keeps. The service cancels by generation whoever sent a batch (see Cancellation), so a regen cancels older requests, and a pick or measure sent at the client's current generation never cancels a regen. Only a regen may take a new generation: any other batch that did (a STEP import, say) would cancel the regen in flight, which then resolves to null with nothing reporting in its place, so the app sends every other batch at `latestGeneration` and releases shapes with `KernelClient.release`, outside the batch queue. The app's `startRegen` also asks again when its newest regen comes back null. A pending regen resolves to null when the worker is restarted or terminated, like a pending submit. `RegenClient.regen` returns every regen the worker completed, even when a newer request came meanwhile: the engine reports a changed mesh once, to the regen that built it, so a caller that dropped completed results would lose meshes.
 
 After a recycle every body is gone. The engine only forgets (its hook runs inside the service's queue, where nothing may be submitted); the main thread hears of it through the kernel's `recycled` status and asks for a regen of its current document (apps/web `kernelLoader`). A worker restart is handled the same way, through the client's `onRestarted` option. Imported STEP reference bodies are not part of a regen, so the app reads them again from the files their import features store.
 
@@ -88,7 +89,8 @@ last completed regen (see below). For assemblies, `kernelRegenerator` keeps the 
 sources like those of parts and registers every body an instance shows under
 `<assembly id>/<instance id>/<body id>` with its source body's shape, so a pick on an instance
 becomes a stored reference like a pick on a part; the assembly workspace previews mates with
-`RegenClient.solveAssembly` and drags instances with `dragInstance` (the loader's `assembler`).
+`RegenClient.solveAssembly`, drags instances with `dragInstance` and checks interference with
+`interference` (the loader's `assembler`).
 
 **Decision: the sketch solver runs in the regen worker, in-process**, as a `SolverService` loading planegcs on the first sketch solve, instead of on a `MessageChannel` port to the solver worker (ADR 0007 decision 2, amended there):
 
@@ -355,6 +357,24 @@ document's: commit them with `setPoses` on release, never per step. A drag that 
 or nothing moved) calls `endDrag(assemblyId)` (`RegenClient.endDrag`), so the next drag starts
 from the last regen's poses again rather than from where the last step left them.
 
+**Interference.** `interference(assemblyId, { generation, mesh?, tolerance?, onPair? })`
+(`RegenClient.interference`) lists the pairs of instances whose bodies overlap, with the overlap's
+volume (and its mesh, in world coordinates, with `mesh`). It is on demand only and never part of a
+regen: the pairwise booleans are the costly part. It checks what the last regen placed: every
+completed regen keeps, per assembly, the bodies each unsuppressed instance shows (live shape ids
+from the cache, with the kernel instance they live in) next to the drag state, and the poses are
+the drag state's, so an instance being dragged is checked where the screen shows it. The check
+runs on the regen chain, after any regen in flight, so no regen can evict those bodies while it
+runs. One batch runs the kernel's bounding-box prefilter over every instance (`prefilterOnly`),
+then one batch per candidate pair (kernel README, "Interference"); each pair goes to `onPair` as
+it is found (awaited, so from the worker every pair reaches the main thread before the report),
+and the report lists them again (without meshes when they were streamed). Cancellation: the check
+takes the client's current generation, so it never cancels a regen; a newer regen supersedes it
+between two pairs (it resolves to null); `cancelInterference(assemblyId)` stops it before its next
+pair with a `cancelled` report and the pairs found so far; bodies lost to a recycle give a `stale`
+report (check again after the next regen). A request older than the newest regen, or for an
+assembly the last regen does not have, is null.
+
 **Configuration rows** (`source.configuration`) are not applied yet (T2.4c): the instance shows the
 part as it is, with a `configuration` warning. Instance sources are grouped by
 `instanceSourceKey`, which T2.4c extends with the row, so two instances at two rows get two builds
@@ -540,6 +560,14 @@ pnpm --filter @manufakture/regen test
   with meshes in `sources`, and a preview solve places it without reporting anything; nothing
   leaks. Through the worker (`worker-api.test.ts`): a preview, coalesced drags at the current
   generation, and committing the drag as a pose-only regen that sends no mesh.
+- Interference (`engine.test.ts`, against the scripted kernel): never sent by a regen; the
+  prefilter batch, then one batch per candidate pair, with the regen's live body shapes, the
+  suppressed instance left out and pairs streamed in order; the poses of a drag in progress; a
+  `stale` report after a recycle; null for a stale request or an unknown assembly. Through the
+  worker with the real kernel (`worker-api.test.ts`): a lid lying on its box (touching: no
+  candidate, no boolean), then the lid turned a quarter turn down into the box by its stored pose,
+  solved on the hinge, overlapping by 4000 mm3 with the overlap's mesh streamed ahead of the
+  report; a stop before the first pair; a check superseded by a regen; nothing left in the kernel.
 - `derived.test.ts` also checks that a source whose reading throws is a `source` error.
 
 ## Deviations and gaps

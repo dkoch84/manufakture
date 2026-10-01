@@ -58,6 +58,8 @@ import {
   type Deflection,
   type FeatureInput,
   type FeatureOutcome,
+  type InterferenceOp,
+  type InterferenceResult,
   type KernelOp,
   type MeshData,
   type OpResult,
@@ -117,7 +119,9 @@ import type {
   ConsumedBody,
   DragResult,
   FeatureResult,
+  InstanceInterference,
   InstanceResult,
+  InterferenceReport,
   MateResult,
   PartResult,
   RegenCounters,
@@ -325,13 +329,35 @@ interface Assembled {
   connectorKeys: Set<string>;
 }
 
-/** What a drag of an assembly starts from: the last regen's solver input and stored poses. */
+/**
+ * What a drag or an interference check of an assembly starts from: the last regen's solver input,
+ * stored poses and the bodies each instance shows.
+ */
 interface DragState {
   generation: number;
   input: AssemblyInput;
   /** Where the regen left the instances: what `endDrag` puts `input` back to. */
   solved: AssemblyInput['instances'];
   stored: ReadonlyMap<string, Pose>;
+  /**
+   * The bodies each instance shows (unsuppressed instances with bodies only), live as long as the
+   * regen's cache entries are: an interference check runs on the regen chain, so no later regen
+   * can evict them while it runs.
+   */
+  bodies: ReadonlyMap<string, readonly LiveBody[]>;
+}
+
+export interface InterferenceCheckOptions extends AssemblyOptions {
+  /** Tessellate each overlap (default false). */
+  mesh?: boolean;
+  /** Overlaps of at most this volume (mm3) are not reported; default the kernel's 1e-3. */
+  tolerance?: number;
+  /**
+   * Called with each overlapping pair as soon as it is found (the report's then has no mesh). A
+   * promise it returns is awaited before the next pair, so pairs reach a caller in another thread
+   * before the report does.
+   */
+  onPair?: (pair: InstanceInterference) => unknown;
 }
 
 interface PendingDrag {
@@ -402,6 +428,8 @@ export class RegenEngine {
   /** The newest drag not started yet; a newer one replaces it (latest target wins). */
   #pendingDrag: PendingDrag | null = null;
   #dragging = false;
+  /** Interference checks asked to stop (`cancelInterference`), by assembly id. */
+  #stopChecks = new Set<string>();
 
   constructor(options: RegenEngineOptions) {
     this.#kernel = options.kernel;
@@ -1107,6 +1135,124 @@ export class RegenEngine {
     if (state) state.input = { instances: state.solved, mates: state.input.mates };
   }
 
+  /**
+   * Which instances of `assemblyId` overlap, and by how much, as the last regen placed them (or
+   * where a drag in progress has them). On demand only, never part of a regen: pairwise booleans
+   * are the costly part. One kernel batch runs the bounding-box prefilter over every instance,
+   * then one batch per candidate pair, so pairs arrive one by one (`onPair`), a newer regen
+   * supersedes the check between two pairs (it resolves to null), and `cancelInterference` stops
+   * it there (a `cancelled` report with the pairs found so far). Runs on the regen chain, after
+   * any regen in flight. Null too when the request is older than the newest regen, or the last
+   * regen has no such assembly.
+   */
+  interference(
+    assemblyId: string,
+    options: InterferenceCheckOptions = {},
+  ): Promise<InterferenceReport | null> {
+    const generation = this.#currentGeneration(options);
+    if (generation < this.#latest) return Promise.resolve(null);
+    // A stop asked for before this check began is not for it.
+    this.#stopChecks.delete(assemblyId);
+    const task = this.#chain.then(() => this.#interference(assemblyId, generation, options));
+    this.#chain = task.catch(() => undefined);
+    return task;
+  }
+
+  /** Stop a running interference check of `assemblyId` before its next pair. */
+  cancelInterference(assemblyId: string): void {
+    this.#stopChecks.add(assemblyId);
+  }
+
+  async #interference(
+    assemblyId: string,
+    generation: number,
+    options: InterferenceCheckOptions,
+  ): Promise<InterferenceReport | null> {
+    const state = this.#assemblyStates.get(assemblyId);
+    if (generation < this.#latest || state === undefined || generation < state.generation) {
+      return null;
+    }
+    const t0 = now();
+    const run = this.#newRun(generation, this.#lastDocument!);
+    const placed = state.input.instances.filter((x) => (state.bodies.get(x.id)?.length ?? 0) > 0);
+    const report: InterferenceReport = {
+      generation,
+      assemblyId,
+      instances: placed.map((x) => x.id),
+      pairs: [],
+      candidates: 0,
+      booleans: 0,
+      failures: [],
+      status: 'done',
+      ms: 0,
+    };
+    const items = placed.map((x) => ({
+      shapes: state.bodies.get(x.id)!.map((b) => b.shape),
+      transform: x.pose,
+    }));
+    const bodies = placed.flatMap((x) => state.bodies.get(x.id)!);
+    const common: InterferenceOp = { op: 'interference', items };
+    if (options.tolerance !== undefined) common.tolerance = options.tolerance;
+    /** One batch; null when the bodies are gone (a recycle). */
+    const check = async (op: InterferenceOp): Promise<InterferenceResult | null> => {
+      const batch = emptyBatch();
+      batch.ops.push(op);
+      this.#usesBodies(batch, bodies);
+      const reply = await this.#submit(run, batch.ops);
+      run.counters.otherOps++;
+      try {
+        this.#checkLive(batch, reply);
+      } catch (error) {
+        if (error instanceof StaleShapes) return null;
+        throw error;
+      }
+      const r = reply.results[0]!;
+      if (!r.ok) throw new Error(`interference of ${assemblyId} failed: ${r.error.message}`);
+      return r.value as InterferenceResult;
+    };
+    const finish = (status: InterferenceReport['status']) => {
+      report.status = status;
+      report.ms = now() - t0;
+      this.#stopChecks.delete(assemblyId);
+      this.#addStats(run.counters);
+      return report;
+    };
+    try {
+      if (items.length < 2) return finish('done');
+      const pre = await check({ ...common, prefilterOnly: true });
+      if (pre === null) return finish('stale');
+      report.candidates = pre.candidates.length;
+      for (const [i, j] of pre.candidates) {
+        if (this.#stopChecks.has(assemblyId)) return finish('cancelled');
+        const op: InterferenceOp = { ...common, pairs: [[i, j]] };
+        if (options.mesh) op.mesh = true;
+        const one = await check(op);
+        if (one === null) return finish('stale');
+        report.booleans += one.booleans;
+        const a = placed[i]!.id;
+        const b = placed[j]!.id;
+        for (const f of one.failures) report.failures.push({ a, b, message: f.message });
+        for (const p of one.pairs) {
+          const pair: InstanceInterference = { a, b, volume: p.volume, mesh: p.mesh ?? null };
+          if (options.onPair) {
+            await options.onPair(pair);
+            report.pairs.push({ ...pair, mesh: null });
+          } else {
+            report.pairs.push(pair);
+          }
+        }
+      }
+      return finish('done');
+    } catch (error) {
+      if (error instanceof Superseded) {
+        this.#stopChecks.delete(assemblyId);
+        this.#addStats(run.counters);
+        return null;
+      }
+      throw error;
+    }
+  }
+
   #currentGeneration(options: AssemblyOptions): number {
     if (options.generation !== undefined) {
       if (!Number.isSafeInteger(options.generation)) {
@@ -1464,6 +1610,7 @@ export class RegenEngine {
       input: { instances: solved, mates },
       solved,
       stored,
+      bodies: partBodies,
     });
     return result;
   }

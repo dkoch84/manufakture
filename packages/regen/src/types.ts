@@ -348,3 +348,43 @@ export interface DragResult {
   warnings: AssemblyWarning[];
   message?: string;
 }
+
+// Interference -------------------------------------------------------------------------------
+
+/** Two instances whose bodies overlap (`interference`). */
+export interface InstanceInterference {
+  /** Instance ids, in the assembly's order (`a` before `b`). */
+  a: string;
+  b: string;
+  /** The overlap's volume in mm3 (over every pair of bodies of the two). */
+  volume: number;
+  /**
+   * The overlap's tessellation in world coordinates, as the instances were placed for the check,
+   * when asked for; null otherwise, and in the final report when the pairs were streamed (the
+   * streamed pair carried it).
+   */
+  mesh: MeshData | null;
+}
+
+/** One interference check of an assembly, on demand (never part of a regen). */
+export interface InterferenceReport {
+  generation: number;
+  assemblyId: string;
+  /** Instances checked: every instance placed with bodies, unsuppressed, in the assembly's order. */
+  instances: string[];
+  /** Overlapping pairs found, in the order they were checked (the assembly's order). */
+  pairs: InstanceInterference[];
+  /** Pairs whose bounding boxes overlap: the only ones that cost a boolean. */
+  candidates: number;
+  /** `common` booleans run, one per candidate pair of bodies. */
+  booleans: number;
+  /** Pairs the kernel could not check (the boolean failed): neither reported nor ruled out. */
+  failures: { a: string; b: string; message: string }[];
+  /**
+   * `cancelled`: stopped by `cancelInterference` before every candidate was checked (`pairs` are
+   * the ones found so far). `stale`: the bodies were lost to a kernel recycle; check again after
+   * the next regen.
+   */
+  status: 'done' | 'cancelled' | 'stale';
+  ms: number;
+}

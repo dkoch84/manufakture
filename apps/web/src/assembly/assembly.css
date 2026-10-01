@@ -149,3 +149,50 @@
 .assembly-tab-icon {
   color: #5b6673;
 }
+
+.interference-summary {
+  margin: 0 0 0.5rem;
+  padding: 0.3rem 0.45rem;
+  border-radius: 4px;
+  background: #eef3f8;
+}
+
+.interference-summary.found {
+  background: #fff1e6;
+  color: #8a3b0a;
+}
+
+.interference-list li {
+  padding: 0;
+}
+
+.interference-pair {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.15rem 0.5rem;
+  width: 100%;
+  padding: 0.3rem 0.25rem;
+  border: none;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.interference-list li.highlighted .interference-pair {
+  background: #fff1e6;
+  box-shadow: inset 3px 0 0 #e8590c;
+}
+
+.interference-volume {
+  color: #5b6673;
+  font-variant-numeric: tabular-nums;
+}
+
+.interference-edge {
+  fill: none;
+  stroke: #e8590c;
+  stroke-width: 2;
+  stroke-linejoin: round;
+}

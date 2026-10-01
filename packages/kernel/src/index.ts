@@ -112,6 +112,7 @@ export type {
   FeatureOp,
   FilletOp,
   ImportStepOp,
+  InterferenceOp,
   KernelOp,
   MeasureOp,
   OpName,
@@ -168,3 +169,4 @@ export type {
 export { createKernelWorkerApi } from './worker-api';
 export type { InitReport, KernelWorkerApi, WorkerApiOptions } from './worker-api';
 export { MAX_STEP_BYTES } from './exchange';
+export { DEFAULT_INTERFERENCE_TOLERANCE } from './interference';

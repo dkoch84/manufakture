@@ -269,4 +269,82 @@ describe('the regen worker', () => {
     expect(lid.moved).toBe(false);
     expect(lid.transform.rotation[0]).toBeCloseTo(-Math.SQRT1_2, 9);
   });
+  it('checks interference on demand with the solved transforms, streaming pairs; a newer regen or a stop ends it', async () => {
+    // The lid lies on the box: they touch, so not even their boxes are a candidate.
+    const doc = boxAndLid();
+    const lying = (await client.regen(doc))!;
+    expect(lying.assemblies[0]!.dof).toBe(1);
+    const none = (await client.interference(ASSEMBLY))!;
+    expect(none).toMatchObject({
+      assemblyId: ASSEMBLY,
+      generation: lying.generation,
+      instances: ['inst#1', 'inst#2'],
+      pairs: [],
+      candidates: 0,
+      booleans: 0,
+      failures: [],
+      status: 'done',
+    });
+    // Asking does not take a generation.
+    expect(client.latestGeneration).toBe(lying.generation);
+
+    // The lid turned a quarter turn down about the hinge (the box's top back edge, x along
+    // y = 30, z = 20): it hangs into the box, x 0..40, y 25..30, z -10..20, so they share
+    // 40 x 5 x 20 = 4000 mm3.
+    const s = Math.SQRT1_2;
+    const down = apply(doc, {
+      type: 'setPoses',
+      assemblyId: ASSEMBLY,
+      poses: { 'inst#2': { translation: [0, 30, -10], rotation: [s, 0, 0, s] } },
+    });
+    const hanging = (await client.regen(down))!;
+    const lid = hanging.assemblies[0]!.instances[1]!;
+    expect(hanging.assemblies[0]!.mates[0]!.status).toBe('ok');
+    expect(lid.transform.translation[1]).toBeCloseTo(30, 9);
+    expect(lid.transform.translation[2]).toBeCloseTo(-10, 9);
+    const streamed: { a: string; b: string; volume: number; mesh: MeshData | null }[] = [];
+    const report = (await client.interference(ASSEMBLY, {
+      mesh: true,
+      onPair: (pair) => streamed.push(pair),
+    }))!;
+    expect(report).toMatchObject({ status: 'done', candidates: 1, booleans: 1, failures: [] });
+    expect(report.pairs).toHaveLength(1);
+    expect(report.pairs[0]).toMatchObject({ a: 'inst#1', b: 'inst#2', mesh: null });
+    expect(report.pairs[0]!.volume).toBeCloseTo(4000, 6);
+    // The pair came on its own, before the report, with the overlap's mesh in world coordinates.
+    expect(streamed).toHaveLength(1);
+    const mesh = streamed[0]!.mesh!;
+    expect(faceCount(mesh)).toBe(6);
+    const lo = [Infinity, Infinity, Infinity];
+    const hi = [-Infinity, -Infinity, -Infinity];
+    mesh.positions.forEach((v, i) => {
+      lo[i % 3] = Math.min(lo[i % 3]!, v);
+      hi[i % 3] = Math.max(hi[i % 3]!, v);
+    });
+    [0, 25, 0].forEach((v, i) => expect(lo[i]).toBeCloseTo(v, 4));
+    [40, 30, 20].forEach((v, i) => expect(hi[i]).toBeCloseTo(v, 4));
+
+    // A stop before the first pair: cancelled, with the candidates known and no boolean run.
+    const stopped = client.interference(ASSEMBLY);
+    await client.cancelInterference(ASSEMBLY);
+    expect(await stopped).toMatchObject({
+      status: 'cancelled',
+      candidates: 1,
+      booleans: 0,
+      pairs: [],
+    });
+
+    // A regen asked for meanwhile supersedes a check: it resolves to null.
+    const superseded = client.interference(ASSEMBLY);
+    const back = (await client.regen(doc))!;
+    expect(await superseded).toBeNull();
+    expect(back.assemblies[0]!.instances[1]!.transform.translation[2]).toBeCloseTo(20, 9);
+    expect((await client.interference(ASSEMBLY))!.pairs).toEqual([]);
+
+    // An assembly the last regen does not have: nothing to check.
+    expect(await client.interference('assembly#9')).toBeNull();
+    // The check left nothing in the kernel beyond the bodies the regens keep.
+    const leaks = await client.leaks();
+    expect(leaks.every((r) => r.operation !== 'interference')).toBe(true);
+  });
 });

@@ -13,6 +13,8 @@ import { clickWorld, project, settle, type Vec3 } from './helpers';
 // - Assembly 2: the drawer in the box on a slider between their front faces (DOF 1), limited to
 //   0 to 25 mm; dragging moves it along the slider only. A handle fastened 4 mm in front of the
 //   drawer leaves the DOF as it was, and follows the drawer. Undo takes the fastening back.
+//   The interference check finds nothing with the drawer pulled out, then the box and the drawer
+//   overlapping by 1500 mm3 once the drawer is made too deep, and nothing again when it fits.
 //   A part of another document, inserted at a named version, is placed and shown.
 // - A reload brings back both assemblies, their instances, mates and poses.
 
@@ -447,6 +449,71 @@ test('assemblies: a hinged lid, a drawer on a slider with a handle, a pinned par
   asm = await solved(page, 'assembly#2');
   expect(asm.dof).toBe(1);
   await expect(page.getByTestId('mate-mate#2')).toBeVisible();
+
+  // --- Interference (T2.3d) ---------------------------------------------------------------
+  // The drawer pulled out to its 25 mm limit (y -25..-5) clears the solid box (y 0..30), and the
+  // handle only touches the drawer's front: nothing overlaps.
+  await execute(
+    page,
+    {
+      type: 'setPoses',
+      assemblyId: 'assembly#2',
+      poses: { 'inst#2': { translation: [5, -25, 5], rotation: [0, 0, 0, 1] } },
+    },
+    'Pull the drawer out',
+  );
+  asm = await solved(page, 'assembly#2');
+  expectNear(instance(asm, 'inst#2').transform.translation, [5, -25, 5]);
+  await page.getByTestId('assembly-interference').click();
+  const interference = page.getByTestId('interference-panel');
+  const status = interference.getByTestId('interference-status');
+  await interference.getByTestId('interference-check').click();
+  await expect(status).toHaveText('No interference between the 3 instances.');
+  await expect(interference.getByTestId('interference-list')).toHaveCount(0);
+
+  // A drawer too deep for where it is: 30 mm instead of 20 reaches 5 mm into the box, over its
+  // 30 mm width and 10 mm height: 30 x 5 x 10 = 1500 mm3.
+  const drawerSketch = (depth: number) => box('part#3', 30, depth, 10)[0] as { feature: unknown };
+  await execute(
+    page,
+    { type: 'editFeature', partId: 'part#3', feature: drawerSketch(30).feature },
+    'Make the drawer too deep',
+  );
+  await solved(page, 'assembly#2');
+  await expect(status).toHaveAttribute('data-changed', 'true');
+  await interference.getByTestId('interference-check').click();
+  await expect(status).toHaveText('1 pair overlaps.');
+  const clash = interference.getByTestId('interference-pair-inst#1/inst#2');
+  await expect(clash).toContainText('Box 1 and Drawer 1');
+  await expect(clash).toContainText('1500.00 mm³');
+  expect(Number(await clash.getAttribute('data-volume'))).toBeCloseTo(1500, 3);
+  await expect(interference.locator('[data-testid^="interference-pair-"]')).toHaveCount(1);
+  // Picking the pair selects both instances and outlines the overlap (a 30 x 5 x 10 block).
+  await clash.click();
+  await expect(page.getByTestId('interference-overlay')).toHaveAttribute('data-edges', '12');
+  // Each face's id is `<assembly id>/<instance id>/<body id>/<face name>`.
+  const picked = await page.evaluate(() =>
+    window
+      .__manufakture!.selection.getState()
+      .selected.map((i) => i.id.split('/').slice(0, 3).join('/')),
+  );
+  expect(new Set(picked)).toEqual(
+    new Set(['assembly#2/inst#1/extrude#1', 'assembly#2/inst#2/extrude#1']),
+  );
+
+  // Back to 20 mm: the list is empty again.
+  await execute(
+    page,
+    { type: 'editFeature', partId: 'part#3', feature: drawerSketch(20).feature },
+    'Make the drawer fit',
+  );
+  await solved(page, 'assembly#2');
+  await interference.getByTestId('interference-check').click();
+  await expect(status).toHaveText('No interference between the 3 instances.');
+  await expect(interference.locator('[data-testid^="interference-pair-"]')).toHaveCount(0);
+  await expect(page.getByTestId('interference-overlay')).toHaveCount(0);
+  await interference.getByTestId('interference-close').click();
+  await expect(interference).toBeHidden();
 
   // The knob of the other document, at version v1: placed (free) and shown.
   await page.getByTestId('assembly-insert').click();

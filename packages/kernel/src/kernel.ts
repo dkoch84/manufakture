@@ -16,6 +16,7 @@ import type { TopoDS_Edge, TopoDS_Face, TopoDS_Shape } from 'libcascade/single/i
 import { KernelError, isFatalWasmError } from './errors';
 import { MAX_STEP_BYTES, decodeBase64, readStep, writeStep } from './exchange';
 import { collectHistory, resultMaps, type HistorySource, type ResultMaps } from './history';
+import { interferenceOf, type PlacedItem } from './interference';
 import { tessellate } from './mesh';
 import {
   measureShape,
@@ -49,6 +50,9 @@ import type {
   Topology,
   Vec3,
   Frame,
+  InterferenceItem,
+  InterferenceOptions,
+  InterferenceResult,
 } from './types';
 
 export type BooleanKind = 'fuse' | 'cut' | 'common';
@@ -878,6 +882,36 @@ export class Kernel {
     return this.op('measure', (s) =>
       measureShape(this.oc, s, this.get(shape, 'measure'), this.named(shape), targets, options),
     );
+  }
+
+  /**
+   * Which pairs of items (assembly instances: bodies at a placement) overlap, and by how much: a
+   * bounding-box prefilter, then a `common` per pair of bodies whose boxes overlap (see
+   * interference.ts). Overlaps up to `tolerance` (1e-3 mm3) are not reported, so touching bodies
+   * never are. Makes no shapes: every temporary is released before it returns.
+   */
+  interference(
+    items: readonly InterferenceItem[],
+    options: InterferenceOptions = {},
+  ): InterferenceResult {
+    return this.op('interference', (s) => {
+      const deflection: Deflection = {
+        linear: options.deflection?.linear ?? DEFAULT_DEFLECTION.linear,
+        angular: options.deflection?.angular ?? DEFAULT_DEFLECTION.angular,
+      };
+      positive('interference', 'deflection.linear', deflection.linear);
+      positive('interference', 'deflection.angular', deflection.angular);
+      const placed = items.map((item) => {
+        const out: PlacedItem = {
+          shapes: item.shapes.map((id) => this.get(id, 'interference')),
+        };
+        if (item.transform !== undefined) out.transform = item.transform;
+        return out;
+      });
+      return interferenceOf(this.oc, s, placed, options, deflection, (error) =>
+        this.toError('interference', error),
+      );
+    });
   }
 
   /** Tessellate: triangles per face and polylines per edge, in face-map and edge-map order. */

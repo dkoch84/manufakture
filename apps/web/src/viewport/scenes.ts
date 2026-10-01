@@ -131,6 +131,12 @@ export function kernelLoader(
     drag: (assemblyId, instanceId, target) =>
       client === null ? Promise.resolve(null) : client.dragInstance(assemblyId, instanceId, target),
     endDrag: (assemblyId) => void client?.endDrag(assemblyId).catch(() => undefined),
+    interference: (assemblyId, onPair) =>
+      client === null
+        ? Promise.resolve(null)
+        : client.interference(assemblyId, { mesh: true, onPair }),
+    cancelInterference: (assemblyId) =>
+      void client?.cancelInterference(assemblyId).catch(() => undefined),
   };
   const loader = loaderFrom(
     { label: 'Starting the geometry kernel', fraction: null },

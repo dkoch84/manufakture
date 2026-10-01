@@ -7,6 +7,7 @@ export {
   RegenEngine,
   type EngineStats,
   type AssemblyOptions,
+  type InterferenceCheckOptions,
   type RegenEngineOptions,
   type RegenKernel,
   type RegenOptions,

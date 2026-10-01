@@ -11,16 +11,28 @@ import type { DragTarget } from '@manufakture/assembly';
 import type { ManufaktureDocument } from '@manufakture/core';
 import {
   createKernelWorkerApi,
+  meshBuffers,
   type KernelService,
   type KernelWorkerApi,
   type WorkerApiOptions,
 } from '@manufakture/kernel';
 import { createSolverService } from '@manufakture/sketch';
 import * as Comlink from 'comlink';
-import { RegenEngine, type EngineStats, type RegenEngineOptions } from './engine';
+import {
+  RegenEngine,
+  type EngineStats,
+  type InterferenceCheckOptions,
+  type RegenEngineOptions,
+} from './engine';
 import type { RegenSolver } from './sketches';
 import { regenTransferables } from './transfer';
-import type { AssemblyResult, DragResult, RegenResult } from './types';
+import type {
+  AssemblyResult,
+  DragResult,
+  InstanceInterference,
+  InterferenceReport,
+  RegenResult,
+} from './types';
 
 export interface RegenWorkerApi extends KernelWorkerApi {
   /**
@@ -55,6 +67,20 @@ export interface RegenWorkerApi extends KernelWorkerApi {
   ): Promise<DragResult | null>;
   /** A drag that was not committed: the next one starts from the last regen again. */
   endDrag(assemblyId: string): Promise<void>;
+  /**
+   * Which instances of an assembly of the last regen overlap, on demand, at the client's current
+   * generation (a newer regen supersedes it: null). `onPair` (a `Comlink.proxy`, so a top-level
+   * argument: Comlink does not look for proxies inside objects) gets each pair as it is found,
+   * its mesh transferred; the report's pairs then carry no mesh. Without `onPair` the report's
+   * meshes are transferred with it.
+   */
+  interference(
+    assemblyId: string,
+    options: { generation: number; mesh?: boolean; tolerance?: number },
+    onPair?: (pair: InstanceInterference) => unknown,
+  ): Promise<InterferenceReport | null>;
+  /** Stop a running interference check of an assembly before its next pair (a `cancelled` report). */
+  cancelInterference(assemblyId: string): Promise<void>;
   /** Cumulative engine counters. */
   regenStats(): Promise<EngineStats>;
 }
@@ -112,6 +138,35 @@ export function createRegenWorkerApi(options: RegenWorkerApiOptions): RegenWorke
 
     async endDrag(assemblyId) {
       (await engineFor()).endDrag(assemblyId);
+    },
+
+    async interference(assemblyId, { generation, mesh, tolerance }, onPair) {
+      const engine = await engineFor();
+      const options: InterferenceCheckOptions = { generation };
+      if (mesh !== undefined) options.mesh = mesh;
+      if (tolerance !== undefined) options.tolerance = tolerance;
+      if (onPair !== undefined) {
+        // Awaited by the engine: the callback's port is not the reply's, so only waiting for it
+        // keeps every pair ahead of the report. A main thread that went away fails nothing.
+        options.onPair = (pair) =>
+          Promise.resolve(
+            onPair(Comlink.transfer(pair, pair.mesh ? meshBuffers(pair.mesh) : [])),
+          ).catch(() => undefined);
+      }
+      try {
+        const report = await engine.interference(assemblyId, options);
+        if (report === null) return null;
+        const buffers = report.pairs.flatMap((p) => (p.mesh ? meshBuffers(p.mesh) : []));
+        return Comlink.transfer(report, buffers);
+      } finally {
+        // The main thread's callback: let its proxy go.
+        const remote = onPair as { [Comlink.releaseProxy]?: () => void } | undefined;
+        remote?.[Comlink.releaseProxy]?.();
+      }
+    },
+
+    async cancelInterference(assemblyId) {
+      (await engineFor()).cancelInterference(assemblyId);
     },
 
     async regenStats() {

@@ -107,6 +107,71 @@ export type Transform =
   | { kind: 'rotate'; axis: Axis; angle: number }
   | { kind: 'mirror'; plane: Plane };
 
+/**
+ * A rigid placement: `p_world = R p + translation`, `rotation` a unit quaternion `[x, y, z, w]`
+ * (an assembly instance's pose; core's and the mate solver's `Pose`). A quaternion that is not of
+ * unit length is normalised; a zero one is `invalid-argument`.
+ */
+export interface Placement {
+  translation: Vec3;
+  rotation: readonly [number, number, number, number];
+}
+
+/**
+ * One item of an interference check: an assembly instance, as the bodies it shows (live shape ids,
+ * in their own coordinates) at one placement. Bodies of one item are never checked against each
+ * other.
+ */
+export interface InterferenceItem {
+  shapes: readonly ShapeId[];
+  /** Absent: the bodies as they are. */
+  transform?: Placement;
+}
+
+export interface InterferenceOptions {
+  /**
+   * The item pairs to look at, as `[i, j]` indices into the items (`i !== j`); default every
+   * pair, in order (0, 1), (0, 2), ... (1, 2), ...
+   */
+  pairs?: readonly (readonly [number, number])[];
+  /** Overlaps of at most this volume (mm3) are not reported; default 1e-3 (`DEFAULT_INTERFERENCE_TOLERANCE`). */
+  tolerance?: number;
+  /** Tessellate each reported overlap (in world coordinates); default false. */
+  mesh?: boolean;
+  /** Tessellation of the overlaps; default `DEFAULT_DEFLECTION`. */
+  deflection?: Partial<Deflection>;
+  /**
+   * Only run the bounding-box prefilter: `candidates` is filled and no boolean runs. A caller that
+   * streams results asks for the candidates first, then checks them one pair at a time.
+   */
+  prefilterOnly?: boolean;
+}
+
+/** Two items whose bodies overlap by more than the tolerance. */
+export interface InterferencePair {
+  /** Item indices, `a < b` when the pair was given that way (always for the default pairs). */
+  a: number;
+  b: number;
+  /** The overlap's volume in mm3: the sum over the pairs of bodies of the two items. */
+  volume: number;
+  /** The overlap's tessellation in world coordinates, when asked for (name slots UNNAMED). */
+  mesh?: MeshData;
+}
+
+export interface InterferenceResult {
+  /**
+   * Item pairs whose placed bounding boxes overlap by more than the tolerance (in volume): the
+   * only ones a boolean is run for. In the order of the pairs looked at.
+   */
+  candidates: [number, number][];
+  /** `common` booleans run (one per candidate pair of bodies); 0 with `prefilterOnly`. */
+  booleans: number;
+  /** In the order of the pairs looked at. */
+  pairs: InterferencePair[];
+  /** Pairs whose boolean OCCT could not compute, with its message; not counted as overlaps. */
+  failures: { a: number; b: number; message: string }[];
+}
+
 /** How a chamfer is sized. Asymmetric chamfers measure `distance` on the edge's reference face. */
 export type ChamferSize =
   | { kind: 'distance'; distance: number }

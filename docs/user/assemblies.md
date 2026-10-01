@@ -6,7 +6,7 @@ An **assembly** puts parts together: a lid hinged on a box, a drawer that slides
 
 Assemblies are tabs next to the part studios at the bottom of the editor. **+ Assembly** adds one, named "Assembly 1", "Assembly 2" and so on, and opens it. Double-click a tab (or **Rename**) to rename it, and **Delete** removes the open assembly with its instances and mates. Every change is one step that **Undo** takes back, and undo or redo switch to the tab they changed. A reload opens the tab that was open.
 
-In an assembly tab the feature toolbar gives way to **Insert** and **Mate**, and the feature tree to the assembly's tree: how many degrees of freedom it has left, its instances, and its mates.
+In an assembly tab the feature toolbar gives way to **Insert**, **Mate** and **Interference**, and the feature tree to the assembly's tree: how many degrees of freedom it has left, its instances, and its mates.
 
 ## Inserting instances
 
@@ -58,6 +58,18 @@ Drag an instance with the left mouse button to move it as far as its mates allow
 
 Letting go records where everything ended up as one step, so **Undo** puts it back.
 
+## Interference
+
+**Interference** opens the Interference panel, which lists every pair of instances that overlap, with the volume they share: a drawer too deep for its cabinet, a screw longer than its hole, two parts placed in the same spot. **Check** runs it on the assembly as it is shown, including an instance you are dragging.
+
+- Pairs appear as they are found; a large assembly can take a while, and **Stop** ends the check with the pairs found so far.
+- Instances that only touch (a lid lying on a box, a handle against a drawer) are not listed. Overlaps of 0.001 mm³ or less are ignored.
+- Click a pair to select both instances and outline the space they share; click it again to clear it.
+- An instance shows its part's bodies, and only overlaps between instances count: two bodies of the same part that overlap are the part studio's business.
+- The check is never run by itself, so editing and dragging stay quick. Once the assembly changes, the panel says so: **Check again**.
+
+Volumes are shown in the document's units. Only pairs whose bounding boxes overlap are intersected, so a spread-out assembly is checked quickly whatever its size.
+
 ## How it is solved
 
 Mates are solved in the background, in the same worker that builds the part studios, so the editor stays responsive while an assembly is solved or dragged. Assemblies that are trees of mates (each instance hanging off a fixed one, as most are) are placed exactly; a closed loop of mates (a four-bar linkage) is solved numerically from where the instances were last. That is why the poses are saved: they choose between the solutions of a loop, and they are where a mate that cannot be solved leaves its instances.
@@ -71,3 +83,5 @@ Mates are solved in the background, in the same worker that builds the part stud
 5. Make a drawer of 30 x 20 x 10 mm and a handle of 10 x 4 x 4 mm. In a new assembly, insert the box, the drawer and the handle.
 6. Mate the box's front face to the drawer's front face with a slider, limits 0 and 25 mm. Drag the drawer: it slides out, up to 25 mm.
 7. Mate the drawer's front face to the handle's front face, fastened, with an offset of 4 mm in z: the handle sits on the drawer, and the assembly still has 1 degree of freedom.
+8. Pull the drawer all the way out (25 mm) and open **Interference**: **Check** finds nothing (the handle only touches the drawer).
+9. Make the drawer 30 mm deep instead of 20 and **Check again**: Box 1 and Drawer 1 overlap by 1500 mm³ (30 x 5 x 10 mm, the back of the drawer inside the box). Click the pair to see where. Back to 20 mm, and the list is empty again.

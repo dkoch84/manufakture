@@ -8,7 +8,7 @@ import {
   type Command,
   type ManufaktureDocument,
 } from '@manufakture/core';
-import type { FeatureResult } from '@manufakture/regen';
+import type { FeatureResult, InstanceInterference } from '@manufakture/regen';
 import { importSource, writeBinaryStl } from '@manufakture/io';
 import { App } from './App';
 import { MemoryBackend } from './persistence/backend';
@@ -23,7 +23,7 @@ import { demoDocument } from './model/demo';
 import { createModelStore, type Regenerator, type RegenView } from './model/model';
 import { createDocumentStore } from './state/document';
 import { createMeasureStore } from './state/measure';
-import { createSelectionStore, geometryRef } from './state/selection';
+import { createSelectionStore, geometryRef, type GeometryRef } from './state/selection';
 import { createViewSettingsStore } from './state/viewSettings';
 import type { BodyInput } from './viewport/bodies';
 import type { LoadStatus, SceneLoader } from './viewport/scenes';
@@ -1502,7 +1502,29 @@ describe('App assemblies', () => {
       regen: (document) => new Promise((resolve) => requests.push({ document, resolve })),
       onInvalidated: () => () => undefined,
     };
-    const assembler = { solve: vi.fn(async () => null), drag: vi.fn(async () => null) };
+    const overlap = boxBody({ id: 'overlap', min: [0, 0, 0], size: [10, 10, 2] }).mesh;
+    const assembler = {
+      solve: vi.fn(async () => null),
+      drag: vi.fn(async () => null),
+      interference: vi.fn(
+        async (assemblyId: string, onPair: (pair: InstanceInterference) => void) => {
+          const pair = { a: 'inst#1', b: 'inst#2', volume: 200, mesh: overlap };
+          onPair(pair);
+          return {
+            generation: 1,
+            assemblyId,
+            instances: ['inst#1', 'inst#2'],
+            pairs: [{ ...pair, mesh: null }],
+            candidates: 1,
+            booleans: 1,
+            failures: [],
+            status: 'done' as const,
+            ms: 1,
+          };
+        },
+      ),
+      cancelInterference: vi.fn(),
+    };
     const loader: SceneLoader = {
       load: async () => [],
       dispose: vi.fn(),
@@ -1615,5 +1637,46 @@ describe('App assemblies', () => {
     expect(screen.getByRole('toolbar', { name: 'Features' })).toBeDefined();
     await waitFor(() => expect(t.shownIds()).toEqual(['part#1/extrude#1']));
     expect(t.engine.api.setObjectDrag).toHaveBeenLastCalledWith(null);
+  });
+  it('checks interference from the assembly toolbar; a pair selects both instances and outlines the overlap', async () => {
+    const t = assemblySetup();
+    await waitFor(() => expect(t.requests).toHaveLength(1));
+    await t.answer(0);
+    fireEvent.click(screen.getByTestId('assembly-tab-assembly#1'));
+    await waitFor(() => expect(t.shownIds()).toHaveLength(2));
+
+    fireEvent.click(screen.getByTestId('assembly-interference'));
+    expect(screen.getByTestId('interference-panel')).toBeDefined();
+    fireEvent.click(screen.getByTestId('interference-check'));
+    await waitFor(() =>
+      expect(screen.getByTestId('interference-status').textContent).toBe('1 pair overlaps.'),
+    );
+    expect(t.assembler.interference).toHaveBeenCalledWith('assembly#1', expect.any(Function));
+    const pair = screen.getByTestId('interference-pair-inst#1/inst#2');
+    expect(pair.textContent).toContain('Box 1 and Lid 1');
+    expect(pair.textContent).toContain('200.00 mm³');
+
+    // The pair: both instances selected, face by face, and the overlap outlined; the view is
+    // not rebuilt for it.
+    const builds = t.engine.api.setBodies.mock.calls.length;
+    fireEvent.click(pair);
+    const selected = t.selection.getState().selected as GeometryRef[];
+    expect(selected).toHaveLength(12);
+    expect(new Set(selected.map((i) => i.bodyId))).toEqual(
+      new Set(['assembly#1/inst#1/extrude#1', 'assembly#1/inst#2/extrude#1']),
+    );
+    expect(screen.getByTestId('interference-overlay').getAttribute('data-edges')).toBe('12');
+    expect(t.engine.api.setBodies.mock.calls.length).toBe(builds);
+    // Picking it again clears both.
+    fireEvent.click(pair);
+    expect(t.selection.getState().selected).toEqual([]);
+    expect(screen.queryByTestId('interference-overlay')).toBeNull();
+
+    // Closing the panel drops the check.
+    fireEvent.click(pair);
+    fireEvent.click(screen.getByTestId('interference-close'));
+    expect(screen.queryByTestId('interference-panel')).toBeNull();
+    expect(screen.queryByTestId('interference-overlay')).toBeNull();
+    expect(t.selection.getState().selected).toEqual([]);
   });
 });

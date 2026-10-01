@@ -42,8 +42,11 @@ import type {
   Deflection,
   ExtrudeResult,
   Frame,
+  InterferenceOptions,
+  InterferenceResult,
   MeshData,
   OperationResult,
+  Placement,
   ProfileLoop,
   ShapeId,
   ShapeProperties,
@@ -169,6 +172,15 @@ export type ExportStepOp = OpCommon & {
 };
 /** Read a STEP file (bytes, or base64 text) into a new, unnamed shape. */
 export type ImportStepOp = OpCommon & { op: 'importStep'; data: Uint8Array | string };
+/**
+ * Which pairs of items (assembly instances: their bodies at a placement) overlap, and by how much
+ * (`Kernel.interference`). Makes no shapes.
+ */
+export type InterferenceOp = OpCommon &
+  InterferenceOptions & {
+    op: 'interference';
+    items: readonly { shapes: readonly ShapeRef[]; transform?: Placement }[];
+  };
 
 export type KernelOp =
   | BoxOp
@@ -187,7 +199,8 @@ export type KernelOp =
   | PickOp
   | MeasureOp
   | ExportStepOp
-  | ImportStepOp;
+  | ImportStepOp
+  | InterferenceOp;
 
 export type OpName = KernelOp['op'];
 
@@ -217,6 +230,8 @@ export interface OpValues {
   /** `data` is transferred. */
   exportStep: { data: Uint8Array };
   importStep: { shape: ShapeId };
+  /** Overlap meshes are transferred. */
+  interference: InterferenceResult;
 }
 
 export type OpValue<O extends { op: OpName }> = OpValues[O['op']];
@@ -246,6 +261,7 @@ const OP_NAMES: ReadonlySet<string> = new Set<OpName>([
   'measure',
   'exportStep',
   'importStep',
+  'interference',
 ]);
 
 // Validation ----------------------------------------------------------------------
@@ -267,6 +283,21 @@ const measureTarget: Check = (v, p) => {
     ? shape({ kind, name: str })(v, p)
     : shape({ kind, index: num })(v, p);
 };
+
+/** A placement: `{ translation: [x, y, z], rotation: [x, y, z, w] }`. */
+const placement: Check = (v, p) => {
+  const e = shape({ translation: vec3, rotation: arrayOf(num, true) })(v, p);
+  if (e !== null) return e;
+  return (v as { rotation: unknown[] }).rotation.length === 4
+    ? null
+    : `${p}.rotation must be a quaternion [x, y, z, w]`;
+};
+
+/** An item pair: `[i, j]`. */
+const pair: Check = (v, p) =>
+  Array.isArray(v) && v.length === 2 && v.every((c) => typeof c === 'number')
+    ? null
+    : `${p} must be [number, number]`;
 
 const FIELDS: Record<OpName, [Record<string, Check>, Record<string, Check>]> = {
   box: [{ size: vec3 }, { at: vec3 }],
@@ -323,6 +354,16 @@ const FIELDS: Record<OpName, [Record<string, Check>, Record<string, Check>]> = {
           : `${p} must be a Uint8Array or base64 text`,
     },
     {},
+  ],
+  interference: [
+    { items: arrayOf(shape({ shapes: arrayOf(shapeRef) }, { transform: placement })) },
+    {
+      pairs: arrayOf(pair),
+      tolerance: num,
+      mesh: bool,
+      deflection: shape({}, { linear: num, angular: num }),
+      prefilterOnly: bool,
+    },
   ],
 };
 
@@ -452,6 +493,24 @@ export function executeOp(
       };
     case 'importStep':
       return { shape: kernel.importStep(op.data) };
+    case 'interference': {
+      const options: InterferenceOptions = {};
+      if (op.pairs !== undefined) options.pairs = op.pairs;
+      if (op.tolerance !== undefined) options.tolerance = op.tolerance;
+      if (op.mesh !== undefined) options.mesh = op.mesh;
+      if (op.deflection !== undefined) options.deflection = op.deflection;
+      if (op.prefilterOnly !== undefined) options.prefilterOnly = op.prefilterOnly;
+      return kernel.interference(
+        op.items.map((item) => {
+          const out: { shapes: ShapeId[]; transform?: Placement } = {
+            shapes: item.shapes.map((ref) => resolve(ref, 'interference')),
+          };
+          if (item.transform !== undefined) out.transform = item.transform;
+          return out;
+        }),
+        options,
+      );
+    }
     case 'release': {
       // Like every other op on a lost kernel: fatal, not a list of unknown ids.
       const lost = kernel.lostReason;

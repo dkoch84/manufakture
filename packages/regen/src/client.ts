@@ -9,8 +9,15 @@
 import type { DragTarget } from '@manufakture/assembly';
 import type { ManufaktureDocument } from '@manufakture/core';
 import { KernelClient, type KernelClientOptions } from '@manufakture/kernel/kernel-client';
+import * as Comlink from 'comlink';
 import type { EngineStats } from './engine';
-import type { AssemblyResult, DragResult, RegenResult } from './types';
+import type {
+  AssemblyResult,
+  DragResult,
+  InstanceInterference,
+  InterferenceReport,
+  RegenResult,
+} from './types';
 import type { RegenWorkerApi } from './worker-api';
 
 export class RegenClient extends KernelClient {
@@ -67,6 +74,38 @@ export class RegenClient extends KernelClient {
    */
   endDrag(assemblyId: string): Promise<void> {
     return this.droppable(this.worker<RegenWorkerApi>().endDrag(assemblyId)).then(() => undefined);
+  }
+
+  /**
+   * Which instances of an assembly overlap, and by how much, as the last regen (or a drag in
+   * progress) placed them: on demand, never part of a regen. At the current generation, so it
+   * never cancels a regen, and a newer regen supersedes it (null). `onPair` gets each overlapping
+   * pair as it is found, with its mesh when `mesh` is set; the report then lists the pairs again
+   * without meshes. Null too when the worker was stopped.
+   */
+  interference(
+    assemblyId: string,
+    options: {
+      mesh?: boolean;
+      tolerance?: number;
+      onPair?: (pair: InstanceInterference) => void;
+    } = {},
+  ): Promise<InterferenceReport | null> {
+    const { onPair, ...rest } = options;
+    return this.droppable(
+      this.worker<RegenWorkerApi>().interference(
+        assemblyId,
+        { ...rest, generation: this.latestGeneration },
+        onPair ? Comlink.proxy(onPair) : undefined,
+      ) as Promise<InterferenceReport | null>,
+    ).then((result) => result ?? null);
+  }
+
+  /** Stop the running interference check of an assembly before its next pair. */
+  cancelInterference(assemblyId: string): Promise<void> {
+    return this.droppable(this.worker<RegenWorkerApi>().cancelInterference(assemblyId)).then(
+      () => undefined,
+    );
   }
 
   regenStats(): Promise<EngineStats> {

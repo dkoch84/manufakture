@@ -420,6 +420,78 @@ describe('embind objects', () => {
     expect(tracker.liveNames()).toEqual([]);
   });
 
+  it('interference leaves nothing behind: placements, boxes, booleans, meshes and failures', () => {
+    const block = k.box(10, 10, 10);
+    const cyl = k.cylinder(4, 12, [5, 5, -1]);
+    const turn = (angle: number, translation: [number, number, number]) => ({
+      translation,
+      rotation: [0, 0, Math.sin(angle / 2), Math.cos(angle / 2)] as [
+        number,
+        number,
+        number,
+        number,
+      ],
+    });
+    tracker.reset();
+    const runs: Array<[string, () => unknown]> = [
+      [
+        'overlapping, touching and apart, several bodies per item, with meshes',
+        () =>
+          k.interference(
+            [
+              { shapes: [block, cyl] },
+              { shapes: [block], transform: turn(Math.PI / 5, [6, 3, 2]) },
+              { shapes: [block], transform: turn(0, [10, -10, 0]) },
+              { shapes: [cyl], transform: turn(0, [40, 0, 0]) },
+            ],
+            { mesh: true },
+          ),
+      ],
+      [
+        'the prefilter alone',
+        () =>
+          k.interference(
+            [{ shapes: [block] }, { shapes: [block], transform: turn(1, [3, 3, 3]) }],
+            { prefilterOnly: true },
+          ),
+      ],
+    ];
+    for (const [name, fn] of runs) {
+      tracker.reset();
+      const r = fn() as { candidates: unknown[]; pairs: unknown[] };
+      expect(tracker.liveNames(), name).toEqual([]);
+      // Each run had work to do: candidates found (and in the first, overlaps meshed).
+      expect(r.candidates.length, name).toBeGreaterThan(0);
+    }
+    const failing: Array<[string, () => unknown]> = [
+      [
+        'a bad placement after other items were placed',
+        () =>
+          k.interference([
+            { shapes: [block], transform: turn(1, [1, 1, 1]) },
+            { shapes: [block], transform: { translation: [0, 0, 0], rotation: [0, 0, 0, 0] } },
+          ]),
+      ],
+      [
+        'an unknown shape',
+        () => k.interference([{ shapes: [block] }, { shapes: [999_999 as ShapeId] }]),
+      ],
+      [
+        'a bad deflection',
+        () => k.interference([{ shapes: [block] }], { deflection: { linear: 0 } }),
+      ],
+    ];
+    for (const [name, fn] of failing) {
+      tracker.reset();
+      expect(fn, name).toThrow(KernelError);
+      expect(tracker.liveNames(), name).toEqual([]);
+    }
+    expect(k.shapeCount).toBe(2);
+    k.release(block);
+    k.release(cyl);
+    expect(tracker.liveNames()).toEqual([]);
+  });
+
   it('releaseSince frees a whole regen', () => {
     const mark = k.checkpoint();
     regen();
@@ -437,5 +509,25 @@ describe('heap', () => {
     for (let i = 0; i < 30; i++) for (const id of regen()) k.release(id);
     expect(k.shapeCount).toBe(0);
     expect(k.heapBytes()).toBe(before);
+  }, 60_000);
+
+  it('repeated interference checks do not grow the wasm heap', () => {
+    const block = k.box(10, 10, 10);
+    const cyl = k.cylinder(4, 12, [5, 5, -1]);
+    const check = () =>
+      k.interference(
+        [
+          { shapes: [block, cyl] },
+          { shapes: [block], transform: { translation: [6, 3, 2], rotation: [0, 0, 0.3, 0.95] } },
+          { shapes: [cyl], transform: { translation: [3, 3, 0], rotation: [0, 0, 0, 1] } },
+        ],
+        { mesh: true },
+      );
+    expect(check().pairs.length).toBe(3);
+    const before = k.heapBytes();
+    for (let i = 0; i < 30; i++) check();
+    expect(k.heapBytes()).toBe(before);
+    k.release(block);
+    k.release(cyl);
   }, 60_000);
 });
