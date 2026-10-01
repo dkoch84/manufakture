@@ -1,6 +1,6 @@
 # 0006: Licensing: GPL-3.0-or-later, and what we may depend on
 
-- Status: accepted
+- Status: accepted, amended 2026-10-01
 - Date: 2026-09-26
 
 ## Context
@@ -72,3 +72,22 @@ Notes on the inventory:
 - Every new runtime dependency needs a license check and a row in the shipped notices; the table above is a snapshot and is not kept current by hand.
 - Kernel and solver stay separate assets for good, including our own builds; ADR 0002 and ADR 0003 already require that.
 - The app is JavaScript delivered to the browser, so serving it to users distributes it: whoever hosts a build must also offer its corresponding source, including the build recipes of the `.wasm` modules.
+
+## Amendment: OFL 1.1 for bundled fonts, opentype.js and Inter Bold (T3.0c, #1038)
+
+M3's text features need a bundled font, and decision 2 does not name the SIL Open Font License, under which nearly all good open fonts are released. [ADR 0011](0011-fonts.md) decides the fonts question and adds to decision 2:
+
+- **SIL OFL 1.1**, for font files only, shipped as separate data files loaded at run time as bytes, never compiled, inlined or base64-encoded into our JavaScript. The OFL keeps the font under the OFL (its condition 5), so it ships beside the GPL code as an aggregate and never becomes part of it. Each font file is shipped unmodified, or has no Reserved Font Name (OFL FAQ 2.6 counts subsetting as modification). Its copyright line and the full OFL text go into the shipped notices (decision 5), and its license is read from the font's own files (decision 6). This covers every font file committed to the repository, test fixtures included.
+
+User fonts that a user adds to a document are not dependencies and are not covered by this list; ADR 0011 decision 7 sets their rules. The follow-up license check of decision 5 must also check the font files under `packages/text/fonts/`, which are not npm packages.
+
+Rows added to the inventory (same conventions as the table above; "npm metadata" means read from the registry, not from an installed package, so it must be re-read from the installed package on adoption):
+
+| Component   | Version | License        | Use                             | Verified from                                                                                                  |
+| ----------- | ------- | -------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| opentype.js | 2.0.0   | MIT            | font parsing in `packages/text` | npm metadata, 2026-09-26                                                                                       |
+| Inter Bold  | 4.1     | OFL-1.1-no-RFN | bundled font (ADR 0011)         | license verified 2026-10-01 from the release (`LICENSE.txt` and `name` table); SHA-256 still recorded by T3.2b |
+
+- **opentype.js**'s own runtime dependencies, if any, get rows when it is installed.
+- **Inter Bold** is the static `extras/ttf/Inter-Bold.ttf` from the upstream `rsms/inter` 4.1 release (latest release as of 2026-10-01). Its license file is `LICENSE.txt`: SIL OFL 1.1, copyright "The Inter Project Authors", no RFN (confirmed from `LICENSE.txt` on 2026-10-01). The file is static with OS/2 `fsType` 0. T3.2b records the SHA-256 and runs the remaining checks of ADR 0011 decision 3 (overlaps, stroke widths); if one fails, the fallback is Noto Sans Bold (OFL 1.1; its RFN status is not verified here), and this row changes with it.
+- M5's amendment for LGPL-3.0 (OpenCAMLib, T5.0c or T5.5a) is independent of this one; whichever lands second extends the other.
