@@ -129,6 +129,7 @@ export * from './cache';
 
 // T5.2b: the profile operation (registered on the worker by `registerBuiltinOperations`).
 export {
+  MAX_DEPTH_LEVELS,
   PROFILE_SAFE_ABOVE,
   PROFILE_TAB_MARGIN,
   PROFILE_TAB_MIN_INSIDE_SIZE,
@@ -187,6 +188,48 @@ export {
   toolTipLength,
 } from './ops/drill';
 export type { DrillExtras, DrillOperation } from './ops/drill';
+
+// T5.2f: the V-carve operation (registered on the worker by `registerBuiltinOperations`), and the
+// clearing of its flat floor by an end mill as a toolpath of its own.
+export {
+  OutlineDistance,
+  VCARVE_FLAT_RIDGE,
+  VCARVE_INSET_STEP,
+  VCARVE_MAX_FLAT_RINGS,
+  VCARVE_MAX_LEVELS,
+  VCARVE_SAFE_ABOVE,
+  VCARVE_SAMPLE,
+  VCARVE_TOLERANCE,
+  generateVCarve,
+  generateVCarveClearing,
+} from './ops/vcarve';
+export type { VCarveClearing, VCarveExtras, VCarveOperation } from './ops/vcarve';
+
+// T5.2g: linking and job assembly (a setup's operations as one program for the posts).
+export {
+  JOB_LINK_OP,
+  JOB_SAFE_ABOVE,
+  JOB_SPINDLE_DWELL,
+  JOB_TWO_OPT_LIMIT,
+  assembleJob,
+  cyclePieces,
+  jobOperations,
+  orderPieces,
+  stockTopZ,
+} from './job';
+export type {
+  Job,
+  JobError,
+  JobFailure,
+  JobOperation,
+  JobOperationOutcome,
+  JobOptions,
+  JobPiece,
+  JobResult,
+  JobSetup,
+  JobSpan,
+  JobWarning,
+} from './job';
 
 // T5.1d: the tool library, feed presets and machine profiles (also `@manufakture/cam/library`).
 export * from './library';

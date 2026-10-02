@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { angleAbout, arcSweep, radiusAbout } from '../arc';
 import type { Move, Toolpath } from '../ir';
 import { isMove } from '../ir';
+import { regionLoops, unionLoops } from '../offset/engine';
 import { flattenSegments } from '../offset/flatten';
 import { distToLoops, pointInLoops } from '../offset/geometry';
-import { circle, dumbbell, hole, rect, slot } from '../offset/test-shapes';
+import { circle, dumbbell, hole, polygon, rect, slot } from '../offset/test-shapes';
 import type { Loop2, Setup, Vec2, Vec3 } from '../types';
 import { validateToolpath } from '../validate';
 import { registerBuiltinOperations } from '../worker/builtin';
@@ -628,6 +629,46 @@ describe('pocket operation: material removal', () => {
     });
     const { toolpath } = await run(op);
     const sim = simulate(toolpath, op, 0.04);
+    expect(sim.rapidBelow).toBeLessThan(1e-6);
+    expect(sim.gouge).toBeLessThan(0.003);
+  });
+
+  it('plunges a finishing pass at the wall from above the top when it has no room to lead in', async () => {
+    // A bulb off the left wall, through a neck narrower than the 2 mm tool: it has a finishing
+    // loop of its own. The allowance is large enough that the clearing ring in the square counts
+    // as covering that loop, but there is no room in the bulb to lead in from the cleared pocket,
+    // so the pass plunges at the wall, through the allowance, which is uncut from the top down.
+    const bulb = polygon(
+      Array.from({ length: 96 }, (_, k): Vec2 => {
+        const t = Math.PI + (2 * Math.PI * k) / 96;
+        return [-1.85 + 2 * Math.cos(t), 12 + 2 * Math.sin(t)];
+      }),
+    );
+    // One outline (the walls' distance check needs no overlap inside it).
+    const united = unionLoops([rect(0, 0, 24, 24), bulb]);
+    if (!united.ok) throw new Error(united.error.message);
+    const op = pocket({
+      tool: { ...tool, diameter: 2 },
+      loops: regionLoops(united.value),
+      finishAllowance: 9,
+      entry: { kind: 'plunge' },
+    });
+    const { toolpath, warnings } = await run(op);
+    expect(warnings?.map((w) => w.code)).toEqual(['finish-plunge-at-wall']);
+    const moves = withStarts(toolpath);
+    const plunges = moves
+      .map((m, i) => ({ ...m, i }))
+      .filter(
+        ({ from, move }) => move.kind !== 'rapid' && move.feedClass === 'plunge' && from[0] < 0,
+      );
+    expect(plunges.length).toBeGreaterThan(0);
+    for (const { from, i } of plunges) {
+      // Straight down from the rapid that stopped above the top, not above the cleared floor.
+      const before = moves[i - 1]!;
+      expect(before.move.kind).toBe('rapid');
+      expect(from[2]).toBeCloseTo(op.depth.top + POCKET_SAFE_ABOVE, 9);
+    }
+    const sim = simulate(toolpath, op, 0.05);
     expect(sim.rapidBelow).toBeLessThan(1e-6);
     expect(sim.gouge).toBeLessThan(0.003);
   });

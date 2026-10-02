@@ -7,6 +7,7 @@ import { generateFacing } from '../ops/facing';
 import { generateDrill } from '../ops/drill';
 import { generatePocket } from '../ops/pocket';
 import { generateProfile } from '../ops/profile';
+import { generateVCarve } from '../ops/vcarve';
 import type { OperationRegistry } from './registry';
 
 export function registerBuiltinOperations(registry: OperationRegistry): OperationRegistry {
@@ -14,5 +15,6 @@ export function registerBuiltinOperations(registry: OperationRegistry): Operatio
   registry.register('pocket', generatePocket);
   registry.register('drill', generateDrill);
   registry.register('facing', generateFacing);
+  registry.register('vcarve', generateVCarve);
   return registry;
 }
