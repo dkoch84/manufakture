@@ -47,6 +47,7 @@ import {
   type DerivedSource,
   type DocumentChange,
   type DocumentFont,
+  type ExtensionFeature,
   type Feature,
   type ImportSource,
   type ManufaktureDocument,
@@ -68,10 +69,12 @@ import {
   type KernelOp,
   type MeshData,
   type OpResult,
+  type OrientedBox,
   type ReferenceReport,
   type ShapeId,
   type TessellateOp,
   type Topology,
+  type TopoRef,
 } from '@manufakture/kernel';
 import type { SketchPlacement } from '@manufakture/sketch';
 import { bundledFont } from '@manufakture/text/bundled';
@@ -108,6 +111,25 @@ import {
 import { DerivedSources, carriedProps, describeSource, effectiveProps, tooDeep } from './derived';
 import { mapFailure, mapOutcome, planeReport } from './errors';
 import {
+  checkOutput,
+  checkQueries,
+  defaultExtensions,
+  evaluateExtension,
+  extensionKey,
+  extensionNamespace,
+  guard,
+  readDomainData,
+  readParams,
+  supported,
+  type ExtensionContext,
+  type ExtensionRegistry,
+  type ExtensionUpstream,
+  type GeometryAnswer,
+  type GeometryQuery,
+  type NamespaceRead,
+  type ResolvedReference,
+} from './extensions';
+import {
   bodyUse,
   buildGraph,
   dirtyFeaturesOf,
@@ -125,7 +147,7 @@ import {
   type SketchResult,
 } from './sketches';
 import { TextBudget, lazyTextOutliner, type TextOutliner } from './text';
-import { faceRef, translateFeature } from './translate';
+import { faceRef, topoRef, translateFeature } from './translate';
 import type {
   AssemblyResult,
   BodyResult,
@@ -141,10 +163,12 @@ import type {
   RegenCounters,
   RegenError,
   RegenResult,
+  ReferenceResolution,
   RegenWarning,
   SourceResult,
 } from './types';
 import { evaluateFeature, evaluateVariables, type VariableValues } from './values';
+import { profileOf } from './sketches';
 
 /**
  * What the engine needs from the kernel: the batch API of `KernelService` (which satisfies it
@@ -185,6 +209,11 @@ export interface RegenEngineOptions {
    * `createTextOutliner({ allowFileFonts: true })`.
    */
   text?: TextOutliner;
+  /**
+   * The domains extension features are built with (ADR 0013 decision 5). Default:
+   * `defaultExtensions`, which the app's regen worker entry fills at start-up.
+   */
+  extensions?: ExtensionRegistry;
   /**
    * The kernel recycled its instance, so every cached body is gone. The host should regen the
    * current document again (the next regen rebuilds; nothing is lost but time).
@@ -262,6 +291,7 @@ const MIXED_INSTANCES = -1;
 
 type Meta =
   | { type: 'feature'; feature: Feature; key: string; result: FeatureResult; started: number }
+  /** An op whose result a callback takes: `resolve`, and an extension's `obb` queries. */
   | { type: 'resolve'; take: (r: OpResult) => void }
   | { type: 'mesh'; slot: string }
   | { type: 'topology'; slot: string };
@@ -327,6 +357,8 @@ interface PartState extends BuildScope {
    * by the body id they would have (`derived#1:from/<source body id>`).
    */
   inherited: Map<string, BodyPropsFields>;
+  /** What the extensions built so far translated to, by feature id, for later ones to read. */
+  extensions: Map<string, ExtensionUpstream>;
 }
 
 const now = (): number => performance.now();
@@ -440,6 +472,52 @@ function emptyCounters(): RegenCounters {
   return { featureOps: 0, otherOps: 0, batches: 0, solves: 0, cacheHits: 0, cacheMisses: 0 };
 }
 
+/** A deep copy of plain data, frozen all the way down: what domain code is given to read. */
+function frozenCopy<T>(value: T): T {
+  const copy = structuredClone(value);
+  const stack: unknown[] = [copy];
+  while (stack.length > 0) {
+    const v = stack.pop();
+    if (typeof v !== 'object' || v === null || Object.isFrozen(v)) continue;
+    if (ArrayBuffer.isView(v)) continue;
+    Object.freeze(v);
+    for (const x of Object.values(v)) stack.push(x);
+  }
+  return copy;
+}
+
+/** The error of an extension reference that did not resolve (ADR 0004 decision 6). */
+function lostReference(
+  reference: ExtensionFeature['references'][number],
+  target: string,
+  report: Extract<ReferenceReport, { ok: false }>,
+): RegenError {
+  const hint = reference.lastResolved;
+  const extra =
+    hint === undefined ? {} : { lastResolved: { point: hint.point, direction: hint.direction } };
+  if (report.status === 'lost') {
+    return {
+      code: 'reference-lost',
+      referenceId: reference.id,
+      target,
+      missing: [...report.missing],
+      message: `${target} is lost: re-pick it`,
+      ...extra,
+    };
+  }
+  if (report.status === 'ambiguous') {
+    return {
+      code: 'reference-ambiguous',
+      referenceId: reference.id,
+      target,
+      candidates: [...report.candidates],
+      message: `${target} is ambiguous: re-pick it`,
+      ...extra,
+    };
+  }
+  return { code: 'no-body', referenceId: reference.id, message: report.message };
+}
+
 export class RegenEngine {
   readonly #kernel: RegenKernel;
   readonly #solver: RegenSolver;
@@ -449,6 +527,7 @@ export class RegenEngine {
   readonly #text: TextOutliner;
   readonly #deflection: Partial<Deflection> | undefined;
   readonly #onRecycled: (() => void) | undefined;
+  readonly #extensions: ExtensionRegistry;
   /**
    * Import sources whose stored SHA-256 was checked against their data, and the outcome. Keyed by
    * the source object: documents share unchanged objects between edits, so each file is hashed
@@ -497,6 +576,7 @@ export class RegenEngine {
     this.#text = options.text ?? lazyTextOutliner();
     this.#deflection = options.deflection;
     this.#onRecycled = options.onKernelRecycled;
+    this.#extensions = options.extensions ?? defaultExtensions;
     this.#unsubscribe = options.kernel.onRecycle?.(() => {
       // Runs inside the service's queue: only forget, never submit from here.
       void this.#cache.dropBodies(null);
@@ -658,14 +738,15 @@ export class RegenEngine {
       const partChange = reuseChange
         ? options.change!.parts.find((p) => p.partId === part.id)
         : undefined;
-      const dirty = dirtyFeaturesOf(
-        this.#lastDocument,
-        document,
-        part.id,
-        reuseChange
-          ? { firstAffectedIndex: partChange ? partChange.firstAffectedIndex : null }
-          : {},
-      );
+      const dirty = dirtyFeaturesOf(this.#lastDocument, document, part.id, {
+        ...(reuseChange
+          ? {
+              firstAffectedIndex: partChange ? partChange.firstAffectedIndex : null,
+              domainChanged: options.change!.domainChanged,
+            }
+          : {}),
+        domainReads: (type) => this.#extensions.readsOf(type),
+      });
       const state = await this.#buildPart(run, part, document, variables, {
         ns: null,
         depth: 0,
@@ -855,7 +936,10 @@ export class RegenEngine {
       inputs: new Map(),
       references: new Set(),
       inherited: new Map(),
+      extensions: new Map(),
     };
+    /** Domain data namespaces as their owners read them, once per part build. */
+    const domainReads = new Map<string, NamespaceRead>();
 
     for (const [i, f] of graph.active.entries()) {
       const started = now();
@@ -920,13 +1004,15 @@ export class RegenEngine {
         continue;
       }
       if (f.kind === 'extension') {
-        result.warnings = [
-          {
-            code: 'extension',
-            message: `Regen does not build "${f.extension}" features yet; it changes no geometry`,
-          },
-        ];
-        result.ms = now() - started;
+        const errors = await this.#extension(run, state, f, {
+          domains: document.domains,
+          domainReads,
+          variables,
+          result,
+          started,
+          lookup,
+        });
+        if (errors !== null) fail('error', errors);
         continue;
       }
 
@@ -1967,6 +2053,328 @@ export class RegenEngine {
       warnings: [...warnings, ...solved.warnings],
       references,
       sketch: solved.sketch,
+    });
+  }
+
+  // Extensions -----------------------------------------------------------------------------------
+
+  /**
+   * Build an extension feature through its domain's translator (ADR 0013 decisions 4 to 6): the
+   * type checked against the registry, domain data and params read by the domain, expressions
+   * evaluated, references resolved on the bodies before it, the queries of a two-step translator
+   * answered, then one kernel `feature` op per input it returns, each cached under a key of that
+   * input, the type, its version and the domain's implementation. Translators are pure and
+   * cheap, so they run on every regen; only the kernel step is cached. Returns the errors of a
+   * failure before the kernel step (the caller fails the feature with them), or null when the
+   * result is filled in.
+   */
+  async #extension(
+    run: Run,
+    state: PartState,
+    stored: ExtensionFeature,
+    at: {
+      domains: ManufaktureDocument['domains'];
+      domainReads: Map<string, NamespaceRead>;
+      variables: VariableValues;
+      result: FeatureResult;
+      started: number;
+      lookup: (id: string) => Feature | undefined;
+    },
+  ): Promise<RegenError[] | null> {
+    const { result, started } = at;
+    const found = supported(this.#extensions, stored);
+    if (!found.ok) return [found.error];
+    const extension = found.extension;
+    const type = stored.extension;
+    // Domain code gets frozen copies: a translator that writes to its input fails (a throw,
+    // contained below) instead of changing the document or what later extensions read.
+    const f = frozenCopy(stored);
+    const data = readDomainData(this.#extensions, extension, at.domains, at.domainReads);
+    if (!data.ok) return [data.error];
+    const params = readParams(extension, f);
+    if (!params.ok) return [params.error];
+    const values = evaluateExtension(extension, f, at.variables);
+    if (values.errors.length > 0) return values.errors;
+
+    const resolved = await this.#extensionReferences(run, state, f);
+    if (!resolved.ok) return resolved.errors;
+
+    const sketches = new Map<string, SketchResult>();
+    const upstream = new Map<string, ExtensionUpstream>();
+    for (const id of f.dependsOn) {
+      const sketch = state.sketches.get(id);
+      if (sketch !== undefined) sketches.set(id, frozenCopy(sketch));
+      const built = state.extensions.get(id);
+      if (built !== undefined && extensionNamespace(built.type) === extension.namespace) {
+        upstream.set(id, built);
+      }
+    }
+    let shared: { params: unknown; data: Record<string, unknown> };
+    try {
+      shared = frozenCopy({ params: params.params, data: data.data });
+    } catch (error) {
+      return [
+        {
+          code: 'extension',
+          message: `The "${type}" params or domain data are not plain data: ${error instanceof Error ? error.message : String(error)}`,
+        },
+      ];
+    }
+    const context: ExtensionContext = {
+      feature: f,
+      params: shared.params,
+      values: Object.freeze(values.values),
+      references: Object.freeze(resolved.references),
+      data: shared.data,
+      sketches,
+      upstream,
+      bodies: Object.freeze(state.bodies.map((b) => b.id)),
+      profile: (sketchId, entities) => {
+        const sketch = sketches.get(sketchId);
+        if (sketch === undefined) {
+          return {
+            ok: false,
+            message: `${sketchId} is not a solved sketch this feature depends on`,
+            field: ['dependsOn'],
+          };
+        }
+        const p = profileOf(sketchId, sketch, entities);
+        return p.ok
+          ? { ok: true, value: p.profile }
+          : { ok: false, message: p.error.message, field: ['dependsOn'] };
+      },
+    };
+
+    // The two-step form: answer what the translator asks about the part before building.
+    let answers: GeometryAnswer[] = [];
+    const ask = extension.definition.queries;
+    if (ask !== undefined) {
+      const asked = guard(type, 'queries', () => ask.call(extension.definition, context));
+      if (!asked.ok) return [asked.error];
+      const queries = checkQueries(type, asked.value);
+      if (!queries.ok) return [queries.error];
+      answers = await this.#answerQueries(run, state, queries.queries);
+    }
+    const translated = guard(type, 'translator', () =>
+      extension.definition.translate(context, Object.freeze(answers)),
+    );
+    if (!translated.ok) return [translated.error];
+    // Checked and copied to frozen plain data in one guard: a getter or a value structured clone
+    // refuses is the feature's error, and the kernel sees the copy, not the translator's objects.
+    const checked = guard(type, 'translator result check', () => {
+      const out = checkOutput(f, translated.value, new Set(state.bodies.map((b) => b.id)));
+      if (!out.ok) return out;
+      const copy: ExtensionUpstream = frozenCopy(
+        out.metadata === undefined
+          ? { type, inputs: out.inputs }
+          : { type, inputs: out.inputs, metadata: out.metadata },
+      );
+      return { ok: true as const, built: copy };
+    });
+    if (!checked.ok) return [checked.error];
+    if (!checked.value.ok) return checked.value.errors;
+    const built = checked.value.built;
+    state.extensions.set(f.id, built);
+    if (built.metadata !== undefined) result.metadata = built.metadata;
+
+    // One kernel op per input, in order, each reading the bodies as the one before left them.
+    const errors: RegenError[] = [];
+    const warnings: RegenWarning[] = [...resolved.warnings];
+    const references: ReferenceResolution[] = [...resolved.resolutions];
+    let cached = built.inputs.length > 0;
+    let ok = true;
+    // A failed extension changes nothing (ADR 0013 decision 5): what earlier inputs did to the
+    // bodies is undone when a later one fails. Their cache entries stay; they are still right.
+    const bodiesBefore = [...state.bodies];
+    const consumedBefore = state.consumed.length;
+    for (const [i, input] of built.inputs.entries()) {
+      const read = new Set(routeBodies(bodyUse(f, at.lookup)!, state.bodies));
+      const reads = state.bodies.filter((b) => read.has(b.id));
+      const key = this.#key(state, {
+        extension: extensionKey(extension, f, i, built.inputs.length),
+        input,
+        bodies: reads.map((b) => [b.id, b.key]),
+      });
+      run.used.add(key);
+      const step: FeatureResult = { ...result, errors: [], warnings: [], references: [] };
+      const hit = await this.#cache.get(key);
+      if (hit !== undefined && hit.type === 'body' && hit.outcome !== undefined) {
+        run.counters.cacheHits++;
+        this.#applyOutcome(state, f.id, key, hit.outcome);
+        this.#fill(step, hit, started);
+        if (!hit.ok) state.unavailable.set(f.id, 'error');
+      } else {
+        cached = false;
+        run.counters.cacheMisses++;
+        this.#usesBodies(state.batch, reads);
+        state.batch.ops.push({
+          op: 'feature',
+          bodies: reads.map((b) => ({ id: b.id, shape: b.shape })),
+          feature: input,
+        });
+        state.batch.metas.push({ type: 'feature', feature: stored, key, result: step, started });
+        await this.#flush(run, state);
+      }
+      errors.push(...step.errors);
+      warnings.push(...step.warnings);
+      references.push(...step.references);
+      if (step.status !== 'ok') {
+        ok = false;
+        break;
+      }
+    }
+    result.status = ok ? 'ok' : 'error';
+    result.errors = errors;
+    result.warnings = warnings;
+    result.references = references;
+    result.cached = ok && cached;
+    result.ms = now() - started;
+    if (!ok) {
+      state.bodies = bodiesBefore;
+      state.consumed.length = consumedBefore;
+      state.unavailable.set(f.id, 'error');
+    }
+    return null;
+  }
+
+  /**
+   * An extension's references resolved on the bodies before it (the kernel's `resolve` op, one
+   * per body a reference may lie on), all in one batch. A reference that does not resolve fails
+   * the feature as a lost face fails a built-in one.
+   */
+  async #extensionReferences(
+    run: Run,
+    state: PartState,
+    f: ExtensionFeature,
+  ): Promise<
+    | {
+        ok: true;
+        references: Record<string, ResolvedReference>;
+        warnings: RegenWarning[];
+        resolutions: ReferenceResolution[];
+      }
+    | { ok: false; errors: RegenError[] }
+  > {
+    const out = {
+      references: {} as Record<string, ResolvedReference>,
+      warnings: [] as RegenWarning[],
+      resolutions: [] as ReferenceResolution[],
+    };
+    if (f.references.length === 0) return { ok: true, ...out };
+    const reports = await this.#resolveOnBodies(
+      run,
+      state,
+      f.references.map((r) => topoRef(r.ref)),
+    );
+    const errors: RegenError[] = [];
+    f.references.forEach((reference, i) => {
+      const { body, report } = reports[i]!;
+      const ref = reference.ref;
+      const target = 'face' in ref ? ref.face : ref.faces.join('|');
+      if (!report.ok) {
+        errors.push(lostReference(reference, target, report));
+        return;
+      }
+      out.references[reference.id] = {
+        body: body!,
+        target,
+        via: report.via,
+        fragile: report.fragile,
+        geometry: report.geometry,
+      };
+      out.resolutions.push({
+        referenceId: reference.id,
+        target,
+        via: report.via,
+        fragile: report.fragile,
+      });
+      if (report.via !== 'exact' || report.fragile) {
+        out.warnings.push({
+          code: 'reference',
+          referenceId: reference.id,
+          target,
+          via: report.via,
+          fragile: report.fragile,
+          message: `${target} resolved ${report.fragile ? 'by position' : `by ${report.via}`}: check it`,
+        });
+      }
+    });
+    return errors.length > 0 ? { ok: false, errors } : { ok: true, ...out };
+  }
+
+  /** A two-step translator's queries answered against the part before the feature, in order. */
+  async #answerQueries(
+    run: Run,
+    state: PartState,
+    queries: readonly GeometryQuery[],
+  ): Promise<GeometryAnswer[]> {
+    const refs = queries.flatMap((q) => (q.type === 'resolve' ? [q.ref] : []));
+    const resolved = refs.length > 0 ? await this.#resolveOnBodies(run, state, refs) : [];
+    const boxes = new Map<number, { box: OrientedBox | null; message?: string }>();
+    queries.forEach((q, i) => {
+      if (q.type !== 'obb') return;
+      const body = state.bodies.find((b) => b.id === q.body);
+      if (body === undefined) {
+        boxes.set(i, { box: null, message: `${q.body} is not a body at this point` });
+        return;
+      }
+      this.#usesBodies(state.batch, [body]);
+      state.batch.ops.push({ op: 'obb', shape: body.shape });
+      state.batch.metas.push({
+        type: 'resolve',
+        take: (r) =>
+          boxes.set(
+            i,
+            r.ok ? { box: r.value as OrientedBox } : { box: null, message: r.error.message },
+          ),
+      });
+      run.counters.otherOps++;
+    });
+    await this.#flush(run, state);
+    let next = 0;
+    return queries.map((q, i): GeometryAnswer => {
+      if (q.type === 'resolve') return { type: 'resolve', ...resolved[next++]! };
+      const got = boxes.get(i) ?? { box: null, message: 'not answered' };
+      return { type: 'obb', body: q.body, ...got };
+    });
+  }
+
+  /**
+   * Resolve each reference on the bodies that may carry it (by the feature ids in its names), in
+   * one batch: the first body it resolves on, or the first failure. No body at all is `no-body`.
+   */
+  async #resolveOnBodies(
+    run: Run,
+    state: PartState,
+    refs: readonly TopoRef[],
+  ): Promise<{ body: string | null; report: ReferenceReport }[]> {
+    const found = refs.map(() => [] as { body: string; report: ReferenceReport }[]);
+    const failures: (string | undefined)[] = refs.map(() => undefined);
+    refs.forEach((ref, i) => {
+      const names = 'face' in ref ? [ref.face] : [...ref.faces, ...(ref.ends ?? [])];
+      const read = new Set(routeBodies({ all: false, scope: [], refs: [names] }, state.bodies));
+      const owners = state.bodies.filter((b) => read.has(b.id));
+      this.#usesBodies(state.batch, owners);
+      for (const b of owners) {
+        state.batch.ops.push({ op: 'resolve', shape: b.shape, refs: [ref] });
+        state.batch.metas.push({
+          type: 'resolve',
+          take: (r) => {
+            if (r.ok) {
+              const report = (r.value as { results: ReferenceReport[] }).results[0]!;
+              found[i]!.push({ body: b.id, report });
+            } else failures[i] ??= r.error.message;
+          },
+        });
+        run.counters.otherOps++;
+      }
+    });
+    await this.#flush(run, state);
+    return found.map((list, i) => {
+      const hit = list.find((x) => x.report.ok) ?? list[0];
+      if (hit !== undefined) return hit;
+      const message = failures[i] ?? 'there is no body yet';
+      return { body: null, report: { ok: false, status: 'no-body', message } };
     });
   }
 

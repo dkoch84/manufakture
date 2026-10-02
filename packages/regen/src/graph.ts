@@ -28,6 +28,7 @@ import {
   type Part,
   type Variable,
 } from '@manufakture/core';
+import { extensionNamespace } from './extensions';
 
 /** Features the kernel builds: each takes the bodies before it and gives the bodies after it. */
 export const BODY_KINDS: ReadonlySet<Feature['kind']> = new Set([
@@ -41,6 +42,9 @@ export const BODY_KINDS: ReadonlySet<Feature['kind']> = new Set([
   'mirror',
   'derived',
   'thread',
+  // Built through its domain's translator (ADR 0013 decision 5); one whose type no domain builds
+  // fails and changes nothing, but is still placed in the graph by its `operation` and `scope`.
+  'extension',
 ]);
 
 export function isBodyFeature(feature: Feature): boolean {
@@ -67,8 +71,10 @@ export function readsBody(feature: Feature): boolean {
  *
  * A `new` feature reads only the bodies its references lie on (a blind extrusion reads none), so
  * a body made later does not depend on earlier bodies. A pattern or mirror of features reads what
- * the features it repeats read, plus its own references. Null for a feature that reads no body
- * (a sketch on a plane, an extension, a reference import).
+ * the features it repeats read, plus its own references. An extension reads like an extrude by
+ * its `operation` and `scope`; with no operation it reads its scope (absent: every body), since it
+ * may change bodies through inputs that name them (ADR 0013 decision 6). Null for a feature that
+ * reads no body (a sketch on a plane, a reference import).
  */
 export interface BodyUse {
   all: boolean;
@@ -98,6 +104,9 @@ export function bodyUse(
       }
       return { all: feature.scope === undefined, scope, refs };
     }
+    case 'extension':
+      if (feature.operation === 'new') return { all: false, scope: [], refs };
+      return { all: feature.scope === undefined, scope: feature.scope ?? [], refs };
     case 'fillet':
     case 'chamfer':
     case 'thread':
@@ -242,6 +251,10 @@ function actsOn(
       return { ids: scoped(f.scope), merges: f.operation === 'add' };
     case 'hole':
       return { ids: scoped(f.scope), merges: false };
+    case 'extension':
+      // Without an operation it changes what its scope lists, through inputs that name them.
+      if (f.operation === 'new') return { ids: [], merges: false };
+      return { ids: scoped(f.scope), merges: f.operation === 'add' };
     case 'fillet':
     case 'chamfer':
     case 'shell':
@@ -472,9 +485,18 @@ export function changedVariables(
 export interface DirtyOptions {
   /**
    * Core's `firstAffectedIndex` for this part (from the store's change event): features before
-   * it are known clean and are not compared. `null` means nothing in the part changed.
+   * it are known clean and are not compared. `null` means nothing in the part changed (domain
+   * data may still have: see `domainChanged`).
    */
   firstAffectedIndex?: number | null;
+  /**
+   * Namespaces of domain data that changed (core's `domainChanged`): every extension that may
+   * read one of them is a seed (ADR 0013 decision 5). Which of them really build differently is
+   * the cache's to find out.
+   */
+  domainChanged?: readonly string[];
+  /** The namespaces an extension type may read (`ExtensionRegistry.readsOf`); default its own. */
+  domainReads?: (type: string) => readonly string[];
 }
 
 /**
@@ -490,8 +512,15 @@ export function dirtyFeatures(
 ): string[] {
   const graph = buildGraph(next.part, next.variables);
   if (previous === null) return graph.active.map((f) => f.id);
-  if (options.firstAffectedIndex === null) return [];
-  const from = options.firstAffectedIndex ?? 0;
+  const changedDomains = new Set(options.domainChanged ?? []);
+  const reads = options.domainReads ?? ((type: string) => [extensionNamespace(type)]);
+  const readsChanged = (f: Feature) =>
+    f.kind === 'extension' &&
+    changedDomains.size > 0 &&
+    reads(f.extension).some((ns) => changedDomains.has(ns));
+  if (options.firstAffectedIndex === null && changedDomains.size === 0) return [];
+  const from =
+    options.firstAffectedIndex === null ? graph.active.length : (options.firstAffectedIndex ?? 0);
   const old = buildGraph(previous.part, previous.variables);
   const oldActive = new Map(old.active.map((f) => [f.id, f]));
   const vars = changedVariables(previous.variables, next.variables);
@@ -503,6 +532,7 @@ export function dirtyFeatures(
     for (const d of graph.dependents.get(id) ?? []) visit(d);
   };
   graph.active.forEach((f, i) => {
+    if (readsChanged(f)) visit(f.id);
     if (i < from) return;
     const was = oldActive.get(f.id);
     const seed =
@@ -515,7 +545,23 @@ export function dirtyFeatures(
   return graph.active.filter((f) => dirty.has(f.id)).map((f) => f.id);
 }
 
-/** `dirtyFeatures` for one part of two documents. */
+/** The namespaces whose domain data differs between two documents, sorted. */
+export function changedDomains(
+  previous: ManufaktureDocument['domains'],
+  next: ManufaktureDocument['domains'],
+): string[] {
+  if (previous === next) return [];
+  const p = previous ?? {};
+  const n = next ?? {};
+  return [...new Set([...Object.keys(p), ...Object.keys(n)])]
+    .filter((ns) => !deepEqual(p[ns], n[ns]))
+    .sort();
+}
+
+/**
+ * `dirtyFeatures` for one part of two documents. Without `domainChanged` in the options, the
+ * namespaces are compared from the two documents.
+ */
 export function dirtyFeaturesOf(
   previous: ManufaktureDocument | null,
   next: ManufaktureDocument,
@@ -525,9 +571,12 @@ export function dirtyFeaturesOf(
   const part = next.parts.find((p) => p.id === partId);
   if (!part) return [];
   const old = previous?.parts.find((p) => p.id === partId);
+  const domainChanged =
+    options.domainChanged ??
+    (previous === null ? [] : changedDomains(previous.domains, next.domains));
   return dirtyFeatures(
     old ? { part: old, variables: previous!.variables } : null,
     { part, variables: next.variables },
-    options,
+    { ...options, domainChanged },
   );
 }

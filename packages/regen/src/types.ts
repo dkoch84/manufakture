@@ -11,7 +11,7 @@ import type {
   Outcome,
   Residual,
 } from '@manufakture/assembly';
-import type { BodyPropsFields, FeatureKind, Pose, Vec3 } from '@manufakture/core';
+import type { BodyPropsFields, DomainData, FeatureKind, Pose, Vec3 } from '@manufakture/core';
 import type { MeshData, ShapeId, ThreadReport, Topology, Via } from '@manufakture/kernel';
 import type { OutlineShape, RegionDiagnosticCode, SketchPlacement } from '@manufakture/sketch';
 import type { UnitsError } from '@manufakture/units';
@@ -64,7 +64,12 @@ export type RegenError =
   | { code: 'unnamed-face'; message: string }
   | { code: 'kernel'; message: string; occtMessage?: string; occtType?: string }
   | {
-      code: 'invalid' | 'invalid-shape' | 'no-body' | 'empty' | 'unsupported';
+      /**
+       * `unsupported`: also an extension whose type no registered domain builds, or whose
+       * `schemaVersion` (or domain data's) is newer than this build reads (ADR 0013 decision 4).
+       * `extension`: a domain's code threw or returned something malformed; the domain has a bug.
+       */
+      code: 'invalid' | 'invalid-shape' | 'no-body' | 'empty' | 'unsupported' | 'extension';
       message: string;
       referenceId?: string;
       field?: FieldPath;
@@ -136,6 +141,11 @@ export type RegenWarning =
       entityIds: string[];
     }
   | { code: 'redundant'; message: string; constraints: string[] }
+  /**
+   * No longer emitted: regen builds extensions through their domain's translator, and one it
+   * cannot build fails with `unsupported` (ADR 0013 decision 4). Kept so older consumers of the
+   * union still compile.
+   */
   | { code: 'extension'; message: string }
   /** An import kept aside as a reference body (display and measure only): no geometry change. */
   | { code: 'reference-body'; message: string }
@@ -197,6 +207,12 @@ export interface FeatureResult {
    * cosmetic thread's helix and the tree can show the size.
    */
   thread?: ThreadReport;
+  /**
+   * Extensions only, when built: the metadata their translator returned next to its kernel
+   * inputs (a board's frame, ADR 0013 decision 7), for the domain's derived models. Recomputed
+   * on every regen, never stored.
+   */
+  metadata?: DomainData['data'];
 }
 
 /** One body of a part after the last feature (M2 plan, decision 1: named after its creator). */

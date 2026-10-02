@@ -10,6 +10,7 @@ import {
   parseDocument,
   type ChangeEvent,
   type DerivedFeature,
+  type ExtensionFeature,
   type ImportFeature,
   type ManufaktureDocument,
   type Pose,
@@ -19,6 +20,7 @@ import { createNodeService } from '@manufakture/kernel/node';
 import { createSolverService, type SolverService } from '@manufakture/sketch';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { RegenEngine, type RegenKernel } from './engine';
+import { ExtensionRegistry, type ExtensionType } from './extensions';
 import {
   ASSEMBLY,
   IDENTITY_POSE,
@@ -38,6 +40,7 @@ import {
   midpoint,
   mm,
   pin,
+  rectangle,
   setVariable,
   shelfBoard,
   statuses,
@@ -876,6 +879,84 @@ describe('configuration rows with the real kernel', () => {
       }),
     ))!;
     expect(await volume(engine, wider.parts[0]!.bodies[0]!.shape)).toBeCloseTo(board(1000), 3);
+    await engine.dispose();
+    await service.idle();
+    expect(service.leaks()).toEqual([]);
+  });
+});
+
+describe('extensions with the real kernel', () => {
+  /** A fake board: its sketch extruded by its `thickness`, as `domain-wood` builds a panel. */
+  const board: ExtensionType<{ sketch: string }> = {
+    schemaVersion: 1,
+    expressions: { thickness: 'length' },
+    translate(ctx) {
+      const profile = ctx.profile(ctx.params.sketch);
+      if (!profile.ok) return { error: profile.message };
+      return {
+        inputs: [
+          {
+            kind: 'extrude',
+            id: ctx.feature.id,
+            profile: profile.value,
+            extent: { type: 'blind', distance: ctx.values.thickness! },
+            mode: 'new',
+          },
+        ],
+        metadata: { thickness: ctx.values.thickness! },
+      };
+    },
+  };
+  const extension = (
+    id: string,
+    thickness: string,
+    extra: Partial<ExtensionFeature> = {},
+  ): ExtensionFeature => ({
+    id,
+    kind: 'extension',
+    name: id,
+    suppressed: false,
+    extension: 'fake.board',
+    schemaVersion: 1,
+    dependsOn: ['sketch#1'],
+    references: [],
+    expressions: { thickness: mm(thickness) },
+    params: { sketch: 'sketch#1' },
+    operation: 'new',
+    ...extra,
+  });
+
+  it('builds a board with the exact volume, names its faces after it, and cuts with another', async () => {
+    const extensions = new ExtensionRegistry();
+    extensions.registerDomain({
+      namespace: 'fake',
+      implementation: 1,
+      types: { 'fake.board': board as ExtensionType },
+    });
+    const engine = new RegenEngine({ kernel: service, solver, extensions });
+    const doc = build([
+      setVariable('t', '18'),
+      add(rectangle('sketch#1', { width: '40', depth: '30' })),
+      add(extension('extension#1', 't')),
+    ]);
+    const first = (await engine.regen(doc))!;
+    expect(statuses(first)).toEqual({ 'sketch#1': 'ok', 'extension#1': 'ok' });
+    const body = first.parts[0]!.bodies[0]!;
+    expect(body.bodyId).toBe('extension#1');
+    expect(await volume(engine, body.shape)).toBeCloseTo(40 * 30 * 18, 6);
+    expect(first.names).toContain('extension#1:cap:end');
+    expect(first.parts[0]!.features[1]!.metadata).toEqual({ thickness: 18 });
+
+    // A second board cuts 5 mm into the first, scoped to it.
+    const cut = apply(
+      doc,
+      add(extension('extension#2', '5', { operation: 'cut', scope: ['extension#1'] })),
+    );
+    const second = (await engine.regen(cut))!;
+    expect(statuses(second)).toMatchObject({ 'extension#2': 'ok' });
+    expect(second.counters).toMatchObject({ featureOps: 1 });
+    expect(await volume(engine, second.parts[0]!.bodies[0]!.shape)).toBeCloseTo(40 * 30 * 13, 6);
+
     await engine.dispose();
     await service.idle();
     expect(service.leaks()).toEqual([]);

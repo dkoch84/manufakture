@@ -145,7 +145,9 @@ everything after it is dirty, as in M1. The comparison is always with the docume
 engine's last completed regen. With a store change event (`update`, or `regen` given `previous`
 and `change`) whose previous document is that one, the part's `firstAffectedIndex` bounds the
 comparison (features before it are not compared, and `null` means nothing in the part is dirty);
-the worker's `regen` takes no change, so it compares whole parts. `regenOrder` and `topologicalOrder` give a dependency order that is
+the worker's `regen` takes no change, so it compares whole parts. Extensions that may read a
+domain data namespace that changed are seeds too (see "Extensions"), even when `firstAffectedIndex`
+is `null`. `regenOrder` and `topologicalOrder` give a dependency order that is
 the document order for any valid part (core keeps dependencies earlier).
 
 The dirty set is reported per part (`PartResult.dirty`). It is informational: the cache, not the
@@ -210,6 +212,99 @@ it, not `detached` bodies.
 A `thread` feature (core README, "Threads"; ADR 0012 decision 9) translates to the kernel's thread on a face (`ThreadFaceInput`, kernel README, "Threads"): the face and start references as stored, the size's basic major diameter, pitch and tap drill from the kernel's `THREAD_SIZES` (a size it does not know is `invalid` on `['standard', 'size']`), the length in mm or `full`, and **half** the clearance, since core's clearance is diametral like the fit variables and the kernel's is radial (a negative one is `invalid` on `['clearance']`). Everything that needs the body is resolved in the kernel: the axis, side, radius and extent of the face, the ends, and the range check, so a cylinder the size cannot be cut into fails with `invalid` on the face's reference id, naming the range (`M6 (external) needs a shaft 4.988 to 8 mm across; extrude#2:side:e2 is 10 mm`). A cosmetic thread resizes the whole face (to the tap drill inside, the major diameter less the clearance outside) and builds no helix.
 
 A thread acts on the body owning its face, like a fillet: in the graph it reads and changes only that body (`bodyUse` and `actsOn` treat it as a fillet), and the kernel input has no scope, so a coaxial body (a nut on the bolt) is never cut. The kernel's `ThreadReport` (the body, the axis from the start, the radius after the feature, length, pitch, hand, phase, representation, how each end was finished) is kept in the cache entry and returned as `FeatureResult.thread` on a build and on a cache hit alike; the app draws cosmetic threads from it. Threads are the slowest features to build (about a second for 20 mm of M6), and the per-feature cache keeps them from rebuilding on an edit that does not reach them (`threads.test.ts` checks it).
+
+## Extensions
+
+Domain features (a board, a joint, later a wall) are core `extension` features; regen builds them
+through a **translator registry** (`src/extensions.ts`, ADR 0013 decisions 4 to 6). Regen imports no
+domain package: the app's worker entry registers the domains it ships (`domain-wood` in M4) on
+`defaultExtensions`, or passes its own `ExtensionRegistry` as the engine's `extensions` option;
+tests register fakes.
+
+```ts
+const registry = new ExtensionRegistry();
+const unregister = registry.registerDomain({
+  namespace: 'wood', // the first segment of its types
+  implementation: 1, // bump with any change that can alter a translator's output
+  reads: ['stock'], // shared namespaces its translators read, besides its own
+  data: { wood: woodReader, stock: stockReader }, // readers of the namespaces it owns
+  types: { 'wood.board': board },
+});
+registry.register('wood.dado', dado); // one more type of a registered domain
+registry.unregister('wood.dado');
+```
+
+An `ExtensionType` declares its newest `schemaVersion`, the kind (`length`, `angle`, `number`) of
+each named expression, an optional `params(params, schemaVersion)` that migrates and validates the
+stored params, and `translate(ctx, answers)`. The context holds the feature (a frozen copy), its
+params as `params` returned them, its expressions evaluated by the declared kinds (an undeclared one
+is a plain number in internal units), its references resolved on the bodies before it with their
+geometry (`body`, `target`, `via`, `fragile`, plane, line or circle; the kernel's `resolve` op), the
+domain data of every namespace it may read (read by the domain that owns the namespace: migrated,
+validated), the solved sketches and the results (inputs and metadata) of extensions of its own
+namespace that it names in `dependsOn`, the ids of the bodies before it, and `profile(sketch,
+entities?)` for a sketch's kernel profile. It returns `{ inputs, metadata? }`, one or more kernel
+`FeatureInput`s with the feature's id, or `{ error, field?, referenceId? }`.
+
+**The two-step form.** A type with `queries(ctx)` first says what it needs to know about the part
+before the feature: `{ type: 'resolve', ref }` (a face or edge by name, on the body that carries
+it) or `{ type: 'obb', body }` (a body's oriented box). Regen answers them with the kernel's
+`resolve` and `obb` ops in one batch, and passes the answers, in order, to `translate`. A joint
+asks for the faces of the boards it joins this way.
+
+**Bodies.** An extension is placed in the graph like an extrude, by its `operation` and `scope`
+(`bodyUse`, `actsOn`): `new` reads only the bodies its references lie on and makes a body; `add`,
+`cut` and `intersect` read their scope, or every body; with no operation it reads its scope, or
+every body, since it may change bodies through inputs that name them (a joint's `tools` items).
+Regen gives the translator's inputs those semantics (`checkOutput`): with an operation, every input
+that combines a solid (one with a `mode`) gets the operation's mode and the feature's scope, and
+with `new` or `add` makes its body under the feature's id, or `<id>:<key>` when the input names one
+(several bodies from one extension, M6 decision 7). Every solid input is forced to the
+operation's mode, so one extension cannot mix modes: a `new` board cannot extrude and then subtract
+as two solid inputs (a cut belongs in its own feature, or in a `tools` input). A `new` extension
+makes each body once: two inputs making the same body (two unkeyed solids, or one key twice) are an
+`extension` error, so give each a key. Without an operation no input may combine a solid of its
+own. A `scope` entry that is not a body at that point is `reference-lost` on `scope`. Each input is
+one kernel `feature` op, in order, each reading the bodies as the one before left them, so face
+names come from that input's rules with the extension's id (`extension#7:cap:end`). Which bodies
+an input reads is set by the feature's `operation` and `scope`, not by what earlier inputs made, so
+a non-solid follow-up input in a `new` extension cannot reach the body it just made. The first
+input that fails stops the feature, and what the inputs before it did is undone: a failed extension
+changes no body (their cache entries stay, since they are still right).
+
+**Caching.** Translators are pure and cheap and run on every regen; only the kernel step is cached.
+Each input's key is the input itself (which carries every value the translator read: evaluated
+expressions, resolved geometry, stock sizes from domain data), the type, the feature's
+`schemaVersion`, the domain's `implementation` and the input's position, plus the keys of the bodies
+it reads. A domain data change that no translator reads (a price) is a cache hit everywhere; one that
+changes an input (a stock thickness) misses for exactly the features it changes. In the dirty set, a
+`domainChanged` namespace (from core's `diffDocuments`, or compared from the two documents) marks
+every extension whose type may read it (`ExtensionRegistry.readsOf`); there is no per-domain
+"affected features" hook.
+
+**What fails, and how** (ADR 0013 decision 4). Nothing here rewrites the document.
+
+| Case                                                                   | Result                                                    |
+| ---------------------------------------------------------------------- | --------------------------------------------------------- |
+| No registered domain builds the type (with or without an operation)    | `unsupported` on `extension`, naming the type and version |
+| The feature's `schemaVersion` is newer than the type's                 | `unsupported` on `schemaVersion`, naming both versions    |
+| A namespace it reads is newer than its owner reads, or has no owner    | `unsupported` on `domains.<ns>`, for every reader of it   |
+| The owner refuses the namespace's data                                 | `invalid` on `domains.<ns>.data...`, for every reader     |
+| The type's `params` refuses the params                                 | `invalid` on `params...`, with the domain's message       |
+| An expression fails, or has the wrong kind                             | `expression` on `expressions.<name>`                      |
+| A reference does not resolve                                           | `reference-lost`, `reference-ambiguous` or `no-body`      |
+| The translator returns `{ error }`                                     | `invalid` with its message, `field` and `referenceId`     |
+| Domain code throws, writes to what it reads, or returns something else | `extension`, naming the type and the step                 |
+| The kernel fails an input                                              | the kernel's error, as for any feature                    |
+
+Malformed covers anything regen cannot use as it is: a `body` or `scope` that is not strings, a
+query `ref` that is not a face (`{ face }`) or an edge (`{ faces, ends?, ordinal? }`) by name, a
+value that is not plain data, a getter that throws. Regen checks the result and copies it to plain
+data inside a guard, so domain code never fails the regen itself.
+
+A failed extension makes no body; later features that name its bodies are `upstream-error`, and
+features that do not depend on it build. A translator's metadata (a board's frame) is reported as
+`FeatureResult.metadata`, recomputed on every regen and never stored.
 
 ## Text
 
@@ -574,8 +669,9 @@ reference's `lastResolved` hint when it has one. Missing sketch geometry (a prof
 line, a hole point) is `reference-lost` on `profile`, `axis` or `points`. Kernel warnings map the
 same way: `reference` (with `via` and `fragile`, for `ends`, `descendant`, `ancestor`, ordinal and
 fragile resolutions), `missed` and `direction`. Regen adds `expression`, `sketch`, `upstream`,
-`source` and `font` errors, and `sketch`, `redundant`, `extension`, `reference-body`,
-`derived-source`, `text` and `font-changed` warnings.
+`source`, `font` and `extension` errors (the last when a domain's code throws or returns something
+malformed, see "Extensions"), and `sketch`, `redundant`, `reference-body`, `derived-source`, `text`
+and `font-changed` warnings. The `extension` warning is no longer emitted.
 
 **Propagation.** A failed feature is skipped: the kernel passes the bodies through, so independent
 later features still build on them. A feature naming a failed, suppressed or upstream-errored feature
@@ -684,6 +780,20 @@ pnpm --filter @manufakture/regen test
   suppression, reorder, rollback and `firstAffectedIndex`; per-body dirty sets (an edit to body 2
   leaves body 1's fillet clean with a scoped cut between them, not with an unscoped one) and
   references routed through a merge.
+- `extensions.test.ts`: extensions through the registry against the scripted kernel
+  (`fake-kernel.ts`, shared with `engine.test.ts`): a fake board making a body named after it, cache
+  hits across regens and an expression edit rebuilding only it, `add` and `cut` by operation and
+  scope, several inputs from one extension, a kernel failure; a throwing translator isolated as a
+  feature error, malformed results (a non-string `body` or `scope`, a throwing getter, one body
+  made twice) and malformed queries, an extension that fails partway leaving the bodies as they
+  were, a translator writing to its input, error values, refused and migrated params, a wrong
+  expression kind; unregistered types and newer `schemaVersion`s as
+  `unsupported` with the document untouched, registering and unregistering a domain between regens;
+  domain data given to readers, a `domainChanged` dirtying every reader while the cache rebuilds only
+  the board whose stock thickness changed, an implementation bump missing the cache, newer, invalid
+  and unowned data failing its readers only; the two-step form (resolve and `obb` queries answered
+  before the build), resolved and lost references, results of earlier extensions of the namespace;
+  a pattern of an extension refused; and the registry's checks.
 - `engine.test.ts`: the engine against a scripted kernel and solver: ops sent, cache hits on
   unrelated edits, same-value rewrites, eviction and release, undo from spare entries, upstream
   versus independent failures, cached failures, reference errors and warnings, sketch conflicts,
@@ -754,7 +864,8 @@ pnpm --filter @manufakture/regen test
   placement with a fillet on one of its edges, whose pin is then updated to a version where
   `#thickness` is 8 mm; the fillet resolves `exact` to the same named edge, and the volume and the
   round's extent are checked at both versions. A cut with the derived bracket, with a recycle
-  forced between the source build and the derive; nothing leaks.
+  forced between the source build and the derive; nothing leaks. A fake board extension builds a
+  body of exactly its volume with faces named after it, and a second one, scoped to it, cuts it.
 
 - Assemblies (`engine.test.ts`, "assemblies", against the scripted kernel): frames found once
   per body and a pose-only change re-solved with no kernel op; frames kept across a recycle; a lost
@@ -814,7 +925,8 @@ pnpm --filter @manufakture/regen test
   read ("the text worker could not be started"), not remembered and not cached. Node hosts use the
   in-process outliner, which has no time limit and so reads bundled fonts only unless the host
   opts in (`allowFileFonts`).
-- **Extension features** change no geometry yet; they are `ok` with an `extension` warning.
+- **Extensions in patterns.** A pattern or mirror of features cannot repeat an extension: an
+  extension can build several kernel inputs, and the pattern input takes one per feature.
 - **Imports.** A STEP import with operation `new`, `add`, `cut` or `intersect` is a kernel feature
   like an extrusion: it is translated to the kernel's `import` input with the document's base64
   text passed as is, and its faces are named `import#k:face:<n>` (always fragile). A file the kernel

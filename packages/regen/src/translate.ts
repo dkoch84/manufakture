@@ -194,7 +194,15 @@ function instanceSource(ctx: TranslateContext, f: PatternFeature | MirrorFeature
       });
       continue;
     }
-    if (!input) throw new Error(`no kernel input for ${id}`);
+    if (!input) {
+      // Not a single kernel feature: an extension (which may build several inputs) or a sketch.
+      errors.push({
+        code: 'unsupported',
+        field: ['features'],
+        message: `${id} is not a kernel feature of its own: only extrudes, revolves and holes can be repeated (or the whole body)`,
+      });
+      continue;
+    }
     if (input.kind === 'extrude' || input.kind === 'revolve' || input.kind === 'hole') {
       tools.push(input);
     } else {
