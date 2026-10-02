@@ -122,3 +122,12 @@ export * from './post';
 // The worker entry is `@manufakture/cam/worker` and the main-thread client `@manufakture/cam/client`.
 export * from './worker';
 export * from './cache';
+
+// T5.2b: the profile operation (registered on the worker by `registerBuiltinOperations`).
+export {
+  PROFILE_SAFE_ABOVE,
+  PROFILE_TAB_MARGIN,
+  PROFILE_TAB_MIN_INSIDE_SIZE,
+  generateProfile,
+} from './ops/profile';
+export type { ProfileExtras, ProfileOperation } from './ops/profile';

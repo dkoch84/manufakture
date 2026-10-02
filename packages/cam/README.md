@@ -52,7 +52,8 @@ The evaluated counterparts of the document's `cam` section (T5.1b), each with it
   These are first cuts that the operation tasks extend:
   - `facing`: `loops`, `depth`, `stepdown`, `stepover` (fraction of the diameter), `angle`;
   - `profile`: `loops`, `side` (`outside`, `inside`, `on`), `depth`, `stepdown`,
-    `finishAllowance`, `tabs?` (`count`, `width`, `height`), `entry`, `leadIn`, `leadOut`, `climb`;
+    `finishAllowance`, `tabs?` (`count`, `width`, `height`), `entry`, `leadIn`, `leadOut`, `climb`
+    (and, for now, the optional `ProfileExtras` of [the profile operation](#the-profile-operation-opsprofilets));
   - `pocket`: `loops` (outer and islands), `depth`, `stepdown`, `stepover`, `finishAllowance`,
     `entry`, `climb`;
   - `drill`: `points` (`MachineDrillPoint`), `peck?` (mm), `dwell?` (seconds);
@@ -596,6 +597,84 @@ change that can alter a toolpath.
 Not yet: linking per setup and its cache (T5.2g), progress reports for long 3D finishes (T5.5a),
 an OPFS tier for the cache.
 
+## The profile operation (`ops/profile.ts`)
+
+`generateProfile(input, context)` (T5.2b), registered as the `profile` generator, cuts along or
+around closed loops: the plywood sign's outer cut. It reads its `ProfileInput`, the setup's
+`heights` and nothing else.
+
+**Extra fields** (`ProfileExtras`, all optional, until `ProfileInput` and the core schema take
+them over): `finishPass` (default: true when `finishAllowance` is above zero), `finishStepdown`
+(default: the whole depth in one step when within the tool's flute length, else `stepdown`),
+`tabSpacing` (mm along each loop; replaces `tabs.count`; needs `tabs` for the width and height,
+else a `tab-spacing-unused` warning) and `tabMinInsideSize` (default 25 mm).
+
+**The tool centre path** is `offsetLoops(loops, +r)` for `outside`, `offsetLoops(loops, -r)` for
+`inside` (r the tool radius, plus `finishAllowance` for the roughing passes), and the loops
+themselves for `on` (which ignores the allowance, with an `allowance-ignored` warning). Lines stay
+lines and arcs stay arcs. `loops` follow the `Loop2` convention, so holes of an outside profile
+are cut on their scrap side too, and islands of an inside profile are left standing.
+
+**Direction.** The spindle is assumed to turn clockwise (M3). Climb milling keeps the wall being
+cut on the right of travel, conventional on the left: an outside (or on) cut runs clockwise around
+an outer loop when climbing, an inside cut counter-clockwise.
+
+**Passes.** Each cut loop starts half-way along its longest segment. Depth levels go from `top`
+to `bottom` in equal steps of at most `stepdown` (finishing: `finishStepdown`), the last exactly at
+`bottom`; `bottom` may lie below the stock for a through cut. Order: loop by loop, smallest
+first, each roughed at every level and then finished, so every loop is complete before any loop
+enclosing it is cut (an enclosed loop is always the smaller), and inner cuts finish while the part
+is still held. A roughing loop belongs to the finishing loop nearest its start. A finishing loop
+gets its own `finishStepdown` levels only where the roughing cut so far cleared along all of it:
+every point of it, sampled every 0.5 mm, within 1.5 allowances of a roughing path (the slack
+covers the sharp vertices at concave corners up to 90 degrees). Where the roughing offset pinched
+off at a neck or merged across a gap narrower than the allowance, or the allowance closed the loop
+altogether, the finishing loop is cut in `stepdown` levels instead (`finish-steps-down` when it
+had roughing loops), so no finishing move ever runs deeper than one step into stock nothing has
+cut. Each loop at each level is one
+IR `pass`, numbered from 0. Between levels of one
+loop the tool goes straight on down when it is already at the entry point; otherwise it rapids to
+`retract` (at least 0.5 mm above `top`), across, and down to 0.5 mm (`PROFILE_SAFE_ABOVE`) above
+the depth already cut there, and feeds from there. The program starts at `clearance` above the
+first entry and ends with a rapid to `clearance`. `context.checkpoint()` runs before every pass.
+
+**Entries.** `plunge` feeds straight down. `ramp` descends along the path itself at the given angle
+(over several laps of a short loop) and then cuts one full lap at depth, so the ramp's wedge is
+cleaned up; a ramp starts on the path, so it uses no lead-in (`lead-in-ignored`). `helix` turns
+about a centre `radius` from the entry point on the scrap side, as `fullCircle` arcs of at most the
+angle's drop per turn, turning the way that leaves it tangent to the cut; when the helix would cut
+into the part (or, for a finishing pass, leave the roughed slot), the pass plunges instead
+(`helix-fallback`).
+
+**Leads.** An `arc` lead is a quarter turn of the given radius on the scrap side, tangent to the
+path where it joins it; a `line` lead runs square to the wall from the scrap side. Every lead and
+helix is checked against the part: the tool centre must stay on the scrap side, at least the cut's
+own offset from every loop of the operation. A lead that fails is left out (`lead-collision`).
+Leads of an `on` profile are not checked against the part, since the cut itself runs on the
+outline. A finishing pass runs below the stock's top only where the roughing cleared to full
+depth: its leads (and helix) must keep the tool centre within the roughing offset (tool radius
+plus allowance) of the part, so the tool never meets uncut stock. Leads that leave that band are
+left out (`finish-lead-dropped`), and the finishing pass then feeds straight down on its own path
+from just above the stock. Lead-in and lead-out are fed with the `lead` feed.
+
+**Tabs** are left at `bottom + height` in the passes below that height: the tool rises straight up
+at a tab, runs over it, and drops back to depth. The lifted stretch is `width` plus the tool
+diameter long, measured along the tool centre path, so a tab on a straight wall is `width` wide.
+`count` tabs per loop (or one per `tabSpacing`) are spread evenly by length, then each moves to
+the nearest spot clear of corners (sharp junctions and round joins about a source vertex), of
+arcs shorter than the tab and of the loop's start, with `PROFILE_TAB_MARGIN` (0.5 mm) to spare.
+Tabs are placed on the loops that cut the final wall and carried to the roughing loops by
+position. Loops around scrap (inside cuts, holes of an outside profile) whose tool centre path
+has a bounding box narrower than `tabMinInsideSize` get none (`tabs-skipped`); tabs with no room are dropped (`tabs-dropped`). A
+finishing tab that cannot be carried to its roughing loop (it would cross that loop's start) is
+also reported as `tabs-dropped`, saying plainly that the roughing cuts through there and the part
+is held at that spot only by a sliver as thin as the allowance. Tabs as high as the cut is deep
+make nothing (`tabs-unused`).
+
+**Errors and warnings.** Bad numbers, no loops, open loops and a tool that fits nowhere are
+`invalid-input` errors. Warnings: `depth-exceeds-flutes`, `loop-too-small` (an inside loop, or a
+hole of an outside profile, the tool does not fit into, so it is not cut), and those above.
+
 ## Tests
 
 `./node_modules/.bin/vitest run packages/cam` from the repository root:
@@ -622,6 +701,22 @@ an OPFS tier for the cache.
 - `offset/grbl.test.ts`: the pre-check's radius rule, rounding and full-circle travel, and the
   demotion of flat arcs;
 - `offset/perf.test.ts`: the performance budget above.
+- `ops/profile.test.ts`: the exact IR of a rectangle cut outside, and of its climb reversal; for a
+  rectangle, a rounded rectangle and a circle on each side, the tool centre at the tool radius
+  with arcs kept as arcs, and climb against conventional by winding; holes cut first; even depth
+  steps no deeper than the stepdown; each loop roughed and finished before the loop enclosing it;
+  finishing in stepdown steps where the roughing split at a dumbbell's neck or merged across a
+  narrow gap between two parts, and in one step for a rectangle with a hole near its edge;
+  roughing with an allowance and the finishing pass; tabs at
+  their height and width, on straight sides or long arcs and never on corners or short arcs, by
+  count and by spacing, skipped on small inside loops, carried to the finishing pass, dropped when
+  there is no room; tangent arc leads on the scrap side for both directions, line leads, leads
+  that would gouge left out; holes of an outside profile too small for the tool; a tab spacing with
+  no tabs; ramps at their angle along the path (over several laps of a short
+  loop) followed by a full lap; helixes on the scrap side, tangent to the cut, and their plunge fallback; refusals;
+  checkpoints and `CamCancelled`; a run through the worker; and the sign's 300 x 150 mm outline, whose finishing
+  feeds below the stock's top never have the tool centre beyond the roughed slot.
+  Every toolpath passes the IR validator;
 - `post/format.test.ts`: number formatting (rounding, no exponent, no `-0`, the eight-digit
   limit), Grbl's `read_float` in single precision, comment sanitising and wrapping;
 - `post/dialect.test.ts`: code normalising, a JSON round trip of a dialect, and each refusal:
