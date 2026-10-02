@@ -14,9 +14,12 @@
     "orca:matrix": "node scripts/orca-matrix.ts"
   },
   "dependencies": {
+    "@manufakture/drawing": "workspace:*",
     "fflate": "^0.8.3"
   },
   "devDependencies": {
-    "@manufakture/kernel": "workspace:*"
+    "@manufakture/kernel": "workspace:*",
+    "dxf-parser": "^1.1.2",
+    "pdfjs-dist": "^6.3.289"
   }
 }

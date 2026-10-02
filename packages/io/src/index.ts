@@ -1,6 +1,7 @@
 // @manufakture/io: file formats. STL and 3MF are read and written here in
 // plain TypeScript; STEP geometry goes through the kernel (OCCT's
-// translators), and this package only reads STEP text (product names).
+// translators), and this package only reads STEP text (product names). 2D
+// sheets (drawings, and laser and plasma outlines) are written as SVG, DXF and PDF.
 
 export const packageName = '@manufakture/io';
 
@@ -77,3 +78,53 @@ export {
   type ExportTolerancePreset,
   type StlFile,
 } from './export';
+export {
+  JOIN_TOLERANCE,
+  baselinePoint,
+  connectedRuns,
+  formatNumber,
+  isFullTurn,
+  itemsByLayer,
+  line,
+  pageOf,
+  polylinePath,
+  segmentBeziers,
+  segmentBounds,
+  segmentPoint,
+  sheetBounds,
+  signedSweep,
+  type Bounds2,
+  type Item2,
+  type Layer2,
+  type Path2,
+  type Segment2,
+  type Sheet2,
+  type Text2,
+  type TextAnchor,
+  type TextBaseline,
+  type Vec2 as Point2,
+} from './path2';
+export {
+  SVG_FONT_FAMILY,
+  escapeXml,
+  layerId,
+  pathData,
+  writeSvg,
+  type SvgWriteOptions,
+} from './svg';
+export { DXF_LINEWEIGHTS, dxfColor, dxfLineweight, dxfName, dxfText, writeDxf } from './dxf';
+export { POINTS_PER_MM, contentStream, pdfTextString, writePdf, type PdfWriteOptions } from './pdf';
+export {
+  HELVETICA_CAP_HEIGHT,
+  helveticaTextWidth,
+  helveticaWidth,
+  winAnsiBytes,
+} from './helvetica';
+export {
+  DRAWING_LINETYPES,
+  displayListToSheet,
+  drawingToDxf,
+  drawingToPdf,
+  drawingToSvg,
+  type DrawingSheetOptions,
+} from './drawing-export';

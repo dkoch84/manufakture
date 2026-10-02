@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="420mm" height="297mm" viewBox="0 0 420 297">
+<title>M1 bracket</title>
+<g id="layer-visible" data-layer="visible" fill="none" stroke="#000000" stroke-width="0.5" stroke-linecap="round" stroke-linejoin="round">
+<path data-owner="view#1" d="M60 207 L160 207"/>
+<path data-owner="view#1" d="M160 207 L160 195"/>
+<path data-owner="view#1" d="M160 195 L80 195"/>
+<path data-owner="view#1" d="M72 187 A8 8 0 0 0 80 195"/>
+<path data-owner="view#1" d="M72 187 L72 127"/>
+<path data-owner="view#1" d="M72 127 L60 127"/>
+<path data-owner="view#1" d="M60 127 L60 207"/>
+<path data-owner="view#2" d="M60 97 L160 97"/>
+<path data-owner="view#2" d="M160 97 L160 37"/>
+<path data-owner="view#2" d="M160 37 L60 37"/>
+<path data-owner="view#2" d="M60 37 L60 97"/>
+<path data-owner="view#2" d="M72 97 L72 37"/>
+<path data-owner="view#2" d="M118 67 A8 8 0 0 0 102 67 A8 8 0 0 0 118 67"/>
+<path data-owner="view#2" d="M114.5 67 A4.5 4.5 0 0 0 105.5 67 A4.5 4.5 0 0 0 114.5 67"/>
+<path data-owner="view#2" d="M148 67 A8 8 0 0 0 132 67 A8 8 0 0 0 148 67"/>
+<path data-owner="view#2" d="M144.5 67 A4.5 4.5 0 0 0 135.5 67 A4.5 4.5 0 0 0 144.5 67"/>
+<path data-owner="view#3" d="M210 207 L270 207"/>
+<path data-owner="view#3" d="M270 207 L270 127"/>
+<path data-owner="view#3" d="M270 127 L210 127"/>
+<path data-owner="view#3" d="M210 127 L210 207"/>
+<path data-owner="view#3" d="M210 195 L270 195"/>
+</g>
+<g id="layer-hidden" data-layer="hidden" fill="none" stroke="#000000" stroke-width="0.35" stroke-linecap="butt" stroke-linejoin="round" stroke-dasharray="3 1.5">
+<path data-owner="view#1" d="M105.5 207 L105.5 203.8"/>
+<path data-owner="view#1" d="M114.5 207 L114.5 203.8"/>
+<path data-owner="view#1" d="M102 203.8 L102 195"/>
+<path data-owner="view#1" d="M118 203.8 L118 195"/>
+<path data-owner="view#1" d="M102 203.8 L118 203.8"/>
+<path data-owner="view#1" d="M135.5 207 L135.5 203.8"/>
+<path data-owner="view#1" d="M144.5 207 L144.5 203.8"/>
+<path data-owner="view#1" d="M132 203.8 L132 195"/>
+<path data-owner="view#1" d="M148 203.8 L148 195"/>
+<path data-owner="view#1" d="M132 203.8 L148 203.8"/>
+<path data-owner="view#3" d="M235.5 207 L235.5 203.8"/>
+<path data-owner="view#3" d="M244.5 207 L244.5 203.8"/>
+<path data-owner="view#3" d="M232 203.8 L232 195"/>
+<path data-owner="view#3" d="M248 203.8 L248 195"/>
+<path data-owner="view#3" d="M232 203.8 L248 203.8"/>
+</g>
+<g id="layer-smooth" data-layer="smooth" fill="none" stroke="#000000" stroke-width="0.25" stroke-linecap="round" stroke-linejoin="round">
+<path data-owner="view#2" d="M80 97 L80 37"/>
+<path data-owner="view#3" d="M210 187 L270 187"/>
+</g>
+<g id="layer-centre" data-layer="centre" fill="none" stroke="#000000" stroke-width="0.25" stroke-linecap="butt" stroke-linejoin="round" stroke-dasharray="8 1.5 1.5 1.5">
+<path data-owner="view#2" d="M100 67 L120 67"/>
+<path data-owner="view#2" d="M110 77 L110 57"/>
+<path data-owner="view#2" d="M130 67 L150 67"/>
+<path data-owner="view#2" d="M140 77 L140 57"/>
+</g>
+<g id="layer-dimension" data-layer="dimension" fill="none" stroke="#000000" stroke-width="0.25" stroke-linecap="round" stroke-linejoin="round">
+<path data-owner="dim#1" d="M59 207 L48 207"/>
+<path data-owner="dim#1" d="M59 127 L48 127"/>
+<path data-owner="dim#1" d="M50 207 L50 127"/>
+<path data-owner="dim#1" d="M50 207 L50.5 204 L49.5 204 Z" fill="#000000"/>
+<path data-owner="dim#1" d="M50 127 L49.5 130 L50.5 130 Z" fill="#000000"/>
+<path data-owner="dim#2" d="M60 208 L60 219"/>
+<path data-owner="dim#2" d="M160 208 L160 219"/>
+<path data-owner="dim#2" d="M60 217 L160 217"/>
+<path data-owner="dim#2" d="M60 217 L63 217.5 L63 216.5 Z" fill="#000000"/>
+<path data-owner="dim#2" d="M160 217 L157 216.5 L157 217.5 Z" fill="#000000"/>
+<path data-owner="dim#3" d="M161 207 L172 207"/>
+<path data-owner="dim#3" d="M161 195 L172 195"/>
+<path data-owner="dim#3" d="M170 207 L170 195"/>
+<path data-owner="dim#3" d="M170 207 L170.5 204 L169.5 204 Z" fill="#000000"/>
+<path data-owner="dim#3" d="M170 195 L169.5 198 L170.5 198 Z" fill="#000000"/>
+<path data-owner="dim#4" d="M74.343146 192.656854 L80 187"/>
+<path data-owner="dim#4" d="M74.343146 192.656854 L76.818019 190.889087 L76.110913 190.181981 Z" fill="#000000"/>
+<path data-owner="dim#4" d="M80 187 L84.242641 182.757359"/>
+<path data-owner="dim#4" d="M84.242641 182.757359 L87.242641 182.757359"/>
+<path data-owner="dim#5" d="M110 66 L110 25"/>
+<path data-owner="dim#5" d="M140 66 L140 25"/>
+<path data-owner="dim#5" d="M110 27 L140 27"/>
+<path data-owner="dim#5" d="M110 27 L113 27.5 L113 26.5 Z" fill="#000000"/>
+<path data-owner="dim#5" d="M140 27 L137 26.5 L137 27.5 Z" fill="#000000"/>
+<path data-owner="dim#6" d="M134.343146 61.343146 L145.656854 72.656854"/>
+<path data-owner="dim#6" d="M145.656854 72.656854 L143.889087 70.181981 L143.181981 70.889087 Z" fill="#000000"/>
+<path data-owner="dim#6" d="M134.343146 61.343146 L136.110913 63.818019 L136.818019 63.110913 Z" fill="#000000"/>
+<path data-owner="dim#6" d="M145.656854 72.656854 L149.899495 76.899495"/>
+<path data-owner="dim#6" d="M149.899495 76.899495 L152.899495 76.899495"/>
+<path data-owner="dim#7" d="M210 208 L210 219"/>
+<path data-owner="dim#7" d="M270 208 L270 219"/>
+<path data-owner="dim#7" d="M210 217 L270 217"/>
+<path data-owner="dim#7" d="M210 217 L213 217.5 L213 216.5 Z" fill="#000000"/>
+<path data-owner="dim#7" d="M270 217 L267 216.5 L267 217.5 Z" fill="#000000"/>
+</g>
+<g id="layer-text" data-layer="text" fill="none" stroke="#000000" stroke-width="0.25" stroke-linecap="round" stroke-linejoin="round">
+<text data-owner="titleBlock" x="231" y="279.8" font-family="Helvetica, Arial, sans-serif" font-size="2.506964" fill="#000000" stroke="none">DRAWING NO.</text>
+<text data-owner="titleBlock" x="232" y="285.5" font-family="Helvetica, Arial, sans-serif" font-size="4.874652" fill="#000000" stroke="none">MK-0001</text>
+<text data-owner="titleBlock" x="321" y="279.8" font-family="Helvetica, Arial, sans-serif" font-size="2.506964" fill="#000000" stroke="none">REV</text>
+<text data-owner="titleBlock" x="322" y="285.5" font-family="Helvetica, Arial, sans-serif" font-size="4.874652" fill="#000000" stroke="none">A</text>
+<text data-owner="titleBlock" x="341" y="279.8" font-family="Helvetica, Arial, sans-serif" font-size="2.506964" fill="#000000" stroke="none">SHEET</text>
+<text data-owner="titleBlock" x="342" y="285.5" font-family="Helvetica, Arial, sans-serif" font-size="4.874652" fill="#000000" stroke="none">1 / 1</text>
+<text data-owner="titleBlock" x="371" y="279.8" font-family="Helvetica, Arial, sans-serif" font-size="2.506964" fill="#000000" stroke="none">SCALE</text>
+<text data-owner="titleBlock" x="372" y="285.5" font-family="Helvetica, Arial, sans-serif" font-size="4.874652" fill="#000000" stroke="none">2:1</text>
+<text data-owner="titleBlock" x="231" y="265.8" font-family="Helvetica, Arial, sans-serif" font-size="2.506964" fill="#000000" stroke="none">TITLE</text>
+<text data-owner="titleBlock" x="232" y="275.5" font-family="Helvetica, Arial, sans-serif" font-size="6.963788" fill="#000000" stroke="none">M1 bracket</text>
+<text data-owner="titleBlock" x="231" y="255.8" font-family="Helvetica, Arial, sans-serif" font-size="2.506964" fill="#000000" stroke="none">COMPANY</text>
+<text data-owner="titleBlock" x="321" y="255.8" font-family="Helvetica, Arial, sans-serif" font-size="2.506964" fill="#000000" stroke="none">DRAWN</text>
+<text data-owner="titleBlock" x="366" y="255.8" font-family="Helvetica, Arial, sans-serif" font-size="2.506964" fill="#000000" stroke="none">DATE</text>
+<text data-owner="titleBlock" x="231" y="245.8" font-family="Helvetica, Arial, sans-serif" font-size="2.506964" fill="#000000" stroke="none">MATERIAL</text>
+<text data-owner="titleBlock" x="321" y="245.8" font-family="Helvetica, Arial, sans-serif" font-size="2.506964" fill="#000000" stroke="none">UNITS</text>
+<text data-owner="titleBlock" x="322" y="251.5" font-family="Helvetica, Arial, sans-serif" font-size="4.874652" fill="#000000" stroke="none">mm</text>
+<text data-owner="titleBlock" x="366" y="245.8" font-family="Helvetica, Arial, sans-serif" font-size="2.506964" fill="#000000" stroke="none">PROJECTION</text>
+<text data-owner="titleBlock" x="367" y="251.5" font-family="Helvetica, Arial, sans-serif" font-size="4.874652" fill="#000000" stroke="none">THIRD ANGLE</text>
+<text data-owner="dim#1" x="49" y="167" font-family="Helvetica, Arial, sans-serif" font-size="4.874652" fill="#000000" stroke="none" text-anchor="middle" transform="rotate(-90 49 167)">40</text>
+<text data-owner="dim#2" x="110" y="216" font-family="Helvetica, Arial, sans-serif" font-size="4.874652" fill="#000000" stroke="none" text-anchor="middle">50</text>
+<text data-owner="dim#3" x="169" y="201" font-family="Helvetica, Arial, sans-serif" font-size="4.874652" fill="#000000" stroke="none" text-anchor="middle" transform="rotate(-90 169 201)">6</text>
+<text data-owner="dim#4" x="88.242641" y="184.507359" font-family="Helvetica, Arial, sans-serif" font-size="4.874652" fill="#000000" stroke="none">R4</text>
+<text data-owner="dim#5" x="125" y="26" font-family="Helvetica, Arial, sans-serif" font-size="4.874652" fill="#000000" stroke="none" text-anchor="middle">15</text>
+<text data-owner="dim#6" x="153.899495" y="78.649495" font-family="Helvetica, Arial, sans-serif" font-size="4.874652" fill="#000000" stroke="none">2x Ø8 CBORE</text>
+<text data-owner="dim#7" x="240" y="216" font-family="Helvetica, Arial, sans-serif" font-size="4.874652" fill="#000000" stroke="none" text-anchor="middle">30</text>
+<text data-owner="note#1" x="40" y="227" font-family="Helvetica, Arial, sans-serif" font-size="4.874652" fill="#000000" stroke="none">BREAK ALL SHARP EDGES</text>
+<text data-owner="note#1" x="40" y="232.6" font-family="Helvetica, Arial, sans-serif" font-size="4.874652" fill="#000000" stroke="none">MATERIAL 6061-T6</text>
+</g>
+<g id="layer-border" data-layer="border" fill="none" stroke="#000000" stroke-width="0.7" stroke-linecap="round" stroke-linejoin="round">
+<path data-owner="border" d="M20 287 L410 287 L410 10 L20 10 Z"/>
+</g>
+<g id="layer-titleBlock" data-layer="titleBlock" fill="none" stroke="#000000" stroke-width="0.35" stroke-linecap="round" stroke-linejoin="round">
+<path data-owner="titleBlock" d="M230 287 L230 243"/>
+<path data-owner="titleBlock" d="M230 243 L410 243"/>
+<path data-owner="titleBlock" d="M230 277 L410 277"/>
+<path data-owner="titleBlock" d="M320 287 L320 277"/>
+<path data-owner="titleBlock" d="M340 287 L340 277"/>
+<path data-owner="titleBlock" d="M370 287 L370 277"/>
+<path data-owner="titleBlock" d="M230 263 L410 263"/>
+<path data-owner="titleBlock" d="M230 253 L410 253"/>
+<path data-owner="titleBlock" d="M320 263 L320 253"/>
+<path data-owner="titleBlock" d="M365 263 L365 253"/>
+<path data-owner="titleBlock" d="M320 253 L320 243"/>
+<path data-owner="titleBlock" d="M365 253 L365 243"/>
+</g>
+</svg>

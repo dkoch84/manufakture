@@ -11,6 +11,9 @@
 // SLICER_CMD and ORCA_CMD (whitespace-separated, e.g. `xvfb-run -a prusa-slicer`, or
 // `<dir>/squashfs-root/AppRun` for an extracted OrcaSlicer AppImage; ORCA_PROFILES names its
 // `resources/profiles` when they are not next to the command).
+// Drawings (T4.4f): Inkscape converts our SVG of the M1 bracket drawing to PNG, and LibreCAD's
+// console mode (`librecad dxf2pdf`, run with QT_QPA_PLATFORM=offscreen) converts our DXF to PDF;
+// overridden with INKSCAPE_CMD and LIBRECAD_CMD, skipped when missing like the others.
 // Set INTEROP_KEEP=1 to keep the files it writes.
 //
 // INTEROP_BRACKET_DIR points at the M1 bracket as the app exported it in the browser
@@ -55,6 +58,8 @@ import {
   exportStlAssembly,
   type ExportAssembly,
 } from './export';
+import { drawingToDxf, drawingToSvg } from './drawing-export';
+import { bracketSheet } from './sheet-test-helpers';
 import { boxMesh } from './test-helpers';
 import { validate3mf } from './threemf';
 
@@ -71,6 +76,8 @@ function command(envName: string, candidates: string[]): string[] | null {
 const freecad = command('FREECADCMD', ['freecadcmd', 'FreeCADCmd']);
 const slicer = command('SLICER_CMD', ['prusa-slicer', 'PrusaSlicer']);
 const orca = orcaSlicer();
+const inkscape = command('INKSCAPE_CMD', ['inkscape']);
+const librecad = command('LIBRECAD_CMD', ['librecad']);
 
 /**
  * OrcaSlicer's command, version and profiles, or why it is skipped: not installed, does not
@@ -605,5 +612,28 @@ describe.skipIf(!('cmd' in orca))('OrcaSlicer loads and slices our 3MF', () => {
     );
     expect(problems.join('\n')).toMatch(/load: objects .*Blue box slot 1/);
     expect(problems.join('\n')).toMatch(/slice: G-code slots/);
+  });
+});
+
+describe.skipIf(!inkscape)('Inkscape opens our drawing SVG', () => {
+  it('exports the M1 bracket drawing to PNG', () => {
+    const svg = join(dir, 'bracket-drawing.svg');
+    const png = join(dir, 'bracket-drawing.png');
+    writeFileSync(svg, drawingToSvg(bracketSheet()));
+    const r = run(inkscape!, ['--export-type=png', `--export-filename=${png}`, svg]);
+    expect(r.status, r.out).toBe(0);
+    expect(existsSync(png) && statSync(png).size > 1000, r.out).toBe(true);
+  });
+});
+
+describe.skipIf(!librecad)('LibreCAD opens our drawing DXF', () => {
+  it('converts the M1 bracket drawing to PDF', () => {
+    const dxf = join(dir, 'bracket-drawing.dxf');
+    const pdf = join(dir, 'bracket-drawing.pdf');
+    writeFileSync(dxf, drawingToDxf(bracketSheet()));
+    const r = run(librecad!, ['dxf2pdf', '-o', pdf, dxf], { QT_QPA_PLATFORM: 'offscreen' });
+    expect(r.status, r.out).toBe(0);
+    expect(existsSync(pdf), r.out).toBe(true);
+    expect(readFileSync(pdf).subarray(0, 5).toString('latin1')).toBe('%PDF-');
   });
 });
