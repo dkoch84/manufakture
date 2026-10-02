@@ -678,7 +678,6 @@ class PocketCutter {
       return top;
     };
 
-    /** A straight move at depth stays in the pocket and within a stepover of what is cut. */
     /**
      * A straight move at depth keeps the tool centre clear of the walls and islands (exactly)
      * and within a stepover of what is cut (checked every quarter stepover).
@@ -1009,6 +1008,8 @@ class PocketCutter {
       // else half-way along a segment (longest first), where the wall's normal is well defined.
       let path = nearest;
       let entryXY = pointAt(path, 0);
+      // Where the pass plunges at the wall, the allowance there is uncut from the top down.
+      let atWall = false;
       if (covered && a > 0) {
         const starts = [
           nearest,
@@ -1031,6 +1032,7 @@ class PocketCutter {
           const n = scrapNormalAt(found, 0);
           entryXY = [q[0] + n[0] * a, q[1] + n[1] * a];
         } else {
+          atWall = true;
           this.once(
             'finish-plunge-at-wall',
             'A finishing pass has no room to lead in from the cleared pocket; it plunges at the wall, through the allowance.',
@@ -1038,7 +1040,10 @@ class PocketCutter {
         }
       }
       const p0 = pointAt(path, 0);
-      let cleared = covered ? floor : op.depth.top;
+      // Rapids stop above what is cleared under the entry: the clearing's floor where the entry is
+      // in the cleared pocket, else the top (the allowance at the wall, or a wall nothing cleared),
+      // and after that the level this pass reached.
+      let cleared = covered && !atWall ? floor : op.depth.top;
       for (const z of lv) {
         await this.context.checkpoint();
         this.moveAbove(entryXY, Math.max(z, cleared));
@@ -1046,7 +1051,7 @@ class PocketCutter {
         if (dist2(entryXY, p0) > EPS) em.linear([p0[0], p0[1], z], 'lead');
         walk(em, path, path.length, { s0: 0, rampEnd: 0, from: z, to: z }, [], -Infinity);
         if (dist2(entryXY, p0) > EPS) em.linear([entryXY[0], entryXY[1], z], 'lead');
-        if (!covered) cleared = z;
+        if (!covered || atWall) cleared = z;
         em.pass++;
       }
     }
@@ -1164,7 +1169,8 @@ export async function generatePocket(
   const fa = op.floorAllowance ?? 0;
   const floorPass = fa > 0 && (op.floorPass ?? true);
   const roughLevels = levels(top, bottom + fa, op.stepdown);
-  const layers = floorPass ? [...roughLevels, bottom] : roughLevels;
+  if (!roughLevels.ok) return err(roughLevels.error.code, `${op.id}: ${roughLevels.error.message}`);
+  const layers = floorPass ? [...roughLevels.value, bottom] : roughLevels.value;
   let previous: { geom: PocketGeometry; z: number } | undefined;
   if (geom.value.roots.length > 0) {
     for (const z of layers) {
@@ -1178,12 +1184,13 @@ export async function generatePocket(
     const floor = floorPass || fa === 0 ? bottom : bottom + fa;
     const finishStep = op.finishStepdown ?? (depth <= op.tool.fluteLength ? depth : op.stepdown);
     const reached = geom.value.roots.length > 0 ? layers[layers.length - 1]! : top;
-    await cutter.finish(
-      geom.value,
-      levels(top, floor, finishStep),
-      levels(top, floor, op.stepdown),
-      reached,
-    );
+    const finishLevels = levels(top, floor, finishStep);
+    if (!finishLevels.ok) {
+      return err(finishLevels.error.code, `${op.id}: ${finishLevels.error.message}`);
+    }
+    const stepLevels = levels(top, floor, op.stepdown);
+    if (!stepLevels.ok) return err(stepLevels.error.code, `${op.id}: ${stepLevels.error.message}`);
+    await cutter.finish(geom.value, finishLevels.value, stepLevels.value, reached);
   }
   return ok(cutter.result());
 }

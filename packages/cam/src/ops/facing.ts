@@ -313,9 +313,11 @@ export async function generateFacing(
     return true;
   };
 
+  const depths = levels(top, bottom, op.stepdown);
+  if (!depths.ok) return err(depths.error.code, `${op.id}: ${depths.error.message}`);
   let order = lines.map((chords) => [...chords]);
   let previous = top;
-  for (const z of levels(top, bottom, op.stepdown)) {
+  for (const z of depths.value) {
     await context.checkpoint();
     // Zigzag: the first chord runs from whichever end the tool is nearer to.
     let forward = true;

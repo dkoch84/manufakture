@@ -58,7 +58,8 @@ The evaluated counterparts of the document's `cam` section (T5.1b), each with it
     `entry`, `climb`;
   - `drill`: `points` (`MachineDrillPoint`), `peck?` (mm), `dwell?` (seconds) (and, for now, the
     optional `DrillExtras` of [the drill operation](#the-drill-operation-opsdrillts));
-  - `vcarve`: `loops`, `top`, `maxDepth?`;
+  - `vcarve`: `loops`, `top`, `maxDepth?` (and, for now, the optional `VCarveExtras` of
+    [the V-carve operation](#the-v-carve-operation-opsvcarvets));
   - `surface3d`: `mesh`, `stepover` (mm), `angle`, `allowance`.
   - `Entry` is `plunge`, `ramp` (`angle`) or `helix` (`angle`, `radius`); `Lead` is `none`,
     `line` (`length`) or `arc` (`radius`).
@@ -834,8 +835,9 @@ request was superseded stay cached. Any entry may be evicted at any time; a miss
 regenerating. Typed arrays are hashed from their bytes. Bump `CAM_IMPLEMENTATION_VERSION` with any
 change that can alter a toolpath.
 
-Not yet: linking per setup and its cache (T5.2g), progress reports for long 3D finishes (T5.5a),
-an OPFS tier for the cache.
+Not yet: progress reports for long 3D finishes (T5.5a), an OPFS tier for the cache. Linking
+(T5.2g) runs on the worker's results: `jobOperations` and `assembleJob` (see
+[Linking and job assembly](#linking-and-job-assembly-jobts)).
 
 ## The profile operation (`ops/profile.ts`)
 
@@ -861,7 +863,11 @@ an outer loop when climbing, an inside cut counter-clockwise.
 
 **Passes.** Each cut loop starts half-way along its longest segment. Depth levels go from `top`
 to `bottom` in equal steps of at most `stepdown` (finishing: `finishStepdown`), the last exactly at
-`bottom`; `bottom` may lie below the stock for a through cut. Order: loop by loop, smallest
+`bottom`; `bottom` may lie below the stock for a through cut. `levels(top, bottom, step)` (shared by
+profile, pocket and facing) refuses, as the operation's `invalid-input` error, a step that is not
+a finite number above zero and a cut that would need more than `MAX_DEPTH_LEVELS` (1000) levels:
+a stepdown typed far too small never runs the generator out of memory, and is never clamped to a
+deeper cut than asked. Order: loop by loop, smallest
 first, each roughed at every level and then finished, so every loop is complete before any loop
 enclosing it is cut (an enclosed loop is always the smaller), and inner cuts finish while the part
 is still held. A roughing loop belongs to the finishing loop nearest its start. A finishing loop
@@ -951,9 +957,10 @@ piece, and each ring is cut once, in the climb direction for an M3 spindle (oute
 counter-clockwise; `climb: false` reverses them). The smaller branches at a split (corner blobs,
 the far side of a neck) are surrounded by cut rings by then and are cut from the outside in. Each
 ring starts at its point nearest the tool. A ring is reached at depth when the straight link keeps
-the tool centre `r + a` clear of every wall and island (an exact segment distance, not samples)
-and within one stepover of the rings already cut (checked every quarter stepover, so the tool
-never takes more than a stepover); failing that, by running on along the ring just cut (cleared
+the tool centre `r + a` clear of every wall and island (an exact segment distance, not samples,
+less `CLEARANCE_TOLERANCE`, 0.005 mm, of slack for the refit of the offset rings) and within one
+stepover of the rings already cut (checked every quarter stepover, so the tool never takes more
+than a stepover); failing that, by running on along the ring just cut (cleared
 already) to its point nearest the next ring, possibly by way of one other ring cut in the level;
 failing that, by a retract and a plunge where the ring passes within the tool radius of what is
 cut; and only then by a retract and a new entry. Rapids go up to `retract` (at least
@@ -976,9 +983,10 @@ included) is cut in `finishStepdown` levels, starting at its point nearest the t
 the cleared pocket `a` inside the wall, a lead (fed at the `lead` feed) square onto the wall, one
 lap, and a lead back. Where that lead would come too close to the wall (a sharp vertex), it starts
 half-way along a segment instead, longest first; when no start has room it plunges at the wall,
-through the allowance (`finish-plunge-at-wall`). A wall loop the clearing did not run alongside (a neck narrower than the
-tool plus twice the allowance) is cut in `stepdown` levels from the top instead
-(`finish-steps-down`).
+through the allowance (`finish-plunge-at-wall`), and its rapids then stop above the top, not the
+clearing's floor, since the allowance there is uncut. A wall loop the clearing did not run
+alongside (a neck narrower than the tool plus twice the allowance) is cut in `stepdown` levels
+from the top instead (`finish-steps-down`).
 
 **Layers.** `generatePocketLayers(op, layers, context)` clears z-level layers with their own
 loops (3D roughing's slices), with the same rings, entries and links; an entry starts above the
@@ -1096,7 +1104,7 @@ cycle markers. The tool's sloped helix floor is flattened by the level turn; a b
 mill leaves its own profile on a blind hole's floor.
 
 **Order and passes.** Holes in nearest-neighbour order from the WCS origin (`nearestNeighbourOrder`;
-linking, T5.2g, may reorder across operations). Each peck and each bore ring is one `pass`, counted
+linking, T5.2g, reorders the drilled holes from where the tool really is). Each peck and each bore ring is one `pass`, counted
 across the operation. `context.checkpoint()` runs before every hole.
 
 **Counterbores.** M5 drills a counterbored hole's through hole only, from the counterbore's floor
@@ -1109,6 +1117,175 @@ breakthrough, a bore stepover outside (0, 1], a hole whose bottom is not below i
 and the tool cases above are `invalid-input` errors. Warnings: `depth-exceeds-flutes` when the
 deepest hole goes further below the start of material than the flutes are long,
 `breakthrough-capped`, `sloped-entry` and `merged-below-floor` (above).
+
+## The V-carve operation (`ops/vcarve.ts`)
+
+`generateVCarve(input, context)` (T5.2f), registered as the `vcarve` generator, carves sign
+lettering with a V-bit (or an engraver): the depth follows the width of the shape. It reads its
+`VCarveInput`, the setup's `heights`, stock and WCS (for the stock top's machine Z) and nothing
+else. `loops` follow the `Loop2` convention (outer loops counter-clockwise, counters clockwise);
+`top` is the machine Z of the face carved into, which may lie below the stock top.
+
+**Extra fields** (`VCarveExtras`, all optional): `stepdown` (mm; default one level),
+`flatStepover` (mm, the spacing of the V-bit's rings on a flat floor; default rings close enough
+to leave ridges no higher than `VCARVE_FLAT_RIDGE`, 0.2 mm) and `clearing` (an end mill for the
+flat floor, below).
+
+**The surface.** With half angle `a` and tip radius `rt`, the carved surface lies `d / tan(a)`
+below `top` at a point `d` inside the outline, down to the maximum depth `D`: `maxDepth`, or what
+the bit reaches when it has none (its full diameter, `(diameter / 2 - rt) / tan(a)`, or its flute
+length, whichever is less; a deeper `maxDepth` is capped with a `max-depth-limited` warning). A
+bit whose tip stands on the shape's centre line (its medial axis) at depth `(f - rt) / tan(a)`,
+with `f` the distance to the outline there, touches the outline with its rim at the top, and its
+outer flank lies exactly on that surface out to the outline. So one pass along the centre line
+carves the whole shape, corners included: a slot of width `w` is carved to `w / 2` with a 90
+degree bit, and a rectangle's centre line runs out along the bisectors to each corner at depth 0.
+
+**Finding the centre line, without a Voronoi library.** The outline is inset in steps of about
+`VCARVE_INSET_STEP` (0.5 mm, at most `VCARVE_MAX_LEVELS` insets; more is a `levels-capped`
+warning) from `rt` to `rt + D tan(a)`. Each inset is sampled every `VCARVE_SAMPLE` (0.25 mm), with
+a fan of normals at reflex corners. From each sample the tool steps inward along the normal: where
+the distance to the outline keeps growing as fast as the step for the whole way to the next inset
+(and 0.02 mm past it, since the offset drops the zero-width sliver a ridge exactly there would
+leave), nothing collapses there. Where it stops growing, a bisection (16 steps) finds the ridge and
+a golden section search (one distance per step, to 1e-6 mm) its highest point: a centre-line
+point, cut at the depth of its exact distance. The distance is unsigned, so near a very sharp
+tip a normal can cross the outline within the ridge tolerance and keep "growing" outside; a point
+found outside the shape is no centre-line point, and the sample falls back to the tool standing
+on the inset itself (which touches the outline and no more).
+Inset corners that turn by less than 8 degrees count as smooth (a flattened curve), which leaves
+an error below 0.003 times the distance to the outline there. Samples are added between neighbours until the
+centre-line points between them lie within 0.01 mm of the chord, or where one collapses and the
+other does not. Every chord of the result is checked exactly against the outline (the distance is 1-Lipschitz, so a stretch is subdivided only while its midpoint lacks
+room for half its length): the cone may reach at most `VCARVE_TOLERANCE` (0.005 mm) past the
+surface, and a chord that would go further splits the line. The lines are simplified within
+0.002 mm. Distances use a bucket grid over the outline's segments (`OutlineDistance`: cells
+about two segments long, each arc bucketed by its own box rather than its circle's, lines in flat
+arrays compared by squared distance), which agrees with the exact distance; its `inside(p)` is
+an even-odd test over the outline flattened to 0.1 micrometre, looking only at the edges in the
+query's grid row. The stepped insets in the plan carve every ring between them; that
+is not needed, since each ring's outer flank lies on the surface that the centre line already
+cuts, so this version cuts only the centre line and the full-depth rings below. No dependency
+was added. The npm Voronoi packages (`d3-delaunay`, `voronoi`) take point sites only; segment
+Voronoi diagrams exist as JSPoly (a JavaScript translation of Boost.Polygon, BSL-1.0, which ADR
+0006 allows) and OpenVoronoi (C++, LGPL-2.1, so only as a separate `.wasm` we would build), but
+both take straight segments, not arcs, so letters with arcs would be flattened first, and the
+diagram still needs the same pruning, depth and link checks as the insets do.
+
+**The flat floor.** Where the shape is wider than `2 (rt + D tan(a))`, the carve stops at `D`:
+the bit cuts the inset at `rt + D tan(a)` at that depth (its outer flank finishes the slope), then
+clears the floor inside with insets `flatStepover` apart at `D`, whose own collapses get the same
+centre-line pass. At most `VCARVE_MAX_FLAT_RINGS` (400) rings; more makes them coarser
+(`flat-stepover-coarsened`). A `flat-floor` warning gives the floor's area and ridge height, and
+`tool-depth-limit` says when the floor comes from the bit's size, not `maxDepth`.
+
+**Clearing the floor with an end mill.** With `clearing` (`tool`, a `flat` or `bull` end mill;
+`feeds`; `stepdown`; `stepover`, a fraction of its diameter; `entry`, default a 3 degree helix of
+half its radius), `generateVCarveClearing(input, context)` makes the end mill's toolpath of its
+own: a pocket (`generatePocket`) of the floor, the shape inset by `D tan(a)`, where the bit's
+flanks meet the floor, from the stock top (or `top`, when higher) down to `D`. Run it before the
+V-carve; job assembly or the UI places it, as its own tool group. The V-bit's floor rings then go
+only `diameter / 2` of the end mill past the full-depth inset: every floor point the end mill
+cannot reach lies that close to the floor's edge. The pocket's `unreachable` warnings are dropped
+(the V-bit cuts those corners). No floor (`no-floor`) or an end mill that fits nowhere on it
+(`clearing-tool-does-not-fit`) gives an empty toolpath with a warning.
+
+**Moves.** One IR `pass` per depth level: `stepdown` levels down to the deepest point the carve
+has (each centre line cut only where it is deeper than the level before, clamped to the level),
+or one level. In each level the pieces (centre lines, rings) are cut nearest first, open lines
+from their nearer end, closed ones (without repeating their closing point) and rings from their
+point nearest the tool; rings run in their natural direction (climb with an M3 spindle). The
+nearest-first search skips every piece whose bounding box is no nearer than the best so far. A
+piece is reached by a straight `cut` move when it is at most one tool diameter away, the move
+keeps the cone inside the surface (the same exact check), stays at least `VCARVE_LINK_MARGIN`
+(0.05 mm) from the outline all the way and runs inside the shape (`vcarveLinkAllowed` answers
+this for a given move). The margin matters at the top: centre lines end in corners at depth 0,
+where a sharp bit's cone has no reach, so the surface check alone would pass a move across the
+face between two letters and score it. Otherwise up to `retract`, across, down by rapid to `VCARVE_SAFE_ABOVE` (0.5
+mm) above the stock top or `top`, whichever is higher, and a `plunge` feed from there. So no rapid
+ever goes below the stock top, even when `top` is below it. The retract height is the setup's,
+raised to that approach height; the clearance at least the retract. It starts at the clearance
+over the first piece and ends at the clearance. `context.checkpoint()` runs before every inset,
+floor ring and piece cut.
+
+**`top` below the stock top.** The carve assumes the material above `top` over the shape is
+already gone: it cuts from `top` down and plunges from above the stock top, but does not clear
+what lies between. When `top` is below the stock top and that material has not been removed (by
+an earlier facing or pocket), ordering the operations so that it is, is the user's job.
+
+**Performance.** Measured on one desktop core (Node 26), 60 degree bit, "O"s of 400 vertices
+(two 200-gon ellipses each), from `generateVCarve` called to its result; before and after the
+review fixes:
+
+| Sign                      | Before | After |
+| ------------------------- | ------ | ----- |
+| 1 letter, no `maxDepth`   | 2.2 s  | 0.1 s |
+| 4 letters, no `maxDepth`  | 11.0 s | 0.4 s |
+| 20 letters, no `maxDepth` | 57 s   | 2.0 s |
+| 4 letters, `maxDepth` 2   | 7.9 s  | 0.3 s |
+| 20 letters, `maxDepth` 2  | 90 s   | 1.7 s |
+
+The time was in the distance queries (arcs were bucketed by their whole circle, so every cell
+held dozens of them; the ridge search took about 105 distances per collapsed sample, now about 45) and in choosing the next
+piece (every ring's cut path was rebuilt and searched for every pick, quadratic in the rings).
+Both are now near linear in the letters. A test carves the 20-letter sign with and without
+`maxDepth` under a generous 30 s bound.
+
+**Errors and warnings.** A tool that is not a `vbit` or `engraver`, an angle outside (0, 180)
+degrees, a tip at least as wide as the tool, a `maxDepth`, `stepdown` or `flatStepover` not above
+zero, no loops, a shape too small to carve and a clearing tool that is not a flat or bull end mill
+are `invalid-input` errors. Warnings: `too-narrow` (area narrower than a flat tip, left uncut) and
+those above.
+
+## Linking and job assembly (`job.ts`)
+
+`assembleJob(setup, operations, options)` (T5.2g) turns a setup's operation toolpaths into one
+program: the IR a post writes, one file per tool where the dialect splits them. `jobOperations(setup,
+results, suppressed)` builds its input from the CAM worker's `generate` reply (unpacked, in the
+setup's order; an operation with no result is a `not-generated` failure). It reads the setup's
+heights, stock and WCS only.
+
+**Order.** The user's order by default; `groupByTool: true` groups operations by tool, tools in
+the order they are first used and each tool's operations in the user's order. Grouping changes
+the order material comes off (a profile can then run before a pocket that was listed after it),
+which is why it is an option. Suppressed operations are left out. An operation with an error (or a
+spindle speed not above zero) fails the job: `{ ok: false, error }` with `error.failures` naming
+every such operation, so an export never silently drops a cut; suppress it to go on. A job with
+nothing left to cut is an error too. Operations with no moves are left out with an
+`empty-operation` warning; the operations' own warnings come through tagged with their ids.
+
+**Heights.** The stock top is machine Z 0 with the origin on top, else the stock height
+(`stockTopZ`). The job's clearance is the setup's, raised to at least `JOB_SAFE_ABOVE` (0.5 mm)
+above the stock top (`clearance-raised` warning). Between operations the tool rises straight up to
+the clearance (or stays higher), crosses there, and comes down to where the next operation's
+toolpath starts. An operation that claims to start below `stockTop + JOB_SAFE_ABOVE` is refused,
+since the job would rapid down to it. The program starts at `options.start` (default the WCS
+origin at the clearance) and ends with a rise to the clearance and the spindle off.
+
+**Tool changes and the spindle.** At every change of tool: a rise to the clearance, spindle off,
+`toolChange` (id, number, name, diameter), spindle on clockwise at the operation's speed, and a
+dwell of `JOB_SPINDLE_DWELL` (5 s; a cautious default with no published spin-up time behind it,
+marked unverified; `spindleDwell` overrides it). The same tool at another speed gets a new spindle
+entry and the dwell, also at the clearance. An operator comment with the operation's name follows.
+
+**Independent pieces.** The job passes an operation's moves through as generated, with one
+exception: pieces the operation exposes as independent may be reordered (`reorder`, default
+true). Drilling made only of canned-cycle groups joined by rapids is split into its holes
+(`cyclePieces`; bores and anything else keep their order); an operation can also hand over
+`pieces` (toolpaths, each starting at least 0.5 mm above the stock top) in its outcome. The order
+(`orderPieces`) starts from where the tool really is: the shortest of the given order, its reverse
+and a nearest-neighbour tour, improved by 2-opt for up to `JOB_TWO_OPT_LIMIT` (150) pieces, and
+never longer than the given order. Between pieces the tool rises straight up, crosses at the
+retract height when that is at least 0.5 mm above the stock top (else at the clearance: when
+unsure, the clearance), and comes down to the next piece's start. Linking moves are tagged
+`op: 'link'` (`JOB_LINK_OP`), pass 0; spindle, tool change and dwell entries carry the operation
+they serve. The job does not lower links into cleared material on its own: operations do that
+inside themselves, where they know what they have cut.
+
+**Result.** `Job` holds the toolpath, each operation's entry span (`from` its comment and approach,
+`to` its last entry), the tool ids in the order of their changes, the warnings, the clearance and
+retract it used (for the post's `heights`), and with `rapidRate` the whole program's
+`toolpathStats`. The assembled toolpath is run through `validateToolpath`; an issue is an error.
 
 ## Tests
 
@@ -1124,6 +1301,19 @@ deepest hole goes further below the start of material than the flutes are long,
 - `stats.test.ts`: lengths per class, time estimate and bounds on a sample program;
 - `validate.test.ts`: a valid program and each issue code, canned-cycle markers included;
 - `boundary.test.ts`: the import allowlist above, and a self-test of its scanner.
+- `job.test.ts`: jobs from the real generators on fixtures and on 40 seeded random jobs
+  (profiles, pockets, facings, straight, peck and bored holes; random stock, heights, tools,
+  grouping): the IR validator passes on the whole job, it starts and ends at the clearance, every
+  tool change comes at the clearance with the spindle off and is followed by spindle on and a
+  dwell, the job's own sideways rapids stay above the stock top, and no rapid runs into material
+  (a heightmap of the stock lowered by every feed move, `rapidCollisions` in `test-helpers.ts`,
+  itself tested on a rapid through stock); grouping, speed changes, suppressed and failing
+  operations, explicit pieces, the clearance fallback for a low retract, the rapid length against
+  the naive order on a fixture (637 mm naive, 572 mm reordered), and the worker results.
+  `test/job-gcode.test.ts` posts an assembled job for Grbl and Carbide Motion and runs the G-code
+  verifier on every file.
+- `ops/levels.test.ts`: depth levels, the `MAX_DEPTH_LEVELS` cap, refused steps, and the error
+  from profile, pocket and facing for a tiny stepdown.
 - `offset/engine.test.ts`: offsets of rectangles, rounded rectangles, circles and slots against
   closed-form areas and the exact distance (both paths), slots that vanish and a 0.2 mm sliver, a
   dumbbell that splits, holes and islands, 50 pocket rings, source tags, a dense polygon refit to a
@@ -1233,6 +1423,19 @@ deepest hole goes further below the start of material than the flutes are long,
   bracket's two holes from model to machine coordinates, the Grbl post (plain G0 and G1, no G8x),
   packing, statistics, checkpoints and the flute warning. Every toolpath passes the IR validator,
   and a checker follows every rapid below the stock top into a column the tool has already cut.
+- `ops/vcarve.test.ts`: a heightmap simulation of the swept V-bit (exact along each straight
+  move) against the ideal V-carve surface: a 6 mm slot reaches 3 mm along its whole centre line
+  with a 90 degree bit, a 5 mm slot `2.5 / tan(30 degrees)` with a 60 degree bit, a rectangle's
+  corners carved right into the corner, a flat tip's shallower centre, and the "OAB" lettering
+  fixture of T5.8 (`packages/io/src/fixtures/svg/letters.svg`, written out as loops: a polygon O,
+  a straight-line A, a B with arcs and a dot) within 0.006 mm deeper and 0.02 mm shallower than
+  the ideal everywhere; the maximum depth with the floor cleared by the V-bit (ridges within
+  0.2 mm), the bit's own depth limit, a capped `maxDepth`; an end mill clearing the floor first
+  and the V-bit after, on the same material, within the same bounds and with a much shorter V-bit
+  path; empty clearings; stepdown levels; rapids above the stock top when `top` is below it (origin
+  on top and on the bottom); no rapid into material; feed moves inside the outline; the bucket
+  grid against the exact distance; refusals, the narrow-tip warning, checkpoints and
+  `CamCancelled`, registration. Every toolpath passes the IR validator.
 - `library/library.test.ts`: every built-in tool validates; the starter set and catalogue
   numbers; V-bit cone heights; the #201 presets equal to the chart rows; derived presets keep the
   #201 chip load scaled by diameter, stay within the flutes and are unverified; a preset for every

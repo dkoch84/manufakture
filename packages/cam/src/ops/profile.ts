@@ -685,11 +685,33 @@ export function roughingCovers(f: CutPath, rough: readonly CutPath[], allowance:
   return true;
 }
 
-/** Depth levels from below `top` down to `bottom` in equal steps of at most `step`. */
-export function levels(top: number, bottom: number, step: number): number[] {
-  const n = Math.max(1, Math.ceil((top - bottom) / step - 1e-9));
-  return Array.from({ length: n }, (_, k) =>
-    k === n - 1 ? bottom : top - ((k + 1) * (top - bottom)) / n,
+/**
+ * The most depth levels `levels` makes for one cut. A stepdown so small that it needs more is a
+ * slip (0.001 mm typed for 1 mm, say), not a plan: 1000 levels is a 50 mm cut in 0.05 mm steps.
+ */
+export const MAX_DEPTH_LEVELS = 1000;
+
+/**
+ * Depth levels from below `top` down to `bottom` in equal steps of at most `step`; one level, at
+ * `bottom`, when `bottom` is not below `top`. An error (never a silent empty or clamped list) when
+ * a number is not finite, `step` is not greater than zero, or the cut would need more than
+ * `MAX_DEPTH_LEVELS` levels: a clamped stepdown would cut deeper per pass than the user asked.
+ */
+export function levels(top: number, bottom: number, step: number): CamResult<number[]> {
+  if (!finite(top) || !finite(bottom)) return err('invalid-input', 'The depths must be finite.');
+  if (!positive(step)) return err('invalid-input', `The stepdown must be greater than zero.`);
+  const count = (top - bottom) / step - 1e-9;
+  if (count > MAX_DEPTH_LEVELS) {
+    return err(
+      'invalid-input',
+      `A stepdown of ${step} mm over ${top - bottom} mm needs ${Math.ceil(count)} depth passes; at most ${MAX_DEPTH_LEVELS} are allowed. Use a larger stepdown.`,
+    );
+  }
+  const n = Math.max(1, Math.ceil(count));
+  return ok(
+    Array.from({ length: n }, (_, k) =>
+      k === n - 1 ? bottom : top - ((k + 1) * (top - bottom)) / n,
+    ),
   );
 }
 
@@ -882,7 +904,11 @@ export async function generateProfile(
   // loops (each with the finishing loop nearest its start), smallest finishing loop first. An
   // enclosed loop always has the smaller area.
   const roughLevels = levels(top, bottom, op.stepdown);
+  if (!roughLevels.ok) return err(roughLevels.error.code, `${op.id}: ${roughLevels.error.message}`);
   const finishLevels = levels(top, bottom, finishStep);
+  if (!finishLevels.ok) {
+    return err(finishLevels.error.code, `${op.id}: ${finishLevels.error.message}`);
+  }
   const plan = (path: CutPath, lv: readonly number[], band?: number): PassPlan => ({
     path,
     levels: lv,
@@ -891,7 +917,7 @@ export async function generateProfile(
   });
   const plans: PassPlan[] = [];
   if (finishPaths.length === 0) {
-    for (const path of roughPaths) plans.push(plan(path, roughLevels));
+    for (const path of roughPaths) plans.push(plan(path, roughLevels.value));
   } else {
     const groups = new Map<CutPath, CutPath[]>(finishPaths.map((f) => [f, []]));
     for (const rp of roughPaths) {
@@ -911,15 +937,16 @@ export async function generateProfile(
     let unroughed = 0;
     for (const f of finishPaths) {
       const rough = groups.get(f)!;
-      for (const rp of rough) plans.push(plan(rp, roughLevels));
+      for (const rp of rough) plans.push(plan(rp, roughLevels.value));
       roughed.push(...rough);
       // A finishing loop is finished in one go only where the roughing cleared along all of it.
       // Where the roughing offset pinched off or merged (a neck or a gap narrower than the
       // allowance), or the allowance closed the loop, it is cut in roughing steps instead.
-      if (roughingCovers(f, roughed, allowance)) plans.push(plan(f, finishLevels, r + allowance));
-      else {
+      if (roughingCovers(f, roughed, allowance)) {
+        plans.push(plan(f, finishLevels.value, r + allowance));
+      } else {
         if (rough.length > 0) unroughed++;
-        plans.push(plan(f, roughLevels));
+        plans.push(plan(f, roughLevels.value));
       }
     }
     if (unroughed > 0) {
