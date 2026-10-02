@@ -1,6 +1,6 @@
 import { applyConfigurationRow, configurationRow } from './configurations';
 import { featureExpressions, mateExpressions, printSetupExpressions } from './features';
-import type { Assembly, ManufaktureDocument, Part, PrintData, Variable } from './schema';
+import type { Assembly, Domains, ManufaktureDocument, Part, PrintData, Variable } from './schema';
 import { expressionVariableNames } from './validate';
 
 /**
@@ -55,6 +55,13 @@ export interface DocumentChange {
    * reports that.
    */
   readonly fontsChanged: boolean;
+  /**
+   * The namespaces whose `domains` entry was added, removed or changed (its `schemaVersion` or
+   * its `data`), sorted; empty when none did (since version 11). Never a regen trigger by itself,
+   * so it adds nothing to `parts` and has no `firstAffectedIndex`: core cannot see inside domain
+   * data, so the domain decides which of its features a change affects (ADR 0013 decision 5).
+   */
+  readonly domainChanged: readonly string[];
 }
 
 /**
@@ -421,7 +428,23 @@ function diffRaw(prev: ManufaktureDocument, next: ManufaktureDocument): Document
     printChanged: printTouched(print) || !deepEqual(prev.print, next.print),
     print,
     fontsChanged: !deepEqual(prev.fonts, next.fonts),
+    domainChanged: diffDomains(prev.domains, next.domains),
   };
+}
+
+/** The namespaces whose domain data differs between two documents, sorted. */
+function diffDomains(prev: Domains | undefined, next: Domains | undefined): string[] {
+  if (prev === next) return [];
+  const p = prev ?? {};
+  const n = next ?? {};
+  const namespaces = new Set([...Object.keys(p), ...Object.keys(n)]);
+  return [...namespaces]
+    .filter((ns) => {
+      const a = Object.hasOwn(p, ns) ? p[ns] : undefined;
+      const b = Object.hasOwn(n, ns) ? n[ns] : undefined;
+      return !deepEqual(a, b);
+    })
+    .sort();
 }
 
 /** The document with its active configuration row applied (what T2.4b has regen build). */

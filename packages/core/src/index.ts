@@ -90,6 +90,7 @@ export {
   migrateV7ToV8,
   migrateV8ToV9,
   migrateV9ToV10,
+  migrateV10ToV11,
   type JsonObject,
   type Migration,
 } from './migrations';

@@ -14,6 +14,7 @@ import {
   migrateV7ToV8,
   migrateV8ToV9,
   migrateV9ToV10,
+  migrateV10ToV11,
   type Migration,
 } from './migrations';
 import type { CoreErrorCode } from './result';
@@ -32,6 +33,7 @@ import v7Bracket from './fixtures/v7-bracket.json';
 import v8Bracket from './fixtures/v8-bracket.json';
 import v9Bracket from './fixtures/v9-bracket.json';
 import v10Bracket from './fixtures/v10-bracket.json';
+import v11Bracket from './fixtures/v11-bracket.json';
 
 /** One fixture per older file version; `migrates every older version` checks this is complete. */
 const FIXTURES: Record<number, unknown> = {
@@ -45,6 +47,7 @@ const FIXTURES: Record<number, unknown> = {
   7: v7Bracket,
   8: v8Bracket,
   9: v9Bracket,
+  10: v10Bracket,
 };
 
 function load(value: unknown): ManufaktureDocument {
@@ -55,7 +58,7 @@ describe('serialize and deserialize', () => {
   const documents: [string, () => ManufaktureDocument][] = [
     ['an empty document', () => createDocument({ id: 'd', name: 'Empty' })],
     ['the bracket', bracket],
-    ['the current fixture', () => load(v10Bracket)],
+    ['the current fixture', () => load(v11Bracket)],
     ['the two-body fixture', () => load(v4TwoBodies)],
     [
       'a document with body props and a scope',
@@ -188,20 +191,20 @@ describe('serialize and deserialize', () => {
     expect(serialize(unwrap(deserialize(serialize(shuffled))).document)).toBe(serialize(doc));
     expect(
       serialize(doc).startsWith(
-        '{\n  "format": "manufakture",\n  "version": 10,\n  "namingScheme": 1,',
+        '{\n  "format": "manufakture",\n  "version": 11,\n  "namingScheme": 1,',
       ),
     ).toBe(true);
   });
 
   it('refuses to serialize an invalid document', () => {
     const doc = clone(bracket()) as unknown as { version: number };
-    doc.version = 11;
+    doc.version = 12;
     expect(() => serialize(doc as unknown as ManufaktureDocument)).toThrow(/Cannot serialize/);
   });
 });
 
 describe('loading errors', () => {
-  const current = () => clone(v10Bracket) as Record<string, unknown>;
+  const current = () => clone(v11Bracket) as Record<string, unknown>;
   const cases: [string, string | (() => unknown), CoreErrorCode, RegExp?][] = [
     ['not JSON', '{ "format": ', 'json'],
     ['an array', '[]', 'format'],
@@ -257,7 +260,7 @@ describe('loading errors', () => {
   it('never modifies the value it is given, even a newer one', () => {
     for (const value of [
       clone(v0Bracket),
-      { ...clone(v10Bracket), version: 99 },
+      { ...clone(v11Bracket), version: 99 },
       clone(v1Bracket),
       clone(v3Bracket),
       clone(v4Bracket),
@@ -267,6 +270,7 @@ describe('loading errors', () => {
       clone(v8Bracket),
       clone(v9Bracket),
       clone(v10Bracket),
+      clone(v11Bracket),
     ]) {
       const frozen = deepFreeze(value);
       const snapshot = JSON.stringify(frozen);
@@ -276,7 +280,7 @@ describe('loading errors', () => {
   });
 
   it('reports schema problems with paths', () => {
-    const d = clone(v10Bracket) as { variables: { expression: unknown }[] };
+    const d = clone(v11Bracket) as { variables: { expression: unknown }[] };
     d.variables[0]!.expression = 6;
     const r = parseDocument(d);
     expect(r.ok).toBe(false);
@@ -299,11 +303,14 @@ describe('migrations', () => {
     expect(migrateV7ToV8.migrate(clone(v7Bracket) as Record<string, unknown>)).toEqual(v8Bracket);
     expect(migrateV8ToV9.migrate(clone(v8Bracket) as Record<string, unknown>)).toEqual(v9Bracket);
     expect(migrateV9ToV10.migrate(clone(v9Bracket) as Record<string, unknown>)).toEqual(v10Bracket);
+    expect(migrateV10ToV11.migrate(clone(v10Bracket) as Record<string, unknown>)).toEqual(
+      v11Bracket,
+    );
     const loaded = unwrap(parseDocument(v0Bracket));
     expect(loaded.from).toEqual({ version: 0, namingScheme: 1 });
     expect(loaded.migrated).toBe(true);
-    expect(loaded.document).toEqual(load(v10Bracket));
-    expect(JSON.parse(serialize(loaded.document))).toEqual(v10Bracket);
+    expect(loaded.document).toEqual(load(v11Bracket));
+    expect(JSON.parse(serialize(loaded.document))).toEqual(v11Bracket);
   });
 
   it('v1 to v2 changes only the version: a version 1 part has no material', () => {
@@ -480,9 +487,43 @@ describe('migrations', () => {
     const loaded = unwrap(parseDocument(v9Bracket));
     expect(loaded.from.version).toBe(9);
     expect(loaded.migrated).toBe(true);
-    expect(loaded.document).toEqual(load(v10Bracket));
-    expect(serialize(loaded.document)).toBe(serialize(load(v10Bracket)));
-    expect(JSON.parse(serialize(loaded.document))).toEqual(v10Bracket);
+    expect(loaded.document).toEqual(load(v11Bracket));
+    expect(serialize(loaded.document)).toBe(serialize(load(v11Bracket)));
+  });
+
+  it('v10 to v11 changes only the version: a version 10 file has no domain data', () => {
+    expect(migrateV10ToV11.migrate(clone(v10Bracket) as Record<string, unknown>)).toEqual({
+      ...clone(v10Bracket),
+      version: 11,
+    });
+    const loaded = unwrap(parseDocument(v10Bracket));
+    expect(loaded.from.version).toBe(10);
+    expect(loaded.migrated).toBe(true);
+    expect(loaded.document).toEqual(load(v11Bracket));
+    expect('domains' in loaded.document).toBe(false);
+    expect(serialize(loaded.document)).toBe(serialize(load(v11Bracket)));
+    expect(JSON.parse(serialize(loaded.document))).toEqual(v11Bracket);
+  });
+
+  it('v10 to v11 keeps an extension feature as it was, with no operation or scope', () => {
+    const v10 = clone(v10Bracket) as { parts: { features: unknown[]; nextIds: object }[] };
+    const extension = {
+      id: 'extension#1',
+      kind: 'extension',
+      name: 'Board 1',
+      suppressed: false,
+      extension: 'wood.board',
+      schemaVersion: 1,
+      dependsOn: ['sketch#1'],
+      references: [],
+      expressions: {},
+      params: { stock: 'ply-18' },
+    };
+    v10.parts[0]!.features.push(extension);
+    v10.parts[0]!.nextIds = { ...v10.parts[0]!.nextIds, extension: 2 };
+    const doc = unwrap(parseDocument(v10)).document;
+    expect(doc.version).toBe(FORMAT_VERSION);
+    expect(doc.parts[0]!.features.at(-1)).toEqual(extension);
   });
 
   it('refuses a material that is not in the built-in table', () => {

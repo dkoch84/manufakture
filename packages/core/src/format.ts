@@ -10,6 +10,7 @@ import {
   FORMAT_TAG,
   FORMAT_VERSION,
   NAMING_SCHEME,
+  type DomainData,
   type ManufaktureDocument,
 } from './schema';
 import { checkDocument } from './validate';
@@ -63,13 +64,24 @@ function sortKeys(value: unknown, deep: boolean): unknown {
 /**
  * Schema-shaped objects already come out of zod in schema order. Records (`nextIds` of the
  * document, its parts, its assemblies and its print section, an extension's `expressions` and
- * its opaque `params`, a configuration row's `values`) keep insertion order, so they are sorted
- * here; otherwise two equal documents could be saved as different text.
+ * its opaque `params`, a configuration row's `values`, the `domains` namespaces and each one's
+ * opaque `data`) keep insertion order, so they are sorted here; otherwise two equal documents
+ * could be saved as different text.
  */
 function canonical(doc: ManufaktureDocument): ManufaktureDocument {
-  const { configurations } = doc;
+  const { configurations, domains } = doc;
   return {
     ...doc,
+    ...(domains && {
+      domains: Object.fromEntries(
+        Object.keys(domains)
+          .sort()
+          .map((ns) => [
+            ns,
+            { ...domains[ns]!, data: sortKeys(domains[ns]!.data, true) as DomainData['data'] },
+          ]),
+      ),
+    }),
     ...(configurations && {
       configurations: {
         ...configurations,
@@ -217,6 +229,21 @@ export function migrateJson(
 
 /** Loads a document from parsed JSON: migrate, then validate. */
 export function parseDocument(value: unknown): CoreResult<Loaded> {
+  try {
+    return loadDocument(value);
+  } catch (e) {
+    // Data nested deeper than the schema's limits can overflow the stack in the deep copy
+    // before the schema runs: report it like any other bad document.
+    if (e instanceof RangeError) return tooDeep(e);
+    throw e;
+  }
+}
+
+function tooDeep(e: RangeError): CoreResult<never> {
+  return fail('schema', `Invalid document: it nests too deeply (${e.message})`);
+}
+
+function loadDocument(value: unknown): CoreResult<Loaded> {
   const migrated = migrateJson(value);
   if (!migrated.ok) return migrated;
   const parsed = DocumentSchema.safeParse(migrated.value.json);
@@ -237,6 +264,7 @@ export function deserialize(text: string): CoreResult<Loaded> {
   try {
     value = JSON.parse(text);
   } catch (e) {
+    if (e instanceof RangeError) return tooDeep(e);
     return fail('json', `Not valid JSON: ${e instanceof Error ? e.message : String(e)}`);
   }
   return parseDocument(value);

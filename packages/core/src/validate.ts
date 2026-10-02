@@ -294,8 +294,10 @@ function derivedBodies(bodies: readonly string[]): ReadonlySet<string> {
  * it repeats makes a body (`new`, or `add` copies touching nothing); which suffixes exist is a
  * regen result. A derived feature with `new` or `add` makes its bodies under
  * `<id>:from/<source body id>`, one per source body it derives (all, or those in `bodies`); which
- * source bodies exist is a regen result too. `features` looks up the repeated features by id; without it, a pattern of
- * features makes no body.
+ * source bodies exist is a regen result too. An extension with `new` or `add` makes its bodies
+ * under its own id, alone or with a key (`extension#3`, `extension#3:layer/a`; ADR 0013 decision
+ * 6); which keys exist is up to its domain, so any is accepted. `features` looks up the repeated
+ * features by id; without it, a pattern of features makes no body.
  */
 export function bodyCreationProblem(
   creator: Feature,
@@ -325,6 +327,15 @@ export function bodyCreationProblem(
       }
       return undefined;
     }
+    case 'extension':
+      if (creator.operation !== 'new' && creator.operation !== 'add') {
+        return creator.operation === undefined
+          ? `${creator.id} is an extension with no operation, which makes no body`
+          : `${creator.id} is a "${creator.operation}" extension, which makes no body`;
+      }
+      return bodyId.length === creator.id.length + 1
+        ? `a body made by ${creator.id} is named "${creator.id}" or "${creator.id}:<key>"`
+        : undefined;
     case 'pattern':
     case 'mirror':
       if (creator.body !== true && !creator.features.some((id) => makesBody(features?.(id)))) {

@@ -214,6 +214,20 @@ export const migrateV9ToV10: Migration = {
   },
 };
 
+/**
+ * Version 11 let extension features make and change bodies (optional `operation` and `scope`)
+ * and added the optional document-level `domains` (ADR 0013 decisions 3 and 6). Nothing in a
+ * version 10 file changes: its extensions have neither field and it has no domain data.
+ */
+export const migrateV10ToV11: Migration = {
+  from: 10,
+  to: 11,
+  description: 'Let extensions make bodies; add domain data',
+  migrate(doc) {
+    return { ...doc, version: 11 };
+  },
+};
+
 /** File format migrations, in order: `FORMAT_MIGRATIONS[i]` goes from version i to i + 1. */
 export const FORMAT_MIGRATIONS: readonly Migration[] = [
   migrateV0ToV1,
@@ -226,6 +240,7 @@ export const FORMAT_MIGRATIONS: readonly Migration[] = [
   migrateV7ToV8,
   migrateV8ToV9,
   migrateV9ToV10,
+  migrateV10ToV11,
 ];
 
 /**

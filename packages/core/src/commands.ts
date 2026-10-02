@@ -30,6 +30,8 @@ import {
   ConfigRowSchema,
   DisplayUnitsSchema,
   DocumentSchema,
+  DomainDataSchema,
+  DomainNamespaceSchema,
   FONT_COUNTER,
   FONT_ID_PATTERN,
   FeatureSchema,
@@ -38,6 +40,7 @@ import {
   InstanceSchema,
   InstanceSourceSchema,
   MateSchema,
+  MAX_DOMAINS,
   MAX_FONT_TOTAL_BYTES,
   MAX_INSTANCE_NAME,
   MaterialIdSchema,
@@ -56,6 +59,7 @@ import {
   type ConfigRow,
   type Configurations,
   type DocumentFont,
+  type DomainData,
   type Feature,
   type Instance,
   type ManufaktureDocument,
@@ -374,6 +378,29 @@ export const SimpleCommandSchema = z.discriminatedUnion('type', [
   /** History only: put a deleted font back at `index` (its id was allocated before). */
   z.strictObject({ type: z.literal('restoreFont'), font: FontSchema, index }),
   /**
+   * Replace a domain's document-level data (ADR 0013 decision 3): `schemaVersion` and `data`
+   * together set the namespace's entry; both absent remove it. Core never looks inside `data`;
+   * the domain package validates it before issuing the command. The inverse sets the old entry
+   * back, or removes the namespace when it had none. Since version 11.
+   */
+  z
+    .strictObject({
+      type: z.literal('setDomainData'),
+      namespace: DomainNamespaceSchema,
+      schemaVersion: DomainDataSchema.shape.schemaVersion.exactOptional(),
+      data: DomainDataSchema.shape.data.exactOptional(),
+    })
+    .check((ctx) => {
+      if ('schemaVersion' in ctx.value !== 'data' in ctx.value) {
+        ctx.issues.push({
+          code: 'custom',
+          message:
+            'give both "schemaVersion" and "data" to set domain data, or neither to remove it',
+          input: ctx.value,
+        });
+      }
+    }),
+  /**
    * History only: put a whole document in place of this one (restore a version or revision; the
    * undo of a restore). The replacement must be this document (same `id`) and valid as a whole,
    * assemblies and configurations included. Its inverse is `replaceDocument` of the document it
@@ -442,6 +469,8 @@ function applyUnchecked(doc: ManufaktureDocument, command: Command): CoreResult<
         document: { ...doc, units: command.units },
         inverse: { type: 'setDisplayUnits', units: doc.units },
       });
+    case 'setDomainData':
+      return setDomainData(doc, command);
     case 'replaceDocument': {
       const next = command.document;
       if (next.id !== doc.id) {
@@ -513,6 +542,49 @@ function applyUnchecked(doc: ManufaktureDocument, command: Command): CoreResult<
     default:
       return applyToPart(doc, command);
   }
+}
+
+type SetDomainDataCommand = Extract<SimpleCommand, { type: 'setDomainData' }>;
+
+/** The `setDomainData` that puts a namespace's entry back as it is in `doc` (or removes it). */
+function domainDataCommand(doc: ManufaktureDocument, namespace: string): SetDomainDataCommand {
+  const old = Object.hasOwn(doc.domains ?? {}, namespace) ? doc.domains![namespace] : undefined;
+  return old === undefined
+    ? { type: 'setDomainData', namespace }
+    : { type: 'setDomainData', namespace, schemaVersion: old.schemaVersion, data: old.data };
+}
+
+/**
+ * Sets or removes one namespace's entry in `domains`. Removing the last entry drops `domains`
+ * itself, so a document that never had domain data and one whose entries were all removed are
+ * the same document.
+ */
+function setDomainData(
+  doc: ManufaktureDocument,
+  command: SetDomainDataCommand,
+): CoreResult<Applied> {
+  const { namespace } = command;
+  const inverse = domainDataCommand(doc, namespace);
+  const domains: Record<string, DomainData> = { ...doc.domains };
+  if (command.schemaVersion === undefined || !('data' in command)) {
+    if (!Object.hasOwn(domains, namespace)) return ok({ document: doc, inverse });
+    delete domains[namespace];
+  } else {
+    if (!Object.hasOwn(domains, namespace) && Object.keys(domains).length >= MAX_DOMAINS) {
+      return fail(
+        'schema',
+        `The document already holds ${MAX_DOMAINS} domain entries, the most allowed`,
+        ['namespace'],
+      );
+    }
+    domains[namespace] = { schemaVersion: command.schemaVersion, data: command.data };
+  }
+  const { domains: _old, ...rest } = doc;
+  void _old;
+  return ok({
+    document: Object.keys(domains).length === 0 ? rest : { ...rest, domains },
+    inverse,
+  });
 }
 
 /** Each counter at the higher of its values in `a` and `b`. */

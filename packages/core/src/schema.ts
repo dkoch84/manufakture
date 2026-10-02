@@ -30,7 +30,7 @@ import { MATERIAL_IDS } from './materials';
  */
 
 /** The file format version this code reads and writes. Bump it only together with a migration. */
-export const FORMAT_VERSION = 10;
+export const FORMAT_VERSION = 11;
 /** The topological naming scheme version (T0.5) that stored references are written in. */
 export const NAMING_SCHEME = 1;
 export const FORMAT_TAG = 'manufakture';
@@ -75,6 +75,39 @@ export const FontIdSchema = z
   .string()
   .max(32, { abort: true })
   .regex(FONT_ID_PATTERN, 'Expected a font id like "font#1"');
+
+/** An extension feature's type: a namespace and one or more dotted names (`wood.board`). */
+export const EXTENSION_TYPE_PATTERN = /^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)+$/;
+/**
+ * A domain namespace (ADR 0013 decision 3): the first segment of an extension type (`wood` of
+ * `wood.board`), the key of a `domains` entry. Since version 11.
+ */
+export const DOMAIN_NAMESPACE_PATTERN = /^[a-z][a-z0-9-]*$/;
+/** The longest domain namespace, in characters. */
+export const MAX_DOMAIN_NAMESPACE_LENGTH = 64;
+/** The most `domains` entries a document may hold; bounds what a crafted file costs to check. */
+export const MAX_DOMAINS = 1000;
+/**
+ * How deeply a domain entry's `data` may nest arrays and objects (a scalar is 0, `{}` is 1). Far
+ * beyond any setting, and it keeps parsing iterative-safe: deeper data is a schema error, never a
+ * stack overflow, and a whole document stays inside the 64 levels the app's file store walks.
+ */
+export const MAX_DOMAIN_DATA_DEPTH = 32;
+
+/**
+ * Whether `value` nests arrays and objects more than `max` levels deep. Iterative, so a crafted
+ * value cannot overflow the stack, and it stops at `max + 1`, so a cyclic value ends too.
+ */
+export function nestsDeeperThan(value: unknown, max: number): boolean {
+  const stack: [unknown, number][] = [[value, 0]];
+  while (stack.length > 0) {
+    const [v, depth] = stack.pop()!;
+    if (v === null || typeof v !== 'object') continue;
+    if (depth + 1 > max) return true;
+    for (const child of Array.isArray(v) ? v : Object.values(v)) stack.push([child, depth + 1]);
+  }
+  return false;
+}
 
 /**
  * A body id: the id of the feature that made the body, alone (`extrude#3`) or followed by a
@@ -745,22 +778,55 @@ export const MirrorFeatureSchema = z
   .check(checkInstanceSource);
 
 /**
- * The extension point for later domain features (printing, CAM, woodworking). `extension` is a
- * dotted, namespaced type (`print.brim`) with its own `schemaVersion`, owned by the domain
- * package. Core understands only the generic parts: feature dependencies, geometry references and
- * expressions, which it validates like any other feature's. `params` is opaque JSON.
+ * An extension's `scope` (ADR 0013 decision 6): an extension may change bodies with no
+ * `operation` of its own (a joint cuts each board through inputs that name them), so unlike
+ * `checkScopeOperation` a scope is refused only when the extension makes a `new` body.
  */
-export const ExtensionFeatureSchema = z.strictObject({
-  ...base('extension'),
-  extension: z
-    .string()
-    .regex(/^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)+$/, 'Expected a namespaced type like "print.brim"'),
-  schemaVersion: z.int().min(1),
-  dependsOn: z.array(featureId),
-  references: z.array(ReferenceSchema),
-  expressions: z.record(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/), StoredExpressionSchema),
-  params: z.record(z.string(), z.json()),
-});
+function checkExtensionScopeOperation<T extends { operation?: string; scope?: readonly string[] }>(
+  ctx: z.core.ParsePayload<T>,
+): void {
+  const { operation, scope } = ctx.value;
+  if (scope !== undefined && operation === 'new') {
+    ctx.issues.push({
+      code: 'custom',
+      message: 'a "new" operation acts on no existing body, so it has no scope',
+      input: scope,
+      path: ['scope'],
+    });
+  }
+}
+
+/**
+ * The extension point for domain features (woodworking, construction; ADR 0013). `extension` is
+ * a dotted, namespaced type (`wood.board`) with its own `schemaVersion`, owned by the domain
+ * package. Core understands only the generic parts: feature dependencies, geometry references,
+ * expressions, and since version 11 `operation` and `scope`, which it validates like any other
+ * feature's. `params` is opaque JSON.
+ */
+export const ExtensionFeatureSchema = z
+  .strictObject({
+    ...base('extension'),
+    extension: z
+      .string()
+      .regex(EXTENSION_TYPE_PATTERN, 'Expected a namespaced type like "wood.board"'),
+    schemaVersion: z.int().min(1),
+    dependsOn: z.array(featureId),
+    references: z.array(ReferenceSchema),
+    expressions: z.record(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/), StoredExpressionSchema),
+    params: z.record(z.string(), z.json()),
+    /**
+     * How the extension's solid combines with the part, as for an extrude: with `new` or `add`
+     * the extension creates bodies (`extension#n`, or `extension#n:<key>` for several). Absent:
+     * it makes no solid of its own to combine. Since version 11.
+     */
+    operation: BooleanOperationSchema.exactOptional(),
+    /**
+     * Every body the extension combines with or changes; absent: every body. Allowed without an
+     * `operation`, refused with `new`. Since version 11.
+     */
+    scope,
+  })
+  .check(checkExtensionScopeOperation);
 
 /**
  * An imported file, kept in the document itself (README, "Imported geometry"): the file's bytes
@@ -1532,6 +1598,59 @@ export const PrintDataSchema = z.strictObject({
   nextIds: z.record(z.string(), z.int().min(1)),
 });
 
+export const DomainNamespaceSchema = z
+  .string()
+  .max(MAX_DOMAIN_NAMESPACE_LENGTH, { abort: true })
+  .regex(DOMAIN_NAMESPACE_PATTERN, 'Expected a domain namespace like "wood"');
+
+/**
+ * One domain's document-level data (ADR 0013 decision 3): settings, not model. Core checks only
+ * this envelope; `data` is validated and migrated by the domain package that owns the namespace,
+ * at its own `schemaVersion`. Since version 11.
+ */
+export const DomainDataSchema = z.strictObject({
+  /** The domain's own version of `data`, from 1. */
+  schemaVersion: z.int().min(1),
+  /**
+   * Any JSON, nested at most `MAX_DOMAIN_DATA_DEPTH` levels. The depth is checked first, without
+   * recursion, so `z.json()` never sees data deep enough to overflow the stack.
+   */
+  data: z
+    .unknown()
+    .check((ctx) => {
+      if (nestsDeeperThan(ctx.value, MAX_DOMAIN_DATA_DEPTH)) {
+        ctx.issues.push({
+          code: 'custom',
+          message: `domain data may nest at most ${MAX_DOMAIN_DATA_DEPTH} levels`,
+          input: ctx.value,
+        });
+      }
+    })
+    .pipe(z.json()),
+});
+
+/**
+ * Domain data by namespace. Since version 11. Never empty: a document without domain data has
+ * no `domains` key, so undo is exact and the saved text canonical.
+ */
+export const DomainsSchema = z.record(DomainNamespaceSchema, DomainDataSchema).check((ctx) => {
+  const count = Object.keys(ctx.value).length;
+  if (count === 0) {
+    ctx.issues.push({
+      code: 'custom',
+      message: 'an empty domains record is not allowed; leave the key out instead',
+      input: count,
+    });
+  }
+  if (count > MAX_DOMAINS) {
+    ctx.issues.push({
+      code: 'custom',
+      message: `the document holds ${count} domain entries; at most ${MAX_DOMAINS} are allowed`,
+      input: count,
+    });
+  }
+});
+
 export const DocumentSchema = z.strictObject({
   format: z.literal(FORMAT_TAG),
   version: z.literal(FORMAT_VERSION),
@@ -1561,6 +1680,11 @@ export const DocumentSchema = z.strictObject({
     }),
   /** The configuration table; absent when the document has none. Since version 5. */
   configurations: ConfigurationsSchema.exactOptional(),
+  /**
+   * Document-level domain data by namespace (`wood`, `stock`), opaque to core; absent when the
+   * document has none. Since version 11.
+   */
+  domains: DomainsSchema.exactOptional(),
   /**
    * Next number per document-level id counter (`part`, giving `part#n`; `cp` and `cfg`, giving
    * configuration parameter and row ids; `assembly`, giving `assembly#n`; `font`, giving
@@ -1658,4 +1782,6 @@ export type PrintSetup = z.infer<typeof PrintSetupSchema>;
 export type PrintData = z.infer<typeof PrintDataSchema>;
 export type FontSource = z.infer<typeof FontSourceSchema>;
 export type DocumentFont = z.infer<typeof FontSchema>;
+export type DomainData = z.infer<typeof DomainDataSchema>;
+export type Domains = z.infer<typeof DomainsSchema>;
 export type ManufaktureDocument = z.infer<typeof DocumentSchema>;

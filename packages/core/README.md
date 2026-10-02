@@ -23,7 +23,7 @@ import {
 ```ts
 interface ManufaktureDocument {
   format: 'manufakture';
-  version: 10; // file format version, FORMAT_VERSION
+  version: 11; // file format version, FORMAT_VERSION
   namingScheme: 1; // topological naming scheme version (T0.5), NAMING_SCHEME
   id: string;
   name: string;
@@ -34,6 +34,7 @@ interface ManufaktureDocument {
   print: PrintData; // print setups: what to print, on which printer, oriented how (since version 8)
   fonts: DocumentFont[]; // the fonts texts use, bundled or added by the user (since version 9)
   configurations?: Configurations; // the configuration table; absent: none (since version 5)
+  domains?: Record<string, DomainData>; // domain settings by namespace; absent: none (since version 11)
   nextIds: Record<string, number>; // document-level counters: `part` (since version 4), `cp`, `cfg`, `assembly`, `font`
 }
 
@@ -69,7 +70,11 @@ on.
   instance prefix: copies of bodies (`body: true`), and copies of features that make bodies (a
   `new` extrude, revolve or import, or an `add` whose copy touches nothing). A copy is
   `pattern#2:i3` or `mirror#1:image`, followed by `/<source id>` when the pattern copies several
-  bodies or features (`pattern#2:i3/extrude#1`). A derived body is
+  bodies or features (`pattern#2:i3/extrude#1`). An extension feature with operation `new` or
+  `add` makes bodies under its own id, alone (`extension#3`) or with a key its domain chooses
+  (`extension#3:layer/sheathing`) when it makes several (since version 11; ADR 0013 decision 6).
+  A pattern or mirror of features does not copy a body-making extension: it makes no copies of
+  it, so `pattern#2:i3/extension#3` is not a body id. A derived body is
   `derived#1:from/<source body id>`, the source body id being the body's id in the source
   document (`derived#1:from/pattern#2:i3/extrude#1`). Feature ids are never reused, so body ids
   are not either, and they need no counter. `bodyCreator(bodyId)` gives the creating feature: the
@@ -86,7 +91,9 @@ on.
   body pattern copies. Absent means every body at that point, which is what a version 3 part (one
   compound) did, so old documents regenerate unchanged. A scope is at least one body; a `new` or
   `reference` operation and a pattern of features have none (the schema refuses it). A derived
-  feature takes a scope like an import (since version 6). Fillet, chamfer and shell take no
+  feature takes a scope like an import (since version 6). An extension takes one too (since
+  version 11): every body it combines with or changes, with or without an `operation` of its own
+  (a joint cuts the boards it names and has none), refused only with `new`. Fillet, chamfer and shell take no
   scope: they act on the bodies that own their references.
 - **Body pattern mode.** A pattern or mirror with `body: true` may say how its copies join the
   part (since version 6): `mode: 'add'` fuses each copy with the bodies it touches, `mode: 'new'`
@@ -100,8 +107,11 @@ on.
 Validation checks body ids as far as it can without regen. A `BodyProps.id` or a `scope` entry
 must name a body a feature of the part can create: its creating feature exists and is an extrude,
 revolve or import with operation `new` or `add` (named exactly its id), a pattern or mirror of
-bodies or of body-making features (named with a suffix), or a derived feature with operation
-`new` or `add` (named `<id>:from/<source body id>`, and when it lists `bodies`, one of them). A scope entry's creator must come before the feature; it becomes one
+bodies or of body-making features (named with a suffix), a derived feature with operation
+`new` or `add` (named `<id>:from/<source body id>`, and when it lists `bodies`, one of them), or
+an extension with operation `new` or `add` (named its id, or `<id>:<key>` with any key; which keys
+exist is its domain's business). An extension with `cut`, `intersect` or no operation makes no
+body. A scope entry's creator must come before the feature; it becomes one
 of `featureDependencies`, so reorder and delete respect it. Duplicate ids in `bodies` or in one
 scope are refused. The rest is regen's: whether an `add` really made a body (it may have merged),
 whether an instance suffix exists (`:i3` of a three-copy pattern) and whether a source body
@@ -406,6 +416,55 @@ font an outline still uses (`fontUsers(doc, id)` lists them as `<part>/<sketch>/
 font never disappears from under a text. `findFont(doc, id)` finds one. Fonts change no geometry
 by themselves, so `diffDocuments` reports `fontsChanged` apart from the parts.
 
+### Domain data
+
+A document may carry settings that belong to a domain but are not features (since version 11;
+[ADR 0013](../../docs/adr/0013-domain-packages.md) decision 3): woodworking's kerf and trims under
+`wood`, the document's stock overrides under `stock`.
+
+```ts
+interface DomainData {
+  schemaVersion: number; // the domain's own version of `data`, from 1
+  data: JsonValue; // validated and migrated by the domain package, never by core
+}
+```
+
+`domains` is keyed by namespace, the first segment of an extension type (`wood` of `wood.board`):
+`DOMAIN_NAMESPACE_PATTERN`, `^[a-z][a-z0-9-]*$`, at most `MAX_DOMAIN_NAMESPACE_LENGTH` (64)
+characters, at most `MAX_DOMAINS` (1000) entries, never an empty record (no domain data means no
+`domains` key). `data` is any JSON nested at most `MAX_DOMAIN_DATA_DEPTH` (32) levels of arrays and
+objects; deeper data is a `schema` error, checked without recursion. Core checks only this envelope: an entry of a
+namespace no domain claims, or with a `schemaVersion` newer than its domain knows, loads and is
+kept as it is; the domain reports what it cannot read. Domain data holds settings, not model: no
+face names, feature or body ids, or variable uses, so no core command ever looks inside `data`
+(the domain's validator enforces this). There is no `expressions` record on an entry. Absent
+`domains` means no domain data.
+
+Rules for domain packages reading and writing `domains`:
+
+- Look a namespace up with `Object.hasOwn(doc.domains ?? {}, ns)`, never `ns in doc.domains` or a
+  bare `doc.domains[ns]` truthiness test, so an inherited name such as `constructor` is never
+  mistaken for an entry.
+- `data` must not contain an object shaped like a stored source, which the app's file store treats
+  as a reference to a stored file and rewrites on save: an object with a `source` object and
+  `kind` `import` or `derived` and a string `id`; an object whose `id` is a font id (`font#n`)
+  and whose `source` has `kind: 'file'`; or any object whose `source` has string `documentId`,
+  `versionId` and `partId`. Settings never need these shapes; avoid the key `source` with an
+  object value altogether.
+
+`setDomainData { namespace, schemaVersion, data }` replaces a namespace's entry whole; without
+`schemaVersion` and `data` it removes the entry, and removing the last one drops `domains`. Adding
+a new namespace to a document that already holds `MAX_DOMAINS` entries is refused (`schema`);
+replacing or removing an entry at the cap works. Its
+inverse sets the old entry back (or removes it), so every change is one undo step. `null` is data
+like any other, not a removal. `diffDocuments` reports the namespaces whose entry changed in
+`domainChanged`, apart from the parts and with no `firstAffectedIndex`: core cannot tell which
+features a domain setting affects. There is no per-domain hook: regen marks dirty every extension
+of a domain that may read the namespace (for `stock`, every `wood.*` extension), and the cache
+sorts out which really changed (ADR 0013 decision 5). `serialize`
+writes namespaces and the keys of every object in `data` sorted, so equal documents save as the
+same text.
+
 ### Materials
 
 `MATERIALS` (`src/materials.ts`) is the built-in table: PLA, PETG, ABS, pine, oak, plywood, MDF,
@@ -546,7 +605,7 @@ union is discriminated by `kind`.
 | `hole`      | `sketch` and its `points`, `diameter`, `extent` (blind depth or through all), `head` (simple, counterbore, countersink), optional `standard` (`size`, `fit`)                                                                                                           |
 | `pattern`   | `features` to repeat, or `body: true` (and no features) for the bodies with an optional `mode` (`new`, `add`), `layout` (linear: direction, count, spacing; circular: axis, count, angle; `flip`)                                                                      |
 | `mirror`    | `features`, or `body: true` with an optional `mode`, `plane` (a planar face reference)                                                                                                                                                                                 |
-| `extension` | a later domain feature: `extension` type (`print.brim`), `schemaVersion`, `dependsOn`, `references`, `expressions`, opaque JSON `params`                                                                                                                               |
+| `extension` | a domain feature: `extension` type (`wood.board`), `schemaVersion`, `dependsOn`, `references`, `expressions`, opaque JSON `params`, optional `operation` (`new`, `add`, `cut`, `intersect`) and `scope` (since version 11)                                             |
 | `import`    | `source` (the imported file: `format` `step` or `stl`, `fileName`, `size`, `sha256`, base64 `data`), `operation` (`reference`, `new`, `add`, `cut`, `intersect`)                                                                                                       |
 | `derived`   | `source` (the pinned version: `documentId`, `documentName`, `versionId`, `versionName`, `partId`, optional `configuration`, `size`, `sha256`, text `data`), optional `bodies`, `placement` (`translation`, `rotation`), `operation` (`new`, `add`, `cut`, `intersect`) |
 | `thread`    | `face` (a cylinder), optional `start` (a circular edge of it), `length` (an expression or `'full'`), `standard` (`system` `iso-metric` or `unc`, `size`), `hand` (`right`, `left`), `clearance` (diametral), `representation` (`modelled`, `cosmetic`)                 |
@@ -556,7 +615,7 @@ regions (absent: every closed region). Extrude extents are `blind`, `symmetric` 
 centred), `throughAll` and `upToFace`.
 
 Extrude, revolve, import, hole, derived, and pattern and mirror with `body: true`, also take an
-optional `scope` (since version 4; see Bodies). A thread acts on the body owning its face and
+optional `scope` (since version 4; see Bodies), and so does an extension (since version 11). A thread acts on the body owning its face and
 takes none.
 
 The kernel implements these as `applyFeature` inputs (`packages/kernel`, Part features). Unequal
@@ -574,9 +633,12 @@ The schema does not check the range: the kernel does at regen, for a count writt
 number and one computed by an expression alike, so a stored count out of range (say `1001`) still
 loads and fails only that pattern at regen, where the user can fix it.
 
-`extension` is the extension point: core validates its dependencies, references and
-expressions like any other feature's, and leaves `params` to the domain package that owns the
-type.
+`extension` is the extension point for domain packages ([ADR 0013](../../docs/adr/0013-domain-packages.md)):
+core validates its dependencies, references, expressions, `operation` and `scope` like any other
+feature's, and leaves `params` to the domain package that owns the type. `operation` says how the
+extension's solid combines with the part, as for an extrude; with `new` or `add` the extension
+creates bodies (see Bodies). Without an `operation` it makes no solid of its own to combine, but
+it may still change the bodies in its `scope`.
 
 ### Threads
 
@@ -827,6 +889,7 @@ resulting document with `checkDocument`, and returns `{ document, inverse }` or 
 | `setMaterial`            | `partId`, `material` (a material id, `null` clears)           | `setMaterial` (the old one or null)                                    |
 | `setBodyProps`           | `partId`, `bodyId`, `props`, `index?` (for a new one)         | `setBodyProps` (the old props)                                         |
 | `renameDocument`         | `name` (trimmed, 1 to 200 characters)                         | `renameDocument` (the old name)                                        |
+| `setDomainData`          | `namespace`, `schemaVersion` and `data` (both absent: remove) | `setDomainData` (the old entry, or a removal)                          |
 | `setConfigParameter`     | `parameter` (by id: new or replaced), `index?`                | `setConfigParameter` or `deleteConfigParameter`                        |
 | `deleteConfigParameter`  | `parameterId` (its row values go too)                         | `restoreConfigParameter`, plus `setConfigRow` per row that had a value |
 | `restoreConfigParameter` | `parameter`, `index` (history only)                           | `deleteConfigParameter`                                                |
@@ -1005,6 +1068,11 @@ added, removed and changed setup ids and `print.reordered` whether their order c
 edit adds nothing to `parts`, so it has no `firstAffectedIndex`; the print workspace re-checks the
 setups listed, and re-checks every setup when `parts` reports a part it prints.
 
+`domainChanged` lists, sorted, the namespaces whose `domains` entry was added, removed or changed
+(since version 11). It adds nothing to `parts` and has no `firstAffectedIndex`. There is no
+per-domain hook: regen marks dirty every extension of a domain that may read the namespace, and the
+cache sorts out the rest (ADR 0013 decision 5).
+
 ## File format
 
 `serialize(doc)` writes canonical JSON: keys in schema order (records such as `nextIds` and a row's
@@ -1040,7 +1108,8 @@ solids in one compound (`v3-two-bodies.json`) regenerates the same solids, now a
 `v1-bracket.json`, that to exactly `v2-bracket.json`, that to exactly `v3-bracket.json` and that
 to exactly `v4-bracket.json` and that to exactly `v5-bracket.json` and that to exactly
 `v6-bracket.json` and that to exactly `v7-bracket.json` and that to exactly `v8-bracket.json`
-and that to exactly `v9-bracket.json` and that to exactly `v10-bracket.json`, and
+and that to exactly `v9-bracket.json` and that to exactly `v10-bracket.json` and that to exactly
+`v11-bracket.json`, and
 `v3-two-bodies.json` to
 exactly `v4-two-bodies.json`. Version 5 added the optional configuration table; `migrateV4ToV5`
 only bumps the version, since a version 4 document has none and an absent counter starts at 1.
@@ -1059,7 +1128,11 @@ after `print` (where a saved file has it) and changes nothing else, since a vers
 no text and the `font` counter starts at 1; `v8-bracket.json` migrates to exactly
 `v9-bracket.json`. Version 10 added the `thread` feature kind (ADR 0012 decision 9);
 `migrateV9ToV10` only bumps the version, since a version 9 part has no threads;
-`v9-bracket.json` migrates to exactly `v10-bracket.json`.
+`v9-bracket.json` migrates to exactly `v10-bracket.json`. Version 11 let extension features make
+and change bodies (optional `operation` and `scope`, and `<id>:<key>` body ids) and added the
+optional `domains` (ADR 0013 decisions 3 and 6); `migrateV10ToV11` only bumps the version, since
+both are optional and a version 10 file has neither; `v10-bracket.json` migrates to exactly
+`v11-bracket.json`.
 
 To change the file shape:
 
