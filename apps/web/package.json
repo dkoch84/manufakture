@@ -13,6 +13,7 @@
     "e2e:install": "playwright install --with-deps chromium"
   },
   "dependencies": {
+    "@manufakture/cam": "workspace:*",
     "@manufakture/core": "workspace:*",
     "@manufakture/domain-wood": "workspace:*",
     "@manufakture/drawing": "workspace:*",
