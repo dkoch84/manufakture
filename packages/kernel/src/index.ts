@@ -22,6 +22,7 @@ export type {
 } from './kernel';
 export {
   MAX_PATTERN_COUNT,
+  TOOL_OVERLAP,
   applyFeature,
   connectorFrame,
   connectorTarget,
@@ -73,6 +74,9 @@ export type {
   ThreadReport,
   ThreadRepresentation,
   ToolInput,
+  ToolItem,
+  ToolPrimitive,
+  ToolsInput,
   VertexRef,
 } from './features';
 export {
@@ -93,6 +97,7 @@ export {
   splitParent,
   sweepRegionOrder,
   threadFace,
+  toolFace,
 } from './naming';
 export type {
   EdgeName,

@@ -17,6 +17,8 @@
 //   chamfer#4:bevel:r1, chamfer#4:corner:... the same for chamfers
 //   shell#5:offset:X                         the wall face a shell grew from face X
 //   hole#6:wall:p1                           a hole's faces, by part and sketch point
+//   extension#7:t2:xmax, extension#7:t1:wall a `tools` feature's faces, by tool id and the
+//                                            primitive's own face role
 //   pattern#7:i2/X, mirror#8:image/X         face X of pattern instance 2, of a mirror image
 //   import#9:face:4                          face 4 of an imported file, by its position in
 //                                            the file (no history: always fragile)
@@ -240,6 +242,16 @@ export function threadFace(feature: string, part: string, turn: number | null = 
   if (turn === null) return { name: whole, lineage: [whole], fragile: false };
   const name = `${whole}:${turn}`;
   return { name, lineage: [name, whole], fragile: false };
+}
+
+/**
+ * A face of tool `item` of a `tools` feature: `<feature>:<item>:<role>`, the role the face plays
+ * in the primitive (`xmin` .. `zmax` of a box; `start`, `wall`, `end`, `step`, `shoulder`, `tip`
+ * of a cylinder). Fixed by construction, so never fragile.
+ */
+export function toolFace(feature: string, item: string, role: string): FaceName {
+  const name = `${feature}:${item}:${role}`;
+  return { name, lineage: [name], fragile: false };
 }
 
 export interface SweepFaces {

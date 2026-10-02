@@ -4,12 +4,19 @@
 
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { KernelError } from './errors';
-import { applyFeature, type DeriveInput, type FeatureBody, type FeatureInput } from './features';
+import {
+  applyFeature,
+  type DeriveInput,
+  type FeatureBody,
+  type FeatureInput,
+  type ToolItem,
+  type ToolPrimitive,
+} from './features';
 import { Kernel } from './kernel';
 import { createNodeInstance } from './node';
 import { threadSolid, type ThreadGeometry } from './threads';
 import { track, type Tracker } from './track';
-import type { Frame, ProfileLoop, ShapeId } from './types';
+import type { Frame, ProfileLoop, ShapeId, Vec3 } from './types';
 
 let tracker: Tracker;
 let k: Kernel;
@@ -75,6 +82,103 @@ function threadedBlock(kernel: Kernel = k): ShapeId[] {
   expect(out.errors).toEqual([]);
   kernel.release(made.bodies[0]!.shape);
   return out.bodies.map((b) => b.shape);
+}
+
+/** A 100 x 100 x 19 board at height `z`, made by extrusion `id`. */
+function boardsInput(id: string, z: number): FeatureInput {
+  return {
+    kind: 'extrude',
+    id,
+    profile: {
+      frame: { ...XY, origin: [0, 0, z] },
+      loops: [
+        {
+          entities: [
+            { kind: 'line', id: 'e1', start: [0, 0], end: [100, 0] },
+            { kind: 'line', id: 'e2', start: [100, 0], end: [100, 100] },
+            { kind: 'line', id: 'e3', start: [100, 100], end: [0, 100] },
+            { kind: 'line', id: 'e4', start: [0, 100], end: [0, 0] },
+          ],
+        },
+      ],
+    },
+    extent: { type: 'blind', distance: 19 },
+    mode: 'new',
+  };
+}
+
+function boxPrimitive(min: Vec3, max: Vec3): ToolPrimitive {
+  return {
+    type: 'box',
+    frame: { origin: min, xDir: [1, 0, 0], normal: [0, 0, 1] },
+    size: [max[0] - min[0], max[1] - min[1], max[2] - min[2]],
+  };
+}
+
+/**
+ * Every kind of tool on two stacked boards: a flush dado (overlap rule), a dowel through both,
+ * a stepped and tipped cylinder, an added block, and an item that misses (a per-item error).
+ */
+const TOOLS: FeatureInput = {
+  kind: 'tools',
+  id: 'extension#3',
+  items: [
+    {
+      id: 'd1',
+      body: 'extrude#1',
+      mode: 'subtract',
+      primitive: boxPrimitive([10, 0, 13], [29, 100, 19]),
+    },
+    ...['extrude#1', 'extrude#2'].map((body, i): ToolItem => ({
+      id: `w${i + 1}`,
+      body,
+      mode: 'subtract',
+      primitive: {
+        type: 'cylinder',
+        axis: { origin: [60, 60, 0], direction: [0, 0, 1] },
+        radius: 4,
+        length: 38,
+      },
+    })),
+    {
+      id: 'c1',
+      body: 'extrude#2',
+      mode: 'subtract',
+      primitive: {
+        type: 'cylinder',
+        axis: { origin: [80, 20, 38], direction: [0, 0, -1] },
+        radius: 2,
+        length: 12,
+        step: { radius: 4, length: 4 },
+        tip: { angle: (118 * Math.PI) / 180 },
+      },
+    },
+    {
+      id: 'a1',
+      body: 'extrude#2',
+      mode: 'add',
+      primitive: boxPrimitive([40, 40, 38], [50, 50, 45]),
+    },
+    {
+      id: 'm1',
+      body: 'extrude#2',
+      mode: 'subtract',
+      primitive: boxPrimitive([200, 0, 0], [210, 10, 10]),
+    },
+  ],
+};
+
+/** Two boards joined by every kind of tool: returns the shapes left alive (the two boards). */
+function jointedBoards(kernel: Kernel = k): ShapeId[] {
+  let set: FeatureBody[] = [];
+  for (const f of [boardsInput('extrude#1', 0), boardsInput('extrude#2', 19), TOOLS]) {
+    const out = applyFeature(kernel, set, f);
+    expect(out.errors.map((e) => e.ref)).toEqual(f.kind === 'tools' ? ['m1'] : []);
+    const live = new Set(out.bodies.map((b) => b.shape));
+    for (const b of set) if (!live.has(b.shape)) kernel.release(b.shape);
+    set = out.bodies.map((b) => ({ id: b.id, shape: b.shape }));
+  }
+  return set.map((b) => b.shape);
 }
 
 /**
@@ -720,6 +824,39 @@ describe('embind objects', () => {
     expect(k.shapeCount).toBe(0);
   });
 
+  it('tools leave only the bodies: boxes, stepped and tipped cylinders, adds, misses, failures', () => {
+    const run = chain([
+      boardsInput('extrude#1', 0),
+      boardsInput('extrude#2', 19),
+      TOOLS,
+      // Fails as a whole (a cut that leaves nothing): nothing changes and nothing leaks.
+      {
+        kind: 'tools',
+        id: 'extension#4',
+        items: [
+          {
+            id: 'x1',
+            body: 'extrude#1',
+            mode: 'subtract',
+            primitive: boxPrimitive([-1, -1, -1], [101, 101, 20]),
+          },
+        ],
+      },
+      // Malformed: refused before any OCCT call.
+      { kind: 'tools', id: 'extension#5', items: [] },
+    ]);
+    expect(run.errors).toEqual([
+      'extension#3: invalid',
+      'extension#4: empty',
+      'extension#5: invalid',
+    ]);
+    expect(run.set.map((b) => b.id)).toEqual(['extrude#1', 'extrude#2']);
+    expect(k.shapeCount).toBe(2);
+    expect(tracker.liveNames().every((n) => n.startsWith('TopoDS_'))).toBe(true);
+    for (const b of run.set) expect(k.release(b.shape)).toBe(true);
+    expect(tracker.liveNames()).toEqual([]);
+  });
+
   it('releaseSince frees a whole regen', () => {
     const mark = k.checkpoint();
     regen();
@@ -755,6 +892,21 @@ describe('heap', () => {
     };
     const perThread = ((await inUseAfter(12)) - (await inUseAfter(2))) / 10;
     expect(perThread).toBeLessThan(1.5 * 2 ** 20);
+  }, 120_000);
+
+  it('repeated tools features with release leak a bounded amount of heap', async () => {
+    // As for threads: the heap in use after 2 and after 12 pairs of jointed boards, each on a
+    // fresh instance. The booleans' and makers' empty destructors (ADR 0002) keep part of each
+    // run; instance recycling bounds it.
+    const inUseAfter = async (n: number) => {
+      const fresh = new Kernel(await createNodeInstance());
+      for (let i = 0; i < n; i++) for (const id of jointedBoards(fresh)) fresh.release(id);
+      expect(fresh.shapeCount).toBe(0);
+      return heapInUse(fresh);
+    };
+    const perRun = ((await inUseAfter(12)) - (await inUseAfter(2))) / 10;
+    console.log(`tools: ${(perRun / 2 ** 10).toFixed(0)} KiB per run`);
+    expect(perRun).toBeLessThan(2 ** 20);
   }, 120_000);
 
   it('repeated oriented boxes leak only the small values libcascade cannot free', async () => {

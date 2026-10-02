@@ -53,6 +53,7 @@ import {
   resolve,
   sweepRegionOrder,
   threadFace as threadFaceName,
+  toolFace,
   vertexName,
   type EdgeRef,
   type FaceName,
@@ -426,7 +427,71 @@ export interface ThreadReport {
   end: ThreadEnd;
 }
 
+/**
+ * A placed solid a `tools` feature cuts from or adds to a body (M4 plan, decision 5), in model
+ * space, with every face named by its role in the primitive:
+ *
+ * - `box`: the block from `frame.origin` along the frame's x, y (`normal x xDir`) and normal by
+ *   `size[0]`, `size[1]`, `size[2]` (a corner at the origin, not centred). `xDir` need not be
+ *   perpendicular to the normal: its component along it is dropped. Roles `xmin`, `xmax`,
+ *   `ymin`, `ymax`, `zmin`, `zmax`: the faces at the low and high end of each frame axis.
+ * - `cylinder`: from `axis.origin` along `axis.direction` for `length`, of `radius`. Roles
+ *   `start` (the flat face at the origin), `wall`, `end` (the flat far face). `step`: a wider
+ *   first part (a counterbore, a pocket screw's body) of `step.radius` for `step.length` from
+ *   the start, adding the roles `step` (its wall) and `shoulder` (the ring where it meets the
+ *   narrower wall). `tip`: a drill point of included `tip.angle` (radians) past `length`, in
+ *   place of `end`, role `tip`.
+ */
+export type ToolPrimitive =
+  | { type: 'box'; frame: Frame; size: Vec3 }
+  | {
+      type: 'cylinder';
+      axis: Axis;
+      radius: number;
+      length: number;
+      step?: { radius: number; length: number };
+      tip?: { angle: number };
+    };
+
+/** One named primitive of a `tools` feature, cut from or added to one body. */
+export interface ToolItem {
+  /** Unique in the feature; names the faces it makes (`<feature>:<id>:<role>`). */
+  id: string;
+  /** The body it acts on. */
+  body: string;
+  mode: 'subtract' | 'add';
+  primitive: ToolPrimitive;
+}
+
+/**
+ * Named primitives cut from or added to chosen bodies (M4 plan T4.2a): what joints (and M6's
+ * openings) translate to, so they need no kernel feature of their own. Each body gets its items
+ * in item order, consecutive items of one mode fused first and combined in one boolean, so a
+ * body sees one boolean per run of items (one, when they share a mode). A face a tool makes is
+ * named `<id>:<item id>:<role>` (`ToolPrimitive` lists the roles); the body's own faces keep
+ * their names through the history, as for an extrusion.
+ *
+ * A subtracting tool face in the plane of a body face that faces the same way (a dado flush
+ * with the board's top, a through dado's ends at the board's edges) is moved out by
+ * `TOOL_OVERLAP` when the body has no material just beyond it, so OCCT never meets coplanar
+ * faces there; the cut is the same. A face in the plane of a body face it does not meet (a hole
+ * ending at the height of a rabbet's floor) stays put.
+ *
+ * An item whose body is not there (`lost`) or that does not touch its body (`invalid`) is
+ * reported on its own, with `ref` the item id: the other items still apply, and the outcome
+ * carries those errors with the bodies the others changed.
+ */
+export interface ToolsInput {
+  kind: 'tools';
+  id: string;
+  items: readonly ToolItem[];
+}
+
+/** How far a subtracting tool is moved past a body face it is flush with, mm. */
+export const TOOL_OVERLAP = 0.01;
+
 export type FeatureInput =
+  | ToolsInput
   | ExtrudeInput
   | RevolveInput
   | FilletInput
@@ -526,7 +591,9 @@ export interface FeatureOutcome {
   /**
    * The part's bodies after the feature, in creator order: a new body comes
    * last, a merged body keeps the place of the first body merged into it.
-   * The input bodies, unchanged, when the feature failed.
+   * The input bodies, unchanged, when the feature failed; except for a
+   * `tools` feature whose errors are all per item, which keeps what its other
+   * items did.
    */
   bodies: OutcomeBody[];
   /** Ids of the bodies this feature made. */
@@ -598,6 +665,8 @@ interface Ctx {
   solids: Map<ShapeId, number>;
   /** Set by a thread on a face. */
   thread?: ThreadReport;
+  /** Errors of single items (a `tools` feature): the feature still applies the rest. */
+  partial: FeatureError[];
 }
 
 const TWO_PI = 2 * Math.PI;
@@ -622,6 +691,7 @@ export function applyFeature(
     warnings: [],
     boxes: new Map(),
     solids: new Map(),
+    partial: [],
   };
   const given = Array.isArray(bodies) ? bodies : [];
   const pass = (errors: FeatureError[]): FeatureOutcome => ({
@@ -700,12 +770,12 @@ export function applyFeature(
     return {
       featureId,
       kind,
-      ok: true,
+      ok: ctx.partial.length === 0,
       bodies: out,
       created: after.filter((s) => s.created).map((s) => s.body.id),
       changed: after.filter((s) => !s.created && s.made !== null).map((s) => s.body.id),
       consumed: given.filter((b) => !ids.has(b.id)).map((b) => b.id),
-      errors: [],
+      errors: ctx.partial,
       warnings: ctx.warnings,
       resolved: ctx.resolved,
       ...(ctx.thread ? { thread: ctx.thread } : {}),
@@ -790,6 +860,8 @@ function run(ctx: Ctx, slots: readonly Slot[], input: FeatureInput): Slot[] | nu
     }
     case 'thread':
       return 'face' in input ? threadOnFace(ctx, slots, input) : thread(ctx, slots, input);
+    case 'tools':
+      return tools(ctx, slots, input);
   }
 }
 
@@ -2169,6 +2241,338 @@ function checked(ctx: Ctx, made: Made): Made {
   return made;
 }
 
+// Tools: named primitives per body ---------------------------------------------------------
+
+/** How close a tool face's plane must be to a body face's to count as flush with it, mm. */
+const FLUSH_TOL = 1e-6;
+
+/**
+ * Apply a `tools` feature: per body (in creator order), its items in item order, each run of
+ * one mode as one boolean of the body with the run's tools (fused first where they meet).
+ * Items on a body that is not there, or that do not touch their body, become per-item errors.
+ */
+function tools(ctx: Ctx, slots: readonly Slot[], input: ToolsInput): Slot[] {
+  const out = [...slots];
+  const byBody = new Map<string, ToolItem[]>();
+  for (const item of input.items) {
+    if (!slots.some((s) => s.body.id === item.body)) {
+      ctx.partial.push({
+        featureId: ctx.id,
+        code: 'lost',
+        message: `tool ${item.id} acts on ${item.body}, which is not a body at this point`,
+        ref: item.id,
+        target: item.body,
+        missing: [item.body],
+      });
+      continue;
+    }
+    byBody.set(item.body, [...(byBody.get(item.body) ?? []), item]);
+  }
+  for (const [i, slot] of slots.entries()) {
+    const items = byBody.get(slot.body.id);
+    if (items === undefined) continue;
+    let current: Made = {
+      shape: slot.body.shape,
+      faces: slot.body.names.faces,
+      topology: slot.body.topology,
+      unnamed: [],
+    };
+    let changed = false;
+    for (const run of runsOf(items)) {
+      const next = toolRun(ctx, slot.body.id, current, run);
+      if (next !== null) {
+        current = next;
+        changed = true;
+      }
+    }
+    if (changed) out[i] = changedSlot(slot, checked(ctx, current));
+  }
+  return out;
+}
+
+/** Items split into runs of consecutive items of one mode, in order. */
+function runsOf(items: readonly ToolItem[]): ToolItem[][] {
+  const runs: ToolItem[][] = [];
+  for (const item of items) {
+    const last = runs.at(-1);
+    if (last !== undefined && last[0]!.mode === item.mode) last.push(item);
+    else runs.push([item]);
+  }
+  return runs;
+}
+
+/**
+ * One run of items of one mode on one body: the body after it, or null when no item of the
+ * run touched the body (each such item is reported, and the body keeps its shape).
+ */
+function toolRun(ctx: Ctx, bodyId: string, body: Made, run: readonly ToolItem[]): Made | null {
+  const { k } = ctx;
+  const mode = run[0]!.mode;
+  const box = boxOf(ctx, body.shape);
+  const missed = (item: ToolItem) =>
+    ctx.partial.push({
+      featureId: ctx.id,
+      code: 'invalid',
+      message: `tool ${item.id} does not touch ${bodyId}`,
+      ref: item.id,
+      target: bodyId,
+    });
+  const near: { item: ToolItem; made: Made }[] = [];
+  for (const item of run) {
+    const made = toolShape(ctx, item, mode === 'subtract' ? body : null);
+    if (!overlaps(box, boxOf(ctx, made.shape))) {
+      missed(item);
+      continue;
+    }
+    if (mode === 'add') {
+      // An added tool touches the body when the fuse has fewer solids than the two had.
+      const fused = temp(ctx, k.boolean('fuse', body.shape, [made.shape], { history: false }));
+      if (k.solids(fused.shape) >= solidsOf(ctx, body.shape) + solidsOf(ctx, made.shape)) {
+        missed(item);
+        continue;
+      }
+    }
+    near.push({ item, made });
+  }
+  if (near.length === 0) return null;
+  const tool = gatherTools(
+    ctx,
+    groupTools(
+      ctx,
+      near.map((n) => n.made),
+    ),
+  );
+  const made = booleanOf(ctx, mode === 'subtract' ? 'cut' : 'fuse', body, [tool]);
+  if (made.topology.faces.length === 0) fail(ctx, 'empty', `${ctx.id} leaves nothing of ${bodyId}`);
+  if (mode === 'add') return made;
+  // A cut that reached the body left a face of the tool in it: one made by tools alone, since
+  // a tool that only touches the body merges its face with the body's there. A tool that took a
+  // whole solid of the body away leaves no face, but changes the body's face count (as in
+  // `cutTools`); then an item with no face left is a hit when it shares material with the body.
+  const own = new Set(body.faces.flatMap((f) => f.lineage));
+  const lineage = new Set(
+    made.faces.filter((f) => !f.lineage.some((n) => own.has(n))).flatMap((f) => f.lineage),
+  );
+  const recount = made.topology.faces.length !== body.topology.faces.length;
+  const reaches = (tool: Made) =>
+    k.solids(temp(ctx, k.boolean('common', body.shape, [tool.shape], { history: false })).shape) >
+    0;
+  let hit = false;
+  for (const { item, made: tool } of near) {
+    const prefix = `${ctx.id}:${item.id}:`;
+    if ([...lineage].some((name) => name.startsWith(prefix)) || (recount && reaches(tool))) {
+      hit = true;
+    } else {
+      missed(item);
+    }
+  }
+  return hit ? made : null;
+}
+
+/**
+ * The primitive of an item as a named solid. `flushWith`: the body a subtracting tool cuts; a
+ * flat face of the tool flush with one of its planar faces is moved out past it when the body
+ * has no material there (`flushOut`).
+ */
+function toolShape(ctx: Ctx, item: ToolItem, flushWith: Made | null): Made {
+  const p = item.primitive;
+  return p.type === 'box'
+    ? boxShape(ctx, item, p, flushWith)
+    : cylinderShape(ctx, item, p, flushWith);
+}
+
+/** Whether a body has a planar face in the plane through `point` facing along `normal`. */
+function flushFace(topology: Topology, point: Vec3, normal: Vec3): boolean {
+  return topology.faces.some(
+    (f) =>
+      f.surface === 'plane' &&
+      f.normal !== null &&
+      dot(f.normal, normal) > 1 - 1e-9 &&
+      Math.abs(dot(sub(f.centroid, point), normal)) <= FLUSH_TOL,
+  );
+}
+
+/**
+ * Whether a subtracting tool's flat face, in the plane through `point` facing along `normal`,
+ * moves out by `TOOL_OVERLAP`: when it is flush with a planar body face facing the same way, and
+ * the body has no material in `slab`, the solid the face would sweep moving out. A face in the
+ * plane of a body face it does not meet (a hole ending at the height of a rabbet's floor, with
+ * material above it) stays where it is, so the cut is the tool's exactly. `slab` is made only
+ * when the face is flush, as a temporary shape.
+ */
+function flushOut(ctx: Ctx, body: Made | null, point: Vec3, normal: Vec3, slab: () => ShapeId) {
+  if (body === null || !flushFace(body.topology, point, normal)) return false;
+  const piece = slab();
+  if (!overlaps(boxOf(ctx, body.shape), boxOf(ctx, piece))) return true;
+  const common = temp(ctx, ctx.k.boolean('common', body.shape, [piece], { history: false }));
+  return ctx.k.solids(common.shape) === 0;
+}
+
+/** Name the faces of a sweep whose profile entities carry the primitive's roles. */
+function namedSweep(ctx: Ctx, item: ToolItem, shape: ShapeId, roles: Record<string, number>): Made {
+  const topology = ctx.k.topology(shape);
+  const faces: (FaceName | undefined)[] = new Array(topology.faces.length);
+  for (const [role, index] of Object.entries(roles)) {
+    if (index > 0) faces[index - 1] = toolFace(ctx.id, item.id, role);
+  }
+  const unnamed: number[] = [];
+  return {
+    shape,
+    topology,
+    faces: faces.map((f, i) => {
+      if (f) return f;
+      unnamed.push(i + 1);
+      return toolFace(ctx.id, item.id, `?face${i + 1}`);
+    }),
+    unnamed,
+  };
+}
+
+function boxShape(
+  ctx: Ctx,
+  item: ToolItem,
+  p: Extract<ToolPrimitive, { type: 'box' }>,
+  flushWith: Made | null,
+): Made {
+  const { k } = ctx;
+  const bad = (message: string) =>
+    fail(ctx, 'invalid', `tool ${item.id}: ${message}`, { ref: item.id });
+  if (!(norm(p.frame.normal) > 1e-12)) bad('the frame normal is a zero vector');
+  const n = unit(p.frame.normal);
+  const along = sub(p.frame.xDir, scale(n, dot(p.frame.xDir, n)));
+  if (!(norm(along) > 1e-9)) bad('the frame x direction is parallel to its normal');
+  const x = unit(along);
+  const y = cross(n, x);
+  if (!p.size.every((v) => v > 0)) bad('every size of a box must be positive');
+  const size = p.size;
+  // A box in the tool's frame from `at`, its sizes along x, y and the normal: the tool itself,
+  // or the slab a face of it sweeps moving out.
+  const cuboid = (at: Vec3, [ax, ay, az]: Vec3) => {
+    const entities = [
+      { kind: 'line' as const, id: 'ymin', start: [0, 0] as Vec2, end: [ax, 0] as Vec2 },
+      { kind: 'line' as const, id: 'xmax', start: [ax, 0] as Vec2, end: [ax, ay] as Vec2 },
+      { kind: 'line' as const, id: 'ymax', start: [ax, ay] as Vec2, end: [0, ay] as Vec2 },
+      { kind: 'line' as const, id: 'xmin', start: [0, ay] as Vec2, end: [0, 0] as Vec2 },
+    ];
+    const profile = temp(ctx, {
+      shape: k.profile({ origin: at, xDir: x, normal: n }, [{ entities }]),
+    });
+    return temp(ctx, k.extrude(profile.shape, az, { history: false }));
+  };
+  // Move each face flush with a body face, and clear of its material, out by the overlap. The
+  // faces are judged on the box as given, then all moved.
+  const axes: Vec3[] = [x, y, n];
+  const o0 = p.frame.origin;
+  const thin = (i: number): Vec3 => [
+    i === 0 ? TOOL_OVERLAP : size[0],
+    i === 1 ? TOOL_OVERLAP : size[1],
+    i === 2 ? TOOL_OVERLAP : size[2],
+  ];
+  const grow = axes.map((dir, i) => {
+    const lo = flushOut(
+      ctx,
+      flushWith,
+      o0,
+      scale(dir, -1),
+      () => cuboid(sub(o0, scale(dir, TOOL_OVERLAP)), thin(i)).shape,
+    );
+    const far = add(o0, scale(dir, size[i]!));
+    const hi = flushOut(ctx, flushWith, far, dir, () => cuboid(far, thin(i)).shape);
+    return [lo ? TOOL_OVERLAP : 0, hi ? TOOL_OVERLAP : 0] as const;
+  });
+  let o = o0;
+  axes.forEach((dir, i) => (o = sub(o, scale(dir, grow[i]![0]))));
+  const grown = (i: number) => size[i]! + grow[i]![0] + grow[i]![1];
+  const made = cuboid(o, [grown(0), grown(1), grown(2)]);
+  return namedSweep(ctx, item, made.shape, {
+    ...made.sideIds,
+    zmin: made.capStart,
+    zmax: made.capEnd,
+  });
+}
+
+function cylinderShape(
+  ctx: Ctx,
+  item: ToolItem,
+  p: Extract<ToolPrimitive, { type: 'cylinder' }>,
+  flushWith: Made | null,
+): Made {
+  const { k } = ctx;
+  const bad = (message: string) =>
+    fail(ctx, 'invalid', `tool ${item.id}: ${message}`, { ref: item.id });
+  if (!(norm(p.axis.direction) > 1e-12)) bad('the axis direction is a zero vector');
+  const d = unit(p.axis.direction);
+  const r = p.radius;
+  if (!(r > 0)) bad('the radius must be positive');
+  if (!(p.length > 0)) bad('the length must be positive');
+  const step = p.step;
+  if (step !== undefined) {
+    if (!(step.radius > r)) bad('the step must be wider than the cylinder');
+    if (!(step.length > 0 && step.length < p.length)) {
+      bad('the step length must be positive and less than the length');
+    }
+  }
+  let tip = 0;
+  if (p.tip !== undefined) {
+    if (!(p.tip.angle > 0 && p.tip.angle < Math.PI)) bad('the tip angle must be between 0 and pi');
+    tip = r / Math.tan(p.tip.angle / 2);
+  }
+  // Flat ends flush with a body face, and clear of its material, move out by the overlap.
+  const start = p.axis.origin;
+  const far = add(start, scale(d, p.length));
+  const disk = (at: Vec3, radius: number) => () =>
+    temp(ctx, { shape: k.cylinder(radius, TOOL_OVERLAP, at, d) }).shape;
+  const startRadius = step === undefined ? r : step.radius;
+  const lo = flushOut(
+    ctx,
+    flushWith,
+    start,
+    scale(d, -1),
+    disk(sub(start, scale(d, TOOL_OVERLAP)), startRadius),
+  )
+    ? TOOL_OVERLAP
+    : 0;
+  const hi = tip === 0 && flushOut(ctx, flushWith, far, d, disk(far, r)) ? TOOL_OVERLAP : 0;
+  const origin = sub(p.axis.origin, scale(d, lo));
+  const length = p.length + lo + hi;
+  // Half section in (u radial, v along d), from the axis at the start; each point starts the
+  // line that sweeps the face of its role.
+  const pts: { at: Vec2; id: string }[] = [{ at: [0, 0], id: 'start' }];
+  if (step !== undefined) {
+    const s = step.length + lo;
+    pts.push({ at: [step.radius, 0], id: 'step' }, { at: [step.radius, s], id: 'shoulder' });
+    pts.push({ at: [r, s], id: 'wall' });
+  } else {
+    pts.push({ at: [r, 0], id: 'wall' });
+  }
+  if (tip > 0) {
+    pts.push({ at: [r, length], id: 'tip' }, { at: [0, length + tip], id: 'axis' });
+  } else {
+    pts.push({ at: [r, length], id: 'end' }, { at: [0, length], id: 'axis' });
+  }
+  const entities = pts.map((q, i) => ({
+    kind: 'line' as const,
+    id: q.id,
+    start: q.at,
+    end: pts[(i + 1) % pts.length]!.at,
+  }));
+  // A radial direction fixed by the axis alone: across the world axis least along it.
+  const ref: Vec3 =
+    Math.abs(d[0]) <= Math.abs(d[1]) && Math.abs(d[0]) <= Math.abs(d[2])
+      ? [1, 0, 0]
+      : Math.abs(d[1]) <= Math.abs(d[2])
+        ? [0, 1, 0]
+        : [0, 0, 1];
+  const x = unit(cross(d, ref));
+  const section: Frame = { origin, xDir: x, normal: cross(x, d) };
+  const profile = temp(ctx, { shape: k.profile(section, [{ entities }]) });
+  const made = temp(
+    ctx,
+    k.revolve(profile.shape, { origin, direction: d }, TWO_PI, { history: false }),
+  );
+  return namedSweep(ctx, item, made.shape, made.sideIds);
+}
+
 // Fillet, chamfer, shell ----------------------------------------------------------------
 
 /**
@@ -3118,6 +3522,28 @@ export function validateFeature(input: unknown): string | null {
         return `kind ${JSON.stringify(v.kind)} cannot be repeated by a pattern or mirror`;
     }
   };
+  const primitive = (v: unknown): string | null => {
+    if (!isObj(v)) return 'primitive must be an object';
+    if (v.type === 'box')
+      return frame(v.frame, 'primitive.frame') ?? vec3(v.size, 'primitive.size');
+    if (v.type !== 'cylinder') return 'primitive.type must be box or cylinder';
+    const e =
+      axis(v.axis, 'primitive.axis') ??
+      num(v.radius, 'primitive.radius') ??
+      num(v.length, 'primitive.length');
+    if (e) return e;
+    if (v.step !== undefined) {
+      if (!isObj(v.step)) return 'primitive.step must be an object';
+      const bad =
+        num(v.step.radius, 'primitive.step.radius') ?? num(v.step.length, 'primitive.step.length');
+      if (bad) return bad;
+    }
+    if (v.tip !== undefined) {
+      if (!isObj(v.tip)) return 'primitive.tip must be an object';
+      return num(v.tip.angle, 'primitive.tip.angle');
+    }
+    return null;
+  };
   const source = (v: unknown): string | null => {
     if (!isObj(v)) return 'source must be an object';
     if (v.type === 'body') {
@@ -3251,6 +3677,24 @@ export function validateFeature(input: unknown): string | null {
         return 'representation must be modelled or cosmetic';
       }
       if (f.label !== undefined && typeof f.label !== 'string') return 'label must be a string';
+      return null;
+    }
+    case 'tools': {
+      if (!Array.isArray(f.items) || f.items.length === 0) return 'items must be a non-empty array';
+      const seen = new Set<string>();
+      for (const [i, item] of (f.items as unknown[]).entries()) {
+        if (!isObj(item)) return `items[${i}] must be an object`;
+        const bad =
+          invalidSketchId(item.id, false) ??
+          bodyId(item.body, 'body') ??
+          (item.mode === 'subtract' || item.mode === 'add'
+            ? null
+            : 'mode must be subtract or add') ??
+          primitive(item.primitive);
+        if (bad) return `items[${i}]: ${bad}`;
+        if (seen.has(item.id as string)) return `tool id '${String(item.id)}' is used twice`;
+        seen.add(item.id as string);
+      }
       return null;
     }
     case 'import':
