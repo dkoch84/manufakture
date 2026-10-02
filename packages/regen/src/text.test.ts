@@ -12,21 +12,31 @@ import {
   type SketchEntity,
 } from '@manufakture/sketch';
 import { INTER_BOLD, bundledFontUrl, layoutText, loadFont } from '@manufakture/text';
+import { MAX_IMPORT_BYTES } from '@manufakture/core';
 import { describe, expect, it } from 'vitest';
 import {
   MAX_TEXT_CURVES,
   MAX_TEXT_LOOPS,
+  MAX_FONT_NAME_LENGTH,
   TextBudget,
   TextCancelled,
   createWatchdogOutliner,
   fontKey,
   lazyTextOutliner,
+  type TextOutliner,
   type TextRequest,
   type WireRequest,
 } from './text';
-import { TextEngine, createTextOutliner, serveText, textTooComplex } from './text-engine';
+import {
+  TextEngine,
+  createTextOutliner,
+  fontSummary,
+  serveText,
+  textTooComplex,
+} from './text-engine';
 import { fromDisk } from './test-helpers';
 import { Watchdog, WatchdogError, type WorkerLike } from './watchdog';
+import { createRegenWorkerApi } from './worker-api';
 
 const interBytes = () => new Uint8Array(readFileSync(fileURLToPath(bundledFontUrl(INTER_BOLD.id))));
 const base64 = (bytes: Uint8Array) => Buffer.from(bytes).toString('base64');
@@ -425,6 +435,34 @@ describe('createWatchdogOutliner', () => {
     );
   });
 
+  it("charges a font for its own requests' run, not for the wait behind another font's", async () => {
+    const log: WireRequest[] = [];
+    const outliner = createWatchdogOutliner(() => fakeTextWorker(log, 'evil.otf'), {
+      timeLimit: 400,
+    });
+    const evil = await userFont(new Uint8Array([1, 2, 3, 4]), 'evil.otf');
+    const honest = await userFont(interBytes(), 'honest.ttf');
+    const honestKey = fontKey(honest as { kind: 'file'; sha256: string });
+    // One budget for both, as a preview pass or a regen has; the honest font's is below the
+    // hostile font's time limit, so the wait alone would take it past.
+    const budget = new TextBudget({ perFont: 300, total: 60_000 });
+    const started = performance.now();
+    // The hostile font's load is queued first and hangs its whole time limit.
+    const [hung, first] = await Promise.all([
+      outliner.outline(request('A', evil), { budget }),
+      outliner.outline(request('A', honest), { budget }),
+    ]);
+    expect(performance.now() - started).toBeGreaterThanOrEqual(390);
+    expect(hung).toMatchObject({ ok: false, code: 'font' });
+    expect(first.ok).toBe(true);
+    expect(
+      budget.spentOn(fontKey(evil as { kind: 'file'; sha256: string })),
+    ).toBeGreaterThanOrEqual(390);
+    expect(budget.spentOn(honestKey)).toBeLessThan(300);
+    // Not failed: its next text in the same budget is laid out.
+    expect((await outliner.outline(request('B', honest), { budget })).ok).toBe(true);
+  });
+
   it('does not remember a bundled font that failed, so a slow fetch costs one regen only', async () => {
     const log: WireRequest[] = [];
     let slow = true;
@@ -618,3 +656,236 @@ function slowBundledEngine(slow: () => boolean): TextEngine {
     fetchImpl: (url) => (slow() ? new Promise<Response>(() => undefined) : fromDisk(url)),
   });
 }
+
+// Reading a user font for Add font (T3.2d): its names and permissions, in the text worker under
+// the watchdog, never in the regen worker or on the main thread.
+describe('reading a user font', () => {
+  it('summarises the names and embedding permissions, and keeps the font loaded', async () => {
+    const engine = new TextEngine();
+    const bytes = interBytes();
+    const sha = await sha256(bytes);
+    const reply = await engine.info({
+      kind: 'file',
+      fileName: 'Inter-Bold.ttf',
+      size: bytes.length,
+      sha256: sha,
+      bytes,
+    });
+    if (!reply.ok || !('info' in reply)) throw new Error(JSON.stringify(reply));
+    expect(reply.info).toMatchObject({
+      family: 'Inter',
+      style: 'Bold',
+      version: INTER_BOLD.version,
+      copyright: 'Copyright 2016 The Inter Project Authors',
+      licenseUrl: 'http://scripts.sil.org/OFL',
+      fsType: 0,
+      embedding: {
+        level: 'installable',
+        noSubsetting: false,
+        bitmapOnly: false,
+        restrictive: false,
+      },
+      outlines: 'truetype',
+      variable: false,
+      sha256: INTER_BOLD.sha256,
+      size: INTER_BOLD.size,
+    });
+    expect(reply.info.license).toContain('SIL Open Font License');
+    expect(engine.has(sha)).toBe(true);
+  });
+
+  it('fails a file that is not a font as "this font could not be read"', async () => {
+    const bytes = new TextEncoder().encode('<script>alert(1)</script> not a font');
+    const reply = await new TextEngine().info({
+      kind: 'file',
+      fileName: 'evil.ttf',
+      size: bytes.length,
+      sha256: await sha256(bytes),
+      bytes,
+    });
+    expect(reply.ok).toBe(false);
+    expect(!reply.ok && reply.message).toMatch(/^This font could not be read \(evil\.ttf\): /);
+  });
+
+  it('cuts every string from the font to MAX_FONT_NAME_LENGTH characters', () => {
+    const font = loadFont(interBytes());
+    const long = 'x'.repeat(MAX_FONT_NAME_LENGTH * 3);
+    const summary = fontSummary(
+      { ...font, info: { ...font.info, family: long, license: long } },
+      'abc',
+      1,
+    );
+    expect([...summary.family]).toHaveLength(MAX_FONT_NAME_LENGTH);
+    expect(summary.family.endsWith('\u2026')).toBe(true);
+    expect([...summary.license!]).toHaveLength(MAX_FONT_NAME_LENGTH);
+    expect(summary.style).toBe('Bold');
+  });
+
+  it('reads it through the watchdog, then sets texts in it without sending the bytes again', async () => {
+    const log: WireRequest[] = [];
+    const outliner = createWatchdogOutliner(() => fakeTextWorker(log), { timeLimit: 5000 });
+    const bytes = interBytes();
+    const reply = await outliner.readFont('Inter-Bold.ttf', bytes);
+    expect(reply).toMatchObject({ ok: true, info: { family: 'Inter', style: 'Bold' } });
+    // The caller's bytes were copied, not transferred away.
+    expect(bytes.length).toBe(INTER_BOLD.size);
+    expect((await outliner.outline(request('A', await userFont(bytes)))).ok).toBe(true);
+    expect(ops(log)).toEqual(['info+bytes', 'outline']);
+  });
+
+  it('turns a font whose reading hangs into "could not be read", once, and never tries it again', async () => {
+    const log: WireRequest[] = [];
+    let spawned = 0;
+    const outliner = createWatchdogOutliner(() => (spawned++, fakeTextWorker(log, 'evil.otf')), {
+      timeLimit: 100,
+    });
+    const evil = new Uint8Array([0x4f, 0x54, 0x54, 0x4f, 1, 2, 3]);
+    const message = 'This font could not be read (evil.otf): reading it took longer than 100 ms';
+    expect(await outliner.readFont('evil.otf', evil)).toEqual({ ok: false, message });
+    expect(await outliner.readFont('evil.otf', evil)).toEqual({ ok: false, message });
+    // Its texts fail at once with the same message, and the worker is not tried again for it.
+    expect(await outliner.outline(request('A', await userFont(evil, 'evil.otf')))).toEqual({
+      ok: false,
+      code: 'font',
+      message,
+    });
+    expect(log).toHaveLength(1);
+    expect(spawned).toBe(1);
+  });
+
+  it('is served by the regen worker API, which refuses without a watchdog', async () => {
+    const log: WireRequest[] = [];
+    const outliner = createWatchdogOutliner(() => fakeTextWorker(log), { timeLimit: 5000 });
+    const api = createRegenWorkerApi({
+      source: { url: 'kernel.wasm' },
+      engine: { text: outliner },
+    });
+    expect(await api.readFont('Inter-Bold.ttf', interBytes())).toMatchObject({
+      ok: true,
+      info: { family: 'Inter' },
+    });
+    const text = await api.outlineText(request('Hi'));
+    expect(text.ok && text.glyphs).toEqual([0, 1]);
+
+    const bare = createRegenWorkerApi({ source: { url: 'kernel.wasm' } });
+    expect(await bare.readFont('x.ttf', interBytes())).toEqual({
+      ok: false,
+      message:
+        'This font could not be read (x.ttf): user fonts are read only in the text worker, under a time limit, and this host has none',
+    });
+  });
+});
+
+describe("the sketcher's previews through the worker API", () => {
+  it('gives the texts of one pass one budget and lays previews out one at a time', async () => {
+    const budgets: (TextBudget | undefined)[] = [];
+    let active = 0;
+    let most = 0;
+    const fake: TextOutliner = {
+      async outline(r, call) {
+        budgets.push(call?.budget);
+        most = Math.max(most, ++active);
+        await new Promise((done) => setTimeout(done, 5));
+        active--;
+        return { ok: false, code: 'glyph', message: r.text };
+      },
+    };
+    const api = createRegenWorkerApi({ source: { url: 'kernel.wasm' }, engine: { text: fake } });
+    const replies = await Promise.all([
+      api.outlineText(request('a'), { pass: 1 }),
+      api.outlineText(request('b'), { pass: 1 }),
+      api.outlineText(request('c'), { pass: 2 }),
+      api.outlineText(request('d')),
+    ]);
+    expect(replies.map((r) => !r.ok && r.message)).toEqual(['a', 'b', 'c', 'd']);
+    expect(most).toBe(1);
+    expect(budgets.every((b) => b instanceof TextBudget)).toBe(true);
+    expect(budgets[1]).toBe(budgets[0]);
+    expect(budgets[2]).not.toBe(budgets[0]);
+    expect(budgets[3]).not.toBe(budgets[0]);
+    expect(budgets[3]).not.toBe(budgets[2]);
+  });
+
+  it('keeps the budgets of the last eight passes, made by previewBudget', async () => {
+    const budgets: (TextBudget | undefined)[] = [];
+    const fake: TextOutliner = {
+      async outline(r, call) {
+        budgets.push(call?.budget);
+        return { ok: false, code: 'glyph', message: r.text };
+      },
+    };
+    let made = 0;
+    const api = createRegenWorkerApi({
+      source: { url: 'kernel.wasm' },
+      engine: { text: fake },
+      previewBudget: () => (made++, new TextBudget({ perFont: 1, total: 2 })),
+    });
+    // Two passes: one budget each, from previewBudget.
+    await Promise.all([
+      api.outlineText(request('a'), { pass: 1 }),
+      api.outlineText(request('b'), { pass: 2 }),
+      api.outlineText(request('c'), { pass: 1 }),
+    ]);
+    expect(made).toBe(2);
+    expect(budgets[0]).toBe(budgets[2]);
+    expect(budgets[1]).not.toBe(budgets[0]);
+    expect(budgets[0]!.perFont).toBe(1);
+    // Passes 3 to 9 make seven more; pass 1 falls out, pass 2 is still kept.
+    for (let pass = 3; pass <= 9; pass++) await api.outlineText(request('x'), { pass });
+    expect(made).toBe(9);
+    await api.outlineText(request('d'), { pass: 2 });
+    expect(budgets.at(-1)).toBe(budgets[1]);
+    expect(made).toBe(9);
+    await api.outlineText(request('e'), { pass: 1 });
+    expect(made).toBe(10);
+    expect(budgets.at(-1)).not.toBe(budgets[0]);
+  });
+
+  it('stops a pass of slow texts in a hostile font after its budget, not one limit per text', async () => {
+    const log: WireRequest[] = [];
+    const outliner = createWatchdogOutliner(() => fakeTextWorker(log, 'text:slow'), {
+      timeLimit: 100,
+    });
+    const api = createRegenWorkerApi({
+      source: { url: 'kernel.wasm' },
+      engine: { text: outliner },
+      previewBudget: () => new TextBudget({ perFont: 150, total: 60_000 }),
+    });
+    const font = await userFont(interBytes(), 'slow.ttf');
+    const started = performance.now();
+    // Ten texts of one pass, asked for at once as the sketcher does when a sketch opens.
+    const replies = await Promise.all(
+      Array.from({ length: 10 }, () => api.outlineText(request('slow', font), { pass: 7 })),
+    );
+    const elapsed = performance.now() - started;
+    // Two run their time limit; the rest are refused when they start.
+    expect(replies.slice(0, 2).map((r) => !r.ok && r.code)).toEqual(['glyph', 'glyph']);
+    const refused =
+      'This font could not be read (slow.ttf): its texts took longer than 150 ms in all to lay out';
+    expect(replies.slice(2)).toEqual(
+      Array.from({ length: 8 }, () => ({ ok: false, code: 'font', message: refused })),
+    );
+    expect(elapsed).toBeLessThan(800);
+    expect(log.filter((r) => r.op === 'outline')).toHaveLength(2);
+  });
+
+  it('refuses to read a font file above MAX_IMPORT_BYTES before hashing or sending it', async () => {
+    const log: WireRequest[] = [];
+    const outliner = createWatchdogOutliner(() => fakeTextWorker(log), { timeLimit: 5000 });
+    const huge = new Uint8Array(MAX_IMPORT_BYTES + 1);
+    expect(await outliner.readFont('huge.ttf', huge)).toEqual({
+      ok: false,
+      message: `This font could not be read (huge.ttf): it is ${MAX_IMPORT_BYTES + 1} bytes, and a font may be at most ${MAX_IMPORT_BYTES} bytes`,
+    });
+    expect(log).toHaveLength(0);
+    // The text worker checks an info request itself too.
+    const reply = await new TextEngine().info({
+      kind: 'file',
+      fileName: 'huge.ttf',
+      size: 4,
+      sha256: 'a'.repeat(64),
+      bytes: huge,
+    });
+    expect(reply).toMatchObject({ ok: false, code: 'font', message: /at most 20971520 bytes/ });
+  });
+});

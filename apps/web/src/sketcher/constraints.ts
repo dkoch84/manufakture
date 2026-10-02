@@ -79,6 +79,8 @@ function classify(items: readonly SketchItem[], index: EntityIndex): Classified 
       if (e?.kind === 'line') out.lines.push(e.id);
       else if (e?.kind === 'circle' || e?.kind === 'arc') out.rounds.push(e.id);
       else if (e?.kind === 'point') out.points.push({ entity: e.id });
+      // A text is constrained by its anchor, like a point.
+      else if (e?.kind === 'outline') out.points.push({ entity: e.id, at: 'anchor' });
     }
   }
   return out;

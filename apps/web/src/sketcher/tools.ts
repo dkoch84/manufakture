@@ -5,6 +5,7 @@
 // where it has a direction, and never reversed afterwards, so the region ids
 // of `@manufakture/sketch` stay stable.
 
+import type { StoredExpression } from '@manufakture/core';
 import type { EndPosition, PointRef, SketchEntity, Vec2 } from '@manufakture/sketch/model';
 import {
   directionConstraints,
@@ -26,6 +27,7 @@ import {
   type EntityIndex,
 } from './geometry';
 import type { PickPoint } from './snap';
+import { DEFAULT_ALIGN, DEFAULT_TEXT } from './text';
 
 export type DrawToolId =
   | 'line'
@@ -35,7 +37,8 @@ export type DrawToolId =
   | 'arc3'
   | 'tangentArc'
   | 'centerArc'
-  | 'point';
+  | 'point'
+  | 'text';
 
 export type ToolId = 'select' | 'dimension' | DrawToolId;
 
@@ -48,6 +51,7 @@ export const DRAW_TOOLS: readonly DrawToolId[] = [
   'tangentArc',
   'centerArc',
   'point',
+  'text',
 ];
 
 /** Keyboard shortcuts for the tools. */
@@ -60,6 +64,7 @@ export const TOOL_KEYS: Readonly<Record<string, ToolId>> = {
   g: 'tangentArc',
   p: 'point',
   d: 'dimension',
+  x: 'text',
 };
 
 export function isDrawTool(tool: ToolId): tool is DrawToolId {
@@ -68,6 +73,7 @@ export function isDrawTool(tool: ToolId): tool is DrawToolId {
 
 export type DrawState =
   | { tool: 'point' }
+  | { tool: 'text' }
   | { tool: 'line'; start: PickPoint | null }
   | { tool: 'rectangle' | 'centerRectangle' | 'circle'; first: PickPoint | null }
   | { tool: 'arc3'; start: PickPoint | null; end: PickPoint | null }
@@ -87,6 +93,8 @@ export interface ToolContext {
   construction: boolean;
   /** Snap tolerance in sketch units, for "is this the same place". */
   tolerance: number;
+  /** What a new text starts with: its font (a `font#n` of the sketch's fonts) and size. */
+  text?: { font: string; size: StoredExpression };
 }
 
 export interface ToolStep {
@@ -101,6 +109,8 @@ export function toolPrompt(state: DrawState): string {
   switch (state.tool) {
     case 'point':
       return 'Click where the point goes (a hole centre, a reference point).';
+    case 'text':
+      return 'Click where the text goes: its anchor. Then type the text in the Text panel.';
     case 'line':
       return state.start
         ? 'Click the next point. Double-click or Esc ends the line.'
@@ -133,6 +143,7 @@ export function toolPrompt(state: DrawState): string {
 export function initialDrawState(tool: DrawToolId): DrawState {
   switch (tool) {
     case 'point':
+    case 'text':
       return { tool };
     case 'line':
     case 'tangentArc':
@@ -321,6 +332,33 @@ export function toolClick(
         draft: {
           entities: [{ id, kind: 'point', construction: c, position: pick.position }],
           constraints: snapConstraints(pick.target, { entity: id }),
+        },
+      };
+    }
+    case 'text': {
+      if (preview) return { state };
+      if (!ctx.text) return { state, message: 'There is no font to set the text in.' };
+      const id = tempId(0);
+      return {
+        state,
+        draft: {
+          entities: [
+            {
+              id,
+              kind: 'outline',
+              construction: c,
+              anchor: pick.position,
+              angle: 0,
+              source: {
+                kind: 'text',
+                text: DEFAULT_TEXT,
+                font: ctx.text.font,
+                size: ctx.text.size,
+                align: { ...DEFAULT_ALIGN },
+              },
+            },
+          ],
+          constraints: snapConstraints(pick.target, { entity: id, at: 'anchor' }),
         },
       };
     }

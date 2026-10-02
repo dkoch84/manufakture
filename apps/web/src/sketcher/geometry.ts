@@ -172,7 +172,8 @@ export function closestOnEntity(e: SketchEntity, p: Vec2): Vec2 {
       return distance(p, e.start) <= distance(p, e.end) ? e.start : e.end;
     }
     case 'outline':
-      // Picked by its anchor until the sketcher draws text (T3.2d).
+      // A text's letters are not curves here: the session picks a text by the box of its
+      // letters (text.ts, `shapesBox`), and snaps and constrains it by its anchor.
       return e.anchor;
   }
 }
@@ -202,7 +203,7 @@ export function tessellate(e: SketchEntity, maxStep = Math.PI / 36): Vec2[] {
       return pts;
     }
     case 'outline':
-      // Text is drawn from regen's loops (T3.2d), not from the entity.
+      // Text is drawn from its layout (text.ts, `glyphOutlines`), not from the entity.
       return [e.anchor];
   }
 }

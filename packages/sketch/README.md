@@ -344,9 +344,17 @@ region with its holes for hover highlighting: `positions` (world xyz, `Float32Ar
 flattened within a linear and angular deflection (default 0.05 mm, 0.25 rad), chords are split
 further where other geometry comes closer to an arc than its chord (a corner just inside a circle, a
 tangent hole), holes are bridged into the outline, and the polygon is ear clipped. Beziers (glyphs)
-are flattened within the linear deflection. It is meant for highlights, not for export: cost grows
-quadratically with the number of flattened points. `loopPolygon(loop, deflection)` gives any
-region loop as a closed polygon, for containment tests and drawing.
+are flattened within the linear deflection, at most 256 chords each. It is meant for highlights, not
+for export: cost grows quadratically with the number of flattened points. So `flattenRegion` (which
+the fills and the sketcher's overlay use) is capped: a region whose loops would flatten to more than
+`MAX_FLATTEN_POINTS` (100,000) points in all, or to more than `{ maxPoints }` when the caller passes
+a lower cap, throws a `RangeError` (naming that cap) as soon as the count passes it, before the
+points are made, and `regionFill` throws it on. `regionFills` throws it for the whole list, so a
+caller that should skip only the region past the cap calls `regionFill` per region and draws no fill
+for that one. Without the cap a large or hostile text (up to 500,000 Bezier
+curves, regen's `MAX_TEXT_CURVES`) could make tens of millions of points. The sketcher's overlay
+also spends one budget of 200,000 points on all the fills of a sketch. `loopPolygon(loop,
+deflection)` gives any region loop as a closed polygon, for containment tests and drawing.
 
 ## Outlines
 

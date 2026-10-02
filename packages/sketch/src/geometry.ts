@@ -51,11 +51,14 @@ export {
 } from './region-profile';
 export {
   DEFAULT_FILL_DEFLECTION,
+  MAX_FLATTEN_POINTS,
+  MAX_REFINE_WORK,
   flattenRegion,
   regionFill,
   regionFills,
   triangulateRegion2D,
   type FillDeflection,
+  type FlattenOptions,
   type RegionFill,
 } from './region-mesh';
 export {

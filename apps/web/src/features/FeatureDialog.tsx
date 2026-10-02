@@ -53,6 +53,7 @@ import {
 import type { CreateVersion } from '../history/history';
 import type { PinLibrary } from './derived';
 import { DerivedDialog } from './DerivedDialog';
+import { ProfileRegions } from './ProfileRegions';
 import type { PickOutcome } from './references';
 import { ScopePicker } from './ScopePicker';
 import {
@@ -354,13 +355,29 @@ function PartFeatureDialog({
           sketches={sketches}
           error={errors.sketch}
           onChange={(v) => {
-            if (form.kind === 'revolve') {
+            // Another sketch: its regions, all of them, not the old sketch's entities.
+            const { entities: _old, ...rest } = form;
+            void _old;
+            if (rest.kind === 'revolve') {
               const line = sketches
                 .find((s) => s.id === v)
                 ?.entities.find((e) => e.kind === 'line');
-              setForm({ ...form, sketch: v, axisLine: line?.id ?? '' });
-            } else set('sketch', v);
+              setForm({ ...rest, sketch: v, axisLine: line?.id ?? '' });
+            } else setForm({ ...rest, sketch: v });
           }}
+        />,
+        <ProfileRegions
+          key="regions"
+          sketch={sketches.find((s) => s.id === form.sketch)}
+          entities={form.entities}
+          onChange={(entities) =>
+            setForm((f) => {
+              if (f.kind !== 'extrude' && f.kind !== 'revolve') return f;
+              const { entities: _old, ...rest } = f;
+              void _old;
+              return entities ? { ...rest, entities } : rest;
+            })
+          }
         />,
         <Select
           key="operation"

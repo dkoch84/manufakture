@@ -20,6 +20,29 @@ export interface FillDeflection {
 
 export const DEFAULT_FILL_DEFLECTION: FillDeflection = { linear: 0.05, angular: 0.25 };
 
+/**
+ * Most points `flattenRegion` makes of one region, its loops together. Glyph Beziers flatten
+ * to up to 256 chords each and a text may have hundreds of thousands of them (regen's
+ * `MAX_TEXT_CURVES`), so without a cap a large or hostile text could make tens of millions of
+ * points here, and ear clipping is quadratic in them. Past the cap `flattenRegion` throws a
+ * `RangeError` and the caller draws no fill for the region. A region of real text is a glyph
+ * (a few hundred points at 0.05 mm), or a plate with a text's letters as holes (a few hundred
+ * per letter).
+ */
+export const MAX_FLATTEN_POINTS = 100_000;
+
+export interface FlattenOptions {
+  /** Default `MAX_FLATTEN_POINTS`. */
+  maxPoints?: number;
+  /** Default `MAX_REFINE_WORK`. */
+  maxRefineWork?: number;
+}
+
+/** The `RangeError` for a region that flattens to more than `max` points. */
+function tooManyPoints(max: number): RangeError {
+  return new RangeError(`The region flattens to more than ${max} points; it is not drawn.`);
+}
+
 export interface RegionFill {
   regionId: string;
   /** xyz per vertex, in world coordinates. */
@@ -53,11 +76,22 @@ interface Flat {
 
 const TAU = 2 * Math.PI;
 
-function flatten(loop: RegionLoop, deflection: FillDeflection): Flat {
+function flatten(
+  loop: RegionLoop,
+  deflection: FillDeflection,
+  budget: { left: number; readonly max: number },
+): Flat {
   const points: Vec2[] = [];
   const arcs: (ChordArc | null)[] = [];
+  // The error names the region's cap, not what was left of it when this loop started.
+  const { max } = budget;
+  const spend = (n: number, cap: number) => {
+    budget.left -= n;
+    if (budget.left < 0) throw tooManyPoints(cap);
+  };
   for (const c of loop.curves) {
     if (c.kind === 'line') {
+      spend(1, max);
       points.push(c.start);
       arcs.push(null);
       continue;
@@ -76,6 +110,7 @@ function flatten(loop: RegionLoop, deflection: FillDeflection): Flat {
         },
         deflection.linear,
       );
+      spend(chord.length - 1, max);
       for (const p of chord.slice(0, -1)) {
         points.push(p);
         arcs.push(null);
@@ -93,6 +128,7 @@ function flatten(loop: RegionLoop, deflection: FillDeflection): Flat {
       deflection.linear < c.radius ? 2 * Math.acos(1 - deflection.linear / c.radius) : Math.PI;
     const step = Math.max(1e-3, Math.min(deflection.angular, byChord, Math.PI / 2));
     const n = Math.max(1, Math.ceil(sweep / step - 1e-9));
+    spend(n, max);
     const arc: ChordArc = { center: c.center, radius: c.radius, sense };
     // Start exactly at the curve's start: other loops may touch it there.
     points.push(c.start);
@@ -106,17 +142,86 @@ function flatten(loop: RegionLoop, deflection: FillDeflection): Flat {
   return { points, arcs };
 }
 
+/** A uniform grid over a set of points, cells about one point each on average. */
+interface PointGrid {
+  minX: number;
+  minY: number;
+  cell: number;
+  cols: number;
+  rows: number;
+  /** Per cell, its first entry in `items`; `cols * rows + 1` offsets. */
+  starts: Int32Array;
+  /** Point indices, grouped by cell. */
+  items: Int32Array;
+}
+
+function pointGrid(points: readonly Vec2[]): PointGrid {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const [x, y] of points) {
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+  const n = Math.max(1, points.length);
+  const w = maxX - minX;
+  const h = maxY - minY;
+  // Cell size so that cols * rows stays within about 3n, even for a degenerate (flat) box.
+  const cell = Math.max(Math.sqrt((w * h) / n), Math.max(w, h) / n, 1e-12);
+  const cols = Math.floor(w / cell) + 1;
+  const rows = Math.floor(h / cell) + 1;
+  const starts = new Int32Array(cols * rows + 1);
+  const cellOf = (q: Vec2) =>
+    Math.min(rows - 1, Math.floor((q[1] - minY) / cell)) * cols +
+    Math.min(cols - 1, Math.floor((q[0] - minX) / cell));
+  const cells = new Int32Array(points.length);
+  points.forEach((q, i) => {
+    cells[i] = cellOf(q);
+    starts[cells[i]! + 1]!++;
+  });
+  for (let c = 0; c < cols * rows; c++) starts[c + 1]! += starts[c]!;
+  const fill = starts.slice(0, -1);
+  const items = new Int32Array(points.length);
+  for (let i = 0; i < points.length; i++) items[fill[cells[i]!]!++] = i;
+  return { minX, minY, cell, cols, rows, starts, items };
+}
+
+/**
+ * Most units of work `refine` does for one region: grid cells visited plus points tested
+ * against a chord's circular segment, over all its rounds. A region of real geometry takes a
+ * few per chord; geometry crowded against a long arc could take far more on every drag frame,
+ * so past this `flattenRegion` throws its `RangeError` and the region is not filled.
+ */
+export const MAX_REFINE_WORK = 2_000_000;
+
 /**
  * Split every chord whose circular segment (between the chord and its arc)
  * holds a point of another chord end, until none does. A chord cuts inside
  * its circle by up to the linear deflection, so geometry closer to the arc
  * than that (a corner just inside, a hole touching it) would otherwise end up
  * outside the flattened loop, and the polygon would cross itself.
+ *
+ * Each chord looks only at the points in its segment's box (the chord's box
+ * grown by the sagitta), found through a uniform grid, and the total work is
+ * capped at `maxWork`: past it this throws `tooManyPoints(maxPoints)`.
  */
-function refine(flats: Flat[]): void {
-  const all = () => flats.flatMap((f) => f.points);
+function refine(flats: Flat[], maxPoints: number, maxWork: number): void {
+  let work = 0;
+  const spend = (n: number) => {
+    work += n;
+    if (work > maxWork) throw tooManyPoints(maxPoints);
+  };
   for (let round = 0; round < 40; round++) {
-    const points = all();
+    const points = flats.flatMap((f) => f.points);
+    spend(points.length);
+    const grid = pointGrid(points);
+    const col = (x: number) =>
+      Math.min(grid.cols - 1, Math.max(0, Math.floor((x - grid.minX) / grid.cell)));
+    const row = (y: number) =>
+      Math.min(grid.rows - 1, Math.max(0, Math.floor((y - grid.minY) / grid.cell)));
     let changed = false;
     for (const f of flats) {
       for (let k = 0; k < f.points.length; k++) {
@@ -124,17 +229,48 @@ function refine(flats: Flat[]): void {
         if (!arc) continue;
         const a = f.points[k]!;
         const b = f.points[(k + 1) % f.points.length]!;
-        const r2 = arc.radius * arc.radius * (1 - 1e-12);
-        const minX = Math.min(a[0], b[0]) - arc.radius;
-        const maxX = Math.max(a[0], b[0]) + arc.radius;
-        const hit = points.some((q) => {
-          if (q[0] < minX || q[0] > maxX || same(q, a) || same(q, b)) return false;
-          const dx = q[0] - arc.center[0];
-          const dy = q[1] - arc.center[1];
-          // Inside the circle, and on the arc's side of the chord (it bulges
-          // to the right of a counter-clockwise chord).
-          return dx * dx + dy * dy < r2 && cross(a, b, q) * arc.sense < 0;
-        });
+        const r = arc.radius;
+        const r2 = r * r * (1 - 1e-12);
+        // The segment's box: the chord's, grown by the sagitta (the whole circle's for a
+        // chord of more than half the circle, which flattening never makes).
+        let lo: Vec2;
+        let hi: Vec2;
+        if (cross(a, b, arc.center) * arc.sense >= 0) {
+          const half2 = ((b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2) / 4;
+          const sagitta = half2 / (r + Math.sqrt(Math.max(0, r * r - half2)));
+          const grow = sagitta * (1 + 1e-6) + r * 1e-9;
+          lo = [Math.min(a[0], b[0]) - grow, Math.min(a[1], b[1]) - grow];
+          hi = [Math.max(a[0], b[0]) + grow, Math.max(a[1], b[1]) + grow];
+        } else {
+          lo = [arc.center[0] - r, arc.center[1] - r];
+          hi = [arc.center[0] + r, arc.center[1] + r];
+        }
+        let hit = false;
+        const c0 = col(lo[0]);
+        const c1 = col(hi[0]);
+        const r1 = row(hi[1]);
+        for (let y = row(lo[1]); y <= r1 && !hit; y++) {
+          spend(c1 - c0 + 1);
+          for (let x = c0; x <= c1 && !hit; x++) {
+            const cellIndex = y * grid.cols + x;
+            const end = grid.starts[cellIndex + 1]!;
+            const from = grid.starts[cellIndex]!;
+            spend(end - from);
+            for (let i = from; i < end; i++) {
+              const q = points[grid.items[i]!]!;
+              if (q[0] < lo[0] || q[0] > hi[0] || q[1] < lo[1] || q[1] > hi[1]) continue;
+              if (same(q, a) || same(q, b)) continue;
+              const dx = q[0] - arc.center[0];
+              const dy = q[1] - arc.center[1];
+              // Inside the circle, and on the arc's side of the chord (it bulges
+              // to the right of a counter-clockwise chord).
+              if (dx * dx + dy * dy < r2 && cross(a, b, q) * arc.sense < 0) {
+                hit = true;
+                break;
+              }
+            }
+          }
+        }
         if (!hit) continue;
         const t0 = Math.atan2(a[1] - arc.center[1], a[0] - arc.center[0]);
         const t1 = Math.atan2(b[1] - arc.center[1], b[0] - arc.center[0]);
@@ -156,11 +292,21 @@ function refine(flats: Flat[]): void {
 /**
  * A region's loops as polygons (outer first, then holes), without repeating
  * first points: arcs flattened within `deflection`, and refined wherever
- * other geometry comes closer to an arc than its chords do.
+ * other geometry comes closer to an arc than its chords do. Throws a
+ * `RangeError` when the loops would take more than `options.maxPoints`
+ * (`MAX_FLATTEN_POINTS`) points in all, or refining them more than
+ * `options.maxRefineWork` (`MAX_REFINE_WORK`) work.
  */
-export function flattenRegion(region: Region, deflection: FillDeflection): Vec2[][] {
-  const flats = [region.outer, ...region.holes].map((l) => flatten(l, deflection));
-  refine(flats);
+export function flattenRegion(
+  region: Region,
+  deflection: FillDeflection,
+  options: FlattenOptions = {},
+): Vec2[][] {
+  const max = options.maxPoints ?? MAX_FLATTEN_POINTS;
+  const budget = { left: max, max };
+  const flats = [region.outer, ...region.holes].map((l) => flatten(l, deflection, budget));
+  refine(flats, max, options.maxRefineWork ?? MAX_REFINE_WORK);
+  if (flats.reduce((n, f) => n + f.points.length, 0) > max) throw tooManyPoints(max);
   return flats.map((f) => f.points);
 }
 
@@ -371,7 +517,10 @@ export function regionFill(
   };
 }
 
-/** Fills for every region, in the same order. */
+/**
+ * Fills for every region, in the same order. A region past the flattening cap throws its
+ * `RangeError` for the whole list: to skip only that region, call `regionFill` per region.
+ */
 export function regionFills(
   regions: readonly Region[],
   placement: SketchPlacement,

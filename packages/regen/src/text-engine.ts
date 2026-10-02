@@ -18,6 +18,7 @@ import {
 } from '@manufakture/text';
 import { decodeBase64 } from './imports';
 import {
+  MAX_FONT_NAME_LENGTH,
   MAX_TEXT_CURVES,
   MAX_TEXT_LOOPS,
   MAX_TEXT_POINTS,
@@ -25,10 +26,13 @@ import {
   budgetRefusal,
   fontKey,
   fontName,
+  fontTooLarge,
   unreadableFont,
+  type FontSummary,
   type TextOutliner,
   type TextReply,
   type WireFont,
+  type WireInfo,
   type WireOutline,
   type WireReply,
   type WireRequest,
@@ -52,6 +56,40 @@ export function textTooComplex(result: OutlinePartsResult): string | null {
   if (size.curves > MAX_TEXT_CURVES) return over('curves', size.curves, MAX_TEXT_CURVES);
   if (size.points > MAX_TEXT_POINTS) return over('points', size.points, MAX_TEXT_POINTS);
   return null;
+}
+
+/** A string from a font file, cut to `MAX_FONT_NAME_LENGTH` characters. */
+function clip(value: string): string {
+  const chars = [...value];
+  return chars.length <= MAX_FONT_NAME_LENGTH
+    ? value
+    : `${chars.slice(0, MAX_FONT_NAME_LENGTH - 1).join('')}\u2026`;
+}
+
+/** What `info` replies with: the font's names and permissions, every string cut to length. */
+export function fontSummary(font: LoadedFont, sha256: string, size: number): FontSummary {
+  const { info } = font;
+  const summary: FontSummary = {
+    family: clip(info.family),
+    style: clip(info.style),
+    fsType: info.fsType,
+    embedding: {
+      level: info.embedding.level,
+      noSubsetting: info.embedding.noSubsetting,
+      bitmapOnly: info.embedding.bitmapOnly,
+      restrictive: info.embedding.restrictive,
+    },
+    outlines: info.outlines,
+    variable: info.variable,
+    glyphCount: info.glyphCount,
+    sha256,
+    size,
+  };
+  for (const key of ['fullName', 'version', 'copyright', 'license', 'licenseUrl'] as const) {
+    const value = info[key];
+    if (value !== undefined) summary[key] = clip(value);
+  }
+  return summary;
 }
 
 /**
@@ -181,9 +219,40 @@ export class TextEngine {
     }
   }
 
+  /**
+   * Read a user font's names and permissions for **Add font**, and keep it loaded so the texts
+   * set in it next need not parse it again. A font that cannot be parsed is a `font` failure.
+   */
+  async info(font: WireInfo['font']): Promise<WireReply> {
+    // Checked here too, before anything is hashed or parsed: the request may not come from
+    // `createWatchdogOutliner`.
+    const tooLarge = fontTooLarge(font.fileName, Math.max(font.size, font.bytes.length));
+    if (tooLarge) return { ok: false, code: 'font', message: tooLarge };
+    const loaded = await this.#load(font);
+    if (loaded === null) {
+      return { ok: false, code: 'need-bytes', message: `${font.fileName} is not loaded` };
+    }
+    if ('error' in loaded) {
+      return {
+        ok: false,
+        code: 'font',
+        message: unreadableFont(font.fileName, loaded.error),
+        ...(loaded.transient ? { transient: true } : {}),
+      };
+    }
+    return { ok: true, code: 'info', info: fontSummary(loaded.font, loaded.sha256, font.size) };
+  }
+
   /** Serve one request of the wire protocol. */
   handle(request: WireRequest): Promise<WireReply> {
-    return request.op === 'load' ? this.load(request.font) : this.outline(request);
+    switch (request.op) {
+      case 'load':
+        return this.load(request.font);
+      case 'info':
+        return this.info(request.font);
+      case 'outline':
+        return this.outline(request);
+    }
   }
 }
 

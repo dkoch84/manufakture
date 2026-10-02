@@ -4,8 +4,13 @@
 // a dimension value. Geometry is SVG; glyphs, labels and the editor are HTML
 // so they can be clicked and typed into. Everything is projected through the
 // viewport camera, so it follows the view when the user orbits.
+//
+// Texts are drawn from their last layout (`texts` in the session, from the regen worker's text
+// outliner), placed at their current anchor, one path per glyph; their letters are regions too,
+// filled like the others. Fills are flattened under a point budget (`FILL_POINT_BUDGET`, `regionFills`): a text
+// too large for it draws its outline without fills rather than stall the page.
 
-import { detectRegions, flattenRegion } from '@manufakture/sketch/geometry';
+import { detectRegions, type OutlineShape } from '@manufakture/sketch/geometry';
 import type { DimensionalConstraint, SketchEntity, Vec2 } from '@manufakture/sketch/model';
 import {
   useEffect,
@@ -23,6 +28,7 @@ import { axisSegments } from './planes';
 import { pathData, type SketchView } from './projection';
 import type { SketchSessionStore } from './session';
 import { constraintState, entityStatus } from './status';
+import { glyphOutlines, placedTextsCache, pointBudget, regionFills } from './text';
 import { toolPreview } from './tools';
 import { ExpressionField } from '../components/ExpressionField';
 import {
@@ -51,16 +57,41 @@ export function SketchOverlay({ session, view, size }: SketchOverlayProps) {
   const hoveredKey = s.hovered ? itemKey(s.hovered) : null;
   const upp = view.unitsPerPixel(size.width / 2, size.height / 2);
 
-  // Closed regions as subtle fills. Detection depends on the geometry only.
+  // Texts placed at their anchors, from their last layout; the same map while none moved.
+  const [placeTexts] = useState(placedTextsCache);
+  const texts = useMemo(
+    () => placeTexts(sketch.entities, s.texts),
+    [placeTexts, sketch.entities, s.texts],
+  );
+
+  // Closed regions as subtle fills, letters included. Detection depends on the geometry only.
   const regions = useMemo(() => {
+    const outlines: OutlineShape[] = [];
+    for (const e of sketch.entities) {
+      if (e.kind === 'outline' && !e.construction) outlines.push(...(texts.get(e.id) ?? []));
+    }
+    let found;
     try {
-      return detectRegions(sketch.entities).regions.map((r) =>
-        flattenRegion(r, { linear: 0.05, angular: 0.2 }),
-      );
+      found = detectRegions(sketch.entities, { outlines }).regions;
     } catch {
       return [];
     }
-  }, [sketch.entities]);
+    return regionFills(found);
+  }, [sketch.entities, texts]);
+
+  // One path per glyph, flattened to a fraction of a pixel.
+  const tolerance = Math.max(upp * 0.35, 1e-4);
+  const textPaths = useMemo(() => {
+    // One point budget for every text of the sketch, not one per text.
+    const budget = pointBudget();
+    return [...texts].map(([id, shapes]) => ({
+      id,
+      glyphs: glyphOutlines(shapes, tolerance, budget).map((g) => ({
+        key: g.key,
+        d: g.loops.map((l) => pathData(view, l, true)).join(' '),
+      })),
+    }));
+  }, [texts, tolerance, view]);
 
   if (!source) return null;
   const units = source.units;
@@ -121,9 +152,29 @@ export function SketchOverlay({ session, view, size }: SketchOverlayProps) {
           <path className="sk-axis x" d={pathData(view, axes.x)} />
           <path className="sk-axis y" d={pathData(view, axes.y)} />
         </g>
+        <g className="sk-texts">
+          {textPaths.map((t) => {
+            const e = index.get(t.id);
+            if (!e) return null;
+            return (
+              <g
+                key={t.id}
+                className={`${entityClass(e)} sk-text`}
+                data-testid={`text-${t.id}`}
+                data-glyphs={t.glyphs.length}
+                data-status={entityStatus(solve, e.id)}
+                data-construction={e.construction ? 'true' : 'false'}
+              >
+                {t.glyphs.map((g) => (
+                  <path key={g.key} fillRule="evenodd" d={g.d} />
+                ))}
+              </g>
+            );
+          })}
+        </g>
         <g className="sk-entities">
           {sketch.entities.map((e) =>
-            e.kind === 'point' ? null : (
+            e.kind === 'point' || e.kind === 'outline' ? null : (
               <path
                 key={e.id}
                 className={entityClass(e)}

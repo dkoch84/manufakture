@@ -16,8 +16,8 @@ Only faces and edges of the part can be used; the faces of an imported reference
 
 ## The dialogs
 
-- **Extrude**: a sketch (every closed region of it) pushed out of its plane. **Result** says what happens to the part: a new body (the default for the first), added to it, removed from it (a cut) or intersected with it. A new body stays separate even where it overlaps another one (see [Bodies](bodies.md)). **End**: a depth, a depth split evenly to both sides, through the whole part, or up to a picked flat face. **Opposite direction** flips it; the optional **Draft angle** tapers the sides.
-- **Revolve**: a sketch turned about an axis, a line of the same sketch or a straight edge of the part. **Angle** is up to a full turn; **Symmetric** splits it to both sides.
+- **Extrude**: a sketch (every closed region of it) pushed out of its plane. For a sketch with [text](text.md), **Regions** picks what is pushed: every region, **The text only** (every letter, in one click: emboss with **Add**, deboss with **Remove**) or **Everything but the text** (a plate with letter-shaped holes, as a stencil). **Result** says what happens to the part: a new body (the default for the first), added to it, removed from it (a cut) or intersected with it. A new body stays separate even where it overlaps another one (see [Bodies](bodies.md)). **End**: a depth, a depth split evenly to both sides, through the whole part, or up to a picked flat face. **Opposite direction** flips it; the optional **Draft angle** tapers the sides.
+- **Revolve**: a sketch turned about an axis, a line of the same sketch or a straight edge of the part. **Regions** works as for Extrude. **Angle** is up to a full turn; **Symmetric** splits it to both sides.
 - **Fillet**: rounds the picked edges with a radius.
 - **Chamfer**: bevels the picked edges, by one distance, by two, or by a distance and an angle.
 - **Shell**: hollows the part with a wall thickness, removing the picked faces to open it; with none it becomes a closed hollow. **Grow the wall outward** keeps the inside as it is.

@@ -11,6 +11,8 @@
 
 import type {
   DimensionalConstraint,
+  OutlineEntity,
+  OutlineSource,
   PointRef,
   SketchConstraint,
   SketchEntity,
@@ -20,7 +22,13 @@ import type {
   Vec2,
 } from '@manufakture/sketch/model';
 import { applyCoordinates } from '@manufakture/sketch/model';
-import type { DisplayUnits, FaceRef } from '@manufakture/core';
+import {
+  bareUnits,
+  type DisplayUnits,
+  type DocumentFont,
+  type FaceRef,
+  type StoredExpression,
+} from '@manufakture/core';
 import type { SketchSolverApi } from '@manufakture/sketch';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import { constraintsFromSelection, type ConstraintToolKind } from './constraints';
@@ -40,6 +48,14 @@ import {
   type DrawState,
   type ToolId,
 } from './tools';
+import {
+  DEFAULT_TEXT_SIZE_MM,
+  boxDistance,
+  placedTexts,
+  shapesBox,
+  type Box,
+  type TextPreview,
+} from './text';
 import { checkValue, measuredSource, type ValueCheck, type Variables } from './values';
 
 export interface SketchSource {
@@ -57,6 +73,29 @@ export interface SketchSource {
   nextConstraint: number;
   units: DisplayUnits;
   variables: Variables;
+  /** The document's fonts, which texts name by id. */
+  fonts?: readonly DocumentFont[];
+  /** Next number of the document's `font` counter. */
+  nextFont?: number;
+  /**
+   * The bundled font a new text uses when the document has none yet (ADR 0011 decision 6): it
+   * is added to the document with the sketch.
+   */
+  bundledFont?: { id: string; family: string; style: string; sha256: string };
+}
+
+/** A change to a text: its source fields, or its angle. */
+export interface TextPatch {
+  text?: string;
+  font?: string;
+  size?: StoredExpression;
+  align?: OutlineSource['align'];
+  /** Null removes it (no extra spacing). */
+  letterSpacing?: StoredExpression | null;
+  /** Null removes it (the font's line height). */
+  lineSpacing?: StoredExpression | null;
+  /** Radians, counter-clockwise. */
+  angle?: number;
 }
 
 /** What the last solve said, without the entities (those are in `sketch`). */
@@ -119,10 +158,18 @@ export interface SketchSessionState {
   canUndo: boolean;
   canRedo: boolean;
   dragging: boolean;
+  /** The document's fonts and those added in this session, which texts name by id. */
+  fonts: readonly DocumentFont[];
+  /** Fonts added in this session (Add font, or the bundled font for a first text). */
+  addedFonts: readonly DocumentFont[];
+  /** The last layout of each text, by entity id (see `useTextPreviews`). */
+  texts: Readonly<Record<string, TextPreview>>;
+  /** A text just placed with the Text tool: its panel takes the keyboard. */
+  placedText: string | null;
 
   begin(source: SketchSource): void;
-  /** End the session and return the sketch to commit. */
-  finish(): { source: SketchSource; sketch: SketchInput } | null;
+  /** End the session and return the sketch to commit, with the fonts added to it. */
+  finish(): { source: SketchSource; sketch: SketchInput; fonts: DocumentFont[] } | null;
   cancel(): void;
 
   setTool(tool: ToolId): void;
@@ -151,6 +198,17 @@ export interface SketchSessionState {
   setDimensionValue(id: string, source: string): ValueCheck;
   moveLabel(id: string, at: Vec2): void;
 
+  /**
+   * Change a text. Edits with the same `coalesce` key in a row (typing in one field) are one
+   * undo step.
+   */
+  updateText(id: string, patch: TextPatch, options?: { coalesce?: string }): void;
+  /** Add a user font to the sketch's fonts; it is added to the document with the sketch. */
+  addFont(font: Omit<DocumentFont, 'id'>): DocumentFont;
+  /** The id `addFont` gives the next font. */
+  nextFontId(): string;
+  setTextPreview(id: string, preview: TextPreview): void;
+
   undo(): void;
   redo(): void;
   /** Resolves when no solve is in flight. */
@@ -173,6 +231,15 @@ export function createSketchSession(solver: SketchSolverApi): SketchSessionStore
   let curveBusy: Promise<void> | null = null;
   let nextE = 1;
   let nextK = 1;
+  let nextFont = 1;
+  /** The field the last text edit came from, while the user keeps typing in it. */
+  let coalescing: string | null = null;
+  /** Text boxes for hit testing, for the entities and previews they were made from. */
+  let boxCache: {
+    entities: readonly SketchEntity[];
+    texts: Readonly<Record<string, TextPreview>>;
+    boxes: Map<string, Box>;
+  } | null = null;
 
   return createStore<SketchSessionState>()((set, get) => {
     const index = (): EntityIndex => indexEntities(get().sketch.entities);
@@ -209,6 +276,7 @@ export function createSketchSession(solver: SketchSolverApi): SketchSessionStore
 
     /** Replace the sketch as one undo step, and solve. */
     const edit = (next: SketchInput, added: string[] = [], record = true) => {
+      coalescing = null;
       if (record) {
         undoStack.push(get().sketch);
         if (undoStack.length > HISTORY_LIMIT) undoStack.shift();
@@ -216,6 +284,57 @@ export function createSketchSession(solver: SketchSolverApi): SketchSessionStore
       }
       set({ sketch: next, lastAdded: added, ...history() });
       void resolve();
+    };
+
+    /** The boxes of the texts laid out so far, for picking them by their letters. */
+    const textBoxes = (): Map<string, Box> => {
+      const { sketch, texts } = get();
+      if (boxCache?.entities === sketch.entities && boxCache.texts === texts) return boxCache.boxes;
+      const boxes = new Map<string, Box>();
+      for (const [id, shapes] of placedTexts(sketch.entities, texts)) {
+        const box = shapesBox(shapes);
+        if (box) boxes.set(id, box);
+      }
+      boxCache = { entities: sketch.entities, texts, boxes };
+      return boxes;
+    };
+    /** What is under `at`: `hitTest`, then a text whose letters' box holds it. */
+    const hit = (at: Vec2, tolerance: number): SketchItem | null => {
+      const item = hitTest(get().sketch.entities, at, tolerance);
+      // Geometry right at the pointer wins over a text it lies in (a plate around a label);
+      // a text wins over the axes it lies on.
+      if (item && !isBuiltinItem(item)) return item;
+      for (const [id, box] of textBoxes()) {
+        if (boxDistance(box, at) <= tolerance * 0.5) return { kind: 'entity', id };
+      }
+      return item;
+    };
+
+    /** The font a new text uses: the bundled one, added to the sketch's fonts if need be. */
+    const textFont = (): string | null => {
+      const { source, fonts } = get();
+      const bundled = source?.bundledFont;
+      const existing = fonts.find(
+        (f) => f.source.kind === 'bundled' && (!bundled || f.source.id === bundled.id),
+      );
+      if (existing) return existing.id;
+      if (!bundled) return fonts[0]?.id ?? null;
+      const font: DocumentFont = {
+        id: `font#${nextFont++}`,
+        family: bundled.family,
+        style: bundled.style,
+        source: { kind: 'bundled', id: bundled.id, sha256: bundled.sha256 },
+      };
+      set({ fonts: [...fonts, font], addedFonts: [...get().addedFonts, font] });
+      return font.id;
+    };
+    /** A new text's size, typed in the document's units. */
+    const textSize = (): StoredExpression => {
+      const units = get().source!.units;
+      return {
+        source: measuredSource(DEFAULT_TEXT_SIZE_MM, 'length', units),
+        ...bareUnits(units),
+      };
     };
 
     const entityId = () => `e${nextE++}`;
@@ -284,6 +403,10 @@ export function createSketchSession(solver: SketchSolverApi): SketchSessionStore
       canUndo: false,
       canRedo: false,
       dragging: false,
+      fonts: [],
+      addedFonts: [],
+      texts: {},
+      placedText: null,
 
       begin(source) {
         undoStack = [];
@@ -291,9 +414,16 @@ export function createSketchSession(solver: SketchSolverApi): SketchSessionStore
         drag = null;
         nextE = source.nextEntity;
         nextK = source.nextConstraint;
+        nextFont = source.nextFont ?? 1;
+        coalescing = null;
+        boxCache = null;
         set({
           active: true,
           source,
+          fonts: source.fonts ?? [],
+          addedFonts: [],
+          texts: {},
+          placedText: null,
           sketch: { entities: source.entities, constraints: source.constraints },
           solve: null,
           solverError: null,
@@ -311,7 +441,7 @@ export function createSketchSession(solver: SketchSolverApi): SketchSessionStore
       },
 
       finish() {
-        const { source, sketch } = get();
+        const { source, sketch, addedFonts } = get();
         if (!source) return null;
         generation++; // a solve still running must not land on the next session
         void solver.close(source.featureId).catch(() => undefined);
@@ -322,8 +452,11 @@ export function createSketchSession(solver: SketchSolverApi): SketchSessionStore
           solve: null,
           editing: null,
           selection: [],
+          texts: {},
+          addedFonts: [],
+          placedText: null,
         });
-        return { source, sketch };
+        return { source, sketch, fonts: [...addedFonts] };
       },
 
       cancel() {
@@ -337,6 +470,9 @@ export function createSketchSession(solver: SketchSolverApi): SketchSessionStore
           solve: null,
           editing: null,
           selection: [],
+          texts: {},
+          addedFonts: [],
+          placedText: null,
         });
       },
 
@@ -374,13 +510,13 @@ export function createSketchSession(solver: SketchSolverApi): SketchSessionStore
       },
 
       pointerMove(input) {
-        const { tool, draw, sketch } = get();
+        const { tool, draw } = get();
         if (draw) {
           const pick = drawPick(input, draw);
           set({ cursor: pick, draw: toolMove(draw, pick), hovered: null });
           return;
         }
-        const hovered = hitTest(sketch.entities, input.at, input.tolerance);
+        const hovered = hit(input.at, input.tolerance);
         const cursor: PickPoint = { position: input.at, target: null };
         if (!sameItem(hovered, get().hovered)) set({ hovered, cursor });
         else if (tool === 'dimension') set({ cursor });
@@ -388,17 +524,30 @@ export function createSketchSession(solver: SketchSolverApi): SketchSessionStore
 
       click(input) {
         const state = get();
-        const { draw, tool, sketch } = state;
+        const { draw, tool } = state;
         if (draw) {
           const pick = drawPick(input, draw);
+          const font = draw.tool === 'text' ? textFont() : null;
           const step = toolClick(draw, pick, {
             index: index(),
             construction: state.construction,
             tolerance: input.tolerance,
+            ...(font !== null ? { text: { font, size: textSize() } } : {}),
           });
           let next = step.state;
           if (step.draft) {
             const m = addDraft(step.draft);
+            if (draw.tool === 'text') {
+              // The text is placed: select it, and its panel takes the typing.
+              const placed = m.entities[0]!.id;
+              set({
+                ...resetTool('select'),
+                cursor: null,
+                selection: [{ kind: 'entity', id: placed }],
+                placedText: placed,
+              });
+              return;
+            }
             const rename = (id: string) => m.ids.get(id) ?? id;
             if (next.tool === 'line' && next.start)
               next = { ...next, start: renamePick(next.start, rename) };
@@ -406,16 +555,19 @@ export function createSketchSession(solver: SketchSolverApi): SketchSessionStore
           set({ draw: next, cursor: pick, message: step.message ?? null });
           return;
         }
-        const item = hitTest(sketch.entities, input.at, input.tolerance);
+        const item = hit(input.at, input.tolerance);
         if (tool === 'dimension') {
           const picks = state.dimensionPicks;
+          const idx = index();
           const pick: DimensionPick | null =
             item?.kind === 'point'
               ? { kind: 'point', ref: item.ref }
-              : item?.kind === 'entity'
-                ? { kind: 'curve', entity: item.id }
-                : null;
-          const idx = index();
+              : item?.kind === 'entity' && idx.get(item.id)?.kind === 'outline'
+                ? // A text is dimensioned by its anchor, like a point.
+                  { kind: 'point', ref: { entity: item.id, at: 'anchor' } }
+                : item?.kind === 'entity'
+                  ? { kind: 'curve', entity: item.id }
+                  : null;
           if (pick && picks.length < 2) {
             const already = picks.some((p) => JSON.stringify(p) === JSON.stringify(pick));
             if (already) return;
@@ -487,13 +639,15 @@ export function createSketchSession(solver: SketchSolverApi): SketchSessionStore
       dragStart(input) {
         const { tool, sketch } = get();
         if (tool !== 'select') return false;
-        const item = hitTest(sketch.entities, input.at, input.tolerance);
+        const item = hit(input.at, input.tolerance);
         if (!item || item.kind === 'constraint' || isBuiltinItem(item)) return false;
         const idx = index();
         let mode: DragState['mode'] = 'curve';
         let point: PointRef | null = null;
         if (item.kind === 'point') point = item.ref;
         else if (idx.get(item.id)?.kind === 'point') point = { entity: item.id };
+        // A text moves by its anchor, which the solver drags like a point.
+        else if (idx.get(item.id)?.kind === 'outline') point = { entity: item.id, at: 'anchor' };
         let offset: Vec2 = [0, 0];
         let started: Promise<void> = Promise.resolve();
         if (point) {
@@ -502,18 +656,20 @@ export function createSketchSession(solver: SketchSolverApi): SketchSessionStore
           const at =
             e.kind === 'point'
               ? e.position
-              : point.at === 'center'
-                ? (e as { center: Vec2 }).center
-                : point.at === 'end'
-                  ? (e as { end: Vec2 }).end
-                  : (e as { start: Vec2 }).start;
+              : e.kind === 'outline'
+                ? e.anchor
+                : point.at === 'center'
+                  ? (e as { center: Vec2 }).center
+                  : point.at === 'end'
+                    ? (e as { end: Vec2 }).end
+                    : (e as { start: Vec2 }).start;
           offset = sub(at, input.at);
           const ref = point;
           // Start after any solve in flight, so the drag starts from solved geometry.
           started = inflight.then(() => solver.dragStart(sessionId(), ref));
         }
         drag = { item, before: sketch, grab: input.at, offset, moved: false, mode, started };
-        set({ dragging: true, hovered: item });
+        set({ dragging: true, hovered: item, placedText: null });
         return true;
       },
 
@@ -597,6 +753,7 @@ export function createSketchSession(solver: SketchSolverApi): SketchSessionStore
 
       select(item, mode = 'replace') {
         const { selection } = get();
+        if (get().placedText !== null) set({ placedText: null });
         if (!item) {
           if (mode === 'replace' && selection.length > 0) set({ selection: [] });
           return;
@@ -717,7 +874,62 @@ export function createSketchSession(solver: SketchSolverApi): SketchSessionStore
         set({ labels: { ...get().labels, [id]: at } });
       },
 
+      updateText(id, patch, options = {}) {
+        const { sketch } = get();
+        const e = sketch.entities.find((x) => x.id === id);
+        if (!e || e.kind !== 'outline') return;
+        const source: OutlineSource = { ...e.source };
+        if (patch.text !== undefined) source.text = patch.text;
+        if (patch.font !== undefined) source.font = patch.font;
+        if (patch.size !== undefined) source.size = patch.size;
+        if (patch.align !== undefined) source.align = { ...patch.align };
+        if (patch.letterSpacing === null) delete source.letterSpacing;
+        else if (patch.letterSpacing !== undefined) source.letterSpacing = patch.letterSpacing;
+        if (patch.lineSpacing === null) delete source.lineSpacing;
+        else if (patch.lineSpacing !== undefined) source.lineSpacing = patch.lineSpacing;
+        const next: OutlineEntity = {
+          ...e,
+          source,
+          ...(patch.angle !== undefined && Number.isFinite(patch.angle)
+            ? { angle: patch.angle }
+            : {}),
+        };
+        if (JSON.stringify(next) === JSON.stringify(e)) return;
+        const key = options.coalesce ? `${id}:${options.coalesce}` : null;
+        const record = key === null || key !== coalescing;
+        edit(
+          {
+            entities: sketch.entities.map((x) => (x.id === id ? next : x)),
+            constraints: sketch.constraints,
+          },
+          [],
+          record,
+        );
+        coalescing = key;
+      },
+
+      addFont(font) {
+        // The same file twice is one font (core refuses a second copy).
+        const twin = get().fonts.find((f) => f.source.sha256 === font.source.sha256);
+        if (twin) return twin;
+        const added: DocumentFont = { ...font, id: `font#${nextFont++}` };
+        set({ fonts: [...get().fonts, added], addedFonts: [...get().addedFonts, added] });
+        return added;
+      },
+
+      nextFontId() {
+        return `font#${nextFont}`;
+      },
+
+      setTextPreview(id, preview) {
+        const { texts, sketch } = get();
+        if (!sketch.entities.some((e) => e.id === id)) return;
+        if (texts[id] === preview) return;
+        set({ texts: { ...texts, [id]: preview } });
+      },
+
       undo() {
+        coalescing = null;
         const prev = undoStack.pop();
         if (!prev) return;
         redoStack.push(get().sketch);
@@ -726,6 +938,7 @@ export function createSketchSession(solver: SketchSolverApi): SketchSessionStore
       },
 
       redo() {
+        coalescing = null;
         const next = redoStack.pop();
         if (!next) return;
         undoStack.push(get().sketch);

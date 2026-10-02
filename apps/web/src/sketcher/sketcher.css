@@ -477,3 +477,115 @@
   background: none;
   text-align: left;
 }
+
+/* Texts: one path per glyph, outlined in the entity's state colour (T3.2d). */
+.sk-text path {
+  stroke: inherit;
+  stroke-width: 1.25;
+}
+
+.sk-text.hovered path,
+.sk-text.selected path {
+  stroke-width: 2;
+}
+
+.sk-committed.text {
+  fill: rgb(107 118 132 / 12%);
+  stroke-width: 1;
+}
+
+/* The Text panel and Add font, in the sketch's side panel. */
+.text-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #d6dce3;
+}
+
+.text-panel h2 {
+  margin: 0;
+}
+
+.text-panel .text-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.text-panel .text-field > label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.text-panel textarea {
+  font: inherit;
+  resize: vertical;
+}
+
+.text-panel .text-align {
+  flex-direction: row;
+  gap: 0.5rem;
+}
+
+.text-panel .field-note {
+  margin: 0;
+  color: #5b6573;
+  font-size: 0.8rem;
+}
+
+.text-error {
+  margin: 0;
+  color: var(--sk-over, #c62828);
+  font-size: 0.85rem;
+}
+
+.text-warning {
+  margin: 0;
+  color: #8a5a00;
+  font-size: 0.85rem;
+}
+
+.add-font {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.5rem;
+  border: 1px solid #d6dce3;
+  border-radius: 4px;
+  background: #f7f9fb;
+}
+
+.add-font h4 {
+  margin: 0;
+}
+
+.add-font .dialog-buttons {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.font-summary dl {
+  margin: 0;
+}
+
+.font-summary .font-row {
+  display: grid;
+  grid-template-columns: 6.5rem 1fr;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+}
+
+.font-summary dt {
+  color: #5b6573;
+}
+
+.font-summary dd {
+  margin: 0;
+  max-height: 6rem;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}

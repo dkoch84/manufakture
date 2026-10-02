@@ -55,9 +55,15 @@ export function useSketching(
     const s = session.getState();
     if (!s.active || !s.source || !partId.current) return false;
     await s.idle();
-    const { source, sketch } = session.getState();
+    const { source, sketch, addedFonts } = session.getState();
     if (!source) return false;
-    const commit = commitSketch(documents.getState().document, partId.current, source, sketch);
+    const commit = commitSketch(
+      documents.getState().document,
+      partId.current,
+      source,
+      sketch,
+      addedFonts,
+    );
     if (commit) {
       const r = documents.getState().execute(commit.command, commit.label);
       if (!r.ok) {

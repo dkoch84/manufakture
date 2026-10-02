@@ -1,13 +1,17 @@
 // Between the document and a sketch session: what a session starts from
 // (a new sketch on a plane, or an existing sketch feature), and the one
-// document command that commits it when the user exits the sketch.
+// document command that commits it when the user exits the sketch (with the
+// fonts its texts added, in the same batch: one undo step).
 
+import { DEFAULT_FONT_ID, bundledFont } from '@manufakture/regen/client';
 import {
+  FONT_COUNTER,
   findPart,
   parseFeatureId,
   peekCounter,
   previewIds,
   type Command,
+  type DocumentFont,
   type FaceRef,
   type ManufaktureDocument,
   type SketchFeature,
@@ -63,11 +67,24 @@ export function startSketch(
 ): { ok: true; value: SketchStart } | { ok: false; message: string } {
   const part = findPart(doc, partId);
   if (!part) return { ok: false, message: `There is no part ${partId}.` };
+  const bundled = bundledFont(DEFAULT_FONT_ID);
   const base = {
     nextEntity: peekCounter(part.nextIds, 'e'),
     nextConstraint: peekCounter(part.nextIds, 'k'),
     units: doc.units,
     variables: evaluateVariables(doc),
+    fonts: doc.fonts,
+    nextFont: peekCounter(doc.nextIds, FONT_COUNTER),
+    ...(bundled
+      ? {
+          bundledFont: {
+            id: bundled.id,
+            family: bundled.family,
+            style: bundled.style,
+            sha256: bundled.sha256,
+          },
+        }
+      : {}),
   };
   if (target.kind === 'new') {
     const [featureId] = previewIds(part.nextIds, 'sketch');
@@ -119,9 +136,27 @@ export function startSketch(
 
 /**
  * The command that commits a finished session, with its undo label, or null
- * when an edited sketch did not change.
+ * when an edited sketch did not change and added no font. Fonts the session
+ * added (`fonts`) go first, in one batch with the sketch.
  */
 export function commitSketch(
+  doc: ManufaktureDocument,
+  partId: string,
+  source: SketchSource,
+  sketch: SketchInput,
+  fonts: readonly DocumentFont[] = [],
+): { command: Command; label: string } | null {
+  const sketchCommit = commitSketchOnly(doc, partId, source, sketch);
+  if (fonts.length === 0) return sketchCommit;
+  const adds: Command[] = fonts.map((font) => ({ type: 'addFont', font }));
+  const commands = sketchCommit ? [...adds, sketchCommit.command] : adds;
+  return {
+    command: { type: 'batch', commands },
+    label: sketchCommit?.label ?? (fonts.length === 1 ? 'Add a font' : 'Add fonts'),
+  };
+}
+
+function commitSketchOnly(
   doc: ManufaktureDocument,
   partId: string,
   source: SketchSource,

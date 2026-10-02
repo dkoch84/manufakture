@@ -18,7 +18,7 @@
 // the in-process `createTextOutliner`, is in `text-engine.ts`, which the regen worker loads only
 // when it runs text in-process.
 
-import type { OutlineAlign } from '@manufakture/core';
+import { MAX_IMPORT_BYTES, type OutlineAlign } from '@manufakture/core';
 import type { OutlinePartsResult } from '@manufakture/sketch';
 import { decodeBase64 } from './imports';
 import { Watchdog, WatchdogError, type WorkerLike } from './watchdog';
@@ -86,6 +86,18 @@ export interface TextOutliner {
 /** The message a user sees for a font that could not be read. */
 export function unreadableFont(name: string, why: string): string {
   return `This font could not be read (${name}): ${why}`;
+}
+
+/**
+ * "This font could not be read" for a file of `size` bytes above `MAX_IMPORT_BYTES` (20 MiB), or
+ * null when the size is allowed.
+ */
+export function fontTooLarge(fileName: string, size: number): string | null {
+  if (size <= MAX_IMPORT_BYTES) return null;
+  return unreadableFont(
+    fileName,
+    `it is ${size} bytes, and a font may be at most ${MAX_IMPORT_BYTES} bytes`,
+  );
 }
 
 export function fontName(
@@ -248,13 +260,73 @@ export interface WireOutline extends Omit<TextRequest, 'font'> {
   font: WireFont;
 }
 
-export type WireRequest = WireLoad | WireOutline;
+/** Read a user font's names and permissions (and keep it loaded): what **Add font** shows. */
+export interface WireInfo {
+  op: 'info';
+  font: { kind: 'file'; fileName: string; size: number; sha256: string; bytes: Uint8Array };
+}
+
+export type WireRequest = WireLoad | WireOutline | WireInfo;
 
 /** A reply from the text worker: as `TextReply`, "the font is loaded", or "send the font's bytes". */
 export type WireReply =
   | TextReply
   | { ok: true; code: 'loaded'; sha256: string }
+  | { ok: true; code: 'info'; info: FontSummary }
   | { ok: false; code: 'need-bytes'; message: string };
+
+// Reading a user font's metadata -------------------------------------------------------------
+
+/**
+ * What the app shows of a user font when it is added (ADR 0011 decision 7), read from the font
+ * in the text worker under the watchdog: the family and style the document records, the
+ * version, the copyright and license strings (names 0, 13 and 14) and the embedding permissions
+ * (OS/2 `fsType`). Every string comes from an untrusted file: it is cut to
+ * `MAX_FONT_NAME_LENGTH` characters, and the app shows it as plain text, never as markup or a
+ * link.
+ */
+export interface FontSummary {
+  family: string;
+  style: string;
+  fullName?: string;
+  version?: string;
+  copyright?: string;
+  license?: string;
+  licenseUrl?: string;
+  /** OS/2 `fsType`, as stored. */
+  fsType: number;
+  embedding: {
+    level: 'installable' | 'restricted' | 'preview-and-print' | 'editable';
+    noSubsetting: boolean;
+    bitmapOnly: boolean;
+    /** Restricted, or preview and print: sharing a document that holds it may not be allowed. */
+    restrictive: boolean;
+  };
+  outlines: 'truetype' | 'cff';
+  variable: boolean;
+  glyphCount: number;
+  /** Lower-case hex SHA-256 of the file. */
+  sha256: string;
+  /** Bytes. */
+  size: number;
+}
+
+/** The longest string of a `FontSummary` (a license text is cut here, with an ellipsis). */
+export const MAX_FONT_NAME_LENGTH = 2000;
+
+/** A user font read for **Add font**: its summary, or why it cannot be used. */
+export type FontReadReply = { ok: true; info: FontSummary } | { ok: false; message: string };
+
+/** Reads user fonts' metadata under a time limit (the watchdog outliner does). */
+export interface FontReader {
+  readFont(fileName: string, bytes: Uint8Array): Promise<FontReadReply>;
+}
+
+/** Lower-case hex SHA-256 of bytes (Web Crypto, in the browser, workers and Node alike). */
+export async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', bytes as Uint8Array<ArrayBuffer>);
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
 
 // The regen worker's side --------------------------------------------------------------------
 
@@ -272,12 +344,13 @@ export interface WatchdogOutlinerOptions {
  * request starts a new worker. Failures that may not repeat are not remembered for the session:
  * a bundled font (its fetch may have been slow), and a worker that could not be started; they are
  * remembered on the call's `TextBudget` for the rest of the regen, so each costs the time limit at
- * most once per regen. The time a call takes, loading included, is charged to its font.
+ * most once per regen. The time a call's requests run, loading included, is charged to its font;
+ * the time they wait in the watchdog's queue behind other requests is not.
  */
 export function createWatchdogOutliner(
   spawn: () => WorkerLike,
   options: WatchdogOutlinerOptions = {},
-): TextOutliner & { readonly watchdog: Watchdog<WireRequest, WireReply> } {
+): TextOutliner & FontReader & { readonly watchdog: Watchdog<WireRequest, WireReply> } {
   const timeLimit = options.timeLimit ?? TEXT_TIME_LIMIT_MS;
   // `serveText` says when the worker has started, so a worker that never starts is not
   // mistaken for a font that hangs.
@@ -296,17 +369,22 @@ export function createWatchdogOutliner(
   // not tried again, so one hostile font costs the time limit once, not once per text.
   const failed = new Map<string, string>();
 
-  const load = (font: TextFontRef, signal: AbortSignal | undefined): Promise<WireReply> => {
-    if (font.kind === 'bundled') return watchdog.call({ op: 'load', font }, [], signal);
+  const load = (
+    font: TextFontRef,
+    signal: AbortSignal | undefined,
+    onStart: () => void,
+  ): Promise<WireReply> => {
+    if (font.kind === 'bundled') return watchdog.call({ op: 'load', font }, [], signal, onStart);
     const { data, ...rest } = font;
     const bytes = decodeBase64(data) ?? new Uint8Array(0);
     return watchdog.call(
       { op: 'load', font: { ...rest, bytes } },
       [bytes.buffer as ArrayBuffer],
       signal,
+      onStart,
     );
   };
-  const layout = (request: TextRequest, signal: AbortSignal | undefined) => {
+  const layout = (request: TextRequest, signal: AbortSignal | undefined, onStart: () => void) => {
     const { font } = request;
     let wire: WireFont = font;
     if (font.kind === 'file') {
@@ -315,11 +393,51 @@ export function createWatchdogOutliner(
       void data;
       wire = rest;
     }
-    return watchdog.call({ ...request, op: 'outline', font: wire }, [], signal);
+    return watchdog.call({ ...request, op: 'outline', font: wire }, [], signal, onStart);
   };
 
   return {
     watchdog,
+    async readFont(fileName, bytes) {
+      // A font is an import like any other: no larger than `MAX_IMPORT_BYTES`, checked here
+      // before the bytes are hashed, copied or sent on, whatever the caller checked.
+      const tooLarge = fontTooLarge(fileName, bytes.length);
+      if (tooLarge) return { ok: false, message: tooLarge };
+      // The same rules as a text's font: a font that hung or crashed the worker before is not
+      // tried again, and a timeout or a crash is "this font could not be read".
+      const sha256 = await sha256Hex(bytes);
+      const key = fontKey({ kind: 'file', sha256 });
+      const known = failed.get(key);
+      if (known !== undefined) return { ok: false, message: known };
+      // A copy crosses (transferred), so the caller keeps its bytes for the document.
+      const copy = bytes.slice();
+      try {
+        const reply = await watchdog.call(
+          { op: 'info', font: { kind: 'file', fileName, size: copy.length, sha256, bytes: copy } },
+          [copy.buffer as ArrayBuffer],
+        );
+        sync();
+        if (reply.ok && 'info' in reply) {
+          loaded.add(key);
+          return { ok: true, info: reply.info };
+        }
+        return {
+          ok: false,
+          message: 'message' in reply ? reply.message : unreadableFont(fileName, 'no reply'),
+        };
+      } catch (error) {
+        if (!(error instanceof WatchdogError)) throw error;
+        const why =
+          error.reason === 'spawn'
+            ? `the text worker could not be started (${error.message})`
+            : error.reason === 'timeout'
+              ? `reading it took longer than ${timeLimit} ms`
+              : 'reading it ran out of memory or crashed';
+        const message = unreadableFont(fileName, why);
+        if (error.reason === 'timeout' || error.reason === 'crashed') failed.set(key, message);
+        return { ok: false, message };
+      }
+    },
     async outline(request, call = {}) {
       const { font } = request;
       const name = fontName(font);
@@ -350,13 +468,20 @@ export function createWatchdogOutliner(
       if (refused) return refused;
       if (call.signal?.aborted) throw new TextCancelled();
 
-      // Everything the call takes, loading the font included, is charged to the font: a font
-      // whose load is slow uses up its budget like one whose texts are.
-      let mark = now();
-      const settle = () => {
-        const at = now();
-        budget?.charge(key, at - mark);
-        mark = at;
+      // The time the call's requests run, loading the font included, is charged to the font: a
+      // font whose load is slow uses up its budget like one whose texts are. Only their run, from
+      // when each request's turn comes in the watchdog's queue: previews and regens share the
+      // queue, so the wait behind another font's slow request is that font's cost, not this one's.
+      let started: number | null = null;
+      const begin = () => {
+        started = now();
+      };
+      // A request that passed the time limit costs the whole limit, however early the timer fired.
+      const settle = (timedOut = false) => {
+        if (started === null) return;
+        const elapsed = now() - started;
+        budget?.charge(key, timedOut ? Math.max(elapsed, timeLimit) : elapsed);
+        started = null;
       };
       let phase: 'load' | 'layout' | undefined;
       try {
@@ -364,7 +489,8 @@ export function createWatchdogOutliner(
           sync();
           if (!loaded.has(key)) {
             phase = 'load';
-            const reply = await load(font, call.signal);
+            const reply = await load(font, call.signal, begin);
+            settle();
             sync();
             if (!reply.ok) {
               const why = reply.message;
@@ -384,13 +510,13 @@ export function createWatchdogOutliner(
             loaded.add(key);
           }
           phase = 'layout';
-          const reply = await layout(request, call.signal);
+          const reply = await layout(request, call.signal, begin);
+          settle();
           sync();
           // The worker let the font go (it keeps a few): load it again, once, if the budget allows.
           if (!reply.ok && reply.code === 'need-bytes') {
             loaded.delete(key);
             if (attempt === 0) {
-              settle();
               const again = refuse();
               if (again) return again;
               continue;
@@ -401,6 +527,7 @@ export function createWatchdogOutliner(
         }
       } catch (error) {
         if (!(error instanceof WatchdogError)) throw error;
+        if (error.reason === 'timeout') settle(true);
         if (error.reason === 'cancelled') throw new TextCancelled();
         if (error.reason === 'spawn') {
           budget?.fail(TEXT_WORKER_KEY, error.message);

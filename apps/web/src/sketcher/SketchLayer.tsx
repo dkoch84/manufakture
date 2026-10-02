@@ -3,6 +3,7 @@
 // viewport element, on top of the canvas.
 
 import type { SketchFeature } from '@manufakture/core';
+import type { OutlineShape } from '@manufakture/sketch/geometry';
 import { useEffect, useMemo, useState } from 'react';
 import { useStore } from 'zustand';
 import type { ViewportApi } from '../viewport/Viewport';
@@ -11,6 +12,7 @@ import { tessellate } from './geometry';
 import { pathData, sketchView } from './projection';
 import type { SketchSessionStore } from './session';
 import { SketchCanvas } from './SketchMode';
+import { glyphOutlines, pointBudget, type Texter } from './text';
 
 export interface SketchLayerProps {
   viewport: ViewportApi;
@@ -20,6 +22,10 @@ export interface SketchLayerProps {
   placements?: SketchPlacements;
   /** A sketch to highlight (hovered in the feature tree). */
   highlighted?: string | null;
+  /** The texts of each sketch as regen last placed them (`FeatureResult.outlines`), by feature id. */
+  outlines?: ReadonlyMap<string, readonly OutlineShape[]>;
+  /** Lays texts out while a sketch is edited. */
+  texter?: Texter | null;
 }
 
 /** Re-renders the caller whenever the viewport's camera or size changes. */
@@ -40,6 +46,8 @@ export function SketchLayer({
   sketches,
   placements,
   highlighted = null,
+  outlines,
+  texter = null,
 }: SketchLayerProps) {
   const version = useViewVersion(viewport);
   const editing = useStore(session, (s) => (s.active ? (s.source?.featureId ?? null) : null));
@@ -52,8 +60,11 @@ export function SketchLayer({
         placements={placements}
         highlighted={highlighted}
         version={version}
+        outlines={outlines}
       />
-      {editing !== null && <SketchCanvas session={session} viewport={viewport} size={size} />}
+      {editing !== null && (
+        <SketchCanvas session={session} viewport={viewport} size={size} texter={texter} />
+      )}
     </>
   );
 }
@@ -64,33 +75,50 @@ function CommittedSketches({
   placements,
   highlighted,
   version,
+  outlines,
 }: {
   viewport: ViewportApi;
   sketches: readonly SketchFeature[];
   placements: SketchPlacements | undefined;
   highlighted: string | null;
   version: number;
+  outlines: ReadonlyMap<string, readonly OutlineShape[]> | undefined;
 }) {
-  const paths = useMemo(
-    () =>
-      sketches.flatMap((f) => {
-        const placement = sketchPlacement(f, placements);
-        if (!placement) return [];
-        const view = sketchView(viewport, placement);
-        return f.entities
-          .filter((e) => e.kind !== 'point')
-          .map((e) => ({
-            key: `${f.id}/${e.id}`,
-            feature: f.id,
-            construction: e.construction,
-            d: pathData(view, tessellate(e)),
-          }))
-          .filter((p) => p.d !== '');
-      }),
+  const paths = useMemo(() => {
+    // One point budget for the texts of every committed sketch, however many there are.
+    const budget = pointBudget();
+    return sketches.flatMap((f) => {
+      const placement = sketchPlacement(f, placements);
+      if (!placement) return [];
+      const view = sketchView(viewport, placement);
+      const curves = f.entities
+        .filter((e) => e.kind !== 'point' && e.kind !== 'outline')
+        .map((e) => ({
+          key: `${f.id}/${e.id}`,
+          feature: f.id,
+          construction: e.construction,
+          text: false,
+          d: pathData(view, tessellate(e)),
+        }));
+      // Texts as regen built them, one path per glyph.
+      const shapes = outlines?.get(f.id) ?? [];
+      const construction = new Set(
+        f.entities.filter((e) => e.kind === 'outline' && e.construction).map((e) => e.id),
+      );
+      const upp = view.unitsPerPixel(0, 0);
+      const tolerance = Number.isFinite(upp) && upp > 0 ? upp * 0.5 : 0.05;
+      const glyphs = glyphOutlines(shapes, tolerance, budget).map((g) => ({
+        key: `${f.id}/${g.key}`,
+        feature: f.id,
+        construction: construction.has(g.key.split('.')[0]!),
+        text: true,
+        d: g.loops.map((l) => pathData(view, l, true)).join(' '),
+      }));
+      return [...curves, ...glyphs].filter((p) => p.d !== '');
+    });
     // `version` stands for the camera: re-project when it changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [viewport, sketches, placements, version],
-  );
+  }, [viewport, sketches, placements, version, outlines]);
   if (paths.length === 0) return null;
   return (
     <svg
@@ -102,8 +130,9 @@ function CommittedSketches({
       {paths.map((p) => (
         <path
           key={p.key}
-          className={`sk-committed${p.construction ? ' construction' : ''}${p.feature === highlighted ? ' hovered' : ''}`}
+          className={`sk-committed${p.text ? ' text' : ''}${p.construction ? ' construction' : ''}${p.feature === highlighted ? ' hovered' : ''}`}
           data-feature={p.feature}
+          {...(p.text ? { fillRule: 'evenodd' as const, 'data-text': 'true' } : {})}
           d={p.d}
         />
       ))}

@@ -15,7 +15,9 @@ import type { PointerInput, SketchSessionStore } from './session';
 import { SketchOverlay } from './SketchOverlay';
 import { selectModeOf } from './items';
 import { conflictBlame, describeStatus } from './status';
+import type { Texter } from './text';
 import { toolPrompt, type ToolId } from './tools';
+import { useTextPreviews } from './useTextPreviews';
 import { formatValue, valueKindOf, evaluateStored } from './values';
 
 /** Pixels within which the pointer snaps to and picks sketch geometry. */
@@ -44,6 +46,12 @@ const TOOLS: readonly { id: ToolId; label: string; key: string; title: string }[
   { id: 'centerArc', label: 'Center arc', key: '', title: 'Arc from its centre' },
   { id: 'point', label: 'Point', key: 'p', title: 'Point: a hole centre or a reference (P)' },
   {
+    id: 'text',
+    label: 'Text',
+    key: 'x',
+    title: 'Text: click where it goes, then type it in the Text panel (X)',
+  },
+  {
     id: 'dimension',
     label: 'Dimension',
     key: 'd',
@@ -56,11 +64,14 @@ export interface SketchModeProps {
   viewport: ViewportApi;
   /** Where the overlay goes: the viewport's own element, over the canvas. */
   size: { width: number; height: number };
+  /** Lays texts out (the regen worker's text outliner); without it texts show as their anchor. */
+  texter?: Texter | null;
 }
 
 /** The sketch drawing, attached to the viewport. Rendered inside the viewport element. */
-export function SketchCanvas({ session, viewport, size }: SketchModeProps) {
+export function SketchCanvas({ session, viewport, size, texter = null }: SketchModeProps) {
   const placement = useStore(session, (s) => s.source?.placement ?? null);
+  useTextPreviews(session, texter);
   const [version, setVersion] = useState(0);
 
   useEffect(() => viewport.onViewChange(() => setVersion((v) => v + 1)), [viewport]);

@@ -101,7 +101,7 @@ export function nearestCurve(
   let best: { entity: string; position: Vec2 } | null = null;
   let bestD = tolerance;
   for (const e of entities) {
-    if (e.kind === 'point' || exclude?.has(e.id)) continue;
+    if (e.kind === 'point' || e.kind === 'outline' || exclude?.has(e.id)) continue;
     const q = closestOnEntity(e, p);
     const d = distance(p, q);
     if (d <= bestD) {

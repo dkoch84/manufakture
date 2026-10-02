@@ -1,6 +1,6 @@
 # Sketches
 
-A sketch is a flat drawing of lines, arcs and circles on a plane, held in shape by constraints and dimensions. Closed areas in a sketch are what later features (extrude, revolve) turn into solids.
+A sketch is a flat drawing of lines, arcs, circles and text on a plane, held in shape by constraints and dimensions. Closed areas in a sketch are what later features (extrude, revolve) turn into solids; the letters of a text are closed areas too.
 
 ## Starting and leaving a sketch
 
@@ -8,7 +8,7 @@ A sketch is a flat drawing of lines, arcs and circles on a plane, held in shape 
 - **Finish sketch** saves the sketch to the part as one step: **Undo** in the header (or Ctrl+Z) takes the whole sketch back out, **Redo** (Ctrl+Y or Ctrl+Shift+Z) puts it back.
 - **Cancel** leaves the sketch without saving what you changed in it.
 - The [feature tree](feature-tree.md) lists the part's sketches with its other features. A double-click on a sketch (or its edit button) opens it again; finishing an edit is again one undo step.
-- Finished sketches stay visible in grey.
+- Finished sketches stay visible in grey, their texts as the part was built from them.
 
 A sketch on a face of the part stores the face itself, by its name, so it follows the face when the part changes (a taller extrusion lifts a sketch on its top). Its x axis runs along the world X axis (Y for a face that faces X), and its origin is where the world origin projects onto the face. A face of an imported reference body cannot be followed; a sketch there stores the plane as it is.
 
@@ -26,6 +26,7 @@ Pick a tool in the sketch toolbar, or press its key. **Esc** drops the shape you
 | Tangent arc      | G   | Click the end of a line or arc, then where the arc ends. The arc continues the curve smoothly.       |
 | Center arc       |     | Click the centre, the start, then the end. The arc goes the way you moved the pointer round.         |
 | Point            | P   | Click where a point goes: a hole centre for the Hole feature, or a reference to constrain to.        |
+| Text             | X   | Click where the text goes (its anchor), then type it in the Text panel. See [Text](text.md).         |
 | Construction     | Q   | New geometry is construction geometry (dashed). With geometry selected, it switches that geometry.   |
 
 You can also press, drag and release instead of clicking twice. Construction geometry helps position other geometry and never becomes part of a closed area.
@@ -97,11 +98,16 @@ When a new constraint or value cannot hold together with the others, the sketch 
 
 A constraint that repeats what others already say (a redundant one) is shown in amber; the sketch still solves.
 
+## Text
+
+The **Text** tool places a text at its **anchor**; the **Text** panel in the side panel sets its string, font, size, alignment, spacing and angle. The letters are drawn as the font shapes them and fill as regions, so a text inside a rectangle shows as letter-shaped holes in it. A text is dragged, dimensioned and constrained by its anchor, like a point: click its letters to select it. Fonts, sizes for printing and embossing are in [Text](text.md).
+
 ## Keys
 
 | Key                        | Action                                                          |
 | -------------------------- | --------------------------------------------------------------- |
 | S, L, R, C, A, G, P, D     | Select, Line, Rectangle, Circle, Arc, Tangent arc, Point, Dim.  |
+| X                          | Text                                                            |
 | Q                          | Construction                                                    |
 | H, V, I, T, E              | Constraints, with geometry selected                             |
 | Delete, Backspace          | Delete the selection                                            |

@@ -25,6 +25,16 @@ import {
   type RegenEngineOptions,
 } from './engine';
 import type { RegenSolver } from './sketches';
+import {
+  TextBudget,
+  lazyTextOutliner,
+  unreadableFont,
+  type FontReader,
+  type FontReadReply,
+  type TextOutliner,
+  type TextReply,
+  type TextRequest,
+} from './text';
 import { regenTransferables } from './transfer';
 import type {
   AssemblyResult,
@@ -83,13 +93,46 @@ export interface RegenWorkerApi extends KernelWorkerApi {
   cancelInterference(assemblyId: string): Promise<void>;
   /** Cumulative engine counters. */
   regenStats(): Promise<EngineStats>;
+  /**
+   * Lay out and outline one text for the sketcher, as a regen would (the same outliner, so the
+   * text worker under its watchdog in the browser): the glyph regions in the text's own frame,
+   * for the sketcher to place at the anchor it is dragging. Needs no kernel.
+   *
+   * The sketcher lays its texts out in passes (`TextPreviewOptions.pass`): the texts of one pass
+   * share a `TextBudget`, as a regen's do, and are laid out one after another, so a hostile font
+   * whose every text takes just under the time limit costs a pass about twice the limit, not
+   * the limit once per text. A call with no pass has a budget of its own.
+   */
+  outlineText(request: TextRequest, options?: TextPreviewOptions): Promise<TextReply>;
+  /**
+   * Read a user font's names and embedding permissions for **Add font**, in the text worker
+   * under its watchdog (never in this worker or on the main thread: ADR 0011's amendment). A
+   * host without the watchdog refuses.
+   */
+  readFont(fileName: string, bytes: Uint8Array): Promise<FontReadReply>;
 }
+
+/** What a sketcher's `outlineText` call says besides the request. */
+export interface TextPreviewOptions {
+  /** The sketcher's pass this text belongs to: the same number for every text of one pass. */
+  pass?: number;
+}
+
+/**
+ * How many preview passes keep their budgets, so the map stays small. A text takes its pass's
+ * budget when it is asked for, and the sketcher asks for all of a pass's texts at once with pass
+ * numbers that only grow, so a pass that falls out has no texts still to come; those it queued
+ * keep the budget they took.
+ */
+const PREVIEW_PASSES_KEPT = 8;
 
 export interface RegenWorkerApiOptions extends WorkerApiOptions {
   /** The sketch solver; default: planegcs in this worker, loaded on the first solve. */
   solver?: RegenSolver;
   /** Passed to the engine (cache, tessellation, build identities). */
   engine?: Omit<RegenEngineOptions, 'kernel' | 'solver'>;
+  /** Makes the budget of a preview pass (`outlineText`); default a `TextBudget` with its defaults. */
+  previewBudget?: () => TextBudget;
 }
 
 /** Build the API object; `worker.ts` passes it to `Comlink.expose`. */
@@ -100,6 +143,25 @@ export function createRegenWorkerApi(options: RegenWorkerApiOptions): RegenWorke
   const kernelApi = createKernelWorkerApi(options);
   const solver = options.solver ?? createSolverService();
   let engine: RegenEngine | null = null;
+  // The engine's outliner when the host passed one (the regen worker's watchdog outliner),
+  // else an in-process one for bundled fonts, as the engine would make.
+  const given: (TextOutliner & Partial<FontReader>) | undefined = options.engine?.text;
+  let outliner: TextOutliner | undefined = given;
+  // The budgets of the last few preview passes, and the queue that lays previews out one at a
+  // time (the text worker runs one request at a time anyway), so that a pass's budget is
+  // checked when each of its texts starts, not when they were all asked for at once.
+  const passes = new Map<number, TextBudget>();
+  let previews: Promise<unknown> = Promise.resolve();
+  const newBudget = options.previewBudget ?? (() => new TextBudget());
+  const passBudget = (pass: number | undefined): TextBudget => {
+    if (pass === undefined) return newBudget();
+    let budget = passes.get(pass);
+    if (!budget) {
+      passes.set(pass, (budget = newBudget()));
+      while (passes.size > PREVIEW_PASSES_KEPT) passes.delete(passes.keys().next().value!);
+    }
+    return budget;
+  };
 
   const engineFor = async (): Promise<RegenEngine> => {
     await kernelApi.init();
@@ -177,6 +239,27 @@ export function createRegenWorkerApi(options: RegenWorkerApiOptions): RegenWorke
 
     async regenStats() {
       return (await engineFor()).stats;
+    },
+
+    outlineText(request, options = {}) {
+      const text = (outliner ??= lazyTextOutliner());
+      const budget = passBudget(options.pass);
+      const reply = previews.then(() => text.outline(request, { budget }));
+      previews = reply.catch(() => undefined);
+      return reply;
+    },
+
+    async readFont(fileName, bytes) {
+      if (!given?.readFont) {
+        return {
+          ok: false,
+          message: unreadableFont(
+            fileName,
+            'user fonts are read only in the text worker, under a time limit, and this host has none',
+          ),
+        };
+      }
+      return given.readFont(fileName, bytes);
     },
   };
 }

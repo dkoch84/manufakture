@@ -88,10 +88,18 @@ export class Watchdog<Request, Reply> {
    * Send one request, after every earlier one has finished. Rejects with a `WatchdogError` when
    * it passes the time limit or the worker dies; the worker is then gone, and the next request
    * starts a new one. Aborting `signal` rejects it as `cancelled`: before it ran, it never runs;
-   * while it runs, the worker is terminated.
+   * while it runs, the worker is terminated. `onStart` is called when the request's turn comes
+   * (after the requests queued ahead of it, and once a worker is there for it), so a caller can
+   * time the request's own run and not its wait in the queue; a request cancelled before its
+   * turn, or one no worker could be started for, never calls it.
    */
-  call(request: Request, transfer: Transferable[] = [], signal?: AbortSignal): Promise<Reply> {
-    const run = this.#queue.then(() => this.#run(request, transfer, signal));
+  call(
+    request: Request,
+    transfer: Transferable[] = [],
+    signal?: AbortSignal,
+    onStart?: () => void,
+  ): Promise<Reply> {
+    const run = this.#queue.then(() => this.#run(request, transfer, signal, onStart));
     // Keep the queue going whatever this request does.
     this.#queue = run.catch(() => undefined);
     return run;
@@ -129,7 +137,12 @@ export class Watchdog<Request, Reply> {
     return worker;
   }
 
-  #run(request: Request, transfer: Transferable[], signal?: AbortSignal): Promise<Reply> {
+  #run(
+    request: Request,
+    transfer: Transferable[],
+    signal?: AbortSignal,
+    onStart?: () => void,
+  ): Promise<Reply> {
     return new Promise<Reply>((resolve, reject) => {
       if (signal?.aborted) {
         reject(new WatchdogError('cancelled', 'The request was cancelled.'));
@@ -142,6 +155,8 @@ export class Watchdog<Request, Reply> {
         reject(new WatchdogError('spawn', `The worker could not be started: ${String(error)}`));
         return;
       }
+      // After the worker is made, so starting one is not charged to the request that needs it.
+      onStart?.();
       const id = this.#nextId++;
       const onAbort = () => {
         if (this.#pending === pending) {

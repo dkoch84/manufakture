@@ -305,6 +305,33 @@ budget })` per outline entity, the request carrying the font (a bundled id, or a
   and 448,000 points; real text never comes near, and a hostile font whose glyphs have thousands of
   contours is stopped before its loops reach `detectRegions`, whose own work for outlines is
   bounded too (sketch README, "Outline entities").
+- **The sketcher's calls.** While a sketch is edited, the app draws its texts before any regen:
+  `outlineText(request)` on the worker API (`RegenClient.outlineText`) runs the same outliner the
+  engine uses (the watchdog outliner in the browser) on one `TextRequest` and returns its
+  `TextReply`, the glyph regions in the text's own frame, which the app places at the anchor it is
+  dragging (`placeOutline`). It needs no kernel and takes no generation, so it never cancels a
+  regen, and it is never cancelled itself: an abort would terminate the text worker, and the next
+  request would load the font again. The app waits 120 ms after the last change of a text before it
+  asks (apps/web `useTextPreviews.ts`). The app asks in passes, `outlineText(request, { pass })`:
+  the texts of one pass share a `TextBudget` as a regen's do, and the worker API lays previews out
+  one at a time, so each is checked against the budget when it starts. A hostile font whose every
+  text takes just under the time limit therefore costs a pass about two time limits (and is then
+  failed for the session, as in a regen), not one time limit per text of the sketch. Previews and
+  regens share the text worker's queue, so a font is charged only for the time its own requests
+  run, from when each one's turn comes (`Watchdog.call`'s `onStart`): waiting behind a hostile
+  font's slow request costs an honest font nothing.
+- **Reading a user font for Add font.** `readFont(fileName, bytes)` (`RegenClient.readFont`) refuses
+  a file above `MAX_IMPORT_BYTES` (20 MiB) before it hashes or copies it (and the text worker checks
+  the size of an `info` request again), then sends the file to the text worker under the same
+  watchdog as a `load` (`WireInfo`, op `info`) and replies with a `FontSummary`: family, style, version, copyright, license and license URL (names
+  1/16, 2/17, 5, 0, 13 and 14), `fsType` and its decoded embedding permissions, outline kind,
+  whether it is variable, its glyph count, size and SHA-256. Every string is cut to
+  `MAX_FONT_NAME_LENGTH` (2000) characters in the worker; the app shows them as plain text. The
+  font stays loaded in the text worker, so the first text set in it does not parse it again. A
+  font that times out or crashes the worker is "This font could not be read" and is remembered as
+  failed, like a font that does so in a regen; a host without the watchdog (`createTextOutliner`)
+  refuses (`unreadableFont(..., 'this host has none')`). The main thread never parses the file: it
+  checks only the name, size and signature first (apps/web `sketcher/text.ts`, `checkFontFile`).
 - **Cost.** Layout and outlines take about 0.13 ms per glyph, region detection adds little (10,000
   characters in a plate: about 1.3 s and 130 ms; 1000 characters: about 145 ms and 30 ms, logged
   by `text.test.ts`); the kernel's sweeps dominate (kernel README, "Several regions"). Core caps a
@@ -696,7 +723,11 @@ pnpm --filter @manufakture/regen test
   a worker that cannot be started or dies before it is ready, not remembered for the session but
   for the regen: six texts in a hanging bundled font cost one load and one worker; the budget
   checked again before a font a worker let go is loaded a second time; an aborted signal
-  terminating the worker), and the cost of a 1000-character text (logged).
+  terminating the worker), the cost of a 1000-character text (logged), and reading a user font
+  for Add font (its names and permissions from the bundled font's file, a file that is not a font
+  refused, strings cut to length, read through the watchdog with the bytes sent once and the font
+  kept for its first text, a font whose reading hangs failed once and never retried, and the worker
+  API's `readFont` and `outlineText`, refused without a watchdog).
 - `text-regen.test.ts`: text through the engine with the real kernel and solver: a plate with "OK"
   in it, the plate extruded by its lines (letter-shaped holes, the counter of the "O" kept) and the
   letters by the text, volumes against areas computed glyph by glyph from the font; a new string

@@ -69,6 +69,7 @@ export {
   type SolveOutcome,
 } from './sketches';
 export {
+  MAX_FONT_NAME_LENGTH,
   MAX_TEXT_CURVES,
   MAX_TEXT_LOOPS,
   MAX_TEXT_POINTS,
@@ -78,8 +79,12 @@ export {
   TextBudget,
   TextCancelled,
   createWatchdogOutliner,
+  fontTooLarge,
   lazyTextOutliner,
   unreadableFont,
+  type FontReadReply,
+  type FontReader,
+  type FontSummary,
   type TextCallOptions,
   type TextFontRef,
   type TextOutliner,
@@ -93,6 +98,7 @@ export {
 export {
   TextEngine,
   createTextOutliner,
+  fontSummary,
   serveText,
   textTooComplex,
   type TextEngineOptions,
@@ -122,5 +128,6 @@ export {
   createRegenWorkerApi,
   type RegenWorkerApi,
   type RegenWorkerApiOptions,
+  type TextPreviewOptions,
 } from './worker-api';
 export type * from './types';

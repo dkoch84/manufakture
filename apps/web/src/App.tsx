@@ -98,6 +98,7 @@ import {
   SketchToolbar,
 } from './sketcher/SketchMode';
 import { SketchMenu } from './sketcher/SketchPanels';
+import { TextPanel } from './sketcher/TextPanel';
 import { FeatureTree } from './tree/FeatureTree';
 import type { DialogRequest } from './features/FeatureDialog';
 import { openSourceAt } from './features/derived';
@@ -114,6 +115,7 @@ import { LoadingSplash } from './viewport/LoadingSplash';
 import { loaderForLocation, type LoadStatus, type SceneLoader } from './viewport/scenes';
 import { SelectionPanel, Toolbar } from './viewport/Toolbar';
 import { Viewport, type EngineFactory, type ViewportApi } from './viewport/Viewport';
+import { ThreadOverlay } from './viewport/ThreadOverlay';
 import './viewport/viewport.css';
 import './sketcher/sketcher.css';
 import './measure/measure.css';
@@ -409,6 +411,17 @@ export function App({
     const out = new Map<string, SketchPlacement>();
     for (const p of parts) {
       for (const f of p.features) if (f.placement) out.set(f.featureId, f.placement);
+    }
+    return out;
+  }, [parts]);
+  // The texts of each sketch as regen placed them, for drawing committed sketches.
+  const sketchOutlines = useMemo(() => {
+    const out = new Map<
+      string,
+      NonNullable<(typeof parts)[number]['features'][number]['outlines']>
+    >();
+    for (const p of parts) {
+      for (const f of p.features) if (f.outlines) out.set(f.featureId, f.outlines);
     }
     return out;
   }, [parts]);
@@ -1063,6 +1076,18 @@ export function App({
     exchanger: loader.exchanger ?? null,
     analyzer: printAnalyzer,
   });
+  // Export for printing: the kernel's meshes, and the shared regenerator for every configuration.
+  const printExporter = useMemo(
+    () =>
+      loader.exchanger
+        ? {
+            exchanger: loader.exchanger,
+            exclusive: shared ? shared.exclusive : null,
+            ...(shared ? { busy: shared.busy } : {}),
+          }
+        : null,
+    [loader, shared],
+  );
   const printSetupId = useStore(printUi, (s) => s.setupId);
   const fitSetupId = activeSetup(document, printSetupId)?.id;
 
@@ -1793,6 +1818,8 @@ export function App({
                 sketches={sketches}
                 placements={placements}
                 highlighted={hoveredFeature}
+                outlines={sketchOutlines}
+                texter={loader.texter ?? null}
               />
             )}
             {viewport && assemblyId !== null && !printing && (
@@ -1828,6 +1855,14 @@ export function App({
             {viewport && !sketching.active && !printing && assemblyId === null && (
               <MeasureOverlay viewport={viewport} measure={measure} units={shownDocument.units} />
             )}
+            {viewport && !printing && assemblyId === null && (
+              <ThreadOverlay
+                viewport={viewport}
+                model={shownModel}
+                partId={shownPartId}
+                bodies={partBodies}
+              />
+            )}
             {sketching.active && <SketchStatusBar session={session} />}
           </Viewport>
           <div className="side-panel">
@@ -1836,6 +1871,7 @@ export function App({
                 <ConflictPanel session={session} />
                 <h2>Sketch selection</h2>
                 <SketchSelectionList session={session} />
+                <TextPanel session={session} texter={loader.texter ?? null} />
               </aside>
             ) : printing ? (
               <>
@@ -1847,6 +1883,10 @@ export function App({
                   issues={print.issues}
                   analysis={print.analysis}
                   onIssue={print.onIssue}
+                  exporter={printExporter}
+                  disabled={ioBusy}
+                  modelPending={modelPending}
+                  onExportBusy={setIoBusy}
                 />
                 <VariablesPanel
                   documents={documents}

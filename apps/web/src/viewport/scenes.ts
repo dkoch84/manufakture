@@ -15,6 +15,7 @@ import type { Measurer } from '../measure/measurer';
 import { demoDocument } from '../model/demo';
 import { kernelRegenerator } from '../model/kernelModel';
 import { buildable, type Regenerator } from '../model/model';
+import type { Texter } from '../sketcher/text';
 import { testHooksEnabled } from '../testHooks';
 import type { BodyInput } from './bodies';
 import { fillPlaceholderNames } from './naming';
@@ -45,6 +46,8 @@ export interface SceneLoader {
   referencer?: Referencer;
   /** Assembly previews and drags in the regen worker; absent for kernel-free scenes. */
   assembler?: Assembler;
+  /** Text layout and font reading for the sketcher, in the regen worker; absent for kernel-free scenes. */
+  texter?: Texter;
   /** A document the scene opens with (the demo scene); the app loads it once the scene is loaded. */
   initialDocument?: ManufaktureDocument;
 }
@@ -145,6 +148,13 @@ export function kernelLoader(
     cancelInterference: (assemblyId) =>
       void client?.cancelInterference(assemblyId).catch(() => undefined),
   };
+  // Texts and fonts go to the regen worker's text worker (under its watchdog); they need no kernel.
+  const texter: Texter = {
+    outline: (request, options) =>
+      client === null ? Promise.resolve(null) : client.outlineText(request, options),
+    readFont: (fileName, bytes) =>
+      client === null ? Promise.resolve(null) : client.readFont(fileName, bytes),
+  };
   const loader = loaderFrom(
     { label: 'Starting the geometry kernel', fraction: null },
     async (report) => {
@@ -170,6 +180,7 @@ export function kernelLoader(
     exchanger,
     referencer,
     assembler,
+    texter,
     ...(options.initialDocument ? { initialDocument: options.initialDocument } : {}),
   };
 }

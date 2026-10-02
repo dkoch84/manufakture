@@ -11,6 +11,7 @@ import type { ManufaktureDocument } from '@manufakture/core';
 import { KernelClient, type KernelClientOptions } from '@manufakture/kernel/kernel-client';
 import * as Comlink from 'comlink';
 import type { EngineStats } from './engine';
+import type { FontReadReply, TextReply, TextRequest } from './text';
 import type {
   AssemblyResult,
   DragResult,
@@ -18,7 +19,7 @@ import type {
   InterferenceReport,
   RegenResult,
 } from './types';
-import type { RegenWorkerApi } from './worker-api';
+import type { RegenWorkerApi, TextPreviewOptions } from './worker-api';
 
 export class RegenClient extends KernelClient {
   /**
@@ -121,6 +122,28 @@ export class RegenClient extends KernelClient {
     );
   }
 
+  /**
+   * Lay out one text in the regen worker's text worker (under its watchdog), for the sketcher to
+   * draw while the sketch is edited: never a regen, never a new generation. Null when the
+   * worker was stopped before it answered.
+   */
+  outlineText(request: TextRequest, options?: TextPreviewOptions): Promise<TextReply | null> {
+    return this.droppable(
+      this.worker<RegenWorkerApi>().outlineText(request, options) as Promise<TextReply>,
+    ).then((reply) => reply ?? null);
+  }
+
+  /**
+   * Read a user font's names and permissions in the text worker (under its watchdog), for
+   * **Add font**. The bytes are copied, not transferred: the caller keeps them for the document.
+   * Null when the worker was stopped before it answered.
+   */
+  readFont(fileName: string, bytes: Uint8Array): Promise<FontReadReply | null> {
+    return this.droppable(
+      this.worker<RegenWorkerApi>().readFont(fileName, bytes) as Promise<FontReadReply>,
+    ).then((reply) => reply ?? null);
+  }
+
   regenStats(): Promise<EngineStats> {
     return this.worker<RegenWorkerApi>().regenStats() as Promise<EngineStats>;
   }
@@ -136,3 +159,13 @@ export function spawnRegenWorker(options: KernelClientOptions = {}): RegenClient
     return { endpoint: worker, terminate: () => worker.terminate() };
   }, options);
 }
+
+// The bundled fonts' metadata (ids, names, SHA-256), for the main thread: `@manufakture/text/bundled`
+// loads no font parser, so this keeps opentype.js out of the app's bundle.
+export {
+  BUNDLED_FONTS,
+  DEFAULT_FONT_ID,
+  INTER_BOLD,
+  bundledFont,
+  type BundledFont,
+} from '@manufakture/text/bundled';
