@@ -258,3 +258,56 @@
   border-radius: 2px;
   border: 1px solid rgb(0 0 0 / 15%);
 }
+
+.print-export h3,
+.print-handoff h3 {
+  margin: 0.75rem 0 0.35rem;
+  font-size: 0.9rem;
+}
+
+.print-export-options {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.35rem;
+}
+
+.print-export-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0.5rem 0;
+}
+
+.print-export-help {
+  border: none;
+  background: none;
+  padding: 0;
+  color: #1d4ea8;
+  text-decoration: underline;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+
+.print-handoff {
+  margin-top: 0.5rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid #c9d8f5;
+  border-radius: 4px;
+  background: #f4f8ff;
+}
+
+.print-handoff-choice {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35rem;
+}
+
+.print-handoff-steps {
+  margin: 0.5rem 0;
+  padding-left: 1.5em;
+  font-size: 0.85rem;
+}
+
+.print-handoff-steps li + li {
+  margin-top: 0.3rem;
+}

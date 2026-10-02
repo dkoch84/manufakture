@@ -15,7 +15,12 @@ describe('view settings', () => {
     a.getState().toggleProjection();
     a.getState().setSection({ enabled: true });
     const stored = JSON.parse(localStorage.getItem(VIEW_SETTINGS_KEY) ?? '{}');
-    expect(stored.state).toEqual({ preset: 'fusion', projection: 'orthographic' });
+    expect(stored.state).toEqual({
+      preset: 'fusion',
+      projection: 'orthographic',
+      slicer: 'orcaslicer',
+      slicerHelpDismissed: [],
+    });
 
     const b = createViewSettingsStore();
     expect(b.getState().preset).toBe('fusion');
@@ -31,6 +36,37 @@ describe('view settings', () => {
     const s = createViewSettingsStore();
     expect(s.getState().preset).toBe('onshape');
     expect(s.getState().projection).toBe('perspective');
+  });
+
+  it('keeps the slicer for Open in slicer, and the slicers whose help was closed', () => {
+    const a = createViewSettingsStore();
+    expect(a.getState().slicer).toBe('orcaslicer');
+    a.getState().setSlicer('bambustudio');
+    a.getState().dismissSlicerHelp('bambustudio');
+    a.getState().dismissSlicerHelp('bambustudio');
+    const b = createViewSettingsStore();
+    expect(b.getState().slicer).toBe('bambustudio');
+    expect(b.getState().slicerHelpDismissed).toEqual(['bambustudio']);
+  });
+
+  it('ignores a stored slicer it does not know', () => {
+    localStorage.setItem(
+      VIEW_SETTINGS_KEY,
+      JSON.stringify({
+        state: { slicer: 'cura', slicerHelpDismissed: ['cura', 'prusaslicer', 'prusaslicer', 7] },
+        version: 1,
+      }),
+    );
+    const s = createViewSettingsStore();
+    expect(s.getState().slicer).toBe('orcaslicer');
+    expect(s.getState().slicerHelpDismissed).toEqual(['prusaslicer']);
+    s.getState().setSlicer('cura' as never);
+    expect(s.getState().slicer).toBe('orcaslicer');
+    localStorage.setItem(
+      VIEW_SETTINGS_KEY,
+      JSON.stringify({ state: { slicerHelpDismissed: 'x' } }),
+    );
+    expect(createViewSettingsStore().getState().slicerHelpDismissed).toEqual([]);
   });
 
   it('toggles the projection both ways', () => {

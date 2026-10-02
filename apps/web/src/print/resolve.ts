@@ -259,7 +259,7 @@ function itemOrientation(
 }
 
 /** The nozzles a copy is printed with on a two-nozzle printer: both when it uses two colours. */
-function nozzlesFor(printer: Printer, bodies: readonly ItemBody[]): number[] | undefined {
+export function nozzlesFor(printer: Printer, bodies: readonly ItemBody[]): number[] | undefined {
   if (!printer.nozzleAreas || printer.nozzleAreas.length < 2) return undefined;
   const colours = new Set(bodies.map((b) => b.color.toLowerCase()));
   return colours.size >= 2 ? [0, 1] : undefined;
@@ -474,8 +474,9 @@ function polygonArea(points: readonly (readonly [number, number])[]): number {
 /**
  * A note when the copies cannot all fit on one plate: the footprints of every copy of every
  * item that fits on its own (each with `COPY_GAP` around it) add up to more than the printable
- * area minus the excluded areas. An estimate in the copies' favour, and never blocking: the
- * slicer arranges the plate, and the rest can go on a second one.
+ * area minus the excluded areas. An estimate in the copies' favour, so it warns ahead of an export
+ * that will be refused (an export writes one plate) but not of every one: only packing, when the
+ * export is asked for, settles it. Never blocking by itself.
  */
 export function plateNote(items: readonly ResolvedItem[], printer: Printer | null): string | null {
   if (!printer) return null;
@@ -491,7 +492,7 @@ export function plateNote(items: readonly ResolvedItem[], printer: Printer | nul
   const room =
     polygonArea(printer.area) - printer.excluded.reduce((a, e) => a + polygonArea(e.polygon), 0);
   if (count < 2 || used <= room) return null;
-  return `The ${count} copies need about ${Math.round((100 * used) / room)}% of the plate, so they will not all fit on one. Each fits on its own; the slicer arranges the plate, and the rest can go on another.`;
+  return `The ${count} copies need about ${Math.round((100 * used) / room)}% of the plate, so they will not all fit on one. Each fits on its own, but Export for printing writes one plate and will refuse them: lower the copies or move some items to another setup.`;
 }
 
 /** The bodies the viewport draws for a resolved setup: every body of every laid-out copy. */

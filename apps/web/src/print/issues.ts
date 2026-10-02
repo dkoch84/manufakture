@@ -13,6 +13,7 @@ import {
   OVERHANG_CLASSES,
   analyzeHoles,
   classifyOverhangs,
+  type BedFitResult,
   type OverhangResult,
   type PrintAnalysisBodyResult,
   type ThicknessIssue,
@@ -103,25 +104,42 @@ function areaText(mm2: number, units: DisplayUnits): string {
 const length = (mm: number, units: DisplayUnits) => formatKind(mm, 'length', units);
 const angle = (rad: number, units: DisplayUnits) => formatKind(rad, 'angle', units);
 
-function bedFitIssue(item: ResolvedItem, units: DisplayUnits): PrintIssue | null {
-  const fit = item.fit;
-  if (!fit || fit.fits) return null;
+/**
+ * Why a bed fit fails, in words, and its worst value. An item too big for the usable area is
+ * only said to be too big: the excluded areas its centred spot also overlaps are beside the
+ * point, since it fits nowhere. The excluded areas are named only for an item small enough that
+ * no spot clear of them was found.
+ */
+export function bedFitReasons(
+  fit: BedFitResult,
+  units: DisplayUnits,
+): { worst: string; reasons: string[] } {
   const axes = (['x', 'y', 'z'] as const).filter((a) => fit.overshoot[a] > 0);
   const parts = axes.map((a) => `${a} ${length(fit.overshoot[a], units)}`);
   const reasons: string[] = [];
   if (parts.length > 0) reasons.push(`too big by ${parts.join(', ')}`);
-  if (fit.exclusions.length > 0) {
+  else if (fit.exclusions.length > 0) {
     reasons.push(`no spot clear of ${fit.exclusions.map((e) => e.name.toLowerCase()).join(', ')}`);
   }
   if (fit.region.area.length === 0) reasons.push('the nozzles it needs share no printable area');
   if (fit.region.unknownNozzles.length > 0) reasons.push('it needs a nozzle the printer lacks');
+  return {
+    worst: parts.join(', ') || (fit.exclusions.length > 0 ? 'excluded area' : ''),
+    reasons,
+  };
+}
+
+function bedFitIssue(item: ResolvedItem, units: DisplayUnits): PrintIssue | null {
+  const fit = item.fit;
+  if (!fit || fit.fits) return null;
+  const { worst, reasons } = bedFitReasons(fit, units);
   const copy = item.copies[0]?.copy ?? 0;
   return {
     key: `bedFit:${item.item.id}`,
     kind: 'bedFit',
     itemId: item.item.id,
     item: item.label,
-    worst: parts.join(', ') || (fit.exclusions.length > 0 ? 'excluded area' : ''),
+    worst,
     detail: `${reasons.join('; ')}.`,
     targets: item.bodies.map((b) => ({
       viewId: printViewId(item.item.id, copy, b.sourceId),

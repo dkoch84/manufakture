@@ -49,6 +49,16 @@ Hover over the setting to see its values. A finer tolerance gives larger files a
 
 Before an STL or 3MF file is written, its triangles are joined into one closed surface and checked: every edge must be shared by exactly two triangles that face the same way, with no gaps, no flipped triangles and no zero-size triangles. A body that fails the check is not exported; you get a message saying what was wrong instead of a file your slicer would have to repair.
 
+### Colours, names and orientation in 3MF
+
+To print a part as it is laid out in a [print setup](printing.md), use **Export for printing** in the Print workspace rather than the header's **Export**. Its 3MF is ready for the slicer:
+
+- **Orientation and placement**: each item is turned as the setup says (laid flat on a face, turned, or as modelled) and stands on the bed; its copies are packed onto the printer's plate. The turn and the place are written as a transform per object, so the meshes stay as modelled.
+- **Colours**: each body's colour is written once per distinct colour, in the order the bodies first use them. OrcaSlicer and Bambu Studio give each colour a filament slot of its own (the first colour slot 1, the next slot 2, and so on); they take the slot from the file but keep the filament colours set in the slicer. PrusaSlicer reads the geometry and names but not the colours.
+- **Names**: an item of one body is named after its part (with the body's name when the item prints one body of several); an item of several bodies is one object named after the part, with a part per body named after the body, each in its colour's slot.
+
+Turning a part on the bed to make it fit is not considered: the export moves copies but never turns them. See [Export for printing](printing.md#export-for-printing) for when an export is refused and how the plate is packed.
+
 ### Checking an export in OrcaSlicer or Bambu Studio
 
 1. Export as **3MF**.

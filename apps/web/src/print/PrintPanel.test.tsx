@@ -130,8 +130,13 @@ describe('PrintPanel', () => {
     fireEvent.change(copies(), { target: { value: '1' } });
     fireEvent.change(copies(), { target: { value: '12' } });
     expect(doc().print.setups[0]!.items[1]).not.toHaveProperty('copies');
+    const field = copies();
+    field.focus();
     fireEvent.keyDown(copies(), { key: 'Enter' });
     expect(doc().print.setups[0]!.items[1]!.copies).toBe(12);
+    // Enter commits in place: the same field, still focused.
+    expect(copies()).toBe(field);
+    expect(document.activeElement).toBe(field);
     expect(documents.core.undoStack.length).toBe(steps + 1);
     expect(documents.getState().undoLabel).toBe('Change copies');
     // Cleared and left: the stored value comes back, nothing runs.

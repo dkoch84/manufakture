@@ -56,6 +56,17 @@ describe('printIssues', () => {
     ]);
   });
 
+  it('does not name the excluded corner for a part too big for the bed', () => {
+    const built = withSetup(partsDocument(), [{ part: 'part#1' }]);
+    const r = resolved(built.doc, built.setupId, [
+      boxPart('part#1', [{ bodyId: 'extrude#1', size: [300, 20, 10] }]),
+    ]);
+    const issues = printIssues(r, overhangsOf(r), null, UNITS);
+    expect(issues.map((i) => [i.kind, i.worst, i.detail])).toEqual([
+      ['bedFit', 'x 44.00 mm', 'too big by x 44.00 mm.'],
+    ]);
+  });
+
   it('groups thickness and gap issues per item and kind, with the worst value', () => {
     const { doc, setupId } = withSetup(partsDocument(2), [{ part: 'part#1' }, { part: 'part#2' }]);
     const r = resolved(doc, setupId, [

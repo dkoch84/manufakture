@@ -5,6 +5,8 @@
 //
 // An item whose body or lay-flat face is gone shows `reference-lost` with the missing name and a
 // re-pick: another body from the picker, or Lay flat again (ADR 0012 decision 2).
+//
+// Below the items, Export for printing and Open in slicer (`PrintExport`, T3.3b).
 
 import {
   bareUnits,
@@ -33,6 +35,7 @@ import type { DocumentStoreApi } from '../state/document';
 import type { AnalysisState } from './analysis';
 import { addItemCommand, addSetupCommand, editItemCommand, editSetupCommand } from './commands';
 import { IssuesList } from './IssuesList';
+import { PrintExport, type PrintExporter } from './PrintExport';
 import type { PrintIssue } from './issues';
 import { printVariables, type ResolvedSetup } from './resolve';
 import { activeItemId, activeSetup, type PrintUiStore } from './state';
@@ -48,7 +51,13 @@ export interface PrintPanelProps {
   issues: readonly PrintIssue[];
   analysis: AnalysisState;
   onIssue: (issue: PrintIssue | null) => void;
+  /** Meshes and regens for Export for printing; null or absent: export is not available. */
+  exporter?: PrintExporter | null;
   disabled?: boolean;
+  /** The model is regenerating: export waits for it (see `PrintExport`). */
+  modelPending?: boolean;
+  /** Told when an export from the panel starts and ends. */
+  onExportBusy?: (busy: boolean) => void;
 }
 
 type ThresholdKey = 'overhang' | 'minWall' | 'minGap' | 'minHole' | 'teardrop';
@@ -99,7 +108,10 @@ export function PrintPanel({
   issues,
   analysis,
   onIssue,
+  exporter = null,
   disabled = false,
+  modelPending = false,
+  onExportBusy,
 }: PrintPanelProps) {
   const doc = useStore(documents, (s) => s.document);
   const setupId = useStore(printUi, (s) => s.setupId);
@@ -166,6 +178,17 @@ export function PrintPanel({
           disabled={disabled}
           run={run}
           printUi={printUi}
+        />
+      )}
+      {setup && resolved?.setup.id === setup.id && (
+        <PrintExport
+          doc={doc}
+          resolved={resolved}
+          issues={issues}
+          exporter={exporter}
+          disabled={disabled}
+          modelPending={modelPending}
+          {...(onExportBusy ? { onBusy: onExportBusy } : {})}
         />
       )}
       {setup && resolved && (
@@ -560,13 +583,7 @@ function Items({
                     ))}
                   </select>
                 </label>
-                <CopiesField
-                  key={item.copies ?? 1}
-                  item={item}
-                  setupId={setup.id}
-                  disabled={disabled}
-                  run={run}
-                />
+                <CopiesField item={item} setupId={setup.id} disabled={disabled} run={run} />
                 {status === 'reference-lost' && item.orientation.kind === 'layFlat' && (
                   <button
                     type="button"
@@ -646,6 +663,8 @@ function Items({
  * How many copies of an item. A draft while typing (so the field can be cleared and retyped);
  * committed as one command, one undo step, on blur or Enter, like the app's other numeric
  * fields. Escape, or a value that is not a whole number from 1 to 1000, puts the stored one back.
+ * A new stored count (a commit, an undo) replaces the draft in place: the field is not mounted
+ * again, so Enter keeps the focus in it.
  */
 function CopiesField({
   item,
@@ -660,6 +679,11 @@ function CopiesField({
 }) {
   const stored = item.copies ?? 1;
   const [draft, setDraft] = useState(String(stored));
+  const [shown, setShown] = useState(stored);
+  if (shown !== stored) {
+    setShown(stored);
+    setDraft(String(stored));
+  }
   const commit = () => {
     const n = Number(draft.trim());
     if (draft.trim() === '' || !Number.isInteger(n) || n < 1 || n > 1000 || n === stored) {
