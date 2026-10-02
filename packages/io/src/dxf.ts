@@ -14,6 +14,7 @@
 import {
   JOIN_TOLERANCE,
   connectedRuns,
+  loopsToSheet,
   formatNumber,
   isFullTurn,
   itemsByLayer,
@@ -24,6 +25,8 @@ import {
   sheetBounds,
   signedSweep,
   type Layer2,
+  type LoopLayer2,
+  type LoopSheetOptions,
   type Path2,
   type Segment2,
   type Sheet2,
@@ -173,8 +176,20 @@ function lineTypes(layers: readonly Layer2[]): {
   return { defs, byLayer };
 }
 
+export interface DxfWriteOptions {
+  /**
+   * Decimals of LWPOLYLINE bulges (default 6, as every other number). A bulge is the tangent of a
+   * quarter of the arc's sweep, so its rounding moves the arc's middle by about the radius times
+   * the rounding: 10 decimals keep a 1 m radius within 1e-6 mm.
+   */
+  readonly bulgeDigits?: number;
+}
+
+/** Bulge decimals for loops, where arcs are exact (see `DxfWriteOptions.bulgeDigits`). */
+export const LOOP_BULGE_DIGITS = 10;
+
 /** An ASCII DXF (AC1015, millimetres) of the sheet. */
-export function writeDxf(sheet: Sheet2): string {
+export function writeDxf(sheet: Sheet2, options: DxfWriteOptions = {}): string {
   const groups = itemsByLayer(sheet);
   const names = new Set<string>(['0']);
   const layerName = new Map<string, string>();
@@ -420,7 +435,7 @@ export function writeDxf(sheet: Sheet2): string {
       .add(100, 'AcDbEntity')
       .add(8, layer)
       .add(100, subclass);
-  const ctx: EntityWriter = { body, entity };
+  const ctx: EntityWriter = { body, entity, bulgeDigits: options.bulgeDigits ?? 6 };
   for (const { layer, items } of groups) {
     const name = layerName.get(layer.name)!;
     for (const item of items) {
@@ -492,6 +507,7 @@ export function writeDxf(sheet: Sheet2): string {
 interface EntityWriter {
   readonly body: Groups;
   readonly entity: (type: string, layer: string, subclass: string) => Groups;
+  readonly bulgeDigits: number;
 }
 
 function writeSegment(ctx: EntityWriter, seg: Segment2, layer: string): void {
@@ -619,7 +635,7 @@ function writePolyline(
     .add(43, 0);
   for (const v of vertices) {
     g.add(10, v.p[0]).add(20, v.p[1]);
-    if (Math.abs(v.bulge) > 1e-12) g.add(42, v.bulge);
+    if (Math.abs(v.bulge) > 1e-12) g.add(42, formatNumber(v.bulge, ctx.bulgeDigits));
   }
 }
 
@@ -632,6 +648,20 @@ function writeSolid(ctx: EntityWriter, run: readonly Segment2[], layer: string):
   if (pts.length < 3 || pts.length > 4) return;
   const [a, b, c, d] = [pts[0]!, pts[1]!, pts[2]!, pts[3] ?? pts[2]!];
   ctx.entity('SOLID', layer, 'AcDbTrace').point(10, a).point(11, b).point(12, d).point(13, c);
+}
+
+/**
+ * Closed loops (laser and plasma outlines) as a DXF: a layer per `LoopLayer2`, each loop one
+ * closed LWPOLYLINE with its arcs as bulges (`LOOP_BULGE_DIGITS` decimals), or a CIRCLE when it
+ * is one full circle. Ends are kept exactly (see `loopsToSheet`).
+ */
+export function loopsToDxf(
+  layers: readonly LoopLayer2[],
+  options: LoopSheetOptions & DxfWriteOptions = {},
+): string {
+  return writeDxf(loopsToSheet(layers, options), {
+    bulgeDigits: options.bulgeDigits ?? LOOP_BULGE_DIGITS,
+  });
 }
 
 const H_JUSTIFY = { start: 0, middle: 1, end: 2 } as const;

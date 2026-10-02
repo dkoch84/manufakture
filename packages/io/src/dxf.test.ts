@@ -1,11 +1,16 @@
 import DxfParser from 'dxf-parser';
 import { describe, expect, it } from 'vitest';
 import { displayListToSheet } from './drawing-export';
-import { dxfColor, dxfLineweight, dxfName, dxfText, writeDxf } from './dxf';
+import { dxfColor, dxfLineweight, dxfName, dxfText, loopsToDxf, writeDxf } from './dxf';
+import { bulgeArc, expectLoop, loopLayers, slot, type ReadPiece } from './loop-test-helpers';
 import {
+  formatNumber,
+  loopsToSheet,
   polylinePath,
   segmentPoint,
   signedSweep,
+  type Loop2,
+  type Path2,
   type Segment2,
   type Sheet2,
   type Vec2,
@@ -350,5 +355,203 @@ describe('DXF helpers', () => {
       ['STR_M', ['0', '-2']],
       ['STR_M__', ['3', '-1']],
     ]);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Loops (T5.6a): read back by dxf-parser and by a plain group reader, compared to the input.
+
+/** One loop entity as pieces, from dxf-parser's entity. */
+function parserPieces(e: any): ReadPiece[] {
+  if (e.type === 'CIRCLE')
+    return [{ kind: 'circle', center: [e.center.x, e.center.y], radius: e.radius }];
+  expect(e.type).toBe('LWPOLYLINE');
+  expect(e.shape).toBe(true);
+  const v: { x: number; y: number; bulge?: number }[] = e.vertices;
+  return v.map((a, i) => {
+    const b = v[(i + 1) % v.length]!;
+    const start: Vec2 = [a.x, a.y];
+    const end: Vec2 = [b.x, b.y];
+    return a.bulge ? bulgeArc(start, end, a.bulge) : { kind: 'line', start, end };
+  });
+}
+
+/** The same from the raw group codes, read in order (vertex, then its bulge). */
+function groupPieces(pairs: [number, string][]): { layer: string; pieces: ReadPiece[] }[] {
+  const out: { layer: string; pieces: ReadPiece[] }[] = [];
+  const start = pairs.findIndex(([c, v]) => c === 2 && v === 'ENTITIES');
+  let i = start + 1;
+  while (pairs[i]![1] !== 'ENDSEC') {
+    const type = pairs[i]![1];
+    const body: [number, string][] = [];
+    for (i++; pairs[i]![0] !== 0; i++) body.push(pairs[i]!);
+    const layer = body.find(([c]) => c === 8)![1];
+    const num = (c: number) => Number(body.find(([k]) => k === c)![1]);
+    if (type === 'CIRCLE') {
+      out.push({
+        layer,
+        pieces: [{ kind: 'circle', center: [num(10), num(20)], radius: num(40) }],
+      });
+      continue;
+    }
+    expect(type).toBe('LWPOLYLINE');
+    expect(num(70) & 1).toBe(1);
+    const v: { p: [number, number]; bulge: number }[] = [];
+    for (const [c, val] of body) {
+      if (c === 10) v.push({ p: [Number(val), 0], bulge: 0 });
+      else if (c === 20) v[v.length - 1]!.p[1] = Number(val);
+      else if (c === 42) v[v.length - 1]!.bulge = Number(val);
+    }
+    expect(v.length).toBe(num(90));
+    out.push({
+      layer,
+      pieces: v.map((a, k) => {
+        const b = v[(k + 1) % v.length]!;
+        return a.bulge ? bulgeArc(a.p, b.p, a.bulge) : { kind: 'line', start: a.p, end: b.p };
+      }),
+    });
+  }
+  return out;
+}
+
+describe('loopsToDxf', () => {
+  const layers = loopLayers();
+  const loops = layers.flatMap((l) => l.loops.map((loop) => ({ layer: l.name, loop })));
+  const text = loopsToDxf(layers);
+
+  it('writes millimetres, a layer per source and one closed entity per loop', () => {
+    const doc = parse(text);
+    expect(doc.header.$ACADVER).toBe('AC1015');
+    expect(doc.header.$INSUNITS).toBe(4);
+    expect(doc.header.$MEASUREMENT).toBe(1);
+    expect(Object.keys(doc.tables.layer.layers).sort()).toEqual(['0', 'engrave', 'outside']);
+    expect(doc.tables.layer.layers.outside.colorIndex).toBe(1);
+    expect(doc.tables.layer.layers.engrave.colorIndex).toBe(5);
+    expect(doc.entities.map((e: any) => [e.layer, e.type])).toEqual([
+      ['outside', 'LWPOLYLINE'],
+      ['outside', 'CIRCLE'],
+      ['outside', 'LWPOLYLINE'],
+      ['outside', 'LWPOLYLINE'],
+      ['engrave', 'LWPOLYLINE'],
+    ]);
+    // The header as the raw groups give it, for readers that look only there.
+    const pairs = groups(text);
+    const at = pairs.findIndex(([c, v]) => c === 9 && v === '$INSUNITS');
+    expect(pairs[at + 1]).toEqual([70, '4']);
+  });
+
+  it('reads back exactly with dxf-parser', () => {
+    const entities = parse(text).entities;
+    expect(entities).toHaveLength(loops.length);
+    loops.forEach(({ layer, loop }, i) => {
+      expect(entities[i].layer).toBe(layer);
+      expectLoop(parserPieces(entities[i]), loop, `dxf-parser loop ${i}`);
+    });
+  });
+
+  it('reads back exactly with a plain group reader', () => {
+    const read = groupPieces(groups(text));
+    expect(read.map((r) => r.layer)).toEqual(loops.map((l) => l.layer));
+    loops.forEach(({ loop }, i) => expectLoop(read[i]!.pieces, loop, `groups loop ${i}`));
+  });
+
+  it('writes bulges to ten decimals and points to six', () => {
+    const bulges = groups(text).filter(([c]) => c === 42);
+    expect(bulges.length).toBeGreaterThan(0);
+    // A quarter turn's bulge, tan(pi / 8), to ten decimals.
+    expect(bulges.map(([, v]) => v)).toContain(formatNumber(Math.tan(Math.PI / 8), 10));
+    const xs = groups(text).filter(([c]) => c === 10);
+    for (const [, v] of xs) expect(v).toMatch(/^-?\d+(\.\d{1,6})?$/);
+    // A drawing keeps six.
+    expect(writeDxf(loopsToSheet(layers))).toContain(
+      `\n 42\n${formatNumber(Math.tan(Math.PI / 8))}\n`,
+    );
+  });
+
+  it('needs the extra bulge decimals to read back exactly', () => {
+    const coarse = parse(loopsToDxf(layers, { bulgeDigits: 6 })).entities;
+    expect(() =>
+      loops.forEach(({ loop }, i) => expectLoop(parserPieces(coarse[i]), loop, `loop ${i}`)),
+    ).toThrow();
+  });
+
+  it('is deterministic', () => {
+    expect(loopsToDxf(loopLayers())).toBe(text);
+  });
+});
+
+describe('loopsToSheet', () => {
+  it('maps loops to closed paths with their owners and layer styles', () => {
+    const sheet = loopsToSheet(loopLayers(), { title: 'Part', size: { width: 200, height: 100 } });
+    expect(sheet.layers).toEqual([
+      { name: 'outside', color: '#ff0000' },
+      { name: 'engrave', color: '#0000ff', weight: 0.1 },
+    ]);
+    expect(sheet.size).toEqual({ width: 200, height: 100 });
+    expect(sheet.title).toBe('Part');
+    expect(sheet.items.map((p) => [p.layer, p.kind === 'path' && p.closed, p.owner])).toEqual([
+      ['outside', true, 'outline'],
+      ['outside', true, 'hole#1'],
+      ['outside', true, undefined],
+      ['outside', true, undefined],
+      ['engrave', true, 'keyhole'],
+    ]);
+  });
+
+  it('closes small gaps and puts an inconsistent arc centre on the bisector', () => {
+    // A half disc: the arc's end is 3e-4 mm further from the centre than its start, and the line
+    // back starts 2e-4 mm away from the arc's end.
+    const loop: Loop2 = {
+      segments: [
+        { kind: 'arc', center: [0, 0], start: [10, 0], end: [-10.0003, 0], ccw: true },
+        { kind: 'line', start: [-10.0003, 0.0002], end: [10, 0] },
+      ],
+    };
+    const [path] = loopsToSheet([{ name: 'cut', loops: [loop] }]).items as Path2[];
+    const [arc, back] = path!.segments;
+    if (arc?.kind !== 'arc') throw new Error('expected an arc');
+    expect(arc.center[0]).toBeCloseTo(-0.00015, 12);
+    expect(arc.center[1]).toBeCloseTo(0, 12);
+    expect(arc.radius).toBeCloseTo(10.00015, 12);
+    const e = segmentPoint(arc, 'end');
+    expect(e[0]).toBeCloseTo(-10.0003, 12);
+    expect(e[1]).toBeCloseTo(0, 12);
+    expect(back).toEqual({ kind: 'line', a: [-10.0003, 0], b: [10, 0] });
+    // Still one closed entity in the file.
+    const doc = parse(loopsToDxf([{ name: 'cut', loops: [loop] }]));
+    expect(doc.entities.map((x: any) => x.type)).toEqual(['LWPOLYLINE']);
+    expect(doc.entities[0].vertices).toHaveLength(2);
+  });
+
+  it('keeps a direction: clockwise arcs get negative bulges', () => {
+    const doc = parse(loopsToDxf([{ name: 'cut', loops: [slot()] }]));
+    const bulges = doc.entities[0].vertices.map((v: any) => v.bulge ?? 0);
+    expect(bulges).toEqual([0, -1, 0, -1]);
+  });
+
+  it('refuses open, empty and degenerate loops', () => {
+    const open: Loop2 = {
+      segments: [
+        { kind: 'line', start: [0, 0], end: [10, 0] },
+        { kind: 'line', start: [10, 0], end: [0, 1] },
+      ],
+    };
+    expect(() => loopsToSheet([{ name: 'cut', loops: [open] }])).toThrow(
+      /Loop not closed: segment 0 .*layer "cut", loop 0/,
+    );
+    expect(() =>
+      loopsToSheet([{ name: 'cut', loops: [open] }], { snapTolerance: 2 }),
+    ).not.toThrow();
+    expect(() => loopsToSheet([{ name: 'cut', loops: [{ segments: [] }] }])).toThrow(/Empty loop/);
+    const zeroArc: Loop2 = {
+      segments: [{ kind: 'arc', center: [0, 0], start: [1, 0], end: [1, 0], ccw: true }],
+    };
+    expect(() => loopsToSheet([{ name: 'cut', loops: [zeroArc] }])).toThrow(/not a full circle/);
+    const nan: Loop2 = {
+      segments: [
+        { kind: 'arc', center: [NaN, 0], start: [1, 0], end: [1, 0], ccw: true, fullCircle: true },
+      ],
+    };
+    expect(() => loopsToSheet([{ name: 'cut', loops: [nan] }])).toThrow(/not finite/);
   });
 });

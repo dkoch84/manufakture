@@ -81,12 +81,14 @@ export {
 } from './export';
 export {
   JOIN_TOLERANCE,
+  LOOP_SNAP_TOLERANCE,
   baselinePoint,
   connectedRuns,
   formatNumber,
   isFullTurn,
   itemsByLayer,
   line,
+  loopsToSheet,
   pageOf,
   polylinePath,
   segmentBeziers,
@@ -97,6 +99,12 @@ export {
   type Bounds2,
   type Item2,
   type Layer2,
+  type Loop2,
+  type LoopArc2,
+  type LoopLayer2,
+  type LoopLine2,
+  type LoopSegment2,
+  type LoopSheetOptions,
   type Path2,
   type Segment2,
   type Sheet2,
@@ -106,14 +114,26 @@ export {
   type Vec2 as Point2,
 } from './path2';
 export {
+  LOOP_MAX_ARC_SWEEP,
   SVG_FONT_FAMILY,
   escapeXml,
   layerId,
+  loopsToSvg,
   pathData,
   writeSvg,
   type SvgWriteOptions,
 } from './svg';
-export { DXF_LINEWEIGHTS, dxfColor, dxfLineweight, dxfName, dxfText, writeDxf } from './dxf';
+export {
+  DXF_LINEWEIGHTS,
+  LOOP_BULGE_DIGITS,
+  dxfColor,
+  dxfLineweight,
+  dxfName,
+  dxfText,
+  loopsToDxf,
+  writeDxf,
+  type DxfWriteOptions,
+} from './dxf';
 export { POINTS_PER_MM, contentStream, pdfTextString, writePdf, type PdfWriteOptions } from './pdf';
 export {
   HELVETICA_CAP_HEIGHT,

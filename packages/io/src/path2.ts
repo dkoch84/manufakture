@@ -365,3 +365,158 @@ export function baselinePoint(t: Text2): Vec2 {
   // Down along the text's own up direction (a quarter turn counter-clockwise from its run).
   return [t.at[0] + drop * Math.sin(t.rotation), t.at[1] - drop * Math.cos(t.rotation)];
 }
+
+// ---------------------------------------------------------------------------------------------
+// Closed 2D loops (laser and plasma outlines, M5 T5.6a)
+
+/**
+ * A line of a loop, from `start` to `end`. The loop types here have the shape of
+ * `packages/cam`'s `Loop2` (its `source` tags are ignored), declared again so this package does
+ * not depend on cam (ADR 0014 decision 1 keeps cam free of io, and the other way round keeps the
+ * writers shared with drawings without a CAM dependency).
+ */
+export interface LoopLine2 {
+  readonly kind: 'line';
+  readonly start: Vec2;
+  readonly end: Vec2;
+}
+
+/**
+ * An arc of a loop about `center`, from `start` to `end`, counter-clockwise when `ccw`. A full
+ * circle has `fullCircle: true` (and `start` equal to `end`); it is never implied by equal ends.
+ */
+export interface LoopArc2 {
+  readonly kind: 'arc';
+  readonly start: Vec2;
+  readonly end: Vec2;
+  readonly center: Vec2;
+  readonly ccw: boolean;
+  readonly fullCircle?: boolean;
+}
+
+export type LoopSegment2 = LoopLine2 | LoopArc2;
+
+/**
+ * A closed loop: each segment starts where the previous one ends and the last ends at the first's
+ * start. Outer loops counter-clockwise and holes clockwise, by cam's convention; the writers keep
+ * whatever direction they are given. `id` is written as the path's owner (SVG `data-owner`).
+ */
+export interface Loop2 {
+  readonly segments: readonly LoopSegment2[];
+  readonly id?: string;
+}
+
+/** A layer of loops: the layer's style (as `Layer2`) and its loops, one layer per source. */
+export interface LoopLayer2 extends Layer2 {
+  readonly loops: readonly Loop2[];
+}
+
+export interface LoopSheetOptions {
+  /** The page, origin at (0, 0); without it the page is the loops' bounds. */
+  readonly size?: { readonly width: number; readonly height: number };
+  readonly title?: string;
+  /**
+   * The largest gap, mm, between a segment's start and the previous segment's end that is closed
+   * by moving the start onto that end (default `LOOP_SNAP_TOLERANCE`); a wider gap is an error.
+   */
+  readonly snapTolerance?: number;
+}
+
+/**
+ * The default largest gap closed in a loop, mm: cam's arc tolerance (`DEFAULT_ARC_TOLERANCE`), a
+ * tenth of Grbl's arc radius check.
+ */
+export const LOOP_SNAP_TOLERANCE = 0.0005;
+
+/**
+ * Loops as a sheet of closed paths, a layer per `LoopLayer2` in the given order, a path per loop.
+ * Ends are kept exactly: each segment starts at the previous segment's end (gaps up to the snap
+ * tolerance closed), and an arc whose ends lie at different distances from its centre (cam allows
+ * up to its arc tolerance) gets the centre moved onto the ends' perpendicular bisector, the
+ * nearest point at which both ends lie on one circle. Throws a `RangeError` for an empty loop, a
+ * gap wider than the tolerance, an arc that is not a full circle but has equal ends, or a point
+ * that is not finite.
+ */
+export function loopsToSheet(
+  layers: readonly LoopLayer2[],
+  options: LoopSheetOptions = {},
+): Sheet2 {
+  const tol = options.snapTolerance ?? LOOP_SNAP_TOLERANCE;
+  const items: Path2[] = [];
+  for (const layer of layers)
+    layer.loops.forEach((loop, i) => {
+      const where = `layer "${layer.name}", loop ${i}`;
+      items.push({
+        kind: 'path',
+        layer: layer.name,
+        segments: loopSegments(loop, tol, where),
+        closed: true,
+        ...(loop.id === undefined ? {} : { owner: loop.id }),
+      });
+    });
+  return {
+    layers: layers.map(layerStyle),
+    items,
+    ...(options.size ? { size: options.size } : {}),
+    ...(options.title === undefined ? {} : { title: options.title }),
+  };
+}
+
+/** A loop layer's style alone, without its loops. */
+function layerStyle(layer: LoopLayer2): Layer2 {
+  const style: { -readonly [K in keyof Layer2]: Layer2[K] } = { name: layer.name };
+  if (layer.weight !== undefined) style.weight = layer.weight;
+  if (layer.dash !== undefined) style.dash = layer.dash;
+  if (layer.lineType !== undefined) style.lineType = layer.lineType;
+  if (layer.color !== undefined) style.color = layer.color;
+  return style;
+}
+
+function loopSegments(loop: Loop2, tol: number, where: string): Segment2[] {
+  const segs = loop.segments;
+  if (!segs.length) throw new RangeError(`Empty loop (${where})`);
+  const out: Segment2[] = [];
+  segs.forEach((seg, i) => {
+    for (const p of [seg.start, seg.end, ...(seg.kind === 'arc' ? [seg.center] : [])])
+      if (!Number.isFinite(p[0]) || !Number.isFinite(p[1]))
+        throw new RangeError(`Point not finite (${where}, segment ${i})`);
+    const prevEnd = segs[(i + segs.length - 1) % segs.length]!.end;
+    const gap = Math.hypot(seg.start[0] - prevEnd[0], seg.start[1] - prevEnd[1]);
+    if (gap > tol)
+      throw new RangeError(
+        `Loop not closed: segment ${i} starts ${gap} mm from the previous end (${where})`,
+      );
+    // A full circle is closed on itself: its start is its own end.
+    const start = seg.kind === 'arc' && seg.fullCircle ? seg.start : prevEnd;
+    if (seg.kind === 'line') out.push(line(start, seg.end));
+    else out.push(loopArc(seg, start, where, i));
+  });
+  return out;
+}
+
+function loopArc(seg: LoopArc2, start: Vec2, where: string, i: number): Segment2 {
+  if (seg.fullCircle) {
+    const radius = Math.hypot(start[0] - seg.center[0], start[1] - seg.center[1]);
+    if (!(radius > 0)) throw new RangeError(`Circle of zero radius (${where}, segment ${i})`);
+    const a0 = Math.atan2(start[1] - seg.center[1], start[0] - seg.center[0]);
+    return { kind: 'arc', center: seg.center, radius, start: a0, end: a0 + (seg.ccw ? TAU : -TAU) };
+  }
+  const end = seg.end;
+  const dx = end[0] - start[0];
+  const dy = end[1] - start[1];
+  const chord = Math.hypot(dx, dy);
+  if (!(chord > 0))
+    throw new RangeError(`Arc with equal ends that is not a full circle (${where}, segment ${i})`);
+  // The centre projected onto the perpendicular bisector of the chord.
+  const mid: Vec2 = [(start[0] + end[0]) / 2, (start[1] + end[1]) / 2];
+  const u: Vec2 = [-dy / chord, dx / chord];
+  const along = (seg.center[0] - mid[0]) * u[0] + (seg.center[1] - mid[1]) * u[1];
+  const center: Vec2 = [mid[0] + along * u[0], mid[1] + along * u[1]];
+  const radius = Math.hypot(start[0] - center[0], start[1] - center[1]);
+  const a0 = Math.atan2(start[1] - center[1], start[0] - center[0]);
+  const a1 = Math.atan2(end[1] - center[1], end[0] - center[0]);
+  let sweep = a1 - a0;
+  if (seg.ccw) while (sweep <= 0) sweep += TAU;
+  else while (sweep >= 0) sweep -= TAU;
+  return { kind: 'arc', center, radius, start: a0, end: a0 + sweep };
+}

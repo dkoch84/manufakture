@@ -3,19 +3,31 @@ import { describe, expect, it } from 'vitest';
 import { drawingToSvg, displayListToSheet } from './drawing-export';
 import { HELVETICA_CAP_HEIGHT } from './helvetica';
 import {
+  HOLE,
+  arcSweep,
+  endpointArc,
+  expectLoop,
+  loopLayers,
+  type ReadPiece,
+} from './loop-test-helpers';
+import {
   baselinePoint,
+  formatNumber,
   itemsByLayer,
+  loopsToSheet,
   pageOf,
   polylinePath,
   segmentPoint,
   signedSweep,
+  type Loop2,
   type Path2,
   type Sheet2,
   type Text2,
   type Vec2,
 } from './path2';
 import { PLATE_SHEET, SHAPES_SHEET, bracketSheet } from './sheet-test-helpers';
-import { escapeXml, layerId, writeSvg } from './svg';
+import { escapeXml, layerId, loopsToSvg, writeSvg } from './svg';
+import { importSvg } from './svg-import';
 
 function parseSvg(text: string): Document {
   const doc = new DOMParser().parseFromString(text, 'image/svg+xml');
@@ -264,5 +276,148 @@ describe('writeSvg', () => {
     const ok = doc.getElementById('layer-ok')!;
     expect(ok.getAttribute('stroke')).toBe('#00ff00');
     expect(ok.hasAttribute('stroke-dasharray')).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Loops (T5.6a): read back with jsdom's DOM parser and with this package's SVG import.
+
+/** One `<path>`'s data as pieces in millimetres with y up, from its page coordinates. */
+function domPieces(d: string, page: { origin: Vec2; height: number }): ReadPiece[] {
+  const up = (p: Vec2): Vec2 => [p[0] + page.origin[0], page.height - p[1] + page.origin[1]];
+  const out: ReadPiece[] = [];
+  for (const piece of parsePath(d)) {
+    if (piece.cmd === 'M') continue;
+    if (piece.cmd === 'A') {
+      const a = piece.arc!;
+      expect(a.rx).toBe(a.ry);
+      // Sweep flag 0 runs counter-clockwise once y points up again.
+      out.push(endpointArc(up(a.from), up(piece.to), a.rx, a.large, !a.sweep));
+      continue;
+    }
+    const prev = out[out.length - 1];
+    const from = prev && prev.kind !== 'circle' ? prev.end : undefined;
+    if (piece.cmd === 'Z') {
+      // Our loops end on their start, so the closing command adds nothing.
+      expect(from).toBeDefined();
+      continue;
+    }
+    // A line from the current point: the previous piece's end, or the move.
+    out.push({ kind: 'line', start: from ?? [NaN, NaN], end: up(piece.to) });
+  }
+  // Fill in the first line's start from the move.
+  const m = parsePath(d)[0]!;
+  const first = out[0]!;
+  if (first.kind === 'line' && Number.isNaN(first.start[0])) out[0] = { ...first, start: up(m.to) };
+  return out;
+}
+
+describe('loopsToSvg', () => {
+  const layers = loopLayers();
+  const loops = layers.flatMap((l) => l.loops.map((loop) => ({ layer: l.name, loop })));
+  const text = loopsToSvg(layers, { title: 'Part' });
+  const page = pageOf(loopsToSheet(layers));
+
+  it('writes a millimetre page, a group per layer and a closed path per loop', () => {
+    const svg = parseSvg(text).documentElement;
+    expect(svg.getAttribute('width')).toBe(`${formatNumber(page.width)}mm`);
+    expect(svg.getAttribute('height')).toBe(`${formatNumber(page.height)}mm`);
+    expect(svg.getAttribute('viewBox')).toBe(
+      `0 0 ${formatNumber(page.width)} ${formatNumber(page.height)}`,
+    );
+    const gs = [...svg.getElementsByTagName('g')];
+    expect(gs.map((g) => [g.getAttribute('data-layer'), g.getAttribute('stroke')])).toEqual([
+      ['outside', '#ff0000'],
+      ['engrave', '#0000ff'],
+    ]);
+    expect(gs.map((g) => g.getElementsByTagName('path').length)).toEqual([4, 1]);
+    const paths = [...svg.getElementsByTagName('path')];
+    expect(paths.map((p) => p.getAttribute('data-owner'))).toEqual([
+      'outline',
+      'hole#1',
+      null,
+      null,
+      'keyhole',
+    ]);
+    for (const p of paths) expect(p.getAttribute('d')).toMatch(/Z$/);
+  });
+
+  it('reads back exactly through the DOM', () => {
+    const paths = [...parseSvg(text).getElementsByTagName('path')];
+    expect(paths).toHaveLength(loops.length);
+    loops.forEach(({ layer, loop }, i) => {
+      expect(paths[i]!.parentElement!.getAttribute('data-layer')).toBe(layer);
+      expectLoop(domPieces(paths[i]!.getAttribute('d')!, page), loop, `DOM loop ${i}`);
+    });
+  });
+
+  it('reads back exactly through importSvg', () => {
+    const read = importSvg(text, { tolerance: 1e-7 });
+    expect(read.circles).toHaveLength(0);
+    expect(read.contours).toHaveLength(loops.length);
+    const world = (p: Vec2): Vec2 => [p[0] + page.origin[0], p[1] + page.origin[1]];
+    loops.forEach(({ loop }, i) => {
+      const contour = read.contours[i]!;
+      expect(contour.closed).toBe(true);
+      const pieces: ReadPiece[] = contour.segments.map((s) =>
+        s.kind === 'line'
+          ? { kind: 'line', start: world(s.start), end: world(s.end) }
+          : {
+              kind: 'arc',
+              start: world(s.start),
+              end: world(s.end),
+              center: world(s.center),
+              sweep: arcSweep(s.center, s.start, s.end, !s.clockwise),
+            },
+      );
+      expectLoop(pieces, loop, `importSvg loop ${i}`);
+    });
+  });
+
+  it('splits arcs into quarter turns at most', () => {
+    const arcs = [...parseSvg(text).getElementsByTagName('path')].flatMap((p) =>
+      parsePath(p.getAttribute('d')!).filter((x) => x.cmd === 'A'),
+    );
+    // Four corners, a circle in four, two half circles in two each, 270 degrees in three.
+    expect(arcs).toHaveLength(4 + 4 + 4 + 3);
+    for (const a of arcs) expect(a.arc!.large).toBe(false);
+    // A drawing keeps a full circle as two halves.
+    const drawing = writeSvg(loopsToSheet([{ name: 'cut', loops: [HOLE] }]));
+    expect(drawing.match(/A/g)).toHaveLength(2);
+  });
+
+  it('needs the quarter turn split to read back exactly', () => {
+    // A half disc whose radius rounds up while its chord rounds down: as one half arc command, a
+    // reader puts the centre about 3 um off the chord.
+    const c: Vec2 = [3e-7, 0];
+    const r = 10.0000006;
+    const d: Loop2 = {
+      segments: [
+        { kind: 'arc', center: c, start: [c[0] + r, 0], end: [c[0] - r, 0], ccw: true },
+        { kind: 'line', start: [c[0] - r, 0], end: [c[0] + r, 0] },
+      ],
+    };
+    const cut = [{ name: 'cut', loops: [d] }];
+    const dPage = pageOf(loopsToSheet(cut));
+    const read = (svg: string) =>
+      domPieces(parseSvg(svg).getElementsByTagName('path')[0]!.getAttribute('d')!, dPage);
+    expectLoop(read(loopsToSvg(cut)), d, 'quarters');
+    expect(() => expectLoop(read(loopsToSvg(cut, { maxArcSweep: Math.PI })), d, 'half')).toThrow(
+      /centre/,
+    );
+  });
+
+  it('keeps absolute positions on a sized page', () => {
+    const sized = loopsToSvg(layers, { size: { width: 200, height: 100 } });
+    const svg = parseSvg(sized).documentElement;
+    expect(svg.getAttribute('viewBox')).toBe('0 0 200 100');
+    const paths = [...svg.getElementsByTagName('path')];
+    loops.forEach(({ loop }, i) =>
+      expectLoop(
+        domPieces(paths[i]!.getAttribute('d')!, { origin: [0, 0], height: 100 }),
+        loop,
+        `sized loop ${i}`,
+      ),
+    );
   });
 });

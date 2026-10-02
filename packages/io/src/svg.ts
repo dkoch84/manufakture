@@ -11,10 +11,13 @@ import {
   isFullTurn,
   itemsByLayer,
   layerDash,
+  loopsToSheet,
   pageOf,
   segmentPoint,
   signedSweep,
   type Layer2,
+  type LoopLayer2,
+  type LoopSheetOptions,
   type Path2,
   type Segment2,
   type Sheet2,
@@ -25,7 +28,18 @@ import {
 export interface SvgWriteOptions {
   /** CSS font family list for text (default Helvetica, then Arial, then any sans-serif). */
   readonly fontFamily?: string;
+  /**
+   * The largest sweep, radians, of one arc command (default: no limit, a full turn as two
+   * halves). A reader rebuilds an arc's centre from its ends and radius, and near half a turn
+   * that centre moves by about the square root of the radius times the rounding (7 um for a
+   * 50 mm radius at six decimals); at a quarter turn or less it moves by at most 1.5 times the
+   * rounding. Loops are written with `LOOP_MAX_ARC_SWEEP`. Values below 0.01 are taken as 0.01.
+   */
+  readonly maxArcSweep?: number;
 }
+
+/** Arc commands of loops sweep at most a quarter turn (see `SvgWriteOptions.maxArcSweep`). */
+export const LOOP_MAX_ARC_SWEEP = Math.PI / 2;
 
 export const SVG_FONT_FAMILY = 'Helvetica, Arial, sans-serif';
 
@@ -46,7 +60,7 @@ export function writeSvg(sheet: Sheet2, options: SvgWriteOptions = {}): string {
     out.push(`<g ${layerAttributes(layer)}>`);
     for (const item of items) {
       if (item.kind === 'path') {
-        const d = pathData(item, flip);
+        const d = pathData(item, flip, options.maxArcSweep);
         if (d)
           out.push(
             `<path${ownerAttr(item.owner)} d="${d}"${item.fill ? ` fill="${color(layer)}"` : ''}/>`,
@@ -94,13 +108,14 @@ const ownerAttr = (owner?: string): string =>
 export function pathData(
   path: Pick<Path2, 'segments' | 'closed'>,
   flip: (p: Vec2) => Vec2,
+  maxArcSweep?: number,
 ): string {
   const parts: string[] = [];
   const runs = connectedRuns(path.segments);
   for (const run of runs) {
     const s = flip(segmentPoint(run[0]!, 'start'));
     parts.push(`M${n(s[0])} ${n(s[1])}`);
-    for (const seg of run) parts.push(...segmentCommands(seg, flip));
+    for (const seg of run) parts.push(...segmentCommands(seg, flip, maxArcSweep));
   }
   if (path.closed && runs.length) {
     if (runs.length === 1) parts.push('Z');
@@ -112,14 +127,20 @@ export function pathData(
   return parts.join(' ');
 }
 
-function segmentCommands(seg: Segment2, flip: (p: Vec2) => Vec2): string[] {
+function segmentCommands(
+  seg: Segment2,
+  flip: (p: Vec2) => Vec2,
+  maxArcSweep: number | undefined,
+): string[] {
   if (seg.kind === 'line') {
     const b = flip(seg.b);
     return [`L${n(b[0])} ${n(b[1])}`];
   }
   const sweep = signedSweep(seg);
   // A full turn has no single arc command (its endpoints coincide): two halves.
-  const pieces = isFullTurn(seg) ? 2 : 1;
+  let pieces = isFullTurn(seg) ? 2 : 1;
+  if (maxArcSweep !== undefined && maxArcSweep > 0)
+    pieces = Math.max(pieces, Math.ceil(Math.abs(sweep) / Math.max(maxArcSweep, 0.01) - 1e-9));
   const [rx, ry, rot] =
     seg.kind === 'arc' ? [seg.radius, seg.radius, 0] : [seg.major, seg.minor, seg.rotation];
   // y flips, so the rotation turns the other way and a counter-clockwise sweep (sweep-flag 0
@@ -135,6 +156,21 @@ function segmentCommands(seg: Segment2, flip: (p: Vec2) => Vec2): string[] {
     out.push(`A${n(rx)} ${n(ry)} ${n(rotation)} ${large} ${sweepFlag} ${n(end[0])} ${n(end[1])}`);
   }
   return out;
+}
+
+/**
+ * Closed loops (laser and plasma outlines) as an SVG: a `<g>` per `LoopLayer2`, a closed `<path>`
+ * per loop (lines and arc commands of at most `LOOP_MAX_ARC_SWEEP`), `data-owner` from the loop's
+ * `id`. Ends are kept exactly (see `loopsToSheet`).
+ */
+export function loopsToSvg(
+  layers: readonly LoopLayer2[],
+  options: LoopSheetOptions & SvgWriteOptions = {},
+): string {
+  return writeSvg(loopsToSheet(layers, options), {
+    ...options,
+    maxArcSweep: options.maxArcSweep ?? LOOP_MAX_ARC_SWEEP,
+  });
 }
 
 function textElement(t: Text2, flip: (p: Vec2) => Vec2, layer: Layer2, font: string): string {
