@@ -60,7 +60,8 @@ The evaluated counterparts of the document's `cam` section (T5.1b), each with it
     optional `DrillExtras` of [the drill operation](#the-drill-operation-opsdrillts));
   - `vcarve`: `loops`, `top`, `maxDepth?` (and, for now, the optional `VCarveExtras` of
     [the V-carve operation](#the-v-carve-operation-opsvcarvets));
-  - `surface3d`: `mesh`, `stepover` (mm), `angle`, `allowance`.
+  - `surface3d`: `mesh`, `stepover` (mm), `angle`, `allowance` (and, for now, the optional
+    `Surface3dExtras` of [the 3D surfacing operation](#the-3d-surfacing-operation-opssurface3dts)).
   - `Entry` is `plunge`, `ramp` (`angle`) or `helix` (`angle`, `radius`); `Lead` is `none`,
     `line` (`length`) or `arc` (`radius`).
 
@@ -1237,6 +1238,141 @@ zero, no loops, a shape too small to carve and a clearing tool that is not a fla
 are `invalid-input` errors. Warnings: `too-narrow` (area narrower than a flat tip, left uncut) and
 those above.
 
+## The 3D surfacing operation (`ops/surface3d.ts`)
+
+`generateSurface3d(input, context)` (T5.5a), registered as the `surface3d` generator, machines a
+curved part from its mesh (`input.mesh`, machine coordinates, as the CAM geometry stage's mesh at
+the CAM tolerance turned into the setup's WCS). It reads its `Surface3dInput`, the setup's stock,
+WCS and heights. Following the T5.0b spike and ADR 0014 decision 13 it runs on our own TypeScript
+drop-cutter, with no OpenCAMLib and no new dependency. Two strategies:
+
+- **`parallel`** (finishing, the default): raster lines a stepover apart within a boundary, the
+  tool dropped onto the mesh along each line;
+- **`zlevel`** (roughing): the part sliced at falling heights, each slice cleared by the pocket
+  operation's layer clearing (`generatePocketLayers`), leaving the stock to leave.
+
+**Waterline (constant-Z) finishing is not implemented** (out of M5's scope, T5.0b): a follow-up
+decides between a TypeScript waterline (push-cutter fibres along X and Y plus a loop weave, on the
+same cutter geometry) and OpenCAMLib with the ADR 0006 amendment drafted in the spike. Steep walls
+are therefore finished only as well as a raster finishes them; the scallop on a slope is larger
+than on a flat (the stepover is measured in XY).
+
+**Fields.** From the core schema: `stepover` (mm between raster lines; at most the tool diameter),
+`angle` (raster direction, radians from machine +X) and `allowance` (stock to leave, mm, zero or
+more). The rest are `Surface3dExtras` (all optional, not in the core schema yet; they need a format
+bump when the UI (T5.5b) adds them): `strategy` (`parallel` or `zlevel`), `boundary` (loops the
+tool centre stays inside, machine XY; default the mesh's XY bounding box for `parallel`, the stock
+outline grown by half the tool diameter for `zlevel`), `tolerance` (default
+`SURFACE3D_TOLERANCE`, 0.01 mm), `sampling` (drop points along a line, default a quarter of the
+tool radius, between 0.05 and 0.5 mm), `floor` (the lowest tip Z; default the mesh's lowest point),
+`pattern` (`zigzag`, the default, or `oneway`), and for `zlevel` `stepdown` (default half the tool
+diameter), `entry` (default a 3 degree helix, `SURFACE3D_ROUGH_ENTRY`), `climb` (default true)
+and `sliceCell` (default `SURFACE3D_SLICE_CELL`, 0.2 mm). For `zlevel` the stepover becomes the
+pocket's fraction of the diameter.
+
+### The drop-cutter (`mesh/dropcutter.ts`)
+
+`DropCutter(mesh, shape)` answers `drop(x, y, floor)`: the lowest tool tip Z at (x, y) at which
+the tool clears every triangle, or `floor`. Moved from the spike, where it agreed with OpenCAMLib to
+2.3e-12 mm for flat and ball cutters on 892,104 points and did not gouge where OCL's cone cutter
+does. A cutter is a solid of revolution given by its profile f(r) above the tip; each triangle
+bounds the tip by its vertices, its facet (one known contact point per plane normal) and its edges
+(the bound along an edge is concave for every profile here, so its maximum is a closed form for
+flat, ball and sharp V cutters, and a bisection on the monotonic derivative for bull and
+flat-tipped V cutters). Shapes: `flat`, `ball`, `bull` (corner radius) and `vbit` (half angle and
+tip radius); `cutterForTool(tool, allowance)` maps a `Tool` to one, grown by the stock to leave (a
+flat end mill becomes a bull nose, a ball a larger ball, a bull a larger bull; dropping the grown
+cutter and adding the allowance keeps the real tool that far from the mesh). V-bits take no
+allowance (a grown cone is none of these shapes); drills and engravers are refused. The spatial
+index is a uniform XY grid over the triangles' boxes (cell the tool radius, at least 0.5 mm) in a
+compressed layout, and triangles wholly below the current height are skipped. It holds about 150
+bytes per triangle in typed arrays. `SurfaceSampler` is the one interface surfacing reads, so a
+later engine plugs in behind it.
+
+### Parallel finishing
+
+The raster is `facingRaster(boundary, ...)` with no margin and no tool radius inset: lines across
+the boundary at most a stepover apart, each cut into its stretches inside. Along each stretch the
+tool is dropped every `sampling` mm (with the grown cutter for the allowance, down to `floor`), and
+between neighbouring samples the middle is dropped too: where it lies more than half the tolerance
+off the chord the interval is halved, up to 10 times or down to 0.002 mm. A jump that halving
+cannot resolve (a flat end mill passing a vertical wall) becomes a step straight up then across, or
+across then straight down, never a diagonal through the wall. The points are then filtered to lines
+and arcs (`fitPolyline`, below) within the other half of the tolerance, so the posted path stays
+within `tolerance` of the true cutter locations (measured on the filleted block at 0.01 mm: no ball
+centre nearer the mesh than its radius less 0.0067 mm).
+
+**Links and safety.** The program starts at the clearance height above the first line's start.
+To start a stretch the tool rises straight up to the retract height (at least
+`SURFACE3D_SAFE_ABOVE`, 0.5 mm, above the stock top, or above the mesh when that is higher),
+crosses there, rapids down to 0.5 mm above the stock top (or the point, when higher) and feeds down
+at the plunge feed: a finish does not know what the roughing left, so nothing rapids below the
+stock top except straight up. In a zigzag, the next stretch is reached along the surface instead
+(the dropped cutter locations from the end of one stretch to the start of the next, fed as a cut)
+when it is at most two stepovers away and the straight link stays inside the boundary; otherwise
+it retracts. One IR `pass` per raster line. The program ends with a rapid to the clearance.
+`context.checkpoint()` runs before every line.
+
+**Scallops.** `scallopHeight(shape, stepover)` is the cusp a cutter leaves between lines on a flat
+floor: `R - sqrt(R^2 - (s/2)^2)` for a ball, 0 for a flat end mill, the corner's for a bull. On the
+filleted block's flat top the measured cusp matches it within 5 micrometres at 1 and 2 mm stepovers.
+
+### Z-level roughing
+
+The slices come from a height grid (`mesh/slices.ts`): at every node of a `sliceCell` grid, the
+highest point of the mesh within `reach` (a flat drop-cutter of that radius), with `reach` the
+cell's diagonal plus `SURFACE3D_SLICE_SIMPLIFY` (0.02 mm). Marching triangles (two per cell, so the
+interpolant is one piecewise-linear function and the slices of falling levels are nested) trace
+where the grid exceeds `z - allowance`; with that reach, every point under material higher than
+that lies inside the traced loops, which are then simplified within 0.02 mm. Those loops are the
+islands of the layer at `z`: the region cleared is the boundary grown by the tool radius plus the
+allowance, less the islands, and the pocket insets both by the tool radius plus the allowance. So
+at every layer the tool (taken as a flat cylinder) keeps the allowance from the part sideways and
+below it. Levels: even steps of at most `stepdown` from the stock top to the floor, plus the
+allowance above every horizontal face of the mesh (with at least 1 mm2 of area), so flat areas
+are roughed to exactly the stock to leave. The pocket does the entries, links and rapids (rapids
+only above what it has cut, at the retract height otherwise); no wall or floor finishing pass. On
+the filleted block with a 6 mm flat end mill and 0.5 mm to leave, no point of the tool comes nearer
+the part than the allowance, the flat top is roughed to 0.5 mm above it, and at the floor the
+tool's edge stays 0.65 mm from the wall (the allowance plus the slice's reach). Round tools rough
+too, with a `rough-round-tool` warning: they leave more than the allowance between levels.
+
+**Errors and warnings.** Bad numbers (a stepover outside (0, diameter], a negative allowance, a
+non-finite angle, a tolerance below 0.0001 mm, an unknown strategy or pattern), an empty or
+malformed mesh (indices out of range, coordinates not finite), an empty boundary, a floor not
+below the stock top, a V-bit with an allowance and a drill or engraver are `invalid-input` errors.
+Warnings: `depth-exceeds-flutes` (the finish reaches, or the roughing goes, deeper below the stock
+top than the flute length) and `rough-round-tool`.
+
+### Point filtering (`mesh/fit.ts`)
+
+`fitPolyline(points, tolerance)` turns cutter locations into lines and arcs: greedily from the
+start, the longest run of points one line holds (3D distance) against the longest run one arc
+holds (an XY arc, flat or helical with Z linear in the angle, at most half a turn, through the
+run's first, middle and last points, every point and every chord's middle within the tolerance,
+and passing `grblArcPrecheck`), the longer winning and a line on a tie. Runs are found by galloping
+and bisection, and every accepted element is checked against every point it replaces. A straight
+raster line lies in a vertical plane, so it only ever becomes lines (on the block's flat top, one
+move per stretch); arcs come from cutter locations that turn in XY.
+
+### Performance
+
+Measured in Node 26 on one desktop core (an AMD Ryzen 5 7600X), medians of 3, with the test
+fixture's filleted block grown to 120 x 90 x 30 mm (fillet radius 8 mm, stock 130 x 100 x 32 mm),
+a 1/4" (6.35 mm) ball for finishing (raster along X, sampling 0.5 mm, tolerance 0.01 mm) and a
+1/4" flat end mill for roughing (stepdown 3 mm, stepover 2.5 mm, 0.5 mm to leave, slice cell
+0.2 mm):
+
+| Mesh triangles | Index build | Finish, stepover 0.5 mm (181 lines) | Finish, stepover 1 mm | Z-level rough |
+| -------------- | ----------- | ----------------------------------- | --------------------- | ------------- |
+| 8,718          | 6 ms        | 263 ms                              | 127 ms                | 1.8 s         |
+| 33,806         | 4 ms        | 612 ms                              | 322 ms                | 1.9 s         |
+| 98,574         | 7 ms        | 1.5 s                               | 0.8 s                 | 2.0 s         |
+
+Of the roughing on the largest mesh, the slice grid (about 600 x 450 nodes) takes about 0.42 s and
+tracing 12 slices 0.06 s; the rest is the pocket clearing its 12 layers. Memory: the
+JS heap after `gc()` stays flat over 8 repeated finishes (15.9 to 16.1 MiB in the test run).
+
 ## Linking and job assembly (`job.ts`)
 
 `assembleJob(setup, operations, options)` (T5.2g) turns a setup's operation toolpaths into one
@@ -1436,6 +1572,34 @@ retract it used (for the post's `heights`), and with `rapidRate` the whole progr
   on top and on the bottom); no rapid into material; feed moves inside the outline; the bucket
   grid against the exact distance; refusals, the narrow-tip warning, checkpoints and
   `CamCancelled`, registration. Every toolpath passes the IR validator.
+- `mesh/dropcutter.test.ts`: closed-form drops of every cutter (flat, ball, bull, sharp and
+  flat-tipped V) on a horizontal facet, its edge and corner, inclined planes in both V regimes, a
+  ridge edge and a spike vertex; a bull with its corner equal to its radius is a ball; random
+  meshes against a brute-force lower bound that shares no code with the cutter (never below it,
+  above it only by the bound's sampling error); the same answers at any grid cell size; the empty
+  mesh; `cutterForTool` and its grown cutters (a ball grown by the allowance keeps its centre
+  `R + a` from a plane), and its refusals.
+- `mesh/fit.test.ts`: collinear points to one line, a raster profile within 0.001 to 0.02 mm with
+  far fewer lines, circles in both directions and a helix to arcs, arcs never past half a turn and
+  all passing the Grbl pre-check, random walks within the tolerance.
+- `mesh/slices.test.ts`: slices of a filleted block contain every point with material above the
+  level and nothing beyond the reach plus a cell, are nested as the level falls, vanish above the
+  part, trace holes clockwise; closed polygon simplification within the tolerance.
+- `ops/surface3d.test.ts`: golden tests on a filleted block (60 x 40 x 18 mm, fillet r 8, 8,718
+  triangles built in `mesh/test-meshes.ts`): the parallel finish never puts a 6 mm ball's centre
+  nearer the mesh than its radius less the tolerance, checked by exact point-to-triangle distance
+  every 0.1 mm along every feed move, and keeps it touching while cutting; ball and flat end mill
+  finishes keep the stock to leave; the scallop on the flat top matches `scallopHeight` within
+  0.002 mm at 1 and 2 mm stepovers; zigzag links along the surface and one-way retracts, rapids
+  only straight up or above the stock top; an angled raster inside a given boundary; filtering
+  shrinks the moves; bull and V-bit finishes agree with the drop-cutter; z-level roughing leaves
+  the stock to leave against the analytic surface, roughs the flat top to exactly it, comes to
+  within 1 mm more of the wall at the floor, steps down no more than the stepdown, and never
+  rapids into material (the heightmap check); a given boundary and the round-tool warning;
+  refusals, the flute warning, `CamCancelled` at a checkpoint, registration; and the JS heap flat
+  over 8 repeated runs. Every toolpath passes the IR validator.
+  `test/surface3d-gcode.test.ts` assembles a z-level rough and a parallel finish into a job, posts
+  it for Grbl (one file per tool) and runs the G-code verifier on both files.
 - `library/library.test.ts`: every built-in tool validates; the starter set and catalogue
   numbers; V-bit cone heights; the #201 presets equal to the chart rows; derived presets keep the
   #201 chip load scaled by diameter, stay within the flutes and are unverified; a preset for every

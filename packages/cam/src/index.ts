@@ -205,6 +205,31 @@ export {
 } from './ops/vcarve';
 export type { VCarveClearing, VCarveExtras, VCarveOperation } from './ops/vcarve';
 
+// T5.5a: 3D surfacing (registered on the worker by `registerBuiltinOperations`): parallel
+// finishing on our TypeScript drop-cutter, and z-level roughing through the pocket's layers.
+export {
+  SURFACE3D_ROUGH_ENTRY,
+  SURFACE3D_SAFE_ABOVE,
+  SURFACE3D_SLICE_CELL,
+  SURFACE3D_SLICE_SIMPLIFY,
+  SURFACE3D_TOLERANCE,
+  generateSurface3d,
+  scallopHeight,
+} from './ops/surface3d';
+export type { Surface3dExtras, Surface3dOperation, Surface3dStrategy } from './ops/surface3d';
+export { DropCutter, cutterForTool, meshBounds } from './mesh/dropcutter';
+export type { CutterShape, DropCutterOptions, SurfaceSampler } from './mesh/dropcutter';
+export { distToSegment3, fitPolyline } from './mesh/fit';
+export type { FitElement } from './mesh/fit';
+export {
+  MAX_GRID_NODES,
+  heightGrid,
+  polygonArea,
+  simplifyClosed,
+  superLevelLoops,
+} from './mesh/slices';
+export type { HeightGrid } from './mesh/slices';
+
 // T5.2g: linking and job assembly (a setup's operations as one program for the posts).
 export {
   JOB_LINK_OP,

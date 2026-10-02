@@ -7,6 +7,7 @@ import { generateFacing } from '../ops/facing';
 import { generateDrill } from '../ops/drill';
 import { generatePocket } from '../ops/pocket';
 import { generateProfile } from '../ops/profile';
+import { generateSurface3d } from '../ops/surface3d';
 import { generateVCarve } from '../ops/vcarve';
 import type { OperationRegistry } from './registry';
 
@@ -16,5 +17,6 @@ export function registerBuiltinOperations(registry: OperationRegistry): Operatio
   registry.register('drill', generateDrill);
   registry.register('facing', generateFacing);
   registry.register('vcarve', generateVCarve);
+  registry.register('surface3d', generateSurface3d);
   return registry;
 }
