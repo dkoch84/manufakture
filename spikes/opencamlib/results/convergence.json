@@ -1,0 +1,90 @@
+{
+  "host": {
+    "cpu": "AMD Ryzen 5 7600X 6-Core Processor",
+    "logicalCpus": 12,
+    "memoryGiB": 62,
+    "node": "v26.10.0",
+    "platform": "linux x64",
+    "libcascade": "3.0.2 (single-threaded build), meshes only",
+    "ocl": {
+      "emscripten": "emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 6.0.10 (d6c521a7f05449857c76bd99e396895583cf2083)",
+      "emsdk": "6.0.10",
+      "emsdkCommit": "e566f7bdcc7735f44037911c24b87a58a3c93145",
+      "cmake": "4.4.3",
+      "ninja": "1.13.2.git.kitware.jobserver-pipe-1",
+      "opencamlib": "95b036fe28ce6d77c97b98e5fbc337904ae49560",
+      "boost": "1.89.0",
+      "buildSeconds": 9,
+      "mjsBytes": 103248,
+      "wasmBytes": 329046,
+      "wasmSha256": "0c6bc7b289c389e5f4a5a76a54c1bf03eaf63249823936f320a5851d6ecaf514"
+    },
+    "measuredAt": "2026-10-02T16:42:05.671Z"
+  },
+  "cutter": {
+    "kind": "vbit",
+    "diameter": 6.35,
+    "angle": 60
+  },
+  "steps": [
+    400,
+    1000,
+    2500
+  ],
+  "points": [
+    {
+      "mesh": "bracket",
+      "x": 9.177280550774526,
+      "y": -15.5,
+      "ts": 5.227654552841659,
+      "ocl": 5.221084429199951,
+      "bounds": [
+        {
+          "steps": 400,
+          "bound": 5.2276545522619235,
+          "tsMinusBound": 0,
+          "boundMinusOcl": 0.0065701
+        },
+        {
+          "steps": 1000,
+          "bound": 5.227654542764673,
+          "tsMinusBound": 0,
+          "boundMinusOcl": 0.0065701
+        },
+        {
+          "steps": 2500,
+          "bound": 5.227654552840996,
+          "tsMinusBound": 0,
+          "boundMinusOcl": 0.0065701
+        }
+      ]
+    },
+    {
+      "mesh": "filleted",
+      "x": 122.90085870413739,
+      "y": 71.5,
+      "ts": 18.575355105223032,
+      "ocl": 18.466992245511197,
+      "bounds": [
+        {
+          "steps": 400,
+          "bound": 18.573966898189976,
+          "tsMinusBound": 0.0013882,
+          "boundMinusOcl": 0.1069747
+        },
+        {
+          "steps": 1000,
+          "bound": 18.575265333449643,
+          "tsMinusBound": 0.0000898,
+          "boundMinusOcl": 0.1082731
+        },
+        {
+          "steps": 2500,
+          "bound": 18.575290783701465,
+          "tsMinusBound": 0.0000643,
+          "boundMinusOcl": 0.1082985
+        }
+      ]
+    }
+  ]
+}

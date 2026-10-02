@@ -1,0 +1,3 @@
+# Build outputs of build/build-ocl.sh and cached meshes: reproducible, not committed.
+build/dist/
+.cache/

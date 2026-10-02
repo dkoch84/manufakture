@@ -1,0 +1,89 @@
+{
+  "host": {
+    "cpu": "AMD Ryzen 5 7600X 6-Core Processor",
+    "logicalCpus": 12,
+    "memoryGiB": 62,
+    "node": "v26.10.0",
+    "platform": "linux x64",
+    "libcascade": "3.0.2 (single-threaded build), meshes only",
+    "ocl": {
+      "emscripten": "emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 6.0.10 (d6c521a7f05449857c76bd99e396895583cf2083)",
+      "emsdk": "6.0.10",
+      "opencamlib": "95b036fe28ce6d77c97b98e5fbc337904ae49560",
+      "boost": "1.89.0",
+      "buildSeconds": 9,
+      "mjsBytes": 103248,
+      "wasmBytes": 329046,
+      "wasmSha256": "0c6bc7b289c389e5f4a5a76a54c1bf03eaf63249823936f320a5851d6ecaf514"
+    },
+    "measuredAt": "2026-10-02T16:23:43.091Z"
+  },
+  "settings": {
+    "stepover": 0.5,
+    "sampling": 1,
+    "minSampling": 0.02,
+    "cosLimit": 0.999
+  },
+  "rows": [
+    {
+      "mesh": "bracket",
+      "cutter": "ball 6.35",
+      "uniform": {
+        "points": 44814,
+        "runMs": 663.11
+      },
+      "adaptive": {
+        "points": 12511,
+        "runMs": 404.01,
+        "extractMs": 7.02,
+        "maxBelowMesh": 1.9184653865522705e-13
+      },
+      "uniformMaxBelowMesh": 5.3734794391857577e-14
+    },
+    {
+      "mesh": "bracket",
+      "cutter": "flat 6.35",
+      "uniform": {
+        "points": 44814,
+        "runMs": 513.8
+      },
+      "adaptive": {
+        "points": 7798,
+        "runMs": 183.98,
+        "extractMs": 4.18,
+        "maxBelowMesh": 1.0658141036401503e-14
+      },
+      "uniformMaxBelowMesh": 7.638334409421077e-14
+    },
+    {
+      "mesh": "filleted",
+      "cutter": "ball 6.35",
+      "uniform": {
+        "points": 252554,
+        "runMs": 23905.18
+      },
+      "adaptive": {
+        "points": 39715,
+        "runMs": 10983.46,
+        "extractMs": 26.08,
+        "maxBelowMesh": 2.284394895468722e-12
+      },
+      "uniformMaxBelowMesh": 2.291500322826323e-12
+    },
+    {
+      "mesh": "filleted",
+      "cutter": "flat 6.35",
+      "uniform": {
+        "points": 252554,
+        "runMs": 22284.97
+      },
+      "adaptive": {
+        "points": 41336,
+        "runMs": 8926.08,
+        "extractMs": 29.96,
+        "maxBelowMesh": 3.147704319417244e-12
+      },
+      "uniformMaxBelowMesh": 1.6839862837514374e-12
+    }
+  ]
+}

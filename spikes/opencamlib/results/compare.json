@@ -1,0 +1,416 @@
+{
+  "host": {
+    "cpu": "AMD Ryzen 5 7600X 6-Core Processor",
+    "logicalCpus": 12,
+    "memoryGiB": 62,
+    "node": "v26.10.0",
+    "platform": "linux x64",
+    "libcascade": "3.0.2 (single-threaded build), meshes only",
+    "ocl": {
+      "emscripten": "emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 6.0.10 (d6c521a7f05449857c76bd99e396895583cf2083)",
+      "emsdk": "6.0.10",
+      "opencamlib": "95b036fe28ce6d77c97b98e5fbc337904ae49560",
+      "boost": "1.89.0",
+      "buildSeconds": 9,
+      "mjsBytes": 103248,
+      "wasmBytes": 329046,
+      "wasmSha256": "0c6bc7b289c389e5f4a5a76a54c1bf03eaf63249823936f320a5851d6ecaf514"
+    },
+    "measuredAt": "2026-10-02T16:34:56.418Z"
+  },
+  "raster": {
+    "stepover": 0.5,
+    "sampling": 0.1
+  },
+  "runs": 3,
+  "rows": [
+    {
+      "mesh": "bracket",
+      "triangles": 2172,
+      "cutter": "flat 6.35",
+      "points": 44814,
+      "ocl": {
+        "surfMs": 8.64,
+        "setupMs": 2.31,
+        "runMs": 516.41,
+        "extractMs": 23.82,
+        "firstRunMs": 558.05
+      },
+      "ts": {
+        "indexMs": 0.95,
+        "dropMs": 183.86,
+        "firstDropMs": 192.99,
+        "trianglesTestedPerPoint": 109
+      },
+      "speedRatioRun": 2.81,
+      "speedRatioTotal": 2.94,
+      "agreement": {
+        "maxAbsDz": 7.638334409421077e-14,
+        "maxTsAbove": 7.638334409421077e-14,
+        "maxOclAbove": 8.881784197001252e-15,
+        "over1um": 0,
+        "over10um": 0
+      },
+      "sanity": {
+        "ocl": {
+          "checked": 44814,
+          "maxBallPenetration": null,
+          "ballNotTouching": null,
+          "maxVertexPenetration": 0
+        },
+        "ts": {
+          "checked": 44814,
+          "maxBallPenetration": null,
+          "ballNotTouching": null,
+          "maxVertexPenetration": 0
+        }
+      },
+      "worst": []
+    },
+    {
+      "mesh": "bracket",
+      "triangles": 2172,
+      "cutter": "ball 6.35",
+      "points": 44814,
+      "ocl": {
+        "surfMs": 8.64,
+        "setupMs": 2.27,
+        "runMs": 622.39,
+        "extractMs": 23.65,
+        "firstRunMs": 626.15
+      },
+      "ts": {
+        "indexMs": 0.17,
+        "dropMs": 246.66,
+        "firstDropMs": 252.98,
+        "trianglesTestedPerPoint": 109
+      },
+      "speedRatioRun": 2.52,
+      "speedRatioTotal": 2.63,
+      "agreement": {
+        "maxAbsDz": 5.3734794391857577e-14,
+        "maxTsAbove": 5.3734794391857577e-14,
+        "maxOclAbove": 7.105427357601002e-15,
+        "over1um": 0,
+        "over10um": 0
+      },
+      "sanity": {
+        "ocl": {
+          "checked": 44814,
+          "maxBallPenetration": 5.773159728050814e-15,
+          "ballNotTouching": 0,
+          "maxVertexPenetration": 7.105427357601002e-15
+        },
+        "ts": {
+          "checked": 44814,
+          "maxBallPenetration": 5.773159728050814e-15,
+          "ballNotTouching": 0,
+          "maxVertexPenetration": 7.105427357601002e-15
+        }
+      },
+      "worst": []
+    },
+    {
+      "mesh": "bracket",
+      "triangles": 2172,
+      "cutter": "ball 3.175",
+      "points": 44814,
+      "ocl": {
+        "surfMs": 8.64,
+        "setupMs": 2.26,
+        "runMs": 411.95,
+        "extractMs": 26.8,
+        "firstRunMs": 411.91
+      },
+      "ts": {
+        "indexMs": 0.29,
+        "dropMs": 125.08,
+        "firstDropMs": 124.99,
+        "trianglesTestedPerPoint": 58.6
+      },
+      "speedRatioRun": 3.29,
+      "speedRatioTotal": 3.52,
+      "agreement": {
+        "maxAbsDz": 6.039613253960852e-14,
+        "maxTsAbove": 6.039613253960852e-14,
+        "maxOclAbove": 7.105427357601002e-15,
+        "over1um": 0,
+        "over10um": 0
+      },
+      "sanity": {
+        "ocl": {
+          "checked": 44814,
+          "maxBallPenetration": 4.218847493575595e-15,
+          "ballNotTouching": 0,
+          "maxVertexPenetration": 0
+        },
+        "ts": {
+          "checked": 44814,
+          "maxBallPenetration": 4.884981308350689e-15,
+          "ballNotTouching": 0,
+          "maxVertexPenetration": 0
+        }
+      },
+      "worst": []
+    },
+    {
+      "mesh": "bracket",
+      "triangles": 2172,
+      "cutter": "vbit 60 6.35",
+      "points": 44814,
+      "ocl": {
+        "surfMs": 8.64,
+        "setupMs": 2.27,
+        "runMs": 659.31,
+        "extractMs": 24.36,
+        "firstRunMs": 665.67
+      },
+      "ts": {
+        "indexMs": 0.61,
+        "dropMs": 217.51,
+        "firstDropMs": 221.97,
+        "trianglesTestedPerPoint": 109
+      },
+      "speedRatioRun": 3.03,
+      "speedRatioTotal": 3.14,
+      "agreement": {
+        "maxAbsDz": 0.006570123641707504,
+        "maxTsAbove": 0.006570123641707504,
+        "maxOclAbove": 8.881784197001252e-15,
+        "over1um": 64,
+        "over10um": 0
+      },
+      "sanity": {
+        "ocl": {
+          "checked": 44814,
+          "maxBallPenetration": null,
+          "ballNotTouching": null,
+          "maxVertexPenetration": 7.105427357601002e-15
+        },
+        "ts": {
+          "checked": 44814,
+          "maxBallPenetration": null,
+          "ballNotTouching": null,
+          "maxVertexPenetration": 7.105427357601002e-15
+        }
+      },
+      "worst": [
+        {
+          "x": 9.177280550774526,
+          "y": -15.5,
+          "ts": 5.227654552841659,
+          "ocl": 5.221084429199951,
+          "bound": 5.2276545522619235
+        },
+        {
+          "x": 9.177280550774526,
+          "y": 15.5,
+          "ts": 5.227654552841659,
+          "ocl": 5.221084429199951,
+          "bound": 5.2276545522619235
+        },
+        {
+          "x": 9.177280550774526,
+          "y": -16.5,
+          "ts": 3.513885296994423,
+          "ocl": 3.508977928523457,
+          "bound": 3.513885293230344
+        }
+      ]
+    },
+    {
+      "mesh": "filleted",
+      "triangles": 99200,
+      "cutter": "flat 6.35",
+      "points": 252554,
+      "ocl": {
+        "surfMs": 196.3,
+        "setupMs": 155.82,
+        "runMs": 22822.64,
+        "extractMs": 159.54,
+        "firstRunMs": 20949.21
+      },
+      "ts": {
+        "indexMs": 14.4,
+        "dropMs": 5703.33,
+        "firstDropMs": 5711.06,
+        "trianglesTestedPerPoint": 407.8
+      },
+      "speedRatioRun": 4,
+      "speedRatioTotal": 4.05,
+      "agreement": {
+        "maxAbsDz": 1.6839862837514374e-12,
+        "maxTsAbove": 1.6839862837514374e-12,
+        "maxOclAbove": 7.531752999057062e-13,
+        "over1um": 0,
+        "over10um": 0
+      },
+      "sanity": {
+        "ocl": {
+          "checked": 50511,
+          "maxBallPenetration": null,
+          "ballNotTouching": null,
+          "maxVertexPenetration": 0
+        },
+        "ts": {
+          "checked": 50511,
+          "maxBallPenetration": null,
+          "ballNotTouching": null,
+          "maxVertexPenetration": 0
+        }
+      },
+      "worst": []
+    },
+    {
+      "mesh": "filleted",
+      "triangles": 99200,
+      "cutter": "ball 6.35",
+      "points": 252554,
+      "ocl": {
+        "surfMs": 196.3,
+        "setupMs": 160.53,
+        "runMs": 25724.03,
+        "extractMs": 142.2,
+        "firstRunMs": 26025.69
+      },
+      "ts": {
+        "indexMs": 7.33,
+        "dropMs": 6743.75,
+        "firstDropMs": 6723.97,
+        "trianglesTestedPerPoint": 407.8
+      },
+      "speedRatioRun": 3.81,
+      "speedRatioTotal": 3.86,
+      "agreement": {
+        "maxAbsDz": 2.291500322826323e-12,
+        "maxTsAbove": 2.291500322826323e-12,
+        "maxOclAbove": 7.460698725481052e-13,
+        "over1um": 0,
+        "over10um": 0
+      },
+      "sanity": {
+        "ocl": {
+          "checked": 50511,
+          "maxBallPenetration": 7.460698725481052e-14,
+          "ballNotTouching": 0,
+          "maxVertexPenetration": 7.105427357601002e-15
+        },
+        "ts": {
+          "checked": 50511,
+          "maxBallPenetration": 3.3306690738754696e-14,
+          "ballNotTouching": 0,
+          "maxVertexPenetration": 0
+        }
+      },
+      "worst": []
+    },
+    {
+      "mesh": "filleted",
+      "triangles": 99200,
+      "cutter": "ball 3.175",
+      "points": 252554,
+      "ocl": {
+        "surfMs": 196.3,
+        "setupMs": 156.07,
+        "runMs": 14905.13,
+        "extractMs": 142.25,
+        "firstRunMs": 14762.28
+      },
+      "ts": {
+        "indexMs": 6.41,
+        "dropMs": 2158.96,
+        "firstDropMs": 2155.89,
+        "trianglesTestedPerPoint": 133.4
+      },
+      "speedRatioRun": 6.9,
+      "speedRatioTotal": 7.02,
+      "agreement": {
+        "maxAbsDz": 2.2879476091475226e-12,
+        "maxTsAbove": 2.2879476091475226e-12,
+        "maxOclAbove": 4.760636329592671e-13,
+        "over1um": 0,
+        "over10um": 0
+      },
+      "sanity": {
+        "ocl": {
+          "checked": 50511,
+          "maxBallPenetration": 5.750955267558311e-14,
+          "ballNotTouching": 0,
+          "maxVertexPenetration": 7.105427357601002e-15
+        },
+        "ts": {
+          "checked": 50511,
+          "maxBallPenetration": 3.019806626980426e-14,
+          "ballNotTouching": 0,
+          "maxVertexPenetration": 0
+        }
+      },
+      "worst": []
+    },
+    {
+      "mesh": "filleted",
+      "triangles": 99200,
+      "cutter": "vbit 60 6.35",
+      "points": 252554,
+      "ocl": {
+        "surfMs": 196.3,
+        "setupMs": 155.56,
+        "runMs": 28094.98,
+        "extractMs": 141.77,
+        "firstRunMs": 28604.78
+      },
+      "ts": {
+        "indexMs": 6.11,
+        "dropMs": 6432.47,
+        "firstDropMs": 6450.79,
+        "trianglesTestedPerPoint": 407.8
+      },
+      "speedRatioRun": 4.37,
+      "speedRatioTotal": 4.41,
+      "agreement": {
+        "maxAbsDz": 0.10836285971183557,
+        "maxTsAbove": 0.10836285971183557,
+        "maxOclAbove": 5.684341886080802e-14,
+        "over1um": 9649,
+        "over10um": 4209
+      },
+      "sanity": {
+        "ocl": {
+          "checked": 50511,
+          "maxBallPenetration": null,
+          "ballNotTouching": null,
+          "maxVertexPenetration": 7.105427357601002e-15
+        },
+        "ts": {
+          "checked": 50511,
+          "maxBallPenetration": null,
+          "ballNotTouching": null,
+          "maxVertexPenetration": 3.552713678800501e-15
+        }
+      },
+      "worst": [
+        {
+          "x": 122.90085870413739,
+          "y": 71.5,
+          "ts": 18.575355105223032,
+          "ocl": 18.466992245511197,
+          "bound": 18.573966898189976
+        },
+        {
+          "x": 122.90085870413739,
+          "y": 72,
+          "ts": 18.575355105223032,
+          "ocl": 18.466992245511197,
+          "bound": 18.575128262443187
+        },
+        {
+          "x": 122.90085870413739,
+          "y": 72.5,
+          "ts": 18.575355105223032,
+          "ocl": 18.466992245511197,
+          "bound": 18.572730475320224
+        }
+      ]
+    }
+  ]
+}

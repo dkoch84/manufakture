@@ -1,0 +1,101 @@
+{
+  "host": {
+    "cpu": "AMD Ryzen 5 7600X 6-Core Processor",
+    "logicalCpus": 12,
+    "memoryGiB": 62,
+    "node": "v26.10.0",
+    "platform": "linux x64",
+    "libcascade": "3.0.2 (single-threaded build), meshes only",
+    "ocl": {
+      "emscripten": "emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 6.0.10 (d6c521a7f05449857c76bd99e396895583cf2083)",
+      "emsdk": "6.0.10",
+      "opencamlib": "95b036fe28ce6d77c97b98e5fbc337904ae49560",
+      "boost": "1.89.0",
+      "buildSeconds": 9,
+      "mjsBytes": 103248,
+      "wasmBytes": 329046,
+      "wasmSha256": "0c6bc7b289c389e5f4a5a76a54c1bf03eaf63249823936f320a5851d6ecaf514"
+    },
+    "measuredAt": "2026-10-02T16:25:48.727Z"
+  },
+  "mesh": "filleted",
+  "runs": 12,
+  "cutter": {
+    "kind": "ball",
+    "diameter": 6.35
+  },
+  "result": {
+    "ocl-pdc": {
+      "heapTopMiB": [
+        118.188,
+        131.199,
+        131.199,
+        131.199,
+        131.199,
+        131.199,
+        131.199,
+        131.199,
+        131.199,
+        131.199,
+        131.199,
+        131.199
+      ],
+      "growthAfterFirstKiB": 13324,
+      "memoryMiB": 138
+    },
+    "ocl-adaptive": {
+      "heapTopMiB": [
+        131.199,
+        131.199,
+        131.199,
+        131.199,
+        131.199,
+        131.199,
+        131.199,
+        131.199,
+        131.199,
+        131.199,
+        131.199,
+        131.199
+      ],
+      "growthAfterFirstKiB": 0,
+      "memoryMiB": 138
+    },
+    "ocl-waterline": {
+      "heapTopMiB": [
+        152.789,
+        152.789,
+        152.789,
+        152.789,
+        152.789,
+        152.789,
+        152.789,
+        152.789,
+        152.789,
+        152.789,
+        152.789,
+        152.789
+      ],
+      "growthAfterFirstKiB": 0,
+      "memoryMiB": 165.6
+    },
+    "ts": {
+      "gcAvailable": true,
+      "heapUsedMiB": [
+        15.63,
+        15.63,
+        15.62,
+        15.62,
+        15.56,
+        15.54,
+        15.54,
+        15.54,
+        15.54,
+        15.54,
+        15.54,
+        15.54
+      ],
+      "growthAfterFirstKiB": -90.9
+    }
+  }
+}
