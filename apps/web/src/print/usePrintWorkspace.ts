@@ -30,7 +30,7 @@ import {
 } from './analysis';
 import { layFlatCommand } from './commands';
 import { overhangsOf, printIssues, type PrintIssue } from './issues';
-import { createPrintMeshes } from './meshes';
+import { createPrintMeshes, type PrintMeshes } from './meshes';
 import { parsePrintViewId, printViewBodies, resolveSetup, type ResolvedSetup } from './resolve';
 import { activeSetup, type PrintUiStore } from './state';
 
@@ -57,9 +57,6 @@ export interface PrintWorkspace {
   /** Select and frame what an issue is about; null lets go. */
   onIssue: (issue: PrintIssue | null) => void;
 }
-
-/** Retry export-tolerance meshes a regen dropped after this long (ms). */
-const MESH_RETRY_MS = 400;
 
 /** The faces an issue names, as selectable references, and their placed box. */
 export function issueSelection(
@@ -109,6 +106,20 @@ export function issueSelection(
   return { refs, box: min[0] <= max[0] ? { min, max } : null };
 }
 
+/**
+ * True once every body of `resolved` has its export-tolerance mesh (or the kernel said it has none
+ * of the same shape) and is checked on it: never while one stands in on its viewport mesh, nor
+ * between a finer mesh arriving and the checks being run again on it.
+ */
+export function meshesSettled(resolved: ResolvedSetup | null, meshes: PrintMeshes): boolean {
+  if (!resolved) return true;
+  const bodies = resolved.items.flatMap((i) => i.bodies);
+  return (
+    !meshes.waiting(bodies.map((b) => b.view)) &&
+    bodies.every((b) => b.input.mesh === meshes.meshOf(b.view).mesh)
+  );
+}
+
 export function usePrintWorkspace({
   open,
   documents,
@@ -125,7 +136,7 @@ export function usePrintWorkspace({
   const layingFlat = useStore(printUi, (s) => s.layingFlat);
   const setup = open ? activeSetup(doc, setupId) : undefined;
 
-  // Export-tolerance meshes, asked for once per regenerated body.
+  // Export-tolerance meshes, asked for once per regenerated body and again until the kernel answers.
   const meshes = useMemo(() => createPrintMeshes(exchanger), [exchanger]);
   const [meshRevision, setMeshRevision] = useState(0);
   const resolved = useMemo(() => {
@@ -140,9 +151,14 @@ export function usePrintWorkspace({
     let timer: ReturnType<typeof setTimeout> | undefined;
     const ask = () => {
       void meshes.request(views).then((changed) => {
-        if (!live) return;
+        // Even from a superseded run: a later run found these bodies pending and asked for
+        // nothing, so only this reply can bring the finer meshes into the checks.
         if (changed) setMeshRevision((n) => n + 1);
-        else if (meshes.waiting(views)) timer = setTimeout(ask, MESH_RETRY_MS);
+        if (!live || changed) return;
+        // Dropped (a regen superseded it), or another request for them still on its way: ask
+        // again until every body has its finer mesh.
+        const wait = meshes.retryIn(views);
+        if (wait !== null) timer = setTimeout(ask, wait);
       });
     };
     ask();
@@ -290,13 +306,9 @@ export function usePrintWorkspace({
         bodies: () => bodiesRef.current,
         issues: () => issuesRef.current,
         analysis: () => analysisRef.current,
-        // True once every drawn body has its export-tolerance mesh (or never will get one).
-        meshesSettled: () => {
-          const r = resolvedRef.current;
-          return (
-            !r || !meshesRef.current.waiting(r.items.flatMap((i) => i.bodies.map((b) => b.view)))
-          );
-        },
+        // True once every drawn body has its export-tolerance mesh (or the kernel said it has none of
+        // the same shape); never while one is checked on its viewport mesh in the meantime.
+        meshesSettled: () => meshesSettled(resolvedRef.current, meshesRef.current),
       },
     };
     return () => {
