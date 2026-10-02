@@ -1,0 +1,19 @@
+{
+  "name": "@manufakture/nesting",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "GPL-3.0-or-later",
+  "exports": {
+    ".": "./src/index.ts",
+    "./fixtures": "./src/fixtures.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --root ../.. --project packages packages/nesting",
+    "bench": "vitest run --root ../.. --project packages --silent=false --reporter=verbose packages/nesting/src/benchmark.test.ts"
+  },
+  "devDependencies": {
+    "guillotine-packer": "1.0.2"
+  }
+}

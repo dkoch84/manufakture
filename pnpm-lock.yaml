@@ -142,6 +142,12 @@ importers:
         specifier: 3.0.2
         version: 3.0.2
 
+  packages/nesting:
+    devDependencies:
+      guillotine-packer:
+        specifier: 1.0.2
+        version: 1.0.2
+
   packages/print:
     dependencies:
       comlink:
@@ -1016,6 +1022,10 @@ packages:
   globals@17.12.0:
     resolution: {integrity: sha512-cezEd/DTyyht9cvSSURyygXPfy04GtWO/5e6ZPvH7fCtjKz9PYOmuawphw1Ctd1f6C+5JypXfGD7ahNMXvevBA==}
     engines: {node: '>=18'}
+
+  guillotine-packer@1.0.2:
+    resolution: {integrity: sha512-k4lNoqRRPzxH+9cdvIEkdbswpSEBreRCeYBIFTa6kLWk5TgxoV5kuNF1nILbrqkukqtLvDyQKQpS5XXt/eZgrQ==}
+    engines: {node: '>=6.0.0'}
 
   hashery@1.5.1:
     resolution: {integrity: sha512-iZyKG96/JwPz1N55vj2Ie2vXbhu440zfUfJvSwEqEbeLluk7NnapfGqa7LH0mOsnDxTF85Mx8/dyR6HfqcbmbQ==}
@@ -2308,6 +2318,12 @@ snapshots:
       is-glob: 4.0.3
 
   globals@17.12.0: {}
+
+  guillotine-packer@1.0.2:
+    dependencies:
+      debug: 4.4.3
+    transitivePeerDependencies:
+      - supports-color
 
   hashery@1.5.1:
     dependencies:
