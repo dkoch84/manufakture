@@ -56,7 +56,9 @@ jobs:
     # Playwright against a production build (vite preview). Kept out of the
     # `check` job's unit run; see apps/web/playwright.config.ts.
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # The M3 acceptance specs (e2e/m3-*.spec.ts) add about a minute locally, more under CI's
+    # software rendering.
+    timeout-minutes: 30
     defaults:
       run:
         shell: bash
@@ -71,8 +73,8 @@ jobs:
       - name: Install Chromium and its system libraries
         run: pnpm --filter @manufakture/web exec playwright install --with-deps chromium
       - name: Run e2e tests
-        # Includes M1 acceptance (e2e/m1-*.spec.ts): the bracket walkthrough, viewport
-        # screenshots against the committed baselines (never rewritten here), and the
+        # Includes the acceptance walkthroughs of M1, M2 and M3 (e2e/m1-*, m2-*, m3-*.spec.ts):
+        # viewport screenshots against the committed baselines (never rewritten here), and the
         # performance budgets, which are written to this job's summary.
         run: pnpm --filter @manufakture/web e2e
       - name: Upload the M1 bracket exports for the interop job
@@ -83,6 +85,16 @@ jobs:
           path: apps/web/test-results/m1-bracket/
           if-no-files-found: ignore
           retention-days: 14
+      - name: Upload the M3 jig for printing
+        # The PTFE tube cutting jig as Open in slicer exported it (e2e/m3-jig.spec.ts, chapter 8):
+        # the 3MF for the print (docs/m3-acceptance.md) and what it should hold.
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: m3-jig
+          path: apps/web/test-results/m3-jig/
+          if-no-files-found: warn
+          retention-days: 30
       - name: Upload the Playwright report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7
