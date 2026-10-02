@@ -1,0 +1,247 @@
+{
+  "host": {
+    "cpu": "AMD Ryzen 5 7600X 6-Core Processor",
+    "logicalCpus": 12,
+    "memoryGiB": 62,
+    "node": "v26.10.0",
+    "platform": "linux x64",
+    "libcascade": "3.0.2 (single-threaded build)",
+    "measuredAt": "2026-10-02T05:35:02.448Z"
+  },
+  "stored": {
+    "footThickness": {
+      "kind": "vertical",
+      "from": {
+        "vertex": {
+          "faces": [
+            "extrude#1:cap:end",
+            "extrude#1:side:e1",
+            "extrude#1:side:e2"
+          ]
+        }
+      },
+      "to": {
+        "vertex": {
+          "faces": [
+            "extrude#1:cap:end",
+            "extrude#1:side:e2",
+            "extrude#1:side:e3"
+          ]
+        }
+      }
+    },
+    "height": {
+      "kind": "vertical",
+      "from": {
+        "vertex": {
+          "faces": [
+            "extrude#1:cap:end",
+            "extrude#1:side:e1",
+            "extrude#1:side:e6"
+          ]
+        }
+      },
+      "to": {
+        "vertex": {
+          "faces": [
+            "extrude#1:cap:end",
+            "extrude#1:side:e5",
+            "extrude#1:side:e6"
+          ]
+        }
+      }
+    },
+    "holeSpacing": {
+      "kind": "horizontal",
+      "from": {
+        "edge": {
+          "faces": [
+            "extrude#1:side:e3",
+            "hole#1:cbore:e7"
+          ]
+        }
+      },
+      "to": {
+        "edge": {
+          "faces": [
+            "extrude#1:side:e3",
+            "hole#1:cbore:e8"
+          ]
+        }
+      }
+    },
+    "holeDiameterTop": {
+      "kind": "diameter",
+      "of": {
+        "face": {
+          "face": "hole#1:wall:e7"
+        }
+      }
+    },
+    "holeDiameterFront": {
+      "kind": "diameter",
+      "of": {
+        "face": {
+          "face": "hole#1:wall:e7"
+        }
+      }
+    },
+    "filletRadius": {
+      "kind": "radius",
+      "of": {
+        "face": {
+          "face": "fillet#1:round:r2"
+        }
+      }
+    }
+  },
+  "resolved": {
+    "t6": {
+      "footThickness": {
+        "status": "exact",
+        "value": 6,
+        "warnings": [],
+        "anchors": "points"
+      },
+      "height": {
+        "status": "exact",
+        "value": 40,
+        "warnings": [],
+        "anchors": "points"
+      },
+      "holeSpacing": {
+        "status": "exact",
+        "value": 15,
+        "warnings": [],
+        "anchors": "points"
+      },
+      "holeDiameterTop": {
+        "status": "exact",
+        "value": 4.5,
+        "warnings": [],
+        "anchors": "circle"
+      },
+      "holeDiameterFront": {
+        "status": "exact",
+        "value": 4.5,
+        "warnings": [],
+        "anchors": "silhouettes"
+      },
+      "filletRadius": {
+        "status": "exact",
+        "value": 4,
+        "warnings": [],
+        "anchors": "circle"
+      }
+    },
+    "t8": {
+      "footThickness": {
+        "status": "exact",
+        "value": 8,
+        "warnings": [],
+        "anchors": "points"
+      },
+      "height": {
+        "status": "exact",
+        "value": 40,
+        "warnings": [],
+        "anchors": "points"
+      },
+      "holeSpacing": {
+        "status": "exact",
+        "value": 15,
+        "warnings": [],
+        "anchors": "points"
+      },
+      "holeDiameterTop": {
+        "status": "exact",
+        "value": 4.5,
+        "warnings": [],
+        "anchors": "circle"
+      },
+      "holeDiameterFront": {
+        "status": "exact",
+        "value": 4.5,
+        "warnings": [],
+        "anchors": "silhouettes"
+      },
+      "filletRadius": {
+        "status": "exact",
+        "value": 4,
+        "warnings": [],
+        "anchors": "circle"
+      }
+    },
+    "t8 without fillet": {
+      "footThickness": {
+        "status": "exact",
+        "value": 8,
+        "warnings": [],
+        "anchors": "points"
+      },
+      "height": {
+        "status": "exact",
+        "value": 40,
+        "warnings": [],
+        "anchors": "points"
+      },
+      "holeSpacing": {
+        "status": "exact",
+        "value": 15,
+        "warnings": [],
+        "anchors": "points"
+      },
+      "holeDiameterTop": {
+        "status": "exact",
+        "value": 4.5,
+        "warnings": [],
+        "anchors": "circle"
+      },
+      "holeDiameterFront": {
+        "status": "exact",
+        "value": 4.5,
+        "warnings": [],
+        "anchors": "silhouettes"
+      },
+      "filletRadius": {
+        "status": "lost",
+        "value": null,
+        "warnings": [],
+        "anchors": null
+      }
+    }
+  },
+  "formatted": [
+    {
+      "mm": 900,
+      "format": {
+        "unit": "ft-in",
+        "denominator": 16
+      },
+      "text": "2' 11-7/16\""
+    },
+    {
+      "mm": 1028.7,
+      "format": {
+        "unit": "ft-in",
+        "denominator": 16
+      },
+      "text": "3' 4-1/2\""
+    },
+    {
+      "mm": 18,
+      "format": {
+        "unit": "in-fraction",
+        "denominator": 32
+      },
+      "text": "23/32\""
+    },
+    {
+      "mm": 4.5,
+      "format": {
+        "unit": "mm"
+      },
+      "text": "4.50 mm"
+    }
+  ]
+}

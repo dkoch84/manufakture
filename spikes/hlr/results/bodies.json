@@ -1,0 +1,275 @@
+{
+  "host": {
+    "cpu": "AMD Ryzen 5 7600X 6-Core Processor",
+    "logicalCpus": 12,
+    "memoryGiB": 62,
+    "node": "v26.10.0",
+    "platform": "linux x64",
+    "libcascade": "3.0.2 (single-threaded build)",
+    "measuredAt": "2026-10-02T05:33:29.338Z"
+  },
+  "layers": [
+    {
+      "fixture": "dado-pair",
+      "view": "front",
+      "ms": {
+        "whole": 7.54,
+        "perBodyLayers": 1.89,
+        "eachBodyAlone": 1.72
+      },
+      "perBodyLayers": {
+        "visibleNotInWhole": 0,
+        "wholeVisibleNotInLayers": 0,
+        "hiddenNotInWhole": 0
+      },
+      "eachBodyAlone": {
+        "visibleThatShouldBeHidden": 0,
+        "visibleTotal": 2084
+      }
+    },
+    {
+      "fixture": "dado-pair",
+      "view": "top",
+      "ms": {
+        "whole": 2.88,
+        "perBodyLayers": 1.78,
+        "eachBodyAlone": 1.77
+      },
+      "perBodyLayers": {
+        "visibleNotInWhole": 0,
+        "wholeVisibleNotInLayers": 0,
+        "hiddenNotInWhole": 0
+      },
+      "eachBodyAlone": {
+        "visibleThatShouldBeHidden": 299.5,
+        "visibleTotal": 1724
+      }
+    },
+    {
+      "fixture": "dado-pair",
+      "view": "right",
+      "ms": {
+        "whole": 1.61,
+        "perBodyLayers": 1.56,
+        "eachBodyAlone": 1.57
+      },
+      "perBodyLayers": {
+        "visibleNotInWhole": 0,
+        "wholeVisibleNotInLayers": 0,
+        "hiddenNotInWhole": 0
+      },
+      "eachBodyAlone": {
+        "visibleThatShouldBeHidden": 0,
+        "visibleTotal": 2400
+      }
+    },
+    {
+      "fixture": "dado-pair",
+      "view": "iso",
+      "ms": {
+        "whole": 1.56,
+        "perBodyLayers": 1.11,
+        "eachBodyAlone": 1.13
+      },
+      "perBodyLayers": {
+        "visibleNotInWhole": 0,
+        "wholeVisibleNotInLayers": 0,
+        "hiddenNotInWhole": 0
+      },
+      "eachBodyAlone": {
+        "visibleThatShouldBeHidden": 998.5,
+        "visibleTotal": 3752.6
+      }
+    },
+    {
+      "fixture": "bookshelf",
+      "view": "front",
+      "ms": {
+        "whole": 49.01,
+        "perBodyLayers": 39.09,
+        "eachBodyAlone": 27.25
+      },
+      "perBodyLayers": {
+        "visibleNotInWhole": 0,
+        "wholeVisibleNotInLayers": 0,
+        "hiddenNotInWhole": 0
+      },
+      "eachBodyAlone": {
+        "visibleThatShouldBeHidden": 1552,
+        "visibleTotal": 10884
+      }
+    },
+    {
+      "fixture": "bookshelf",
+      "view": "top",
+      "ms": {
+        "whole": 53.31,
+        "perBodyLayers": 51.59,
+        "eachBodyAlone": 29.98
+      },
+      "perBodyLayers": {
+        "visibleNotInWhole": 0,
+        "wholeVisibleNotInLayers": 0,
+        "hiddenNotInWhole": 0
+      },
+      "eachBodyAlone": {
+        "visibleThatShouldBeHidden": 2348,
+        "visibleTotal": 3600
+      }
+    },
+    {
+      "fixture": "bookshelf",
+      "view": "right",
+      "ms": {
+        "whole": 17.47,
+        "perBodyLayers": 15.17,
+        "eachBodyAlone": 14.74
+      },
+      "perBodyLayers": {
+        "visibleNotInWhole": 0,
+        "wholeVisibleNotInLayers": 0,
+        "hiddenNotInWhole": 0
+      },
+      "eachBodyAlone": {
+        "visibleThatShouldBeHidden": 6888.2,
+        "visibleTotal": 2400
+      }
+    },
+    {
+      "fixture": "bookshelf",
+      "view": "iso",
+      "ms": {
+        "whole": 24.42,
+        "perBodyLayers": 23.04,
+        "eachBodyAlone": 20.09
+      },
+      "perBodyLayers": {
+        "visibleNotInWhole": 0,
+        "wholeVisibleNotInLayers": 0,
+        "hiddenNotInWhole": 0
+      },
+      "eachBodyAlone": {
+        "visibleThatShouldBeHidden": 10523.2,
+        "visibleTotal": 13163.2
+      }
+    },
+    {
+      "fixture": "cabinet-run-100",
+      "view": "front",
+      "ms": {
+        "whole": 54.53,
+        "perBodyLayers": 55.37,
+        "eachBodyAlone": 49.46
+      },
+      "perBodyLayers": {
+        "visibleNotInWhole": 0,
+        "wholeVisibleNotInLayers": 0,
+        "hiddenNotInWhole": 0
+      },
+      "eachBodyAlone": {
+        "visibleThatShouldBeHidden": 0,
+        "visibleTotal": 106560
+      }
+    },
+    {
+      "fixture": "cabinet-run-100",
+      "view": "top",
+      "ms": {
+        "whole": 55.61,
+        "perBodyLayers": 55.19,
+        "eachBodyAlone": 51.53
+      },
+      "perBodyLayers": {
+        "visibleNotInWhole": 0,
+        "wholeVisibleNotInLayers": 0,
+        "hiddenNotInWhole": 0
+      },
+      "eachBodyAlone": {
+        "visibleThatShouldBeHidden": 22390,
+        "visibleTotal": 95600
+      }
+    },
+    {
+      "fixture": "cabinet-run-100",
+      "view": "right",
+      "ms": {
+        "whole": 99.45,
+        "perBodyLayers": 99.18,
+        "eachBodyAlone": 49.74
+      },
+      "perBodyLayers": {
+        "visibleNotInWhole": 0,
+        "wholeVisibleNotInLayers": 0,
+        "hiddenNotInWhole": 0
+      },
+      "eachBodyAlone": {
+        "visibleThatShouldBeHidden": 59390,
+        "visibleTotal": 2560
+      }
+    },
+    {
+      "fixture": "cabinet-run-100",
+      "view": "iso",
+      "ms": {
+        "whole": 45.43,
+        "perBodyLayers": 45.55,
+        "eachBodyAlone": 30.87
+      },
+      "perBodyLayers": {
+        "visibleNotInWhole": 0,
+        "wholeVisibleNotInLayers": 0,
+        "hiddenNotInWhole": 0
+      },
+      "eachBodyAlone": {
+        "visibleThatShouldBeHidden": 125434.3,
+        "visibleTotal": 175220.2
+      }
+    }
+  ],
+  "translatedInstance": [
+    {
+      "view": "front",
+      "shiftedNotInPlaced": 0,
+      "placedNotInShifted": 0
+    },
+    {
+      "view": "top",
+      "shiftedNotInPlaced": 0,
+      "placedNotInShifted": 0
+    },
+    {
+      "view": "right",
+      "shiftedNotInPlaced": 0,
+      "placedNotInShifted": 0
+    },
+    {
+      "view": "iso",
+      "shiftedNotInPlaced": 0,
+      "placedNotInShifted": 0
+    }
+  ],
+  "section": {
+    "cutMs": 10.3,
+    "hlrMs": 2.86,
+    "sectionFaces": 3,
+    "area": 422.6336,
+    "expectedArea": 422.6336,
+    "boundaryEdges": 23,
+    "boundaryEdgesNotDrawnVisible": 0,
+    "hlrEdges": 38
+  },
+  "polyContact": [
+    {
+      "label": "all 7 boards",
+      "visiblePolyNotExact": 1429
+    },
+    {
+      "label": "left side alone",
+      "visiblePolyNotExact": 0
+    },
+    {
+      "label": "left side and back",
+      "visiblePolyNotExact": 714.5
+    }
+  ]
+}

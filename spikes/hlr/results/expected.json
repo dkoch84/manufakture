@@ -1,0 +1,415 @@
+{
+  "host": {
+    "cpu": "AMD Ryzen 5 7600X 6-Core Processor",
+    "logicalCpus": 12,
+    "memoryGiB": 62,
+    "node": "v26.10.0",
+    "platform": "linux x64",
+    "libcascade": "3.0.2 (single-threaded build)",
+    "measuredAt": "2026-10-02T05:33:30.326Z"
+  },
+  "results": {
+    "box-hole": {
+      "front.exact": {
+        "algorithm": "exact",
+        "ok": true,
+        "expected": {
+          "visible": 4,
+          "hidden": 2,
+          "visibleLength": 240,
+          "hiddenLength": 40
+        },
+        "actual": {
+          "visible": 4,
+          "hidden": 10,
+          "smooth": 0,
+          "sewn": 0
+        },
+        "hiddenUnderVisible": 280,
+        "mismatches": []
+      },
+      "front.poly": {
+        "algorithm": "poly",
+        "ok": true,
+        "expected": {
+          "visible": 4,
+          "hidden": 2,
+          "visibleLength": 240,
+          "hiddenLength": 40
+        },
+        "actual": {
+          "visible": 4,
+          "hidden": 151,
+          "smooth": 0,
+          "sewn": 0
+        },
+        "hiddenUnderVisible": 279.512,
+        "mismatches": []
+      },
+      "top.exact": {
+        "algorithm": "exact",
+        "ok": true,
+        "expected": {
+          "visible": 5,
+          "hidden": 0,
+          "visibleLength": 331.416,
+          "hiddenLength": 0
+        },
+        "actual": {
+          "visible": 5,
+          "hidden": 5,
+          "smooth": 0,
+          "sewn": 0
+        },
+        "hiddenUnderVisible": 331.403,
+        "mismatches": []
+      },
+      "top.poly": {
+        "algorithm": "poly",
+        "ok": true,
+        "expected": {
+          "visible": 5,
+          "hidden": 0,
+          "visibleLength": 331.416,
+          "hiddenLength": 0
+        },
+        "actual": {
+          "visible": 75,
+          "hidden": 75,
+          "smooth": 0,
+          "sewn": 0
+        },
+        "hiddenUnderVisible": 331.406,
+        "mismatches": []
+      },
+      "right.exact": {
+        "algorithm": "exact",
+        "ok": true,
+        "expected": {
+          "visible": 4,
+          "hidden": 2,
+          "visibleLength": 140,
+          "hiddenLength": 40
+        },
+        "actual": {
+          "visible": 4,
+          "hidden": 12,
+          "smooth": 0,
+          "sewn": 1
+        },
+        "hiddenUnderVisible": 180,
+        "mismatches": []
+      },
+      "right.poly": {
+        "algorithm": "poly",
+        "ok": true,
+        "expected": {
+          "visible": 4,
+          "hidden": 2,
+          "visibleLength": 140,
+          "hiddenLength": 40
+        },
+        "actual": {
+          "visible": 4,
+          "hidden": 154,
+          "smooth": 0,
+          "sewn": 1
+        },
+        "hiddenUnderVisible": 179.365,
+        "mismatches": []
+      },
+      "iso.exact": {
+        "algorithm": "exact",
+        "ok": true,
+        "expected": {
+          "visible": 10,
+          "hidden": 6,
+          "visibleLength": 441.637,
+          "hiddenLength": 196.688
+        },
+        "actual": {
+          "visible": 12,
+          "hidden": 8,
+          "smooth": 0,
+          "sewn": 1
+        },
+        "hiddenUnderVisible": 0,
+        "mismatches": []
+      },
+      "iso.poly": {
+        "algorithm": "poly",
+        "ok": true,
+        "expected": {
+          "visible": 10,
+          "hidden": 6,
+          "visibleLength": 441.637,
+          "hiddenLength": 196.688
+        },
+        "actual": {
+          "visible": 82,
+          "hidden": 80,
+          "smooth": 0,
+          "sewn": 1
+        },
+        "hiddenUnderVisible": 0,
+        "mismatches": []
+      }
+    },
+    "cylinder": {
+      "front.exact": {
+        "algorithm": "exact",
+        "ok": true,
+        "expected": {
+          "visible": 4,
+          "hidden": 0,
+          "visibleLength": 180,
+          "hiddenLength": 0
+        },
+        "actual": {
+          "visible": 4,
+          "hidden": 2,
+          "smooth": 0,
+          "sewn": 0
+        },
+        "hiddenUnderVisible": 80,
+        "mismatches": []
+      },
+      "front.poly": {
+        "algorithm": "poly",
+        "ok": true,
+        "expected": {
+          "visible": 4,
+          "hidden": 0,
+          "visibleLength": 180,
+          "hiddenLength": 0
+        },
+        "actual": {
+          "visible": 145,
+          "hidden": 142,
+          "smooth": 0,
+          "sewn": 0
+        },
+        "hiddenUnderVisible": 80,
+        "mismatches": []
+      },
+      "top.exact": {
+        "algorithm": "exact",
+        "ok": true,
+        "expected": {
+          "visible": 1,
+          "hidden": 0,
+          "visibleLength": 125.663,
+          "hiddenLength": 0
+        },
+        "actual": {
+          "visible": 1,
+          "hidden": 1,
+          "smooth": 0,
+          "sewn": 0
+        },
+        "hiddenUnderVisible": 125.651,
+        "mismatches": []
+      },
+      "top.poly": {
+        "algorithm": "poly",
+        "ok": true,
+        "expected": {
+          "visible": 1,
+          "hidden": 0,
+          "visibleLength": 125.663,
+          "hiddenLength": 0
+        },
+        "actual": {
+          "visible": 141,
+          "hidden": 141,
+          "smooth": 0,
+          "sewn": 0
+        },
+        "hiddenUnderVisible": 125.653,
+        "mismatches": []
+      },
+      "right.exact": {
+        "algorithm": "exact",
+        "ok": true,
+        "expected": {
+          "visible": 4,
+          "hidden": 0,
+          "visibleLength": 180,
+          "hiddenLength": 0
+        },
+        "actual": {
+          "visible": 6,
+          "hidden": 2,
+          "smooth": 0,
+          "sewn": 1
+        },
+        "hiddenUnderVisible": 80,
+        "mismatches": []
+      },
+      "right.poly": {
+        "algorithm": "poly",
+        "ok": true,
+        "expected": {
+          "visible": 4,
+          "hidden": 0,
+          "visibleLength": 180,
+          "hiddenLength": 0
+        },
+        "actual": {
+          "visible": 148,
+          "hidden": 142,
+          "smooth": 0,
+          "sewn": 1
+        },
+        "hiddenUnderVisible": 80,
+        "mismatches": []
+      },
+      "iso.exact": {
+        "algorithm": "exact",
+        "ok": true,
+        "expected": {
+          "visible": 4,
+          "hidden": 1,
+          "visibleLength": 232.992,
+          "hiddenLength": 50.447
+        },
+        "actual": {
+          "visible": 7,
+          "hidden": 1,
+          "smooth": 0,
+          "sewn": 1
+        },
+        "hiddenUnderVisible": 0,
+        "mismatches": []
+      },
+      "iso.poly": {
+        "algorithm": "poly",
+        "ok": true,
+        "expected": {
+          "visible": 4,
+          "hidden": 1,
+          "visibleLength": 232.992,
+          "hiddenLength": 50.447
+        },
+        "actual": {
+          "visible": 218,
+          "hidden": 72,
+          "smooth": 0,
+          "sewn": 1
+        },
+        "hiddenUnderVisible": 0,
+        "mismatches": []
+      }
+    },
+    "bracket": {
+      "front.exact": {
+        "algorithm": "exact",
+        "ok": true,
+        "expected": {
+          "visible": 7,
+          "hidden": 10,
+          "visibleLength": 178.283,
+          "hiddenLength": 40
+        },
+        "actual": {
+          "visible": 7,
+          "hidden": 31,
+          "smooth": 0,
+          "sewn": 0
+        },
+        "hiddenUnderVisible": 228.281,
+        "mismatches": []
+      },
+      "front.poly": {
+        "algorithm": "poly",
+        "ok": true,
+        "expected": {
+          "visible": 7,
+          "hidden": 10,
+          "visibleLength": 178.283,
+          "hiddenLength": 40
+        },
+        "actual": {
+          "visible": 22,
+          "hidden": 480,
+          "smooth": 0,
+          "sewn": 0
+        },
+        "hiddenUnderVisible": 227.171,
+        "mismatches": []
+      },
+      "top.exact": {
+        "algorithm": "exact",
+        "ok": true,
+        "expected": {
+          "visible": 9,
+          "hidden": 0,
+          "visibleLength": 268.54,
+          "hiddenLength": 0
+        },
+        "actual": {
+          "visible": 13,
+          "hidden": 9,
+          "smooth": 1,
+          "sewn": 0
+        },
+        "hiddenUnderVisible": 268.474,
+        "mismatches": []
+      },
+      "top.poly": {
+        "algorithm": "poly",
+        "ok": true,
+        "expected": {
+          "visible": 9,
+          "hidden": 0,
+          "visibleLength": 268.54,
+          "hiddenLength": 0
+        },
+        "actual": {
+          "visible": 261,
+          "hidden": 227,
+          "smooth": 1,
+          "sewn": 0
+        },
+        "hiddenUnderVisible": 268.499,
+        "mismatches": []
+      },
+      "right.exact": {
+        "algorithm": "exact",
+        "ok": true,
+        "expected": {
+          "visible": 5,
+          "hidden": 5,
+          "visibleLength": 170,
+          "hiddenLength": 20
+        },
+        "actual": {
+          "visible": 9,
+          "hidden": 37,
+          "smooth": 1,
+          "sewn": 4
+        },
+        "hiddenUnderVisible": 220,
+        "mismatches": []
+      },
+      "right.poly": {
+        "algorithm": "poly",
+        "ok": true,
+        "expected": {
+          "visible": 5,
+          "hidden": 5,
+          "visibleLength": 170,
+          "hiddenLength": 20
+        },
+        "actual": {
+          "visible": 39,
+          "hidden": 469,
+          "smooth": 1,
+          "sewn": 4
+        },
+        "hiddenUnderVisible": 218.742,
+        "mismatches": []
+      }
+    }
+  }
+}

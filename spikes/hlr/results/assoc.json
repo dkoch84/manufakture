@@ -1,0 +1,2002 @@
+{
+  "host": {
+    "cpu": "AMD Ryzen 5 7600X 6-Core Processor",
+    "logicalCpus": 12,
+    "memoryGiB": 62,
+    "node": "v26.10.0",
+    "platform": "linux x64",
+    "libcascade": "3.0.2 (single-threaded build)",
+    "measuredAt": "2026-10-02T05:33:10.413Z"
+  },
+  "rows": [
+    {
+      "fixture": "box-hole",
+      "view": "front",
+      "hlrEdges": 14,
+      "unmatched": 0,
+      "severalPieces": 9,
+      "pieces": 13,
+      "oneSource": 7,
+      "severalSources": 6,
+      "noSource": 0,
+      "outlineOnEdge": 0,
+      "outlines": 1,
+      "clicks": 120,
+      "nearest": 118,
+      "nearestFront": 120,
+      "outlineClicks": 0,
+      "nearestRate": 0.9833,
+      "nearestFrontRate": 1,
+      "ms": {
+        "exact": 9.93,
+        "exactWithSource": 3.59,
+        "matchSources": 12.93,
+        "pickAllClicks": 1.5
+      },
+      "sampleMisses": [
+        {
+          "at": [51.01020408163265, 0],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 5
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 14
+          }
+        },
+        {
+          "at": [51.01020408163265, 20],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 7
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 10
+          }
+        }
+      ],
+      "frontMisses": []
+    },
+    {
+      "fixture": "box-hole",
+      "view": "top",
+      "hlrEdges": 10,
+      "unmatched": 0,
+      "severalPieces": 5,
+      "pieces": 10,
+      "oneSource": 10,
+      "severalSources": 0,
+      "noSource": 0,
+      "outlineOnEdge": 0,
+      "outlines": 0,
+      "clicks": 166,
+      "nearest": 116,
+      "nearestFront": 166,
+      "outlineClicks": 0,
+      "nearestRate": 0.6988,
+      "nearestFrontRate": 1,
+      "ms": {
+        "exact": 1.64,
+        "exactWithSource": 1.87,
+        "matchSources": 0.66,
+        "pickAllClicks": 0.85
+      },
+      "sampleMisses": [
+        {
+          "at": [0.5, 0],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 7
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 5
+          }
+        },
+        {
+          "at": [2.520408163265306, 0],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 7
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 5
+          }
+        },
+        {
+          "at": [4.540816326530612, 0],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 7
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 5
+          }
+        },
+        {
+          "at": [6.5612244897959195, 0],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 7
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 5
+          }
+        },
+        {
+          "at": [8.581632653061224, 0],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 7
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 5
+          }
+        }
+      ],
+      "frontMisses": []
+    },
+    {
+      "fixture": "box-hole",
+      "view": "right",
+      "hlrEdges": 17,
+      "unmatched": 0,
+      "severalPieces": 12,
+      "pieces": 15,
+      "oneSource": 7,
+      "severalSources": 8,
+      "noSource": 0,
+      "outlineOnEdge": 0,
+      "outlines": 2,
+      "clicks": 70,
+      "nearest": 0,
+      "nearestFront": 70,
+      "outlineClicks": 0,
+      "nearestRate": 0,
+      "nearestFrontRate": 1,
+      "ms": {
+        "exact": 1.76,
+        "exactWithSource": 2.38,
+        "matchSources": 4.32,
+        "pickAllClicks": 0.28
+      },
+      "sampleMisses": [
+        {
+          "at": [0, 0.5],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 6
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 1
+          }
+        },
+        {
+          "at": [0, 2.611111111111111],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 6
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 1
+          }
+        },
+        {
+          "at": [0, 4.722222222222222],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 6
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 1
+          }
+        },
+        {
+          "at": [0, 6.833333333333334],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 6
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 1
+          }
+        },
+        {
+          "at": [0, 8.944444444444445],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 6
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 1
+          }
+        }
+      ],
+      "frontMisses": []
+    },
+    {
+      "fixture": "box-hole",
+      "view": "iso",
+      "hlrEdges": 21,
+      "unmatched": 0,
+      "severalPieces": 0,
+      "pieces": 19,
+      "oneSource": 19,
+      "severalSources": 0,
+      "noSource": 0,
+      "outlineOnEdge": 0,
+      "outlines": 2,
+      "clicks": 220,
+      "nearest": 219,
+      "nearestFront": 220,
+      "outlineClicks": 0,
+      "nearestRate": 0.9955,
+      "nearestFrontRate": 1,
+      "ms": {
+        "exact": 1.65,
+        "exactWithSource": 1.95,
+        "matchSources": 0.87,
+        "pickAllClicks": 0.87
+      },
+      "sampleMisses": [
+        {
+          "at": [56.398176290229756, 8.254114999731852],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 10
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 11
+          }
+        }
+      ],
+      "frontMisses": []
+    },
+    {
+      "fixture": "bracket",
+      "view": "front",
+      "hlrEdges": 38,
+      "unmatched": 0,
+      "severalPieces": 28,
+      "pieces": 34,
+      "oneSource": 16,
+      "severalSources": 18,
+      "noSource": 0,
+      "outlineOnEdge": 0,
+      "outlines": 4,
+      "clicks": 89,
+      "nearest": 0,
+      "nearestFront": 89,
+      "outlineClicks": 0,
+      "nearestRate": 0,
+      "nearestFrontRate": 1,
+      "ms": {
+        "exact": 4.19,
+        "exactWithSource": 6.52,
+        "matchSources": 10.39,
+        "pickAllClicks": 1.5
+      },
+      "sampleMisses": [
+        {
+          "at": [49.5, 6],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 10
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 1
+          }
+        },
+        {
+          "at": [47.44736842105263, 6],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 10
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 1
+          }
+        },
+        {
+          "at": [45.39473684210526, 6],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 10
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 1
+          }
+        },
+        {
+          "at": [43.3421052631579, 6],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 10
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 1
+          }
+        },
+        {
+          "at": [41.28947368421053, 6],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 10
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 1
+          }
+        }
+      ],
+      "frontMisses": []
+    },
+    {
+      "fixture": "bracket",
+      "view": "top",
+      "hlrEdges": 23,
+      "unmatched": 0,
+      "severalPieces": 7,
+      "pieces": 23,
+      "oneSource": 23,
+      "severalSources": 0,
+      "noSource": 0,
+      "outlineOnEdge": 0,
+      "outlines": 0,
+      "clicks": 150,
+      "nearest": 96,
+      "nearestFront": 150,
+      "outlineClicks": 0,
+      "nearestRate": 0.64,
+      "nearestFrontRate": 1,
+      "ms": {
+        "exact": 2.79,
+        "exactWithSource": 4.41,
+        "matchSources": 2.23,
+        "pickAllClicks": 2.76
+      },
+      "sampleMisses": [
+        {
+          "at": [37.18421052631579, 15],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 1
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 5
+          }
+        },
+        {
+          "at": [18.710526315789473, 15],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 1
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 5
+          }
+        },
+        {
+          "at": [5.5, 15],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 6
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 5
+          }
+        },
+        {
+          "at": [3, 15],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 6
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 5
+          }
+        },
+        {
+          "at": [0.5, 15],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 6
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 5
+          }
+        }
+      ],
+      "frontMisses": []
+    },
+    {
+      "fixture": "bracket",
+      "view": "right",
+      "hlrEdges": 51,
+      "unmatched": 0,
+      "severalPieces": 44,
+      "pieces": 43,
+      "oneSource": 13,
+      "severalSources": 30,
+      "noSource": 0,
+      "outlineOnEdge": 0,
+      "outlines": 8,
+      "clicks": 100,
+      "nearest": 81,
+      "nearestFront": 100,
+      "outlineClicks": 0,
+      "nearestRate": 0.81,
+      "nearestFrontRate": 1,
+      "ms": {
+        "exact": 4.34,
+        "exactWithSource": 6.94,
+        "matchSources": 23.55,
+        "pickAllClicks": 1.16
+      },
+      "sampleMisses": [
+        {
+          "at": [15, 16.714285714285715],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 4
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 7
+          }
+        },
+        {
+          "at": [15, 22.92857142857143],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 4
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 7
+          }
+        },
+        {
+          "at": [14.5, 6],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 9
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 8
+          }
+        },
+        {
+          "at": [12.428571428571429, 6],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 9
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 8
+          }
+        },
+        {
+          "at": [10.357142857142858, 6],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 9
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 8
+          }
+        }
+      ],
+      "frontMisses": []
+    },
+    {
+      "fixture": "bracket",
+      "view": "iso",
+      "hlrEdges": 65,
+      "unmatched": 0,
+      "severalPieces": 4,
+      "pieces": 57,
+      "oneSource": 53,
+      "severalSources": 4,
+      "noSource": 0,
+      "outlineOnEdge": 0,
+      "outlines": 8,
+      "clicks": 206,
+      "nearest": 205,
+      "nearestFront": 206,
+      "outlineClicks": 0,
+      "nearestRate": 0.9951,
+      "nearestFrontRate": 1,
+      "ms": {
+        "exact": 4.36,
+        "exactWithSource": 6.03,
+        "matchSources": 4.35,
+        "pickAllClicks": 2.21
+      },
+      "sampleMisses": [
+        {
+          "at": [-5.535533905932738, -3.195941990698568],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 14
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 19
+          }
+        }
+      ],
+      "frontMisses": []
+    },
+    {
+      "fixture": "fillet-chamfer",
+      "view": "front",
+      "hlrEdges": 34,
+      "unmatched": 0,
+      "severalPieces": 18,
+      "pieces": 34,
+      "oneSource": 34,
+      "severalSources": 0,
+      "noSource": 0,
+      "outlineOnEdge": 0,
+      "outlines": 0,
+      "clicks": 182,
+      "nearest": 167,
+      "nearestFront": 182,
+      "outlineClicks": 0,
+      "nearestRate": 0.9176,
+      "nearestFrontRate": 1,
+      "ms": {
+        "exact": 3.79,
+        "exactWithSource": 4.44,
+        "matchSources": 1.11,
+        "pickAllClicks": 3.55
+      },
+      "sampleMisses": [
+        {
+          "at": [45.07575757575758, 27],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 21
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 30
+          }
+        },
+        {
+          "at": [43.04545454545455, 27],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 21
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 30
+          }
+        },
+        {
+          "at": [32.89393939393939, 27],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 21
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 30
+          }
+        },
+        {
+          "at": [24.772727272727273, 27],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 21
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 30
+          }
+        },
+        {
+          "at": [20.71212121212121, 27],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 21
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 30
+          }
+        }
+      ],
+      "frontMisses": []
+    },
+    {
+      "fixture": "fillet-chamfer",
+      "view": "top",
+      "hlrEdges": 32,
+      "unmatched": 0,
+      "severalPieces": 5,
+      "pieces": 32,
+      "oneSource": 32,
+      "severalSources": 0,
+      "noSource": 0,
+      "outlineOnEdge": 0,
+      "outlines": 0,
+      "clicks": 276,
+      "nearest": 156,
+      "nearestFront": 276,
+      "outlineClicks": 0,
+      "nearestRate": 0.5652,
+      "nearestFrontRate": 1,
+      "ms": {
+        "exact": 1.47,
+        "exactWithSource": 2.32,
+        "matchSources": 0.79,
+        "pickAllClicks": 1.97
+      },
+      "sampleMisses": [
+        {
+          "at": [0, 6.499999999999999],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 2
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 3
+          }
+        },
+        {
+          "at": [0, 8.543478260869565],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 2
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 3
+          }
+        },
+        {
+          "at": [0, 10.586956521739129],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 2
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 3
+          }
+        },
+        {
+          "at": [0, 12.630434782608695],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 2
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 3
+          }
+        },
+        {
+          "at": [0, 14.673913043478262],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 2
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 3
+          }
+        }
+      ],
+      "frontMisses": []
+    },
+    {
+      "fixture": "fillet-chamfer",
+      "view": "right",
+      "hlrEdges": 34,
+      "unmatched": 0,
+      "severalPieces": 16,
+      "pieces": 34,
+      "oneSource": 34,
+      "severalSources": 0,
+      "noSource": 0,
+      "outlineOnEdge": 0,
+      "outlines": 0,
+      "clicks": 152,
+      "nearest": 19,
+      "nearestFront": 152,
+      "outlineClicks": 0,
+      "nearestRate": 0.125,
+      "nearestFrontRate": 1,
+      "ms": {
+        "exact": 2.92,
+        "exactWithSource": 4.13,
+        "matchSources": 1.07,
+        "pickAllClicks": 1.11
+      },
+      "sampleMisses": [
+        {
+          "at": [5.5, 0],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 14
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 6
+          }
+        },
+        {
+          "at": [2.9999999999999996, 0],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 14
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 6
+          }
+        },
+        {
+          "at": [0.4999999999999991, 0],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 14
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 6
+          }
+        },
+        {
+          "at": [54.5, 0],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 15
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 11
+          }
+        },
+        {
+          "at": [57, 0],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 15
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 11
+          }
+        }
+      ],
+      "frontMisses": []
+    },
+    {
+      "fixture": "fillet-chamfer",
+      "view": "iso",
+      "hlrEdges": 46,
+      "unmatched": 0,
+      "severalPieces": 5,
+      "pieces": 44,
+      "oneSource": 44,
+      "severalSources": 0,
+      "noSource": 0,
+      "outlineOnEdge": 0,
+      "outlines": 2,
+      "clicks": 276,
+      "nearest": 238,
+      "nearestFront": 274,
+      "outlineClicks": 22,
+      "nearestRate": 0.8623,
+      "nearestFrontRate": 0.9928,
+      "ms": {
+        "exact": 2.67,
+        "exactWithSource": 4.34,
+        "matchSources": 1.08,
+        "pickAllClicks": 2.07
+      },
+      "sampleMisses": [
+        {
+          "at": [8.537768474316929, 26.974690611974186],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 9
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 2
+          }
+        },
+        {
+          "at": [10.27856321606271, 27.979738924724998],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 9
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 2
+          }
+        },
+        {
+          "at": [12.019357957808491, 28.98478723747581],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 9
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 2
+          }
+        },
+        {
+          "at": [13.760152699554272, 29.989835550226623],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 9
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 2
+          }
+        },
+        {
+          "at": [15.500947441300054, 30.994883862977435],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 9
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 2
+          }
+        }
+      ],
+      "frontMisses": [
+        {
+          "at": [5.930948328786706, 25.46964229922337],
+          "cls": "sharp",
+          "truth": [
+            {
+              "body": 0,
+              "edge": 8
+            }
+          ],
+          "picked": {
+            "body": 0,
+            "edge": 20
+          }
+        },
+        {
+          "at": [93.06400103732996, 17.30467648994611],
+          "cls": "sharp",
+          "truth": [
+            {
+              "body": 0,
+              "edge": 38
+            }
+          ],
+          "picked": {
+            "body": 0,
+            "edge": 27
+          }
+        }
+      ]
+    },
+    {
+      "fixture": "board-10-holes",
+      "view": "front",
+      "hlrEdges": 68,
+      "unmatched": 0,
+      "severalPieces": 54,
+      "pieces": 58,
+      "oneSource": 16,
+      "severalSources": 42,
+      "noSource": 0,
+      "outlineOnEdge": 0,
+      "outlines": 10,
+      "clicks": 618,
+      "nearest": 610,
+      "nearestFront": 618,
+      "outlineClicks": 0,
+      "nearestRate": 0.9871,
+      "nearestFrontRate": 1,
+      "ms": {
+        "exact": 6.31,
+        "exactWithSource": 11.52,
+        "matchSources": 31.1,
+        "pickAllClicks": 11
+      },
+      "sampleMisses": [
+        {
+          "at": [50.58361204013378, 0],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 5
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 23
+          }
+        },
+        {
+          "at": [106.67725752508362, 0],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 5
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 24
+          }
+        },
+        {
+          "at": [381.1354515050167, 0],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 5
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 29
+          }
+        },
+        {
+          "at": [545.4096989966555, 0],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 5
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 32
+          }
+        },
+        {
+          "at": [50.58361204013378, 18],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 7
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 10
+          }
+        }
+      ],
+      "frontMisses": []
+    },
+    {
+      "fixture": "board-10-holes",
+      "view": "top",
+      "hlrEdges": 28,
+      "unmatched": 0,
+      "severalPieces": 5,
+      "pieces": 28,
+      "oneSource": 28,
+      "severalSources": 0,
+      "noSource": 0,
+      "outlineOnEdge": 0,
+      "outlines": 0,
+      "clicks": 980,
+      "nearest": 680,
+      "nearestFront": 980,
+      "outlineClicks": 0,
+      "nearestRate": 0.6939,
+      "nearestFrontRate": 1,
+      "ms": {
+        "exact": 2.95,
+        "exactWithSource": 4.8,
+        "matchSources": 3.85,
+        "pickAllClicks": 18.33
+      },
+      "sampleMisses": [
+        {
+          "at": [0.5, 0],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 7
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 5
+          }
+        },
+        {
+          "at": [2.5033444816053514, 0],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 7
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 5
+          }
+        },
+        {
+          "at": [4.506688963210703, 0],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 7
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 5
+          }
+        },
+        {
+          "at": [6.510033444816053, 0],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 7
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 5
+          }
+        },
+        {
+          "at": [8.513377926421406, 0],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 7
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 5
+          }
+        }
+      ],
+      "frontMisses": []
+    },
+    {
+      "fixture": "board-10-holes",
+      "view": "right",
+      "hlrEdges": 98,
+      "unmatched": 0,
+      "severalPieces": 96,
+      "pieces": 78,
+      "oneSource": 6,
+      "severalSources": 72,
+      "noSource": 0,
+      "outlineOnEdge": 0,
+      "outlines": 20,
+      "clicks": 318,
+      "nearest": 0,
+      "nearestFront": 318,
+      "outlineClicks": 0,
+      "nearestRate": 0,
+      "nearestFrontRate": 1,
+      "ms": {
+        "exact": 7.56,
+        "exactWithSource": 16.09,
+        "matchSources": 314.72,
+        "pickAllClicks": 5.44
+      },
+      "sampleMisses": [
+        {
+          "at": [0, 0.5],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 6
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 1
+          }
+        },
+        {
+          "at": [0, 2.625],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 6
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 1
+          }
+        },
+        {
+          "at": [0, 4.75],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 6
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 1
+          }
+        },
+        {
+          "at": [0, 6.875],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 6
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 1
+          }
+        },
+        {
+          "at": [0, 9],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 6
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 1
+          }
+        }
+      ],
+      "frontMisses": []
+    },
+    {
+      "fixture": "board-10-holes",
+      "view": "iso",
+      "hlrEdges": 102,
+      "unmatched": 0,
+      "severalPieces": 0,
+      "pieces": 82,
+      "oneSource": 82,
+      "severalSources": 0,
+      "noSource": 0,
+      "outlineOnEdge": 0,
+      "outlines": 20,
+      "clicks": 1192,
+      "nearest": 1192,
+      "nearestFront": 1192,
+      "outlineClicks": 0,
+      "nearestRate": 1,
+      "nearestFrontRate": 1,
+      "ms": {
+        "exact": 5.22,
+        "exactWithSource": 9.81,
+        "matchSources": 8.88,
+        "pickAllClicks": 22.02
+      },
+      "sampleMisses": [],
+      "frontMisses": []
+    },
+    {
+      "fixture": "dado-pair",
+      "view": "front",
+      "hlrEdges": 24,
+      "unmatched": 0,
+      "severalPieces": 17,
+      "pieces": 24,
+      "oneSource": 12,
+      "severalSources": 12,
+      "noSource": 0,
+      "outlineOnEdge": 0,
+      "outlines": 0,
+      "clicks": 1042,
+      "nearest": 1042,
+      "nearestFront": 1042,
+      "outlineClicks": 0,
+      "nearestRate": 1,
+      "nearestFrontRate": 1,
+      "ms": {
+        "exact": 1.71,
+        "exactWithSource": 1.76,
+        "matchSources": 0.08,
+        "pickAllClicks": 6.21
+      },
+      "sampleMisses": [],
+      "frontMisses": []
+    },
+    {
+      "fixture": "dado-pair",
+      "view": "top",
+      "hlrEdges": 26,
+      "unmatched": 0,
+      "severalPieces": 24,
+      "pieces": 26,
+      "oneSource": 9,
+      "severalSources": 17,
+      "noSource": 0,
+      "outlineOnEdge": 0,
+      "outlines": 0,
+      "clicks": 862,
+      "nearest": 465,
+      "nearestFront": 862,
+      "outlineClicks": 0,
+      "nearestRate": 0.5394,
+      "nearestFrontRate": 1,
+      "ms": {
+        "exact": 1.43,
+        "exactWithSource": 2.1,
+        "matchSources": 0.22,
+        "pickAllClicks": 3.13
+      },
+      "sampleMisses": [
+        {
+          "at": [13.25, 0],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 10
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 6
+          }
+        },
+        {
+          "at": [15.375, 0],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 10
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 6
+          }
+        },
+        {
+          "at": [17.5, 0],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 10
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 6
+          }
+        },
+        {
+          "at": [18.5, 0],
+          "truth": [
+            {
+              "body": 1,
+              "edge": 10
+            }
+          ],
+          "nearest": {
+            "body": 1,
+            "edge": 9
+          }
+        },
+        {
+          "at": [20.505102040816325, 0],
+          "truth": [
+            {
+              "body": 1,
+              "edge": 10
+            }
+          ],
+          "nearest": {
+            "body": 1,
+            "edge": 9
+          }
+        }
+      ],
+      "frontMisses": []
+    },
+    {
+      "fixture": "dado-pair",
+      "view": "right",
+      "hlrEdges": 24,
+      "unmatched": 0,
+      "severalPieces": 18,
+      "pieces": 24,
+      "oneSource": 12,
+      "severalSources": 12,
+      "noSource": 0,
+      "outlineOnEdge": 0,
+      "outlines": 0,
+      "clicks": 1200,
+      "nearest": 74,
+      "nearestFront": 1200,
+      "outlineClicks": 0,
+      "nearestRate": 0.0617,
+      "nearestFrontRate": 1,
+      "ms": {
+        "exact": 1.28,
+        "exactWithSource": 1.8,
+        "matchSources": 0.1,
+        "pickAllClicks": 4.76
+      },
+      "sampleMisses": [
+        {
+          "at": [0, 0.5],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 5
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 1
+          }
+        },
+        {
+          "at": [0, 2.5067114093959733],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 5
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 1
+          }
+        },
+        {
+          "at": [0, 4.5134228187919465],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 5
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 1
+          }
+        },
+        {
+          "at": [0, 6.52013422818792],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 5
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 1
+          }
+        },
+        {
+          "at": [0, 8.526845637583893],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 5
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 1
+          }
+        }
+      ],
+      "frontMisses": []
+    },
+    {
+      "fixture": "dado-pair",
+      "view": "iso",
+      "hlrEdges": 37,
+      "unmatched": 0,
+      "severalPieces": 16,
+      "pieces": 37,
+      "oneSource": 21,
+      "severalSources": 16,
+      "noSource": 0,
+      "outlineOnEdge": 0,
+      "outlines": 0,
+      "clicks": 1869,
+      "nearest": 1865,
+      "nearestFront": 1869,
+      "outlineClicks": 0,
+      "nearestRate": 0.9979,
+      "nearestFrontRate": 1,
+      "ms": {
+        "exact": 0.88,
+        "exactWithSource": 1.45,
+        "matchSources": 0.09,
+        "pickAllClicks": 6.8
+      },
+      "sampleMisses": [
+        {
+          "at": [216.04931729483036, 120.21284277991269],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 6
+            },
+            {
+              "body": 1,
+              "edge": 9
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 19
+          }
+        },
+        {
+          "at": [219.5305109623715, 118.20297467885659],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 6
+            },
+            {
+              "body": 1,
+              "edge": 9
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 19
+          }
+        },
+        {
+          "at": [223.01170462991266, 116.19310657780048],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 6
+            },
+            {
+              "body": 1,
+              "edge": 9
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 19
+          }
+        },
+        {
+          "at": [224.75230146368324, 115.18817252727243],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 6
+            },
+            {
+              "body": 1,
+              "edge": 9
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 19
+          }
+        }
+      ],
+      "frontMisses": []
+    },
+    {
+      "fixture": "bookshelf",
+      "view": "front",
+      "hlrEdges": 394,
+      "unmatched": 0,
+      "severalPieces": 377,
+      "pieces": 354,
+      "oneSource": 29,
+      "severalSources": 325,
+      "noSource": 0,
+      "outlineOnEdge": 0,
+      "outlines": 40,
+      "clicks": 5442,
+      "nearest": 5432,
+      "nearestFront": 5442,
+      "outlineClicks": 0,
+      "nearestRate": 0.9982,
+      "nearestFrontRate": 1,
+      "ms": {
+        "exact": 39.95,
+        "exactWithSource": 82.4,
+        "matchSources": 640.28,
+        "pickAllClicks": 487.65
+      },
+      "sampleMisses": [
+        {
+          "at": [18, 118.6923076923077],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 9
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 51
+          }
+        },
+        {
+          "at": [18, 184.94615384615383],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 9
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 52
+          }
+        },
+        {
+          "at": [18, 249.19230769230768],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 9
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 53
+          }
+        },
+        {
+          "at": [18, 376.60769230769233],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 13
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 67
+          }
+        },
+        {
+          "at": [18, 503.0923076923077],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 13
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 69
+          }
+        }
+      ],
+      "frontMisses": []
+    },
+    {
+      "fixture": "bookshelf",
+      "view": "top",
+      "hlrEdges": 506,
+      "unmatched": 0,
+      "severalPieces": 500,
+      "pieces": 426,
+      "oneSource": 15,
+      "severalSources": 411,
+      "noSource": 0,
+      "outlineOnEdge": 0,
+      "outlines": 80,
+      "clicks": 1800,
+      "nearest": 330,
+      "nearestFront": 1800,
+      "outlineClicks": 0,
+      "nearestRate": 0.1833,
+      "nearestFrontRate": 1,
+      "ms": {
+        "exact": 53.76,
+        "exactWithSource": 131.02,
+        "matchSources": 4831.65,
+        "pickAllClicks": 162.59
+      },
+      "sampleMisses": [
+        {
+          "at": [13.25, 0],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 22
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 6
+          }
+        },
+        {
+          "at": [15.375, 0],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 22
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 6
+          }
+        },
+        {
+          "at": [17.5, 0],
+          "truth": [
+            {
+              "body": 0,
+              "edge": 22
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 6
+          }
+        },
+        {
+          "at": [800, 0.5],
+          "truth": [
+            {
+              "body": 1,
+              "edge": 31
+            }
+          ],
+          "nearest": {
+            "body": 1,
+            "edge": 30
+          }
+        },
+        {
+          "at": [800, 2.5067114093959733],
+          "truth": [
+            {
+              "body": 1,
+              "edge": 31
+            }
+          ],
+          "nearest": {
+            "body": 1,
+            "edge": 30
+          }
+        }
+      ],
+      "frontMisses": []
+    },
+    {
+      "fixture": "bookshelf",
+      "view": "right",
+      "hlrEdges": 248,
+      "unmatched": 0,
+      "severalPieces": 246,
+      "pieces": 248,
+      "oneSource": 4,
+      "severalSources": 244,
+      "noSource": 0,
+      "outlineOnEdge": 0,
+      "outlines": 0,
+      "clicks": 1200,
+      "nearest": 0,
+      "nearestFront": 1200,
+      "outlineClicks": 0,
+      "nearestRate": 0,
+      "nearestFrontRate": 1,
+      "ms": {
+        "exact": 15.36,
+        "exactWithSource": 52.83,
+        "matchSources": 440.72,
+        "pickAllClicks": 111.91
+      },
+      "sampleMisses": [
+        {
+          "at": [0, 0.5],
+          "truth": [
+            {
+              "body": 1,
+              "edge": 5
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 1
+          }
+        },
+        {
+          "at": [0, 2.502227171492205],
+          "truth": [
+            {
+              "body": 1,
+              "edge": 5
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 1
+          }
+        },
+        {
+          "at": [0, 4.50445434298441],
+          "truth": [
+            {
+              "body": 1,
+              "edge": 5
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 1
+          }
+        },
+        {
+          "at": [0, 6.506681514476615],
+          "truth": [
+            {
+              "body": 1,
+              "edge": 5
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 1
+          }
+        },
+        {
+          "at": [0, 8.50890868596882],
+          "truth": [
+            {
+              "body": 1,
+              "edge": 5
+            }
+          ],
+          "nearest": {
+            "body": 0,
+            "edge": 1
+          }
+        }
+      ],
+      "frontMisses": []
+    },
+    {
+      "fixture": "bookshelf",
+      "view": "iso",
+      "hlrEdges": 600,
+      "unmatched": 0,
+      "severalPieces": 156,
+      "pieces": 520,
+      "oneSource": 364,
+      "severalSources": 156,
+      "noSource": 0,
+      "outlineOnEdge": 0,
+      "outlines": 80,
+      "clicks": 6572,
+      "nearest": 6561,
+      "nearestFront": 6572,
+      "outlineClicks": 0,
+      "nearestRate": 0.9983,
+      "nearestFrontRate": 1,
+      "ms": {
+        "exact": 25.07,
+        "exactWithSource": 100.59,
+        "matchSources": 230.97,
+        "pickAllClicks": 625.88
+      },
+      "sampleMisses": [
+        {
+          "at": [567.8644377251152, 409.5063440765834],
+          "truth": [
+            {
+              "body": 1,
+              "edge": 31
+            }
+          ],
+          "nearest": {
+            "body": 1,
+            "edge": 40
+          }
+        },
+        {
+          "at": [580.0864382430099, 416.56271936562564],
+          "truth": [
+            {
+              "body": 1,
+              "edge": 31
+            }
+          ],
+          "nearest": {
+            "body": 1,
+            "edge": 40
+          }
+        },
+        {
+          "at": [601.0384391308294, 428.6593627182695],
+          "truth": [
+            {
+              "body": 1,
+              "edge": 31
+            }
+          ],
+          "nearest": {
+            "body": 1,
+            "edge": 40
+          }
+        },
+        {
+          "at": [613.2604396487241, 435.71573800731176],
+          "truth": [
+            {
+              "body": 1,
+              "edge": 31
+            }
+          ],
+          "nearest": {
+            "body": 1,
+            "edge": 40
+          }
+        },
+        {
+          "at": [625.4824401666187, 442.772113296354],
+          "truth": [
+            {
+              "body": 1,
+              "edge": 31
+            }
+          ],
+          "nearest": {
+            "body": 1,
+            "edge": 40
+          }
+        }
+      ],
+      "frontMisses": []
+    }
+  ]
+}

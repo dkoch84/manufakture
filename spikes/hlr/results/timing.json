@@ -1,0 +1,2195 @@
+{
+  "host": {
+    "cpu": "AMD Ryzen 5 7600X 6-Core Processor",
+    "logicalCpus": 12,
+    "memoryGiB": 62,
+    "node": "v26.10.0",
+    "platform": "linux x64",
+    "libcascade": "3.0.2 (single-threaded build)",
+    "measuredAt": "2026-10-02T05:32:58.328Z"
+  },
+  "runs": 5,
+  "rows": [
+    {
+      "fixture": "box-hole",
+      "bodies": 1,
+      "faces": 7,
+      "modelEdges": 15,
+      "view": "front",
+      "algorithm": "exact",
+      "firstMs": 9.78,
+      "medianMs": 1.48,
+      "medianHideMs": 1,
+      "edges": 14,
+      "byClass": {
+        "visible.sharp": 4,
+        "hidden.sharp": 9,
+        "hidden.outline": 1
+      },
+      "byType": {
+        "Line": 10,
+        "BSplineCurve": 4
+      },
+      "byKind": {
+        "line": 14
+      }
+    },
+    {
+      "fixture": "box-hole",
+      "bodies": 1,
+      "faces": 7,
+      "modelEdges": 15,
+      "view": "front",
+      "algorithm": "poly",
+      "firstMs": 9.93,
+      "medianMs": 2,
+      "medianHideMs": 1.24,
+      "edges": 62,
+      "byClass": {
+        "visible.sharp": 4,
+        "hidden.sharp": 57,
+        "hidden.outline": 1
+      },
+      "byType": {
+        "Line": 62
+      },
+      "byKind": {
+        "line": 62
+      },
+      "disagreement": {
+        "visibleExactNotPoly": 0,
+        "visiblePolyNotExact": 0,
+        "hiddenExactNotPoly": 0,
+        "hiddenPolyNotExact": 0
+      }
+    },
+    {
+      "fixture": "box-hole",
+      "bodies": 1,
+      "faces": 7,
+      "modelEdges": 15,
+      "view": "top",
+      "algorithm": "exact",
+      "firstMs": 1.12,
+      "medianMs": 0.86,
+      "medianHideMs": 0.36,
+      "edges": 10,
+      "byClass": {
+        "visible.sharp": 5,
+        "hidden.sharp": 5
+      },
+      "byType": {
+        "Line": 8,
+        "Circle": 2
+      },
+      "byKind": {
+        "line": 8,
+        "arc": 2
+      }
+    },
+    {
+      "fixture": "box-hole",
+      "bodies": 1,
+      "faces": 7,
+      "modelEdges": 15,
+      "view": "top",
+      "algorithm": "poly",
+      "firstMs": 1.91,
+      "medianMs": 1.67,
+      "medianHideMs": 1.04,
+      "edges": 60,
+      "byClass": {
+        "visible.sharp": 30,
+        "hidden.sharp": 30
+      },
+      "byType": {
+        "Line": 60
+      },
+      "byKind": {
+        "line": 60
+      },
+      "disagreement": {
+        "visibleExactNotPoly": 0,
+        "visiblePolyNotExact": 0,
+        "hiddenExactNotPoly": 0,
+        "hiddenPolyNotExact": 0
+      }
+    },
+    {
+      "fixture": "box-hole",
+      "bodies": 1,
+      "faces": 7,
+      "modelEdges": 15,
+      "view": "right",
+      "algorithm": "exact",
+      "firstMs": 1.5,
+      "medianMs": 1.37,
+      "medianHideMs": 0.93,
+      "edges": 17,
+      "byClass": {
+        "visible.sharp": 4,
+        "hidden.sharp": 10,
+        "hidden.sewn": 1,
+        "hidden.outline": 2
+      },
+      "byType": {
+        "Line": 11,
+        "BSplineCurve": 6
+      },
+      "byKind": {
+        "line": 17
+      }
+    },
+    {
+      "fixture": "box-hole",
+      "bodies": 1,
+      "faces": 7,
+      "modelEdges": 15,
+      "view": "right",
+      "algorithm": "poly",
+      "firstMs": 2.04,
+      "medianMs": 1.81,
+      "medianHideMs": 1.05,
+      "edges": 69,
+      "byClass": {
+        "visible.sharp": 4,
+        "hidden.sharp": 60,
+        "hidden.sewn": 1,
+        "hidden.outline": 4
+      },
+      "byType": {
+        "Line": 69
+      },
+      "byKind": {
+        "line": 69
+      },
+      "disagreement": {
+        "visibleExactNotPoly": 0,
+        "visiblePolyNotExact": 0,
+        "hiddenExactNotPoly": 0,
+        "hiddenPolyNotExact": 0
+      }
+    },
+    {
+      "fixture": "box-hole",
+      "bodies": 1,
+      "faces": 7,
+      "modelEdges": 15,
+      "view": "iso",
+      "algorithm": "exact",
+      "firstMs": 1.59,
+      "medianMs": 1,
+      "medianHideMs": 0.36,
+      "edges": 21,
+      "byClass": {
+        "visible.sharp": 12,
+        "hidden.sharp": 6,
+        "hidden.sewn": 1,
+        "hidden.outline": 2
+      },
+      "byType": {
+        "Line": 15,
+        "Ellipse": 6
+      },
+      "byKind": {
+        "line": 15,
+        "ellipseArc": 6
+      }
+    },
+    {
+      "fixture": "box-hole",
+      "bodies": 1,
+      "faces": 7,
+      "modelEdges": 15,
+      "view": "iso",
+      "algorithm": "poly",
+      "firstMs": 1.81,
+      "medianMs": 1.72,
+      "medianHideMs": 0.99,
+      "edges": 73,
+      "byClass": {
+        "visible.sharp": 37,
+        "hidden.sharp": 31,
+        "hidden.sewn": 1,
+        "hidden.outline": 4
+      },
+      "byType": {
+        "Line": 73
+      },
+      "byKind": {
+        "line": 73
+      },
+      "disagreement": {
+        "visibleExactNotPoly": 0,
+        "visiblePolyNotExact": 0,
+        "hiddenExactNotPoly": 0,
+        "hiddenPolyNotExact": 0
+      }
+    },
+    {
+      "fixture": "cylinder",
+      "bodies": 1,
+      "faces": 3,
+      "modelEdges": 3,
+      "view": "front",
+      "algorithm": "exact",
+      "firstMs": 1.41,
+      "medianMs": 0.8,
+      "medianHideMs": 0.49,
+      "edges": 6,
+      "byClass": {
+        "visible.sharp": 3,
+        "hidden.sharp": 2,
+        "visible.outline": 1
+      },
+      "byType": {
+        "BSplineCurve": 4,
+        "Line": 2
+      },
+      "byKind": {
+        "line": 6
+      }
+    },
+    {
+      "fixture": "cylinder",
+      "bodies": 1,
+      "faces": 3,
+      "modelEdges": 3,
+      "view": "front",
+      "algorithm": "poly",
+      "firstMs": 2.8,
+      "medianMs": 2.42,
+      "medianHideMs": 1.22,
+      "edges": 95,
+      "byClass": {
+        "visible.sharp": 47,
+        "hidden.sharp": 46,
+        "visible.outline": 2
+      },
+      "byType": {
+        "Line": 95
+      },
+      "byKind": {
+        "line": 95
+      },
+      "disagreement": {
+        "visibleExactNotPoly": 0,
+        "visiblePolyNotExact": 0,
+        "hiddenExactNotPoly": 0,
+        "hiddenPolyNotExact": 0
+      }
+    },
+    {
+      "fixture": "cylinder",
+      "bodies": 1,
+      "faces": 3,
+      "modelEdges": 3,
+      "view": "top",
+      "algorithm": "exact",
+      "firstMs": 1,
+      "medianMs": 0.89,
+      "medianHideMs": 0.06,
+      "edges": 2,
+      "byClass": {
+        "visible.sharp": 1,
+        "hidden.sharp": 1
+      },
+      "byType": {
+        "Circle": 2
+      },
+      "byKind": {
+        "arc": 2
+      }
+    },
+    {
+      "fixture": "cylinder",
+      "bodies": 1,
+      "faces": 3,
+      "modelEdges": 3,
+      "view": "top",
+      "algorithm": "poly",
+      "firstMs": 2.13,
+      "medianMs": 2.08,
+      "medianHideMs": 1.12,
+      "edges": 90,
+      "byClass": {
+        "visible.sharp": 45,
+        "hidden.sharp": 45
+      },
+      "byType": {
+        "Line": 90
+      },
+      "byKind": {
+        "line": 90
+      },
+      "disagreement": {
+        "visibleExactNotPoly": 0,
+        "visiblePolyNotExact": 0,
+        "hiddenExactNotPoly": 0,
+        "hiddenPolyNotExact": 0
+      }
+    },
+    {
+      "fixture": "cylinder",
+      "bodies": 1,
+      "faces": 3,
+      "modelEdges": 3,
+      "view": "right",
+      "algorithm": "exact",
+      "firstMs": 1.03,
+      "medianMs": 0.91,
+      "medianHideMs": 0.57,
+      "edges": 9,
+      "byClass": {
+        "visible.sharp": 4,
+        "hidden.sharp": 2,
+        "visible.sewn": 1,
+        "visible.outline": 2
+      },
+      "byType": {
+        "BSplineCurve": 6,
+        "Line": 3
+      },
+      "byKind": {
+        "line": 9
+      }
+    },
+    {
+      "fixture": "cylinder",
+      "bodies": 1,
+      "faces": 3,
+      "modelEdges": 3,
+      "view": "right",
+      "algorithm": "poly",
+      "firstMs": 2.27,
+      "medianMs": 2.18,
+      "medianHideMs": 1.13,
+      "edges": 99,
+      "byClass": {
+        "visible.sharp": 48,
+        "hidden.sharp": 46,
+        "visible.sewn": 1,
+        "visible.outline": 4
+      },
+      "byType": {
+        "Line": 99
+      },
+      "byKind": {
+        "line": 99
+      },
+      "disagreement": {
+        "visibleExactNotPoly": 0,
+        "visiblePolyNotExact": 0,
+        "hiddenExactNotPoly": 0,
+        "hiddenPolyNotExact": 0
+      }
+    },
+    {
+      "fixture": "cylinder",
+      "bodies": 1,
+      "faces": 3,
+      "modelEdges": 3,
+      "view": "iso",
+      "algorithm": "exact",
+      "firstMs": 1.24,
+      "medianMs": 1.09,
+      "medianHideMs": 0.24,
+      "edges": 9,
+      "byClass": {
+        "visible.sharp": 5,
+        "hidden.sharp": 1,
+        "visible.sewn": 1,
+        "visible.outline": 2
+      },
+      "byType": {
+        "Ellipse": 6,
+        "Line": 3
+      },
+      "byKind": {
+        "ellipseArc": 6,
+        "line": 3
+      }
+    },
+    {
+      "fixture": "cylinder",
+      "bodies": 1,
+      "faces": 3,
+      "modelEdges": 3,
+      "view": "iso",
+      "algorithm": "poly",
+      "firstMs": 2.28,
+      "medianMs": 2.19,
+      "medianHideMs": 1.13,
+      "edges": 99,
+      "byClass": {
+        "visible.sharp": 70,
+        "hidden.sharp": 24,
+        "visible.sewn": 1,
+        "visible.outline": 4
+      },
+      "byType": {
+        "Line": 99
+      },
+      "byKind": {
+        "line": 99
+      },
+      "disagreement": {
+        "visibleExactNotPoly": 0,
+        "visiblePolyNotExact": 0,
+        "hiddenExactNotPoly": 0,
+        "hiddenPolyNotExact": 0
+      }
+    },
+    {
+      "fixture": "board-40-holes",
+      "bodies": 1,
+      "faces": 46,
+      "modelEdges": 132,
+      "view": "front",
+      "algorithm": "exact",
+      "firstMs": 24.88,
+      "medianMs": 18.43,
+      "medianHideMs": 11.81,
+      "edges": 248,
+      "byClass": {
+        "visible.sharp": 4,
+        "hidden.sharp": 204,
+        "hidden.outline": 40
+      },
+      "byType": {
+        "Line": 88,
+        "BSplineCurve": 160
+      },
+      "byKind": {
+        "line": 248
+      }
+    },
+    {
+      "fixture": "board-40-holes",
+      "bodies": 1,
+      "faces": 46,
+      "modelEdges": 132,
+      "view": "front",
+      "algorithm": "poly",
+      "firstMs": 54.15,
+      "medianMs": 51.13,
+      "medianHideMs": 29.6,
+      "edges": 2168,
+      "byClass": {
+        "visible.sharp": 4,
+        "hidden.sharp": 2124,
+        "hidden.outline": 40
+      },
+      "byType": {
+        "Line": 2168
+      },
+      "byKind": {
+        "line": 2168
+      },
+      "disagreement": {
+        "visibleExactNotPoly": 0,
+        "visiblePolyNotExact": 0,
+        "hiddenExactNotPoly": 0,
+        "hiddenPolyNotExact": 0
+      }
+    },
+    {
+      "fixture": "board-40-holes",
+      "bodies": 1,
+      "faces": 46,
+      "modelEdges": 132,
+      "view": "top",
+      "algorithm": "exact",
+      "firstMs": 7.75,
+      "medianMs": 7.47,
+      "medianHideMs": 0.99,
+      "edges": 88,
+      "byClass": {
+        "visible.sharp": 44,
+        "hidden.sharp": 44
+      },
+      "byType": {
+        "Line": 8,
+        "Circle": 80
+      },
+      "byKind": {
+        "line": 8,
+        "arc": 80
+      }
+    },
+    {
+      "fixture": "board-40-holes",
+      "bodies": 1,
+      "faces": 46,
+      "modelEdges": 132,
+      "view": "top",
+      "algorithm": "poly",
+      "firstMs": 50.6,
+      "medianMs": 50.55,
+      "medianHideMs": 29.84,
+      "edges": 2088,
+      "byClass": {
+        "visible.sharp": 1044,
+        "hidden.sharp": 1044
+      },
+      "byType": {
+        "Line": 2088
+      },
+      "byKind": {
+        "line": 2088
+      },
+      "disagreement": {
+        "visibleExactNotPoly": 0,
+        "visiblePolyNotExact": 0,
+        "hiddenExactNotPoly": 0,
+        "hiddenPolyNotExact": 0
+      }
+    },
+    {
+      "fixture": "board-40-holes",
+      "bodies": 1,
+      "faces": 46,
+      "modelEdges": 132,
+      "view": "right",
+      "algorithm": "exact",
+      "firstMs": 23.96,
+      "medianMs": 23.57,
+      "medianHideMs": 14.17,
+      "edges": 368,
+      "byClass": {
+        "visible.sharp": 4,
+        "hidden.sharp": 244,
+        "hidden.sewn": 40,
+        "hidden.outline": 80
+      },
+      "byType": {
+        "Line": 128,
+        "BSplineCurve": 240
+      },
+      "byKind": {
+        "line": 368
+      }
+    },
+    {
+      "fixture": "board-40-holes",
+      "bodies": 1,
+      "faces": 46,
+      "modelEdges": 132,
+      "view": "right",
+      "algorithm": "poly",
+      "firstMs": 53.02,
+      "medianMs": 54.72,
+      "medianHideMs": 30.5,
+      "edges": 2448,
+      "byClass": {
+        "visible.sharp": 4,
+        "hidden.sharp": 2244,
+        "hidden.sewn": 40,
+        "hidden.outline": 160
+      },
+      "byType": {
+        "Line": 2448
+      },
+      "byKind": {
+        "line": 2448
+      },
+      "disagreement": {
+        "visibleExactNotPoly": 0,
+        "visiblePolyNotExact": 0,
+        "hiddenExactNotPoly": 0,
+        "hiddenPolyNotExact": 0
+      }
+    },
+    {
+      "fixture": "board-40-holes",
+      "bodies": 1,
+      "faces": 46,
+      "modelEdges": 132,
+      "view": "iso",
+      "algorithm": "exact",
+      "firstMs": 20.04,
+      "medianMs": 19.78,
+      "medianHideMs": 9.76,
+      "edges": 372,
+      "byClass": {
+        "visible.sharp": 129,
+        "hidden.sharp": 123,
+        "hidden.sewn": 40,
+        "hidden.outline": 80
+      },
+      "byType": {
+        "Line": 132,
+        "Ellipse": 240
+      },
+      "byKind": {
+        "line": 132,
+        "ellipseArc": 240
+      }
+    },
+    {
+      "fixture": "board-40-holes",
+      "bodies": 1,
+      "faces": 46,
+      "modelEdges": 132,
+      "view": "iso",
+      "algorithm": "poly",
+      "firstMs": 54.49,
+      "medianMs": 55.05,
+      "medianHideMs": 31.15,
+      "edges": 2452,
+      "byClass": {
+        "visible.sharp": 1129,
+        "hidden.sharp": 1123,
+        "hidden.sewn": 40,
+        "hidden.outline": 160
+      },
+      "byType": {
+        "Line": 2452
+      },
+      "byKind": {
+        "line": 2452
+      },
+      "disagreement": {
+        "visibleExactNotPoly": 0,
+        "visiblePolyNotExact": 0,
+        "hiddenExactNotPoly": 0,
+        "hiddenPolyNotExact": 0
+      }
+    },
+    {
+      "fixture": "fillet-chamfer",
+      "bodies": 1,
+      "faces": 18,
+      "modelEdges": 40,
+      "view": "front",
+      "algorithm": "exact",
+      "firstMs": 3.23,
+      "medianMs": 2.43,
+      "medianHideMs": 1.66,
+      "edges": 34,
+      "byClass": {
+        "visible.sharp": 13,
+        "hidden.sharp": 13,
+        "visible.smooth": 4,
+        "hidden.smooth": 4
+      },
+      "byType": {
+        "Line": 22,
+        "BSplineCurve": 12
+      },
+      "byKind": {
+        "line": 34
+      }
+    },
+    {
+      "fixture": "fillet-chamfer",
+      "bodies": 1,
+      "faces": 18,
+      "modelEdges": 40,
+      "view": "front",
+      "algorithm": "poly",
+      "firstMs": 3.25,
+      "medianMs": 2.67,
+      "medianHideMs": 1.51,
+      "edges": 106,
+      "byClass": {
+        "visible.sharp": 49,
+        "hidden.sharp": 45,
+        "visible.smooth": 4,
+        "hidden.smooth": 8
+      },
+      "byType": {
+        "Line": 106
+      },
+      "byKind": {
+        "line": 106
+      },
+      "disagreement": {
+        "visibleExactNotPoly": 0,
+        "visiblePolyNotExact": 0,
+        "hiddenExactNotPoly": 60.5,
+        "hiddenPolyNotExact": 0
+      }
+    },
+    {
+      "fixture": "fillet-chamfer",
+      "bodies": 1,
+      "faces": 18,
+      "modelEdges": 40,
+      "view": "top",
+      "algorithm": "exact",
+      "firstMs": 1.3,
+      "medianMs": 1.11,
+      "medianHideMs": 0.43,
+      "edges": 32,
+      "byClass": {
+        "visible.sharp": 16,
+        "hidden.sharp": 8,
+        "visible.smooth": 8
+      },
+      "byType": {
+        "Line": 20,
+        "Circle": 12
+      },
+      "byKind": {
+        "line": 20,
+        "arc": 12
+      }
+    },
+    {
+      "fixture": "fillet-chamfer",
+      "bodies": 1,
+      "faces": 18,
+      "modelEdges": 40,
+      "view": "top",
+      "algorithm": "poly",
+      "firstMs": 2.62,
+      "medianMs": 2.43,
+      "medianHideMs": 1.4,
+      "edges": 104,
+      "byClass": {
+        "visible.sharp": 64,
+        "hidden.sharp": 32,
+        "visible.smooth": 8
+      },
+      "byType": {
+        "Line": 104
+      },
+      "byKind": {
+        "line": 104
+      },
+      "disagreement": {
+        "visibleExactNotPoly": 0,
+        "visiblePolyNotExact": 0,
+        "hiddenExactNotPoly": 0,
+        "hiddenPolyNotExact": 0
+      }
+    },
+    {
+      "fixture": "fillet-chamfer",
+      "bodies": 1,
+      "faces": 18,
+      "modelEdges": 40,
+      "view": "right",
+      "algorithm": "exact",
+      "firstMs": 2.61,
+      "medianMs": 2.36,
+      "medianHideMs": 1.66,
+      "edges": 34,
+      "byClass": {
+        "visible.sharp": 13,
+        "hidden.sharp": 13,
+        "visible.smooth": 4,
+        "hidden.smooth": 4
+      },
+      "byType": {
+        "BSplineCurve": 12,
+        "Line": 22
+      },
+      "byKind": {
+        "line": 34
+      }
+    },
+    {
+      "fixture": "fillet-chamfer",
+      "bodies": 1,
+      "faces": 18,
+      "modelEdges": 40,
+      "view": "right",
+      "algorithm": "poly",
+      "firstMs": 2.54,
+      "medianMs": 2.47,
+      "medianHideMs": 1.42,
+      "edges": 106,
+      "byClass": {
+        "visible.sharp": 49,
+        "hidden.sharp": 45,
+        "visible.smooth": 4,
+        "hidden.smooth": 8
+      },
+      "byType": {
+        "Line": 106
+      },
+      "byKind": {
+        "line": 106
+      },
+      "disagreement": {
+        "visibleExactNotPoly": 0,
+        "visiblePolyNotExact": 0,
+        "hiddenExactNotPoly": 60.5,
+        "hiddenPolyNotExact": 0
+      }
+    },
+    {
+      "fixture": "fillet-chamfer",
+      "bodies": 1,
+      "faces": 18,
+      "modelEdges": 40,
+      "view": "iso",
+      "algorithm": "exact",
+      "firstMs": 2.68,
+      "medianMs": 2,
+      "medianHideMs": 1.05,
+      "edges": 46,
+      "byClass": {
+        "visible.sharp": 22,
+        "hidden.sharp": 10,
+        "visible.smooth": 8,
+        "hidden.smooth": 4,
+        "visible.outline": 2
+      },
+      "byType": {
+        "Ellipse": 16,
+        "Line": 30
+      },
+      "byKind": {
+        "ellipseArc": 16,
+        "line": 30
+      }
+    },
+    {
+      "fixture": "fillet-chamfer",
+      "bodies": 1,
+      "faces": 18,
+      "modelEdges": 40,
+      "view": "iso",
+      "algorithm": "poly",
+      "firstMs": 2.77,
+      "medianMs": 2.65,
+      "medianHideMs": 1.46,
+      "edges": 120,
+      "byClass": {
+        "visible.sharp": 76,
+        "hidden.sharp": 26,
+        "visible.smooth": 8,
+        "hidden.smooth": 6,
+        "visible.outline": 4
+      },
+      "byType": {
+        "Line": 120
+      },
+      "byKind": {
+        "line": 120
+      },
+      "disagreement": {
+        "visibleExactNotPoly": 0,
+        "visiblePolyNotExact": 0,
+        "hiddenExactNotPoly": 2.9,
+        "hiddenPolyNotExact": 0
+      }
+    },
+    {
+      "fixture": "vase",
+      "bodies": 1,
+      "faces": 3,
+      "modelEdges": 3,
+      "view": "front",
+      "algorithm": "exact",
+      "firstMs": 13.55,
+      "medianMs": 4.92,
+      "medianHideMs": 4.09,
+      "edges": 6,
+      "byClass": {
+        "visible.sharp": 3,
+        "hidden.sharp": 2,
+        "visible.outline": 1
+      },
+      "byType": {
+        "BSplineCurve": 5,
+        "BezierCurve": 1
+      },
+      "byKind": {
+        "line": 4,
+        "polyline": 2
+      }
+    },
+    {
+      "fixture": "vase",
+      "bodies": 1,
+      "faces": 3,
+      "modelEdges": 3,
+      "view": "front",
+      "algorithm": "poly",
+      "firstMs": 32.1,
+      "medianMs": 27.37,
+      "medianHideMs": 25.42,
+      "edges": 194,
+      "byClass": {
+        "visible.sharp": 75,
+        "hidden.sharp": 51,
+        "visible.outline": 68
+      },
+      "byType": {
+        "Line": 194
+      },
+      "byKind": {
+        "line": 194
+      },
+      "disagreement": {
+        "visibleExactNotPoly": 0,
+        "visiblePolyNotExact": 0,
+        "hiddenExactNotPoly": 0,
+        "hiddenPolyNotExact": 0
+      }
+    },
+    {
+      "fixture": "vase",
+      "bodies": 1,
+      "faces": 3,
+      "modelEdges": 3,
+      "view": "top",
+      "algorithm": "exact",
+      "firstMs": 7.71,
+      "medianMs": 6.8,
+      "medianHideMs": 3.88,
+      "edges": 8,
+      "byClass": {
+        "visible.sharp": 1,
+        "hidden.sharp": 1,
+        "visible.sewn": 1,
+        "hidden.sewn": 3,
+        "visible.outline": 1,
+        "hidden.outline": 1
+      },
+      "byType": {
+        "Circle": 2,
+        "BezierCurve": 4,
+        "BSplineCurve": 2
+      },
+      "byKind": {
+        "arc": 2,
+        "line": 4,
+        "polyline": 2
+      }
+    },
+    {
+      "fixture": "vase",
+      "bodies": 1,
+      "faces": 3,
+      "modelEdges": 3,
+      "view": "top",
+      "algorithm": "poly",
+      "firstMs": 30.08,
+      "medianMs": 29.94,
+      "medianHideMs": 25.98,
+      "edges": 407,
+      "byClass": {
+        "visible.sharp": 45,
+        "hidden.sharp": 55,
+        "visible.sewn": 11,
+        "hidden.sewn": 16,
+        "visible.outline": 180,
+        "hidden.outline": 100
+      },
+      "byType": {
+        "Line": 407
+      },
+      "byKind": {
+        "line": 407
+      },
+      "disagreement": {
+        "visibleExactNotPoly": 0,
+        "visiblePolyNotExact": 0,
+        "hiddenExactNotPoly": 0,
+        "hiddenPolyNotExact": 0
+      }
+    },
+    {
+      "fixture": "vase",
+      "bodies": 1,
+      "faces": 3,
+      "modelEdges": 3,
+      "view": "right",
+      "algorithm": "exact",
+      "firstMs": 4.81,
+      "medianMs": 4.61,
+      "medianHideMs": 3.61,
+      "edges": 9,
+      "byClass": {
+        "visible.sharp": 4,
+        "hidden.sharp": 2,
+        "visible.sewn": 1,
+        "visible.outline": 2
+      },
+      "byType": {
+        "BSplineCurve": 8,
+        "BezierCurve": 1
+      },
+      "byKind": {
+        "line": 7,
+        "polyline": 2
+      }
+    },
+    {
+      "fixture": "vase",
+      "bodies": 1,
+      "faces": 3,
+      "modelEdges": 3,
+      "view": "right",
+      "algorithm": "poly",
+      "firstMs": 28.7,
+      "medianMs": 28.52,
+      "medianHideMs": 25.66,
+      "edges": 287,
+      "byClass": {
+        "visible.sharp": 52,
+        "hidden.sharp": 52,
+        "visible.sewn": 24,
+        "visible.outline": 159
+      },
+      "byType": {
+        "Line": 287
+      },
+      "byKind": {
+        "line": 287
+      },
+      "disagreement": {
+        "visibleExactNotPoly": 0,
+        "visiblePolyNotExact": 0,
+        "hiddenExactNotPoly": 0,
+        "hiddenPolyNotExact": 0
+      }
+    },
+    {
+      "fixture": "vase",
+      "bodies": 1,
+      "faces": 3,
+      "modelEdges": 3,
+      "view": "iso",
+      "algorithm": "exact",
+      "firstMs": 6.11,
+      "medianMs": 5.74,
+      "medianHideMs": 4.08,
+      "edges": 9,
+      "byClass": {
+        "visible.sharp": 5,
+        "hidden.sharp": 1,
+        "visible.sewn": 1,
+        "visible.outline": 2
+      },
+      "byType": {
+        "Ellipse": 6,
+        "BezierCurve": 1,
+        "BSplineCurve": 2
+      },
+      "byKind": {
+        "ellipseArc": 6,
+        "polyline": 3
+      }
+    },
+    {
+      "fixture": "vase",
+      "bodies": 1,
+      "faces": 3,
+      "modelEdges": 3,
+      "view": "iso",
+      "algorithm": "poly",
+      "firstMs": 28.44,
+      "medianMs": 28.26,
+      "medianHideMs": 25.54,
+      "edges": 277,
+      "byClass": {
+        "visible.sharp": 64,
+        "hidden.sharp": 38,
+        "visible.sewn": 24,
+        "visible.outline": 151
+      },
+      "byType": {
+        "Line": 277
+      },
+      "byKind": {
+        "line": 277
+      },
+      "disagreement": {
+        "visibleExactNotPoly": 0,
+        "visiblePolyNotExact": 0,
+        "hiddenExactNotPoly": 0,
+        "hiddenPolyNotExact": 0
+      }
+    },
+    {
+      "fixture": "bracket",
+      "bodies": 1,
+      "faces": 15,
+      "modelEdges": 33,
+      "view": "front",
+      "algorithm": "exact",
+      "firstMs": 2.97,
+      "medianMs": 2.71,
+      "medianHideMs": 1.76,
+      "edges": 38,
+      "byClass": {
+        "visible.sharp": 7,
+        "hidden.sharp": 27,
+        "hidden.outline": 4
+      },
+      "byType": {
+        "Line": 20,
+        "Circle": 2,
+        "BSplineCurve": 16
+      },
+      "byKind": {
+        "line": 36,
+        "arc": 2
+      }
+    },
+    {
+      "fixture": "bracket",
+      "bodies": 1,
+      "faces": 15,
+      "modelEdges": 33,
+      "view": "front",
+      "algorithm": "poly",
+      "firstMs": 5.42,
+      "medianMs": 5,
+      "medianHideMs": 2.61,
+      "edges": 242,
+      "byClass": {
+        "visible.sharp": 13,
+        "hidden.sharp": 225,
+        "hidden.outline": 4
+      },
+      "byType": {
+        "Line": 242
+      },
+      "byKind": {
+        "line": 242
+      },
+      "disagreement": {
+        "visibleExactNotPoly": 0,
+        "visiblePolyNotExact": 0,
+        "hiddenExactNotPoly": 0,
+        "hiddenPolyNotExact": 0
+      }
+    },
+    {
+      "fixture": "bracket",
+      "bodies": 1,
+      "faces": 15,
+      "modelEdges": 33,
+      "view": "top",
+      "algorithm": "exact",
+      "firstMs": 2.19,
+      "medianMs": 2.06,
+      "medianHideMs": 0.81,
+      "edges": 23,
+      "byClass": {
+        "visible.sharp": 13,
+        "hidden.sharp": 9,
+        "visible.smooth": 1
+      },
+      "byType": {
+        "Line": 13,
+        "BSplineCurve": 2,
+        "Circle": 8
+      },
+      "byKind": {
+        "line": 15,
+        "arc": 8
+      }
+    },
+    {
+      "fixture": "bracket",
+      "bodies": 1,
+      "faces": 15,
+      "modelEdges": 33,
+      "view": "top",
+      "algorithm": "poly",
+      "firstMs": 4.97,
+      "medianMs": 4.91,
+      "medianHideMs": 2.58,
+      "edges": 235,
+      "byClass": {
+        "visible.sharp": 125,
+        "hidden.sharp": 109,
+        "visible.smooth": 1
+      },
+      "byType": {
+        "Line": 235
+      },
+      "byKind": {
+        "line": 235
+      },
+      "disagreement": {
+        "visibleExactNotPoly": 0,
+        "visiblePolyNotExact": 0,
+        "hiddenExactNotPoly": 0,
+        "hiddenPolyNotExact": 0
+      }
+    },
+    {
+      "fixture": "bracket",
+      "bodies": 1,
+      "faces": 15,
+      "modelEdges": 33,
+      "view": "right",
+      "algorithm": "exact",
+      "firstMs": 3.43,
+      "medianMs": 3.35,
+      "medianHideMs": 2.14,
+      "edges": 51,
+      "byClass": {
+        "visible.sharp": 9,
+        "hidden.sharp": 29,
+        "visible.smooth": 1,
+        "hidden.sewn": 4,
+        "hidden.outline": 8
+      },
+      "byType": {
+        "BSplineCurve": 26,
+        "Line": 25
+      },
+      "byKind": {
+        "line": 51
+      }
+    },
+    {
+      "fixture": "bracket",
+      "bodies": 1,
+      "faces": 15,
+      "modelEdges": 33,
+      "view": "right",
+      "algorithm": "poly",
+      "firstMs": 5.35,
+      "medianMs": 5.3,
+      "medianHideMs": 2.61,
+      "edges": 271,
+      "byClass": {
+        "visible.sharp": 21,
+        "hidden.sharp": 229,
+        "visible.smooth": 1,
+        "hidden.sewn": 4,
+        "hidden.outline": 16
+      },
+      "byType": {
+        "Line": 271
+      },
+      "byKind": {
+        "line": 271
+      },
+      "disagreement": {
+        "visibleExactNotPoly": 0,
+        "visiblePolyNotExact": 0,
+        "hiddenExactNotPoly": 0,
+        "hiddenPolyNotExact": 0
+      }
+    },
+    {
+      "fixture": "bracket",
+      "bodies": 1,
+      "faces": 15,
+      "modelEdges": 33,
+      "view": "iso",
+      "algorithm": "exact",
+      "firstMs": 2.99,
+      "medianMs": 2.83,
+      "medianHideMs": 1.08,
+      "edges": 65,
+      "byClass": {
+        "visible.sharp": 26,
+        "hidden.sharp": 25,
+        "visible.smooth": 2,
+        "hidden.sewn": 4,
+        "hidden.outline": 8
+      },
+      "byType": {
+        "Line": 31,
+        "Ellipse": 34
+      },
+      "byKind": {
+        "line": 31,
+        "ellipseArc": 34
+      }
+    },
+    {
+      "fixture": "bracket",
+      "bodies": 1,
+      "faces": 15,
+      "modelEdges": 33,
+      "view": "iso",
+      "algorithm": "poly",
+      "firstMs": 5.51,
+      "medianMs": 5.49,
+      "medianHideMs": 2.71,
+      "edges": 281,
+      "byClass": {
+        "visible.sharp": 98,
+        "hidden.sharp": 161,
+        "visible.smooth": 2,
+        "hidden.sewn": 4,
+        "hidden.outline": 16
+      },
+      "byType": {
+        "Line": 281
+      },
+      "byKind": {
+        "line": 281
+      },
+      "disagreement": {
+        "visibleExactNotPoly": 0,
+        "visiblePolyNotExact": 0,
+        "hiddenExactNotPoly": 0,
+        "hiddenPolyNotExact": 0
+      }
+    },
+    {
+      "fixture": "dado-pair",
+      "bodies": 2,
+      "faces": 16,
+      "modelEdges": 36,
+      "view": "front",
+      "algorithm": "exact",
+      "firstMs": 1.28,
+      "medianMs": 1.04,
+      "medianHideMs": 0.75,
+      "edges": 24,
+      "byClass": {
+        "visible.sharp": 12,
+        "hidden.sharp": 12
+      },
+      "byType": {
+        "Line": 24
+      },
+      "byKind": {
+        "line": 24
+      }
+    },
+    {
+      "fixture": "dado-pair",
+      "bodies": 2,
+      "faces": 16,
+      "modelEdges": 36,
+      "view": "front",
+      "algorithm": "poly",
+      "firstMs": 1.36,
+      "medianMs": 1,
+      "medianHideMs": 0.72,
+      "edges": 24,
+      "byClass": {
+        "visible.sharp": 12,
+        "hidden.sharp": 12
+      },
+      "byType": {
+        "Line": 24
+      },
+      "byKind": {
+        "line": 24
+      },
+      "disagreement": {
+        "visibleExactNotPoly": 0,
+        "visiblePolyNotExact": 0,
+        "hiddenExactNotPoly": 0,
+        "hiddenPolyNotExact": 0
+      }
+    },
+    {
+      "fixture": "dado-pair",
+      "bodies": 2,
+      "faces": 16,
+      "modelEdges": 36,
+      "view": "top",
+      "algorithm": "exact",
+      "firstMs": 1.21,
+      "medianMs": 1.08,
+      "medianHideMs": 0.78,
+      "edges": 26,
+      "byClass": {
+        "visible.sharp": 7,
+        "hidden.sharp": 19
+      },
+      "byType": {
+        "Line": 26
+      },
+      "byKind": {
+        "line": 26
+      }
+    },
+    {
+      "fixture": "dado-pair",
+      "bodies": 2,
+      "faces": 16,
+      "modelEdges": 36,
+      "view": "top",
+      "algorithm": "poly",
+      "firstMs": 1.03,
+      "medianMs": 0.98,
+      "medianHideMs": 0.69,
+      "edges": 26,
+      "byClass": {
+        "visible.sharp": 7,
+        "hidden.sharp": 19
+      },
+      "byType": {
+        "Line": 26
+      },
+      "byKind": {
+        "line": 26
+      },
+      "disagreement": {
+        "visibleExactNotPoly": 0,
+        "visiblePolyNotExact": 0,
+        "hiddenExactNotPoly": 0,
+        "hiddenPolyNotExact": 0
+      }
+    },
+    {
+      "fixture": "dado-pair",
+      "bodies": 2,
+      "faces": 16,
+      "modelEdges": 36,
+      "view": "right",
+      "algorithm": "exact",
+      "firstMs": 1.14,
+      "medianMs": 1.07,
+      "medianHideMs": 0.79,
+      "edges": 24,
+      "byClass": {
+        "visible.sharp": 10,
+        "hidden.sharp": 14
+      },
+      "byType": {
+        "Line": 24
+      },
+      "byKind": {
+        "line": 24
+      }
+    },
+    {
+      "fixture": "dado-pair",
+      "bodies": 2,
+      "faces": 16,
+      "modelEdges": 36,
+      "view": "right",
+      "algorithm": "poly",
+      "firstMs": 0.99,
+      "medianMs": 0.93,
+      "medianHideMs": 0.66,
+      "edges": 24,
+      "byClass": {
+        "visible.sharp": 10,
+        "hidden.sharp": 14
+      },
+      "byType": {
+        "Line": 24
+      },
+      "byKind": {
+        "line": 24
+      },
+      "disagreement": {
+        "visibleExactNotPoly": 0,
+        "visiblePolyNotExact": 0,
+        "hiddenExactNotPoly": 0,
+        "hiddenPolyNotExact": 0
+      }
+    },
+    {
+      "fixture": "dado-pair",
+      "bodies": 2,
+      "faces": 16,
+      "modelEdges": 36,
+      "view": "iso",
+      "algorithm": "exact",
+      "firstMs": 0.72,
+      "medianMs": 0.66,
+      "medianHideMs": 0.25,
+      "edges": 37,
+      "byClass": {
+        "visible.sharp": 22,
+        "hidden.sharp": 15
+      },
+      "byType": {
+        "Line": 37
+      },
+      "byKind": {
+        "line": 37
+      }
+    },
+    {
+      "fixture": "dado-pair",
+      "bodies": 2,
+      "faces": 16,
+      "modelEdges": 36,
+      "view": "iso",
+      "algorithm": "poly",
+      "firstMs": 1.13,
+      "medianMs": 1.09,
+      "medianHideMs": 0.68,
+      "edges": 37,
+      "byClass": {
+        "visible.sharp": 22,
+        "hidden.sharp": 15
+      },
+      "byType": {
+        "Line": 37
+      },
+      "byKind": {
+        "line": 37
+      },
+      "disagreement": {
+        "visibleExactNotPoly": 0,
+        "visiblePolyNotExact": 0,
+        "hiddenExactNotPoly": 0,
+        "hiddenPolyNotExact": 0
+      }
+    },
+    {
+      "fixture": "bookshelf",
+      "bodies": 7,
+      "faces": 182,
+      "modelEdges": 352,
+      "view": "front",
+      "algorithm": "exact",
+      "firstMs": 36.37,
+      "medianMs": 35.5,
+      "medianHideMs": 27.75,
+      "edges": 394,
+      "byClass": {
+        "visible.sharp": 57,
+        "hidden.sharp": 297,
+        "hidden.outline": 40
+      },
+      "byType": {
+        "Line": 234,
+        "BSplineCurve": 160
+      },
+      "byKind": {
+        "line": 394
+      }
+    },
+    {
+      "fixture": "bookshelf",
+      "bodies": 7,
+      "faces": 182,
+      "modelEdges": 352,
+      "view": "front",
+      "algorithm": "poly",
+      "firstMs": 47.21,
+      "medianMs": 47.08,
+      "medianHideMs": 23.08,
+      "edges": 2358,
+      "byClass": {
+        "visible.sharp": 79,
+        "hidden.sharp": 2239,
+        "hidden.outline": 40
+      },
+      "byType": {
+        "Line": 2358
+      },
+      "byKind": {
+        "line": 2358
+      },
+      "disagreement": {
+        "visibleExactNotPoly": 0,
+        "visiblePolyNotExact": 1429,
+        "hiddenExactNotPoly": 0,
+        "hiddenPolyNotExact": 0
+      }
+    },
+    {
+      "fixture": "bookshelf",
+      "bodies": 7,
+      "faces": 182,
+      "modelEdges": 352,
+      "view": "top",
+      "algorithm": "exact",
+      "firstMs": 50.84,
+      "medianMs": 50.37,
+      "medianHideMs": 39.27,
+      "edges": 506,
+      "byClass": {
+        "visible.sharp": 17,
+        "hidden.sharp": 369,
+        "hidden.sewn": 40,
+        "hidden.outline": 80
+      },
+      "byType": {
+        "Line": 266,
+        "BSplineCurve": 240
+      },
+      "byKind": {
+        "line": 506
+      }
+    },
+    {
+      "fixture": "bookshelf",
+      "bodies": 7,
+      "faces": 182,
+      "modelEdges": 352,
+      "view": "top",
+      "algorithm": "poly",
+      "firstMs": 49.67,
+      "medianMs": 49.53,
+      "medianHideMs": 24.1,
+      "edges": 2586,
+      "byClass": {
+        "visible.sharp": 17,
+        "hidden.sharp": 2369,
+        "hidden.sewn": 40,
+        "hidden.outline": 160
+      },
+      "byType": {
+        "Line": 2586
+      },
+      "byKind": {
+        "line": 2586
+      },
+      "disagreement": {
+        "visibleExactNotPoly": 0,
+        "visiblePolyNotExact": 0,
+        "hiddenExactNotPoly": 0,
+        "hiddenPolyNotExact": 0
+      }
+    },
+    {
+      "fixture": "bookshelf",
+      "bodies": 7,
+      "faces": 182,
+      "modelEdges": 352,
+      "view": "right",
+      "algorithm": "exact",
+      "firstMs": 14.36,
+      "medianMs": 14.03,
+      "medianHideMs": 5.76,
+      "edges": 248,
+      "byClass": {
+        "visible.sharp": 4,
+        "hidden.sharp": 244
+      },
+      "byType": {
+        "Line": 168,
+        "Circle": 80
+      },
+      "byKind": {
+        "line": 168,
+        "arc": 80
+      }
+    },
+    {
+      "fixture": "bookshelf",
+      "bodies": 7,
+      "faces": 182,
+      "modelEdges": 352,
+      "view": "right",
+      "algorithm": "poly",
+      "firstMs": 44.41,
+      "medianMs": 44.97,
+      "medianHideMs": 22.79,
+      "edges": 2248,
+      "byClass": {
+        "visible.sharp": 4,
+        "hidden.sharp": 2244
+      },
+      "byType": {
+        "Line": 2248
+      },
+      "byKind": {
+        "line": 2248
+      },
+      "disagreement": {
+        "visibleExactNotPoly": 0,
+        "visiblePolyNotExact": 0,
+        "hiddenExactNotPoly": 0,
+        "hiddenPolyNotExact": 0
+      }
+    },
+    {
+      "fixture": "bookshelf",
+      "bodies": 7,
+      "faces": 182,
+      "modelEdges": 352,
+      "view": "iso",
+      "algorithm": "exact",
+      "firstMs": 23.01,
+      "medianMs": 22,
+      "medianHideMs": 9.33,
+      "edges": 600,
+      "byClass": {
+        "visible.sharp": 105,
+        "hidden.sharp": 375,
+        "hidden.sewn": 40,
+        "hidden.outline": 80
+      },
+      "byType": {
+        "Line": 358,
+        "Ellipse": 242
+      },
+      "byKind": {
+        "line": 358,
+        "ellipseArc": 242
+      }
+    },
+    {
+      "fixture": "bookshelf",
+      "bodies": 7,
+      "faces": 182,
+      "modelEdges": 352,
+      "view": "iso",
+      "algorithm": "poly",
+      "firstMs": 50.35,
+      "medianMs": 50.42,
+      "medianHideMs": 24.07,
+      "edges": 2680,
+      "byClass": {
+        "visible.sharp": 313,
+        "hidden.sharp": 2167,
+        "hidden.sewn": 40,
+        "hidden.outline": 160
+      },
+      "byType": {
+        "Line": 2680
+      },
+      "byKind": {
+        "line": 2680
+      },
+      "disagreement": {
+        "visibleExactNotPoly": 0,
+        "visiblePolyNotExact": 0,
+        "hiddenExactNotPoly": 0,
+        "hiddenPolyNotExact": 0
+      }
+    },
+    {
+      "fixture": "cabinet-run-100",
+      "bodies": 100,
+      "faces": 760,
+      "modelEdges": 1680,
+      "view": "front",
+      "algorithm": "exact",
+      "firstMs": 51.22,
+      "medianMs": 50.4,
+      "medianHideMs": 38.86,
+      "edges": 1120,
+      "byClass": {
+        "visible.sharp": 480,
+        "hidden.sharp": 640
+      },
+      "byType": {
+        "Line": 1120
+      },
+      "byKind": {
+        "line": 1120
+      }
+    },
+    {
+      "fixture": "cabinet-run-100",
+      "bodies": 100,
+      "faces": 760,
+      "modelEdges": 1680,
+      "view": "front",
+      "algorithm": "poly",
+      "firstMs": 43.71,
+      "medianMs": 38.19,
+      "medianHideMs": 27.37,
+      "edges": 1120,
+      "byClass": {
+        "visible.sharp": 480,
+        "hidden.sharp": 640
+      },
+      "byType": {
+        "Line": 1120
+      },
+      "byKind": {
+        "line": 1120
+      },
+      "disagreement": {
+        "visibleExactNotPoly": 0,
+        "visiblePolyNotExact": 0,
+        "hiddenExactNotPoly": 0,
+        "hiddenPolyNotExact": 0
+      }
+    },
+    {
+      "fixture": "cabinet-run-100",
+      "bodies": 100,
+      "faces": 760,
+      "modelEdges": 1680,
+      "view": "top",
+      "algorithm": "exact",
+      "firstMs": 53.03,
+      "medianMs": 52.74,
+      "medianHideMs": 41.19,
+      "edges": 1120,
+      "byClass": {
+        "visible.sharp": 320,
+        "hidden.sharp": 800
+      },
+      "byType": {
+        "Line": 1120
+      },
+      "byKind": {
+        "line": 1120
+      }
+    },
+    {
+      "fixture": "cabinet-run-100",
+      "bodies": 100,
+      "faces": 760,
+      "modelEdges": 1680,
+      "view": "top",
+      "algorithm": "poly",
+      "firstMs": 39.31,
+      "medianMs": 40.09,
+      "medianHideMs": 27.9,
+      "edges": 1200,
+      "byClass": {
+        "visible.sharp": 360,
+        "hidden.sharp": 840
+      },
+      "byType": {
+        "Line": 1200
+      },
+      "byKind": {
+        "line": 1200
+      },
+      "disagreement": {
+        "visibleExactNotPoly": 0,
+        "visiblePolyNotExact": 0,
+        "hiddenExactNotPoly": 0,
+        "hiddenPolyNotExact": 0
+      }
+    },
+    {
+      "fixture": "cabinet-run-100",
+      "bodies": 100,
+      "faces": 760,
+      "modelEdges": 1680,
+      "view": "right",
+      "algorithm": "exact",
+      "firstMs": 97.14,
+      "medianMs": 95.98,
+      "medianHideMs": 84.5,
+      "edges": 1120,
+      "byClass": {
+        "visible.sharp": 4,
+        "hidden.sharp": 1116
+      },
+      "byType": {
+        "Line": 1120
+      },
+      "byKind": {
+        "line": 1120
+      }
+    },
+    {
+      "fixture": "cabinet-run-100",
+      "bodies": 100,
+      "faces": 760,
+      "modelEdges": 1680,
+      "view": "right",
+      "algorithm": "poly",
+      "firstMs": 39.98,
+      "medianMs": 39.2,
+      "medianHideMs": 27.93,
+      "edges": 1120,
+      "byClass": {
+        "visible.sharp": 4,
+        "hidden.sharp": 1116
+      },
+      "byType": {
+        "Line": 1120
+      },
+      "byKind": {
+        "line": 1120
+      },
+      "disagreement": {
+        "visibleExactNotPoly": 0,
+        "visiblePolyNotExact": 0,
+        "hiddenExactNotPoly": 0,
+        "hiddenPolyNotExact": 0
+      }
+    },
+    {
+      "fixture": "cabinet-run-100",
+      "bodies": 100,
+      "faces": 760,
+      "modelEdges": 1680,
+      "view": "iso",
+      "algorithm": "exact",
+      "firstMs": 44.69,
+      "medianMs": 42.1,
+      "medianHideMs": 23.81,
+      "edges": 1820,
+      "byClass": {
+        "visible.sharp": 862,
+        "hidden.sharp": 958
+      },
+      "byType": {
+        "Line": 1820
+      },
+      "byKind": {
+        "line": 1820
+      }
+    },
+    {
+      "fixture": "cabinet-run-100",
+      "bodies": 100,
+      "faces": 760,
+      "modelEdges": 1680,
+      "view": "iso",
+      "algorithm": "poly",
+      "firstMs": 47.94,
+      "medianMs": 47.62,
+      "medianHideMs": 29.48,
+      "edges": 1820,
+      "byClass": {
+        "visible.sharp": 862,
+        "hidden.sharp": 958
+      },
+      "byType": {
+        "Line": 1820
+      },
+      "byKind": {
+        "line": 1820
+      },
+      "disagreement": {
+        "visibleExactNotPoly": 0,
+        "visiblePolyNotExact": 0,
+        "hiddenExactNotPoly": 0,
+        "hiddenPolyNotExact": 0
+      }
+    },
+    {
+      "fixture": "step-import",
+      "bodies": 1,
+      "faces": 954,
+      "modelEdges": 2044,
+      "view": "front",
+      "algorithm": "exact",
+      "firstMs": 106.34,
+      "medianMs": 104.22,
+      "medianHideMs": 81,
+      "edges": 1560,
+      "byClass": {
+        "visible.sharp": 515,
+        "hidden.sharp": 1001,
+        "visible.outline": 4,
+        "hidden.outline": 40
+      },
+      "byType": {
+        "Line": 1376,
+        "BSplineCurve": 184
+      },
+      "byKind": {
+        "line": 1552,
+        "polyline": 8
+      }
+    },
+    {
+      "fixture": "step-import",
+      "bodies": 1,
+      "faces": 954,
+      "modelEdges": 2044,
+      "view": "front",
+      "algorithm": "poly",
+      "firstMs": 221.91,
+      "medianMs": 214.69,
+      "medianHideMs": 172.19,
+      "edges": 4286,
+      "byClass": {
+        "visible.sharp": 830,
+        "hidden.sharp": 3136,
+        "hidden.sewn": 8,
+        "visible.outline": 272,
+        "hidden.outline": 40
+      },
+      "byType": {
+        "Line": 4286
+      },
+      "byKind": {
+        "line": 4286
+      },
+      "disagreement": {
+        "visibleExactNotPoly": 0,
+        "visiblePolyNotExact": 1429,
+        "hiddenExactNotPoly": 0,
+        "hiddenPolyNotExact": 0
+      }
+    },
+    {
+      "fixture": "step-import",
+      "bodies": 1,
+      "faces": 954,
+      "modelEdges": 2044,
+      "view": "top",
+      "algorithm": "exact",
+      "firstMs": 115.82,
+      "medianMs": 114.05,
+      "medianHideMs": 85.52,
+      "edges": 1658,
+      "byClass": {
+        "visible.sharp": 341,
+        "hidden.sharp": 1173,
+        "visible.sewn": 4,
+        "hidden.sewn": 52,
+        "visible.outline": 4,
+        "hidden.outline": 84
+      },
+      "byType": {
+        "Line": 1386,
+        "Circle": 8,
+        "BSplineCurve": 264
+      },
+      "byKind": {
+        "line": 1642,
+        "arc": 8,
+        "polyline": 8
+      }
+    },
+    {
+      "fixture": "step-import",
+      "bodies": 1,
+      "faces": 954,
+      "modelEdges": 2044,
+      "view": "top",
+      "algorithm": "poly",
+      "firstMs": 233.13,
+      "medianMs": 231.06,
+      "medianHideMs": 176.82,
+      "edges": 5414,
+      "byClass": {
+        "visible.sharp": 557,
+        "hidden.sharp": 3413,
+        "visible.sewn": 44,
+        "hidden.sewn": 120,
+        "visible.outline": 720,
+        "hidden.outline": 560
+      },
+      "byType": {
+        "Line": 5414
+      },
+      "byKind": {
+        "line": 5414
+      },
+      "disagreement": {
+        "visibleExactNotPoly": 0,
+        "visiblePolyNotExact": 0,
+        "hiddenExactNotPoly": 0,
+        "hiddenPolyNotExact": 0
+      }
+    },
+    {
+      "fixture": "step-import",
+      "bodies": 1,
+      "faces": 954,
+      "modelEdges": 2044,
+      "view": "right",
+      "algorithm": "exact",
+      "firstMs": 180.98,
+      "medianMs": 178.3,
+      "medianHideMs": 154.35,
+      "edges": 1405,
+      "byClass": {
+        "visible.sharp": 12,
+        "hidden.sharp": 1356,
+        "visible.sewn": 1,
+        "hidden.sewn": 27,
+        "visible.outline": 3,
+        "hidden.outline": 6
+      },
+      "byType": {
+        "Line": 1288,
+        "BSplineCurve": 37,
+        "Circle": 80
+      },
+      "byKind": {
+        "line": 1316,
+        "arc": 80,
+        "polyline": 9
+      }
+    },
+    {
+      "fixture": "step-import",
+      "bodies": 1,
+      "faces": 954,
+      "modelEdges": 2044,
+      "view": "right",
+      "algorithm": "poly",
+      "firstMs": 224.18,
+      "medianMs": 223.97,
+      "medianHideMs": 178.67,
+      "edges": 4530,
+      "byClass": {
+        "visible.sharp": 60,
+        "hidden.sharp": 3700,
+        "visible.sewn": 24,
+        "hidden.sewn": 96,
+        "visible.outline": 199,
+        "hidden.outline": 451
+      },
+      "byType": {
+        "Line": 4530
+      },
+      "byKind": {
+        "line": 4530
+      },
+      "disagreement": {
+        "visibleExactNotPoly": 0,
+        "visiblePolyNotExact": 0,
+        "hiddenExactNotPoly": 0,
+        "hiddenPolyNotExact": 0
+      }
+    },
+    {
+      "fixture": "step-import",
+      "bodies": 1,
+      "faces": 954,
+      "modelEdges": 2044,
+      "view": "iso",
+      "algorithm": "exact",
+      "firstMs": 98.24,
+      "medianMs": 95.47,
+      "medianHideMs": 57.26,
+      "edges": 2470,
+      "byClass": {
+        "visible.sharp": 960,
+        "hidden.sharp": 1354,
+        "visible.sewn": 4,
+        "hidden.sewn": 64,
+        "visible.outline": 8,
+        "hidden.outline": 80
+      },
+      "byType": {
+        "Line": 2192,
+        "Ellipse": 266,
+        "BSplineCurve": 12
+      },
+      "byKind": {
+        "line": 2192,
+        "ellipseArc": 266,
+        "polyline": 12
+      }
+    },
+    {
+      "fixture": "step-import",
+      "bodies": 1,
+      "faces": 954,
+      "modelEdges": 2044,
+      "view": "iso",
+      "algorithm": "poly",
+      "firstMs": 239.06,
+      "medianMs": 233.36,
+      "medianHideMs": 176.14,
+      "edges": 5624,
+      "byClass": {
+        "visible.sharp": 1404,
+        "hidden.sharp": 3294,
+        "visible.sewn": 96,
+        "hidden.sewn": 64,
+        "visible.outline": 606,
+        "hidden.outline": 160
+      },
+      "byType": {
+        "Line": 5624
+      },
+      "byKind": {
+        "line": 5624
+      },
+      "disagreement": {
+        "visibleExactNotPoly": 0,
+        "visiblePolyNotExact": 0,
+        "hiddenExactNotPoly": 14.5,
+        "hiddenPolyNotExact": 0
+      }
+    }
+  ]
+}

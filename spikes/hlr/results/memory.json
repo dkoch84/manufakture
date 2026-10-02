@@ -1,0 +1,182 @@
+{
+  "host": {
+    "cpu": "AMD Ryzen 5 7600X 6-Core Processor",
+    "logicalCpus": 12,
+    "memoryGiB": 62,
+    "node": "v26.10.0",
+    "platform": "linux x64",
+    "libcascade": "3.0.2 (single-threaded build)",
+    "measuredAt": "2026-10-02T05:33:21.874Z"
+  },
+  "destructors": {
+    "HLRBRep_Algo": true,
+    "HLRBRep_InternalAlgo": true,
+    "HLRBRep_HLRToShape": false,
+    "HLRBRep_PolyAlgo": true,
+    "HLRBRep_PolyHLRToShape": false,
+    "HLRAlgo_Projector": false,
+    "HLRAppli_ReflectLines": false,
+    "HLRTopoBRep_OutLiner": true,
+    "BRepAdaptor_Curve": true,
+    "BRepMesh_IncrementalMesh": true,
+    "gp_Ax2": false,
+    "gp_Dir": false,
+    "gp_Pnt": false,
+    "gp_Pnt2d": false,
+    "gp_Circ": false,
+    "gp_Elips": false,
+    "TopoDS_Shape": false,
+    "TopoDS_Compound": false,
+    "TopoDS_Edge": false,
+    "NCollection_IndexedMap_TopoDS_Shape_TopTools_ShapeMapHasher": true
+  },
+  "hlrClassesWithEmptyDestructor": [
+    "HLRAlgo",
+    "HLRAlgo_BiPoint",
+    "HLRAlgo_EdgeIterator",
+    "HLRAlgo_EdgeStatus",
+    "HLRAlgo_Interference",
+    "HLRAlgo_Intersection",
+    "HLRAlgo_PolyHidingData",
+    "HLRAlgo_PolyInternalSegment",
+    "HLRAlgo_Projector",
+    "HLRAlgo_TriangleData",
+    "HLRAppli_ReflectLines",
+    "HLRBRep",
+    "HLRBRep_BCurveTool",
+    "HLRBRep_BiPnt2D",
+    "HLRBRep_BiPoint",
+    "HLRBRep_CInter",
+    "HLRBRep_CLPropsATool",
+    "HLRBRep_Curve",
+    "HLRBRep_CurveTool",
+    "HLRBRep_EdgeBuilder",
+    "HLRBRep_EdgeData",
+    "HLRBRep_EdgeFaceTool",
+    "HLRBRep_EdgeIList",
+    "HLRBRep_EdgeInterferenceTool",
+    "HLRBRep_ExactIntersectionPointOfTheIntPCurvePCurveOfCInter",
+    "HLRBRep_FaceData",
+    "HLRBRep_FaceIterator",
+    "HLRBRep_HLRToShape",
+    "HLRBRep_Hider",
+    "HLRBRep_IntConicCurveOfCInter",
+    "HLRBRep_InterCSurf",
+    "HLRBRep_LineTool",
+    "HLRBRep_MyImpParToolOfTheIntersectorOfTheIntConicCurveOfCInter",
+    "HLRBRep_PolyHLRToShape",
+    "HLRBRep_SLProps",
+    "HLRBRep_SLPropsATool",
+    "HLRBRep_ShapeBounds",
+    "HLRBRep_ShapeToHLR",
+    "HLRBRep_SurfaceTool",
+    "HLRBRep_TheDistBetweenPCurvesOfTheIntPCurvePCurveOfCInter",
+    "HLRBRep_TheExactInterCSurf",
+    "HLRBRep_TheIntConicCurveOfCInter",
+    "HLRBRep_TheIntPCurvePCurveOfCInter",
+    "HLRBRep_TheInterferenceOfInterCSurf",
+    "HLRBRep_TheIntersectorOfTheIntConicCurveOfCInter",
+    "HLRBRep_ThePolygon2dOfTheIntPCurvePCurveOfCInter",
+    "HLRBRep_ThePolygonOfInterCSurf",
+    "HLRBRep_ThePolygonToolOfInterCSurf",
+    "HLRBRep_ThePolyhedronToolOfInterCSurf",
+    "HLRBRep_TheProjPCurOfCInter",
+    "HLRBRep_TheQuadCurvExactInterCSurf",
+    "HLRBRep_TheQuadCurvFuncOfTheQuadCurvExactInterCSurf",
+    "HLRBRep_VertexList",
+    "HLRTopoBRep_DSFiller",
+    "HLRTopoBRep_Data",
+    "HLRTopoBRep_FaceData",
+    "HLRTopoBRep_FaceIsoLiner",
+    "HLRTopoBRep_VData"
+  ],
+  "hlrClasses": 71,
+  "tracker": {
+    "exact": {
+      "created": 1147,
+      "live": 0,
+      "liveNames": []
+    },
+    "poly": {
+      "created": 2510,
+      "live": 0,
+      "liveNames": []
+    }
+  },
+  "heapPerRun": [
+    {
+      "variant": "exact, released",
+      "fixture": "board-40-holes",
+      "view": "iso",
+      "heapN2": 43122688,
+      "heapN12": 43843584,
+      "bytesPerRun": 72090
+    },
+    {
+      "variant": "exact, no release rule",
+      "fixture": "board-40-holes",
+      "view": "iso",
+      "heapN2": 44040192,
+      "heapN12": 50593792,
+      "bytesPerRun": 655360
+    },
+    {
+      "variant": "exact with source and per item",
+      "fixture": "board-40-holes",
+      "view": "iso",
+      "heapN2": 43188224,
+      "heapN12": 44105728,
+      "bytesPerRun": 91750
+    },
+    {
+      "variant": "poly, released",
+      "fixture": "board-40-holes",
+      "view": "iso",
+      "heapN2": 43843584,
+      "heapN12": 45940736,
+      "bytesPerRun": 209715
+    },
+    {
+      "variant": "poly, no release rule",
+      "fixture": "board-40-holes",
+      "view": "iso",
+      "heapN2": 45809664,
+      "heapN12": 55705600,
+      "bytesPerRun": 989594
+    }
+  ],
+  "singleCall": [
+    {
+      "fixture": "bookshelf",
+      "algorithm": "exact",
+      "memoryBefore": 134217728,
+      "memoryAfter": 134217728,
+      "heapInUseAfter": 43384832,
+      "edges": 600
+    },
+    {
+      "fixture": "bookshelf",
+      "algorithm": "poly",
+      "memoryBefore": 134217728,
+      "memoryAfter": 134217728,
+      "heapInUseAfter": 44367872,
+      "edges": 2680
+    },
+    {
+      "fixture": "cabinet-run-100",
+      "algorithm": "exact",
+      "memoryBefore": 134217728,
+      "memoryAfter": 134217728,
+      "heapInUseAfter": 43843584,
+      "edges": 1820
+    },
+    {
+      "fixture": "cabinet-run-100",
+      "algorithm": "poly",
+      "memoryBefore": 134217728,
+      "memoryAfter": 134217728,
+      "heapInUseAfter": 43581440,
+      "edges": 1820
+    }
+  ]
+}
