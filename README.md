@@ -6,7 +6,7 @@ The aim is the openness of FreeCAD with the usability of Onshape: sketch, constr
 
 ## Status
 
-Milestones 1 (a printable part) and 2 (multi-body parts and assemblies) are done. Milestone 3 (parts for an FDM printer) is built; the prints that check it (the fit-test coupon and the acceptance jig, printed by hand) are still to do. It all runs in the browser: there is no account and no server, and documents are kept locally and move between machines as `.mfk` files. What works today:
+Milestones 1 (a printable part) and 2 (multi-body parts and assemblies) are done. Milestone 3 (parts for an FDM printer) is built; the prints that check it (the fit-test coupon and the acceptance jig, printed by hand) are still to do. Milestone 4 (woodworking: boards, joints, cut lists and sheet layouts, 2D drawings and exploded views) is done. It all runs in the browser: there is no account and no server, and documents are kept locally and move between machines as `.mfk` files. What works today:
 
 - sketches with dimensions and constraints, solved as you draw;
 - extrude, revolve, fillet, chamfer, shell, holes (standard clearance, counterbore and countersink sizes), patterns and mirror;
@@ -25,11 +25,15 @@ Milestones 1 (a printable part) and 2 (multi-body parts and assemblies) are done
 - modelled and cosmetic screw threads, with clearance for printing;
 - fits for printed parts: press, slip and sliding clearances as variables, and a fit-test coupon;
 - export for printing: a multi-part, multi-colour 3MF with the copies packed onto the plate, and **Open in slicer** to hand it to OrcaSlicer, Bambu Studio or PrusaSlicer;
-- woodworking boards: panels and sticks cut from real stock (plywood, MDF, dimension lumber, hardwood) at its actual size, with grain direction and per-document stock overrides.
+- woodworking boards: panels and sticks cut from real stock (plywood, MDF, dimension lumber, hardwood) at its actual size, with grain direction and per-document stock overrides;
+- joints that cut boards against each other: dados, rabbets, pocket screws and more, each saying what it cuts;
+- a cut list and bill of materials with board feet, square feet and hardware, sheet layouts and stick plans that respect the saw kerf and the grain, exported as CSV and PDF;
+- 2D drawings: sheets of projected views with hidden lines, dimensions and a title block, exported as SVG, DXF and PDF;
+- exploded views of assemblies, in steps, shown in the assembly and in drawings.
 
-Not there yet: the rest of the woodworking tools (joints, cut lists), and the domain tools for CNC and construction (see the plans in `docs/plans`).
+Not there yet: CAM for a CNC router, construction (walls, framing, roofs), and a sync server with share links; see the plans for M5 to M7 in `docs/plans`.
 
-[docs/m1-acceptance.md](docs/m1-acceptance.md) walks through the milestone's acceptance part, a bracket, and lists the automated checks behind each step. [docs/m2-acceptance.md](docs/m2-acceptance.md) does the same for M2: a wall shelf with a derived bracket, assembled. [docs/m3-acceptance.md](docs/m3-acceptance.md) does it for M3: a PTFE tube cutting jig, from sketch to a multi-colour 3MF for the slicer.
+[docs/m1-acceptance.md](docs/m1-acceptance.md) walks through the milestone's acceptance part, a bracket, and lists the automated checks behind each step. [docs/m2-acceptance.md](docs/m2-acceptance.md) does the same for M2: a wall shelf with a derived bracket, assembled. [docs/m3-acceptance.md](docs/m3-acceptance.md) does it for M3: a PTFE tube cutting jig, from sketch to a multi-colour 3MF for the slicer. [docs/m4-acceptance.md](docs/m4-acceptance.md) does it for M4: a bookshelf of plywood and 1x2s, whose cut list and sheet layouts are checked against a hand calculation, with its exploded assembly and drawing.
 
 ## Quick start
 
@@ -73,11 +77,12 @@ The user guide lives in `docs/user`:
 - [Printing](docs/user/printing.md): print setups, orienting parts on the bed, overhangs, thin walls, holes and bed fit
 - [Text](docs/user/text.md): raised and sunk lettering, fonts, and editing the text later
 - [Threads](docs/user/threads.md): external and internal screw threads, sizes, clearance and cosmetic threads
-- [Woodworking](docs/user/woodworking.md): boards cut from real stock, their grain, and the Stock panel
+- [Woodworking](docs/user/woodworking.md): boards cut from real stock, their grain, the Stock panel, joints, the cut list and sheet layouts
 - [Configurations](docs/user/configurations.md): variants in a table, switching them, exporting every one
 - [Version history](docs/user/history.md): named versions, the timeline, viewing and restoring a past state
 - [Derived parts](docs/user/derived.md): a part from a version of another document, placed, and updated to newer versions
-- [Assemblies](docs/user/assemblies.md): instances of parts, mates between them, dragging within their freedom
+- [Assemblies](docs/user/assemblies.md): instances of parts, mates between them, dragging within their freedom, exploded views
+- [Drawings](docs/user/drawings.md): sheets of views of a part studio or an assembly, dimensions, and export to SVG, DXF and PDF
 - [Measuring](docs/user/measure.md): exact measurements, material and mass
 - [The 3D viewport](docs/user/viewport.md): mouse, views, selection and section view
 - [Importing and exporting](docs/user/import-export.md): STL, 3MF, STEP, and checking a 3MF in a slicer
@@ -85,22 +90,26 @@ The user guide lives in `docs/user`:
 ## Layout
 
 ```
-apps/web            React UI
-packages/core       Document model (pure TS)
-packages/kernel     Worker-hosted OpenCascade (WASM) wrapper
-packages/sketch     Sketch entities + planegcs solver wrapper
-packages/regen      Regeneration engine
-packages/units      Unit parsing/formatting, expressions
-packages/io         Import/export adapters
-packages/print      Printability checks, printers and fit defaults
-packages/text       Fonts and text layout for sketches
-docs/decisions      Product decision records
-docs/adr            Architecture decision records
-docs/user           User guide
-docs/plans          Plans for the milestones after M1
-docs/spikes         Write-ups of the early technical spikes
-docs/research       Background research (slicer hand-off, 3MF)
-spikes/             Spike code and raw results behind docs/spikes (not part of the app)
+apps/web              React UI
+packages/core         Document model (pure TS)
+packages/kernel       Worker-hosted OpenCascade (WASM) wrapper
+packages/sketch       Sketch entities + planegcs solver wrapper
+packages/regen        Regeneration engine
+packages/units        Unit parsing/formatting, expressions
+packages/io           Import/export adapters
+packages/print        Printability checks, printers and fit defaults
+packages/text         Fonts and text layout for sketches
+packages/domain-wood  Woodworking: stock catalog, boards, joints, cut list
+packages/takeoff      Generic quantity takeoff rows, merging and totals
+packages/nesting      Sheet and stick layouts for cut plans
+packages/drawing      Drawing sheets as 2D geometry: views, dimensions, title block
+docs/decisions        Product decision records
+docs/adr              Architecture decision records
+docs/user             User guide
+docs/plans            Plans for the milestones after M1
+docs/spikes           Write-ups of the early technical spikes
+docs/research         Background research (slicer hand-off, 3MF)
+spikes/               Spike code and raw results behind docs/spikes (not part of the app)
 ```
 
 Packages are consumed from source (`exports` points at `src/index.ts`), so there is no per-package build step.
