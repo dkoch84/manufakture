@@ -37,6 +37,7 @@ import {
 } from './features';
 import { DEFAULT_DEFLECTION, type BooleanKind, type Kernel } from './kernel';
 import type { MeasureResult, MeasureTarget } from './measure';
+import type { OrientedBox } from './obb';
 import { applyNames, type NameTable } from './names';
 import { isUnnamed, type TopoRef } from './naming';
 import type {
@@ -167,6 +168,12 @@ export type MeasureOp = OpCommon & {
 };
 
 /**
+ * The oriented bounding box of a body: centre, unit axes and sizes, longest first
+ * (`Kernel.orientedBox`). `optimal` (default true) is OCCT's optimal mode. Makes no shapes.
+ */
+export type ObbOp = OpCommon & { op: 'obb'; shape: ShapeRef; optimal?: boolean };
+
+/**
  * One AP214 STEP file of the shapes, each a named top-level product; with `assembly`, an
  * assembly of them instead: each part (bodies by index in `bodies`) once, each instance a
  * placed component (see exchange.ts).
@@ -204,6 +211,7 @@ export type KernelOp =
   | ConnectorOp
   | PickOp
   | MeasureOp
+  | ObbOp
   | ExportStepOp
   | ImportStepOp
   | InterferenceOp;
@@ -233,6 +241,7 @@ export interface OpValues {
   connector: { results: ConnectorReport[] };
   pick: { ref: TopoRef | VertexRef | null };
   measure: MeasureResult;
+  obb: OrientedBox;
   /** `data` is transferred. */
   exportStep: { data: Uint8Array };
   importStep: { shape: ShapeId };
@@ -265,6 +274,7 @@ const OP_NAMES: ReadonlySet<string> = new Set<OpName>([
   'connector',
   'pick',
   'measure',
+  'obb',
   'exportStep',
   'importStep',
   'interference',
@@ -351,6 +361,7 @@ const FIELDS: Record<OpName, [Record<string, Check>, Record<string, Check>]> = {
   ],
   pick: [{ shape: shapeRef, kind: oneOf('face', 'edge', 'vertex'), index: num }, {}],
   measure: [{ shape: shapeRef, targets: arrayOf(measureTarget) }, { body: bool }],
+  obb: [{ shape: shapeRef }, { optimal: bool }],
   // The assembly's parts and instances are checked by the kernel (`stepAssemblyProblem`).
   exportStep: [
     { bodies: arrayOf(shape({ shape: shapeRef, name: str }), true) },
@@ -494,6 +505,11 @@ export function executeOp(
         resolve(op.shape, 'measure'),
         op.targets,
         op.body === undefined ? {} : { body: op.body },
+      );
+    case 'obb':
+      return kernel.orientedBox(
+        resolve(op.shape, 'obb'),
+        op.optimal === undefined ? {} : { optimal: op.optimal },
       );
     case 'exportStep':
       return {

@@ -31,6 +31,7 @@ import {
   type MeasureResult,
   type MeasureTarget,
 } from './measure';
+import { orientedBoxOf, type OrientedBox, type OrientedBoxOptions } from './obb';
 import { mapShapes, norm, Scope, toVec3, type Oc, type ShapeList } from './occt';
 import type { Names } from './naming';
 import { buildProfile } from './profile';
@@ -889,6 +890,19 @@ export class Kernel {
   ): MeasureResult {
     return this.op('measure', (s) =>
       measureShape(this.oc, s, this.get(shape, 'measure'), this.named(shape), targets, options),
+    );
+  }
+
+  /**
+   * The oriented bounding box of a shape (the `obb` op): centre, unit axes and sizes, longest
+   * first, from `BRepBndLib.AddOBB` on the exact geometry, or the tight axis-aligned box when that
+   * is tighter or the OBB fails. Makes no shapes. See obb.ts.
+   */
+  orientedBox(shape: ShapeId, options: OrientedBoxOptions = {}): OrientedBox {
+    return this.op('obb', (s) =>
+      orientedBoxOf(this.oc, s, this.get(shape, 'obb'), options, (error) =>
+        this.toError('obb', error),
+      ),
     );
   }
 

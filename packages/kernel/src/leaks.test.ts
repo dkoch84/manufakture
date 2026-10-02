@@ -579,6 +579,8 @@ describe('embind objects', () => {
             { kind: 'face', index: 2 },
           ]),
       ],
+      ['oriented box', () => k.orientedBox(holed)],
+      ['oriented box, not optimal', () => k.orientedBox(drill, { optimal: false })],
     ];
     for (const [name, fn] of ops) {
       tracker.reset();
@@ -753,6 +755,31 @@ describe('heap', () => {
     };
     const perThread = ((await inUseAfter(12)) - (await inUseAfter(2))) / 10;
     expect(perThread).toBeLessThan(1.5 * 2 ** 20);
+  }, 120_000);
+
+  it('repeated oriented boxes leak only the small values libcascade cannot free', async () => {
+    // Measured on fresh instances, as for threads: after 10 and after 2010 boxes of a turned board
+    // with a dado. No shape or triangulation is kept, but `delete()` is empty even for the value
+    // classes a call reads (Bnd_OBB about 100 bytes, Bnd_Box 50, gp_XYZ and gp_Pnt 16 each), so
+    // about 200 bytes per call stay behind until the instance is recycled. A leaked B-rep or
+    // triangulation would be kilobytes.
+    const inUseAfter = async (n: number) => {
+      const fresh = new Kernel(await createNodeInstance());
+      const board = fresh.box(600, 300, 19);
+      const tool = fresh.box(19, 320, 10, [200, -10, 13]);
+      const cut = fresh.boolean('cut', board, [tool]).shape;
+      const turned = fresh.transform(cut, {
+        kind: 'rotate',
+        axis: { origin: [0, 0, 0], direction: [0, 0.6, 0.8] },
+        angle: 0.7,
+      }).shape;
+      for (let i = 0; i < n; i++) fresh.orientedBox(turned);
+      for (const id of [board, tool, cut, turned]) fresh.release(id);
+      expect(fresh.shapeCount).toBe(0);
+      return heapInUse(fresh);
+    };
+    const perBox = ((await inUseAfter(2010)) - (await inUseAfter(10))) / 2000;
+    expect(perBox).toBeLessThan(400);
   }, 120_000);
 
   it('repeated interference checks do not grow the wasm heap', () => {

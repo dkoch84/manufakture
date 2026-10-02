@@ -146,6 +146,7 @@ export type {
   InterferenceOp,
   KernelOp,
   MeasureOp,
+  ObbOp,
   OpName,
   OpResult,
   OpResults,
@@ -175,6 +176,7 @@ export type {
   MeasuredItem,
   MeasuredVertex,
 } from './measure';
+export type { OrientedBox, OrientedBoxOptions } from './obb';
 export { NameTable, applyNames, faceNameOfTriangle } from './names';
 export type { SubShapeName } from './names';
 export { meshBuffers } from './mesh';

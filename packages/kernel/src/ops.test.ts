@@ -42,6 +42,8 @@ describe('validateOp', () => {
         ],
         body: true,
       },
+      { op: 'obb', shape: 1 },
+      { op: 'obb', shape: { result: 0 }, optimal: false },
     ];
     for (const op of ops) expect(validateOp(op), JSON.stringify(op)).toBeNull();
   });
@@ -85,6 +87,8 @@ describe('validateOp', () => {
     ],
     [{ op: 'measure', shape: 1, targets: [{ kind: 'edge' }] }, /op\.targets\[0\]\.index/],
     [{ op: 'measure', shape: 1, targets: [], body: 1 }, /op\.body must be a boolean/],
+    [{ op: 'obb' }, /op\.shape must be a shape id/],
+    [{ op: 'obb', shape: 1, optimal: 1 }, /op\.optimal must be a boolean/],
     [{ op: 'fillet', shape: 1, edges: 1, radius: 1 }, /op\.edges must be an array/],
     [{ op: 'tessellate', shape: 1, deflection: { linear: 'fine' } }, /deflection\.linear/],
     [{ op: 'release', shapes: [{ result: '0' }] }, /op\.shapes\[0\]/],
