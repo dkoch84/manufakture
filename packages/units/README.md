@@ -1,19 +1,24 @@
 # @manufakture/units
 
 Every numeric input in manufakture goes through this package: parsing lengths and angles in
-metric and imperial notation, formatting them for display, and evaluating expressions with named
-variables and dimensional analysis. It is plain TypeScript with no dependencies.
+metric and imperial notation, feed rates and spindle speeds for CAM, formatting them for
+display, and evaluating expressions with named variables and dimensional analysis. It is plain
+TypeScript with no dependencies.
 
 ## Internal units
 
-| Quantity | Internal unit         | Default display |
-| -------- | --------------------- | --------------- |
-| length   | millimetres (float64) | document unit   |
-| angle    | radians               | degrees         |
-| number   | plain number, no unit | n/a             |
+| Quantity      | Internal unit                | Default display              |
+| ------------- | ---------------------------- | ---------------------------- |
+| length        | millimetres (float64)        | document unit                |
+| angle         | radians                      | degrees                      |
+| time          | minutes                      | n/a                          |
+| feed          | millimetres per minute       | document length unit per min |
+| spindle speed | revolutions per minute (rpm) | rpm                          |
+| number        | plain number, no unit        | n/a                          |
 
 Every function that returns a length returns millimetres. Every function that returns an angle
-returns radians.
+returns radians. A feed rate is millimetres per minute and a spindle speed is revolutions per
+minute, the units G-code and the CAM package work in.
 
 ## Errors
 
@@ -48,25 +53,70 @@ A parenthesised sub-expression's range includes its parentheses.
 
 ## Units
 
-| Kind   | Spellings (word units are case-insensitive)                                     |
-| ------ | ------------------------------------------------------------------------------- |
-| length | `mm`, `cm`, `m`, `in` `inch` `inches` `"` `″`, `ft` `foot` `feet` `'` `′`, `yd` |
-| angle  | `deg` `°`, `rad`                                                                |
+| Kind          | Spellings (word units are case-insensitive)                                     |
+| ------------- | ------------------------------------------------------------------------------- |
+| length        | `mm`, `cm`, `m`, `in` `inch` `inches` `"` `″`, `ft` `foot` `feet` `'` `′`, `yd` |
+| angle         | `deg` `°`, `rad`                                                                |
+| time          | `min`, `s`                                                                      |
+| spindle speed | `rpm`                                                                           |
 
 A unit goes directly after a number, with or without a space: `12mm`, `12 mm`, `1.5"`. It can
 also follow a closing parenthesis: `(a + 2)mm`. A unit binds only to the number right before it,
 so `2^3mm` is `2^(3mm)`, which is an error, and `x/2in` is `x / (2in)`.
 
 **Bare numbers** (no unit) are dimensionless. Where the context needs a length or an angle, they
-are read in the document's display unit (`lengthUnit`, `angleUnit`). This applies:
+are read in the document's display unit (`lengthUnit`, `angleUnit`). Where it needs a feed, they
+are display length units per minute (`600` is 600 mm/min in a millimetre document and 600 in/min
+under `in`, `ft-in` or `in-fraction`); where it needs a spindle speed, they are rpm. This
+applies:
 
 - to the final result, so `12` in a length field with display unit `in` is 12 inches;
 - to a bare operand of `+`, `-`, `min`, `max`, `atan2` or a `round` step whose other operand is
-  a length or angle, so `thickness + 3` means 3 display units;
+  a length, angle, feed or spindle speed, so `thickness + 3` means 3 display units;
 - to the argument of `sin`, `cos` and `tan`, so `sin(30)` is `sin(30°)` when the display angle
   unit is degrees. Write `sin((pi/6)rad)` for radians.
 
 Bare numbers are not converted in `*`, `/` or `^`: `2 * thickness` is twice the thickness.
+
+### Feed rates and spindle speeds
+
+A feed rate is a length per time and a spindle speed is "per time" (revolutions are not a
+dimension). They are written as a unit per minute, or as a division by a time:
+
+| Input           | Value          |
+| --------------- | -------------- |
+| `1000mm/min`    | 1000 mm/min    |
+| `40in/min`      | 1016 mm/min    |
+| `1.5 m/min`     | 1500 mm/min    |
+| `25mm / 1s`     | 1500 mm/min    |
+| `18000rpm`      | 18000 rpm      |
+| `12000/min`     | 12000 rpm      |
+| `1/8"/min`      | 3.175 mm/min   |
+| `(a + 2)mm/min` | `a + 2` mm/min |
+
+1. **Per-minute literal**: a number with or without a unit (or a parenthesised value with a
+   unit), followed with no spaces by `/min`, is one literal, like a fraction literal. `/min`
+   therefore binds to that number only: `x / 2mm/min` is `x / (2 mm/min)`, `x/2/min` is
+   `x / (2/min)` (x times half a minute), and `1/2/min` is half a revolution per minute. A power
+   applies to the whole literal: `1000mm/min^2` is `(1000mm/min)^2`.
+2. **`min` is the minute** wherever it is not followed by `(`. `min` cannot be a variable name
+   (it is a function), so `1000 mm / min` (with spaces), `x / min` and `5 min` are all minutes,
+   while `min(a, b)` is always the function. After a number, `5 min (3)` is a syntax error, as
+   for any unit followed by `(`.
+3. **Seconds have no per-time form.** A variable may be called `s`, and `100mm/s` has always
+   meant `100mm` divided by that variable, so it still does. Attach `s` to a number and divide
+   by it instead: `25mm / 1s` or `25mm/(1s)` (both 1500 mm/min).
+4. `s` and `rpm` are units only after a number or a closing parenthesis (`30s`, `18000 rpm`,
+   `(n)rpm`); written alone they are variable names, as before.
+5. **Case**: after a number, `min`, `s` and `rpm` are case-insensitive like every word unit
+   (`5MIN`, `18000RPM`). Standalone and after `/`, only lowercase `min` is the minute, because
+   `MIN` is a valid variable name: `100mm/MIN` divides by a variable called `MIN`, as it always
+   did.
+
+Dimensional analysis treats time as a third dimension, so `#chipload * #flutes * #rpm` (a length
+times a number times a spindle speed) is a feed, and `#feed / #rpm` is a length per revolution.
+`1000mm/min + 5mm` is an error. A time on its own (`5 min`) is a valid intermediate value, but
+there is no expected kind for it yet.
 
 ### Fractions, mixed numbers and feet-inches
 
@@ -131,22 +181,26 @@ primary    := number-literal | '(' expression ')' unit? | #name | name | name '(
 
   With one argument, `round`, `floor` and `ceil` work in the display unit when the value is a
   length or an angle: `round(2.4in)` is `2in` when the display unit is inches and `61mm` when it
-  is millimetres, and `round(29.6deg)` is `30deg` when angles display in degrees. Any other
+  is millimetres, and `round(29.6deg)` is `30deg` when angles display in degrees. A feed rounds
+  to whole display length units per minute (`round(1016.3mm/min)` is `40 in/min` under inches)
+  and a spindle speed to whole rpm. Any other
   value (a number, an area) is rounded as it is, in internal units. With a step they round
   to a multiple of it: `round(width, 1/16")`. `round` rounds halves away from zero.
 
 ### Dimensional analysis
 
-Every value has a dimension: exponents of length and angle. `thickness * width` is an area,
-`sqrt(area)` is a length, `1 / thickness` is 1/length. Angle is its own dimension, so
-`thickness * slope` is length·angle, not a length.
+Every value has a dimension: exponents of length, angle and time. `thickness * width` is an
+area, `sqrt(area)` is a length, `1 / thickness` is 1/length. Angle is its own dimension, so
+`thickness * slope` is length·angle, not a length. Time is the third: a feed is length/time and a
+spindle speed 1/time.
 
 - `+`, `-`, `min`, `max`, `atan2` and a `round` step need operands of the same dimension, apart
   from the bare-number rule above. `thickness + 30deg` is an error.
 - `^` needs a dimensionless exponent and scales the base's dimension.
 - A unit can be applied only to a dimensionless value: `(2mm)in` is an error.
-- The caller states the expected kind (`length`, `angle` or `number`), and the result must match
-  it exactly. `thickness * thickness` in a length field is an error.
+- The caller states the expected kind (`length`, `angle`, `feed`, `spindleSpeed` or `number`),
+  and the result must match it exactly. `thickness * thickness` in a length field is an error,
+  and so is `1000mm` in a feed field ("Expected a feed rate (length/time) but got a length").
 - Every intermediate result is checked. A non-finite value (`10^400`, `1e300 * 1e300`) is a
   `domain` error at the operation that produced it, even when later operations would hide it
   (`1 / 10^400`, `min(1e200 * 1e200, 5)`). Division by zero is a `domain` error at the divisor.
@@ -166,6 +220,8 @@ import {
   evaluate,
   parseLength,
   parseAngle,
+  parseFeed,
+  parseSpindleSpeed,
   evaluateQuantity,
   parseExpression,
   evaluateParsed,
@@ -176,9 +232,14 @@ import {
   formatLength,
   formatAngle,
   formatNumber,
+  formatFeed,
+  formatSpindleSpeed,
   lengthQuantity,
   angleQuantity,
   numberQuantity,
+  timeQuantity,
+  feedQuantity,
+  spindleSpeedQuantity,
 } from '@manufakture/units';
 ```
 
@@ -188,20 +249,23 @@ import {
 evaluate(source: string, options: EvaluateOptions): Result<number>
 
 interface EvaluateOptions {
-  expected: 'length' | 'angle' | 'number';
-  lengthUnit?: 'mm' | 'cm' | 'm' | 'in' | 'ft'; // bare-number length unit, default 'mm'
+  expected: 'length' | 'angle' | 'feed' | 'spindleSpeed' | 'number';
+  lengthUnit?: 'mm' | 'cm' | 'm' | 'in' | 'ft'; // bare-number length unit (and feed unit per min), default 'mm'
   angleUnit?: 'deg' | 'rad'; // bare-number angle unit, default 'deg'
   variables?: (name: string) => Quantity | undefined; // name has no '#'
 }
 
 interface Quantity {
   value: number; // internal units
-  dimension: { length: number; angle: number };
+  dimension: { length: number; angle: number; time?: number }; // time absent means 0
 }
 ```
 
-The result is in millimetres, radians or a plain number. Build lookup values with
-`lengthQuantity(mm)`, `angleQuantity(rad)` and `numberQuantity(n)`:
+The result is in millimetres, radians, mm/min, rpm or a plain number. Build lookup values with
+`lengthQuantity(mm)`, `angleQuantity(rad)`, `numberQuantity(n)`, `timeQuantity(minutes)`,
+`feedQuantity(mmPerMinute)` and `spindleSpeedQuantity(rpm)`. `time` is optional in `Dimension` so
+that dimensions written before it existed (`{ length: 2, angle: 0 }`) stay valid; the package
+only sets it when it is not zero, so lengths and angles look exactly as they did.
 
 ```ts
 const vars = new Map([['thickness', lengthQuantity(19.05)]]);
@@ -213,8 +277,23 @@ evaluate('2*#thickness + 1/8"', {
 // { ok: true, value: 41.275 }
 ```
 
+And for a feed:
+
+```ts
+const vars = new Map([
+  ['chipload', lengthQuantity(0.05)],
+  ['flutes', numberQuantity(2)],
+  ['rpm', spindleSpeedQuantity(18000)],
+]);
+evaluate('#chipload * #flutes * #rpm', { expected: 'feed', variables: (n) => vars.get(n) });
+// { ok: true, value: 1800 } (mm/min)
+```
+
 - `parseLength(source, unit = 'mm')` is `evaluate` with `expected: 'length'` and no variables.
 - `parseAngle(source, unit = 'deg')` is the same for angles, and returns radians.
+- `parseFeed(source, unit = 'mm')` returns mm/min; bare numbers are `unit` per minute (pass
+  `'in'` under `ft-in` and `in-fraction`, as for lengths).
+- `parseSpindleSpeed(source)` returns rpm; bare numbers are rpm.
 - `evaluateQuantity(source, context)` returns a `Quantity` without an expected kind, and leaves
   bare numbers dimensionless. Use it where the kind is inferred, for example variables of type
   "any".
@@ -268,11 +347,27 @@ formatLength(mm: number, format?: LengthFormat): string
   to `formatAngle` and `formatNumber`.
 
 `formatAngle(rad, { unit?: 'deg' | 'rad', decimals? })` gives `45.00°` or `0.7854 rad`.
+
+```ts
+formatFeed(mmPerMinute: number, format?: FeedFormat): string
+formatSpindleSpeed(rpm: number, decimals = 0): string
+
+interface FeedFormat {
+  unit?: LengthFormat['unit']; // the document's length format unit, default 'mm'
+  decimals?: number; // defaults: mm 0, cm 1, m 3, in 1, ft 2
+}
+```
+
+`formatFeed` writes the document's length unit per minute: `1000 mm/min`, `39.4 in/min`,
+`3.28 ft/min`. Feeds are not written as fractions, so `ft-in` and `in-fraction` give decimal
+`in/min`. `formatSpindleSpeed(18000)` gives `18000 rpm`. Both parse back to the displayed value
+(with `parseFeed` and `parseSpindleSpeed`), whatever the display unit, and handle `-0` and
+non-finite values like `formatLength`.
 `formatNumber(value, decimals = 3)` gives a fixed-point number.
 
 ### Conversions
 
-`MM_PER_INCH`, `MM_PER_FOOT`, `RAD_PER_DEG`, `toMillimetres(value, unit)`,
+`MM_PER_INCH`, `MM_PER_FOOT`, `RAD_PER_DEG`, `SECONDS_PER_MINUTE`, `toMillimetres(value, unit)`,
 `fromMillimetres(mm, unit)`, `toRadians(value, unit)`, `fromRadians(rad, unit)`,
 `lengthUnitFactor(unit)`, `angleUnitFactor(unit)`.
 
@@ -281,5 +376,6 @@ formatLength(mm: number, format?: LengthFormat): string
 - **Roof pitch notation** (`6/12` as an angle input) is deferred to M6 (construction). For now,
   write the angle as `atan2(6, 12)` or `atan(6/12)`. When it is added, pitch notation should
   apply only to angle fields, so `6/12` keeps its meaning as division everywhere else.
+- A `time` expected kind (for dwells): times evaluate, but no field can ask for one yet.
 - Comparison and conditional operators.
 - Locale decimal commas. The comma separates function arguments.

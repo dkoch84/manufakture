@@ -1,4 +1,4 @@
-import { ANGLE, LENGTH, type Dimension } from './dimension';
+import { ANGLE, LENGTH, SPINDLE_SPEED, TIME, type Dimension } from './dimension';
 
 /** Length units a document can display in and that bare numbers can be interpreted as. */
 export type LengthUnit = 'mm' | 'cm' | 'm' | 'in' | 'ft';
@@ -9,6 +9,8 @@ export type AngleUnit = 'deg' | 'rad';
 export const MM_PER_INCH = 25.4;
 export const MM_PER_FOOT = 304.8;
 export const RAD_PER_DEG = Math.PI / 180;
+/** Time is in minutes internally, so feeds are mm/min and spindle speeds rpm. */
+export const SECONDS_PER_MINUTE = 60;
 
 const LENGTH_FACTORS: Readonly<Record<LengthUnit, number>> = {
   mm: 1,
@@ -57,7 +59,7 @@ export function fromRadians(rad: number, unit: AngleUnit): number {
 export interface UnitDefinition {
   /** Canonical spelling, for messages. */
   readonly symbol: string;
-  /** Internal units (mm or rad) per one of this unit. */
+  /** Internal units (mm, rad, min or rpm) per one of this unit. */
   readonly factor: number;
   readonly dimension: Dimension;
   /** Feet may be followed by an inches part (`3' 4"`); inches terminate one. */
@@ -76,6 +78,14 @@ const FOOT = lengthUnit('ft', MM_PER_FOOT, 'foot');
 const YARD = lengthUnit('yd', 3 * MM_PER_FOOT);
 const DEG = { symbol: 'deg', factor: RAD_PER_DEG, dimension: ANGLE, role: 'other' } as const;
 const RAD = { symbol: 'rad', factor: 1, dimension: ANGLE, role: 'other' } as const;
+const MINUTE = { symbol: 'min', factor: 1, dimension: TIME, role: 'other' } as const;
+const SECOND = {
+  symbol: 's',
+  factor: 1 / SECONDS_PER_MINUTE,
+  dimension: TIME,
+  role: 'other',
+} as const;
+const RPM = { symbol: 'rpm', factor: 1, dimension: SPINDLE_SPEED, role: 'other' } as const;
 
 /** Word units, matched case-insensitively. */
 const WORD_UNITS: ReadonlyMap<string, UnitDefinition> = new Map<string, UnitDefinition>([
@@ -91,6 +101,9 @@ const WORD_UNITS: ReadonlyMap<string, UnitDefinition> = new Map<string, UnitDefi
   ['yd', YARD],
   ['deg', DEG],
   ['rad', RAD],
+  ['min', MINUTE],
+  ['s', SECOND],
+  ['rpm', RPM],
 ]);
 
 export function lookupWordUnit(name: string): UnitDefinition | undefined {
@@ -100,3 +113,4 @@ export function lookupWordUnit(name: string): UnitDefinition | undefined {
 export const FOOT_UNIT: UnitDefinition = FOOT;
 export const INCH_UNIT: UnitDefinition = INCH;
 export const DEGREE_UNIT: UnitDefinition = DEG;
+export const MINUTE_UNIT: UnitDefinition = MINUTE;

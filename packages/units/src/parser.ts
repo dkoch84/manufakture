@@ -1,10 +1,12 @@
 import type { BinaryOperator, Expression } from './ast';
+import { DIMENSIONLESS, divideDimensions, type Dimension } from './dimension';
 import { tokenize, type Token } from './lexer';
 import { err, ok, type Result } from './result';
 import {
   DEGREE_UNIT,
   FOOT_UNIT,
   INCH_UNIT,
+  MINUTE_UNIT,
   MM_PER_INCH,
   lookupWordUnit,
   type UnitDefinition,
@@ -55,8 +57,9 @@ function describeToken(token: Token): string {
  *   power      := primary ('^' unary)?            -- right-associative, `2^-1` allowed
  *   primary    := measure | '(' expression ')' unit? | variable | name '(' args ')' | name
  *
- * `measure` is a number literal with its optional unit, fraction, mixed number and feet-inches
- * tail; the rules are documented in the package README.
+ * `measure` is a number literal with its optional unit, fraction, mixed number, feet-inches
+ * tail and per-time suffix (`mm/min`, `/min`); a bare `min` not followed by '(' is also a
+ * measure (one minute). The rules are documented in the package README.
  */
 class Parser {
   private pos = 0;
@@ -97,6 +100,16 @@ class Parser {
       this.fail('syntax', "Unmatched ')'", token.start, token.end);
     }
     if (token.kind === 'ident' && prev?.kind === 'number' && prev.end === token.start) {
+      if (token.text === 'min' && this.tok(this.pos + 1).kind === '(') {
+        // `5min(3)`: `min` is both a unit and a function, and a name followed by '(' is always a
+        // call, so this is not "5 minutes".
+        this.fail(
+          'syntax',
+          `Missing operator: write '${prev.text}*${token.text}(…)' to call ${token.text}(), or '${prev.text}${token.text}' alone for the unit`,
+          token.start,
+          token.end,
+        );
+      }
       const hint = CONSTANTS.has(token.text)
         ? `; write '${prev.text}*${token.text}' to multiply`
         : '';
@@ -241,6 +254,17 @@ class Parser {
       case 'ident': {
         this.pos++;
         if (this.cur().kind === '(') return this.parseCall(token);
+        // `min` cannot be a variable (it is a function), so on its own it is the minute:
+        // `1000 mm / min`. Only lowercase: `MIN` is a valid variable name.
+        if (token.text === 'min') {
+          return {
+            type: 'measure',
+            value: MINUTE_UNIT.factor,
+            dimension: MINUTE_UNIT.dimension,
+            start: token.start,
+            end: token.end,
+          };
+        }
         const constant = CONSTANTS.get(token.text);
         if (constant !== undefined) {
           return { type: 'number', value: constant, start: token.start, end: token.end };
@@ -277,8 +301,21 @@ class Parser {
       return widened;
     }
     this.pos++;
+    let applied = unit.unit;
+    let end = unit.token.end;
+    const perTime = this.perTimeAt(this.pos);
+    if (perTime !== undefined) {
+      applied = {
+        symbol: `${applied.symbol}/${perTime.unit.symbol}`,
+        factor: applied.factor / perTime.unit.factor,
+        dimension: divideDimensions(applied.dimension, perTime.unit.dimension),
+        role: 'other',
+      };
+      end = perTime.token.end;
+      this.pos += 2;
+    }
     return this.node(
-      { type: 'unit', operand: inner, unit: unit.unit, start: open.start, end: unit.token.end },
+      { type: 'unit', operand: inner, unit: applied, start: open.start, end },
       inner,
     );
   }
@@ -331,6 +368,26 @@ class Parser {
     }
   }
 
+  /**
+   * A per-minute suffix starting at token `i`: `/` glued to the token before it, then a lowercase
+   * `min` glued to the slash and not followed by `(` (`mm/min`, `12000/min`). Only `min`
+   * qualifies, because it is the only time unit that cannot be a variable name: `100mm/s` and
+   * `100mm/MIN` keep dividing by variables called `s` and `MIN`.
+   */
+  private perTimeAt(i: number): UnitMatch | undefined {
+    const slash = this.tok(i);
+    const name = this.tok(i + 1);
+    if (!this.isOp(slash, '/') || slash.start !== this.tok(i - 1).end) return undefined;
+    if (name.kind !== 'ident' || name.start !== slash.end || name.text !== 'min') return undefined;
+    if (this.tok(i + 2).kind === '(') return undefined;
+    return { unit: MINUTE_UNIT, token: name };
+  }
+
+  /** Whether a unit or a per-time suffix starts at token `i`, which makes a fraction a literal. */
+  private hasUnitAt(i: number): boolean {
+    return this.unitAt(i) !== undefined || this.perTimeAt(i) !== undefined;
+  }
+
   private isInteger(i: number): boolean {
     const token = this.tok(i);
     return token.kind === 'number' && INTEGER.test(token.text);
@@ -378,7 +435,7 @@ class Parser {
       if (fractionStart >= 0) {
         const fraction = this.fractionAt(fractionStart);
         if (fraction !== undefined) {
-          if (hyphen && !inchContext && this.unitAt(fraction.next) === undefined) {
+          if (hyphen && !inchContext && !this.hasUnitAt(fraction.next)) {
             const numerator = this.tok(fractionStart).text;
             const denominator = this.tok(fractionStart + 2).text;
             const w = whole.text;
@@ -393,7 +450,7 @@ class Parser {
         }
       }
       const fraction = this.fractionAt(i);
-      if (fraction !== undefined && (inchContext || this.unitAt(fraction.next))) return fraction;
+      if (fraction !== undefined && (inchContext || this.hasUnitAt(fraction.next))) return fraction;
     }
     return { value: Number(whole.text), next: i + 1 };
   }
@@ -427,6 +484,16 @@ class Parser {
     const magnitude = this.magnitudeAt(this.pos, false);
     let next = magnitude.next;
     const unit = this.unitAt(next);
+    const perTime = unit === undefined ? this.perTimeAt(next) : undefined;
+    if (perTime !== undefined) {
+      // `12000/min`: a bare number per time.
+      return this.finishMeasure(
+        first,
+        magnitude.value / perTime.unit.factor,
+        divideDimensions(DIMENSIONLESS, perTime.unit.dimension),
+        next + 2,
+      );
+    }
     if (unit === undefined) {
       if (!Number.isFinite(magnitude.value)) {
         this.fail('domain', 'Number is too large', first.start, this.tok(next - 1).end);
@@ -448,6 +515,18 @@ class Parser {
         next = tail.next;
       }
     }
+    let dimension = unit.unit.dimension;
+    const per = this.perTimeAt(next);
+    if (per !== undefined) {
+      value /= per.unit.factor;
+      dimension = divideDimensions(dimension, per.unit.dimension);
+      next += 2;
+    }
+    return this.finishMeasure(first, value, dimension, next);
+  }
+
+  /** A measure literal from token `first` up to (not including) token `next`. */
+  private finishMeasure(first: Token, value: number, dimension: Dimension, next: number) {
     if (!Number.isFinite(value)) {
       this.fail('domain', 'Number is too large', first.start, this.tok(next - 1).end);
     }
@@ -455,10 +534,10 @@ class Parser {
     return {
       type: 'measure',
       value,
-      dimension: unit.unit.dimension,
+      dimension,
       start: first.start,
       end: this.tok(next - 1).end,
-    };
+    } as const;
   }
 }
 

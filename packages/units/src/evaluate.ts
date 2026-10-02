@@ -2,7 +2,9 @@ import type { CallNode, Expression } from './ast';
 import {
   ANGLE,
   DIMENSIONLESS,
+  FEED,
   LENGTH,
+  SPINDLE_SPEED,
   describeDimension,
   dimensionOfKind,
   dimensionsEqual,
@@ -22,7 +24,10 @@ import { angleUnitFactor, lengthUnitFactor, type AngleUnit, type LengthUnit } fr
 export type VariableLookup = (name: string) => Quantity | undefined;
 
 export interface EvaluationContext {
-  /** Unit that bare numbers are read in when a length is needed. Default `'mm'`. */
+  /**
+   * Unit that bare numbers are read in when a length is needed, and per minute when a feed is
+   * needed. Default `'mm'`.
+   */
   readonly lengthUnit?: LengthUnit;
   /** Unit that bare numbers are read in when an angle is needed. Default `'deg'`. */
   readonly angleUnit?: AngleUnit;
@@ -50,15 +55,27 @@ function environment(context: EvaluationContext): Environment {
 }
 
 /**
- * Reads a dimensionless value as a length or angle in the display unit, so `thickness + 3` and
- * `sin(30)` mean 3 display units and 30 display-angle units. Other values are returned unchanged.
+ * Display-unit factor that a bare number is scaled by when it stands for a value of dimension
+ * `d`, or `undefined` if bare numbers do not stand for such values. A feed is display length
+ * units per minute and a spindle speed rpm, which are already the internal time units.
+ */
+function displayFactor(d: Dimension, env: Environment): number | undefined {
+  if (dimensionsEqual(d, LENGTH)) return env.lengthFactor;
+  if (dimensionsEqual(d, ANGLE)) return env.angleFactor;
+  if (dimensionsEqual(d, FEED)) return env.lengthFactor;
+  if (dimensionsEqual(d, SPINDLE_SPEED)) return 1;
+  return undefined;
+}
+
+/**
+ * Reads a dimensionless value as a length, angle, feed or spindle speed in the display unit, so
+ * `thickness + 3` and `sin(30)` mean 3 display units and 30 display-angle units. Other values are
+ * returned unchanged.
  */
 function promote(q: Quantity, target: Dimension, env: Environment): Quantity {
   if (!isDimensionless(q.dimension)) return q;
-  if (dimensionsEqual(target, LENGTH))
-    return { value: q.value * env.lengthFactor, dimension: LENGTH };
-  if (dimensionsEqual(target, ANGLE)) return { value: q.value * env.angleFactor, dimension: ANGLE };
-  return q;
+  const factor = displayFactor(target, env);
+  return factor === undefined ? q : { value: q.value * factor, dimension: target };
 }
 
 /** Brings two operands to a common dimension, or returns `undefined` if they are incompatible. */
@@ -172,9 +189,7 @@ function rounding(rounder: Rounder): FunctionSpec {
     apply(args, node, env) {
       const x = arg(args, 0);
       if (args.length === 1) {
-        let scale = 1;
-        if (dimensionsEqual(x.dimension, LENGTH)) scale = env.lengthFactor;
-        else if (dimensionsEqual(x.dimension, ANGLE)) scale = env.angleFactor;
+        const scale = displayFactor(x.dimension, env) ?? 1;
         return ok({ value: rounder(x.value / scale) * scale, dimension: x.dimension });
       }
       const pair = unify(x, arg(args, 1), env);
@@ -404,7 +419,7 @@ export function evaluateParsedQuantity(
 
 /**
  * Evaluates an already-parsed expression and checks it against `options.expected`. Returns the
- * value in internal units: millimetres, radians, or a plain number.
+ * value in internal units: millimetres, radians, mm/min, rpm, or a plain number.
  */
 export function evaluateParsed(expression: Expression, options: EvaluateOptions): Result<number> {
   const env = environment(options);
@@ -441,7 +456,8 @@ export function evaluateQuantity(
 
 /**
  * Parses and evaluates `source` as `options.expected`. Returns millimetres for lengths, radians
- * for angles and a plain number for numbers. A dimensionless result is read in the display unit.
+ * for angles, mm/min for feeds, rpm for spindle speeds and a plain number for numbers. A
+ * dimensionless result is read in the display unit.
  */
 export function evaluate(source: string, options: EvaluateOptions): Result<number> {
   const parsed = parseExpression(source);
@@ -456,4 +472,14 @@ export function parseLength(source: string, unit: LengthUnit = 'mm'): Result<num
 /** Parses an angle (or angle expression without variables) to radians; bare numbers in `unit`. */
 export function parseAngle(source: string, unit: AngleUnit = 'deg'): Result<number> {
   return evaluate(source, { expected: 'angle', angleUnit: unit });
+}
+
+/** Parses a feed rate to mm/min; bare numbers are `unit` per minute. */
+export function parseFeed(source: string, unit: LengthUnit = 'mm'): Result<number> {
+  return evaluate(source, { expected: 'feed', lengthUnit: unit });
+}
+
+/** Parses a spindle speed to rpm; bare numbers are rpm. */
+export function parseSpindleSpeed(source: string): Result<number> {
+  return evaluate(source, { expected: 'spindleSpeed' });
 }

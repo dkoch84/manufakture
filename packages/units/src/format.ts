@@ -144,3 +144,45 @@ export function formatNumber(value: number, decimals = 3): string {
   if (!Number.isFinite(value)) return nonFinite(value);
   return fixed(value, decimals);
 }
+
+/**
+ * How to show a feed rate: the document's length format unit per minute. The fractional formats
+ * show decimal inches per minute.
+ */
+export interface FeedFormat {
+  /** Default `'mm'`. */
+  readonly unit?: LengthFormat['unit'];
+  /** Digits after the decimal point. Defaults: mm 0, cm 1, m 3, in 1, ft 2. */
+  readonly decimals?: number;
+}
+
+const FEED_DECIMALS: Readonly<Record<LengthUnit, number>> = {
+  mm: 0,
+  cm: 1,
+  m: 3,
+  in: 1,
+  ft: 2,
+};
+
+/**
+ * Formats a feed rate given in mm/min: `1000 mm/min`, `39.4 in/min`. The output always parses
+ * back with `parseFeed` to the displayed value. `NaN` and infinities give `'NaN'`, `'Infinity'`
+ * or `'-Infinity'`.
+ */
+export function formatFeed(mmPerMinute: number, format: FeedFormat = {}): string {
+  if (!Number.isFinite(mmPerMinute)) return nonFinite(mmPerMinute);
+  const requested = format.unit ?? 'mm';
+  const unit: LengthUnit = requested === 'ft-in' || requested === 'in-fraction' ? 'in' : requested;
+  const decimals = format.decimals ?? FEED_DECIMALS[unit];
+  return `${fixed(fromMillimetres(mmPerMinute, unit), decimals)} ${unit}/min`;
+}
+
+/**
+ * Formats a spindle speed given in rpm with fixed decimals (default 0): `18000 rpm`. The output
+ * always parses back with `parseSpindleSpeed`. `NaN` and infinities give `'NaN'`, `'Infinity'`
+ * or `'-Infinity'`.
+ */
+export function formatSpindleSpeed(rpm: number, decimals = 0): string {
+  if (!Number.isFinite(rpm)) return nonFinite(rpm);
+  return `${fixed(rpm, decimals)} rpm`;
+}
