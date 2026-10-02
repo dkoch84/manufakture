@@ -33,6 +33,14 @@ import {
 } from './measure';
 import { orientedBoxOf, type OrientedBox, type OrientedBoxOptions } from './obb';
 import { mapShapes, norm, Scope, toVec3, type Oc, type ShapeList } from './occt';
+import {
+  projectView,
+  type ProjectInput,
+  type ProjectItem,
+  type ProjectOptions,
+  type ProjectResult,
+  type ProjectView,
+} from './project';
 import type { Names } from './naming';
 import { buildProfile } from './profile';
 import { buildThread, type ThreadGeometry, type ThreadTools } from './threads';
@@ -932,6 +940,29 @@ export class Kernel {
       });
       return interferenceOf(this.oc, s, placed, options, deflection, (error) =>
         this.toError('interference', error),
+      );
+    });
+  }
+
+  /**
+   * Hidden-line removal (the `project` op): every item placed at its `transform` and projected in
+   * ONE exact HLR run, read back per item as classified 2D curves in view coordinates, with an
+   * optional section (see project.ts). Makes no shapes: every temporary is released before it
+   * returns.
+   */
+  project(
+    items: readonly ProjectItem[],
+    view: ProjectView,
+    options: ProjectOptions = {},
+  ): ProjectResult {
+    return this.op('project', (s) => {
+      const inputs = items.map((item) => {
+        const out: ProjectInput = { shape: this.get(item.shape, 'project'), key: item.key };
+        if (item.transform !== undefined) out.transform = item.transform;
+        return out;
+      });
+      return projectView(this.oc, s, inputs, view, options, (error) =>
+        this.toError('project', error),
       );
     });
   }

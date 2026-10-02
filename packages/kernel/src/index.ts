@@ -159,6 +159,7 @@ export type {
   OpValues,
   PickOp,
   ProfileOp,
+  ProjectOp,
   PropertiesOp,
   ReleaseOp,
   ReleaseResult,
@@ -182,6 +183,21 @@ export type {
   MeasuredVertex,
 } from './measure';
 export type { OrientedBox, OrientedBoxOptions } from './obb';
+export { DEFAULT_PROJECT_DEFLECTION, boundsOf, endsOf, projectPoint, viewFrame } from './project';
+export type {
+  Bounds2,
+  Curve2,
+  EdgeClass,
+  ItemSection,
+  ProjectItem,
+  ProjectOptions,
+  ProjectResult,
+  ProjectView,
+  ProjectedEdge,
+  SectionFace,
+  SectionPlane,
+  ViewFrame,
+} from './project';
 export { NameTable, applyNames, faceNameOfTriangle } from './names';
 export type { SubShapeName } from './names';
 export { meshBuffers } from './mesh';

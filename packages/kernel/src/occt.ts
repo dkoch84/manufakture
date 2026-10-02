@@ -60,6 +60,12 @@ export function releaseOwned(oc: Oc, item: Deletable): void {
       empty.delete();
       builder.delete();
     }
+  } else if (name === 'HLRBRep_Algo') {
+    // `HLRBRep_HLRToShape` keeps a handle on the algorithm and its destructor is empty, so the
+    // algorithm outlives delete(); removing every loaded shape frees its data structure and the
+    // B-reps it holds (T4.4a: 640 KiB a projection down to 70).
+    const algo = o as unknown as { NbShapes(): number; Remove(i: number): void };
+    for (let i = algo.NbShapes(); i >= 1; i--) algo.Remove(i);
   } else if (name === 'BRepExtrema_DistShapeShape') {
     // Holds both input shapes; loading null shapes drops their handles.
     const empty = new oc.TopoDS_Shape();

@@ -809,6 +809,82 @@ describe('embind objects', () => {
     expect(tracker.liveNames()).toEqual([]);
   });
 
+  it('project leaves nothing behind: placed items, sections, every class, and failures', () => {
+    const block = k.box(100, 50, 20);
+    const drill = k.cylinder(5, 40, [50, 25, -10]);
+    const holed = k.boolean('cut', block, [drill]).shape;
+    const quarter = { translation: [200, 0, 0] as Vec3, rotation: [0, 0, 0.7071, 0.7071] as const };
+    const iso = { direction: [-1, 1, -1] as Vec3, up: [0, 0, 1] as Vec3 };
+    const runs: Array<[string, () => { edges: unknown[] }]> = [
+      [
+        'two items, one placed, every class',
+        () =>
+          k.project(
+            [
+              { shape: holed, key: 'a' },
+              { shape: drill, key: 'b', transform: quarter },
+            ],
+            iso,
+            { sewn: true },
+          ),
+      ],
+      [
+        'a section through the hole',
+        () =>
+          k.project([{ shape: holed, key: 'a' }], iso, {
+            section: { origin: [0, 25, 0], normal: [0, 1, 0] },
+          }),
+      ],
+      [
+        'a section that removes one item',
+        () =>
+          k.project(
+            [
+              { shape: holed, key: 'a' },
+              { shape: block, key: 'b', transform: quarter },
+            ],
+            { direction: [0, 0, -1], up: [0, 1, 0] },
+            { section: { origin: [0, 0, 10], normal: [1, 0, 0] }, hidden: false },
+          ),
+      ],
+    ];
+    for (const [name, fn] of runs) {
+      tracker.reset();
+      expect(fn().edges.length, name).toBeGreaterThan(0);
+      expect(tracker.liveNames(), name).toEqual([]);
+    }
+    const failing: Array<[string, () => unknown]> = [
+      [
+        'a bad placement after another item was placed',
+        () =>
+          k.project(
+            [
+              { shape: holed, key: 'a', transform: quarter },
+              {
+                shape: block,
+                key: 'b',
+                transform: { translation: [0, 0, 0], rotation: [0, 0, 0, 0] },
+              },
+            ],
+            iso,
+          ),
+      ],
+      ['an unknown shape', () => k.project([{ shape: 999_999 as ShapeId, key: 'x' }], iso)],
+      [
+        'up parallel to the direction',
+        () => k.project([{ shape: holed, key: 'a' }], { direction: [0, 0, 1], up: [0, 0, -1] }),
+      ],
+    ];
+    for (const [name, fn] of failing) {
+      tracker.reset();
+      expect(fn, name).toThrow(KernelError);
+      expect(tracker.liveNames(), name).toEqual([]);
+    }
+    expect(k.shapeCount).toBe(3);
+    for (const id of [block, drill, holed]) k.release(id);
+    expect(tracker.liveNames()).toEqual([]);
+  });
+
   it('threads leave only the bodies: groove, crest trim and chamfers, on success and failure', () => {
     const [block] = threadedBlock();
     // Only the threaded block is alive; every tool and temporary is gone.
@@ -932,6 +1008,38 @@ describe('heap', () => {
     };
     const perBox = ((await inUseAfter(2010)) - (await inUseAfter(10))) / 2000;
     expect(perBox).toBeLessThan(400);
+  }, 120_000);
+
+  it('repeated projections leak only the small values libcascade cannot free', async () => {
+    // T4.4a's measurement, kept: a 600 x 300 x 18 board with 40 holes in the isometric view (about
+    // 370 edges), on fresh instances after 2 and after 12 projections. With `Remove(i)` on the
+    // algorithm before delete (releaseOwned) and points read through one `gp_Pnt`, what stays is
+    // the small embind values whose delete() is empty (edges, circles, ellipses, axes): the spike
+    // measured 70 KiB a projection; without the release rule it was 640 KiB. Measured here: 58 KiB,
+    // and 621 KiB with the rule disabled, so the bound below catches a lost rule.
+    const inUseAfter = async (n: number) => {
+      const fresh = new Kernel(await createNodeInstance());
+      const tools: ShapeId[] = [];
+      for (let i = 0; i < 40; i++) {
+        tools.push(
+          fresh.cylinder(2.5, 40, [50 + (i % 10) * 55, 40 + Math.floor(i / 10) * 60, -10]),
+        );
+      }
+      const blank = fresh.box(600, 300, 18);
+      const board = fresh.boolean('cut', blank, tools).shape;
+      for (let i = 0; i < n; i++) {
+        fresh.project([{ shape: board, key: 'board' }], {
+          direction: [-1, 1, -1],
+          up: [0, 0, 1],
+        });
+      }
+      for (const id of [blank, board, ...tools]) fresh.release(id);
+      expect(fresh.shapeCount).toBe(0);
+      return heapInUse(fresh);
+    };
+    const perRun = ((await inUseAfter(12)) - (await inUseAfter(2))) / 10;
+    console.log(`project: ${(perRun / 2 ** 10).toFixed(0)} KiB per projection`);
+    expect(perRun).toBeLessThan(150 * 2 ** 10);
   }, 120_000);
 
   it('repeated interference checks do not grow the wasm heap', () => {

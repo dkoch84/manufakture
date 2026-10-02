@@ -59,7 +59,7 @@ function union(boxes: readonly Box[]): Box | null {
 }
 
 /** Why `p` is not a usable placement, or null. */
-function placementProblem(p: Placement): string | null {
+export function placementProblem(p: Placement): string | null {
   const t = p.translation;
   const r = p.rotation;
   if (!Array.isArray(t) || t.length !== 3 || !t.every(Number.isFinite)) {
@@ -73,7 +73,12 @@ function placementProblem(p: Placement): string | null {
 }
 
 /** `shape` placed by `p`: a located handle on the same B-rep, owned by `s`. */
-function placed(oc: Oc, s: Scope, shape: TopoDS_Shape, p: Placement | undefined): TopoDS_Shape {
+export function placed(
+  oc: Oc,
+  s: Scope,
+  shape: TopoDS_Shape,
+  p: Placement | undefined,
+): TopoDS_Shape {
   if (p === undefined) return shape;
   const n = Math.hypot(...p.rotation);
   const [x, y, z, w] = p.rotation.map((c) => c / n) as [number, number, number, number];

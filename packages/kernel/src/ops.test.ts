@@ -44,6 +44,24 @@ describe('validateOp', () => {
       },
       { op: 'obb', shape: 1 },
       { op: 'obb', shape: { result: 0 }, optimal: false },
+      { op: 'project', items: [], view: { direction: [0, 1, 0], up: [0, 0, 1] } },
+      {
+        op: 'project',
+        items: [
+          { shape: 1, key: 'a' },
+          {
+            shape: { result: 0 },
+            key: 'b',
+            transform: { translation: [1, 2, 3], rotation: [0, 0, 0, 1] },
+          },
+        ],
+        view: { direction: [0, 1, 0], up: [0, 0, 1], origin: [0, 0, 0] },
+        hidden: false,
+        smooth: true,
+        sewn: false,
+        deflection: 0.1,
+        section: { origin: [0, 0, 0], normal: [0, 1, 0] },
+      },
     ];
     for (const op of ops) expect(validateOp(op), JSON.stringify(op)).toBeNull();
   });
@@ -89,6 +107,36 @@ describe('validateOp', () => {
     [{ op: 'measure', shape: 1, targets: [], body: 1 }, /op\.body must be a boolean/],
     [{ op: 'obb' }, /op\.shape must be a shape id/],
     [{ op: 'obb', shape: 1, optimal: 1 }, /op\.optimal must be a boolean/],
+    [{ op: 'project', items: [] }, /op\.view must be an object/],
+    [
+      { op: 'project', items: [{ shape: 1 }], view: { direction: [0, 1, 0], up: [0, 0, 1] } },
+      /op\.items\[0\]\.key must be a string/,
+    ],
+    [
+      {
+        op: 'project',
+        items: [{ shape: 1, key: 'a', transform: { translation: [0, 0, 0], rotation: [0, 0, 1] } }],
+        view: { direction: [0, 1, 0], up: [0, 0, 1] },
+      },
+      /op\.items\[0\]\.transform\.rotation must be a quaternion/,
+    ],
+    [
+      { op: 'project', items: [], view: { direction: [0, 1, 0] } },
+      /op\.view\.up must be \[number, number, number\]/,
+    ],
+    [
+      { op: 'project', items: [], view: { direction: [0, 1, 0], up: [0, 0, 1] }, hidden: 1 },
+      /op\.hidden must be a boolean/,
+    ],
+    [
+      {
+        op: 'project',
+        items: [],
+        view: { direction: [0, 1, 0], up: [0, 0, 1] },
+        section: { origin: [0, 0, 0] },
+      },
+      /op\.section\.normal/,
+    ],
     [{ op: 'fillet', shape: 1, edges: 1, radius: 1 }, /op\.edges must be an array/],
     [{ op: 'tessellate', shape: 1, deflection: { linear: 'fine' } }, /deflection\.linear/],
     [{ op: 'release', shapes: [{ result: '0' }] }, /op\.shapes\[0\]/],

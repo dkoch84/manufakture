@@ -38,6 +38,7 @@ import {
 import { DEFAULT_DEFLECTION, type BooleanKind, type Kernel } from './kernel';
 import type { MeasureResult, MeasureTarget } from './measure';
 import type { OrientedBox } from './obb';
+import type { ProjectOptions, ProjectResult, ProjectView } from './project';
 import { applyNames, type NameTable } from './names';
 import { isUnnamed, type TopoRef } from './naming';
 import type {
@@ -195,6 +196,18 @@ export type InterferenceOp = OpCommon &
     items: readonly { shapes: readonly ShapeRef[]; transform?: Placement }[];
   };
 
+/**
+ * A view of placed bodies by hidden-line removal (`Kernel.project`): every item in one run, its
+ * edges classified and in view coordinates; with `section`, cut first and the section faces
+ * returned as loops. Makes no shapes.
+ */
+export type ProjectOp = OpCommon &
+  ProjectOptions & {
+    op: 'project';
+    items: readonly { shape: ShapeRef; transform?: Placement; key: string }[];
+    view: ProjectView;
+  };
+
 export type KernelOp =
   | BoxOp
   | CylinderOp
@@ -214,7 +227,8 @@ export type KernelOp =
   | ObbOp
   | ExportStepOp
   | ImportStepOp
-  | InterferenceOp;
+  | InterferenceOp
+  | ProjectOp;
 
 export type OpName = KernelOp['op'];
 
@@ -247,6 +261,7 @@ export interface OpValues {
   importStep: { shape: ShapeId };
   /** Overlap meshes are transferred. */
   interference: InterferenceResult;
+  project: ProjectResult;
 }
 
 export type OpValue<O extends { op: OpName }> = OpValues[O['op']];
@@ -278,6 +293,7 @@ const OP_NAMES: ReadonlySet<string> = new Set<OpName>([
   'exportStep',
   'importStep',
   'interference',
+  'project',
 ]);
 
 // Validation ----------------------------------------------------------------------
@@ -384,6 +400,20 @@ const FIELDS: Record<OpName, [Record<string, Check>, Record<string, Check>]> = {
       mesh: bool,
       deflection: shape({}, { linear: num, angular: num }),
       prefilterOnly: bool,
+    },
+  ],
+  // Ranges (a zero direction, an up parallel to it, repeated keys) are the kernel's to refuse.
+  project: [
+    {
+      items: arrayOf(shape({ shape: shapeRef, key: str }, { transform: placement })),
+      view: shape({ direction: vec3, up: vec3 }, { origin: vec3 }),
+    },
+    {
+      hidden: bool,
+      smooth: bool,
+      sewn: bool,
+      deflection: num,
+      section: shape({ origin: vec3, normal: vec3 }),
     },
   ],
 };
@@ -535,6 +565,26 @@ export function executeOp(
           if (item.transform !== undefined) out.transform = item.transform;
           return out;
         }),
+        options,
+      );
+    }
+    case 'project': {
+      const options: ProjectOptions = {};
+      if (op.hidden !== undefined) options.hidden = op.hidden;
+      if (op.smooth !== undefined) options.smooth = op.smooth;
+      if (op.sewn !== undefined) options.sewn = op.sewn;
+      if (op.deflection !== undefined) options.deflection = op.deflection;
+      if (op.section !== undefined) options.section = op.section;
+      return kernel.project(
+        op.items.map((item) => {
+          const out: { shape: ShapeId; transform?: Placement; key: string } = {
+            shape: resolve(item.shape, 'project'),
+            key: item.key,
+          };
+          if (item.transform !== undefined) out.transform = item.transform;
+          return out;
+        }),
+        op.view,
         options,
       );
     }
