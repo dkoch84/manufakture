@@ -32,6 +32,7 @@ import {
   type BoardForm,
   type GrainChoice,
 } from './boards';
+import { Select } from './Select';
 import { StockPicker } from './StockPicker';
 import './wood.css';
 
@@ -399,43 +400,6 @@ function StockSummary({
     <p className="field-note" data-testid="stock-summary">
       {entry.name}: {parts.join(', ')}.
     </p>
-  );
-}
-
-function Select({
-  label,
-  name,
-  value,
-  options,
-  error,
-  onChange,
-}: {
-  label: string;
-  name: string;
-  value: string;
-  options: readonly (readonly [string, string])[];
-  error?: string | undefined;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <div className="dialog-field">
-      <label>
-        {label}
-        <select
-          value={value}
-          data-testid={`field-${name}`}
-          aria-invalid={error !== undefined}
-          onChange={(e) => onChange(e.target.value)}
-        >
-          {options.map(([v, text]) => (
-            <option key={v} value={v}>
-              {text}
-            </option>
-          ))}
-        </select>
-      </label>
-      {error && <span className="field-error">{error}</span>}
-    </div>
   );
 }
 

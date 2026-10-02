@@ -14,7 +14,7 @@ import {
   type Part,
 } from '@manufakture/core';
 import type { FeatureResult, RegenError } from '@manufakture/regen';
-import { boardStockName, extensionLabel } from '../wood/kinds';
+import { boardStockName, extensionLabel, jointDetail } from '../wood/kinds';
 
 /**
  * What a row shows. `warning` is an `ok` feature with warnings; `pending` means regen has not
@@ -75,11 +75,21 @@ export function featureKindLabel(feature: Feature): string {
 
 /**
  * A short note the row shows after the name, or null: a thread's size, with its hand when left
- * and its representation when cosmetic (`M6`, `1/4-20 LH, cosmetic`); a board's stock (`2x4`).
+ * and its representation when cosmetic (`M6`, `1/4-20 LH, cosmetic`); a board's stock (`2x4`);
+ * a joint's boards and hardware (`Shelf into Side, 4 dowels`), named from `context.features` and
+ * counted from the joint's regen result.
  */
-export function featureDetail(feature: Feature): string | null {
+export function featureDetail(
+  feature: Feature,
+  context: { features?: readonly Feature[]; result?: FeatureResult | undefined } = {},
+): string | null {
   const stock = boardStockName(feature);
   if (stock !== null) return stock;
+  const joint = jointDetail(feature, {
+    ...(context.features ? { features: context.features } : {}),
+    metadata: context.result?.metadata,
+  });
+  if (joint !== null) return joint;
   if (feature.kind !== 'thread') return null;
   const parts = [feature.standard.size + (feature.hand === 'left' ? ' LH' : '')];
   if (feature.representation === 'cosmetic') parts.push('cosmetic');

@@ -407,6 +407,7 @@ export function FeatureTree({
     const picks = repicks(row.result);
     const statusLabel = `${STATUS_LABELS[row.status]}${row.stale && row.status !== 'suppressed' && row.status !== 'rolled-back' ? ' (rebuilding)' : ''}`;
     const tipId = `feature-tip-${f.id.replace('#', '-')}`;
+    const detail = featureDetail(f, { features: part.features, result: row.result });
     const classes = [
       'feature-row',
       f.kind === 'derived' ? 'derived' : '',
@@ -466,9 +467,9 @@ export function FeatureTree({
         ) : (
           <span className="name">{f.name}</span>
         )}
-        {featureDetail(f) !== null && (
+        {detail !== null && (
           <span className="detail" data-testid={`detail-${f.id}`}>
-            {featureDetail(f)}
+            {detail}
           </span>
         )}
         <button

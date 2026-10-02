@@ -29,8 +29,11 @@ export const DIALOG_KINDS: readonly DialogKind[] = [
   'derived',
 ];
 
-/** What a toolbar button opens: a feature dialog, or the Board dialog (a `wood.board` extension). */
-export type ToolKind = DialogKind | 'board';
+/**
+ * What a toolbar button opens: a feature dialog, the Board dialog (a `wood.board` extension) or the
+ * Joint dialog (a `wood.joint` extension).
+ */
+export type ToolKind = DialogKind | 'board' | 'joint';
 
 export function isDialogKind(kind: string): kind is DialogKind {
   return (DIALOG_KINDS as readonly string[]).includes(kind);

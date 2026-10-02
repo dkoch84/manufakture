@@ -1,4 +1,4 @@
-import { DocumentStore, type ManufaktureDocument } from '@manufakture/core';
+import { DocumentStore, type ExtensionFeature, type ManufaktureDocument } from '@manufakture/core';
 import type { FeatureResult } from '@manufakture/regen';
 import { describe, expect, it } from 'vitest';
 import { demoDocument } from '../model/demo';
@@ -8,6 +8,7 @@ import {
   dependentsOf,
   dropIndex,
   featureDetail,
+  featureKindLabel,
   firstChanged,
   moveFeature,
   renameFeature,
@@ -247,5 +248,41 @@ describe('featureDetail', () => {
       'M6 LH, cosmetic',
     );
     expect(featureDetail(demoDocument().parts[0]!.features[0]!)).toBeNull();
+  });
+
+  it("shows a joint's boards by name, and its hardware once regen has counted it", () => {
+    const board = (id: string, name: string): ExtensionFeature => ({
+      id,
+      kind: 'extension',
+      name,
+      suppressed: false,
+      extension: 'wood.board',
+      schemaVersion: 1,
+      operation: 'new',
+      dependsOn: [],
+      references: [],
+      expressions: {},
+      params: {},
+    });
+    const joint = {
+      ...board('extension#3', 'Dowels 3'),
+      extension: 'wood.joint',
+      operation: undefined,
+      params: { kind: 'dowel', a: 'extension#1', b: 'extension#2' },
+    } as unknown as Parameters<typeof featureDetail>[0];
+    const features = [board('extension#1', 'Side'), board('extension#2', 'Shelf'), joint];
+    expect(featureKindLabel(joint)).toBe('Dowels');
+    expect(featureDetail(joint, { features })).toBe('Shelf into Side');
+    const result = {
+      metadata: {
+        kind: 'dowel',
+        a: 'extension#1',
+        b: 'extension#2',
+        hardware: [{ item: 'dowel', diameter: 8, length: 32, quantity: 4 }],
+        warnings: [],
+        details: {},
+      },
+    } as unknown as FeatureResult;
+    expect(featureDetail(joint, { features, result })).toBe('Shelf into Side, 4 dowels');
   });
 });

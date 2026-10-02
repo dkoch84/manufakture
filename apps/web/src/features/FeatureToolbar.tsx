@@ -1,9 +1,10 @@
 // The feature buttons in the header: each opens its dialog for a new feature, added at the
-// rollback bar. Board (a board cut from real stock, M4) sits beside Extrude, which it builds on.
+// rollback bar. Board (a board cut from real stock, M4) sits beside Extrude, which it builds on,
+// and Joint (two boards cut against each other) right after it.
 
 import { Fragment } from 'react';
 import { KIND_LABELS } from '../tree/tree';
-import { BoardIcon, KindIcon } from '../tree/icons';
+import { BoardIcon, JointIcon, KindIcon } from '../tree/icons';
 import { DIALOG_KINDS, type DialogKind, type ToolKind } from './kinds';
 
 const TITLES: Record<DialogKind, string> = {
@@ -43,15 +44,26 @@ export function FeatureToolbar({
             {BUTTON_TEXT[kind] ?? KIND_LABELS[kind]}
           </button>
           {kind === 'extrude' && (
-            <button
-              type="button"
-              disabled={disabled}
-              title="A board from real stock: a panel from a sketch region, or a stick along a sketch line"
-              onClick={() => onOpen('board')}
-            >
-              <BoardIcon />
-              Board
-            </button>
+            <>
+              <button
+                type="button"
+                disabled={disabled}
+                title="A board from real stock: a panel from a sketch region, or a stick along a sketch line"
+                onClick={() => onOpen('board')}
+              >
+                <BoardIcon />
+                Board
+              </button>
+              <button
+                type="button"
+                disabled={disabled}
+                title="Join two boards: a dado, rabbet, mortise and tenon, dowels, pocket screws or a box joint (select the two boards first, or choose them in the dialog)"
+                onClick={() => onOpen('joint')}
+              >
+                <JointIcon />
+                Joint
+              </button>
+            </>
           )}
         </Fragment>
       ))}

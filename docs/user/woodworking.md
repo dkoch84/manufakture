@@ -1,4 +1,4 @@
-# Woodworking: boards from real stock
+# Woodworking: boards from real stock, and joints
 
 A **board** is a body cut from stock you can buy: a sheet of plywood or MDF, or a length of dimension lumber or hardwood. You choose the stock by the name it is sold under (`3/4" plywood`, `2x4`, `18 mm plywood`), and the board is built at the stock's **actual** size, which is smaller than its name says: a 2x4 is 1-1/2" x 3-1/2", and 3/4" plywood is usually 23/32" thick. Each board knows which way its grain runs, and its body is made of the stock's material.
 
@@ -59,6 +59,54 @@ A price changes no board, so setting one rebuilds nothing. Prices and sheet size
 
 **Show grain arrows on boards**, at the bottom of the panel, turns the grain arrows on the boards in the view on and off. An arrow is drawn on both broad faces of every board whose stock has a grain, pointing along the grain. The setting is part of your view, not of the document.
 
+## Joints
+
+A **joint** cuts two boards against each other: a groove in one where the other sits in it, a tenon and its mortise, holes for dowels or pocket screws, or the fingers of a box joint. Joints work on boards only, and the two boards must be square to each other (every face of one parallel or square to the faces of the other); a splayed or angled joint is not supported.
+
+**Joint**, next to **Board** in the feature toolbar, opens the Joint dialog. Select the two boards in the feature tree (or a face of each in the view) first and the dialog starts with them, the first one you picked receiving; or choose them in the dialog.
+
+### Which board is which
+
+Every joint has two boards with different jobs:
+
+- **Receives (A)** is the board that is cut where the other one enters it: the side a shelf sits in, the leg that takes a tenon, the board a pocket screw goes into.
+- **Enters (B)** is the board that goes into A: the shelf, the rail with the tenon, the board with the pocket holes.
+
+**Swap A and B** swaps them. While the dialog is open, the view shows what the joint would cut, drawn over the model: **solid** outlines are cut from A, **dashed** ones from B. The dialog lists the same in words ("Cut from Side (A): a groove. Cut from Shelf (B): nothing."), with the joint's sizes as built, in the document's units.
+
+### The depth comes from the model
+
+For a dado, a rabbet, a mortise and tenon and a box joint, draw board B reaching into board A by the depth you want: the boards overlap, and the joint cuts the overlap. A shelf drawn 6 mm into the side gets a 6 mm deep dado; a rail drawn 25 mm into the leg gets a 25 mm tenon. So the depth is not a field in the dialog: to change it, move or resize B (its sketch, or the board's length). The cut list reads the boards as you drew them, so the shelf's length already includes what sits in the dado.
+
+Dowels and pocket screws are the other way round: B must touch A without overlapping it.
+
+When a board moves or changes size, its joints follow: a dado moves with its shelf, and a thicker shelf (a new stock, or a measured thickness in the [Stock panel](#the-stock-panel)) gets a wider dado.
+
+### Kinds of joint
+
+Every size is optional unless noted, and takes an expression (`1/4"`, `#clearance`). Leave a field empty for its default.
+
+| Joint                 | What it cuts                                                                                                                | Fields                                                                                                                                                                                                                   |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Dado**              | A groove across A's face, as wide as B is thick. **Through**, or **stopped** short of one end or both (B is notched there). | **Clearance** (the total play, split on both sides), **Stop** (how far short of the end it stops; needed when stopped).                                                                                                  |
+| **Rabbet**            | A step along A's edge where B sits at it. B inside A's face is a dado, not a rabbet: the dialog says so.                    | **Clearance** (all of it on the inner side).                                                                                                                                                                             |
+| **Mortise and tenon** | A tenon on B's end, centred across its width; the mortise in A to match. **Square** or **rounded** mortise ends.            | **Tenon thickness** (a third of B's), **Tenon width** (B's width less two thirds of its thickness), **Tenon offset** across B's thickness, **Clearance** (added to the mortise).                                         |
+| **Dowels**            | A row of holes into both boards, along the middle of where they touch.                                                      | **Dowel diameter** (8 mm), **Hole depth** into A (1.5 diameters) and into B (2.5 diameters), **How many** or **Spacing** (by default spread evenly, at least two), **Distance from the ends** (2 diameters), **Offset**. |
+| **Pocket screws**     | Angled pocket holes in B, opening on the face you choose; nothing is cut from A.                                            | **How many** or **Spacing**, **Distance from the ends** (3/4"), **Pocket angle** (15 degrees, the standard jig), **Screw length** (the jig chart's for B's thickness).                                                   |
+| **Box joint**         | Interlocking fingers on both boards' ends; choose which board has the first finger.                                         | **Finger width** (the thinner board's thickness, rounded to fit) or **Number of fingers**, **Clearance**.                                                                                                                |
+
+### Warnings, hardware and refusals
+
+- **Warnings** show in the dialog and do not stop the joint. A dado or rabbet deeper than half of A, or a dowel more than half as thick as the board it is set in, is marked as a **rule of thumb, not engineering**. A pocket screw whose tip would come out of A's far side is warned about too; the screw itself is not modelled.
+- **Hardware**: dowels and pocket screws are counted with their sizes ("4 dowels, 8 mm x 32 mm"), shown in the dialog and in the feature tree, and counted for the bill of materials.
+- A joint that **cannot be built** is refused before anything is applied, with the reason in the boards' names ("Shelf (B) is not square to Side (A) (about 30 degrees off)") and the field at fault marked. **OK** does nothing until it is fixed: choose another kind, swap the boards, or change the boards themselves.
+
+A joint is one step that **Undo** takes back.
+
+### Joints in the feature tree
+
+A joint shows in the tree with a joint icon, its name after its kind ("Dado 7", "Mortise and tenon 9"), the boards it joins ("Shelf into Side") and its hardware ("4 dowels"). It comes after both boards, and moving it above either of them is refused. Double-click it to open the Joint dialog again. A joint saved by a newer version of manufakture, which this version cannot read, keeps its place in the tree but cannot be edited here, like such a board.
+
 ## Files and history
 
-Boards and stock overrides are saved with the document, travel in `.mfk` files, and appear in the [history](history.md): a version that differs only in its overrides says "Settings that differ: stock overrides."
+Boards, joints and stock overrides are saved with the document, travel in `.mfk` files, and appear in the [history](history.md): a version that differs only in its overrides says "Settings that differ: stock overrides."

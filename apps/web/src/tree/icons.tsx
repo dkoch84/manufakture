@@ -3,7 +3,7 @@
 
 import type { Feature, FeatureKind } from '@manufakture/core';
 import type { ReactNode } from 'react';
-import { isBoard } from '../wood/kinds';
+import { isBoard, isJoint } from '../wood/kinds';
 import type { RowStatus } from './tree';
 
 function Svg({ children, className }: { children: ReactNode; className?: string }) {
@@ -127,9 +127,21 @@ export function BoardIcon() {
   );
 }
 
+/** A joint (`wood.joint`): one board standing in a groove of another. */
+export function JointIcon() {
+  return (
+    <Svg className="kind-icon">
+      <path d="M1.5 9.5h4.5v-2.5h4v2.5h4.5v4h-13z" />
+      <rect x="6.5" y="1.5" width="3" height="8" />
+    </Svg>
+  );
+}
+
 /** A feature's icon: its domain's for the extension types the app knows, else its kind's. */
 export function FeatureIcon({ feature }: { feature: Feature }) {
-  return isBoard(feature) ? <BoardIcon /> : <KindIcon kind={feature.kind} />;
+  if (isBoard(feature)) return <BoardIcon />;
+  if (isJoint(feature)) return <JointIcon />;
+  return <KindIcon kind={feature.kind} />;
 }
 
 const STATUS_PATHS: Partial<Record<RowStatus, ReactNode>> = {
