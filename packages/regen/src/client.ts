@@ -12,6 +12,7 @@ import { KernelClient } from '@manufakture/kernel/kernel-client';
 import * as Comlink from 'comlink';
 import type { DrawingSheetResult, DrawingViewResult } from './drawing';
 import type { EngineStats } from './engine';
+import type { OrientedSizesOptions, OrientedSizesResult } from './oriented';
 import type { FontReadReply, TextReply, TextRequest } from './text';
 import type {
   AssemblyResult,
@@ -155,6 +156,25 @@ export class RegenClient extends KernelClient {
         ...options,
         generation: this.latestGeneration,
       }) as Promise<DrawingSheetResult | null>,
+    ).then((result) => result ?? null);
+  }
+
+  /**
+   * The oriented box sizes of a part's bodies, for the cut list (bodies that are not boards:
+   * pass `skipExtensions: ['wood.board']`). On demand, at the current generation, so it never
+   * cancels a regen; cached by body key in the worker, so asking again for unchanged bodies sends
+   * nothing to the kernel. Null when a newer regen superseded it or the worker was stopped.
+   */
+  orientedSizes(
+    document: ManufaktureDocument,
+    partId: string,
+    options: Omit<OrientedSizesOptions, 'generation'> = {},
+  ): Promise<OrientedSizesResult | null> {
+    return this.droppable(
+      this.worker<RegenWorkerApi>().orientedSizes(document, partId, {
+        ...options,
+        generation: this.latestGeneration,
+      }) as Promise<OrientedSizesResult | null>,
     ).then((result) => result ?? null);
   }
 

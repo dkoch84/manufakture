@@ -5,6 +5,7 @@ import {
   checkStickLayout,
   layoutSticks,
   layoutSticksAsync,
+  layoutSticksSteps,
   type StickInput,
   type StickLayoutResult,
 } from './stick';
@@ -198,5 +199,31 @@ describe('the stick checker', () => {
     const lost = structuredClone(r);
     lost.sticks.pop();
     expect(checkStickLayout(threeThirds(KERF_1_8), lost).join('\n')).toMatch(/quantity/);
+  });
+
+  it('catches a copy number outside the part quantity', () => {
+    const r = layoutSticks(threeThirds(0));
+    const bad = structuredClone(r);
+    bad.sticks[0]!.cuts[0]!.copy = 9;
+    expect(checkStickLayout(threeThirds(0), bad).join('\n')).toMatch(/copy 9 of 3/);
+  });
+});
+
+describe('stick progress', () => {
+  it('reaches its total, also for a single part copy (no random attempts)', () => {
+    const run = (input: StickInput) => {
+      const steps = layoutSticksSteps(input);
+      let last = { attempt: 0, total: -1 };
+      for (let r = steps.next(); !r.done; r = steps.next()) last = r.value;
+      return last;
+    };
+    const one = run({
+      parts: [{ id: 'a', length: 30, quantity: 1 }],
+      stock: [{ id: 's', length: 96 }],
+      settings: { kerf: 0, randomAttempts: 30 },
+    });
+    expect(one.attempt).toBe(one.total);
+    const many = run(FACE_FRAME);
+    expect(many.attempt).toBe(many.total);
   });
 });

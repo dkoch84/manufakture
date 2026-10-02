@@ -120,7 +120,10 @@ then the least total stock length, then the fewest sticks, then the best offcuts
 Both packers come in three forms: `layoutSheets` (synchronous), `layoutSheetsSteps` (a generator
 that yields `{ attempt, total }` after each attempt and returns the result; stop iterating to
 cancel) and `layoutSheetsAsync(input, { signal })`, which yields to the event loop between
-attempts and rejects with `signal.reason` when aborted. The same for sticks.
+attempts and rejects with `signal.reason` when aborted. The same for sticks. The progress
+`total` counts the random attempts only when they run (more than one part copy to reorder), so
+the last step always reports `attempt === total`. `checkStickLayout` checks each cut's `copy`
+against its part's quantity, as the sheet checker does.
 
 ## Fixtures
 

@@ -1,0 +1,169 @@
+/* The Cut list panel: the list table, the layouts drawn to scale, the settings and the files. The
+   head and buttons follow the Stock panel (wood.css). */
+.cutlist-panel button,
+.cutlist-panel select,
+.cutlist-panel input {
+  font: inherit;
+  font-size: 0.78rem;
+}
+
+.cutlist-tabs {
+  display: flex;
+  gap: 0.3rem;
+  margin: 0.25rem 0 0.4rem;
+}
+
+.cutlist-tabs button[aria-selected='true'] {
+  background: #dbe7ff;
+  border-color: #4d8dff;
+}
+
+.cutlist-warnings {
+  margin: 0.3rem 0;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid #e0a100;
+  border-radius: 4px;
+  background: #fff6db;
+  font-size: 0.78rem;
+}
+
+.cutlist-warnings ul {
+  margin: 0.2rem 0 0;
+  padding-left: 1.2em;
+}
+
+.cutlist-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+
+.cutlist-table th,
+.cutlist-table td {
+  padding: 0.15rem 0.25rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.cutlist-table td:nth-child(4),
+.cutlist-table td:nth-child(1) {
+  text-align: right;
+}
+
+.cutlist-table tbody tr[data-testid='cutlist-row'] {
+  cursor: pointer;
+  border-top: 1px solid #edf0f3;
+}
+
+.cutlist-table tbody tr[data-testid='cutlist-row']:hover {
+  background: #f2f6fc;
+}
+
+.cutlist-table tr.picked {
+  background: #dbe7ff;
+}
+
+.cutlist-group th {
+  padding-top: 0.45rem;
+  font-weight: 600;
+  color: #3b4652;
+}
+
+.cutlist-sort {
+  border: none;
+  background: none;
+  padding: 0;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.cutlist-flag {
+  display: inline-block;
+  margin-left: 0.3rem;
+  padding: 0 0.3rem;
+  border-radius: 3px;
+  background: #eef1f5;
+  color: #5b6673;
+  font-size: 0.7rem;
+}
+
+.cutlist-hardware,
+.cutlist-totals {
+  margin: 0.2rem 0;
+  padding-left: 1.2em;
+  font-size: 0.78rem;
+}
+
+.cutlist-panel h3 {
+  margin: 0.5rem 0 0.2rem;
+  font-size: 0.82rem;
+}
+
+.cutlist-settings {
+  margin-bottom: 0.4rem;
+}
+
+.cutlist-sheet,
+.cutlist-stick {
+  margin: 0.3rem 0 0.6rem;
+  /* Skipped by layout and paint while off screen: many sheets scroll as cheaply as a few. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 12rem;
+}
+
+.cutlist-stick {
+  contain-intrinsic-size: auto 3rem;
+}
+
+.cutlist-sheet svg,
+.cutlist-stick svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.cutlist-waste {
+  fill: #e3e6ea;
+}
+
+.cutlist-offcut {
+  fill: #f6f7f9;
+  stroke: #7a8591;
+  stroke-dasharray: 4 3;
+  vector-effect: non-scaling-stroke;
+}
+
+.cutlist-part rect {
+  fill: #cfe0fb;
+  stroke: #1f4fa8;
+  vector-effect: non-scaling-stroke;
+}
+
+.cutlist-part.highlighted rect {
+  fill: #ffd98a;
+}
+
+.cutlist-part text {
+  fill: #13243d;
+  font-family: sans-serif;
+}
+
+.cutlist-outline {
+  fill: none;
+  stroke: #222;
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.cutlist-cuts ol {
+  margin: 0.2rem 0;
+  padding-left: 1.6em;
+  font-size: 0.75rem;
+}
+
+.cutlist-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.5rem;
+}

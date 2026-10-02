@@ -823,7 +823,8 @@ export function* layoutSheetsSteps(
       }
     }
   }
-  const total = grid.length + settings.randomAttempts;
+  // The random attempts only run when there is more than one copy to reorder.
+  const total = grid.length + (instances.length > 1 ? settings.randomAttempts : 0);
 
   let best: { attempt: Attempt; rule: SheetRule; order: Instance[] } | null = null;
   let done = 0;

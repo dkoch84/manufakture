@@ -331,7 +331,8 @@ export function* layoutSticksSteps(
       for (const stockOrder of stockOrders) grid.push({ sort, fit, stockOrder, perturbation: 0 });
     }
   }
-  const total = grid.length + settings.randomAttempts;
+  // The random attempts only run when there is more than one copy to reorder.
+  const total = grid.length + (instances.length > 1 ? settings.randomAttempts : 0);
   let best: { attempt: Attempt; rule: StickRule; order: Instance[] } | null = null;
   let done = 0;
   for (const rule of grid) {
@@ -509,6 +510,9 @@ export function checkStickLayout(input: StickInput, result: StickLayoutResult): 
         problems.push(`${where}: ${c.partId} at ${c.start} is closer than the kerf`);
       }
       prevEnd = c.start + c.length;
+      if (!(Number.isInteger(c.copy) && c.copy >= 1 && c.copy <= part.quantity)) {
+        problems.push(`${where}: ${c.partId} has copy ${c.copy} of ${part.quantity}`);
+      }
       const set = copies.get(c.partId) ?? new Set<number>();
       if (set.has(c.copy)) problems.push(`${where}: ${c.partId} copy ${c.copy} cut twice`);
       set.add(c.copy);

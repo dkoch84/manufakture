@@ -125,6 +125,12 @@ import {
 } from './drawing';
 import { mapFailure, mapOutcome, planeReport } from './errors';
 import {
+  OrientedCache,
+  type OrientedSizesOptions,
+  type OrientedSizesResult,
+  type OrientedStats,
+} from './oriented';
+import {
   directionInference,
   explodeWarnings,
   explodedOffsets,
@@ -591,6 +597,8 @@ export class RegenEngine {
   #stopChecks = new Set<string>();
   /** Drawing views, resolved dimension references and picking data, cached by body key. */
   readonly #drawings = new DrawingStage();
+  /** Oriented box sizes of bodies, by body key (`orientedSizes`). */
+  readonly #oriented = new OrientedCache();
 
   constructor(options: RegenEngineOptions) {
     this.#kernel = options.kernel;
@@ -1596,6 +1604,100 @@ export class RegenEngine {
     options: DrawingRequestOptions,
     body: (host: DrawingHost) => Promise<T>,
   ): Promise<T | null> {
+    return this.#onDemand(document, options, (run) => body(this.#drawingHost(run, document)));
+  }
+
+  // Oriented sizes ----------------------------------------------------------------------------
+
+  /** The oriented-size counters: `obb` ops sent and bodies answered from the cache. */
+  get orientedStats(): Readonly<OrientedStats> {
+    return { ...this.#oriented.stats };
+  }
+
+  /**
+   * The oriented box sizes of bodies of a part (see `oriented.ts`), for the cut list: the part
+   * built through the cache, each body not in the cache measured by one `obb` op (all in one
+   * batch), the sizes cached by body key. On demand only, at the client's current generation
+   * (never a new one), on the regen chain. Null when a newer regen superseded it. Rejects for a
+   * part the document does not have.
+   */
+  orientedSizes(
+    document: ManufaktureDocument,
+    partId: string,
+    options: OrientedSizesOptions = {},
+  ): Promise<OrientedSizesResult | null> {
+    if (!document.parts.some((p) => p.id === partId)) {
+      return Promise.reject(new TypeError(`the document has no part ${partId}`));
+    }
+    return this.#onDemand(document, options, async (run) => {
+      const part = document.parts.find((p) => p.id === partId)!;
+      const state = await this.#buildPart(
+        run,
+        part,
+        document,
+        evaluateVariables(document.variables),
+        {
+          ns: null,
+          depth: 0,
+          versions: run.versions,
+        },
+      );
+      this.#checkInstances(run, [state]);
+      const skip = new Set(options.skipExtensions ?? []);
+      const features = new Map(state.part.features.map((f) => [f.id, f]));
+      const all = state.broken ? [] : state.bodies;
+      const wanted = options.bodies === undefined ? undefined : new Set(options.bodies);
+      const missing = (options.bodies ?? []).filter((id) => !all.some((b) => b.id === id));
+      const measured = all.filter((b) => {
+        if (wanted !== undefined && !wanted.has(b.id)) return false;
+        const creator = features.get(b.creator);
+        return !(creator?.kind === 'extension' && skip.has(creator.extension));
+      });
+      const result: OrientedSizesResult = {
+        generation: run.generation,
+        partId,
+        sizes: [],
+        missing,
+        failures: [],
+      };
+      const todo = measured.filter((b) => this.#oriented.get(b.key) === undefined);
+      if (todo.length > 0) {
+        const batch = emptyBatch();
+        for (const b of todo) {
+          batch.ops.push({ op: 'obb', shape: b.shape });
+          if (b.instance === null) continue;
+          const from = batch.shapesFrom;
+          batch.shapesFrom = from === null || from === b.instance ? b.instance : MIXED_INSTANCES;
+        }
+        const reply = await this.#submit(run, batch.ops);
+        run.counters.otherOps += batch.ops.length;
+        this.#oriented.stats.obbOps += batch.ops.length;
+        this.#checkLive(batch, reply);
+        for (const [i, b] of todo.entries()) {
+          const r = reply.results[i]!;
+          if (r.ok) this.#oriented.set(b.key, r.value as OrientedBox);
+          else result.failures.push({ bodyId: b.id, message: r.error.message });
+        }
+      }
+      for (const b of measured) {
+        const hit = this.#oriented.get(b.key);
+        if (hit === undefined) continue;
+        if (!todo.includes(b)) this.#oriented.stats.obbHits++;
+        result.sizes.push({ bodyId: b.id, sizes: [...hit.sizes], source: hit.source });
+      }
+      return result;
+    });
+  }
+
+  /**
+   * A request on the regen chain that is not a regen (drawings, oriented sizes): at the client's
+   * current generation, superseded (null) by a newer regen, retried on stale shapes.
+   */
+  #onDemand<T>(
+    document: ManufaktureDocument,
+    options: { generation?: number; stored?: ManufaktureDocument },
+    body: (run: Run) => Promise<T>,
+  ): Promise<T | null> {
     let generation: number;
     try {
       generation = this.#currentGeneration(options);
@@ -1609,7 +1711,7 @@ export class RegenEngine {
         return null;
       }
       const run = this.#newRun(generation, document, options.stored);
-      const result = await this.#attempt(run, () => body(this.#drawingHost(run, document)));
+      const result = await this.#attempt(run, () => body(run));
       if (result !== null) this.#addStats(run.counters);
       return result;
     });

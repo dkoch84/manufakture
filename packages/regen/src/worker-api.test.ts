@@ -389,4 +389,17 @@ describe('the regen worker', () => {
     expect(sheet.views[0]!.cached).toBe(true);
     expect(sheet.display!.items.some((i) => i.owner === 'view#1')).toBe(true);
   });
+
+  it('answers oriented sizes at the current generation, without cancelling the regen', async () => {
+    const doc = block();
+    const result = (await client.regen(doc))!;
+    const sizes = (await client.orientedSizes(doc, 'part#1'))!;
+    expect(sizes.generation).toBe(result.generation);
+    expect(client.latestGeneration).toBe(result.generation);
+    expect(sizes.sizes).toHaveLength(1);
+    expect(sizes.failures).toEqual([]);
+    // The block is 40 x 30 x 20 with one rounded vertical edge: its box is still 40 x 30 x 20.
+    const [l, w, t] = sizes.sizes[0]!.sizes;
+    expect([l, w, t].map((x) => Math.round(x * 1e6) / 1e6)).toEqual([40, 30, 20]);
+  });
 });

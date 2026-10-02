@@ -754,6 +754,20 @@ or cylinder silhouette, and among candidates within `PICK_TIE_TOLERANCE` (0.15 m
 the one nearest the viewer (T4.4a: 99.99 % right where the nearest alone is 78.3 %). A silhouette
 is only offered where the face really has one (a fillet's quarter round has one at most).
 
+## Oriented sizes
+
+`orientedSizes(document, partId, { generation, stored?, bodies?, skipExtensions? })`
+(`src/oriented.ts`, `RegenClient.orientedSizes`; M4 plan T4.3d) sizes a part's bodies by the
+kernel's `obb` op (T4.3b): the cut list's input for bodies that are not boards. Like the drawing
+requests it is on demand only, at the client's current generation, on the regen chain (null when a
+newer regen supersedes it), and builds the part through the cache. `bodies` limits it to those
+body ids (any the part does not have come back in `missing`); `skipExtensions` leaves out bodies
+made by extension features of those types (the app passes `wood.board`: a board's size is its
+blank, never its box). The bodies not yet measured go to the kernel in one batch; their sizes
+(longest first, with the box's `source`, `obb` or `aabb`) are cached by body key (an LRU of
+`ORIENTED_CACHE_SIZE` bodies), so asking again for unchanged bodies sends nothing
+(`orientedStats`: `obbOps`, `obbHits`). A body the kernel cannot measure is a `failures` entry.
+
 ## Errors, warnings, statuses
 
 Per feature: `ok`, `error`, `upstream-error`, `suppressed` or `rolled-back`, with `errors`,

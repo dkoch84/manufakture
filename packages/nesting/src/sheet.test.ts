@@ -288,6 +288,23 @@ describe('determinism and cancelling', () => {
     expect(steps.return(undefined as never).done).toBe(true);
   });
 
+  it('progress reaches its total, also for a single part copy (no random attempts)', () => {
+    const run = (input: SheetInput) => {
+      const steps = layoutSheetsSteps(input);
+      let last = { attempt: 0, total: -1 };
+      for (let r = steps.next(); !r.done; r = steps.next()) last = r.value;
+      return last;
+    };
+    const one = run({
+      parts: [{ id: 'a', length: 10, width: 5, quantity: 1, grainLocked: false }],
+      stock: [{ id: 's', length: 96, width: 48, grain: 'none' }],
+      settings: { kerf: 0, randomAttempts: 30 },
+    });
+    expect(one.attempt).toBe(one.total);
+    const many = run({ ...bookshelfA(), settings: { kerf: 0, randomAttempts: 3 } });
+    expect(many.attempt).toBe(many.total);
+  });
+
   it('the async form rejects when aborted and resolves like the sync form otherwise', async () => {
     const input = bookshelfA();
     const controller = new AbortController();

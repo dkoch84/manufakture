@@ -25,6 +25,7 @@ import {
   type RegenEngineOptions,
 } from './engine';
 import type { DrawingSheetResult, DrawingViewResult } from './drawing';
+import type { OrientedSizesOptions, OrientedSizesResult } from './oriented';
 import type { RegenSolver } from './sketches';
 import {
   TextBudget,
@@ -110,6 +111,16 @@ export interface RegenWorkerApi extends KernelWorkerApi {
     sheetId: string,
     options: { generation: number; stored?: ManufaktureDocument; pick?: boolean },
   ): Promise<DrawingSheetResult | null>;
+  /**
+   * The oriented box sizes of a part's bodies (`RegenEngine.orientedSizes`), for the cut list's
+   * bodies that are not boards: cached by body key, at the client's current generation; null
+   * when a newer regen superseded it.
+   */
+  orientedSizes(
+    document: ManufaktureDocument,
+    partId: string,
+    options: OrientedSizesOptions & { generation: number },
+  ): Promise<OrientedSizesResult | null>;
   /** Cumulative engine counters. */
   regenStats(): Promise<EngineStats>;
   /**
@@ -262,6 +273,10 @@ export function createRegenWorkerApi(options: RegenWorkerApiOptions): RegenWorke
 
     async drawingSheet(document, drawingId, sheetId, options) {
       return (await engineFor()).drawingSheet(document, drawingId, sheetId, options);
+    },
+
+    async orientedSizes(document, partId, options) {
+      return (await engineFor()).orientedSizes(document, partId, options);
     },
 
     async regenStats() {

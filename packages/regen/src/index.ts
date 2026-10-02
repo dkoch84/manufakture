@@ -194,6 +194,14 @@ export {
   type ExplodedViewResult,
 } from './explode';
 export { mapFailure, mapKernelError, mapKernelWarning, mapOutcome } from './errors';
+export {
+  ORIENTED_CACHE_SIZE,
+  OrientedCache,
+  type OrientedBodySize,
+  type OrientedSizesOptions,
+  type OrientedSizesResult,
+  type OrientedStats,
+} from './oriented';
 export { hashString, hashValue, stableStringify } from './hash';
 export { regenTransferables } from './transfer';
 export {

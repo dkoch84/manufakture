@@ -107,6 +107,39 @@ A joint is one step that **Undo** takes back.
 
 A joint shows in the tree with a joint icon, its name after its kind ("Dado 7", "Mortise and tenon 9"), the boards it joins ("Shelf into Side") and its hardware ("4 dowels"). It comes after both boards, and moving it above either of them is refused. Double-click it to open the Joint dialog again. A joint saved by a newer version of manufakture, which this version cannot read, keeps its place in the tree but cannot be edited here, like such a board.
 
+## The cut list
+
+**Cut list**, in the toolbar once a document has a board, opens the **Cut list** panel in the side panel. It is made from the model as it is now, in the configuration shown by the configuration switcher (the panel says which), and it follows every edit.
+
+### The list
+
+Each row is a set of identical pieces: the same stock, material and blank size. The size is the **blank**, the board as you cut it on the saw before any joinery (a tenon's length is part of its board), given as length along the grain by width by thickness. Plywood and other sheet goods total their area; lumber totals its **board feet** (on the nominal size for softwood, `2x4`, and on rough quarters with the real width for hardwood) and its length. The **Totals** under the list add each kind up, with all the board feet together; **Hardware** lists the dowels and pocket screws the joints need.
+
+- Rows are grouped by stock. Click a column heading to sort the rows within each group (click again to reverse).
+- **Click a row** to select its bodies in the view.
+- A long list of names is shortened: `Shelf 1, Shelf 2, Shelf 3` shows as `Shelf 1-3`; hover a row for every name.
+- Notes on a row: **ripped** marks lumber narrower or wider than its stock (a ripped or glued-up board), counted in board feet on its real width; **sized from its shape** marks a body that is not a board (an extrusion or an import given a wood material), sized by the smallest box that holds it; **size unknown** marks such a body before it has been measured.
+
+**Bodies that are not in the list are named above it**, in a yellow box, so the list never comes up short without saying so. The usual case is a pattern or mirror copy of a board: the copy is a plain body, not a board, and has no material, so it is left out. Give it a wood material in the [Bodies section](bodies.md) and it is listed by its shape, or make it a board of its own.
+
+### Layouts
+
+The **Layouts** tab shows how to cut the list from stock:
+
+- **Sheet goods**: every sheet drawn to scale, each part numbered as its row in the list, offcuts dashed and waste shaded, with the waste percentage. **Cut order** under a sheet lists the cuts in an order a saw can make them: trims first, then the rips, then the crosscuts of each strip. A part with a grain runs along the sheet's grain; MDF parts may turn.
+- **Lumber**: each stick to buy, with the pieces cut from it and what is left.
+- A lumber blank wider than its stock (a panel glued up from several boards) cannot come from one stick, so it is listed under the layouts and left out of the lumber plan. A stock with no sheet size, or lumber sold in random lengths, has no layout.
+
+The layouts are made in the background, so the page stays responsive on a large list; a percentage shows while they are being made. They are good layouts, not proven best ones.
+
+**Saw and layout settings**, at the top of the tab, holds the **Kerf** (the width the blade removes; empty means 1/8"), the **Sheet edge trim** taken off every factory edge, the **Lumber end trim** taken off both ends of a stick, the **Stages** (2 for rip-then-crosscut layouts, or more), and whether parts follow a sheet's **grain** or may turn. **Apply** stores them with the document as one step that **Undo** takes back, and the layouts are made again. Like stock overrides, they are measured values (`3/32"`, `3mm`), not variables.
+
+### Files for the shop
+
+- **Cut list CSV**: one line per row with every name, the sizes in the document's units, the quantity, the total and the notes.
+- **BOM CSV**: the parts per stock, the sheets and sticks to buy (once the layouts are made), and the hardware.
+- **PDF**: the cut list, hardware and totals, then one page per sheet and the lumber plans, on Letter paper for inch documents and A4 otherwise.
+
 ## Files and history
 
 Boards, joints and stock overrides are saved with the document, travel in `.mfk` files, and appear in the [history](history.md): a version that differs only in its overrides says "Settings that differ: stock overrides."
