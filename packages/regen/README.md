@@ -325,6 +325,25 @@ but bound nothing. A sketch's `FeatureResult.outlines` (and `SketchResult.outlin
 outline's placed loops, so the app draws text as regen built it (T3.2d). Glyph geometry never
 reaches the solver.
 
+- **SVG artwork** (an outline with an `svg` source, M5 T5.8) needs no font and no text worker:
+  `expandOutlines` turns its paths into region loops in the regen worker itself, at the evaluated
+  `scale` (a number; one not above 0 is `invalid` on `entities.<i>.source.scale`), with
+  `svgOutlineRegions` in `packages/sketch` (each path converted alone by its fill rule, then all of
+  them united), and places them like glyphs, a path's index standing for the glyph's
+  (`e5.g3.c0.s12#1`, fragile). Every SVG outline of the regen pass spends one `OutlineBudget`
+  (`Run.svg`, passed as `OutlineContext.svgBudget`), so a document of many costly outlines is
+  bounded as one: three outlines that each cost about half the budget stop in about 8 s, where a
+  budget per outline would let 250 of them run for minutes. An outline refused because the pass's
+  budget ran out fails the sketch with "too complex to convert in one rebuild", marked transient,
+  and neither the sketch's result nor the conversion is cached, so the next regen tries again. A
+  path that cannot be converted fails the sketch (`invalid` on `entities.<i>.source.paths`, naming
+  the shape); open contours and loops that touch are `text` warnings, grouped by code in `svgOutlineRegions` and at most `MAX_SVG_WARNINGS` (8)
+  per artwork, the rest counted in one more. Every regen gets a fresh
+  copy of the document, so results are cached by content: `svgPathsHash` (computed once per paths
+  array) and the scale key the last `SVG_RESULTS_CACHED` (16) conversions, and the sketch's cache
+  key holds the hash instead of the paths (`sketchKeyDefinition`), so a regen that only moves the
+  artwork, or changes another feature, converts nothing again. SVG artwork counts against
+  `MAX_SKETCH_OUTLINE_CURVES` with the texts.
 - **Values.** `size` (the cap height), `letterSpacing` and `lineSpacing` are the feature's
   expressions (core's `featureExpressions`), evaluated with the rest; a size that is not above 0 is
   `invalid` on `entities.<i>.source.size`.
@@ -957,6 +976,11 @@ pnpm --filter @manufakture/regen test
   refused, strings cut to length, read through the watchdog with the bytes sent once and the font
   kept for its first text, a font whose reading hangs failed once and never retried, and the worker
   API's `readFont` and `outlineText`, refused without a watchdog).
+- `svg-regen.test.ts`: SVG artwork through the engine with the real kernel and solver: a plate cut
+  around an `evenodd` frame and a square and the artwork extruded, its volume following the scale
+  variable, the sketch cached on a fresh copy of the document, the conversion cached by content and
+  the key holding a hash of the paths, and a scale of 0 and paths that cannot be converted failing
+  the sketch with the field and shape named.
 - `text-regen.test.ts`: text through the engine with the real kernel and solver: a plate with "OK"
   in it, the plate extruded by its lines (letter-shaped holes, the counter of the "O" kept) and the
   letters by the text, volumes against areas computed glyph by glyph from the font; a new string

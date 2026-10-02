@@ -242,6 +242,19 @@ export const migrateV11ToV12: Migration = {
   },
 };
 
+/**
+ * Version 13 added the `svg` source of the `outline` sketch entity (ADR 0012 decision 7, M5
+ * T5.8): SVG artwork stored as paths. Nothing in a version 12 file changes: its outlines are text.
+ */
+export const migrateV12ToV13: Migration = {
+  from: 12,
+  to: 13,
+  description: 'Add SVG outline sources',
+  migrate(doc) {
+    return { ...doc, version: 13 };
+  },
+};
+
 /** File format migrations, in order: `FORMAT_MIGRATIONS[i]` goes from version i to i + 1. */
 export const FORMAT_MIGRATIONS: readonly Migration[] = [
   migrateV0ToV1,
@@ -256,6 +269,7 @@ export const FORMAT_MIGRATIONS: readonly Migration[] = [
   migrateV9ToV10,
   migrateV10ToV11,
   migrateV11ToV12,
+  migrateV12ToV13,
 ];
 
 /**

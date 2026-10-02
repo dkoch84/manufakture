@@ -8,7 +8,8 @@
 
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { DocumentStore, validateDocument, type OutlineEntity } from '@manufakture/core';
+import { DocumentStore, validateDocument } from '@manufakture/core';
+import type { TextOutline } from '../sketcher/text';
 import type { MeasureResult } from '@manufakture/kernel';
 import { createNodeService } from '@manufakture/kernel/node';
 import {
@@ -66,7 +67,7 @@ describe('the fit-test coupon document', () => {
     ]);
     const features = doc.parts[0]!.features;
     const sketch = features.find((f) => f.name === 'Clearance labels');
-    const labels = (sketch?.kind === 'sketch' ? sketch.entities : []) as OutlineEntity[];
+    const labels = (sketch?.kind === 'sketch' ? sketch.entities : []) as TextOutline[];
     expect(labels.map((l) => [l.source.text, l.anchor[0], l.source.font])).toEqual(
       COUPON_CLEARANCES.map((c, i) => [c.toFixed(2), 10 * (i + 1), 'font#1']),
     );

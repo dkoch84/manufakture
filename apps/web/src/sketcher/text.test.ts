@@ -12,7 +12,6 @@ import {
   type Region,
   type RegionCurve,
 } from '@manufakture/sketch/geometry';
-import type { OutlineEntity } from '@manufakture/sketch/model';
 import { lengthQuantity } from '@manufakture/units';
 import { describe, expect, it } from 'vitest';
 import {
@@ -33,6 +32,7 @@ import {
   regionFills,
   shapesBox,
   textRequestOf,
+  type TextOutline,
 } from './text';
 import { interBold, localTexter } from './text.test-helpers';
 
@@ -49,7 +49,7 @@ const USER: DocumentFont = {
   source: { kind: 'file', fileName: 'mine.ttf', size: 3, sha256: 'b'.repeat(64), data: 'AAAA' },
 };
 
-function text(patch: Partial<OutlineEntity['source']> = {}, anchor: [number, number] = [0, 0]) {
+function text(patch: Partial<TextOutline['source']> = {}, anchor: [number, number] = [0, 0]) {
   return {
     id: 'e5',
     kind: 'outline',
@@ -64,7 +64,7 @@ function text(patch: Partial<OutlineEntity['source']> = {}, anchor: [number, num
       align: { horizontal: 'center', vertical: 'middle' },
       ...patch,
     },
-  } satisfies OutlineEntity;
+  } satisfies TextOutline;
 }
 
 describe('textRequestOf', () => {

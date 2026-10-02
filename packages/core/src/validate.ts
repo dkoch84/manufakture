@@ -32,6 +32,8 @@ import {
   DRAWING_COUNTER,
   FONT_COUNTER,
   MAX_SKETCH_OUTLINE_TEXT,
+  MAX_SKETCH_SVG_COMMANDS,
+  svgCommandCount,
   SKETCH_ORIGIN,
   codePointLength,
   type Assembly,
@@ -199,6 +201,7 @@ function checkSketch(
 ): void {
   const entities = new Map(sketch.entities.map((e) => [e.id, e]));
   let text = 0;
+  let svgCommands = 0;
   sketch.entities.forEach((e, ei) => {
     if (e.kind !== 'outline') return;
     const epath = [...path, 'entities', ei];
@@ -210,6 +213,10 @@ function checkSketch(
         path: [...epath, 'id'],
       });
     }
+    if (e.source.kind === 'svg') {
+      svgCommands += svgCommandCount(e.source.paths);
+      return;
+    }
     if (!fontIds.has(e.source.font)) {
       out.push({
         code: 'dependency',
@@ -220,6 +227,13 @@ function checkSketch(
     }
     text += codePointLength(e.source.text);
   });
+  if (svgCommands > MAX_SKETCH_SVG_COMMANDS) {
+    out.push({
+      code: 'sketch',
+      message: `The SVG artwork of ${sketch.id} has ${svgCommands} path commands together; a sketch holds at most ${MAX_SKETCH_SVG_COMMANDS}`,
+      path: [...path, 'entities'],
+    });
+  }
   if (text > MAX_SKETCH_OUTLINE_TEXT) {
     out.push({
       code: 'sketch',

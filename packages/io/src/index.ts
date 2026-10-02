@@ -1,7 +1,8 @@
 // @manufakture/io: file formats. STL and 3MF are read and written here in
 // plain TypeScript; STEP geometry goes through the kernel (OCCT's
 // translators), and this package only reads STEP text (product names). 2D
-// sheets (drawings, and laser and plasma outlines) are written as SVG, DXF and PDF.
+// sheets (drawings, and laser and plasma outlines) are written as SVG, DXF and PDF,
+// and SVG artwork is read as lines and arcs for sketches.
 
 export const packageName = '@manufakture/io';
 
@@ -128,3 +129,48 @@ export {
   drawingToSvg,
   type DrawingSheetOptions,
 } from './drawing-export';
+export {
+  DEFAULT_SVG_OUTLINE_TOLERANCE,
+  DEFAULT_SVG_TOLERANCE,
+  MAX_SVG_CHARS,
+  MAX_SVG_COMMANDS,
+  MAX_SVG_DEPTH,
+  MAX_SVG_ELEMENTS,
+  MAX_SVG_SEGMENTS,
+  MAX_SVG_VISITS,
+  SvgImportError,
+  fitSvg,
+  importSvg,
+  parseLength,
+  parsePathData,
+  parseSvg,
+  parseTransform,
+  parseXml,
+  placeSvgImport,
+  svgAnchorPoint,
+  svgGeometryBounds,
+  svgImportCounts,
+  svgOutlinePaths,
+  type ParsedSvg,
+  type SvgAnchor,
+  type SvgBounds,
+  type SvgCircle,
+  type SvgContour,
+  type SvgFillRule,
+  type SvgFitOptions,
+  type SvgImport,
+  type SvgImportErrorCode,
+  type SvgImportOptions,
+  type SvgIssue,
+  type SvgIssueCode,
+  type SvgMatrix,
+  type SvgOutlineCommand,
+  type SvgOutlineLimit,
+  type SvgOutlineOptions,
+  type SvgOutlinePath,
+  type SvgOutlinePaths,
+  type SvgPathCommand,
+  type SvgSegment,
+  type SvgShape,
+  type XmlElement,
+} from './svg-import';

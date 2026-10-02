@@ -90,11 +90,44 @@ export interface TextOutlineSource {
   lineSpacing?: StoredExpression;
 }
 
-/** What an outline is drawn from. M5 adds an `svg` source to this union (ADR 0012 decision 7). */
-export type OutlineSource = TextOutlineSource;
+/**
+ * One command of a path of lines and Beziers (`outline.ts` turns paths into region loops). A path
+ * is a list of these; each `moveTo` starts a contour.
+ */
+export type PathCommand =
+  | { kind: 'moveTo'; to: Vec2 }
+  | { kind: 'lineTo'; to: Vec2 }
+  | { kind: 'quadTo'; control: Vec2; to: Vec2 }
+  | { kind: 'cubicTo'; control1: Vec2; control2: Vec2; to: Vec2 }
+  | { kind: 'close' };
+
+/** One shape of an SVG file: its path and the fill rule it is drawn with. */
+export interface SvgOutlinePath {
+  fillRule: 'nonzero' | 'evenodd';
+  commands: PathCommand[];
+}
 
 /**
- * Closed outlines from a source (text, later SVG), placed at `anchor` and turned by `angle`
+ * Artwork from an SVG file (M5 T5.8), stored as the file's shapes already read: paths of lines
+ * and Beziers in millimetres with y up, in the outline's own frame (the anchor at the origin),
+ * at scale 1; elliptical arcs became cubics within a tolerance when the file was imported
+ * (`@manufakture/io`'s `svgOutlinePaths`). Each path keeps its fill rule; the filled areas of all
+ * of them together are the outline's regions.
+ */
+export interface SvgOutlineSource {
+  kind: 'svg';
+  /** The file it was imported from, for display only. */
+  fileName: string;
+  paths: SvgOutlinePath[];
+  /** A plain number multiplying the paths about the anchor; absent: 1. */
+  scale?: StoredExpression;
+}
+
+/** What an outline is drawn from (ADR 0012 decision 7): text, or SVG artwork (M5 T5.8). */
+export type OutlineSource = TextOutlineSource | SvgOutlineSource;
+
+/**
+ * Closed outlines from a source (text or SVG artwork), placed at `anchor` and turned by `angle`
  * (radians, counter-clockwise from the sketch x axis) about it. The anchor is a point the
  * solver moves like a point entity and constraints reference as `{ entity, at: 'anchor' }`;
  * `angle` is stored as placed and never solved, and the outline's own geometry is never solved

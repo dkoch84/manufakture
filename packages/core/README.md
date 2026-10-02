@@ -935,13 +935,13 @@ solved values, in millimetres in the sketch plane's 2D frame: they seed the solv
 solution the sketch settles into; the constraints define it. The plane is an explicit
 `{ origin, normal, xDir }` (the sketch package's `SketchPlacement`) or a face reference.
 
-| Entity    | Fields                                                                     |
-| --------- | -------------------------------------------------------------------------- |
-| `point`   | `position`                                                                 |
-| `line`    | `start`, `end` (lines own their endpoints, FreeCAD style)                  |
-| `circle`  | `center`, `radius`                                                         |
-| `arc`     | `center`, `start`, `end` (counter-clockwise; radius is derived)            |
-| `outline` | `anchor`, `angle` (radians), `source` (since version 9; a text, see below) |
+| Entity    | Fields                                                                              |
+| --------- | ----------------------------------------------------------------------------------- |
+| `point`   | `position`                                                                          |
+| `line`    | `start`, `end` (lines own their endpoints, FreeCAD style)                           |
+| `circle`  | `center`, `radius`                                                                  |
+| `arc`     | `center`, `start`, `end` (counter-clockwise; radius is derived)                     |
+| `outline` | `anchor`, `angle` (radians), `source` (since version 9; text or SVG art, see below) |
 
 Every entity also has `id` and `construction`. Constraints name geometry in two ways: a curve is
 an entity id, and a point is a `PointRef { entity, at? }`, where `at` is `start` or `end` (lines,
@@ -972,7 +972,8 @@ it maps onto planegcs, is the sketch package's business.
 **Outlines** ([ADR 0012](../../docs/adr/0012-3d-printing.md) decision 7) are closed shapes from a
 source, placed at `anchor` and turned by `angle` about it. The anchor is solved like a point, so
 constraints can place a text; `angle` and the shape are not solved. Regen lays the source out and
-turns it into regions at every regen. One source kind exists so far (M5 adds `svg`):
+turns it into regions at every regen. Two source kinds exist, text and (since version 13, M5 T5.8)
+SVG artwork:
 
 ```ts
 source: {
@@ -986,17 +987,37 @@ source: {
 }
 ```
 
+```ts
+source: {
+  kind: 'svg';
+  fileName: string; // the file it came from, for display; at most 255 characters
+  paths: { fillRule: 'nonzero' | 'evenodd'; commands: PathCommand[] }[]; // see below
+  scale?: StoredExpression; // a plain number multiplying the paths about the anchor; absent: 1
+}
+```
+
+An SVG source holds the file's shapes already read (`@manufakture/io`'s `svgOutlinePaths`): one
+path per shape, its commands `moveTo`, `lineTo`, `quadTo`, `cubicTo` and `close` (the sketch
+model's `PathCommand`) in millimetres in the outline's own frame (the anchor at the origin), at
+scale 1, with the shape's fill rule. The document stores no SVG text, so loading one parses no
+XML: the schema checks every coordinate is a finite number and caps a source at
+`MAX_SVG_OUTLINE_PATHS` (20,000) paths and `MAX_SVG_OUTLINE_COMMANDS` (100,000) commands, and
+validation caps all the SVG outlines of one sketch together at `MAX_SKETCH_SVG_COMMANDS` (100,000).
+Regen bounds the work of turning them into regions (regen README, "Text").
+
 The text of all outlines of one sketch together is capped at `MAX_SKETCH_OUTLINE_TEXT` (10,000
 code points): layout and kerning cost grow with it, and the string comes from the document. An
 outline's id takes no split suffix (its glyph edge ids are built on it). `featureExpressions`
-lists `size`, `letterSpacing` and `lineSpacing` at `['entities', i, 'source', ...]`, so they are
-checked, renamed and inlined like any other expression.
+lists `size`, `letterSpacing` and `lineSpacing` (and an SVG source's `scale`, a number) at
+`['entities', i, 'source', ...]`, so they are checked, renamed and inlined like any other
+expression. Only text uses fonts: an SVG outline never blocks deleting one.
 
 ### One source of truth for sketch types
 
 The sketch data types are defined once, in `@manufakture/sketch/model`: `SketchEntity` (and
 `PointEntity`, `LineEntity`, `CircleEntity`, `ArcEntity`, `OutlineEntity` with its
-`OutlineSource`, `TextOutlineSource` and `OutlineAlign`), `SketchConstraint`, `ConstraintKind`,
+`OutlineSource`, `TextOutlineSource`, `SvgOutlineSource`, `SvgOutlinePath`, `PathCommand` and
+`OutlineAlign`), `SketchConstraint`, `ConstraintKind`,
 `PointRef`, `PointPosition`, `EndPosition`, `SketchPlacement`, `StoredExpression`, `Vec2` and
 `Vec3`. Core imports them with `import type` only and re-exports them, so
 `import type { SketchEntity } from '@manufakture/core'` is the same type as the sketch package's;
@@ -1363,7 +1384,8 @@ solids in one compound (`v3-two-bodies.json`) regenerates the same solids, now a
 to exactly `v4-bracket.json` and that to exactly `v5-bracket.json` and that to exactly
 `v6-bracket.json` and that to exactly `v7-bracket.json` and that to exactly `v8-bracket.json`
 and that to exactly `v9-bracket.json` and that to exactly `v10-bracket.json` and that to exactly
-`v11-bracket.json` and that to exactly `v12-bracket.json`, and
+`v11-bracket.json` and that to exactly `v12-bracket.json` and that to exactly `v13-bracket.json`,
+and
 `v3-two-bodies.json` to
 exactly `v4-two-bodies.json`. Version 5 added the optional configuration table; `migrateV4ToV5`
 only bumps the version, since a version 4 document has none and an absent counter starts at 1.
@@ -1389,7 +1411,10 @@ both are optional and a version 10 file has neither; `v10-bracket.json` migrates
 `v11-bracket.json`. Version 12 added drawings (the optional document-level `drawings`) and
 exploded views (the optional `explodedViews` of an assembly), M4 plan decisions 7 and 9;
 `migrateV11ToV12` only bumps the version, since both are optional, absent when empty, and a version
-11 file has neither; `v11-bracket.json` migrates to exactly `v12-bracket.json`.
+11 file has neither; `v11-bracket.json` migrates to exactly `v12-bracket.json`. Version 13 added
+the `svg` source of the `outline` entity (ADR 0012 decision 7, M5 T5.8); `migrateV12ToV13` only
+bumps the version, since a version 12 file's outlines are all text; `v12-bracket.json` migrates to
+exactly `v13-bracket.json`.
 
 To change the file shape:
 

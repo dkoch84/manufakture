@@ -1,6 +1,8 @@
 import type {
   OutlineAlign,
   OutlineSource,
+  PathCommand,
+  SvgOutlinePath,
   PointRef,
   SketchConstraint,
   SketchEntity,
@@ -30,7 +32,7 @@ import { MATERIAL_IDS } from './materials';
  */
 
 /** The file format version this code reads and writes. Bump it only together with a migration. */
-export const FORMAT_VERSION = 12;
+export const FORMAT_VERSION = 13;
 /** The topological naming scheme version (T0.5) that stored references are written in. */
 export const NAMING_SCHEME = 1;
 export const FORMAT_TAG = 'manufakture';
@@ -296,9 +298,41 @@ export const OutlineAlignSchema = z.strictObject({
 }) satisfies z.ZodType<OutlineAlign>;
 
 /**
+ * The most path commands one SVG outline may have (checked here and again by
+ * `@manufakture/sketch`'s `svgOutlineRegions`, with the same value), and all the SVG outlines of
+ * one sketch together (checked here only, by `validate.ts`). The paths come from the document,
+ * so the caps bound what a crafted file costs to load and to regenerate. A sign's lettering is a
+ * few thousand.
+ */
+export const MAX_SVG_OUTLINE_COMMANDS = 100_000;
+export const MAX_SKETCH_SVG_COMMANDS = 100_000;
+/** The most paths (shapes of the file) one SVG outline may have. */
+export const MAX_SVG_OUTLINE_PATHS = 20_000;
+
+export const PathCommandSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('moveTo'), to: Point2Schema }),
+  z.strictObject({ kind: z.literal('lineTo'), to: Point2Schema }),
+  z.strictObject({ kind: z.literal('quadTo'), control: Point2Schema, to: Point2Schema }),
+  z.strictObject({
+    kind: z.literal('cubicTo'),
+    control1: Point2Schema,
+    control2: Point2Schema,
+    to: Point2Schema,
+  }),
+  z.strictObject({ kind: z.literal('close') }),
+]) satisfies z.ZodType<PathCommand>;
+
+export const SvgOutlinePathSchema = z.strictObject({
+  fillRule: z.enum(['nonzero', 'evenodd']),
+  commands: z.array(PathCommandSchema).max(MAX_SVG_OUTLINE_COMMANDS, { abort: true }),
+}) satisfies z.ZodType<SvgOutlinePath>;
+
+/**
  * What an outline is drawn from (ADR 0012 decision 7). `text`: a string in a font of the
  * document, `size` its cap height (a length), `letterSpacing` a length, `lineSpacing` a multiple
- * of the font's line height (a plain number). M5 adds an `svg` source.
+ * of the font's line height (a plain number). `svg` (since version 13, M5 T5.8): an SVG file's
+ * shapes as paths of lines and Beziers in millimetres in the outline's frame, each with its fill
+ * rule, the file's name for display, and `scale` a plain number (absent: 1).
  */
 export const OutlineSourceSchema = z.discriminatedUnion('kind', [
   z.strictObject({
@@ -317,7 +351,26 @@ export const OutlineSourceSchema = z.discriminatedUnion('kind', [
     letterSpacing: StoredExpressionSchema.exactOptional(),
     lineSpacing: StoredExpressionSchema.exactOptional(),
   }),
+  z.strictObject({
+    kind: z.literal('svg'),
+    fileName: z.string().max(255),
+    paths: z
+      .array(SvgOutlinePathSchema)
+      .max(MAX_SVG_OUTLINE_PATHS, { abort: true })
+      .refine(
+        (paths) => svgCommandCount(paths) <= MAX_SVG_OUTLINE_COMMANDS,
+        `SVG artwork holds at most ${MAX_SVG_OUTLINE_COMMANDS} path commands`,
+      ),
+    scale: StoredExpressionSchema.exactOptional(),
+  }),
 ]) satisfies z.ZodType<OutlineSource>;
+
+/** Path commands of an SVG outline's paths, in all. */
+export function svgCommandCount(paths: readonly { commands: readonly unknown[] }[]): number {
+  let n = 0;
+  for (const p of paths) n += p.commands.length;
+  return n;
+}
 
 const construction = z.boolean();
 
@@ -2096,6 +2149,7 @@ export type {
   OutlineAlign,
   OutlineEntity,
   OutlineSource,
+  PathCommand,
   PointEntity,
   PointPosition,
   PointRef,
@@ -2103,6 +2157,8 @@ export type {
   SketchEntity,
   SketchPlacement,
   StoredExpression,
+  SvgOutlinePath,
+  SvgOutlineSource,
   TextOutlineSource,
   Vec2,
   Vec3,

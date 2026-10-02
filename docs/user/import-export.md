@@ -73,6 +73,8 @@ Click **Import** and pick a file:
 - **STEP** (`.step`, `.stp`): read by the geometry kernel as exact geometry. The body is named after the first product in the file, or the file name. Its faces can be selected and measured like the part's.
 - **STL** (`.stl`, binary or ASCII): a triangle mesh. It is shown and its **Body** measurements (volume, surface area, centre of mass, size) work; single faces and edges of a mesh cannot be measured, and no modelling feature can use a mesh. A mesh with holes or other bad edges encloses no volume, so its volume, centre of mass and mass show as none (hover over **Volume** for why); surface area and size still work.
 
+SVG artwork (a sign's lettering, a logo) is imported into a sketch instead: as one outline that keeps its curves exact (the default), or as sketch lines, arcs and circles to edit point by point. See [Importing SVG artwork](sketcher.md#importing-svg-artwork).
+
 An imported file becomes a **reference body**: it is shown next to the model and can be measured, but it is not joined to your part and is never exported with it. It is added to the document as an **Import** feature, one undo step: **Undo** removes it and hides the body, **Redo** brings it back. Once an undone import can no longer be redone (you made another change after the undo), the body is let go for good.
 
 The file itself is stored inside the document, so the document stays complete on its own when it is saved or copied. Files up to 20 MB can be imported.

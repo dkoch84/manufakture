@@ -159,7 +159,8 @@ export type RegenWarning =
   | { code: 'rollback'; message: string; partId: string }
   /**
    * A text built with something to look at: characters its font has no glyph for (`missing`,
-   * left out), kerning that could not be read, glyph loops that touch at a point.
+   * left out), kerning that could not be read, glyph loops that touch at a point. Also SVG
+   * artwork's (an outline with an `svg` source): contours left open, loops that touch.
    */
   | { code: 'text'; message: string; entityId: string; missing?: string[] }
   /**

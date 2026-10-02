@@ -1838,7 +1838,7 @@ export function fontUsers(doc: ManufaktureDocument, fontId: string): string[] {
     for (const f of part.features) {
       if (f.kind !== 'sketch') continue;
       for (const e of f.entities) {
-        if (e.kind === 'outline' && e.source.font === fontId)
+        if (e.kind === 'outline' && e.source.kind === 'text' && e.source.font === fontId)
           out.push(`${part.id}/${f.id}/${e.id}`);
       }
     }

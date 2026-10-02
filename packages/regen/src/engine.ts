@@ -78,7 +78,7 @@ import {
   type Topology,
   type TopoRef,
 } from '@manufakture/kernel';
-import type { SketchPlacement } from '@manufakture/sketch';
+import { OutlineBudget, type SketchPlacement } from '@manufakture/sketch';
 import { bundledFont } from '@manufakture/text/bundled';
 import {
   DEFAULT_KERNEL_BUILD,
@@ -169,6 +169,7 @@ import { importSourceMatches, keyInput } from './imports';
 import {
   explicitPlacement,
   sketchFontKey,
+  sketchKeyDefinition,
   solveSketch,
   type RegenSolver,
   type SketchResult,
@@ -342,6 +343,8 @@ interface Run {
   abort: AbortController;
   /** The time this run's texts may take (`TextBudget`). */
   text: TextBudget;
+  /** The work this run's SVG outlines may take together (`OutlineBudget`). */
+  svg: OutlineBudget;
   counters: RegenCounters;
   used: Set<string>;
   /** Kernel instance of the latest reply. */
@@ -702,6 +705,7 @@ export class RegenEngine {
       generation,
       abort: new AbortController(),
       text: new TextBudget(),
+      svg: new OutlineBudget(),
       stored,
       counters: emptyCounters(),
       used: new Set(),
@@ -2354,7 +2358,7 @@ export class RegenEngine {
     const fonts = sketchFontKey(f, state.fonts, (id) => bundledFont(id)?.sha256);
     const key = this.#key(state, {
       solver: this.#solverBuild,
-      sketch: definition,
+      sketch: sketchKeyDefinition(definition),
       values: [...values.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
       plane,
       // Only sketches with text have fonts in their key, so other keys stay as they were.
@@ -2458,6 +2462,7 @@ export class RegenEngine {
       outliner: this.#text,
       signal: run.abort.signal,
       budget: run.text,
+      svgBudget: run.svg,
       checkStale: () => this.#checkStale(run),
     });
     this.#checkStale(run);

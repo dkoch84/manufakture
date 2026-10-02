@@ -2,15 +2,32 @@
 // decision 4), then split into regions (`detectRegions`). A sketch makes no geometry of its
 // own; extrudes, revolves and holes read its solved entities, regions and placement.
 //
-// Outline entities (text, ADR 0012 decision 7) are expanded after the solve, once their anchors
-// are placed: each text is laid out in its font and its glyphs turned into region loops by the
-// text outliner (`text.ts`, in a text worker under a watchdog), placed at the anchor and angle
-// (`placeOutline`), and handed to `detectRegions` with the sketch's own curves. Glyph geometry
-// never reaches the solver.
+// Outline entities (text and SVG artwork, ADR 0012 decision 7) are expanded after the solve, once
+// their anchors are placed: each text is laid out in its font and its glyphs turned into region
+// loops by the text outliner (`text.ts`, in a text worker under a watchdog); SVG artwork's paths
+// are turned into region loops here (`svgOutlineRegions`, bounded by one shared work budget, so
+// it needs no worker of its own). Either is placed at the anchor and angle (`placeOutline`) and
+// handed to `detectRegions` with the sketch's own curves. Outline geometry never reaches the
+// solver.
+//
+// The document reaches the regen worker as a fresh copy on every regen, so SVG results are
+// cached by the content of their paths (`svgPathsHash`), which the sketch's cache key uses too
+// (`sketchKeyDefinition`): a regen that only moves the artwork converts nothing again, and the
+// key is built from a hash rather than from every path command.
 
-import type { DocumentFont, OutlineEntity, SketchFeature, SketchPlane } from '@manufakture/core';
+import type {
+  DocumentFont,
+  OutlineEntity,
+  SketchFeature,
+  SketchPlane,
+  SvgOutlinePath,
+} from '@manufakture/core';
 import {
   detectRegions,
+  svgIssueShapes,
+  svgOutlineRegions,
+  type OutlineBudget,
+  type OutlinePartsResult,
   outlinePartsSize,
   placeOutline,
   placementFromNormal,
@@ -31,6 +48,7 @@ import {
   type TextReply,
   type TextRequest,
 } from './text';
+import { hashString, stableStringify } from './hash';
 import { pathKey, type VariableValues } from './values';
 import type { RegenError, RegenWarning } from './types';
 
@@ -108,6 +126,71 @@ export interface OutlineContext {
   checkStale?: () => void;
   /** Default `MAX_SKETCH_OUTLINE_CURVES`. */
   maxCurves?: number;
+  /**
+   * The work every SVG outline of the regen pass may spend together (one `OutlineBudget` per
+   * pass): many outlines that are each costly cannot add up. Default: one per outline.
+   */
+  svgBudget?: OutlineBudget;
+}
+
+// SVG outlines ----------------------------------------------------------------------------------
+
+const svgHashes = new WeakMap<readonly SvgOutlinePath[], string>();
+
+/** A hash of an SVG outline's paths: what its regions and the sketch's cache key depend on. */
+export function svgPathsHash(paths: readonly SvgOutlinePath[]): string {
+  let hash = svgHashes.get(paths);
+  if (hash === undefined) {
+    hash = hashString(stableStringify(paths));
+    svgHashes.set(paths, hash);
+  }
+  return hash;
+}
+
+/** Warnings one SVG outline may add to a sketch's result; past this they are counted. */
+export const MAX_SVG_WARNINGS = 8;
+
+/** SVG outline conversions kept, by paths hash and scale: the last few, least recent dropped. */
+export const SVG_RESULTS_CACHED = 16;
+const svgResults = new Map<string, OutlinePartsResult>();
+
+/** `svgOutlineRegions`, remembered by content across regens (each gets a new document copy). */
+export function cachedSvgOutlineRegions(
+  paths: readonly SvgOutlinePath[],
+  scale: number,
+  budget?: OutlineBudget,
+): OutlinePartsResult {
+  const key = `${svgPathsHash(paths)}|${scale}`;
+  const hit = svgResults.get(key);
+  if (hit) {
+    svgResults.delete(key);
+    svgResults.set(key, hit);
+    return hit;
+  }
+  const result = svgOutlineRegions(paths, scale, budget ? { budget } : {});
+  // A refusal for the pass's shared budget is not this artwork's result: never cached.
+  if (budget?.exhausted && result.issues.some((i) => i.code === 'too-complex')) return result;
+  svgResults.set(key, result);
+  if (svgResults.size > SVG_RESULTS_CACHED) svgResults.delete(svgResults.keys().next().value!);
+  return result;
+}
+
+/**
+ * A sketch definition for its cache key: every SVG outline's paths replaced by their hash, so the
+ * key does not grow with the artwork.
+ */
+export function sketchKeyDefinition<T extends Pick<SketchFeature, 'entities'>>(definition: T): T {
+  if (!definition.entities.some((e) => e.kind === 'outline' && e.source.kind === 'svg')) {
+    return definition;
+  }
+  return {
+    ...definition,
+    entities: definition.entities.map((e) =>
+      e.kind === 'outline' && e.source.kind === 'svg'
+        ? { ...e, source: { ...e.source, paths: svgPathsHash(e.source.paths) } }
+        : e,
+    ),
+  } as T;
 }
 
 /**
@@ -146,6 +229,84 @@ export async function expandOutlines(
     const entity = (byId.get(stored.id) ?? stored) as OutlineEntity;
     const field = (...rest: string[]) => ['entities', i, 'source', ...rest];
     const { source } = entity;
+    if (source.kind === 'svg') {
+      const scale = context.values.get(pathKey(field('scale'))) ?? 1;
+      if (!(scale > 0) || !Number.isFinite(scale)) {
+        out.errors.push({
+          code: 'invalid',
+          field: field('scale'),
+          message: `The scale of ${entity.id} must be a number above 0`,
+        });
+        continue;
+      }
+      const result = cachedSvgOutlineRegions(source.paths, scale, context.svgBudget);
+      let failed = false;
+      if (context.svgBudget?.exhausted && result.issues.some((i) => i.code === 'too-complex')) {
+        // The pass's budget for SVG artwork is spent: may not happen in a regen of fewer
+        // outlines, so the sketch is not cached.
+        out.transient = true;
+        out.errors.push({
+          code: 'invalid',
+          field: field('paths'),
+          message: `The SVG artwork ${entity.id} (${source.fileName}) was not converted: the SVG artwork of this document is too complex to convert in one rebuild; simplify it, or remove some`,
+        });
+        continue;
+      }
+      // `svgOutlineRegions` groups its issues by code; at most MAX_SVG_WARNINGS go out anyway.
+      let warned = 0;
+      let unsent = 0;
+      for (const issue of result.issues) {
+        if (issue.severity === 'warning' && warned >= MAX_SVG_WARNINGS) {
+          unsent++;
+          continue;
+        }
+        // At most a few shapes named, the rest counted: one issue may involve every path.
+        const shapes = svgIssueShapes(issue);
+        const what = `${entity.id} (${source.fileName}${shapes ? `, shape ${shapes}` : ''})`;
+        if (issue.severity === 'error') {
+          failed = true;
+          out.errors.push({
+            code: 'invalid',
+            field: field('paths'),
+            message: `The SVG artwork ${what} could not be converted: ${issue.message}`,
+          });
+        } else if (issue.severity === 'warning') {
+          warned++;
+          out.warnings.push({
+            code: 'text',
+            message: `${what}: ${issue.message}`,
+            entityId: entity.id,
+          });
+        }
+      }
+      if (unsent > 0) {
+        out.warnings.push({
+          code: 'text',
+          message: `${entity.id} (${source.fileName}): ${unsent.toLocaleString('en')} more warnings.`,
+          entityId: entity.id,
+        });
+      }
+      if (failed) continue;
+      const placing = outlinePartsSize(result).curves;
+      if (curves + placing > maxCurves) {
+        out.errors.push({
+          code: 'invalid',
+          field: field('paths'),
+          message: `The outlines of this sketch are too complex: with ${entity.id} they make ${curves + placing} curves, and a sketch's outlines may make at most ${maxCurves}; simplify the artwork, or put some in another sketch`,
+        });
+        continue;
+      }
+      curves += placing;
+      out.shapes.push(
+        ...placeOutline(
+          entity,
+          source.paths.map((_, k) => k),
+          result,
+        ),
+      );
+      if (entity.construction) out.construction.add(entity.id);
+      continue;
+    }
     const font = context.fonts.find((f) => f.id === source.font);
     if (!font) {
       out.errors.push({
@@ -385,7 +546,9 @@ export function sketchFontKey(
   bundledSha256: (id: string) => string | undefined,
 ): unknown[] {
   const used = new Set<string>();
-  for (const e of feature.entities) if (e.kind === 'outline') used.add(e.source.font);
+  for (const e of feature.entities) {
+    if (e.kind === 'outline' && e.source.kind === 'text') used.add(e.source.font);
+  }
   return [...used].sort().map((id) => {
     const font = fonts.find((f) => f.id === id);
     if (!font) return [id, null];

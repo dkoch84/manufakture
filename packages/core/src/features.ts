@@ -210,9 +210,14 @@ export function featureExpressions(feature: Feature): ExpressionSite[] {
           );
         }
       });
-      // A text's size and spacing (since version 9): evaluated by regen, never by the solver.
+      // A text's size and spacing (since version 9), and an SVG outline's scale (since version
+      // 13): evaluated by regen, never by the solver.
       feature.entities.forEach((e, i) => {
         if (e.kind !== 'outline') return;
+        if (e.source.kind === 'svg') {
+          add(['entities', i, 'source', 'scale'], e.source.scale, 'number');
+          return;
+        }
         add(['entities', i, 'source', 'size'], e.source.size, 'length');
         add(['entities', i, 'source', 'letterSpacing'], e.source.letterSpacing, 'length');
         add(['entities', i, 'source', 'lineSpacing'], e.source.lineSpacing, 'number');

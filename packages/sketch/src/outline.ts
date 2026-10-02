@@ -42,7 +42,7 @@
 // This module knows nothing about fonts or SVG; units are whatever the path
 // uses (millimetres in a sketch). Everything is plain data.
 
-import type { Vec2 } from './model';
+import type { PathCommand, Vec2 } from './model';
 
 /** Default tolerance relative to the path's extent, as `detectRegions` uses. */
 const RELATIVE_TOLERANCE = 1e-6;
@@ -64,13 +64,34 @@ export const MAX_OUTLINE_POINTS = 1_000_000;
 /** Thrown when a call runs out of its work budget. */
 class TooComplex extends Error {}
 
-/** What one call may still spend. */
-class Budget {
-  private steps = MAX_OUTLINE_WORK;
-  private points = MAX_OUTLINE_POINTS;
+/**
+ * What a call may still spend: by default each call gets its own (`MAX_OUTLINE_WORK` steps,
+ * `MAX_OUTLINE_POINTS` vertices). Pass one as `OutlineOptions.budget` to share it between calls,
+ * so that many calls together are bounded too (an SVG outline's paths, `outline-svg.ts`).
+ */
+export class OutlineBudget {
+  private steps: number;
+  private points: number;
+  private readonly fullSteps: number;
+  private readonly fullPoints: number;
+  constructor(steps: number = MAX_OUTLINE_WORK, points: number = MAX_OUTLINE_POINTS) {
+    this.steps = this.fullSteps = steps;
+    this.points = this.fullPoints = points;
+  }
+  /**
+   * Whether anything was spent yet. A call refused for a budget that was untouched when it
+   * began is too complex on its own; one refused after other calls spent part of it may not be.
+   */
+  get used(): boolean {
+    return this.steps !== this.fullSteps || this.points !== this.fullPoints;
+  }
   spend(steps: number): void {
     this.steps -= steps;
     if (this.steps < 0) throw new TooComplex('too complex');
+  }
+  /** Whether the budget has run out: a call that spent it all was refused as `too-complex`. */
+  get exhausted(): boolean {
+    return this.steps < 0 || this.points < 0;
   }
   /** Vertices made by flattening; they count as steps too. */
   flattened(points: number): void {
@@ -82,12 +103,7 @@ class Budget {
 
 // Public types ----------------------------------------------------------------------
 
-export type PathCommand =
-  | { kind: 'moveTo'; to: Vec2 }
-  | { kind: 'lineTo'; to: Vec2 }
-  | { kind: 'quadTo'; control: Vec2; to: Vec2 }
-  | { kind: 'cubicTo'; control1: Vec2; control2: Vec2; to: Vec2 }
-  | { kind: 'close' };
+export type { PathCommand } from './model';
 
 /**
  * Where a segment comes from. `contour`, `index`, `split` and `piece` together
@@ -180,6 +196,8 @@ export interface OutlineOptions {
    * of it (in path units, finite and above 0). Off by default: Beziers are kept.
    */
   arcs?: { tolerance: number };
+  /** Work to spend, shared with other calls; default a fresh `OutlineBudget` per call. */
+  budget?: OutlineBudget;
 }
 
 // Bezier helpers --------------------------------------------------------------------
@@ -569,7 +587,7 @@ function adjacent(p: Chord, q: Chord): boolean {
 function findCrossing(
   contours: readonly Contour[],
   tolerance: number,
-  budget: Budget,
+  budget: OutlineBudget,
 ): OutlineIssue | null {
   const chords: Chord[] = [];
   for (const contour of contours) {
@@ -752,7 +770,7 @@ function segmentIntersections(
   a: readonly Vec2[],
   b: readonly Vec2[],
   tolerance: number,
-  budget: Budget,
+  budget: OutlineBudget,
 ): [number, number][] {
   const out: [number, number][] = [];
   let work = 0;
@@ -876,7 +894,7 @@ function segmentStart(segment: OutlineSegment): Vec2 {
 function splitPinchedLoop(
   segments: readonly OutlineSegment[],
   snap: number,
-  budget: Budget,
+  budget: OutlineBudget,
   pinches: Vec2[],
 ): OutlineSegment[][] {
   const parts: OutlineSegment[][] = [];
@@ -920,7 +938,7 @@ function mergeContours(
   filled: (w: number) => boolean,
   tolerance: number,
   extent: number,
-  budget: Budget,
+  budget: OutlineBudget,
   touching: Vec2[],
 ): OutlineLoop[] {
   const segments = contours.flatMap((c) => c.segments);
@@ -1142,7 +1160,7 @@ function bezierToArcs(
   tolerance: number,
   depth: number,
   out: Piece[],
-  budget: Budget,
+  budget: OutlineBudget,
 ): void {
   // A fit evaluates the Bezier at every sample, about 20 steps' worth each.
   budget.spend(20 * ARC_SAMPLES);
@@ -1182,7 +1200,7 @@ function bezierToArcs(
   bezierToArcs(right, tolerance, depth + 1, out, budget);
 }
 
-function loopToArcs(loop: OutlineLoop, tolerance: number, budget: Budget): OutlineLoop {
+function loopToArcs(loop: OutlineLoop, tolerance: number, budget: OutlineBudget): OutlineLoop {
   const segments: OutlineSegment[] = [];
   for (const segment of loop.segments) {
     if (segment.kind !== 'bezier') {
@@ -1268,7 +1286,7 @@ export function outlineRegions(
   });
   if (path.length > MAX_OUTLINE_COMMANDS) return tooComplex();
   try {
-    return convert(path, options, new Budget());
+    return convert(path, options, options.budget ?? new OutlineBudget());
   } catch (error) {
     if (error instanceof TooComplex) return tooComplex();
     throw error;
@@ -1278,7 +1296,7 @@ export function outlineRegions(
 function convert(
   path: readonly PathCommand[],
   options: OutlineOptions,
-  budget: Budget,
+  budget: OutlineBudget,
 ): OutlineResult {
   const issues: OutlineIssue[] = [];
   if (!allFinite(path)) {
@@ -1442,8 +1460,10 @@ export interface OutlinePartRegion {
 }
 
 export type OutlinePartIssue = Omit<OutlineIssue, 'contours'> & {
-  /** The paths involved. */
+  /** The paths involved (for SVG artwork, the first few: see `partCount`). */
   parts: number[];
+  /** How many paths are involved, when `parts` names only the first few of them. */
+  partCount?: number;
   /** The contours involved, as `[part, contour]`. */
   contours: [number, number][];
 };

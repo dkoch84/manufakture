@@ -65,6 +65,7 @@ export {
   MAX_OUTLINE_COMMANDS,
   MAX_OUTLINE_POINTS,
   MAX_OUTLINE_WORK,
+  OutlineBudget,
   bezierPoint,
   flattenSegment,
   loopArea,
@@ -88,6 +89,7 @@ export {
   type PathCommand,
 } from './outline';
 export { outlineEdgeId, placeOutline } from './outline-entity';
+export { MAX_SVG_OUTLINE_COMMANDS, svgIssueShapes, svgOutlineRegions } from './outline-svg';
 export {
   evaluateValues,
   pointKey,

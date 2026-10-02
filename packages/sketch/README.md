@@ -36,22 +36,23 @@ Entities carry the coordinates of their last solve. They are the solver's starti
 decide which solution the sketch settles into ([ADR 0004](../../docs/adr/0004-document-format.md),
 decision 1); the constraints are what define the sketch.
 
-| Entity    | Fields                                                                     |
-| --------- | -------------------------------------------------------------------------- |
-| `point`   | `position`                                                                 |
-| `line`    | `start`, `end` (a line owns its endpoints, as in FreeCAD)                  |
-| `circle`  | `center`, `radius`                                                         |
-| `arc`     | `center`, `start`, `end`, counter-clockwise; radius and angles are derived |
-| `outline` | `anchor`, `angle`, `source`: closed shapes (text) placed at the anchor     |
+| Entity    | Fields                                                                      |
+| --------- | --------------------------------------------------------------------------- |
+| `point`   | `position`                                                                  |
+| `line`    | `start`, `end` (a line owns its endpoints, as in FreeCAD)                   |
+| `circle`  | `center`, `radius`                                                          |
+| `arc`     | `center`, `start`, `end`, counter-clockwise; radius and angles are derived  |
+| `outline` | `anchor`, `angle`, `source`: closed shapes (text, SVG) placed at the anchor |
 
 Every entity has an `id` and a `construction` flag. Construction geometry is solved like any
 other and never becomes a profile edge.
 
 An **outline** ([ADR 0012](../../docs/adr/0012-3d-printing.md) decision 7) is closed shapes from a
 `source`, placed at `anchor` and turned by `angle` (radians, counter-clockwise from the sketch x
-axis) about it. The only source so far is text, `{ kind: 'text', text, font, size, align:
-{ horizontal, vertical }, letterSpacing?, lineSpacing? }` (core README, "Sketch data"; M5 adds an
-`svg` source). To the solver an outline is its anchor and nothing else: two unknowns, referenced
+axis) about it. Its source is text, `{ kind: 'text', text, font, size, align:
+{ horizontal, vertical }, letterSpacing?, lineSpacing? }`, or SVG artwork, `{ kind: 'svg',
+fileName, paths: { fillRule, commands: PathCommand[] }[], scale? }` (M5 T5.8; core README,
+"Sketch data", and [SVG outlines](#svg-outlines) below). To the solver an outline is its anchor and nothing else: two unknowns, referenced
 as `{ entity, at: 'anchor' }`, so constraints place a text like a point (`coordinateCount` is 2,
 `packCoordinates` packs the anchor). `angle` and the source are carried through unchanged, and the
 glyphs are never solved: regen lays the text out after the solve and hands its loops to
@@ -470,6 +471,34 @@ loop and issue says which path (`part`) and which of its contours it comes from,
 within each path as `outlineRegions` counts them; each group is one `outlineRegions` call with its
 own limits.
 
+### SVG outlines
+
+`svgOutlineRegions(paths, scale)` (`src/outline-svg.ts`) gives the regions of an SVG outline's
+paths at a scale, in the outline's own frame, for `placeOutline` with each path's index as its
+glyph. Each path is converted alone by its own fill rule, which makes clean loops (outer
+counter-clockwise, holes clockwise); those are then converted together under `nonzero`, which
+unites what overlaps. So an `evenodd` path whose counters run the same way as its outline gets its
+holes, and overlapping paths drawn in opposite directions do not cancel, as a browser would draw
+them. The paths come from a document, so the work is bounded: more than
+`MAX_SVG_OUTLINE_COMMANDS` (100,000) commands is a `too-complex` error, and every call of one
+conversion spends one shared `OutlineBudget` (`OutlineOptions.budget`; by default each
+`outlineRegions` call gets its own), so many paths that are each cheap cannot add up: 40 paths of
+120 crossing bars each stop with `too-complex` in about 3.5 s, where one budget per path would let
+them run for minutes. A caller converting many outlines passes one budget for all of them,
+`svgOutlineRegions(paths, scale, { budget })` (regen one per regen pass, the sketcher one per
+preview pass); `OutlineBudget.exhausted` says whether it ran out, and `OutlineBudget.used`
+whether anything was spent yet (the sketcher keeps a refusal for a budget that was untouched when
+the conversion began, since the outline alone spent all of it, and retries one for a budget
+earlier previews shared). Results are cached per paths
+array and scale (the last four scales), so a drag converts nothing; a refusal because a shared
+budget ran out is not cached, since it says nothing about the outline itself. The per-sketch cap
+on SVG commands is core's (`MAX_SKETCH_SVG_COMMANDS`), not this package's. Issues are grouped: at most one per code
+and severity, a count with the first `SVG_ISSUE_EXAMPLES` (3) contours named ("30,000 contours do
+not end where they start; ..., for example shape 3 contour 0, ..., and 29,997 more."), so artwork
+of many open or empty subpaths makes two short warnings, not one per contour. Every issue names at most three paths
+and contours; when more are involved, `partCount` keeps the true number, and `svgIssueShapes`
+words it as "1, 2, 3 and 19,997 more" (regen's messages use it).
+
 ### Outline entities
 
 `placeOutline(entity, glyphs, result)` (`src/outline-entity.ts`) places the result of
@@ -559,6 +588,9 @@ figure eight, curves crossing lines, a hole touching its outline, a short piece 
 crossing, duplicates, and the refusal of coincident curves), the limits (hundreds of crossing
 contours, too many commands or vertices, an arc tolerance too fine to fit, invalid tolerances),
 exact areas, and the arc approximation's distance to the Beziers both ways.
+`outline-svg.test.ts` covers SVG outlines: fill rules (an "O" drawn both ways round under both
+rules), overlapping paths in opposite directions united, scale and the cache, the command cap and
+the shared budget stopping many costly paths, and an SVG outline placed in a plate like text.
 `outline-entity.test.ts` covers the outline entity in the solver and validation,
 `outlinePartsRegions`, `placeOutline`'s placement and names, and text joining the regions: letter
 holes and counters in a plate, a text alone and in a void, a text that crosses or encloses other

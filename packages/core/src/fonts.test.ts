@@ -16,6 +16,7 @@ import {
   type DocumentFont,
   type ManufaktureDocument,
   type OutlineEntity,
+  type TextOutlineSource,
   type SketchFeature,
 } from './schema';
 import { validateDocument } from './validate';
@@ -42,7 +43,10 @@ const userFont = (id = 'font#2'): DocumentFont => ({
   source: { kind: 'file', fileName: 'my.ttf', size: 4, sha256: SHA_B, data: 'YWJjZA==' },
 });
 
-const label = (id = 'e10', font = 'font#1', text = 'M3'): OutlineEntity => ({
+/** A text outline: its source is text. */
+type TextOutline = OutlineEntity & { source: TextOutlineSource };
+
+const label = (id = 'e10', font = 'font#1', text = 'M3'): TextOutline => ({
   id,
   kind: 'outline',
   construction: false,
@@ -177,7 +181,7 @@ describe('validation', () => {
   it('refuses an outline whose font is not in the document', () => {
     const doc = labelled();
     const sketch = doc.parts[0]!.features[2] as SketchFeature;
-    (sketch.entities[1] as OutlineEntity).source.font = 'font#7';
+    (sketch.entities[1] as TextOutline).source.font = 'font#7';
     expect(codes(doc)).toEqual([
       ['dependency', ['parts', 0, 'features', 2, 'entities', 1, 'source', 'font']],
     ]);
@@ -226,7 +230,7 @@ describe('validation', () => {
   it('checks the size and spacing expressions like any other', () => {
     const doc = labelled();
     const sketch = doc.parts[0]!.features[2] as SketchFeature;
-    const outline = sketch.entities[1] as OutlineEntity;
+    const outline = sketch.entities[1] as TextOutline;
     expect(featureExpressions(sketch).map((s) => [s.path, s.expected])).toEqual([
       [['constraints', 0, 'value'], 'length'],
       [['entities', 1, 'source', 'size'], 'length'],
@@ -290,7 +294,7 @@ describe('commands', () => {
     }
     // Nor can a sketch edit leave an outline without its font.
     const sketch = clone(doc.parts[0]!.features[2] as SketchFeature);
-    (sketch.entities[1] as OutlineEntity).source.font = 'font#2';
+    (sketch.entities[1] as TextOutline).source.font = 'font#2';
     const edit = applyCommand(doc, { type: 'editFeature', partId: PART, feature: sketch });
     expect(edit.ok ? null : edit.error.code).toBe('dependency');
   });
@@ -309,7 +313,7 @@ describe('commands', () => {
     const doc = labelled();
     const batch = unwrap(renameVariable(doc, 'size', 'label'));
     const renamed = unwrap(applyCommand(doc, batch)).document;
-    const outline = (renamed.parts[0]!.features[2] as SketchFeature).entities[1] as OutlineEntity;
+    const outline = (renamed.parts[0]!.features[2] as SketchFeature).entities[1] as TextOutline;
     expect(outline.source.size.source).toBe('#label');
   });
 

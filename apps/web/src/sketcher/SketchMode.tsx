@@ -13,6 +13,7 @@ import { indexEntities } from './geometry';
 import { sketchView } from './projection';
 import type { PointerInput, SketchSessionStore } from './session';
 import { SketchOverlay } from './SketchOverlay';
+import { SvgImportDialog } from './SvgImport';
 import { selectModeOf } from './items';
 import { conflictBlame, describeStatus } from './status';
 import type { Texter } from './text';
@@ -158,6 +159,7 @@ export interface SketchToolbarProps {
 export function SketchToolbar({ session, onFinish, onCancel }: SketchToolbarProps) {
   const s = useStore(session);
   const index = useMemo(() => indexEntities(s.sketch.entities), [s.sketch.entities]);
+  const [importing, setImporting] = useState(false);
   return (
     <div className="sketch-toolbar" role="toolbar" aria-label="Sketch">
       <span className="sketch-name" data-testid="sketch-name">
@@ -219,6 +221,19 @@ export function SketchToolbar({ session, onFinish, onCancel }: SketchToolbarProp
             </button>
           );
         })}
+      </div>
+      <div className="toolbar-group svg-import-anchor">
+        <button
+          type="button"
+          aria-expanded={importing}
+          aria-haspopup="dialog"
+          data-testid="svg-import-open"
+          title="Import an SVG file's paths: as one outline, or as sketch lines, arcs and circles"
+          onClick={() => setImporting(!importing)}
+        >
+          Import SVG
+        </button>
+        {importing && <SvgImportDialog session={session} onClose={() => setImporting(false)} />}
       </div>
       <div className="toolbar-group">
         <button

@@ -6,11 +6,11 @@
 
 import { DEFAULT_UNITS, applyCommand, createDocument } from '@manufakture/core';
 import { SolverService, XY_PLANE } from '@manufakture/sketch';
-import type { OutlineEntity, Vec2 } from '@manufakture/sketch/model';
+import type { Vec2 } from '@manufakture/sketch/model';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import { commitSketch } from './commit';
 import { createSketchSession, type SketchSource } from './session';
-import { millimetres, type Texter } from './text';
+import { millimetres, type TextOutline, type Texter } from './text';
 import { localTexter } from './text.test-helpers';
 import { startTextPreviews } from './useTextPreviews';
 
@@ -52,7 +52,7 @@ async function started(patch: Partial<SketchSource> = {}) {
   const placeText = async (p: Vec2) => {
     s().setTool('text');
     await click(p);
-    return s().sketch.entities.at(-1) as OutlineEntity;
+    return s().sketch.entities.at(-1) as TextOutline;
   };
   return { session, s, at, click, placeText };
 }
@@ -137,7 +137,7 @@ describe('editing a text', () => {
     t.s().updateText('e1', { size: millimetres(8) }, { coalesce: 'size' });
     t.s().updateText('e1', { angle: Math.PI / 2 });
     await t.s().idle();
-    const e = () => t.s().sketch.entities[0] as OutlineEntity;
+    const e = () => t.s().sketch.entities[0] as TextOutline;
     expect(e().source.text).toBe('M3 x 12');
     expect(e().source.size.source).toBe('8');
     expect(e().angle).toBeCloseTo(Math.PI / 2, 12);
@@ -155,12 +155,12 @@ describe('editing a text', () => {
     const t = await started();
     await t.placeText([0, 0]);
     t.s().updateText('e1', { letterSpacing: millimetres(0.5), lineSpacing: millimetres(2) });
-    expect((t.s().sketch.entities[0] as OutlineEntity).source).toMatchObject({
+    expect((t.s().sketch.entities[0] as TextOutline).source).toMatchObject({
       letterSpacing: { source: '0.5' },
       lineSpacing: { source: '2' },
     });
     t.s().updateText('e1', { letterSpacing: null, lineSpacing: null });
-    const src = (t.s().sketch.entities[0] as OutlineEntity).source;
+    const src = (t.s().sketch.entities[0] as TextOutline).source;
     expect('letterSpacing' in src || 'lineSpacing' in src).toBe(false);
   });
 
@@ -204,7 +204,7 @@ describe('picking, dragging and dimensioning a text', () => {
       expect(t.s().dragStart(t.at([26, 16]))).toBe(true);
       t.s().dragMove(t.at([36, 26]));
       await t.s().dragEnd();
-      const e = t.s().sketch.entities[0] as OutlineEntity;
+      const e = t.s().sketch.entities[0] as TextOutline;
       expect(e.anchor[0]).toBeCloseTo(30, 6);
       expect(e.anchor[1]).toBeCloseTo(25, 6);
       // A dimension from the origin to the text's letters: a distance to its anchor.

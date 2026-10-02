@@ -1,6 +1,6 @@
 # @manufakture/io
 
-File formats for getting parts out to slicers and other CAD tools and bringing geometry in, and 2D sheets (drawings, laser and plasma outlines) out as SVG, DXF and PDF. STL and 3MF are written and read here, in plain TypeScript with no WebAssembly; STEP geometry goes through the kernel (OCCT's translators, see the kernel README's STEP exchange), and this package only reads STEP text. It runs the same on the main thread, in a worker and in Node.
+File formats for getting parts out to slicers and other CAD tools and bringing geometry in, 2D sheets (drawings, laser and plasma outlines) out as SVG, DXF and PDF, and SVG artwork in as lines and arcs for sketches. STL and 3MF are written and read here, in plain TypeScript with no WebAssembly; STEP geometry goes through the kernel (OCCT's translators, see the kernel README's STEP exchange), and this package only reads STEP text. It runs the same on the main thread, in a worker and in Node.
 
 ```ts
 import {
@@ -124,6 +124,126 @@ One page per sheet, `MediaBox` the sheet in points (72 per 25.4 mm). The content
 
 `displayListToSheet(list)` maps `packages/drawing`'s display list: the paper size; the layers in `LAYER_NAMES` order with their weights and dashes, dashed lines as DXF `HIDDEN` and chain lines as `CENTER` (`DRAWING_LINETYPES`; the section layer's longer chain becomes `CENTER_SECTION`); lines, arcs and ellipse arcs with their counter-clockwise sweep made explicit; polylines as paths of lines (closed and filled kept); text as is; hatches expanded to their lines with the drawing package's `hatchLines` (0.05 mm flattening), the same in every format. `owner` is kept, `item` dropped. `drawingToSvg`, `drawingToDxf` and `drawingToPdf` (several sheets, a page each) wrap it.
 
+## SVG import
+
+Sign artwork and lettering converted to paths, for sketches (M5 T5.8). `parseSvg(text)` reads a
+file **once** into shapes (`ParsedSvg`: each shape's path commands in its own user units, the
+matrix to millimetres with y up and the page's bottom left corner at the origin, its fill rule and
+its element), the page and the issues; it throws `SvgImportError` for a file that cannot be read at
+all. From the shapes, without parsing again:
+
+- `svgOutlinePaths(parsed, { tolerance?, maxCommands?, maxPaths?, maxCoordinate? })` gives paths
+  of lines and Beziers for a sketch's
+  `svg` outline: `moveTo`, `lineTo`, `quadTo`, `cubicTo` and `close` (the shape of the sketch
+  model's `PathCommand`), each path with its element and fill rule, and the paths' extent (Beziers
+  by their true extremes). Lines and Beziers are mapped exactly (an affine map keeps a Bezier a
+  Bezier); elliptical arcs (and circles, ellipses and rounded corners) become cubics of at most a
+  quarter turn, as many as keep them within `tolerance` mm of the true arc (the error of a cubic
+  over a circular arc grows as the sixth power of its angle, scaled by the map's largest stretch;
+  at most 256 cubics an arc). `tolerance` defaults to 0.001 mm. The output is bounded while it is
+  built: the first command past `maxCommands` (default `MAX_SVG_COMMANDS`), the first path past
+  `maxPaths`, or the first coordinate past `maxCoordinate` mm or not finite throws
+  `SvgImportError` (`too-complex`, or `out-of-range` for a coordinate, with `limit` naming the
+  cap), and an arc's ends are checked before it is split. So artwork whose arcs `<use>` reuses
+  under a huge `scale()` stops at once instead of making millions of cubics; the app passes the
+  outline caps (100,000 commands, 20,000 paths, 1,000,000 mm).
+- `fitSvg(parsed, { scale?, tolerance?, curves?, maxSegments? })` gives lines, circular arcs and
+  circles (`SvgImport`) for sketch entities: `contours` (each a list of `line` and `arc` segments
+  joined end to start exactly, `closed`, and the `element` it came from, `path#O`), `circles`,
+  `issues`, `bounds` (arcs by their true extremes), `page` and `maxDeviation`. `scale` is applied
+  before fitting, so the tolerance holds at the final size. `placeSvgImport(result, anchor, at)`
+  moves it so the page corner, the geometry's bottom left corner or its centre (`svgAnchorPoint`)
+  lands on a point: a translation, so placing again needs no fit. `importSvg(text, options)` is
+  `fitSvg(parseSvg(text), options)`; `svgImportCounts` counts lines, arcs and circles.
+
+```ts
+import { fitSvg, parseSvg, placeSvgImport, svgOutlinePaths } from '@manufakture/io';
+
+const parsed = parseSvg(text); // throws SvgImportError
+const outline = svgOutlinePaths(parsed); // { paths, bounds, commands }
+const fitted = placeSvgImport(fitSvg(parsed, { scale: 1, tolerance: 0.01 }), 'center', [0, 0]);
+fitted.contours[0].segments; // { kind: 'line', start, end } | { kind: 'arc', center, start, end, clockwise }
+```
+
+The app uses both (`apps/web/src/sketcher/svg-import.ts`): an outline by default, sketch geometry
+for small artwork to edit.
+
+**No DOM.** `parseXml` is a small XML reader (elements and attributes; text, comments, CDATA,
+processing instructions and the DOCTYPE skipped; the five predefined entities and character
+references decoded, nothing else expanded, so no entity bombs), so the import runs the same on the
+main thread, in a worker and in Node. `svg-import.test.ts` checks it against jsdom's `DOMParser`
+on the bracket golden. Malformed XML is an `SvgImportError` (`xml`) naming the line.
+
+**What is read.** `<path>` (`parsePathData`: every command, absolute and relative, implicit
+repeats, `S` and `T` reflections, compact numbers and arc flags such as `a1 1 0 00 1 1`; data with
+an error is read up to it, as browsers draw it, and counted once per element however often it is
+used), `<rect>` (rounded corners as quarter ellipses), `<circle>`, `<ellipse>`,
+`<line>`, `<polyline>`, `<polygon>`, through `<g>`, `<a>`, `<switch>`, nested `<svg>` (its
+viewBox) and `<use>` (`href` or `xlink:href`, `<symbol>` with its viewBox; cycles and nesting past
+8 refused with a `use` issue; a path's data is parsed once however often it is used). `transform`
+lists (`matrix`, `translate`, `scale`, `rotate` with a centre, `skewX`, `skewY`; `parseTransform`)
+compose down the tree; one that does not parse, or overflows, is ignored with an `attribute` issue,
+the root's included. `fill-rule` (attribute or style, inherited) is kept per shape. Skipped
+silently: `display: none` (attribute or style), `<defs>` and the other non-drawing containers (clip
+paths, masks, patterns, markers, gradients, filters, metadata, style, script, foreign objects) and
+elements of other vocabularies (editor metadata). Skipped with an `unsupported-element` issue:
+`<text>` (convert to paths first) and `<image>`. Other styles are not read: stroked and filled
+shapes alike become outlines. Lengths take CSS units (`parseLength`); unit names are looked up in a
+`Map`, so `1constructor` is not a length.
+
+**Issues are grouped.** There is at most one issue per code (`unsupported-element` one per tag):
+a single problem is one sentence; more are a count and the first three, as in "1,234 elements have
+path data or points with an error, read up to it, for example: ...; and 1,231 more.". Ids,
+element names, attribute values and hrefs are cut to 40 characters wherever a message (or a
+shape's `element`) quotes them, so 100,000 bad elements with long ids make a few hundred
+characters of issues, not megabytes.
+
+**Units.** The root's `width` and `height` in real units with its `viewBox` (and
+`preserveAspectRatio`: alignment, `meet`, `slice`, `none`) map user units to millimetres; a viewBox
+alone, or no size at all, means 96 user units to the inch (CSS pixels). `page` is the page in
+millimetres when the file gives one.
+
+**Curves to arcs** (`fitSvg`). Circles under a transform that keeps them round (rotation, uniform
+scale, reflection) stay `circles`. Every other curve (cubic and quadratic Beziers, elliptical
+arcs, ellipses, a circle under a non-uniform scale) is evaluated exactly under its transform and
+fitted greedily: from where the last piece ended, the longest piece that fits within 0.8 of the
+tolerance (halving until one fits, then bisecting towards the shortest that does not), as a line
+when the piece is flat within it, else as an arc through the piece's ends: first the arc through
+the curve's middle, then the arc with the least deviation, found by a golden-section search over
+its sagitta. A piece is checked at 15 interior points, both for its distance from the arc's circle
+and for running along the arc in order. `curves: 'lines'` fits lines only. Lines shorter than 0.05
+of the tolerance are merged into their neighbours, a subpath that ends within that distance of its
+start is closed onto it, and closed subpaths enclosing no area are dropped. `maxDeviation` is the
+largest distance the fit found at the points it checks: an estimate, not a bound over every point
+(the tests measure the true two-sided distance on dense samples). Arcs make few entities (the "O"
+of the fixture is 16 arcs a contour at 0.01 mm) and keep curves exact for toolpaths; the cost is
+the sketch solver's (see `apps/web/src/sketcher/svg-import.ts`).
+
+**Limits.** The file is untrusted, and every cost is bounded:
+
+| Limit                | Value                               | What stops                                                                                                                                        |
+| -------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MAX_SVG_CHARS`      | 32 MB of text                       | the file, before parsing (`too-large`)                                                                                                            |
+| `MAX_SVG_ELEMENTS`   | 200,000                             | elements in the XML (`too-complex`)                                                                                                               |
+| `MAX_SVG_DEPTH`      | 256                                 | element nesting, in the XML and through `<use>` (`too-complex`, before any stack overflow)                                                        |
+| `MAX_SVG_VISITS`     | 800,000 (4 x elements)              | elements the walk visits, each `<use>` instance counted: a fan-out of nested `<use>` stops here even when its leaves draw nothing (`too-complex`) |
+| `MAX_SVG_COMMANDS`   | 1,000,000                           | path commands of all shapes, `<use>` instances counted (`too-complex`)                                                                            |
+| `maxSegments`        | default `MAX_SVG_SEGMENTS`, 100,000 | lines, arcs and circles of a fit (`too-complex`); the app passes 3,000                                                                            |
+| `maxCommands`        | default `MAX_SVG_COMMANDS`          | commands of `svgOutlinePaths`, checked as each is made (`too-complex`); also `maxPaths`, and `maxCoordinate` (`out-of-range`)                     |
+| fit depth and pieces | 24 halvings, 65,536 pieces          | a pathological curve: it ends in a line, its deviation recorded                                                                                   |
+
+Nothing that is not finite gets through: numbers that overflow (`1e999`) end a points list or a
+viewBox, transforms whose matrix overflows are ignored, a shape whose coordinates overflow under
+its transforms is dropped at parse time and an import whose scale makes them overflow drops them
+at fit time (`not-finite` issues), and an elliptical arc whose radii overflow is drawn as the line
+it nearly is. Every scan of attribute text is linear: lengths and transforms are split by hand and
+matched with sticky regexes without ambiguous whitespace (100,000 spaces in an attribute read in
+milliseconds), and styles are split on `;` and `:`. What the walk reads from an element (its
+style and presentation properties, transform, lengths, viewBox, `preserveAspectRatio`, points
+list, a `<use>`'s reference, like a path's data) is read on its first visit and remembered, so a
+megabyte attribute on an element `<use>` draws a thousand times is read once, not a thousand times.
+Each problem is counted once per element too, not once per visit.
+
 ## STEP
 
 The kernel writes and reads STEP (`exportStep`, `importStep` ops). Here: `isStep(bytes)`, `sniffFormat(bytes, fileName)` (STEP, STL or 3MF by content, the name only breaking ties) and `stepProductNames(bytes)`, the `PRODUCT` names in file order with ISO 10303-21 string escapes decoded. The app names an imported body after the file's first product.
@@ -157,6 +277,7 @@ pnpm --filter @manufakture/io test
 - `dxf.test.ts`: the section and table skeleton, unique handles below `$HANDSEED`, owners, the header units, the LTYPE table (`HIDDEN` 3, -1.5) and each layer's linetype and lineweight; through dxf-parser, the stroked length per layer equal to the source's, ellipses with swapped axes, text with justification and `%%c`, the arrowhead's `SOLID`, and a laser plate as one closed bulged `LWPOLYLINE` plus a `CIRCLE`.
 - `pdf.test.ts`: the xref table (every offset at its `n 0 obj`, `startxref`, stream lengths); through pdf.js, page sizes in points, the title block's text, one path per stroked item, text widths, anchors, baselines and rotation, several pages, deflated streams, determinism.
 - `drawing-export.test.ts`: the display list mapping, and **goldens** of the M1 bracket's three-view drawing (the drawing package's own golden input) in `src/goldens/`: `bracket.svg`, `bracket.dxf` and the PDF page's content stream `bracket-pdf-page.txt`. After a deliberate change, look at the diff, then `vitest run packages/io -u`.
+- `svg-import.test.ts` (jsdom, for `DOMParser` only): the hostile cases (a `<use>` fan-out eight levels deep, deep nesting, too many elements, too large a file, `1constructor` and `__proto__` units, `1e999` points and viewBox, `scale(1e200) scale(1e200)`, `r=1e300` under `scale(1e10)`, relative paths and arc radii that overflow, a scale that overflows the fit, an unreadable root transform, 100,000 spaces in an attribute, a megabyte style, transform, length, points list, viewBox or href on an element nested `<use>` draws 1,000 times read in bounded time, 10,000 arcs reused 20 times under `scale(1e12)` or `scale(1000)` refused by the outline caps at once with bounded memory, and 100,000 bad paths, lengths, transforms or hrefs with long ids grouped into at most two issues under 1,000 characters), outline paths (exact Beziers, elliptical arcs within 0.01, 0.001 and 0.00001 mm, fill rules from attributes and styles, the word fixture `src/fixtures/svg/word.svg` written by `scripts/svg-word-fixture.ts`), parsing once; path data (commands, repeats, reflections, compact numbers, errors), transforms, lengths, the XML reader (prolog, DOCTYPE with an internal subset, comments, CDATA, entities, prefixes, malformed input with line numbers, and agreement with `DOMParser` on the bracket golden); the lettering fixture `src/fixtures/svg/letters.svg` ("O" of cubic Beziers, "A" of lines, "B" of circular arc commands, each with its counters, and a dot) as closed contours, y up, with exact arcs where the file has circles and the two-sided distance between the O's Beziers and its arcs within the tolerance at 0.01, 0.0005 and 0.05 mm and at ten times the size; every shape element, an ellipse under a rotation within 0.002 mm, circles kept or not under transforms, page units and `preserveAspectRatio`, nested transforms, `<use>`, `<symbol>`, nested `<svg>`, hidden and non-drawing elements, the issues, closing and merging short pieces, refusals, a round trip through `writeSvg`, the bracket golden, and placement.
 - `placement.test.ts`: poses to 3MF matrices (axis images, translation, normalising), composition order, moved meshes keeping their volume.
 - `export.test.ts`: assembly exports, 3MF (an object per body per instance, each with its build item and placement; colour groups shared by every copy; a `oneObject` part as a components object per instance with its settings) and STL (merged in place), and assemblies that do not add up.
 - `kernel-export.test.ts`: real kernel meshes (the kernel is a dev dependency) exported watertight at every preset, STL and 3MF read back, a STEP round trip meshed, an assembly of the demo part placed twice.

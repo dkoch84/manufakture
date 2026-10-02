@@ -7,6 +7,16 @@
 // moves the text at once without asking the worker again. A preview is keyed by what the layout
 // depends on (font, string, evaluated size and spacing, alignment), never by the anchor.
 //
+// SVG artwork (an outline with an `svg` source, M5 T5.8) is previewed the same way, but its
+// regions are made here on the main thread (`svgPreviewOf`): its paths are already in the
+// document, and `svgOutlineRegions` caches by paths array (the session keeps an artwork's source
+// object across solves, `keepSvgSources`), so a preview is made once per artwork and scale, and a
+// drag only places it again. All the SVG previews of one pass share one work budget,
+// `SVG_PREVIEW_WORK` (a second or two at most), so a document of many costly outlines cannot hold
+// the page up; one that runs out shows an error here (tried again in a later pass when other
+// outlines had spent part of the budget, never when it alone spent all of it), and the model is
+// built anyway.
+//
 // User fonts are untrusted input (ADR 0011 decision 7 and its amendment). The main thread only
 // checks a file's name, size and first four bytes (`checkFontFile`) and never parses it: reading
 // its names and permissions is the text worker's job, under the regen worker's watchdog
@@ -20,6 +30,8 @@ import {
   type OutlineAlign,
   type OutlineEntity,
   type StoredExpression,
+  type SvgOutlineSource,
+  type TextOutlineSource,
 } from '@manufakture/core';
 import type {
   FontReadReply,
@@ -32,7 +44,9 @@ import {
   MAX_FLATTEN_POINTS,
   flattenRegion,
   flattenSegment,
+  OutlineBudget,
   placeOutline,
+  svgOutlineRegions,
   type OutlinePartsResult,
   type Region,
   type OutlineShape,
@@ -80,6 +94,19 @@ export function millimetres(value: number): StoredExpression {
   return { source: String(value), lengthUnit: 'mm', angleUnit: 'deg' };
 }
 
+/** An outline whose source is text. */
+export type TextOutline = OutlineEntity & { source: TextOutlineSource };
+/** An outline whose source is SVG artwork. */
+export type SvgOutline = OutlineEntity & { source: SvgOutlineSource };
+
+export function isTextOutline(e: { kind: string; source?: unknown }): e is TextOutline {
+  return e.kind === 'outline' && (e as OutlineEntity).source.kind === 'text';
+}
+
+export function isSvgOutline(e: { kind: string; source?: unknown }): e is SvgOutline {
+  return e.kind === 'outline' && (e as OutlineEntity).source.kind === 'svg';
+}
+
 // Requests -----------------------------------------------------------------------------------
 
 export type TextRequestOutcome =
@@ -106,7 +133,7 @@ function evaluated(
  * cannot be laid out (a font the sketch does not have, a size that does not evaluate).
  */
 export function textRequestOf(
-  entity: OutlineEntity,
+  entity: TextOutline,
   fonts: readonly DocumentFont[],
   variables: Variables,
 ): TextRequestOutcome {
@@ -183,6 +210,80 @@ export function previewOf(key: string, reply: TextReply | null): TextPreview {
     if (issue.severity !== 'info') warnings.push(issue.message);
   }
   return { key, layout: { glyphs: reply.glyphs, result: reply.result }, error: null, warnings };
+}
+
+/**
+ * Work all the SVG previews of one pass may spend together on the main thread: 100 million of
+ * `OutlineBudget`'s steps, about a second or two (regen's per-pass budget is 250 million, in its
+ * worker).
+ */
+export const SVG_PREVIEW_WORK = 100_000_000;
+
+/** A budget for the SVG previews of one pass. */
+export function svgPreviewBudget(): OutlineBudget {
+  return new OutlineBudget(SVG_PREVIEW_WORK);
+}
+
+/** Numbers for paths arrays, so a preview key changes when the artwork is replaced. */
+const pathsIds = new WeakMap<object, number>();
+let nextPathsId = 1;
+
+/** What an SVG preview depends on: the paths (by identity) and the evaluated scale. */
+export function svgPreviewKey(entity: SvgOutline, variables: Variables): string {
+  const { source } = entity;
+  let id = pathsIds.get(source.paths);
+  if (id === undefined) {
+    id = nextPathsId++;
+    pathsIds.set(source.paths, id);
+  }
+  return JSON.stringify(['svg', id, evaluated(source.scale, 'number', 1, variables)]);
+}
+
+/**
+ * The preview of SVG artwork, made at once: its regions at its evaluated scale, keyed by the
+ * paths (by identity) and the scale. An error when the scale does not evaluate to a number above
+ * 0, or when the artwork cannot be converted.
+ */
+export function svgPreviewOf(
+  entity: SvgOutline,
+  variables: Variables,
+  budget: OutlineBudget = svgPreviewBudget(),
+): TextPreview {
+  const { source } = entity;
+  const scale = evaluated(source.scale, 'number', 1, variables);
+  const key = svgPreviewKey(entity, variables);
+  if (scale === null || !(scale > 0)) {
+    return { key, layout: null, error: 'The scale must be a number above 0.', warnings: [] };
+  }
+  const shared = budget.used;
+  const result = svgOutlineRegions(source.paths, scale, { budget });
+  const failed = result.issues.find((i) => i.severity === 'error');
+  if (failed && budget.exhausted) {
+    // Refused for the budget. When earlier previews of the pass had spent part of it, that says
+    // nothing about this artwork: stored under a key no pass asks for, so the next pass tries it
+    // again. When this artwork alone spent a whole budget, it would again: kept under its key.
+    return {
+      key: shared ? `${key}#budget` : key,
+      layout: null,
+      error:
+        'The SVG artwork of this sketch is too complex to show here; the model is still built from it.',
+      warnings: [],
+    };
+  }
+  if (failed) {
+    return {
+      key,
+      layout: null,
+      error: `The artwork cannot be shown: ${failed.message}`,
+      warnings: [],
+    };
+  }
+  return {
+    key,
+    layout: { glyphs: source.paths.map((_, i) => i), result },
+    error: null,
+    warnings: result.issues.filter((i) => i.severity === 'warning').map((i) => i.message),
+  };
 }
 
 /** The placed shapes of a text, at its current anchor and angle; none until it is laid out. */

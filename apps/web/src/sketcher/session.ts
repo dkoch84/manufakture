@@ -14,6 +14,8 @@ import type {
   OutlineEntity,
   OutlineSource,
   PointRef,
+  SvgOutlineSource,
+  TextOutlineSource,
   SketchConstraint,
   SketchEntity,
   SketchInput,
@@ -84,18 +86,20 @@ export interface SketchSource {
   bundledFont?: { id: string; family: string; style: string; sha256: string };
 }
 
-/** A change to a text: its source fields, or its angle. */
+/** A change to an outline: a text's source fields, SVG artwork's scale, or the angle. */
 export interface TextPatch {
   text?: string;
   font?: string;
   size?: StoredExpression;
-  align?: OutlineSource['align'];
+  align?: TextOutlineSource['align'];
   /** Null removes it (no extra spacing). */
   letterSpacing?: StoredExpression | null;
   /** Null removes it (the font's line height). */
   lineSpacing?: StoredExpression | null;
   /** Radians, counter-clockwise. */
   angle?: number;
+  /** SVG artwork's scale, a plain number. Null removes it (scale 1). */
+  scale?: StoredExpression | null;
 }
 
 /** What the last solve said, without the entities (those are in `sketch`). */
@@ -208,6 +212,11 @@ export interface SketchSessionState {
   /** The id `addFont` gives the next font. */
   nextFontId(): string;
   setTextPreview(id: string, preview: TextPreview): void;
+  /**
+   * Add imported geometry (an SVG, `svg-import.ts`) as one undo step and select it. `message`
+   * goes to the status bar. Returns the new entities' ids.
+   */
+  importGeometry(draft: Draft, message?: string): string[];
 
   undo(): void;
   redo(): void;
@@ -219,6 +228,39 @@ export type SketchSessionStore = StoreApi<SketchSessionState>;
 
 const HISTORY_LIMIT = 200;
 const EMPTY: SketchInput = { entities: [], constraints: [] };
+
+/** Whether two SVG sources are the same artwork, by everything but the coordinates. */
+function sameSvgSource(a: SvgOutlineSource, b: SvgOutlineSource): boolean {
+  if (a.fileName !== b.fileName || JSON.stringify(a.scale) !== JSON.stringify(b.scale)) {
+    return false;
+  }
+  if (a.paths.length !== b.paths.length) return false;
+  return a.paths.every(
+    (p, i) =>
+      p.fillRule === b.paths[i]!.fillRule && p.commands.length === b.paths[i]!.commands.length,
+  );
+}
+
+/**
+ * Solved entities with the SVG sources of the sketch the solver was given. The solver moves an
+ * outline's anchor and never its source, but its reply is a structured clone: without this every
+ * solve would give the artwork a new `paths` array, and what is keyed by that array (the preview,
+ * `svgOutlineRegions`' cache) would convert the artwork again after each one.
+ */
+export function keepSvgSources(
+  solved: readonly SketchEntity[],
+  sent: readonly SketchEntity[],
+): SketchEntity[] {
+  const before = new Map<string, SvgOutlineSource>();
+  for (const e of sent)
+    if (e.kind === 'outline' && e.source.kind === 'svg') before.set(e.id, e.source);
+  if (before.size === 0) return solved as SketchEntity[];
+  return solved.map((e) => {
+    if (e.kind !== 'outline' || e.source.kind !== 'svg') return e;
+    const kept = before.get(e.id);
+    return kept && kept !== e.source && sameSvgSource(kept, e.source) ? { ...e, source: kept } : e;
+  });
+}
 
 export function createSketchSession(solver: SketchSolverApi): SketchSessionStore {
   let undoStack: SketchInput[] = [];
@@ -247,11 +289,16 @@ export function createSketchSession(solver: SketchSolverApi): SketchSessionStore
     const variables = () => get().source?.variables ?? {};
     const history = () => ({ canUndo: undoStack.length > 0, canRedo: redoStack.length > 0 });
 
-    /** Take a solve result: solved geometry, and the diagnosis in any case. */
-    const accept = (r: SolveResult) => {
+    /**
+     * Take a solve result: solved geometry, and the diagnosis in any case. `sent` is the sketch
+     * the solver was given (the current one when not known), whose SVG sources are kept.
+     */
+    const accept = (r: SolveResult, sent: SketchInput = get().sketch) => {
       const { entities, ...info } = r;
       const patch: Partial<SketchSessionState> = { solve: info, solverError: null };
-      if (r.status === 'solved') patch.sketch = { ...get().sketch, entities };
+      if (r.status === 'solved') {
+        patch.sketch = { ...get().sketch, entities: keepSvgSources(entities, sent.entities) };
+      }
       set(patch);
     };
 
@@ -262,7 +309,7 @@ export function createSketchSession(solver: SketchSolverApi): SketchSessionStore
       const p = solver.update(sessionId(), sketch, variables()).then(
         (r) => {
           if (gen !== generation) return;
-          accept(r);
+          accept(r, sketch);
           set({ solving: false });
         },
         (e: unknown) => {
@@ -705,7 +752,7 @@ export function createSketchSession(solver: SketchSolverApi): SketchSessionStore
             curvePending = null;
             const r = await solver.update(sessionId(), sketch, variables(), { analyze: false });
             if (drag === d && r.status === 'solved')
-              set({ sketch: { ...sketch, entities: r.entities } });
+              set({ sketch: { ...sketch, entities: keepSvgSources(r.entities, sketch.entities) } });
           }
         };
         if (!curveBusy) {
@@ -878,15 +925,25 @@ export function createSketchSession(solver: SketchSolverApi): SketchSessionStore
         const { sketch } = get();
         const e = sketch.entities.find((x) => x.id === id);
         if (!e || e.kind !== 'outline') return;
-        const source: OutlineSource = { ...e.source };
-        if (patch.text !== undefined) source.text = patch.text;
-        if (patch.font !== undefined) source.font = patch.font;
-        if (patch.size !== undefined) source.size = patch.size;
-        if (patch.align !== undefined) source.align = { ...patch.align };
-        if (patch.letterSpacing === null) delete source.letterSpacing;
-        else if (patch.letterSpacing !== undefined) source.letterSpacing = patch.letterSpacing;
-        if (patch.lineSpacing === null) delete source.lineSpacing;
-        else if (patch.lineSpacing !== undefined) source.lineSpacing = patch.lineSpacing;
+        let source: OutlineSource;
+        if (e.source.kind === 'svg') {
+          // The paths never change here; only the scale (and the angle, below).
+          const svg = { ...e.source };
+          if (patch.scale === null) delete svg.scale;
+          else if (patch.scale !== undefined) svg.scale = patch.scale;
+          source = svg;
+        } else {
+          const text = { ...e.source };
+          if (patch.text !== undefined) text.text = patch.text;
+          if (patch.font !== undefined) text.font = patch.font;
+          if (patch.size !== undefined) text.size = patch.size;
+          if (patch.align !== undefined) text.align = { ...patch.align };
+          if (patch.letterSpacing === null) delete text.letterSpacing;
+          else if (patch.letterSpacing !== undefined) text.letterSpacing = patch.letterSpacing;
+          if (patch.lineSpacing === null) delete text.lineSpacing;
+          else if (patch.lineSpacing !== undefined) text.lineSpacing = patch.lineSpacing;
+          source = text;
+        }
         const next: OutlineEntity = {
           ...e,
           source,
@@ -894,7 +951,10 @@ export function createSketchSession(solver: SketchSolverApi): SketchSessionStore
             ? { angle: patch.angle }
             : {}),
         };
-        if (JSON.stringify(next) === JSON.stringify(e)) return;
+        // Compared without the paths of SVG artwork, which can be large and never change here.
+        const shape = (x: OutlineEntity) =>
+          JSON.stringify(x.source.kind === 'svg' ? { ...x, source: { ...x.source, paths: 0 } } : x);
+        if (shape(next) === shape(e)) return;
         const key = options.coalesce ? `${id}:${options.coalesce}` : null;
         const record = key === null || key !== coalescing;
         edit(
@@ -926,6 +986,18 @@ export function createSketchSession(solver: SketchSolverApi): SketchSessionStore
         if (!sketch.entities.some((e) => e.id === id)) return;
         if (texts[id] === preview) return;
         set({ texts: { ...texts, [id]: preview } });
+      },
+
+      importGeometry(draft, message) {
+        if (!get().active || draft.entities.length === 0) return [];
+        const m = addDraft(draft);
+        set({
+          ...resetTool('select'),
+          cursor: null,
+          selection: m.entities.map((e) => ({ kind: 'entity' as const, id: e.id })),
+          message: message ?? null,
+        });
+        return m.entities.map((e) => e.id);
       },
 
       undo() {

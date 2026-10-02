@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Sign lettering converted to paths, as a drawing program saves it: "O", "A" and "B" with
+     their counters (holes), and a dot. One user unit is one millimetre. The A's and B's counters
+     run the same way round as their outlines, so the letters are filled by the evenodd rule. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="120mm" height="50mm" viewBox="0 0 120 50">
+  <title>OAB</title>
+  <g id="letters" fill="#000" stroke="none" fill-rule="evenodd">
+    <!-- O: cubic Beziers (an ellipse 28 x 40 mm), the counter in relative commands. -->
+    <path id="O" d="M 34 25 C 34 36.046 27.732 45 20 45 C 12.268 45 6 36.046 6 25 C 6 13.954 12.268 5 20 5 C 27.732 5 34 13.954 34 25 Z M 27 25 c 0 -6.627 -3.134 -12 -7 -12 c -3.866 0 -7 5.373 -7 12 c 0 6.627 3.134 12 7 12 c 3.866 0 7 -5.373 7 -12 z"/>
+    <!-- A: straight lines, absolute and relative, H and h. -->
+    <g transform="translate(40,0)">
+      <path id="A" d="M0 45 L11 5 H19 L30 45 h-7 l-2.5-10 h-11 L7 45 z M11.5 28 L15 13 L18.5 28 Z"/>
+    </g>
+    <!-- B: elliptical arc commands that are circular (two bowls, two counters). -->
+    <path id="B" transform="matrix(1 0 0 1 75 0)" d="M0 5 H14 A9.5 9.5 0 0 1 14 24 H15 A10.5 10.5 0 0 1 15 45 H0 Z M7 11 H13 a3.5 3.5 0 0 1 0 7 H7 Z M7 29 h7 a5 5 0 0 1 0 10 h-7 z"/>
+    <circle id="dot" cx="112" cy="40" r="4"/>
+  </g>
+</svg>

@@ -1,7 +1,8 @@
-// Keeps the layout of every text of the sketch being edited current: when a text's string, font,
-// size, spacing or alignment changes (or a variable its size uses), the sketcher asks the regen
-// worker's text outliner for a new layout and stores the reply in the session (`texts`). Moving
-// the anchor or turning the text needs no new layout: the sketcher places the last one.
+// Keeps the layout of every text (and SVG artwork) of the sketch being edited current: when a
+// text's string, font, size, spacing or alignment changes (or a variable its size uses), the
+// sketcher asks the regen worker's text outliner for a new layout and stores the reply in the
+// session (`texts`). Moving the anchor or turning the text needs no new layout: the sketcher
+// places the last one.
 //
 // Requests wait `TEXT_PREVIEW_DEBOUNCE_MS` after the last change, so typing a word sends one
 // request, not one per key; a text with no layout yet (just placed, or the sketch just opened) is
@@ -15,14 +16,24 @@
 
 import { useEffect } from 'react';
 import type { SketchSessionStore } from './session';
-import { TEXT_PREVIEW_DEBOUNCE_MS, previewOf, textRequestOf, type Texter } from './text';
+import {
+  TEXT_PREVIEW_DEBOUNCE_MS,
+  isSvgOutline,
+  isTextOutline,
+  previewOf,
+  svgPreviewBudget,
+  svgPreviewKey,
+  svgPreviewOf,
+  textRequestOf,
+  type Texter,
+} from './text';
 
 /** Numbers the passes of every session of the page, for the worker's per-pass budgets. */
 let passes = 0;
 
 export function startTextPreviews(
   session: SketchSessionStore,
-  texter: Texter,
+  texter: Texter | null,
   debounceMs: number = TEXT_PREVIEW_DEBOUNCE_MS,
 ): () => void {
   /** The key last requested per entity, until its reply arrives. */
@@ -35,8 +46,17 @@ export function startTextPreviews(
     const s = session.getState();
     if (!s.active || !s.source) return;
     const pass = ++passes;
+    // Every SVG preview of this pass spends one main-thread budget.
+    const svgBudget = svgPreviewBudget();
     for (const e of s.sketch.entities) {
-      if (e.kind !== 'outline') continue;
+      if (isSvgOutline(e)) {
+        // SVG artwork needs no worker: its preview is made here, once per artwork and scale.
+        if (s.texts[e.id]?.key === svgPreviewKey(e, s.source.variables)) continue;
+        s.setTextPreview(e.id, svgPreviewOf(e, s.source.variables, svgBudget));
+        continue;
+      }
+      // Text needs the regen worker's outliner; without one (kernel-free scenes) it shows its anchor.
+      if (!isTextOutline(e) || !texter) continue;
       const outcome = textRequestOf(e, s.fonts, s.source.variables);
       const shown = s.texts[e.id];
       if (shown?.key === outcome.key) {
@@ -106,10 +126,7 @@ export function startTextPreviews(
   };
 }
 
-/** `startTextPreviews` for the life of the component; nothing without a texter. */
+/** `startTextPreviews` for the life of the component; texts need a texter, SVG artwork does not. */
 export function useTextPreviews(session: SketchSessionStore, texter: Texter | null | undefined) {
-  useEffect(() => {
-    if (!texter) return;
-    return startTextPreviews(session, texter);
-  }, [session, texter]);
+  useEffect(() => startTextPreviews(session, texter ?? null), [session, texter]);
 }

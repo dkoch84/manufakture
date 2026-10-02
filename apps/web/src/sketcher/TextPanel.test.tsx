@@ -10,12 +10,12 @@ import {
 } from '@manufakture/core';
 import type { FontSummary } from '@manufakture/regen';
 import { XY_PLANE } from '@manufakture/sketch/geometry';
-import type { OutlineEntity, SketchEntity } from '@manufakture/sketch/model';
+import type { SketchEntity } from '@manufakture/sketch/model';
 import { lengthQuantity } from '@manufakture/units';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { createSketchSession, type SketchSessionStore } from './session';
-import { fontTotalProblem, millimetres, type Texter } from './text';
+import { fontTotalProblem, millimetres, type TextOutline, type Texter } from './text';
 import { TextPanel } from './TextPanel';
 import { immediateSolver } from './testSolver';
 
@@ -26,7 +26,7 @@ const BUNDLED: DocumentFont = {
   source: { kind: 'bundled', id: 'inter-bold', sha256: 'f'.repeat(64) },
 };
 
-const TEXT: OutlineEntity = {
+const TEXT: TextOutline = {
   id: 'e1',
   kind: 'outline',
   construction: false,
@@ -71,7 +71,7 @@ async function setup(entities: SketchEntity[] = [TEXT, LINE], texter: Texter | n
 }
 
 const text = (s: SketchSessionStore) =>
-  s.getState().sketch.entities.find((e) => e.id === 'e1') as OutlineEntity;
+  s.getState().sketch.entities.find((e) => e.id === 'e1') as TextOutline;
 
 function summary(patch: Partial<FontSummary> = {}): FontSummary {
   return {

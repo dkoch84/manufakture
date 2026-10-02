@@ -132,7 +132,8 @@ async function volumes(e: RegenEngine, result: RegenResult): Promise<Record<stri
 
 const editText = (doc: ManufaktureDocument, text: string): Command => {
   const sketch = structuredClone(doc.parts[0]!.features[0] as SketchFeature);
-  (sketch.entities[4] as OutlineEntity).source.text = text;
+  const source = (sketch.entities[4] as OutlineEntity).source;
+  if (source.kind === 'text') source.text = text;
   return { type: 'editFeature', partId: PART, feature: sketch };
 };
 

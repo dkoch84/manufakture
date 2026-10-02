@@ -1,5 +1,6 @@
 // The Text panel (M3 plan, T3.2d): edits the selected text of the sketch: its string, font
-// (with Add font), size as an expression, alignment, spacing and angle. Changes go to the sketch
+// (with Add font), size as an expression, alignment, spacing and angle. For SVG artwork (an
+// outline with an `svg` source, M5 T5.8) it edits the scale and the angle instead. Changes go to the sketch
 // session at once (typing in one field is one undo step) and the sketcher lays the text out
 // again through the regen worker (`useTextPreviews`). The anchor is dragged and dimensioned in
 // the sketch like a point.
@@ -12,7 +13,13 @@ import { ExpressionField } from '../components/ExpressionField';
 import { analyzeExpression, type ValueKind } from '../components/expression';
 import { AddFont } from './AddFont';
 import type { SketchSessionStore, TextPatch } from './session';
-import { RECOMMENDED_MIN_SIZE_MM, fontLabel, type Texter } from './text';
+import {
+  RECOMMENDED_MIN_SIZE_MM,
+  fontLabel,
+  type SvgOutline,
+  type TextOutline,
+  type Texter,
+} from './text';
 import { evaluateStored, measuredSource } from './values';
 
 export interface TextPanelProps {
@@ -37,8 +44,12 @@ export function TextPanel({ session, texter }: TextPanelProps) {
   useStore(session, (s) => s.sketch.entities);
   const text = selectedText(session);
   if (!text) return null;
+  if (text.source.kind === 'svg') return <SvgFields key={text.id} session={session} id={text.id} />;
   return <TextFields key={text.id} session={session} texter={texter} id={text.id} />;
 }
+
+/** Warnings an SVG artwork's panel lists; past this it says how many more there are. */
+const MAX_SHOWN_WARNINGS = 8;
 
 const ALIGN_H = [
   ['left', 'Left'],
@@ -54,8 +65,9 @@ const ALIGN_V = [
 type Field = 'size' | 'letterSpacing' | 'lineSpacing' | 'angle';
 
 function TextFields({ session, texter, id }: TextPanelProps & { id: string }) {
-  const entity = useStore(session, (s) => s.sketch.entities.find((e) => e.id === id)) as
-    OutlineEntity | undefined;
+  const found = useStore(session, (s) => s.sketch.entities.find((e) => e.id === id));
+  const entity =
+    found?.kind === 'outline' && found.source.kind === 'text' ? (found as TextOutline) : undefined;
   const fonts = useStore(session, (s) => s.fonts);
   const preview = useStore(session, (s) => s.texts[id]);
   const placed = useStore(session, (s) => s.placedText === id);
@@ -239,8 +251,7 @@ function TextFields({ session, texter, id }: TextPanelProps & { id: string }) {
               update({
                 align: {
                   ...entity.source.align,
-                  horizontal: e.currentTarget
-                    .value as OutlineEntity['source']['align']['horizontal'],
+                  horizontal: e.currentTarget.value as TextOutline['source']['align']['horizontal'],
                 },
               })
             }
@@ -261,7 +272,7 @@ function TextFields({ session, texter, id }: TextPanelProps & { id: string }) {
               update({
                 align: {
                   ...entity.source.align,
-                  vertical: e.currentTarget.value as OutlineEntity['source']['align']['vertical'],
+                  vertical: e.currentTarget.value as TextOutline['source']['align']['vertical'],
                 },
               })
             }
@@ -295,6 +306,105 @@ function TextFields({ session, texter, id }: TextPanelProps & { id: string }) {
       <p className="field-note">
         Drag the text, or dimension its anchor like a point. Emboss or deboss it with Extrude: pick
         the text regions with Text only.
+      </p>
+    </section>
+  );
+}
+
+type SvgField = 'scale' | 'angle';
+
+/** SVG artwork: its file, its scale (a plain number, an expression) and its angle. */
+function SvgFields({ session, id }: { session: SketchSessionStore; id: string }) {
+  const found = useStore(session, (s) => s.sketch.entities.find((e) => e.id === id));
+  const preview = useStore(session, (s) => s.texts[id]);
+  const source = useStore(session, (s) => s.source);
+  const [drafts, setDrafts] = useState<Partial<Record<SvgField, string>>>({});
+  if (found?.kind !== 'outline' || found.source.kind !== 'svg' || !source) return null;
+  const entity = found as SvgOutline;
+  const { units, variables } = source;
+  const names = Object.keys(variables);
+  const stored: Record<SvgField, string> = {
+    scale: entity.source.scale?.source ?? '1',
+    angle: measuredSource(entity.angle, 'angle', units),
+  };
+  const kinds: Record<SvgField, ValueKind> = { scale: 'number', angle: 'angle' };
+  const validate: Partial<Record<SvgField, (v: number) => string | null>> = {
+    scale: (v) => (v > 0 ? null : 'The scale must be above 0.'),
+  };
+  const update = (patch: TextPatch, coalesce: string) =>
+    session.getState().updateText(id, patch, { coalesce });
+  const change = (f: SvgField, value: string) => {
+    setDrafts((d) => ({ ...d, [f]: value }));
+    const a = analyzeExpression(value, kinds[f], units, variables, validate[f]);
+    if (a.state === 'empty' && f === 'scale') {
+      update({ scale: null }, f);
+      return;
+    }
+    if (a.state !== 'ok') return;
+    if (f === 'angle') update({ angle: a.value }, f);
+    else update({ scale: a.expression }, f);
+  };
+  const field = (f: SvgField, label: string, testId: string) => (
+    <div className="text-field" key={f}>
+      <ExpressionField
+        label={label}
+        value={drafts[f] ?? stored[f]}
+        kind={kinds[f]}
+        units={units}
+        variables={variables}
+        names={names}
+        validate={validate[f]}
+        testId={testId}
+        errorTestId={`${testId}-error`}
+        onChange={(v) => change(f, v)}
+        onKeyDown={(e) => {
+          e.stopPropagation();
+          if (e.key === 'Enter' || e.key === 'Escape') e.currentTarget.blur();
+        }}
+        onBlur={(_, a) => {
+          if (a.state === 'ok' || a.state === 'empty')
+            setDrafts((d) => {
+              const { [f]: _gone, ...rest } = d;
+              void _gone;
+              return rest;
+            });
+        }}
+      />
+    </div>
+  );
+  const shapes = entity.source.paths.length;
+  return (
+    <section
+      className="text-panel"
+      aria-label="SVG artwork"
+      data-testid="svg-outline-panel"
+      data-entity={id}
+      onPointerDown={(e) => e.stopPropagation()}
+    >
+      <h2>SVG artwork {id}</h2>
+      <p data-testid="svg-outline-file">
+        {entity.source.fileName}: {shapes} shape{shapes === 1 ? '' : 's'}
+      </p>
+      {field('scale', 'Scale', 'svg-outline-scale')}
+      {field('angle', `Angle (${bareUnits(units).angleUnit})`, 'svg-outline-angle')}
+      {preview?.error && (
+        <p className="text-error" role="alert" data-testid="svg-outline-error">
+          {preview.error}
+        </p>
+      )}
+      {preview?.warnings.slice(0, MAX_SHOWN_WARNINGS).map((w, i) => (
+        <p key={i} className="text-warning">
+          {w}
+        </p>
+      ))}
+      {preview && preview.warnings.length > MAX_SHOWN_WARNINGS && (
+        <p className="text-warning" data-testid="svg-outline-more-warnings">
+          And {(preview.warnings.length - MAX_SHOWN_WARNINGS).toLocaleString('en')} more.
+        </p>
+      )}
+      <p className="field-note">
+        Drag the artwork, or dimension its anchor like a point. Its shapes are not sketch lines:
+        pocket, V-carve or extrude them as regions.
       </p>
     </section>
   );

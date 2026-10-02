@@ -5,7 +5,6 @@
 
 import { DEFAULT_UNITS, type SketchFeature } from '@manufakture/core';
 import { XY_PLANE } from '@manufakture/sketch/geometry';
-import type { OutlineEntity } from '@manufakture/sketch/model';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { PointerDelegate } from '../viewport/engine';
@@ -13,7 +12,7 @@ import type { ViewportApi } from '../viewport/Viewport';
 import { createSketchSession } from './session';
 import { SketchLayer } from './SketchLayer';
 import { SketchCanvas } from './SketchMode';
-import { placedText } from './text';
+import { placedText, type TextOutline } from './text';
 import { localTexter } from './text.test-helpers';
 import { immediateSolver } from './testSolver';
 
@@ -77,7 +76,7 @@ describe('texts in the sketch overlay', () => {
       vp.delegate()!.up({ ...e, buttons: 0 } as PointerEvent, { x: 300, y: 100 });
     });
     await act(() => s.getState().idle());
-    const text = s.getState().sketch.entities[0] as OutlineEntity;
+    const text = s.getState().sketch.entities[0] as TextOutline;
     expect(text).toMatchObject({ kind: 'outline', anchor: [10, 10], source: { text: 'Text' } });
     // "Text": four glyphs, one path each.
     const drawn = await screen.findByTestId('text-e1');
@@ -127,7 +126,7 @@ describe('texts in committed sketches', () => {
   it('draws the texts regen placed, one path per glyph', async () => {
     const s = await sketching();
     const texter = localTexter();
-    const entity: OutlineEntity = {
+    const entity: TextOutline = {
       id: 'e1',
       kind: 'outline',
       construction: false,
