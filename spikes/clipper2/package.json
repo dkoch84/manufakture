@@ -1,0 +1,17 @@
+{
+  "name": "@manufakture/spike-clipper2",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "GPL-3.0-or-later",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "measure": "vitest run --config vitest.measure.config.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@manufakture/sketch": "workspace:*",
+    "clipper2-ts": "2.0.1-18",
+    "clipper2-wasm": "0.4.0"
+  }
+}
