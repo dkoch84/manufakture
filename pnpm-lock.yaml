@@ -123,6 +123,31 @@ importers:
         specifier: ^4.6.5
         version: 4.6.5
 
+  packages/domain-wood:
+    dependencies:
+      '@manufakture/core':
+        specifier: workspace:*
+        version: link:../core
+      '@manufakture/units':
+        specifier: workspace:*
+        version: link:../units
+    devDependencies:
+      '@manufakture/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      '@manufakture/regen':
+        specifier: workspace:*
+        version: link:../regen
+      '@manufakture/sketch':
+        specifier: workspace:*
+        version: link:../sketch
+
+  packages/drawing:
+    dependencies:
+      '@manufakture/units':
+        specifier: workspace:*
+        version: link:../units
+
   packages/io:
     dependencies:
       fflate:
