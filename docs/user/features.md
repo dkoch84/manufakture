@@ -2,6 +2,8 @@
 
 The row under the header holds the part features: **Extrude**, **Revolve**, **Fillet**, **Chamfer**, **Shell**, **Hole**, **Pattern**, **Mirror** and **Thread**. Each opens its dialog in the side panel. A new feature goes in at the rollback bar of the [feature tree](feature-tree.md); a double-click on a feature in the tree opens the same dialog to change it.
 
+Next to **Extrude**, **Board** makes a woodworking board: a panel or a stick cut from real stock (plywood, MDF, lumber) at its actual size, with its grain. See [Woodworking](woodworking.md).
+
 **OK** (or Enter in a field) applies the dialog as one step for Undo; **Cancel** (or Escape) leaves the part as it was. When something is missing or wrong, the dialog stays open and says what, next to the field.
 
 ## Numbers

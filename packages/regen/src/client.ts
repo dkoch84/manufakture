@@ -8,7 +8,7 @@
 
 import type { DragTarget } from '@manufakture/assembly';
 import type { ManufaktureDocument } from '@manufakture/core';
-import { KernelClient, type KernelClientOptions } from '@manufakture/kernel/kernel-client';
+import { KernelClient } from '@manufakture/kernel/kernel-client';
 import * as Comlink from 'comlink';
 import type { DrawingSheetResult, DrawingViewResult } from './drawing';
 import type { EngineStats } from './engine';
@@ -183,17 +183,6 @@ export class RegenClient extends KernelClient {
   regenStats(): Promise<EngineStats> {
     return this.worker<RegenWorkerApi>().regenStats() as Promise<EngineStats>;
   }
-}
-
-/** Start the regen worker (the kernel plus the regen engine) and connect to it. */
-export function spawnRegenWorker(options: KernelClientOptions = {}): RegenClient {
-  return new RegenClient(() => {
-    const worker = new Worker(new URL('./worker.ts', import.meta.url), {
-      type: 'module',
-      name: 'manufakture-kernel',
-    });
-    return { endpoint: worker, terminate: () => worker.terminate() };
-  }, options);
 }
 
 // The bundled fonts' metadata (ids, names, SHA-256), for the main thread: `@manufakture/text/bundled`

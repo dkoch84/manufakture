@@ -31,8 +31,9 @@ const sheet = await engine.drawingSheet(document, 'drawing#1', 'sheet#1', { gene
 ```
 
 That is the engine's own API, as tests and a custom host use it. apps/web does not construct an
-engine: it spawns the regen worker (`@manufakture/regen/worker`) through `spawnRegenWorker` and
-calls `RegenClient.regen(document)` (see "The worker").
+engine: it spawns a worker entry of its own (`apps/web/src/viewport/regen-worker.ts`:
+`@manufakture/regen/worker` with the app's domains registered) and calls
+`RegenClient.regen(document)` (see "The worker").
 
 ## Where it runs
 
@@ -67,12 +68,14 @@ service (`@manufakture/kernel/node`) and the real solver directly.
 
 ### The worker
 
-| Import                      | Where        | What                                                                                           |
-| --------------------------- | ------------ | ---------------------------------------------------------------------------------------------- |
-| `@manufakture/regen`        | worker, Node | the engine, graph, translation, cache, `createRegenWorkerApi`                                  |
-| `@manufakture/regen/worker` | worker entry | `Comlink.expose` of the regen worker API, with the kernel's `.wasm` imported as a `?url` asset |
-| `src/text-worker.ts`        | text worker  | the text worker the regen worker starts for outlines (see Text)                                |
-| `@manufakture/regen/client` | main thread  | `spawnRegenWorker()`, `RegenClient`                                                            |
+| Import                          | Where        | What                                                                                                            |
+| ------------------------------- | ------------ | --------------------------------------------------------------------------------------------------------------- |
+| `@manufakture/regen`            | worker, Node | the engine, graph, translation, cache, `createRegenWorkerApi`                                                   |
+| `@manufakture/regen/worker`     | worker entry | `Comlink.expose` of the regen worker API, with the kernel's `.wasm` imported as a `?url` asset                  |
+| `src/text-worker.ts`            | text worker  | the text worker the regen worker starts for outlines (see Text)                                                 |
+| `@manufakture/regen/client`     | main thread  | `RegenClient`, without any worker entry (a host with its own entry imports only this)                           |
+| `@manufakture/regen/spawn`      | main thread  | `spawnRegenWorker()`: starts regen's own worker entry and returns its `RegenClient`                             |
+| `@manufakture/regen/extensions` | worker entry | the translator registry (`ExtensionRegistry`, `defaultExtensions`) without the text engine the index re-exports |
 
 `createRegenWorkerApi` (`src/worker-api.ts`) builds the kernel's worker API (`createKernelWorkerApi`: loading with progress, batches, release, cancel, recycle, stats), waits for its service, creates the engine next to it and adds `regen(document, { generation })`, `solveAssembly(document, assemblyId, { generation })`, `dragInstance(assemblyId, instanceId, target, { generation })`, `interference(assemblyId, { generation, mesh?, tolerance? }, onPair?)`, `cancelInterference(assemblyId)` and `regenStats()`. `RegenClient.solveAssembly`, `RegenClient.dragInstance` and `RegenClient.interference` send the client's current generation (`latestGeneration`), never a new one, so none of them cancels a regen. `interference`'s `onPair` is a `Comlink.proxy` passed as an argument of its own (Comlink only looks for proxies in top-level arguments); each pair's mesh buffers are transferred with it. Mesh buffers are marked with `regenTransferables(result)`; nothing else heavy crosses. `RegenClient` extends the kernel's `KernelClient` (imported from `@manufakture/kernel/kernel-client`, so the kernel's own worker entry is not bundled), so every request of every kind (a regen, a `pick`, a `measure`, an export) takes its generation from the one sequence the client keeps. The service cancels by generation whoever sent a batch (see Cancellation), so a regen cancels older requests, and a pick or measure sent at the client's current generation never cancels a regen. Only a regen may take a new generation: any other batch that did (a STEP import, say) would cancel the regen in flight, which then resolves to null with nothing reporting in its place, so the app sends every other batch at `latestGeneration` and releases shapes with `KernelClient.release`, outside the batch queue. The app's `startRegen` also asks again when its newest regen comes back null. A pending regen resolves to null when the worker is restarted or terminated, like a pending submit. `RegenClient.regen` returns every regen the worker completed, even when a newer request came meanwhile: the engine reports a changed mesh once, to the regen that built it, so a caller that dropped completed results would lose meshes.
 

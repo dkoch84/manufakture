@@ -324,6 +324,23 @@ export function compareDocuments(
       );
     }
   }
+  if (change.drawingChanged) {
+    const drawingName = (id: string) =>
+      (viewed.drawings?.find((d) => d.id === id) ?? current.drawings?.find((d) => d.id === id))
+        ?.name ?? id;
+    const d = change.drawings.drawings;
+    if (d.added.length > 0) lines.push(`Drawings only here: ${listOf(d.added.map(drawingName))}.`);
+    if (d.removed.length > 0) {
+      lines.push(`Drawings only in the current state: ${listOf(d.removed.map(drawingName))}.`);
+    }
+    if (d.changed.length > 0)
+      lines.push(`Drawings that differ: ${listOf(d.changed.map(drawingName))}.`);
+    if (d.added.length + d.removed.length + d.changed.length === 0) {
+      lines.push(
+        change.drawings.reordered ? 'Drawings are in a different order.' : 'The drawings differ.',
+      );
+    }
+  }
   if (change.fontsChanged) {
     const ids = (doc: ManufaktureDocument) => new Set(doc.fonts.map((f) => f.id));
     const [inViewed, inCurrent] = [ids(viewed), ids(current)];

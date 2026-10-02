@@ -1,4 +1,10 @@
-import { applyCommand, createPrintSetup, serialize, type Command } from '@manufakture/core';
+import {
+  applyCommand,
+  createDrawing,
+  createPrintSetup,
+  serialize,
+  type Command,
+} from '@manufakture/core';
 import { describe, expect, it } from 'vitest';
 import { MemoryBackend } from '../persistence/backend';
 import { DocumentLibrary, type LoggedRevision, type Version } from '../persistence/library';
@@ -228,6 +234,19 @@ describe('comparing with the current state', () => {
     expect(compareDocuments(current, both)).toEqual([
       'Settings that differ: "cam-x" data, stock overrides, woodworking settings.',
     ]);
+  });
+
+  it('lists drawings added, removed and changed, which change no geometry', () => {
+    const drawn = unwrapDoc(
+      applyCommand(current, { type: 'addDrawing', drawing: createDrawing('drawing#1', 'Shop') }),
+    );
+    // Not "Same as the current state": versions differing only in their drawings.
+    expect(compareDocuments(current, drawn)).toEqual(['Drawings only here: Shop.']);
+    expect(compareDocuments(drawn, current)).toEqual(['Drawings only in the current state: Shop.']);
+    const renamed = unwrapDoc(
+      applyCommand(drawn, { type: 'renameDrawing', drawingId: 'drawing#1', name: 'Cut list' }),
+    );
+    expect(compareDocuments(drawn, renamed)).toEqual(['Drawings that differ: Cut list.']);
   });
 
   it('lists print setups added, removed and changed, which change no geometry', () => {

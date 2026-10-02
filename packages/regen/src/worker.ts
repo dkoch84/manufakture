@@ -1,5 +1,5 @@
 // Regen worker entry: the kernel and the regen engine in one worker (ADR 0007 decision 1). Start
-// it from the main thread with `spawnRegenWorker()` from `@manufakture/regen/client`.
+// it from the main thread with `spawnRegenWorker()` from `@manufakture/regen/spawn`.
 //
 // `?url` makes Vite emit the kernel's .wasm as its own content-hashed asset, never inlined (ADR
 // 0002 decision 4); planegcs.wasm is found by its Emscripten glue next to the bundled JS. Loading

@@ -306,7 +306,7 @@ describe('DocumentLibrary', () => {
     expect((await opened(lib, 'doc-1')).document).toEqual(doc);
   });
 
-  it('saves domain data and logged setDomainData commands unchanged (ADR 0013, format v11)', async () => {
+  it('saves domain data and logged setDomainData commands unchanged (ADR 0013, format v12)', async () => {
     const backend = new MemoryBackend();
     const lib = library(backend);
     const doc = partDocument();

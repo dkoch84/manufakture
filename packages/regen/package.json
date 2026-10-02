@@ -7,6 +7,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./client": "./src/client.ts",
+    "./extensions": "./src/extensions.ts",
+    "./spawn": "./src/spawn.ts",
     "./worker": "./src/worker.ts"
   },
   "scripts": {

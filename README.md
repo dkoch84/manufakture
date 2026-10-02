@@ -24,9 +24,10 @@ Milestones 1 (a printable part) and 2 (multi-body parts and assemblies) are done
 - raised and sunk text, in the built-in font or your own;
 - modelled and cosmetic screw threads, with clearance for printing;
 - fits for printed parts: press, slip and sliding clearances as variables, and a fit-test coupon;
-- export for printing: a multi-part, multi-colour 3MF with the copies packed onto the plate, and **Open in slicer** to hand it to OrcaSlicer, Bambu Studio or PrusaSlicer.
+- export for printing: a multi-part, multi-colour 3MF with the copies packed onto the plate, and **Open in slicer** to hand it to OrcaSlicer, Bambu Studio or PrusaSlicer;
+- woodworking boards: panels and sticks cut from real stock (plywood, MDF, dimension lumber, hardwood) at its actual size, with grain direction and per-document stock overrides.
 
-Not there yet: the domain tools for woodworking, CNC and construction (see the plans in `docs/plans`).
+Not there yet: the rest of the woodworking tools (joints, cut lists), and the domain tools for CNC and construction (see the plans in `docs/plans`).
 
 [docs/m1-acceptance.md](docs/m1-acceptance.md) walks through the milestone's acceptance part, a bracket, and lists the automated checks behind each step. [docs/m2-acceptance.md](docs/m2-acceptance.md) does the same for M2: a wall shelf with a derived bracket, assembled. [docs/m3-acceptance.md](docs/m3-acceptance.md) does it for M3: a PTFE tube cutting jig, from sketch to a multi-colour 3MF for the slicer.
 
@@ -72,6 +73,7 @@ The user guide lives in `docs/user`:
 - [Printing](docs/user/printing.md): print setups, orienting parts on the bed, overhangs, thin walls, holes and bed fit
 - [Text](docs/user/text.md): raised and sunk lettering, fonts, and editing the text later
 - [Threads](docs/user/threads.md): external and internal screw threads, sizes, clearance and cosmetic threads
+- [Woodworking](docs/user/woodworking.md): boards cut from real stock, their grain, and the Stock panel
 - [Configurations](docs/user/configurations.md): variants in a table, switching them, exporting every one
 - [Version history](docs/user/history.md): named versions, the timeline, viewing and restoring a past state
 - [Derived parts](docs/user/derived.md): a part from a version of another document, placed, and updated to newer versions
