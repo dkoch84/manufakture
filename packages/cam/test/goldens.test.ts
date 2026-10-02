@@ -2,11 +2,19 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type { CompiledDialect } from '../src/post/dialect';
+import { CARBIDE_MOTION } from '../src/post/carbide-motion';
 import { GRBL } from '../src/post/grbl';
+import { GRBLHAL } from '../src/post/grblhal';
+import { LINUXCNC } from '../src/post/linuxcnc';
+import { MACH3 } from '../src/post/mach3';
 import {
+  CARBIDE_MOTION_GOLDENS,
   FIXTURE_ORIGIN,
   GOLDEN_STOCK,
+  GRBLHAL_GOLDENS,
   GRBL_GOLDENS,
+  LINUXCNC_GOLDENS,
+  MACH3_GOLDENS,
   SHAPEOKO_4_XXL_FIXTURE,
   SHAPEOKO_5_PRO_4X4_FIXTURE,
 } from './gcode-fixtures';
@@ -18,7 +26,8 @@ import type { GcodeReport, VerifyMachine } from './verify-gcode';
 // verifier, on both machines. Each subdirectory holding `.nc` files is one post's goldens and must
 // be in `GOLDEN_SETS` with its dialect and a fixture per file. The firmware validators (grbl-sim's
 // `gvalidate`, grblHAL's `grblHAL_validator`) run on the GRBL files in CI's optional
-// `gcode-validate` job (`firmware-validate.sh`).
+// `gcode-validate` job (`firmware-validate.sh`); `grblHAL_validator` also takes the `test/grblhal/`
+// files without M6 (it has no tool change handler).
 
 const TEST_DIR = fileURLToPath(new URL('./', import.meta.url));
 
@@ -30,6 +39,10 @@ interface GoldenSet {
 /** Each golden directory (relative to `packages/cam/test/`) and its dialect. */
 const GOLDEN_SETS: Readonly<Record<string, GoldenSet>> = {
   grbl: { dialect: GRBL, fixtures: GRBL_GOLDENS },
+  'carbide-motion': { dialect: CARBIDE_MOTION, fixtures: CARBIDE_MOTION_GOLDENS },
+  grblhal: { dialect: GRBLHAL, fixtures: GRBLHAL_GOLDENS },
+  linuxcnc: { dialect: LINUXCNC, fixtures: LINUXCNC_GOLDENS },
+  mach3: { dialect: MACH3, fixtures: MACH3_GOLDENS },
 };
 
 /** Every directory under `test/` (the test directory itself included) that holds `.nc` files. */

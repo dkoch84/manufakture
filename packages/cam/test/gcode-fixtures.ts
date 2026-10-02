@@ -40,12 +40,14 @@ export const FLAT_201: VerifyTool = {
 };
 export const VBIT_302: VerifyTool = { number: 302, name: '#302 60 deg V-bit', diameter: 12.7 };
 export const DRILL_3: VerifyTool = { number: 3, name: '3 mm drill', diameter: 3 };
+/** The V-bit as tool 2, for Mach3, whose T stops at 255 (`golden-jobs.ts`' `VBIT_2`). */
+export const VBIT_2: VerifyTool = { ...VBIT_302, number: 2 };
 
 export interface GoldenFixture {
   /** The file's tools in the order it uses them. */
   readonly tools: readonly VerifyTool[];
-  /** How the file changes tools: one tool per file, or an M0 pause per change. */
-  readonly toolChange: 'none' | 'm0-pause';
+  /** How the file changes tools: one tool per file, an M0 pause, or `M6 T<n>` per change. */
+  readonly toolChange: 'none' | 'm0-pause' | 'm6';
 }
 
 /**
@@ -57,7 +59,35 @@ export const GRBL_GOLDENS: Readonly<Record<string, GoldenFixture>> = {
   'profile-tabs-inch.nc': { tools: [FLAT_201], toolChange: 'none' },
   'pocket.nc': { tools: [FLAT_201], toolChange: 'none' },
   'drilling.nc': { tools: [DRILL_3], toolChange: 'none' },
+  'drilling-cycles.nc': { tools: [DRILL_3], toolChange: 'none' },
   'two-tools-files-1.nc': { tools: [FLAT_201], toolChange: 'none' },
   'two-tools-files-2.nc': { tools: [VBIT_302], toolChange: 'none' },
   'two-tools-pause.nc': { tools: [FLAT_201, VBIT_302], toolChange: 'm0-pause' },
+};
+
+/** The `M6 T<n>` posts' goldens (one file, every tool change an M6): `tools` per file. */
+function m6Goldens(twoTools: readonly VerifyTool[]): Readonly<Record<string, GoldenFixture>> {
+  return {
+    'profile-tabs.nc': { tools: [FLAT_201], toolChange: 'm6' },
+    'profile-tabs-inch.nc': { tools: [FLAT_201], toolChange: 'm6' },
+    'pocket.nc': { tools: [FLAT_201], toolChange: 'm6' },
+    'drilling.nc': { tools: [DRILL_3], toolChange: 'm6' },
+    'drilling-cycles.nc': { tools: [DRILL_3], toolChange: 'm6' },
+    'two-tools.nc': { tools: twoTools, toolChange: 'm6' },
+  };
+}
+
+/** Every Carbide Motion golden file by name (T5.4c). */
+export const CARBIDE_MOTION_GOLDENS = m6Goldens([FLAT_201, VBIT_302]);
+
+/** Every LinuxCNC golden file by name (T5.4c). */
+export const LINUXCNC_GOLDENS = m6Goldens([FLAT_201, VBIT_302]);
+
+/** Every Mach3 golden file by name (T5.4c): the V-bit is tool 2, Mach3's T stops at 255. */
+export const MACH3_GOLDENS = m6Goldens([FLAT_201, VBIT_2]);
+
+/** Every grblHAL golden file by name (T5.4c): Grbl's tool changes, and the M6 option. */
+export const GRBLHAL_GOLDENS: Readonly<Record<string, GoldenFixture>> = {
+  ...GRBL_GOLDENS,
+  'two-tools-m6.nc': { tools: [FLAT_201, VBIT_302], toolChange: 'm6' },
 };

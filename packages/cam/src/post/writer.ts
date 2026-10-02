@@ -6,7 +6,7 @@
 
 import { MM_PER_INCH } from '@manufakture/units';
 import { angleAbout, arcSweep, radiusAbout } from '../arc';
-import type { ArcMove, IrEntry, Toolpath, ToolChange } from '../ir';
+import type { ArcMove, CycleStart, IrEntry, Toolpath, ToolChange } from '../ir';
 import { err, ok } from '../types';
 import type { CamErrorCode, CamResult, Heights, Vec2, Vec3 } from '../types';
 import { DEFAULT_ARC_TOLERANCE, validateToolpath } from '../validate';
@@ -28,7 +28,7 @@ import type {
   ToolChangeStyle,
 } from './dialect';
 import { commentLines, formatNumber } from './format';
-import { GRBL_CHECK_OFFSETS, grblArcCheck } from './grbl-arc';
+import { GRBL_CHECK_OFFSETS, RADIUS_MARGIN, grblArcCheck } from './grbl-arc';
 
 /**
  * The refit tolerance, mm (ADR 0014 decision 12): how far a written path may stray from the
@@ -91,6 +91,13 @@ export interface PostOptions {
   readonly arcTolerance?: number;
   /** Work offsets the Grbl arc check runs at; `GRBL_CHECK_OFFSETS` when absent. */
   readonly checkOffsets?: readonly Vec2[];
+  /**
+   * Write the IR's drill cycles as G81 (straight) or G83 (peck) canned cycles; the dialect must
+   * have `cannedCycles`. A cycle with a dwell is still written as moves. False when absent.
+   */
+  readonly cannedCycles?: boolean;
+  /** Overrides the dialect's `toolLengthOffset` (`G43 H<n>` after each `M6 T<n>`). */
+  readonly toolLengthOffset?: boolean;
 }
 
 export interface PostFile {
@@ -174,6 +181,17 @@ function run(job: PostJob, d: CompiledDialect, options: PostOptions): PostOutput
   const styleProblem = toolChangeProblem(style, d.mCodes);
   if (styleProblem) refuse('unsupported', styleProblem);
   const split = options.splitPerTool ?? d.dialect.splitPerTool;
+  const cycles = options.cannedCycles ?? false;
+  if (cycles && !d.dialect.cannedCycles) {
+    refuse('unsupported', `The ${d.dialect.name} post has no canned cycles.`);
+  }
+  const lengthOffset = options.toolLengthOffset ?? d.dialect.toolLengthOffset ?? false;
+  if (lengthOffset && (style !== 'm6' || !d.gCodes.has('G43'))) {
+    refuse(
+      'unsupported',
+      `A tool length offset (G43 H) needs G43 and the m6 tool change; the ${d.dialect.name} post is writing '${style}'.`,
+    );
+  }
   const tolerance = options.tolerance ?? DEFAULT_POST_TOLERANCE;
   if (!(tolerance > 0) || tolerance > 0.1) {
     refuse('invalid-input', 'The tolerance must be greater than 0 and at most 0.1 mm.');
@@ -240,6 +258,8 @@ function run(job: PostJob, d: CompiledDialect, options: PostOptions): PostOutput
       tolerance,
       offsets,
       stats,
+      cycles,
+      lengthOffset,
       fileIndex: n + 1,
       fileCount: plans.length,
       plan,
@@ -308,6 +328,10 @@ interface WriterInput {
   readonly style: ToolChangeStyle;
   readonly tolerance: number;
   readonly offsets: readonly Vec2[];
+  /** Write drill cycles as G81/G83. */
+  readonly cycles: boolean;
+  /** Write `G43 H<n>` after each `M6 T<n>`. */
+  readonly lengthOffset: boolean;
   readonly stats: { arcs: number; arcsAsLines: number; fullCirclesSplit: number };
   readonly fileIndex: number;
   readonly fileCount: number;
@@ -360,6 +384,10 @@ class FileWriter {
   private firstRapid = false;
   private tool: ToolInfo | undefined;
   private toolsSeen = 0;
+  /** True between a cycle marker written as a canned cycle and its end: the moves are skipped. */
+  private inCycle = false;
+  /** The controller's arc radius rule in mm, when the dialect has one. */
+  private readonly arcLimit: number | undefined;
   /** The index in the plan's entries of the entry being written; -1 before the first. */
   private cursor = -1;
   private modal: { units?: string; distance?: boolean; plane?: boolean; feedMode?: boolean } = {};
@@ -375,6 +403,13 @@ class FileWriter {
     this.step = 10 ** -this.coord;
     this.irPos = input.irPos;
     this.tool = input.plan.tools[0];
+    const limit = input.d.dialect.arcRadiusTolerance;
+    this.arcLimit =
+      limit === undefined
+        ? undefined
+        : input.units === 'inch'
+          ? limit.inch * MM_PER_INCH
+          : limit.mm;
   }
 
   write(): string[] {
@@ -597,12 +632,27 @@ class FileWriter {
     if (!this.modal.plane) words.push('G17');
     if (!this.modal.feedMode && this.d.gCodes.has('G94')) words.push('G94');
     if (words.length > 0) this.emit(words.join(' '));
+    if (this.d.dialect.pathBlending) {
+      // The largest P the output can hold that is not over the tolerance, in output units.
+      const p = formatNumber(Math.floor(this.input.tolerance * this.k * 1e6) / 1e6, 6);
+      if (p === undefined || !(Number(p) > 0)) {
+        refuse('invalid-input', `The tolerance ${this.input.tolerance} mm cannot be a G64 P.`);
+      }
+      this.needG('G64', 'path blending');
+      this.emit(`G64 P${p}`);
+    }
   }
 
   // -------------------------------------------------------------------------------------------
   // Entries
 
   private entry(e: IrEntry): void {
+    if (this.inCycle) {
+      // Inside a group written as one canned cycle: the moves are the controller's to make.
+      if (e.kind === 'cycleEnd') this.endCycle();
+      else if (e.kind === 'rapid' || e.kind === 'linear' || e.kind === 'arc') this.irPos = e.to;
+      return;
+    }
     switch (e.kind) {
       case 'comment':
         for (const l of commentLines(e.text, this.d.dialect.maxLineLength)) this.emit(l);
@@ -615,6 +665,13 @@ class FileWriter {
         return;
       case 'dwell':
         this.dwell(e.seconds);
+        return;
+      case 'cycle':
+        // Written as a canned cycle when asked and possible; otherwise the expanded moves
+        // between the markers are written as they are.
+        if (this.input.cycles) this.inCycle = this.cycle(e);
+        return;
+      case 'cycleEnd':
         return;
       case 'rapid':
         this.rapid(e.to);
@@ -677,6 +734,10 @@ class FileWriter {
         );
       }
       this.emit(`M6 T${n}`);
+      if (this.input.lengthOffset) {
+        this.needG('G43', 'a tool length offset');
+        this.emit(`G43 H${n}`);
+      }
     }
     if (style !== 'none' && !first) {
       // The machine may have moved, and senders may reset modes: start over from a safe height.
@@ -723,6 +784,61 @@ class FileWriter {
     if (dial !== undefined) this.comment(dialComment(dial, Number(s)));
     this.emit(`${code} S${s}`);
     this.spindleOn = true;
+  }
+
+  /**
+   * Write a drill cycle group as one G81 or G83 line; false, writing nothing, when it must stay
+   * moves: a dwell (G82's P unit differs between controllers), no feed in the group, or the tool
+   * not written at the hole centre on the retract plane. `G99` returns to the R plane, where the
+   * IR's group ends. The controller measures G83's pecks from R, not from the cycle's `top`, and
+   * backs off its own distance between pecks (LinuxCNC: 0.254 mm), so its first peck is shorter
+   * by the gap between them; the depth reached is the same.
+   */
+  private cycle(e: CycleStart): boolean {
+    const c = e.drill;
+    if (c.dwell !== undefined || this.needSafeStart || this.firstRapid) return false;
+    const entries = this.input.plan.entries;
+    let feed: number | undefined;
+    for (let i = this.cursor + 1; i < entries.length; i++) {
+      const x = entries[i]!;
+      if (x.kind === 'cycleEnd') break;
+      if (x.kind === 'linear') {
+        feed = x.feed;
+        break;
+      }
+    }
+    if (feed === undefined) return false;
+    const x = this.coordWord(c.at[0]);
+    const y = this.coordWord(c.at[1]);
+    const r = this.coordWord(c.retract);
+    if (this.pos.x !== x || this.pos.y !== y || this.pos.z !== r) return false;
+    const code = c.peck === undefined ? 'G81' : 'G83';
+    this.needG(code, 'a drilling cycle');
+    this.needG('G99', 'a drilling cycle');
+    this.needG('G80', 'ending a drilling cycle');
+    const words = ['G99', code, `X${x}`, `Y${y}`, `Z${this.coordWord(c.bottom)}`, `R${r}`];
+    if (c.peck !== undefined) {
+      const q = formatNumber(c.peck * this.k, this.coord);
+      if (q === undefined || !(Number(q) > 0)) {
+        refuse('invalid-input', `The peck ${c.peck} mm cannot be written as a positive Q.`);
+      }
+      words.push(`Q${q}`);
+    }
+    const f = this.feedWord(feed);
+    if (f !== this.feed) {
+      words.push(`F${f}`);
+      this.feed = f;
+    }
+    this.emit(words.join(' '));
+    this.motion = code;
+    return true;
+  }
+
+  /** After a canned cycle: back on the R plane over the hole, and the cycle cancelled. */
+  private endCycle(): void {
+    this.inCycle = false;
+    this.emit('G80');
+    this.motion = undefined;
   }
 
   private dwell(seconds: number): void {
@@ -867,6 +983,8 @@ class FileWriter {
         this.input.offsets,
       );
       if (!check.ok) continue;
+      if (this.arcLimit !== undefined && check.exactDeltaR > RADIUS_MARGIN * this.arcLimit)
+        continue;
       const code = a.direction === 'cw' ? 'G2' : 'G3';
       this.needG(code, 'an arc');
       const words = [code, `X${ex}`, `Y${ey}`];

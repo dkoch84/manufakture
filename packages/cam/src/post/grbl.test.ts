@@ -2,11 +2,24 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import Toolpath from 'gcode-toolpath';
 import { describe, expect, it } from 'vitest';
-import { isMove } from '../ir';
 import { COMPACT_ROUTER_DIAL } from '../library/machines';
-import type { ArcMove, FeedClass, IrEntry, LinearMove, RapidMove, ToolChange } from '../ir';
-import type { Toolpath as IrToolpath } from '../ir';
-import type { Vec2, Vec3 } from '../types';
+import type { IrEntry, ToolChange } from '../ir';
+import {
+  CLEARANCE,
+  DRILLING,
+  DRILLING_CYCLES,
+  FLAT,
+  H,
+  POCKET,
+  PROFILE,
+  R,
+  TWO_TOOLS,
+  VBIT,
+  job,
+  profileOp,
+  toolpath,
+  vcarveOp,
+} from './golden-jobs';
 import { compileDialect, normalizeCode } from './dialect';
 import { GRBL, GRBL_DIALECT, postGrbl } from './grbl';
 import type { GrblOptions } from './grbl';
@@ -22,270 +35,7 @@ import type { PostJob, PostOutput } from './writer';
 const GOLDEN_DIR = fileURLToPath(new URL('../../test/grbl/', import.meta.url));
 const UPDATE = process.env.UPDATE_GOLDENS === '1';
 
-// ---------------------------------------------------------------------------------------------
-// Fixture data
-
-// The Carbide Compact Router's dial: the machine profiles' table (`library/machines.ts`, cited to
-// Carbide 3D's product page there), so the goldens use the same numbers the app does.
-
-const ORIGIN = 'stock top, front left corner';
-const CLEARANCE = 15;
-const RETRACT = 5;
-
-const FLAT: ToolChange = {
-  kind: 'toolChange',
-  tool: 'tool#1',
-  number: 201,
-  name: '#201 1/4" flat end mill',
-  diameter: 6.35,
-};
-// Tool number 302 is above Grbl's 255: the grbl post writes no T word, so it only appears in
-// comments, where Grbl does not read it.
-const VBIT: ToolChange = {
-  kind: 'toolChange',
-  tool: 'tool#2',
-  number: 302,
-  name: '#302 60 deg V-bit',
-  diameter: 12.7,
-};
-const DRILL: ToolChange = {
-  kind: 'toolChange',
-  tool: 'tool#3',
-  number: 3,
-  name: '3 mm drill',
-  diameter: 3,
-};
-
-const CUT = 1000;
-const PLUNGE = 300;
-
-/** IR builder: moves tagged with an operation and pass, the position tracked for arcs. */
-class Ir {
-  readonly entries: IrEntry[] = [];
-  op = '';
-  pass = 0;
-
-  tool(change: ToolChange, rpm: number): this {
-    this.entries.push(
-      { ...change, op: this.op },
-      { kind: 'spindle', state: 'cw', rpm, op: this.op },
-    );
-    return this;
-  }
-
-  stop(): this {
-    this.entries.push({ kind: 'spindle', state: 'off', op: this.op });
-    return this;
-  }
-
-  comment(text: string): this {
-    this.entries.push({ kind: 'comment', text, op: this.op });
-    return this;
-  }
-
-  rapid(x: number, y: number, z: number): this {
-    const e: RapidMove = { kind: 'rapid', to: [x, y, z], op: this.op, pass: this.pass };
-    this.entries.push(e);
-    return this;
-  }
-
-  line(x: number, y: number, z: number, feed = CUT, feedClass: FeedClass = 'cut'): this {
-    const e: LinearMove = {
-      kind: 'linear',
-      to: [x, y, z],
-      feed,
-      feedClass,
-      op: this.op,
-      pass: this.pass,
-    };
-    this.entries.push(e);
-    return this;
-  }
-
-  arc(
-    to: Vec3,
-    center: Vec2,
-    direction: 'cw' | 'ccw',
-    extra: Partial<Pick<ArcMove, 'fullCircle' | 'feed' | 'feedClass'>> = {},
-  ): this {
-    this.entries.push({
-      kind: 'arc',
-      to,
-      center,
-      direction,
-      fullCircle: false,
-      feed: CUT,
-      feedClass: 'cut',
-      op: this.op,
-      pass: this.pass,
-      ...extra,
-    });
-    return this;
-  }
-
-  dwell(seconds: number): this {
-    this.entries.push({ kind: 'dwell', seconds, op: this.op });
-    return this;
-  }
-}
-
-const R = FLAT.diameter! / 2;
-const W = 60;
-const H = 40;
-
-/**
- * An outside profile of the W x H rectangle at the origin, climb milled (clockwise around the
- * outside), the tool centre R off the sides with arcs about the corners. From (W/2, -R), the
- * middle of the front side. `tabs` lifts the tool to `tabTop` over two tabs, one on the front
- * side and one on the back, 5 mm wide, with 1 mm ramps either side.
- */
-function outsideLap(ir: Ir, z: number, tabs?: { top: number }): void {
-  const y0 = -R;
-  const y1 = H + R;
-  const half = (5 + FLAT.diameter!) / 2;
-  if (tabs) {
-    // Front side, right to left, tab centred at x = 15.
-    ir.line(15 + half + 1, y0, z)
-      .line(15 + half, y0, tabs.top, CUT, 'ramp')
-      .line(15 - half, y0, tabs.top)
-      .line(15 - half - 1, y0, z, CUT, 'ramp');
-  }
-  ir.line(0, y0, z).arc([-R, 0, z], [0, 0], 'cw').line(-R, H, z).arc([0, y1, z], [0, H], 'cw');
-  if (tabs) {
-    // Back side, left to right, tab centred at x = 30.
-    ir.line(30 - half - 1, y1, z)
-      .line(30 - half, y1, tabs.top, CUT, 'ramp')
-      .line(30 + half, y1, tabs.top)
-      .line(30 + half + 1, y1, z, CUT, 'ramp');
-  }
-  ir.line(W, y1, z)
-    .arc([W + R, H, z], [W, H], 'cw')
-    .line(W + R, 0, z)
-    .arc([W, -R, z], [W, 0], 'cw')
-    .line(W / 2, y0, z);
-}
-
-/** The profile operation: two depth steps through 6.5 mm, tabs 2 mm high on the last. */
-function profileOp(ir: Ir): void {
-  ir.op = 'profile#1';
-  ir.comment('Profile: outline, outside, 2 passes, 2 tabs');
-  ir.pass = 0;
-  ir.rapid(W / 2, -R, RETRACT).line(W / 2, -R, -3.25, PLUNGE, 'plunge');
-  outsideLap(ir, -3.25);
-  ir.pass = 1;
-  ir.line(W / 2, -R, -6.5, PLUNGE, 'plunge');
-  outsideLap(ir, -6.5, { top: -4.5 });
-}
-
-/**
- * A 40 x 30 mm pocket 3 mm deep centred at (100, 15): a helical entry of four turns (radius 2 mm,
- * 1 mm a turn) with a flat turn at the bottom, then rectangular rings from the inside out with a
- * 2.5 mm stepover.
- */
-function pocketOp(ir: Ir): void {
-  const cx = 100;
-  const cy = 15;
-  const z = -3;
-  ir.op = 'pocket#1';
-  ir.comment('Pocket: 40 x 30 mm, 3 mm deep, helical entry');
-  ir.pass = 0;
-  ir.rapid(cx + 2, cy, RETRACT).rapid(cx + 2, cy, 1);
-  for (const turnZ of [0, -1, -2, -3]) {
-    ir.arc([cx + 2, cy, turnZ], [cx, cy], 'ccw', {
-      fullCircle: true,
-      feed: PLUNGE,
-      feedClass: 'ramp',
-    });
-  }
-  ir.arc([cx + 2, cy, z], [cx, cy], 'ccw', { fullCircle: true });
-  for (let k = 3; k >= 0; k--) {
-    const hx = 20 - R - k * 2.5;
-    const hy = 15 - R - k * 2.5;
-    ir.pass = 3 - k;
-    ir.line(cx + hx, cy, z)
-      .line(cx + hx, cy + hy, z)
-      .line(cx - hx, cy + hy, z)
-      .line(cx - hx, cy - hy, z)
-      .line(cx + hx, cy - hy, z)
-      .line(cx + hx, cy, z);
-  }
-}
-
-/** Peck drilling at three points, 8 mm deep in 3 mm pecks, written as moves (Grbl has no G83). */
-function drillOp(ir: Ir): void {
-  ir.op = 'drill#1';
-  ir.comment('Drill: 3 holes, 8 mm deep, 3 mm pecks');
-  const pecks = [-3, -6, -8];
-  for (const [n, [x, y]] of [
-    [10, 10],
-    [50, 10],
-    [30, 30],
-  ].entries()) {
-    ir.pass = n;
-    ir.rapid(x!, y!, RETRACT).rapid(x!, y!, 1);
-    let previous = 1;
-    for (const depth of pecks) {
-      // Back down by rapid to just above the last peck, then feed on.
-      if (previous < 1) ir.rapid(x!, y!, previous + 0.2);
-      ir.line(x!, y!, depth, 150, 'plunge');
-      // A dwell at the bottom of the hole, then out.
-      if (depth === pecks[pecks.length - 1]) ir.dwell(0.5);
-      ir.rapid(x!, y!, 1);
-      previous = depth;
-    }
-    if (n < 2) ir.rapid(x!, y!, RETRACT);
-  }
-}
-
-/** V-carving with the 60 degree V-bit: a line and an arc, 1 mm deep. */
-function vcarveOp(ir: Ir): void {
-  ir.op = 'vcarve#1';
-  ir.comment('V-carve: line and arc, 1 mm deep');
-  ir.pass = 0;
-  ir.rapid(10, 20, RETRACT)
-    .line(10, 20, -1, 200, 'plunge')
-    .line(25, 20, -1, 800)
-    .arc([35, 20, -1], [30, 20], 'cw', { feed: 800 })
-    .line(50, 20, -1, 800);
-}
-
-/**
- * Each tool's operations, as linking (T5.2g) will join them: the tool change and spindle start,
- * the operations, a rapid straight up to the clearance from where the last cut ended, the spindle
- * stop.
- */
-function toolpath(...tools: [ToolChange, number, (ir: Ir) => void][]): IrToolpath {
-  const ir = new Ir();
-  for (const [n, [change, rpm, op]] of tools.entries()) {
-    if (n > 0) ir.comment(`Next: ${change.name}`);
-    ir.tool(change, rpm);
-    op(ir);
-    const last = ir.entries.findLast((e) => isMove(e));
-    if (last === undefined || !isMove(last)) throw new Error('an operation needs a move');
-    ir.rapid(last.to[0], last.to[1], CLEARANCE);
-    ir.stop();
-  }
-  return { start: [0, 0, CLEARANCE], entries: ir.entries };
-}
-
-const PROFILE = toolpath([FLAT, 18000, profileOp]);
-const POCKET = toolpath([FLAT, 18000, pocketOp]);
-const DRILLING = toolpath([DRILL, 12000, drillOp]);
-const TWO_TOOLS = toolpath([FLAT, 18000, profileOp], [VBIT, 24500, vcarveOp]);
-
-/** The fixture job; `dial: false` leaves out the router dial table. */
-function job(tp: IrToolpath, over: Partial<PostJob> = {}, dial = true): PostJob {
-  return {
-    toolpath: tp,
-    job: 'Plywood sign',
-    setup: 'Top',
-    date: '2026-10-02',
-    origin: ORIGIN,
-    heights: { clearance: CLEARANCE, retract: RETRACT },
-    ...(dial ? { spindleDial: COMPACT_ROUTER_DIAL } : {}),
-    ...over,
-  };
-}
+// The fixture jobs are shared with the other posts' tests (`golden-jobs.ts`).
 
 function post(j: PostJob, options: GrblOptions = {}): PostOutput {
   const r = postGrbl(j, options);
@@ -309,6 +59,8 @@ const GOLDENS: readonly Golden[] = [
   // No dial table: the spindle line has no router comment.
   { name: 'pocket', job: job(POCKET, {}, false), files: 1 },
   { name: 'drilling', job: job(DRILLING), files: 1 },
+  // Grbl has no canned cycles: the cycle markers are skipped and the moves written.
+  { name: 'drilling-cycles', job: job(DRILLING_CYCLES), files: 1 },
   { name: 'two-tools-files', job: job(TWO_TOOLS), files: 2 },
   { name: 'two-tools-pause', job: job(TWO_TOOLS), options: { multiTool: 'pause' }, files: 1 },
 ];

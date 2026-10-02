@@ -65,8 +65,9 @@ export interface Dialect {
   /** Write one file per tool by default. */
   readonly splitPerTool: boolean;
   /**
-   * Whether the controller accepts canned drilling cycles (G81, G83). Recorded for the drill
-   * posts; the IR has no cycle markers yet, so the engine writes drilling as G0 and G1 moves.
+   * Whether the controller accepts canned drilling cycles (G80, G81, G83 and G99). The engine
+   * writes the IR's drill cycles as G81 or G83 only when a post call asks for it
+   * (`PostOptions.cannedCycles`) and this is true; otherwise as the G0 and G1 moves they expand to.
    */
   readonly cannedCycles: boolean;
   /** An intended full circle as two half arcs (the safe default) or as one arc. */
@@ -86,6 +87,25 @@ export interface Dialect {
    * absent. A larger number is refused, never written: Grbl fails the line with error 38.
    */
   readonly maxToolNumber?: number;
+  /**
+   * Write `G43 H<n>` after every `M6 T<n>`, applying the new tool's length offset from the
+   * controller's tool table (LinuxCNC, Mach3). Needs G43 and the `m6` style; a post call may
+   * override it. False when absent.
+   */
+  readonly toolLengthOffset?: boolean;
+  /**
+   * Write `G64 P<tolerance>` after the modes line: path blending that may round a corner by at
+   * most the post's tolerance (LinuxCNC; without P it blends with no bound). Needs G64. False
+   * when absent.
+   */
+  readonly pathBlending?: boolean;
+  /**
+   * The controller's own arc rule, when stricter than Grbl's: the most the distances from an
+   * arc's centre to its written start and end may differ, in the file's units (Mach3: 0.002 mm,
+   * 0.0002 in). The engine keeps the written radii within `RADIUS_MARGIN` of it, and writes an
+   * arc that cannot be kept so as lines. Grbl's rule alone when absent.
+   */
+  readonly arcRadiusTolerance?: { readonly mm: number; readonly inch: number };
 }
 
 /** Grbl 1.1's `MAX_TOOL_NUMBER` (`gcode.h`): a larger `T` fails with error 38. */
@@ -168,6 +188,9 @@ export const MAX_G64_P = 0.1;
 /** M codes a template may write. `M2` and `M30` (program end) only in the footer. */
 export const TEMPLATE_M_CODES: readonly string[] = ['M0', 'M1', 'M2', 'M5', 'M8', 'M9', 'M30'];
 
+/** The G codes a dialect with `cannedCycles` must accept: cancel, G81, G83 and R-plane return. */
+export const CANNED_CYCLE_G_CODES: readonly string[] = ['G80', 'G81', 'G83', 'G99'];
+
 /** Codes the engine itself always needs. */
 export const REQUIRED_G_CODES: readonly string[] = ['G0', 'G1', 'G2', 'G3', 'G17', 'G90'];
 
@@ -244,6 +267,9 @@ const DIALECT_KEYS = [
   'decimals',
   'templates',
   'maxToolNumber',
+  'toolLengthOffset',
+  'pathBlending',
+  'arcRadiusTolerance',
 ] as const;
 
 /** `G01` to `G1`, `g91.1` to `G91.1`; undefined when `code` is not a G or M code. */
@@ -358,6 +384,33 @@ function compileCopy(input: unknown): CamResult<CompiledDialect> {
     maxTool > 1e8 - 1
   ) {
     return bad('maxToolNumber must be a whole number from 0 to 99999999.');
+  }
+  for (const key of ['toolLengthOffset', 'pathBlending'] as const) {
+    if (d[key] !== undefined && typeof d[key] !== 'boolean') {
+      return bad(`${key} must be true or false.`);
+    }
+  }
+  if (d.toolLengthOffset === true) {
+    if (!gCodes.has('G43')) return bad('toolLengthOffset needs G43.');
+    if (style !== 'm6') return bad("toolLengthOffset needs the 'm6' tool change.");
+  }
+  if (d.pathBlending === true && !gCodes.has('G64')) return bad('pathBlending needs G64.');
+  if (d.cannedCycles === true) {
+    for (const code of CANNED_CYCLE_G_CODES) {
+      if (!gCodes.has(code)) return bad(`cannedCycles needs ${code}, which gCodes lacks.`);
+    }
+  }
+  if (d.arcRadiusTolerance !== undefined) {
+    const a = d.arcRadiusTolerance;
+    const positive = (v: unknown): boolean => typeof v === 'number' && v > 0 && v <= 0.5;
+    if (
+      !isRecord(a) ||
+      Object.keys(a).some((k) => k !== 'mm' && k !== 'inch') ||
+      !positive(a.mm) ||
+      !positive(a.inch)
+    ) {
+      return bad('arcRadiusTolerance must be { mm, inch }, each greater than 0 and at most 0.5.');
+    }
   }
 
   if (!isRecord(d.templates)) return bad('templates must be an object.');

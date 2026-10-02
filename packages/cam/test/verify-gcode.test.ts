@@ -2,6 +2,9 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { GRBL, GRBL_DIALECT } from '../src/post/grbl';
+import { GRBLHAL } from '../src/post/grblhal';
+import { LINUXCNC } from '../src/post/linuxcnc';
+import { MACH3 } from '../src/post/mach3';
 import type { Dialect } from '../src/post/dialect';
 import {
   DRILL_3,
@@ -340,5 +343,140 @@ describe('verifyGcode: the other checks', () => {
     expect(bad({ stock: { min: [0, 0, 0], max: [-1, 1, 1] } })).toBe(false);
     expect(bad({ tools: [] })).toBe(false);
     expect(bad({ throughCutAllowance: -1 })).toBe(false);
+  });
+});
+
+describe('verifyGcode: the codes the T5.4c posts write', () => {
+  const m6 = { dialect: LINUXCNC, tools: [FLAT_201, DRILL_3] };
+  /** An m6 program: G64, M6 T201 and the body, as the LinuxCNC post writes them. */
+  const lcnc = (...body: string[]): string =>
+    [
+      '%',
+      'G91.1',
+      'G21 G90 G17 G94',
+      'G64 P0.002',
+      'M6 T201',
+      ...body,
+      'G0 Z15',
+      'M3 S18000',
+      'G0 X10 Y10',
+      'G1 Z-1 F300',
+      'G0 Z15',
+      'M5',
+      'M30',
+      '%',
+    ].join('\n');
+
+  it('checks G43 H against the tool the last M6 loaded', () => {
+    expect(found(verify(lcnc('G43 H201'), m6))).toEqual([]);
+    expect(found(verify(lcnc('G43 H3'), m6))).toEqual(['tool-change@6']);
+    expect(found(verify(lcnc('G43'), m6))).toEqual(['tool-change@6']);
+    // H only with G43; G43 only in an m6 file.
+    expect(found(verify(lcnc('G0 Z15 H201'), m6))).toEqual(['word@6']);
+    const hal = { dialect: GRBLHAL, tools: [FLAT_201] };
+    expect(found(verify(program('G43 H201'), hal))).toEqual([`tool-change@${BODY_START}`]);
+    // G43 is not Grbl's: only a word issue there, and its H is not modelled either.
+    expect(found(verify(program('G43 H201')))).toEqual([
+      `word@${BODY_START}`,
+      `word@${BODY_START}`,
+    ]);
+  });
+
+  it('checks G64 for a P within the tolerance', () => {
+    expect(found(verify(lcnc().replace('G64 P0.002', 'G64'), m6))).toEqual(['path@4']);
+    expect(found(verify(lcnc().replace('G64 P0.002', 'G64 P0.01'), m6))).toEqual(['path@4']);
+    expect(
+      found(verify(lcnc().replace('G64 P0.002', 'G64 P0.01'), { ...m6, tolerance: 0.01 })),
+    ).toEqual([]);
+  });
+
+  describe('canned cycles', () => {
+    const drill = { dialect: LINUXCNC, tools: [DRILL_3] };
+    /** A drilling program on the R plane 1 mm above the stock at (10, 10). */
+    const cycle = (...body: string[]): string =>
+      [
+        'G21 G90 G17 G94',
+        'M6 T3',
+        'G0 Z15',
+        'M3 S12000',
+        'X10 Y10',
+        'Z1',
+        ...body,
+        'G0 Z15',
+        'M5',
+        'M30',
+      ].join('\n');
+
+    it('expands G81 and G83 into the moves the controller makes, and checks them', () => {
+      const g81 = verify(cycle('G99 G81 X10 Y10 Z-4 R1 F150', 'G80'), drill);
+      expect(found(g81)).toEqual([]);
+      expect(g81.cuttingExtents).toEqual({ min: [10, 10, -4], max: [10, 10, 1] });
+      // G83 Q3 from R1: feeds to -2, -5, -8, out to R between pecks, down to 0.254 above.
+      const g83 = verify(cycle('G99 G83 X10 Y10 Z-8 R1 Q3 F150', 'G80'), drill);
+      expect(found(g83)).toEqual([]);
+      expect(g83.moves).toMatchObject({ linear: 3 });
+      expect(g83.cuttingExtents!.min[2]).toBe(-8);
+      // A modal repeat at another hole, as a hand-written file may have it.
+      const two = verify(cycle('G99 G81 X10 Y10 Z-4 R1 F150', 'X20', 'G80'), drill);
+      expect(found(two)).toEqual([]);
+      expect(two.cuttingExtents!.max[0]).toBe(20);
+    });
+
+    it('catches a cycle below the stock bottom, and outside the stock', () => {
+      // The feed down and the rapid back out both reach below the 12 mm stock.
+      expect(found(verify(cycle('G99 G81 X10 Y10 Z-13 R1 F150', 'G80'), drill))).toEqual([
+        'depth@7',
+        'depth@7',
+      ]);
+      expect(found(verify(cycle('G99 G81 X200 Y10 Z-4 R1 F150', 'G80'), drill))).toEqual([
+        'stock@7',
+      ]);
+    });
+
+    it('catches a cycle without its words, or without a return mode', () => {
+      expect(found(verify(cycle('G99 G81 X10 Y10 Z-4 F150', 'G80'), drill))).toEqual(['cycle@7']);
+      expect(found(verify(cycle('G99 G83 X10 Y10 Z-4 R1 F150', 'G80'), drill))).toEqual([
+        'cycle@7',
+      ]);
+      expect(found(verify(cycle('G81 X10 Y10 Z-4 R1 F150', 'G80'), drill))).toEqual(['cycle@7']);
+      // Q with G81, R outside a cycle: words that mean nothing there.
+      expect(found(verify(cycle('G99 G81 X10 Y10 Z-4 R1 Q3 F150', 'G80'), drill))).toEqual([
+        'word@7',
+      ]);
+      expect(found(verify(cycle('G0 X10 R1'), drill))).toEqual(['word@7']);
+    });
+
+    it('catches axis words after G80 cancelled the motion mode', () => {
+      expect(found(verify(cycle('G99 G81 X10 Y10 Z-4 R1 F150', 'G80', 'X20'), drill))).toEqual([
+        'word@9',
+      ]);
+    });
+
+    it('returns to the starting Z with G98', () => {
+      const g98 = verify(cycle('G0 Z5', 'G98 G81 X10 Y10 Z-4 R1 F150', 'G80'), drill);
+      expect(found(g98)).toEqual([]);
+      expect(g98.extents!.max[2]).toBe(15);
+    });
+  });
+
+  it("checks arcs against Mach3's 0.002 mm radius rule, where Grbl's allows more", () => {
+    const arc = (end: string): string =>
+      [
+        'G21 G90 G17 G94',
+        'M6 T201',
+        'G0 Z15',
+        'M3 S18000',
+        'G0 X10 Y10',
+        'G1 Z-1 F300',
+        `G2 ${end} Y10 I10 J0`,
+        'G0 Z15',
+        'M5',
+        'M30',
+      ].join('\n');
+    const tools = [FLAT_201];
+    // On a 10 mm radius 0.003 mm off passes Grbl's 0.005 mm and LinuxCNC's, not Mach3's.
+    expect(found(verify(arc('X30.003'), { dialect: LINUXCNC, tools }))).toEqual([]);
+    expect(found(verify(arc('X30.003'), { dialect: MACH3, tools }))).toEqual(['arc-radius@7']);
+    expect(found(verify(arc('X30.001'), { dialect: MACH3, tools }))).toEqual([]);
   });
 });

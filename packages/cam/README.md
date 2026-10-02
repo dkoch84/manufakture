@@ -56,7 +56,8 @@ The evaluated counterparts of the document's `cam` section (T5.1b), each with it
     (and, for now, the optional `ProfileExtras` of [the profile operation](#the-profile-operation-opsprofilets));
   - `pocket`: `loops` (outer and islands), `depth`, `stepdown`, `stepover`, `finishAllowance`,
     `entry`, `climb`;
-  - `drill`: `points` (`MachineDrillPoint`), `peck?` (mm), `dwell?` (seconds);
+  - `drill`: `points` (`MachineDrillPoint`), `peck?` (mm), `dwell?` (seconds) (and, for now, the
+    optional `DrillExtras` of [the drill operation](#the-drill-operation-opsdrillts));
   - `vcarve`: `loops`, `top`, `maxDepth?`;
   - `surface3d`: `mesh`, `stepover` (mm), `angle`, `allowance`.
   - `Entry` is `plunge`, `ramp` (`angle`) or `helix` (`angle`, `radius`); `Lead` is `none`,
@@ -79,8 +80,10 @@ The evaluated counterparts of the document's `cam` section (T5.1b), each with it
 - **`MachineLoops`**: loops in machine XY at one machine `z`.
 - **`DrillPoint`**: a hole in model coordinates: `position` (centre of its top), `axis` (unit,
   into the material), `diameter` (the through hole's, never a counterbore head), `depth`,
-  `through?`, `source?`. **`MachineDrillPoint`**: `at` (machine XY), `depth`, `diameter`,
-  `through?`, `source?`.
+  `through?`, `clearBelow?` (mm clear under a through hole's exit, when material lies further
+  down), `entryTilt?` (radians the mouth is tilted from square), `source?`.
+  **`MachineDrillPoint`**: `at` (machine XY), `depth`, `diameter`, `through?`, `clearBelow?`,
+  `entryTilt?`, `source?`.
 - **`DepthRange`**: `top` and `bottom` in machine Z, `top >= bottom`.
 - **`Mesh`**: `positions` (xyz per vertex) and `indices` (three per triangle), a structural subset
   of the kernel's `MeshData`, for `surface3d`.
@@ -133,6 +136,77 @@ Then `toMachine(frame, p)` is `[(p - origin) . xAxis, (p - origin) . yAxis, (p -
   contain the body is a `stock-too-small` error naming the axis.
 - `stockSize(stock)` is its extent along X, Y and Z.
 
+## Tool library and machine profiles (`library/`)
+
+The built-in tools, feed presets and machine profiles (T5.1d), also exported on their own as
+`@manufakture/cam/library` so the app's library store loads them without the rest of the package.
+Library data keeps each number in the unit its source prints (`unit: 'in'` for Carbide 3D's inch
+cutters and charts; angles in degrees as `angleDeg`), so nothing is rounded on the way in;
+`toMm`, `resolvePreset` and `libraryToolToTool` give internal units. Every number from outside
+says where it comes from (`source`: the URL and the figure as printed) and whether it was checked
+against it (`verified`), like the kernel's `HOLE_SIZES`; `unverifiedToolFields(tool)` and
+`unverifiedMachineFields(machine)` list the unchecked ones by path, for the UI to flag.
+
+```ts
+BUILTIN_TOOLS: readonly LibraryTool[]      // starter set; ids permanent (copied tools name them)
+FEED_CATEGORIES                            // plywood, mdf, softwood, hardwood, plastics, aluminium, steel
+MATERIAL_FEED_CATEGORY                     // core material id -> feed category ('oak' -> 'hardwood')
+resolvePreset(tool, materialOrCategory): CamResult<ResolvedPreset>   // mm, mm/min, rpm, chip load
+feedFromChipLoad(rpm, flutes, chipLoad)    // feed = rpm x flutes x chipLoad
+chipLoadFromFeed(feed, rpm, flutes)
+MACHINES, SPINDLES, COMPACT_ROUTER_DIAL, DEFAULT_MACHINE_ID, defaultPost(m), machineDial(m)
+libraryToolToCamTool(tool, 'tool#3', 'builtin'): CamToolData   // for addCamTool
+validateLibraryTool(value), validateToolLibraryFile(value), parseToolLibrary(json),
+serializeToolLibrary(tools), validateMachine(m)
+```
+
+**Tools.** Carbide 3D #201 (1/4" flat, 3 flutes), #102 (1/8" flat), #251 (1/4" down-cut flat),
+#101 (1/8" ball), #302 and #301 (1/2" V-bits, 60 and 90 degrees), plus a 3 mm and a 6 mm
+two-flute flat and a 1/8" drill with no vendor. Geometry is read from each Carbide 3D product
+page's spec table (`https://shop.carbide3d.com/products/<handle>`, read 2026-10-02; the vendor's
+catalogue number becomes the tool number). The pages print no cutting length for the V-bits; their
+`fluteLength` is the cone height, (diameter / 2) / tan(angle / 2). The metric end mills and the
+drill have typical dimensions and `verified: false`. Carbide 3D's 2019 Nomad chart labels #101 as
+square and #102 as ball; the current product pages say the opposite, and the product pages win.
+
+**Feeds.** One source per entry, labelled a starting point, not a promise. The #201's presets are
+the rows of Carbide 3D's "Shapeoko 3 Feeds & Speeds" chart for "#201 .25" Square" (archived at
+`CHART_URL`, dated 2019-07-29; measured slotting, "100% engagement"), as printed in inches:
+Plywood, MDF, Pine (softwood), Mahogany (hardwood: the chart has no oak, which is harder), ABS
+(plastics; PLA and PETG soften sooner), 6061 AL, and Steel ("Use Coolant"; the category carries
+the maker's warning that steel is not recommended on a Shapeoko). Every other tool's presets are
+derived from those rows and flagged unverified: chip load scaled by diameter at the same rpm (a
+V-bit fed as a 1/8" two-flute cutter, since it cuts mostly near the tip), plunge alike, depth by
+diameter capped at the flute length; a drill feeds at its plunge and pecks one diameter. Stepovers
+are this library's defaults (40% flat and V-bit, 10% ball, 50% for the drill, where drilling does
+not use it), unverified. The chart's own dial table differs from the product page's, so presets
+keep the rpm only and the post names the dial setting from the machine's own table.
+
+**Machines.** The Shapeoko 5 Pro 4x4 and Shapeoko 4 XXL are the primary profiles (the machines
+cut on), the 5 Pro 4x4 the default (`DEFAULT_MACHINE_ID`): the larger, stiffer machine, and nothing
+in the data argues otherwise. The other Shapeoko 4 (Standard, XL) and 5 Pro (4x2, 2x2) sizes
+follow. Default configuration throughout: the Carbide Compact Router and its dial, Carbide Motion,
+the BitSetter. Sources, read 2026-10-02:
+
+| Number                | Value                                                          | Source                                                                                                                                            | Verified |
+| --------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| Shapeoko 5 Pro travel | 4x4 1237 x 1237, 4x2 1237 x 623, 2x2 623 x 623 mm; Z 155 mm    | `carbide3d.com/shapeoko/shapeoko5pro-specs/` "Machine Travel", "Total Z Travel"; the 2023 Shapeoko 5 Pro page (Wayback 2023-09-28) gives the same | yes      |
+| Shapeoko 4 travel     | Standard 17.5 x 17.5, XL 33 x 17.5, XXL 33 x 33 in; Z 4 in     | `shop.carbide3d.com/products/shapeoko4` "Cutting Area"                                                                                            | yes      |
+| Maximum feed          | 5000 mm/min                                                    | `carbide3d.com/shapeoko/capable/`: "Shapeoko cuts at up to 5000 mm/min"                                                                           | yes      |
+| Rapid rate            | 5000 mm/min                                                    | no maker figure; Grbl rapids at its $110/$111 maximum, taken as the cutting maximum                                                               | no       |
+| Compact Router dial   | 1 11,000; 2 13,500; 3 18,250; 4 24,500; 5 29,250; 6 31,000 rpm | `shop.carbide3d.com/products/carbide-compact-router` (which also says "RPM Range 12,000 - 30,000")                                                | yes      |
+| 65mm VFD spindle      | 8,000 to 24,000 rpm                                            | `shop.carbide3d.com/products/vfd-spindle-kit`                                                                                                     | yes      |
+| Sender, BitSetter     | Carbide Motion; BitSetter standard                             | each machine's "Includes" list                                                                                                                    | yes      |
+| Firmware              | Grbl 1.1 on both                                               | Shapeoko 5 Pro: Carbide 3D staff on its forum ("Grbl 1.1h" is current); Shapeoko 4: no maker statement                                            | no       |
+
+The Shapeoko 5 Pro is recorded as Grbl 1.1, not grblHAL: the maker's own staff name Grbl 1.1h
+as its current firmware. So every profile's posts are `['carbide-motion', 'grbl']`: Carbide Motion first, the sender
+shipped and the one that handles BitSetter tool changes, then plain `grbl`.
+`defaultPost(machine, available)` returns the first of these the build has (`BUILTIN_POST_IDS`
+holds every built-in post, `carbide-motion` included since T5.4c; `defaultPost(machine)` alone
+gives the first listed). `COMPACT_ROUTER_DIAL` is the
+authoritative dial table; the GRBL post's goldens use it.
+
 ## The toolpath IR (`ir.ts`)
 
 A **`Toolpath`** is `start` (the machine position before the first entry) and `entries`, in order.
@@ -180,14 +254,24 @@ its feed from `Feeds`:
 
 Each may carry an optional `op`.
 
-- **`dwell`**: `seconds` (zero or more). G4.
+- **`dwell`**: `seconds` (zero or more), `pass?` (like a move's, when it belongs to one). G4.
 - **`toolChange`**: `tool` (the document id, `tool#n`), `number?` (written with `T`), `name` (for
   comments and the operator prompt). The spindle must be off.
 - **`spindle`**: `state` `cw` or `ccw` with `rpm` (greater than zero), or `state: 'off'`. M3, M4,
   M5 with S.
 - **`comment`**: `text`. Posts sanitise it (parenthesised ASCII, ADR 0014 decision 10).
+- **`cycle`** and **`cycleEnd`**: canned-cycle markers. A `cycle` carries `drill` (a
+  `DrillCycle`: `at`, `top`, `bottom`, `retract`, `peck?`, `dwell?`) and opens a group that the
+  next `cycleEnd` closes. The entries between them are the cycle's expanded G0 and G1 moves (and
+  its dwell), complete on their own: the tool starts and ends at `[at, retract]`, feeds down to
+  `bottom` in pecks of `peck` measured down from `top` (a rapid back to `retract` after each, and a
+  rapid down to just above the last depth before the next), and dwells at the bottom. Markers
+  carry no motion and never nest. Grbl has no canned cycles, so its post writes the moves and skips
+  the markers, as the statistics, bounds and packing do; a later post for a controller with G81,
+  G82 and G83 (grblHAL) may write the cycle instead of the group, provided it reproduces these
+  semantics (a G83 that measures pecks from R rather than from `top` does not).
 
-`isMove(entry)` and `isFeedMove(entry)` narrow an entry.
+`isMove(entry)`, `isFeedMove(entry)` and `isCycleMarker(entry)` narrow an entry.
 
 ## Statistics and bounds (`stats.ts`)
 
@@ -236,10 +320,15 @@ loaded.
 | `arc-radius`             | start and end radius differ by more than the tolerance                |
 | `arc-degenerate`         | start and end coincide in XY without `fullCircle`                     |
 | `arc-full-circle-open`   | a `fullCircle` arc that does not end at its start in XY               |
+| `cycle-pairing`          | a nested `cycle`, a stray `cycleEnd`, or a `cycle` never closed       |
+| `cycle-invalid`          | bottom not below top, top above retract, peck or dwell not above 0    |
+| `cycle-content`          | in a cycle: not a rapid, straight feed or dwell, or a move off `at`   |
+| `cycle-position`         | a cycle group not starting or ending at `at` on its retract plane     |
 
 The arc tolerance, `DEFAULT_ARC_TOLERANCE`, is **0.0005 mm**: a tenth of Grbl's 0.005 mm radius
 check (error 33). The refit projects arc ends onto the exact circle, so its arcs agree far better.
-Rapids are allowed with the spindle off and before any tool change.
+Rapids are allowed with the spindle off and before any tool change. A dwell's `pass`, when it has
+one, is checked like a move's (`bad-tag`).
 
 ## Offsets (`offset/`)
 
@@ -399,21 +488,24 @@ coordinate or feed cannot be written) or `invalid-dialect`. Inch conversion uses
 }
 ```
 
-| Field              | Meaning                                                                                                                                                                                                         |
-| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`, `name`       | Lower case id (`a-z`, digits, single hyphens) and a display name (`{post}`).                                                                                                                                    |
-| `gCodes`, `mCodes` | Every code the controller accepts (`G01` and `G1` are the same). The engine needs G0 to G3, G17, G90 and G21 or G20; it writes G4, G94, M0, M3, M4, M5 and M6 only when they are listed, and refuses otherwise. |
-| `toolChange`       | `none` (one tool per file), `m0-pause` (`M0` and comments between tools) or `m6` (`M6 T<n>` at every tool change, including each file's first).                                                                 |
-| `splitPerTool`     | Default for writing one file per tool.                                                                                                                                                                          |
-| `cannedCycles`     | Whether the controller takes G81/G83. Recorded for the drill posts; the IR has no cycle markers yet, so drilling is always written as G0/G1 moves.                                                              |
-| `fullCircles`      | `halves` (default and safe) writes an intended full circle as two half arcs; `single` writes one arc with equal start and end, which Grbl 1.1 accepts in IJK form.                                              |
-| `comments`         | `parentheses`, the only style written.                                                                                                                                                                          |
-| `maxLineLength`    | Longest line, 40 to 255 (80 for Grbl's line buffer). Comments wrap; a longer code line is refused.                                                                                                              |
-| `programDelimiter` | `%` lines around the program (LinuxCNC, Mach3).                                                                                                                                                                 |
-| `dwellUnit`        | G4's P in `seconds` (Grbl, LinuxCNC) or `milliseconds`.                                                                                                                                                         |
-| `decimals`         | Decimals for coordinates (X Y Z I J) and F per unit system, and for S and P. Coordinates need 2 to 6.                                                                                                           |
-| `templates`        | `header` (top of every file), `tool` (once per tool in the file, after the header), `toolChange` (at each change, before `M0`/`M6`), `footer` (end of every file).                                              |
-| `maxToolNumber`    | Optional: the largest tool number a `T` word may carry, 255 when absent (Grbl's `MAX_TOOL_NUMBER`; a larger T fails with error 38). A larger number is refused, in `M6 T<n>` and in a template's `T{tool}`.     |
+| Field                | Meaning                                                                                                                                                                                                         |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`, `name`         | Lower case id (`a-z`, digits, single hyphens) and a display name (`{post}`).                                                                                                                                    |
+| `gCodes`, `mCodes`   | Every code the controller accepts (`G01` and `G1` are the same). The engine needs G0 to G3, G17, G90 and G21 or G20; it writes G4, G94, M0, M3, M4, M5 and M6 only when they are listed, and refuses otherwise. |
+| `toolChange`         | `none` (one tool per file), `m0-pause` (`M0` and comments between tools) or `m6` (`M6 T<n>` at every tool change, including each file's first).                                                                 |
+| `splitPerTool`       | Default for writing one file per tool.                                                                                                                                                                          |
+| `cannedCycles`       | Whether the controller takes G81/G83 (it must then list G80, G81, G83 and G99). The IR's drill cycles are written as G81/G83 only when a post call sets `cannedCycles: true`; otherwise as G0/G1 moves.         |
+| `fullCircles`        | `halves` (default and safe) writes an intended full circle as two half arcs; `single` writes one arc with equal start and end, which Grbl 1.1 accepts in IJK form.                                              |
+| `comments`           | `parentheses`, the only style written.                                                                                                                                                                          |
+| `maxLineLength`      | Longest line, 40 to 255 (80 for Grbl's line buffer). Comments wrap; a longer code line is refused.                                                                                                              |
+| `programDelimiter`   | `%` lines around the program (LinuxCNC, Mach3).                                                                                                                                                                 |
+| `dwellUnit`          | G4's P in `seconds` (Grbl, LinuxCNC) or `milliseconds`.                                                                                                                                                         |
+| `decimals`           | Decimals for coordinates (X Y Z I J) and F per unit system, and for S and P. Coordinates need 2 to 6.                                                                                                           |
+| `templates`          | `header` (top of every file), `tool` (once per tool in the file, after the header), `toolChange` (at each change, before `M0`/`M6`), `footer` (end of every file).                                              |
+| `maxToolNumber`      | Optional: the largest tool number a `T` word may carry, 255 when absent (Grbl's `MAX_TOOL_NUMBER`; a larger T fails with error 38). A larger number is refused, in `M6 T<n>` and in a template's `T{tool}`.     |
+| `toolLengthOffset`   | Optional: write `G43 H<n>` after every `M6 T<n>` (LinuxCNC, Mach3). Needs G43 and the `m6` style; `PostOptions.toolLengthOffset` overrides it.                                                                  |
+| `pathBlending`       | Optional: write `G64 P<tolerance>` after the modes line, P the post tolerance in output units rounded down to 6 decimals (LinuxCNC; G64 without P blends with no bound). Needs G64.                             |
+| `arcRadiusTolerance` | Optional `{ mm, inch }`, file units: the controller's own arc radius rule when stricter than Grbl's (Mach3: 0.002 mm, 0.0002 in). Arcs whose written radii differ by more than 0.8 of it become lines.          |
 
 **Templates.** A template line is either a comment line, `(` text `)` with no other parentheses,
 or a code line of words (`G90 G94`, `T{tool}`). `{name}` substitutes a variable from the fixed
@@ -496,7 +588,15 @@ code line the engine forgets its position and modes and starts the next move fro
   footer). `none` with several tools in one file is refused. At an `M0` pause the operator's
   instructions come first: the next tool's dial setting (when there is a dial table) and a
   comment to turn the router off, change the bit, re-zero Z or keep the same stick-out, set the
-  dial, turn the router on and resume.
+  dial, turn the router on and resume. With `m6`, `M6 T<n>` at every change (the first included),
+  then `G43 H<n>` when the dialect or call asks for a tool length offset.
+- **Canned cycles.** With `cannedCycles: true` (and a dialect that has them) each IR drill cycle
+  group becomes one line, `G99 G81 X Y Z R F` (straight) or `G99 G83 X Y Z R Q F` (peck), then
+  `G80`; the moves inside the group are not written. G99 returns to R, where the IR's group ends.
+  A cycle with a dwell stays moves (G82's P unit is not the same on every controller), as does a
+  group the writer did not reach over its hole on the R plane. The controller pecks by Q from R,
+  not from the cycle's `top`, and backs off its own distance between pecks, so its first peck is
+  shorter by `retract - top`; the holes reach the same depth.
 
 ### Arcs
 
@@ -529,10 +629,9 @@ cases: a 5 mm circle written from (4.998, 0.137) at a work offset of -1499.873 m
 on the wrong side of Grbl's 5e-7 rad threshold for every rounding of I and J, so Grbl would cut
 almost nothing. Two halves never depend on that threshold, which is why they are the default.
 
-Not covered yet: LinuxCNC's own arc radius tolerance (T5.4c may need a per-dialect value);
-coolant (the IR has no coolant entry); canned cycles. Neither is in the IR: drilling arrives as
-G0/G1 moves (pecks, dwells and retracts written out), so every post writes it that way, and a
-Grbl post needs neither.
+LinuxCNC's radius rule is Grbl's (0.5 mm, or both 0.005 mm and 0.1% of the radius), so it needs
+nothing more; Mach3's is 0.002 mm (0.0002 in), kept with the dialect's `arcRadiusTolerance`. Not
+covered yet: coolant (the IR has no coolant entry).
 
 ### The GRBL post (`post/grbl.ts`)
 
@@ -567,7 +666,89 @@ GCODE_FILE_EXTENSION // 'nc'
   and length rules (`packages/cam` does not depend on `io`).
 
 Golden files for the fixture jobs are in `test/grbl/` (see the tests below); after a deliberate
-change, rewrite them with `UPDATE_GOLDENS=1` and review the diff line by line.
+change, rewrite them with `UPDATE_GOLDENS=1` and review the diff line by line. The fixture jobs
+(`post/golden-jobs.ts`, test data) are shared by every post, so the goldens of different dialects
+can be compared file by file.
+
+### The Carbide Motion, grblHAL, LinuxCNC and Mach3 posts
+
+T5.4c's posts, each dialect data with golden files in `test/<id>/` for the same fixture jobs
+(`post/goldens.test.ts` writes them, `test/goldens.test.ts` checks each with `verifyGcode` for its
+dialect). `BUILTIN_DIALECTS` maps every built-in post's id to its compiled dialect.
+
+```ts
+postCarbideMotion(job, options?: CarbideMotionOptions) // PostOptions: units, tolerance, ...
+postGrblHal(job, options?: GrblHalOptions) // + multiTool: 'files' | 'pause' | 'm6', toolLengthOffset, cannedCycles
+postLinuxCnc(job, options?: LinuxCncOptions) // + cannedCycles
+postMach3(job, options?: Mach3Options) // + cannedCycles
+builtinDialect(id: string): CompiledDialect | undefined
+```
+
+|                        | `grbl`                                    | `carbide-motion`                         | `grblhal`                                       | `linuxcnc`                 | `mach3`                    |
+| ---------------------- | ----------------------------------------- | ---------------------------------------- | ----------------------------------------------- | -------------------------- | -------------------------- |
+| Tool change            | none: a file per tool, or `M0` per change | `M6 T<n>` at every change, one file      | as `grbl`; `M6 T<n>` with `multiTool: 'm6'` [1] | `M6 T<n>`, one file        | `M6 T<n>`, one file        |
+| T limit                | no T written                              | 999 [3]                                  | 99999999                                        | 99999999                   | 255                        |
+| Tool length offset     | none                                      | none (G43 ignored)                       | `G43 H<n>` only with `toolLengthOffset` [2]     | `G43 H<n>`                 | `G43 H<n>`                 |
+| Canned cycles (option) | no: moves                                 | no: moves                                | G81, G83                                        | G81, G83                   | G81, G83                   |
+| Path blending          | none                                      | none                                     | none (G64 off by default)                       | `G64 P<tolerance>`         | none (G64 has no P)        |
+| Header codes           | `G21 G90 G17 G94`                         | `G21 G90 G17` (no G94 on Carbide's list) | `G21 G90 G17 G94`                               | `G91.1`, `G21 G90 G17 G94` | `G91.1`, `G21 G90 G17 G94` |
+| `%` wrappers           | no                                        | no                                       | no                                              | yes                        | yes                        |
+| Longest line           | 79                                        | 79                                       | 255                                             | 255                        | 255                        |
+| Arc radius rule        | Grbl's                                    | Grbl's                                   | Grbl's                                          | Grbl's (the same)          | 0.002 mm, 0.0002 in        |
+| Dwell `G4 P`           | seconds                                   | seconds                                  | seconds                                         | seconds                    | seconds [4]                |
+| Tool comment           | `(Tool n: name)`                          | `(TOOL n: name)`, Carbide Create's       | `(Tool n: name)`                                | `(Tool n: name)`           | `(Tool n: name)`           |
+| Work offsets           | as set                                    | as set; never G10 or G54 to G59          | as set                                          | as set                     | as set                     |
+
+1. grblHAL's M6 depends on the board driver and its tool change configuration, and a manual
+   change needs a sender that handles grblHAL's tool change protocol; so it is an option, and
+   Grbl's tool changes are the default. The grblHAL Simulator's `grblHAL_validator` has no tool
+   change handler and crashes on M6 (and on G83), so it checks only the other grblHAL goldens.
+2. grblHAL refuses G43 (as opposed to G43.1) without a tool table, which a default build lacks.
+3. Carbide Motion takes `M6` itself (Grbl would fail it); whether it forwards T to Grbl, which
+   refuses T over 255, is not documented. Carbide Create writes `M6 T302` for Carbide's own
+   V-bits, so the post allows Carbide's three-digit numbers; unverified until T5.7b.
+4. Mach3 reads G4's P as seconds or milliseconds by its Config > Logic setting; seconds is the
+   safe guess (a machine set to milliseconds dwells a thousandth as long, never a thousand times
+   as long).
+
+Sources, read 2026-10-02 and cited in each dialect file: Carbide 3D's
+[supported G-codes](https://guides.carbide3d.com/faq/supported-gcodes/) (taken as a floor: the
+work offsets are left out because Carbide Motion owns them), the
+[Shapeoko CNC A to Z](https://shapeokoenthusiasts.gitbook.io/shapeoko-cnc-a-to-z/cad-cam-tools) on
+M6 prompts, Carbide 3D's [BitSetter](https://carbide3d.com/blog/bitsetter-changes-carbide-motion/)
+notes and the community thread on
+[tool naming](https://community.carbide3d.com/t/tool-naming-on-m6/89851); the
+[grblHAL core README](https://github.com/grblHAL/core) and its `gcode.c` at the commit CI's
+Simulator builds; LinuxCNC's [overview](https://linuxcnc.org/docs/html/gcode/overview.html),
+[G-codes](https://linuxcnc.org/docs/html/gcode/g-code.html) and
+[M-codes](https://linuxcnc.org/docs/html/gcode/m-code.html); and ArtSoft's
+[Using Mach3Mill](https://www.machsupport.com/wp-content/uploads/2013/02/Mach3Mill_1.84.pdf),
+revision 1.84-A2, chapter 10. Carbide Motion's accepted set is documented only partly; T5.7b
+confirms it on a machine.
+
+### Verifying G-code (`test/verify-gcode.ts`)
+
+A test utility (T5.4d), not part of the package's exports. `verifyGcode(text, { dialect, stock,
+machine, tools })` reads a finished file with `gcode-toolpath` (cncjs, MIT, a development
+dependency) and returns a report: issues by line and code, the extents of all moves and of the
+feed moves (arcs by their true extremes, WCS mm), move counts and tool changes. It checks line
+length, characters and comments, words against the dialect's lists, tool changes in the
+dialect's style (or `toolChange`), no feed move with the spindle off or before a positive F,
+Grbl's arc radius rule and travel on the written words, full circles where the dialect writes
+halves, the machine travel (every point from `origin`, the WCS zero's place in the travel; or
+the span per axis without one), the stock bottom minus `throughCutAllowance`, and feed moves at
+or below the stock top inside the stock grown by the tool radius and `leadInAllowance`. `stock`
+is a box in WCS coordinates; `machine` needs only `travel`, so a machine profile can be passed.
+It models only the G codes the engine writes (G0 to G4, G17, G20, G21, G54, G90, G91.1, G94;
+G43 H, which must name the tool the last M6 loaded, and G49; G61 and G64, whose P must be at
+most `tolerance`; and the canned cycles G81 and G83 with G80, G98 and G99, which it expands into
+the controller's own moves as LinuxCNC documents them and checks like any other move); any other
+code the dialect accepts (G91, G92, G28, G53, G18, G93, ...) is an `unsupported` issue, and a
+modelled code outside the dialect's list only a `word` issue. M2 and M30 stop the spindle. A
+dialect's `arcRadiusTolerance` is checked as well as Grbl's rule. The `cam-gcode` vitest project
+(`test/goldens.test.ts`) runs it on every golden file, one dialect per directory of `test/`; CI's optional `gcode-validate` job also
+runs grbl-sim's `gvalidate` and the grblHAL Simulator's `grblHAL_validator` on them
+(`test/firmware-validate.sh`).
 
 ## The CAM worker (`worker/`, `client.ts`, `cache/`)
 
@@ -808,6 +989,127 @@ reports no unreachable areas.
 pocket), no loops and a tool that fits nowhere are `invalid-input` errors. Warnings:
 `depth-exceeds-flutes`, and those above.
 
+## The facing operation (`ops/facing.ts`)
+
+`generateFacing(input, context)` (T5.2d), registered as the `facing` generator, flattens the top
+of the stock and brings it to a set thickness. It reads its `FacingInput`, the setup's `heights`
+and nothing else. `loops` is the area to face, usually the stock outline (a rectangle in M5), and
+follows the `Loop2` convention.
+
+**Extra fields** (`FacingExtras`, all optional): `margin` (mm, zero or more; default the tool
+radius, so the tool's edge just clears the stock's edge at the end of every line) and `pattern`
+(`zigzag`, the default, or `oneway`).
+
+**The raster** (`facingRaster(loops, options)`, pure): the area the tool centre covers is
+`offsetLoops(loops, margin)`. Straight lines along `angle` (radians from machine +X) cross it,
+evenly spaced at most one stepover (`stepover` times the diameter) apart. The outermost lines sit
+the tool radius less the stepover inside the loops' extent across the raster, so the tool
+overlaps each edge by the stepover (or just inside the grown area, when the margin is smaller);
+loops no wider than the tool get one line through the middle. Each line is cut exactly into its
+stretches inside the grown area (its meetings with every line and arc, kept where the middle of a
+stretch is inside), so a non-convex area gives several stretches on one line. With a margin of at
+least the tool radius, every point of the loops lies within the tool radius of a stretch: the
+spacing is at most the diameter, and the disc of the tool radius about any point of the loops
+lies inside the grown area.
+
+**Passes.** One IR `pass` per depth level, from `top` in equal steps of at most `stepdown` down to
+`bottom`, the last exactly at `bottom` (`depth.top` is the stock top, as the geometry stage
+gives it). Each level runs every line; the next level runs them in the opposite order, so it
+starts where the tool already is. `zigzag` cuts each line the other way to the one before and
+steps over to the next line as a `cut` feed move at depth, when the straight step stays inside the
+grown area (always, for a convex one); between levels it feeds straight down where it stopped.
+`oneway` cuts every line along the raster direction. Whenever the tool cannot step over at depth
+(every line of a one-way raster, a stretch beyond a gap, a step that would leave the area) it
+rapids up to `retract` (at least `FACING_SAFE_ABOVE`, 0.5 mm, above `top`), across, and down to
+0.5 mm above the floor the level before left there (the top on the first level), then plunges at
+the `plunge` feed. Nothing rapids through material. The program starts at `clearance` above the
+first line's start and ends with a rapid to `clearance`. `context.checkpoint()` runs before every
+level and every line.
+
+**Errors and warnings.** Bad numbers (a stepover outside (0, 1], a negative margin, a non-finite
+angle, an unknown pattern), no loops, open loops and an empty area are `invalid-input` errors.
+Warnings: `depth-exceeds-flutes`, and `margin-small` when the margin is less than the tool radius
+(the edges may not be faced cleanly, and at an angle the corners may be missed).
+
+## The drill operation (`ops/drill.ts`)
+
+`generateDrill(input, context)` (T5.2e), registered as the `drill` generator, makes the holes the
+model knows about: hole features, and the round hole walls of the body that the geometry stage
+finds (regen README, "CAM geometry"), each as a `MachineDrillPoint`. It reads its `DrillInput`, the
+setup's `heights`, stock and WCS (for the stock top's machine Z) and nothing else.
+
+**Extra fields** (`DrillExtras`, all optional): `breakthrough` (mm, default
+`DRILL_BREAKTHROUGH_MARGIN`, 0.5), `matchTolerance` (mm, default `DRILL_MATCH_TOLERANCE`, 0.05),
+`helixAngle` (default `DRILL_HELIX_ANGLE`, 3 degrees) and `boreStepover` (fraction of the tool
+diameter, default `DRILL_BORE_STEPOVER`, 0.5).
+
+**Which holes how.** Points at the same place with the same diameter are merged, cautiously: the
+deepest bottom, the highest top, the highest cavity floor under the exit and the steepest mouth. When
+one of them already goes below the cavity floor the other found, the merged hole cuts into that
+floor with no breakthrough, and a `merged-below-floor` warning says so. A hole smaller than the tool by more than `DRILL_UNDERSIZE_TOLERANCE` (0.01 mm, the
+rounding of inch sizes) is an `invalid-input` error naming every such hole. A hole up to
+`matchTolerance` larger than the tool is **drilled** (any tool but a V-bit or engraver), and so is
+one less than twice `DRILL_MIN_BORE_RADIUS` (0.025 mm) larger whatever the tolerance, since a
+smaller helix cuts nothing and fails the arc checks. A larger
+hole is **bored** with a flat, ball or bull end mill; a drill smaller than the hole is an error
+("bore it with an end mill").
+
+**Heights.** Material may start at the stock top (machine Z 0 with the origin on top, the stock
+height with it on the bottom), or a hole's own top when that is higher. The retract height is the
+setup's, raised to at least `DRILL_SAFE_ABOVE` (0.5 mm) above that; the clearance at least the
+retract. The toolpath starts at the clearance over the first hole, crosses between holes at the
+retract height, and ends at the clearance. **No rapid goes below the stock top except straight
+down inside the hole just cut.** That matters for a counterbored hole, whose point starts at the
+counterbore's floor: when the drill runs before the counterbore's pocket, the material above that
+floor is still there, so drilling feeds from the retract height, never rapids to the point's top.
+
+**Through holes.** A through hole's depth stops exactly at the body's bottom, and a pointed tool
+leaves a cone there, so the tool goes deeper by its tip length (`toolTipLength`: a drill's point,
+`r / tan(angle / 2)` with `DRILL_DEFAULT_POINT_ANGLE`, 118 degrees, when the tool has no angle; a
+ball's radius; a bull nose's corner radius; nothing for a flat end mill) plus `breakthrough`. That
+goes into the spoilboard. A through hole whose exit opens into a cavity (`clearBelow`, the clear
+height under the exit, from the geometry stage) goes at most to `DRILL_CAVITY_CLEARANCE` (0.2 mm)
+above the cavity's floor, with a `breakthrough-capped` warning when that is less than the full
+breakthrough (a pointed tool then leaves the exit undersize). A blind hole stops at its bottom.
+A drill (not a bore) entering a mouth tilted more than `DRILL_SLOPED_ENTRY` (20 degrees,
+`entryTilt`) gets a `sloped-entry` warning: spot it or mill it flat first.
+
+**Drilling** (one `cycle` group per hole, see [Other entries](#other-entries)): over the hole at the
+retract height, a `plunge` feed to the bottom, an optional dwell (`dwell` seconds, when above zero,
+tagged with the last peck's pass), and a rapid back to the retract height. With a `peck`, the pecks
+reach `top - peck`, `top - 2 peck`, ... and then the bottom (`top` the start of material above);
+after each peck but the last the tool rapids up to the **retract height**, then rapids down to
+`DRILL_PECK_CLEARANCE` (0.5 mm) above the depth reached and feeds on. A peck as deep as the hole is
+one straight feed, and the marker then has no `peck`.
+
+**Boring.** The tool centre runs on helices about the hole's centre, counter-clockwise (climb on
+the wall with an M3 spindle), as `fullCircle` `ramp` arcs from the start of material down to the
+bottom, each turn dropping the same amount and at most `2 pi (rh + r) tan(helixAngle)` (the slope
+at the hole wall, where the tool edge cuts), then one level `cut` turn at the bottom. The outer
+helix radius is `(D - d) / 2`, so its outer diameter is the hole's exactly, and its level turn is
+the finishing circle. A hole wider than about twice the tool is bored in rings from the inside out:
+the first at most 0.9 tool radii (so no core is left standing, and no slug comes loose in a through
+hole), then outward in equal steps of at most `boreStepover` tool diameters, each ring its own
+helix from the top. Between rings the tool rapids straight up inside the bore to 0.5 mm above the
+stock top and across. After the last ring it moves to the centre and rapids up. Bores have no
+cycle markers. The tool's sloped helix floor is flattened by the level turn; a ball or bull end
+mill leaves its own profile on a blind hole's floor.
+
+**Order and passes.** Holes in nearest-neighbour order from the WCS origin (`nearestNeighbourOrder`;
+linking, T5.2g, may reorder across operations). Each peck and each bore ring is one `pass`, counted
+across the operation. `context.checkpoint()` runs before every hole.
+
+**Counterbores.** M5 drills a counterbored hole's through hole only, from the counterbore's floor
+down; the counterbore itself is left to a pocket on its floor face. The geometry stage likewise
+gives a counterbore's narrow wall and not its wide one. Countersinks are not cut (a V-bit cannot
+drill here); chamfer them by hand or with a V-carve.
+
+**Errors and warnings.** Bad numbers (a peck or helix angle not above zero, a negative dwell or
+breakthrough, a bore stepover outside (0, 1], a hole whose bottom is not below its top), no holes,
+and the tool cases above are `invalid-input` errors. Warnings: `depth-exceeds-flutes` when the
+deepest hole goes further below the start of material than the flutes are long,
+`breakthrough-capped`, `sloped-entry` and `merged-below-floor` (above).
+
 ## Tests
 
 `./node_modules/.bin/vitest run packages/cam` from the repository root:
@@ -820,7 +1122,7 @@ pocket), no loops and a tool that fits nowhere are `invalid-input` errors. Warni
 - `arc.test.ts`: sweeps, helical lengths, bounds across every quadrant and a randomised check
   that the bounds contain and are tight on 200 sampled arcs;
 - `stats.test.ts`: lengths per class, time estimate and bounds on a sample program;
-- `validate.test.ts`: a valid program and each issue code;
+- `validate.test.ts`: a valid program and each issue code, canned-cycle markers included;
 - `boundary.test.ts`: the import allowlist above, and a self-test of its scanner.
 - `offset/engine.test.ts`: offsets of rectangles, rounded rectangles, circles and slots against
   closed-form areas and the exact distance (both paths), slots that vanish and a 0.2 mm sliver, a
@@ -863,6 +1165,16 @@ pocket), no loops and a tool that fits nowhere are `invalid-input` errors. Warni
   which no rapid ever runs below the material left (an island near a wall with a floor allowance,
   and a 1 mm tool between islands and walls); z-level layers; refusals; checkpoints and
   `CamCancelled`; registration. Every toolpath passes the IR validator;
+- `ops/facing.test.ts`: a raster check of the swept tool at the final depth (every grid point of
+  the stock within the tool radius of a level cut; a self-test shows it finds the gaps a smaller
+  tool would leave) at 0, 30, 45, 90 and 135 degrees in both
+  patterns, with no margin at 0 degrees, for a strip narrower than the tool and for an L-shaped
+  area (whose zigzag never steps across the notch); raster directions along the angle (both ways
+  in a zigzag, one way only in a one-way raster); depth levels and their pass numbers; the
+  clearance start and end, rapids in XY only at the retract height (raised above a high stock top)
+  and rapids down only to just above the floor already cut; zigzag step-overs fed at depth with no
+  rapid between levels; the margin; line spacing and stretches split by a gap; refusals;
+  checkpoints and `CamCancelled`; registration. Every toolpath passes the IR validator;
 - `post/format.test.ts`: number formatting (rounding, no exponent, no `-0`, the eight-digit
   limit), Grbl's `read_float` in single precision, comment sanitising and wrapping;
 - `post/dialect.test.ts`: code normalising, a JSON round trip of a dialect, and each refusal:
@@ -910,3 +1222,37 @@ pocket), no loops and a tool that fits nowhere are `invalid-input` errors. Warni
   failures cached as values, invalid toolpaths refused, no generator, transferred meshes,
   statistics, eviction, and the simulation channel (transferred heightmap, a simulation during a
   long generation with both done, missing toolpaths, supersede, a simulator bug).
+- `ops/drill.test.ts`: the exact moves of a straight drill and of a peck cycle (each peck back to
+  the retract height, re-entering 0.5 mm above the last depth, the dwell with its pass), pecks that
+  do not divide the depth, the breakthrough below through holes and every tool's tip length, a
+  counterbored hole drilled from the retract height, the retract height kept above the stock top
+  (origin on top and on the bottom), a 6 mm hole bored with a 1/8" end mill (every arc's outer
+  diameter 6 mm within 0.01 mm, a finishing circle at the bottom, the helix slope), a 20 mm bore in
+  rings from the inside out, errors for holes smaller than the tool, a drill smaller than a hole
+  and V-bits, the match tolerance, refusals, nearest-neighbour order and merged duplicates, the
+  bracket's two holes from model to machine coordinates, the Grbl post (plain G0 and G1, no G8x),
+  packing, statistics, checkpoints and the flute warning. Every toolpath passes the IR validator,
+  and a checker follows every rapid below the stock top into a column the tool has already cut.
+- `library/library.test.ts`: every built-in tool validates; the starter set and catalogue
+  numbers; V-bit cone heights; the #201 presets equal to the chart rows; derived presets keep the
+  #201 chip load scaled by diameter, stay within the flutes and are unverified; a preset for every
+  feed category on every tool, resolved in internal units; unverified fields; materials to
+  categories; the chip load calculator and its refusals; copying a tool as expressions that
+  evaluate (with `@manufakture/units`) to the library values;
+- `library/machines.test.ts`: every machine validates; the primary machines and the default;
+  every size; travel; the default configuration (router dial, Carbide Motion, BitSetter, Grbl 1.1,
+  posts); the dial table; flagged fields; refused profiles;
+- `library/validate.test.ts`: a library file round trip, and refusals of unknown and missing
+  fields at every level, wrong types and ranges, kind rules, duplicate presets and ids, wrong
+  formats and versions, non-JSON, `__proto__` keys and oversized lists.
+- `apps/web/src/cam/library/` (in the app's test project): every core material id resolves on
+  every built-in tool; every built-in tool copied into a document is a valid `addCamTool` whose
+  result validates; the OPFS store's add, replace, remove, export, import (merge, replace,
+  refused, a picked file size-checked before it is read), damaged and foreign newer files kept
+  aside and never deleted, a newer `version: 2` file next to good older ones, a lone file this
+  build refuses (nothing saved over it), numbers never reused and rejected bytes never
+  overwritten (the double failure, a name collision, a retry), at most five rejected copies
+  kept (never one the same save set aside), a save refused before any change when it would need a
+  file number past eight digits, a crash at every step of a save (also one that moves a rejected file aside), write and read errors
+  as values, a re-list when listed files vanish, the save size limit, two concurrent puts with no
+  Web Locks, and its lock. The store's layout and rules are described in `store.ts`.

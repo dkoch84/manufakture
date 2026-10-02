@@ -15,7 +15,13 @@
 // - spindle and feed: no feed move with the spindle off or at 0 rpm, every F positive, no feed
 //   move before an F;
 // - arcs: Grbl 1.1's radius rule and angular travel on the written words (`grblArcCheck`), and
-//   no full circle where the dialect writes full circles as halves;
+//   no full circle where the dialect writes full circles as halves; and the dialect's own radius
+//   rule (`arcRadiusTolerance`, Mach3) when it has one;
+// - tool length offsets: `G43 H<n>` only in an `m6` file, after an `M6`, naming the tool in the
+//   spindle; path blending: `G64` only with a P of at most the tolerance;
+// - canned cycles (G81, G83, with G98 or G99; G80 cancels): expanded into the moves the
+//   controller makes, as LinuxCNC documents them (preliminary motion to the R plane, pecks of Q
+//   from R backing off 0.254 mm or 0.01 in, the retract), which are then checked like any move;
 // - every move, arcs by their true extremes: inside the machine travel from the WCS origin (or,
 //   with no origin given, spanning no more than the travel on any axis), never lower than the
 //   stock bottom minus the through-cut allowance; and every feed move that reaches the stock top
@@ -23,7 +29,8 @@
 //
 // Positions are millimetres in the WCS (the file's coordinates; G20 files are converted by the
 // parser). The verifier models only the G codes the engine writes (`MODELLED_G_CODES`); any other
-// G code is reported as unsupported rather than passed unchecked.
+// G code is reported as unsupported rather than passed unchecked, and a modelled code outside the
+// dialect's list is only a `word` issue (its effect is not modelled for that file).
 
 import Toolpath from 'gcode-toolpath';
 import { arcBounds, arcSweep } from '../src/arc';
@@ -110,6 +117,10 @@ export type GcodeIssueCode =
   | 'stock'
   /** A move below the stock bottom minus the through-cut allowance. */
   | 'depth'
+  /** A canned cycle without its words (Z, R, Q for G83), from an unknown position, or a bad Q. */
+  | 'cycle'
+  /** A G64 without a P, or with a P over the tolerance. */
+  | 'path'
   /** A G code the verifier does not model (G91, G92, G28, G53, G18, G93, ...). */
   | 'unsupported';
 
@@ -138,8 +149,14 @@ export interface GcodeReport {
   readonly units: 'mm' | 'inch' | undefined;
 }
 
-/** The letters the engine writes besides G and M; T only where tool changes are `m6`. */
+/**
+ * The letters the engine writes besides G and M; T only where tool changes are `m6`, H only with
+ * G43, R and Q only in a canned cycle.
+ */
 const LETTERS = new Set(['X', 'Y', 'Z', 'I', 'J', 'F', 'S', 'P']);
+
+/** The canned cycles the verifier expands. */
+const CYCLES: ReadonlySet<string> = new Set(['G81', 'G83']);
 
 /** Characters Grbl and grblHAL act on wherever they appear in the stream, comments included. */
 const REAL_TIME = /[?!~]/;
@@ -149,7 +166,10 @@ const AXES = ['X', 'Y', 'Z'] as const;
 /**
  * The G codes whose effect the verifier models: motion G0 to G3, dwell G4, the XY plane G17,
  * units G20 and G21, the default work offset G54, absolute distance G90, incremental arc centres
- * G91.1 (the IJK mode it assumes) and units per minute G94. Any other G code (G91, G92, G28,
+ * G91.1 (the IJK mode it assumes) and units per minute G94; tool length offsets G43 H and G49
+ * (which leave the program's coordinates as they are), path control G61 and G64 P (a corner
+ * rounded by at most P), and the canned cycles G81 and G83 with G80, G98 and G99. Any other G
+ * code (G91, G92, G28,
  * G53, G18, G93, G38.2, ...) changes positions, planes or feeds in ways the checks do not follow,
  * so it is an `unsupported` issue. G92 is left out on purpose: the parser applies its offset to
  * the positions it reports, but the arc check reads the written words, which it would not shift.
@@ -163,10 +183,19 @@ const MODELLED_G_CODES: ReadonlySet<string> = new Set([
   'G17',
   'G20',
   'G21',
+  'G43',
+  'G49',
   'G54',
+  'G61',
+  'G64',
+  'G80',
+  'G81',
+  'G83',
   'G90',
   'G91.1',
   'G94',
+  'G98',
+  'G99',
 ]);
 
 interface Word {
@@ -283,6 +312,13 @@ export function verifyGcode(text: string, options: VerifyOptions): CamResult<Gco
   let toolIndex = 0;
   let activeTool: VerifyTool | undefined = style === 'm6' ? undefined : tools[0];
   let toolChanges = 0;
+  /** The position after the last move, WCS mm, per axis; undefined while unknown. */
+  const cur: (number | undefined)[] = options.start ? [...options.start] : [];
+  /** Canned cycles: the return mode, the sticky words (file units), the Z the series began at. */
+  let returnMode: 'G98' | 'G99' | undefined;
+  const sticky: Partial<Record<'Z' | 'R' | 'Q', number>> = {};
+  let initialZ: number | undefined;
+  const arcLimit = dialect.dialect.arcRadiusTolerance;
   const moves = { rapid: 0, linear: 0, arc: 0 };
   const all = new Extents();
   const cutting = new Extents();
@@ -326,12 +362,15 @@ export function verifyGcode(text: string, options: VerifyOptions): CamResult<Gco
         if (c !== undefined) (w.letter === 'G' ? gCodes : mCodes).push(c);
         continue;
       }
-      if (!LETTERS.has(w.letter) && !(w.letter === 'T' && style === 'm6')) {
+      const contextual = w.letter === 'H' || w.letter === 'R' || w.letter === 'Q';
+      if (!contextual && !LETTERS.has(w.letter) && !(w.letter === 'T' && style === 'm6')) {
         issue('word', `The ${w.letter} word is not one this dialect's files use.`);
       }
       if (letters.has(w.letter)) issue('word', `Two ${w.letter} words on one line.`);
       letters.set(w.letter, w);
     }
+    /** This line's G codes that the dialect has, whose effect is modelled. */
+    const has = (g: string): boolean => gCodes.includes(g) && dialect.gCodes.has(g);
     for (const w of words) {
       const digits = w.text.replace(/[^0-9]/g, '').replace(/^0+/, '');
       if (digits.length > MAX_NUMBER_DIGITS) {
@@ -341,12 +380,38 @@ export function verifyGcode(text: string, options: VerifyOptions): CamResult<Gco
 
     // Modal state. A G code the dialect accepts but the verifier does not model is reported,
     // never silently passed (one outside the dialect is already a `word` issue).
+    const wasCycle = motion !== undefined && CYCLES.has(motion);
     for (const g of gCodes) {
       if (g === 'G0' || g === 'G1' || g === 'G2' || g === 'G3') motion = g;
       if (g === 'G20') [inches, units] = [true, 'inch'];
       if (g === 'G21') [inches, units] = [false, 'mm'];
+      if (dialect.gCodes.has(g)) {
+        if (g === 'G80') motion = 'G80';
+        if (CYCLES.has(g)) motion = g;
+        if (g === 'G98' || g === 'G99') returnMode = g;
+      }
       if (dialect.gCodes.has(g) && !MODELLED_G_CODES.has(g)) {
         issue('unsupported', `${g} is not modelled by the verifier, so the file is not verified.`);
+      }
+    }
+    const inCycle = motion !== undefined && CYCLES.has(motion);
+    // H, R and Q only where they mean something.
+    for (const [letter, ok, where] of [
+      ['H', has('G43'), 'with G43'],
+      ['R', inCycle, 'in a canned cycle'],
+      ['Q', inCycle && motion === 'G83', 'in a G83 cycle'],
+    ] as const) {
+      if (letters.has(letter) && !ok) {
+        issue('word', `The ${letter} word is not one this dialect's files use, except ${where}.`);
+      }
+    }
+    const k = inches ? MM_PER_INCH : 1;
+    if (has('G64')) {
+      const p = letters.get('P');
+      if (p === undefined) {
+        issue('path', 'A G64 without P blends corners with no bound on the path error.');
+      } else if (!(p.value > 0) || p.value * k > tol + 1e-9) {
+        issue('path', `G64 P${p.text} is not greater than 0 and at most ${fmt(tol)} mm.`);
       }
     }
     const f = letters.get('F');
@@ -393,6 +458,19 @@ export function verifyGcode(text: string, options: VerifyOptions): CamResult<Gco
         }
       }
     }
+    if (has('G43')) {
+      const h = letters.get('H');
+      if (style !== 'm6') {
+        issue(
+          'tool-change',
+          `A G43 tool length offset in a file whose tool changes are '${style}'.`,
+        );
+      } else if (h === undefined) {
+        issue('tool-change', 'A G43 without an H word.');
+      } else if (activeTool === undefined || activeTool.number !== h.value) {
+        issue('tool-change', `G43 H${h.text} is not the tool the last M6 loaded.`);
+      }
+    }
     if (mCodes.includes('M3') || mCodes.includes('M4')) spindleOn = true;
     // M2 and M30 end the program, which stops the spindle (Grbl's `gc_execute_line`).
     if (mCodes.some((m) => m === 'M5' || m === 'M2' || m === 'M30')) spindleOn = false;
@@ -411,6 +489,7 @@ export function verifyGcode(text: string, options: VerifyOptions): CamResult<Gco
         inches,
         direction: motion === 'G2' ? 'cw' : 'ccw',
         fullCirclesAsHalves: dialect.dialect.fullCircles === 'halves',
+        ...(arcLimit !== undefined ? { limit: inches ? arcLimit.inch : arcLimit.mm } : {}),
         issue,
       });
     }
@@ -419,7 +498,33 @@ export function verifyGcode(text: string, options: VerifyOptions): CamResult<Gco
     if (letters.has('Y')) lastWord.Y = letters.get('Y')!.text;
 
     segments.length = 0;
-    reader.loadFromStringSync(line);
+    const hasCycleCode = gCodes.some((g) => CYCLES.has(g));
+    if (motion === 'G80' && hasAxis && !gCodes.some((g) => /^G[0-3]$/.test(g))) {
+      issue('word', 'Axis words with no motion mode: G80 cancelled it.');
+    } else if (inCycle && (hasCycleCode || hasAxis)) {
+      // A canned cycle: the parser does not know them, so it reads the moves the controller makes.
+      if (hasCycleCode && !wasCycle) initialZ = cur[2];
+      for (const a of ['Z', 'R', 'Q'] as const) {
+        const w = letters.get(a);
+        if (w) sticky[a] = w.value;
+      }
+      const expanded = expandCycle({
+        code: motion!,
+        letters,
+        cur,
+        k,
+        sticky,
+        returnMode,
+        initialZ,
+        issue,
+      });
+      if (expanded !== undefined) {
+        known.fill(true);
+        reader.loadFromStringSync(expanded.join('\n'));
+      }
+    } else {
+      reader.loadFromStringSync(line);
+    }
 
     for (const seg of segments) {
       const feedMove = seg.motion === 'G1' || seg.motion === 'G2' || seg.motion === 'G3';
@@ -522,6 +627,8 @@ export function verifyGcode(text: string, options: VerifyOptions): CamResult<Gco
         }
       }
     }
+    const last = segments[segments.length - 1];
+    if (last) for (const i of [0, 1, 2]) if (known[i]) cur[i] = last.end[i];
   }
 
   return ok({
@@ -597,6 +704,85 @@ function readWords(
   return words;
 }
 
+interface CycleInput {
+  /** `G81` or `G83`. */
+  readonly code: string;
+  readonly letters: ReadonlyMap<string, Word>;
+  /** The position before the line, WCS mm. */
+  readonly cur: readonly (number | undefined)[];
+  /** Millimetres per file unit. */
+  readonly k: number;
+  /** Z, R and Q as last written, file units. */
+  readonly sticky: Readonly<Partial<Record<'Z' | 'R' | 'Q', number>>>;
+  readonly returnMode: 'G98' | 'G99' | undefined;
+  /** Z where the series of cycles began, mm (G98 returns to it). */
+  readonly initialZ: number | undefined;
+  readonly issue: (code: GcodeIssueCode, message: string) => void;
+}
+
+/**
+ * A G81 or G83 line as the G0 and G1 lines (file units) of the controller's own moves, as LinuxCNC
+ * documents them (Mach3 and grblHAL follow the same NIST RS274NGC cycles): up to R when below it,
+ * across at the current height, down to R; G81 feeds to Z; G83 feeds by Q from R, rapids out to
+ * R and back down to 0.254 mm (0.01 in) above the last depth, until Z; then out to R (G99), or to
+ * the higher of R and the Z the series began at (G98). Undefined (reported) when it cannot run.
+ */
+function expandCycle(c: CycleInput): string[] | undefined {
+  const { sticky, k } = c;
+  if (sticky.Z === undefined || sticky.R === undefined) {
+    c.issue('cycle', `A ${c.code} without Z and R.`);
+    return undefined;
+  }
+  if (c.returnMode === undefined) {
+    c.issue(
+      'cycle',
+      `A ${c.code} with no G98 or G99: where it retracts is the controller's default.`,
+    );
+    return undefined;
+  }
+  if (c.cur.length < 3 || c.cur.some((v) => v === undefined)) {
+    c.issue('cycle', `A ${c.code} from a position the file has not set.`);
+    return undefined;
+  }
+  const q = sticky.Q;
+  if (c.code === 'G83' && !(q !== undefined && q > 0)) {
+    c.issue('cycle', 'A G83 without a positive Q.');
+    return undefined;
+  }
+  const bottom = sticky.Z;
+  const r = sticky.R;
+  if (!(bottom < r)) {
+    c.issue('cycle', `A ${c.code} whose Z ${bottom} is not below its R ${r}.`);
+    return undefined;
+  }
+  const n = (v: number): string => String(Number(v.toFixed(9)));
+  const x = c.letters.get('X')?.value ?? c.cur[0]! / k;
+  const y = c.letters.get('Y')?.value ?? c.cur[1]! / k;
+  let z = c.cur[2]! / k;
+  const out: string[] = [];
+  if (z < r) {
+    out.push(`G0 Z${n(r)}`);
+    z = r;
+  }
+  out.push(`G0 X${n(x)} Y${n(y)}`);
+  if (z > r) out.push(`G0 Z${n(r)}`);
+  if (c.code === 'G81') {
+    out.push(`G1 Z${n(bottom)}`);
+  } else {
+    const backOff = k === 1 ? 0.254 : 0.01;
+    for (let depth = r; ;) {
+      const target = Math.max(bottom, depth - q!);
+      out.push(`G1 Z${n(target)}`);
+      if (target <= bottom) break;
+      out.push(`G0 Z${n(r)}`, `G0 Z${n(target + backOff)}`);
+      depth = target;
+    }
+  }
+  const initial = c.initialZ === undefined ? r : c.initialZ / k;
+  out.push(`G0 Z${n(c.returnMode === 'G99' ? r : Math.max(r, initial))}`);
+  return out;
+}
+
 interface ArcInput {
   readonly letters: ReadonlyMap<string, Word>;
   readonly lastWord: Readonly<Record<'X' | 'Y', string | undefined>>;
@@ -606,6 +792,8 @@ interface ArcInput {
   readonly inches: boolean;
   readonly direction: 'cw' | 'ccw';
   readonly fullCirclesAsHalves: boolean;
+  /** The dialect's own radius rule, file units (`arcRadiusTolerance`); Grbl's alone when absent. */
+  readonly limit?: number;
   readonly issue: (code: GcodeIssueCode, message: string) => void;
 }
 
@@ -649,6 +837,12 @@ function checkArc(a: ArcInput): void {
     issue(
       'arc-radius',
       `The end point's radius differs from the start's by ${fmt(check.deltaR, 4)} mm (Grbl error 33).`,
+    );
+  }
+  if (a.limit !== undefined && check.exactDeltaR > a.limit * k + 1e-12) {
+    issue(
+      'arc-radius',
+      `The end point's radius differs from the start's by ${fmt(check.exactDeltaR, 4)} mm, over the controller's ${fmt(a.limit * k, 4)} mm.`,
     );
   }
   if (!check.travelOk) {
