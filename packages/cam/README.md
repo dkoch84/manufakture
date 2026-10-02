@@ -7,7 +7,8 @@ linking, the simulation, the machine and tool tables, the post-processors and th
 far it has the foundation every later task builds on (T5.1c): evaluated input types, the IR, WCS
 transforms, stock boxes, IR statistics and bounds, and the IR validator.
 
-Pure TypeScript with no dependencies. Everything runs in Node tests with no kernel `.wasm` loaded.
+Pure TypeScript; its runtime dependencies are `clipper2-ts` (the offset engine, T5.2a) and
+`comlink` (the CAM worker, T5.1g). Everything runs in Node tests with no kernel `.wasm` loaded.
 
 ## Units and inputs
 
@@ -227,6 +228,7 @@ loaded.
 | `spindle-off`            | a feed move while the spindle is off                                  |
 | `no-tool`                | a feed move before any tool change                                    |
 | `spindle-rpm`            | a spindle start at zero rpm or less                                   |
+| `spindle-state`          | a spindle entry whose state is not `cw`, `ccw` or `off`               |
 | `tool-change-spindle-on` | a tool change while the spindle runs                                  |
 | `dwell`                  | a negative dwell                                                      |
 | `arc-zero-radius`        | an arc starting on its centre                                         |
@@ -237,6 +239,362 @@ loaded.
 The arc tolerance, `DEFAULT_ARC_TOLERANCE`, is **0.0005 mm**: a tenth of Grbl's 0.005 mm radius
 check (error 33). The refit projects arc ends onto the exact circle, so its arcs agree far better.
 Rapids are allowed with the spindle off and before any tool change.
+
+## Offsets (`offset/`)
+
+The offset engine (T5.2a; ADR 0014 decision 12): offsets and booleans of `Loop2`s that come back
+as lines and arcs. [clipper2-ts](https://github.com/countertype/clipper2-ts) 2.0.1-18 (BSL-1.0,
+pinned exactly, chosen by the [T5.0a spike](../../docs/spikes/T5.0a-clipper2.md)) does the polygon
+work behind an adapter (`offset/engine.ts`) that owns the integer scale, the range checks and the Z
+tags; nothing else in the package imports it.
+
+Results are `Region2`s: an `outer` loop (counter-clockwise) and the `holes` directly inside it
+(clockwise). An island inside a hole is a region of its own. Inputs follow the `Loop2` convention
+(outer loops counter-clockwise, holes clockwise; positive winding is inside, so overlapping outer
+loops are united, and a clockwise loop that no counter-clockwise loop encloses encloses nothing: a
+lone one gives an empty list). `offsetLoops` unites its input this way before offsetting, as the
+booleans do. No result holds a clockwise outer, and every path drops loops that fit in a square
+`2 * REFIT_TOLERANCE` wide (0.004 mm), so a shape shrinking to a speck vanishes the same way with
+or without the fast path. Every function returns a `CamResult`; bad input (a coordinate that is not
+finite or lies beyond 4.7 m, a gap over 0.001 mm between segments, an arc with no radius or no
+sweep, a non-finite offset) is an `invalid-input` error.
+
+- **`offsetLoops(loops, delta, options?)`**: `delta` mm, positive grows the material (out from
+  outer loops, into holes), negative shrinks it. Round joins at sharp corners, as tool compensation
+  needs. A shape can split into several regions or vanish (an empty list). A zero offset is the
+  union of the loops. Pockets offset **every ring from the source loops**, never from the previous
+  ring (22 times the vertices and 41 times the time in the spike).
+- **`offsetOpenPaths(paths, delta, { ends })`**: the outline of a stroke `2 delta` wide along each
+  `OpenPath2` (an open chain of segments), with `round` (default) or `butt` ends; overlapping
+  outlines are united.
+- **`unionLoops(loops)`**, **`differenceLoops(subject, clip)`** (stock minus part, pocket minus
+  islands), **`intersectLoops(subject, clip)`**.
+- `regionLoops(regions)` lists every loop; `regionArea(region)` is exact (arcs included).
+- Geometry helpers, exported for operations and tests: `loopArea` (exact, signed), `loopLength`,
+  `segmentLength`, `segmentPoint`, `signedSweep`, `arcRadius`, `distToSegment`, `distToLoops`,
+  and `flattenSegments(segments, closed, tol?)` (a polyline with its vertices on the arcs).
+
+### How it works
+
+1. **Flatten and tag** (`flatten.ts`). Arcs are flattened with their vertices on the arc, each
+   vertex scaled to integers and tagged in Z with its index plus one (Clipper treats 0 as "no
+   tag"). A table maps each tag to its point, the source segments it lies on, whether it is a
+   sharp corner (tangent junctions are not, so arcs run on through them) and whether it ends an
+   open path.
+2. **Clipper**. `ClipperOffset` with round joins and an explicit `arcTolerance`, or `Clipper64`
+   for booleans, both with the `Positive` fill rule and a `PolyTree64` result. Clipper copies a
+   vertex's tag to every point it offsets from it; the adapter's Z callback gives every other
+   intersection the tag of the nearest tagged edge end.
+3. **Refit** (`refit.ts`). A polyline segment whose two ends come from the same source arc lies on
+   that arc's concentric offset (radius `r + |d|` or `r - |d|`, whichever fits); one whose ends
+   come from the same sharp corner lies on the round join about it (radius `|d|`). A run of
+   segments on one circle becomes arcs on that exact circle: ends projected onto it, clamped to the
+   source arc's angles (Clipper's polyline overshoots a tangent point by a chord), and snapped to an
+   open path's end vertex (Clipper squares an end to its first chord, not to the arc's tangent).
+   Runs that turn more than half a turn are split into equal pieces. What the tags do not explain
+   (lines, intersections, untagged polygon input) goes through a greedy fit of lines and circles
+   within the refit tolerance. Then adjacent arcs meet at their circles' intersection and lines
+   move to meet arcs, so every loop is exactly continuous.
+4. **Demote**. The last step splits an arc swept past half a turn (a stitching artefact) into
+   equal pieces on its circle, then turns an arc into a line with the same ends when its sagitta is at
+   most `DEMOTE_SAGITTA`, or when it fails Grbl's checks at 3 decimals (`grblArcPrecheck`: the
+   radius rule of error 33, and `mc_arc`'s angular travel, which turns an arc whose written ends
+   coincide into a full circle), at `options.decimals` (default 3) on both paths. Results never hold a full circle or an arc over half a turn. The
+   post repeats Grbl's checks as written (`post/grbl-arc.ts`), which is the authoritative one.
+
+**The analytic fast path** (`analytic.ts`) skips Clipper where the exact answer is provably
+simple: a lone counter-clockwise circle offset by any delta that leaves a radius, and a convex
+counter-clockwise loop offset outward (each segment moved out along its normal, a round join at
+each sharp corner). It declines a dense polygon, whose tiny joins would all become lines (the refit
+does better there). `{ analytic: false }` forces Clipper. The spike estimated that it saves little
+(0.2 to 4 ms per sketch case); it is kept because its results are exact and the tests compare the
+two paths.
+
+### Tolerances (`tolerances.ts`)
+
+All in one place; changing any of them changes the CAM implementation version (ADR 0014).
+
+| Constant               | Value       | Meaning                                               |
+| ---------------------- | ----------- | ----------------------------------------------------- |
+| `CLIPPER_SCALE`        | 1e4 per mm  | integer units handed to Clipper (0.1 micrometre)      |
+| `MAX_CLIPPER_COORD`    | 4.7e7 units | largest coordinate accepted (`MAX_COORD_MM`, 4.7 m)   |
+| `FLATTEN_TOLERANCE`    | 0.001 mm    | chord error of arc flattening                         |
+| `JOIN_TOLERANCE`       | 0.001 mm    | chord error of Clipper's round joins (`arcTolerance`) |
+| `REFIT_TOLERANCE`      | 0.002 mm    | untagged fit; the offset budget after refit           |
+| `TAG_TOLERANCE`        | 0.0025 mm   | how far points may be from a circle their tags name   |
+| `DEMOTE_SAGITTA`       | 0.0001 mm   | an arc this close to its chord becomes a line         |
+| `GRBL_CHECK_DECIMALS`  | 3           | decimals of the refit's Grbl pre-check                |
+| `MAX_ARC_SWEEP`        | pi          | largest sweep of one result arc                       |
+| `TANGENT_ANGLE`        | 1e-6 rad    | junctions closer to tangent than this get no join tag |
+| `CONTINUITY_TOLERANCE` | 0.001 mm    | largest gap allowed between input segments            |
+
+**Accuracy.** Every result is within `REFIT_TOLERANCE` (0.002 mm) of the exact offset, and arcs the
+tags explain sit on the exact circles (to about 1e-9 mm in the tests). One exception, inherent to
+flattening: at a sharp convex tip with tip angle 2a, the joins' chord error moves the tip of an
+out-then-in offset back by up to the error divided by sin(a) (0.008 mm at a 10 degree tip in the
+property tests).
+
+**Performance (an estimate).** Medians in Node on the development machine, offset plus refit, with
+other tests running: the spike's bracket offset both ways in about 5 ms, a 10,000-vertex outline
+in about 140 ms, and the 50 rings of the spike's pocket, each from the source, in about 450 ms (the
+spike measured 264 ms for the offsets alone; the engine also re-flattens the source per call and
+refits every ring). `perf.test.ts` fails only at ten times the spike's figures.
+
+## The post-processor engine (`post/`)
+
+One engine turns a `Toolpath` into G-code for any controller described by a **dialect record**
+(T5.4a; ADR 0014 decision 10). A dialect is data only: a user post is a JSON file of this shape,
+checked field by field when it is loaded, and no part of it is ever run.
+
+```ts
+postProcess(job: PostJob, dialect: Dialect | CompiledDialect, options?: PostOptions)
+  : CamResult<{ files: PostFile[]; stats: PostStats }>
+compileDialect(data: unknown): CamResult<CompiledDialect> // load and check a user post
+```
+
+`PostJob` is `{ toolpath, job, setup?, date?, heights }`: names for the templates, a date the
+caller formats (so output is reproducible) and the setup's `Heights` (machine Z). Both heights
+must be finite and `retract` may not be above `clearance`; the engine refuses the job otherwise.
+`PostOptions` picks `units` (`mm`, the default, or `inch`), overrides the dialect's `toolChange`
+and `splitPerTool`, and sets the refit `tolerance` (0.002 mm), the IR validator's `arcTolerance`
+and the work offsets of the Grbl check. Each `PostFile` has its `lines`, its `text` (newline
+terminated) and the tool ids it uses. `compileDialect` checks a JSON copy of its input and returns
+it frozen; `postProcess` uses a `CompiledDialect` as is only when `compileDialect` made it, and
+compiles anything else. The engine never throws on bad input: anything it cannot
+write is an error value with code `unsupported` (the dialect lacks what the IR needs),
+`invalid-input` (the toolpath fails `validateToolpath`, the heights are wrong, or an option,
+coordinate or feed cannot be written) or `invalid-dialect`. Inch conversion uses
+`@manufakture/units`' `MM_PER_INCH`.
+
+### The dialect format
+
+```json
+{
+  "id": "my-grbl",
+  "name": "My Grbl",
+  "gCodes": ["G0", "G1", "G2", "G3", "G4", "G17", "G20", "G21", "G90", "G91.1", "G94"],
+  "mCodes": ["M0", "M2", "M3", "M5", "M30"],
+  "toolChange": "none",
+  "splitPerTool": true,
+  "cannedCycles": false,
+  "fullCircles": "halves",
+  "comments": "parentheses",
+  "maxLineLength": 80,
+  "programDelimiter": false,
+  "dwellUnit": "seconds",
+  "decimals": {
+    "mm": { "coordinate": 3, "feed": 0 },
+    "inch": { "coordinate": 4, "feed": 1 },
+    "spindle": 0,
+    "dwell": 3
+  },
+  "templates": {
+    "header": ["({job} / {setup}, {date})", "(Post {post}, {units})"],
+    "tool": ["(T{tool} {tool_name} D{tool_diameter})"],
+    "toolChange": ["(Tool {tool}: {tool_name}, {rpm} rpm)"],
+    "footer": ["M30"]
+  }
+}
+```
+
+| Field              | Meaning                                                                                                                                                                                                         |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`, `name`       | Lower case id (`a-z`, digits, single hyphens) and a display name (`{post}`).                                                                                                                                    |
+| `gCodes`, `mCodes` | Every code the controller accepts (`G01` and `G1` are the same). The engine needs G0 to G3, G17, G90 and G21 or G20; it writes G4, G94, M0, M3, M4, M5 and M6 only when they are listed, and refuses otherwise. |
+| `toolChange`       | `none` (one tool per file), `m0-pause` (`M0` and comments between tools) or `m6` (`M6 T<n>` at every tool change, including each file's first).                                                                 |
+| `splitPerTool`     | Default for writing one file per tool.                                                                                                                                                                          |
+| `cannedCycles`     | Whether the controller takes G81/G83. Recorded for the drill posts; the IR has no cycle markers yet, so drilling is always written as G0/G1 moves.                                                              |
+| `fullCircles`      | `halves` (default and safe) writes an intended full circle as two half arcs; `single` writes one arc with equal start and end, which Grbl 1.1 accepts in IJK form.                                              |
+| `comments`         | `parentheses`, the only style written.                                                                                                                                                                          |
+| `maxLineLength`    | Longest line, 40 to 255 (80 for Grbl's line buffer). Comments wrap; a longer code line is refused.                                                                                                              |
+| `programDelimiter` | `%` lines around the program (LinuxCNC, Mach3).                                                                                                                                                                 |
+| `dwellUnit`        | G4's P in `seconds` (Grbl, LinuxCNC) or `milliseconds`.                                                                                                                                                         |
+| `decimals`         | Decimals for coordinates (X Y Z I J) and F per unit system, and for S and P. Coordinates need 2 to 6.                                                                                                           |
+| `templates`        | `header` (top of every file), `tool` (once per tool in the file, after the header), `toolChange` (at each change, before `M0`/`M6`), `footer` (end of every file).                                              |
+
+**Templates.** A template line is either a comment line, `(` text `)` with no other parentheses,
+or a code line of words (`G90 G94`, `T{tool}`). `{name}` substitutes a variable from the fixed
+list below; an unknown variable, a stray brace or non-ASCII text refuses the dialect when it is
+loaded. There is no other syntax: no expressions, conditions or loops.
+
+| Variable                                 | Kind   | Value                                                                  |
+| ---------------------------------------- | ------ | ---------------------------------------------------------------------- |
+| `tool`                                   | number | the tool number                                                        |
+| `tool_name`                              | text   | the tool's name                                                        |
+| `tool_diameter`                          | number | cutting diameter, output units (`ToolChange.diameter`)                 |
+| `rpm`                                    | number | the tool's first spindle speed                                         |
+| `feed`                                   | number | the tool's first `cut` feed (else its first feed), output units        |
+| `job`, `setup`                           | text   | names from the `PostJob`                                               |
+| `date`                                   | text   | the `PostJob`'s date text                                              |
+| `post`                                   | text   | the dialect's name                                                     |
+| `units`                                  | text   | `mm` or `inch`                                                         |
+| `units_code`                             | code   | `G21` or `G20`                                                         |
+| `file_index`, `file_count`, `tool_count` | number | this file's number from 1, the number of files, the tools in this file |
+
+Text variables may appear only in comment lines, so user text never reaches a code line; code
+variables only in code lines. In a comment a missing value is written as `unknown`; in a code line
+it refuses the job. A number variable may only follow `T` (`T{tool}`), and a code variable must be
+a word of its own, so no variable can build a G, M or P word. Code lines may write settings only:
+G17, G20, G21, G40, G49, G61, G80, G90, G91.1, G94, G54 to G59 in the header only (a work offset
+changes what every remembered position means), G64 with exactly one literal P greater than 0 and
+at most 0.1 (and at most the post tolerance in output units when written; LinuxCNC's G64 without
+P blends with no tolerance), and M0, M1, M5, M8, M9, with M2 and M30 in the footer and `T` in
+`toolChange`. Motion, distance mode, spindle start and M6 belong to the engine. After any template
+code line the engine forgets its position and modes and starts the next move from the clearance
+(a `G80` cancels the motion mode, for one).
+
+### What the engine writes
+
+- **Modes.** After the header and tool list, one line sets whichever of the units (G21 or G20),
+  G90, G17 and G94 (when the dialect has it) the header did not. A header that sets the other
+  units is refused.
+- **Safe start.** Each file's first tool change (or first move), every move after an `M0`, an
+  `M6` or a template code line, starts with `G0 Z<clearance>`. Before each tool change and before
+  the footer the tool also rises to the clearance when it is known to be below it. The first rapid after it goes up before across when its
+  target is above the clearance, and across before down when below. A feed move before that first
+  rapid is refused, since X and Y are unknown there.
+- **Modal state.** A G0 or G1 word is written only when the motion changes, an axis only when its
+  written value changes, F only when the written feed changes. A move that changes no written word
+  is dropped. G2/G3, X and Y are always written on an arc line, with I and J both written. After an
+  `M0` or `M6` every word is written again.
+- **Numbers.** Fixed notation, rounded to the dialect's decimals, trailing zeros dropped, never
+  `-0` or an exponent, at most eight digits (Grbl's `read_float` drops further digits silently;
+  such a value is refused). Under G20 lengths are divided by 25.4 and feeds are in in/min. An F or
+  S that rounds to zero is refused.
+- **Comments.** Parenthesised printable ASCII only: accents transliterated, `(` and `)` turned into
+  `[` and `]`, and `?`, `!`, `~`, `;`, `%` and anything outside a small set dropped. Grbl acts on
+  `?`, `!` and `~` anywhere in the stream, comments included. Long comments wrap. A line, first or
+  continuation, that starts (case-insensitively) with `MSG`, `DEBUG`, `PRINT`, `LOG`, `PROBE`,
+  `ABORT` or `PY`, or with a word followed by a comma, gets a leading `_`: LinuxCNC and Mach3 act
+  on such comments (`(LOGOPEN,file)` opens a file on the controller, `(py,...)` runs Python).
+- **Spindle and dwell.** `M3 S<rpm>` (M4 when counter-clockwise and listed), `M5`; any other
+  spindle state is refused (the validator's `spindle-state`). A file that ends
+  with the spindle running gets an `M5` before the footer. `G4 P<t>` in the dialect's unit; a zero
+  dwell is dropped.
+- **Tool changes and files.** With `splitPerTool` each tool change after a file's first starts a
+  new file (comments just before the change go with it); each file is complete (header, modes,
+  footer). `none` with several tools in one file is refused.
+
+### Arcs
+
+Every arc is checked as Grbl will see it, on the words as written: in the file's units, after
+rounding, read with Grbl's `read_float` in single precision, converted to millimetres and moved by
+a work offset (`grbl-arc.ts`). The machine's G54 offset is not known when the file is written, and
+single precision error grows with the size of the machine coordinates, so the check runs at six
+offsets (`GRBL_CHECK_OFFSETS`): zero and points across a 1.5 m travel on both signs. The engine
+writes an arc as **lines** (G1) when:
+
+| Rule                                                                                                                         | Constant                                                            |
+| ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| its rounded start and end coincide (not a full circle)                                                                       |                                                                     |
+| its written chord is under ten output steps (0.01 mm at 3 decimals)                                                          | `MIN_ARC_CHORD_STEPS` = 10                                          |
+| its radius is under ten output steps                                                                                         | `MIN_ARC_RADIUS_STEPS` = 10                                         |
+| its sagitta is at most tol / 20 (0.0001 mm)                                                                                  | `LINE_SAGITTA_FRACTION` = 1/20, `DEFAULT_POST_TOLERANCE` = 0.002 mm |
+| it fails Grbl's radius rule (error 33) at any offset                                                                         | 0.005 mm or 0.1% of r, never over 0.5 mm                            |
+| its radii differ by more than 0.8 of that allowance in exact arithmetic                                                      | `RADIUS_MARGIN` = 0.8                                               |
+| Grbl's angular travel (`mc_arc`, with its 5e-7 rad full-turn rule) is more than 0.5 rad off the intended sweep at any offset | `TRAVEL_TOLERANCE` = 0.5 rad                                        |
+
+An arc written as lines is not one G1 by default: its sagitta is checked too, and it becomes as
+many chords as keep every chord within the tolerance of the arc (at most a quarter turn each, at
+most `MAX_ARC_SEGMENTS` = 10,000), Z interpolated along a helix. So a nearly full turn whose ends
+round together, or a large arc that fails the check, is cut as the arc it is, never as a full
+circle and never as a short cut across it. I and J are chosen among the roundings of the exact
+centre offset (each down or up) to make the written start and end radii agree best. A full circle
+is written as one arc only with `fullCircles: 'single'` and only when it passes the check;
+otherwise as two halves, and halves that fail become lines like any arc. The check fails real
+cases: a 5 mm circle written from (4.998, 0.137) at a work offset of -1499.873 mm gets a travel
+on the wrong side of Grbl's 5e-7 rad threshold for every rounding of I and J, so Grbl would cut
+almost nothing. Two halves never depend on that threshold, which is why they are the default.
+
+Not covered yet: LinuxCNC's own arc radius tolerance (T5.4c may need a per-dialect value);
+coolant (the IR has no coolant entry); canned cycles.
+
+## The CAM worker (`worker/`, `client.ts`, `cache/`)
+
+The fifth worker context (T5.1g; ADR 0014 decision 7, ADR 0007's CAM worker amendment): toolpath
+generation and the simulation run here, off the main thread and away from the kernel, so a slow
+pocket never delays a regen or a sketch drag. Entries: `@manufakture/cam/worker` (the worker,
+`worker/worker.ts`) and `@manufakture/cam/client` (`CamClient`).
+
+```ts
+import { spawnCamClient } from './cam/spawn'; // apps/web: holds the `new Worker(...)`
+const cam = spawnCamClient(); // no worker yet: it starts on the first call
+const reply = await cam.generate(setup, { keys }); // null when a newer request superseded it
+if (reply?.status === 'done') {
+  for (const op of reply.operations) {
+    if (op.ok) preview(unpackToolpath(op.toolpath));
+    else show(op.id, op.error); // errors are values
+  }
+}
+```
+
+**`CamWorkerApi`** (`worker/api.ts`) has coarse calls (ADR 0007 decision 3):
+
+- **`generate({ generation, setup, only?, keys?, machine? })`**: one evaluated `Setup`, generating
+  each of its operations (or those in `only`) in order. Each operation's result is
+  `{ id, kind, key, cached, ms, ok: true, toolpath, warnings }` or `{ ..., ok: false, error }`.
+  The reply is `done`, `cancelled` (superseded) or `failed` (a malformed request).
+- **`simulate({ generation, toolpaths: [{ key, tool }], stock, cell })`**: the material-removal
+  simulation (T5.3c) of cached toolpaths, returning a `Heightmap` (`origin`, `cell`, `nx`, `ny`,
+  `heights`). Until a `Simulator` is passed to `createCamWorkerApi`, it fails with `no-simulator`;
+  a key not in the cache fails with `missing-toolpath` and the keys. The simulator gets the
+  cache's own toolpaths and must never mutate them or transfer their buffers; the `heights` it
+  returns are transferred.
+- **`stats(keys, { rapidRate })`**: `toolpathStats` and `toolpathBounds` of cached toolpaths, null
+  for a key not in the cache.
+- **`cancel(channel, generation?)`**, **`cacheInfo()`**, **`clearCache()`**.
+
+**Generations and cancellation** (ADR 0007 decision 4). `generate` and `simulate` are two
+channels, each with its own generations: a newer `generate` supersedes every older one still
+running, but never a simulation, and the reverse. Generators and the simulator call
+`await context.checkpoint()` between passes, rings or raster lines; it yields to the event loop
+once the time slice (8 ms) is used up, so a newer request arriving meanwhile is seen, and throws
+`CamCancelled` when the request is stale, which the worker turns into `cancelled`. A single long
+call that never checkpoints cannot be cancelled midway. `CamClient` numbers requests, drops stale
+replies (resolving to null; UI code must not assume one reply per request) and settles calls in
+flight with null on `terminate`.
+
+**Operations plug in through a registry** (`worker/registry.ts`). An `OperationGenerator` takes the
+evaluated operation and an `OperationContext` (`setup`, `machine`, `generation`, `cancelled`,
+`checkpoint()`) and returns a `CamResult<{ toolpath, warnings? }>`, synchronously or not. The
+worker entry serves `defaultOperations`, on which `registerBuiltinOperations` (`worker/builtin.ts`)
+registers the operations this package ships: each operation task (T5.2b on) adds its line there.
+A kind with no generator gets a `no-generator` error value. Only what the key holds may shape a
+generator's output: it must not read its sibling operations, its operation's `name`, or the
+setup's `name` or `post`; one that needs any of them adds it to `toolpathKey` and bumps
+`CAM_IMPLEMENTATION_VERSION` in the same change.
+
+**Errors are values.** An expected failure is the generator's `{ ok: false, error }`. A generator
+that throws is a bug, reported as `internal` with the message and stack; one that returns a
+toolpath the IR validator refuses is `invalid-toolpath` with the issues. The validator's `no-tool`
+and `spindle-off` are not checked on an operation's own toolpath, since linking (T5.2g) puts the
+tool change and spindle start in front of it.
+
+**Transferred buffers** (ADR 0007 decision 6). Toolpaths travel packed (`worker/pack.ts`): per
+entry a kind byte, six `Float64Array` values (`to`, the arc `center`, the feed) and three
+`Int32Array` values (the `op` index into a string table, the `pass`, and flags for the feed class,
+direction and `fullCircle`); tool changes, spindle, dwells and comments go beside them as plain
+objects. `unpackToolpath` gives back the exact IR. The reply's buffers are transferred; the cached
+copy keeps its own. Heightmaps transfer their `heights`. With `transferMeshes: true`,
+`CamClient.generate` also transfers `surface3d` meshes into the worker (the caller's arrays are
+detached afterwards).
+
+**The toolpath cache** (ADR 0014 decision 9; `cache/`). An in-memory LRU (`LruCache`) in the
+worker, bounded to 512 entries or 256 MiB of packed toolpaths (`createToolpathCache`). Keys are
+`toolpathKey({ operation, setup, machine? })`: a 128-bit hash of the evaluated operation (its
+tool, feeds and geometry included; not its `name`), the setup without its operation list, `name`
+and `post`, the machine row, and
+`CAM_IMPLEMENTATION_VERSION`, `POLYGON_LIBRARY` and, for `surface3d` only, `DROP_CUTTER`. The app
+computes the keys (to mark operations stale, ADR 0014 decision 8) and sends them as `keys`; the
+worker computes any missing one itself. A hit never reaches the generator. Toolpaths and expected
+failures are cached; bugs and `no-generator` are not, nor anything a generator returns once its
+request is stale (one that caught `CamCancelled` may return an error or a partial toolpath). Operations that finished before their
+request was superseded stay cached. Any entry may be evicted at any time; a miss only means
+regenerating. Typed arrays are hashed from their bytes. Bump `CAM_IMPLEMENTATION_VERSION` with any
+change that can alter a toolpath.
+
+Not yet: linking per setup and its cache (T5.2g), progress reports for long 3D finishes (T5.5a),
+an OPFS tier for the cache.
 
 ## Tests
 
@@ -252,3 +610,54 @@ Rapids are allowed with the spindle off and before any tool change.
 - `stats.test.ts`: lengths per class, time estimate and bounds on a sample program;
 - `validate.test.ts`: a valid program and each issue code;
 - `boundary.test.ts`: the import allowlist above, and a self-test of its scanner.
+- `offset/engine.test.ts`: offsets of rectangles, rounded rectangles, circles and slots against
+  closed-form areas and the exact distance (both paths), slots that vanish and a 0.2 mm sliver, a
+  dumbbell that splits, holes and islands, 50 pocket rings, source tags, a dense polygon refit to a
+  few arcs, the fast path against Clipper, open paths (round and butt ends, along lines and arcs),
+  booleans, and refused input. Every result is checked for continuity, orientation, arcs on their
+  circles and at most half a turn, and Grbl's radius rule and travel at 3 and 4 decimals;
+- `offset/property.test.ts`: on random star and convex polygons and plates with holes, offset out
+  then in contains the original, stays within the offset of it, gives back a convex polygon, and
+  offsetting it out again matches the first outward offset;
+- `offset/grbl.test.ts`: the pre-check's radius rule, rounding and full-circle travel, and the
+  demotion of flat arcs;
+- `offset/perf.test.ts`: the performance budget above.
+- `post/format.test.ts`: number formatting (rounding, no exponent, no `-0`, the eight-digit
+  limit), Grbl's `read_float` in single precision, comment sanitising and wrapping;
+- `post/dialect.test.ts`: code normalising, a JSON round trip of a dialect, and each refusal:
+  unknown fields, bad codes, missing required codes, tool change styles, flags, decimals,
+  unknown variables, text variables in code lines, motion and program end in templates, malformed
+  lines;
+- `post/grbl-arc.test.ts`: the radius rule and its margin, inch conversion, the T5.0a tiny arc that
+  Grbl cuts as a full circle, intended full circles, and the work offsets;
+- `post/writer.test.ts`: exact text for a sample program in millimetres and inches, modal
+  omission, the modes preamble, the safe start, each arc rule, full circles (halves, single, and
+  single falling back), the choice of I and J, comments and line length, files per tool, `M0`
+  pauses, `M6 T<n>`, template variables, dwells, `%` lines and every refusal; a template `G80`
+  followed by a full safe start, work offsets only in the header, the G64 P cap, controller
+  keywords in wrapped comments, forged and hostile dialects, unknown spindle states;
+- `post/writer.property.test.ts`: 3,000 random arcs (radius 0.001 to 500 mm, tiny to full sweeps,
+  helical, millimetres and inches, single and split full circles) read back from the text alone:
+  every G2/G3 passes Grbl's radius rule and travel at every offset, only an intended full circle
+  ends where it starts, every arc ends at the IR end, and every point and chord written for an arc
+  stays within the tolerance of its circle;
+- `post/roundtrip.test.ts`: the output parsed back with `gcode-toolpath` (cncjs, MIT, a development
+  dependency), a parser we did not write: every parsed move is the IR move in hand (or the safe
+  start), within the output rounding, and every IR move is reached in order; no arc ends where it
+  starts unless a full circle is meant; the only extra rapids are the engine's safe start and
+  retracts. The sample program and a two-tool job in millimetres and
+  inches, every file mode and tool change style, and 400 random arcs.
+- `worker/pack.test.ts`: packed toolpaths round-trip every entry kind, flag and op id exactly;
+  clones own their buffers; packing refuses unknown kinds and feed classes, bad arc directions and
+  passes outside Int32;
+- `cache/cache.test.ts`: canonical hashing (key order, `-0`, typed arrays by bytes), what changes
+  a toolpath key and what does not (names and post do not), `POLYGON_LIBRARY` against the pinned
+  clipper2-ts, refused non-plain objects, and LRU eviction by count and size;
+- `worker/worker.test.ts`: the worker over a real `MessageChannel` with stub operations: results
+  arrive with buffers transferred, a newer request cancels an older long one mid-generator,
+  `cancel`, a cache hit sends nothing to the generator, app-sent keys and `only`, finished
+  operations kept after a supersede, nothing cached from a generator that caught `CamCancelled`,
+  the machine row in the context, a thrown generator bug becomes an error value, expected
+  failures cached as values, invalid toolpaths refused, no generator, transferred meshes,
+  statistics, eviction, and the simulation channel (transferred heightmap, a simulation during a
+  long generation with both done, missing toolpaths, supersede, a simulator bug).

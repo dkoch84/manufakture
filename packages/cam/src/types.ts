@@ -25,7 +25,11 @@ export type CamErrorCode =
   /** A plane or axis that is not parallel to the setup's XY plane or Z axis (ADR 0014 decision 5). */
   | 'not-parallel'
   /** An explicit stock that does not contain the body. */
-  | 'stock-too-small';
+  | 'stock-too-small'
+  /** The toolpath needs a code or feature the post's dialect does not allow (ADR 0014 decision 10). */
+  | 'unsupported'
+  /** A post dialect record that is malformed: a bad field, code, template or variable. */
+  | 'invalid-dialect';
 
 export interface CamError {
   readonly code: CamErrorCode;

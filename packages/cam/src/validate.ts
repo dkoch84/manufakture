@@ -19,6 +19,8 @@ export type IrIssueCode =
   | 'no-tool'
   /** A spindle start with an rpm of zero or less. */
   | 'spindle-rpm'
+  /** A spindle entry whose state is not `cw`, `ccw` or `off`. */
+  | 'spindle-state'
   /** A tool change while the spindle runs. */
   | 'tool-change-spindle-on'
   /** A dwell of less than zero seconds. */
@@ -92,8 +94,11 @@ export function validateToolpath(
         pos = e.to;
         return;
       }
-      case 'spindle':
-        if (e.state === 'off') {
+      case 'spindle': {
+        const state: string = e.state;
+        if (state !== 'cw' && state !== 'ccw' && state !== 'off') {
+          report('spindle-state', `Unknown spindle state '${state}'.`);
+        } else if (e.state === 'off') {
           spindleOn = false;
         } else if (!Number.isFinite(e.rpm)) {
           report('non-finite', 'The spindle speed is not finite.');
@@ -103,6 +108,7 @@ export function validateToolpath(
           spindleOn = true;
         }
         return;
+      }
       case 'toolChange':
         if (spindleOn)
           report('tool-change-spindle-on', `Tool change to ${e.tool} with the spindle on.`);

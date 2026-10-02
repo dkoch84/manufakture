@@ -7,13 +7,13 @@ import { describe, expect, it } from 'vitest';
 // sketch package, on any domain package, on the app or on the DOM. At run time it may load only
 // its own modules, `@manufakture/units`, `comlink` (the worker, T5.1g) and `clipper2-ts` (the
 // offset adapter, T5.2a). Type-only imports may also name `@manufakture/core` (the `cam` section's
-// types) and `@manufakture/kernel` (`MeshData`); they are erased. Tests may also load `vitest` and
-// Node built-ins. This is an allowlist, so a new dependency fails here until it is added on
-// purpose.
+// types) and `@manufakture/kernel` (`MeshData`); they are erased. Tests may also load `vitest`,
+// `gcode-toolpath` (the post's round trip, T5.4a; a development dependency, MIT) and Node
+// built-ins. This is an allowlist, so a new dependency fails here until it is added on purpose.
 
 const RUNTIME = ['@manufakture/units', 'comlink', 'clipper2-ts'];
 const TYPE_ONLY = [...RUNTIME, '@manufakture/core', '@manufakture/kernel'];
-const TEST_ONLY = ['vitest'];
+const TEST_ONLY = ['vitest', 'gcode-toolpath'];
 
 const SRC = fileURLToPath(new URL('.', import.meta.url));
 

@@ -5,10 +5,20 @@
   "type": "module",
   "license": "GPL-3.0-or-later",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./client": "./src/client.ts",
+    "./worker": "./src/worker/worker.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run --root ../.. --project packages packages/cam"
+  },
+  "dependencies": {
+    "@manufakture/units": "workspace:*",
+    "clipper2-ts": "2.0.1-18",
+    "comlink": "^4.4.2"
+  },
+  "devDependencies": {
+    "gcode-toolpath": "3.0.0"
   }
 }

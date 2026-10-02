@@ -99,6 +99,18 @@ describe('validateToolpath', () => {
     expect(codes(t)).toEqual(['spindle-rpm', 'spindle-off']);
   });
 
+  it('an unknown spindle state, which leaves the spindle off', () => {
+    const t: Toolpath = {
+      start: [0, 0, 0],
+      entries: [
+        { kind: 'toolChange', tool: 'tool#1', name: 't', op },
+        { kind: 'spindle', state: 'reverse', rpm: 1000, op } as unknown as IrEntry,
+        { kind: 'linear', to: [1, 0, 0], feed: 100, feedClass: 'plunge', op, pass: 0 },
+      ],
+    };
+    expect(codes(t)).toEqual(['spindle-state', 'spindle-off']);
+  });
+
   it('a tool change with the spindle on', () => {
     expect(codes(program({ kind: 'toolChange', tool: 'tool#2', name: 'v', op }))).toEqual([
       'tool-change-spindle-on',

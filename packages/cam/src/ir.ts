@@ -73,6 +73,8 @@ export interface ToolChange {
   readonly number?: number;
   /** For comments and the operator prompt. */
   readonly name: string;
+  /** Cutting diameter, mm, for the post's tool comments (`{tool_diameter}`). */
+  readonly diameter?: number;
   readonly op?: string;
 }
 

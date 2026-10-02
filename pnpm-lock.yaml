@@ -50,6 +50,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@manufakture/cam':
+        specifier: workspace:*
+        version: link:../../packages/cam
       '@manufakture/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -129,7 +132,21 @@ importers:
 
   packages/assembly: {}
 
-  packages/cam: {}
+  packages/cam:
+    dependencies:
+      '@manufakture/units':
+        specifier: workspace:*
+        version: link:../units
+      clipper2-ts:
+        specifier: 2.0.1-18
+        version: 2.0.1-18
+      comlink:
+        specifier: ^4.4.2
+        version: 4.4.2
+    devDependencies:
+      gcode-toolpath:
+        specifier: 3.0.0
+        version: 3.0.0
 
   packages/core:
     dependencies:
@@ -1176,6 +1193,16 @@ packages:
     resolution: {integrity: sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw==}
     engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
     os: [darwin]
+
+  gcode-interpreter@3.0.0:
+    resolution: {integrity: sha512-4GDLQpflU1e7tcj0vjxKB76y2fMdlU5X01PVbSGoNoiekS8HsPXLEAdJJI1CGwNToNJq1SLolGQaA9c7xmWjNQ==}
+
+  gcode-parser@2.2.0:
+    resolution: {integrity: sha512-7h8P9+NEdOxpIaEQ3TIlRQow5Lh/cwJj6hDCO54wQRd4PZwd9BDNE+OLKgVT93/of2zF20bVIpoijrWI9LnUBw==}
+
+  gcode-toolpath@3.0.0:
+    resolution: {integrity: sha512-ofXsBt+rpdOB+G8Gak+THq9jwFfl4snjrGQupvNdvvqiJDGXnBrE4Wqoc3WIVDRXXvspUvOMwA3C6THH51Ge3A==}
+    engines: {node: '>=4'}
 
   gensync@1.0.0-beta.2:
     resolution: {integrity: sha512-3hN7NaskYvMDLQY55gnW3NQ+mesEAepTqlg+VEbj7zzqEMBVNhzcGYYeqFo/TlYz6eQiFcp1HcsCZO+nGgS8zg==}
@@ -2544,6 +2571,16 @@ snapshots:
 
   fsevents@2.3.3:
     optional: true
+
+  gcode-interpreter@3.0.0:
+    dependencies:
+      gcode-parser: 2.2.0
+
+  gcode-parser@2.2.0: {}
+
+  gcode-toolpath@3.0.0:
+    dependencies:
+      gcode-interpreter: 3.0.0
 
   gensync@1.0.0-beta.2: {}
 

@@ -88,3 +88,37 @@ export type { StatsOptions, ToolpathBounds, ToolpathStats } from './stats';
 
 export { DEFAULT_ARC_TOLERANCE, validateToolpath } from './validate';
 export type { IrIssue, IrIssueCode, ValidateOptions } from './validate';
+
+// T5.2a: the offset engine (Clipper2 adapter, flattening, booleans, tagged arc refit).
+export {
+  CLIPPER_SCALE,
+  FLATTEN_TOLERANCE,
+  JOIN_TOLERANCE,
+  MAX_COORD_MM,
+  REFIT_TOLERANCE,
+  arcRadius,
+  differenceLoops,
+  distToLoops,
+  distToSegment,
+  flattenSegments,
+  intersectLoops,
+  loopArea,
+  loopLength,
+  offsetLoops,
+  offsetOpenPaths,
+  regionArea,
+  regionLoops,
+  segmentLength,
+  segmentPoint,
+  signedSweep,
+  unionLoops,
+} from './offset';
+export type { OffsetOptions, OpenOffsetOptions, OpenPath2, Region2 } from './offset';
+
+// T5.4a: the post-processor engine (dialect records, formatting, Grbl arc checks, the writer).
+export * from './post';
+
+// T5.1g: the CAM worker's API, operation registry and packed toolpaths, and the toolpath cache.
+// The worker entry is `@manufakture/cam/worker` and the main-thread client `@manufakture/cam/client`.
+export * from './worker';
+export * from './cache';
