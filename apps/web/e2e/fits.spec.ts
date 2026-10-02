@@ -3,7 +3,8 @@ import { expect, test, type Page } from '@playwright/test';
 // Fits as variables (ADR 0012 decision 10, plan M3 T3.2g), through the UI and the real regen
 // worker: Insert fit variables adds #fit_press, #fit_slip and #fit_sliding in one undo step; a
 // hole sized as an M3 with a printed slip fit reads #fit_slip; changing #fit_slip in the table
-// changes the hole. Then the fit-test coupon template, made from the home screen, regenerates.
+// changes the hole. Then the fit-test coupon template, made from the home screen, regenerates,
+// its debossed clearance labels included.
 
 const PLATE = { x: 40, y: 20, t: 5 };
 const M3 = 3;
@@ -20,7 +21,9 @@ async function openEmpty(page: Page) {
 /** Wait until the model shows the open document; then every feature's status and warnings. */
 async function regenerated(
   page: Page,
-): Promise<Record<string, { status: string; cached: boolean; errors: unknown[] }>> {
+): Promise<
+  Record<string, { status: string; cached: boolean; errors: unknown[]; warnings: string[] }>
+> {
   await page.waitForFunction(() => {
     const hooks = window.__manufakture!;
     const m = hooks.model.getState();
@@ -28,12 +31,15 @@ async function regenerated(
   });
   return page.evaluate(() =>
     Object.fromEntries(
-      window
-        .__manufakture!.model.getState()
-        .parts[0]!.features.map((f) => [
-          f.featureId,
-          { status: f.status, cached: f.cached, errors: f.errors },
-        ]),
+      window.__manufakture!.model.getState().parts[0]!.features.map((f) => [
+        f.featureId,
+        {
+          status: f.status,
+          cached: f.cached,
+          errors: f.errors,
+          warnings: f.warnings.map((w) => w.message),
+        },
+      ]),
     ),
   );
 }
@@ -200,5 +206,9 @@ test('the fit-test coupon template regenerates', async ({ page }) => {
   );
   expect(Object.keys(statuses)).toHaveLength(count);
   await expect(page.getByTestId('feature-hole#4')).toContainText('Hole 4: +0.15 mm');
+  // The clearance labels: laid out by the text worker in the bundled font and debossed.
+  await expect(page.getByTestId('feature-extrude#2')).toContainText('Labels');
+  expect(statuses['sketch#3']).toMatchObject({ status: 'ok', warnings: [] });
+  expect(statuses['extrude#2']).toMatchObject({ status: 'ok', warnings: [] });
   expect(errors).toEqual([]);
 });

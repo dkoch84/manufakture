@@ -47,10 +47,10 @@ The insert holes are CNC Kitchen's own table for their standard inserts (read fr
 
 On the Documents screen, **New fit-test coupon** makes a new document to measure your fits. It has two plates in one part studio:
 
-- the **hole plate**, 120 x 20 x 6 mm, with a row of eleven holes. Their diameters are `#peg_d` (6 mm) plus a clearance that grows by 0.05 mm per hole: hole 1 has +0.00 mm, hole 2 +0.05 mm, up to hole 11 with +0.50 mm. Each hole's name in the feature tree says its clearance (**Hole 4: +0.15 mm**);
+- the **hole plate**, 120 x 26 x 6 mm, with a row of eleven holes. Their diameters are `#peg_d` (6 mm) plus a clearance that grows by 0.05 mm per hole: hole 1 (on the left) has +0.00 mm, hole 2 +0.05 mm, up to hole 11 with +0.50 mm. Each hole is **labelled with its clearance** in mm (`0.15`), debossed 0.6 mm into the top face in the built-in font at a 5 mm cap height (above the [recommended minimum](text.md#size-for-printing) for a 0.4 mm nozzle). A label is wider than the gap between holes, so they take turns: odd holes have theirs below the row, even holes above. Each hole's name in the feature tree says its clearance too (**Hole 4: +0.15 mm**);
 - the **peg plate**, 50 x 15 x 3 mm, with three pegs of diameter `#peg_d`, 10 mm tall.
 
-The holes are not labelled on the part yet (labels come with text, in a later version). Instead a small **marker hole** sits in the corner next to **hole 1**: count from the marker.
+The labels are ordinary [text](text.md): the sketch **Clearance labels** and the cut **Labels**. The print workspace's wall-thickness check marks a few spots in their pockets, where the font's strokes meet at a sharp angle (the notch of a "1", the joins of a "2" and a "5"); the plate left there narrows to a point, as it does around any label in this font at any size. Nothing else on the coupon is flagged.
 
 | Hole      | 1    | 2    | 3    | 4    | 5    | 6    | 7    | 8    | 9    | 10   | 11   |
 | --------- | ---- | ---- | ---- | ---- | ---- | ---- | ---- | ---- | ---- | ---- | ---- |
@@ -61,10 +61,10 @@ The document comes with a print setup for a Bambu Lab X1 Carbon with a 0.4 mm no
 ### Procedure
 
 1. Print both plates flat, as modelled, in the filament and with the slicer profile you use for real parts. Let them cool.
-2. Take a peg and try it in each hole, starting at hole 1 (next to the marker). Hold the peg plate at right angles to the hole plate so only one peg meets the row: the pegs are 15 mm apart and the holes 10 mm, so held parallel, the other pegs land on solid plate. Push from the top side of the plate: the bottom of each hole is affected by the first layer.
+2. Take a peg and try it in each hole, starting at hole 1 (labelled `0.00`). Hold the peg plate at right angles to the hole plate so only one peg meets the row: the pegs are 15 mm apart and the holes 10 mm, so held parallel, the other pegs land on solid plate. Push from the top side of the plate: the bottom of each hole is affected by the first layer.
 3. **Press**: the first hole where the peg goes in with force and stays.
 4. **Slip**: the first hole where the peg slides in by hand without play.
 5. **Sliding**: the first hole where the peg moves freely.
-6. In your own documents, set `#fit_press`, `#fit_slip` and `#fit_sliding` to those holes' clearances (from the table above, or the feature names). If no hole is tight enough for a press fit, the press clearance is below 0 for that printer: try `0 mm` and print a test of the real part.
+6. In your own documents, set `#fit_press`, `#fit_slip` and `#fit_sliding` to those holes' clearances (from the labels, the table above, or the feature names). If no hole is tight enough for a press fit, the press clearance is below 0 for that printer: try `0 mm` and print a test of the real part.
 
 One printer and one spool are one data point; a new filament or a changed profile may need a new coupon.

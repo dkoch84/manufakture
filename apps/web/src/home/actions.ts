@@ -163,7 +163,7 @@ export function homeActions(host: HomeHost): HomeActions {
         ok: true,
         message:
           `Created ${doc.name}: print it, then set #fit_press, #fit_slip and #fit_sliding from ` +
-          'the holes that fit (hole 1 is next to the marker; each hole adds 0.05 mm).',
+          'the clearances debossed next to the holes that fit.',
       };
     },
 
