@@ -31,6 +31,14 @@ import {
   type MeasureResult,
   type MeasureTarget,
 } from './measure';
+import {
+  DEFAULT_LOOP_DEFLECTION,
+  faceLoopsOf,
+  sectionLoopsOf,
+  type FaceLoopsReport,
+  type FaceLoopsTarget,
+  type SectionLoops,
+} from './loops';
 import { orientedBoxOf, type OrientedBox, type OrientedBoxOptions } from './obb';
 import { mapShapes, norm, Scope, toVec3, type Oc, type ShapeList } from './occt';
 import {
@@ -898,6 +906,57 @@ export class Kernel {
   ): MeasureResult {
     return this.op('measure', (s) =>
       measureShape(this.oc, s, this.get(shape, 'measure'), this.named(shape), targets, options),
+    );
+  }
+
+  /**
+   * The loops of one planar face (by name on a named body, or by 1-based index) in `frame`'s 2D
+   * coordinates: the outer loop counter-clockwise and the holes clockwise, as lines, arcs and
+   * polylines within `deflection` (mm), each tagged with its edge, and the face's height along the
+   * frame normal. A face that is not there, not planar or not parallel to the frame is reported,
+   * not thrown. Makes no shapes. See loops.ts.
+   */
+  faceLoops(
+    shape: ShapeId,
+    target: FaceLoopsTarget,
+    frame: Frame,
+    deflection: number = DEFAULT_LOOP_DEFLECTION,
+  ): FaceLoopsReport {
+    return this.op('faceLoops', (s) =>
+      faceLoopsOf(
+        this.oc,
+        s,
+        this.get(shape, 'faceLoops'),
+        this.named(shape),
+        target,
+        frame,
+        deflection,
+      ),
+    );
+  }
+
+  /**
+   * The section of a shape by `frame`'s plane moved `height` along its normal
+   * (`BRepAlgoAPI_Section`), as closed loops in the frame's 2D coordinates nested into regions
+   * (outer counter-clockwise, holes clockwise), each segment tagged with the face it lies on.
+   * Makes no shapes. See loops.ts.
+   */
+  section(
+    shape: ShapeId,
+    frame: Frame,
+    height = 0,
+    deflection: number = DEFAULT_LOOP_DEFLECTION,
+  ): SectionLoops {
+    return this.op('section', (s) =>
+      sectionLoopsOf(
+        this.oc,
+        s,
+        this.get(shape, 'section'),
+        this.named(shape),
+        frame,
+        height,
+        deflection,
+      ),
     );
   }
 

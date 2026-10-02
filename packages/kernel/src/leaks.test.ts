@@ -885,6 +885,79 @@ describe('embind objects', () => {
     expect(tracker.liveNames()).toEqual([]);
   });
 
+  it('faceLoops and section leave nothing behind: lines, arcs, flattened curves, failures', () => {
+    const made = applyFeature(k, [], {
+      kind: 'extrude',
+      id: 'extrude#1',
+      profile: {
+        frame: XY,
+        loops: [
+          {
+            entities: [
+              { kind: 'line', id: 'e1', start: [0, 0], end: [20, 0] },
+              {
+                kind: 'bezier',
+                id: 'b1',
+                points: [
+                  [20, 0],
+                  [30, 5],
+                  [30, 15],
+                  [20, 20],
+                ],
+              },
+              { kind: 'line', id: 'e2', start: [20, 20], end: [0, 20] },
+              { kind: 'line', id: 'e3', start: [0, 20], end: [0, 0] },
+            ],
+          },
+          { entities: [{ kind: 'circle', id: 'h1', center: [8, 10], radius: 3 }] },
+        ],
+      },
+      extent: { type: 'blind', distance: 8 },
+      mode: 'new',
+    });
+    expect(made.errors).toEqual([]);
+    const body = made.bodies[0]!.shape;
+    const side: Frame = { origin: [0, 0, 0], xDir: [1, 0, 0], normal: [0, -1, 0] };
+    const runs: Array<[string, () => unknown]> = [
+      ['the top face by name', () => k.faceLoops(body, { name: 'extrude#1:cap:end' }, XY)],
+      ['the bottom face by index, finely', () => k.faceLoops(body, { index: 1 }, XY, 0.001)],
+      ['a face that is not planar', () => k.faceLoops(body, { name: 'extrude#1:side:b1' }, XY)],
+      ['a face that is not there', () => k.faceLoops(body, { name: 'extrude#1:side:e9' }, XY)],
+      ['a horizontal section through the hole', () => k.section(body, XY, 4)],
+      ['a vertical section through the hole', () => k.section(body, side, -10)],
+      ['a section that misses', () => k.section(body, XY, 100)],
+    ];
+    for (const [name, fn] of runs) {
+      tracker.reset();
+      fn();
+      expect(tracker.created(), name).toBeGreaterThan(0);
+      expect(tracker.liveNames(), name).toEqual([]);
+    }
+    // The wire explorer, the section algorithm and the flattener were really exercised.
+    tracker.reset();
+    k.faceLoops(body, { name: 'extrude#1:cap:end' }, XY);
+    k.section(body, XY, 4);
+    expect(tracker.createdNames()).toEqual(
+      expect.arrayContaining([
+        'BRepTools_WireExplorer',
+        'BRepAlgoAPI_Section',
+        'GCPnts_TangentialDeflection',
+      ]),
+    );
+    const failing: Array<[string, () => unknown]> = [
+      ['an unknown shape', () => k.section(999_999 as ShapeId, XY)],
+      ['a degenerate frame', () => k.faceLoops(body, { index: 1 }, { ...XY, xDir: [0, 0, 1] })],
+      ['a bad deflection', () => k.section(body, XY, 4, -1)],
+    ];
+    for (const [name, fn] of failing) {
+      tracker.reset();
+      expect(fn, name).toThrow(KernelError);
+      expect(tracker.liveNames(), name).toEqual([]);
+    }
+    k.release(body);
+    expect(tracker.liveNames()).toEqual([]);
+  });
+
   it('threads leave only the bodies: groove, crest trim and chamfers, on success and failure', () => {
     const [block] = threadedBlock();
     // Only the threaded block is alive; every tool and temporary is gone.
@@ -1041,6 +1114,46 @@ describe('heap', () => {
     console.log(`project: ${(perRun / 2 ** 10).toFixed(0)} KiB per projection`);
     expect(perRun).toBeLessThan(150 * 2 ** 10);
   }, 120_000);
+
+  it('repeated sections and face loops leak only the small values libcascade cannot free', async () => {
+    // The 40-hole board of the projection test, cut at mid-thickness (a rectangle and 40 circles)
+    // and its top face's loops read, on fresh instances after 2 and after 12 runs.
+    // `BRepAlgoAPI_Section` is released by `releaseOwned` (cleared, empty arguments and tools); what
+    // stays is the embind values whose delete() is empty. Measured: about 26 KiB a run for each,
+    // and 480 KiB a section with the release rule disabled, so the bound below catches a lost rule.
+    const inUseAfter = async (n: number, what: 'section' | 'faceLoops') => {
+      const fresh = new Kernel(await createNodeInstance());
+      const tools: ShapeId[] = [];
+      for (let i = 0; i < 40; i++) {
+        tools.push(
+          fresh.cylinder(2.5, 40, [50 + (i % 10) * 55, 40 + Math.floor(i / 10) * 60, -10]),
+        );
+      }
+      const blank = fresh.box(600, 300, 18);
+      const board = fresh.boolean('cut', blank, tools).shape;
+      const top = fresh
+        .topology(board)
+        .faces.find((f) => f.surface === 'plane' && Math.abs(f.centroid[2] - 18) < 1e-9)!.index;
+      for (let i = 0; i < n; i++) {
+        if (what === 'section') {
+          expect(fresh.section(board, XY, 9).regions[0]!.holes).toHaveLength(40);
+        } else {
+          const r = fresh.faceLoops(board, { index: top }, XY);
+          expect(r.ok && r.holes.length).toBe(40);
+        }
+      }
+      for (const id of [blank, board, ...tools]) fresh.release(id);
+      expect(fresh.shapeCount).toBe(0);
+      return heapInUse(fresh);
+    };
+    const section = ((await inUseAfter(12, 'section')) - (await inUseAfter(2, 'section'))) / 10;
+    const loops = ((await inUseAfter(12, 'faceLoops')) - (await inUseAfter(2, 'faceLoops'))) / 10;
+    console.log(
+      `section: ${(section / 2 ** 10).toFixed(0)} KiB per run; faceLoops: ${(loops / 2 ** 10).toFixed(0)} KiB per run`,
+    );
+    expect(section).toBeLessThan(150 * 2 ** 10);
+    expect(loops).toBeLessThan(150 * 2 ** 10);
+  }, 180_000);
 
   it('repeated interference checks do not grow the wasm heap', () => {
     const block = k.box(10, 10, 10);

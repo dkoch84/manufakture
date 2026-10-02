@@ -36,6 +36,7 @@ import {
   type VertexRef,
 } from './features';
 import { DEFAULT_DEFLECTION, type BooleanKind, type Kernel } from './kernel';
+import type { FaceLoopsReport, FaceLoopsTarget, SectionLoops } from './loops';
 import type { MeasureResult, MeasureTarget } from './measure';
 import type { OrientedBox } from './obb';
 import type { ProjectOptions, ProjectResult, ProjectView } from './project';
@@ -208,6 +209,31 @@ export type ProjectOp = OpCommon &
     view: ProjectView;
   };
 
+/**
+ * The loops of one planar face in a frame's 2D coordinates (`Kernel.faceLoops`): the face by name
+ * on a named body or by 1-based index; `deflection` (mm) for curves that are not lines or circles.
+ * Makes no shapes.
+ */
+export type FaceLoopsOp = OpCommon & {
+  op: 'faceLoops';
+  shape: ShapeRef;
+  target: FaceLoopsTarget;
+  frame: Frame;
+  deflection?: number;
+};
+
+/**
+ * The section of a body by a frame's plane, moved `height` (default 0) along its normal, as nested
+ * loops in the frame's 2D coordinates (`Kernel.section`). Makes no shapes.
+ */
+export type SectionOp = OpCommon & {
+  op: 'section';
+  shape: ShapeRef;
+  frame: Frame;
+  height?: number;
+  deflection?: number;
+};
+
 export type KernelOp =
   | BoxOp
   | CylinderOp
@@ -228,7 +254,9 @@ export type KernelOp =
   | ExportStepOp
   | ImportStepOp
   | InterferenceOp
-  | ProjectOp;
+  | ProjectOp
+  | FaceLoopsOp
+  | SectionOp;
 
 export type OpName = KernelOp['op'];
 
@@ -262,6 +290,8 @@ export interface OpValues {
   /** Overlap meshes are transferred. */
   interference: InterferenceResult;
   project: ProjectResult;
+  faceLoops: FaceLoopsReport;
+  section: SectionLoops;
 }
 
 export type OpValue<O extends { op: OpName }> = OpValues[O['op']];
@@ -294,6 +324,8 @@ const OP_NAMES: ReadonlySet<string> = new Set<OpName>([
   'importStep',
   'interference',
   'project',
+  'faceLoops',
+  'section',
 ]);
 
 // Validation ----------------------------------------------------------------------
@@ -315,6 +347,10 @@ const measureTarget: Check = (v, p) => {
     ? shape({ kind, name: str })(v, p)
     : shape({ kind, index: num })(v, p);
 };
+
+/** A face target: `{ name }` or `{ index }`. */
+const faceTarget: Check = (v, p) =>
+  isObject(v) && 'name' in v ? shape({ name: str })(v, p) : shape({ index: num })(v, p);
 
 /** A placement: `{ translation: [x, y, z], rotation: [x, y, z, w] }`. */
 const placement: Check = (v, p) => {
@@ -401,6 +437,12 @@ const FIELDS: Record<OpName, [Record<string, Check>, Record<string, Check>]> = {
       deflection: shape({}, { linear: num, angular: num }),
       prefilterOnly: bool,
     },
+  ],
+  // Degenerate frames and deflections are the kernel's to refuse (`invalid-argument`).
+  faceLoops: [{ shape: shapeRef, target: faceTarget, frame }, { deflection: num }],
+  section: [
+    { shape: shapeRef, frame },
+    { height: num, deflection: num },
   ],
   // Ranges (a zero direction, an up parallel to it, repeated keys) are the kernel's to refuse.
   project: [
@@ -588,6 +630,20 @@ export function executeOp(
         options,
       );
     }
+    case 'faceLoops':
+      return kernel.faceLoops(
+        resolve(op.shape, 'faceLoops'),
+        op.target,
+        op.frame,
+        ...(op.deflection === undefined ? [] : [op.deflection]),
+      );
+    case 'section':
+      return kernel.section(
+        resolve(op.shape, 'section'),
+        op.frame,
+        op.height ?? 0,
+        ...(op.deflection === undefined ? [] : [op.deflection]),
+      );
     case 'release': {
       // Like every other op on a lost kernel: fatal, not a list of unknown ids.
       const lost = kernel.lostReason;

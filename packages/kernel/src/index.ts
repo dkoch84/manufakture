@@ -145,6 +145,7 @@ export type {
   CylinderOp,
   ExportStepOp,
   ExtrudeOp,
+  FaceLoopsOp,
   FeatureOp,
   FilletOp,
   ImportStepOp,
@@ -164,6 +165,7 @@ export type {
   ReleaseOp,
   ReleaseResult,
   ResolveOp,
+  SectionOp,
   ShapeRef,
   TessellateOp,
   TopologyOp,
@@ -182,6 +184,16 @@ export type {
   MeasuredItem,
   MeasuredVertex,
 } from './measure';
+export { DEFAULT_LOOP_DEFLECTION } from './loops';
+export type {
+  FaceLoopsReport,
+  FaceLoopsTarget,
+  Loop,
+  LoopRegion,
+  LoopSegment,
+  LoopSource,
+  SectionLoops,
+} from './loops';
 export type { OrientedBox, OrientedBoxOptions } from './obb';
 export { DEFAULT_PROJECT_DEFLECTION, boundsOf, endsOf, projectPoint, viewFrame } from './project';
 export type {

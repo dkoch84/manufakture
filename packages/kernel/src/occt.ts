@@ -43,6 +43,9 @@ export function releaseOwned(oc: Oc, item: Deletable): void {
     } finally {
       empty.delete();
     }
+  } else if (name === 'BRepTools_WireExplorer') {
+    // Holds the wire, the face and a map of vertices to edges (T5.1e).
+    (o.Clear as () => void).call(o);
   } else if (name === 'BRepFilletAPI_MakeFillet' || name === 'BRepFilletAPI_MakeChamfer') {
     (o.Reset as () => void).call(o);
   } else if (name === 'BRepOffsetAPI_DraftAngle') {

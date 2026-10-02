@@ -153,11 +153,12 @@ export function measureShape(
   };
 }
 
-type Located =
+export type Located =
   | { ok: true; index: number; name: string | null }
   | { ok: false; failure: { status: 'not-found' | 'ambiguous'; message: string } };
 
-function locate(count: number, named: NamedShape | null, target: MeasureTarget): Located {
+/** Find a target among `count` sub-shapes of its kind: by index, or by name on a named body. */
+export function locate(count: number, named: NamedShape | null, target: MeasureTarget): Located {
   if ('index' in target) {
     if (!Number.isInteger(target.index) || target.index < 1 || target.index > count) {
       return notFound(`the body has no ${target.kind} ${target.index}`);
