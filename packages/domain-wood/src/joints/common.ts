@@ -15,9 +15,11 @@ export type JointHardware =
 /**
  * A warning a joint reports. `rule-of-thumb`: the joint weakens a board below a common
  * woodworking rule of thumb (a dado deeper than half the board's thickness). Not engineering.
+ * `breaks-out`: something the joint does not model comes out of a board (a pocket screw's tip
+ * through A's far face); the joint still builds.
  */
 export interface JointWarning {
-  code: 'rule-of-thumb';
+  code: 'rule-of-thumb' | 'breaks-out';
   message: string;
 }
 

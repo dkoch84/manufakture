@@ -29,15 +29,19 @@ export const DEFAULT_DOWEL = 8;
 /**
  * A row of dowel holes across the contact of two touching boards, along its longer side: into A
  * by `depthA`, into B by `depthB`, `edge` in from each end of the row, `count` of them or as many
- * as fit at `spacing`, on the contact's centre line moved by `offset` (along the A axis across the
- * row). Defaults: 8 mm dowels, 1.5 diameters into A and 2.5 into B but at most two thirds of each
+ * as fit at `spacing`, on the contact's centre line moved by `offset`. The offset runs along the
+ * A axis that is neither the row's axis nor the axis through the contact (the contact's shorter
+ * side), positive toward A's high end of it; that axis is reported as `details.offsetAxis` (0
+ * length, 1 width, 2 thickness). Defaults: 8 mm dowels, 1.5 diameters into A and 2.5 into B but at most two thirds of each
  * board's depth there, two diameters from each end, and spread evenly from end to end at most 12
  * diameters apart (at least two).
  */
 export function dowelJoint(p: Pair, _params: DowelParams, v: Values): Built {
   const { a, b } = p;
   const found = contactOf(p, 'a dowel joint');
-  if (!found.ok) refuse(found.message, ['params', 'b']);
+  if (!found.ok) {
+    refuse(found.message, ['params', 'b']);
+  }
   const { axis: e, aSide, at } = found.contact;
   const [q1, q2] = ([0, 1, 2] as AxisIndex[]).filter((i) => i !== e) as [AxisIndex, AxisIndex];
   const extent = (i: AxisIndex) => p.hi[i] - p.lo[i];
@@ -71,13 +75,15 @@ export function dowelJoint(p: Pair, _params: DowelParams, v: Values): Built {
     defaultSpacing: 12 * d,
     min: 2,
   });
-  if (!row.ok)
+  if (!row.ok) {
     refuse(`the dowels do not fit: ${row.message}`, [
       'expressions',
       v.has('count') ? 'count' : 'edge',
     ]);
-  if (row.at.length > MAX_HOLES)
+  }
+  if (row.at.length > MAX_HOLES) {
     refuse(`more than ${MAX_HOLES} dowels in one row`, ['expressions', 'spacing']);
+  }
   if (row.at[0]! - d / 2 < p.lo[r] - LINEAR_TOL) {
     refuse(
       `the end dowels break out of the joint: the edge distance must be at least half the diameter`,
@@ -117,7 +123,7 @@ export function dowelJoint(p: Pair, _params: DowelParams, v: Values): Built {
     items,
     hardware: [{ item: 'dowel', diameter: d, length: depthA + depthB, quantity: centres.length }],
     warnings,
-    details: { count: centres.length, diameter: d, depthA, depthB },
+    details: { count: centres.length, diameter: d, depthA, depthB, offsetAxis: x },
   };
 }
 
@@ -159,8 +165,9 @@ export function pocketScrew(thickness: number): number | undefined {
   let best: readonly [number, number] | undefined;
   for (const row of POCKET_SCREWS) {
     const off = Math.abs(row[0] * IN - thickness);
-    if (off <= IN / 16 && (best === undefined || off < Math.abs(best[0] * IN - thickness)))
+    if (off <= IN / 16 && (best === undefined || off < Math.abs(best[0] * IN - thickness))) {
       best = row;
+    }
   }
   return best === undefined ? undefined : best[1] * IN;
 }
@@ -180,7 +187,9 @@ const MIN_POCKET_THICKNESS = IN / 2 - IN / 16;
 export function pocketJoint(p: Pair, params: PocketParams, v: Values): Built {
   const { a, b } = p;
   const found = contactOf(p, 'a pocket screw joint');
-  if (!found.ok) refuse(found.message, ['params', 'b']);
+  if (!found.ok) {
+    refuse(found.message, ['params', 'b']);
+  }
   const { axis: e, aSide, at } = found.contact;
   const kt = p.map[2].axis;
   if (kt === e) {
@@ -243,13 +252,15 @@ export function pocketJoint(p: Pair, params: PocketParams, v: Values): Built {
     defaultSpacing: 6 * IN,
     min: 1,
   });
-  if (!row.ok)
+  if (!row.ok) {
     refuse(`the screws do not fit: ${row.message}`, [
       'expressions',
       v.has('count') ? 'count' : 'edge',
     ]);
-  if (row.at.length > MAX_HOLES)
+  }
+  if (row.at.length > MAX_HOLES) {
     refuse(`more than ${MAX_HOLES} screws in one row`, ['expressions', 'spacing']);
+  }
   if (row.at[0]! - rs < p.bLo[r] - LINEAR_TOL || row.at.at(-1)! + rs > p.bHi[r] + LINEAR_TOL) {
     refuse(`the end pockets break out of ${b.id}'s side: move them in from the edge`, [
       'expressions',
@@ -263,6 +274,26 @@ export function pocketJoint(p: Pair, params: PocketParams, v: Values): Built {
   const outward = unitA(kt, outSign);
   const u: V3 = [0, 0, 0];
   for (let i = 0; i < 3; i++) u[i] = cos * into[i]! - sin * outward[i]!;
+  // The screw: its head on the pocket's floor, `pilot` before the exit, so its tip lies the
+  // other half of its length past the exit, in A. Warn when it comes out of A.
+  const reach = screw - pilot;
+  const tip: V3 = [0, 0, 0];
+  tip[e] = at + u[e]! * reach;
+  tip[kt] = ct + u[kt]! * reach;
+  const warnings: JointWarning[] = [];
+  if (tip[e] <= LINEAR_TOL || tip[e] >= a.size[e] - LINEAR_TOL) {
+    warnings.push({
+      code: 'breaks-out',
+      message: `the ${mm(screw)} screws' tips come out of ${a.id}'s far face: ${a.id} is ${mm(a.size[e])} there and they reach ${mm(Math.abs(tip[e] - at))} into it; use shorter screws`,
+    });
+  }
+  if (tip[kt] <= LINEAR_TOL || tip[kt] >= a.size[kt] - LINEAR_TOL) {
+    warnings.push({
+      code: 'breaks-out',
+      message: `the ${mm(screw)} screws' tips come out of the side of ${a.id}: move ${b.id} in, turn the pockets to the other face or use shorter screws`,
+    });
+  }
+
   const items = row.at.map((s, i) => {
     const exit: V3 = [0, 0, 0];
     exit[e] = at;
@@ -276,7 +307,7 @@ export function pocketJoint(p: Pair, params: PocketParams, v: Values): Built {
   return {
     items,
     hardware: [{ item: 'pocket-screw', length: screw, quantity: items.length }],
-    warnings: [],
+    warnings,
     details: { count: items.length, angle, screw },
   };
 }

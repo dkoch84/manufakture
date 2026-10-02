@@ -57,19 +57,23 @@ export function boxJoint(p: Pair, params: BoxJointParams, v: Values): Built {
     ]);
   }
   const w = width / n;
+  // The clearance is the total play between a finger and its slot, as for a dado or a mortise:
+  // each slot is widened by a quarter of it on both sides, so the fingers left between slots are
+  // narrower by the same, and a slot is wider than the finger it takes by `c`.
   const c = v.nonNegative('clearance', 0);
-  if (!(c < w))
+  if (!(c < w)) {
     refuse(`the clearance must be less than the ${mm(w)} finger width`, [
       'expressions',
       'clearance',
     ]);
+  }
 
   const slots = { a: [] as ReturnType<typeof boxTool>[], b: [] as ReturnType<typeof boxTool>[] };
   for (let i = 0; i < n; i++) {
     const owner = i % 2 === 0 ? params.start : params.start === 'a' ? 'b' : 'a';
     const other = owner === 'a' ? 'b' : 'a';
-    const s0 = Math.max(lo, lo + i * w - c / 2);
-    const s1 = Math.min(lo + width, lo + (i + 1) * w + c / 2);
+    const s0 = Math.max(lo, lo + i * w - c / 4);
+    const s1 = Math.min(lo + width, lo + (i + 1) * w + c / 4);
     const from: V3 = [p.lo[0], s0, p.lo[2]];
     const to: V3 = [p.hi[0], s1, p.hi[2]];
     const body = other === 'a' ? a.id : b.id;

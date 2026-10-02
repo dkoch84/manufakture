@@ -283,6 +283,34 @@ describe('dado and rabbet', () => {
     expectBox(items[0], 'groove', 'extension#1', [581.5, 0, 12], [600, 300, 18]);
   });
 
+  it('refuses a clearance that takes a dado through the edge or a rabbet across A', () => {
+    const ab = { a: 'extension#1', b: 'extension#2' };
+    // A dado 0.2 from A's edge: a 0.4 clearance leaves no lip. A 0.3 one leaves 0.05.
+    expect(
+      refused(context({ kind: 'dado', ...ab }, SIDE, shelfAt(0.2), { clearance: 0.4 })),
+    ).toMatchObject({
+      field: ['expressions', 'clearance'],
+      error: expect.stringMatching(/through the edge of extension#1, leaving no lip/),
+    });
+    expect(
+      refused(context({ kind: 'dado', ...ab }, SIDE, shelfAt(581.9), { clearance: 0.2 })),
+    ).toMatchObject({ field: ['expressions', 'clearance'] });
+    expectBox(
+      built(context({ kind: 'dado', ...ab }, SIDE, shelfAt(0.2), { clearance: 0.3 })).items[0],
+      'groove',
+      'extension#1',
+      [0.05, 0, 12],
+      [18.35, 300, 18],
+    );
+    // A rabbet whose clearance reaches A's other edge would cut the whole slice.
+    expect(
+      refused(context({ kind: 'rabbet', ...ab }, SIDE, shelfAt(582), { clearance: 582 })),
+    ).toMatchObject({
+      field: ['expressions', 'clearance'],
+      error: expect.stringMatching(/across the whole 600 mm length/),
+    });
+  });
+
   it('follows A frame: the same dado with A turned about z', () => {
     // A's length along +y and width along -x: the same 600 x 300 side, standing the other way.
     const turned = frame([300, 0, 0], [Y, neg(X), Z], [600, 300, 18]);
@@ -457,7 +485,7 @@ describe('box joint', () => {
     expectBox(items[3], 'b-slot-1', 'extension#2', [282, 0, 0], [300, w, 18]);
   });
 
-  it('starts with B, takes a count, and widens slots by the clearance inside the joint', () => {
+  it('starts with B, takes a count, and makes each slot wider than its finger by the clearance', () => {
     const { items } = built(
       context({ kind: 'box-joint', ...ab, start: 'b' }, A, B, { count: 5, clearance: 0.2 }),
     );
@@ -468,8 +496,14 @@ describe('box joint', () => {
       'b-slot-2',
       'b-slot-4',
     ]);
-    expectBox(items[0], 'a-slot-1', 'extension#1', [282, 0, 0], [300, 20.1, 18]);
-    expectBox(items[3], 'b-slot-2', 'extension#2', [282, 19.9, 0], [300, 40.1, 18]);
+    // Fingers of 20 with a 0.2 total clearance, as a dado's or a mortise's: a quarter of it on
+    // each side of every slot (none past the joint's ends).
+    expectBox(items[0], 'a-slot-1', 'extension#1', [282, 0, 0], [300, 20.05, 18]);
+    expectBox(items[1], 'a-slot-3', 'extension#1', [282, 39.95, 0], [300, 60.05, 18]);
+    expectBox(items[3], 'b-slot-2', 'extension#2', [282, 19.95, 0], [300, 40.05, 18]);
+    // A's finger 2 is what lies between A's slots 1 and 3: 39.95 - 20.05 = 19.9; B's slot 2 that
+    // takes it is 40.05 - 19.95 = 20.1. The difference is the clearance.
+    expect(40.05 - 19.95 - (39.95 - 20.05)).toBeCloseTo(0.2, 12);
   });
 
   it('refuses boards that do not meet end to end at a flush corner', () => {
@@ -535,6 +569,8 @@ describe('dowels', () => {
     expect(p).toHaveLength(4);
     close(axisOf(p[0]).origin, [211, 50, 18]);
     close(axisOf(p[1]).origin, [211, 250, 18]);
+    // The offset ran along A's length (x), the axis across the row, and says so.
+    expect(counted.meta.details.offsetAxis).toBe(0);
     expect(counted.meta.hardware).toEqual([
       { item: 'dowel', diameter: 6, length: 35, quantity: 2 },
     ]);
@@ -600,6 +636,35 @@ describe('pocket screws', () => {
       context({ kind: 'pocket-screw', ...ab, face: 'high' }, SIDE, B, { count: 1 }),
     );
     close(axisOf(high.items[0]!.primitive).direction, [-u[0], 0, u[2]]);
+    // The tip, half a screw past the exit, stays inside the 18 mm side: no warning.
+    expect(meta.warnings).toEqual([]);
+  });
+
+  it('warns when the screw tips come out of A', () => {
+    // A 12 mm side: a 1-1/4" screw reaches 15.875 cos 15° = 15.33 mm into it.
+    const thinSide = flat(600, 300, 12);
+    const shelf = standing(200, 0, 300, 12, 400, 18);
+    const { items, meta } = built(context({ kind: 'pocket-screw', ...ab }, thinSide, shelf));
+    expect(items).toHaveLength(3);
+    expect(meta.warnings).toEqual([
+      {
+        code: 'breaks-out',
+        message: expect.stringMatching(
+          /tips come out of extension#1's far face: extension#1 is 12 mm there and they reach 15\.33/,
+        ),
+      },
+    ]);
+    // Shorter screws stay inside.
+    expect(
+      built(context({ kind: 'pocket-screw', ...ab }, thinSide, shelf, { screw: 20 })).meta.warnings,
+    ).toEqual([]);
+    // B overhanging A's end, its middle 1 mm in: the tips, leaning away from the pocket's face,
+    // come out of A's end instead.
+    const atEdge = standing(590, 0, 300, 18, 400, 18);
+    const side = built(context({ kind: 'pocket-screw', ...ab }, SIDE, atEdge));
+    expect(side.meta.warnings.map((w) => w.message)).toEqual([
+      expect.stringMatching(/come out of the side of extension#1/),
+    ]);
   });
 
   it('follows the screw chart, and refuses thin stock, a face against A and a stock off the chart', () => {

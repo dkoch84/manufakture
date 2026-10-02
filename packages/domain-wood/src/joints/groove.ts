@@ -52,6 +52,12 @@ export function grooveJoint(p: Pair, params: DadoParams | RabbetParams, v: Value
       ]);
     }
     groove = [k0 - c / 2, k1 + c / 2];
+    if (groove[0] <= LINEAR_TOL || groove[1] >= a.size[k] - LINEAR_TOL) {
+      refuse(
+        `a ${mm(c)} clearance takes the dado out through the edge of ${a.id}, leaving no lip: move ${b.id} in or make it a rabbet`,
+        ['expressions', 'clearance'],
+      );
+    }
   } else {
     if (!atLow && !atHigh) {
       refuse(`${b.id} does not sit at an edge of ${a.id}: that is a dado, not a rabbet`, [
@@ -60,6 +66,12 @@ export function grooveJoint(p: Pair, params: DadoParams | RabbetParams, v: Value
       ]);
     }
     groove = atLow ? [0, k1 + c] : [k0 - c, a.size[k]];
+    if (groove[1] - groove[0] >= a.size[k] - LINEAR_TOL) {
+      refuse(
+        `a ${mm(c)} clearance takes the rabbet across the whole ${mm(a.size[k])} ${AXIS_NAMES[k]} of ${a.id}`,
+        ['expressions', 'clearance'],
+      );
+    }
   }
 
   // Along its run: through A, or stopped short of either end.
@@ -67,8 +79,9 @@ export function grooveJoint(p: Pair, params: DadoParams | RabbetParams, v: Value
   let m0 = 0;
   let m1 = a.size[m];
   if (stopped === 'none') {
-    if (v.has('stop'))
+    if (v.has('stop')) {
       refuse('a through dado has no stop: set where it stops first', ['expressions', 'stop']);
+    }
   } else {
     const stop = v.positive('stop');
     if (stop === undefined) {

@@ -6,6 +6,12 @@
 // Rounded ends (a mortise cut with a router) are a box and two half-round ends, cylinders along
 // the mortise's depth; the tenon's edges are rounded to match: its shoulders are cut back by half
 // its thickness and two cylinders are added in their place.
+//
+// Where the tenon sits: centred on B's section, moved only along B's thickness axis by `offset`
+// (positive toward B's high thickness face). There is no offset across B's width: the tenon is
+// always centred there, with equal shoulders each side. The shoulders are implicit: they lie
+// where B's blank meets A's face, so the tenon's length is how far B is drawn into A, and there is
+// no shoulder depth of its own to set.
 
 import { refuse, type Built, type Values } from './common';
 import {
@@ -26,7 +32,9 @@ import type { TenonParams } from './params';
 export function tenonJoint(p: Pair, params: TenonParams, v: Values): Built {
   const { a, b } = p;
   const found = entryOf(p, 'a mortise and tenon');
-  if (!found.ok) refuse(found.message, ['params', 'b']);
+  if (!found.ok) {
+    refuse(found.message, ['params', 'b']);
+  }
   const { axis: e, side, depth, through } = found.entry;
   if (p.map[0].axis !== e) {
     refuse(
@@ -40,11 +48,12 @@ export function tenonJoint(p: Pair, params: TenonParams, v: Values): Built {
   const bw = b.size[1];
   const t = v.positive('thickness', bt / 3);
   const w = v.positive('width', bw - (2 * bt) / 3);
-  if (!(w > 0))
+  if (!(w > 0)) {
     refuse(`${b.id} is too narrow for the default tenon width: give a width`, [
       'expressions',
       'width',
     ]);
+  }
   const offset = v.any('offset', 0);
   const c = v.nonNegative('clearance', 0);
   const rounded = params.ends === 'rounded';
@@ -131,7 +140,9 @@ export function tenonJoint(p: Pair, params: TenonParams, v: Values): Built {
     { id: 'shoulder-1', ...box(re, tt, [tw[1] - rt, ow[1]]) },
   ];
   for (const piece of waste) {
-    if (solid(piece.lo, piece.hi)) items.push(boxTool(a, piece.id, b.id, piece.lo, piece.hi));
+    if (solid(piece.lo, piece.hi)) {
+      items.push(boxTool(a, piece.id, b.id, piece.lo, piece.hi));
+    }
   }
   if (rounded) {
     for (const [id, sw] of [

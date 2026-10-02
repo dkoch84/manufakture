@@ -41,7 +41,7 @@ export interface JointMetadata {
   b: string;
   /** Dowels and screws, for the bill of materials. */
   hardware: JointHardware[];
-  /** Rule-of-thumb warnings (not engineering). */
+  /** Rule-of-thumb warnings (not engineering) and parts breaking out of a board. */
   warnings: JointWarning[];
   /** The joint's sizes as built (mm, radians, counts), by name. */
   details: Record<string, number>;
