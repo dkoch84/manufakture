@@ -3,7 +3,8 @@
 The woodworking domain ([ADR 0013](../../docs/adr/0013-domain-packages.md), M4 plan T4.1c): the
 **stock catalog** (lumber and sheet goods with nominal and actual sizes), the **board** feature
 (`wood.board`, a body cut from real stock with a grain) and its translator to kernel inputs, and
-the document data the domain owns (`domains.wood` settings, `domains.stock` overrides). Plain
+the document data the domain owns (`domains.wood` settings, `domains.stock` overrides), and the
+**joint** feature (`wood.joint`, T4.2b: six kinds of joint cut between two boards). Plain
 TypeScript under GPL-3.0-or-later.
 
 **Dependencies.** At run time only `@manufakture/core` and `@manufakture/units`, so everything
@@ -24,7 +25,7 @@ const unregister = registerWood(defaultExtensions); // the app's regen worker en
 `woodDomain` is the definition it registers: namespace `wood`, implementation version
 `WOOD_IMPLEMENTATION` (bump it with any change that can alter a translator's output, so regen's
 cache never serves results of older domain code), `reads: ['stock']`, the readers of the two
-namespaces it owns (`wood`, `stock`) and the type `wood.board`.
+namespaces it owns (`wood`, `stock`) and the types `wood.board` and `wood.joint`.
 
 ## The stock catalog
 
@@ -173,6 +174,71 @@ regen, never stored), read back with `readBoardMetadata`:
 The blank is `origin + [0, length] * axes.length + [0, width] * axes.width + [0, thickness] *
 axes.thickness`. Panel extents are exact for lines and arcs and sampled for Bezier curves.
 
+## The joint feature
+
+A joint cuts two boards against each other. It makes no body, so it has no `operation`
+(anything else is refused); it names the boards in `params.a` and `params.b`, depends on both
+(`dependsOn`, so regen hands it their frames) and, when it has a `scope`, lists both there:
+
+```ts
+{
+  kind: 'extension', extension: 'wood.joint', schemaVersion: 1,
+  dependsOn: ['extension#1', 'extension#2'], scope: ['extension#1', 'extension#2'],
+  references: [],
+  params: { kind: 'dado', a: 'extension#1', b: 'extension#2', stopped: 'low' },
+  expressions: { clearance: <length>, stop: <length> },  // all optional unless noted
+}
+```
+
+`a` is the board that receives (the dado's, the mortise's, the one a screw goes into), `b` the
+board that enters it. Both must be `wood.board` bodies, and B must be square to A: each of B's
+frame axes parallel to one of A's. Boards at an odd angle (a splayed leg) are refused on
+`params.b` with a message naming the angle ("extension#2 is not square to extension#1 (about 30°
+off)"). Every joint is found from the two frames, not from faces, so it follows its boards when
+they move or change size.
+
+**A board's blank includes its joinery.** For a dado, rabbet, tenon or box joint, draw B into A
+by the joint's depth: the boards' blanks overlap, and the joint cuts that overlap. The depth of
+a dado or a rabbet and the length of a tenon are how far B reaches into A, so the cut list,
+which reads the blanks, gets the right lengths with no help from the joint. Dowels and pocket
+screws join boards that touch without overlapping (an overlap is refused, and vice versa).
+
+| `kind`          | Params                                   | Expressions (lengths unless noted; defaults)                                                                                                                                          | What it cuts                                                                                                                                                                                                                |
+| --------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `dado`          | `stopped`: `none`, `low`, `high`, `both` | `clearance` (0, split on both sides), `stop` (required when stopped; refused when not)                                                                                                | `groove` in A: B's thickness plus the clearance, as deep as B enters, through A or stopped short of the low or high end of the A axis it runs along. Where B runs past a stop, `notch-low` / `notch-high` in B.             |
+| `rabbet`        | none                                     | `clearance` (0, on the inner side)                                                                                                                                                    | `groove` in A along the edge B sits at, through. B at an edge is a rabbet, B inside a face a dado: the wrong kind is refused on `params.kind`.                                                                              |
+| `mortise-tenon` | `ends`: `square`, `rounded`              | `thickness` (a third of B's), `width` (B's width less two thirds of its thickness), `offset` (0, along B's thickness axis), `clearance` (0, added to the mortise's section and depth) | B's end must enter A. In B: `cheek-0`, `cheek-1`, `shoulder-0`, `shoulder-1` (empty ones left out). In A: `mortise`, through A when the tenon is. Rounded: `mortise-end-0`, `-1` cylinders, and `round-0`, `-1` added to B. |
+| `dowel`         | none                                     | `diameter` (8 mm), `depthA` (1.5 diameters, at most 2/3 of A there), `depthB` (2.5 diameters, at most 2/3 of B), `count` (number) or `spacing`, `edge` (2 diameters), `offset` (0)    | `a-hole-n` in A and `b-hole-n` in B: a row along the contact's longer side, on its centre line; by default spread evenly from end to end at most 12 diameters apart, at least two.                                          |
+| `pocket-screw`  | `face`: `low`, `high` (of B's thickness) | `count` (number) or `spacing`, `edge` (3/4"), `angle` (angle, 15°), `screw` (the jig chart's length for B's thickness)                                                                | `pocket-n` in B: an angled stepped cylinder (3/8" pocket, 11/64" pilot) coming out at the middle of B's thickness where B meets A. B's end or edge must touch A. Nothing is cut from A; the screw is not modelled.          |
+| `box-joint`     | `start`: `a`, `b`                        | `finger` (the thinner board's thickness, rounded to fit) or `count` (number, 2 to 200), `clearance` (0)                                                                               | `a-slot-n` in A and `b-slot-n` in B, `n` the finger the slot receives. B stands on A's end: A's end flush with B's outside face, B's end flush with A's outside face. One boolean per board however many fingers.           |
+
+**Names.** Every tool is placed in A's frame, so its face names are `extension#n:<tool>:<role>`
+with the kernel's roles (`xmin` .. `zmax` for boxes at the low and high ends of A's length, width
+and thickness axes; `start`, `wall`, `end`, `step`, `shoulder` for cylinders). They do not depend
+on where the boards are: a dado's names stay the same when either board grows, and when the shelf
+moves the dado moves with it under the same names.
+
+**Pocket-hole jig.** The defaults follow the standard jig: a 3/8" stepped bit with an 11/64" pilot
+at 15° ([McFeely's](https://www.mcfeelys.com/pocket_hole_joinery-1)), the screw coming out at the
+middle of the board's thickness, and the screw length chart of the Kreg Jig R3 owner's manual (1/2"
+stock: 1", 3/4": 1-1/4", 1-1/2": 2-1/2", and the rows between; `pocketScrew(thickness)`). Stock
+off the chart needs `screw`; stock under 1/2" (less a sixteenth) is refused. The pocket's floor
+is placed half a screw length back from where the screw comes out, an approximation of the jig's
+depth setting.
+
+**Metadata** (`readJointMetadata`): `{ kind, a, b, hardware, warnings, details }`. `hardware`
+lists dowels (`{ item: 'dowel', diameter, length, quantity }`, `length` the two holes' depths
+together) and pocket screws (`{ item: 'pocket-screw', length, quantity }`) for the bill of
+materials. `warnings` are rule-of-thumb warnings, marked as such and not engineering: a dado or
+rabbet deeper than half of A, a dowel more than half as thick as what it is set in. Regen's
+extension contract has no warnings of its own, so they ride in the metadata for the app to show.
+`details` holds the joint's sizes as built (`depth`, `fingers`, `finger`, `count`, ...).
+
+Joints that cannot be built are refused on the feature with the field at fault: a board that is
+not a body or not a board the joint depends on, a value the kind does not read, a tenon that does
+not fit B or a mortise breaking out of A, holes coming out through a board, and boards that do
+not meet the way the kind needs (with a message saying how they should).
+
 ## Tests
 
 `catalog.test.ts` (every Table 3 size against an independently typed copy, exact millimetres,
@@ -181,7 +247,12 @@ trips), `board.test.ts` (params, and the translator in Node with no kernel: a 2x
 is a 38.1 x 88.9 mm section extruded 2438.4 mm; a 3/4" plywood panel from a 600 x 300 mm region is
 extruded 18.25625 mm; an override wins) and `regen.test.ts` (panel and stick through regen with the
 real kernel and solver: exact volumes, frames, face names, a thickness override rebuilding only its
-board, a price rebuilding nothing, a refused override failing every board).
+board, a price rebuilding nothing, a refused override failing every board). Joints:
+`joints/joints.test.ts` (params, and every kind's tool primitives against hand-computed boxes and
+cylinders, refusals with their fields) and `joints/regen.test.ts` (every kind through regen with
+the real kernel: exact volumes, the kernel's interference check between the boards non-empty
+before a dado, tenon or box joint and empty after, face names unchanged when a board grows, a dado
+following its shelf, an odd angle refused on the joint while the boards still build).
 
 ```sh
 ./node_modules/.bin/vitest run --project packages packages/domain-wood

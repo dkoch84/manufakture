@@ -5,6 +5,7 @@
 
 import type { ExtensionDomain, ExtensionRegistry, ExtensionType } from '@manufakture/regen';
 import { BOARD_TYPE, boardType } from './board';
+import { JOINT_TYPE, jointType } from './joints';
 import type { Json } from './migrations';
 import { STOCK_DATA_VERSION, STOCK_NAMESPACE, readStockData } from './stock-data';
 import { WOOD_DATA_VERSION, WOOD_NAMESPACE, readWoodData } from './wood-data';
@@ -31,7 +32,10 @@ export const woodDomain: ExtensionDomain = {
       read: (data, schemaVersion) => readStockData(data as Json, schemaVersion),
     },
   },
-  types: { [BOARD_TYPE]: boardType as ExtensionType },
+  types: {
+    [BOARD_TYPE]: boardType as ExtensionType,
+    [JOINT_TYPE]: jointType as ExtensionType,
+  },
 };
 
 /** Register the woodworking domain on a regen registry. Returns a function that unregisters it. */

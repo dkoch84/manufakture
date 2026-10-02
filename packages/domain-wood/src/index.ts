@@ -1,6 +1,6 @@
 // @manufakture/domain-wood: the woodworking domain (ADR 0013). The stock catalog, the board
-// feature (`wood.board`) and its translator, and the document data the domain owns
-// (`domains.wood`, `domains.stock`). See README.md.
+// feature (`wood.board`) and the joint feature (`wood.joint`) with their translators, and the
+// document data the domain owns (`domains.wood`, `domains.stock`). See README.md.
 
 export const packageName = '@manufakture/domain-wood';
 
@@ -73,6 +73,37 @@ export {
   type WoodData,
   type WoodSettings,
 } from './wood-data';
+export {
+  DADO_STOPS,
+  DEFAULT_DOWEL,
+  JOINT_EXPRESSIONS,
+  JOINT_KINDS,
+  JOINT_PARAMS,
+  JOINT_SCHEMA_VERSION,
+  JOINT_TYPE,
+  KIND_EXPRESSIONS,
+  MAX_FINGERS,
+  MAX_HOLES,
+  POCKET_JIG,
+  POCKET_SCREWS,
+  jointType,
+  pocketScrew,
+  readJointMetadata,
+  readJointParams,
+  translateJoint,
+  type BoxJointParams,
+  type DadoParams,
+  type DadoStop,
+  type DowelParams,
+  type JointHardware,
+  type JointKind,
+  type JointMetadata,
+  type JointParams,
+  type JointWarning,
+  type PocketParams,
+  type RabbetParams,
+  type TenonParams,
+} from './joints';
 export { WOOD_IMPLEMENTATION, registerWood, woodDomain } from './domain';
 export { currentVersion, migrate, type Json, type Migration, type Versioned } from './migrations';
 export { constantLength, type Path, type Read } from './read';
