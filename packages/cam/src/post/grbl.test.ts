@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import Toolpath from 'gcode-toolpath';
 import { describe, expect, it } from 'vitest';
 import { isMove } from '../ir';
+import { COMPACT_ROUTER_DIAL } from '../library/machines';
 import type { ArcMove, FeedClass, IrEntry, LinearMove, RapidMove, ToolChange } from '../ir';
 import type { Toolpath as IrToolpath } from '../ir';
 import type { Vec2, Vec3 } from '../types';
@@ -10,7 +11,7 @@ import { compileDialect, normalizeCode } from './dialect';
 import { GRBL, GRBL_DIALECT, postGrbl } from './grbl';
 import type { GrblOptions } from './grbl';
 import { FALLBACK_FILE_STEM, GCODE_FILE_EXTENSION, postFileStem } from './naming';
-import type { DialSetting, PostJob, PostOutput } from './writer';
+import type { PostJob, PostOutput } from './writer';
 
 // The GRBL post (T5.4b): golden G-code for fixture jobs written as hand-made IR, so the post does
 // not wait for the operations. The goldens live in `packages/cam/test/grbl/`; after a deliberate
@@ -24,19 +25,8 @@ const UPDATE = process.env.UPDATE_GOLDENS === '1';
 // ---------------------------------------------------------------------------------------------
 // Fixture data
 
-/**
- * The Carbide Compact Router's dial (Carbide 3D's product page, "Dial Value / Approximate RPM",
- * read 2026-10-02: https://shop.carbide3d.com/products/carbide-compact-router). Test data only:
- * the machine profiles (T5.1d) own the real table.
- */
-const COMPACT_ROUTER_DIAL: readonly DialSetting[] = [
-  { setting: '1', rpm: 11000 },
-  { setting: '2', rpm: 13500 },
-  { setting: '3', rpm: 18250 },
-  { setting: '4', rpm: 24500 },
-  { setting: '5', rpm: 29250 },
-  { setting: '6', rpm: 31000 },
-];
+// The Carbide Compact Router's dial: the machine profiles' table (`library/machines.ts`, cited to
+// Carbide 3D's product page there), so the goldens use the same numbers the app does.
 
 const ORIGIN = 'stock top, front left corner';
 const CLEARANCE = 15;

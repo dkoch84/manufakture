@@ -7,11 +7,12 @@
   "exports": {
     ".": "./src/index.ts",
     "./client": "./src/client.ts",
+    "./library": "./src/library/index.ts",
     "./worker": "./src/worker/worker.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run --root ../.. --project packages packages/cam"
+    "test": "vitest run --root ../.. --project packages --project cam-gcode packages/cam"
   },
   "dependencies": {
     "@manufakture/units": "workspace:*",
