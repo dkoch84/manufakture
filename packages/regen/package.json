@@ -16,6 +16,7 @@
   "dependencies": {
     "@manufakture/assembly": "workspace:*",
     "@manufakture/core": "workspace:*",
+    "@manufakture/drawing": "workspace:*",
     "@manufakture/kernel": "workspace:*",
     "@manufakture/sketch": "workspace:*",
     "@manufakture/text": "workspace:*",

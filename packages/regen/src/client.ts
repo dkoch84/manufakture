@@ -10,6 +10,7 @@ import type { DragTarget } from '@manufakture/assembly';
 import type { ManufaktureDocument } from '@manufakture/core';
 import { KernelClient, type KernelClientOptions } from '@manufakture/kernel/kernel-client';
 import * as Comlink from 'comlink';
+import type { DrawingSheetResult, DrawingViewResult } from './drawing';
 import type { EngineStats } from './engine';
 import type { FontReadReply, TextReply, TextRequest } from './text';
 import type {
@@ -120,6 +121,41 @@ export class RegenClient extends KernelClient {
     return this.droppable(this.worker<RegenWorkerApi>().cancelInterference(assemblyId)).then(
       () => undefined,
     );
+  }
+
+  /**
+   * One view of a drawing: its projected edges, its dimensions resolved on the current model and,
+   * with `pick`, the picking data `pickInView` takes. On demand (the views on screen), at the
+   * current generation, so it never cancels a regen; null when a newer regen superseded it or the
+   * worker was stopped. `stored` as for `regen`.
+   */
+  drawingView(
+    document: ManufaktureDocument,
+    drawingId: string,
+    viewId: string,
+    options: { stored?: ManufaktureDocument; pick?: boolean } = {},
+  ): Promise<DrawingViewResult | null> {
+    return this.droppable(
+      this.worker<RegenWorkerApi>().drawingView(document, drawingId, viewId, {
+        ...options,
+        generation: this.latestGeneration,
+      }) as Promise<DrawingViewResult | null>,
+    ).then((result) => result ?? null);
+  }
+
+  /** Every view of a sheet and the sheet's display list (for export, and the sheet on screen). */
+  drawingSheet(
+    document: ManufaktureDocument,
+    drawingId: string,
+    sheetId: string,
+    options: { stored?: ManufaktureDocument; pick?: boolean } = {},
+  ): Promise<DrawingSheetResult | null> {
+    return this.droppable(
+      this.worker<RegenWorkerApi>().drawingSheet(document, drawingId, sheetId, {
+        ...options,
+        generation: this.latestGeneration,
+      }) as Promise<DrawingSheetResult | null>,
+    ).then((result) => result ?? null);
   }
 
   /**

@@ -320,6 +320,28 @@ describe('regen with the real kernel and solver', () => {
     expect(service.leaks()).toEqual([]);
   });
 
+  it('picks a generation past what the shared kernel cancelled, so a second engine is never stale', async () => {
+    // Two engines on one service: the first cancels up to a generation no batch has used yet
+    // (as a client that numbered a request and dropped it would), past everything the service
+    // has seen. The second engine's default generation must be newer than that, or every batch
+    // it sends is cancelled and the regen resolves to null.
+    const first = new RegenEngine({ kernel: service, solver });
+    expect(await first.regen(block())).not.toBeNull();
+    const cancelled = service.stats().generation + 3;
+    service.cancel(cancelled);
+    expect(service.stats().cancelledThrough).toBe(cancelled);
+    expect(service.stats().generation).toBeLessThan(cancelled);
+    const second = new RegenEngine({ kernel: service, solver });
+    const result = await second.regen(block());
+    expect(result).not.toBeNull();
+    expect(result!.generation).toBe(cancelled + 1);
+    expect(statuses(result!)).toEqual({ 'sketch#1': 'ok', 'extrude#1': 'ok', 'fillet#1': 'ok' });
+    await first.dispose();
+    await second.dispose();
+    await service.idle();
+    expect(service.leaks()).toEqual([]);
+  });
+
   it('rebuilds from the document after the kernel recycles', async () => {
     const store = unwrap(DocumentStore.create(block()));
     let recycled = 0;

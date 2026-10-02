@@ -24,6 +24,7 @@ import {
   type InterferenceCheckOptions,
   type RegenEngineOptions,
 } from './engine';
+import type { DrawingSheetResult, DrawingViewResult } from './drawing';
 import type { RegenSolver } from './sketches';
 import {
   TextBudget,
@@ -91,6 +92,24 @@ export interface RegenWorkerApi extends KernelWorkerApi {
   ): Promise<InterferenceReport | null>;
   /** Stop a running interference check of an assembly before its next pair (a `cancelled` report). */
   cancelInterference(assemblyId: string): Promise<void>;
+  /**
+   * One view of a drawing of `document` (`RegenEngine.drawingView`): projected edges, dimensions
+   * and, with `pick`, picking data. At the client's current generation; null when a newer regen
+   * superseded it.
+   */
+  drawingView(
+    document: ManufaktureDocument,
+    drawingId: string,
+    viewId: string,
+    options: { generation: number; stored?: ManufaktureDocument; pick?: boolean },
+  ): Promise<DrawingViewResult | null>;
+  /** Every view of a sheet and the sheet laid out (`RegenEngine.drawingSheet`). */
+  drawingSheet(
+    document: ManufaktureDocument,
+    drawingId: string,
+    sheetId: string,
+    options: { generation: number; stored?: ManufaktureDocument; pick?: boolean },
+  ): Promise<DrawingSheetResult | null>;
   /** Cumulative engine counters. */
   regenStats(): Promise<EngineStats>;
   /**
@@ -235,6 +254,14 @@ export function createRegenWorkerApi(options: RegenWorkerApiOptions): RegenWorke
 
     async cancelInterference(assemblyId) {
       (await engineFor()).cancelInterference(assemblyId);
+    },
+
+    async drawingView(document, drawingId, viewId, options) {
+      return (await engineFor()).drawingView(document, drawingId, viewId, options);
+    },
+
+    async drawingSheet(document, drawingId, sheetId, options) {
+      return (await engineFor()).drawingSheet(document, drawingId, sheetId, options);
     },
 
     async regenStats() {

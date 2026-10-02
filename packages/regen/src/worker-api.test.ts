@@ -16,6 +16,7 @@ import {
   block,
   boxAndLid,
   hinge,
+  mm,
   setVariable,
   statuses,
   twoBodies,
@@ -346,5 +347,46 @@ describe('the regen worker', () => {
     // The check left nothing in the kernel beyond the bodies the regens keep.
     const leaks = await client.leaks();
     expect(leaks.every((r) => r.operation !== 'interference')).toBe(true);
+  });
+
+  it('answers drawing views and sheets at the current generation, picking data included', async () => {
+    const doc = apply(block(), {
+      type: 'addDrawing',
+      drawing: {
+        id: 'drawing#1',
+        name: 'Drawing',
+        nextIds: { sheet: 2, view: 2 },
+        sheets: [
+          {
+            id: 'sheet#1',
+            name: 'Sheet 1',
+            size: 'A4',
+            orientation: 'landscape',
+            views: [
+              {
+                id: 'view#1',
+                source: { part: 'part#1' },
+                direction: 'top',
+                scale: { paper: mm('1'), model: mm('2') },
+                position: [100, 100],
+                options: { hidden: true, smooth: false },
+              },
+            ],
+            dimensions: [],
+            notes: [],
+          },
+        ],
+      },
+    });
+    const result = (await client.regen(doc))!;
+    const view = (await client.drawingView(doc, 'drawing#1', 'view#1', { pick: true }))!;
+    expect(view.generation).toBe(result.generation);
+    expect(client.latestGeneration).toBe(result.generation);
+    expect(view.bounds!.max[0]).toBeCloseTo(40, 6);
+    expect(view.bounds!.max[1]).toBeCloseTo(30, 6);
+    expect(view.pick!.items[0]!.edges.length).toBeGreaterThan(0);
+    const sheet = (await client.drawingSheet(doc, 'drawing#1', 'sheet#1'))!;
+    expect(sheet.views[0]!.cached).toBe(true);
+    expect(sheet.display!.items.some((i) => i.owner === 'view#1')).toBe(true);
   });
 });

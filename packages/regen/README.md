@@ -8,7 +8,8 @@ reference resolutions and timing, plus every final body's mesh and one name tabl
 viewport. A part carries a set of bodies (M2 plan, decisions 1 to 3), and an edit rebuilds only the
 features of the bodies it touches. After the parts, it places the instances of every assembly with
 the mate solver of `packages/assembly` ([ADR 0008](../../docs/adr/0008-assembly-mate-solver.md)),
-and it answers assembly previews, drags and interference checks (see Assemblies).
+and it answers assembly previews, drags and interference checks (see Assemblies), and drawing
+views on request (see Drawings).
 
 ```ts
 import { RegenEngine } from '@manufakture/regen';
@@ -25,6 +26,8 @@ store.subscribe((event) => engine.update(event)); // uses the event's previous d
 const preview = await engine.solveAssembly(draft, 'assembly#1', { generation }); // a mate dialog
 const step = await engine.drag('assembly#1', 'inst#2', target, { generation }); // coalesced
 const clash = await engine.interference('assembly#1', { generation, onPair }); // on demand
+const view = await engine.drawingView(document, 'drawing#1', 'view#1', { generation, pick: true });
+const sheet = await engine.drawingSheet(document, 'drawing#1', 'sheet#1', { generation });
 ```
 
 That is the engine's own API, as tests and a custom host use it. apps/web does not construct an
@@ -654,6 +657,74 @@ the instance is then the part's own build, which the app makes from the document
 says so in its configuration message), so it shows the part as stored rather than failing. Every `SourceResult` carries the part's name (`partName`) and, when one is applied, the
 row (`row: { id, name }`), for the app's labels and export names.
 
+## Drawings
+
+`src/drawing.ts` is the drawing stage (M4 plan T4.4e, decisions 7 and 8): the one place where
+core's drawings (`Drawing`, `Sheet`, `View`, `Dimension`, `Note`) meet the kernel's `project` op
+and `packages/drawing`'s inputs. Views are never computed by a regen: the drawing workspace asks
+for the views on screen (`drawingView`, `RegenClient.drawingView`) and export for whole sheets
+(`drawingSheet`). Both take the client's current generation (never a new one, so they never cancel
+a regen), run on the regen chain, build the parts and assemblies through the cache (all hits after
+a regen of the same document; `stored` as for `regen`), and resolve to null when a newer regen
+supersedes them. A drawing, sheet or view the document does not have rejects.
+
+**Views.** A part view shows the part's bodies (or those its `source.bodies` lists; missing ones
+are a `missing-body` diagnostic) at the identity pose; an assembly view shows every unsuppressed
+instance's bodies at their solved poses, keyed `<instance id>/<body id>`. Features of the part, or
+instances of the assembly, that failed are a `source-errors` warning; the view shows what was built.
+A view of an exploded view is drawn assembled with an `explode-pending` warning until T4.5a plugs
+in the exploded offsets. Every body of a view goes into ONE `project` op (T4.4a: projecting bodies
+alone and merging is wrong where they hide each other), with the view's hidden and smooth options
+and its section (core removes the side the section normal points to, so the kernel's normal is
+its negation, through `normal * offset`). The result is cached as plain data by the bodies' keys
+and poses, the direction, the options and `DRAWING_STAGE_VERSION`, so an unchanged view, a moved
+view or a new dimension sends no `project` op (`DrawingViewResult.cached`,
+`engine.drawingStats`). Scales are two length expressions: a ratio reduced to a smaller side of 1,
+or the architectural notation when both sides are written in inches or feet. Core anchors a view
+at its model origin, `packages/drawing` at the centre of its bounds; the stage converts.
+
+**Dimensions.** Each reference is resolved on its body (by body id, and instance in assembly
+views): edges and faces with the `resolve` op, vertices with the `connector` op's vertex rule (the
+kernel's `resolveVertex`, ordinal included), then measured exactly (`measure` by index), placed at
+the body's pose and projected in TypeScript with the view's frame (`viewFrame`, `projectPoint`).
+Resolutions are cached by body key and reference, and picking data by body key; the caches are
+bounded, and a request reads its own results, never back from a cache, so a view of more bodies or
+references than a cache keeps still works (`new DrawingStage({ refs, picks, views })` sizes them).
+The outcome per dimension is `exact`, `warning`
+(`reference` warnings for weaker or positional resolutions, `foreshortened`, `not-parallel`,
+`silhouette`),
+`lost` or `ambiguous` (`reference-lost`, `reference-ambiguous` errors with `referenceId` `refs.0`
+or `refs.1`; a body that is not in the view is `reference-lost` too), or `error` (geometry that
+cannot be dimensioned so). Anchors follow core's rules: a vertex, a line edge's midpoint, a
+circle's centre, a cylinder's axis; a planar face is a plane, and between a point and a plane or
+two parallel planes the distance is along the (first) plane's normal. Core's linear `offset` is
+from the first anchor along the measuring direction turned counter-clockwise (left for vertical);
+`packages/drawing`'s is from the nearer anchor (right for vertical): `drawingOffset` converts. A
+radius or diameter of a circle or a cylinder seen face on is a circle (`at` gives the leader's
+angle, not its length); a diameter of a cylinder seen across is its two silhouettes, as long as
+the face's axial extent (from its boundary edges, found with the `topology` op and measured, as
+picking finds it), with a `silhouette` warning when the face covers only part of the round and a
+silhouette is not on it (a fillet's quarter round); a radius of one is an error. An angle takes two line edges or planar faces seen edge on; `at` picks the quadrant and the
+arc's radius. Values are formatted in the document's display units with the dimension's
+`decimals` or `denominator`.
+
+**Sheets.** `drawingSheet` lays the sheet out with `layoutSheet`: a custom size is evaluated first,
+and one that does not evaluate or is not positive is a diagnostic and no display list (never a
+`RangeError`). Title block fields map to the title block's cells by label (`Title`, `Drawing
+number`, `Revision`, `Sheet`, `Scale`, `Company`, `Drawn by`, `Date`, `Material`, `Units`,
+`Projection`); other labels are a `title-field` warning. A note on a view sits relative to the
+view's position. No collision nudging of dimensions and notes is done here (the plan does not give
+it to this task; `packages/drawing` places each where its offset says).
+
+**Picking.** With `pick: true` a view carries, per body, its named edges as 3D polylines (the
+mesh's), its vertices and its cylindrical faces (axis, radius, extent and the arc the face
+covers), each with the reference a dimension stores (the kernel's `pick` op), placed at the body's
+pose and cached by body key. They stay 3D because the pick needs depth: `pickInView(data, at,
+{ radius })` takes a vertex within `vertexRadius` (default half the radius), else the nearest edge
+or cylinder silhouette, and among candidates within `PICK_TIE_TOLERANCE` (0.15 mm) of the nearest,
+the one nearest the viewer (T4.4a: 99.99 % right where the nearest alone is 78.3 %). A silhouette
+is only offered where the face really has one (a fillet's quarter round has one at most).
+
 ## Errors, warnings, statuses
 
 Per feature: `ok`, `error`, `upstream-error`, `suppressed` or `rolled-back`, with `errors`,
@@ -694,6 +765,11 @@ the service abandons between ops (releasing what they made); the older regen sto
 await and resolves to null. Text is cancelled the same way: the older regen's signal is aborted,
 which stops the text it is laying out (terminating the text worker), and it checks for a newer
 regen between texts ("Text", Cancelling).
+
+A default generation is newer than the newest the engine requested, the kernel has seen, and the
+kernel has cancelled through (`stats().cancelledThrough`): `cancel(g)` raises the latter even past
+any batch seen, so a second engine on a shared service would otherwise pick a cancelled generation
+and resolve to null.
 
 `KernelService.cancel(generation)` cancels every batch up to that generation, whoever sent it:
 generations are one sequence shared by every client of the kernel (ADR 0007 decision 4), not one
@@ -901,6 +977,16 @@ pnpm --filter @manufakture/regen test
   active row applied and the stored document passed, an instance in a row that leaves a
   parameter out gets the stored value: the same body as the document built in that row, unlike
   configuring the active-row document.
+- `drawing.test.ts`: the drawing stage's mapping (offsets, scales, custom sheet sizes, title
+  blocks, value formats), dimension geometry (parallel planes, foreshortening, silhouettes, angle
+  quadrants, a partial cylinder's extent and arc) and the depth tie-break of `pickInView`; a stage
+  with one-entry caches answering a view of five bodies on a fake host; with the real kernel, the M1 bracket's front
+  and top views: dimensions on picked references following `#thickness` 6 to 8 and a radius `lost`
+  when the fillet goes, views projected only on request with no `project` op on a cache hit (also
+  after moving a view or adding a dimension), the quarter round picked by its one silhouette and its diameter drawn its full height with a
+  `silhouette` warning, sections keeping the side core keeps with their cut faces filled in, an
+  assembly view at the solved poses with a dimension across two instances and `explode-pending`,
+  a laid-out sheet with notes, title block and inch values, and a bad custom size as a diagnostic.
 - `derived.test.ts` also checks that a source whose reading throws is a `source` error, and how a
   source opens in a row (once per hash and row, the namespace, a missing row).
 

@@ -109,6 +109,18 @@ import {
   type MateValues,
 } from './assembly';
 import { DerivedSources, carriedProps, describeSource, effectiveProps, tooDeep } from './derived';
+import {
+  DrawingStage,
+  IDENTITY_POSE,
+  findView,
+  type DrawingBody,
+  type DrawingDiagnostic,
+  type DrawingHost,
+  type DrawingRequestOptions,
+  type DrawingSheetResult,
+  type DrawingStats,
+  type DrawingViewResult,
+} from './drawing';
 import { mapFailure, mapOutcome, planeReport } from './errors';
 import {
   checkOutput,
@@ -183,10 +195,12 @@ export interface RegenKernel {
   /** Called after every instance recycle, when every shape id is gone. */
   onRecycle?(hook: () => void): () => void;
   /**
-   * The newest generation the kernel has seen. A default generation is made newer than it, so
-   * an engine never submits batches the kernel would treat as stale.
+   * The newest generation the kernel has seen, and the generation every batch up to which it
+   * cancels (`KernelService.cancel` raises it, even past any batch seen; another engine sharing
+   * the service may have). A default generation is made newer than both, so an engine never
+   * submits batches the kernel would treat as stale.
    */
-  stats?(): { generation: number };
+  stats?(): { generation: number; cancelledThrough?: number };
 }
 
 export interface RegenEngineOptions {
@@ -566,6 +580,8 @@ export class RegenEngine {
   #dragging = false;
   /** Interference checks asked to stop (`cancelInterference`), by assembly id. */
   #stopChecks = new Set<string>();
+  /** Drawing views, resolved dimension references and picking data, cached by body key. */
+  readonly #drawings = new DrawingStage();
 
   constructor(options: RegenEngineOptions) {
     this.#kernel = options.kernel;
@@ -605,9 +621,7 @@ export class RegenEngine {
    * (drop it: the newer one reports). Rejects only on programming errors.
    */
   regen(document: ManufaktureDocument, options: RegenOptions = {}): Promise<RegenResult | null> {
-    const seen = this.#kernel.stats?.().generation ?? 0;
-    const generation =
-      options.generation ?? Math.max(this.#latest, Number.isFinite(seen) ? seen : 0) + 1;
+    const generation = options.generation ?? this.#newestSeen() + 1;
     if (!Number.isSafeInteger(generation)) {
       return Promise.reject(new TypeError('a regen generation must be an integer'));
     }
@@ -1415,8 +1429,17 @@ export class RegenEngine {
       }
       return options.generation;
     }
-    const seen = this.#kernel.stats?.().generation ?? 0;
-    return Math.max(this.#latest, Number.isFinite(seen) ? seen : 0);
+    return this.#newestSeen();
+  }
+
+  /**
+   * The newest generation requested here or seen by the kernel, or cancelled there: a batch at a
+   * generation up to the kernel's `cancelledThrough` is cancelled, so a new regen must be newer.
+   */
+  #newestSeen(): number {
+    const stats = this.#kernel.stats?.();
+    const finite = (g: number | undefined) => (g !== undefined && Number.isFinite(g) ? g : 0);
+    return Math.max(this.#latest, finite(stats?.generation), finite(stats?.cancelledThrough));
   }
 
   async #runDrags(): Promise<void> {
@@ -1500,6 +1523,237 @@ export class RegenEngine {
       this.#addStats(run.counters);
       return assembled.results[0]!;
     });
+  }
+
+  // Drawings ----------------------------------------------------------------------------------
+
+  /** The drawing stage's counters: `project` ops sent and served from its cache, and so on. */
+  get drawingStats(): Readonly<DrawingStats> {
+    return { ...this.#drawings.stats };
+  }
+
+  /**
+   * One view of a drawing (see `drawing.ts`): its bodies built through the cache and projected in
+   * one `project` op (cached by the bodies' keys and poses and the view), its dimensions resolved
+   * and laid out as `packages/drawing` inputs, and with `pick` its picking data. On demand only,
+   * at the client's current generation (never a new one), on the regen chain. Null when a newer
+   * regen superseded it. Rejects for a drawing or view the document does not have.
+   */
+  drawingView(
+    document: ManufaktureDocument,
+    drawingId: string,
+    viewId: string,
+    options: DrawingRequestOptions = {},
+  ): Promise<DrawingViewResult | null> {
+    const drawing = document.drawings?.find((d) => d.id === drawingId);
+    if (drawing === undefined) {
+      return Promise.reject(new TypeError(`the document has no drawing ${drawingId}`));
+    }
+    const found = findView(drawing, viewId);
+    if (found === null) {
+      return Promise.reject(new TypeError(`drawing ${drawingId} has no view ${viewId}`));
+    }
+    return this.#drawing(document, options, (host) =>
+      this.#drawings.view(host, document, drawing, found.sheet, found.view, options),
+    );
+  }
+
+  /**
+   * Every view of a sheet as `drawingView` gives it, and the sheet laid out by `packages/drawing`
+   * (`layoutSheet`): the display list the screen and the writers draw.
+   */
+  drawingSheet(
+    document: ManufaktureDocument,
+    drawingId: string,
+    sheetId: string,
+    options: DrawingRequestOptions = {},
+  ): Promise<DrawingSheetResult | null> {
+    const drawing = document.drawings?.find((d) => d.id === drawingId);
+    if (drawing === undefined) {
+      return Promise.reject(new TypeError(`the document has no drawing ${drawingId}`));
+    }
+    const sheet = drawing.sheets.find((x) => x.id === sheetId);
+    if (sheet === undefined) {
+      return Promise.reject(new TypeError(`drawing ${drawingId} has no sheet ${sheetId}`));
+    }
+    return this.#drawing(document, options, (host) =>
+      this.#drawings.sheet(host, document, drawing, sheet, options),
+    );
+  }
+
+  /** A drawing request on the regen chain, with a host over this run's build of `document`. */
+  #drawing<T>(
+    document: ManufaktureDocument,
+    options: DrawingRequestOptions,
+    body: (host: DrawingHost) => Promise<T>,
+  ): Promise<T | null> {
+    let generation: number;
+    try {
+      generation = this.#currentGeneration(options);
+    } catch (error) {
+      return Promise.reject(error);
+    }
+    if (generation < this.#latest) return Promise.resolve(null);
+    const task = this.#chain.then(async () => {
+      if (generation < this.#latest) {
+        this.#stats.superseded++;
+        return null;
+      }
+      const run = this.#newRun(generation, document, options.stored);
+      const result = await this.#attempt(run, () => body(this.#drawingHost(run, document)));
+      if (result !== null) this.#addStats(run.counters);
+      return result;
+    });
+    this.#chain = task.catch(() => undefined);
+    return task;
+  }
+
+  /** What the drawing stage builds and runs through, for one attempt of one request. */
+  #drawingHost(run: Run, document: ManufaktureDocument): DrawingHost {
+    const variables = evaluateVariables(document.variables);
+    const states = new Map<string, PartState>();
+    const partFor = async (id: string): Promise<PartState | undefined> => {
+      let state = states.get(id);
+      const part = document.parts.find((p) => p.id === id);
+      if (state === undefined && part !== undefined) {
+        state = await this.#buildPart(run, part, document, variables, {
+          ns: null,
+          depth: 0,
+          versions: run.versions,
+        });
+        states.set(id, state);
+      }
+      return state;
+    };
+    const assembled = new Map<string, Assembled>();
+    const failedFeatures = (state: PartState) =>
+      state.part.features
+        .filter((f) => {
+          const status = state.results.get(f.id)?.status;
+          return status === 'error' || status === 'upstream-error';
+        })
+        .map((f) => f.id);
+    const live = (b: LiveBody, extra: Partial<DrawingBody> & { key: string; pose: Pose }) => ({
+      body: b.id,
+      shape: b.shape,
+      bodyKey: b.key,
+      kernelInstance: b.instance,
+      ...extra,
+    });
+    return {
+      generation: run.generation,
+      variables,
+      versions: run.versions,
+      deflection: this.#deflection,
+      bodies: async (source) => {
+        const diagnostics: DrawingDiagnostic[] = [];
+        if ('part' in source) {
+          const state = await partFor(source.part);
+          if (state === undefined) {
+            diagnostics.push({
+              code: 'unknown-source',
+              severity: 'error',
+              subject: '',
+              message: `The document has no part ${source.part}`,
+            });
+            return { bodies: [], diagnostics };
+          }
+          this.#checkInstances(run, [state]);
+          const failed = failedFeatures(state);
+          if (failed.length > 0) {
+            diagnostics.push({
+              code: 'source-errors',
+              severity: 'warning',
+              subject: '',
+              failed,
+              message: `${failed.length === 1 ? 'A feature' : `${failed.length} features`} of ${state.part.name} failed (${failed.join(', ')}): the view shows what was built without ${failed.length === 1 ? 'it' : 'them'}`,
+            });
+          }
+          const all = state.broken ? [] : state.bodies;
+          const listed = source.bodies;
+          if (listed !== undefined) {
+            const missing = listed.filter((id) => !all.some((b) => b.id === id));
+            if (missing.length > 0) {
+              diagnostics.push({
+                code: 'missing-body',
+                severity: 'warning',
+                subject: '',
+                missing,
+                message: `${state.part.name} has no body ${missing.join(', ')} (merged into another, or never made)`,
+              });
+            }
+          }
+          const shown = listed === undefined ? all : all.filter((b) => listed.includes(b.id));
+          return {
+            bodies: shown.map((b) => live(b, { key: b.id, pose: IDENTITY_POSE })),
+            diagnostics,
+          };
+        }
+        const assembly = document.assemblies.find((a) => a.id === source.assembly);
+        if (assembly === undefined) {
+          diagnostics.push({
+            code: 'unknown-source',
+            severity: 'error',
+            subject: '',
+            message: `The document has no assembly ${source.assembly}`,
+          });
+          return { bodies: [], diagnostics };
+        }
+        if (source.explodedView !== undefined) {
+          diagnostics.push({
+            code: 'explode-pending',
+            severity: 'warning',
+            subject: '',
+            message: `${source.explodedView} is drawn assembled: exploded views are not applied to drawings yet`,
+          });
+        }
+        let out = assembled.get(assembly.id);
+        if (out === undefined) {
+          out = await this.#assemble(run, document, variables, partFor, assembly.id);
+          assembled.set(assembly.id, out);
+        }
+        this.#checkInstances(run, [
+          ...states.values(),
+          ...[...out.sources.values()].map((x) => x.state),
+        ]);
+        const result = out.results[0]!;
+        const state = out.states.get(assembly.id);
+        const failed = result.instances
+          .filter((x) => x.status === 'error')
+          .map((x) => x.instanceId);
+        if (failed.length > 0) {
+          diagnostics.push({
+            code: 'source-errors',
+            severity: 'warning',
+            subject: '',
+            failed,
+            message: `${failed.length === 1 ? 'Instance' : 'Instances'} ${failed.join(', ')} of ${assembly.name} could not be built in full: see the assembly`,
+          });
+        }
+        const bodies: DrawingBody[] = [];
+        for (const x of state?.solved ?? []) {
+          for (const b of state!.bodies.get(x.id) ?? []) {
+            bodies.push(live(b, { key: `${x.id}/${b.id}`, instance: x.id, pose: x.pose }));
+          }
+        }
+        return { bodies, diagnostics };
+      },
+      run: async (ops, bodies) => {
+        if (ops.length === 0) return [];
+        const batch = emptyBatch();
+        batch.ops.push(...ops);
+        for (const b of bodies) {
+          if (b.kernelInstance === null) continue;
+          const from = batch.shapesFrom;
+          batch.shapesFrom =
+            from === null || from === b.kernelInstance ? b.kernelInstance : MIXED_INSTANCES;
+        }
+        const reply = await this.#submit(run, batch.ops);
+        run.counters.otherOps += ops.length;
+        this.#checkLive(batch, reply);
+        return reply.results;
+      },
+    };
   }
 
   /** Every assembly of `document` (or only `only`), after the parts. */
