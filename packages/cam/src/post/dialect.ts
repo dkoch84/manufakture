@@ -81,7 +81,15 @@ export interface Dialect {
   readonly dwellUnit: 'seconds' | 'milliseconds';
   readonly decimals: DialectDecimals;
   readonly templates: DialectTemplates;
+  /**
+   * The largest tool number a `T` word may carry; `DEFAULT_MAX_TOOL_NUMBER` (Grbl's 255) when
+   * absent. A larger number is refused, never written: Grbl fails the line with error 38.
+   */
+  readonly maxToolNumber?: number;
 }
+
+/** Grbl 1.1's `MAX_TOOL_NUMBER` (`gcode.h`): a larger `T` fails with error 38. */
+export const DEFAULT_MAX_TOOL_NUMBER = 255;
 
 /** What a variable holds, which decides where it may appear. */
 export type VariableKind = 'number' | 'text' | 'code';
@@ -108,6 +116,8 @@ export const TEMPLATE_VARIABLES: Readonly<Record<string, VariableKind>> = {
   setup: 'text',
   /** Date text, as the caller gives it. */
   date: 'text',
+  /** Where the operator zeroes X, Y and Z (the WCS origin), as the caller describes it. */
+  origin: 'text',
   /** The post's name. */
   post: 'text',
   /** `mm` or `inch`. */
@@ -161,6 +171,38 @@ export const TEMPLATE_M_CODES: readonly string[] = ['M0', 'M1', 'M2', 'M5', 'M8'
 /** Codes the engine itself always needs. */
 export const REQUIRED_G_CODES: readonly string[] = ['G0', 'G1', 'G2', 'G3', 'G17', 'G90'];
 
+/**
+ * The modal group of each G and M code a template may write (NIST RS274NGC table 4, as Grbl 1.1's
+ * `gcode.c` groups them). Two codes of one group on a line fail in Grbl with error 21, even when
+ * they are the same code (`G21 G21`).
+ */
+export const MODAL_GROUPS: Readonly<Record<string, string>> = {
+  G80: 'motion',
+  G17: 'plane',
+  G20: 'units',
+  G21: 'units',
+  G40: 'cutter compensation',
+  G49: 'tool length offset',
+  G54: 'work offset',
+  G55: 'work offset',
+  G56: 'work offset',
+  G57: 'work offset',
+  G58: 'work offset',
+  G59: 'work offset',
+  G61: 'path control',
+  G64: 'path control',
+  G90: 'distance',
+  'G91.1': 'arc distance',
+  G94: 'feed rate mode',
+  M0: 'stopping',
+  M1: 'stopping',
+  M2: 'stopping',
+  M30: 'stopping',
+  M5: 'spindle',
+  M8: 'coolant',
+  M9: 'coolant',
+};
+
 export type TemplateSection = keyof DialectTemplates;
 
 export const TEMPLATE_SECTIONS: readonly TemplateSection[] = [
@@ -182,6 +224,8 @@ export interface CompiledDialect {
   readonly gCodes: ReadonlySet<string>;
   readonly mCodes: ReadonlySet<string>;
   readonly templates: Readonly<Record<TemplateSection, readonly TemplateLine[]>>;
+  /** The dialect's `maxToolNumber`, or the default. */
+  readonly maxToolNumber: number;
 }
 
 const DIALECT_KEYS = [
@@ -199,6 +243,7 @@ const DIALECT_KEYS = [
   'dwellUnit',
   'decimals',
   'templates',
+  'maxToolNumber',
 ] as const;
 
 /** `G01` to `G1`, `g91.1` to `G91.1`; undefined when `code` is not a G or M code. */
@@ -305,6 +350,15 @@ function compileCopy(input: unknown): CamResult<CompiledDialect> {
   }
   const decimalsProblem = checkDecimals(d.decimals);
   if (decimalsProblem) return bad(decimalsProblem);
+  const maxTool = d.maxToolNumber ?? DEFAULT_MAX_TOOL_NUMBER;
+  if (
+    typeof maxTool !== 'number' ||
+    !Number.isInteger(maxTool) ||
+    maxTool < 0 ||
+    maxTool > 1e8 - 1
+  ) {
+    return bad('maxToolNumber must be a whole number from 0 to 99999999.');
+  }
 
   if (!isRecord(d.templates)) return bad('templates must be an object.');
   const templates = {} as Record<TemplateSection, TemplateLine[]>;
@@ -323,20 +377,24 @@ function compileCopy(input: unknown): CamResult<CompiledDialect> {
       const line = parseTemplateLine(text);
       if (typeof line === 'string') return bad(`templates.${section}[${n}]: ${line}`);
       if (line.kind === 'code') {
-        const problem = checkTemplateWords(
-          literalCode(line, gCodes),
-          section,
-          gCodes,
-          mCodes,
-          true,
-        );
+        const problem = checkTemplateWords(literalCode(line, gCodes), section, gCodes, mCodes, {
+          maxTool,
+        });
         if (problem) return bad(`templates.${section}[${n}]: ${problem}`);
       }
       parsed.push(line);
     }
     templates[section] = parsed;
   }
-  return ok(Object.freeze({ dialect: input as unknown as Dialect, gCodes, mCodes, templates }));
+  return ok(
+    Object.freeze({
+      dialect: input as unknown as Dialect,
+      gCodes,
+      mCodes,
+      templates,
+      maxToolNumber: maxTool,
+    }),
+  );
 }
 
 /** Why `style` cannot be written with `mCodes`, or undefined when it can. */
@@ -382,8 +440,10 @@ export function parseTemplateLine(text: string): TemplateLine | string {
     }
     if (kind === 'code') {
       const before = body.slice(0, m.index);
-      if (varKind === 'number' && !/(^|\s)T$/.test(before)) {
-        return `the number variable {${name}} may appear only as a tool number, T{${name}}.`;
+      if (varKind === 'number' && (name !== 'tool' || !/(^|\s)T$/.test(before))) {
+        return name === 'tool'
+          ? 'the number variable {tool} may appear only as a tool number, T{tool}.'
+          : `the number variable {${name}} may appear only in a comment line; a code line takes only T{tool}.`;
       }
       if (varKind === 'code' && !/(^|\s)$/.test(before)) {
         return `the code variable {${name}} must stand alone as a word.`;
@@ -407,21 +467,47 @@ function literalCode(line: TemplateLine, gCodes: ReadonlySet<string>): string {
     .join('');
 }
 
+/** Limits for `checkTemplateWords`. */
+export interface TemplateWordLimits {
+  /** The largest G64 P, in the file's units; `MAX_G64_P` when absent. */
+  readonly maxP?: number;
+  /** The largest T; `DEFAULT_MAX_TOOL_NUMBER` when absent. */
+  readonly maxTool?: number;
+}
+
 /**
- * Why the words of a template code line are not allowed, or undefined when they are. With
- * `placeholders`, variables have been replaced by stand-ins (load time); without, the line is the
- * substituted text (write time).
+ * Why the words of a template code line are not allowed, or undefined when they are. At load time
+ * the variables have been replaced by stand-ins (`T1`, `G21`); at write time the line is the
+ * substituted text.
  */
 export function checkTemplateWords(
   text: string,
   section: TemplateSection,
   gCodes: ReadonlySet<string>,
   mCodes: ReadonlySet<string>,
-  placeholders = false,
-  maxP = MAX_G64_P,
+  limits: TemplateWordLimits = {},
 ): string | undefined {
+  const maxP = limits.maxP ?? MAX_G64_P;
+  const maxTool = limits.maxTool ?? DEFAULT_MAX_TOOL_NUMBER;
   const words = codeWords(text);
   if (!words || words.length === 0) return 'a code line must be words such as G90 or M5.';
+  const groups = new Map<string, string>();
+  const letters = new Set<string>();
+  for (const w of words) {
+    if (w.letter === 'G' || w.letter === 'M') {
+      const code = normalizeCode(`${w.letter}${w.value}`, w.letter);
+      const group = code === undefined ? undefined : MODAL_GROUPS[code];
+      if (code === undefined || group === undefined) continue;
+      const other = groups.get(group);
+      if (other !== undefined) {
+        return `${other} and ${code} are both in the ${group} modal group; a line may hold one.`;
+      }
+      groups.set(group, code);
+    } else {
+      if (letters.has(w.letter)) return `a line may hold one ${w.letter} word.`;
+      letters.add(w.letter);
+    }
+  }
   const hasG64 = words.some((w) => w.letter === 'G' && normalizeCode(`G${w.value}`, 'G') === 'G64');
   const pWords = words.filter((w) => w.letter === 'P');
   if (hasG64 && pWords.length !== 1) {
@@ -445,7 +531,10 @@ export function checkTemplateWords(
       }
     } else if (w.letter === 'T') {
       if (section !== 'toolChange') return 'a T word may appear only in the toolChange template.';
-      if (!placeholders && !/^\d+$/.test(w.value)) return `${word} is not a whole tool number.`;
+      if (!/^\d+$/.test(w.value)) return `${word} is not a whole tool number.`;
+      if (Number(w.value) > maxTool) {
+        return `${word} is above the largest tool number the controller takes, ${maxTool}.`;
+      }
     } else if (w.letter === 'P') {
       if (!hasG64) return 'a P word may appear only with G64.';
       const p = Number(w.value);

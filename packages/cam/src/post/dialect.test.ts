@@ -145,11 +145,14 @@ describe('compileDialect: words that would mislead the engine', () => {
       templates: { header: [], tool: [], toolChange: [], footer: [], [section]: [line] },
     });
 
-  it('refuses number variables glued to anything but T, and code variables glued at all', () => {
+  it('allows only T{tool} as a number in a code line, and no code variable glued at all', () => {
     expect(problem(tpl('toolChange', 'G{tool}'))).toMatch(/only as a tool number/);
     expect(problem(tpl('toolChange', 'M{tool}'))).toMatch(/only as a tool number/);
-    expect(problem(tpl('header', 'G64 P{rpm}'))).toMatch(/only as a tool number/);
-    expect(problem(tpl('header', 'G90 {file_index}'))).toMatch(/only as a tool number/);
+    expect(problem(tpl('header', 'G64 P{rpm}'))).toMatch(/only in a comment line/);
+    expect(problem(tpl('header', 'G90 {file_index}'))).toMatch(/only in a comment line/);
+    expect(problem(tpl('toolChange', 'T{rpm}'))).toMatch(/takes only T\{tool\}/);
+    expect(problem(tpl('toolChange', 'T{file_index}'))).toMatch(/takes only T\{tool\}/);
+    expect(compileDialect(tpl('toolChange', '(Tool {tool} at {rpm} rpm)')).ok).toBe(true);
     expect(problem(tpl('header', 'G9{units_code}'))).toMatch(/stand alone/);
     expect(compileDialect(tpl('toolChange', 'T{tool}')).ok).toBe(true);
     expect(compileDialect(tpl('header', '{units_code} G90')).ok).toBe(true);
@@ -164,10 +167,32 @@ describe('compileDialect: words that would mislead the engine', () => {
 
   it('needs one literal G64 P, greater than 0 and at most 0.1', () => {
     expect(problem(tpl('header', 'G64'))).toMatch(/exactly one P/);
-    expect(problem(tpl('header', 'G64 P0.01 P0.02'))).toMatch(/exactly one P/);
+    expect(problem(tpl('header', 'G64 P0.01 P0.02'))).toMatch(/one P/);
     expect(problem(tpl('header', 'G64 P0'))).toMatch(/greater than 0/);
     expect(problem(tpl('header', 'G64 P0.5'))).toMatch(/at most 0.1/);
     expect(compileDialect(tpl('header', 'G64 P0.01')).ok).toBe(true);
+  });
+
+  it('refuses two codes of one modal group on a line, even the same code twice', () => {
+    expect(problem(tpl('header', 'G21 G21'))).toMatch(/G21 and G21 are both in the units/);
+    expect(problem(tpl('header', 'G21 G90 G21'))).toMatch(/units modal group/);
+    expect(problem(tpl('header', '{units_code} G21'))).toMatch(/units modal group/);
+    expect(problem(tpl('header', 'G54 G55'))).toMatch(/work offset modal group/);
+    expect(problem(tpl('header', 'G90 G90'))).toMatch(/distance modal group/);
+    expect(problem(tpl('footer', 'M5 M5'))).toMatch(/spindle modal group/);
+    expect(problem(tpl('footer', 'M0 M30'))).toMatch(/stopping modal group/);
+    expect(problem(tpl('toolChange', 'T{tool} T{tool}'))).toMatch(/one T word/);
+    expect(compileDialect(tpl('header', 'G21 G90 G17 G94')).ok).toBe(true);
+    expect(compileDialect(tpl('footer', 'M5 M30')).ok).toBe(true);
+  });
+
+  it('caps literal T words at the dialect maxToolNumber, 255 by default', () => {
+    expect(problem(tpl('toolChange', 'T256'))).toMatch(/above the largest tool number .* 255/);
+    expect(compileDialect(tpl('toolChange', 'T255')).ok).toBe(true);
+    expect(compileDialect({ ...tpl('toolChange', 'T256'), maxToolNumber: 999 }).ok).toBe(true);
+    expect(problem({ ...tpl('header', 'G90'), maxToolNumber: -1 })).toMatch(/maxToolNumber/);
+    expect(problem({ ...tpl('header', 'G90'), maxToolNumber: 1.5 })).toMatch(/maxToolNumber/);
+    expect(problem({ ...tpl('header', 'G90'), maxToolNumber: 1e8 })).toMatch(/maxToolNumber/);
   });
 
   it('returns an error value for input that is not plain data', () => {

@@ -215,13 +215,116 @@ describe('postProcess: safe start', () => {
     expect(lines.slice(1, 6)).toEqual(['G0 Z15', 'M3 S16000', 'X10 Y0', 'Z5', 'G1 Z-1 F300']);
   });
 
-  it('goes up before across when the first rapid is above the clearance', () => {
+  it('goes straight to the height of the first rapid when it is above the clearance', () => {
     const tp = program();
     const entries = tp.entries.map((e) =>
       e.kind === 'rapid' && e.to[2] === 5 ? { ...e, to: [10, 0, 20] as Vec3 } : e,
     );
     const lines = post({ ...tp, entries }).files[0]!.lines;
-    expect(lines.slice(1, 5)).toEqual(['G0 Z15', 'M3 S16000', 'Z20', 'X10 Y0']);
+    // Never to the clearance and then up again.
+    expect(lines.slice(1, 4)).toEqual(['G0 Z20', 'M3 S16000', 'X10 Y0']);
+  });
+
+  it('splits the first rapid after a retract into Z and XY, never coming down diagonally', () => {
+    // Rapids before the first tool change: its retract leaves the tool at the clearance, and the
+    // next rapid must go across first and then down.
+    const tp: Toolpath = {
+      start: [0, 0, 10],
+      entries: [
+        { kind: 'rapid', to: [10, 0, 2], op, pass: 0 },
+        ...START.slice(0, 2),
+        { kind: 'rapid', to: [20, 20, 1], op, pass: 0 },
+        { kind: 'linear', to: [20, 20, -1], feed: 300, feedClass: 'plunge', op, pass: 0 },
+        ...END,
+      ],
+    };
+    const lines = post(tp).files[0]!.lines;
+    expect(lines.slice(1, 9)).toEqual([
+      'G0 Z15',
+      'X10 Y0',
+      'Z2',
+      'G0 Z15',
+      'M3 S16000',
+      'X20 Y20',
+      'Z1',
+      'G1 Z-1 F300',
+    ]);
+  });
+
+  it('retracts to the next rapid height when it is above the clearance', () => {
+    const tp: Toolpath = {
+      start: [0, 0, 10],
+      entries: [
+        { kind: 'rapid', to: [10, 0, 2], op, pass: 0 },
+        ...START.slice(0, 2),
+        { kind: 'rapid', to: [20, 20, 30], op, pass: 0 },
+        { kind: 'rapid', to: [20, 20, 1], op, pass: 0 },
+        { kind: 'linear', to: [20, 20, -1], feed: 300, feedClass: 'plunge', op, pass: 0 },
+        ...END,
+      ],
+    };
+    const lines = post(tp).files[0]!.lines;
+    expect(lines.slice(1, 9)).toEqual([
+      'G0 Z15',
+      'X10 Y0',
+      'Z2',
+      'G0 Z30',
+      'M3 S16000',
+      'X20 Y20',
+      'Z1',
+      'G1 Z-1 F300',
+    ]);
+  });
+
+  it('retracts to the retract height before stopping the spindle with the tool in the work', () => {
+    const tp = program();
+    // END without its rapid: the IR stops the spindle at Z-1.
+    const entries = tp.entries.filter((e, i) => i !== tp.entries.length - 2);
+    const lines = post({ ...tp, entries }).files[0]!.lines;
+    expect(lines.slice(-4)).toEqual(['G0 Z5', 'M5', 'G0 Z15', 'M30']);
+  });
+
+  it('refuses a rapid that comes down while it moves across below the clearance', () => {
+    const down = program(
+      { kind: 'rapid', to: [10, 0, 5], op, pass: 0 },
+      { kind: 'rapid', to: [20, 0, 2], op, pass: 0 },
+    );
+    expect(refusal(down)).toMatchObject({ code: 'invalid-input' });
+    expect(refusal(down).message).toMatch(/comes down while it moves across/);
+    // Across and up, straight down, and across at one height are all fine.
+    const ok = program(
+      { kind: 'rapid', to: [20, 0, 5], op, pass: 0 },
+      { kind: 'rapid', to: [30, 0, 5], op, pass: 0 },
+      { kind: 'rapid', to: [30, 0, 1], op, pass: 0 },
+      { kind: 'rapid', to: [40, 0, 20], op, pass: 0 },
+      { kind: 'linear', to: [40, 0, -1], feed: 300, feedClass: 'plunge', op, pass: 0 },
+    );
+    expect(post(ok).files).toHaveLength(1);
+    // Coming down diagonally above the clearance is allowed.
+    const high = program(
+      { kind: 'rapid', to: [20, 0, 30], op, pass: 0 },
+      { kind: 'rapid', to: [30, 0, 20], op, pass: 0 },
+      { kind: 'rapid', to: [30, 0, 1], op, pass: 0 },
+      { kind: 'linear', to: [30, 0, -1], feed: 300, feedClass: 'plunge', op, pass: 0 },
+    );
+    expect(post(high).files).toHaveLength(1);
+  });
+
+  it('refuses a malformed spindle dial with an error value, not an exception', () => {
+    for (const spindleDial of [
+      [null],
+      ['3'],
+      [{ setting: 3, rpm: 1000 }],
+      [{ setting: '3', rpm: '1000' }],
+      [{ setting: '3', rpm: Number.POSITIVE_INFINITY }],
+      // A hole in the array.
+      [undefined],
+      {},
+    ]) {
+      const r = refusal(program(), plain(), {}, { spindleDial: spindleDial as never });
+      expect(r.code).toBe('invalid-input');
+      expect(r.message).toMatch(/spindle dial must be/);
+    }
   });
 
   it('refuses a feed move before the first rapid of a file', () => {
@@ -488,10 +591,13 @@ describe('postProcess: tool changes and files', () => {
     expect(lines.filter((l) => l === 'M0')).toHaveLength(1);
     const i = lines.indexOf('M0');
     // Up to the clearance before the pause, and again after it: the machine may have moved.
-    expect(lines.slice(i - 3, i + 6)).toEqual([
+    expect(lines.slice(i - 5, i + 6)).toEqual([
       'M5',
       '(Pocket)',
       'G0 Z15',
+      // The operator's instructions come before the pause.
+      '(Pause: stop the spindle, change the tool, re-zero Z or keep the same)',
+      '(stick-out, then resume)',
       'M0',
       'G0 Z15',
       'M3 S20000',
@@ -521,6 +627,23 @@ describe('postProcess: tool changes and files', () => {
     const tp = program();
     const entries = tp.entries.map(withoutToolNumber);
     expect(refusal({ ...tp, entries }, d).message).toMatch(/needs a tool number/);
+  });
+
+  it('refuses a tool number above the dialect maxToolNumber, in M6 and in T{tool}', () => {
+    const tp = program();
+    const entries = tp.entries.map((e) => (e.kind === 'toolChange' ? { ...e, number: 301 } : e));
+    const m6 = plain({ mCodes: ['M3', 'M5', 'M6', 'M30'], toolChange: 'm6' });
+    expect(refusal({ ...tp, entries }, m6)).toMatchObject({ code: 'unsupported' });
+    expect(refusal({ ...tp, entries }, m6).message).toMatch(/number 301, above the 255/);
+    const t = plain({ templates: { header: [], tool: [], toolChange: ['T{tool}'], footer: [] } });
+    expect(refusal({ ...tp, entries }, t).message).toMatch(/T301 is above .* 255/);
+    // A tool number in a comment is only text.
+    const c = plain({
+      templates: { header: [], tool: ['(Tool {tool})'], toolChange: [], footer: [] },
+    });
+    expect(post({ ...tp, entries }, c).files[0]!.lines[0]).toBe('(Tool 301)');
+    const wide = { ...m6, maxToolNumber: 999 };
+    expect(post({ ...tp, entries }, wide).files[0]!.lines).toContain('M6 T301');
   });
 
   it('refuses a style whose codes the dialect lacks', () => {
@@ -699,6 +822,11 @@ describe('postProcess: templates never leave the engine with a stale position', 
     expect(refusal(program(), d('0.0001'), { units: 'inch' })).toMatchObject({
       code: 'invalid-dialect',
     });
+    // With 4 inch decimals the smallest P is 0.0001 in, so an inch file holds a G64 only when
+    // the tolerance is at least 0.00254 mm.
+    expect(
+      post(program(), d('0.0001'), { units: 'inch', tolerance: 0.00254 }).files[0]!.lines[0],
+    ).toBe('G64 P0.0001');
   });
 });
 

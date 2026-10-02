@@ -55,12 +55,27 @@ export interface PostJob {
   readonly setup?: string;
   /** Date text, for `{date}`; the caller formats it, so output is reproducible. */
   readonly date?: string;
+  /** Where to zero X, Y and Z (the setup's WCS origin) in words, for `{origin}`. */
+  readonly origin?: string;
+  /**
+   * The router's speed dial, from the machine profile, when the spindle is a router whose speed
+   * is set by hand. Each spindle start then gets a comment naming the nearest setting.
+   */
+  readonly spindleDial?: readonly DialSetting[];
   /**
    * The setup's heights, machine Z; `retract` must not be above `clearance`. Every file, and every
    * move after an `M0` or `M6` tool change, starts with a rapid straight up (or down) to the
    * clearance height.
    */
   readonly heights: Heights;
+}
+
+/** One setting of a router's speed dial. */
+export interface DialSetting {
+  /** As printed on the dial: `3`, `3.5`. */
+  readonly setting: string;
+  /** rpm, greater than zero. */
+  readonly rpm: number;
 }
 
 export interface PostOptions {
@@ -177,6 +192,7 @@ function run(job: PostJob, d: CompiledDialect, options: PostOptions): PostOutput
       `The retract height ${retract} mm is above the clearance ${clearance} mm.`,
     );
   }
+  const dial = checkDial(job.spindleDial);
   const offsets = options.checkOffsets ?? GRBL_CHECK_OFFSETS;
   if (offsets.length === 0 || !offsets.every((o) => o.every(Number.isFinite))) {
     refuse('invalid-input', 'The check offsets must be a non-empty list of finite points.');
@@ -228,6 +244,7 @@ function run(job: PostJob, d: CompiledDialect, options: PostOptions): PostOutput
       fileCount: plans.length,
       plan,
       irPos,
+      ...(dial !== undefined ? { dial } : {}),
     });
     const lines = w.write();
     irPos = w.irPos;
@@ -296,6 +313,32 @@ interface WriterInput {
   readonly fileCount: number;
   readonly plan: FilePlan;
   readonly irPos: Vec3;
+  /** The job's spindle dial, checked and copied by `checkDial`. */
+  readonly dial?: readonly DialSetting[];
+}
+
+/**
+ * A checked copy of a spindle dial table, read once (so a getter cannot hand the writer a
+ * different value later), or undefined when there is none.
+ */
+function checkDial(dial: unknown): readonly DialSetting[] | undefined {
+  if (dial === undefined) return undefined;
+  const bad = (): never =>
+    refuse(
+      'invalid-input',
+      'The spindle dial must be a non-empty list of { setting, rpm }: setting text and a positive rpm.',
+    );
+  if (!Array.isArray(dial) || dial.length === 0) bad();
+  const copy: DialSetting[] = [];
+  for (let i = 0; i < (dial as unknown[]).length; i++) {
+    const entry: unknown = (dial as unknown[])[i];
+    if (typeof entry !== 'object' || entry === null) bad();
+    const { setting, rpm } = entry as Record<string, unknown>;
+    if (typeof setting !== 'string' || setting.trim() === '') bad();
+    if (typeof rpm !== 'number' || !Number.isFinite(rpm) || rpm <= 0) bad();
+    copy.push({ setting: setting as string, rpm: rpm as number });
+  }
+  return copy;
 }
 
 /** Writes one file, tracking modal state from the first line to the last. */
@@ -317,6 +360,8 @@ class FileWriter {
   private firstRapid = false;
   private tool: ToolInfo | undefined;
   private toolsSeen = 0;
+  /** The index in the plan's entries of the entry being written; -1 before the first. */
+  private cursor = -1;
   private modal: { units?: string; distance?: boolean; plane?: boolean; feedMode?: boolean } = {};
   irPos: Vec3;
 
@@ -338,7 +383,11 @@ class FileWriter {
     this.template('header');
     for (const t of plan.tools) this.template('tool', t);
     this.preamble();
-    for (const e of plan.entries) this.entry(e);
+    for (const [i, e] of plan.entries.entries()) {
+      this.cursor = i;
+      this.entry(e);
+    }
+    this.cursor = plan.entries.length;
     this.retract();
     if (this.spindleOn) this.spindle({ kind: 'spindle', state: 'off' });
     this.template('footer');
@@ -391,6 +440,11 @@ class FileWriter {
     return text;
   }
 
+  /** `text` as sanitised comment lines. */
+  private comment(text: string): void {
+    for (const l of commentLines(text, this.d.dialect.maxLineLength)) this.emit(l);
+  }
+
   // -------------------------------------------------------------------------------------------
   // Templates and the modal preamble
 
@@ -426,7 +480,10 @@ class FileWriter {
       .trim()
       .replace(/\s+/g, ' ');
     const maxP = Math.min(MAX_G64_P, this.input.tolerance * this.k);
-    const problem = checkTemplateWords(text, section, this.d.gCodes, this.d.mCodes, false, maxP);
+    const problem = checkTemplateWords(text, section, this.d.gCodes, this.d.mCodes, {
+      maxP,
+      maxTool: this.d.maxToolNumber,
+    });
     if (problem) refuse('invalid-dialect', `The ${section} template writes '${text}': ${problem}`);
     for (const w of codeWords(text) ?? []) {
       const code = normalizeCode(`${w.letter}${w.value}`, 'G');
@@ -458,13 +515,33 @@ class FileWriter {
     this.firstRapid = false;
   }
 
-  /** A rapid straight up to the clearance height, when the tool is known to be below it. */
+  /**
+   * A rapid straight up to the safe height (`safeHeight`), when the tool is known to be below it.
+   * The next rapid then starts from there like the first rapid of a file: up before across, or
+   * across before down, never diagonally down.
+   */
   private retract(): void {
     const z = this.pos.z;
-    const clearance = this.input.job.heights.clearance;
-    if (z !== undefined && Number(z) < Number(this.coordWord(clearance))) {
-      this.move('G0', [undefined, undefined, clearance], undefined, true);
+    const safe = this.safeHeight();
+    if (z !== undefined && Number(z) < Number(this.coordWord(safe))) {
+      this.move('G0', [undefined, undefined, safe], undefined, true);
+      this.firstRapid = true;
     }
+  }
+
+  /**
+   * The height a safe start or a retract goes to: the clearance, or the next rapid's Z when that
+   * is higher, so the file never goes to the clearance and then climbs again.
+   */
+  private safeHeight(): number {
+    const clearance = this.input.job.heights.clearance;
+    const entries = this.input.plan.entries;
+    for (let i = Math.max(0, this.cursor); i < entries.length; i++) {
+      const e = entries[i]!;
+      if (e.kind === 'rapid') return Math.max(clearance, e.to[2]);
+      if (e.kind === 'linear' || e.kind === 'arc') break;
+    }
+    return clearance;
   }
 
   /** A template variable's text, or undefined when it has no value here. */
@@ -494,6 +571,8 @@ class FileWriter {
         return job.setup;
       case 'date':
         return job.date;
+      case 'origin':
+        return job.origin;
       case 'post':
         return d.dialect.name;
       case 'units':
@@ -574,13 +653,28 @@ class FileWriter {
       // The operator loads a file's first tool before starting it, so only later tools pause.
       if (!first) {
         this.needM('M0', 'a tool change pause');
+        // The operator acts during the pause, so everything they need is written before it.
+        const dial = this.input.dial;
+        const rpm = this.tool?.rpm;
+        if (dial !== undefined && rpm !== undefined) this.comment(dialComment(dial, rpm));
+        this.comment(
+          dial !== undefined
+            ? 'Pause: turn the router off, change the bit, re-zero Z or keep the same stick-out, set the dial, turn the router on, then resume'
+            : 'Pause: stop the spindle, change the tool, re-zero Z or keep the same stick-out, then resume',
+        );
         this.emit('M0');
       }
     } else {
       this.needM('M6', 'a tool change');
       const n = e.number;
-      if (n === undefined || !Number.isInteger(n) || n < 0 || n >= 1e8) {
+      if (n === undefined || !Number.isInteger(n) || n < 0) {
         refuse('unsupported', `Tool ${e.tool} (${e.name}) needs a tool number for M6.`);
+      }
+      if (n > this.d.maxToolNumber) {
+        refuse(
+          'unsupported',
+          `Tool ${e.tool} (${e.name}) has the number ${n}, above the ${this.d.maxToolNumber} the ${this.d.dialect.name} post takes in a T word: give it a smaller number.`,
+        );
       }
       this.emit(`M6 T${n}`);
     }
@@ -591,9 +685,12 @@ class FileWriter {
     if (this.needSafeStart) this.safeStart();
   }
 
-  /** A rapid straight to the clearance height before anything else moves or spins. */
+  /**
+   * A rapid straight to the clearance height (or the next rapid's Z when higher) before anything
+   * else moves or spins.
+   */
   private safeStart(): void {
-    this.move('G0', [undefined, undefined, this.input.job.heights.clearance], undefined, true);
+    this.move('G0', [undefined, undefined, this.safeHeight()], undefined, true);
     this.needSafeStart = false;
     this.firstRapid = true;
   }
@@ -601,6 +698,13 @@ class FileWriter {
   private spindle(e: Extract<IrEntry, { kind: 'spindle' }>): void {
     if (e.state === 'off') {
       this.needM('M5', 'stopping the spindle');
+      // Never stop the spindle with the tool in the work: rise to the retract height first.
+      const z = this.pos.z;
+      const retract = this.input.job.heights.retract;
+      if (z !== undefined && Number(z) < Number(this.coordWord(retract))) {
+        this.move('G0', [undefined, undefined, retract], undefined, true);
+        this.firstRapid = true;
+      }
       this.emit('M5');
       this.spindleOn = false;
       return;
@@ -615,6 +719,8 @@ class FileWriter {
     if (s === undefined || !(Number(s) > 0)) {
       refuse('invalid-input', `The spindle speed ${e.rpm} rpm cannot be written as a positive S.`);
     }
+    const dial = this.input.dial;
+    if (dial !== undefined) this.comment(dialComment(dial, Number(s)));
     this.emit(`${code} S${s}`);
     this.spindleOn = true;
   }
@@ -642,6 +748,21 @@ class FileWriter {
         this.move('G0', [undefined, undefined, to[2]]);
       }
       return;
+    }
+    // A rapid that comes down while it moves across, below the clearance, could drive the tool
+    // into the stock or a clamp on the way: the IR must go across first, then down.
+    const z0 = this.pos.z;
+    const zText = this.coordWord(to[2]);
+    if (
+      to[2] < clearance &&
+      z0 !== undefined &&
+      Number(zText) < Number(z0) &&
+      (this.coordWord(to[0]) !== this.pos.x || this.coordWord(to[1]) !== this.pos.y)
+    ) {
+      refuse(
+        'invalid-input',
+        `A rapid to (${to.join(', ')}) comes down while it moves across, below the clearance; rapid across first, then down.`,
+      );
     }
     this.move('G0', to);
   }
@@ -833,6 +954,18 @@ class FileWriter {
       }
     }
   }
+}
+
+/**
+ * The comment naming the dial setting nearest to `rpm` (the first of equally near ones), with
+ * the setting's own speed and, when that differs, the speed asked for.
+ */
+export function dialComment(dial: readonly DialSetting[], rpm: number): string {
+  let best = dial[0]!;
+  for (const s of dial) if (Math.abs(s.rpm - rpm) < Math.abs(best.rpm - rpm)) best = s;
+  const n = (v: number): string => formatNumber(v, 0) ?? String(v);
+  const at = `Router dial ${best.setting.trim()}: ${n(best.rpm)} rpm`;
+  return best.rpm === rpm ? at : `${at}, nearest to ${n(rpm)} rpm`;
 }
 
 /** Greatest distance between an arc of radius `r` and sweep `sweep` and its chord. */
