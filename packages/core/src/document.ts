@@ -6,6 +6,7 @@ import {
   type Assembly,
   type DisplayUnits,
   type DocumentFont,
+  type Drawing,
   type Feature,
   type ManufaktureDocument,
   type Part,
@@ -55,6 +56,11 @@ export function createAssembly(id: string, name: string): Assembly {
   return { id, name, instances: [], mates: [], nextIds: {} };
 }
 
+/** An empty drawing: no sheets, fresh counters. */
+export function createDrawing(id: string, name: string): Drawing {
+  return { id, name, sheets: [], nextIds: {} };
+}
+
 /** An empty print section: no setups, fresh counters. */
 export function createPrintData(): PrintData {
   return { setups: [], nextIds: {} };
@@ -93,6 +99,10 @@ export function findPart(doc: ManufaktureDocument, partId: string): Part | undef
 
 export function findAssembly(doc: ManufaktureDocument, assemblyId: string): Assembly | undefined {
   return doc.assemblies.find((a) => a.id === assemblyId);
+}
+
+export function findDrawing(doc: ManufaktureDocument, drawingId: string): Drawing | undefined {
+  return doc.drawings?.find((d) => d.id === drawingId);
 }
 
 export function findFont(doc: ManufaktureDocument, fontId: string): DocumentFont | undefined {

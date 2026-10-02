@@ -23,7 +23,7 @@ import {
 ```ts
 interface ManufaktureDocument {
   format: 'manufakture';
-  version: 11; // file format version, FORMAT_VERSION
+  version: 12; // file format version, FORMAT_VERSION
   namingScheme: 1; // topological naming scheme version (T0.5), NAMING_SCHEME
   id: string;
   name: string;
@@ -33,9 +33,10 @@ interface ManufaktureDocument {
   assemblies: Assembly[]; // instances of parts placed by mates, in tab order (since version 7)
   print: PrintData; // print setups: what to print, on which printer, oriented how (since version 8)
   fonts: DocumentFont[]; // the fonts texts use, bundled or added by the user (since version 9)
+  drawings?: Drawing[]; // drawings of parts and assemblies, in tab order; absent: none (since version 12)
   configurations?: Configurations; // the configuration table; absent: none (since version 5)
   domains?: Record<string, DomainData>; // domain settings by namespace; absent: none (since version 11)
-  nextIds: Record<string, number>; // document-level counters: `part` (since version 4), `cp`, `cfg`, `assembly`, `font`
+  nextIds: Record<string, number>; // document-level counters: `part` (since version 4), `cp`, `cfg`, `assembly`, `font`, `drawing`
 }
 
 interface Part {
@@ -195,7 +196,8 @@ interface Assembly {
   name: string;
   instances: Instance[];
   mates: Mate[]; // in creation order: the last is the newest
-  nextIds: Record<string, number>; // `inst`, `mate`, `mc`, `r`; only ever increase
+  explodedViews?: ExplodedView[]; // absent: none, never empty (since version 12; see Exploded views)
+  nextIds: Record<string, number>; // `inst`, `mate`, `mc`, `r`, `explode`, `step`; only ever increase
 }
 
 interface Instance {
@@ -280,7 +282,12 @@ What an assembly uses cannot be removed under it:
   lists `<assembly id>/<instance id>`, as `partInstances(doc, partId)` does). An instance of a
   pinned part names no part of this document and does not block.
 - `deleteInstance` refuses while a mate connects the instance (`blockers`: the mate ids;
-  `instanceMates(assembly, id)` lists them). Delete the mates first in the same `batch`.
+  `instanceMates(assembly, id)` lists them), while a step of an exploded view moves it or reads
+  its direction from it (`<assembly id>/<exploded view id>`; `instanceExplodedViews`). Delete or
+  edit them first in the same `batch`. A drawing dimension that measures the instance does not
+  block: regen reports it `lost` (`instanceDimensions(doc, assemblyId, id)` lists them, as
+  `<drawing>/<sheet>/<dimension>`, so the app can warn).
+- `deleteAssembly` refuses while a drawing view shows the assembly (`assemblyViews(doc, id)`).
 - `deleteVariable` refuses while a connector offset or a limit reads the variable (`variableUsers`
   lists `<assembly id>/<mate id>`, and `variableMates(doc, name)` the mates). `renameVariable` and
   `inlineVariable` rewrite those expressions with `editMate`. `variableUses` lists each as a
@@ -289,6 +296,45 @@ What an assembly uses cannot be removed under it:
 `mateExpressions(mate)` lists a mate's expressions with the kind each expects, like
 `featureExpressions`; `mateIds`, `mateConnectors`, `mateInstances`, `isPinnedSource` and
 `instancePart` are the other generic views, in `src/features.ts`.
+
+### Exploded views
+
+An assembly may have exploded views (since version 12; M4 plan decision 9): named, ordered steps,
+each moving a set of its instances along a direction by a distance. They are applied on top of the
+solved poses for display (the viewport and drawings) and never change a stored pose or a mate.
+Regen computes the offsets (T4.5a), one function for both callers.
+
+```ts
+interface ExplodedView {
+  id: 'explode#1'; // from the assembly's nextIds.explode
+  name: string;
+  steps: ExplodeStep[]; // applied in order; moves add up
+}
+
+interface ExplodeStep {
+  id: 'step#1'; // from the assembly's nextIds.step
+  instances: string[]; // instances of the same assembly, each once, at least one
+  direction:
+    | { vector: Vec3 } // in the assembly frame; non-zero, only its direction counts
+    | { instance: string; edge: EdgeRef; flip?: true } // a line edge's direction
+    | { instance: string; face: FaceRef; flip?: true }; // a plane's normal or a cylinder's axis
+  distance: StoredExpression; // a length
+}
+```
+
+A reference direction names geometry of `instance`'s part, like a mate connector's origin, read at
+the instance's solved pose; a lost one is a warning on the step at regen, never a load error.
+Validation refuses an exploded view or step id at or past its counter or used twice in the
+assembly, a step that moves an instance twice, an instance (moved, or read for a direction) that
+is not in the assembly, and a distance that does not parse or names an unknown variable. The
+schema refuses a zero vector, a step that moves nothing, `flip: false` (absent means not flipped),
+an empty `explodedViews` and more than `MAX_ASSEMBLY_ITEMS` views per assembly, steps per view or
+instances per step. `deleteExplodedView` refuses while a drawing view shows it
+(`explodedViewViews(doc, assemblyId, id)`). `deleteVariable` refuses while a step distance reads
+the variable (`variableUsers` lists `<assembly id>/<exploded view id>`, and
+`variableExplodedViews(doc, name)` the views); `renameVariable` and `inlineVariable` rewrite them
+with `editExplodedView`. `explodedViewIds`, `explodedViewExpressions`, `explodeStepInstances` and
+`instanceExplodedViews` are the generic views, in `src/features.ts`.
 
 ### Print setups
 
@@ -465,6 +511,155 @@ sorts out which really changed (ADR 0013 decision 5). `serialize`
 writes namespaces and the keys of every object in `data` sorted, so equal documents save as the
 same text.
 
+### Drawings
+
+A document may hold drawings (since version 12; M4 plan decision 7, the dimension model of the
+[T4.4a spike](../../docs/spikes/T4.4a-hlr.md)): sheets of views of its parts and assemblies, with
+dimensions and notes. Drawings are generic (woodworking, and later construction, use the same
+ones) and are document state, not features: a drawing changes no geometry. Nothing derived is
+stored (ADR 0004 decision 1): regen computes each view's hidden-line projection and resolves each
+dimension on request (T4.4e), and `packages/drawing` lays them out on paper from its own input
+types, which regen fills from these.
+
+```ts
+interface Drawing {
+  id: 'drawing#1'; // from the document's nextIds.drawing
+  name: string;
+  sheets: Sheet[]; // in page order
+  nextIds: Record<string, number>; // `sheet`, `view`, `dim`, `note`; per drawing, never reused
+}
+
+interface Sheet {
+  id: 'sheet#1';
+  name: string;
+  size: 'A4' | 'A3' | 'A2' | 'A1' | 'A0' | 'letter' | 'tabloid' | { width: E; height: E }; // E = StoredExpression (lengths)
+  orientation: 'landscape' | 'portrait'; // the longer side across, or up; a custom size too
+  titleBlock?: { fields: { label: string; value: string }[] }; // absent: no title block
+  views: DrawingView[];
+  dimensions: Dimension[]; // in drawing order
+  notes: Note[];
+}
+
+interface DrawingView {
+  id: 'view#1';
+  label?: string; // a caption, 'SECTION A-A'
+  source: { part: string; bodies?: string[] } | { assembly: string; explodedView?: string };
+  direction:
+    | 'front'
+    | 'back'
+    | 'left'
+    | 'right'
+    | 'top'
+    | 'bottom'
+    | 'isometric'
+    | { direction: Vec3; up: Vec3 };
+  scale: { paper: E; model: E }; // 1:5 is paper 1, model 5; 1-1/2" = 1' is paper 1-1/2", model 1'
+  position: [number, number]; // paper mm from the sheet's bottom-left corner, of the projected model origin
+  options: { hidden: boolean; smooth: boolean; section?: { normal: Vec3; offset: E } };
+}
+
+type DimensionRef = ({ vertex: VertexRef } | { edge: EdgeRef } | { face: FaceRef }) & {
+  body: string; // a body id of the view's part, or of the instance's part
+  instance?: string[]; // assembly views only: the instance path, today one instance id
+};
+
+type Dimension = {
+  id: 'dim#1';
+  view: string; // a view on the same sheet
+  text?: string; // replaces the value; `<>` stands for the value
+  decimals?: number; // 0 to 12, for decimal lengths and angles; absent: the display units'
+  denominator?: 1 | 2 | 4 | 8 | 16 | 32 | 64 | 128; // for ft-in and in-fraction
+} & (
+  | {
+      kind: 'horizontal' | 'vertical' | 'aligned';
+      refs: [DimensionRef, DimensionRef];
+      offset: number;
+    }
+  | { kind: 'radius' | 'diameter'; refs: [EdgeOrFaceRef]; at: [number, number] }
+  | { kind: 'angle'; refs: [EdgeOrFaceRef, EdgeOrFaceRef]; at: [number, number] }
+);
+
+interface Note {
+  id: 'note#1';
+  view?: string; // attached: `position` is from the view's position, so it moves with the view
+  position: [number, number]; // paper mm
+  text: string; // 1 to MAX_NOTE_TEXT (10,000) characters
+}
+```
+
+**Directions.** `STANDARD_VIEWS` gives each named view's `direction` (the way the viewer looks,
+from the eye into the model) and `up`, for a Z-up model in third-angle convention, as the spike
+used: front looks along +Y, right along -X, top down -Z, and isometric looks down from the front
+right. A custom direction gives both vectors (non-zero, not parallel). Views are orthographic.
+
+**Scale and position.** The scale is two length expressions so imperial scales keep their text and
+a scale can read a variable; the ratio is what they evaluate to. A view's `position` places the
+projection of the model origin, not the projected geometry's centre, so editing the model never
+moves a view on the sheet. A section view cuts the model by the plane at `offset` along `normal`
+from the origin and removes the side `normal` points to.
+
+**Dimensions store model references only** (T4.4a): the kernel's `VertexRef`, `EdgeRef` and
+`FaceRef`, with the body they are on and, in an assembly view, the instance. Regen resolves them
+like a feature's references and measures and projects their exact geometry; values are never
+stored, so a dimension follows model edits and is `lost` (never moved) when a reference is.
+How each kind is stored, which settles the spike review's open points:
+
+- **Linear** (`horizontal`, `vertical`, `aligned`): two references, each anchoring at a point (a
+  vertex; a line edge's midpoint; a circular edge's centre) or, for a planar face, a plane.
+  Between two planar faces the dimension stores both face references and nothing else, and its
+  value is the distance between the planes along the first face's normal (regen warns when they
+  are not parallel); a point and a plane measure along the plane's normal. `offset` places the
+  dimension line: the signed distance in paper mm from the first anchor, along the measuring
+  direction turned a quarter turn counter-clockwise (for `horizontal`, upwards).
+- **Angle**: two references, each a line edge or a planar face (a plane seen edge on is a line);
+  never a vertex. The arc is centred where the two projected lines meet, and `at` is a point on
+  it in paper mm from there: its length is the arc's radius, and its direction picks which of the
+  four angles is meant (the one containing `at`).
+- **Radius and diameter**: one circular edge or cylindrical face. Their leader is placed by a 2D
+  point, `at`, not a scalar offset: where the value's text sits, in paper mm from the projected
+  centre (a circle seen face on) or from the midpoint of the projected axis (a cylinder seen
+  across, drawn between its two silhouettes). Both the leader's angle and its length come from it.
+- Text, `decimals` and `denominator` override the document's display units for one dimension;
+  values are formatted with `packages/units`.
+
+**What blocks what.** A view's source blocks: `deletePart`, `deleteAssembly` and
+`deleteExplodedView` refuse while a view shows what they delete (`dependency`, `blockers` as
+`<drawing id>/<sheet id>/<view id>`; `partViews`, `assemblyViews`, `explodedViewViews` list them),
+unless the views are deleted or changed first in the same `batch`. A dimension's model references
+never block: deleting, suppressing or changing the feature that made a body, face, edge or vertex
+always succeeds, and regen's drawing stage reports the dimension `lost` (like print references and
+M5's CAM references), so validation checks only that they are well formed. That holds for
+instances too: in an assembly view each reference names one instance, but `deleteInstance` still
+succeeds while a dimension measures it, and the instance is not checked against the view's
+assembly (`instanceDimensions` lists the dimensions on an instance). A view's `bodies` are not
+checked against the part either. Inside a sheet, `deleteView` refuses while a dimension or note is
+in the view (`blockers`: their ids); deleting a sheet or a drawing takes everything on it.
+
+**Ids.** Drawings are `drawing#n` from the document's `nextIds.drawing`; inside a drawing, sheets
+are `sheet#n`, views `view#n`, dimensions `dim#n` and notes `note#n`, from the drawing's own
+`nextIds`, unique across the drawing's sheets and never reused. All have at most 15 digits.
+
+Validation refuses: a drawing id at or past its counter or used twice; an id inside a drawing at
+or past its counter or used twice in it; a view of a part, assembly or exploded view that does not
+exist; a body listed twice in a view; a dimension or note in a view that is not on its sheet; a
+dimension reference with an instance in a part view, without one (or with a path of more than one
+instance) in an assembly view; a sheet
+size, scale or section offset that does not parse or names an unknown variable. The schema refuses
+an unknown sheet size or key, a zero or parallel custom direction, a zero section normal, a vertex
+for a radius, diameter or angle, a linear dimension placed by `at` or another kind by `offset`,
+empty texts and labels, a paper coordinate or offset beyond `MAX_PAPER_COORDINATE` (1 km), more
+than `MAX_TITLE_FIELDS` (100) title fields, an empty `drawings`, and more than
+`MAX_DRAWING_ITEMS` (10,000) drawings, sheets per drawing, or views, dimensions or notes per sheet.
+
+`deleteVariable` refuses while a sheet size, a view scale or a section offset reads the variable
+(`variableUsers` lists the drawing id; `variableDrawings(doc, name)` the drawings), and
+`renameVariable` and `inlineVariable` rewrite them with `editSheet` and `editView`.
+`drawingVariableUses(doc, name)` lists each use in an exploded view or a drawing with its path; it
+is apart from `variableUses` so that code switching over every `VariableUse` kind keeps working.
+`drawingExpressions`, `sheetExpressions`, `viewExpressions`, `sheetIds`, `dimensionInstances` and
+`forEachView` are the generic views, in `src/features.ts`; `createDrawing(id, name)` makes an
+empty drawing and `findDrawing(doc, id)` finds one.
+
 ### Materials
 
 `MATERIALS` (`src/materials.ts`) is the built-in table: PLA, PETG, ABS, pine, oak, plywood, MDF,
@@ -518,7 +713,9 @@ variable or a feature reads it (`variableUsers` lists them).
 
 - `variableUses(doc, name)` lists each direct use: another variable, or a feature field with its
   path and expected kind (and `constraintId` for a sketch dimension); then mates, print setups and
-  configurations (see Assemblies, Print setups and Configurations).
+  configurations (see Assemblies, Print setups and Configurations). Uses in exploded views and
+  drawings are listed by `drawingVariableUses(doc, name)` (see Drawings); both edits below
+  rewrite them too.
 - `renameVariable(doc, from, to, expression?)` renames in place and rewrites every reference as
   `#to` (found by the parser, so `#width` is untouched when renaming `w`).
 - `inlineVariable(doc, name, literal)` writes `literal` into every use, parenthesised inside a
@@ -538,8 +735,9 @@ Ids are permanent and never reused, including after deletion (ADR 0004 decision 
 | geometry reference  | `r<n>`         | `r`                     |
 | sketch split pieces | `<id>#a`, `#b` | none: named from `<id>` |
 
-Assemblies have their own counters, per assembly (see Assemblies): `inst`, `mate`, `mc` and `r`.
-The print section has its own too (see Print setups): `print`, `item` and `r`.
+Assemblies have their own counters, per assembly (see Assemblies): `inst`, `mate`, `mc`, `r`,
+`explode` and `step`. The print section has its own too (see Print setups): `print`, `item` and
+`r`. So does each drawing (see Drawings): `sheet`, `view`, `dim` and `note`.
 
 All counters are per part, so sub-ids are unique across the part, not only within one feature.
 Entities are `e` and constraints `k` because T0.5 face names use sketch entity ids after `side:`
@@ -928,6 +1126,37 @@ resulting document with `checkDocument`, and returns `{ document, inverse }` or 
 | `addFont`                | `font` (a fresh `font#n`; not the same bytes twice), `index?` | `deleteFont`                                                           |
 | `deleteFont`             | `fontId` (refused while an outline uses it)                   | `restoreFont`                                                          |
 | `restoreFont`            | `font`, `index` (history only)                                | `deleteFont`                                                           |
+| `addExplodedView`        | `assemblyId`, `explodedView` (fresh ids), `index?`            | `deleteExplodedView`                                                   |
+| `editExplodedView`       | `assemblyId`, `explodedView` (by id; new ids fresh)           | `restoreExplodedView` (old state)                                      |
+| `deleteExplodedView`     | `assemblyId`, `explodedViewId` (not while a view shows it)    | `restoreExplodedView`                                                  |
+| `restoreExplodedView`    | `assemblyId`, `explodedView`, `index` (history only)          | `restoreExplodedView` or `deleteExplodedView`                          |
+| `addExplodeStep`         | `assemblyId`, `explodedViewId`, `step` (fresh), `index?`      | `deleteExplodeStep`                                                    |
+| `editExplodeStep`        | `assemblyId`, `explodedViewId`, `step` (by id)                | `restoreExplodeStep` (old state)                                       |
+| `deleteExplodeStep`      | `assemblyId`, `explodedViewId`, `stepId`                      | `restoreExplodeStep`                                                   |
+| `restoreExplodeStep`     | `assemblyId`, `explodedViewId`, `step`, `index` (history)     | `restoreExplodeStep` or `deleteExplodeStep`                            |
+| `addDrawing`             | `drawing` (a fresh `drawing#n`), `index?`                     | `deleteDrawing`                                                        |
+| `renameDrawing`          | `drawingId`, `name` (trimmed, 1 to 200 characters)            | `renameDrawing` (the old name)                                         |
+| `deleteDrawing`          | `drawingId` (with its sheets)                                 | `restoreDrawing`                                                       |
+| `restoreDrawing`         | `drawing`, `index` (history only)                             | `deleteDrawing`                                                        |
+| `reorderDrawings`        | `drawingId`, `index` (final position)                         | `reorderDrawings`                                                      |
+| `addSheet`               | `drawingId`, `sheet` (fresh ids, contents included), `index?` | `deleteSheet`                                                          |
+| `editSheet`              | `drawingId`, `sheetId`, fields to change (below)              | `editSheet` (the old values)                                           |
+| `deleteSheet`            | `drawingId`, `sheetId` (with everything on it)                | `restoreSheet`                                                         |
+| `restoreSheet`           | `drawingId`, `sheet`, `index` (history only)                  | `deleteSheet`                                                          |
+| `reorderSheets`          | `drawingId`, `sheetId`, `index` (final position)              | `reorderSheets`                                                        |
+| `addView`                | `drawingId`, `sheetId`, `view` (a fresh `view#n`), `index?`   | `deleteView`                                                           |
+| `editView`               | `drawingId`, `sheetId`, `view` (by id)                        | `restoreView` (old state)                                              |
+| `moveView`               | `drawingId`, `sheetId`, `viewId`, `position`                  | `moveView` (the old position)                                          |
+| `deleteView`             | `drawingId`, `sheetId`, `viewId` (not while in use)           | `restoreView`                                                          |
+| `restoreView`            | `drawingId`, `sheetId`, `view`, `index` (history only)        | `restoreView` or `deleteView`                                          |
+| `addDimension`           | `drawingId`, `sheetId`, `dimension` (fresh `dim#n`), `index?` | `deleteDimension`                                                      |
+| `editDimension`          | `drawingId`, `sheetId`, `dimension` (by id)                   | `restoreDimension` (old state)                                         |
+| `deleteDimension`        | `drawingId`, `sheetId`, `dimensionId`                         | `restoreDimension`                                                     |
+| `restoreDimension`       | `drawingId`, `sheetId`, `dimension`, `index` (history only)   | `restoreDimension` or `deleteDimension`                                |
+| `addNote`                | `drawingId`, `sheetId`, `note` (a fresh `note#n`), `index?`   | `deleteNote`                                                           |
+| `editNote`               | `drawingId`, `sheetId`, `note` (by id)                        | `restoreNote` (old state)                                              |
+| `deleteNote`             | `drawingId`, `sheetId`, `noteId`                              | `restoreNote`                                                          |
+| `restoreNote`            | `drawingId`, `sheetId`, `note`, `index` (history only)        | `restoreNote` or `deleteNote`                                          |
 | `replaceDocument`        | `document` (the same `id`; history only)                      | `replaceDocument` (the old document)                                   |
 | `batch`                  | `commands` (applied in order, all or nothing)                 | `batch` of inverses, reversed                                          |
 
@@ -970,6 +1199,21 @@ id, and the ids it introduces must be fresh: re-picking a `layFlat` face takes a
 `restorePrintSetup` and `restorePrintItem` are the history-only counterparts. None of them looks
 at geometry, and no part or feature command looks at print references (see Print setups).
 
+Exploded views and drawings: every list (exploded views and their steps, drawings, sheets, views,
+dimensions, notes) follows the rules of mates and print items. An add allocates every id the item
+carries (a sheet's views, dimensions and notes included) from its counter and refuses one handed
+out before (`id-reused`); an add past a list's cap is refused (`schema`). An edit replaces an item
+by id and its new ids must be fresh; its inverse is the history-only restore with the old state,
+which replaces by id at the same index, or inserts. `editExplodedView` replaces a whole exploded
+view, so it renames it and adds, removes, edits and reorders its steps in one undo step; the step
+commands do one step at a time. `editSheet` changes only the fields it is given (`name`, `size`,
+`orientation`, `titleBlock` with `null` for none) and its inverse gives exactly those fields their
+old values; `moveView` sets only a view's position (a drag). `addDrawing` takes a fresh
+`drawing#n` from the document's `nextIds.drawing`; the drawing's own `nextIds` must already cover
+the ids inside it. Removing the last drawing drops `drawings`, and the last exploded view drops
+`explodedViews`, so undo of the first add is exact and the saved text canonical. No drawing
+command looks at what a dimension's references name.
+
 `restoreFeature` is a history-only command: it is what undo and redo use to put a feature state
 back, and clients must not use it to edit. Unlike `addFeature` and `editFeature`, it requires its
 ids to have been allocated before, so undoing a delete brings back the same ids without counting
@@ -983,8 +1227,8 @@ replacement must have the same `id` and pass the schema and `checkDocument` as a
 assemblies and configurations included. It does not look at counters itself, so that its inverse
 can put back exactly what was there; a client builds the replacement with
 `restoredDocument(current, past)`, which keeps `past`'s content under `current`'s id and raises
-every counter (the document's, the print section's, and each part's and assembly's that both
-have) to the higher of the two values, so no id handed out after `past` is handed out again. In the op log the command
+every counter (the document's, the print section's, and each part's, assembly's and drawing's
+that both have) to the higher of the two values, so no id handed out after `past` is handed out again. In the op log the command
 carries the whole document: imported files and pinned versions are stored by reference as for any
 command, so it is the feature JSON that repeats.
 
@@ -1057,7 +1301,10 @@ Per assembly, `assemblies` lists added, removed and changed instances (anything 
 the instances whose pose changed (`posed`), added, removed and changed mates (edited,
 suppressed, renamed, or with an offset or limit reading a changed variable, also through the
 active configuration row), whether mates were reordered, and `posesOnly`: only poses changed, as
-after a committed drag, so nothing regenerates and nothing needs solving again. An assembly change
+after a committed drag, so nothing regenerates and nothing needs solving again. It also lists
+added, removed and changed exploded views (`explodedViews`, a step distance reading a changed
+variable counts), whether they were reordered, and `explodedOnly`: only exploded views changed, so
+nothing regenerates or solves, and only the exploded offsets are computed again. An assembly change
 never lists a part in `parts`; an instance's geometry changes when its part does, which `parts`
 reports.
 
@@ -1068,6 +1315,13 @@ added, removed and changed setup ids and `print.reordered` whether their order c
 edit adds nothing to `parts`, so it has no `firstAffectedIndex`; the print workspace re-checks the
 setups listed, and re-checks every setup when `parts` reports a part it prints.
 
+Drawings never dirty a regen either. `drawingChanged` says `drawings` changed: a drawing, sheet,
+view, dimension or note added, removed or edited, drawings reordered, or a sheet size, view scale
+or section offset reading a changed variable. `drawings.drawings` lists the added, removed and
+changed drawing ids and `drawings.reordered` whether their order changed. A drawing-only edit adds
+nothing to `parts` or `assemblies`, so it has no `firstAffectedIndex`; a model edit sets no
+`drawingChanged`, since regen caches views by the bodies they show (T4.4e).
+
 `domainChanged` lists, sorted, the namespaces whose `domains` entry was added, removed or changed
 (since version 11). It adds nothing to `parts` and has no `firstAffectedIndex`. There is no
 per-domain hook: regen marks dirty every extension of a domain that may read the namespace, and the
@@ -1075,8 +1329,8 @@ cache sorts out the rest (ADR 0013 decision 5).
 
 ## File format
 
-`serialize(doc)` writes canonical JSON: keys in schema order (records such as `nextIds` and a row's
-`values` sorted),
+`serialize(doc)` writes canonical JSON: keys in schema order (records such as every `nextIds`,
+a drawing's included, and a row's `values` sorted),
 two-space indent, trailing newline. `deserialize(text)` (or `parseDocument(value)`) loads:
 
 1. parse the JSON (`json` error);
@@ -1109,7 +1363,7 @@ solids in one compound (`v3-two-bodies.json`) regenerates the same solids, now a
 to exactly `v4-bracket.json` and that to exactly `v5-bracket.json` and that to exactly
 `v6-bracket.json` and that to exactly `v7-bracket.json` and that to exactly `v8-bracket.json`
 and that to exactly `v9-bracket.json` and that to exactly `v10-bracket.json` and that to exactly
-`v11-bracket.json`, and
+`v11-bracket.json` and that to exactly `v12-bracket.json`, and
 `v3-two-bodies.json` to
 exactly `v4-two-bodies.json`. Version 5 added the optional configuration table; `migrateV4ToV5`
 only bumps the version, since a version 4 document has none and an absent counter starts at 1.
@@ -1132,7 +1386,10 @@ no text and the `font` counter starts at 1; `v8-bracket.json` migrates to exactl
 and change bodies (optional `operation` and `scope`, and `<id>:<key>` body ids) and added the
 optional `domains` (ADR 0013 decisions 3 and 6); `migrateV10ToV11` only bumps the version, since
 both are optional and a version 10 file has neither; `v10-bracket.json` migrates to exactly
-`v11-bracket.json`.
+`v11-bracket.json`. Version 12 added drawings (the optional document-level `drawings`) and
+exploded views (the optional `explodedViews` of an assembly), M4 plan decisions 7 and 9;
+`migrateV11ToV12` only bumps the version, since both are optional, absent when empty, and a version
+11 file has neither; `v11-bracket.json` migrates to exactly `v12-bracket.json`.
 
 To change the file shape:
 
@@ -1143,7 +1400,7 @@ To change the file shape:
 
 ## Where this deviates from ADR 0004's first cut
 
-- **Added fields.** The document has `id`, `name`, `nextIds`, `assemblies`, `print` and an optional `configurations`; a part has `name`,
+- **Added fields.** The document has `id`, `name`, `nextIds`, `assemblies`, `print` and optional `configurations` and `drawings`; a part has `name`,
   `rollbackIndex`, an optional `material` (the default for its bodies) and `bodies`;
   every feature has `name` and `suppressed`. The ADR's shape was a first cut that expected feature kinds
   to add their own fields.

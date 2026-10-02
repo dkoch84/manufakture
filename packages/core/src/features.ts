@@ -2,6 +2,11 @@ import type {
   Assembly,
   ConstraintKind,
   DerivedSource,
+  Dimension,
+  Drawing,
+  DrawingView,
+  ExplodedView,
+  ExplodeStep,
   Feature,
   FeatureKind,
   InstanceSource,
@@ -11,6 +16,7 @@ import type {
   PrintItem,
   PrintSetup,
   Reference,
+  Sheet,
   SketchConstraint,
   SketchEntity,
   StoredExpression,
@@ -463,4 +469,109 @@ export function printSetupExpressions(setup: PrintSetup): ExpressionSite[] {
       printItemExpressions(item).map((site) => ({ ...site, path: ['items', i, ...site.path] })),
     ),
   ];
+}
+
+// ---------------------------------------------------------------------------------------------
+// Exploded views and drawings (since version 12): generic views, as above for mates and setups.
+
+/** Every id an exploded view owns: its own, then its steps' (`step#n`), in step order. */
+export function explodedViewIds(view: ExplodedView): string[] {
+  return [view.id, ...view.steps.map((s) => s.id)];
+}
+
+/** The instances a step names: those it moves, then the one its direction is read from, if any. */
+export function explodeStepInstances(step: ExplodeStep): string[] {
+  return 'instance' in step.direction
+    ? [...step.instances, step.direction.instance]
+    : [...step.instances];
+}
+
+/** An exploded view's expressions (each step's distance), with paths from the view. */
+export function explodedViewExpressions(view: ExplodedView): ExpressionSite[] {
+  return view.steps.map((step, i) => ({
+    path: ['steps', i, 'distance'],
+    expression: step.distance,
+    expected: 'length' as const,
+  }));
+}
+
+/**
+ * The exploded views of an assembly that move instance `instanceId` or read a direction from it,
+ * by id.
+ */
+export function instanceExplodedViews(assembly: Assembly, instanceId: string): string[] {
+  return (assembly.explodedViews ?? [])
+    .filter((v) => v.steps.some((s) => explodeStepInstances(s).includes(instanceId)))
+    .map((v) => v.id);
+}
+
+/** A sheet's size expressions (a custom size's sides), with paths from the sheet. */
+export function sheetExpressions(sheet: Sheet): ExpressionSite[] {
+  if (typeof sheet.size === 'string') return [];
+  return [
+    { path: ['size', 'width'], expression: sheet.size.width, expected: 'length' },
+    { path: ['size', 'height'], expression: sheet.size.height, expected: 'length' },
+  ];
+}
+
+/** A view's expressions (its scale, and a section's offset), with paths from the view. */
+export function viewExpressions(view: DrawingView): ExpressionSite[] {
+  const out: ExpressionSite[] = [
+    { path: ['scale', 'paper'], expression: view.scale.paper, expected: 'length' },
+    { path: ['scale', 'model'], expression: view.scale.model, expected: 'length' },
+  ];
+  const section = view.options.section;
+  if (section !== undefined) {
+    out.push({
+      path: ['options', 'section', 'offset'],
+      expression: section.offset,
+      expected: 'length',
+    });
+  }
+  return out;
+}
+
+/**
+ * Every expression in a drawing, with paths from the drawing: per sheet, its size, then its
+ * views' (`['sheets', 0, 'views', 2, 'scale', 'paper']`).
+ */
+export function drawingExpressions(drawing: Drawing): ExpressionSite[] {
+  return drawing.sheets.flatMap((sheet, si) => [
+    ...sheetExpressions(sheet).map((site) => ({ ...site, path: ['sheets', si, ...site.path] })),
+    ...sheet.views.flatMap((view, vi) =>
+      viewExpressions(view).map((site) => ({
+        ...site,
+        path: ['sheets', si, 'views', vi, ...site.path],
+      })),
+    ),
+  ]);
+}
+
+/** Every id a sheet owns: its own, then its views', dimensions' and notes'. */
+export function sheetIds(sheet: Sheet): string[] {
+  return [
+    sheet.id,
+    ...sheet.views.map((v) => v.id),
+    ...sheet.dimensions.map((d) => d.id),
+    ...sheet.notes.map((n) => n.id),
+  ];
+}
+
+/** The instance ids a dimension's references name (the first of each instance path). */
+export function dimensionInstances(dimension: Dimension): string[] {
+  const out: string[] = [];
+  for (const ref of dimension.refs) {
+    if (ref.instance !== undefined) out.push(ref.instance[0]!);
+  }
+  return out;
+}
+
+/** Visits every view of every drawing, with where it is. */
+export function forEachView(
+  drawings: readonly Drawing[] | undefined,
+  visit: (view: DrawingView, sheet: Sheet, drawing: Drawing) => void,
+): void {
+  for (const drawing of drawings ?? []) {
+    for (const sheet of drawing.sheets) for (const view of sheet.views) visit(view, sheet, drawing);
+  }
 }

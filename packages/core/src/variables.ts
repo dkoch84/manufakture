@@ -2,27 +2,34 @@
 // inlining one (replacing each reference with a literal, then deleting it). Both return one
 // `batch` command, so each is a single undo step, checked once at the end like any batch.
 // Configurations count as uses: a parameter that configures a variable, and a row value that
-// mentions one. So do mates: a connector offset or a limit that reads a variable; and print
-// setups: a threshold or an item's orientation angle.
+// mentions one. So do mates: a connector offset or a limit that reads a variable; print setups:
+// a threshold or an item's orientation angle; exploded views: a step's distance; and drawings: a
+// custom sheet size, a view's scale or a section's offset.
 
 import { isValidVariableName } from '@manufakture/units';
 import { variableParameters, type Command, type SimpleCommand } from './commands';
 import {
+  explodedViewExpressions,
   featureExpressions,
   mateExpressions,
   printItemExpressions,
   printSetupExpressions,
   printThresholdExpressions,
+  sheetExpressions,
+  viewExpressions,
   type ExpressionKind,
 } from './features';
 import { fail, ok, type CoreResult } from './result';
 import type {
   ConfigRow,
+  DrawingView,
+  ExplodedView,
   Feature,
   ManufaktureDocument,
   Mate,
   PrintItem,
   PrintThresholds,
+  SheetSize,
   StoredExpression,
 } from './schema';
 import { expressionReferences } from './validate';
@@ -65,6 +72,37 @@ export type VariableUse =
   /** A configuration row whose value for `parameterId` mentions the variable. */
   | { kind: 'row'; rowId: string; parameterId: string };
 
+/**
+ * A use of a variable in an exploded view or a drawing (since version 12). Kept apart from
+ * `VariableUse` so code that switches over every `VariableUse` kind keeps working; list them with
+ * `drawingVariableUses`. `renameVariable`, `inlineVariable` and `variableUsers` cover them.
+ */
+export type DrawingVariableUse =
+  /**
+   * A step distance of an exploded view. `path` is from the exploded view:
+   * `['steps', 1, 'distance']`.
+   */
+  | {
+      kind: 'explodedView';
+      assemblyId: string;
+      explodedViewId: string;
+      stepId: string;
+      path: readonly (string | number)[];
+      expected: ExpressionKind;
+    }
+  /**
+   * A drawing's custom sheet size (no `viewId`) or a view's scale or section offset. `path` is
+   * from the drawing: `['sheets', 0, 'views', 2, 'scale', 'model']`.
+   */
+  | {
+      kind: 'drawing';
+      drawingId: string;
+      sheetId: string;
+      viewId?: string;
+      path: readonly (string | number)[];
+      expected: ExpressionKind;
+    };
+
 function mentions(expression: StoredExpression, name: string): boolean {
   const r = expressionReferences(expression.source);
   return r.ok && r.value.some((ref) => ref.name === name);
@@ -74,6 +112,7 @@ function mentions(expression: StoredExpression, name: string): boolean {
  * Every direct use of variable `name`, in document order: variables, then features, then mates
  * (assembly by assembly, in creation order), then print setups (thresholds, then items), then
  * configuration parameters that configure it, then configuration row values that mention it.
+ * Uses in exploded views and drawings are listed by `drawingVariableUses`.
  */
 export function variableUses(doc: ManufaktureDocument, name: string): VariableUse[] {
   const out: VariableUse[] = [];
@@ -139,6 +178,50 @@ export function variableUses(doc: ManufaktureDocument, name: string): VariableUs
 }
 
 /**
+ * Every use of variable `name` in exploded views (assembly by assembly, step by step) and then in
+ * drawings (sheet by sheet: its size, then its views), in document order.
+ */
+export function drawingVariableUses(doc: ManufaktureDocument, name: string): DrawingVariableUse[] {
+  const out: DrawingVariableUse[] = [];
+  for (const assembly of doc.assemblies) {
+    for (const view of assembly.explodedViews ?? []) {
+      for (const site of explodedViewExpressions(view)) {
+        if (!mentions(site.expression, name)) continue;
+        out.push({
+          kind: 'explodedView',
+          assemblyId: assembly.id,
+          explodedViewId: view.id,
+          stepId: view.steps[site.path[1] as number]!.id,
+          path: site.path,
+          expected: site.expected,
+        });
+      }
+    }
+  }
+  for (const drawing of doc.drawings ?? []) {
+    drawing.sheets.forEach((sheet, si) => {
+      const base = { kind: 'drawing' as const, drawingId: drawing.id, sheetId: sheet.id };
+      for (const site of sheetExpressions(sheet)) {
+        if (!mentions(site.expression, name)) continue;
+        out.push({ ...base, path: ['sheets', si, ...site.path], expected: site.expected });
+      }
+      sheet.views.forEach((view, vi) => {
+        for (const site of viewExpressions(view)) {
+          if (!mentions(site.expression, name)) continue;
+          out.push({
+            ...base,
+            viewId: view.id,
+            path: ['sheets', si, 'views', vi, ...site.path],
+            expected: site.expected,
+          });
+        }
+      });
+    });
+  }
+  return out;
+}
+
+/**
  * `source` with every reference to variable `name` replaced by `replacement(hashed)`, or null
  * when it does not parse. References are found by the parser, so text inside other names
  * (`#width` when renaming `w`) is never touched.
@@ -175,8 +258,9 @@ function replaceAt<T>(value: T, path: readonly (string | number)[], next: unknow
 
 /**
  * The commands that rewrite every expression reading `name` with `rewrite` (variables other
- * than `name` itself, then features, then mates, then print setups and items, then
- * configuration rows), without deleting or adding anything.
+ * than `name` itself, then features, then mates, then print setups and items, then exploded
+ * views, then drawing sheets and views, then configuration rows), without deleting or adding
+ * anything.
  */
 function rewriteUses(
   doc: ManufaktureDocument,
@@ -234,6 +318,43 @@ function rewriteUses(
         next = replaceAt(next, site.path, { ...site.expression, source });
       }
       if (next !== item) commands.push({ type: 'editPrintItem', setupId: setup.id, item: next });
+    }
+  }
+  for (const assembly of doc.assemblies) {
+    for (const view of assembly.explodedViews ?? []) {
+      let next: ExplodedView = view;
+      for (const site of explodedViewExpressions(view)) {
+        if (!mentions(site.expression, name)) continue;
+        const source = rewrite(site.expression.source);
+        if (source === null) continue;
+        next = replaceAt(next, site.path, { ...site.expression, source });
+      }
+      if (next !== view) {
+        commands.push({ type: 'editExplodedView', assemblyId: assembly.id, explodedView: next });
+      }
+    }
+  }
+  for (const drawing of doc.drawings ?? []) {
+    for (const sheet of drawing.sheets) {
+      const ids = { drawingId: drawing.id, sheetId: sheet.id };
+      let size: SheetSize = sheet.size;
+      for (const site of sheetExpressions(sheet)) {
+        if (!mentions(site.expression, name)) continue;
+        const source = rewrite(site.expression.source);
+        if (source === null) continue;
+        size = replaceAt(size, site.path.slice(1), { ...site.expression, source });
+      }
+      if (size !== sheet.size) commands.push({ type: 'editSheet', ...ids, size });
+      for (const view of sheet.views) {
+        let next: DrawingView = view;
+        for (const site of viewExpressions(view)) {
+          if (!mentions(site.expression, name)) continue;
+          const source = rewrite(site.expression.source);
+          if (source === null) continue;
+          next = replaceAt(next, site.path, { ...site.expression, source });
+        }
+        if (next !== view) commands.push({ type: 'editView', ...ids, view: next });
+      }
     }
   }
   for (const row of doc.configurations?.rows ?? []) {

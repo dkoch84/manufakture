@@ -1082,7 +1082,10 @@ describe('changes', () => {
         posed: ['inst#2'],
         mates: { added: [], removed: [], changed: [] },
         matesReordered: false,
+        explodedViews: { added: [], removed: [], changed: [] },
+        explodedViewsReordered: false,
         posesOnly: true,
+        explodedOnly: false,
       },
     ]);
   });

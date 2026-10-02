@@ -30,7 +30,7 @@ import { MATERIAL_IDS } from './materials';
  */
 
 /** The file format version this code reads and writes. Bump it only together with a migration. */
-export const FORMAT_VERSION = 11;
+export const FORMAT_VERSION = 12;
 /** The topological naming scheme version (T0.5) that stored references are written in. */
 export const NAMING_SCHEME = 1;
 export const FORMAT_TAG = 'manufakture';
@@ -153,24 +153,24 @@ export const StoredExpressionSchema = z.strictObject({
 // Display units (ADR 0005 decision 3). Shapes match `LengthFormat` and `AngleFormat` in units.
 
 const decimals = z.int().min(0).max(12);
+/** The denominators a fraction may be shown with. */
+export const FractionDenominatorSchema = z.union(
+  [1, 2, 4, 8, 16, 32, 64, 128].map((d) => z.literal(d)) as [
+    z.ZodLiteral<1>,
+    z.ZodLiteral<2>,
+    z.ZodLiteral<4>,
+    z.ZodLiteral<8>,
+    z.ZodLiteral<16>,
+    z.ZodLiteral<32>,
+    z.ZodLiteral<64>,
+    z.ZodLiteral<128>,
+  ],
+);
 export const LengthDisplaySchema = z.discriminatedUnion('unit', [
   z.strictObject({ unit: LengthUnitSchema, decimals: decimals.optional() }),
   z.strictObject({
     unit: z.enum(['ft-in', 'in-fraction']),
-    denominator: z
-      .union(
-        [1, 2, 4, 8, 16, 32, 64, 128].map((d) => z.literal(d)) as [
-          z.ZodLiteral<1>,
-          z.ZodLiteral<2>,
-          z.ZodLiteral<4>,
-          z.ZodLiteral<8>,
-          z.ZodLiteral<16>,
-          z.ZodLiteral<32>,
-          z.ZodLiteral<64>,
-          z.ZodLiteral<128>,
-        ],
-      )
-      .optional(),
+    denominator: FractionDenominatorSchema.optional(),
   }),
 ]);
 export const AngleDisplaySchema = z.strictObject({
@@ -1468,6 +1468,65 @@ export const MateSchema = z
     }
   });
 
+// Exploded views (since version 12; M4 plan decision 9): named, ordered steps that move instances
+// for display, on top of the solved poses, never changing them.
+
+/** Assembly-level `nextIds` keys for exploded views (`explode#n`) and their steps (`step#n`). */
+export const EXPLODED_VIEW_COUNTER = 'explode';
+export const EXPLODE_STEP_COUNTER = 'step';
+export const EXPLODED_VIEW_ID_PATTERN = /^explode#[1-9][0-9]{0,14}$/;
+export const EXPLODE_STEP_ID_PATTERN = /^step#[1-9][0-9]{0,14}$/;
+export const ExplodedViewIdSchema = counted(EXPLODED_VIEW_ID_PATTERN, 'explode#1');
+export const ExplodeStepIdSchema = counted(EXPLODE_STEP_ID_PATTERN, 'step#1');
+
+const nonZeroVec3 = Vec3Schema.check((ctx) => {
+  if (!nonZero(ctx.value)) {
+    ctx.issues.push({ code: 'custom', message: 'a direction must not be zero', input: ctx.value });
+  }
+});
+
+/**
+ * Which way a step moves its instances. `vector`: a direction in the assembly's frame (any
+ * length but zero; only its direction counts). `edge` or `face`: the direction of a named line
+ * edge, or the normal of a planar face or the axis of a cylindrical face, of `instance` (an
+ * instance of the same assembly) at its solved pose, in that instance's part's names, as a mate
+ * connector's origin; `flip` turns it round. Resolving a reference is regen's (T4.5a): a lost one
+ * is a warning on the step, never a load error.
+ */
+export const ExplodeDirectionSchema = z.union([
+  z.strictObject({ vector: nonZeroVec3 }),
+  z.strictObject({
+    instance: InstanceIdSchema,
+    edge: EdgeRefSchema,
+    flip: z.literal(true).exactOptional(),
+  }),
+  z.strictObject({
+    instance: InstanceIdSchema,
+    face: FaceRefSchema,
+    flip: z.literal(true).exactOptional(),
+  }),
+]);
+
+/** One step: move `instances` along `direction` by `distance` (a length expression). */
+export const ExplodeStepSchema = z.strictObject({
+  id: ExplodeStepIdSchema,
+  /** Instances of the same assembly, each once. */
+  instances: z.array(InstanceIdSchema).min(1).max(MAX_ASSEMBLY_ITEMS),
+  direction: ExplodeDirectionSchema,
+  distance: StoredExpressionSchema,
+});
+
+/**
+ * An exploded view of an assembly. Steps apply in order and add up: an instance moved by two
+ * steps ends up at the sum of both moves, each along its direction as resolved at the solved
+ * poses.
+ */
+export const ExplodedViewSchema = z.strictObject({
+  id: ExplodedViewIdSchema,
+  name: featureName,
+  steps: z.array(ExplodeStepSchema).max(MAX_ASSEMBLY_ITEMS),
+});
+
 /** An assembly (README, "Assemblies"). Since version 7. */
 export const AssemblySchema = z.strictObject({
   id: AssemblyIdSchema,
@@ -1475,7 +1534,15 @@ export const AssemblySchema = z.strictObject({
   instances: z.array(InstanceSchema).max(MAX_ASSEMBLY_ITEMS),
   /** In creation order: the last is the newest. */
   mates: z.array(MateSchema).max(MAX_ASSEMBLY_ITEMS),
-  /** Next number per id counter (`inst`, `mate`, `mc`, `r`). Only ever increases. */
+  /**
+   * Exploded views, in display order; absent when the assembly has none, never empty. Since
+   * version 12.
+   */
+  explodedViews: z.array(ExplodedViewSchema).min(1).max(MAX_ASSEMBLY_ITEMS).exactOptional(),
+  /**
+   * Next number per id counter (`inst`, `mate`, `mc`, `r`, `explode`, `step`). Only ever
+   * increases.
+   */
   nextIds: z.record(z.string(), z.int().min(1)),
 });
 
@@ -1598,6 +1665,323 @@ export const PrintDataSchema = z.strictObject({
   nextIds: z.record(z.string(), z.int().min(1)),
 });
 
+// ---------------------------------------------------------------------------------------------
+// Drawings (since version 12; M4 plan decision 7, T4.4a spike "the dimension model"). Document
+// state, not features: a drawing changes no geometry. Views are computed by regen on request and
+// never stored; a dimension stores model references, never drawing geometry.
+
+/** The document-level `nextIds` key for drawing ids (`drawing#n`). */
+export const DRAWING_COUNTER = 'drawing';
+/** Drawing-level `nextIds` keys: sheets, views, dimensions and notes. */
+export const SHEET_COUNTER = 'sheet';
+export const VIEW_COUNTER = 'view';
+export const DIMENSION_COUNTER = 'dim';
+export const NOTE_COUNTER = 'note';
+export const DRAWING_ID_PATTERN = /^drawing#[1-9][0-9]{0,14}$/;
+export const SHEET_ID_PATTERN = /^sheet#[1-9][0-9]{0,14}$/;
+export const VIEW_ID_PATTERN = /^view#[1-9][0-9]{0,14}$/;
+export const DIMENSION_ID_PATTERN = /^dim#[1-9][0-9]{0,14}$/;
+export const NOTE_ID_PATTERN = /^note#[1-9][0-9]{0,14}$/;
+export const DrawingIdSchema = counted(DRAWING_ID_PATTERN, 'drawing#1');
+export const SheetIdSchema = counted(SHEET_ID_PATTERN, 'sheet#1');
+export const ViewIdSchema = counted(VIEW_ID_PATTERN, 'view#1');
+export const DimensionIdSchema = counted(DIMENSION_ID_PATTERN, 'dim#1');
+export const NoteIdSchema = counted(NOTE_ID_PATTERN, 'note#1');
+
+/**
+ * The most drawings a document, sheets a drawing, and views, dimensions or notes a sheet may hold.
+ * A real drawing has a few sheets of tens of views; the caps bound what a crafted file costs.
+ */
+export const MAX_DRAWING_ITEMS = 10_000;
+/**
+ * The farthest any paper coordinate or offset may be from the sheet's corner, in millimetres
+ * (1 km). Far beyond A0; it keeps a crafted value from wrecking layout arithmetic.
+ */
+export const MAX_PAPER_COORDINATE = 1e6;
+/** The most code points a note's text, or a dimension's text override, may have. */
+export const MAX_NOTE_TEXT = 10_000;
+/** The most fields a title block may have, and the longest label and value, in code points. */
+export const MAX_TITLE_FIELDS = 100;
+export const MAX_TITLE_LABEL = 100;
+export const MAX_TITLE_VALUE = 1000;
+/** The longest instance path a dimension reference may store. Assemblies do not nest yet. */
+export const MAX_INSTANCE_PATH = 32;
+
+/** A string of `min` to `max` code points (the cheap UTF-16 bound first). */
+const codePoints = (max: number, what: string, min = 0) =>
+  z
+    .string()
+    .min(min)
+    .max(2 * max, { abort: true })
+    .refine((t) => codePointLength(t) <= max, `${what} holds at most ${max} characters`);
+
+const paperNumber = z.number().min(-MAX_PAPER_COORDINATE).max(MAX_PAPER_COORDINATE);
+/** A point or offset on the paper, in millimetres. */
+export const PaperPointSchema = z.tuple([paperNumber, paperNumber]).readonly();
+
+/** The standard sheet sizes (ISO 216 A0 to A4; US letter and tabloid). */
+export const SHEET_SIZES = ['A4', 'A3', 'A2', 'A1', 'A0', 'letter', 'tabloid'] as const;
+/** Each standard size's sides in millimetres, the shorter first. */
+export const SHEET_SIZE_MM: Readonly<
+  Record<(typeof SHEET_SIZES)[number], readonly [number, number]>
+> = {
+  A4: [210, 297],
+  A3: [297, 420],
+  A2: [420, 594],
+  A1: [594, 841],
+  A0: [841, 1189],
+  letter: [215.9, 279.4],
+  tabloid: [279.4, 431.8],
+};
+export const SheetSizeSchema = z.union([
+  z.enum(SHEET_SIZES),
+  /** A custom size: the two sides, as length expressions. */
+  z.strictObject({ width: StoredExpressionSchema, height: StoredExpressionSchema }),
+]);
+
+export const TitleBlockSchema = z.strictObject({
+  /** Label and value pairs, in display order (`Title`, `Drawn by`, `Material`). */
+  fields: z
+    .array(
+      z.strictObject({
+        label: codePoints(MAX_TITLE_LABEL, 'A title block label', 1),
+        value: codePoints(MAX_TITLE_VALUE, 'A title block value'),
+      }),
+    )
+    .max(MAX_TITLE_FIELDS),
+});
+
+/**
+ * What a view shows: a part studio of this document (all its bodies, or the listed ones, by body
+ * id in that part), or an assembly of this document, assembled or as one of its exploded views.
+ */
+export const ViewSourceSchema = z.union([
+  z.strictObject({
+    part: z.string().min(1).max(MAX_PART_ID_LENGTH),
+    bodies: z.array(BodyIdSchema).min(1).max(MAX_BODY_LIST).exactOptional(),
+  }),
+  z.strictObject({
+    assembly: AssemblyIdSchema,
+    explodedView: ExplodedViewIdSchema.exactOptional(),
+  }),
+]);
+
+/** The named standard views (third-angle, Z up), with their directions in `STANDARD_VIEWS`. */
+export const STANDARD_VIEW_NAMES = [
+  'front',
+  'back',
+  'left',
+  'right',
+  'top',
+  'bottom',
+  'isometric',
+] as const;
+export type StandardViewName = (typeof STANDARD_VIEW_NAMES)[number];
+
+const S3 = 1 / Math.sqrt(3);
+/**
+ * Each standard view's `direction` (the way the viewer looks, from the eye into the model) and
+ * `up` (the model direction that points up on the paper), for a Z-up model: front looks along +Y,
+ * right along -X, top down -Z; isometric looks down from the front right. As in the T4.4a spike.
+ */
+export const STANDARD_VIEWS: Readonly<
+  Record<StandardViewName, { readonly direction: Vec3; readonly up: Vec3 }>
+> = {
+  front: { direction: [0, 1, 0], up: [0, 0, 1] },
+  back: { direction: [0, -1, 0], up: [0, 0, 1] },
+  left: { direction: [1, 0, 0], up: [0, 0, 1] },
+  right: { direction: [-1, 0, 0], up: [0, 0, 1] },
+  top: { direction: [0, 0, -1], up: [0, 1, 0] },
+  bottom: { direction: [0, 0, 1], up: [0, -1, 0] },
+  isometric: { direction: [-S3, S3, -S3], up: [0, 0, 1] },
+};
+
+/**
+ * A view direction: a standard view by name, or a custom one (`direction` the way the viewer
+ * looks, `up` the model direction shown upwards; both non-zero, not parallel; in the frame of the
+ * view's part or assembly). Orthographic only.
+ */
+export const ViewDirectionSchema = z.union([
+  z.enum(STANDARD_VIEW_NAMES),
+  z.strictObject({ direction: nonZeroVec3, up: nonZeroVec3 }).check((ctx) => {
+    const { direction: d, up: u } = ctx.value;
+    const cross = Math.hypot(
+      d[1] * u[2] - d[2] * u[1],
+      d[2] * u[0] - d[0] * u[2],
+      d[0] * u[1] - d[1] * u[0],
+    );
+    if (nonZero(d) && nonZero(u) && cross / (Math.hypot(...d) * Math.hypot(...u)) < 1e-9) {
+      ctx.issues.push({
+        code: 'custom',
+        message: 'up must not be parallel to the view direction',
+        input: u,
+        path: ['up'],
+      });
+    }
+  }),
+]);
+
+/**
+ * A view's scale, paper length to model length, both length expressions: `1:5` is `paper` 1 and
+ * `model` 5 (any one unit), `1-1/2" = 1'` is `paper` 1-1/2" and `model` 1'. How it is written on
+ * the sheet is `packages/drawing`'s; the ratio is what the expressions evaluate to.
+ */
+export const ViewScaleSchema = z.strictObject({
+  paper: StoredExpressionSchema,
+  model: StoredExpressionSchema,
+});
+
+/** How a view is drawn. */
+export const ViewOptionsSchema = z.strictObject({
+  /** Draw hidden edges (dashed). */
+  hidden: z.boolean(),
+  /** Draw smooth edges (where tangent faces meet). */
+  smooth: z.boolean(),
+  /**
+   * A section view: the model is cut by the plane at signed distance `offset` (a length) from
+   * the model origin along `normal`, and the part on the side `normal` points to is removed.
+   * Absent: no section.
+   */
+  section: z.strictObject({ normal: nonZeroVec3, offset: StoredExpressionSchema }).exactOptional(),
+});
+
+export const ViewSchema = z.strictObject({
+  id: ViewIdSchema,
+  /** A caption (`SECTION A-A`); absent: none. */
+  label: codePoints(MAX_TITLE_LABEL, 'A view label', 1).exactOptional(),
+  source: ViewSourceSchema,
+  direction: ViewDirectionSchema,
+  scale: ViewScaleSchema,
+  /**
+   * Where the projection of the model origin (the part's or assembly's) lands on the sheet, in
+   * paper millimetres from the sheet's bottom-left corner. Anchored to the origin, not to the
+   * projected geometry, so a model edit never moves a view.
+   */
+  position: PaperPointSchema,
+  options: ViewOptionsSchema,
+});
+
+const refTarget = {
+  /** The body the reference is on, by body id in the view's part (or in the instance's part). */
+  body: BodyIdSchema,
+  /**
+   * Assembly views only: the instance path from the view's assembly to the part, today one
+   * instance id (assemblies do not nest). Absent in a part view.
+   */
+  instance: z.array(InstanceIdSchema).min(1).max(MAX_INSTANCE_PATH).exactOptional(),
+};
+
+/**
+ * A model reference a dimension measures (T4.4a): a vertex (the kernel's `vertexName`), an edge
+ * (ADR 0004's `EdgeRef`) or a face (`FaceRef`: planes, and cylinders for radius, diameter and
+ * silhouettes), on one body, by name. Regen resolves it like a feature's reference.
+ */
+export const DimensionRefSchema = z.union([
+  z.strictObject({ vertex: VertexRefSchema, ...refTarget }),
+  z.strictObject({ edge: EdgeRefSchema, ...refTarget }),
+  z.strictObject({ face: FaceRefSchema, ...refTarget }),
+]);
+/** An edge or a face reference: what a radius, diameter or angle dimension can measure. */
+const EdgeOrFaceRefSchema = z.union([
+  z.strictObject({ edge: EdgeRefSchema, ...refTarget }),
+  z.strictObject({ face: FaceRefSchema, ...refTarget }),
+]);
+
+export const LINEAR_DIMENSION_KINDS = ['horizontal', 'vertical', 'aligned'] as const;
+export const DIMENSION_KIND_NAMES = [
+  ...LINEAR_DIMENSION_KINDS,
+  'radius',
+  'diameter',
+  'angle',
+] as const;
+
+const dimensionBase = {
+  id: DimensionIdSchema,
+  /** The view on the same sheet the dimension is drawn in, and whose projection places it. */
+  view: ViewIdSchema,
+  /** Replaces the shown value; `<>` in it stands for the value. Absent: the value alone. */
+  text: codePoints(MAX_NOTE_TEXT, 'A dimension text', 1).exactOptional(),
+  /** Decimal places when the value shows as a decimal (lengths in mm, cm, m, in, ft; angles). */
+  decimals: z.int().min(0).max(12).exactOptional(),
+  /** The fraction denominator when the length shows in `ft-in` or `in-fraction`. */
+  denominator: FractionDenominatorSchema.exactOptional(),
+};
+
+/**
+ * A dimension (README, "Drawings"). Values are never stored: regen measures the references on the
+ * current model at every use, so the dimension follows model edits, and is `lost` when a
+ * reference is.
+ *
+ * - Linear (`horizontal`, `vertical`, `aligned`): two references. Each anchors at a point: a
+ *   vertex; a line edge's midpoint or a circular edge's centre; a planar face is a plane. Between
+ *   a point and a plane, or two parallel planes, the distance is measured along the (first) plane's
+ *   normal: two planar faces store both face references and nothing else. `offset` is the signed
+ *   distance, in paper mm, from the first anchor to the dimension line, measured along the
+ *   measuring direction turned a quarter turn counter-clockwise (for `horizontal`: upwards).
+ * - `radius`, `diameter`: one circular edge or cylindrical face. `at` is where the value's text
+ *   sits, in paper mm from the projected centre (a circle seen face on) or from the midpoint of
+ *   the projected axis (a cylinder seen across, drawn between its two silhouettes): the leader's
+ *   direction and length both come from it.
+ * - `angle`: two line edges or planar faces (a plane seen edge on is a line). The arc is centred
+ *   where the two projected lines meet; `at` is a point on the arc, in paper mm from there, so it
+ *   gives the arc's radius and which of the four angles is meant (the one containing `at`).
+ */
+export const DimensionSchema = z.discriminatedUnion('kind', [
+  z.strictObject({
+    ...dimensionBase,
+    kind: z.enum(LINEAR_DIMENSION_KINDS),
+    refs: z.tuple([DimensionRefSchema, DimensionRefSchema]),
+    offset: paperNumber,
+  }),
+  z.strictObject({
+    ...dimensionBase,
+    kind: z.enum(['radius', 'diameter']),
+    refs: z.tuple([EdgeOrFaceRefSchema]),
+    at: PaperPointSchema,
+  }),
+  z.strictObject({
+    ...dimensionBase,
+    kind: z.literal('angle'),
+    refs: z.tuple([EdgeOrFaceRefSchema, EdgeOrFaceRefSchema]),
+    at: PaperPointSchema,
+  }),
+]);
+
+/**
+ * Text on a sheet. With `view`, `position` is relative to the view's `position`, so the note
+ * moves with the view; without, it is from the sheet's bottom-left corner. Paper mm.
+ */
+export const NoteSchema = z.strictObject({
+  id: NoteIdSchema,
+  view: ViewIdSchema.exactOptional(),
+  position: PaperPointSchema,
+  text: codePoints(MAX_NOTE_TEXT, 'A note', 1),
+});
+
+export const SheetSchema = z.strictObject({
+  id: SheetIdSchema,
+  name: featureName,
+  size: SheetSizeSchema,
+  /** Landscape: the longer side runs across; portrait: up. For a custom size too. */
+  orientation: z.enum(['landscape', 'portrait']),
+  /** Absent: no title block. */
+  titleBlock: TitleBlockSchema.exactOptional(),
+  views: z.array(ViewSchema).max(MAX_DRAWING_ITEMS),
+  /** In drawing order. */
+  dimensions: z.array(DimensionSchema).max(MAX_DRAWING_ITEMS),
+  notes: z.array(NoteSchema).max(MAX_DRAWING_ITEMS),
+});
+
+/** A drawing: sheets of views, dimensions and notes (README, "Drawings"). Since version 12. */
+export const DrawingSchema = z.strictObject({
+  id: DrawingIdSchema,
+  name: featureName,
+  /** In page order. */
+  sheets: z.array(SheetSchema).max(MAX_DRAWING_ITEMS),
+  /** Next number per id counter (`sheet`, `view`, `dim`, `note`). Only ever increases. */
+  nextIds: z.record(z.string(), z.int().min(1)),
+});
+
 export const DomainNamespaceSchema = z
   .string()
   .max(MAX_DOMAIN_NAMESPACE_LENGTH, { abort: true })
@@ -1678,6 +2062,11 @@ export const DocumentSchema = z.strictObject({
         });
       }
     }),
+  /**
+   * Drawings of the document's parts and assemblies, in tab order; absent when the document has
+   * none, never empty. Since version 12.
+   */
+  drawings: z.array(DrawingSchema).min(1).max(MAX_DRAWING_ITEMS).exactOptional(),
   /** The configuration table; absent when the document has none. Since version 5. */
   configurations: ConfigurationsSchema.exactOptional(),
   /**
@@ -1688,7 +2077,8 @@ export const DocumentSchema = z.strictObject({
   /**
    * Next number per document-level id counter (`part`, giving `part#n`; `cp` and `cfg`, giving
    * configuration parameter and row ids; `assembly`, giving `assembly#n`; `font`, giving
-   * `font#n`). Only ever increases, so an id is never reused. Since version 4.
+   * `font#n`; `drawing`, giving `drawing#n`). Only ever increases, so an id is never reused.
+   * Since version 4.
    */
   nextIds: z.record(z.string(), z.int().min(1)),
 });
@@ -1782,6 +2172,22 @@ export type PrintSetup = z.infer<typeof PrintSetupSchema>;
 export type PrintData = z.infer<typeof PrintDataSchema>;
 export type FontSource = z.infer<typeof FontSourceSchema>;
 export type DocumentFont = z.infer<typeof FontSchema>;
+export type ExplodeDirection = z.infer<typeof ExplodeDirectionSchema>;
+export type ExplodeStep = z.infer<typeof ExplodeStepSchema>;
+export type ExplodedView = z.infer<typeof ExplodedViewSchema>;
+export type SheetSize = z.infer<typeof SheetSizeSchema>;
+export type TitleBlock = z.infer<typeof TitleBlockSchema>;
+export type ViewSource = z.infer<typeof ViewSourceSchema>;
+export type ViewDirection = z.infer<typeof ViewDirectionSchema>;
+export type ViewScale = z.infer<typeof ViewScaleSchema>;
+export type ViewOptions = z.infer<typeof ViewOptionsSchema>;
+export type DrawingView = z.infer<typeof ViewSchema>;
+export type DimensionRef = z.infer<typeof DimensionRefSchema>;
+export type Dimension = z.infer<typeof DimensionSchema>;
+export type DimensionKind = Dimension['kind'];
+export type Note = z.infer<typeof NoteSchema>;
+export type Sheet = z.infer<typeof SheetSchema>;
+export type Drawing = z.infer<typeof DrawingSchema>;
 export type DomainData = z.infer<typeof DomainDataSchema>;
 export type Domains = z.infer<typeof DomainsSchema>;
 export type ManufaktureDocument = z.infer<typeof DocumentSchema>;

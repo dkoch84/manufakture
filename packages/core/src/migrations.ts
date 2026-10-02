@@ -228,6 +228,20 @@ export const migrateV10ToV11: Migration = {
   },
 };
 
+/**
+ * Version 12 added drawings (the optional document-level `drawings`) and exploded views (the
+ * optional `explodedViews` of an assembly), M4 plan decisions 7 and 9. Nothing in a version 11
+ * file changes: it has neither.
+ */
+export const migrateV11ToV12: Migration = {
+  from: 11,
+  to: 12,
+  description: 'Add drawings and exploded views',
+  migrate(doc) {
+    return { ...doc, version: 12 };
+  },
+};
+
 /** File format migrations, in order: `FORMAT_MIGRATIONS[i]` goes from version i to i + 1. */
 export const FORMAT_MIGRATIONS: readonly Migration[] = [
   migrateV0ToV1,
@@ -241,6 +255,7 @@ export const FORMAT_MIGRATIONS: readonly Migration[] = [
   migrateV8ToV9,
   migrateV9ToV10,
   migrateV10ToV11,
+  migrateV11ToV12,
 ];
 
 /**

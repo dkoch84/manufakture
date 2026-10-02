@@ -1,6 +1,21 @@
 import { applyConfigurationRow, configurationRow } from './configurations';
-import { featureExpressions, mateExpressions, printSetupExpressions } from './features';
-import type { Assembly, Domains, ManufaktureDocument, Part, PrintData, Variable } from './schema';
+import {
+  drawingExpressions,
+  explodedViewExpressions,
+  featureExpressions,
+  mateExpressions,
+  printSetupExpressions,
+} from './features';
+import type {
+  Assembly,
+  Domains,
+  Drawing,
+  ManufaktureDocument,
+  Part,
+  PrintData,
+  StoredExpression,
+  Variable,
+} from './schema';
 import { expressionVariableNames } from './validate';
 
 /**
@@ -62,6 +77,26 @@ export interface DocumentChange {
    * data, so the domain decides which of its features a change affects (ADR 0013 decision 5).
    */
   readonly domainChanged: readonly string[];
+  /**
+   * Anything in `drawings` changed: a drawing, sheet, view, dimension or note was added, removed,
+   * edited or moved, or a sheet size, view scale or section offset reads a changed variable (since
+   * version 12). Never a regen trigger: a drawing changes no geometry, so a drawing-only edit adds
+   * nothing to `parts` or `assemblies` and has no `firstAffectedIndex`. The drawing workspace
+   * asks regen for the views it shows again (T4.4e caches them by the bodies they show).
+   */
+  readonly drawingChanged: boolean;
+  readonly drawings: DrawingsChange;
+}
+
+/**
+ * Drawings that changed, by id. `changed` lists drawings with any change inside (name, sheets,
+ * views, dimensions, notes) or whose expressions read a changed variable (also through other
+ * variables, or through the active configuration row).
+ */
+export interface DrawingsChange {
+  readonly drawings: ItemChanges;
+  /** The relative order of drawings present in both documents changed. */
+  readonly reordered: boolean;
 }
 
 /**
@@ -100,10 +135,22 @@ export interface AssemblyChange {
   /** The relative order of mates present in both documents changed (it decides blame). */
   readonly matesReordered: boolean;
   /**
+   * Exploded views (since version 12); `changed` lists those renamed or whose steps changed, or
+   * whose step distances read a changed variable. Exploded views never change solved poses.
+   */
+  readonly explodedViews: ItemChanges;
+  /** The relative order of exploded views present in both documents changed. */
+  readonly explodedViewsReordered: boolean;
+  /**
    * Only instance poses changed (a committed drag or solve): nothing to regenerate and nothing to
    * solve again, since the poses are already the solver's answer.
    */
   readonly posesOnly: boolean;
+  /**
+   * Only exploded views changed: nothing to regenerate and nothing to solve; the exploded
+   * offsets (T4.5a) are computed again from the same solved poses.
+   */
+  readonly explodedOnly: boolean;
 }
 
 export interface PartChange {
@@ -305,14 +352,27 @@ function diffAssembly(
   const pCommon = pm.filter((m) => nmIds.has(m.id)).map((m) => m.id);
   const nCommon = nm.filter((m) => pById.has(m.id)).map((m) => m.id);
   const matesReordered = pCommon.some((id, i) => nCommon[i] !== id);
+  const exploded = diffItems(prev?.explodedViews ?? [], next?.explodedViews ?? [], (v) =>
+    readsAny(explodedViewExpressions(v), vars),
+  );
   const nameChanged = !!prev && !!next && prev.name !== next.name;
   const status = !prev ? 'added' : !next ? 'removed' : 'changed';
+  const untouched = (c: ItemChanges) => c.added.length + c.removed.length + c.changed.length === 0;
+  const explodedTouched = !untouched(exploded.items) || exploded.reordered;
   const posesOnly =
     status === 'changed' &&
     posed.length > 0 &&
     !nameChanged &&
     !matesReordered &&
-    [instances, mates].every((c) => c.added.length + c.removed.length + c.changed.length === 0);
+    !explodedTouched &&
+    [instances, mates].every(untouched);
+  const explodedOnly =
+    status === 'changed' &&
+    explodedTouched &&
+    posed.length === 0 &&
+    !nameChanged &&
+    !matesReordered &&
+    [instances, mates].every(untouched);
   return {
     assemblyId,
     status,
@@ -321,8 +381,53 @@ function diffAssembly(
     posed,
     mates,
     matesReordered,
+    explodedViews: exploded.items,
+    explodedViewsReordered: exploded.reordered,
     posesOnly,
+    explodedOnly,
   };
+}
+
+/** Whether any of the expressions reads one of `vars`. */
+function readsAny(
+  sites: readonly { expression: StoredExpression }[],
+  vars: ReadonlySet<string>,
+): boolean {
+  return (
+    vars.size > 0 &&
+    sites.some((s) => expressionVariableNames(s.expression).some((n) => vars.has(n)))
+  );
+}
+
+/** Added, removed and changed items of a list with ids, and whether the common ones moved. */
+function diffItems<T extends { id: string }>(
+  prev: readonly T[],
+  next: readonly T[],
+  readsChanged: (item: T) => boolean,
+): { items: ItemChanges; reordered: boolean } {
+  const p = new Map(prev.map((x) => [x.id, x]));
+  const nIds = new Set(next.map((x) => x.id));
+  const pCommon = prev.filter((x) => nIds.has(x.id)).map((x) => x.id);
+  const nCommon = next.filter((x) => p.has(x.id)).map((x) => x.id);
+  return {
+    items: {
+      added: next.filter((x) => !p.has(x.id)).map((x) => x.id),
+      removed: prev.filter((x) => !nIds.has(x.id)).map((x) => x.id),
+      changed: next
+        .filter((x) => p.has(x.id) && (!deepEqual(p.get(x.id), x) || readsChanged(x)))
+        .map((x) => x.id),
+    },
+    reordered: pCommon.some((id, i) => nCommon[i] !== id),
+  };
+}
+
+function diffDrawings(
+  prev: readonly Drawing[] | undefined,
+  next: readonly Drawing[] | undefined,
+  vars: ReadonlySet<string>,
+): DrawingsChange {
+  const d = diffItems(prev ?? [], next ?? [], (x) => readsAny(drawingExpressions(x), vars));
+  return { drawings: d.items, reordered: d.reordered };
 }
 
 function diffAssemblies(
@@ -342,7 +447,8 @@ function diffAssemblies(
       !c.nameChanged &&
       !c.matesReordered &&
       c.posed.length === 0 &&
-      [c.instances, c.mates].every(
+      !c.explodedViewsReordered &&
+      [c.instances, c.mates, c.explodedViews].every(
         (x) => x.added.length + x.removed.length + x.changed.length === 0,
       ) &&
       deepEqual(old, a);
@@ -408,6 +514,8 @@ function diffRaw(prev: ManufaktureDocument, next: ManufaktureDocument): Document
   for (const p of prev.parts) if (!nParts.has(p.id)) parts.push(diffPart(p, undefined, vars));
   const assemblies = diffAssemblies(prev, next, vars);
   const print = diffPrint(prev.print, next.print, vars);
+  const drawings = diffDrawings(prev.drawings, next.drawings, vars);
+  const { added, removed, changed } = drawings.drawings;
   const nameChanged = prev.name !== next.name;
   const unitsChanged = !deepEqual(prev.units, next.units);
   const empty =
@@ -429,6 +537,11 @@ function diffRaw(prev: ManufaktureDocument, next: ManufaktureDocument): Document
     print,
     fontsChanged: !deepEqual(prev.fonts, next.fonts),
     domainChanged: diffDomains(prev.domains, next.domains),
+    drawingChanged:
+      drawings.reordered ||
+      added.length + removed.length + changed.length > 0 ||
+      !deepEqual(prev.drawings, next.drawings),
+    drawings,
   };
 }
 
@@ -478,7 +591,10 @@ function mergeAssembly(a: AssemblyChange, b: AssemblyChange): AssemblyChange {
     posed: union(a.posed, b.posed),
     mates: mergeItems(a.mates, b.mates),
     matesReordered: a.matesReordered || b.matesReordered,
+    explodedViews: mergeItems(a.explodedViews, b.explodedViews),
+    explodedViewsReordered: a.explodedViewsReordered || b.explodedViewsReordered,
     posesOnly: a.posesOnly && b.posesOnly,
+    explodedOnly: a.explodedOnly && b.explodedOnly,
   };
 }
 
@@ -540,6 +656,11 @@ export function diffDocuments(
     print: {
       setups: mergeItems(raw.print.setups, configured.print.setups),
       reordered: raw.print.reordered || configured.print.reordered,
+    },
+    drawingChanged: raw.drawingChanged || configured.drawingChanged,
+    drawings: {
+      drawings: mergeItems(raw.drawings.drawings, configured.drawings.drawings),
+      reordered: raw.drawings.reordered || configured.drawings.reordered,
     },
   };
 }

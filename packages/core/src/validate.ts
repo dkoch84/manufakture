@@ -8,6 +8,7 @@ import {
   bodyCreator,
   constraintTargets,
   explicitDependencies,
+  explodeStepInstances,
   featureDependencies,
   featureExpressions,
   featureScope,
@@ -19,6 +20,8 @@ import {
   printItemExpressions,
   printItemIds,
   printThresholdExpressions,
+  sheetExpressions,
+  viewExpressions,
 } from './features';
 import { PART_COUNTER, parseAnyId, parseFeatureId, parseSubId, peekCounter } from './ids';
 import { fail, ok, type CoreError, type CoreResult } from './result';
@@ -26,6 +29,7 @@ import {
   ASSEMBLY_COUNTER,
   CONFIG_PARAMETER_COUNTER,
   CONFIG_ROW_COUNTER,
+  DRAWING_COUNTER,
   FONT_COUNTER,
   MAX_SKETCH_OUTLINE_TEXT,
   SKETCH_ORIGIN,
@@ -33,6 +37,7 @@ import {
   type Assembly,
   type ConfigRow,
   type Configurations,
+  type Drawing,
   type Feature,
   type ManufaktureDocument,
   type Part,
@@ -852,6 +857,41 @@ function checkAssembly(
       checkExpression(site.expression, [...mpath, ...site.path], variables, out);
     }
   });
+
+  (assembly.explodedViews ?? []).forEach((view, ei) => {
+    const epath = [...apath, 'explodedViews', ei];
+    checkId(view.id, [...epath, 'id']);
+    view.steps.forEach((step, si) => {
+      const spath = [...epath, 'steps', si];
+      checkId(step.id, [...spath, 'id']);
+      const moved = new Set<string>();
+      step.instances.forEach((id, k) => {
+        if (moved.has(id)) {
+          out.push({
+            code: 'duplicate',
+            message: `Step ${step.id} of ${view.id} moves ${id} twice`,
+            path: [...spath, 'instances', k],
+            blockers: [id],
+          });
+        }
+        moved.add(id);
+      });
+      const named = explodeStepInstances(step);
+      named.forEach((id, k) => {
+        if (instances.has(id)) return;
+        out.push({
+          code: 'dependency',
+          message: `Step ${step.id} of exploded view ${view.id} names ${id}, which is not an instance of assembly ${assembly.id}`,
+          path:
+            k < step.instances.length
+              ? [...spath, 'instances', k]
+              : [...spath, 'direction', 'instance'],
+          blockers: [id],
+        });
+      });
+      checkExpression(step.distance, [...spath, 'distance'], variables, out);
+    });
+  });
 }
 
 /**
@@ -919,6 +959,193 @@ function checkPrint(
   });
 }
 
+/**
+ * The drawings (M4 plan decision 7): drawing ids allocated by the document's `nextIds.drawing`
+ * and unique; every id inside a drawing (sheets, views, dimensions, notes) allocated by the
+ * drawing's own `nextIds` and used once in it; a view's part, assembly and exploded view exist;
+ * no body listed twice in a view; a dimension's and a note's view is on the same sheet; a
+ * dimension's references carry an instance path exactly when their view shows an assembly, and
+ * the instance is in that assembly; every expression parses and names existing variables.
+ *
+ * Deliberately not checked: that a view's bodies, or a dimension's body, face, edge or vertex,
+ * still exist. Those are model references, resolved by regen's drawing stage (`exact`, `lost`),
+ * so editing or deleting the features that made them is never blocked by a drawing.
+ */
+function checkDrawings(
+  doc: ManufaktureDocument,
+  partIds: ReadonlySet<string>,
+  variables: ReadonlySet<string>,
+  out: CoreError[],
+): void {
+  const drawings = doc.drawings;
+  if (drawings === undefined) return;
+  const assemblies = new Map(
+    doc.assemblies.map((a) => [
+      a.id,
+      {
+        exploded: new Set((a.explodedViews ?? []).map((v) => v.id)),
+      },
+    ]),
+  );
+  checkUnique(
+    drawings.map((d) => d.id),
+    'Drawing id',
+    (i) => ['drawings', i, 'id'],
+    out,
+  );
+  drawings.forEach((drawing, di) => {
+    checkAllocated(
+      drawing.id,
+      DRAWING_COUNTER,
+      doc.nextIds,
+      'Drawing',
+      ['drawings', di, 'id'],
+      out,
+    );
+    checkDrawing(drawing, di, partIds, assemblies, variables, out);
+  });
+}
+
+function checkDrawing(
+  drawing: Drawing,
+  di: number,
+  partIds: ReadonlySet<string>,
+  assemblies: ReadonlyMap<string, { exploded: ReadonlySet<string> }>,
+  variables: ReadonlySet<string>,
+  out: CoreError[],
+): void {
+  const dpath = ['drawings', di];
+  const seen = new Set<string>();
+  const checkId = (id: string, path: readonly (string | number)[]) => {
+    const parsed = parseAnyId(id);
+    if (parsed && parsed.n >= peekCounter(drawing.nextIds, parsed.counter)) {
+      out.push({
+        code: 'invalid-id',
+        message: `Id "${id}" in drawing ${drawing.id} was never allocated (next is ${previewId(parsed.counter, peekCounter(drawing.nextIds, parsed.counter))})`,
+        path,
+        blockers: [id],
+      });
+    }
+    if (seen.has(id)) {
+      out.push({
+        code: 'duplicate',
+        message: `Id "${id}" is used twice in drawing ${drawing.id}`,
+        path,
+        blockers: [id],
+      });
+    }
+    seen.add(id);
+  };
+
+  drawing.sheets.forEach((sheet, si) => {
+    const spath = [...dpath, 'sheets', si];
+    checkId(sheet.id, [...spath, 'id']);
+    for (const site of sheetExpressions(sheet)) {
+      checkExpression(site.expression, [...spath, ...site.path], variables, out);
+    }
+    /** The assembly each view on the sheet shows, or `null` for a part view. */
+    const views = new Map<string, string | null>();
+    sheet.views.forEach((view, vi) => {
+      const vpath = [...spath, 'views', vi];
+      checkId(view.id, [...vpath, 'id']);
+      const source = view.source;
+      if ('part' in source) {
+        views.set(view.id, null);
+        if (!partIds.has(source.part)) {
+          out.push({
+            code: 'dependency',
+            message: `View ${view.id} of ${drawing.id} shows part ${source.part}, which does not exist`,
+            path: [...vpath, 'source', 'part'],
+            blockers: [source.part],
+          });
+        }
+        if (source.bodies !== undefined) {
+          checkDuplicates(
+            source.bodies,
+            `the bodies view ${view.id} shows`,
+            [...vpath, 'source', 'bodies'],
+            out,
+          );
+        }
+      } else {
+        views.set(view.id, source.assembly);
+        const assembly = assemblies.get(source.assembly);
+        if (assembly === undefined) {
+          out.push({
+            code: 'dependency',
+            message: `View ${view.id} of ${drawing.id} shows assembly ${source.assembly}, which does not exist`,
+            path: [...vpath, 'source', 'assembly'],
+            blockers: [source.assembly],
+          });
+        } else if (
+          source.explodedView !== undefined &&
+          !assembly.exploded.has(source.explodedView)
+        ) {
+          out.push({
+            code: 'dependency',
+            message: `View ${view.id} of ${drawing.id} shows exploded view ${source.explodedView}, which assembly ${source.assembly} does not have`,
+            path: [...vpath, 'source', 'explodedView'],
+            blockers: [source.explodedView],
+          });
+        }
+      }
+      for (const site of viewExpressions(view)) {
+        checkExpression(site.expression, [...vpath, ...site.path], variables, out);
+      }
+    });
+
+    sheet.dimensions.forEach((dimension, ki) => {
+      const kpath = [...spath, 'dimensions', ki];
+      checkId(dimension.id, [...kpath, 'id']);
+      const shown = views.get(dimension.view);
+      if (shown === undefined) {
+        out.push({
+          code: 'dependency',
+          message: `Dimension ${dimension.id} of ${drawing.id} is in view ${dimension.view}, which is not on sheet ${sheet.id}`,
+          path: [...kpath, 'view'],
+          blockers: [dimension.view],
+        });
+        return;
+      }
+      dimension.refs.forEach((ref, ri) => {
+        const rpath = [...kpath, 'refs', ri];
+        if (shown === null) {
+          if (ref.instance !== undefined) {
+            out.push({
+              code: 'kind-mismatch',
+              message: `Dimension ${dimension.id} of ${drawing.id} names an instance, but view ${dimension.view} shows a part`,
+              path: [...rpath, 'instance'],
+            });
+          }
+          return;
+        }
+        if (ref.instance === undefined || ref.instance.length !== 1) {
+          out.push({
+            code: 'kind-mismatch',
+            message: `Dimension ${dimension.id} of ${drawing.id} is in assembly view ${dimension.view}, so each reference names the one instance it is on`,
+            path: ref.instance === undefined ? rpath : [...rpath, 'instance'],
+          });
+        }
+        // Whether the instance still exists is not checked: dimensions never block model edits,
+        // so one on a deleted instance stays valid and regen reports it reference-lost.
+      });
+    });
+
+    sheet.notes.forEach((note, ni) => {
+      const npath = [...spath, 'notes', ni];
+      checkId(note.id, [...npath, 'id']);
+      if (note.view !== undefined && !views.has(note.view)) {
+        out.push({
+          code: 'dependency',
+          message: `Note ${note.id} of ${drawing.id} is attached to view ${note.view}, which is not on sheet ${sheet.id}`,
+          path: [...npath, 'view'],
+          blockers: [note.view],
+        });
+      }
+    });
+  });
+}
+
 /** `<counter>#n` for an assembly-level counter, `<prefix>n` for a reference prefix. */
 function previewId(counter: string, n: number): string {
   return counter.length === 1 ? `${counter}${n}` : `${counter}#${n}`;
@@ -979,6 +1206,7 @@ export function validateDocument(doc: ManufaktureDocument): CoreError[] {
     checkAssembly(assembly, ai, partIds, rowIds, variables, out);
   });
   checkPrint(doc.print, partIds, variables, out);
+  checkDrawings(doc, partIds, variables, out);
   return out;
 }
 

@@ -15,6 +15,7 @@ import {
   migrateV8ToV9,
   migrateV9ToV10,
   migrateV10ToV11,
+  migrateV11ToV12,
   type Migration,
 } from './migrations';
 import type { CoreErrorCode } from './result';
@@ -34,6 +35,7 @@ import v8Bracket from './fixtures/v8-bracket.json';
 import v9Bracket from './fixtures/v9-bracket.json';
 import v10Bracket from './fixtures/v10-bracket.json';
 import v11Bracket from './fixtures/v11-bracket.json';
+import v12Bracket from './fixtures/v12-bracket.json';
 
 /** One fixture per older file version; `migrates every older version` checks this is complete. */
 const FIXTURES: Record<number, unknown> = {
@@ -48,6 +50,7 @@ const FIXTURES: Record<number, unknown> = {
   8: v8Bracket,
   9: v9Bracket,
   10: v10Bracket,
+  11: v11Bracket,
 };
 
 function load(value: unknown): ManufaktureDocument {
@@ -58,7 +61,7 @@ describe('serialize and deserialize', () => {
   const documents: [string, () => ManufaktureDocument][] = [
     ['an empty document', () => createDocument({ id: 'd', name: 'Empty' })],
     ['the bracket', bracket],
-    ['the current fixture', () => load(v11Bracket)],
+    ['the current fixture', () => load(v12Bracket)],
     ['the two-body fixture', () => load(v4TwoBodies)],
     [
       'a document with body props and a scope',
@@ -191,20 +194,20 @@ describe('serialize and deserialize', () => {
     expect(serialize(unwrap(deserialize(serialize(shuffled))).document)).toBe(serialize(doc));
     expect(
       serialize(doc).startsWith(
-        '{\n  "format": "manufakture",\n  "version": 11,\n  "namingScheme": 1,',
+        '{\n  "format": "manufakture",\n  "version": 12,\n  "namingScheme": 1,',
       ),
     ).toBe(true);
   });
 
   it('refuses to serialize an invalid document', () => {
     const doc = clone(bracket()) as unknown as { version: number };
-    doc.version = 12;
+    doc.version = 13;
     expect(() => serialize(doc as unknown as ManufaktureDocument)).toThrow(/Cannot serialize/);
   });
 });
 
 describe('loading errors', () => {
-  const current = () => clone(v11Bracket) as Record<string, unknown>;
+  const current = () => clone(v12Bracket) as Record<string, unknown>;
   const cases: [string, string | (() => unknown), CoreErrorCode, RegExp?][] = [
     ['not JSON', '{ "format": ', 'json'],
     ['an array', '[]', 'format'],
@@ -260,7 +263,7 @@ describe('loading errors', () => {
   it('never modifies the value it is given, even a newer one', () => {
     for (const value of [
       clone(v0Bracket),
-      { ...clone(v11Bracket), version: 99 },
+      { ...clone(v12Bracket), version: 99 },
       clone(v1Bracket),
       clone(v3Bracket),
       clone(v4Bracket),
@@ -271,6 +274,7 @@ describe('loading errors', () => {
       clone(v9Bracket),
       clone(v10Bracket),
       clone(v11Bracket),
+      clone(v12Bracket),
     ]) {
       const frozen = deepFreeze(value);
       const snapshot = JSON.stringify(frozen);
@@ -280,7 +284,7 @@ describe('loading errors', () => {
   });
 
   it('reports schema problems with paths', () => {
-    const d = clone(v11Bracket) as { variables: { expression: unknown }[] };
+    const d = clone(v12Bracket) as { variables: { expression: unknown }[] };
     d.variables[0]!.expression = 6;
     const r = parseDocument(d);
     expect(r.ok).toBe(false);
@@ -306,11 +310,14 @@ describe('migrations', () => {
     expect(migrateV10ToV11.migrate(clone(v10Bracket) as Record<string, unknown>)).toEqual(
       v11Bracket,
     );
+    expect(migrateV11ToV12.migrate(clone(v11Bracket) as Record<string, unknown>)).toEqual(
+      v12Bracket,
+    );
     const loaded = unwrap(parseDocument(v0Bracket));
     expect(loaded.from).toEqual({ version: 0, namingScheme: 1 });
     expect(loaded.migrated).toBe(true);
-    expect(loaded.document).toEqual(load(v11Bracket));
-    expect(JSON.parse(serialize(loaded.document))).toEqual(v11Bracket);
+    expect(loaded.document).toEqual(load(v12Bracket));
+    expect(JSON.parse(serialize(loaded.document))).toEqual(v12Bracket);
   });
 
   it('v1 to v2 changes only the version: a version 1 part has no material', () => {
@@ -487,8 +494,8 @@ describe('migrations', () => {
     const loaded = unwrap(parseDocument(v9Bracket));
     expect(loaded.from.version).toBe(9);
     expect(loaded.migrated).toBe(true);
-    expect(loaded.document).toEqual(load(v11Bracket));
-    expect(serialize(loaded.document)).toBe(serialize(load(v11Bracket)));
+    expect(loaded.document).toEqual(load(v12Bracket));
+    expect(serialize(loaded.document)).toBe(serialize(load(v12Bracket)));
   });
 
   it('v10 to v11 changes only the version: a version 10 file has no domain data', () => {
@@ -499,10 +506,35 @@ describe('migrations', () => {
     const loaded = unwrap(parseDocument(v10Bracket));
     expect(loaded.from.version).toBe(10);
     expect(loaded.migrated).toBe(true);
-    expect(loaded.document).toEqual(load(v11Bracket));
+    expect(loaded.document).toEqual(load(v12Bracket));
     expect('domains' in loaded.document).toBe(false);
-    expect(serialize(loaded.document)).toBe(serialize(load(v11Bracket)));
-    expect(JSON.parse(serialize(loaded.document))).toEqual(v11Bracket);
+    expect(serialize(loaded.document)).toBe(serialize(load(v12Bracket)));
+    expect(JSON.parse(serialize(loaded.document))).toEqual(v12Bracket);
+  });
+
+  it('v11 to v12 changes only the version: a version 11 file has no drawings or exploded views', () => {
+    expect(migrateV11ToV12.migrate(clone(v11Bracket) as Record<string, unknown>)).toEqual({
+      ...clone(v11Bracket),
+      version: 12,
+    });
+    const loaded = unwrap(parseDocument(v11Bracket));
+    expect(loaded.from.version).toBe(11);
+    expect(loaded.migrated).toBe(true);
+    expect(loaded.document).toEqual(load(v12Bracket));
+    expect('drawings' in loaded.document).toBe(false);
+    expect(loaded.document.assemblies.every((a) => !('explodedViews' in a))).toBe(true);
+    expect(serialize(loaded.document)).toBe(serialize(load(v12Bracket)));
+    expect(JSON.parse(serialize(loaded.document))).toEqual(v12Bracket);
+  });
+
+  it('v11 to v12 keeps a version 11 assembly as it was', () => {
+    const v11 = clone(v11Bracket) as { assemblies: unknown[]; nextIds: Record<string, number> };
+    const assembly = { id: 'assembly#1', name: 'Shelf', instances: [], mates: [], nextIds: {} };
+    v11.assemblies.push(assembly);
+    v11.nextIds = { ...v11.nextIds, assembly: 2 };
+    const doc = unwrap(parseDocument(v11)).document;
+    expect(doc.version).toBe(FORMAT_VERSION);
+    expect(doc.assemblies).toEqual([assembly]);
   });
 
   it('v10 to v11 keeps an extension feature as it was, with no operation or scope', () => {
