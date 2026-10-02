@@ -1,6 +1,7 @@
 // @manufakture/domain-wood: the woodworking domain (ADR 0013). The stock catalog, the board
-// feature (`wood.board`) and the joint feature (`wood.joint`) with their translators, and the
-// document data the domain owns (`domains.wood`, `domains.stock`). See README.md.
+// feature (`wood.board`) and the joint feature (`wood.joint`) with their translators, the
+// document data the domain owns (`domains.wood`, `domains.stock`), and the cut list (the
+// woodworking producer of `@manufakture/takeoff`). See README.md.
 
 export const packageName = '@manufakture/domain-wood';
 
@@ -104,6 +105,29 @@ export {
   type RabbetParams,
   type TenonParams,
 } from './joints';
+export {
+  blankBoardFeet,
+  cutList,
+  cutListPart,
+  stockName,
+  type BlankBoardFeet,
+  type CutList,
+  type CutListBody,
+  type CutListFeature,
+  type CutListFlag,
+  type CutListInput,
+  type CutListInstance,
+  type CutListPart,
+  type CutListPartOptions,
+  type CutListRow,
+  type ExcludedBody,
+  type LumberLayoutInput,
+  type MissingItem,
+  type OrientedSize,
+  type PartResultLike,
+  type SheetLayoutInput,
+  type SheetLayoutPart,
+} from './cutlist';
 export { WOOD_IMPLEMENTATION, registerWood, woodDomain } from './domain';
 export { currentVersion, migrate, type Json, type Migration, type Versioned } from './migrations';
 export { constantLength, type Path, type Read } from './read';

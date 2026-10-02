@@ -4,10 +4,12 @@ The woodworking domain ([ADR 0013](../../docs/adr/0013-domain-packages.md), M4 p
 **stock catalog** (lumber and sheet goods with nominal and actual sizes), the **board** feature
 (`wood.board`, a body cut from real stock with a grain) and its translator to kernel inputs, and
 the document data the domain owns (`domains.wood` settings, `domains.stock` overrides), and the
-**joint** feature (`wood.joint`, T4.2b: six kinds of joint cut between two boards). Plain
-TypeScript under GPL-3.0-or-later.
+**joint** feature (`wood.joint`, T4.2b: six kinds of joint cut between two boards), and the **cut
+list** (T4.3a: the woodworking producer of `@manufakture/takeoff`). Plain TypeScript under
+GPL-3.0-or-later.
 
-**Dependencies.** At run time only `@manufakture/core` and `@manufakture/units`, so everything
+**Dependencies.** At run time only `@manufakture/core`, `@manufakture/units` and the shared
+`@manufakture/takeoff` (ADR 0013 decision 8), so everything
 here runs in Node with no `.wasm`. `@manufakture/regen` (the translator contract) and
 `@manufakture/kernel` (the `FeatureInput` types) are type-only imports, and devDependencies, as
 `packages/print` does with kernel types; `@manufakture/sketch` is a devDependency for the solver of
@@ -249,6 +251,73 @@ not fit B or a mortise breaking out of A, holes coming out through a board, a cl
 takes a dado through A's edge or a rabbet across A, and boards that do
 not meet the way the kind needs (with a message saying how they should).
 
+## The cut list
+
+`cutList(input)` (`src/cutlist/`) is pure: from the parts regen built, it gives the cut list,
+the hardware (bill of materials) lines, totals and the inputs of sheet and stick layouts. Rows are
+`@manufakture/takeoff` rows (`TakeoffRow`), so M6's producers add to the same model.
+
+```ts
+import { cutList, cutListPart, stockName } from '@manufakture/domain-wood';
+import { formatRow } from '@manufakture/takeoff';
+
+const list = cutList({
+  parts: [cutListPart(doc.parts[0], result.parts[0], { orientedSizes })],
+  stock, // readStockData(...).value: the document's overrides (domains.stock)
+  settings, // woodSettings(...).value: the grain rule for layouts (domains.wood)
+  // assembly: { instances }, configuration: { id, name }
+});
+list.rows; // boards and wood shapes; list.hardware: dowels and pocket screws
+list.rows.map((r) => formatRow(r, { unit: 'in-fraction', denominator: 32 }, stockName));
+list.sheets; // per sheet stock: sheet size (with overrides), grain, parts for layoutSheets
+list.lumber; // per lumber stock: lengths sold, parts for layoutSticks
+```
+
+**Input.** `CutListPart` per part build: its bodies (`bodyId`, `creator`, optional name, material
+and volume), its features' results (`featureId`, name, `metadata`), and the oriented sizes
+(`{ bodyId, sizes }`, T4.3b's op called by the app in T4.3d) of bodies that are not boards.
+`cutListPart(part, partResult, options)` builds it from a document part and regen's `PartResult`
+(typed structurally; no regen import). A part built in a configuration row is its own
+`CutListPart` with its own id (`part#1@cfg#2`), which instances name. `assembly.instances`
+(`{ id, part, bodies?, suppressed? }`) counts through an assembly; without it, every body of every
+part counts once.
+
+**Rows.**
+
+| Body                              | Category   | Size                                    | Unit, extended          | Flags           |
+| --------------------------------- | ---------- | --------------------------------------- | ----------------------- | --------------- |
+| Board of sheet stock              | `sheet`    | Blank: length (grain), width, thickness | `area`, mm²             |                 |
+| Board of lumber                   | `lumber`   | Blank                                   | `board-foot`; `length`  | `actual-width`  |
+| Board of a stock this build lacks | `part`     | Blank                                   | `each`                  | `stock-unknown` |
+| Other body of a wood material     | `part`     | Oriented box, longest first             | `each`; `volume` if any | `estimated`     |
+| Same, no oriented size given      | `part`     | None                                    | `each`; `volume` if any | `size-unknown`  |
+| Joint hardware                    | `hardware` | Dowel: diameter, length; screw: length  | `each`                  |                 |
+
+A board's size is its **blank**: the frame's sizes, the stock size before joinery. A tenon is cut
+from its board, so the board's drawn length (into the mortise) is the blank's length. Rows group
+pieces of one stock, material and blank size (to the nanometre, so floating point noise groups);
+`item` joins the pieces' names (the body's own, else the creating feature's). A body's own
+material (`Part.bodies`) wins over the board's stock material; a body that is not a board takes
+its part's material, and is left out (`excluded`) unless that is a wood (`not-wood`,
+`no-material`).
+
+**Board feet** (`blankBoardFeet`) follow the stock's basis: `nominal` (softwood) counts nominal
+thickness by nominal width by length, so a 2x4 8 ft long is 5.33; the nominal width applies only
+to a blank as wide as the stock (with its override), and a ripped stick or a glued-up panel is
+counted on its own width (flag `actual-width`). `rough` (hardwood) counts the rough thickness in
+quarters by the actual width and length. Sheets count area instead.
+
+**Counting.** Without an assembly, every body once and every joint once. Through an assembly,
+each instance that is not suppressed counts the bodies it shows (`bodies`, or all), with the
+instance in the row's sources; a joint's hardware counts as often as **both** its boards are
+shown (the smaller count), so an assembly of per-board instances gives exactly the part studio's
+list, and an instance showing only one board adds no dowels. Instances of parts or bodies the
+input lacks are reported in `missing`.
+
+**Order and totals.** Sheets, then lumber, then shapes; within them by catalog order of the stock,
+then material, then thickest, longest, widest. `totals` are per category and unit, `stockTotals`
+per stock. `configuration` echoes the row given.
+
 ## Tests
 
 `catalog.test.ts` (every Table 3 size against an independently typed copy, exact millimetres,
@@ -262,7 +331,13 @@ board, a price rebuilding nothing, a refused override failing every board). Join
 cylinders, refusals with their fields) and `joints/regen.test.ts` (every kind through regen with
 the real kernel: exact volumes, the kernel's interference check between the boards non-empty
 before a dado, tenon or box joint and empty after, face names unchanged when a board grows, a dado
-following its shelf, an odd angle refused on the joint while the boards still build).
+following its shelf, an odd angle refused on the joint while the boards still build). Cut list:
+`cutlist/cutlist.test.ts` (a bookshelf by hand: two 3/4" plywood sides, four 1x12 shelves and a
+1/4" back give 18 and 11.25 sq ft of plywood, 11.5 board feet and 138" of 1x12, 32 dowels and 6
+pocket screws; grouping; a part inserted twice; per-board instances equal to the part studio;
+configurations; shapes that are not boards; board feet by basis; layout inputs) and
+`cutlist/regen.test.ts` (with the real kernel: blanks and dowels of a shelf on a side, a
+configuration row deepening the shelf and nothing else, a tenon's length kept in its blank).
 
 ```sh
 ./node_modules/.bin/vitest run --project packages packages/domain-wood

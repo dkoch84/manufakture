@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@manufakture/core": "workspace:*",
+    "@manufakture/takeoff": "workspace:*",
     "@manufakture/units": "workspace:*"
   },
   "devDependencies": {

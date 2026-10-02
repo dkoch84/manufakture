@@ -131,6 +131,9 @@ importers:
       '@manufakture/core':
         specifier: workspace:*
         version: link:../core
+      '@manufakture/takeoff':
+        specifier: workspace:*
+        version: link:../takeoff
       '@manufakture/units':
         specifier: workspace:*
         version: link:../units
@@ -233,6 +236,12 @@ importers:
       '@salusoft89/planegcs':
         specifier: 1.2.0
         version: 1.2.0
+
+  packages/takeoff:
+    dependencies:
+      '@manufakture/units':
+        specifier: workspace:*
+        version: link:../units
 
   packages/text:
     dependencies:
