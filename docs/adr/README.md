@@ -18,6 +18,7 @@ Product decisions (license, local-first storage, target machines, what comes fir
 - [0010: Scripting sandbox: QuickJS in WebAssembly, inside the regen worker, with no capabilities](0010-scripting-sandbox.md). Proposed.
 - [0011: Fonts: one bundled OFL font (Inter Bold), user fonts stored in the document](0011-fonts.md). Accepted, amended 2026-10-01 (overlap check, untrusted-font limits).
 - [0012: 3D printing: a document-level print section, a print package and worker, standard 3MF by download](0012-3d-printing.md). Accepted.
+- [0013: Domain packages: extension features that make bodies, namespaced domain data, a generic takeoff](0013-domain-packages.md). Accepted.
 
 ## Adding an ADR
 
