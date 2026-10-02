@@ -39,7 +39,7 @@ import {
   type HoleFit,
   type ThreadSystem,
 } from '@manufakture/kernel';
-import type { FitKind } from '@manufakture/print';
+import { FIT_VARIABLES, type FitKind } from '@manufakture/print';
 import { evaluate, evaluateQuantity, fromMillimetres, fromRadians } from '@manufakture/units';
 import { parsePrintedFit, printedFitDiameter } from '../variables/fits';
 import { evaluateVariables, type Variables } from '../sketcher/values';
@@ -527,7 +527,7 @@ export function newForm(kind: FormKind, ctx: FormContext): FeatureForm {
 }
 
 /** The name of the fit variable a thread's clearance starts from (ADR 0012 decision 10). */
-export const THREAD_FIT_VARIABLE = 'fit_slip';
+export const THREAD_FIT_VARIABLE = FIT_VARIABLES.slip;
 /** The clearance a thread starts with when the document has no `#fit_slip`, mm. */
 export const DEFAULT_THREAD_CLEARANCE = 0.2;
 

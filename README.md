@@ -6,7 +6,7 @@ The aim is the openness of FreeCAD with the usability of Onshape: sketch, constr
 
 ## Status
 
-Milestones 1 (a printable part) and 2 (multi-body parts and assemblies) are done. It all runs in the browser: there is no account and no server, and documents are kept locally and move between machines as `.mfk` files. What works today:
+Milestones 1 (a printable part) and 2 (multi-body parts and assemblies) are done. Milestone 3 (parts for an FDM printer) is built; the prints that check it (the fit-test coupon and the acceptance jig, printed by hand) are still to do. It all runs in the browser: there is no account and no server, and documents are kept locally and move between machines as `.mfk` files. What works today:
 
 - sketches with dimensions and constraints, solved as you draw;
 - extrude, revolve, fillet, chamfer, shell, holes (standard clearance, counterbore and countersink sizes), patterns and mirror;
@@ -19,11 +19,16 @@ Milestones 1 (a printable part) and 2 (multi-body parts and assemblies) are done
 - named versions and branches in a document's history, with viewing, comparing and restoring;
 - configurations: a table of parameter rows that makes variants of a part;
 - derived parts: a part of another document at a named version, updated when you choose;
-- assemblies: instances of parts, mates, dragging, an interference check, and export to STEP, 3MF and STL.
+- assemblies: instances of parts, mates, dragging, an interference check, and export to STEP, 3MF and STL;
+- a print workspace: print setups for Bambu Lab printers, orienting parts on the bed, and checks for overhangs, bed fit, thin walls, narrow gaps, small holes and horizontal holes that need a teardrop;
+- raised and sunk text, in the built-in font or your own;
+- modelled and cosmetic screw threads, with clearance for printing;
+- fits for printed parts: press, slip and sliding clearances as variables, and a fit-test coupon;
+- export for printing: a multi-part, multi-colour 3MF with the copies packed onto the plate, and **Open in slicer** to hand it to OrcaSlicer, Bambu Studio or PrusaSlicer.
 
-Not there yet: the domain tools for 3D printing, woodworking, CNC and construction (see the plans in `docs/plans`).
+Not there yet: the domain tools for woodworking, CNC and construction (see the plans in `docs/plans`).
 
-[docs/m1-acceptance.md](docs/m1-acceptance.md) walks through the milestone's acceptance part, a bracket, and lists the automated checks behind each step. [docs/m2-acceptance.md](docs/m2-acceptance.md) does the same for M2: a wall shelf with a derived bracket, assembled.
+[docs/m1-acceptance.md](docs/m1-acceptance.md) walks through the milestone's acceptance part, a bracket, and lists the automated checks behind each step. [docs/m2-acceptance.md](docs/m2-acceptance.md) does the same for M2: a wall shelf with a derived bracket, assembled. [docs/m3-acceptance.md](docs/m3-acceptance.md) does it for M3: a PTFE tube cutting jig, from sketch to a multi-colour 3MF for the slicer.
 
 ## Quick start
 
@@ -65,6 +70,8 @@ The user guide lives in `docs/user`:
 - [Variables](docs/user/variables.md): named values and expressions
 - [Fits for printed parts](docs/user/fits.md): press, slip and sliding clearances as variables, and the fit-test coupon
 - [Printing](docs/user/printing.md): print setups, orienting parts on the bed, overhangs, thin walls, holes and bed fit
+- [Text](docs/user/text.md): raised and sunk lettering, fonts, and editing the text later
+- [Threads](docs/user/threads.md): external and internal screw threads, sizes, clearance and cosmetic threads
 - [Configurations](docs/user/configurations.md): variants in a table, switching them, exporting every one
 - [Version history](docs/user/history.md): named versions, the timeline, viewing and restoring a past state
 - [Derived parts](docs/user/derived.md): a part from a version of another document, placed, and updated to newer versions
@@ -83,6 +90,8 @@ packages/sketch     Sketch entities + planegcs solver wrapper
 packages/regen      Regeneration engine
 packages/units      Unit parsing/formatting, expressions
 packages/io         Import/export adapters
+packages/print      Printability checks, printers and fit defaults
+packages/text       Fonts and text layout for sketches
 docs/decisions      Product decision records
 docs/adr            Architecture decision records
 docs/user           User guide

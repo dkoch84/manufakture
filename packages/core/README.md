@@ -23,7 +23,7 @@ import {
 ```ts
 interface ManufaktureDocument {
   format: 'manufakture';
-  version: 9; // file format version, FORMAT_VERSION
+  version: 10; // file format version, FORMAT_VERSION
   namingScheme: 1; // topological naming scheme version (T0.5), NAMING_SCHEME
   id: string;
   name: string;
