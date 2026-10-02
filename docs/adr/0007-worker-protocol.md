@@ -1,6 +1,6 @@
 # 0007: Worker protocol: Comlink, coarse calls, errors as data, named meshes
 
-- Status: accepted, amended 2026-09-26 and 2026-10-01
+- Status: accepted, amended 2026-09-26, 2026-10-01 and 2026-10-02
 - Date: 2026-09-26
 
 ## Context
@@ -172,3 +172,16 @@ The cost is planegcs's 0.5 MB `.wasm` instantiated in both workers. Decision 1 s
 - **Decision 6, with one difference.** Replies are transferred: per body, the per-triangle `thickness` and `gap` (`Float32Array`) and `flags` (`Uint8Array`) go through `Comlink.transfer`, and the worker keeps no copy. Input meshes go the other way and are **copied**, not transferred, because the main thread keeps drawing them and regen keeps none (ADR 0012, decision 5). For the budget test's 200,000-triangle body that is about 5.6 MB of structured clone per analysis, which the measured time includes.
 
 Details are in `packages/print/README.md`, "The print-analysis worker".
+
+## Amendment: a fifth context, the CAM worker, and a CAM geometry stage in the kernel worker (T5.0c, #1005)
+
+[ADR 0014](0014-cam-architecture.md), decision 7, adds a **CAM worker** next to the four contexts above, and a **CAM geometry stage** as a new call on the kernel worker. Toolpath generation, linking, the material-removal simulation and the TypeScript drop-cutter for 3D surfacing (ADR 0014 decision 13, after the [T5.0b spike](../spikes/T5.0b-opencamlib.md)) run in the CAM worker, so a slow pocket or a 3D finish never delays a regen, a sketch drag or the printability overlay. Extracting the loops, points and meshes an operation machines needs OCCT and the final body, so it stays in the kernel worker. This amendment records how both follow this ADR; the reasons are ADR 0014's. It was recorded before the code: T5.1f builds the stage and T5.1g the worker, and either may refine the names below within these rules.
+
+- **Decision 1.** Five contexts: the main thread, the kernel worker (with the regen engine, the regen solver and now the CAM geometry stage), the solver worker, the print-analysis worker, and the CAM worker (`packages/cam`: pure TypeScript with clipper2-ts, no `.wasm`; OpenCAMLib is not adopted in M5, and a later milestone that adopts it loads it here as a separate `.wasm` under ADR 0014 decision 13's rules). The CAM worker is not shared with the print-analysis worker (ADR 0012 decision 5, confirmed by ADR 0014). It is started lazily, the first time a CAM workspace or a G-code export needs it, so a document with no CAM setup never starts it.
+- **Decision 2.** One Comlink interface, `CamWorkerApi`, defined in `packages/cam`, with the entry `@manufakture/cam/worker` and the main-thread side `@manufakture/cam/client`. The client is only a thin wrapper that starts the worker and forwards calls with their generation, like `@manufakture/print/client`. Expression evaluation, the calls to the geometry stage, cache keys, stale flags and the orchestration of a generation live in `apps/web`, as print's do in `apps/web/src/print/resolve.ts`. The geometry stage is a call on the existing regen worker interface, not a new port: the app asks the kernel worker for geometry, then hands plain data to the CAM worker through the client. There is no direct channel between the two workers.
+- **Decision 3.** Coarse calls: one stage call per setup for all of its sources, and one CAM worker call per setup that generates its stale operations and links them, never one call per operation pass.
+- **Decision 4.** The stage works like the drawing stage: it takes the client's current generation and never starts a new one, so it never cancels a regen, and it resolves to null when a newer regen supersedes it. The CAM worker carries a `generation` on every request, newer requests superseding older ones; it works in chunks and yields between them, as the print-analysis worker does, so a chunk is the unit of cancellation. For 3D surfacing a chunk is at most one raster line of the drop-cutter, so a finish that takes seconds (2.2 to 6.7 s for T5.0b's 99,200-triangle part) stays cancellable and reports progress.
+- **Decision 5.** Expected failures are values: reference outcomes from the stage (`reference-lost`, `reference-ambiguous`, `via` and `fragile` warnings), and per-operation errors from the CAM worker (a tool too large for a region, an empty result, a cut below the stock). The CAM worker loads no `.wasm` in M5, so there is no instance to recycle; a later `.wasm` engine would recycle its instance on an abort, like the kernel.
+- **Decision 6.** Toolpath results go back as transferred typed arrays, and the worker keeps only its cache. Loops, points and depths from the stage are small and are copied through the main thread; meshes for 3D surfacing are transferred on both hops, since the main thread keeps no copy of them (the viewport draws the regen meshes it already has).
+
+Details will be in `packages/cam/README.md` (the worker, T5.1g) and `packages/regen/README.md` (the stage, T5.1f).

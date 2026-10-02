@@ -12,13 +12,14 @@ Product decisions (license, local-first storage, target machines, what comes fir
 - [0004: Document format: a versioned JSON feature list, with names as references](0004-document-format.md). Accepted.
 - [0005: Units: millimetres and radians inside, per-document display units outside](0005-units.md). Accepted.
 - [0006: Licensing: GPL-3.0-or-later, and what we may depend on](0006-licensing.md). Accepted, amended 2026-10-01 (fonts, by 0011).
-- [0007: Worker protocol: Comlink, coarse calls, errors as data, named meshes](0007-worker-protocol.md). Accepted, amended 2026-09-26 and 2026-10-01 (the print-analysis worker).
+- [0007: Worker protocol: Comlink, coarse calls, errors as data, named meshes](0007-worker-protocol.md). Accepted, amended 2026-09-26, 2026-10-01 (the print-analysis worker) and 2026-10-02 (the CAM worker, by 0014).
 - [0008: Assembly mate solver: our own joint-coordinate solver in TypeScript](0008-assembly-mate-solver.md). Accepted.
 - [0009: Sync model: a server-ordered command log, validated by core, rebased on the client](0009-sync-model.md). Proposed.
 - [0010: Scripting sandbox: QuickJS in WebAssembly, inside the regen worker, with no capabilities](0010-scripting-sandbox.md). Proposed.
 - [0011: Fonts: one bundled OFL font (Inter Bold), user fonts stored in the document](0011-fonts.md). Accepted, amended 2026-10-01 (overlap check, untrusted-font limits).
 - [0012: 3D printing: a document-level print section, a print package and worker, standard 3MF by download](0012-3d-printing.md). Accepted.
 - [0013: Domain packages: extension features that make bodies, namespaced domain data, a generic takeoff](0013-domain-packages.md). Accepted.
+- [0014: CAM architecture: a document-level cam section, a pure cam package and worker, posts as data](0014-cam-architecture.md). Accepted.
 
 ## Adding an ADR
 
