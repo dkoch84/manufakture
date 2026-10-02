@@ -5,10 +5,11 @@
 // connector to re-pick), or suppressed. An instance whose source has a configuration table can be
 // built in any of its rows (T2.4c). Every change is one undoable command.
 
-import type { Command } from '@manufakture/core';
+import { instanceDimensions, type Command } from '@manufakture/core';
 import type { AssemblyResult } from '@manufakture/regen';
 import { useState } from 'react';
 import { useStore } from 'zustand';
+import { dimensionWarning } from '../drawing/model';
 import { ConfigurationPicker } from '../features/ConfigurationPicker';
 import type { DocumentStoreApi } from '../state/document';
 import {
@@ -52,6 +53,9 @@ export function AssemblyTree({
 }: AssemblyTreeProps) {
   const doc = useStore(documents, (s) => s.document);
   const [message, setMessage] = useState<string | null>(null);
+  // An instance drawing dimensions measure: deleting it is allowed (the dimensions go lost, and
+  // can be re-picked), but the tree asks first.
+  const [confirming, setConfirming] = useState<{ id: string; dims: string[] } | null>(null);
   const assembly = doc.assemblies.find((a) => a.id === assemblyId);
   if (!assembly) return null;
   const run = (command: Command, label: string) => {
@@ -162,16 +166,51 @@ export function AssemblyTree({
                     disabled={disabled || blockedTitle !== undefined}
                     data-testid={`instance-delete-${inst.id}`}
                     title={blockedTitle}
-                    onClick={() =>
+                    onClick={() => {
+                      const dims = instanceDimensions(doc, assemblyId, inst.id);
+                      if (dims.length > 0) {
+                        setConfirming({ id: inst.id, dims });
+                        return;
+                      }
                       run(
                         { type: 'deleteInstance', assemblyId, instanceId: inst.id },
                         `Delete ${inst.name}`,
-                      )
-                    }
+                      );
+                    }}
                   >
                     Delete
                   </button>
                 </span>
+                {confirming?.id === inst.id && (
+                  <span
+                    className="assembly-item-message"
+                    role="alert"
+                    data-testid={`instance-delete-warning-${inst.id}`}
+                  >
+                    {dimensionWarning(doc, inst.name, confirming.dims)}{' '}
+                    <button
+                      type="button"
+                      disabled={disabled}
+                      data-testid={`instance-delete-confirm-${inst.id}`}
+                      onClick={() => {
+                        setConfirming(null);
+                        run(
+                          { type: 'deleteInstance', assemblyId, instanceId: inst.id },
+                          `Delete ${inst.name}`,
+                        );
+                      }}
+                    >
+                      Delete anyway
+                    </button>{' '}
+                    <button
+                      type="button"
+                      data-testid={`instance-delete-cancel-${inst.id}`}
+                      onClick={() => setConfirming(null)}
+                    >
+                      Cancel
+                    </button>
+                  </span>
+                )}
               </li>
             );
           })}

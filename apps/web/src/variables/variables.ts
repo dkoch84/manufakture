@@ -12,6 +12,7 @@ import {
   bareUnits,
   configurationRow,
   configuredVariables,
+  drawingVariableUses,
   findPart,
   inlineVariable,
   renameVariable,
@@ -22,6 +23,7 @@ import {
   type DisplayUnits,
   type ManufaktureDocument,
   type StoredExpression,
+  type DrawingVariableUse,
   type Variable,
   type VariableUse,
 } from '@manufakture/core';
@@ -192,7 +194,50 @@ export function labelOfUse(doc: ManufaktureDocument, use: VariableUse): string {
   return `${name}: ${field}`;
 }
 
+/** Drawing fields by path from the sheet (size) or from the view (scale, section offset). */
+const DRAWING_FIELD_LABELS: Record<string, string> = {
+  'size.width': 'Sheet width',
+  'size.height': 'Sheet height',
+  'scale.paper': 'Scale (paper side)',
+  'scale.model': 'Scale (model side)',
+  'options.section.offset': 'Section offset',
+};
+
+/** What a use in an exploded view or a drawing is called in the table. */
+export function labelOfDrawingUse(doc: ManufaktureDocument, use: DrawingVariableUse): string {
+  if (use.kind === 'explodedView') {
+    const assembly = doc.assemblies.find((a) => a.id === use.assemblyId);
+    const view = assembly?.explodedViews?.find((v) => v.id === use.explodedViewId);
+    const step = view ? view.steps.findIndex((s) => s.id === use.stepId) + 1 : 0;
+    const where = `${assembly?.name ?? use.assemblyId}: ${view?.name ?? use.explodedViewId}`;
+    return `${where}: step ${step > 0 ? step : use.stepId} distance`;
+  }
+  const drawing = doc.drawings?.find((d) => d.id === use.drawingId);
+  const sheet = drawing?.sheets.find((s) => s.id === use.sheetId);
+  const where = `${drawing?.name ?? use.drawingId}: ${sheet?.name ?? use.sheetId}`;
+  // The path is from the drawing: `sheets, i, ...` for the size, `sheets, i, views, j, ...`.
+  const rest = use.viewId === undefined ? use.path.slice(2) : use.path.slice(4);
+  const field = DRAWING_FIELD_LABELS[rest.join('.')] ?? rest.join('.');
+  return use.viewId === undefined ? `${where}: ${field}` : `${where}: ${use.viewId}: ${field}`;
+}
+
 function usesOf(doc: ManufaktureDocument, name: string): UseRow[] {
+  return [...modelUsesOf(doc, name), ...drawingUsesOf(doc, name)];
+}
+
+/** Uses in exploded views and drawings (`drawingVariableUses`), which also block a delete. */
+function drawingUsesOf(doc: ManufaktureDocument, name: string): UseRow[] {
+  return drawingVariableUses(doc, name).map((u) => ({
+    key:
+      u.kind === 'explodedView'
+        ? `e:${u.assemblyId}/${u.explodedViewId}:${u.path.join('.')}`
+        : `d:${u.drawingId}:${u.path.join('.')}`,
+    label: labelOfDrawingUse(doc, u),
+    featureId: null,
+  }));
+}
+
+function modelUsesOf(doc: ManufaktureDocument, name: string): UseRow[] {
   return variableUses(doc, name).map((u) => ({
     key:
       u.kind === 'variable'

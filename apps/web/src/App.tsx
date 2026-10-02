@@ -89,6 +89,8 @@ import {
   type HistoryTarget,
 } from './history/history';
 import { ConfigurationsPanel } from './configurations/ConfigurationsPanel';
+import { DrawingTabs } from './drawing/DrawingTabs';
+import { createDrawingUiStore } from './drawing/state';
 import { ConfigurationSwitcher } from './configurations/ConfigurationSwitcher';
 import { documentStore, historyShortcut, type DocumentStoreApi } from './state/document';
 import { measureStore, type MeasureStore } from './state/measure';
@@ -157,6 +159,16 @@ const BoardDialog = lazy(() =>
 // The Joint dialog (woodworking, M4) likewise.
 const JointDialog = lazy(() =>
   import('./wood/joints/JointDialog').then((m) => ({ default: m.JointDialog })),
+);
+
+// The drawing workspace (M4 T4.4g), with the drawing writers, when a drawing tab is first opened.
+const DrawingWorkspace = lazy(() =>
+  import('./drawing/DrawingWorkspace').then((m) => ({ default: m.DrawingWorkspace })),
+);
+
+// The Cut list panel (woodworking, M4) likewise, with the nesting and the PDF writer.
+const CutListPanel = lazy(() =>
+  import('./wood/cutlist/CutListPanel').then((m) => ({ default: m.CutListPanel })),
 );
 
 /** The open dialog: a feature dialog, or the Board or Joint dialog (`wood.*` extensions). */
@@ -266,6 +278,8 @@ export function App({
 }: AppProps) {
   const [ownAssemblyUi] = useState(createAssemblyUiStore);
   const assemblyUi = givenAssemblyUi ?? ownAssemblyUi;
+  // The drawing tab shown over the part studio, if any (M4 T4.4g).
+  const [drawingUi] = useState(createDrawingUiStore);
   const [ownPrintUi] = useState(createPrintUiStore);
   const printUi = givenPrintUi ?? ownPrintUi;
   // The print-analysis client starts its worker on the first analysis, not here.
@@ -322,6 +336,7 @@ export function App({
   // Version history: whether the panel shows, a counter that moves with every save (so the panel
   // reads the history again), and the version or revision being viewed, if any.
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [cutListOpen, setCutListOpen] = useState(false);
   const [historyRevision, setHistoryRevision] = useState(0);
   const [viewing, setViewing] = useState<Viewing | null>(null);
   const viewingRef = useRef<Viewing | null>(null);
@@ -761,6 +776,26 @@ export function App({
     assemblyUi.getState().clearPoses();
     assemblyUi.getState().setMessage(null);
   }, [activePartId, activeAssemblyId, printing, selection, assemblyUi]);
+  // A drawing tab is shown over the part studio (M4 T4.4g): another part studio or assembly tab,
+  // or the print workspace, closes it; opening one closes the print workspace.
+  const drawingOpen = useStore(drawingUi, (s) => s.drawingId !== null || s.creating);
+  const drawingTab = useRef(`${activePartId}\n${activeAssemblyId ?? ''}`);
+  useEffect(() => {
+    const tab = `${activePartId}\n${activeAssemblyId ?? ''}`;
+    if (drawingTab.current === tab) return;
+    drawingTab.current = tab;
+    drawingUi.getState().close();
+  }, [activePartId, activeAssemblyId, drawingUi]);
+  useEffect(() => {
+    if (printOpen) drawingUi.getState().close();
+  }, [printOpen, drawingUi]);
+  useEffect(() => {
+    if (drawingOpen && printUi.getState().open) printUi.getState().setOpen(false);
+  }, [drawingOpen, printUi]);
+  const drawingBodyIds = useMemo(
+    () => Object.fromEntries(allParts.map((p) => [p.partId, p.bodies.map((b) => b.bodyId)])),
+    [allParts],
+  );
   // Poses a drag or a mate committed are shown until the model has caught up with them.
   const modelDocument = useModel(model, (s) => s.document);
   const modelPending = useModel(model, (s) => s.pending);
@@ -1724,10 +1759,27 @@ export function App({
           >
             Print
           </button>
+          {hasWoodwork(document) && (
+            <button
+              type="button"
+              aria-pressed={cutListOpen}
+              disabled={locked}
+              data-testid="open-cutlist"
+              title="The cut list, bill of materials and sheet layouts of the boards"
+              onClick={() => setCutListOpen((open) => !open)}
+            >
+              Cut list
+            </button>
+          )}
           <SketchMenu
             face={face}
             disabled={
-              sketching.active || dialog !== null || locked || assemblyId !== null || printing
+              sketching.active ||
+              dialog !== null ||
+              locked ||
+              assemblyId !== null ||
+              printing ||
+              drawingOpen
             }
             onPick={(target) => sketching.enter(target)}
           />
@@ -1824,12 +1876,12 @@ export function App({
           <PrintToolbar documents={documents} printUi={printUi} resolved={print.resolved} />
         </div>
       )}
-      {!sketching.active && !locked && !printing && assemblyId === null && (
+      {!sketching.active && !locked && !printing && !drawingOpen && assemblyId === null && (
         <div className="feature-bar">
           <FeatureToolbar disabled={dialog !== null} onOpen={(kind) => setDialog({ kind })} />
         </div>
       )}
-      {!locked && !printing && assemblyId !== null && (
+      {!locked && !printing && !drawingOpen && assemblyId !== null && (
         <div className="feature-bar">
           <div className="assembly-toolbar" role="toolbar" aria-label="Assembly">
             <button
@@ -2154,6 +2206,19 @@ export function App({
                     onClose={() => setHistoryOpen(false)}
                   />
                 )}
+                {!locked && cutListOpen && hasWoodwork(document) && (
+                  <Suspense fallback={<aside className="selection-panel" aria-busy="true" />}>
+                    <CutListPanel
+                      documents={documents}
+                      model={model}
+                      selection={selection}
+                      assemblyId={assemblyId}
+                      sizer={loader.sizer ?? null}
+                      disabled={exportAll !== null}
+                      onClose={() => setCutListOpen(false)}
+                    />
+                  </Suspense>
+                )}
                 {!locked && (
                   <>
                     <VariablesPanel
@@ -2183,12 +2248,46 @@ export function App({
             )}
           </div>
         </div>
+        {drawingOpen && (
+          <Suspense
+            fallback={
+              <section className="drawing-workspace" aria-busy="true">
+                Opening...
+              </section>
+            }
+          >
+            <DrawingWorkspace
+              documents={shownDocuments}
+              drawingUi={drawingUi}
+              drawer={loader.drawer ?? null}
+              generation={modelGeneration}
+              bodyIds={drawingBodyIds}
+              readOnly={locked}
+            />
+          </Suspense>
+        )}
       </main>
-      <PartTabs
-        documents={shownDocuments}
-        disabled={sketching.active || dialog !== null || assemblyPanel?.kind === 'mate'}
-        readOnly={locked}
-      />
+      {/* Picking a part studio or assembly tab closes the drawing shown over it. */}
+      <div
+        className="app-tabs"
+        onClickCapture={(e) => {
+          if ((e.target as Element).closest?.('.part-tabs [role="tab"]')) {
+            drawingUi.getState().close();
+          }
+        }}
+      >
+        <PartTabs
+          documents={shownDocuments}
+          disabled={sketching.active || dialog !== null || assemblyPanel?.kind === 'mate'}
+          readOnly={locked}
+        />
+        <DrawingTabs
+          documents={shownDocuments}
+          drawingUi={drawingUi}
+          disabled={sketching.active || dialog !== null || assemblyPanel?.kind === 'mate'}
+          readOnly={locked}
+        />
+      </div>
     </div>
   );
 }

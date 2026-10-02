@@ -10,12 +10,14 @@ import type { LoadProgress } from '@manufakture/kernel';
 import type { KernelClientOptions } from '@manufakture/kernel/client';
 import type { RegenClient } from '@manufakture/regen/client';
 import type { Assembler } from '../assembly/assembly';
+import type { Drawer } from '../drawing/drawer';
 import { kernelExchange, type Exchanger, type KernelBody, type Referencer } from '../io/exchange';
 import type { Measurer } from '../measure/measurer';
 import { demoDocument } from '../model/demo';
 import { kernelRegenerator } from '../model/kernelModel';
 import { buildable, type Regenerator } from '../model/model';
 import type { Texter } from '../sketcher/text';
+import type { Sizer } from '../wood/cutlist/sizer';
 import { testHooksEnabled } from '../testHooks';
 import type { BodyInput } from './bodies';
 import { fillPlaceholderNames } from './naming';
@@ -49,6 +51,10 @@ export interface SceneLoader {
   assembler?: Assembler;
   /** Text layout and font reading for the sketcher, in the regen worker; absent for kernel-free scenes. */
   texter?: Texter;
+  /** Oriented box sizes for the cut list, in the regen worker; absent for kernel-free scenes. */
+  sizer?: Sizer;
+  /** Drawing views, dimensions and sheets in the regen worker; absent for kernel-free scenes. */
+  drawer?: Drawer;
   /** A document the scene opens with (the demo scene); the app loads it once the scene is loaded. */
   initialDocument?: ManufaktureDocument;
 }
@@ -149,12 +155,34 @@ export function kernelLoader(
     cancelInterference: (assemblyId) =>
       void client?.cancelInterference(assemblyId).catch(() => undefined),
   };
+  // Drawings are built as a regen builds the document: in its active configuration row.
+  const drawer: Drawer = {
+    sheet: (document, drawingId, sheetId, options = {}) => {
+      if (client === null) return Promise.resolve(null);
+      const built = buildable(document).document;
+      return built === document
+        ? client.drawingSheet(document, drawingId, sheetId, options)
+        : client.drawingSheet(built, drawingId, sheetId, { ...options, stored: document });
+    },
+  };
   // Texts and fonts go to the regen worker's text worker (under its watchdog); they need no kernel.
   const texter: Texter = {
     outline: (request, options) =>
       client === null ? Promise.resolve(null) : client.outlineText(request, options),
     readFont: (fileName, bytes) =>
       client === null ? Promise.resolve(null) : client.readFont(fileName, bytes),
+  };
+  // Sizes of bodies that are not boards, for the cut list: built as a regen builds them.
+  const sizer: Sizer = {
+    orientedSizes: (document, partId, options) => {
+      if (client === null) return Promise.resolve(null);
+      const built = buildable(document).document;
+      return client.orientedSizes(
+        built,
+        partId,
+        built === document ? options : { ...options, stored: document },
+      );
+    },
   };
   const loader = loaderFrom(
     { label: 'Starting the geometry kernel', fraction: null },
@@ -182,6 +210,8 @@ export function kernelLoader(
     referencer,
     assembler,
     texter,
+    drawer,
+    sizer,
     ...(options.initialDocument ? { initialDocument: options.initialDocument } : {}),
   };
 }

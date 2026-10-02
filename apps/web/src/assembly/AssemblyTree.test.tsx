@@ -154,6 +154,74 @@ describe('exploded steps block deleting an instance', () => {
   });
 });
 
+describe('instances that drawings dimension', () => {
+  it('asks before deleting an instance a drawing dimension measures, and deletes on confirm', () => {
+    const ref = (instance: string) => ({
+      vertex: { faces: ['extrude#1:cap:end'] },
+      body: 'extrude#1',
+      instance: [instance],
+    });
+    const doc = apply(twoInstances(), {
+      type: 'addDrawing',
+      drawing: {
+        id: 'drawing#1',
+        name: 'Assembly drawing',
+        nextIds: { sheet: 2, view: 2, dim: 2 },
+        sheets: [
+          {
+            id: 'sheet#1',
+            name: 'Sheet 1',
+            size: 'A4',
+            orientation: 'landscape',
+            views: [
+              {
+                id: 'view#1',
+                source: { assembly: A },
+                direction: 'front',
+                scale: {
+                  paper: { source: '1', lengthUnit: 'mm', angleUnit: 'deg' },
+                  model: { source: '1', lengthUnit: 'mm', angleUnit: 'deg' },
+                },
+                position: [100, 100],
+                options: { hidden: true, smooth: false },
+              },
+            ],
+            dimensions: [
+              {
+                id: 'dim#1',
+                view: 'view#1',
+                kind: 'vertical',
+                refs: [ref('inst#1'), ref('inst#2')],
+                offset: 10,
+              },
+            ],
+            notes: [],
+          },
+        ],
+      },
+    });
+    const documents = createDocumentStore(doc);
+    render(
+      <AssemblyTree documents={documents} assemblyId={A} result={result()} onEditMate={vi.fn()} />,
+    );
+    fireEvent.click(screen.getByTestId('instance-delete-inst#2'));
+    // Not deleted yet: the tree says which dimensions will be lost.
+    expect(documents.getState().document.assemblies[0]!.instances).toHaveLength(2);
+    expect(screen.getByTestId('instance-delete-warning-inst#2').textContent).toContain(
+      'Lid 1 is measured by 1 drawing dimension (Assembly drawing dim#1)',
+    );
+    fireEvent.click(screen.getByTestId('instance-delete-cancel-inst#2'));
+    expect(screen.queryByTestId('instance-delete-warning-inst#2')).toBeNull();
+    fireEvent.click(screen.getByTestId('instance-delete-inst#2'));
+    fireEvent.click(screen.getByTestId('instance-delete-confirm-inst#2'));
+    expect(documents.getState().document.assemblies[0]!.instances.map((x) => x.id)).toEqual([
+      'inst#1',
+    ]);
+    // The dimension stays, to be re-picked.
+    expect(documents.getState().document.drawings![0]!.sheets[0]!.dimensions).toHaveLength(1);
+  });
+});
+
 describe('configuration rows of instances', () => {
   const mm = (source: string) => ({ source, lengthUnit: 'mm' as const, angleUnit: 'deg' as const });
 

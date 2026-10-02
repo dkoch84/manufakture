@@ -56,12 +56,18 @@ importers:
       '@manufakture/domain-wood':
         specifier: workspace:*
         version: link:../../packages/domain-wood
+      '@manufakture/drawing':
+        specifier: workspace:*
+        version: link:../../packages/drawing
       '@manufakture/io':
         specifier: workspace:*
         version: link:../../packages/io
       '@manufakture/kernel':
         specifier: workspace:*
         version: link:../../packages/kernel
+      '@manufakture/nesting':
+        specifier: workspace:*
+        version: link:../../packages/nesting
       '@manufakture/print':
         specifier: workspace:*
         version: link:../../packages/print
@@ -71,6 +77,9 @@ importers:
       '@manufakture/sketch':
         specifier: workspace:*
         version: link:../../packages/sketch
+      '@manufakture/takeoff':
+        specifier: workspace:*
+        version: link:../../packages/takeoff
       '@manufakture/units':
         specifier: workspace:*
         version: link:../../packages/units
@@ -111,6 +120,12 @@ importers:
       '@vitejs/plugin-react':
         specifier: ^6.1.1
         version: 6.1.1(vite@8.3.1(@types/node@22.20.4))
+      dxf-parser:
+        specifier: ^1.1.2
+        version: 1.1.2
+      pdfjs-dist:
+        specifier: ^6.3.289
+        version: 6.3.289
 
   packages/assembly: {}
 

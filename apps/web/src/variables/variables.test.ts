@@ -355,6 +355,68 @@ describe('deleting', () => {
     });
   });
 
+  it('lists uses in drawings and exploded views, which block a delete too', () => {
+    let doc = boxDocument();
+    const ok = (c: Command) => {
+      const r = applyCommand(doc, c);
+      if (!r.ok) throw new Error(r.error.message);
+      doc = r.value.document;
+    };
+    ok({ type: 'setVariable', name: 'paper', expression: mm('1') });
+    ok({
+      type: 'addDrawing',
+      drawing: {
+        id: 'drawing#1',
+        name: 'Plan',
+        nextIds: { sheet: 2, view: 2 },
+        sheets: [
+          {
+            id: 'sheet#1',
+            name: 'Sheet 1',
+            size: { width: mm('w * 10'), height: mm('200') },
+            orientation: 'landscape',
+            views: [
+              {
+                id: 'view#1',
+                source: { part: doc.parts[0]!.id },
+                direction: 'front',
+                scale: { paper: mm('paper'), model: mm('w / 10') },
+                position: [100, 100],
+                options: { hidden: true, smooth: false },
+              },
+            ],
+            dimensions: [],
+            notes: [],
+          },
+        ],
+      },
+    });
+    const row = variableRows(doc).find((r) => r.name === 'w')!;
+    expect(row.uses.slice(-2)).toEqual([
+      {
+        key: 'd:drawing#1:sheets.0.size.width',
+        label: 'Plan: Sheet 1: Sheet width',
+        featureId: null,
+      },
+      {
+        key: 'd:drawing#1:sheets.0.views.0.scale.model',
+        label: 'Plan: Sheet 1: view#1: Scale (model side)',
+        featureId: null,
+      },
+    ]);
+    expect(deleteCommand(doc, 'paper')).toMatchObject({
+      ok: false,
+      uses: [{ label: 'Plan: Sheet 1: view#1: Scale (paper side)' }],
+    });
+    // Its uses take its value instead, drawings included: then it goes.
+    const r = replaceWithValueCommand(doc, 'paper');
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      const next = applyCommand(doc, r.command);
+      expect(next.ok && next.value.document.variables.some((v) => v.name === 'paper')).toBe(false);
+    }
+  });
+
   it('replaces every use with the current value and deletes, as one undo step', () => {
     const doc = boxDocument();
     const store = DocumentStore.create(doc);

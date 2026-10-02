@@ -1,0 +1,277 @@
+/* The drawing workspace: drawn over the part studio panel, with its toolbar, the sheet and a side
+   panel; and the drawing tabs beside the part studio tabs. */
+
+.app-main {
+  position: relative;
+}
+
+.drawing-workspace {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  background: #eef1f5;
+  font-size: 0.85rem;
+}
+
+.drawing-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 1rem;
+  padding: 0.3rem 0.75rem;
+  border-bottom: 1px solid #d6dce3;
+  background: #fff;
+}
+
+.drawing-toolbar > span {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.drawing-toolbar button,
+.drawing-panel button,
+.drawing-new button {
+  font: inherit;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid #c2cad3;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.drawing-toolbar button[aria-pressed='true'],
+.drawing-toolbar button[aria-selected='true'] {
+  background: #e3edff;
+  border-color: #4d8dff;
+}
+
+.drawing-toolbar input {
+  font: inherit;
+  width: 9rem;
+}
+
+.drawing-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.drawing-canvas {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  padding: 1rem;
+}
+
+.drawing-sheet {
+  position: relative;
+  max-width: none;
+  margin: 0 auto;
+  background: #fff;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 25%);
+  touch-action: none;
+  user-select: none;
+}
+
+.drawing-sheet.tool-dimension,
+.drawing-sheet.tool-note {
+  cursor: crosshair;
+}
+
+.drawing-svg,
+.drawing-svg svg,
+.drawing-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.drawing-overlay {
+  pointer-events: none;
+  overflow: visible;
+}
+
+.drawing-selected-view {
+  fill: none;
+  stroke: #1a6fe0;
+  stroke-width: 0.3;
+  stroke-dasharray: 2 1;
+}
+
+.drawing-drag-ghost {
+  fill: rgb(26 111 224 / 8%);
+  stroke: #1a6fe0;
+  stroke-width: 0.3;
+}
+
+.drawing-drag-point,
+.drawing-pick {
+  fill: #ef8a00;
+  stroke: none;
+}
+
+.drawing-panel {
+  width: 17rem;
+  padding: 0.5rem 0.75rem;
+  border-left: 1px solid #d6dce3;
+  background: #fff;
+  overflow: auto;
+}
+
+.drawing-section h3 {
+  font-size: 0.9rem;
+  margin: 0.5rem 0 0.35rem;
+}
+
+.drawing-field {
+  display: grid;
+  grid-template-columns: 5.5rem 1fr;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0.2rem 0;
+}
+
+.drawing-field input,
+.drawing-field select {
+  font: inherit;
+  min-width: 0;
+}
+
+.drawing-field .field-error {
+  grid-column: 1 / -1;
+}
+
+.drawing-check {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0.2rem 0;
+}
+
+.drawing-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin: 0.3rem 0;
+}
+
+.drawing-subhead {
+  margin: 0.5rem 0 0;
+  color: #5b6673;
+}
+
+.drawing-bodies {
+  margin: 0.3rem 0;
+  border: 1px solid #d6dce3;
+}
+
+.drawing-dimensions,
+.drawing-messages {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.drawing-dimension {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0;
+  border-bottom: 1px solid #eef1f5;
+}
+
+.drawing-dimension.selected {
+  background: #eef4ff;
+}
+
+.drawing-link {
+  border: none !important;
+  background: none !important;
+  padding: 0 !important;
+  text-align: left;
+}
+
+.drawing-dim-status {
+  color: #5b6673;
+}
+
+.drawing-dimension.outcome-warning .drawing-dim-status {
+  color: #c77700;
+}
+
+.drawing-dimension.outcome-lost,
+.drawing-dimension.outcome-ambiguous,
+.drawing-dimension.outcome-error {
+  color: #b3261e;
+}
+
+.drawing-dimension.outcome-lost .drawing-dim-status,
+.drawing-dimension.outcome-ambiguous .drawing-dim-status,
+.drawing-dimension.outcome-error .drawing-dim-status {
+  color: #b3261e;
+  font-weight: 600;
+}
+
+.drawing-dim-note {
+  flex-basis: 100%;
+  font-size: 0.8rem;
+}
+
+.drawing-message.error {
+  color: #b3261e;
+}
+
+.drawing-message.warning {
+  color: #8a5a00;
+}
+
+.drawing-new-wrap {
+  margin: 2rem auto;
+  width: 22rem;
+  padding: 1rem;
+  background: #fff;
+  border: 1px solid #d6dce3;
+  border-radius: 6px;
+}
+
+.drawing-new h2 {
+  font-size: 1rem;
+  margin: 0 0 0.5rem;
+}
+
+/* The tab row: part studios and assemblies, then drawings. */
+.app-tabs {
+  display: flex;
+  align-items: stretch;
+  flex: none;
+  min-width: 0;
+}
+
+.app-tabs > .part-tabs {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.drawing-tabs {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 0 1 auto;
+  min-width: 0;
+  padding: 0 0.5rem;
+  border-top: 1px solid #d6dce3;
+  border-left: 1px solid #d6dce3;
+  background: #f4f6f9;
+  font-size: 0.85rem;
+}
+
+.drawing-tab-icon {
+  color: #5b6673;
+}
