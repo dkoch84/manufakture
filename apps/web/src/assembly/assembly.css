@@ -210,3 +210,38 @@
   font: inherit;
   padding: 0.05rem 0.2rem;
 }
+
+/* The Explode panel (T4.5a) and its trail lines. */
+
+.explode-views {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.35rem;
+}
+
+.explode-slider input {
+  width: 100%;
+}
+
+.explode-instances {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin-bottom: 0.35rem;
+}
+
+.explode-steps {
+  padding-left: 0;
+}
+
+.explode-trail {
+  stroke: #3a6fd8;
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
+  fill: none;
+}
+
+.explode-trail-end {
+  fill: #3a6fd8;
+}

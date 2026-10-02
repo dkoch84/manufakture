@@ -913,11 +913,29 @@ describe('drawing views with the real kernel', () => {
     expect(dim.outcome).toBe('exact');
     expect(dim.value).toBeCloseTo(25, 6);
 
-    // An exploded view is drawn assembled until T4.5a, with a warning.
+    // An exploded view (T4.5a): the lid 30 mm up and 10 mm along x, the box where it was. The
+    // dimension across the two follows the lid, and the solved poses stay as they are.
     doc = apply(doc, {
       type: 'addExplodedView',
       assemblyId: ASSEMBLY,
-      explodedView: { id: 'explode#1', name: 'Exploded', steps: [] },
+      explodedView: {
+        id: 'explode#1',
+        name: 'Exploded',
+        steps: [
+          {
+            id: 'step#1',
+            instances: ['inst#2'],
+            direction: { vector: [0, 0, 1] },
+            distance: mm('30'),
+          },
+          {
+            id: 'step#2',
+            instances: ['inst#2'],
+            direction: { instance: 'inst#1', face: { face: 'extrude#1:side:e2' } },
+            distance: mm('10'),
+          },
+        ],
+      },
     } as Command);
     doc = apply(doc, {
       type: 'editView',
@@ -926,8 +944,37 @@ describe('drawing views with the real kernel', () => {
       view: view('view#1', 'front', { source: { assembly: ASSEMBLY, explodedView: 'explode#1' } }),
     });
     const exploded = (await engine.drawingView(doc, D, 'view#1'))!;
-    expect(exploded.diagnostics.map((d) => d.code)).toEqual(['explode-pending']);
-    expect(exploded.cached).toBe(true);
+    expect(exploded.diagnostics).toEqual([]);
+    expect(exploded.cached).toBe(false);
+    expect(exploded.items[0]!.pose).toEqual(front.items[0]!.pose);
+    const at = exploded.items[1]!.pose.translation;
+    const was = lid.transform.translation;
+    expect(at[0] - was[0]).toBeCloseTo(10, 9);
+    expect(at[1] - was[1]).toBeCloseTo(0, 9);
+    expect(at[2] - was[2]).toBeCloseTo(30, 9);
+    expect(exploded.bounds!.max[1]).toBeCloseTo(55, 6);
+    expect(exploded.bounds!.max[0]).toBeCloseTo(50, 6);
+    expect(exploded.dimensions[0]!.outcome).toBe('exact');
+    expect(exploded.dimensions[0]!.value).toBeCloseTo(55, 6);
+    const again = (await engine.regen(doc))!;
+    expect(again.assemblies[0]!.instances[1]!.transform).toEqual(lid.transform);
+    // An exploded view whose step does not resolve in full is drawn without it, with a warning.
+    doc = apply(doc, {
+      type: 'editExplodeStep',
+      assemblyId: ASSEMBLY,
+      explodedViewId: 'explode#1',
+      step: {
+        id: 'step#2',
+        instances: ['inst#2'],
+        direction: { instance: 'inst#1', face: { face: 'extrude#1:side:e9' } },
+        distance: mm('10'),
+      },
+    } as Command);
+    await engine.regen(doc);
+    const partly = (await engine.drawingView(doc, D, 'view#1'))!;
+    expect(partly.diagnostics.map((d) => d.code)).toEqual(['exploded-view']);
+    expect(partly.bounds!.max[0]).toBeCloseTo(40, 6);
+    expect(partly.bounds!.max[1]).toBeCloseTo(55, 6);
     await engine.dispose();
   });
 

@@ -76,6 +76,7 @@ service (`@manufakture/kernel/node`) and the real solver directly.
 | `@manufakture/regen/client`     | main thread  | `RegenClient`, without any worker entry (a host with its own entry imports only this)                           |
 | `@manufakture/regen/spawn`      | main thread  | `spawnRegenWorker()`: starts regen's own worker entry and returns its `RegenClient`                             |
 | `@manufakture/regen/extensions` | worker entry | the translator registry (`ExtensionRegistry`, `defaultExtensions`) without the text engine the index re-exports |
+| `@manufakture/regen/explode`    | main thread  | exploded offsets (`explodedOffsets`, `explodedPose`, `explodeTrails`), pure, for the assembly viewport          |
 
 `createRegenWorkerApi` (`src/worker-api.ts`) builds the kernel's worker API (`createKernelWorkerApi`: loading with progress, batches, release, cancel, recycle, stats), waits for its service, creates the engine next to it and adds `regen(document, { generation })`, `solveAssembly(document, assemblyId, { generation })`, `dragInstance(assemblyId, instanceId, target, { generation })`, `interference(assemblyId, { generation, mesh?, tolerance? }, onPair?)`, `cancelInterference(assemblyId)` and `regenStats()`. `RegenClient.solveAssembly`, `RegenClient.dragInstance` and `RegenClient.interference` send the client's current generation (`latestGeneration`), never a new one, so none of them cancels a regen. `interference`'s `onPair` is a `Comlink.proxy` passed as an argument of its own (Comlink only looks for proxies in top-level arguments); each pair's mesh buffers are transferred with it. Mesh buffers are marked with `regenTransferables(result)`; nothing else heavy crosses. `RegenClient` extends the kernel's `KernelClient` (imported from `@manufakture/kernel/kernel-client`, so the kernel's own worker entry is not bundled), so every request of every kind (a regen, a `pick`, a `measure`, an export) takes its generation from the one sequence the client keeps. The service cancels by generation whoever sent a batch (see Cancellation), so a regen cancels older requests, and a pick or measure sent at the client's current generation never cancels a regen. Only a regen may take a new generation: any other batch that did (a STEP import, say) would cancel the regen in flight, which then resolves to null with nothing reporting in its place, so the app sends every other batch at `latestGeneration` and releases shapes with `KernelClient.release`, outside the batch queue. The app's `startRegen` also asks again when its newest regen comes back null. A pending regen resolves to null when the worker is restarted or terminated, like a pending submit. `RegenClient.regen` returns every regen the worker completed, even when a newer request came meanwhile: the engine reports a changed mesh once, to the regen that built it, so a caller that dropped completed results would lose meshes.
 
@@ -660,6 +661,28 @@ the instance is then the part's own build, which the app makes from the document
 says so in its configuration message), so it shows the part as stored rather than failing. Every `SourceResult` carries the part's name (`partName`) and, when one is applied, the
 row (`row: { id, name }`), for the app's labels and export names.
 
+## Exploded views
+
+`src/explode.ts` is the one owner of exploded offsets (M4 plan, decision 9 and T4.5a). An
+assembly's exploded views (`Assembly.explodedViews`, core) are named, ordered steps, each moving
+some instances along a direction by a distance expression. After an assembly is solved, regen
+resolves every view at the solved poses into `AssemblyResult.explodedViews`
+(`ExplodedViewResult`: per step the instances it moves, a unit direction in the assembly's frame
+and the distance in mm). A `vector` direction is taken as written; an `edge` or `face` direction
+of an instance is the z of a mate connector frame on it (`midpoint` on the edge, `centroid` on the
+face: a straight edge's direction, a plane's normal or a cylinder's axis), found by the same
+`connector` op and cache as mate connectors, turned by that instance's solved pose, and reversed
+with `flip`. Nothing here changes a pose: `explodedOffsets(view, progress?)` adds the steps up in
+order into one offset per instance, `explodedPose(pose, offset)` moves a solved pose by it, and
+`explodeTrails` gives each step's move per instance for trail lines. `progress` (0 assembled, 1
+exploded) plays the steps one after another, each over an equal share (`stepFraction`), for the
+app's slider. What does not resolve is an `ExplodeWarning` on its step, never a failure: an
+instance the assembly no longer has (`missing-instance`, left out of the step), a distance that
+does not evaluate (`expression`) or a direction whose instance is not placed or whose edge or face
+does not resolve (`direction`; both make the step move nothing), and a direction resolved other
+than exactly (`reference`). Suppressed instances are not placed, so steps skip them silently. The
+module imports nothing that needs a worker, so the app imports it as `@manufakture/regen/explode`.
+
 ## Drawings
 
 `src/drawing.ts` is the drawing stage (M4 plan T4.4e, decisions 7 and 8): the one place where
@@ -675,8 +698,11 @@ supersedes them. A drawing, sheet or view the document does not have rejects.
 are a `missing-body` diagnostic) at the identity pose; an assembly view shows every unsuppressed
 instance's bodies at their solved poses, keyed `<instance id>/<body id>`. Features of the part, or
 instances of the assembly, that failed are a `source-errors` warning; the view shows what was built.
-A view of an exploded view is drawn assembled with an `explode-pending` warning until T4.5a plugs
-in the exploded offsets. Every body of a view goes into ONE `project` op (T4.4a: projecting bodies
+A view of an exploded view places each instance at its solved pose plus its exploded offset,
+from the same `explodedOffsets` the assembly viewport calls (see Exploded views); an exploded view
+the assembly does not have (drawn assembled), or steps of it that did not resolve in full, are an
+`exploded-view` warning. Exploded poses are poses like any other, so the cache keys on them and
+dimensions resolve on the instances where they are drawn. Every body of a view goes into ONE `project` op (T4.4a: projecting bodies
 alone and merging is wrong where they hide each other), with the view's hidden and smooth options
 and its section (core removes the side the section normal points to, so the kernel's normal is
 its negation, through `normal * offset`). The result is cached as plain data by the bodies' keys
@@ -980,6 +1006,11 @@ pnpm --filter @manufakture/regen test
   active row applied and the stored document passed, an instance in a row that leaves a
   parameter out gets the stored value: the same body as the document built in that row, unlike
   configuring the active-row document.
+- `explode.test.ts`: exploded offsets: steps adding up in order, the slider's progress playing
+  steps one after another, trails, a deleted instance, a suppressed one, a distance that does not
+  evaluate and a direction that does not resolve as warnings on their step; with the real kernel
+  and solver on the box and lid, an edge and a face direction read at the solved pose (one
+  flipped), the solved and stored poses unchanged, distances following a variable, and a lost face.
 - `drawing.test.ts`: the drawing stage's mapping (offsets, scales, custom sheet sizes, title
   blocks, value formats), dimension geometry (parallel planes, foreshortening, silhouettes, angle
   quadrants, a partial cylinder's extent and arc) and the depth tie-break of `pickInView`; a stage
@@ -988,7 +1019,9 @@ pnpm --filter @manufakture/regen test
   when the fillet goes, views projected only on request with no `project` op on a cache hit (also
   after moving a view or adding a dimension), the quarter round picked by its one silhouette and its diameter drawn its full height with a
   `silhouette` warning, sections keeping the side core keeps with their cut faces filled in, an
-  assembly view at the solved poses with a dimension across two instances and `explode-pending`,
+  assembly view at the solved poses with a dimension across two instances, then the same view of an
+  exploded view: the lid at its exploded offset (a vector step and a face-normal step), the
+  dimension following it, no diagnostic, and an `exploded-view` warning once a step's face is lost,
   a laid-out sheet with notes, title block and inch values, and a bad custom size as a diagnostic.
 - `derived.test.ts` also checks that a source whose reading throws is a `source` error, and how a
   source opens in a row (once per hash and row, the namespace, a missing row).

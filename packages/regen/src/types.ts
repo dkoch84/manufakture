@@ -15,6 +15,7 @@ import type { BodyPropsFields, DomainData, FeatureKind, Pose, Vec3 } from '@manu
 import type { MeshData, ShapeId, ThreadReport, Topology, Via } from '@manufakture/kernel';
 import type { OutlineShape, RegionDiagnosticCode, SketchPlacement } from '@manufakture/sketch';
 import type { UnitsError } from '@manufakture/units';
+import type { ExplodedViewResult } from './explode';
 
 /**
  * - `ok`: built (possibly with warnings);
@@ -363,6 +364,11 @@ export interface AssemblyResult {
   issues: AssemblyIssue[];
   warnings: AssemblyWarning[];
   message?: string;
+  /**
+   * The assembly's exploded views resolved at the solved poses (T4.5a), in the assembly's order:
+   * what `explodedOffsets` turns into display offsets. Absent when the assembly has none.
+   */
+  explodedViews?: ExplodedViewResult[];
   /** Milliseconds for connectors and the solve. */
   ms: number;
 }

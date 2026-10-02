@@ -16,6 +16,18 @@ import { assemblyBodies, instanceOf, type ConnectorChoice } from './assembly/ass
 import { AssemblyTree } from './assembly/AssemblyTree';
 import { ConnectorOverlay } from './assembly/ConnectorOverlay';
 import { instanceDrag } from './assembly/drag';
+import {
+  displayOffsets,
+  distanceExpression,
+  explodeDrag,
+  instanceCentres,
+  shownExplodedView,
+  worldTrails,
+  addStepCommand,
+  axisVector,
+} from './assembly/explode';
+import { ExplodeOverlay } from './assembly/ExplodeOverlay';
+import { ExplodePanel } from './assembly/ExplodePanel';
 import { InsertPanel } from './assembly/InsertPanel';
 import { instanceFaces, pairKey } from './assembly/interference';
 import { InterferenceOverlay } from './assembly/InterferenceOverlay';
@@ -118,7 +130,7 @@ import { SelectionPanel, Toolbar } from './viewport/Toolbar';
 import { Viewport, type EngineFactory, type ViewportApi } from './viewport/Viewport';
 import { ThreadOverlay } from './viewport/ThreadOverlay';
 import { GrainOverlay } from './wood/GrainOverlay';
-import { isBoard } from './wood/kinds';
+import { isBoard, isJoint } from './wood/kinds';
 import { StockPanel } from './wood/StockPanel';
 import { hasWoodwork } from './wood/stock';
 import './viewport/viewport.css';
@@ -142,8 +154,14 @@ const BoardDialog = lazy(() =>
   import('./wood/BoardDialog').then((m) => ({ default: m.BoardDialog })),
 );
 
-/** The open dialog: a feature dialog, or the Board dialog (a `wood.board` extension). */
-type OpenDialog = DialogRequest | { kind: 'board'; featureId?: string };
+// The Joint dialog (woodworking, M4) likewise.
+const JointDialog = lazy(() =>
+  import('./wood/joints/JointDialog').then((m) => ({ default: m.JointDialog })),
+);
+
+/** The open dialog: a feature dialog, or the Board or Joint dialog (`wood.*` extensions). */
+type OpenDialog =
+  DialogRequest | { kind: 'board'; featureId?: string } | { kind: 'joint'; featureId?: string };
 
 export interface AppProps {
   /** A loader owned by the caller: the app uses it but never disposes it. */
@@ -393,6 +411,24 @@ export function App({
   const assemblyPanel = useStore(assemblyUi, (s) => s.panel);
   const assemblyMessage = useStore(assemblyUi, (s) => s.message);
   const shownPoses = useStore(assemblyUi, (s) => (s.posesFor === assemblyId ? s.poses : null));
+  const assemblyResult = modelAssemblies.find((a) => a.assemblyId === assemblyId);
+  // While the Explode panel is open the instances are shown exploded (T4.5a): display offsets on
+  // top of the solved poses, never written back.
+  const explodeUi = useStore(assemblyUi, (s) => s.explode);
+  const exploding = assemblyId !== null && assemblyPanel?.kind === 'explode';
+  const explodedViewId = exploding
+    ? (shownExplodedView(
+        shownDocument.assemblies.find((a) => a.id === assemblyId),
+        explodeUi.viewId,
+      )?.id ?? null)
+    : null;
+  const explodeOffsets = useMemo(
+    () =>
+      exploding
+        ? displayOffsets(assemblyResult, explodedViewId, explodeUi.progress, explodeUi.dragged)
+        : undefined,
+    [exploding, assemblyResult, explodedViewId, explodeUi.progress, explodeUi.dragged],
+  );
   const instanceBodies = useMemo(
     () =>
       assemblyId === null
@@ -402,10 +438,29 @@ export function App({
             assemblyId,
             { parts: allParts, assemblies: modelAssemblies, sources: modelSources },
             shownPoses ?? undefined,
+            explodeOffsets,
           ),
-    [assemblyId, shownDocument, allParts, modelAssemblies, modelSources, shownPoses],
+    [
+      assemblyId,
+      shownDocument,
+      allParts,
+      modelAssemblies,
+      modelSources,
+      shownPoses,
+      explodeOffsets,
+    ],
   );
-  const assemblyResult = modelAssemblies.find((a) => a.assemblyId === assemblyId);
+  const explodeTrailLines = useMemo(() => {
+    if (!exploding || assemblyId === null) return [];
+    const poses = new Map(assemblyResult?.instances.map((x) => [x.instanceId, x.transform]));
+    return worldTrails(
+      assemblyResult,
+      explodedViewId,
+      explodeUi.progress,
+      poses,
+      instanceCentres(instanceBodies, assemblyId),
+    );
+  }, [exploding, assemblyId, assemblyResult, explodedViewId, explodeUi.progress, instanceBodies]);
   // The pair the Interference panel highlights: both instances selected, the overlap outlined.
   const highlightedPair = useStore(assemblyUi, (s) =>
     s.highlight === null || s.interference?.assemblyId !== assemblyId
@@ -1141,9 +1196,51 @@ export function App({
     }
   }, [highlightedPair, assemblyId, selection]);
   const dragging = assemblyId !== null && !locked && loader.assembler !== undefined;
+  // With the Explode panel open, a drag adds an exploded step instead of moving the instance.
+  useEffect(() => {
+    if (!viewport || !exploding || locked) return;
+    viewport.setObjectDrag(
+      explodeDrag({
+        viewport,
+        assemblyId: () => documents.getState().activeAssemblyId,
+        axis: () => assemblyUi.getState().explode.axis,
+        instances: () => assemblyUi.getState().explode.checked,
+        transformOf: (instanceId) => {
+          const asm = documents.getState().activeAssemblyId;
+          return instanceBodiesRef.current.find(
+            (b) => asm !== null && instanceOf(b.id, asm) === instanceId,
+          )?.transform as Pose | undefined;
+        },
+        show: (dragged) => assemblyUi.getState().setExplode({ dragged }),
+        done: (instances, distance) => {
+          const ui = assemblyUi.getState();
+          const state = documents.getState();
+          const assembly = state.document.assemblies.find((a) => a.id === state.activeAssemblyId);
+          const view = shownExplodedView(assembly, ui.explode.viewId);
+          if (distance === null || !assembly) return;
+          if (!view) {
+            ui.setMessage('Add an exploded view first: New exploded view in the Explode panel.');
+            return;
+          }
+          const { command, label } = addStepCommand(
+            assembly,
+            view,
+            instances,
+            { vector: axisVector(ui.explode.axis) },
+            distanceExpression(distance, state.document.units),
+          );
+          const r = state.execute(command, label);
+          if (r.ok) ui.setExplode({ progress: 1 });
+          else ui.setMessage(r.error.message);
+        },
+        refuse: (message) => assemblyUi.getState().setMessage(message),
+      }),
+    );
+    return () => viewport.setObjectDrag(null);
+  }, [viewport, exploding, locked, documents, assemblyUi]);
   useEffect(() => {
     const assembler = loader.assembler;
-    if (!viewport || !dragging || !assembler) return;
+    if (!viewport || !dragging || !assembler || exploding) return;
     viewport.setObjectDrag(
       instanceDrag({
         viewport,
@@ -1176,7 +1273,7 @@ export function App({
       }),
     );
     return () => viewport.setObjectDrag(null);
-  }, [viewport, dragging, loader, documents, assemblyUi]);
+  }, [viewport, dragging, exploding, loader, documents, assemblyUi]);
   // The Mate dialog's preview and connectors.
   const onMatePreview = useCallback(
     (result: AssemblyResult | null) => {
@@ -1386,6 +1483,7 @@ export function App({
       if (!feature) return;
       if (feature.kind === 'sketch') sketching.enter({ kind: 'edit', featureId });
       else if (isBoard(feature)) setDialog({ kind: 'board', featureId });
+      else if (isJoint(feature)) setDialog({ kind: 'joint', featureId });
       else if (isDialogKind(feature.kind)) {
         setDialog({
           kind: feature.kind,
@@ -1397,7 +1495,7 @@ export function App({
     [documents, sketching],
   );
   useSketchShortcuts(session, sketching.active);
-  // The Board dialog's preview of the board it would build.
+  // The Board and Joint dialogs' preview of the board or the joint's tools they would build.
   const onBoardPreview = useCallback(
     (lines: Vec3[][]) => viewport?.setPreviewLines(lines),
     [viewport],
@@ -1768,6 +1866,20 @@ export function App({
             >
               Interference
             </button>
+            <button
+              type="button"
+              aria-pressed={assemblyPanel?.kind === 'explode'}
+              disabled={assemblyPanel?.kind === 'mate'}
+              data-testid="assembly-explode"
+              title="Exploded views: move instances apart in steps, for display and drawings"
+              onClick={() =>
+                assemblyPanel?.kind === 'explode'
+                  ? assemblyUi.getState().close()
+                  : assemblyUi.getState().open({ kind: 'explode' })
+              }
+            >
+              Explode
+            </button>
             {assemblyMessage && (
               <span className="io-status io-error" role="alert" data-testid="assembly-message">
                 {assemblyMessage}
@@ -1848,6 +1960,9 @@ export function App({
                 bodies={instanceBodies}
                 chosen={assemblyPanel?.kind === 'mate' ? mateConnectors : []}
               />
+            )}
+            {viewport && exploding && !printing && (
+              <ExplodeOverlay viewport={viewport} trails={explodeTrailLines} />
             )}
             {viewport && assemblyId !== null && !printing && highlightedPair !== null && (
               <InterferenceOverlay viewport={viewport} mesh={highlightedPair.mesh} />
@@ -1948,6 +2063,15 @@ export function App({
                 result={assemblyResult}
                 onClose={() => assemblyUi.getState().close()}
               />
+            ) : assemblyId !== null && !locked && assemblyPanel?.kind === 'explode' ? (
+              <ExplodePanel
+                documents={documents}
+                assemblyId={assemblyId}
+                assemblyUi={assemblyUi}
+                result={assemblyResult}
+                selection={selection}
+                onClose={() => assemblyUi.getState().close()}
+              />
             ) : assemblyId !== null && !locked && assemblyPanel?.kind === 'insert' ? (
               <InsertPanel
                 documents={documents}
@@ -1966,6 +2090,24 @@ export function App({
               >
                 <BoardDialog
                   key={`board/${dialog.featureId ?? 'new'}`}
+                  featureId={dialog.featureId}
+                  documents={documents}
+                  model={model}
+                  selection={selection}
+                  onPreview={onBoardPreview}
+                  onClose={() => setDialog(null)}
+                />
+              </Suspense>
+            ) : dialog?.kind === 'joint' ? (
+              <Suspense
+                fallback={
+                  <aside className="selection-panel" aria-busy="true">
+                    Opening...
+                  </aside>
+                }
+              >
+                <JointDialog
+                  key={`joint/${dialog.featureId ?? 'new'}`}
                   featureId={dialog.featureId}
                   documents={documents}
                   model={model}

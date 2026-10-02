@@ -109,8 +109,8 @@ const ALIGNED = 1e-9;
  * - `missing-body`: bodies the view lists that the part no longer has (`missing`).
  * - `source-errors`: features of the view's part, or instances of its assembly, failed
  *   (`failed`): the view shows what was built without them.
- * - `explode-pending`: the view names an exploded view; it is drawn assembled until exploded
- *   offsets exist (T4.5a).
+ * - `exploded-view`: the view shows an exploded view that its assembly does not have (drawn
+ *   assembled), or steps of it that did not resolve in full (drawn without what failed; T4.5a).
  * - `empty-view`: nothing to project.
  * - `expression`: a scale, section offset or custom sheet size that does not evaluate (`field`).
  * - `sheet-size`: a custom sheet size that is not a positive length; the sheet is not laid out.
@@ -122,7 +122,7 @@ export interface DrawingDiagnostic {
     | 'unknown-source'
     | 'missing-body'
     | 'source-errors'
-    | 'explode-pending'
+    | 'exploded-view'
     | 'empty-view'
     | 'expression'
     | 'sheet-size'

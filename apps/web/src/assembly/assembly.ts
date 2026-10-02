@@ -16,6 +16,7 @@ import {
   CONNECTOR_COUNTER,
   INSTANCE_COUNTER,
   MATE_COUNTER,
+  explodeStepInstances,
   findPart,
   previewIds,
   type Assembly,
@@ -41,6 +42,7 @@ import type {
   InterferenceReport,
   MateResult,
 } from '@manufakture/regen';
+import { explodedPose } from '@manufakture/regen/explode';
 import {
   configurationRows,
   defaultRowLabel,
@@ -128,14 +130,16 @@ export function addAssemblyCommand(doc: ManufaktureDocument): {
 /**
  * The viewport bodies of assembly `assemblyId`: every body each instance shows, sharing its
  * part's mesh, placed by the instance's solved transform, or by `poses` where given (a drag or
- * a preview in progress). Suppressed and hidden instances are not drawn. Instances regen has
- * not placed yet (just inserted) appear with the next regen.
+ * a preview in progress), then moved by its exploded offset in `offsets` (T4.5a; display only).
+ * Suppressed and hidden instances are not drawn. Instances regen has not placed yet (just
+ * inserted) appear with the next regen.
  */
 export function assemblyBodies(
   doc: ManufaktureDocument,
   assemblyId: string,
   model: Pick<ModelState, 'parts' | 'assemblies' | 'sources'>,
   poses: ReadonlyMap<string, Pose> = new Map(),
+  offsets: ReadonlyMap<string, Vec3> = new Map(),
 ): BodyInput[] {
   const assembly = doc.assemblies.find((a) => a.id === assemblyId);
   const result = model.assemblies.find((a) => a.assemblyId === assemblyId);
@@ -144,7 +148,10 @@ export function assemblyBodies(
   for (const inst of result.instances) {
     const stored = assembly.instances.find((x) => x.id === inst.instanceId);
     if (!stored || stored.suppressed || inst.status === 'suppressed') continue;
-    const transform = poses.get(inst.instanceId) ?? inst.transform;
+    const transform = explodedPose(
+      poses.get(inst.instanceId) ?? inst.transform,
+      offsets.get(inst.instanceId),
+    );
     const source =
       'part' in inst.source
         ? model.parts.find((p) => p.partId === (inst.source as { part: string }).part)?.bodies
@@ -795,15 +802,51 @@ export function assemblySummary(result: AssemblyResult | undefined): string {
   return result.outcome === 'invalid' && result.message ? `${dof}. ${result.message}` : dof;
 }
 
-/** Instances that mates connect, so deleting them is refused: the mates' names, per instance. */
-export function instanceBlockers(assembly: Assembly): Map<string, string[]> {
-  const out = new Map<string, string[]>();
+/** What keeps an instance from being deleted: mates by name, exploded steps as "step n of X". */
+export interface InstanceBlockers {
+  mates: string[];
+  steps: string[];
+}
+
+/**
+ * Instances that mates connect or exploded steps name (moving them, or reading a direction from
+ * them), so deleting them is refused (core says `dependency`): what uses each, per instance.
+ */
+export function instanceBlockers(assembly: Assembly): Map<string, InstanceBlockers> {
+  const out = new Map<string, InstanceBlockers>();
+  const of = (id: string) => {
+    let b = out.get(id);
+    if (b === undefined) out.set(id, (b = { mates: [], steps: [] }));
+    return b;
+  };
   for (const m of assembly.mates) {
-    for (const id of new Set([m.a.instance, m.b.instance])) {
-      out.set(id, [...(out.get(id) ?? []), m.name]);
-    }
+    for (const id of new Set([m.a.instance, m.b.instance])) of(id).mates.push(m.name);
+  }
+  for (const view of assembly.explodedViews ?? []) {
+    view.steps.forEach((step, i) => {
+      for (const id of new Set(explodeStepInstances(step))) {
+        of(id).steps.push(`step ${i + 1} of ${view.name}`);
+      }
+    });
   }
   return out;
+}
+
+/** Why an instance's Delete is disabled, in a sentence; undefined when nothing blocks it. */
+export function blockedDeleteTitle(b: InstanceBlockers | undefined): string | undefined {
+  if (b === undefined || (b.mates.length === 0 && b.steps.length === 0)) return undefined;
+  const parts: string[] = [];
+  if (b.mates.length > 0) parts.push(`Mated by ${b.mates.join(', ')}`);
+  if (b.steps.length > 0) {
+    parts.push(
+      `${parts.length > 0 ? 'moved' : 'Moved'} or aimed by exploded ${b.steps.join(', ')}`,
+    );
+  }
+  const fix = [
+    ...(b.mates.length > 0 ? ['delete those mates'] : []),
+    ...(b.steps.length > 0 ? ['edit or delete those steps'] : []),
+  ].join(' and ');
+  return `${parts.join('; ')}: ${fix} first`;
 }
 
 // Small vectors ------------------------------------------------------------------------------

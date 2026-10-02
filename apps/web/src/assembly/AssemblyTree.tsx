@@ -1,6 +1,6 @@
 // The assembly's tree (M2 plan, T2.3e), where a part studio shows its feature tree: the
 // assembly's degrees of freedom (or why they cannot be counted), its instances (fix and unfix,
-// suppress, delete) and its mates, each with what the last solve said of it: ok, redundant,
+// suppress, delete; refused while a mate or an exploded step uses it) and its mates, each with what the last solve said of it: ok, redundant,
 // conflicting (with the explanation, and the mate to blame marked), an error regen found (a
 // connector to re-pick), or suppressed. An instance whose source has a configuration table can be
 // built in any of its rows (T2.4c). Every change is one undoable command.
@@ -14,6 +14,7 @@ import type { DocumentStoreApi } from '../state/document';
 import {
   MATE_KIND_LABELS,
   assemblySummary,
+  blockedDeleteTitle,
   instanceBlockers,
   instanceRowCommand,
   instanceRows,
@@ -85,7 +86,7 @@ export function AssemblyTree({
           {assembly.instances.map((inst) => {
             const r = result?.instances.find((x) => x.instanceId === inst.id);
             const problem = r?.errors[0]?.message ?? r?.warnings[0]?.message ?? null;
-            const usedBy = blockers.get(inst.id) ?? [];
+            const blockedTitle = blockedDeleteTitle(blockers.get(inst.id));
             const rowChoice = instanceRows(doc, inst.source);
             return (
               <li
@@ -158,13 +159,9 @@ export function AssemblyTree({
                   </button>
                   <button
                     type="button"
-                    disabled={disabled || usedBy.length > 0}
+                    disabled={disabled || blockedTitle !== undefined}
                     data-testid={`instance-delete-${inst.id}`}
-                    title={
-                      usedBy.length > 0
-                        ? `Mated by ${usedBy.join(', ')}: delete those mates first`
-                        : undefined
-                    }
+                    title={blockedTitle}
                     onClick={() =>
                       run(
                         { type: 'deleteInstance', assemblyId, instanceId: inst.id },

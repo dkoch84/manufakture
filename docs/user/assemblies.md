@@ -17,7 +17,7 @@ In an assembly tab the feature toolbar gives way to **Insert**, **Mate** and **I
 
 When an instance's part has [configurations](configurations.md), its row in the tree has a **Configuration** list: **Default** (the configuration shown in the header for a part of this document, or the one the version was made in for a part of another document), or any configuration by name. Two instances of one shelf board part can so be a 600 mm and a 1000 mm board. The row's description names the configuration ("Board (1000 mm)"), and changing it is one step for **Undo**. Mates stay on the faces they were picked on, since faces keep their names in every configuration; a mate on a face that a configuration suppresses becomes an error, as after any edit that removes it.
 
-The first instance of an assembly is **fixed**: it stays where it is, and the others are mated to it. **Fix** and **Unfix** in the tree change that for any instance. **Suppress** takes an instance out of the assembly without deleting it (its mates are suppressed with it). **Delete** is offered once no mate connects the instance any more; delete its mates first.
+The first instance of an assembly is **fixed**: it stays where it is, and the others are mated to it. **Fix** and **Unfix** in the tree change that for any instance. **Suppress** takes an instance out of the assembly without deleting it (its mates are suppressed with it). **Delete** is offered once no mate connects the instance and no exploded step moves it or takes its direction from it; delete those mates and edit or delete those steps first (the button's tooltip names them).
 
 ## Mating
 
@@ -72,6 +72,21 @@ Letting go records where everything ended up as one step, so **Undo** puts it ba
 
 Volumes are shown in the document's units. Only pairs whose bounding boxes overlap are intersected, so a spread-out assembly is checked quickly whatever its size.
 
+## Exploded views
+
+**Explode** opens the Explode panel, where an assembly gets exploded views: the instances pulled apart in steps, to show how it goes together. An exploded view is for showing only: it never moves the instances' real positions, mates still solve as before, and closing the panel shows the assembly assembled again. A drawing view can show an exploded view too, placed the same way.
+
+- **New exploded view** adds one ("Exploded view 1"); an assembly can have several, chosen in the panel's list. **Delete view** removes the one shown (a drawing that shows it must go first).
+- **A step** moves some instances along a direction by a distance. Tick the instances (or select faces of them in the view and **Use selection**), choose the axis (**+X** to **-Z**, in the assembly's axes), enter the distance and **Add step**. The distance is an expression like any other, so `#gap` or `2 * #gap` follow the variable.
+- **Or drag**: with the panel open, drag an instance in the view. It moves along the chosen axis (the ticked instances move with it, or only the one you dragged when none is ticked), and letting go adds the step, its distance rounded to 1 mm (0.1 mm under 10 mm). Turn the view if you are looking straight along the axis.
+- **Steps add up in order**: an instance moved by two steps ends at the sum of both moves. **Up** and **Down** reorder them, the distance field edits a step's distance (Enter or leave the field), and **Delete** removes it.
+- **The slider** plays the steps from assembled (0%) to exploded (100%), one after another: half way through three steps, the first is done, the second half way and the third not started.
+- **Trail lines**, dashed, show where each step takes each instance, from the middle of the instance.
+
+A step whose distance does not evaluate, or whose instance has gone, says so under the step; the rest of the view still applies. Suppressed instances are left out of every step.
+
+Each board of a bookshelf assembled per board (one instance of the part studio per board, each showing that board) explodes on its own: for example the top up by `#gap`, then the left side out along -Y and the right side along +Y.
+
 ## Exporting
 
 **Export** in an assembly tab saves the whole assembly as STL, 3MF or STEP, every part placed where its instances are (a part in two configurations is two parts, named after the configuration: "Board (600 mm)"). STEP writes each part once and places it per instance; 3MF writes each instance's bodies as objects of their own, so a slicer lists every copy by name; see [Exporting an assembly](import-export.md#exporting-an-assembly).
@@ -91,3 +106,4 @@ Mates are solved in the background, in the same worker that builds the part stud
 7. Mate the drawer's front face to the handle's front face, fastened, with an offset of 4 mm in z: the handle sits on the drawer, and the assembly still has 1 degree of freedom.
 8. Pull the drawer all the way out (25 mm) and open **Interference**: **Check** finds nothing (the handle only touches the drawer).
 9. Make the drawer 30 mm deep instead of 20 and **Check again**: Box 1 and Drawer 1 overlap by 1500 mm³ (30 x 5 x 10 mm, the back of the drawer inside the box). Click the pair to see where. Back to 20 mm, and the list is empty again.
+10. Back in the first assembly, open **Explode**, **New exploded view**, tick Lid 1, choose **+Z**, distance 30, **Add step**: the lid floats 30 mm above the box, with a dashed trail from where it was. Drag the slider to 0% and back: it settles onto the box and lifts off again. **Done** shows the box closed.

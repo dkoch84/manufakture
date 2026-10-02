@@ -107,6 +107,53 @@ describe('AssemblyTree', () => {
   });
 });
 
+describe('exploded steps block deleting an instance', () => {
+  it('disables Delete for an instance a step moves or aims by, saying which step', () => {
+    const doc = apply(twoInstances(), {
+      type: 'addExplodedView',
+      assemblyId: A,
+      explodedView: {
+        id: 'explode#1',
+        name: 'Exploded view 1',
+        steps: [
+          {
+            id: 'step#1',
+            instances: ['inst#2'],
+            direction: { instance: 'inst#1', face: { face: 'extrude#1:cap:end' } },
+            distance: { source: '30', lengthUnit: 'mm', angleUnit: 'deg' },
+          },
+        ],
+      },
+    });
+    const documents = createDocumentStore(doc);
+    render(
+      <AssemblyTree documents={documents} assemblyId={A} result={result()} onEditMate={vi.fn()} />,
+    );
+    for (const id of ['inst#1', 'inst#2']) {
+      const button = screen.getByTestId(`instance-delete-${id}`) as HTMLButtonElement;
+      expect(button.disabled).toBe(true);
+      expect(button.title).toBe(
+        'Moved or aimed by exploded step 1 of Exploded view 1: edit or delete those steps first',
+      );
+    }
+    // Once the step goes, the instances can go too.
+    act(() => {
+      documents.getState().execute(
+        {
+          type: 'deleteExplodeStep',
+          assemblyId: A,
+          explodedViewId: 'explode#1',
+          stepId: 'step#1',
+        },
+        'Delete step',
+      );
+    });
+    const lid = screen.getByTestId('instance-delete-inst#2') as HTMLButtonElement;
+    expect(lid.disabled).toBe(false);
+    expect(lid.title).toBe('');
+  });
+});
+
 describe('configuration rows of instances', () => {
   const mm = (source: string) => ({ source, lengthUnit: 'mm' as const, angleUnit: 'deg' as const });
 

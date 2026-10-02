@@ -47,12 +47,14 @@ import {
   type DerivedSource,
   type DocumentChange,
   type DocumentFont,
+  type ExplodeStep,
   type ExtensionFeature,
   type Feature,
   type ImportSource,
   type ManufaktureDocument,
   type Part,
   type Pose,
+  type Vec3,
 } from '@manufakture/core';
 import {
   frameOnPlane,
@@ -122,6 +124,13 @@ import {
   type DrawingViewResult,
 } from './drawing';
 import { mapFailure, mapOutcome, planeReport } from './errors';
+import {
+  directionInference,
+  explodeWarnings,
+  explodedOffsets,
+  explodedPose,
+  resolveExplodedView,
+} from './explode';
 import {
   checkOutput,
   checkQueries,
@@ -1699,14 +1708,6 @@ export class RegenEngine {
           });
           return { bodies: [], diagnostics };
         }
-        if (source.explodedView !== undefined) {
-          diagnostics.push({
-            code: 'explode-pending',
-            severity: 'warning',
-            subject: '',
-            message: `${source.explodedView} is drawn assembled: exploded views are not applied to drawings yet`,
-          });
-        }
         let out = assembled.get(assembly.id);
         if (out === undefined) {
           out = await this.#assemble(run, document, variables, partFor, assembly.id);
@@ -1730,10 +1731,37 @@ export class RegenEngine {
             message: `${failed.length === 1 ? 'Instance' : 'Instances'} ${failed.join(', ')} of ${assembly.name} could not be built in full: see the assembly`,
           });
         }
+        // An exploded view: each instance at its solved pose plus its exploded offset (T4.5a).
+        let offsets = new Map<string, Vec3>();
+        if (source.explodedView !== undefined) {
+          const exploded = result.explodedViews?.find(
+            (v) => v.explodedViewId === source.explodedView,
+          );
+          if (exploded === undefined) {
+            diagnostics.push({
+              code: 'exploded-view',
+              severity: 'warning',
+              subject: '',
+              message: `${assembly.name} has no exploded view ${source.explodedView}: the view is drawn assembled`,
+            });
+          } else {
+            offsets = explodedOffsets(exploded);
+            const warned = explodeWarnings(exploded);
+            if (warned.length > 0) {
+              diagnostics.push({
+                code: 'exploded-view',
+                severity: 'warning',
+                subject: '',
+                message: `${warned.length === 1 ? 'A step' : `${warned.length} steps`} of ${exploded.name} did not resolve in full: ${warned.map((w) => w.warning.message).join('; ')}`,
+              });
+            }
+          }
+        }
         const bodies: DrawingBody[] = [];
         for (const x of state?.solved ?? []) {
+          const pose = explodedPose(x.pose, offsets.get(x.id));
           for (const b of state!.bodies.get(x.id) ?? []) {
-            bodies.push(live(b, { key: `${x.id}/${b.id}`, instance: x.id, pose: x.pose }));
+            bodies.push(live(b, { key: `${x.id}/${b.id}`, instance: x.id, pose }));
           }
         }
         return { bodies, diagnostics };
@@ -2035,6 +2063,29 @@ export class RegenEngine {
       }
       work.push({ mate, result: m, values });
     }
+    // Exploded steps whose direction is an edge or a face of an instance: the same connector op
+    // finds it (the frame's z), on the bodies the instance shows.
+    const stepDirection = (step: ExplodeStep) => {
+      const d = step.direction;
+      const inference = directionInference(step);
+      if ('vector' in d || inference === null) return null;
+      return { instance: d.instance, origin: topoRef('edge' in d ? d.edge : d.face), inference };
+    };
+    for (const view of assembly.explodedViews ?? []) {
+      for (const step of view.steps) {
+        const dir = stepDirection(step);
+        if (dir === null) continue;
+        for (const body of partBodies.get(dir.instance) ?? []) {
+          const key = this.#connectorKey(body, dir.origin, dir.inference);
+          out.connectorKeys.add(key);
+          if (this.#connectors.has(key)) continue;
+          const list = wanted.get(body) ?? [];
+          if (!list.some((x) => x.key === key))
+            list.push({ key, op: { origin: dir.origin, inference: dir.inference } });
+          wanted.set(body, list);
+        }
+      }
+    }
     /** Reports of this regen that are not cached (the op failed as a whole). */
     const uncached = new Map<string, ConnectorReport>();
     if (wanted.size > 0) {
@@ -2099,6 +2150,25 @@ export class RegenEngine {
     applyReport(result, report, stored);
     result.ms = now() - started;
     const solved = input.instances.map((x) => ({ ...x, pose: report.poses[x.id] ?? x.pose }));
+    // Exploded views, on top of the solved poses (T4.5a); they never change them.
+    if (assembly.explodedViews !== undefined) {
+      const context = {
+        variables,
+        instances: new Set(assembly.instances.map((x) => x.id)),
+        poses: new Map(solved.map((x) => [x.id, x.pose])),
+        direction: (step: ExplodeStep) => {
+          const dir = stepDirection(step);
+          if (dir === null) return undefined;
+          const reports = (partBodies.get(dir.instance) ?? []).flatMap((b) => {
+            const key = this.#connectorKey(b, dir.origin, dir.inference);
+            const r = this.#connectors.get(key) ?? uncached.get(key);
+            return r === undefined ? [] : [{ bodyId: b.id, report: r }];
+          });
+          return pickReport(reports);
+        },
+      };
+      result.explodedViews = assembly.explodedViews.map((v) => resolveExplodedView(v, context));
+    }
     out.states.set(assembly.id, {
       generation: run.generation,
       input: { instances: solved, mates },

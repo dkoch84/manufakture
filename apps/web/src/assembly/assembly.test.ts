@@ -19,6 +19,7 @@ import {
   connectorPoint,
   inferencesFor,
   insertCommand,
+  blockedDeleteTitle,
   instanceBlockers,
   instanceOf,
   mateFormOf,
@@ -495,9 +496,55 @@ describe('the mates list', () => {
   });
 
   it('lists the mates that keep an instance from being deleted', () => {
+    const mates = ['Fastened 1', 'Fastened 2', 'Fastened 3'];
     expect([...instanceBlockers(assembly)]).toEqual([
-      ['inst#1', ['Fastened 1', 'Fastened 2', 'Fastened 3']],
-      ['inst#2', ['Fastened 1', 'Fastened 2', 'Fastened 3']],
+      ['inst#1', { mates, steps: [] }],
+      ['inst#2', { mates, steps: [] }],
     ]);
+    expect(blockedDeleteTitle(instanceBlockers(assembly).get('inst#1'))).toBe(
+      'Mated by Fastened 1, Fastened 2, Fastened 3: delete those mates first',
+    );
+    expect(blockedDeleteTitle(undefined)).toBeUndefined();
+  });
+
+  it('lists the exploded steps that keep an instance from being deleted, as mates do', () => {
+    const exploded = {
+      ...assembly,
+      mates: [],
+      explodedViews: [
+        {
+          id: 'explode#1',
+          name: 'Exploded view 1',
+          steps: [
+            {
+              id: 'step#1',
+              instances: ['inst#2'],
+              direction: { vector: [0, 0, 1] as [number, number, number] },
+              distance: { source: '10', lengthUnit: 'mm' as const, angleUnit: 'deg' as const },
+            },
+            {
+              id: 'step#2',
+              instances: ['inst#2'],
+              direction: { instance: 'inst#1', face: { face: 'f' } },
+              distance: { source: '5', lengthUnit: 'mm' as const, angleUnit: 'deg' as const },
+            },
+          ],
+        },
+      ],
+    };
+    const blockers = instanceBlockers(exploded);
+    expect(blockers.get('inst#1')).toEqual({ mates: [], steps: ['step 2 of Exploded view 1'] });
+    expect(blockers.get('inst#2')!.steps).toEqual([
+      'step 1 of Exploded view 1',
+      'step 2 of Exploded view 1',
+    ]);
+    expect(blockedDeleteTitle(blockers.get('inst#1'))).toBe(
+      'Moved or aimed by exploded step 2 of Exploded view 1: edit or delete those steps first',
+    );
+    expect(
+      blockedDeleteTitle({ mates: ['Fastened 1'], steps: ['step 1 of Exploded view 1'] }),
+    ).toBe(
+      'Mated by Fastened 1; moved or aimed by exploded step 1 of Exploded view 1: delete those mates and edit or delete those steps first',
+    );
   });
 });

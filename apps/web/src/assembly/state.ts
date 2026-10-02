@@ -1,7 +1,8 @@
 // What the assembly workspace shows besides the document: which panel is open (Insert, the Mate
-// dialog for a new or an existing mate, or Interference), poses shown in place of the solved ones
+// dialog for a new or an existing mate, Interference or Explode), poses shown in place of the solved ones
 // while a drag or a mate preview is in progress, and the last interference check with the pair it
-// highlights. Not document state: none of it is saved or undone.
+// highlights, and the Explode panel's view, slider, axis, checked instances and dragged step (T4.5a).
+// Not document state: none of it is saved or undone.
 //
 // Shown poses outlive the gesture that made them until the model catches up: a drag commits its
 // poses with `setPoses` on release, and the instances must not jump back to where they were
@@ -9,10 +10,27 @@
 
 import type { ManufaktureDocument, Pose } from '@manufakture/core';
 import { createStore, type StoreApi } from 'zustand/vanilla';
+import type { DraggedStep, ExplodeAxis } from './explode';
 import type { InterferenceView } from './interference';
 
 export type AssemblyPanel =
-  { kind: 'insert' } | { kind: 'mate'; mateId: string | null } | { kind: 'interference' };
+  | { kind: 'insert' }
+  | { kind: 'mate'; mateId: string | null }
+  | { kind: 'interference' }
+  | { kind: 'explode' };
+
+/**
+ * The Explode panel: the exploded view it shows (null: none chosen yet; the viewport shows it
+ * only while the panel is open), how far the slider is (0 assembled, 1 exploded), the axis new
+ * steps go along, the instances a new step moves, and the step being dragged in the view.
+ */
+export interface ExplodeUi {
+  viewId: string | null;
+  progress: number;
+  axis: ExplodeAxis;
+  checked: readonly string[];
+  dragged: DraggedStep | null;
+}
 
 export interface AssemblyUiState {
   panel: AssemblyPanel | null;
@@ -39,11 +57,21 @@ export interface AssemblyUiState {
   /** Update the check of run `run`; a check that was replaced (or dropped) is left alone. */
   updateInterference(run: number, update: (view: InterferenceView) => InterferenceView): void;
   setHighlight(key: string | null): void;
+  explode: ExplodeUi;
+  setExplode(patch: Partial<ExplodeUi>): void;
 }
 
 export type AssemblyUiStore = StoreApi<AssemblyUiState>;
 
 const NONE: ReadonlyMap<string, Pose> = new Map();
+
+export const INITIAL_EXPLODE: ExplodeUi = {
+  viewId: null,
+  progress: 1,
+  axis: '+z',
+  checked: [],
+  dragged: null,
+};
 
 export function createAssemblyUiStore(): AssemblyUiStore {
   return createStore<AssemblyUiState>()((set, get) => ({
@@ -60,7 +88,13 @@ export function createAssemblyUiStore(): AssemblyUiStore {
           ? { panel, message: null }
           : { panel, message: null, interference: null, highlight: null },
       ),
-    close: () => set({ panel: null, interference: null, highlight: null }),
+    close: () =>
+      set((s) => ({
+        panel: null,
+        interference: null,
+        highlight: null,
+        explode: { ...s.explode, dragged: null },
+      })),
     show: (assemblyId, poses) => set({ poses, posesFor: assemblyId, until: null }),
     holdUntil: (document) => {
       if (get().poses.size > 0) set({ until: document });
@@ -77,5 +111,7 @@ export function createAssemblyUiStore(): AssemblyUiStore {
       if (current !== null && current.run === run) set({ interference: update(current) });
     },
     setHighlight: (highlight) => set({ highlight }),
+    explode: INITIAL_EXPLODE,
+    setExplode: (patch) => set((s) => ({ explode: { ...s.explode, ...patch } })),
   }));
 }

@@ -178,6 +178,21 @@ export {
   type RefGeometry,
   type ViewPickData,
 } from './drawing';
+export {
+  directionInference,
+  explodeTrails,
+  explodeWarnings,
+  explodedOffsets,
+  explodedPose,
+  resolveExplodedView,
+  stepFraction,
+  stepMove,
+  type ExplodeContext,
+  type ExplodeStepResult,
+  type ExplodeTrail,
+  type ExplodeWarning,
+  type ExplodedViewResult,
+} from './explode';
 export { mapFailure, mapKernelError, mapKernelWarning, mapOutcome } from './errors';
 export { hashString, hashValue, stableStringify } from './hash';
 export { regenTransferables } from './transfer';
