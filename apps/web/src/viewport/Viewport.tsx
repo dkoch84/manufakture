@@ -34,6 +34,8 @@ export type ViewportApi = Pick<
   | 'setBuildVolume'
   | 'setShading'
   | 'setThreadLines'
+  | 'setGrainLines'
+  | 'setPreviewLines'
   | 'frameBox'
   | 'dispose'
 >;

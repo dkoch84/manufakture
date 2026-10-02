@@ -324,7 +324,32 @@ export function compareDocuments(
       );
     }
   }
+  if (change.fontsChanged) {
+    const ids = (doc: ManufaktureDocument) => new Set(doc.fonts.map((f) => f.id));
+    const [inViewed, inCurrent] = [ids(viewed), ids(current)];
+    const label = (f: ManufaktureDocument['fonts'][number]) => `${f.family} ${f.style}`;
+    const onlyHere = viewed.fonts.filter((f) => !inCurrent.has(f.id)).map(label);
+    const onlyNow = current.fonts.filter((f) => !inViewed.has(f.id)).map(label);
+    if (onlyHere.length > 0) lines.push(`Fonts only here: ${listOf(onlyHere)}.`);
+    if (onlyNow.length > 0) lines.push(`Fonts only in the current state: ${listOf(onlyNow)}.`);
+    if (onlyHere.length + onlyNow.length === 0) lines.push('The font list differs.');
+  }
+  if (change.domainChanged.length > 0) {
+    lines.push(`Settings that differ: ${listOf(change.domainChanged.map(domainLabel))}.`);
+  }
   if (change.configurationsChanged) lines.push('The configuration table differs.');
   if (change.unitsChanged) lines.push('Display units differ.');
   return lines;
+}
+
+/** What the user knows a document's domain data namespace as (ADR 0013 decision 3). */
+const DOMAIN_LABELS: Readonly<Record<string, string>> = {
+  stock: 'stock overrides',
+  wood: 'woodworking settings',
+};
+
+function domainLabel(namespace: string): string {
+  return Object.hasOwn(DOMAIN_LABELS, namespace)
+    ? DOMAIN_LABELS[namespace]!
+    : `"${namespace}" data`;
 }

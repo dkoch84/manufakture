@@ -1,8 +1,9 @@
 // Small line icons for the feature tree: one per feature kind, and the status marks. Drawn in
 // `currentColor` on a 16 x 16 grid, so CSS decides their colour.
 
-import type { FeatureKind } from '@manufakture/core';
+import type { Feature, FeatureKind } from '@manufakture/core';
 import type { ReactNode } from 'react';
+import { isBoard } from '../wood/kinds';
 import type { RowStatus } from './tree';
 
 function Svg({ children, className }: { children: ReactNode; className?: string }) {
@@ -114,6 +115,21 @@ const KIND_PATHS: Record<FeatureKind, ReactNode> = {
 
 export function KindIcon({ kind }: { kind: FeatureKind }) {
   return <Svg className="kind-icon">{KIND_PATHS[kind]}</Svg>;
+}
+
+/** A board (`wood.board`): a plank with its grain. */
+export function BoardIcon() {
+  return (
+    <Svg className="kind-icon">
+      <rect x="1.5" y="5" width="13" height="6" />
+      <path d="M3.5 7.2c2.5-.8 4.5.8 9 0M3.5 9c3-.6 5 .6 9-.2" />
+    </Svg>
+  );
+}
+
+/** A feature's icon: its domain's for the extension types the app knows, else its kind's. */
+export function FeatureIcon({ feature }: { feature: Feature }) {
+  return isBoard(feature) ? <BoardIcon /> : <KindIcon kind={feature.kind} />;
 }
 
 const STATUS_PATHS: Partial<Record<RowStatus, ReactNode>> = {

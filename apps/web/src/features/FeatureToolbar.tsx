@@ -1,9 +1,10 @@
 // The feature buttons in the header: each opens its dialog for a new feature, added at the
-// rollback bar.
+// rollback bar. Board (a board cut from real stock, M4) sits beside Extrude, which it builds on.
 
+import { Fragment } from 'react';
 import { KIND_LABELS } from '../tree/tree';
-import { KindIcon } from '../tree/icons';
-import { DIALOG_KINDS, type DialogKind } from './kinds';
+import { BoardIcon, KindIcon } from '../tree/icons';
+import { DIALOG_KINDS, type DialogKind, type ToolKind } from './kinds';
 
 const TITLES: Record<DialogKind, string> = {
   extrude: 'Extrude a sketch (select it in the feature tree first, or choose it in the dialog)',
@@ -26,21 +27,33 @@ export function FeatureToolbar({
   onOpen,
 }: {
   disabled: boolean;
-  onOpen: (kind: DialogKind) => void;
+  onOpen: (kind: ToolKind) => void;
 }) {
   return (
     <div className="toolbar-group feature-toolbar" role="toolbar" aria-label="Features">
       {DIALOG_KINDS.map((kind) => (
-        <button
-          key={kind}
-          type="button"
-          disabled={disabled}
-          title={TITLES[kind]}
-          onClick={() => onOpen(kind)}
-        >
-          <KindIcon kind={kind} />
-          {BUTTON_TEXT[kind] ?? KIND_LABELS[kind]}
-        </button>
+        <Fragment key={kind}>
+          <button
+            type="button"
+            disabled={disabled}
+            title={TITLES[kind]}
+            onClick={() => onOpen(kind)}
+          >
+            <KindIcon kind={kind} />
+            {BUTTON_TEXT[kind] ?? KIND_LABELS[kind]}
+          </button>
+          {kind === 'extrude' && (
+            <button
+              type="button"
+              disabled={disabled}
+              title="A board from real stock: a panel from a sketch region, or a stick along a sketch line"
+              onClick={() => onOpen('board')}
+            >
+              <BoardIcon />
+              Board
+            </button>
+          )}
+        </Fragment>
       ))}
     </div>
   );

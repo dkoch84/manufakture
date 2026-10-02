@@ -190,8 +190,12 @@ interface Window {
             bodies: { id: string; name?: string; color?: string; material?: string }[];
           }[];
           assemblies: E2eAssembly[];
+          /** Domain data by namespace (ADR 0013): `stock` overrides, `wood` settings. */
+          domains?: Record<string, { schemaVersion: number; data: unknown }>;
         };
         canUndo: boolean;
+        undo(): void;
+        redo(): void;
         activePartId: string;
         activeAssemblyId: string | null;
         execute(command: unknown, label?: string): { ok: boolean };
@@ -211,6 +215,9 @@ interface Window {
         animating: boolean;
         shading: string;
         buildVolume: boolean;
+        /** Polylines drawn as boards' grain arrows, and as a dialog's preview. */
+        grainLines: number;
+        previewLines: number;
       };
       setViewDirection(dir: readonly [number, number, number], animate?: boolean): void;
       frameBox(box: E2eBox, animate?: boolean): void;

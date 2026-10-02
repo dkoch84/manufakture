@@ -306,6 +306,47 @@ describe('DocumentLibrary', () => {
     expect((await opened(lib, 'doc-1')).document).toEqual(doc);
   });
 
+  it('saves domain data and logged setDomainData commands unchanged (ADR 0013, format v11)', async () => {
+    const backend = new MemoryBackend();
+    const lib = library(backend);
+    const doc = partDocument();
+    await lib.save(doc);
+    const set: Command = {
+      type: 'setDomainData',
+      namespace: 'stock',
+      schemaVersion: 1,
+      data: {
+        overrides: {
+          'us-ply-23-32': { thickness: { source: '18.2', lengthUnit: 'mm', angleUnit: 'deg' } },
+        },
+      },
+    };
+    const wood: Command = {
+      type: 'setDomainData',
+      namespace: 'wood',
+      schemaVersion: 1,
+      data: { kerf: { source: '3', lengthUnit: 'mm', angleUnit: 'deg' } },
+    };
+    const changed = unwrapDoc(applyCommand(doc, { type: 'batch', commands: [set, wood] }));
+    expect(Object.keys(changed.domains ?? {}).sort()).toEqual(['stock', 'wood']);
+    const entries: LogEntry[] = [
+      { cause: 'execute', label: 'Set stock override', command: set, at: '2026-10-02T12:00:00Z' },
+      { cause: 'execute', label: 'Set wood settings', command: wood, at: '2026-10-02T12:00:01Z' },
+    ];
+    await lib.save(changed, entries);
+    // Nothing in storage filters top-level document keys: `domains` is in the snapshot as is.
+    const snapshot = JSON.parse(text(backend, 'documents/doc-1/snapshot-00000002.json'));
+    expect(snapshot.domains).toEqual(changed.domains);
+    expect((await opened(library(backend), 'doc-1')).document).toEqual(changed);
+    expect(await library(backend).readLog('doc-1')).toEqual({ ok: true, value: entries });
+    // And through a .mfk file, out and back in.
+    const exported = value(await lib.exportMfk('doc-1'));
+    expect(JSON.parse(unpackMfk(exported.bytes).document).domains).toEqual(changed.domains);
+    await lib.remove('doc-1');
+    value(await lib.importMfk(exported.bytes));
+    expect((await opened(lib, 'doc-1')).document).toEqual(changed);
+  });
+
   it('keeps a logged import even once the document no longer holds it', async () => {
     const backend = new MemoryBackend();
     const lib = library(backend);

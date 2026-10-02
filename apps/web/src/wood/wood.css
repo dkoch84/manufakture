@@ -1,0 +1,84 @@
+/* The Board dialog's stock picker and the Stock panel. The head and buttons follow the Variables
+   panel (variables.css); dialog fields follow the feature dialogs (features.css). */
+.stock-regions {
+  display: flex;
+  gap: 0.3rem;
+  margin-bottom: 0.25rem;
+}
+
+.stock-regions button {
+  font: inherit;
+  font-size: 0.75rem;
+}
+
+.stock-regions button[aria-pressed='true'] {
+  background: #dbe7ff;
+  border-color: #4d8dff;
+}
+
+.stock-panel button,
+.stock-panel select,
+.stock-panel input {
+  font: inherit;
+  font-size: 0.78rem;
+}
+
+.stock-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.stock-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.stock-name {
+  font-weight: 600;
+}
+
+.stock-size {
+  flex: 1;
+  color: #5b6673;
+  font-size: 0.78rem;
+}
+
+.stock-row .field-note {
+  flex-basis: 100%;
+}
+
+.stock-editor {
+  margin: 0.3rem 0 0.5rem;
+  padding: 0.4rem;
+  border: 1px solid #d5dbe3;
+  border-radius: 4px;
+}
+
+.stock-price {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.stock-price input[type='text'] {
+  width: 5rem;
+}
+
+.stock-add {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.35rem;
+  margin-top: 0.4rem;
+}
+
+.stock-add .stock-picker {
+  flex: 1;
+  min-width: 0;
+}

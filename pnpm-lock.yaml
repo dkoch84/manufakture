@@ -53,6 +53,9 @@ importers:
       '@manufakture/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@manufakture/domain-wood':
+        specifier: workspace:*
+        version: link:../../packages/domain-wood
       '@manufakture/io':
         specifier: workspace:*
         version: link:../../packages/io

@@ -8,7 +8,7 @@
 import type { ManufaktureDocument } from '@manufakture/core';
 import type { LoadProgress } from '@manufakture/kernel';
 import type { KernelClientOptions } from '@manufakture/kernel/client';
-import { spawnRegenWorker, type RegenClient } from '@manufakture/regen/client';
+import type { RegenClient } from '@manufakture/regen/client';
 import type { Assembler } from '../assembly/assembly';
 import { kernelExchange, type Exchanger, type KernelBody, type Referencer } from '../io/exchange';
 import type { Measurer } from '../measure/measurer';
@@ -19,6 +19,7 @@ import type { Texter } from '../sketcher/text';
 import { testHooksEnabled } from '../testHooks';
 import type { BodyInput } from './bodies';
 import { fillPlaceholderNames } from './naming';
+import { spawnAppRegenWorker } from './regen-spawn';
 import { boxBody, denseSphereBody } from './testMeshes';
 
 export interface LoadStatus {
@@ -234,7 +235,7 @@ export function perfLoader(triangles: number): SceneLoader {
  */
 export function loaderForLocation(
   search: string = window.location.search,
-  spawn: (options: KernelClientOptions) => RegenClient = spawnRegenWorker,
+  spawn: (options: KernelClientOptions) => RegenClient = spawnAppRegenWorker,
   testScenes: boolean = testHooksEnabled,
 ): SceneLoader {
   const choice: SceneChoice = testScenes

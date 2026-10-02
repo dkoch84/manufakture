@@ -14,6 +14,7 @@ import {
   type Part,
 } from '@manufakture/core';
 import type { FeatureResult, RegenError } from '@manufakture/regen';
+import { boardStockName, extensionLabel } from '../wood/kinds';
 
 /**
  * What a row shows. `warning` is an `ok` feature with warnings; `pending` means regen has not
@@ -67,11 +68,18 @@ export const KIND_LABELS: Record<FeatureKind, string> = {
   thread: 'Thread',
 };
 
+/** What a feature is, for its row's icon title: the domain's name for a known extension type. */
+export function featureKindLabel(feature: Feature): string {
+  return extensionLabel(feature) ?? KIND_LABELS[feature.kind];
+}
+
 /**
  * A short note the row shows after the name, or null: a thread's size, with its hand when left
- * and its representation when cosmetic (`M6`, `1/4-20 LH, cosmetic`).
+ * and its representation when cosmetic (`M6`, `1/4-20 LH, cosmetic`); a board's stock (`2x4`).
  */
 export function featureDetail(feature: Feature): string | null {
+  const stock = boardStockName(feature);
+  if (stock !== null) return stock;
   if (feature.kind !== 'thread') return null;
   const parts = [feature.standard.size + (feature.hand === 'left' ? ' LH' : '')];
   if (feature.representation === 'cosmetic') parts.push('cosmetic');
@@ -123,6 +131,9 @@ export function firstChanged(
   const before = built?.parts.find((p) => p.id === part.id);
   if (!built || !before || built.variables !== current.variables) return 0;
   let i = 0;
+  // Domain data (stock overrides) is read by the domain's extensions: from the first of them.
+  const domainsChanged =
+    JSON.stringify(built.domains ?? {}) !== JSON.stringify(current.domains ?? {});
   while (
     i < part.features.length &&
     i < before.features.length &&
@@ -132,6 +143,10 @@ export function firstChanged(
   }
   const bars = [rollbackPosition(before), rollbackPosition(part)];
   if (bars[0] !== bars[1]) i = Math.min(i, ...bars);
+  if (domainsChanged) {
+    const first = part.features.findIndex((f) => f.kind === 'extension');
+    if (first >= 0) i = Math.min(i, first);
+  }
   return i;
 }
 

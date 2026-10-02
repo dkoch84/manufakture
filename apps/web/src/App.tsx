@@ -6,6 +6,7 @@ import {
   type ManufaktureDocument,
   type Pose,
 } from '@manufakture/core';
+import type { Vec3 } from '@manufakture/kernel';
 import type { AssemblyResult } from '@manufakture/regen';
 import type { ExportTolerancePreset } from '@manufakture/io';
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -116,6 +117,10 @@ import { loaderForLocation, type LoadStatus, type SceneLoader } from './viewport
 import { SelectionPanel, Toolbar } from './viewport/Toolbar';
 import { Viewport, type EngineFactory, type ViewportApi } from './viewport/Viewport';
 import { ThreadOverlay } from './viewport/ThreadOverlay';
+import { GrainOverlay } from './wood/GrainOverlay';
+import { isBoard } from './wood/kinds';
+import { StockPanel } from './wood/StockPanel';
+import { hasWoodwork } from './wood/stock';
 import './viewport/viewport.css';
 import './sketcher/sketcher.css';
 import './measure/measure.css';
@@ -132,6 +137,13 @@ const defaultSolver = () => lazySolver(spawnDefaultSolver);
 const FeatureDialog = lazy(() =>
   import('./features/FeatureDialog').then((m) => ({ default: m.FeatureDialog })),
 );
+// The Board dialog (woodworking, M4) likewise, with the board logic it needs.
+const BoardDialog = lazy(() =>
+  import('./wood/BoardDialog').then((m) => ({ default: m.BoardDialog })),
+);
+
+/** The open dialog: a feature dialog, or the Board dialog (a `wood.board` extension). */
+type OpenDialog = DialogRequest | { kind: 'board'; featureId?: string };
 
 export interface AppProps {
   /** A loader owned by the caller: the app uses it but never disposes it. */
@@ -1366,13 +1378,14 @@ export function App({
 
   const sketching = useSketching(session, documents, viewport, placements);
   // The open feature dialog, if any: a new feature from the toolbar, or one opened from the tree.
-  const [dialog, setDialog] = useState<DialogRequest | null>(null);
+  const [dialog, setDialog] = useState<OpenDialog | null>(null);
   const onEditFeature = useCallback(
     (featureId: string, options: { repick?: string } = {}) => {
       const { document: doc, activePartId: partId } = documents.getState();
       const feature = findPart(doc, partId)?.features.find((f) => f.id === featureId);
       if (!feature) return;
       if (feature.kind === 'sketch') sketching.enter({ kind: 'edit', featureId });
+      else if (isBoard(feature)) setDialog({ kind: 'board', featureId });
       else if (isDialogKind(feature.kind)) {
         setDialog({
           kind: feature.kind,
@@ -1384,6 +1397,11 @@ export function App({
     [documents, sketching],
   );
   useSketchShortcuts(session, sketching.active);
+  // The Board dialog's preview of the board it would build.
+  const onBoardPreview = useCallback(
+    (lines: Vec3[][]) => viewport?.setPreviewLines(lines),
+    [viewport],
+  );
 
   // Undo and redo: the sketch's own history while sketching, else the document's.
   useEffect(() => {
@@ -1863,6 +1881,14 @@ export function App({
                 bodies={partBodies}
               />
             )}
+            {viewport && !printing && assemblyId === null && (
+              <GrainOverlay
+                viewport={viewport}
+                model={shownModel}
+                partId={shownPartId}
+                bodies={partBodies}
+              />
+            )}
             {sketching.active && <SketchStatusBar session={session} />}
           </Viewport>
           <div className="side-panel">
@@ -1930,6 +1956,24 @@ export function App({
                 createVersion={autosave ? autosave.createVersion : null}
                 onClose={() => assemblyUi.getState().close()}
               />
+            ) : dialog?.kind === 'board' ? (
+              <Suspense
+                fallback={
+                  <aside className="selection-panel" aria-busy="true">
+                    Opening...
+                  </aside>
+                }
+              >
+                <BoardDialog
+                  key={`board/${dialog.featureId ?? 'new'}`}
+                  featureId={dialog.featureId}
+                  documents={documents}
+                  model={model}
+                  selection={selection}
+                  onPreview={onBoardPreview}
+                  onClose={() => setDialog(null)}
+                />
+              </Suspense>
             ) : dialog ? (
               <Suspense
                 fallback={
@@ -1980,6 +2024,9 @@ export function App({
                       configurationError={configurationError}
                       disabled={exportAll !== null}
                     />
+                    {hasWoodwork(document) && (
+                      <StockPanel documents={documents} disabled={exportAll !== null} />
+                    )}
                   </>
                 )}
                 <SelectionPanel selection={selection} />

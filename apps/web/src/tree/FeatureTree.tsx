@@ -25,10 +25,10 @@ import type { PinLibrary } from '../features/derived';
 import { BodiesSection } from './BodiesSection';
 import { DerivedSourceLine } from './DerivedSource';
 import { useSourceVersions } from './sourceVersions';
-import { ActionIcon, KindIcon, StatusIcon } from './icons';
+import { ActionIcon, FeatureIcon, StatusIcon } from './icons';
 import {
-  KIND_LABELS,
   featureDetail,
+  featureKindLabel,
   STATUS_LABELS,
   deleteFeature,
   dropIndex,
@@ -446,8 +446,8 @@ export function FeatureTree({
         onKeyDown={(e) => onRowKey(e, row)}
         onPointerDown={(e) => onPointerDown(e, 'feature', f.id, row.index)}
       >
-        <span className="kind" title={KIND_LABELS[f.kind]}>
-          <KindIcon kind={f.kind} />
+        <span className="kind" title={featureKindLabel(f)}>
+          <FeatureIcon feature={f} />
         </span>
         {renaming?.id === f.id ? (
           <input

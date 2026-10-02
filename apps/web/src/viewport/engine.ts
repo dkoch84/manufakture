@@ -147,6 +147,8 @@ const COLORS = {
   edgeSelected: new Color(0x0b5cff),
   cap: new Color(0xe0875e),
   thread: new Color(0x7a4f12),
+  grain: new Color(0x8a5a1e),
+  preview: new Color(0xd9480f),
 };
 
 type Highlight = 'none' | 'hover' | 'selected';
@@ -270,6 +272,14 @@ export class ViewportEngine {
   private readonly threadMaterial: LineMaterial;
   private readonly threadLines = new LineSegments2(new LineSegmentsGeometry());
   private threadLineCount = 0;
+  /** Boards' grain arrows (wood/boards.ts), depth-tested over the faces like threads. */
+  private readonly grainMaterial: LineMaterial;
+  private readonly grainLines = new LineSegments2(new LineSegmentsGeometry());
+  private grainLineCount = 0;
+  /** A dialog's preview of what it would build (a board's blank), drawn over everything. */
+  private readonly previewMaterial: LineMaterial;
+  private readonly previewLines = new LineSegments2(new LineSegmentsGeometry());
+  private previewLineCount = 0;
   private readonly vertexMarkers: Points<BufferGeometry, PointsMaterial>;
   /** The print workspace's shading materials (printView.ts) and the current mode. */
   private readonly overhangMaterial: ShaderMaterial;
@@ -397,6 +407,19 @@ export class ViewportEngine {
     this.threadLines.visible = false;
     this.threadLines.frustumCulled = false;
     this.scene.add(this.threadLines);
+    this.grainMaterial = lineMaterial(COLORS.grain, 2);
+    this.grainLines.material = this.grainMaterial;
+    this.grainLines.renderOrder = 4;
+    this.grainLines.visible = false;
+    this.grainLines.frustumCulled = false;
+    this.scene.add(this.grainLines);
+    this.previewMaterial = lineMaterial(COLORS.preview, 2);
+    this.previewMaterial.depthTest = false;
+    this.previewLines.material = this.previewMaterial;
+    this.previewLines.renderOrder = 7;
+    this.previewLines.visible = false;
+    this.previewLines.frustumCulled = false;
+    this.scene.add(this.previewLines);
 
     this.vertexMarkers = new Points(
       new BufferGeometry(),
@@ -540,6 +563,25 @@ export class ViewportEngine {
     if (positions.length === 0 && this.threadLineCount === 0) return;
     setSegments(this.threadLines, positions);
     this.threadLineCount = lines.length;
+    this.invalidate();
+  }
+
+  /** Draw boards' grain arrows (polylines in world coordinates), replacing the ones before. */
+  setGrainLines(lines: readonly (readonly Vec3[])[]): void {
+    if (lines.length === 0 && this.grainLineCount === 0) return;
+    setSegments(this.grainLines, polylineSegments(lines));
+    this.grainLineCount = lines.length;
+    this.invalidate();
+  }
+
+  /**
+   * Draw a dialog's preview (polylines in world coordinates) over the model, not hidden by it,
+   * replacing the one before; none clears it.
+   */
+  setPreviewLines(lines: readonly (readonly Vec3[])[]): void {
+    if (lines.length === 0 && this.previewLineCount === 0) return;
+    setSegments(this.previewLines, polylineSegments(lines));
+    this.previewLineCount = lines.length;
     this.invalidate();
   }
 
@@ -783,6 +825,8 @@ export class ViewportEngine {
       shading: this.shading?.kind ?? 'normal',
       buildVolume: this.volume !== null,
       threadLines: this.threadLineCount,
+      grainLines: this.grainLineCount,
+      previewLines: this.previewLineCount,
       projection: this.stores.settings.getState().projection,
       halfHeight: this.view.halfHeight,
       animating: this.transition !== null || this.wheelZoom !== null,
@@ -854,6 +898,8 @@ export class ViewportEngine {
       this.hoverEdgeMaterial,
       this.selectedEdgeMaterial,
       this.threadMaterial,
+      this.grainMaterial,
+      this.previewMaterial,
       this.vertexMarkers.material,
       this.grid.material,
       this.cap.material,
@@ -863,6 +909,8 @@ export class ViewportEngine {
     this.hoverEdges.geometry.dispose();
     this.selectedEdges.geometry.dispose();
     this.threadLines.geometry.dispose();
+    this.grainLines.geometry.dispose();
+    this.previewLines.geometry.dispose();
     this.vertexMarkers.geometry.dispose();
     this.grid.geometry.dispose();
     this.cap.geometry.dispose();
@@ -1377,6 +1425,8 @@ export class ViewportEngine {
       this.hoverEdgeMaterial,
       this.selectedEdgeMaterial,
       this.threadMaterial,
+      this.grainMaterial,
+      this.previewMaterial,
     ]) {
       m.resolution.set(w, h);
     }
@@ -1773,6 +1823,15 @@ function sameTransform(a: BodyTransform | undefined, b: BodyTransform | undefine
 function localBoundsOf(b: BodyObjects): { min: Vec3; max: Vec3 } {
   const box = b.geometry.boundingBox ?? (b.geometry.computeBoundingBox(), b.geometry.boundingBox!);
   return { min: [box.min.x, box.min.y, box.min.z], max: [box.max.x, box.max.y, box.max.z] };
+}
+
+/** Polylines as line segment positions, two points per segment. */
+function polylineSegments(lines: readonly (readonly Vec3[])[]): number[] {
+  const positions: number[] = [];
+  for (const line of lines) {
+    for (let i = 1; i < line.length; i++) positions.push(...line[i - 1]!, ...line[i]!);
+  }
+  return positions;
 }
 
 function setSegments(lines: LineSegments2, positions: number[]): void {

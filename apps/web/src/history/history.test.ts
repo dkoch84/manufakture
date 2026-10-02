@@ -190,6 +190,46 @@ describe('comparing with the current state', () => {
     expect(compareDocuments(viewed, current)).toEqual([`Features only here: ${last.name}.`]);
   });
 
+  it('lists fonts and domain data that differ, which change no geometry by themselves', () => {
+    const withFont = unwrapDoc(
+      applyCommand(current, {
+        type: 'addFont',
+        font: {
+          id: 'font#1',
+          family: 'Inter',
+          style: 'Bold',
+          source: { kind: 'bundled', id: 'inter-bold', sha256: 'f'.repeat(64) },
+        },
+      }),
+    );
+    expect(compareDocuments(current, withFont)).toEqual(['Fonts only here: Inter Bold.']);
+    expect(compareDocuments(withFont, current)).toEqual([
+      'Fonts only in the current state: Inter Bold.',
+    ]);
+    const stock = unwrapDoc(
+      applyCommand(current, {
+        type: 'setDomainData',
+        namespace: 'stock',
+        schemaVersion: 1,
+        data: { overrides: { 'us-ply-23-32': { thickness: mm('18.2') } } },
+      }),
+    );
+    // Not "Same as the current state": a version differing only in its stock overrides.
+    expect(compareDocuments(current, stock)).toEqual(['Settings that differ: stock overrides.']);
+    const both = unwrapDoc(
+      applyCommand(stock, {
+        type: 'batch',
+        commands: [
+          { type: 'setDomainData', namespace: 'wood', schemaVersion: 1, data: {} },
+          { type: 'setDomainData', namespace: 'cam-x', schemaVersion: 1, data: {} },
+        ],
+      }),
+    );
+    expect(compareDocuments(current, both)).toEqual([
+      'Settings that differ: "cam-x" data, stock overrides, woodworking settings.',
+    ]);
+  });
+
   it('lists print setups added, removed and changed, which change no geometry', () => {
     const add = (doc: typeof current, id: string, name: string) =>
       unwrapDoc(
