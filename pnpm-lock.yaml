@@ -129,6 +129,8 @@ importers:
 
   packages/assembly: {}
 
+  packages/cam: {}
+
   packages/core:
     dependencies:
       '@manufakture/sketch':
