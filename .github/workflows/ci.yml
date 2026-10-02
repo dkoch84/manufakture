@@ -29,8 +29,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm lint
-      # Unit tests; the kernel goldens run in their own job below.
-      - run: pnpm test --project packages --project web
+      # Unit tests, and the G-code verifier over every golden G-code file (the `cam-gcode`
+      # project); the kernel goldens run in their own job below.
+      - run: pnpm test --project packages --project cam-gcode --project web
       - run: pnpm build
 
   kernel-goldens:
@@ -177,3 +178,79 @@ jobs:
           if command -v prusa-slicer > /dev/null; then export SLICER_CMD="xvfb-run -a prusa-slicer"; fi
           if [ -f m1-bracket/expected.json ]; then export INTEROP_BRACKET_DIR="$PWD/m1-bracket"; fi
           pnpm --filter @manufakture/io exec vitest run --root ../.. --project packages packages/io/src/interop.test.ts
+
+  gcode-validate:
+    # Optional: the firmware's own G-code parsers read every golden G-code file
+    # (packages/cam/test/grbl): `gvalidate` from grbl-sim, which builds Grbl 1.1h's parser on the
+    # host, and `grblHAL_validator` from the grblHAL Simulator, each from a pinned commit (both
+    # GPL-3.0-or-later, built and run here only, never shipped). A validator whose checkout or
+    # build fails is skipped with a warning, and the job never blocks a merge. The required check
+    # is the `cam-gcode` project in the `check` job (packages/cam/test/verify-gcode.ts).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    continue-on-error: true
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Check out Grbl 1.1h
+        id: grbl-src
+        continue-on-error: true
+        uses: actions/checkout@v7
+        with:
+          repository: gnea/grbl
+          ref: bfb67f0c7963fe3ce4aaf8a97f9009ea5a8db36e
+          path: firmware/grbl
+          persist-credentials: false
+      - name: Check out grbl-sim
+        # grbl-sim builds from inside Grbl's source directory.
+        id: grbl-sim-src
+        continue-on-error: true
+        uses: actions/checkout@v7
+        with:
+          repository: grbl/grbl-sim
+          ref: 9bdd1654c7eb6cacf03e35340b38c962bcebe013
+          path: firmware/grbl/grbl/grbl-sim
+          persist-credentials: false
+      - name: Build gvalidate
+        if: ${{ steps.grbl-src.outcome == 'success' && steps.grbl-sim-src.outcome == 'success' }}
+        continue-on-error: true
+        run: |
+          # GCC 10 and later default to -fno-common, and grbl-sim defines globals in headers.
+          make -C firmware/grbl/grbl/grbl-sim gvalidate FLAGS="-O2 -fcommon"
+          echo "GVALIDATE=$PWD/firmware/grbl/grbl/grbl-sim/gvalidate.exe" >> "$GITHUB_ENV"
+      - name: Check out the grblHAL Simulator
+        # Its core and SD card plugin are submodules, pinned by this commit.
+        id: grblhal-src
+        continue-on-error: true
+        uses: actions/checkout@v7
+        with:
+          repository: grblHAL/Simulator
+          ref: 64a349832687ea14b7900c1ecb78e49b78e10c5a
+          submodules: recursive
+          path: firmware/grblhal
+          persist-credentials: false
+      - name: Build grblHAL_validator
+        if: ${{ steps.grblhal-src.outcome == 'success' }}
+        continue-on-error: true
+        run: |
+          # math.h first: glibc 2.43 declares C23's powr, which grblHAL's real.h defines as a
+          # macro; harmless with older glibc.
+          cmake -S firmware/grblhal -B firmware/grblhal/build -DCMAKE_C_FLAGS="-include math.h"
+          cmake --build firmware/grblhal/build --target grblHAL_validator -j "$(nproc)"
+          echo "GRBLHAL_VALIDATOR=$PWD/firmware/grblhal/build/grblHAL_validator" >> "$GITHUB_ENV"
+      - name: Validate the golden G-code files
+        run: |
+          status=0
+          for name in GVALIDATE GRBLHAL_VALIDATOR; do
+            if [ -z "${!name:-}" ] || [ ! -x "${!name}" ]; then
+              echo "::warning::$name was not built; skipped"
+              continue
+            fi
+            echo "== ${!name}"
+            bash packages/cam/test/firmware-validate.sh "${!name}" packages/cam/test/grbl/*.nc || status=1
+          done
+          exit "$status"

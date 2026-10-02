@@ -32,6 +32,14 @@ export default defineConfig({
           include: KERNEL_GOLDENS,
         },
       },
+      {
+        // The G-code verifier and its run over every golden G-code file (packages/cam/test).
+        test: {
+          name: 'cam-gcode',
+          environment: 'node',
+          include: ['packages/cam/test/**/*.test.ts'],
+        },
+      },
       'apps/web',
     ],
   },
