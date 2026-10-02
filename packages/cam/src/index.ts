@@ -45,10 +45,13 @@ export type {
   WcsUp,
 } from './types';
 
-export { FEED_CLASSES, isFeedMove, isMove } from './ir';
+export { FEED_CLASSES, isCycleMarker, isFeedMove, isMove } from './ir';
 export type {
   ArcMove,
   Comment,
+  CycleEnd,
+  CycleStart,
+  DrillCycle,
   Dwell,
   FeedClass,
   IrEntry,
@@ -154,3 +157,36 @@ export type {
   PocketSpot,
   UncutArea,
 } from './ops/pocket';
+
+// T5.2d: the facing operation (registered on the worker by `registerBuiltinOperations`).
+export { FACING_SAFE_ABOVE, facingRaster, generateFacing } from './ops/facing';
+export type {
+  FacingChord,
+  FacingExtras,
+  FacingOperation,
+  FacingPattern,
+  FacingRaster,
+  FacingRasterOptions,
+} from './ops/facing';
+
+// T5.2e: the drill operation (registered on the worker by `registerBuiltinOperations`).
+export {
+  DRILL_BORE_STEPOVER,
+  DRILL_BREAKTHROUGH_MARGIN,
+  DRILL_CAVITY_CLEARANCE,
+  DRILL_DEFAULT_POINT_ANGLE,
+  DRILL_HELIX_ANGLE,
+  DRILL_MATCH_TOLERANCE,
+  DRILL_MIN_BORE_RADIUS,
+  DRILL_PECK_CLEARANCE,
+  DRILL_SAFE_ABOVE,
+  DRILL_SLOPED_ENTRY,
+  DRILL_UNDERSIZE_TOLERANCE,
+  generateDrill,
+  nearestNeighbourOrder,
+  toolTipLength,
+} from './ops/drill';
+export type { DrillExtras, DrillOperation } from './ops/drill';
+
+// T5.1d: the tool library, feed presets and machine profiles (also `@manufakture/cam/library`).
+export * from './library';

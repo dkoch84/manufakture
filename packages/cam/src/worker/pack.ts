@@ -23,6 +23,9 @@ export const PACKED_KINDS = [
   'toolChange',
   'spindle',
   'comment',
+  // Appended, so the indices above stay what they were.
+  'cycle',
+  'cycleEnd',
 ] as const satisfies readonly IrEntry['kind'][];
 
 /** Numbers per entry in `values` and `ints`. */

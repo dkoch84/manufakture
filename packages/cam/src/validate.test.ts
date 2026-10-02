@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ArcMove, IrEntry, Toolpath } from './ir';
+import type { ArcMove, DrillCycle, IrEntry, Toolpath } from './ir';
 import { sampleToolpath } from './test-helpers';
 import { DEFAULT_ARC_TOLERANCE, validateToolpath } from './validate';
 
@@ -191,6 +191,81 @@ describe('validateToolpath', () => {
     it('a helical arc is checked against its XY radius', () => {
       expect(codes(program(arcTo([0, 10, -3])))).toEqual([]);
       expect(codes(program(arcTo([0, 11, -3])))).toEqual(['arc-radius']);
+    });
+  });
+
+  describe('canned-cycle markers', () => {
+    // The preamble's rapid leaves the tool at (10, 0, 0); a cycle starts on its retract plane.
+    const drill: DrillCycle = { at: [10, 0], top: -1, bottom: -6, retract: 0, peck: 2, dwell: 0.5 };
+    const rapid = (z: number, x = 10): IrEntry => ({ kind: 'rapid', to: [x, 0, z], op, pass: 0 });
+    const feed = (z: number, x = 10): IrEntry => ({
+      kind: 'linear',
+      to: [x, 0, z],
+      feed: 300,
+      feedClass: 'plunge',
+      op,
+      pass: 0,
+    });
+    const open: IrEntry = { kind: 'cycle', drill, op };
+    const close: IrEntry = { kind: 'cycleEnd', op };
+
+    it('accepts a peck cycle of rapids, feeds and a dwell, and a dwell with a pass', () => {
+      expect(
+        codes(
+          program(
+            open,
+            feed(-3),
+            rapid(0),
+            rapid(-2.5),
+            feed(-5),
+            rapid(0),
+            rapid(-4.5),
+            feed(-6),
+            { kind: 'dwell', seconds: 0.5, op, pass: 2 },
+            rapid(0),
+            close,
+          ),
+        ),
+      ).toEqual([]);
+    });
+
+    it('pairs markers: no nesting, no stray end, none left open', () => {
+      expect(codes(program(open, open, feed(-6), rapid(0), close))).toEqual(['cycle-pairing']);
+      expect(codes(program(close))).toEqual(['cycle-pairing']);
+      const unclosed = validateToolpath(program(open, feed(-6), rapid(0)));
+      expect(unclosed.map((i) => [i.code, i.index])).toEqual([['cycle-pairing', 3]]);
+    });
+
+    it('checks the numbers of a cycle', () => {
+      const bad = (over: Partial<DrillCycle>) =>
+        codes(program({ kind: 'cycle', drill: { ...drill, ...over }, op }, close));
+      expect(bad({ bottom: -1 })).toEqual(['cycle-invalid']);
+      expect(bad({ top: 1, retract: 0 })).toEqual(['cycle-invalid']);
+      expect(bad({ peck: 0 })).toEqual(['cycle-invalid']);
+      expect(bad({ dwell: -1 })).toEqual(['cycle-invalid']);
+      expect(bad({ bottom: Number.NaN })).toEqual(['non-finite']);
+    });
+
+    it('allows only rapids, straight feeds and dwells on the hole centre inside a cycle', () => {
+      expect(codes(program(open, feed(-6, 11), rapid(0, 10), close))).toEqual(['cycle-content']);
+      expect(
+        codes(program(open, { kind: 'comment', text: 'x', op }, feed(-6), rapid(0), close)),
+      ).toEqual(['cycle-content']);
+      expect(
+        codes(program(open, arcTo([-10, 0, 0], { fullCircle: false }), rapid(0), close)),
+      ).toContain('cycle-content');
+    });
+
+    it('starts and ends a cycle at its centre on its retract plane', () => {
+      expect(codes(program(rapid(2), open, feed(-6), rapid(2), close))).toEqual([
+        'cycle-position',
+        'cycle-position',
+      ]);
+    });
+
+    it('checks a dwell pass like a move pass', () => {
+      expect(codes(program({ kind: 'dwell', seconds: 1, op, pass: -1 }))).toEqual(['bad-tag']);
+      expect(codes(program({ kind: 'dwell', seconds: 1, op, pass: 0.5 }))).toEqual(['bad-tag']);
     });
   });
 });

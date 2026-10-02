@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { IrEntry, Toolpath } from './ir';
 import { toolpathBounds, toolpathStats } from './stats';
 import { sampleToolpath } from './test-helpers';
 
@@ -74,5 +75,28 @@ describe('toolpathBounds', () => {
     });
     expect(b.feed).toBeUndefined();
     expect(b.all).toEqual({ min: [0, 0, 7], max: [5, 6, 10] });
+  });
+
+  it('skips canned-cycle markers: same stats and bounds with and without them', () => {
+    const op = 'drill#1';
+    const moves: IrEntry[] = [
+      { kind: 'linear', to: [5, 5, -6], feed: 300, feedClass: 'plunge', op, pass: 0 },
+      { kind: 'dwell', seconds: 6, op, pass: 0 },
+      { kind: 'rapid', to: [5, 5, 3], op, pass: 0 },
+    ];
+    const plain: Toolpath = { start: [5, 5, 3], entries: moves };
+    const marked: Toolpath = {
+      start: [5, 5, 3],
+      entries: [
+        { kind: 'cycle', drill: { at: [5, 5], top: 0, bottom: -6, retract: 3, dwell: 6 }, op },
+        ...moves,
+        { kind: 'cycleEnd', op },
+      ],
+    };
+    const a = toolpathStats(plain, { rapidRate: 5000 });
+    const b = toolpathStats(marked, { rapidRate: 5000 });
+    expect(b).toEqual(a);
+    expect(b.ok && b.value.estimate.dwellMinutes).toBeCloseTo(0.1, 12);
+    expect(toolpathBounds(marked)).toEqual(toolpathBounds(plain));
   });
 });

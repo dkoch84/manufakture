@@ -3,6 +3,8 @@
 // `registry.register('profile', generateProfile)`. The worker answers a kind with no line here
 // with a `no-generator` error value.
 
+import { generateFacing } from '../ops/facing';
+import { generateDrill } from '../ops/drill';
 import { generatePocket } from '../ops/pocket';
 import { generateProfile } from '../ops/profile';
 import type { OperationRegistry } from './registry';
@@ -10,5 +12,7 @@ import type { OperationRegistry } from './registry';
 export function registerBuiltinOperations(registry: OperationRegistry): OperationRegistry {
   registry.register('profile', generateProfile);
   registry.register('pocket', generatePocket);
+  registry.register('drill', generateDrill);
+  registry.register('facing', generateFacing);
   return registry;
 }

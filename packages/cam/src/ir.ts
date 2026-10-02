@@ -62,6 +62,49 @@ export interface Dwell {
   /** Seconds, zero or more. */
   readonly seconds: number;
   readonly op?: string;
+  /** The pass it belongs to, like a move's (a peck's dwell at the bottom); absent: none. */
+  readonly pass?: number;
+}
+
+/**
+ * What a drilling canned cycle (G81, G82, G83) would do, for a post that can write one: the
+ * expanded moves between a `cycle` marker and its `cycleEnd` do exactly this.
+ *
+ * The tool starts at `[at, retract]` (the R plane), feeds down to `bottom` (in pecks of `peck` mm
+ * measured down from `top` when there is a peck, rapidly back to `retract` after each peck and
+ * rapidly down to just above the last depth before the next), dwells `dwell` seconds at the bottom
+ * when there is a dwell, and ends back at `[at, retract]`. Machine Z, mm.
+ */
+export interface DrillCycle {
+  readonly at: Vec2;
+  /** Where material may start: pecks are measured down from here. At most `retract`. */
+  readonly top: number;
+  /** The bottom of the hole. Below `top`. */
+  readonly bottom: number;
+  /** The R plane: where the cycle starts and ends, and where pecks retract to. */
+  readonly retract: number;
+  /** Peck depth, mm, greater than zero; absent for one straight feed to the bottom. */
+  readonly peck?: number;
+  /** Dwell at the bottom, seconds, greater than zero; absent for none. */
+  readonly dwell?: number;
+}
+
+/**
+ * Opens a canned-cycle group: the entries up to the matching `cycleEnd` are the expanded G0 and
+ * G1 moves (and the dwell) of `drill`, and are complete on their own. A post with canned cycles
+ * may write the cycle instead of the group; every other consumer skips both markers and reads the
+ * moves. Markers never nest.
+ */
+export interface CycleStart {
+  readonly kind: 'cycle';
+  readonly drill: DrillCycle;
+  readonly op?: string;
+}
+
+/** Closes the group a `cycle` marker opened. */
+export interface CycleEnd {
+  readonly kind: 'cycleEnd';
+  readonly op?: string;
 }
 
 /** Change to another tool. The spindle must be off (a `spindle` off entry before it). */
@@ -96,7 +139,7 @@ export interface Comment {
   readonly op?: string;
 }
 
-export type IrEntry = Move | Dwell | ToolChange | Spindle | Comment;
+export type IrEntry = Move | Dwell | ToolChange | Spindle | Comment | CycleStart | CycleEnd;
 
 /** A program: entries in order, from a known start position. */
 export interface Toolpath {
@@ -112,4 +155,9 @@ export function isMove(entry: IrEntry): entry is Move {
 /** A feed move: anything that may touch material. */
 export function isFeedMove(entry: IrEntry): entry is LinearMove | ArcMove {
   return entry.kind === 'linear' || entry.kind === 'arc';
+}
+
+/** A canned-cycle marker: carries no motion, and consumers that do not collapse cycles skip it. */
+export function isCycleMarker(entry: IrEntry): entry is CycleStart | CycleEnd {
+  return entry.kind === 'cycle' || entry.kind === 'cycleEnd';
 }

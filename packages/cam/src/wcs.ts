@@ -269,6 +269,8 @@ export function drillPointToMachine(
     depth: { top: top[2], bottom: top[2] - point.depth },
     diameter: point.diameter,
     ...(point.through !== undefined ? { through: point.through } : {}),
+    ...(point.clearBelow !== undefined ? { clearBelow: point.clearBelow } : {}),
+    ...(point.entryTilt !== undefined ? { entryTilt: point.entryTilt } : {}),
     ...(point.source ? { source: point.source } : {}),
   });
 }

@@ -10,19 +10,30 @@ import {
   type CamOperation,
   type CamSetup,
   type CamTool,
+  type ExtrudeFeature,
   type HoleFeature,
   type ManufaktureDocument,
   type SketchFeature,
   type StoredExpression,
 } from '@manufakture/core';
-import type { KernelService } from '@manufakture/kernel';
+import type {
+  EdgeInfo,
+  FaceInfo,
+  KernelService,
+  MeshData,
+  OpResult,
+  ShapeId,
+  Topology,
+  VertexInfo,
+} from '@manufakture/kernel';
 import { createNodeService } from '@manufakture/kernel/node';
 import { createSolverService, type SolverService } from '@manufakture/sketch';
 import { beforeAll, describe, expect, it } from 'vitest';
 import type { CamGeometryResult, CamLoop, CamOperationResult, CamSourceResult } from './cam';
-import { CAM_MESH_DEFLECTION } from './cam';
+import { CAM_MESH_DEFLECTION, CamStage, holeWallPoints, type CamHost } from './cam';
+import { evaluateVariables } from './values';
 import { RegenEngine } from './engine';
-import { PART, add, apply, mm, rectangle, unwrap } from './test-helpers';
+import { PART, add, apply, build, extrude, mm, rectangle, unwrap } from './test-helpers';
 
 let service: KernelService;
 let solver: SolverService;
@@ -611,8 +622,962 @@ describe('the CAM geometry stage with the real kernel and solver', () => {
     expect(op(m, 'pocket#1').errors).toMatchObject([{ code: 'invalid', field: ['geometry'] }]);
   }, 60_000);
 
+  it("drills the bracket's two holes from their walls when a drill picks nothing", async () => {
+    const engine = new RegenEngine({ kernel: service, solver });
+    const all: CamOperation = { ...drill, geometry: [] };
+    const doc = machined([all]);
+    await engine.regen(doc);
+    const r = (await engine.camGeometry(doc, S))!;
+    const d = op(r, 'drill#1');
+    expect(d.status).toBe('ok');
+    expect(d.errors).toEqual([]);
+    // The counterbore's wide wall sits above the narrow one: left to a pocket, a note says so.
+    expect(d.warnings.map((w) => [w.code, w.message])).toEqual([
+      [
+        'hole-steps',
+        expect.stringMatching(
+          /^The 8 mm step of the 4 mm hole at \(8, 10, 4\) .* is left to a pocket/,
+        ),
+      ],
+    ]);
+    expect(engine.camStats.topologyOps).toBe(1);
+    const walls = d.sources[0]!;
+    if (walls.kind !== 'holeWalls') throw new Error('expected hole walls');
+    expect(walls.source).toBe('body');
+    // The 6 mm hole of extrude#2 and the 4 mm through-hole of the counterbore, whose 8 mm wall is
+    // left to a pocket. Machine coordinates: front-left top origin on a stock with no margins, so
+    // machine Z is model Z less the 6 mm plate.
+    const machine = walls.points
+      .map((p) => ({
+        at: [r6(p.position[0]), r6(p.position[1])],
+        top: r6(p.position[2] - 6),
+        bottom: r6(p.position[2] - 6 - p.depth),
+        diameter: r6(p.diameter),
+        through: p.through,
+        axis: p.axis.map(r6),
+      }))
+      .sort((a, b) => a.at[0]! - b.at[0]!);
+    expect(machine).toEqual([
+      { at: [8, 10], top: -2, bottom: -6, diameter: 4, through: true, axis: [0, 0, -1] },
+      { at: [20, 10], top: 0, bottom: -6, diameter: 6, through: true, axis: [0, 0, -1] },
+    ]);
+    // The same body again: the topology is not asked for twice.
+    await engine.camGeometry(machined([{ ...all, name: 'Renamed' }]), S);
+    expect(engine.camStats.topologyOps).toBe(1);
+
+    // A blind operation depth replaces the walls' depths like a hole feature's.
+    const blind: CamOperation = { ...all, depth: { kind: 'blind', depth: mm('3') } };
+    const b = op((await engine.camGeometry(machined([blind]), S))!, 'drill#1');
+    const bw = b.sources[0] as Extract<CamSourceResult, { kind: 'holeWalls' }>;
+    expect(bw.points.map((p) => [r6(p.depth), p.through])).toEqual([
+      [3, undefined],
+      [3, undefined],
+    ]);
+  }, 60_000);
+
+  it('drills a two-arc circle cut through plates of any thickness at any height, origin top or bottom', async () => {
+    // The 6 mm hole of the bracket drawn as two arcs: the kernel makes its wall two half faces.
+    const plate = (z0: number): ManufaktureDocument => {
+      const json = JSON.parse(
+        readFileSync(new URL('../../core/src/fixtures/v14-bracket.json', import.meta.url), 'utf8'),
+      );
+      const features = json.parts[0].features as { id: string; [k: string]: unknown }[];
+      features.find((f) => f.id === 'extrude#2')!.reverse = true;
+      const base = features.find((f) => f.id === 'sketch#1') as unknown as {
+        plane: { origin: number[] };
+      };
+      base.plane.origin = [0, 0, z0];
+      json.parts[0].nextIds.e = 7;
+      Object.assign(
+        features.find((f) => f.id === 'sketch#2')!,
+        {
+          entities: [
+            {
+              id: 'e5',
+              kind: 'arc',
+              construction: false,
+              center: [20, 10],
+              start: [23, 10],
+              end: [17, 10],
+            },
+            {
+              id: 'e6',
+              kind: 'arc',
+              construction: false,
+              center: [20, 10],
+              start: [17, 10],
+              end: [23, 10],
+            },
+          ],
+          constraints: [],
+        },
+      );
+      return unwrap(parseDocument(json)).document;
+    };
+    const engine = new RegenEngine({ kernel: service, solver });
+    const failures: string[] = [];
+    for (const thickness of [6.35, 12.7, 6, 19.05]) {
+      for (const z0 of [0, 0.7, 1.1, 2.54]) {
+        for (const origin of ['top', 'bottom'] as const) {
+          const doc = apply(
+            setThickness(plate(z0), `${thickness}mm`),
+            { type: 'addCamTool', tool },
+            {
+              type: 'addCamSetup',
+              setup: setup([{ ...drill, geometry: [] }], {
+                wcs: { up: { kind: 'axis', axis: '+z' }, origin: { xy: 'front-left', z: origin } },
+              }),
+            },
+          );
+          await engine.regen(doc);
+          const d = op((await engine.camGeometry(doc, S))!, 'drill#1');
+          const s = d.sources[0];
+          const p = s?.kind === 'holeWalls' && s.points.length === 1 ? s.points[0]! : undefined;
+          const ok =
+            d.status === 'ok' &&
+            d.warnings.length === 0 &&
+            p !== undefined &&
+            p.through === true &&
+            Math.abs(p.diameter - 6) < 1e-6 &&
+            Math.abs(p.depth - thickness) < 1e-6 &&
+            [r6(p.position[0]), r6(p.position[1]), r6(p.position[2] - z0)].join() ===
+              [20, 10, r6(thickness)].join();
+          if (!ok) {
+            failures.push(
+              `${thickness} mm at Z ${z0}, origin ${origin}: ${JSON.stringify({ errors: d.errors, warnings: d.warnings, sources: d.sources })}`,
+            );
+          }
+        }
+      }
+    }
+    expect(failures).toEqual([]);
+  }, 120_000);
+
+  it('skips a hole under material (a side tunnel), and measures the clear height under a hole exiting into it', async () => {
+    // A 40 x 20 x 10 block with a tunnel through it along Y (X 10 to 30, Z 3 to 6). Hole A, 6 mm,
+    // goes down from the tunnel's floor at X 15: material above it. Hole B, 6 mm, comes down from
+    // the top at X 25 into the tunnel's ceiling: through, with 3 mm clear below its exit.
+    const circle = (
+      id: string,
+      entity: string,
+      z0: number,
+      at: [number, number],
+    ): SketchFeature => ({
+      id,
+      kind: 'sketch',
+      name: id,
+      suppressed: false,
+      plane: { type: 'plane', origin: [0, 0, z0], normal: [0, 0, 1], xDir: [1, 0, 0] },
+      entities: [{ id: entity, kind: 'circle', construction: false, center: at, radius: 3 }],
+      constraints: [],
+    });
+    const cut = (id: string, sketch: string, extent: ExtrudeFeature['extent']): ExtrudeFeature => ({
+      ...extrude(id, sketch, '1', 'cut'),
+      extent,
+      reverse: true,
+    });
+    const tunnel = (drillOp: CamOperation) =>
+      build([
+        add(rectangle('sketch#1', { width: '40', depth: '20' })),
+        add(extrude('extrude#1', 'sketch#1', '10')),
+        add(
+          rectangle('sketch#2', {
+            width: '20',
+            depth: '3',
+            at: [10, 3],
+            plane: { type: 'plane', origin: [0, 0, 0], normal: [0, -1, 0], xDir: [1, 0, 0] },
+            ids: ['e5', 'e6', 'e7', 'e8'],
+            firstConstraint: 20,
+          }),
+        ),
+        add(cut('extrude#2', 'sketch#2', { type: 'throughAll' })),
+        add(circle('sketch#3', 'e9', 3, [15, 10])),
+        add(cut('extrude#3', 'sketch#3', { type: 'throughAll' })),
+        add(circle('sketch#4', 'e10', 10, [25, 10])),
+        add(cut('extrude#4', 'sketch#4', { type: 'blind', distance: mm('5') })),
+        { type: 'addCamTool', tool },
+        { type: 'addCamSetup', setup: setup([drillOp]) },
+      ]);
+    const doc = tunnel({ ...drill, geometry: [] });
+    const engine = new RegenEngine({ kernel: service, solver });
+    const regen = (await engine.regen(doc))!;
+    expect(regen.parts[0]!.features.every((f) => f.status === 'ok')).toBe(true);
+    const d = op((await engine.camGeometry(doc, S))!, 'drill#1');
+    expect(d.status).toBe('ok');
+    expect(d.warnings.map((w) => [w.code, w.message])).toEqual([
+      ['holes', expect.stringMatching(/^the 6 mm hole at \(15, 10, 3\) .*material above it/)],
+    ]);
+    const walls = d.sources[0] as Extract<CamSourceResult, { kind: 'holeWalls' }>;
+    expect(walls.points).toHaveLength(1);
+    const b = walls.points[0]!;
+    expect([r6(b.position[0]), r6(b.position[1]), r6(b.position[2])]).toEqual([25, 10, 10]);
+    expect(b.through).toBe(true);
+    expect(b.depth).toBeCloseTo(4, 5);
+    expect(b.clearBelow).toBeCloseTo(3, 4);
+
+    // The operation's own depth, through the stock: hole B would cut the tunnel's 3 mm floor.
+    // Its modelled clear height no longer applies, and a warning says so.
+    const deep = tunnel({ ...drill, geometry: [], depth: { kind: 'through' } });
+    await engine.regen(deep);
+    const dd = op((await engine.camGeometry(deep, S))!, 'drill#1');
+    expect(dd.status).toBe('ok');
+    const deepPoint = (dd.sources[0] as Extract<CamSourceResult, { kind: 'holeWalls' }>).points[0]!;
+    expect(deepPoint.through).toBe(true);
+    expect(deepPoint.depth).toBeCloseTo(10, 5);
+    expect(deepPoint.clearBelow).toBeUndefined();
+    expect(dd.warnings.map((w) => [w.code, w.message])).toEqual([
+      ['holes', expect.stringMatching(/material above it/)],
+      [
+        'holes',
+        "The operation's depth goes past the modelled bottom or exit of the hole at (25, 10, 10) and cuts the material below it",
+      ],
+    ]);
+    // A blind depth no deeper than the hole's own: no warning.
+    const shallow = tunnel({ ...drill, geometry: [], depth: { kind: 'blind', depth: mm('3') } });
+    await engine.regen(shallow);
+    const ds = op((await engine.camGeometry(shallow, S))!, 'drill#1');
+    expect(ds.warnings.map((w) => w.message)).toEqual([expect.stringMatching(/material above it/)]);
+    const sp = (ds.sources[0] as Extract<CamSourceResult, { kind: 'holeWalls' }>).points[0]!;
+    expect([sp.depth, sp.through, sp.clearBelow]).toEqual([3, undefined, undefined]);
+  }, 60_000);
+
+  it('drills a hole through a web over a relief pocket cut from below as a through hole', async () => {
+    const doc = build([
+      add(rectangle('sketch#1', { width: '40', depth: '20' })),
+      add(extrude('extrude#1', 'sketch#1', '10')),
+      // The relief: 20 x 10, 4 mm up from the bottom.
+      add(
+        rectangle('sketch#2', {
+          width: '20',
+          depth: '10',
+          at: [10, 5],
+          ids: ['e5', 'e6', 'e7', 'e8'],
+          firstConstraint: 20,
+        }),
+      ),
+      add(extrude('extrude#2', 'sketch#2', '4', 'cut')),
+      add({
+        id: 'sketch#3',
+        kind: 'sketch',
+        name: 'sketch#3',
+        suppressed: false,
+        plane: { type: 'plane', origin: [0, 0, 10], normal: [0, 0, 1], xDir: [1, 0, 0] },
+        entities: [{ id: 'e9', kind: 'circle', construction: false, center: [20, 10], radius: 3 }],
+        constraints: [],
+      }),
+      add({
+        ...extrude('extrude#3', 'sketch#3', '1', 'cut'),
+        extent: { type: 'throughAll' },
+        reverse: true,
+      }),
+      { type: 'addCamTool', tool },
+      { type: 'addCamSetup', setup: setup([{ ...drill, geometry: [] }]) },
+    ]);
+    const engine = new RegenEngine({ kernel: service, solver });
+    const regen = (await engine.regen(doc))!;
+    expect(regen.parts[0]!.features.every((f) => f.status === 'ok')).toBe(true);
+    const d = op((await engine.camGeometry(doc, S))!, 'drill#1');
+    expect(d.status).toBe('ok');
+    expect(d.warnings).toEqual([]);
+    const walls = d.sources[0] as Extract<CamSourceResult, { kind: 'holeWalls' }>;
+    expect(walls.points).toHaveLength(1);
+    const p = walls.points[0]!;
+    // Machine Z 0 at the top: the wall runs from 0 down to the relief's ceiling at -6.
+    expect(p.position[2]).toBeCloseTo(10, 5);
+    expect(p.depth).toBeCloseTo(6, 5);
+    expect(p.through).toBe(true);
+    // Open below the relief: nothing to cap the breakthrough.
+    expect(p.clearBelow).toBeUndefined();
+  }, 60_000);
+
+  it('fails closed when the CAM mesh is missing or empty: a drill with no geometry drills nothing', async () => {
+    // The stage directly, with no mesh kept between uses, over a host whose second tessellation
+    // fails (or comes back empty): the bounds come from the first, the column check has none.
+    const doc = machined([{ ...drill, geometry: [] }]);
+    const box = new Float32Array([0, 0, 0, 40, 0, 0, 40, 20, 0, 0, 20, 6]);
+    const topology: Topology = {
+      faces: [
+        {
+          index: 0,
+          surface: 'cylinder',
+          centroid: [20, 10, 3],
+          area: 2 * Math.PI * 3 * 6,
+          normal: null,
+          axis: [0, 0, 1],
+          radius: 3,
+          axisOrigin: [20, 10, 0],
+          hole: true,
+        },
+      ],
+      edges: [
+        {
+          index: 0,
+          faces: [0],
+          seam: true,
+          curve: 'line',
+          midpoint: [23, 10, 3],
+          length: 6,
+          vertices: [0, 1],
+        },
+      ],
+      vertices: [
+        { index: 0, point: [23, 10, 0], faces: [0] },
+        { index: 1, point: [23, 10, 6], faces: [0] },
+      ],
+    };
+    for (const second of ['fail', 'empty'] as const) {
+      let tessellations = 0;
+      const host: CamHost = {
+        generation: 1,
+        versions: { kernelBuild: 'test', namingScheme: 1, implementation: 1 },
+        variables: evaluateVariables(doc.variables),
+        part: () =>
+          Promise.resolve({
+            part: doc.parts[0]!,
+            bodies: [{ id: 'extrude#1', shape: 1 as ShapeId, key: 'body', instance: null }],
+            sketches: new Map(),
+            inputs: new Map(),
+            results: new Map(),
+          }),
+        run: (ops) =>
+          Promise.resolve(
+            ops.map((o): OpResult => {
+              if (o.op === 'topology') return { ok: true, op: 'topology', value: topology, ms: 0 };
+              tessellations++;
+              if (tessellations > 1 && second === 'fail') {
+                return {
+                  ok: false,
+                  op: 'tessellate',
+                  error: { code: 'kernel', operation: 'tessellate', message: 'out of memory' },
+                  ms: 0,
+                } as OpResult;
+              }
+              const empty = tessellations > 1;
+              const value = {
+                positions: box,
+                indices: empty ? new Uint32Array(0) : new Uint32Array([0, 1, 2, 0, 2, 3]),
+              } as unknown as MeshData;
+              return { ok: true, op: 'tessellate', value, ms: 0 };
+            }),
+          ),
+      };
+      const stage = new CamStage({ meshes: 0 });
+      const r = await stage.geometry(host, doc, doc.cam.setups[0]!);
+      expect(r.status).toBe('ok');
+      const d = op(r, 'drill#1');
+      expect(d.status).toBe('error');
+      expect(d.errors).toEqual([
+        expect.objectContaining({
+          code: 'kernel',
+          message: expect.stringContaining('drills nothing'),
+        }),
+      ]);
+      expect(tessellations).toBe(2);
+    }
+  });
+
   it('rejects a setup the document does not have', async () => {
     const engine = new RegenEngine({ kernel: service, solver });
     await expect(engine.camGeometry(machined(), 'setup#9')).rejects.toThrow(/no CAM setup/);
+  });
+});
+
+describe('holeWallPoints', () => {
+  const Z: [number, number, number] = [0, 0, 1];
+  /** A mesh with nothing in it: no material above or below any hole. */
+  const NO_MESH = { positions: new Float32Array(0), indices: new Uint32Array(0) };
+  /** Planes the walls' ends meet: facing up (a top face or floor) and facing down. */
+  const UP = 100;
+  const DOWN = 101;
+  const planes: FaceInfo[] = [
+    {
+      index: UP,
+      surface: 'plane',
+      centroid: [0, 0, 10],
+      area: 1,
+      normal: [0, 0, 1],
+      axis: null,
+      radius: null,
+    },
+    {
+      index: DOWN,
+      surface: 'plane',
+      centroid: [0, 0, 0],
+      area: 1,
+      normal: [0, 0, -1],
+      axis: null,
+      radius: null,
+    },
+  ];
+  let edges: EdgeInfo[] = [];
+  let vertices: VertexInfo[] = [];
+  /**
+   * A cylinder face of radius `r` about (x, y) from model Z `z0` to `z1`, `share` of a full turn,
+   * its top circle meeting face `top` and its bottom circle face `bottom`.
+   */
+  function wall(
+    index: number,
+    [x, y]: [number, number],
+    r: number,
+    z0: number,
+    z1: number,
+    {
+      top = UP,
+      bottom = DOWN,
+      share = 1,
+      ...over
+    }: Partial<FaceInfo> & {
+      top?: number;
+      bottom?: number;
+      share?: number;
+    } = {},
+  ): FaceInfo {
+    for (const [z, other] of [
+      [z0, bottom],
+      [z1, top],
+    ] as const) {
+      const v = vertices.length;
+      vertices.push({ index: v, point: [x + r, y, z], faces: [index, other] });
+      edges.push({
+        index: edges.length,
+        faces: [index, other],
+        seam: false,
+        curve: 'circle',
+        midpoint: [x - r, y, z],
+        length: share * 2 * Math.PI * r,
+        vertices: [v],
+      });
+    }
+    return {
+      index,
+      surface: 'cylinder',
+      centroid: [x, y, (z0 + z1) / 2],
+      area: share * 2 * Math.PI * r * (z1 - z0),
+      normal: null,
+      axis: [0, 0, index % 2 === 0 ? 1 : -1],
+      radius: r,
+      axisOrigin: [x, y, -3],
+      hole: true,
+      ...over,
+    };
+  }
+  const topo = (faces: FaceInfo[]) => ({ faces: [...faces, ...planes], edges, vertices });
+  /**
+   * A wall in two half-cylinder faces `i` (front, y < centre) and `j` (back), as a two-arc circle
+   * cut makes it: half-circle end edges, and two lines along the axis between the halves whose
+   * midpoints sit at mid-height give or take the rounding a real kernel leaves (`eps`).
+   */
+  function halves(
+    i: number,
+    j: number,
+    [x, y]: [number, number],
+    r: number,
+    z0: number,
+    z1: number,
+    eps: number,
+    { top = UP, bottom = DOWN }: { top?: number; bottom?: number } = {},
+  ): FaceInfo[] {
+    const v = (point: [number, number, number]) => {
+      vertices.push({ index: vertices.length, point, faces: [i, j] });
+      return vertices.length - 1;
+    };
+    const right = [v([x + r, y, z0]), v([x + r, y, z1])];
+    const left = [v([x - r, y, z0]), v([x - r, y, z1])];
+    const mid = (z0 + z1) / 2;
+    for (const [face, side] of [
+      [i, -1],
+      [j, 1],
+    ] as const) {
+      for (const [z, other, k] of [
+        [z0, bottom, 0],
+        [z1, top, 1],
+      ] as const) {
+        edges.push({
+          index: edges.length,
+          faces: [face, other],
+          seam: false,
+          curve: 'circle',
+          midpoint: [x, y + side * r, z],
+          length: Math.PI * r,
+          vertices: [right[k]!, left[k]!],
+        });
+      }
+    }
+    for (const [pair, e] of [
+      [right, eps],
+      [left, -eps],
+    ] as const) {
+      edges.push({
+        index: edges.length,
+        faces: [i, j],
+        seam: false,
+        curve: 'line',
+        midpoint: [vertices[pair[0]!]!.point[0], y, mid + e],
+        length: z1 - z0,
+        vertices: [pair[0]!, pair[1]!],
+      });
+    }
+    const half = (index: number, side: number): FaceInfo => ({
+      index,
+      surface: 'cylinder',
+      centroid: [x, y + (side * 2 * r) / Math.PI, mid],
+      area: Math.PI * r * (z1 - z0),
+      normal: null,
+      axis: [0, 0, 1],
+      radius: r,
+      axisOrigin: [x, y, 0],
+      hole: true,
+    });
+    return [half(i, -1), half(j, 1)];
+  }
+  const reset = () => {
+    edges = [];
+    vertices = [];
+  };
+
+  it('finds through and blind holes, with machine Z from the origin', () => {
+    reset();
+    const faces = [wall(0, [5, 5], 2, 0, 10), wall(1, [15, 5], 1.5, 4, 10, { bottom: UP })];
+    // Origin on the top (setup Z 10): machine Z is model Z less 10; the body bottom is at -10.
+    const found = holeWallPoints(topo(faces), Z, 10, -10, NO_MESH);
+    expect(found.points).toEqual([
+      { position: [5, 5, 10], axis: [0, 0, -1], diameter: 4, depth: 10, through: true },
+      { position: [15, 5, 10], axis: [0, 0, -1], diameter: 3, depth: 6 },
+    ]);
+    expect(found.warnings).toEqual([]);
+  });
+
+  it('joins a wall split in halves, drills a counterbore through its floor, and a countersink', () => {
+    reset();
+    const faces: FaceInfo[] = [
+      wall(0, [5, 5], 2, 0, 8, { share: 0.5, top: 50 }),
+      wall(1, [5, 5], 2, 0, 8, { share: 0.5, top: 50 }),
+      // The counterbore over it: 4 mm radius from 8 to 10, its floor (face 50) facing up.
+      wall(2, [5, 5], 4, 8, 10, { bottom: 50 }),
+      { ...planes[0]!, index: 50, centroid: [5, 5, 8] },
+      // A countersunk hole: a cone widening from the wall's top at 7 up to the top face.
+      wall(3, [20, 5], 1.5, 0, 7, { top: 60 }),
+      {
+        index: 60,
+        surface: 'cone',
+        centroid: [20, 5, 8.5],
+        area: 1,
+        normal: null,
+        axis: null,
+        radius: null,
+      },
+    ];
+    // The cone's wide edge, radius 3 at Z 10, with the top face.
+    const v = vertices.length;
+    vertices.push({ index: v, point: [23, 5, 10], faces: [60, UP] });
+    edges.push({
+      index: edges.length,
+      faces: [60, UP],
+      seam: false,
+      curve: 'circle',
+      midpoint: [17, 5, 10],
+      length: 6 * Math.PI,
+      vertices: [v],
+    });
+    const found = holeWallPoints(topo(faces), Z, 10, -10, NO_MESH);
+    expect(found.points).toEqual([
+      { position: [5, 5, 8], axis: [0, 0, -1], diameter: 4, depth: 8, through: true },
+      { position: [20, 5, 7], axis: [0, 0, -1], diameter: 3, depth: 7, through: true },
+    ]);
+    expect(found.warnings).toEqual([]);
+    expect(found.notes).toEqual([
+      'The 8 mm step of the 4 mm hole at (5, 5, 8) (face #0, #1) is left to a pocket: only the 4 mm hole is drilled',
+    ]);
+  });
+
+  it('drills a through hole whose wall is two halves, whatever rounding leaves at mid-height', () => {
+    for (const eps of [1e-15, -1e-15, 0, 3e-16]) {
+      reset();
+      const found = holeWallPoints(
+        topo(halves(0, 1, [5, 5], 3, 1.1, 7.45, eps)),
+        Z,
+        7.45,
+        -6.35,
+        NO_MESH,
+      );
+      expect(found.warnings).toEqual([]);
+      expect(found.points).toHaveLength(1);
+      expect(found.points[0]).toMatchObject({ diameter: 6, through: true });
+      expect(found.points[0]!.position.map(r6)).toEqual([5, 5, 7.45]);
+      expect(found.points[0]!.depth).toBeCloseTo(6.35, 12);
+    }
+    // Halves of a blind hole whose mouth opens on the bottom face are still not reachable.
+    reset();
+    const below = holeWallPoints(
+      topo(halves(0, 1, [5, 5], 3, 0, 4, 1e-15, { top: DOWN })),
+      Z,
+      10,
+      -10,
+      NO_MESH,
+    );
+    expect(below.points).toEqual([]);
+    expect(below.warnings).toEqual([expect.stringContaining('(face #0, #1) is not reachable')]);
+  });
+
+  it('keeps a hole with a sloped top, a chamfered or filleted mouth; an unknown surface is unclassified', () => {
+    reset();
+    // A 10 degree sloped top: the wall's area is short of a full cylinder of its height, but its
+    // flat bottom edge goes all the way round.
+    const sloped = wall(0, [5, 5], 2, 0, 10, { area: 2 * Math.PI * 2 * 9.3 });
+    const topEdge = edges.find((e) => e.faces.includes(0) && e.faces.includes(UP))!;
+    edges = edges.map((e) =>
+      e === topEdge ? { ...e, midpoint: [3, 5, 9.3], length: 2 * Math.PI * 2 * 1.008 } : e,
+    );
+    expect(holeWallPoints(topo([sloped]), Z, 10, -10, NO_MESH).points).toHaveLength(1);
+
+    // A fillet (torus) at the mouth widening up to the top face, and an unknown surface.
+    reset();
+    const fillet: FaceInfo = {
+      index: 60,
+      surface: 'torus',
+      centroid: [5, 5, 9.7],
+      area: 1,
+      normal: null,
+      axis: null,
+      radius: null,
+    };
+    const spline: FaceInfo = {
+      ...fillet,
+      index: 61,
+      surface: 'bsplinesurface',
+      centroid: [15, 5, 9.7],
+    };
+    const faces = [
+      wall(0, [5, 5], 2, 0, 9, { top: 60 }),
+      fillet,
+      wall(2, [15, 5], 2, 0, 9, { top: 61 }),
+      spline,
+    ];
+    vertices.push({ index: vertices.length, point: [8, 5, 10], faces: [60, UP] });
+    edges.push({
+      index: edges.length,
+      faces: [60, UP],
+      seam: false,
+      curve: 'circle',
+      midpoint: [2, 5, 10],
+      length: 6 * Math.PI,
+      vertices: [vertices.length - 1],
+    });
+    const found = holeWallPoints(topo(faces), Z, 10, -10, NO_MESH);
+    expect(found.points.map((p) => p.position.map(r6))).toEqual([[5, 5, 9]]);
+    expect(found.warnings).toEqual([
+      'the 4 mm hole at (15, 5, 9) (face #2) is not drilled: the top could not be classified (a bsplinesurface face #61 above it)',
+    ]);
+  });
+
+  it('skips a hole opening on the bottom face, with a warning: it is not reachable from above', () => {
+    reset();
+    // The reviewer's probe: a plate Z 0 to 10, a 4 mm hole 4 deep from the bottom face. Its top
+    // end meets the hole's own floor, which faces down.
+    const found = holeWallPoints(
+      topo([wall(0, [5, 5], 2, 0, 4, { top: DOWN })]),
+      Z,
+      10,
+      -10,
+      NO_MESH,
+    );
+    expect(found.points).toEqual([]);
+    expect(found.warnings).toEqual([
+      'the 4 mm hole at (5, 5, 4) (face #0) is not reachable from this setup: it is closed above; it is not drilled',
+    ]);
+    // A drill-point cone at its top end (drilled from below) does not open it either.
+    reset();
+    const tip: FaceInfo = { ...planes[0]!, index: 70, surface: 'cone', normal: null };
+    const v = vertices.length;
+    vertices.push({ index: v, point: [5, 5, 5.2], faces: [70] });
+    edges.push({
+      index: 99,
+      faces: [70],
+      seam: true,
+      curve: 'line',
+      midpoint: [5, 5, 5],
+      length: 1,
+      vertices: [v],
+    });
+    const pointed = holeWallPoints(
+      topo([wall(0, [5, 5], 2, 0, 4, { top: 70 }), tip]),
+      Z,
+      10,
+      -10,
+      NO_MESH,
+    );
+    expect(pointed.points).toEqual([]);
+    expect(pointed.warnings).toHaveLength(1);
+  });
+
+  it('skips an internal void, closed above and below', () => {
+    reset();
+    const found = holeWallPoints(
+      topo([wall(0, [5, 5], 2, 3, 6, { top: DOWN, bottom: UP })]),
+      Z,
+      10,
+      -10,
+      NO_MESH,
+    );
+    expect(found.points).toEqual([]);
+    expect(found.warnings).toEqual([expect.stringContaining('not reachable from this setup')]);
+  });
+
+  it('warns about an undercut below a narrower hole, and drills the narrow one', () => {
+    reset();
+    // A 2 mm hole from the top down to 6, then a 6 mm chamber from 6 down to 2: its top end is the
+    // chamber's ceiling, facing down.
+    const faces = [
+      wall(0, [5, 5], 1, 6, 10, { bottom: 80 }),
+      wall(2, [5, 5], 3, 2, 6, { top: 80, bottom: UP }),
+    ];
+    const ceiling: FaceInfo = { ...planes[1]!, index: 80 };
+    const found = holeWallPoints(topo([...faces, ceiling]), Z, 10, -10, NO_MESH);
+    expect(found.points.map((p) => [p.diameter, p.depth])).toEqual([[2, 4]]);
+    expect(found.warnings).toEqual([
+      'the 6 mm hole at (5, 5, 6) (face #2) is an undercut below the 2 mm hole at (5, 5, 10) (face #0): it is not reachable from this setup, and only the narrow hole is drilled',
+    ]);
+  });
+
+  it('warns when same-radius walls with a gap between them are merged and dropped', () => {
+    reset();
+    const faces = [
+      wall(0, [5, 5], 2, 6, 10, { bottom: UP }),
+      wall(2, [5, 5], 2, 0, 3, { top: DOWN }),
+    ];
+    const found = holeWallPoints(topo(faces), Z, 10, -10, NO_MESH);
+    expect(found.points).toEqual([]);
+    expect(found.warnings).toEqual([
+      'the 4 mm hole at (5, 5, 10) (face #0, #2) is in pieces with a gap between them: it is not drilled',
+    ]);
+  });
+
+  it('skips partial cylinders, bosses and other surfaces silently, and counts walls across Z', () => {
+    reset();
+    const faces = [
+      wall(0, [5, 5], 2, 0, 10, { share: 0.5 }), // a slot's rounded end
+      wall(1, [15, 5], 2, 0, 10, { hole: false }), // a pin
+      wall(2, [25, 5], 2, 0, 10, { axis: [1, 0, 0] }), // across
+      wall(3, [35, 5], 2, 0, 10, { surface: 'cone' }),
+      wall(4, [45, 5], 2, 0, 10, { axisOrigin: null }),
+    ];
+    expect(holeWallPoints(topo(faces), Z, 10, -10, NO_MESH)).toEqual({
+      points: [],
+      warnings: ["1 round wall is not along this setup's Z axis and is not drilled"],
+      notes: [],
+    });
+  });
+
+  it('counts a plane within 89 degrees of +Z as an open mouth, and reports the tilt', () => {
+    const tilted = (degrees: number): FaceInfo => {
+      const a = (degrees * Math.PI) / 180;
+      return { ...planes[0]!, index: 90, normal: [Math.sin(a), 0, Math.cos(a)] };
+    };
+    for (const [degrees, open] of [
+      [0, true],
+      [30, true],
+      [88.9, true],
+      [89.1, false],
+      [90, false],
+    ] as const) {
+      reset();
+      const found = holeWallPoints(
+        topo([wall(0, [5, 5], 2, 0, 10, { top: 90 }), tilted(degrees)]),
+        Z,
+        10,
+        -10,
+        NO_MESH,
+      );
+      expect(found.points.length, `${degrees} degrees`).toBe(open ? 1 : 0);
+      if (open && degrees > 0) {
+        expect(found.points[0]!.entryTilt).toBeCloseTo((degrees * Math.PI) / 180, 9);
+      }
+      if (degrees === 0) expect(found.points[0]!.entryTilt).toBeUndefined();
+    }
+  });
+
+  it('marks a hole through when it exits onto a downward face above the body bottom', () => {
+    reset();
+    // A web from Z 6 to 10 over a relief pocket: the wall's bottom meets the pocket's ceiling.
+    const found = holeWallPoints(
+      topo([wall(0, [5, 5], 2, 6, 10), wall(2, [15, 5], 2, 6, 10, { bottom: UP })]),
+      Z,
+      10,
+      -10,
+      NO_MESH,
+    );
+    expect(found.points.map((p) => [p.position[0], p.through])).toEqual([
+      [5, true],
+      [15, undefined],
+    ]);
+  });
+
+  it('finds material above a hole and the clear height under its exit in the mesh', () => {
+    reset();
+    // Model Z (machine Z is 10 less): a square facet over (5, 5) at 14, above a hole whose top is at
+    // 10; another at -3, under its exit at 0; and many far-away facets for the grid to skip.
+    const quad = (cx: number, cy: number, w: number, z: number): number[] => [
+      cx - w,
+      cy - w,
+      z,
+      cx + w,
+      cy - w,
+      z,
+      cx + w,
+      cy + w,
+      z,
+      cx - w,
+      cy + w,
+      z,
+    ];
+    const build = (slabs: [number, number, number, number][]) => {
+      const positions: number[] = [];
+      const indices: number[] = [];
+      for (const q of slabs) {
+        const base = positions.length / 3;
+        positions.push(...quad(...q));
+        indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
+      }
+      return { positions: new Float32Array(positions), indices: new Uint32Array(indices) };
+    };
+    const far: [number, number, number, number][] = Array.from({ length: 200 }, (_, k) => [
+      100 + (k % 20) * 3,
+      100 + Math.floor(k / 20) * 3,
+      1,
+      14,
+    ]);
+    const hole = () => [wall(0, [5, 5], 2, 0, 10, { bottom: DOWN })];
+    const over = holeWallPoints(topo(hole()), Z, 10, -20, build([[5, 5, 1, 14], ...far]));
+    expect(over.points).toEqual([]);
+    expect(over.warnings).toEqual([expect.stringContaining('material above it (from 4 mm)')]);
+    reset();
+    const under = holeWallPoints(topo(hole()), Z, 10, -20, build([[5, 5, 4, -3], ...far]));
+    expect(under.warnings).toEqual([]);
+    expect(under.points[0]).toMatchObject({ through: true });
+    expect(under.points[0]!.clearBelow).toBeCloseTo(3, 5);
+    // A facet inside the wall's ring, but beyond the hole, crosses nothing.
+    reset();
+    const beside = holeWallPoints(topo(hole()), Z, 10, -20, build([[12, 5, 1, 14], ...far]));
+    expect(beside.points).toHaveLength(1);
+    expect(beside.points[0]!.clearBelow).toBeUndefined();
+  });
+
+  it('finds a 1 mm rib across a 20 mm hole, above its mouth and under its exit', () => {
+    // Model Z, machine Z 10 less. A 20 mm hole about (50, 50) from 0 to 10, exiting onto a
+    // downward face; a rib 1 mm wide along X at y 5.5 to 6.5 from the axis, 40 mm long.
+    const rib = (z: number) => ({
+      positions: new Float32Array([30, 55.5, z, 70, 55.5, z, 70, 56.5, z, 30, 56.5, z]),
+      indices: new Uint32Array([0, 1, 2, 0, 2, 3]),
+    });
+    const hole = () => [wall(0, [50, 50], 10, 0, 10, { bottom: DOWN })];
+    reset();
+    const over = holeWallPoints(topo(hole()), Z, 10, -20, rib(20));
+    expect(over.points).toEqual([]);
+    expect(over.warnings).toEqual([expect.stringContaining('material above it (from 10 mm)')]);
+    reset();
+    const under = holeWallPoints(topo(hole()), Z, 10, -20, rib(-5));
+    expect(under.warnings).toEqual([]);
+    expect(under.points[0]).toMatchObject({ through: true });
+    expect(under.points[0]!.clearBelow).toBeCloseTo(5, 5);
+    // A sloped floor triangle at -0.5 under the hole, rising to +3 at a far vertex (above the
+    // exit's height outside the disk): still the floor, at its highest over the disk.
+    reset();
+    const sloped = holeWallPoints(topo(hole()), Z, 10, -20, {
+      positions: new Float32Array([20, 20, -0.5, 80, 20, -0.5, 50, 1000, 3]),
+      indices: new Uint32Array([0, 1, 2]),
+    });
+    expect(sloped.points[0]).toMatchObject({ through: true });
+    const clear = sloped.points[0]!.clearBelow!;
+    // The plane rises 3.5 mm over 980 mm: over the disk (9.95 mm round (50, 50), 30 mm from the
+    // low edge) at most 3.5 * (30 + 9.95) / 980 above -0.5, so a little less than the flat 0.5.
+    expect(clear).toBeCloseTo(0.5 - (3.5 * (30 + 9.95)) / 980, 4);
+    // Steeper, so the plane reaches the exit's height inside the disk: no clearance at all.
+    reset();
+    const steep = holeWallPoints(topo(hole()), Z, 10, -20, {
+      positions: new Float32Array([20, 20, -0.5, 80, 20, -0.5, 50, 200, 3]),
+      indices: new Uint32Array([0, 1, 2]),
+    });
+    expect(steep.points[0]!.clearBelow).toBe(0);
+    // A rib wholly outside the disk (beyond the wall) counts for nothing.
+    reset();
+    const outside = holeWallPoints(topo(hole()), Z, 10, -20, {
+      positions: new Float32Array([30, 61, 20, 70, 61, 20, 70, 62, 20, 30, 62, 20]),
+      indices: new Uint32Array([0, 1, 2, 0, 2, 3]),
+    });
+    expect(outside.points).toHaveLength(1);
+    // A facet whose vertices are all outside the disk but which covers the axis is found.
+    reset();
+    const cover = holeWallPoints(topo(hole()), Z, 10, -20, {
+      positions: new Float32Array([0, 0, 20, 100, 0, 20, 50, 100, 20]),
+      indices: new Uint32Array([0, 1, 2]),
+    });
+    expect(cover.points).toEqual([]);
+  });
+
+  it('works for any up direction', () => {
+    reset();
+    // Up is model -Y: a hole along Y, its wall from model y 0 to 6, opening on the face at y 0.
+    const up: [number, number, number] = [0, -1, 0];
+    const face: FaceInfo = {
+      index: 0,
+      surface: 'cylinder',
+      centroid: [3, 3, 3],
+      area: 2 * Math.PI * 2 * 6,
+      normal: null,
+      axis: [0, 1, 0],
+      radius: 2,
+      axisOrigin: [3, 10, 3],
+      hole: true,
+    };
+    const front: FaceInfo = { ...planes[0]!, index: 1, normal: [0, -1, 0] };
+    const back: FaceInfo = { ...planes[0]!, index: 2, normal: [0, 1, 0] };
+    const found = holeWallPoints(
+      {
+        faces: [face, front, back],
+        vertices: [
+          { index: 0, point: [5, 0, 3], faces: [0, 1] },
+          { index: 1, point: [5, 6, 3], faces: [0, 2] },
+        ],
+        edges: [
+          {
+            index: 0,
+            faces: [0, 1],
+            seam: false,
+            curve: 'circle',
+            midpoint: [1, 0, 3],
+            length: 4 * Math.PI,
+            vertices: [0],
+          },
+          {
+            index: 1,
+            faces: [0, 2],
+            seam: false,
+            curve: 'circle',
+            midpoint: [1, 6, 3],
+            length: 4 * Math.PI,
+            vertices: [1],
+          },
+          {
+            index: 2,
+            faces: [0],
+            seam: true,
+            curve: 'line',
+            midpoint: [5, 3, 3],
+            length: 6,
+            vertices: [0, 1],
+          },
+        ],
+      },
+      up,
+      0,
+      -6,
+      NO_MESH,
+    );
+    // The stock top at setup Z 0 (model y 0) is the origin; the body's bottom at machine Z -6.
+    const [p] = found.points;
+    expect(p!.position.map(r6)).toEqual([3, 0, 3]);
+    expect(p!.axis.map(r6)).toEqual([0, 1, 0]);
+    expect(p).toMatchObject({ diameter: 4, through: true });
+    expect(p!.depth).toBeCloseTo(6, 12);
   });
 });

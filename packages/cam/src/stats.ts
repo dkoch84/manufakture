@@ -74,6 +74,8 @@ export function toolpathStats(toolpath: Toolpath, options: StatsOptions): CamRes
         break;
       case 'spindle':
       case 'comment':
+      case 'cycle':
+      case 'cycleEnd':
         break;
     }
   }

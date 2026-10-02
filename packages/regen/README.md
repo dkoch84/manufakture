@@ -828,7 +828,10 @@ What it does for the setup:
   `bottom`: `blind` is `depth` below the top of the operation's geometry (the highest of its
   sources; a `heights` warning when they differ), `through` the stock's bottom less `extra`. A
   facing is measured from the stock top; a V-carve's `top` is its geometry's (the surface carved
-  into). A drill's own `depth` replaces each hole's.
+  into). A drill's own `depth` replaces each hole's and drops its `clearBelow` (the modelled
+  clear height no longer applies); where that depth goes past a hole's modelled bottom or exit
+  into material (a blind hole made deeper or through, a through hole over a cavity's floor) a
+  `holes` warning names the holes it cuts below.
 - **A pocket's face is its floor.** A pocket whose sources are faces ends at the face (the highest
   one, with a `heights` warning when they differ): `bottom` is the face's Z, `top` the stock top,
   and its `depth` (blind or through) does not take it lower. So a counterbore is pocketed from
@@ -856,6 +859,55 @@ What it does for the setup:
     through-hole (below a counterbore's floor or a countersink's cone), its axis, the through-hole
     diameter and its depth (blind: to the shoulder; through all: to the body's bottom, `through`).
     An axis that does not point down machine Z is `not-parallel`.
+  - **no source on a drill**: every round hole of the body that a drill can reach down the
+    setup's Z, from one `topology` op per body key (cached, `CamStageSizes.topology`;
+    `camStats.topologyOps`) read by `holeWallPoints`. Cylinder faces with the material outside
+    along the setup's Z are grouped by axis and radius: a wall split in several faces (the two
+    half faces of a circle drawn as two arcs) is one hole, and its own faces never count as what
+    lies above it. Only the edges wholly above a wall's mid-height (not seams, not the lines along
+    the axis between its pieces) are its top edges.
+    - **Whole**: at some height the faces must go at least `CAM_HOLE_MIN_COVER` (98 %) of the way
+      round, each face's share from the length of its end edges (so a sloped or chamfered top still
+      counts), with no gap in Z. A single partial face (a slot's rounded end, a concave fillet, a
+      hole cut open at the edge) is skipped silently; several faces that are not whole (same-radius
+      walls with a gap between them) with a `holes` warning.
+    - **Open above**: every face meeting a top edge must let the tool in: a plane facing up within
+      `CAM_HOLE_MAX_MOUTH_TILT` (89 degrees) of +Z (the top face, a sloped top, a pocket or
+      counterbore floor), a cone or torus widening above the mouth (a countersink, a chamfer, a
+      fillet) or a wider coaxial hole wall. A downward plane or a narrowing cone closes it (a hole
+      opening on the bottom face, an internal void, the wide part of an undercut, a drill point):
+      a `holes` warning, "not reachable from this setup". Any other surface: a `holes` warning that
+      the top could not be classified. That classification looks one face up only, so the column
+      above each hole is also tested against the body's CAM mesh (the setup's tessellation, cached):
+      every facet whose projection overlaps the disk 0.05 mm inside the wall (at least half the
+      radius in, so the wall's own facets never count) is found exactly: the axis inside the
+      facet, a vertex inside the disk, or an edge within its radius. Any such facet reaching
+      above the mouth (a side tunnel, the floor of an enclosed void, the stem of a T, a 1 mm rib
+      across a 20 mm hole) is material above: a `holes` warning, "not reachable from this setup:
+      there is material above it", and the hole is not drilled. Below a through hole's exit the
+      highest point any facet reaching below it can have inside the disk (its plane's height at the
+      axis plus its slope times the disk's radius, at most the exit's height) is the cavity's
+      floor: conservative, and a sloped floor rising past the exit outside the disk still counts.
+      The 0.05 mm inset leaves the outer 0.05 mm ring of the column unseen. The mesh
+      is projected once per request and binned in a 64 x 64 grid over its extent, so each hole only
+      visits the facets near it. Without a mesh (an empty tessellation) nothing is checked and so
+      nothing is drilled: the operation fails with a `kernel` error asking for hole features.
+    - **Narrowest**: of coaxial walls of different radii only the narrowest is drilled, from its
+      top. A wider wall above it (a counterbore) is left to a pocket without a warning; a wider one
+      reaching below its top (an undercut) gets one.
+    - **Through** when every face meeting the walls' bottom edges is a plane facing down (within the
+      same 89 degrees of -Z: the body's bottom, or the ceiling of a relief pocket cut from below),
+      or when the wall reaches the body's bottom. The same disk test under the exit finds material
+      below it (a cavity's floor): `clearBelow` is the clear height there, and the drill
+      operation caps its breakthrough to it. `entryTilt` is the largest tilt of an upward plane at
+      the mouth, for the drill's sloped-entry warning.
+    - Round walls not along the setup's Z are counted in one `holes` warning. The wider steps of a
+      stepped hole left to a pocket (a counterbore; the 6 mm step of a 10 / 6 / 3 mm hole) are each
+      named in a `hole-steps` warning, which is information rather than a problem.
+    - The source is
+      `{ source: 'body', kind: 'holeWalls', points }`; a body with no such hole is an `invalid`
+      error on `['geometry']`. Core has no source kind for picking one wall or a sketch's points,
+      so this is the way to drill the holes of a part made by cuts rather than hole features.
 - **Reply** (`CamGeometryResult`): the setup's status, errors, warnings and WCS reference, the body
   id and key, bounds, the setup's numbers (`stockZ`, heights, the resolved up), and per operation
   its status (`ok`, `error`, `suppressed`), errors and warnings (with the source index), reference

@@ -45,6 +45,8 @@ import {
   type StoredExpression,
 } from '@manufakture/core';
 import type {
+  EdgeInfo,
+  FaceInfo,
   FaceLoopsReport,
   FeatureInput,
   HoleInput,
@@ -55,6 +57,7 @@ import type {
   OpResult,
   ReferenceReport,
   ShapeId,
+  Topology,
   Vec2,
   Vec3,
 } from '@manufakture/kernel';
@@ -66,7 +69,7 @@ import type { FeatureResult, FieldPath, LastResolved, ReferenceResolution } from
 import { evaluateField, pathKey, type VariableValues } from './values';
 
 /** Bump with any change that can change the stage's output for the same inputs. */
-export const CAM_STAGE_VERSION = 1;
+export const CAM_STAGE_VERSION = 2;
 
 /**
  * The chordal and angular tolerance of the CAM mesh (ADR 0014 decision 7): finer than the
@@ -83,6 +86,23 @@ export const CAM_PARALLEL_TOLERANCE = 1e-6;
 
 /** Source heights further apart than this (mm) are reported as a `heights` warning. */
 const HEIGHT_TOLERANCE = 1e-6;
+
+/** Hole walls: axes and radii this close (mm) are one hole, Z ends this close one height. */
+export const CAM_HOLE_TOLERANCE = 1e-4;
+
+/**
+ * A round hole's wall faces must go at least this fraction of the way round its axis at some
+ * height (measured from the lengths of their end edges, so a sloped or chamfered mouth still
+ * counts as whole): less is a slot's rounded end, a concave fillet or a hole cut open at the
+ * part's edge.
+ */
+export const CAM_HOLE_MIN_COVER = 0.98;
+
+/**
+ * A plane at a hole's mouth faces up, and lets the tool in, when its normal is within this angle
+ * (radians, 89 degrees) of the setup's +Z: anything short of a vertical or overhanging face.
+ */
+export const CAM_HOLE_MAX_MOUTH_TILT = (89 * Math.PI) / 180;
 
 // ---------------------------------------------------------------------------------------------
 // Types (structurally `packages/cam`'s where they share a name)
@@ -138,6 +158,13 @@ export interface CamDrillPoint {
   /** Along `axis` from `position`, mm. */
   readonly depth: number;
   readonly through?: boolean;
+  /**
+   * For a through hole whose exit opens onto material further down (a cavity's floor): the clear
+   * height below the exit, mm, which a breakthrough must not exceed. Absent: nothing below.
+   */
+  readonly clearBelow?: number;
+  /** How far the mouth's surface is tilted from square to the axis, radians; absent: square. */
+  readonly entryTilt?: number;
   readonly source?: CamSourceTag;
 }
 
@@ -334,7 +361,14 @@ export type CamStageWarningCode =
   /** The operation's sources lie at different heights; its depth is from the highest. */
   | 'heights'
   /** Features of the part failed: the setup machines what was built without them. */
-  | 'source-errors';
+  | 'source-errors'
+  /**
+   * A drill with no geometry found round walls it does not drill: closed above (not reachable
+   * from this setup), an undercut below a narrower hole, or a wall in pieces that is not whole.
+   */
+  | 'holes'
+  /** For information: the wider steps of a stepped hole (a counterbore) that are left to a pocket. */
+  | 'hole-steps';
 
 export interface CamStageWarning {
   readonly code: CamStageWarningCode;
@@ -364,7 +398,13 @@ export type CamSourceResult =
       readonly z: number;
       readonly planar: CamPlanarLoops;
     }
-  | { readonly source: number; readonly kind: 'hole'; readonly points: readonly CamDrillPoint[] };
+  | { readonly source: number; readonly kind: 'hole'; readonly points: readonly CamDrillPoint[] }
+  | {
+      /** No geometry source: found on the body (`holeWallPoints`), for a drill with none picked. */
+      readonly source: 'body';
+      readonly kind: 'holeWalls';
+      readonly points: readonly CamDrillPoint[];
+    };
 
 export interface CamOperationResult {
   readonly operationId: string;
@@ -437,6 +477,8 @@ export interface CamStats {
   resolveOps: number;
   /** `faceLoops` ops sent. */
   faceLoopsOps: number;
+  /** `topology` ops sent (hole walls for drills with no geometry). */
+  topologyOps: number;
   /** Results served whole from the cache. */
   resultHits: number;
 }
@@ -503,6 +545,8 @@ export interface CamStageSizes {
   meshes?: number;
   /** Face resolutions and face loops kept. */
   faces?: number;
+  /** Bodies whose topology (for a drill's hole walls) is kept. */
+  topology?: number;
   /** Whole results kept. */
   results?: number;
 }
@@ -811,11 +855,18 @@ interface SetupContext {
 }
 
 export class CamStage {
-  readonly stats: CamStats = { tessellateOps: 0, resolveOps: 0, faceLoopsOps: 0, resultHits: 0 };
+  readonly stats: CamStats = {
+    tessellateOps: 0,
+    resolveOps: 0,
+    faceLoopsOps: 0,
+    topologyOps: 0,
+    resultHits: 0,
+  };
   readonly #bounds: Lru<CamBox>;
   readonly #meshes: Lru<CamMesh>;
   readonly #resolved: Lru<Resolved>;
   readonly #loops: Lru<FaceLoopsReport | { ok: false; status: 'kernel'; message: string }>;
+  readonly #topology: Lru<Topology | { message: string }>;
   readonly #results: Lru<Omit<CamGeometryResult, 'generation' | 'mesh' | 'cached' | 'ms'>>;
   /** Why the last tessellation of a body key failed, until the caller reads it (never cached). */
   readonly #failures = new Map<string, string>();
@@ -825,6 +876,7 @@ export class CamStage {
     this.#meshes = new Lru(sizes.meshes ?? 4);
     this.#resolved = new Lru(sizes.faces ?? 1024);
     this.#loops = new Lru(sizes.faces ?? 1024);
+    this.#topology = new Lru(sizes.topology ?? 64);
     this.#results = new Lru(sizes.results ?? 32);
   }
 
@@ -1244,6 +1296,10 @@ export class CamStage {
         this.#regionSource(ctx, g.sketch, g.entities, i, sources, errors);
       else this.#holeSource(ctx, g.feature, i, sources, errors);
     }
+    // A drill with nothing picked drills every round hole of the body along the setup's Z.
+    if (op.kind === 'drill' && op.geometry.length === 0) {
+      await this.#holeWallsSource(host, ctx, op.id, sources, errors, warnings);
+    }
 
     // Tool and feeds.
     const toolDef = tools.get(op.tool);
@@ -1320,7 +1376,9 @@ export class CamStage {
       );
 
     // The top of the operation's geometry, machine Z.
-    const heights = sources.flatMap((s) => (s.kind === 'hole' ? [] : [s.z]));
+    const heights = sources.flatMap((s) =>
+      s.kind === 'hole' || s.kind === 'holeWalls' ? [] : [s.z],
+    );
     const geometryTop = heights.length > 0 ? Math.max(...heights) : ctx.values.stockZ.top;
     if (heights.length > 1 && Math.max(...heights) - Math.min(...heights) > HEIGHT_TOLERANCE) {
       warnings.push({
@@ -1540,13 +1598,6 @@ export class CamStage {
         break;
       }
       case 'drill': {
-        if (op.geometry.length === 0) {
-          errors.push({
-            code: 'invalid',
-            field: ['geometry'],
-            message: `${op.id} has no holes: pick a hole feature`,
-          });
-        }
         const peck = get('peck');
         const dwell = get('dwell');
         if (peck !== undefined)
@@ -1571,20 +1622,37 @@ export class CamStage {
             ['depth', 'extra'],
             'The extra depth must be zero or more',
           );
+          // A depth past a hole's modelled bottom or exit, where material lies (a blind hole's
+          // floor, a cavity's floor under a through hole's exit), cuts it: warn, naming them.
+          const deeper: string[] = [];
           for (const [j, s] of sources.entries()) {
-            if (s.kind !== 'hole') continue;
+            if (s.kind !== 'hole' && s.kind !== 'holeWalls') continue;
             sources[j] = {
               ...s,
               points: s.points.map((p) => {
-                if (blind !== undefined) {
-                  const { through: _t, ...rest } = p;
-                  void _t;
-                  return { ...rest, depth: blind };
-                }
+                // The modelled clear height under the exit no longer applies to the new depth.
+                const { through: _t, clearBelow: _c, ...rest } = p;
+                void _t;
+                void _c;
                 const top = dot(p.position, ctx.z) - ctx.originZ;
-                return { ...p, depth: top - (ctx.values.stockZ.bottom - extra), through: true };
+                const next =
+                  blind !== undefined
+                    ? { ...rest, depth: blind }
+                    : { ...rest, depth: top - (ctx.values.stockZ.bottom - extra), through: true };
+                const solidBelow = p.through !== true || p.clearBelow !== undefined;
+                if (solidBelow && (next.depth > p.depth + HEIGHT_TOLERANCE || 'through' in next)) {
+                  const at = p.position.map((v) => String(Math.round(v * 1000) / 1000 + 0));
+                  deeper.push(`(${at.join(', ')})`);
+                }
+                return next;
               }),
             };
+          }
+          if (deeper.length > 0) {
+            warnings.push({
+              code: 'holes',
+              message: `The operation's depth goes past the modelled bottom or exit of ${deeper.length === 1 ? 'the hole' : `${deeper.length} holes`} at ${deeper.join(', ')} and cuts the material below ${deeper.length === 1 ? 'it' : 'them'}`,
+            });
           }
         }
         values = {
@@ -1833,6 +1901,56 @@ export class CamStage {
     sources.push({ source: i, kind: 'hole', points });
   }
 
+  /** Every round hole of the body along the setup's Z, from its topology (cached by body key). */
+  async #holeWallsSource(
+    host: CamHost,
+    ctx: SetupContext,
+    opId: string,
+    sources: CamSourceResult[],
+    errors: CamStageError[],
+    warnings: CamStageWarning[],
+  ): Promise<void> {
+    let topology = this.#topology.get(ctx.body.key);
+    if (topology === undefined) {
+      const results = await host.run([{ op: 'topology', shape: ctx.body.shape }], [ctx.body]);
+      this.stats.topologyOps++;
+      const r = results[0]!;
+      topology = r.ok ? (r.value as Topology) : { message: r.error.message };
+      // A kernel failure may not repeat: not cached.
+      if (r.ok) this.#topology.set(ctx.body.key, topology);
+    }
+    if ('message' in topology) {
+      errors.push({
+        code: 'kernel',
+        message: `Reading the holes of ${ctx.body.id} failed: ${topology.message}`,
+      });
+      return;
+    }
+    const mesh = await this.#tessellate(host, ctx.body);
+    this.#failures.delete(ctx.body.key);
+    if (mesh === null || mesh.indices.length === 0) {
+      // Without the mesh the column above each hole cannot be checked: fail closed.
+      errors.push({
+        code: 'kernel',
+        message: `${opId} drills nothing: the CAM mesh of ${ctx.body.id} is not available, so the material above its holes cannot be checked; pick hole features instead`,
+      });
+      return;
+    }
+    const found = holeWallPoints(topology, ctx.z, ctx.originZ, ctx.bodyZ.bottom, mesh);
+    for (const message of found.warnings) warnings.push({ code: 'holes', message });
+    for (const message of found.notes) warnings.push({ code: 'hole-steps', message });
+    const points = found.points;
+    if (points.length === 0) {
+      errors.push({
+        code: 'invalid',
+        field: ['geometry'],
+        message: `${opId} has no holes: ${ctx.body.id} has no round hole along the setup's Z axis; pick a hole feature`,
+      });
+      return;
+    }
+    sources.push({ source: 'body', kind: 'holeWalls', points });
+  }
+
   // Kernel -------------------------------------------------------------------------------------
 
   /** Resolve every face source and its loops not yet cached, in two batches for the setup. */
@@ -2028,4 +2146,476 @@ export function camTransferables(result: CamGeometryResult): ArrayBuffer[] {
   return result.mesh
     ? [result.mesh.positions.buffer as ArrayBuffer, result.mesh.indices.buffer as ArrayBuffer]
     : [];
+}
+
+// ---------------------------------------------------------------------------------------------
+// Hole walls
+
+/** What `holeWallPoints` found. */
+export interface HoleWalls {
+  readonly points: readonly CamDrillPoint[];
+  /** Why round walls are not drilled, or are drilled with a limit. */
+  readonly warnings: readonly string[];
+  /** For information: the steps of stepped holes left to a pocket. */
+  readonly notes: readonly string[];
+}
+
+/** Rays against the mesh start this far past the hole's end, mm (the mesh is single precision). */
+const HOLE_RAY_START = 1e-3;
+
+/** The column tested above and below a hole is this much narrower than the hole, mm. */
+const HOLE_COLUMN_INSET = 0.05;
+
+/** The mesh is binned into at most this many cells along each side for the column checks. */
+const HOLE_GRID = 64;
+
+/**
+ * The body's mesh projected once along `z` and binned in a coarse grid over its XY extent, for
+ * the column checks: `facets(centre, r)` is the machine Z range (low, high, and the facet plane's
+ * highest point over the disk, at most high) of every facet whose projection
+ * overlaps the disk about the hole's axis just inside its wall (radius `r` less
+ * `HOLE_COLUMN_INSET`, at least half of `r`), so the wall's own facets never count. The test is
+ * exact (the centre inside the triangle, a vertex inside the disk, or an edge within the radius of
+ * the centre), so a rib of any width across the column is found. Facets along the axis (vertical
+ * walls) project to nothing and are left out.
+ */
+function meshColumns(
+  mesh: CamMesh,
+  frame: { readonly x: Vec3; readonly y: Vec3; readonly z: Vec3; readonly originZ: number },
+): (centre: Vec3, r: number) => [number, number, number][] {
+  const { x, y, z, originZ } = frame;
+  const P = mesh.positions;
+  const I = mesh.indices;
+  const n = P.length / 3;
+  const U = new Float64Array(n);
+  const V = new Float64Array(n);
+  const W = new Float64Array(n);
+  let u0 = Infinity;
+  let v0 = Infinity;
+  let u1 = -Infinity;
+  let v1 = -Infinity;
+  for (let i = 0; i < n; i++) {
+    const p: Vec3 = [P[3 * i]!, P[3 * i + 1]!, P[3 * i + 2]!];
+    U[i] = dot(p, x);
+    V[i] = dot(p, y);
+    W[i] = dot(p, z) - originZ;
+    u0 = Math.min(u0, U[i]!);
+    v0 = Math.min(v0, V[i]!);
+    u1 = Math.max(u1, U[i]!);
+    v1 = Math.max(v1, V[i]!);
+  }
+  const size = Math.max(u1 - u0, v1 - v0, 1e-6) / HOLE_GRID;
+  const cols = Math.max(1, Math.ceil((u1 - u0) / size) + 1);
+  const rows = Math.max(1, Math.ceil((v1 - v0) / size) + 1);
+  const cell = (value: number, origin: number, count: number) =>
+    Math.min(count - 1, Math.max(0, Math.floor((value - origin) / size)));
+  const grid: number[][] = Array.from({ length: cols * rows }, () => []);
+  for (let t = 0; t + 2 < I.length; t += 3) {
+    const a = I[t]!;
+    const b = I[t + 1]!;
+    const c = I[t + 2]!;
+    const det = (U[b]! - U[a]!) * (V[c]! - V[a]!) - (U[c]! - U[a]!) * (V[b]! - V[a]!);
+    if (Math.abs(det) < 1e-12) continue;
+    const ia = cell(Math.min(U[a]!, U[b]!, U[c]!), u0, cols);
+    const ib = cell(Math.max(U[a]!, U[b]!, U[c]!), u0, cols);
+    const ja = cell(Math.min(V[a]!, V[b]!, V[c]!), v0, rows);
+    const jb = cell(Math.max(V[a]!, V[b]!, V[c]!), v0, rows);
+    for (let j = ja; j <= jb; j++) for (let i = ia; i <= ib; i++) grid[j * cols + i]!.push(t);
+  }
+  /** Distance from (pu, pv) to the segment from vertex a to vertex b, projected. */
+  const toEdge = (pu: number, pv: number, a: number, b: number): number => {
+    const du = U[b]! - U[a]!;
+    const dv = V[b]! - V[a]!;
+    const l2 = du * du + dv * dv;
+    const t = l2 > 0 ? Math.min(1, Math.max(0, ((pu - U[a]!) * du + (pv - V[a]!) * dv) / l2)) : 0;
+    return Math.hypot(pu - U[a]! - t * du, pv - V[a]! - t * dv);
+  };
+  return (centre, r) => {
+    const cu = dot(centre, x);
+    const cv = dot(centre, y);
+    const disk = Math.max(r - HOLE_COLUMN_INSET, r / 2);
+    const seen = new Set<number>();
+    const out: [number, number, number][] = [];
+    for (let j = cell(cv - r, v0, rows); j <= cell(cv + r, v0, rows); j++) {
+      for (let i = cell(cu - r, u0, cols); i <= cell(cu + r, u0, cols); i++) {
+        for (const t of grid[j * cols + i]!) {
+          if (seen.has(t)) continue;
+          seen.add(t);
+          const a = I[t]!;
+          const b = I[t + 1]!;
+          const c = I[t + 2]!;
+          const det = (U[b]! - U[a]!) * (V[c]! - V[a]!) - (U[c]! - U[a]!) * (V[b]! - V[a]!);
+          const l1 = ((cu - U[a]!) * (V[c]! - V[a]!) - (U[c]! - U[a]!) * (cv - V[a]!)) / det;
+          const l2 = ((U[b]! - U[a]!) * (cv - V[a]!) - (cu - U[a]!) * (V[b]! - V[a]!)) / det;
+          const inside = l1 >= 0 && l2 >= 0 && l1 + l2 <= 1;
+          const overlaps =
+            inside ||
+            toEdge(cu, cv, a, b) < disk ||
+            toEdge(cu, cv, b, c) < disk ||
+            toEdge(cu, cv, c, a) < disk;
+          if (!overlaps) continue;
+          // The facet plane's highest point over the disk: its Z at the centre plus its slope
+          // times the disk's radius, never above its highest vertex.
+          const wb = W[b]! - W[a]!;
+          const wc = W[c]! - W[a]!;
+          const du = (wb * (V[c]! - V[a]!) - wc * (V[b]! - V[a]!)) / det;
+          const dv = ((U[b]! - U[a]!) * wc - (U[c]! - U[a]!) * wb) / det;
+          const high = Math.max(W[a]!, W[b]!, W[c]!);
+          const overDisk = W[a]! + l1 * wb + l2 * wc + Math.hypot(du, dv) * disk;
+          out.push([Math.min(W[a]!, W[b]!, W[c]!), high, Math.min(high, overDisk)]);
+        }
+      }
+    }
+    return out;
+  };
+}
+
+/**
+ * The round holes of a body that a drill can reach down the setup's Z (`z`, unit, model
+ * coordinates), from its topology: cylinder faces with the material outside (`FaceInfo.hole`)
+ * along `z`, grouped by axis and radius (a wall split in several faces, such as the two halves a
+ * two-arc circle makes, is one hole). Round walls along another direction are counted in one
+ * warning.
+ *
+ * - **Whole.** At some height the group's faces must go at least `CAM_HOLE_MIN_COVER` of the way
+ *   round, each face's share measured from its end edges (a face with a seam goes all the way), and
+ *   their Z ranges must leave no gap. A single partial face (a slot's rounded end, a concave
+ *   fillet, a hole cut open at the edge) is dropped silently; several faces that are not whole
+ *   (same-radius walls with a gap between them) are dropped with a warning.
+ * - **Open above.** Each face meeting a top edge of the hole's walls, other than the hole's own
+ *   faces, must let the tool in: a plane facing up (within `CAM_HOLE_MAX_MOUTH_TILT`: the top
+ *   face, a sloped top, a pocket or counterbore floor), a cone or torus widening above the mouth
+ *   (a countersink, a chamfer, a fillet) or a wider coaxial hole wall. A downward plane (a hole
+ *   opening on the bottom face, an internal void, the wide part of an undercut) or a narrowing
+ *   cone (a drill point) closes it; any other surface leaves its top unclassified. Both are
+ *   skipped with a warning naming the hole. Against the body's `mesh`, the column above the mouth
+ *   up to the body's top must also be clear (no facet overlapping the disk just inside the wall
+ *   reaches above the mouth): a hole in a floor under overhanging material, however thin, is
+ *   skipped with a warning.
+ * - **Narrowest.** Of coaxial walls of different radii only the narrowest is drilled. A wider wall
+ *   above it (a counterbore) is left to a pocket, in `notes`; one below it is an undercut and gets
+ *   a warning.
+ * - **Through.** A hole is `through` when every face meeting its walls' bottom edges is a plane
+ *   facing down (within `CAM_HOLE_MAX_MOUTH_TILT` of -Z), or when it reaches the body's bottom
+ *   (`bodyBottom`, machine Z). Material in the mesh under the exit (a cavity's floor) sets
+ *   `clearBelow`, the clear height there.
+ *
+ * Each point's `position` is on the axis at the wall's top, `axis` is `-z`, `entryTilt` the
+ * largest tilt of an upward plane at the mouth when above zero; `originZ` is the setup-frame Z of
+ * the machine origin. Points in face order.
+ */
+export function holeWallPoints(
+  topology: Topology,
+  z: Vec3,
+  originZ: number,
+  bodyBottom: number,
+  mesh: CamMesh,
+): HoleWalls {
+  const tol = CAM_HOLE_TOLERANCE;
+  const machineZ = (p: Vec3) => dot(p, z) - originZ;
+  const onAxis = (p: Vec3) => add3(p, scale(z, -dot(p, z)));
+  const faces = new Map(topology.faces.map((f) => [f.index, f]));
+  const vertexAt = new Map(topology.vertices.map((v) => [v.index, v.point]));
+  const edgesByFace = new Map<number, EdgeInfo[]>();
+  for (const e of topology.edges) {
+    for (const f of e.faces) {
+      const list = edgesByFace.get(f);
+      if (list === undefined) edgesByFace.set(f, [e]);
+      else list.push(e);
+    }
+  }
+  const edgesOf = (face: number): readonly EdgeInfo[] => edgesByFace.get(face) ?? [];
+  /** An edge's vertices and its midpoint. */
+  const pointsOf = (e: EdgeInfo): Vec3[] => [
+    ...e.vertices.flatMap((v) => {
+      const p = vertexAt.get(v);
+      return p === undefined ? [] : [p];
+    }),
+    e.midpoint,
+  ];
+  const fmt = (v: number) => String(Math.round(v * 1000) / 1000 + 0);
+  const near = (a: Vec3, b: Vec3) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) <= tol;
+  const radialOf = (axisAt: Vec3, p: Vec3) => {
+    const d = onAxis(p);
+    return Math.hypot(d[0] - axisAt[0], d[1] - axisAt[1], d[2] - axisAt[2]);
+  };
+  const roundWall = (f: FaceInfo): boolean =>
+    f.surface === 'cylinder' &&
+    f.hole === true &&
+    f.axis !== null &&
+    f.radius !== null &&
+    f.radius > 0 &&
+    f.axisOrigin !== undefined &&
+    f.axisOrigin !== null;
+  const alongZ = (f: FaceInfo): boolean =>
+    Math.abs(dot(unit(f.axis!), z)) >= Math.cos(CAM_PARALLEL_TOLERANCE);
+  const holeAxis = (f: FaceInfo): Vec3 | null =>
+    roundWall(f) && alongZ(f) ? onAxis(f.axisOrigin!) : null;
+  const sameHole = (n: FaceInfo, axisAt: Vec3, r: number): boolean => {
+    const other = holeAxis(n);
+    return other !== null && near(other, axisAt) && Math.abs(n.radius! - r) <= tol;
+  };
+  const upCos = Math.cos(CAM_HOLE_MAX_MOUTH_TILT);
+
+  /** What face `n`, just above the mouth of a wall about `axisAt` of radius `r` at `top`, makes of it. */
+  type Mouth = 'open' | 'closed' | 'unknown';
+  const mouthOf = (n: FaceInfo, axisAt: Vec3, r: number, top: number): Mouth => {
+    if (n.surface === 'plane') {
+      if (n.normal === null) return 'unknown';
+      return dot(unit(n.normal), z) > upCos ? 'open' : 'closed';
+    }
+    if (n.surface === 'cone' || n.surface === 'torus') {
+      // A countersink, chamfer or fillet widens above the mouth; a drill point's cone narrows.
+      const widens = edgesOf(n.index).some((e) =>
+        pointsOf(e).some((p) => machineZ(p) > top + tol && radialOf(axisAt, p) > r + tol),
+      );
+      return widens ? 'open' : 'closed';
+    }
+    if (n.surface === 'cylinder') {
+      const other = holeAxis(n);
+      return other !== null && near(other, axisAt) && n.radius! > r + tol ? 'open' : 'closed';
+    }
+    return 'unknown';
+  };
+
+  interface Wall {
+    face: number;
+    /** The axis's point at setup-frame Z 0 along `z`. */
+    axisAt: Vec3;
+    radius: number;
+    top: number;
+    bottom: number;
+    /** How far round the axis the face goes, 0 to 1. */
+    share: number;
+    /** What the faces above its top edges (not the hole's own) make of it; null: none. */
+    mouth: Mouth | null;
+    /** The surfaces that left its mouth unclassified. */
+    unknown: string[];
+    /** The largest tilt of an upward plane at its mouth, radians. */
+    tilt: number;
+    /** Whether every face under its bottom edges (not the hole's own) faces down; null: none. */
+    exitDown: boolean | null;
+  }
+  const walls: Wall[] = [];
+  let across = 0;
+  for (const f of topology.faces) {
+    if (roundWall(f) && !alongZ(f)) across++;
+    const axisAt = holeAxis(f);
+    if (axisAt === null) continue;
+    const r = f.radius!;
+    const edges = edgesOf(f.index);
+    const zs = edges.flatMap((e) => pointsOf(e).map(machineZ));
+    if (zs.length === 0) continue;
+    const top = Math.max(...zs);
+    const bottom = Math.min(...zs);
+    if (!(top - bottom > tol)) continue;
+    const mid = (top + bottom) / 2;
+    // End edges: not seams, not the lines along the axis between the pieces of a split wall, and
+    // wholly above (or below) the wall's middle.
+    const ends = edges.filter((e) => !e.seam && e.curve !== 'line');
+    const tops = ends.filter((e) => pointsOf(e).every((p) => machineZ(p) > mid + tol));
+    const bottoms = ends.filter((e) => pointsOf(e).every((p) => machineZ(p) < mid - tol));
+    const turn = 2 * Math.PI * r;
+    const shares = [tops, bottoms]
+      .filter((list) => list.length > 0)
+      .map((list) => list.reduce((sum, e) => sum + e.length, 0) / turn);
+    const share = edges.some((e) => e.seam)
+      ? 1
+      : shares.length > 0
+        ? Math.min(1, ...shares)
+        : f.area / (turn * (top - bottom));
+    /** The faces across `list` from this wall, not the hole's own; undefined for a missing one. */
+    const across_ = (list: readonly EdgeInfo[]) =>
+      list.flatMap((e) =>
+        e.faces
+          .filter((i) => i !== f.index)
+          .map((i) => faces.get(i) ?? i)
+          .filter((n) => typeof n === 'number' || !sameHole(n, axisAt, r)),
+      );
+    const mouths: Mouth[] = [];
+    const unknown: string[] = [];
+    let tilt = 0;
+    for (const n of across_(tops)) {
+      if (typeof n === 'number') {
+        mouths.push('unknown');
+        unknown.push(`#${n}`);
+        continue;
+      }
+      const m = mouthOf(n, axisAt, r, top);
+      mouths.push(m);
+      if (m === 'unknown') unknown.push(`a ${n.surface} face #${n.index}`);
+      if (m === 'open' && n.surface === 'plane') {
+        tilt = Math.max(tilt, Math.acos(Math.min(1, dot(unit(n.normal!), z))));
+      }
+    }
+    const mouth: Mouth | null =
+      mouths.length === 0
+        ? null
+        : mouths.includes('closed')
+          ? 'closed'
+          : mouths.includes('unknown')
+            ? 'unknown'
+            : 'open';
+    const below = across_(bottoms);
+    const exitDown =
+      below.length === 0
+        ? null
+        : below.every(
+            (n) =>
+              typeof n !== 'number' &&
+              n.surface === 'plane' &&
+              n.normal !== null &&
+              dot(unit(n.normal), z) < -upCos,
+          );
+    walls.push({
+      face: f.index,
+      axisAt,
+      radius: r,
+      top,
+      bottom,
+      share,
+      mouth,
+      unknown,
+      tilt,
+      exitDown,
+    });
+  }
+
+  interface Hole {
+    walls: Wall[];
+    axisAt: Vec3;
+    radius: number;
+    top: number;
+    bottom: number;
+  }
+  const holes: Hole[] = [];
+  for (const w of walls) {
+    const h = holes.find((x) => near(x.axisAt, w.axisAt) && Math.abs(x.radius - w.radius) <= tol);
+    if (h === undefined) {
+      holes.push({ walls: [w], axisAt: w.axisAt, radius: w.radius, top: w.top, bottom: w.bottom });
+    } else {
+      h.walls.push(w);
+      h.top = Math.max(h.top, w.top);
+      h.bottom = Math.min(h.bottom, w.bottom);
+    }
+  }
+
+  const warnings: string[] = [];
+  const notes: string[] = [];
+  if (across > 0) {
+    warnings.push(
+      `${across === 1 ? '1 round wall is' : `${across} round walls are`} not along this setup's Z axis and ${across === 1 ? 'is' : 'are'} not drilled`,
+    );
+  }
+  const name = (h: Hole) => {
+    const top = add3(h.axisAt, scale(z, h.top + originZ));
+    const faceList = h.walls.map((w) => `#${w.face}`).join(', ');
+    return `the ${fmt(2 * h.radius)} mm hole at (${top.map(fmt).join(', ')}) (face ${faceList})`;
+  };
+  // Whole: no gap in Z, and all the way round at some height.
+  const whole = holes.filter((h) => {
+    const ends = [...new Set(h.walls.flatMap((w) => [w.top, w.bottom]))].sort((a, b) => a - b);
+    const cover: number[] = [];
+    for (let k = 0; k + 1 < ends.length; k++) {
+      if (ends[k + 1]! - ends[k]! <= tol) continue;
+      const m = (ends[k]! + ends[k + 1]!) / 2;
+      cover.push(h.walls.reduce((sum, w) => (w.bottom < m && m < w.top ? sum + w.share : sum), 0));
+    }
+    const gap = cover.some((c) => c <= 0);
+    const most = Math.max(0, ...cover);
+    if (!gap && most >= CAM_HOLE_MIN_COVER) return true;
+    if (h.walls.length > 1) {
+      warnings.push(
+        gap
+          ? `${name(h)} is in pieces with a gap between them: it is not drilled`
+          : `${name(h)} is in pieces that go only ${fmt(100 * most)} % of the way round: it is not drilled`,
+      );
+    }
+    return false;
+  });
+  // Open above: every wall whose mouth meets other faces is open there.
+  const reachable: Hole[] = [];
+  const closed: Hole[] = [];
+  const unclassified: Hole[] = [];
+  for (const h of whole) {
+    const mouths = h.walls.flatMap((w) => (w.mouth === null ? [] : [w.mouth]));
+    if (mouths.length > 0 && mouths.every((m) => m === 'open')) reachable.push(h);
+    else if (mouths.includes('closed')) closed.push(h);
+    else unclassified.push(h);
+  }
+  const narrowest = reachable.filter(
+    (h) => !reachable.some((o) => o !== h && near(o.axisAt, h.axisAt) && o.radius < h.radius - tol),
+  );
+  for (const h of closed) {
+    const under = narrowest.find(
+      (k) => near(k.axisAt, h.axisAt) && k.radius < h.radius - tol && h.top <= k.top + tol,
+    );
+    warnings.push(
+      under !== undefined
+        ? `${name(h)} is an undercut below ${name(under)}: it is not reachable from this setup, and only the narrow hole is drilled`
+        : `${name(h)} is not reachable from this setup: it is closed above; it is not drilled`,
+    );
+  }
+  for (const h of unclassified) {
+    const what = [...new Set(h.walls.flatMap((w) => w.unknown))];
+    warnings.push(
+      `${name(h)} is not drilled: the top could not be classified${what.length > 0 ? ` (${what.join(', ')} above it)` : ''}`,
+    );
+  }
+  for (const h of reachable) {
+    if (narrowest.includes(h)) continue;
+    const narrow = narrowest.find((k) => near(k.axisAt, h.axisAt) && k.radius < h.radius - tol)!;
+    // A wider wall above the narrow one is a step left to a pocket (a counterbore); one reaching
+    // below the narrow one's top is an undercut.
+    if (h.bottom < narrow.top - tol) {
+      warnings.push(
+        `${name(h)} reaches below the top of ${name(narrow)} (an undercut): only the narrow hole is drilled`,
+      );
+    } else {
+      notes.push(
+        `The ${fmt(2 * h.radius)} mm step of ${name(narrow)} is left to a pocket: only the ${fmt(2 * narrow.radius)} mm hole is drilled`,
+      );
+    }
+  }
+  // Clear above, and what lies below the exit, from the mesh.
+  const columns =
+    narrowest.length > 0
+      ? meshColumns(mesh, { x: perpendicular(z), y: cross(z, perpendicular(z)), z, originZ })
+      : undefined;
+  const kept: { hole: Hole; clearBelow?: number }[] = [];
+  for (const h of narrowest) {
+    const facets = columns!(h.axisAt, h.radius);
+    const above = facets.filter(([, high]) => high > h.top + HOLE_RAY_START);
+    if (above.length > 0) {
+      warnings.push(
+        `${name(h)} is not reachable from this setup: there is material above it (from ${fmt(Math.min(...above.map(([low]) => Math.max(low, h.top))))} mm); it is not drilled`,
+      );
+      continue;
+    }
+    // Conservative: a facet's highest point is its height.
+    // Every facet reaching below the exit is floor, at the highest it can be inside the disk
+    // (capped at the exit): a sloped floor rising past the exit outside the disk still counts.
+    const under = facets
+      .filter(([low]) => low < h.bottom - HOLE_RAY_START)
+      .map(([, , overDisk]) => Math.min(overDisk, h.bottom));
+    kept.push(
+      under.length > 0 ? { hole: h, clearBelow: h.bottom - Math.max(...under) } : { hole: h },
+    );
+  }
+  kept.sort((a, b) => a.hole.walls[0]!.face - b.hole.walls[0]!.face);
+  const points = kept.map(({ hole: h, clearBelow }): CamDrillPoint => {
+    const exits = h.walls.flatMap((w) => (w.exitDown === null ? [] : [w.exitDown]));
+    const through = h.bottom <= bodyBottom + tol || (exits.length > 0 && exits.every((d) => d));
+    const tilt = Math.max(...h.walls.map((w) => w.tilt));
+    return {
+      position: add3(h.axisAt, scale(z, h.top + originZ)),
+      axis: [0 - z[0], 0 - z[1], 0 - z[2]],
+      diameter: 2 * h.radius,
+      depth: h.top - h.bottom,
+      ...(through ? { through } : {}),
+      ...(through && clearBelow !== undefined ? { clearBelow } : {}),
+      ...(tilt > 1e-6 ? { entryTilt: tilt } : {}),
+    };
+  });
+  return { points, warnings, notes };
 }

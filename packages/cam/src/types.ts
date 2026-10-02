@@ -250,6 +250,13 @@ export interface DrillPoint {
   /** Hole depth along `axis`, mm. */
   readonly depth: number;
   readonly through?: boolean;
+  /**
+   * For a through hole whose exit opens onto material further down (a cavity's floor): the clear
+   * height below the exit, mm; a breakthrough is capped to it. Absent: nothing below.
+   */
+  readonly clearBelow?: number;
+  /** How far the mouth's surface is tilted from square to the axis, radians; absent: square. */
+  readonly entryTilt?: number;
   readonly source?: SourceTag;
 }
 
@@ -259,6 +266,13 @@ export interface MachineDrillPoint {
   readonly depth: DepthRange;
   readonly diameter: number;
   readonly through?: boolean;
+  /**
+   * For a through hole whose exit opens onto material further down (a cavity's floor): the clear
+   * height below the exit, mm; a breakthrough is capped to it. Absent: nothing below.
+   */
+  readonly clearBelow?: number;
+  /** How far the mouth's surface is tilted from square to the axis, radians; absent: square. */
+  readonly entryTilt?: number;
   readonly source?: SourceTag;
 }
 
