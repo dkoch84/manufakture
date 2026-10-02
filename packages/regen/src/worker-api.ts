@@ -24,6 +24,7 @@ import {
   type InterferenceCheckOptions,
   type RegenEngineOptions,
 } from './engine';
+import { camTransferables, type CamGeometryOptions, type CamGeometryResult } from './cam';
 import type { DrawingSheetResult, DrawingViewResult } from './drawing';
 import type { OrientedSizesOptions, OrientedSizesResult } from './oriented';
 import type { RegenSolver } from './sketches';
@@ -121,6 +122,17 @@ export interface RegenWorkerApi extends KernelWorkerApi {
     partId: string,
     options: OrientedSizesOptions & { generation: number },
   ): Promise<OrientedSizesResult | null>;
+  /**
+   * The geometry of one CAM setup of `document` (`RegenEngine.camGeometry`): references resolved
+   * on the final body, expressions evaluated, loops, points and depths, and the CAM mesh when
+   * asked for (transferred). At the client's current generation; null when a newer regen
+   * superseded it.
+   */
+  camGeometry(
+    document: ManufaktureDocument,
+    setupId: string,
+    options: CamGeometryOptions & { generation: number },
+  ): Promise<CamGeometryResult | null>;
   /** Cumulative engine counters. */
   regenStats(): Promise<EngineStats>;
   /**
@@ -277,6 +289,11 @@ export function createRegenWorkerApi(options: RegenWorkerApiOptions): RegenWorke
 
     async orientedSizes(document, partId, options) {
       return (await engineFor()).orientedSizes(document, partId, options);
+    },
+
+    async camGeometry(document, setupId, options) {
+      const result = await (await engineFor()).camGeometry(document, setupId, options);
+      return result === null ? null : Comlink.transfer(result, camTransferables(result));
     },
 
     async regenStats() {

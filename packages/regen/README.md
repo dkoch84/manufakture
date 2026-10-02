@@ -8,8 +8,8 @@ reference resolutions and timing, plus every final body's mesh and one name tabl
 viewport. A part carries a set of bodies (M2 plan, decisions 1 to 3), and an edit rebuilds only the
 features of the bodies it touches. After the parts, it places the instances of every assembly with
 the mate solver of `packages/assembly` ([ADR 0008](../../docs/adr/0008-assembly-mate-solver.md)),
-and it answers assembly previews, drags and interference checks (see Assemblies), and drawing
-views on request (see Drawings).
+and it answers assembly previews, drags and interference checks (see Assemblies), drawing
+views (see Drawings) and the geometry of CAM setups (see CAM geometry) on request.
 
 ```ts
 import { RegenEngine } from '@manufakture/regen';
@@ -28,6 +28,7 @@ const step = await engine.drag('assembly#1', 'inst#2', target, { generation }); 
 const clash = await engine.interference('assembly#1', { generation, onPair }); // on demand
 const view = await engine.drawingView(document, 'drawing#1', 'view#1', { generation, pick: true });
 const sheet = await engine.drawingSheet(document, 'drawing#1', 'sheet#1', { generation });
+const cam = await engine.camGeometry(document, 'setup#1', { generation, mesh: true });
 ```
 
 That is the engine's own API, as tests and a custom host use it. apps/web does not construct an
@@ -78,7 +79,7 @@ service (`@manufakture/kernel/node`) and the real solver directly.
 | `@manufakture/regen/extensions` | worker entry | the translator registry (`ExtensionRegistry`, `defaultExtensions`) without the text engine the index re-exports |
 | `@manufakture/regen/explode`    | main thread  | exploded offsets (`explodedOffsets`, `explodedPose`, `explodeTrails`), pure, for the assembly viewport          |
 
-`createRegenWorkerApi` (`src/worker-api.ts`) builds the kernel's worker API (`createKernelWorkerApi`: loading with progress, batches, release, cancel, recycle, stats), waits for its service, creates the engine next to it and adds `regen(document, { generation })`, `solveAssembly(document, assemblyId, { generation })`, `dragInstance(assemblyId, instanceId, target, { generation })`, `interference(assemblyId, { generation, mesh?, tolerance? }, onPair?)`, `cancelInterference(assemblyId)` and `regenStats()`. `RegenClient.solveAssembly`, `RegenClient.dragInstance` and `RegenClient.interference` send the client's current generation (`latestGeneration`), never a new one, so none of them cancels a regen. `interference`'s `onPair` is a `Comlink.proxy` passed as an argument of its own (Comlink only looks for proxies in top-level arguments); each pair's mesh buffers are transferred with it. Mesh buffers are marked with `regenTransferables(result)`; nothing else heavy crosses. `RegenClient` extends the kernel's `KernelClient` (imported from `@manufakture/kernel/kernel-client`, so the kernel's own worker entry is not bundled), so every request of every kind (a regen, a `pick`, a `measure`, an export) takes its generation from the one sequence the client keeps. The service cancels by generation whoever sent a batch (see Cancellation), so a regen cancels older requests, and a pick or measure sent at the client's current generation never cancels a regen. Only a regen may take a new generation: any other batch that did (a STEP import, say) would cancel the regen in flight, which then resolves to null with nothing reporting in its place, so the app sends every other batch at `latestGeneration` and releases shapes with `KernelClient.release`, outside the batch queue. The app's `startRegen` also asks again when its newest regen comes back null. A pending regen resolves to null when the worker is restarted or terminated, like a pending submit. `RegenClient.regen` returns every regen the worker completed, even when a newer request came meanwhile: the engine reports a changed mesh once, to the regen that built it, so a caller that dropped completed results would lose meshes.
+`createRegenWorkerApi` (`src/worker-api.ts`) builds the kernel's worker API (`createKernelWorkerApi`: loading with progress, batches, release, cancel, recycle, stats), waits for its service, creates the engine next to it and adds `regen(document, { generation })`, `solveAssembly(document, assemblyId, { generation })`, `dragInstance(assemblyId, instanceId, target, { generation })`, `interference(assemblyId, { generation, mesh?, tolerance? }, onPair?)`, `cancelInterference(assemblyId)`, `camGeometry(document, setupId, { generation, mesh? })` and `regenStats()`. `RegenClient.solveAssembly`, `RegenClient.dragInstance`, `RegenClient.interference` and `RegenClient.camGeometry` send the client's current generation (`latestGeneration`), never a new one, so none of them cancels a regen. `interference`'s `onPair` is a `Comlink.proxy` passed as an argument of its own (Comlink only looks for proxies in top-level arguments); each pair's mesh buffers are transferred with it. Mesh buffers are marked with `regenTransferables(result)`; nothing else heavy crosses. `RegenClient` extends the kernel's `KernelClient` (imported from `@manufakture/kernel/kernel-client`, so the kernel's own worker entry is not bundled), so every request of every kind (a regen, a `pick`, a `measure`, an export) takes its generation from the one sequence the client keeps. The service cancels by generation whoever sent a batch (see Cancellation), so a regen cancels older requests, and a pick or measure sent at the client's current generation never cancels a regen. Only a regen may take a new generation: any other batch that did (a STEP import, say) would cancel the regen in flight, which then resolves to null with nothing reporting in its place, so the app sends every other batch at `latestGeneration` and releases shapes with `KernelClient.release`, outside the batch queue. The app's `startRegen` also asks again when its newest regen comes back null. A pending regen resolves to null when the worker is restarted or terminated, like a pending submit. `RegenClient.regen` returns every regen the worker completed, even when a newer request came meanwhile: the engine reports a changed mesh once, to the regen that built it, so a caller that dropped completed results would lose meshes.
 
 After a recycle every body is gone. The engine only forgets (its hook runs inside the service's queue, where nothing may be submitted); the main thread hears of it through the kernel's `recycled` status and asks for a regen of its current document (apps/web `kernelLoader`). A worker restart is handled the same way, through the client's `onRestarted` option. Imported STEP reference bodies are not part of a regen, so the app reads them again from the files their import features store.
 
@@ -787,6 +788,93 @@ blank, never its box). The bodies not yet measured go to the kernel in one batch
 `ORIENTED_CACHE_SIZE` bodies), so asking again for unchanged bodies sends nothing
 (`orientedStats`: `obbOps`, `obbHits`). A body the kernel cannot measure is a `failures` entry.
 
+## CAM geometry
+
+`src/cam.ts` is the CAM geometry stage (M5 plan T5.1f; [ADR 0014](../../docs/adr/0014-cam-architecture.md)
+decisions 5 to 7): one setup of the document's `cam` section turned into plain data for the CAM
+worker (`packages/cam`). Like the drawing requests it never runs in a regen: the CAM workspace and
+export ask for one setup (`engine.camGeometry(document, setupId, { generation, stored?, mesh? })`,
+`RegenClient.camGeometry`), at the client's current generation, on the regen chain, with the part
+built through the cache (all hits after a regen of the same document); a newer regen supersedes it
+(null), and a setup the document does not have rejects. **A generation newer than any the engine or
+the kernel has seen is lowered to the newest seen**: the kernel cancels every batch older than the
+newest generation it has seen, so a CAM batch at a wrong, newer number would make it cancel the
+next regen.
+
+What it does for the setup:
+
+- **Body.** The setup's `body`, or the part's only body. A part with several bodies and none
+  chosen, a body merged away, or no body at all is a `no-body` error on the setup. Failed features
+  of the part are a `source-errors` warning: the setup machines what was built.
+- **Bounds and mesh.** One `tessellate` op per body key at `CAM_MESH_DEFLECTION` (0.004 mm chordal,
+  0.06 rad, ADR 0014's default; no measurement here changed it). The bounds are the mesh's, so they
+  are exact on flat faces and may fall short of a curved extreme by at most 0.004 mm. The mesh is
+  in the reply (positions and indices, a copy, transferred) when `mesh: true` or an unsuppressed
+  operation is `surface3d`; its chordal error adds to a 3D finish's error budget.
+- **WCS.** A model axis, or a planar face resolved by name on the final body (`resolve`), whose
+  outward normal becomes machine +Z. A face that is lost, ambiguous or not planar fails the setup.
+- **Expressions.** The setup's (stock, heights), each operation's and its tool's (`camExpressions`,
+  `camSetupOwnExpressions`, `camToolExpressions`) are evaluated with the document's variables by
+  `evaluateField`, with the dimension check of features (feeds and spindle speeds too); a failure
+  is an `expression` error with its `field` (`['tool', ...]` for the tool's). Absent stepdowns,
+  stepovers and feeds come from the tool's preset for the stock's material, overridden by the
+  operation's `feeds`; when neither sets one it is a `feeds` error. Values out of range (a depth or
+  stepdown not above zero, a stepover outside (0, 1], a tab count that is not whole) are `invalid`.
+- **Depths** are machine Z ranges, from the up direction and the stock's Z range (computed as
+  `packages/cam`'s `boundsInSetup` and `stockFromBounds` / `stockFromSize` do, origin on the stock
+  top or bottom). The `top` of every profile and pocket is the stock top, never the source's
+  plane: the generators rapid down to `top` plus a safe height, and a source lying lower (a face
+  under a stock top margin, a step of the part) would have them rapid into uncut stock. The
+  `bottom`: `blind` is `depth` below the top of the operation's geometry (the highest of its
+  sources; a `heights` warning when they differ), `through` the stock's bottom less `extra`. A
+  facing is measured from the stock top; a V-carve's `top` is its geometry's (the surface carved
+  into). A drill's own `depth` replaces each hole's.
+- **A pocket's face is its floor.** A pocket whose sources are faces ends at the face (the highest
+  one, with a `heights` warning when they differ): `bottom` is the face's Z, `top` the stock top,
+  and its `depth` (blind or through) does not take it lower. So a counterbore is pocketed from
+  the stock top down to its floor face. Blind and through apply to sketch regions, and to the
+  faces of profiles and V-carves, which are outlines, not floors. Floor faces and regions in one
+  pocket are an `invalid` error: split them into two pockets. A floor face looking down the
+  setup's Z (the part's bottom, a step's underside) is an `invalid` error on that source ("pick a
+  face that faces up"): a floor there would clear part material; profiles and V-carves still take
+  such a face as an outline.
+- **Profile extras.** `packages/cam`'s `ProfileExtras` are not in core yet; the stage fills them:
+  `finishPass` when `finishAllowance` is above zero, `finishStepdown` the whole depth when it is
+  within the tool's flute length, else `stepdown`. `tabSpacing` and `tabMinInsideSize` are left to
+  the generator's defaults.
+- **Sources**, each checked against the kinds its operation takes (`unsupported` otherwise):
+  - a **face**: `resolve` on the body, then `faceLoops` by index in a frame whose normal is the
+    setup's up direction, so outer loops run counter-clockwise and holes clockwise seen from above;
+    each segment is tagged with its edge's name (or `#<index>`). A lost or ambiguous name is
+    `reference-lost` / `reference-ambiguous` with the re-pick hint, a weaker resolution a
+    `reference` warning, a face not parallel to the setup's XY plane `not-parallel`;
+  - a **region**: the regions of the solved sketch (`selectRegions`), whether or not a feature
+    consumes the sketch, in the sketch's own frame (`packages/cam` mirrors a frame facing down);
+    Beziers flattened within `CAM_LOOP_DEFLECTION` (0.01 mm). A deleted sketch or entity is
+    `reference-lost`; a failed, suppressed or rolled-back sketch is `upstream`;
+  - a **hole** feature: its translated kernel input gives each point's position at the top of the
+    through-hole (below a counterbore's floor or a countersink's cone), its axis, the through-hole
+    diameter and its depth (blind: to the shoulder; through all: to the body's bottom, `through`).
+    An axis that does not point down machine Z is `not-parallel`.
+- **Reply** (`CamGeometryResult`): the setup's status, errors, warnings and WCS reference, the body
+  id and key, bounds, the setup's numbers (`stockZ`, heights, the resolved up), and per operation
+  its status (`ok`, `error`, `suppressed`), errors and warnings (with the source index), reference
+  resolutions, resolved sources (`CamPlanarLoops`, `CamDrillPoint`s) and evaluated values
+  (`CamOperationValues`). Loops, points and the mesh are in model coordinates and structurally
+  `packages/cam`'s types (`PlanarLoops`, `DrillPoint`, `Tool`, `Feeds`, the operation inputs without
+  geometry): `planarLoopsToMachine` and `drillPointToMachine` take them to machine coordinates.
+  This package does not depend on `packages/cam`.
+- **Keys and caches.** Each operation has a `key` over the operation (without its name), its tool,
+  the setup's own fields, the variables, the body's id and key and the regen key of every sketch
+  and hole it names, so the app can mark exactly the operations whose geometry or numbers changed;
+  the whole reply has one over all of them. Replies are cached whole by that key, bounds and meshes
+  by body key, face resolutions by body key and name, and face loops by body key, face index and up
+  direction (`CamStage` sizes them). So an unchanged setup sends no kernel op, and a CAM-only edit
+  (a feed, a depth) sends no feature op and resolves no face again (`engine.camStats`).
+- **Feature keys.** Regen exposes each sketch's and kernel feature's cache key on its
+  `FeatureResult` (`key`), as ADR 0014 decision 7 asks: a region can name a sketch no feature
+  consumes, so the body key alone does not show that it changed.
+
 ## Errors, warnings, statuses
 
 Per feature: `ok`, `error`, `upstream-error`, `suppressed` or `rolled-back`, with `errors`,
@@ -1061,6 +1149,23 @@ pnpm --filter @manufakture/regen test
   exploded view: the lid at its exploded offset (a vector step and a face-normal step), the
   dimension following it, no diagnostic, and an `exploded-view` warning once a step's face is lost,
   a laid-out sheet with notes, title block and inch values, and a bad custom size as a diagnostic.
+- `cam.test.ts`: the CAM geometry stage with the real kernel and solver on the M1 bracket (its
+  hole drilled through the plate), a counterbored hole feature and a sketch no feature consumes:
+  the top face's loops (four lines, the round as a counter-clockwise arc, two clockwise circles),
+  the region's rectangle, the hole's point under the counterbore, depths in machine Z with the
+  tool's preset and the operation's own feed, the profile extras; `#thickness` 6 to 8 moving every
+  depth with the references still `exact`; a deleted sketch as `reference-lost` on its operation
+  only; an unchanged setup served whole with no kernel batch, and a CAM-only edit with no feature
+  op and no face resolved again, only that operation's key changing; a regen in flight not
+  cancelled, a far newer generation lowered, an older one superseded; a WCS up from a face with
+  the origin on the stock bottom and the mesh sent; `not-parallel` sources for a sideways setup;
+  an edit of the loose sketch missing the cache with no body changed, new region loops and only
+  its pocket's key changed; a 2 mm stock top margin with every cut starting at the stock top; a
+  pocket on the counterbore floor ending there although its depth says through, several floors stopping
+  at the highest with a warning, a down-facing floor refused (a profile still takes it), and a
+  floor mixed with a region refused; a lost WCS face, an expression of the wrong kind and missing feeds. Through the worker
+  (`worker-api.test.ts`): a request sent while a regen is in flight answers at its generation, the
+  mesh transferred.
 - `derived.test.ts` also checks that a source whose reading throws is a `source` error, and how a
   source opens in a row (once per hash and row, the namespace, a missing row).
 

@@ -125,6 +125,13 @@ import {
 } from './drawing';
 import { mapFailure, mapOutcome, planeReport } from './errors';
 import {
+  CamStage,
+  type CamGeometryOptions,
+  type CamGeometryResult,
+  type CamHost,
+  type CamStats,
+} from './cam';
+import {
   OrientedCache,
   type OrientedSizesOptions,
   type OrientedSizesResult,
@@ -602,6 +609,8 @@ export class RegenEngine {
   readonly #drawings = new DrawingStage();
   /** Oriented box sizes of bodies, by body key (`orientedSizes`). */
   readonly #oriented = new OrientedCache();
+  /** The CAM geometry stage's caches (`camGeometry`). */
+  readonly #cam = new CamStage();
 
   constructor(options: RegenEngineOptions) {
     this.#kernel = options.kernel;
@@ -1120,6 +1129,7 @@ export class RegenEngine {
         bodies: reads.map((b) => [b.id, b.key]),
       });
       run.used.add(key);
+      result.key = key;
       const hit = await this.#cache.get(key);
       if (hit !== undefined && hit.type === 'body' && hit.outcome !== undefined) {
         run.counters.cacheHits++;
@@ -1691,6 +1701,87 @@ export class RegenEngine {
       }
       return result;
     });
+  }
+
+  // CAM geometry ------------------------------------------------------------------------------
+
+  /** The CAM stage's counters: kernel ops sent and whole results served from its cache. */
+  get camStats(): Readonly<CamStats> {
+    return { ...this.#cam.stats };
+  }
+
+  /**
+   * The geometry of one CAM setup (see `cam.ts`, M5 plan T5.1f): the part built through the
+   * cache, the setup's body, bounds and WCS, its expressions evaluated and its operations'
+   * sources resolved on the final body, in model coordinates. On demand only, at the client's
+   * current generation, on the regen chain; a generation newer than any the engine or the kernel
+   * has seen is lowered to the newest seen, so a wrong number can never make the kernel cancel a
+   * regen. Null when a newer regen superseded it. Rejects for a setup the document does not have.
+   */
+  camGeometry(
+    document: ManufaktureDocument,
+    setupId: string,
+    options: CamGeometryOptions = {},
+  ): Promise<CamGeometryResult | null> {
+    const setup = document.cam?.setups.find((s) => s.id === setupId);
+    if (setup === undefined) {
+      return Promise.reject(new TypeError(`the document has no CAM setup ${setupId}`));
+    }
+    let generation: number;
+    try {
+      generation = Math.min(this.#currentGeneration(options), this.#newestSeen());
+    } catch (error) {
+      return Promise.reject(error);
+    }
+    return this.#onDemand(document, { ...options, generation }, (run) =>
+      this.#cam.geometry(this.#camHost(run, document), document, setup, options),
+    );
+  }
+
+  /** What the CAM stage builds and runs through, for one attempt of one request. */
+  #camHost(run: Run, document: ManufaktureDocument): CamHost {
+    const variables = evaluateVariables(document.variables);
+    const states = new Map<string, PartState>();
+    return {
+      generation: run.generation,
+      versions: run.versions,
+      variables,
+      part: async (id) => {
+        const part = document.parts.find((p) => p.id === id);
+        if (part === undefined) return undefined;
+        let state = states.get(id);
+        if (state === undefined) {
+          state = await this.#buildPart(run, part, document, variables, {
+            ns: null,
+            depth: 0,
+            versions: run.versions,
+          });
+          states.set(id, state);
+        }
+        this.#checkInstances(run, [state]);
+        return {
+          part,
+          bodies: state.broken ? [] : state.bodies,
+          sketches: state.sketches,
+          inputs: state.inputs,
+          results: state.results,
+        };
+      },
+      run: async (ops, bodies) => {
+        if (ops.length === 0) return [];
+        const batch = emptyBatch();
+        batch.ops.push(...ops);
+        for (const b of bodies) {
+          if (b.instance === null) continue;
+          const from = batch.shapesFrom;
+          batch.shapesFrom = from === null || from === b.instance ? b.instance : MIXED_INSTANCES;
+        }
+        const reply = await this.#submit(run, batch.ops);
+        run.counters.otherOps += ops.length;
+        this.#checkLive(batch, reply);
+        return reply.results;
+      },
+    };
   }
 
   /**
@@ -2365,6 +2456,7 @@ export class RegenEngine {
       ...(fonts.length > 0 ? { fonts } : {}),
     });
     run.used.add(key);
+    result.key = key;
     const hit = await this.#cache.get(key);
     if (hit !== undefined && hit.type === 'sketch') {
       run.counters.cacheHits++;

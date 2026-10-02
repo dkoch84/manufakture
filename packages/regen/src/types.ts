@@ -194,6 +194,12 @@ export interface FeatureResult {
   /** Milliseconds spent on it in this regen: translation plus solve or kernel op. */
   ms: number;
   /**
+   * The feature's cache key (ADR 0004 decision 8), for sketches and kernel features that got as
+   * far as building: equal keys, equal results. The app compares it to tell when a sketch or hole
+   * a CAM source names changed although no body did (ADR 0014 decisions 7 and 8).
+   */
+  key?: string;
+  /**
    * Sketches only: where the sketch lies in this regen (a face sketch's plane is resolved on the
    * body before it), so the app can draw and edit it in the frame regen solved it in.
    */

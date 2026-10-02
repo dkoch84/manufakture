@@ -70,7 +70,7 @@ export interface FeatureValues {
 /** Evaluate one expression as `expected`, turning failures into a feature error. */
 export function evaluateField(
   expression: StoredExpression,
-  expected: 'length' | 'angle' | 'number',
+  expected: 'length' | 'angle' | 'number' | 'feed' | 'spindleSpeed',
   field: FieldPath,
   variables: VariableValues,
 ): { ok: true; value: number } | { ok: false; error: RegenError } {

@@ -10,6 +10,7 @@ import type { DragTarget } from '@manufakture/assembly';
 import type { ManufaktureDocument } from '@manufakture/core';
 import { KernelClient } from '@manufakture/kernel/kernel-client';
 import * as Comlink from 'comlink';
+import type { CamGeometryOptions, CamGeometryResult } from './cam';
 import type { DrawingSheetResult, DrawingViewResult } from './drawing';
 import type { EngineStats } from './engine';
 import type { OrientedSizesOptions, OrientedSizesResult } from './oriented';
@@ -175,6 +176,26 @@ export class RegenClient extends KernelClient {
         ...options,
         generation: this.latestGeneration,
       }) as Promise<OrientedSizesResult | null>,
+    ).then((result) => result ?? null);
+  }
+
+  /**
+   * The geometry of one CAM setup, for the CAM worker: sources resolved on the final body,
+   * expressions evaluated, depths in machine Z, and with `mesh` the body's CAM mesh. On demand,
+   * at the current generation (never a new one, which would cancel the regen in flight); cached
+   * in the worker, so an unchanged setup on an unchanged body sends nothing to the kernel. Null
+   * when a newer regen superseded it or the worker was stopped.
+   */
+  camGeometry(
+    document: ManufaktureDocument,
+    setupId: string,
+    options: Omit<CamGeometryOptions, 'generation'> = {},
+  ): Promise<CamGeometryResult | null> {
+    return this.droppable(
+      this.worker<RegenWorkerApi>().camGeometry(document, setupId, {
+        ...options,
+        generation: this.latestGeneration,
+      }) as Promise<CamGeometryResult | null>,
     ).then((result) => result ?? null);
   }
 

@@ -9,6 +9,7 @@ import type { KernelStatus, MeshData } from '@manufakture/kernel';
 import { wasmPath } from '@manufakture/kernel/node';
 import * as Comlink from 'comlink';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { createCamSetup } from '@manufakture/core';
 import { RegenClient } from './client';
 import {
   ASSEMBLY,
@@ -388,6 +389,62 @@ describe('the regen worker', () => {
     const sheet = (await client.drawingSheet(doc, 'drawing#1', 'sheet#1'))!;
     expect(sheet.views[0]!.cached).toBe(true);
     expect(sheet.display!.items.some((i) => i.owner === 'view#1')).toBe(true);
+  });
+
+  it('answers CAM geometry at the current generation, transferring the mesh, without cancelling a regen', async () => {
+    const doc = apply(
+      block(),
+      {
+        type: 'addCamTool',
+        tool: {
+          id: 'tool#1',
+          name: '6 mm flat',
+          kind: 'flat',
+          diameter: mm('6'),
+          fluteLength: mm('22'),
+          flutes: 2,
+          presets: [],
+        },
+      },
+      {
+        type: 'addCamSetup',
+        setup: {
+          ...createCamSetup('setup#1', 'Top', 'part#1', 'shapeoko-4-xxl', 'grbl'),
+          operations: [
+            {
+              id: 'profile#1',
+              kind: 'profile',
+              name: 'Outline',
+              suppressed: false,
+              tool: 'tool#1',
+              geometry: [{ kind: 'face', face: { id: 'r1', ref: { face: 'extrude#1:cap:end' } } }],
+              feeds: { spindle: mm('18000rpm'), cut: mm('1000mm/min'), plunge: mm('300mm/min') },
+              side: 'outside',
+              depth: { kind: 'through' },
+              stepdown: mm('2'),
+              entry: { kind: 'plunge' },
+              leadIn: { kind: 'none' },
+              leadOut: { kind: 'none' },
+              climb: true,
+            },
+          ],
+        },
+      },
+    );
+    const regen = client.regen(doc);
+    // Sent while the regen is in flight: at the client's current generation, so it waits for the
+    // regen on the worker's chain instead of cancelling it.
+    const cam = client.camGeometry(doc, 'setup#1', { mesh: true });
+    const [result, geometry] = await Promise.all([regen, cam]);
+    expect(result).not.toBeNull();
+    expect(geometry).not.toBeNull();
+    expect(geometry!.generation).toBe(result!.generation);
+    expect(client.latestGeneration).toBe(result!.generation);
+    const profile = geometry!.operations[0]!;
+    expect(profile.status).toBe('ok');
+    expect(profile.values).toMatchObject({ depth: { top: 0, bottom: -20 } });
+    expect(geometry!.mesh!.positions).toBeInstanceOf(Float32Array);
+    expect(geometry!.mesh!.indices.length).toBeGreaterThan(0);
   });
 
   it('answers oriented sizes at the current generation, without cancelling the regen', async () => {
