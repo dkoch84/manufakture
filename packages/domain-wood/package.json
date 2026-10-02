@@ -1,0 +1,23 @@
+{
+  "name": "@manufakture/domain-wood",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "GPL-3.0-or-later",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --root ../.. --project packages packages/domain-wood"
+  },
+  "dependencies": {
+    "@manufakture/core": "workspace:*",
+    "@manufakture/units": "workspace:*"
+  },
+  "devDependencies": {
+    "@manufakture/kernel": "workspace:*",
+    "@manufakture/regen": "workspace:*",
+    "@manufakture/sketch": "workspace:*"
+  }
+}
