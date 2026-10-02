@@ -116,6 +116,7 @@ export {
 export type { OffsetOptions, OpenOffsetOptions, OpenPath2, Region2 } from './offset';
 
 // T5.4a: the post-processor engine (dialect records, formatting, Grbl arc checks, the writer).
+// T5.4b: the GRBL post (`GRBL_DIALECT`, `postGrbl`) and posted file names, from the same module.
 export * from './post';
 
 // T5.1g: the CAM worker's API, operation registry and packed toolpaths, and the toolpath cache.
@@ -131,3 +132,25 @@ export {
   generateProfile,
 } from './ops/profile';
 export type { ProfileExtras, ProfileOperation } from './ops/profile';
+
+// T5.2c: the pocket operation (registered on the worker by `registerBuiltinOperations`); its
+// geometry and layer clearing are reused by V-carve (T5.2f) and 3D roughing (T5.5a).
+export {
+  POCKET_MIN_HELIX_FACTOR,
+  POCKET_SAFE_ABOVE,
+  POCKET_UNREACHABLE_MIN_AREA_FACTOR,
+  generatePocket,
+  generatePocketLayers,
+  pocketGeometry,
+} from './ops/pocket';
+export type {
+  PocketExtras,
+  PocketGeometry,
+  PocketGeometryOptions,
+  PocketLayer,
+  PocketNode,
+  PocketOperation,
+  PocketRing,
+  PocketSpot,
+  UncutArea,
+} from './ops/pocket';

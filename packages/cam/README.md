@@ -353,8 +353,9 @@ postProcess(job: PostJob, dialect: Dialect | CompiledDialect, options?: PostOpti
 compileDialect(data: unknown): CamResult<CompiledDialect> // load and check a user post
 ```
 
-`PostJob` is `{ toolpath, job, setup?, date?, heights }`: names for the templates, a date the
-caller formats (so output is reproducible) and the setup's `Heights` (machine Z). Both heights
+`PostJob` is `{ toolpath, job, setup?, date?, origin?, spindleDial?, heights }`: names for the
+templates, a date the caller formats (so output is reproducible), where to zero X, Y and Z in
+words, the router's dial table (see Spindle below) and the setup's `Heights` (machine Z). Both heights
 must be finite and `retract` may not be above `clearance`; the engine refuses the job otherwise.
 `PostOptions` picks `units` (`mm`, the default, or `inch`), overrides the dialect's `toolChange`
 and `splitPerTool`, and sets the refit `tolerance` (0.002 mm), the IR validator's `arcTolerance`
@@ -412,6 +413,7 @@ coordinate or feed cannot be written) or `invalid-dialect`. Inch conversion uses
 | `dwellUnit`        | G4's P in `seconds` (Grbl, LinuxCNC) or `milliseconds`.                                                                                                                                                         |
 | `decimals`         | Decimals for coordinates (X Y Z I J) and F per unit system, and for S and P. Coordinates need 2 to 6.                                                                                                           |
 | `templates`        | `header` (top of every file), `tool` (once per tool in the file, after the header), `toolChange` (at each change, before `M0`/`M6`), `footer` (end of every file).                                              |
+| `maxToolNumber`    | Optional: the largest tool number a `T` word may carry, 255 when absent (Grbl's `MAX_TOOL_NUMBER`; a larger T fails with error 38). A larger number is refused, in `M6 T<n>` and in a template's `T{tool}`.     |
 
 **Templates.** A template line is either a comment line, `(` text `)` with no other parentheses,
 or a code line of words (`G90 G94`, `T{tool}`). `{name}` substitutes a variable from the fixed
@@ -427,6 +429,7 @@ loaded. There is no other syntax: no expressions, conditions or loops.
 | `feed`                                   | number | the tool's first `cut` feed (else its first feed), output units        |
 | `job`, `setup`                           | text   | names from the `PostJob`                                               |
 | `date`                                   | text   | the `PostJob`'s date text                                              |
+| `origin`                                 | text   | where to zero X, Y and Z, the `PostJob`'s `origin` text                |
 | `post`                                   | text   | the dialect's name                                                     |
 | `units`                                  | text   | `mm` or `inch`                                                         |
 | `units_code`                             | code   | `G21` or `G20`                                                         |
@@ -434,13 +437,19 @@ loaded. There is no other syntax: no expressions, conditions or loops.
 
 Text variables may appear only in comment lines, so user text never reaches a code line; code
 variables only in code lines. In a comment a missing value is written as `unknown`; in a code line
-it refuses the job. A number variable may only follow `T` (`T{tool}`), and a code variable must be
-a word of its own, so no variable can build a G, M or P word. Code lines may write settings only:
+it refuses the job. The only number a code line may take is the tool number as `T{tool}` (other
+number variables, `T{rpm}` included, are for comments), and a code variable must be
+a word of its own, so no variable can build a G, M or P word. A code line may hold one code of
+each modal group and one word of any other letter: `G21 G21`, `G20 G21`, `M0 M30` or two `T`
+words fail in Grbl (errors 21 and 25), so the dialect is refused. Code lines may write settings only:
 G17, G20, G21, G40, G49, G61, G80, G90, G91.1, G94, G54 to G59 in the header only (a work offset
 changes what every remembered position means), G64 with exactly one literal P greater than 0 and
 at most 0.1 (and at most the post tolerance in output units when written; LinuxCNC's G64 without
 P blends with no tolerance), and M0, M1, M5, M8, M9, with M2 and M30 in the footer and `T` in
-`toolChange`. Motion, distance mode, spindle start and M6 belong to the engine. After any template
+`toolChange`. In an inch file at 4 decimals the smallest P is 0.0001 in (0.00254 mm), above the
+default 0.002 mm tolerance, so an inch file holds a G64 only with a tolerance of at least
+0.00254 mm; Grbl has no G64 at all, and the `grbl` dialect never writes one.
+Motion, distance mode, spindle start and M6 belong to the engine. After any template
 code line the engine forgets its position and modes and starts the next move from the clearance
 (a `G80` cancels the motion mode, for one).
 
@@ -450,10 +459,14 @@ code line the engine forgets its position and modes and starts the next move fro
   G90, G17 and G94 (when the dialect has it) the header did not. A header that sets the other
   units is refused.
 - **Safe start.** Each file's first tool change (or first move), every move after an `M0`, an
-  `M6` or a template code line, starts with `G0 Z<clearance>`. Before each tool change and before
-  the footer the tool also rises to the clearance when it is known to be below it. The first rapid after it goes up before across when its
-  target is above the clearance, and across before down when below. A feed move before that first
-  rapid is refused, since X and Y are unknown there.
+  `M6` or a template code line, starts with `G0 Z<clearance>`, or straight to the next rapid's Z
+  when that is higher, so a file never goes to the clearance and then climbs. Before each tool
+  change and before the footer the tool also rises the same way when it is known to be below that
+  height. The first rapid after either goes up before across when its
+  target is above the clearance, and across before down when below, never diagonally down. A feed
+  move before that first rapid is refused, since the tool is not where the IR left it. Any other
+  rapid that comes down while it moves across, ending below the clearance, is refused: the IR
+  must go across first and then down.
 - **Modal state.** A G0 or G1 word is written only when the motion changes, an axis only when its
   written value changes, F only when the written feed changes. A move that changes no written word
   is dropped. G2/G3, X and Y are always written on an arc line, with I and J both written. After an
@@ -471,10 +484,19 @@ code line the engine forgets its position and modes and starts the next move fro
 - **Spindle and dwell.** `M3 S<rpm>` (M4 when counter-clockwise and listed), `M5`; any other
   spindle state is refused (the validator's `spindle-state`). A file that ends
   with the spindle running gets an `M5` before the footer. `G4 P<t>` in the dialect's unit; a zero
-  dwell is dropped.
+  dwell is dropped. With a `spindleDial` in the `PostJob` (the router's dial table from the
+  machine profile, `{ setting, rpm }[]`), each spindle start is preceded by a comment naming the
+  nearest setting: `(Router dial 3: 18250 rpm, nearest to 18000 rpm)`. On a router whose speed
+  is set by hand, `S` changes nothing, so that comment is what the operator acts on. The table is
+  checked (a non-empty list of objects with setting text and a finite positive rpm) and copied
+  before anything is written. When the IR stops the spindle with the tool below the retract
+  height, the tool rises to it before the `M5`.
 - **Tool changes and files.** With `splitPerTool` each tool change after a file's first starts a
   new file (comments just before the change go with it); each file is complete (header, modes,
-  footer). `none` with several tools in one file is refused.
+  footer). `none` with several tools in one file is refused. At an `M0` pause the operator's
+  instructions come first: the next tool's dial setting (when there is a dial table) and a
+  comment to turn the router off, change the bit, re-zero Z or keep the same stick-out, set the
+  dial, turn the router on and resume.
 
 ### Arcs
 
@@ -508,7 +530,44 @@ on the wrong side of Grbl's 5e-7 rad threshold for every rounding of I and J, so
 almost nothing. Two halves never depend on that threshold, which is why they are the default.
 
 Not covered yet: LinuxCNC's own arc radius tolerance (T5.4c may need a per-dialect value);
-coolant (the IR has no coolant entry); canned cycles.
+coolant (the IR has no coolant entry); canned cycles. Neither is in the IR: drilling arrives as
+G0/G1 moves (pecks, dwells and retracts written out), so every post writes it that way, and a
+Grbl post needs neither.
+
+### The GRBL post (`post/grbl.ts`)
+
+The first post (T5.4b), for Grbl 1.1 on the Shapeoko: `GRBL_DIALECT` is dialect data only, and
+`postGrbl(job, options)` is `postProcess` with it (`GRBL` is the record compiled once).
+
+```ts
+postGrbl(job: PostJob, options?: GrblOptions): CamResult<PostOutput>
+// GrblOptions: PostOptions without toolChange and splitPerTool, plus multiTool: 'files' | 'pause'
+postFileStem(job, file, fileCount): string // 'Sign - Top - 2 of 3 - #302 60 deg V-bit'
+GCODE_FILE_EXTENSION // 'nc'
+```
+
+- **Each file**: a comment block (job, setup, date, post, units, file n of m, where to zero X, Y
+  and Z from `PostJob.origin`, and the tool list), then `G21 G90 G17 G94` (`G20` with
+  `units: 'inch'`), the tool's comment (number, name, rpm, cutting feed), `G0 Z<clearance>`, the
+  router dial comment when the job has a dial table, `M3 S<rpm>`; at the end `M5` and `M30`.
+- **No M6** (Grbl fails it with error 20) and **no T word**: Grbl only parses T, and refuses one
+  above 255, while Carbide 3D's catalogue numbers go past it (#301, #302), so the tool number
+  appears in comments only. A job with several tools is one file per tool by default
+  (`multiTool: 'files'`), or one file with an `M0` and comments at each change
+  (`multiTool: 'pause'`). Grbl 1.1 does not jog while held by an `M0`, so re-zeroing Z in the
+  pause needs a sender that handles it; files per tool are the safe default.
+- **Never written**: G64 (Grbl has none), canned cycles (`cannedCycles: false`), coolant, G10 or
+  work offset changes; the machine's active work offset is used as set.
+- **Lines** at most 79 characters: Grbl's `protocol.c` keeps `LINE_BUFFER_SIZE - 1` characters
+  of a line and fails a longer one with error 11.
+- **File names**: `postFileStem` gives the base name (`FALLBACK_FILE_STEM`, `job`, when the
+  names are empty; a Windows device name such as `CON` or `lpt1`, before any dot and in any case,
+  gets a leading `_`); the export UI (T5.4e) passes it through
+  `@manufakture/io`'s `fileName(stem, GCODE_FILE_EXTENSION)` for the reserved character, control
+  and length rules (`packages/cam` does not depend on `io`).
+
+Golden files for the fixture jobs are in `test/grbl/` (see the tests below); after a deliberate
+change, rewrite them with `UPDATE_GOLDENS=1` and review the diff line by line.
 
 ## The CAM worker (`worker/`, `client.ts`, `cache/`)
 
@@ -675,6 +734,80 @@ make nothing (`tabs-unused`).
 `invalid-input` errors. Warnings: `depth-exceeds-flutes`, `loop-too-small` (an inside loop, or a
 hole of an outside profile, the tool does not fit into, so it is not cut), and those above.
 
+## The pocket operation (`ops/pocket.ts`)
+
+`generatePocket(input, context)` (T5.2c), registered as the `pocket` generator, clears an area to
+a depth and leaves islands standing: the sign's recessed border. It reads its `PocketInput`, the
+setup's `heights` and nothing else. `loops` follow the `Loop2` convention: outer loops
+counter-clockwise, islands clockwise. A counter-clockwise loop inside another one is united with
+the pocket and cut, not left standing (`island-orientation` warning). Adaptive clearing is not in
+M5.
+
+**Extra fields** (`PocketExtras`, all optional): `finishPass` (default: true when
+`finishAllowance` is above zero), `finishStepdown` (default: the whole depth in one step when
+within the flute length, else `stepdown`), `floorAllowance` (default 0) and `floorPass` (default:
+true when there is a floor allowance).
+
+**Geometry** (`pocketGeometry(loops, options)`, pure, reused by V-carve and 3D roughing): rings are
+`offsetLoops(loops, -(r + a + k * s))` for k = 0, 1, ... until the offset vanishes (r the tool
+radius, a the wall allowance, s the stepover in mm), so arcs stay arcs. The regions of each offset
+form a tree: a region splits where the pocket narrows. Every point at least `r + a` inside lies
+within one stepover of the nearest ring outside it, so a stepover up to the tool radius leaves
+nothing; above that, cusps can stay between rings at corners. The geometry measures them (what the
+first ring can reach minus what the rings sweep, computed with Clipper) and adds clean-up spots,
+points the tool centre visits after the ring outside them, until nothing is left (three rounds;
+anything still left is a `stepover-cusps` warning). It also computes the areas no move reaches:
+the pocket (less the allowance, when there is no finishing pass) minus everything within the tool
+radius of a tool centre `r` (or `r + a`) inside. Each such area of at least
+`POCKET_UNREACHABLE_MIN_AREA_FACTOR` (0.25) times r squared is an `unreachable` warning with its
+area and a point inside it; smaller ones are the square corners every round tool leaves (about
+0.215 r squared each).
+
+**Clearing order.** One IR `pass` per depth level, from `top` in equal steps of at most
+`stepdown` down to `bottom + floorAllowance`, then a floor pass at `bottom`. In each level the tree
+is cut from the inside out along its largest branch: the entry is in the middle of the largest
+piece, and each ring is cut once, in the climb direction for an M3 spindle (outer rings
+counter-clockwise; `climb: false` reverses them). The smaller branches at a split (corner blobs,
+the far side of a neck) are surrounded by cut rings by then and are cut from the outside in. Each
+ring starts at its point nearest the tool. A ring is reached at depth when the straight link keeps
+the tool centre `r + a` clear of every wall and island (an exact segment distance, not samples)
+and within one stepover of the rings already cut (checked every quarter stepover, so the tool
+never takes more than a stepover); failing that, by running on along the ring just cut (cleared
+already) to its point nearest the next ring, possibly by way of one other ring cut in the level;
+failing that, by a retract and a plunge where the ring passes within the tool radius of what is
+cut; and only then by a retract and a new entry. Rapids go up to `retract` (at least
+`POCKET_SAFE_ABOVE`, 0.5 mm, above `top`), across, and down to 0.5 mm above the floor the levels
+before left under the whole tool there (the top on the first level); everything below that is fed,
+even where part of the tool is over material this level has already cleared.
+`context.checkpoint()` runs before every level and every ring.
+
+**Entry.** `helix` turns about the most inside point of the innermost region, with the requested
+radius or the room there is (the whole helix keeps the tool centre `r + a` from every wall and
+island), as `fullCircle` arcs dropping at most the angle's slope per turn, then one level turn
+that flattens the helix floor. When less than `POCKET_MIN_HELIX_FACTOR` (0.2) times the tool
+radius fits, it ramps along the innermost ring instead (`helix-fallback`). `ramp` descends along
+the ring at the angle (over several laps of a short ring) and then cuts one full lap at depth; a
+ring shorter than the tool diameter is plunged instead (`entry-plunge`). `plunge` feeds straight
+down. Every level after the first starts its entry just above the floor of the level before.
+
+**Finishing.** With a finishing pass, each wall loop (`offsetLoops(loops, -r)`, islands
+included) is cut in `finishStepdown` levels, starting at its point nearest the tool: a plunge in
+the cleared pocket `a` inside the wall, a lead (fed at the `lead` feed) square onto the wall, one
+lap, and a lead back. Where that lead would come too close to the wall (a sharp vertex), it starts
+half-way along a segment instead, longest first; when no start has room it plunges at the wall,
+through the allowance (`finish-plunge-at-wall`). A wall loop the clearing did not run alongside (a neck narrower than the
+tool plus twice the allowance) is cut in `stepdown` levels from the top instead
+(`finish-steps-down`).
+
+**Layers.** `generatePocketLayers(op, layers, context)` clears z-level layers with their own
+loops (3D roughing's slices), with the same rings, entries and links; an entry starts above the
+layer before where that layer cleared it, else at `top`. It makes no floor or finishing pass and
+reports no unreachable areas.
+
+**Errors and warnings.** Bad numbers (a stepover outside (0, 1], a floor allowance as deep as the
+pocket), no loops and a tool that fits nowhere are `invalid-input` errors. Warnings:
+`depth-exceeds-flutes`, and those above.
+
 ## Tests
 
 `./node_modules/.bin/vitest run packages/cam` from the repository root:
@@ -717,6 +850,19 @@ hole of an outside profile, the tool does not fit into, so it is not cut), and t
   checkpoints and `CamCancelled`; a run through the worker; and the sign's 300 x 150 mm outline, whose finishing
   feeds below the stock's top never have the tool centre beyond the roughed slot.
   Every toolpath passes the IR validator;
+- `ops/pocket.test.ts`: a raster check of the swept tool at every level (no uncut grid point a
+  tool centre can reach, right up to straight and curved walls; a self-test shows it fails a first
+  ring 0.3 mm too far in) for a rectangle, a circle (rings kept as arcs), a pocket
+  with an island (never entered or touched), a recessed border (one entry per level) and three
+  islands; no tool centre closer to a wall than the tool radius; climb against conventional;
+  links at depth; clean-up spots for a 95% stepover; a dumbbell's neck reported as unreachable
+  with its area and place, and square corners not reported; helixes inside the pocket and no
+  steeper than the angle, shrunk to the room there is, and the ramp fallback with its warning;
+  wall and floor allowances with the finishing and floor passes; finishing in stepdown steps past
+  a neck; a counter-clockwise island warned about; a heightmap material-removal simulation in
+  which no rapid ever runs below the material left (an island near a wall with a floor allowance,
+  and a 1 mm tool between islands and walls); z-level layers; refusals; checkpoints and
+  `CamCancelled`; registration. Every toolpath passes the IR validator;
 - `post/format.test.ts`: number formatting (rounding, no exponent, no `-0`, the eight-digit
   limit), Grbl's `read_float` in single precision, comment sanitising and wrapping;
 - `post/dialect.test.ts`: code normalising, a JSON round trip of a dialect, and each refusal:
@@ -742,6 +888,14 @@ hole of an outside profile, the tool does not fit into, so it is not cut), and t
   starts unless a full circle is meant; the only extra rapids are the engine's safe start and
   retracts. The sample program and a two-tool job in millimetres and
   inches, every file mode and tool change style, and 400 random arcs.
+- `post/grbl.test.ts`: golden files (`test/grbl/*.nc`, byte for byte) for hand-written IR jobs:
+  a profile with tabs (millimetres and inches), a pocket with a helical entry, peck drilling as
+  moves, and a two-tool job as two files and as one file with an `M0`; every line of every golden
+  checked against a Grbl 1.1 word whitelist written from `gcode.c` independently of the dialect
+  (codes, letters, modal groups, repeated words, digits, line length, comments), which has its
+  own test, and read back with `gcode-toolpath` to stay inside the job and never rapid down
+  diagonally; the header and footer, the router dial comment, no M6, T or G64, files per tool and
+  their names, and refused dial tables.
 - `worker/pack.test.ts`: packed toolpaths round-trip every entry kind, flag and op id exactly;
   clones own their buffers; packing refuses unknown kinds and feed classes, bad arc directions and
   passes outside Int32;

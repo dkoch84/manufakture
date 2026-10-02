@@ -167,7 +167,7 @@ function checkInput(op: ProfileOperation): string | undefined {
 // ---------------------------------------------------------------------------------------------
 // Cut paths: a closed loop in the direction of travel, starting mid-way along its longest segment
 
-interface CutPath {
+export interface CutPath {
   readonly segments: readonly Segment2[];
   /** `cum[i]` is the path length before segment `i`; `cum[n]` is the whole length. */
   readonly cum: readonly number[];
@@ -182,7 +182,7 @@ interface CutPath {
   readonly area: number;
 }
 
-function subSegment(s: Segment2, t0: number, t1: number): Segment2 {
+export function subSegment(s: Segment2, t0: number, t1: number): Segment2 {
   const a = t0 <= 0 ? s.start : t0 >= 1 ? s.end : segmentPoint(s, t0);
   const b = t1 >= 1 ? s.end : t1 <= 0 ? s.start : segmentPoint(s, t1);
   if (s.kind === 'line') return { kind: 'line', start: a, end: b };
@@ -243,24 +243,24 @@ function paramAt(path: CutPath, s: number): { seg: Segment2; t: number } {
   return { seg: path.segments[i]!, t };
 }
 
-function pointAt(path: CutPath, s: number): Vec2 {
+export function pointAt(path: CutPath, s: number): Vec2 {
   const { seg, t } = paramAt(path, s);
   return t <= 0 ? seg.start : t >= 1 ? seg.end : segmentPoint(seg, t);
 }
 
-function tangentAt(path: CutPath, s: number): Vec2 {
+export function tangentAt(path: CutPath, s: number): Vec2 {
   const { seg, t } = paramAt(path, s);
   return segmentTangent(seg, t);
 }
 
 /** Unit normal at `s` pointing into the scrap, away from the wall. */
-function scrapNormalAt(path: CutPath, s: number): Vec2 {
+export function scrapNormalAt(path: CutPath, s: number): Vec2 {
   const t = tangentAt(path, s);
   return path.scrapOnLeft ? leftOf(t) : rightOf(t);
 }
 
 /** The path position nearest `p`, and its distance. */
-function closestOnPath(path: CutPath, p: Vec2): { s: number; d: number } {
+export function closestOnPath(path: CutPath, p: Vec2): { s: number; d: number } {
   let best = { s: 0, d: Infinity };
   path.segments.forEach((seg, i) => {
     const len = path.cum[i + 1]! - path.cum[i]!;
@@ -484,7 +484,7 @@ class ClearanceCheck {
 // ---------------------------------------------------------------------------------------------
 // IR emission
 
-class Emitter {
+export class Emitter {
   readonly entries: IrEntry[] = [];
   pass = 0;
 
@@ -574,7 +574,7 @@ class Emitter {
 }
 
 /** Z along a pass: a ramp from `from` at `s0` to `to` at `rampEnd`, then level. */
-interface ZProfile {
+export interface ZProfile {
   readonly s0: number;
   readonly rampEnd: number;
   readonly from: number;
@@ -587,7 +587,7 @@ function zAt(z: ZProfile, s: number): number {
 }
 
 /** Walk the path from `s0` to `s1` (which may wrap past its length), lifting over tabs. */
-function walk(
+export function walk(
   em: Emitter,
   path: CutPath,
   s1: number,
@@ -675,7 +675,7 @@ const COVER_STEP = 0.5;
  * vertices up to about 1.4 allowances apart (90 degrees), so the limit is 1.5 allowances; a
  * sharper concave corner fails the test and its loop is cut in roughing steps, which is safe.
  */
-function roughingCovers(f: CutPath, rough: readonly CutPath[], allowance: number): boolean {
+export function roughingCovers(f: CutPath, rough: readonly CutPath[], allowance: number): boolean {
   if (rough.length === 0) return false;
   const limit = 1.5 * allowance + CLEARANCE_TOLERANCE;
   for (const seg of f.segments) {
@@ -686,7 +686,7 @@ function roughingCovers(f: CutPath, rough: readonly CutPath[], allowance: number
 }
 
 /** Depth levels from below `top` down to `bottom` in equal steps of at most `step`. */
-function levels(top: number, bottom: number, step: number): number[] {
+export function levels(top: number, bottom: number, step: number): number[] {
   const n = Math.max(1, Math.ceil((top - bottom) / step - 1e-9));
   return Array.from({ length: n }, (_, k) =>
     k === n - 1 ? bottom : top - ((k + 1) * (top - bottom)) / n,
