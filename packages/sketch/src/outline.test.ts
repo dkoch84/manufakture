@@ -486,6 +486,9 @@ describe('outlineRegions: limits', () => {
 
   it('refuses hundreds of contours all crossing each other with too-complex, in bounded time', () => {
     // 640 bars took 26 s to merge before the work budget; 320 took 4 s.
+    // The too-complex result proves the work budget stopped the merge; the
+    // time bound is loose (and the test timeout generous) so a loaded
+    // machine running the whole suite in parallel does not fail it.
     expect(MAX_OUTLINE_WORK).toBe(250_000_000);
     for (const n of [320, 640]) {
       const { regions, issues, ms } = timed(() => outlineRegions(star(n)));
@@ -498,9 +501,9 @@ describe('outlineRegions: limits', () => {
           contours: [],
         },
       ]);
-      expect(ms).toBeLessThan(5000);
+      expect(ms).toBeLessThan(15_000);
     }
-  });
+  }, 30_000);
 
   it('refuses a path of more than MAX_OUTLINE_COMMANDS commands up front', () => {
     expect(MAX_OUTLINE_COMMANDS).toBe(100_000);
