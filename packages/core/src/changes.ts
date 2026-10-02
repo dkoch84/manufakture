@@ -1,5 +1,7 @@
 import { applyConfigurationRow, configurationRow } from './configurations';
 import {
+  camSetupExpressions,
+  camToolExpressions,
   drawingExpressions,
   explodedViewExpressions,
   featureExpressions,
@@ -8,6 +10,7 @@ import {
 } from './features';
 import type {
   Assembly,
+  CamData,
   Domains,
   Drawing,
   ManufaktureDocument,
@@ -64,6 +67,15 @@ export interface DocumentChange {
   readonly printChanged: boolean;
   readonly print: PrintChange;
   /**
+   * The CAM section changed (since version 14): a tool, setup or operation was added, removed or
+   * edited, setups were reordered, or an expression in a tool or setup reads a changed variable.
+   * Never a regen trigger: CAM changes no geometry, so a CAM-only edit adds nothing to `parts`
+   * and has no `firstAffectedIndex` (ADR 0014 decision 2). Which operations changed is the CAM
+   * workspace's to find, by its toolpath keys (decision 9); `cam` says which tools and setups.
+   */
+  readonly camChanged: boolean;
+  readonly cam: CamChange;
+  /**
    * The font list changed (a font added or removed; since version 9). Never a regen trigger by
    * itself: a font's bytes never change under its id and a font in use cannot be removed, so
    * only an outline that starts or stops using a font changes geometry, and its sketch's part
@@ -105,6 +117,20 @@ export interface DrawingsChange {
  * variables, or through the active configuration row).
  */
 export interface PrintChange {
+  readonly setups: ItemChanges;
+  /** The relative order of setups present in both documents changed. */
+  readonly reordered: boolean;
+}
+
+/**
+ * CAM tools and setups that changed, by id. `setups.changed` lists setups with any change inside
+ * (name, part, body, machine, post, stock, WCS, heights, operations) or whose expressions, their
+ * operations' included, read a changed variable (also through other variables, or through the
+ * active configuration row); `tools.changed` the same for tools. A tool edit lists the tool, not
+ * the setups whose operations cut with it.
+ */
+export interface CamChange {
+  readonly tools: ItemChanges;
   readonly setups: ItemChanges;
   /** The relative order of setups present in both documents changed. */
   readonly reordered: boolean;
@@ -480,6 +506,41 @@ function diffPrint(prev: PrintData, next: PrintData, vars: ReadonlySet<string>):
   };
 }
 
+/** Added, removed and changed items of a list by id, and whether the common ones moved. */
+function diffList<T extends { id: string }>(
+  prev: readonly T[],
+  next: readonly T[],
+  readsChanged: (item: T) => boolean,
+): { items: ItemChanges; reordered: boolean } {
+  const p = new Map(prev.map((x) => [x.id, x]));
+  const nIds = new Set(next.map((x) => x.id));
+  const pCommon = prev.filter((x) => nIds.has(x.id)).map((x) => x.id);
+  const nCommon = next.filter((x) => p.has(x.id)).map((x) => x.id);
+  return {
+    items: {
+      added: next.filter((x) => !p.has(x.id)).map((x) => x.id),
+      removed: prev.filter((x) => !nIds.has(x.id)).map((x) => x.id),
+      changed: next
+        .filter((x) => p.has(x.id) && (!deepEqual(p.get(x.id), x) || readsChanged(x)))
+        .map((x) => x.id),
+    },
+    reordered: pCommon.some((id, i) => nCommon[i] !== id),
+  };
+}
+
+function diffCam(prev: CamData, next: CamData, vars: ReadonlySet<string>): CamChange {
+  const reads = (sites: readonly { expression: StoredExpression }[]) =>
+    vars.size > 0 &&
+    sites.some((s) => expressionVariableNames(s.expression).some((n) => vars.has(n)));
+  const tools = diffList(prev.tools, next.tools, (t) => reads(camToolExpressions(t)));
+  const setups = diffList(prev.setups, next.setups, (s) => reads(camSetupExpressions(s)));
+  return { tools: tools.items, setups: setups.items, reordered: setups.reordered };
+}
+
+function touched(items: ItemChanges): boolean {
+  return items.added.length + items.removed.length + items.changed.length > 0;
+}
+
 function printTouched(change: PrintChange): boolean {
   const { added, removed, changed } = change.setups;
   return change.reordered || added.length + removed.length + changed.length > 0;
@@ -514,6 +575,7 @@ function diffRaw(prev: ManufaktureDocument, next: ManufaktureDocument): Document
   for (const p of prev.parts) if (!nParts.has(p.id)) parts.push(diffPart(p, undefined, vars));
   const assemblies = diffAssemblies(prev, next, vars);
   const print = diffPrint(prev.print, next.print, vars);
+  const cam = diffCam(prev.cam, next.cam, vars);
   const drawings = diffDrawings(prev.drawings, next.drawings, vars);
   const { added, removed, changed } = drawings.drawings;
   const nameChanged = prev.name !== next.name;
@@ -535,6 +597,10 @@ function diffRaw(prev: ManufaktureDocument, next: ManufaktureDocument): Document
     // The counters alone can differ (a restore keeps the higher ones): still a print change.
     printChanged: printTouched(print) || !deepEqual(prev.print, next.print),
     print,
+    // As for print: the counters alone can differ after a restore.
+    camChanged:
+      cam.reordered || touched(cam.tools) || touched(cam.setups) || !deepEqual(prev.cam, next.cam),
+    cam,
     fontsChanged: !deepEqual(prev.fonts, next.fonts),
     domainChanged: diffDomains(prev.domains, next.domains),
     drawingChanged:
@@ -656,6 +722,12 @@ export function diffDocuments(
     print: {
       setups: mergeItems(raw.print.setups, configured.print.setups),
       reordered: raw.print.reordered || configured.print.reordered,
+    },
+    camChanged: raw.camChanged || configured.camChanged,
+    cam: {
+      tools: mergeItems(raw.cam.tools, configured.cam.tools),
+      setups: mergeItems(raw.cam.setups, configured.cam.setups),
+      reordered: raw.cam.reordered || configured.cam.reordered,
     },
     drawingChanged: raw.drawingChanged || configured.drawingChanged,
     drawings: {

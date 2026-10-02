@@ -1,0 +1,281 @@
+{
+  "format": "manufakture",
+  "version": 14,
+  "namingScheme": 1,
+  "id": "doc-1",
+  "name": "Bracket",
+  "units": {
+    "length": {
+      "unit": "ft-in",
+      "denominator": 32
+    },
+    "angle": {
+      "unit": "deg",
+      "decimals": 1
+    }
+  },
+  "variables": [
+    {
+      "name": "thickness",
+      "expression": {
+        "source": "6mm",
+        "lengthUnit": "mm",
+        "angleUnit": "deg"
+      }
+    },
+    {
+      "name": "width",
+      "expression": {
+        "source": "40",
+        "lengthUnit": "mm",
+        "angleUnit": "deg"
+      }
+    },
+    {
+      "name": "height",
+      "expression": {
+        "source": "width / 2",
+        "lengthUnit": "mm",
+        "angleUnit": "deg"
+      }
+    },
+    {
+      "name": "lip",
+      "expression": {
+        "source": "1/8\" + #thickness",
+        "lengthUnit": "in",
+        "angleUnit": "deg"
+      }
+    }
+  ],
+  "parts": [
+    {
+      "id": "part#1",
+      "name": "Part 1",
+      "features": [
+        {
+          "id": "sketch#1",
+          "kind": "sketch",
+          "name": "Sketch 1",
+          "suppressed": false,
+          "plane": {
+            "type": "plane",
+            "origin": [0, 0, 0],
+            "normal": [0, 0, 1],
+            "xDir": [1, 0, 0]
+          },
+          "entities": [
+            {
+              "id": "e1",
+              "kind": "line",
+              "construction": false,
+              "start": [0, 0],
+              "end": [40, 0]
+            },
+            {
+              "id": "e2",
+              "kind": "line",
+              "construction": false,
+              "start": [40, 0],
+              "end": [40, 20]
+            },
+            {
+              "id": "e3",
+              "kind": "line",
+              "construction": false,
+              "start": [40, 20],
+              "end": [0, 20]
+            },
+            {
+              "id": "e4",
+              "kind": "line",
+              "construction": false,
+              "start": [0, 20],
+              "end": [0, 0]
+            }
+          ],
+          "constraints": [
+            {
+              "id": "k1",
+              "kind": "coincident",
+              "a": {
+                "entity": "e1",
+                "at": "end"
+              },
+              "b": {
+                "entity": "e2",
+                "at": "start"
+              }
+            },
+            {
+              "id": "k2",
+              "kind": "horizontal",
+              "line": "e1"
+            },
+            {
+              "id": "k3",
+              "kind": "distance",
+              "value": {
+                "source": "width",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "a": {
+                "entity": "e1",
+                "at": "start"
+              },
+              "b": {
+                "entity": "e1",
+                "at": "end"
+              }
+            },
+            {
+              "id": "k4",
+              "kind": "distance",
+              "value": {
+                "source": "height",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "a": {
+                "entity": "e2",
+                "at": "start"
+              },
+              "b": {
+                "entity": "e2",
+                "at": "end"
+              }
+            },
+            {
+              "id": "k5",
+              "kind": "coincident",
+              "a": {
+                "entity": "e1",
+                "at": "start"
+              },
+              "b": {
+                "entity": "@origin"
+              }
+            }
+          ]
+        },
+        {
+          "id": "extrude#1",
+          "kind": "extrude",
+          "name": "Extrude 1",
+          "suppressed": false,
+          "profile": {
+            "sketch": "sketch#1"
+          },
+          "operation": "new",
+          "extent": {
+            "type": "blind",
+            "distance": {
+              "source": "thickness",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            }
+          },
+          "reverse": false
+        },
+        {
+          "id": "sketch#2",
+          "kind": "sketch",
+          "name": "Sketch 2",
+          "suppressed": false,
+          "plane": {
+            "type": "face",
+            "face": {
+              "id": "r1",
+              "ref": {
+                "face": "extrude#1:cap:end"
+              }
+            }
+          },
+          "entities": [
+            {
+              "id": "e5",
+              "kind": "circle",
+              "construction": false,
+              "center": [20, 10],
+              "radius": 3
+            }
+          ],
+          "constraints": [
+            {
+              "id": "k6",
+              "kind": "diameter",
+              "entity": "e5",
+              "value": {
+                "source": "6mm",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            }
+          ]
+        },
+        {
+          "id": "extrude#2",
+          "kind": "extrude",
+          "name": "Extrude 2",
+          "suppressed": false,
+          "profile": {
+            "sketch": "sketch#2"
+          },
+          "operation": "cut",
+          "extent": {
+            "type": "throughAll"
+          },
+          "reverse": false
+        },
+        {
+          "id": "fillet#1",
+          "kind": "fillet",
+          "name": "Fillet 1",
+          "suppressed": false,
+          "edges": [
+            {
+              "id": "r2",
+              "ref": {
+                "faces": ["extrude#1:side:e1", "extrude#1:side:e2"]
+              },
+              "lastResolved": {
+                "point": [40, 0, 6],
+                "direction": [0, 0, 1]
+              }
+            }
+          ],
+          "radius": {
+            "source": "2mm",
+            "lengthUnit": "mm",
+            "angleUnit": "deg"
+          }
+        }
+      ],
+      "rollbackIndex": null,
+      "nextIds": {
+        "e": 6,
+        "extrude": 3,
+        "fillet": 2,
+        "k": 7,
+        "r": 3,
+        "sketch": 3
+      },
+      "bodies": []
+    }
+  ],
+  "assemblies": [],
+  "print": {
+    "setups": [],
+    "nextIds": {}
+  },
+  "fonts": [],
+  "cam": {
+    "tools": [],
+    "setups": [],
+    "nextIds": {}
+  },
+  "nextIds": {
+    "part": 2
+  }
+}

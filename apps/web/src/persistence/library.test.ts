@@ -281,6 +281,109 @@ describe('DocumentLibrary', () => {
     expect((await opened(lib, 'doc-1')).document).toEqual(printed);
   });
 
+  it('saves the CAM section and logged CAM commands unchanged (ADR 0014, format v14)', async () => {
+    const backend = new MemoryBackend();
+    const lib = library(backend);
+    const doc = partDocument();
+    await lib.save(doc);
+    const mm = (source: string) => ({ source, lengthUnit: 'mm', angleUnit: 'deg' }) as const;
+    const add: Command = {
+      type: 'batch',
+      commands: [
+        {
+          type: 'addCamTool',
+          tool: {
+            id: 'tool#1',
+            name: '1/4" flat',
+            kind: 'flat',
+            number: 201,
+            diameter: mm('1/4"'),
+            fluteLength: mm('19'),
+            flutes: 2,
+            presets: [
+              {
+                material: 'plywood',
+                spindle: mm('18000rpm'),
+                feed: mm('1500mm/min'),
+                plunge: mm('500mm/min'),
+                stepdown: mm('2'),
+                stepover: mm('0.4'),
+              },
+            ],
+          },
+        },
+        {
+          type: 'addCamSetup',
+          setup: {
+            id: 'setup#1',
+            name: 'Top',
+            part: 'part#1',
+            machine: 'shapeoko-5-pro-4x4',
+            post: 'grbl',
+            stock: {
+              kind: 'explicit',
+              size: { x: mm('120'), y: mm('80'), z: mm('3/4"') },
+              offset: { x: mm('5'), y: mm('5'), z: mm('0') },
+              material: 'plywood',
+            },
+            wcs: {
+              up: { kind: 'face', face: { id: 'r1', ref: { face: 'extrude#1:cap:end' } } },
+              origin: { xy: 'front-left', z: 'top' },
+            },
+            heights: { clearance: mm('10'), retract: mm('5') },
+            operations: [
+              {
+                id: 'profile#1',
+                kind: 'profile',
+                name: 'Cut out',
+                suppressed: false,
+                tool: 'tool#1',
+                geometry: [
+                  { kind: 'face', face: { id: 'r2', ref: { face: 'extrude#1:cap:end' } } },
+                ],
+                side: 'outside',
+                depth: { kind: 'through', extra: mm('0.5') },
+                entry: { kind: 'ramp', angle: mm('3') },
+                leadIn: { kind: 'none' },
+                leadOut: { kind: 'none' },
+                climb: true,
+              },
+            ],
+          },
+        },
+      ],
+    };
+    const machined = unwrapDoc(applyCommand(doc, add));
+    const entries: LogEntry[] = [
+      { cause: 'execute', label: 'Add CAM setup', command: add, at: '2026-10-02T12:00:00.000Z' },
+    ];
+    await lib.save(machined, entries);
+    // Nothing in storage filters top-level document keys: the section is in the snapshot as is.
+    const snapshot = JSON.parse(text(backend, 'documents/doc-1/snapshot-00000002.json'));
+    expect(snapshot.cam).toEqual(machined.cam);
+    expect((await opened(library(backend), 'doc-1')).document).toEqual(machined);
+    expect(await library(backend).readLog('doc-1')).toEqual({ ok: true, value: entries });
+    // And through a .mfk file, out and back in.
+    const exported = value(await lib.exportMfk('doc-1'));
+    await lib.remove('doc-1');
+    value(await lib.importMfk(exported.bytes));
+    expect((await opened(lib, 'doc-1')).document).toEqual(machined);
+  });
+
+  it('opens a snapshot saved before CAM existed with an empty CAM section (format v13)', async () => {
+    const backend = new MemoryBackend();
+    const lib = library(backend);
+    const doc = partDocument();
+    await lib.save(doc);
+    const path = 'documents/doc-1/snapshot-00000001.json';
+    const { cam: _cam, ...v13 } = JSON.parse(text(backend, path)) as Record<string, unknown>;
+    void _cam;
+    backend.files.set(path, new TextEncoder().encode(JSON.stringify({ ...v13, version: 13 })));
+    const reopened = await opened(library(backend), 'doc-1');
+    expect(reopened.document).toEqual(doc);
+    expect(reopened.document.cam).toEqual({ tools: [], setups: [], nextIds: {} });
+  });
+
   it('saves a user font as a blob and opens the document with it (format v9)', async () => {
     const backend = new MemoryBackend();
     const lib = library(backend);

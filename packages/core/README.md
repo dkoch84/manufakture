@@ -23,7 +23,7 @@ import {
 ```ts
 interface ManufaktureDocument {
   format: 'manufakture';
-  version: 12; // file format version, FORMAT_VERSION
+  version: 14; // file format version, FORMAT_VERSION
   namingScheme: 1; // topological naming scheme version (T0.5), NAMING_SCHEME
   id: string;
   name: string;
@@ -33,6 +33,7 @@ interface ManufaktureDocument {
   assemblies: Assembly[]; // instances of parts placed by mates, in tab order (since version 7)
   print: PrintData; // print setups: what to print, on which printer, oriented how (since version 8)
   fonts: DocumentFont[]; // the fonts texts use, bundled or added by the user (since version 9)
+  cam: CamData; // CAM tools and setups with their operations (since version 14)
   drawings?: Drawing[]; // drawings of parts and assemblies, in tab order; absent: none (since version 12)
   configurations?: Configurations; // the configuration table; absent: none (since version 5)
   domains?: Record<string, DomainData>; // domain settings by namespace; absent: none (since version 11)
@@ -58,7 +59,8 @@ interface BodyProps {
 ```
 
 `createDocument({ id, name, units? })` makes an empty document with one part, `part#1`, no
-assemblies, an empty print section (`createPrintData()`), no fonts, and `nextIds: { part: 2 }`. Core never invents document ids; pass a UUID or similar.
+assemblies, an empty print section (`createPrintData()`), no fonts, an empty CAM section
+(`createCamData()`), and `nextIds: { part: 2 }`. Core never invents document ids; pass a UUID or similar.
 
 ### Bodies
 
@@ -421,6 +423,149 @@ then items); `printThresholdExpressions`, `printItemExpressions`, `printSetupIds
 `printItemIds` are the other generic views, in `src/features.ts`. `createPrintSetup(id, name,
 printer, nozzle)` makes a setup with no items and default thresholds, and `findPrintSetup(doc,
 id)` finds one.
+
+### CAM
+
+A document holds CAM tools and setups (since version 14,
+[ADR 0014](../../docs/adr/0014-cam-architecture.md) decisions 2 to 6): the tools a job cuts with,
+copied from a library, and per setup the body it machines, the stock, the work coordinate system,
+the heights, the machine and post, and the operations in cut order. Nothing derived is stored: no
+extracted loops, no toolpaths, no G-code (`packages/cam` computes those from this data and regen's
+results).
+
+```ts
+interface CamData {
+  tools: CamTool[];
+  setups: CamSetup[];
+  nextIds: Record<string, number>; // `tool`, `setup`, one per operation kind, `r`; only ever increase
+}
+
+interface CamTool {
+  id: 'tool#1'; // from cam.nextIds.tool
+  name: string;
+  kind: 'flat' | 'ball' | 'bull' | 'vbit' | 'drill' | 'engraver';
+  number?: number; // T<n>, 0 to MAX_CAM_TOOL_NUMBER (99,999)
+  diameter: StoredExpression; // lengths, so `1/4"` works in a millimetre document
+  fluteLength: StoredExpression;
+  flutes: number; // 1 to MAX_CAM_FLUTES (32)
+  cornerRadius?: StoredExpression; // a bull's, and required on it
+  angle?: StoredExpression; // a V-bit's included angle (required) or a drill's point angle
+  tipDiameter?: StoredExpression; // a V-bit's flat tip only
+  presets: {
+    material: string; // a material category, 'plywood'; each once per tool
+    spindle: StoredExpression; // spindle speed, '18000rpm'
+    feed: StoredExpression; // feed rates, '1500mm/min'
+    plunge: StoredExpression;
+    stepdown: StoredExpression; // a length
+    stepover: StoredExpression; // a fraction of the diameter, '0.4'
+  }[];
+  source?: { library: string; id: string }; // where it was copied from
+}
+
+interface CamSetup {
+  id: 'setup#1'; // from cam.nextIds.setup
+  name: string;
+  part: string; // a part id of this document
+  body?: string; // a body id of that part; absent: its only body
+  machine: string; // a machine table id, 'shapeoko-5-pro-4x4'; checked at use
+  post: string; // a post id, 'grbl'; checked at use
+  stock:
+    | { kind: 'fromBody'; margins: { xMin; xMax; yMin; yMax; top; bottom }; material?: string }
+    | { kind: 'explicit'; size: { x; y; z }; offset: { x; y; z }; material?: string }; // lengths
+  wcs: {
+    up:
+      | { kind: 'axis'; axis: '+x' | '-x' | '+y' | '-y' | '+z' | '-z' }
+      | { kind: 'face'; face: FaceReference };
+    origin: {
+      xy: 'front-left' | 'front-right' | 'back-left' | 'back-right' | 'centre';
+      z: 'top' | 'bottom';
+    };
+  };
+  heights: { clearance: StoredExpression; retract: StoredExpression };
+  operations: CamOperation[]; // cut order
+}
+
+// Every operation: id '<kind>#n' (from cam.nextIds.<kind>), kind, name, suppressed, tool (a tool
+// id), geometry (sources, below), feeds? ({ spindle?, cut?, plunge?, ramp?, lead? }, overriding
+// the tool's preset; sets at least one). Then per kind:
+//   facing:    depth (removed from the stock top), stepdown?, stepover?, angle
+//   profile:   side ('outside' | 'inside' | 'on'), depth, stepdown?, finishAllowance?,
+//              tabs? ({ count, width, height }), entry, leadIn, leadOut, climb
+//   pocket:    depth, stepdown?, stepover?, finishAllowance?, entry, climb
+//   drill:     depth? (absent: each hole's), peck?, dwell? (seconds)
+//   vcarve:    maxDepth?
+//   surface3d: stepover (a length here), angle, allowance?
+// depth: { kind: 'blind'; depth } | { kind: 'through'; extra? }
+// entry: { kind: 'plunge' } | { kind: 'ramp'; angle } | { kind: 'helix'; angle; radius }
+// lead:  { kind: 'none' } | { kind: 'line'; length } | { kind: 'arc'; radius }
+
+type CamGeometrySource =
+  | { kind: 'face'; face: FaceReference } // a planar face of the setup's body, 'r<n>' from cam.nextIds.r
+  | { kind: 'region'; sketch: 'sketch#n'; entities?: string[] } // a sketch region; absent: every region
+  | { kind: 'hole'; feature: 'hole#n' }; // a hole feature's points and through-hole diameter
+```
+
+Absent `stepdown`, `stepover` and feeds come from the tool's preset for the stock's material. A
+drill takes only `hole` sources, a `surface3d` none (it machines the setup's body), and the others
+faces and sketch regions (a `facing` with none faces the whole stock top). "Profile" inside `cam`
+always means the operation; the sketch region source is `region` (ADR 0014 decision 4).
+
+**Why it is not a feature.** As for print setups: an operation changes no body, acts on the part's
+final body whatever comes after it in the feature list, and is in cut order, not regen order. So
+`cam` is document state beside `parts` and `print`. Regen never reads it, and `diffDocuments`
+reports CAM edits in `camChanged` and `cam`, never in `parts`.
+
+**CAM references never block modelling** (ADR 0014 decision 6). A setup's body, a WCS or source
+face, a region's sketch and entities and a hole feature are names resolved when toolpaths are
+generated. Deleting, suppressing, reordering or editing what they name is always allowed; the
+operation then reports `reference-lost`. Validation checks only that they are well formed, never
+that they exist; likewise machine, post and material ids are checked against `packages/cam`'s
+tables only at use, so a document naming a machine this build does not know still loads.
+
+**Ids.** Tools are `tool#n`, setups `setup#n`, operations `<kind>#n` (`profile#2`, `pocket#1`) and
+face references `r<n>`, all from `cam.nextIds` (`previewIds(doc.cam.nextIds, 'pocket')`), never
+reused, unique across the whole section (moving an operation to another setup keeps its id) and
+separate from every part's and from `print`'s: a CAM `r3` and a part's `r3` are different
+references. Ids have at most 15 digits; there are no split pieces in CAM.
+
+Validation refuses: an id at or past its counter, used twice anywhere in `cam`, or a split piece; a
+setup of a part that does not exist; an operation whose tool is not in `cam.tools`; a geometry
+source of a kind the operation does not take (`kind-mismatch`); an expression that does not parse
+or names an unknown variable. The schema refuses an unknown key or `nextIds` counter, an operation
+id whose prefix is not its kind, a region of a feature that is not a `sketch#n` or a hole source
+that is not a `hole#n`, the tool kind rules above, two presets for one material, table ids that are
+not lower-case letters, digits, `.`, `_` and `-` (at most 64), names over 200 characters, an
+expression source over `MAX_CAM_EXPRESSION` (10,000) characters, and more than `MAX_CAM_TOOLS`
+(1000) tools, `MAX_CAM_SETUPS` (1000) setups, `MAX_CAM_PRESETS` (100) presets per tool,
+`MAX_CAM_SOURCES` (1000) sources per operation, `MAX_CAM_REGION_ENTITIES` (10,000) entities per
+region, and in the whole section `MAX_CAM_OPERATIONS` (10,000) operations and
+`MAX_CAM_TOTAL_SOURCES` (100,000) sources. Commands refuse what would pass the section-wide
+limits (`schema`), since validation does not rerun the schema.
+
+What CAM uses:
+
+- `deletePart` refuses while a setup machines the part (`dependency`; `blockers` lists the setup
+  ids, as `partCamSetups(doc, partId)` does). Only the part blocks: delete or retarget the setup
+  first (`editCamSetup` with another `part`).
+- `deleteCamTool` refuses while an operation cuts with the tool (`dependency`; `blockers` lists
+  `<setup id>/<operation id>`, as `camToolUsers(doc.cam, toolId)` does).
+- `deleteVariable` refuses while a CAM expression reads the variable (`variableUsers` lists the
+  tool id, the setup id for its stock and heights, `<setup id>/<operation id>` for an operation;
+  `variableCamUsers(doc, name)` lists only those). `renameVariable` and `inlineVariable` rewrite
+  them with `editCamTool`, `editCamSetup` and `editCamOperation`. `camVariableUses(doc, name)`
+  lists each as `{ kind: 'camTool', toolId, path, expected }` or
+  `{ kind: 'camSetup', setupId, operationId?, path, expected }` (`path` from the setup). They are
+  kept out of `variableUses`, so code that switches over its kinds keeps working, as for drawings.
+
+`camExpressions(op)` lists an operation's expressions with the kind each expects (`length`,
+`angle`, `number`, `feed`, `spindleSpeed`: a `CamExpressionKind`, which adds the feed rate and
+spindle speed of `@manufakture/units` to core's kinds), for evaluation by the app;
+`camToolExpressions`, `camSetupOwnExpressions` (stock and heights) and `camSetupExpressions` (those,
+then every operation's) are the others. `camSetupIds`, `camSetupOwnIds`, `camOperationIds`,
+`camOperationReferences` and `camToolUsers` are the other generic views, in `src/features.ts`.
+`createCamData()` makes an empty section, `createCamSetup(id, name, part, machine, post)` a setup
+with no operations (stock from the body with no margins, Z up, origin at the front left of the
+stock top, clearance 10 mm and retract 5 mm), and `findCamSetup` and `findCamTool` find them.
 
 ### Fonts
 
@@ -1144,6 +1289,21 @@ resulting document with `checkDocument`, and returns `{ document, inverse }` or 
 | `editPrintItem`          | `setupId`, `item` (by id; new ids fresh)                      | `restorePrintItem` (old state)                                         |
 | `deletePrintItem`        | `setupId`, `itemId`                                           | `restorePrintItem`                                                     |
 | `restorePrintItem`       | `setupId`, `item`, `index` (history only)                     | `restorePrintItem` or `deletePrintItem`                                |
+| `addCamTool`             | `tool` (a fresh `tool#n`), `index?`                           | `deleteCamTool`                                                        |
+| `editCamTool`            | `tool` (by id)                                                | `restoreCamTool` (old state)                                           |
+| `deleteCamTool`          | `toolId` (refused while an operation cuts with it)            | `restoreCamTool`                                                       |
+| `restoreCamTool`         | `tool`, `index` (history only)                                | `restoreCamTool` or `deleteCamTool`                                    |
+| `addCamSetup`            | `setup` (fresh ids, operations included), `index?`            | `deleteCamSetup`                                                       |
+| `editCamSetup`           | `setupId`, fields to change (below)                           | `restoreCamSetup` (old state)                                          |
+| `deleteCamSetup`         | `setupId` (with its operations)                               | `restoreCamSetup`                                                      |
+| `restoreCamSetup`        | `setup`, `index` (history only)                               | `restoreCamSetup` or `deleteCamSetup`                                  |
+| `reorderCamSetups`       | `setupId`, `index` (final position)                           | `reorderCamSetups`                                                     |
+| `addCamOperation`        | `setupId`, `operation` (fresh ids), `index?` (default: last)  | `deleteCamOperation`                                                   |
+| `editCamOperation`       | `setupId`, `operation` (by id; new ids fresh)                 | `restoreCamOperation` (old state)                                      |
+| `deleteCamOperation`     | `setupId`, `operationId`                                      | `restoreCamOperation`                                                  |
+| `restoreCamOperation`    | `setupId`, `operation`, `index` (history only)                | `restoreCamOperation` or `deleteCamOperation`                          |
+| `reorderCamOperation`    | `setupId`, `operationId`, `index` (final cut order position)  | `reorderCamOperation`                                                  |
+| `suppressCamOperation`   | `setupId`, `operationId`, `suppressed`                        | `suppressCamOperation`                                                 |
 | `addFont`                | `font` (a fresh `font#n`; not the same bytes twice), `index?` | `deleteFont`                                                           |
 | `deleteFont`             | `fontId` (refused while an outline uses it)                   | `restoreFont`                                                          |
 | `restoreFont`            | `font`, `index` (history only)                                | `deleteFont`                                                           |
@@ -1195,8 +1355,16 @@ with the same ids, since ids are per part, counters, rollback bar, material and 
 configuration parameter names a feature of the part (`dependency`, the parameter ids in
 `blockers`; `partParameters(doc, partId)` lists them): delete the parameter in the same batch,
 refuses while an assembly instance shows the part (`dependency`, `<assembly id>/<instance id>`
-in `blockers`; `partInstances(doc, partId)` lists them), and refuses while a print item prints
-it (`dependency`, `<setup id>/<item id>` in `blockers`; `partPrintItems(doc, partId)`).
+in `blockers`; `partInstances(doc, partId)` lists them), refuses while a print item prints
+it (`dependency`, `<setup id>/<item id>` in `blockers`; `partPrintItems(doc, partId)`), and
+refuses while a CAM setup machines it (`dependency`, the setup ids in `blockers`;
+`partCamSetups(doc, partId)`).
+
+CAM: `editCamSetup` takes any of `name` (trimmed, 1 to 200 characters), `part`, `body` (`null`:
+the part's only body), `machine`, `post`, `stock`, `wcs` and `heights`; absent fields stay, and a
+new WCS face reference takes a fresh `r<n>`. Every CAM edit's inverse is the matching `restore`
+of the old state, which needs only that its ids were allocated. To move an operation to another
+setup under its id, batch `deleteCamOperation` with `restoreCamOperation` into the other setup.
 
 Assemblies: `addAssembly` takes an `assembly#n` from the document's `nextIds.assembly`, like
 `addPart`. `addInstance` and `addMate` allocate from the assembly's `nextIds` and refuse an id
@@ -1336,6 +1504,14 @@ added, removed and changed setup ids and `print.reordered` whether their order c
 edit adds nothing to `parts`, so it has no `firstAffectedIndex`; the print workspace re-checks the
 setups listed, and re-checks every setup when `parts` reports a part it prints.
 
+CAM never dirties a regen either (ADR 0014 decision 2). `camChanged` says the CAM section changed:
+a tool, setup or operation added, removed or edited, setups reordered, or an expression of a tool or
+setup (its operations' included) reading a changed variable, also through the active configuration
+row. `cam.tools` and `cam.setups` list the added, removed and changed ids and `cam.reordered`
+whether the setups' order changed; a tool edit lists the tool, not the setups that cut with it.
+Which operations changed is for the CAM workspace to find by its toolpath keys (decision 9). A
+CAM-only edit adds nothing to `parts`, so it has no `firstAffectedIndex`.
+
 Drawings never dirty a regen either. `drawingChanged` says `drawings` changed: a drawing, sheet,
 view, dimension or note added, removed or edited, drawings reordered, or a sheet size, view scale
 or section offset reading a changed variable. `drawings.drawings` lists the added, removed and
@@ -1384,7 +1560,8 @@ solids in one compound (`v3-two-bodies.json`) regenerates the same solids, now a
 to exactly `v4-bracket.json` and that to exactly `v5-bracket.json` and that to exactly
 `v6-bracket.json` and that to exactly `v7-bracket.json` and that to exactly `v8-bracket.json`
 and that to exactly `v9-bracket.json` and that to exactly `v10-bracket.json` and that to exactly
-`v11-bracket.json` and that to exactly `v12-bracket.json` and that to exactly `v13-bracket.json`,
+`v11-bracket.json` and that to exactly `v12-bracket.json` and that to exactly `v13-bracket.json`
+and that to exactly `v14-bracket.json` (and every older fixture loads as exactly the current one),
 and
 `v3-two-bodies.json` to
 exactly `v4-two-bodies.json`. Version 5 added the optional configuration table; `migrateV4ToV5`
@@ -1414,7 +1591,11 @@ exploded views (the optional `explodedViews` of an assembly), M4 plan decisions 
 11 file has neither; `v11-bracket.json` migrates to exactly `v12-bracket.json`. Version 13 added
 the `svg` source of the `outline` entity (ADR 0012 decision 7, M5 T5.8); `migrateV12ToV13` only
 bumps the version, since a version 12 file's outlines are all text; `v12-bracket.json` migrates to
-exactly `v13-bracket.json`.
+exactly `v13-bracket.json`. Version 14 added CAM (ADR 0014, M5 T5.1b); `migrateV13ToV14` adds
+`cam: { tools: [], setups: [], nextIds: {} }` right after `fonts` (where a saved file has it) and
+changes nothing else, since a version 13 document has no CAM and every CAM counter starts at 1; a
+version 13 file that already has a `cam` key is refused (`migration`), never repaired;
+`v13-bracket.json` migrates to exactly `v14-bracket.json`.
 
 To change the file shape:
 
@@ -1425,7 +1606,7 @@ To change the file shape:
 
 ## Where this deviates from ADR 0004's first cut
 
-- **Added fields.** The document has `id`, `name`, `nextIds`, `assemblies`, `print` and optional `configurations` and `drawings`; a part has `name`,
+- **Added fields.** The document has `id`, `name`, `nextIds`, `assemblies`, `print`, `cam` and optional `configurations` and `drawings`; a part has `name`,
   `rollbackIndex`, an optional `material` (the default for its bodies) and `bodies`;
   every feature has `name` and `suppressed`. The ADR's shape was a first cut that expected feature kinds
   to add their own fields.

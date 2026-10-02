@@ -25,6 +25,7 @@ export {
 export {
   CommandSchema,
   MAX_ASSEMBLY_NAME,
+  MAX_CAM_SETUP_NAME,
   MAX_DOCUMENT_NAME,
   MAX_DRAWING_NAME,
   MAX_PART_NAME,
@@ -36,12 +37,14 @@ export {
   explodedViewViews,
   fontUsers,
   instanceDimensions,
+  partCamSetups,
   partInstances,
   partParameters,
   partPrintItems,
   partViews,
   restoredDocument,
   rowInstances,
+  variableCamUsers,
   variableDrawings,
   variableExplodedViews,
   variableMates,
@@ -55,11 +58,13 @@ export {
   type SimpleCommand,
 } from './commands';
 export {
+  camVariableUses,
   drawingVariableUses,
   inlineVariable,
   renameVariable,
   rewriteReferences,
   variableUses,
+  type CamVariableUse,
   type DrawingVariableUse,
   type VariableUse,
 } from './variables';
@@ -73,6 +78,7 @@ export {
 export {
   diffDocuments,
   type AssemblyChange,
+  type CamChange,
   type DocumentChange,
   type DrawingsChange,
   type ItemChanges,
@@ -103,6 +109,7 @@ export {
   migrateV10ToV11,
   migrateV11ToV12,
   migrateV12ToV13,
+  migrateV13ToV14,
   type JsonObject,
   type Migration,
 } from './migrations';

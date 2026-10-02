@@ -32,7 +32,7 @@ import { MATERIAL_IDS } from './materials';
  */
 
 /** The file format version this code reads and writes. Bump it only together with a migration. */
-export const FORMAT_VERSION = 13;
+export const FORMAT_VERSION = 14;
 /** The topological naming scheme version (T0.5) that stored references are written in. */
 export const NAMING_SCHEME = 1;
 export const FORMAT_TAG = 'manufakture';
@@ -2035,6 +2035,436 @@ export const DrawingSchema = z.strictObject({
   nextIds: z.record(z.string(), z.int().min(1)),
 });
 
+// ---------------------------------------------------------------------------------------------
+// CAM (since version 14; ADR 0014). Document state, not features: a setup and its operations
+// change no geometry, so they are outside every feature list and never dirty a regen. Nothing
+// derived (loops, toolpaths, G-code) is stored.
+
+/**
+ * `cam.nextIds` keys: tools (`tool#n`), setups (`setup#n`), one per operation kind
+ * (`profile#n`, `pocket#n`, ...), and `r` for face references (`r<n>`). The ids are unique
+ * across the whole `cam` section and a namespace separate from every part's and from `print`'s.
+ */
+export const CAM_TOOL_COUNTER = 'tool';
+export const CAM_SETUP_COUNTER = 'setup';
+/** The CAM operation kinds, each also the `cam.nextIds` key of its ids. */
+export const CAM_OPERATION_KINDS = [
+  'facing',
+  'profile',
+  'pocket',
+  'drill',
+  'vcarve',
+  'surface3d',
+] as const;
+export type CamOperationKind = (typeof CAM_OPERATION_KINDS)[number];
+/** Every key `cam.nextIds` may hold. */
+export const CAM_COUNTERS: readonly string[] = [
+  CAM_TOOL_COUNTER,
+  CAM_SETUP_COUNTER,
+  ...CAM_OPERATION_KINDS,
+  'r',
+];
+export const CAM_TOOL_ID_PATTERN = /^tool#[1-9][0-9]{0,14}$/;
+export const CAM_SETUP_ID_PATTERN = /^setup#[1-9][0-9]{0,14}$/;
+/** An operation id of any kind: `<kind>#n`. Each kind's schema accepts its own prefix only. */
+export const CAM_OPERATION_ID_PATTERN = new RegExp(
+  `^(?:${CAM_OPERATION_KINDS.join('|')})#[1-9][0-9]{0,14}$`,
+);
+/**
+ * A CAM table id: a machine (`shapeoko-5-pro-4x4`), a post (`grbl`), a feed preset's material
+ * category (`plywood`), a tool library and a tool in it. Lower-case letters, digits, `.`, `_` and
+ * `-`, at most 64 characters. The tables are data in `packages/cam` (ADR 0014 decision 11),
+ * checked when a setup is used, never here: they grow without a format change, and a document
+ * naming a machine or post this build does not know still loads (ADR 0014 decision 6).
+ */
+export const CAM_TABLE_ID_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+
+/**
+ * Bounds on what a crafted file costs to check: tools, setups, operations (in the whole
+ * section), geometry sources per operation and in the whole section, feed presets per tool, and
+ * entities a region source lists. A real job has a handful of each.
+ */
+export const MAX_CAM_TOOLS = 1000;
+export const MAX_CAM_SETUPS = 1000;
+export const MAX_CAM_OPERATIONS = 10_000;
+export const MAX_CAM_SOURCES = 1000;
+export const MAX_CAM_TOTAL_SOURCES = 100_000;
+export const MAX_CAM_PRESETS = 100;
+export const MAX_CAM_REGION_ENTITIES = 10_000;
+/** The longest source text of a CAM expression, in UTF-16 units. */
+export const MAX_CAM_EXPRESSION = 10_000;
+/** The largest tool number a post writes (`T<n>`), and the most flutes a tool may have. */
+export const MAX_CAM_TOOL_NUMBER = 99_999;
+export const MAX_CAM_FLUTES = 32;
+/** The longest entity id a region source may list (split pieces included). */
+const MAX_CAM_ENTITY_ID = 256;
+
+export const CamToolIdSchema = counted(CAM_TOOL_ID_PATTERN, 'tool#1');
+export const CamSetupIdSchema = counted(CAM_SETUP_ID_PATTERN, 'setup#1');
+export const CamOperationIdSchema = counted(CAM_OPERATION_ID_PATTERN, 'profile#1');
+export const CamTableIdSchema = z
+  .string()
+  .max(64, { abort: true })
+  .regex(CAM_TABLE_ID_PATTERN, 'Expected an id like "shapeoko-5-pro-4x4"');
+
+/** A `StoredExpression` whose source is at most `MAX_CAM_EXPRESSION` units long. */
+const camExpression = z.strictObject({
+  source: z.string().max(MAX_CAM_EXPRESSION, { abort: true }),
+  lengthUnit: LengthUnitSchema,
+  angleUnit: AngleUnitSchema,
+}) satisfies z.ZodType<StoredExpression>;
+
+/**
+ * Feeds and speeds for one material category, as expressions: `spindle` a spindle speed
+ * (`18000rpm`), `feed` and `plunge` feed rates (`1000mm/min`), `stepdown` a length, `stepover`
+ * a fraction of the tool diameter (a plain number, `0.4`).
+ */
+export const CamFeedPresetSchema = z.strictObject({
+  material: CamTableIdSchema,
+  spindle: camExpression,
+  feed: camExpression,
+  plunge: camExpression,
+  stepdown: camExpression,
+  stepover: camExpression,
+});
+
+export const CAM_TOOL_KINDS = ['flat', 'ball', 'bull', 'vbit', 'drill', 'engraver'] as const;
+
+/**
+ * A cutting tool, copied into the document from a library (ADR 0014 decision 11). Lengths are
+ * expressions, so `1/4"` is a valid diameter in a millimetre document. `cornerRadius` belongs to
+ * (and is required by) a `bull` tool; `angle` (the included angle) is required by a `vbit` and
+ * allowed on a `drill` (its point angle); `tipDiameter` (a flat tip) is a `vbit`'s only.
+ */
+export const CamToolSchema = z
+  .strictObject({
+    id: CamToolIdSchema,
+    name: featureName,
+    kind: z.enum(CAM_TOOL_KINDS),
+    /** The tool number a post writes with `T` (and `M6`); absent: none written. */
+    number: z.int().min(0).max(MAX_CAM_TOOL_NUMBER).exactOptional(),
+    diameter: camExpression,
+    fluteLength: camExpression,
+    flutes: z.int().min(1).max(MAX_CAM_FLUTES),
+    cornerRadius: camExpression.exactOptional(),
+    angle: camExpression.exactOptional(),
+    tipDiameter: camExpression.exactOptional(),
+    /** One per material category, each category once. */
+    presets: z.array(CamFeedPresetSchema).max(MAX_CAM_PRESETS),
+    /** Where the tool was copied from; absent: made in this document. */
+    source: z.strictObject({ library: CamTableIdSchema, id: CamTableIdSchema }).exactOptional(),
+  })
+  .check((ctx) => {
+    const t = ctx.value;
+    const issue = (message: string, path: string) =>
+      ctx.issues.push({ code: 'custom', message, input: t, path: [path] });
+    if (t.kind === 'bull' && t.cornerRadius === undefined) {
+      issue('a bull nose tool has a corner radius', 'cornerRadius');
+    }
+    if (t.kind !== 'bull' && t.cornerRadius !== undefined) {
+      issue(`a ${t.kind} tool has no corner radius`, 'cornerRadius');
+    }
+    if (t.kind === 'vbit' && t.angle === undefined) issue('a V-bit has an included angle', 'angle');
+    if (t.kind !== 'vbit' && t.kind !== 'drill' && t.angle !== undefined) {
+      issue(`a ${t.kind} tool has no angle`, 'angle');
+    }
+    if (t.kind !== 'vbit' && t.tipDiameter !== undefined) {
+      issue(`a ${t.kind} tool has no tip diameter`, 'tipDiameter');
+    }
+    const seen = new Set<string>();
+    t.presets.forEach((p, i) => {
+      if (seen.has(p.material)) {
+        ctx.issues.push({
+          code: 'custom',
+          message: `the tool has two presets for "${p.material}"`,
+          input: p.material,
+          path: ['presets', i, 'material'],
+        });
+      }
+      seen.add(p.material);
+    });
+  });
+
+/**
+ * The stock, as a box in the setup frame (ADR 0014 decision 2; `packages/cam`'s
+ * `stockFromBounds` and `stockFromSize`). `fromBody`: the body's bounds grown by `margins` (each
+ * a length, zero or more: `xMin` to `yMax` on the sides, `top` above, `bottom` below).
+ * `explicit`: a box of `size`, placed so the body's minimum corner sits `offset` in from the
+ * stock's minimum corner. `material` is a material category for feed presets and the setup
+ * sheet (a CAM table id, checked at use); absent: not set.
+ */
+export const CamStockSchema = z.discriminatedUnion('kind', [
+  z.strictObject({
+    kind: z.literal('fromBody'),
+    margins: z.strictObject({
+      xMin: camExpression,
+      xMax: camExpression,
+      yMin: camExpression,
+      yMax: camExpression,
+      top: camExpression,
+      bottom: camExpression,
+    }),
+    material: CamTableIdSchema.exactOptional(),
+  }),
+  z.strictObject({
+    kind: z.literal('explicit'),
+    size: z.strictObject({ x: camExpression, y: camExpression, z: camExpression }),
+    offset: z.strictObject({ x: camExpression, y: camExpression, z: camExpression }),
+    material: CamTableIdSchema.exactOptional(),
+  }),
+]);
+
+/** The model axes a setup can turn to machine +Z. */
+export const CAM_UP_AXES = ['+x', '-x', '+y', '-y', '+z', '-z'] as const;
+/** Where the WCS origin sits in XY on the stock, seen from above with the operator in front. */
+export const CAM_WCS_CORNERS = [
+  'front-left',
+  'front-right',
+  'back-left',
+  'back-right',
+  'centre',
+] as const;
+
+/**
+ * The work coordinate system. `up`: a model axis, or a planar face (its outward normal becomes
+ * machine +Z), resolved on the setup's final body like an operation's face (ADR 0014 decision 5).
+ * `origin`: a corner or the centre of the stock in XY, its top or bottom in Z.
+ */
+export const CamWcsSchema = z.strictObject({
+  up: z.discriminatedUnion('kind', [
+    z.strictObject({ kind: z.literal('axis'), axis: z.enum(CAM_UP_AXES) }),
+    z.strictObject({ kind: z.literal('face'), face: FaceReferenceSchema }),
+  ]),
+  origin: z.strictObject({
+    xy: z.enum(CAM_WCS_CORNERS),
+    z: z.enum(['top', 'bottom']),
+  }),
+});
+
+/** A region source's entity id (`e3`, a split piece `e3#a`). */
+const camEntityId = z
+  .string()
+  .max(MAX_CAM_ENTITY_ID, { abort: true })
+  .refine((s) => isSubId(s, 'e'), 'Expected an id like "e1"');
+
+/**
+ * Where an operation's geometry comes from, by name (ADR 0014 decisions 2, 4 and 5): a planar
+ * face of the setup's body (a `FaceReference`, `r<n>` from `cam.nextIds`), a sketch region
+ * (`sketch` a sketch feature of the setup's part; `entities` the entities bounding the chosen
+ * regions, absent: every closed region), or a hole feature (its axis points and through-hole
+ * diameter). Whether they still exist is a CAM workspace result (`reference-lost`), never a load
+ * or command error (ADR 0014 decision 6).
+ */
+export const CamGeometrySourceSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('face'), face: FaceReferenceSchema }),
+  z.strictObject({
+    kind: z.literal('region'),
+    sketch: counted(/^sketch#[1-9][0-9]{0,14}$/, 'sketch#1'),
+    entities: z.array(camEntityId).min(1).max(MAX_CAM_REGION_ENTITIES).exactOptional(),
+  }),
+  z.strictObject({
+    kind: z.literal('hole'),
+    feature: counted(/^hole#[1-9][0-9]{0,14}$/, 'hole#1'),
+  }),
+]);
+
+/**
+ * How deep a cut goes. `blind`: `depth` (a length) below the top of the operation's geometry.
+ * `through`: through the stock's bottom, and `extra` (a length; absent: zero) below it.
+ */
+export const CamDepthSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('blind'), depth: camExpression }),
+  z.strictObject({ kind: z.literal('through'), extra: camExpression.exactOptional() }),
+]);
+
+/** How a pass enters the material: straight down, on a ramp, or on a helix (angles, lengths). */
+export const CamEntrySchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('plunge') }),
+  z.strictObject({ kind: z.literal('ramp'), angle: camExpression }),
+  z.strictObject({ kind: z.literal('helix'), angle: camExpression, radius: camExpression }),
+]);
+
+/** A lead-in or lead-out move, tangent to the cut. */
+export const CamLeadSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('none') }),
+  z.strictObject({ kind: z.literal('line'), length: camExpression }),
+  z.strictObject({ kind: z.literal('arc'), radius: camExpression }),
+]);
+
+/**
+ * An operation's own feeds and speed, each overriding the tool's preset for the stock's material:
+ * `spindle` a spindle speed; `cut`, `plunge`, `ramp`, `lead` feed rates. Sets at least one; no
+ * overrides at all is an absent `feeds`.
+ */
+export const CamFeedsSchema = z
+  .strictObject({
+    spindle: camExpression.exactOptional(),
+    cut: camExpression.exactOptional(),
+    plunge: camExpression.exactOptional(),
+    ramp: camExpression.exactOptional(),
+    lead: camExpression.exactOptional(),
+  })
+  .check((ctx) => {
+    if (Object.values(ctx.value).every((v) => v === undefined)) {
+      ctx.issues.push({
+        code: 'custom',
+        message: 'feeds set at least one value; leave them out for the tool preset',
+        input: ctx.value,
+        path: [],
+      });
+    }
+  });
+
+const camOperationBase = <K extends CamOperationKind>(kind: K) => ({
+  id: counted(new RegExp(`^${kind}#[1-9][0-9]{0,14}$`), `${kind}#1`),
+  kind: z.literal(kind),
+  name: featureName,
+  suppressed: z.boolean(),
+  /** A tool of `cam.tools`, by id. */
+  tool: CamToolIdSchema,
+  geometry: z.array(CamGeometrySourceSchema).max(MAX_CAM_SOURCES),
+  /** Absent: every value from the tool's preset for the stock's material. */
+  feeds: CamFeedsSchema.exactOptional(),
+});
+
+/**
+ * One CAM operation (ADR 0014 decision 2), a first cut of each kind's fields (the operation
+ * tasks may add fields, each with a format bump). Absent `stepdown`, `stepover` and feeds come
+ * from the tool's preset. A `stepover` is a fraction of the tool diameter (a plain number), except
+ * a `surface3d`'s, which is the distance between raster lines (a length). Angles are from machine
+ * +X. Which geometry sources a kind takes is checked by validation: a drill takes hole features, a
+ * `surface3d` none (it machines the setup's body), the others faces and sketch regions (a
+ * `facing` with none faces the whole stock top).
+ */
+export const CamOperationSchema = z.discriminatedUnion('kind', [
+  z.strictObject({
+    ...camOperationBase('facing'),
+    /** How much to remove from the stock top (a length). */
+    depth: camExpression,
+    stepdown: camExpression.exactOptional(),
+    stepover: camExpression.exactOptional(),
+    /** Raster direction (an angle). */
+    angle: camExpression,
+  }),
+  z.strictObject({
+    ...camOperationBase('profile'),
+    side: z.enum(['outside', 'inside', 'on']),
+    depth: CamDepthSchema,
+    stepdown: camExpression.exactOptional(),
+    /** Material left on the wall by the roughing passes (a length); absent: none. */
+    finishAllowance: camExpression.exactOptional(),
+    /** Absent: no tabs. `count` a plain number, `width` and `height` lengths. */
+    tabs: z
+      .strictObject({ count: camExpression, width: camExpression, height: camExpression })
+      .exactOptional(),
+    entry: CamEntrySchema,
+    leadIn: CamLeadSchema,
+    leadOut: CamLeadSchema,
+    /** Climb milling when true, conventional when false. */
+    climb: z.boolean(),
+  }),
+  z.strictObject({
+    ...camOperationBase('pocket'),
+    depth: CamDepthSchema,
+    stepdown: camExpression.exactOptional(),
+    stepover: camExpression.exactOptional(),
+    finishAllowance: camExpression.exactOptional(),
+    entry: CamEntrySchema,
+    climb: z.boolean(),
+  }),
+  z.strictObject({
+    ...camOperationBase('drill'),
+    /** Absent: each hole's own depth. */
+    depth: CamDepthSchema.exactOptional(),
+    /** Peck depth (a length); absent: one plunge. */
+    peck: camExpression.exactOptional(),
+    /** Dwell at the bottom, in seconds (a plain number); absent: none. */
+    dwell: camExpression.exactOptional(),
+  }),
+  z.strictObject({
+    ...camOperationBase('vcarve'),
+    /** The deepest the carve may go (a length); absent: as deep as the V-bit's geometry needs. */
+    maxDepth: camExpression.exactOptional(),
+  }),
+  z.strictObject({
+    ...camOperationBase('surface3d'),
+    /** Distance between raster lines (a length). */
+    stepover: camExpression,
+    /** Raster direction (an angle). */
+    angle: camExpression,
+    /** Material left on the surface (a length); absent: none. */
+    allowance: camExpression.exactOptional(),
+  }),
+]);
+
+/**
+ * A setup (ADR 0014 decision 2): the body it machines, the stock, the WCS, the heights, the
+ * machine and post, and the operations in cut order. `part` is a part of this document; `body` one
+ * of its bodies, absent meaning its only body. Neither the body nor the machine and post ids are
+ * checked here or by validation (ADR 0014 decision 6).
+ */
+export const CamSetupSchema = z.strictObject({
+  id: CamSetupIdSchema,
+  name: featureName,
+  part: z.string().min(1).max(MAX_PART_ID_LENGTH),
+  body: BodyIdSchema.exactOptional(),
+  machine: CamTableIdSchema,
+  post: CamTableIdSchema,
+  stock: CamStockSchema,
+  wcs: CamWcsSchema,
+  /** Machine Z above the WCS origin: `clearance` for rapids, `retract` between passes (lengths). */
+  heights: z.strictObject({ clearance: camExpression, retract: camExpression }),
+  /** Cut order. */
+  operations: z.array(CamOperationSchema).max(MAX_CAM_OPERATIONS),
+});
+
+/** The CAM section (README, "CAM"). Since version 14. */
+export const CamDataSchema = z
+  .strictObject({
+    tools: z.array(CamToolSchema).max(MAX_CAM_TOOLS),
+    setups: z.array(CamSetupSchema).max(MAX_CAM_SETUPS),
+    /**
+     * Next number per id counter (`tool`, `setup`, one per operation kind, `r`). Only ever
+     * increases.
+     */
+    nextIds: z.record(z.string().max(32, { abort: true }), z.int().min(1)),
+  })
+  .check((ctx) => {
+    const { setups, nextIds } = ctx.value;
+    for (const key of Object.keys(nextIds)) {
+      if (!CAM_COUNTERS.includes(key)) {
+        ctx.issues.push({
+          code: 'custom',
+          message: `"${key}" is not a CAM id counter`,
+          input: key,
+          path: ['nextIds', key],
+        });
+      }
+    }
+    let operations = 0;
+    let sources = 0;
+    for (const s of setups) {
+      operations += s.operations.length;
+      for (const op of s.operations) sources += op.geometry.length;
+    }
+    if (operations > MAX_CAM_OPERATIONS) {
+      ctx.issues.push({
+        code: 'custom',
+        message: `the CAM setups hold ${operations} operations; at most ${MAX_CAM_OPERATIONS} are allowed`,
+        input: operations,
+        path: ['setups'],
+      });
+    }
+    if (sources > MAX_CAM_TOTAL_SOURCES) {
+      ctx.issues.push({
+        code: 'custom',
+        message: `the CAM operations hold ${sources} geometry sources; at most ${MAX_CAM_TOTAL_SOURCES} are allowed`,
+        input: sources,
+        path: ['setups'],
+      });
+    }
+  });
+
 export const DomainNamespaceSchema = z
   .string()
   .max(MAX_DOMAIN_NAMESPACE_LENGTH, { abort: true })
@@ -2115,6 +2545,8 @@ export const DocumentSchema = z.strictObject({
         });
       }
     }),
+  /** CAM: tools, setups and their operations (ADR 0014). Since version 14. */
+  cam: CamDataSchema,
   /**
    * Drawings of the document's parts and assemblies, in tab order; absent when the document has
    * none, never empty. Since version 12.
@@ -2226,6 +2658,19 @@ export type PrintOrientation = z.infer<typeof PrintOrientationSchema>;
 export type PrintItem = z.infer<typeof PrintItemSchema>;
 export type PrintSetup = z.infer<typeof PrintSetupSchema>;
 export type PrintData = z.infer<typeof PrintDataSchema>;
+export type CamFeedPreset = z.infer<typeof CamFeedPresetSchema>;
+export type CamToolKind = (typeof CAM_TOOL_KINDS)[number];
+export type CamTool = z.infer<typeof CamToolSchema>;
+export type CamStock = z.infer<typeof CamStockSchema>;
+export type CamWcs = z.infer<typeof CamWcsSchema>;
+export type CamGeometrySource = z.infer<typeof CamGeometrySourceSchema>;
+export type CamDepth = z.infer<typeof CamDepthSchema>;
+export type CamEntry = z.infer<typeof CamEntrySchema>;
+export type CamLead = z.infer<typeof CamLeadSchema>;
+export type CamFeeds = z.infer<typeof CamFeedsSchema>;
+export type CamOperation = z.infer<typeof CamOperationSchema>;
+export type CamSetup = z.infer<typeof CamSetupSchema>;
+export type CamData = z.infer<typeof CamDataSchema>;
 export type FontSource = z.infer<typeof FontSourceSchema>;
 export type DocumentFont = z.infer<typeof FontSchema>;
 export type ExplodeDirection = z.infer<typeof ExplodeDirectionSchema>;

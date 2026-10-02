@@ -1185,9 +1185,10 @@ describe('drawings in the file', () => {
     expect(serialize(loaded.document)).toBe(text);
     const json = JSON.parse(text) as { drawings: { nextIds: object }[] };
     expect(Object.keys(json.drawings[0]!.nextIds)).toEqual(['dim', 'note', 'sheet', 'view']);
-    // Key order: drawings after fonts, before nextIds.
+    // Key order: drawings after fonts and CAM, before nextIds.
     const keys = Object.keys(JSON.parse(text) as object);
-    expect(keys.indexOf('drawings')).toBe(keys.indexOf('fonts') + 1);
+    expect(keys.indexOf('drawings')).toBe(keys.indexOf('cam') + 1);
+    expect(keys.indexOf('cam')).toBe(keys.indexOf('fonts') + 1);
   });
 
   it('never modifies the value it loads', () => {

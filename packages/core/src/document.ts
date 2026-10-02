@@ -4,6 +4,9 @@ import {
   FORMAT_VERSION,
   NAMING_SCHEME,
   type Assembly,
+  type CamData,
+  type CamSetup,
+  type CamTool,
   type DisplayUnits,
   type DocumentFont,
   type Drawing,
@@ -43,6 +46,7 @@ export function createDocument(options: NewDocumentOptions): ManufaktureDocument
     assemblies: [],
     print: createPrintData(),
     fonts: [],
+    cam: createCamData(),
     nextIds: { part: 2 },
   };
 }
@@ -64,6 +68,43 @@ export function createDrawing(id: string, name: string): Drawing {
 /** An empty print section: no setups, fresh counters. */
 export function createPrintData(): PrintData {
   return { setups: [], nextIds: {} };
+}
+
+/** An empty CAM section: no tools, no setups, fresh counters. */
+export function createCamData(): CamData {
+  return { tools: [], setups: [], nextIds: {} };
+}
+
+/**
+ * A CAM setup of part `part` with no operations: stock from the body's bounds with no margins,
+ * Z up, origin at the front left of the stock top, and the given heights as expressions in
+ * millimetres. The app fills in its own defaults (margins, the default machine) before adding it.
+ */
+export function createCamSetup(
+  id: string,
+  name: string,
+  part: string,
+  machine: string,
+  post: string,
+): CamSetup {
+  const zero = { source: '0', lengthUnit: 'mm', angleUnit: 'deg' } as const;
+  return {
+    id,
+    name,
+    part,
+    machine,
+    post,
+    stock: {
+      kind: 'fromBody',
+      margins: { xMin: zero, xMax: zero, yMin: zero, yMax: zero, top: zero, bottom: zero },
+    },
+    wcs: { up: { kind: 'axis', axis: '+z' }, origin: { xy: 'front-left', z: 'top' } },
+    heights: {
+      clearance: { ...zero, source: '10' },
+      retract: { ...zero, source: '5' },
+    },
+    operations: [],
+  };
 }
 
 /** A print setup with no items and default thresholds. */
@@ -111,6 +152,14 @@ export function findFont(doc: ManufaktureDocument, fontId: string): DocumentFont
 
 export function findPrintSetup(doc: ManufaktureDocument, setupId: string): PrintSetup | undefined {
   return doc.print.setups.find((s) => s.id === setupId);
+}
+
+export function findCamSetup(doc: ManufaktureDocument, setupId: string): CamSetup | undefined {
+  return doc.cam.setups.find((s) => s.id === setupId);
+}
+
+export function findCamTool(doc: ManufaktureDocument, toolId: string): CamTool | undefined {
+  return doc.cam.tools.find((t) => t.id === toolId);
 }
 
 export function findFeature(part: Part, featureId: string): Feature | undefined {

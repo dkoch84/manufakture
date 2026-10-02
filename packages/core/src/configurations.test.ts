@@ -468,6 +468,7 @@ describe('saving configurations', () => {
       'assemblies',
       'print',
       'fonts',
+      'cam',
       'configurations',
       'nextIds',
     ]);

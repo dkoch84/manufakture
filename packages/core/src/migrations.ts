@@ -255,6 +255,29 @@ export const migrateV12ToV13: Migration = {
   },
 };
 
+/**
+ * Version 14 added CAM (ADR 0014 decisions 2 and 14, M5 T5.1b). A version 13 document has none,
+ * so it gets an empty CAM section, `cam: { tools: [], setups: [], nextIds: {} }`, right after
+ * `fonts` as in a freshly saved file; nothing else changes, and every CAM counter starts at 1.
+ */
+export const migrateV13ToV14: Migration = {
+  from: 13,
+  to: 14,
+  description: 'Add CAM tools and setups',
+  migrate(doc) {
+    // Version 13 had no such key: refuse rather than drop or keep it (nothing is repaired).
+    if ('cam' in doc) throw new Error('a version 13 document has no "cam" section');
+    const empty = () => ({ tools: [], setups: [], nextIds: {} });
+    const out: JsonObject = {};
+    for (const [k, v] of Object.entries(doc)) {
+      out[k] = k === 'version' ? 14 : v;
+      if (k === 'fonts') out.cam = empty();
+    }
+    if (!('cam' in out)) out.cam = empty();
+    return out;
+  },
+};
+
 /** File format migrations, in order: `FORMAT_MIGRATIONS[i]` goes from version i to i + 1. */
 export const FORMAT_MIGRATIONS: readonly Migration[] = [
   migrateV0ToV1,
@@ -270,6 +293,7 @@ export const FORMAT_MIGRATIONS: readonly Migration[] = [
   migrateV10ToV11,
   migrateV11ToV12,
   migrateV12ToV13,
+  migrateV13ToV14,
 ];
 
 /**

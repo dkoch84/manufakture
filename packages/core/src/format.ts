@@ -63,7 +63,7 @@ function sortKeys(value: unknown, deep: boolean): unknown {
 
 /**
  * Schema-shaped objects already come out of zod in schema order. Records (`nextIds` of the
- * document, its parts, its assemblies, its print section and its drawings, an extension's
+ * document, its parts, its assemblies, its print and CAM sections and its drawings, an extension's
  * `expressions` and its opaque `params`, a configuration row's `values`, the `domains` namespaces
  * and each one's opaque `data`) keep insertion order, so they are sorted here; otherwise two equal
  * documents could be saved as different text.
@@ -101,6 +101,10 @@ function canonical(doc: ManufaktureDocument): ManufaktureDocument {
     print: {
       ...doc.print,
       nextIds: sortKeys(doc.print.nextIds, false) as Record<string, number>,
+    },
+    cam: {
+      ...doc.cam,
+      nextIds: sortKeys(doc.cam.nextIds, false) as Record<string, number>,
     },
     assemblies: doc.assemblies.map((assembly) => ({
       ...assembly,

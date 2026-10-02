@@ -6,6 +6,9 @@ import {
 } from '@manufakture/units';
 import {
   bodyCreator,
+  camExpressions,
+  camSetupOwnExpressions,
+  camToolExpressions,
   constraintTargets,
   explicitDependencies,
   explodeStepInstances,
@@ -37,6 +40,7 @@ import {
   SKETCH_ORIGIN,
   codePointLength,
   type Assembly,
+  type CamData,
   type ConfigRow,
   type Configurations,
   type Drawing,
@@ -1160,6 +1164,116 @@ function checkDrawing(
   });
 }
 
+/**
+ * The CAM section (ADR 0014 decisions 4 and 6): every id in it (tools, setups, operations, face
+ * references) allocated by `cam.nextIds` and used once anywhere in the section, never a split
+ * piece; every setup names a part of this document; every operation's tool is in `cam.tools`;
+ * every geometry source is of a kind the operation takes (a drill takes hole features, a
+ * `surface3d` none, the others faces and sketch regions); every expression parses and names
+ * existing variables.
+ *
+ * Deliberately not checked: that a setup's body, a WCS or source face, a region's sketch or
+ * entities, or a hole feature still exist, or that the machine, post and material ids are in
+ * `packages/cam`'s tables. Those are CAM workspace results (`reference-lost`, an unknown
+ * machine), so editing or deleting what they name is never blocked; the schema has already
+ * checked they are well formed.
+ */
+function checkCam(
+  cam: CamData,
+  partIds: ReadonlySet<string>,
+  variables: ReadonlySet<string>,
+  out: CoreError[],
+): void {
+  const seen = new Set<string>();
+  const checkId = (id: string, path: readonly (string | number)[]) => {
+    const parsed = parseAnyId(id);
+    if (parsed && (parsed.split !== '' || parsed.n >= peekCounter(cam.nextIds, parsed.counter))) {
+      out.push({
+        code: 'invalid-id',
+        message:
+          parsed.split !== ''
+            ? `Id "${id}" in CAM is a split piece; CAM has none`
+            : `CAM id "${id}" was never allocated (next is ${previewId(parsed.counter, peekCounter(cam.nextIds, parsed.counter))})`,
+        path,
+        blockers: [id],
+      });
+    }
+    if (seen.has(id)) {
+      out.push({
+        code: 'duplicate',
+        message: `Id "${id}" is used twice in CAM`,
+        path,
+        blockers: [id],
+      });
+    }
+    seen.add(id);
+  };
+
+  const toolIds = new Set<string>();
+  cam.tools.forEach((tool, ti) => {
+    const tpath = ['cam', 'tools', ti];
+    checkId(tool.id, [...tpath, 'id']);
+    toolIds.add(tool.id);
+    for (const site of camToolExpressions(tool)) {
+      checkExpression(site.expression, [...tpath, ...site.path], variables, out);
+    }
+  });
+
+  cam.setups.forEach((setup, si) => {
+    const spath = ['cam', 'setups', si];
+    checkId(setup.id, [...spath, 'id']);
+    if (setup.wcs.up.kind === 'face')
+      checkId(setup.wcs.up.face.id, [...spath, 'wcs', 'up', 'face', 'id']);
+    if (!partIds.has(setup.part)) {
+      out.push({
+        code: 'dependency',
+        message: `CAM setup ${setup.id} machines part ${setup.part}, which does not exist`,
+        path: [...spath, 'part'],
+        blockers: [setup.part],
+      });
+    }
+    for (const site of camSetupOwnExpressions(setup)) {
+      checkExpression(site.expression, [...spath, ...site.path], variables, out);
+    }
+    setup.operations.forEach((op, oi) => {
+      const opath = [...spath, 'operations', oi];
+      const where = `CAM operation ${setup.id} / ${op.id}`;
+      checkId(op.id, [...opath, 'id']);
+      if (!toolIds.has(op.tool)) {
+        out.push({
+          code: 'dependency',
+          message: `${where} cuts with tool ${op.tool}, which is not in the CAM tools`,
+          path: [...opath, 'tool'],
+          blockers: [op.tool],
+        });
+      }
+      op.geometry.forEach((source, gi) => {
+        const gpath = [...opath, 'geometry', gi];
+        if (source.kind === 'face') checkId(source.face.id, [...gpath, 'face', 'id']);
+        const allowed =
+          op.kind === 'drill'
+            ? source.kind === 'hole'
+            : op.kind !== 'surface3d' && source.kind !== 'hole';
+        if (!allowed) {
+          out.push({
+            code: 'kind-mismatch',
+            message:
+              op.kind === 'surface3d'
+                ? `${where} machines the setup's body and takes no geometry sources`
+                : op.kind === 'drill'
+                  ? `${where} drills hole features; a ${source.kind} source is not one`
+                  : `${where} takes faces and sketch regions, not a hole feature`,
+            path: [...gpath, 'kind'],
+          });
+        }
+      });
+      for (const site of camExpressions(op)) {
+        checkExpression(site.expression, [...opath, ...site.path], variables, out);
+      }
+    });
+  });
+}
+
 /** `<counter>#n` for an assembly-level counter, `<prefix>n` for a reference prefix. */
 function previewId(counter: string, n: number): string {
   return counter.length === 1 ? `${counter}${n}` : `${counter}#${n}`;
@@ -1220,6 +1334,7 @@ export function validateDocument(doc: ManufaktureDocument): CoreError[] {
     checkAssembly(assembly, ai, partIds, rowIds, variables, out);
   });
   checkPrint(doc.print, partIds, variables, out);
+  checkCam(doc.cam, partIds, variables, out);
   checkDrawings(doc, partIds, variables, out);
   return out;
 }

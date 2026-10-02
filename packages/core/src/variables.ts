@@ -4,11 +4,15 @@
 // Configurations count as uses: a parameter that configures a variable, and a row value that
 // mentions one. So do mates: a connector offset or a limit that reads a variable; print setups:
 // a threshold or an item's orientation angle; exploded views: a step's distance; and drawings: a
-// custom sheet size, a view's scale or a section's offset.
+// custom sheet size, a view's scale or a section's offset; and CAM: a tool's sizes and presets, a
+// setup's stock and heights, and an operation's fields.
 
 import { isValidVariableName } from '@manufakture/units';
 import { variableParameters, type Command, type SimpleCommand } from './commands';
 import {
+  camExpressions,
+  camSetupOwnExpressions,
+  camToolExpressions,
   explodedViewExpressions,
   featureExpressions,
   mateExpressions,
@@ -17,10 +21,14 @@ import {
   printThresholdExpressions,
   sheetExpressions,
   viewExpressions,
+  type CamExpressionKind,
   type ExpressionKind,
 } from './features';
 import { fail, ok, type CoreResult } from './result';
 import type {
+  CamOperation,
+  CamSetup,
+  CamTool,
   ConfigRow,
   DrawingView,
   ExplodedView,
@@ -101,6 +109,32 @@ export type DrawingVariableUse =
       viewId?: string;
       path: readonly (string | number)[];
       expected: ExpressionKind;
+    };
+
+/**
+ * A use of a variable in the CAM section (since version 14). Kept apart from `VariableUse` so code
+ * that switches over every `VariableUse` kind keeps working; list them with `camVariableUses`.
+ * `renameVariable`, `inlineVariable` and `variableUsers` cover them.
+ */
+export type CamVariableUse =
+  /** A tool's size or a preset's value. `path` is from the tool: `['presets', 0, 'feed']`. */
+  | {
+      kind: 'camTool';
+      toolId: string;
+      path: readonly (string | number)[];
+      expected: CamExpressionKind;
+    }
+  /**
+   * A setup's stock or heights (no `operationId`), or one of its operations' fields (with the
+   * operation's id). `path` is from the setup: `['operations', 1, 'depth', 'depth']` for an
+   * operation's.
+   */
+  | {
+      kind: 'camSetup';
+      setupId: string;
+      operationId?: string;
+      path: readonly (string | number)[];
+      expected: CamExpressionKind;
     };
 
 function mentions(expression: StoredExpression, name: string): boolean {
@@ -222,6 +256,39 @@ export function drawingVariableUses(doc: ManufaktureDocument, name: string): Dra
 }
 
 /**
+ * Every use of variable `name` in CAM, in document order: tools, then setups (each setup's stock
+ * and heights, then its operations in cut order).
+ */
+export function camVariableUses(doc: ManufaktureDocument, name: string): CamVariableUse[] {
+  const out: CamVariableUse[] = [];
+  for (const tool of doc.cam.tools) {
+    for (const site of camToolExpressions(tool)) {
+      if (!mentions(site.expression, name)) continue;
+      out.push({ kind: 'camTool', toolId: tool.id, path: site.path, expected: site.expected });
+    }
+  }
+  for (const setup of doc.cam.setups) {
+    for (const site of camSetupOwnExpressions(setup)) {
+      if (!mentions(site.expression, name)) continue;
+      out.push({ kind: 'camSetup', setupId: setup.id, path: site.path, expected: site.expected });
+    }
+    setup.operations.forEach((op, oi) => {
+      for (const site of camExpressions(op)) {
+        if (!mentions(site.expression, name)) continue;
+        out.push({
+          kind: 'camSetup',
+          setupId: setup.id,
+          operationId: op.id,
+          path: ['operations', oi, ...site.path],
+          expected: site.expected,
+        });
+      }
+    });
+  }
+  return out;
+}
+
+/**
  * `source` with every reference to variable `name` replaced by `replacement(hashed)`, or null
  * when it does not parse. References are found by the parser, so text inside other names
  * (`#width` when renaming `w`) is never touched.
@@ -259,7 +326,8 @@ function replaceAt<T>(value: T, path: readonly (string | number)[], next: unknow
 /**
  * The commands that rewrite every expression reading `name` with `rewrite` (variables other
  * than `name` itself, then features, then mates, then print setups and items, then exploded
- * views, then drawing sheets and views, then configuration rows), without deleting or adding
+ * views, then drawing sheets and views, then CAM tools, setups and operations, then configuration
+ * rows), without deleting or adding
  * anything.
  */
 function rewriteUses(
@@ -354,6 +422,45 @@ function rewriteUses(
           next = replaceAt(next, site.path, { ...site.expression, source });
         }
         if (next !== view) commands.push({ type: 'editView', ...ids, view: next });
+      }
+    }
+  }
+  for (const tool of doc.cam.tools) {
+    let next: CamTool = tool;
+    for (const site of camToolExpressions(tool)) {
+      if (!mentions(site.expression, name)) continue;
+      const source = rewrite(site.expression.source);
+      if (source === null) continue;
+      next = replaceAt(next, site.path, { ...site.expression, source });
+    }
+    if (next !== tool) commands.push({ type: 'editCamTool', tool: next });
+  }
+  for (const setup of doc.cam.setups) {
+    let own: CamSetup = setup;
+    for (const site of camSetupOwnExpressions(setup)) {
+      if (!mentions(site.expression, name)) continue;
+      const source = rewrite(site.expression.source);
+      if (source === null) continue;
+      own = replaceAt(own, site.path, { ...site.expression, source });
+    }
+    if (own !== setup) {
+      commands.push({
+        type: 'editCamSetup',
+        setupId: setup.id,
+        stock: own.stock,
+        heights: own.heights,
+      });
+    }
+    for (const op of setup.operations) {
+      let next: CamOperation = op;
+      for (const site of camExpressions(op)) {
+        if (!mentions(site.expression, name)) continue;
+        const source = rewrite(site.expression.source);
+        if (source === null) continue;
+        next = replaceAt(next, site.path, { ...site.expression, source });
+      }
+      if (next !== op) {
+        commands.push({ type: 'editCamOperation', setupId: setup.id, operation: next });
       }
     }
   }

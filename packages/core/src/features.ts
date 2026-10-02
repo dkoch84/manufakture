@@ -1,8 +1,16 @@
 import type {
   Assembly,
+  CamData,
+  CamDepth,
+  CamEntry,
+  CamLead,
+  CamOperation,
+  CamSetup,
+  CamTool,
   ConstraintKind,
   DerivedSource,
   Dimension,
+  FaceReference,
   Drawing,
   DrawingView,
   ExplodedView,
@@ -579,4 +587,196 @@ export function forEachView(
   for (const drawing of drawings ?? []) {
     for (const sheet of drawing.sheets) for (const view of sheet.views) visit(view, sheet, drawing);
   }
+}
+
+// ---------------------------------------------------------------------------------------------
+// CAM (since version 14; ADR 0014): generic views of tools, setups and operations, as above for
+// print setups. Validation, commands, variables and changes use these, so each kind is described
+// once.
+
+/**
+ * What a CAM expression must evaluate to: core's kinds plus the feed rate and spindle speed of
+ * `@manufakture/units` (T5.1a). Kept apart from `ExpressionKind` so code that evaluates feature
+ * expressions keeps working unchanged.
+ */
+export type CamExpressionKind = 'length' | 'angle' | 'number' | 'feed' | 'spindleSpeed';
+
+export interface CamExpressionSite {
+  /** Path from the tool, setup or operation to the expression (`['depth', 'depth']`). */
+  readonly path: readonly (string | number)[];
+  readonly expression: StoredExpression;
+  readonly expected: CamExpressionKind;
+}
+
+function camSites(): {
+  out: CamExpressionSite[];
+  add: (
+    path: readonly (string | number)[],
+    expression: StoredExpression | undefined,
+    expected: CamExpressionKind,
+  ) => void;
+} {
+  const out: CamExpressionSite[] = [];
+  return {
+    out,
+    add: (path, expression, expected) => {
+      if (expression !== undefined) out.push({ path, expression, expected });
+    },
+  };
+}
+
+/** A tool's expressions: its sizes, then each preset's (`['presets', 0, 'feed']`). */
+export function camToolExpressions(tool: CamTool): CamExpressionSite[] {
+  const { out, add } = camSites();
+  add(['diameter'], tool.diameter, 'length');
+  add(['fluteLength'], tool.fluteLength, 'length');
+  add(['cornerRadius'], tool.cornerRadius, 'length');
+  add(['angle'], tool.angle, 'angle');
+  add(['tipDiameter'], tool.tipDiameter, 'length');
+  tool.presets.forEach((p, i) => {
+    add(['presets', i, 'spindle'], p.spindle, 'spindleSpeed');
+    add(['presets', i, 'feed'], p.feed, 'feed');
+    add(['presets', i, 'plunge'], p.plunge, 'feed');
+    add(['presets', i, 'stepdown'], p.stepdown, 'length');
+    add(['presets', i, 'stepover'], p.stepover, 'number');
+  });
+  return out;
+}
+
+/** A setup's own expressions (its stock and heights, not its operations'), with paths from it. */
+export function camSetupOwnExpressions(setup: CamSetup): CamExpressionSite[] {
+  const { out, add } = camSites();
+  const stock = setup.stock;
+  if (stock.kind === 'fromBody') {
+    for (const key of ['xMin', 'xMax', 'yMin', 'yMax', 'top', 'bottom'] as const) {
+      add(['stock', 'margins', key], stock.margins[key], 'length');
+    }
+  } else {
+    for (const key of ['x', 'y', 'z'] as const)
+      add(['stock', 'size', key], stock.size[key], 'length');
+    for (const key of ['x', 'y', 'z'] as const) {
+      add(['stock', 'offset', key], stock.offset[key], 'length');
+    }
+  }
+  add(['heights', 'clearance'], setup.heights.clearance, 'length');
+  add(['heights', 'retract'], setup.heights.retract, 'length');
+  return out;
+}
+
+function depthSites(add: ReturnType<typeof camSites>['add'], depth: CamDepth | undefined): void {
+  if (depth?.kind === 'blind') add(['depth', 'depth'], depth.depth, 'length');
+  else if (depth?.kind === 'through') add(['depth', 'extra'], depth.extra, 'length');
+}
+
+function entrySites(add: ReturnType<typeof camSites>['add'], entry: CamEntry): void {
+  if (entry.kind === 'ramp') add(['entry', 'angle'], entry.angle, 'angle');
+  if (entry.kind === 'helix') {
+    add(['entry', 'angle'], entry.angle, 'angle');
+    add(['entry', 'radius'], entry.radius, 'length');
+  }
+}
+
+function leadSites(
+  add: ReturnType<typeof camSites>['add'],
+  key: 'leadIn' | 'leadOut',
+  lead: CamLead,
+): void {
+  if (lead.kind === 'line') add([key, 'length'], lead.length, 'length');
+  if (lead.kind === 'arc') add([key, 'radius'], lead.radius, 'length');
+}
+
+/**
+ * Every expression of an operation with the kind its field expects, for regen-style evaluation
+ * (M5 plan, T5.1b): its feeds, then its kind's fields, with paths from the operation.
+ */
+export function camExpressions(op: CamOperation): CamExpressionSite[] {
+  const { out, add } = camSites();
+  add(['feeds', 'spindle'], op.feeds?.spindle, 'spindleSpeed');
+  for (const key of ['cut', 'plunge', 'ramp', 'lead'] as const) {
+    add(['feeds', key], op.feeds?.[key], 'feed');
+  }
+  switch (op.kind) {
+    case 'facing':
+      add(['depth'], op.depth, 'length');
+      add(['stepdown'], op.stepdown, 'length');
+      add(['stepover'], op.stepover, 'number');
+      add(['angle'], op.angle, 'angle');
+      break;
+    case 'profile':
+      depthSites(add, op.depth);
+      add(['stepdown'], op.stepdown, 'length');
+      add(['finishAllowance'], op.finishAllowance, 'length');
+      add(['tabs', 'count'], op.tabs?.count, 'number');
+      add(['tabs', 'width'], op.tabs?.width, 'length');
+      add(['tabs', 'height'], op.tabs?.height, 'length');
+      entrySites(add, op.entry);
+      leadSites(add, 'leadIn', op.leadIn);
+      leadSites(add, 'leadOut', op.leadOut);
+      break;
+    case 'pocket':
+      depthSites(add, op.depth);
+      add(['stepdown'], op.stepdown, 'length');
+      add(['stepover'], op.stepover, 'number');
+      add(['finishAllowance'], op.finishAllowance, 'length');
+      entrySites(add, op.entry);
+      break;
+    case 'drill':
+      depthSites(add, op.depth);
+      add(['peck'], op.peck, 'length');
+      add(['dwell'], op.dwell, 'number');
+      break;
+    case 'vcarve':
+      add(['maxDepth'], op.maxDepth, 'length');
+      break;
+    case 'surface3d':
+      add(['stepover'], op.stepover, 'length');
+      add(['angle'], op.angle, 'angle');
+      add(['allowance'], op.allowance, 'length');
+      break;
+  }
+  return out;
+}
+
+/**
+ * Every expression in a setup, with paths from the setup: its own (`camSetupOwnExpressions`),
+ * then each operation's (`['operations', 2, 'depth', 'depth']`).
+ */
+export function camSetupExpressions(setup: CamSetup): CamExpressionSite[] {
+  return [
+    ...camSetupOwnExpressions(setup),
+    ...setup.operations.flatMap((op, i) =>
+      camExpressions(op).map((site) => ({ ...site, path: ['operations', i, ...site.path] })),
+    ),
+  ];
+}
+
+/** The face references an operation holds, in geometry order. */
+export function camOperationReferences(op: CamOperation): FaceReference[] {
+  const out: FaceReference[] = [];
+  for (const source of op.geometry) if (source.kind === 'face') out.push(source.face);
+  return out;
+}
+
+/** Every id an operation owns: its own, then its face references' (`r<n>`). */
+export function camOperationIds(op: CamOperation): string[] {
+  return [op.id, ...camOperationReferences(op).map((r) => r.id)];
+}
+
+/** The ids a setup owns besides its operations': its own and its WCS face reference's. */
+export function camSetupOwnIds(setup: CamSetup): string[] {
+  return setup.wcs.up.kind === 'face' ? [setup.id, setup.wcs.up.face.id] : [setup.id];
+}
+
+/** Every id a setup owns: its own (`camSetupOwnIds`), then each operation's, in cut order. */
+export function camSetupIds(setup: CamSetup): string[] {
+  return [...camSetupOwnIds(setup), ...setup.operations.flatMap(camOperationIds)];
+}
+
+/** Operations, in any setup, that cut with tool `toolId`, as `<setup id>/<operation id>`. */
+export function camToolUsers(cam: CamData, toolId: string): string[] {
+  const out: string[] = [];
+  for (const setup of cam.setups) {
+    for (const op of setup.operations) if (op.tool === toolId) out.push(`${setup.id}/${op.id}`);
+  }
+  return out;
 }

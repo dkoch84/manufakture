@@ -62,8 +62,11 @@ describe('.mfk files', () => {
   it('runs core migrations on import, and refuses a newer format with a clear message', async () => {
     const lib = library();
     const current = JSON.parse(serialize(createDocument({ id: 'old', name: 'Old' })));
-    // Versions 1 and 2 differ from 3 only by features and fields this document does not use.
-    const v1 = { ...current, version: 1 };
+    // Versions 1 and 2 differ from 3 only by features and fields this document does not use. A
+    // file older than 14 has no `cam` key (the v13 to v14 migration refuses one), so drop it.
+    const { cam: _cam, ...rest } = current as Record<string, unknown>;
+    void _cam;
+    const v1 = { ...rest, version: 1 };
     const r = await lib.importMfk(packMfk(JSON.stringify(v1), new Map()));
     expect(r).toMatchObject({ ok: true, value: { migrated: true, summary: { id: 'old' } } });
     const opened = await lib.open('old');

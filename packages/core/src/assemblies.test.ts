@@ -1192,6 +1192,7 @@ describe('saving', () => {
       'assemblies',
       'print',
       'fonts',
+      'cam',
       'nextIds',
     ]);
   });

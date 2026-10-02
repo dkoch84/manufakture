@@ -2,6 +2,12 @@ import { isValidVariableName } from '@manufakture/units';
 import { z } from 'zod';
 import {
   bodyCreator,
+  camExpressions,
+  camOperationIds,
+  camSetupIds,
+  camSetupOwnExpressions,
+  camToolExpressions,
+  camToolUsers,
   dimensionInstances,
   drawingExpressions,
   explodedViewExpressions,
@@ -20,6 +26,7 @@ import {
   printSetupExpressions,
   printSetupIds,
   sheetIds,
+  type CamExpressionSite,
 } from './features';
 import { PART_COUNTER, parseAnyId, peekCounter } from './ids';
 import { fail, ok, schemaError, type CoreResult } from './result';
@@ -29,6 +36,16 @@ import {
   AssemblySchema,
   BodyIdSchema,
   BodyPropsFieldsSchema,
+  CamOperationSchema,
+  CamSetupSchema,
+  CamStockSchema,
+  CamTableIdSchema,
+  CamToolSchema,
+  CamWcsSchema,
+  MAX_CAM_OPERATIONS,
+  MAX_CAM_SETUPS,
+  MAX_CAM_TOOLS,
+  MAX_CAM_TOTAL_SOURCES,
   CONFIG_PARAMETER_COUNTER,
   CONFIG_ROW_COUNTER,
   ConfigParameterIdSchema,
@@ -76,6 +93,10 @@ import {
   type Assembly,
   type BodyProps,
   type BodyPropsFields,
+  type CamData,
+  type CamOperation,
+  type CamSetup,
+  type CamTool,
   type ConfigParameter,
   type ConfigRow,
   type Configurations,
@@ -118,6 +139,8 @@ export const PART_ID_PATTERN = /^part#[1-9][0-9]*$/;
 export const MAX_ASSEMBLY_NAME = 200;
 /** Longest print setup name `editPrintSetup` accepts (as for features). */
 export const MAX_PRINT_SETUP_NAME = 200;
+/** Longest CAM setup name `editCamSetup` accepts (as for features). */
+export const MAX_CAM_SETUP_NAME = 200;
 
 const partId = z.string().min(1);
 const assemblyId = z.string().min(1).max(32);
@@ -133,6 +156,7 @@ const dimensionId = z.string().min(1).max(32);
 const noteId = z.string().min(1).max(32);
 const explodedViewId = z.string().min(1).max(32);
 const stepId = z.string().min(1).max(32);
+const camItemId = z.string().min(1).max(32);
 const index = z.int().min(0);
 
 export const SimpleCommandSchema = z.discriminatedUnion('type', [
@@ -614,6 +638,93 @@ export const SimpleCommandSchema = z.discriminatedUnion('type', [
   /** History only: put a note state back (replace by id at `index`, or insert at `index`). */
   z.strictObject({ type: z.literal('restoreNote'), drawingId, sheetId, note: NoteSchema, index }),
   /**
+   * Add a CAM tool at `index` (default: last). Its id must be a fresh `tool#n` from
+   * `cam.nextIds`. Since version 14.
+   */
+  z.strictObject({ type: z.literal('addCamTool'), tool: CamToolSchema, index: index.optional() }),
+  /** Replace a tool's inputs, by id. */
+  z.strictObject({ type: z.literal('editCamTool'), tool: CamToolSchema }),
+  /** Remove a tool. Refused while an operation of any setup cuts with it. */
+  z.strictObject({ type: z.literal('deleteCamTool'), toolId: camItemId }),
+  /** History only: put a tool state back (replace by id at `index`, or insert at `index`). */
+  z.strictObject({ type: z.literal('restoreCamTool'), tool: CamToolSchema, index }),
+  /**
+   * Add a CAM setup at `index` (default: last). Its id, its WCS face reference's and those of its
+   * operations must be fresh (`setup#n`, `<kind>#n`, `r<n>` from `cam.nextIds`); its part must
+   * exist and its operations' tools be in `cam.tools`. The body, faces, sketches and holes it
+   * names are not checked against the part (ADR 0014 decision 6).
+   */
+  z.strictObject({
+    type: z.literal('addCamSetup'),
+    setup: CamSetupSchema,
+    index: index.optional(),
+  }),
+  /**
+   * Change a setup's name, part, body (`null`: the part's only body), machine, post, stock, WCS
+   * or heights. Absent fields stay; operations are edited with their own commands. A new WCS face
+   * reference id must be fresh.
+   */
+  z.strictObject({
+    type: z.literal('editCamSetup'),
+    setupId,
+    name: z.string().exactOptional(),
+    part: CamSetupSchema.shape.part.exactOptional(),
+    body: BodyIdSchema.nullable().exactOptional(),
+    machine: CamTableIdSchema.exactOptional(),
+    post: CamTableIdSchema.exactOptional(),
+    stock: CamStockSchema.exactOptional(),
+    wcs: CamWcsSchema.exactOptional(),
+    heights: CamSetupSchema.shape.heights.exactOptional(),
+  }),
+  /** Remove a setup with its operations. Nothing refers to a setup. */
+  z.strictObject({ type: z.literal('deleteCamSetup'), setupId }),
+  /**
+   * History only: put a setup state back, replacing the setup with the same id (at `index`) or
+   * inserting it at `index`. Its ids must have been allocated before.
+   */
+  z.strictObject({ type: z.literal('restoreCamSetup'), setup: CamSetupSchema, index }),
+  /** Move a setup so it ends up at `index`. */
+  z.strictObject({ type: z.literal('reorderCamSetups'), setupId, index }),
+  /**
+   * Add an operation to a setup at `index` (default: last, the end of the cut order). Its id and
+   * its face references' ids must be fresh (`<kind>#n`, `r<n>` from `cam.nextIds`); its tool
+   * must be in `cam.tools`.
+   */
+  z.strictObject({
+    type: z.literal('addCamOperation'),
+    setupId,
+    operation: CamOperationSchema,
+    index: index.optional(),
+  }),
+  /** Replace an operation's inputs, by id (so of the same kind). Ids it introduces must be fresh. */
+  z.strictObject({ type: z.literal('editCamOperation'), setupId, operation: CamOperationSchema }),
+  /** Remove an operation from a setup. Nothing refers to an operation. */
+  z.strictObject({ type: z.literal('deleteCamOperation'), setupId, operationId: camItemId }),
+  /**
+   * History only: put an operation state back, replacing the one with the same id (at `index`)
+   * or inserting it at `index`. Its ids must have been allocated before. With
+   * `deleteCamOperation` in one batch, it moves an operation to another setup under its id.
+   */
+  z.strictObject({
+    type: z.literal('restoreCamOperation'),
+    setupId,
+    operation: CamOperationSchema,
+    index,
+  }),
+  /** Move an operation so it ends up at `index` in its setup's cut order. */
+  z.strictObject({
+    type: z.literal('reorderCamOperation'),
+    setupId,
+    operationId: camItemId,
+    index,
+  }),
+  z.strictObject({
+    type: z.literal('suppressCamOperation'),
+    setupId,
+    operationId: camItemId,
+    suppressed: z.boolean(),
+  }),
+  /**
    * History only: put a whole document in place of this one (restore a version or revision; the
    * undo of a restore). The replacement must be this document (same `id`) and valid as a whole,
    * assemblies and configurations included. Its inverse is `replaceDocument` of the document it
@@ -784,6 +895,22 @@ function applyUnchecked(doc: ManufaktureDocument, command: Command): CoreResult<
     case 'deleteFont':
     case 'restoreFont':
       return applyToFonts(doc, command);
+    case 'addCamTool':
+    case 'editCamTool':
+    case 'deleteCamTool':
+    case 'restoreCamTool':
+    case 'addCamSetup':
+    case 'editCamSetup':
+    case 'deleteCamSetup':
+    case 'restoreCamSetup':
+    case 'reorderCamSetups':
+    case 'addCamOperation':
+    case 'editCamOperation':
+    case 'deleteCamOperation':
+    case 'restoreCamOperation':
+    case 'reorderCamOperation':
+    case 'suppressCamOperation':
+      return applyToCam(doc, command);
     default:
       return applyToPart(doc, command);
   }
@@ -845,8 +972,9 @@ function maxCounters(
 /**
  * The replacement a restore puts in place of `current`: `past` (an earlier version or revision of
  * it, or one from another branch) as it was, but with `current`'s id and with every id counter
- * (the document's, the print section's, and those of each part, assembly and drawing both have)
- * at the higher of the two values, so an id handed out after `past` is never handed out again.
+ * (the document's, the print and CAM sections', and those of each part, assembly and drawing
+ * both have) at the higher of the two values, so an id handed out after `past` is never handed
+ * out again.
  * The result is what `replaceDocument` takes.
  */
 export function restoredDocument(
@@ -874,6 +1002,7 @@ export function restoredDocument(
       nextIds: maxCounters(a.nextIds, assemblies.get(a.id)?.nextIds),
     })),
     print: { ...past.print, nextIds: maxCounters(past.print.nextIds, current.print.nextIds) },
+    cam: { ...past.cam, nextIds: maxCounters(past.cam.nextIds, current.cam.nextIds) },
     nextIds: maxCounters(past.nextIds, current.nextIds),
   };
 }
@@ -1658,6 +1787,15 @@ function applyToParts(doc: ManufaktureDocument, command: PartsCommand): CoreResu
           `Cannot delete ${command.partId}: print ${items.length === 1 ? 'item' : 'items'} ${items.join(', ')} ${items.length === 1 ? 'prints' : 'print'} it`,
           ['partId'],
           { blockers: items },
+        );
+      }
+      const camSetups = partCamSetups(doc, command.partId);
+      if (camSetups.length > 0) {
+        return fail(
+          'dependency',
+          `Cannot delete ${command.partId}: CAM ${camSetups.length === 1 ? 'setup' : 'setups'} ${camSetups.join(', ')} ${camSetups.length === 1 ? 'machines' : 'machine'} it`,
+          ['partId'],
+          { blockers: camSetups },
         );
       }
       const views = partViews(doc, command.partId);
@@ -2689,6 +2827,295 @@ function applyPrintItemCommand(
 }
 
 // ---------------------------------------------------------------------------------------------
+// CAM (since version 14; ADR 0014)
+
+/**
+ * CAM setups that machine part `partId`, by id. Only the part blocks a delete; the body, faces,
+ * sketches and holes a setup's operations name never do (ADR 0014 decision 6).
+ */
+export function partCamSetups(doc: ManufaktureDocument, partId: string): string[] {
+  return doc.cam.setups.filter((s) => s.part === partId).map((s) => s.id);
+}
+
+type CamCommand = Extract<
+  SimpleCommand,
+  {
+    type:
+      | 'addCamTool'
+      | 'editCamTool'
+      | 'deleteCamTool'
+      | 'restoreCamTool'
+      | 'addCamSetup'
+      | 'editCamSetup'
+      | 'deleteCamSetup'
+      | 'restoreCamSetup'
+      | 'reorderCamSetups'
+      | 'addCamOperation'
+      | 'editCamOperation'
+      | 'deleteCamOperation'
+      | 'restoreCamOperation'
+      | 'reorderCamOperation'
+      | 'suppressCamOperation';
+  }
+>;
+
+const CAM_TOOL_LIST: ListSpec<CamTool> = {
+  what: 'CAM tool',
+  plural: 'CAM tools',
+  idField: 'toolId',
+  itemField: 'tool',
+  ids: (tool) => [tool.id],
+  max: MAX_CAM_TOOLS,
+};
+const CAM_SETUP_LIST: ListSpec<CamSetup> = {
+  what: 'CAM setup',
+  plural: 'CAM setups',
+  idField: 'setupId',
+  itemField: 'setup',
+  ids: camSetupIds,
+  max: MAX_CAM_SETUPS,
+};
+const CAM_OPERATION_LIST: ListSpec<CamOperation> = {
+  what: 'CAM operation',
+  plural: 'CAM operations',
+  idField: 'operationId',
+  itemField: 'operation',
+  ids: camOperationIds,
+  max: MAX_CAM_OPERATIONS,
+};
+
+/**
+ * The section-wide bounds the schema puts on CAM (operations and geometry sources in all
+ * setups), checked here because validation does not run the schema: a document that commands
+ * build must load again.
+ */
+function camTooBig(cam: CamData): CoreResult<never> | undefined {
+  let operations = 0;
+  let sources = 0;
+  for (const setup of cam.setups) {
+    operations += setup.operations.length;
+    for (const op of setup.operations) sources += op.geometry.length;
+  }
+  if (operations > MAX_CAM_OPERATIONS) {
+    return fail(
+      'schema',
+      `The CAM setups would hold ${operations} operations; at most ${MAX_CAM_OPERATIONS} are allowed`,
+      [],
+    );
+  }
+  if (sources > MAX_CAM_TOTAL_SOURCES) {
+    return fail(
+      'schema',
+      `The CAM operations would hold ${sources} geometry sources; at most ${MAX_CAM_TOTAL_SOURCES} are allowed`,
+      [],
+    );
+  }
+  return undefined;
+}
+
+/**
+ * Commands on the CAM section. Ids come from `cam.nextIds` with the rules of every other list:
+ * `fresh` for add and edit, `restore` for history. An edit's inverse is the matching `restore`
+ * of the old state. Nothing here looks at geometry, so no CAM command is refused because of what
+ * a body, face, sketch or hole reference names; and no part command is refused because of CAM,
+ * except `deletePart` while a setup machines the part.
+ */
+function applyToCam(doc: ManufaktureDocument, command: CamCommand): CoreResult<Applied> {
+  const cam = doc.cam;
+  const done = (changes: Partial<CamData>, inverse: Command): CoreResult<Applied> => {
+    const next = { ...cam, ...changes };
+    const tooBig = camTooBig(next);
+    if (tooBig) return tooBig;
+    return ok({ document: { ...doc, cam: next }, inverse });
+  };
+  const findSetup = (id: string): CoreResult<number> => {
+    const i = cam.setups.findIndex((x) => x.id === id);
+    return i < 0 ? fail('not-found', `No CAM setup "${id}"`, ['setupId']) : ok(i);
+  };
+  const withSetup = (si: number, setup: CamSetup): CamSetup[] => {
+    const setups = cam.setups.slice();
+    setups[si] = setup;
+    return setups;
+  };
+
+  switch (command.type) {
+    case 'addCamTool':
+    case 'editCamTool':
+    case 'deleteCamTool':
+    case 'restoreCamTool': {
+      if (command.type === 'deleteCamTool') {
+        const users = camToolUsers(cam, command.toolId);
+        if (users.length > 0) {
+          return fail(
+            'dependency',
+            `Cannot delete CAM tool ${command.toolId}: ${users.length === 1 ? 'operation' : 'operations'} ${users.join(', ')} ${users.length === 1 ? 'cuts' : 'cut'} with it`,
+            ['toolId'],
+            { blockers: users },
+          );
+        }
+      }
+      const op: ListOp<CamTool> =
+        command.type === 'addCamTool'
+          ? { op: 'add', item: command.tool, index: command.index }
+          : command.type === 'editCamTool'
+            ? { op: 'edit', item: command.tool }
+            : command.type === 'restoreCamTool'
+              ? { op: 'restore', item: command.tool, index: command.index }
+              : { op: 'delete', id: command.toolId };
+      const r = applyListOp(cam.tools, cam.nextIds, op, CAM_TOOL_LIST, '');
+      if (!r.ok) return r;
+      const inv = r.value.inverse;
+      return done(
+        { tools: r.value.list, nextIds: r.value.nextIds },
+        inv.op === 'restore'
+          ? { type: 'restoreCamTool', tool: inv.item, index: inv.index }
+          : { type: 'deleteCamTool', toolId: inv.id },
+      );
+    }
+
+    case 'addCamSetup':
+    case 'deleteCamSetup':
+    case 'restoreCamSetup': {
+      const op: ListOp<CamSetup> =
+        command.type === 'addCamSetup'
+          ? { op: 'add', item: command.setup, index: command.index }
+          : command.type === 'restoreCamSetup'
+            ? { op: 'restore', item: command.setup, index: command.index }
+            : { op: 'delete', id: command.setupId };
+      const r = applyListOp(cam.setups, cam.nextIds, op, CAM_SETUP_LIST, '');
+      if (!r.ok) return r;
+      const inv = r.value.inverse;
+      return done(
+        { setups: r.value.list, nextIds: r.value.nextIds },
+        inv.op === 'restore'
+          ? { type: 'restoreCamSetup', setup: inv.item, index: inv.index }
+          : { type: 'deleteCamSetup', setupId: inv.id },
+      );
+    }
+
+    case 'editCamSetup': {
+      const si = findSetup(command.setupId);
+      if (!si.ok) return si;
+      const old = cam.setups[si.value]!;
+      let next: CamSetup = old;
+      if (command.name !== undefined) {
+        const name = command.name.trim();
+        if (name.length === 0 || name.length > MAX_CAM_SETUP_NAME) {
+          return fail(
+            'invalid-name',
+            `A CAM setup name must be 1 to ${MAX_CAM_SETUP_NAME} characters`,
+            ['name'],
+          );
+        }
+        next = { ...next, name };
+      }
+      if (command.part !== undefined) next = { ...next, part: command.part };
+      if (command.body !== undefined) {
+        const { body: _body, ...rest } = next;
+        void _body;
+        next = command.body === null ? rest : { ...rest, body: command.body };
+      }
+      if (command.machine !== undefined) next = { ...next, machine: command.machine };
+      if (command.post !== undefined) next = { ...next, post: command.post };
+      if (command.stock !== undefined) next = { ...next, stock: command.stock };
+      if (command.wcs !== undefined) next = { ...next, wcs: command.wcs };
+      if (command.heights !== undefined) next = { ...next, heights: command.heights };
+      // A new WCS face reference takes a fresh id; the inverse restores the old state.
+      const r = applyListOp(
+        cam.setups,
+        cam.nextIds,
+        { op: 'edit', item: next },
+        CAM_SETUP_LIST,
+        '',
+      );
+      if (!r.ok) return r;
+      return done(
+        { setups: withSetup(si.value, next), nextIds: r.value.nextIds },
+        { type: 'restoreCamSetup', setup: old, index: si.value },
+      );
+    }
+
+    case 'reorderCamSetups': {
+      const r = reorderList(cam.setups, command.setupId, command.index, CAM_SETUP_LIST, '');
+      if (!r.ok) return r;
+      return done(
+        { setups: r.value.list },
+        { type: 'reorderCamSetups', setupId: command.setupId, index: r.value.from },
+      );
+    }
+
+    default: {
+      const si = findSetup(command.setupId);
+      if (!si.ok) return si;
+      const setup = cam.setups[si.value]!;
+      const { setupId } = command;
+      const at = ` in CAM setup ${setup.id}`;
+      const withOperations = (operations: CamOperation[]) =>
+        withSetup(si.value, { ...setup, operations });
+
+      if (command.type === 'reorderCamOperation') {
+        const r = reorderList(
+          setup.operations,
+          command.operationId,
+          command.index,
+          CAM_OPERATION_LIST,
+          at,
+        );
+        if (!r.ok) return r;
+        return done(
+          { setups: withOperations(r.value.list) },
+          {
+            type: 'reorderCamOperation',
+            setupId,
+            operationId: command.operationId,
+            index: r.value.from,
+          },
+        );
+      }
+
+      if (command.type === 'suppressCamOperation') {
+        const oi = setup.operations.findIndex((o) => o.id === command.operationId);
+        const old = setup.operations[oi];
+        if (!old) {
+          return fail('not-found', `No CAM operation "${command.operationId}"${at}`, [
+            'operationId',
+          ]);
+        }
+        const operations = setup.operations.slice();
+        operations[oi] = { ...old, suppressed: command.suppressed };
+        return done(
+          { setups: withOperations(operations) },
+          {
+            type: 'suppressCamOperation',
+            setupId,
+            operationId: old.id,
+            suppressed: old.suppressed,
+          },
+        );
+      }
+
+      const op: ListOp<CamOperation> =
+        command.type === 'addCamOperation'
+          ? { op: 'add', item: command.operation, index: command.index }
+          : command.type === 'editCamOperation'
+            ? { op: 'edit', item: command.operation }
+            : command.type === 'restoreCamOperation'
+              ? { op: 'restore', item: command.operation, index: command.index }
+              : { op: 'delete', id: command.operationId };
+      const r = applyListOp(setup.operations, cam.nextIds, op, CAM_OPERATION_LIST, at);
+      if (!r.ok) return r;
+      const inv = r.value.inverse;
+      return done(
+        { setups: withOperations(r.value.list), nextIds: r.value.nextIds },
+        inv.op === 'restore'
+          ? { type: 'restoreCamOperation', setupId, operation: inv.item, index: inv.index }
+          : { type: 'deleteCamOperation', setupId, operationId: inv.id },
+      );
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
 // Drawings (since version 12)
 
 /** Longest drawing name `renameDrawing` accepts (as for features). */
@@ -3205,6 +3632,24 @@ export function variablePrintSetups(doc: ManufaktureDocument, name: string): Pri
   );
 }
 
+/**
+ * The CAM items whose expressions mention variable `name`: tools by id, setups by id (for their
+ * stock and heights), and operations as `<setup id>/<operation id>`, in document order.
+ */
+export function variableCamUsers(doc: ManufaktureDocument, name: string): string[] {
+  const reads = (sites: readonly CamExpressionSite[]) =>
+    sites.some((s) => expressionVariableNames(s.expression).includes(name));
+  const out: string[] = [];
+  for (const tool of doc.cam.tools) if (reads(camToolExpressions(tool))) out.push(tool.id);
+  for (const setup of doc.cam.setups) {
+    if (reads(camSetupOwnExpressions(setup))) out.push(setup.id);
+    for (const op of setup.operations) {
+      if (reads(camExpressions(op))) out.push(`${setup.id}/${op.id}`);
+    }
+  }
+  return out;
+}
+
 /** Mates whose expressions (connector offsets, limits) mention variable `name`, by mate. */
 export function variableMates(
   doc: ManufaktureDocument,
@@ -3236,7 +3681,8 @@ export function variableParameters(
  * and configuration rows that use variable `name`: expressions that mention it (a mate as
  * `<assembly id>/<mate id>`, a print setup by its id, for its thresholds and its items'
  * orientations, an exploded view as `<assembly id>/<exploded view id>` for its step distances, a
- * drawing by its id for its sheet sizes, view scales and section offsets), parameters that
+ * drawing by its id for its sheet sizes, view scales and section offsets, CAM tools, setups and
+ * operations as `variableCamUsers` lists them), parameters that
  * configure it, and rows with a value that mentions it.
  */
 export function variableUsers(doc: ManufaktureDocument, name: string): string[] {
@@ -3258,6 +3704,7 @@ export function variableUsers(doc: ManufaktureDocument, name: string): string[] 
     users.push(`${assemblyId}/${explodedView.id}`);
   }
   for (const drawing of variableDrawings(doc, name)) users.push(drawing.id);
+  users.push(...variableCamUsers(doc, name));
   for (const p of variableParameters(doc, name)) users.push(p.id);
   for (const row of doc.configurations?.rows ?? []) {
     const mentions = Object.values(row.values).some(
