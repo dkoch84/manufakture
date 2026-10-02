@@ -30,6 +30,11 @@ import { ExplodeOverlay } from './assembly/ExplodeOverlay';
 import { ExplodePanel } from './assembly/ExplodePanel';
 import { InsertPanel } from './assembly/InsertPanel';
 import { instanceFaces, pairKey } from './assembly/interference';
+import type { CamClient } from '@manufakture/cam/client';
+import { browserToolLibrary } from './cam/library/open';
+import type { ToolLibraryStore } from './cam/library/store';
+import { spawnCamClient } from './cam/spawn';
+import { createCamUiStore, type CamUiStore } from './cam/state';
 import { InterferenceOverlay } from './assembly/InterferenceOverlay';
 import { InterferencePanel } from './assembly/InterferencePanel';
 import { MateDialog } from './assembly/MateDialog';
@@ -166,6 +171,12 @@ const DrawingWorkspace = lazy(() =>
   import('./drawing/DrawingWorkspace').then((m) => ({ default: m.DrawingWorkspace })),
 );
 
+// The Manufacture workspace (M5 T5.3a), with the CAM package, when it is first opened.
+const CamTree = lazy(() => import('./cam/CamWorkspace').then((m) => ({ default: m.CamTree })));
+const CamSidePanel = lazy(() =>
+  import('./cam/CamWorkspace').then((m) => ({ default: m.CamSidePanel })),
+);
+
 // The Cut list panel (woodworking, M4) likewise, with the nesting and the PDF writer.
 const CutListPanel = lazy(() =>
   import('./wood/cutlist/CutListPanel').then((m) => ({ default: m.CutListPanel })),
@@ -217,6 +228,18 @@ export interface AppProps {
    * analysis, so a document never printed never starts it). Null: walls and gaps are not checked.
    */
   createPrintAnalyzer?: () => PrintAnalyzer | null;
+  /** The Manufacture workspace's state (open, active setup, dialogs); the app makes its own by default. */
+  camUi?: CamUiStore;
+  /**
+   * Makes the CAM worker's client (default: the worker, started on the first generation, so a
+   * document never machined never starts it). Null: toolpaths are not generated.
+   */
+  createCamClient?: () => CamClient | null;
+  /**
+   * Opens the user's tool library (default: in the browser's storage, when there is a document
+   * library). Null: the Tools dialog offers the built-in tools only.
+   */
+  openToolLibrary?: (() => Promise<ToolLibraryStore>) | null;
 }
 
 /** Whether `doc` has imported reference bodies, which live outside regen and must be read again. */
@@ -275,6 +298,9 @@ export function App({
   assemblyUi: givenAssemblyUi,
   printUi: givenPrintUi,
   createPrintAnalyzer = spawnPrintAnalyzer,
+  camUi: givenCamUi,
+  createCamClient = spawnCamClient,
+  openToolLibrary,
 }: AppProps) {
   const [ownAssemblyUi] = useState(createAssemblyUiStore);
   const assemblyUi = givenAssemblyUi ?? ownAssemblyUi;
@@ -285,6 +311,17 @@ export function App({
   // The print-analysis client starts its worker on the first analysis, not here.
   const [printAnalyzer] = useState(createPrintAnalyzer);
   useEffect(() => () => printAnalyzer?.terminate(), [printAnalyzer]);
+  const [ownCamUi] = useState(createCamUiStore);
+  const camUi = givenCamUi ?? ownCamUi;
+  // The CAM client starts its worker on the first generation, not here.
+  const [camClient] = useState(createCamClient);
+  useEffect(() => () => camClient?.terminate(), [camClient]);
+  const toolLibrary =
+    openToolLibrary === undefined
+      ? libraryPromise === null
+        ? null
+        : browserToolLibrary
+      : openToolLibrary;
   // A loader starts nothing until `load`, so the initialiser running twice
   // under StrictMode leaves nothing behind.
   const [{ loader, owned }] = useState(() =>
@@ -357,6 +394,9 @@ export function App({
   // The print workspace shows the open document's setups; a past state viewed has none to edit.
   const printOpen = useStore(printUi, (s) => s.open);
   const printing = printOpen && !locked;
+  // The Manufacture workspace edits the open document's CAM setups; likewise not while viewing.
+  const camOpen = useStore(camUi, (s) => s.open);
+  const machining = camOpen && !locked && !printing;
 
   // The scene's own document (the demo scene) replaces the open one once, when the scene loads.
   const openedInitial = useRef(false);
@@ -792,6 +832,19 @@ export function App({
   useEffect(() => {
     if (drawingOpen && printUi.getState().open) printUi.getState().setOpen(false);
   }, [drawingOpen, printUi]);
+  // One workspace at a time: opening Manufacture closes Print and the drawing, and the reverse;
+  // an assembly tab closes Manufacture (a setup machines a part).
+  useEffect(() => {
+    if (!camOpen) return;
+    if (printUi.getState().open) printUi.getState().setOpen(false);
+    drawingUi.getState().close();
+  }, [camOpen, printUi, drawingUi]);
+  useEffect(() => {
+    if ((printOpen || drawingOpen) && camUi.getState().open) camUi.getState().setOpen(false);
+  }, [printOpen, drawingOpen, camUi]);
+  useEffect(() => {
+    if (activeAssemblyId !== null && camUi.getState().open) camUi.getState().setOpen(false);
+  }, [activeAssemblyId, camUi]);
   const drawingBodyIds = useMemo(
     () => Object.fromEntries(allParts.map((p) => [p.partId, p.bodies.map((b) => b.bodyId)])),
     [allParts],
@@ -1603,6 +1656,26 @@ export function App({
     [loader],
   );
 
+  // Viewport picks to stored faces for the Manufacture workspace (planar faces of a setup's part).
+  const resolveCamFace = useCallback(
+    async (geo: GeometryRef, partId: string) => {
+      const { camFaceReference } = await import('./cam/picking');
+      return camFaceReference(geo, partId, {
+        ...pickContext.current,
+        referencer: loader.referencer,
+      });
+    },
+    [loader],
+  );
+  const camBodiesOf = useCallback(
+    (partId: string) =>
+      bodiesOfPart(
+        findPart(documents.getState().document, partId),
+        allParts.find((p) => p.partId === partId),
+      ).map((b) => ({ id: b.bodyId, name: b.name })),
+    [documents, allParts],
+  );
+
   // Measure the selection (and the body it is on) whenever either changes.
   const bodiesRevision = useRef(0);
   useEffect(() => {
@@ -1759,6 +1832,16 @@ export function App({
           >
             Print
           </button>
+          <button
+            type="button"
+            aria-pressed={machining}
+            disabled={sketching.active || dialog !== null || locked || assemblyId !== null}
+            data-testid="open-cam"
+            title="The Manufacture workspace: setups, stock, tools and toolpath operations for a CNC router"
+            onClick={() => camUi.getState().setOpen(!camOpen)}
+          >
+            Manufacture
+          </button>
           {hasWoodwork(document) && (
             <button
               type="button"
@@ -1779,6 +1862,7 @@ export function App({
               locked ||
               assemblyId !== null ||
               printing ||
+              machining ||
               drawingOpen
             }
             onPick={(target) => sketching.enter(target)}
@@ -1876,11 +1960,16 @@ export function App({
           <PrintToolbar documents={documents} printUi={printUi} resolved={print.resolved} />
         </div>
       )}
-      {!sketching.active && !locked && !printing && !drawingOpen && assemblyId === null && (
-        <div className="feature-bar">
-          <FeatureToolbar disabled={dialog !== null} onOpen={(kind) => setDialog({ kind })} />
-        </div>
-      )}
+      {!sketching.active &&
+        !locked &&
+        !printing &&
+        !machining &&
+        !drawingOpen &&
+        assemblyId === null && (
+          <div className="feature-bar">
+            <FeatureToolbar disabled={dialog !== null} onOpen={(kind) => setDialog({ kind })} />
+          </div>
+        )}
       {!locked && !printing && !drawingOpen && assemblyId !== null && (
         <div className="feature-bar">
           <div className="assembly-toolbar" role="toolbar" aria-label="Assembly">
@@ -1975,7 +2064,23 @@ export function App({
               onEditMate={(mateId) => assemblyUi.getState().open({ kind: 'mate', mateId })}
             />
           )}
-          {!sketching.active && !printing && assemblyId === null && (
+          {!sketching.active && machining && assemblyId === null && (
+            <Suspense
+              fallback={
+                <section className="feature-tree" aria-busy="true" aria-label="Manufacture" />
+              }
+            >
+              <CamTree
+                documents={documents}
+                model={model}
+                camUi={camUi}
+                geometer={loader.camGeometer ?? null}
+                client={camClient}
+                disabled={ioBusy}
+              />
+            </Suspense>
+          )}
+          {!sketching.active && !printing && !machining && assemblyId === null && (
             <FeatureTree
               documents={shownDocuments}
               model={shownModel}
@@ -2081,6 +2186,25 @@ export function App({
                   modelPending={modelPending}
                   onExportBusy={setIoBusy}
                 />
+                <VariablesPanel
+                  documents={documents}
+                  selection={selection}
+                  printSetupId={fitSetupId}
+                />
+              </>
+            ) : machining && assemblyId === null ? (
+              <>
+                <Suspense fallback={<aside className="selection-panel" aria-busy="true" />}>
+                  <CamSidePanel
+                    documents={documents}
+                    camUi={camUi}
+                    selection={selection}
+                    resolveFace={resolveCamFace}
+                    bodiesOf={camBodiesOf}
+                    openLibrary={toolLibrary}
+                    disabled={ioBusy}
+                  />
+                </Suspense>
                 <VariablesPanel
                   documents={documents}
                   selection={selection}

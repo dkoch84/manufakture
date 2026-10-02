@@ -6,16 +6,26 @@ import { bareUnits, type DisplayUnits, type StoredExpression } from '@manufaktur
 import {
   evaluate,
   evaluateQuantity,
+  formatFeed,
   formatNumber,
+  formatSpindleSpeed,
   type Quantity,
   type UnitsError,
   type UnitsErrorCode,
 } from '@manufakture/units';
-import { formatValue, type Variables } from '../sketcher/values';
+import { formatValue, lengthFormat, type Variables } from '../sketcher/values';
 
 export type ValueKind = 'length' | 'angle' | 'number';
+/** The CAM kinds (M5): a feed rate (mm/min inside) and a spindle speed (rpm). */
+export type RateKind = 'feed' | 'spindleSpeed';
 /** A field's kind; `any` takes whatever dimension the expression has (a variable's value). */
-export type FieldKind = ValueKind | 'any';
+export type FieldKind = ValueKind | RateKind | 'any';
+
+/** A feed rate or spindle speed for display: in the document's length unit per minute, or rpm. */
+export function formatRate(value: number, kind: RateKind, units: DisplayUnits): string {
+  if (kind === 'spindleSpeed') return formatSpindleSpeed(value);
+  return formatFeed(value, { unit: lengthFormat(units).unit });
+}
 
 export type Analysis =
   | { state: 'empty' }
@@ -101,7 +111,11 @@ export function analyzeExpression(
   if (problem !== null) {
     return { state: 'error', message: problem, code: 'value', start: 0, end: 0 };
   }
-  return { state: 'ok', value: r.value, expression, formatted: formatKind(r.value, kind, units) };
+  const formatted =
+    kind === 'feed' || kind === 'spindleSpeed'
+      ? formatRate(r.value, kind, units)
+      : formatKind(r.value, kind, units);
+  return { state: 'ok', value: r.value, expression, formatted };
 }
 
 /** A units error as an analysis, with its range moved from the trimmed text to the source. */

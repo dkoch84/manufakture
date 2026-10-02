@@ -1,5 +1,6 @@
 import {
   applyCommand,
+  createCamSetup,
   createDrawing,
   createPrintSetup,
   serialize,
@@ -270,6 +271,42 @@ describe('comparing with the current state', () => {
       }),
     );
     expect(compareDocuments(withPlate, onMini)).toEqual(['Print setups that differ: Plate 1.']);
+  });
+
+  it('lists CAM setups and tools added, removed and changed, which change no geometry', () => {
+    const withSetup = unwrapDoc(
+      applyCommand(current, {
+        type: 'addCamSetup',
+        setup: createCamSetup('setup#1', 'Top side', 'part#1', 'shapeoko-5-pro-4x4', 'grbl'),
+      }),
+    );
+    expect(compareDocuments(current, withSetup)).toEqual(['CAM setups only here: Top side.']);
+    expect(compareDocuments(withSetup, current)).toEqual([
+      'CAM setups only in the current state: Top side.',
+    ]);
+    const onXxl = unwrapDoc(
+      applyCommand(withSetup, {
+        type: 'editCamSetup',
+        setupId: 'setup#1',
+        machine: 'shapeoko-4-xxl',
+      }),
+    );
+    expect(compareDocuments(withSetup, onXxl)).toEqual(['CAM setups that differ: Top side.']);
+    const withTool = unwrapDoc(
+      applyCommand(withSetup, {
+        type: 'addCamTool',
+        tool: {
+          id: 'tool#1',
+          name: 'Quarter inch',
+          kind: 'flat',
+          diameter: mm('1/4in'),
+          fluteLength: mm('20'),
+          flutes: 2,
+          presets: [],
+        },
+      }),
+    );
+    expect(compareDocuments(withSetup, withTool)).toEqual(['CAM tools only here: Quarter inch.']);
   });
 });
 

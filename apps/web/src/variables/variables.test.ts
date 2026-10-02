@@ -214,6 +214,89 @@ describe('print setups as uses', () => {
   });
 });
 
+describe('CAM as uses', () => {
+  it('lists tool, setup and operation fields that read a variable (camVariableUses), and refuses a delete', () => {
+    let doc = boxDocument();
+    const run = (command: Command) => {
+      const r = applyCommand(doc, command);
+      if (!r.ok) throw new Error(r.error.message);
+      doc = r.value.document;
+    };
+    run({
+      type: 'addCamTool',
+      tool: {
+        id: 'tool#1',
+        name: 'Quarter inch',
+        kind: 'flat',
+        diameter: mm('#w / 10'),
+        fluteLength: mm('20'),
+        flutes: 2,
+        presets: [],
+      },
+    });
+    const zero = mm('0');
+    run({
+      type: 'addCamSetup',
+      setup: {
+        id: 'setup#1',
+        name: 'Top',
+        part: 'part#1',
+        machine: 'shapeoko-5-pro-4x4',
+        post: 'grbl',
+        stock: {
+          kind: 'fromBody',
+          margins: {
+            xMin: zero,
+            xMax: zero,
+            yMin: zero,
+            yMax: zero,
+            top: mm('#h / 10'),
+            bottom: zero,
+          },
+        },
+        wcs: { up: { kind: 'axis', axis: '+z' }, origin: { xy: 'front-left', z: 'top' } },
+        heights: { clearance: mm('10'), retract: mm('5') },
+        operations: [
+          {
+            id: 'profile#1',
+            kind: 'profile',
+            name: 'Outline',
+            suppressed: false,
+            tool: 'tool#1',
+            geometry: [],
+            side: 'outside',
+            depth: { kind: 'blind', depth: mm('#h') },
+            entry: { kind: 'plunge' },
+            leadIn: { kind: 'none' },
+            leadOut: { kind: 'none' },
+            climb: true,
+          },
+        ],
+      },
+    });
+    const rows = variableRows(doc);
+    expect(rows.find((x) => x.name === 'w')!.uses).toContainEqual({
+      key: 'c:tool#1:diameter',
+      label: 'CAM tool Quarter inch: Diameter',
+      featureId: null,
+    });
+    const h = rows.find((x) => x.name === 'h')!.uses;
+    expect(h).toContainEqual({
+      key: 'c:setup#1:stock.margins.top',
+      label: 'CAM Top: Stock margin above',
+      featureId: null,
+    });
+    expect(h).toContainEqual({
+      key: 'c:setup#1:operations.0.depth.depth',
+      label: 'CAM Top / Outline: Depth',
+      featureId: null,
+    });
+    const del = deleteCommand(doc, 'w');
+    expect(del.ok).toBe(false);
+    if (!del.ok) expect(del.uses.map((u) => u.key)).toContain('c:tool#1:diameter');
+  });
+});
+
 describe('adding and editing', () => {
   it('adds a variable, writing the unit into a bare length', () => {
     const doc = boxDocument();

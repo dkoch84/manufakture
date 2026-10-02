@@ -10,6 +10,7 @@
 
 import {
   bareUnits,
+  camVariableUses,
   configurationRow,
   configuredVariables,
   drawingVariableUses,
@@ -23,6 +24,7 @@ import {
   type DisplayUnits,
   type ManufaktureDocument,
   type StoredExpression,
+  type CamVariableUse,
   type DrawingVariableUse,
   type Variable,
   type VariableUse,
@@ -222,7 +224,94 @@ export function labelOfDrawingUse(doc: ManufaktureDocument, use: DrawingVariable
 }
 
 function usesOf(doc: ManufaktureDocument, name: string): UseRow[] {
-  return [...modelUsesOf(doc, name), ...drawingUsesOf(doc, name)];
+  return [...modelUsesOf(doc, name), ...drawingUsesOf(doc, name), ...camUsesOf(doc, name)];
+}
+
+/** CAM fields by path from the tool, the setup or the operation. */
+const CAM_FIELD_LABELS: Record<string, string> = {
+  diameter: 'Diameter',
+  fluteLength: 'Flute length',
+  cornerRadius: 'Corner radius',
+  angle: 'Angle',
+  tipDiameter: 'Tip diameter',
+  'stock.margins.xMin': 'Stock margin left',
+  'stock.margins.xMax': 'Stock margin right',
+  'stock.margins.yMin': 'Stock margin front',
+  'stock.margins.yMax': 'Stock margin back',
+  'stock.margins.top': 'Stock margin above',
+  'stock.margins.bottom': 'Stock margin below',
+  'stock.size.x': 'Stock X',
+  'stock.size.y': 'Stock Y',
+  'stock.size.z': 'Stock thickness',
+  'stock.offset.x': 'Stock offset X',
+  'stock.offset.y': 'Stock offset Y',
+  'stock.offset.z': 'Stock offset Z',
+  'heights.clearance': 'Clearance height',
+  'heights.retract': 'Retract height',
+  depth: 'Depth',
+  'depth.depth': 'Depth',
+  'depth.extra': 'Below the stock bottom',
+  stepdown: 'Stepdown',
+  stepover: 'Stepover',
+  finishAllowance: 'Finish allowance',
+  'tabs.count': 'Tabs per loop',
+  'tabs.width': 'Tab width',
+  'tabs.height': 'Tab height',
+  'entry.angle': 'Entry angle',
+  'entry.radius': 'Helix radius',
+  'leadIn.length': 'Lead-in length',
+  'leadIn.radius': 'Lead-in radius',
+  'leadOut.length': 'Lead-out length',
+  'leadOut.radius': 'Lead-out radius',
+  peck: 'Peck depth',
+  dwell: 'Dwell',
+  maxDepth: 'Maximum depth',
+  allowance: 'Allowance',
+  'feeds.spindle': 'Spindle speed',
+  'feeds.cut': 'Cutting feed',
+  'feeds.plunge': 'Plunge feed',
+  'feeds.ramp': 'Ramp feed',
+  'feeds.lead': 'Lead feed',
+};
+
+/** A CAM field path's label, by an own-property lookup (paths come from document data). */
+function camFieldLabel(path: string): string {
+  return Object.hasOwn(CAM_FIELD_LABELS, path) ? CAM_FIELD_LABELS[path]! : path;
+}
+
+/** What a use in the CAM section is called in the table (ADR 0014: always says it is CAM). */
+export function labelOfCamUse(doc: ManufaktureDocument, use: CamVariableUse): string {
+  if (use.kind === 'camTool') {
+    const tool = doc.cam.tools.find((t) => t.id === use.toolId);
+    const where = `CAM tool ${tool?.name ?? use.toolId}`;
+    if (use.path[0] === 'presets') {
+      const preset = tool?.presets[use.path[1] as number];
+      const field = String(use.path[2]);
+      return `${where}: ${preset?.material ?? use.path[1]} ${field}`;
+    }
+    return `${where}: ${camFieldLabel(use.path.join('.'))}`;
+  }
+  const setup = doc.cam.setups.find((s) => s.id === use.setupId);
+  const where = `CAM ${setup?.name ?? use.setupId}`;
+  if (use.operationId === undefined) {
+    return `${where}: ${camFieldLabel(use.path.join('.'))}`;
+  }
+  const op = setup?.operations.find((o) => o.id === use.operationId);
+  // The path is from the setup: `operations, i, ...` for an operation's field.
+  const rest = use.path.slice(2).join('.');
+  return `${where} / ${op?.name ?? use.operationId}: ${camFieldLabel(rest)}`;
+}
+
+/** Uses in CAM tools, setups and operations (`camVariableUses`), which also block a delete. */
+function camUsesOf(doc: ManufaktureDocument, name: string): UseRow[] {
+  return camVariableUses(doc, name).map((u) => ({
+    key:
+      u.kind === 'camTool'
+        ? `c:${u.toolId}:${u.path.join('.')}`
+        : `c:${u.setupId}:${u.path.join('.')}`,
+    label: labelOfCamUse(doc, u),
+    featureId: null,
+  }));
 }
 
 /** Uses in exploded views and drawings (`drawingVariableUses`), which also block a delete. */

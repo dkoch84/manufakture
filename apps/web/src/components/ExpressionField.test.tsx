@@ -1,6 +1,6 @@
 import type { DisplayUnits } from '@manufakture/core';
 import { angleQuantity, lengthQuantity } from '@manufakture/units';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { ExpressionField, type ExpressionFieldProps } from './ExpressionField';
@@ -45,6 +45,20 @@ function setup(props: Partial<ExpressionFieldProps> & { initial?: string } = {})
 }
 
 describe('ExpressionField', () => {
+  it('takes feed rates and spindle speeds (CAM), a bare number in the display unit per minute', () => {
+    const { type } = setup({ kind: 'feed' });
+    type('1200');
+    expect(screen.getByTestId('depth-note').textContent).toBe('= 1200 mm/min');
+    type('50 in/min');
+    expect(screen.getByTestId('depth-note').textContent).toBe('= 1270 mm/min');
+    type('3 mm');
+    expect(screen.getByTestId('depth-note').textContent).toContain('Expected');
+    cleanup();
+    const speed = setup({ kind: 'spindleSpeed' });
+    speed.type('18000');
+    expect(screen.getByTestId('depth-note').textContent).toBe('= 18000 rpm');
+  });
+
   it('shows the value in the display units, and an error with its range', () => {
     const { type } = setup();
     type('#width / 2 + 1/2"');

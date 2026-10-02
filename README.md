@@ -75,6 +75,7 @@ The user guide lives in `docs/user`:
 - [Variables](docs/user/variables.md): named values and expressions
 - [Fits for printed parts](docs/user/fits.md): press, slip and sliding clearances as variables, and the fit-test coupon
 - [Printing](docs/user/printing.md): print setups, orienting parts on the bed, overhangs, thin walls, holes and bed fit
+- [Machining](docs/user/cam.md): the Manufacture workspace for CNC routers: setups, stock, work coordinates, tools and operations
 - [Text](docs/user/text.md): raised and sunk lettering, fonts, and editing the text later
 - [Threads](docs/user/threads.md): external and internal screw threads, sizes, clearance and cosmetic threads
 - [Woodworking](docs/user/woodworking.md): boards cut from real stock, their grain, the Stock panel, joints, the cut list and sheet layouts

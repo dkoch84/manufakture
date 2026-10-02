@@ -213,6 +213,36 @@ describe('user tool library store', () => {
     expect(backend.files).toEqual(before);
   });
 
+  it('reset sets a wedged library aside and starts an empty one that saves again', async () => {
+    const backend = new MemoryBackend();
+    const tool = libraryOf([mine('big')]) as { tools: Record<string, unknown>[] };
+    tool.tools[0]!.diameter = 5000;
+    await writeFile(backend, 1, tool);
+    const bytes = backend.files.get(libFile(1))!;
+    const { lib } = store(backend);
+    expect((await lib.put(mine('a'))).ok).toBe(false);
+    expect(value(await lib.keptAside())).toBe(0);
+    expect(value(await lib.reset())).toEqual({ keptAside: 1 });
+    // The unreadable file is kept, byte for byte, under a name the loader ignores.
+    expect(files(backend)).toEqual([path(rejectedName(1))]);
+    expect(backend.files.get(path(rejectedName(1)))).toEqual(bytes);
+    expect(value(await lib.keptAside())).toBe(1);
+    expect(value(await lib.list())).toEqual([]);
+    expect((await lib.put(mine('a'))).ok).toBe(true);
+    expect(await ids(lib)).toEqual(['a']);
+    // A number is never reused: the new file is above the rejected one.
+    expect(files(backend)).toEqual([path(rejectedName(1)), libFile(2)]);
+  });
+
+  it('reset of a readable library keeps its file aside too, and an empty store resets to empty', async () => {
+    const { backend, lib } = store();
+    expect(value(await lib.reset())).toEqual({ keptAside: 0 });
+    await lib.put(mine('a'));
+    expect(value(await lib.reset())).toEqual({ keptAside: 1 });
+    expect(value(await lib.list())).toEqual([]);
+    expect(files(backend)).toEqual([path(rejectedName(1))]);
+  });
+
   it('never reuses a number, and never overwrites rejected bytes (the double failure)', async () => {
     const backend = new MemoryBackend();
     await writeFile(backend, 1, libraryOf([mine('a')]));

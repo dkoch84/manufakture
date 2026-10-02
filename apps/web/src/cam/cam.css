@@ -1,0 +1,236 @@
+/* The Manufacture workspace: the operation list, the setup panel, the dialogs and the WCS gizmo. */
+
+.cam-tree {
+  width: 18rem;
+}
+
+.cam-setup-bar,
+.cam-new-ops,
+.cam-add-source,
+.cam-library-actions,
+.cam-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0.25rem;
+}
+
+.cam-head h2 {
+  margin-right: auto;
+}
+
+.cam-setup-bar select {
+  flex: 1 1 6rem;
+  min-width: 0;
+}
+
+.cam-new-ops button {
+  font-size: 0.8rem;
+}
+
+.cam-op-row {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.15rem;
+  padding: 0.3rem;
+  border-bottom: 1px solid #eef1f5;
+}
+
+.cam-op-main {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.cam-op-main .kind {
+  font-size: 0.7rem;
+  color: #5b6673;
+  min-width: 3.5rem;
+}
+
+.cam-op-main .name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cam-op-detail {
+  font-size: 0.75rem;
+  color: #5b6673;
+}
+
+.cam-status {
+  font-size: 0.7rem;
+  padding: 0 0.3rem;
+  border-radius: 3px;
+  background: #eef1f5;
+  white-space: nowrap;
+}
+
+.cam-status-ok {
+  background: #e3f4e6;
+  color: #1d6b2c;
+}
+
+.cam-status-error {
+  background: #fde7e7;
+  color: #a31d1d;
+}
+
+.cam-status-suppressed {
+  color: #8a94a0;
+}
+
+.cam-op-row.status-suppressed .name {
+  color: #8a94a0;
+  text-decoration: line-through;
+}
+
+.cam-op-row.stale .cam-status::after {
+  content: ' *';
+}
+
+.cam-op-messages {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 0.75rem;
+}
+
+.cam-op-messages .tip-error {
+  color: #a31d1d;
+}
+
+.cam-op-messages .tip-warning {
+  color: #8a5a00;
+}
+
+.cam-op-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem;
+}
+
+.cam-op-actions button,
+.cam-op-actions select,
+.cam-repicks button {
+  font-size: 0.7rem;
+  padding: 0.05rem 0.3rem;
+}
+
+.cam-generate {
+  margin: 0.5rem 0.25rem;
+}
+
+.cam-machine {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  font-size: 0.75rem;
+  color: #5b6673;
+  margin: 0 0 0.35rem;
+}
+
+.cam-unverified,
+.cam-unverified-mark {
+  font-size: 0.75rem;
+  color: #8a5a00;
+}
+
+.cam-unverified {
+  display: block;
+}
+
+.cam-wcs,
+.cam-stock,
+.cam-preset {
+  border: 1px solid #d6dce3;
+  border-radius: 4px;
+  margin: 0.5rem 0;
+  padding: 0.35rem 0.5rem;
+}
+
+.cam-radios {
+  display: flex;
+  flex-direction: column;
+}
+
+.cam-gizmo {
+  width: 100%;
+  max-width: 14rem;
+  height: auto;
+  margin-top: 0.35rem;
+}
+
+.cam-gizmo-stock {
+  fill: #f3ead9;
+  stroke: #9a7b4f;
+}
+
+.cam-gizmo-origin {
+  fill: #2f6fe4;
+}
+
+.cam-gizmo-x {
+  stroke: #d33;
+  stroke-width: 2;
+}
+
+.cam-gizmo-y {
+  stroke: #2a2;
+  stroke-width: 2;
+}
+
+.cam-gizmo-z {
+  stroke: #2f6fe4;
+  stroke-width: 2;
+}
+
+.cam-gizmo-label {
+  font-size: 7px;
+  fill: #5b6673;
+}
+
+.cam-tool-list {
+  list-style: none;
+  margin: 0.25rem 0;
+  padding: 0;
+}
+
+.cam-tool-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0;
+  border-bottom: 1px solid #eef1f5;
+}
+
+.cam-tool-name {
+  font-weight: 600;
+}
+
+.cam-tool-detail {
+  font-size: 0.75rem;
+  color: #5b6673;
+  flex: 1;
+}
+
+.cam-import input[type='file'] {
+  display: block;
+  font-size: 0.75rem;
+}
+
+.cam-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+  font-size: 0.8rem;
+}
+
+.cam-feeds {
+  margin: 0.5rem 0;
+}

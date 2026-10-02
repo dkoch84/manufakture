@@ -1,0 +1,184 @@
+// Generate on demand (M5 plan, T5.3a; ADR 0014 decisions 7 and 8): the geometry stage's reply for
+// one setup (regen worker: sources resolved on the final body, expressions evaluated, depths in
+// machine Z) turned into `packages/cam`'s evaluated `Setup` (stock box, WCS frame, loops and drill
+// points in machine coordinates), which the CAM worker generates. Only operations whose geometry
+// resolved go to the worker; the others keep the stage's errors. Nothing here evaluates an
+// expression or resolves a name: the stage did both.
+
+import {
+  boundsInSetup,
+  drillPointToMachine,
+  planarLoopsToMachine,
+  pointsBoundsInSetup,
+  setupRotation,
+  stockFromBounds,
+  stockFromSize,
+  wcsFrame,
+  wcsOriginInSetup,
+  type Loop2,
+  type MachineDrillPoint,
+  type OperationInput,
+  type Setup,
+  type Stock,
+  type WcsFrame,
+} from '@manufakture/cam';
+import type { CamGeometryResult, CamOperationResult, CamSourceResult } from '@manufakture/regen';
+
+export type SetupBuild =
+  | {
+      ok: true;
+      setup: Setup;
+      /** Operations whose geometry did not convert (not parallel, say), with why, by id. */
+      failed: Readonly<Record<string, string>>;
+    }
+  | { ok: false; message: string };
+
+/** The stock box in the setup frame, from the body's bounds (and mesh, when sent) and the values. */
+export function stockOf(
+  geometry: CamGeometryResult,
+): { ok: true; stock: Stock } | { ok: false; message: string } {
+  const values = geometry.setup;
+  if (!values || !geometry.bounds)
+    return { ok: false, message: 'The setup has no body to machine.' };
+  const rotation = setupRotation(values.wcs.up);
+  if (!rotation.ok) return { ok: false, message: rotation.error.message };
+  const body = geometry.mesh
+    ? pointsBoundsInSetup(rotation.value, geometry.mesh.positions)
+    : boundsInSetup(rotation.value, geometry.bounds);
+  const s = values.stock;
+  const r =
+    s.kind === 'fromBody'
+      ? stockFromBounds(body, s.margins, s.material)
+      : stockFromSize(body, s.size, s.offset, s.material);
+  return r.ok ? { ok: true, stock: r.value } : { ok: false, message: r.error.message };
+}
+
+/**
+ * The stock's outline in machine XY, counter-clockwise: what a facing with no source faces. The
+ * setup frame's axes are the machine's, so a machine point is a setup point less the WCS origin.
+ */
+export function stockOutline(stock: Stock, origin: readonly number[]): Loop2 {
+  const [ox, oy] = origin as [number, number];
+  const x0 = stock.min[0] - ox;
+  const y0 = stock.min[1] - oy;
+  const x1 = stock.max[0] - ox;
+  const y1 = stock.max[1] - oy;
+  const corners: [number, number][] = [
+    [x0, y0],
+    [x1, y0],
+    [x1, y1],
+    [x0, y1],
+  ];
+  return {
+    segments: corners.map((start, i) => ({
+      kind: 'line' as const,
+      start,
+      end: corners[(i + 1) % 4]!,
+    })),
+  };
+}
+
+function loopsOf(
+  frame: WcsFrame,
+  sources: readonly CamSourceResult[],
+): { ok: true; loops: Loop2[] } | { ok: false; message: string } {
+  const loops: Loop2[] = [];
+  for (const s of sources) {
+    if (s.kind !== 'face' && s.kind !== 'region') continue;
+    const r = planarLoopsToMachine(frame, s.planar);
+    if (!r.ok) return { ok: false, message: r.error.message };
+    loops.push(...r.value.loops);
+  }
+  return { ok: true, loops };
+}
+
+function pointsOf(
+  frame: WcsFrame,
+  sources: readonly CamSourceResult[],
+): { ok: true; points: MachineDrillPoint[] } | { ok: false; message: string } {
+  const points: MachineDrillPoint[] = [];
+  for (const s of sources) {
+    if (s.kind !== 'hole' && s.kind !== 'holeWalls') continue;
+    for (const p of s.points) {
+      const r = drillPointToMachine(frame, p);
+      if (!r.ok) return { ok: false, message: r.error.message };
+      points.push(r.value);
+    }
+  }
+  return { ok: true, points };
+}
+
+/** One resolved operation as the CAM worker's input, or why it cannot be. */
+export function operationInput(
+  op: CamOperationResult,
+  frame: WcsFrame,
+  facingArea: Loop2,
+): { ok: true; input: OperationInput } | { ok: false; message: string } | null {
+  const v = op.values;
+  if (op.status !== 'ok' || v === null) return null;
+  switch (v.kind) {
+    case 'facing': {
+      const l = loopsOf(frame, op.sources);
+      if (!l.ok) return l;
+      return { ok: true, input: { ...v, loops: l.loops.length > 0 ? l.loops : [facingArea] } };
+    }
+    case 'profile':
+    case 'pocket':
+    case 'vcarve': {
+      const l = loopsOf(frame, op.sources);
+      if (!l.ok) return l;
+      return { ok: true, input: { ...v, loops: l.loops } as OperationInput };
+    }
+    case 'drill': {
+      const p = pointsOf(frame, op.sources);
+      if (!p.ok) return p;
+      return { ok: true, input: { ...v, points: p.points } };
+    }
+    case 'surface3d':
+      return { ok: false, message: '3D surfacing is not generated from this workspace yet.' };
+  }
+}
+
+/** The evaluated setup the CAM worker takes, with every operation whose geometry resolved. */
+export function setupInput(
+  geometry: CamGeometryResult,
+  setup: { id: string; name: string },
+): SetupBuild {
+  const values = geometry.setup;
+  if (geometry.status !== 'ok' || !values) {
+    return {
+      ok: false,
+      message: geometry.errors[0]?.message ?? 'The setup could not be resolved.',
+    };
+  }
+  const stock = stockOf(geometry);
+  if (!stock.ok) return stock;
+  const wcs = { up: values.wcs.up, origin: values.wcs.origin };
+  const frame = wcsFrame(wcs, stock.stock);
+  if (!frame.ok) return { ok: false, message: frame.error.message };
+  const origin = wcsOriginInSetup(stock.stock, wcs.origin);
+  const facingArea = stockOutline(stock.stock, origin);
+  const operations: OperationInput[] = [];
+  const failed: Record<string, string> = {};
+  for (const op of geometry.operations) {
+    const r = operationInput(op, frame.value, facingArea);
+    if (r === null) continue;
+    if (r.ok) operations.push(r.input);
+    else failed[op.operationId] = r.message;
+  }
+  return {
+    ok: true,
+    setup: {
+      id: setup.id,
+      name: setup.name,
+      stock: stock.stock,
+      wcs,
+      frame: frame.value,
+      heights: values.heights,
+      machine: values.machine,
+      post: values.post,
+      operations,
+    },
+    failed,
+  };
+}

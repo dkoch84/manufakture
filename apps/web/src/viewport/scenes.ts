@@ -10,6 +10,7 @@ import type { LoadProgress } from '@manufakture/kernel';
 import type { KernelClientOptions } from '@manufakture/kernel/client';
 import type { RegenClient } from '@manufakture/regen/client';
 import type { Assembler } from '../assembly/assembly';
+import type { CamGeometer } from '../cam/geometer';
 import type { Drawer } from '../drawing/drawer';
 import { kernelExchange, type Exchanger, type KernelBody, type Referencer } from '../io/exchange';
 import type { Measurer } from '../measure/measurer';
@@ -55,6 +56,8 @@ export interface SceneLoader {
   sizer?: Sizer;
   /** Drawing views, dimensions and sheets in the regen worker; absent for kernel-free scenes. */
   drawer?: Drawer;
+  /** The CAM geometry of a setup, in the regen worker; absent for kernel-free scenes. */
+  camGeometer?: CamGeometer;
   /** A document the scene opens with (the demo scene); the app loads it once the scene is loaded. */
   initialDocument?: ManufaktureDocument;
 }
@@ -165,6 +168,16 @@ export function kernelLoader(
         : client.drawingSheet(built, drawingId, sheetId, { ...options, stored: document });
     },
   };
+  // CAM geometry is built as a regen builds the document: in its active configuration row.
+  const camGeometer: CamGeometer = {
+    geometry: (document, setupId, options = {}) => {
+      if (client === null) return Promise.resolve(null);
+      const built = buildable(document).document;
+      return built === document
+        ? client.camGeometry(document, setupId, options)
+        : client.camGeometry(built, setupId, { ...options, stored: document });
+    },
+  };
   // Texts and fonts go to the regen worker's text worker (under its watchdog); they need no kernel.
   const texter: Texter = {
     outline: (request, options) =>
@@ -212,6 +225,7 @@ export function kernelLoader(
     texter,
     drawer,
     sizer,
+    camGeometer,
     ...(options.initialDocument ? { initialDocument: options.initialDocument } : {}),
   };
 }

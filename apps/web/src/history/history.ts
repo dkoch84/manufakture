@@ -324,6 +324,37 @@ export function compareDocuments(
       );
     }
   }
+  if (change.camChanged) {
+    const setupName = (id: string) =>
+      (viewed.cam.setups.find((s) => s.id === id) ?? current.cam.setups.find((s) => s.id === id))
+        ?.name ?? id;
+    const toolName = (id: string) =>
+      (viewed.cam.tools.find((t) => t.id === id) ?? current.cam.tools.find((t) => t.id === id))
+        ?.name ?? id;
+    const c = change.cam.setups;
+    const t = change.cam.tools;
+    if (c.added.length > 0) lines.push(`CAM setups only here: ${listOf(c.added.map(setupName))}.`);
+    if (c.removed.length > 0) {
+      lines.push(`CAM setups only in the current state: ${listOf(c.removed.map(setupName))}.`);
+    }
+    if (c.changed.length > 0) {
+      lines.push(`CAM setups that differ: ${listOf(c.changed.map(setupName))}.`);
+    }
+    if (t.added.length > 0) lines.push(`CAM tools only here: ${listOf(t.added.map(toolName))}.`);
+    if (t.removed.length > 0) {
+      lines.push(`CAM tools only in the current state: ${listOf(t.removed.map(toolName))}.`);
+    }
+    if (t.changed.length > 0)
+      lines.push(`CAM tools that differ: ${listOf(t.changed.map(toolName))}.`);
+    if (
+      c.added.length + c.removed.length + c.changed.length === 0 &&
+      t.added.length + t.removed.length + t.changed.length === 0
+    ) {
+      lines.push(
+        change.cam.reordered ? 'CAM setups are in a different order.' : 'CAM settings differ.',
+      );
+    }
+  }
   if (change.drawingChanged) {
     const drawingName = (id: string) =>
       (viewed.drawings?.find((d) => d.id === id) ?? current.drawings?.find((d) => d.id === id))

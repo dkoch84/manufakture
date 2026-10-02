@@ -1817,3 +1817,42 @@ describe('App print workspace', () => {
     expect(documents.getState().document.print.setups[0]!.items).toHaveLength(1);
   });
 });
+
+describe('App Manufacture workspace', () => {
+  it('replaces the feature tree and tools while open, one workspace at a time, and leaves modelling as it was', async () => {
+    const t = setup();
+    const { documents } = t;
+    await act(async () => t.resolve([boxBody()]));
+    expect(await screen.findByTestId('feature-tree')).toBeTruthy();
+    expect(screen.getByRole('toolbar', { name: 'Features' })).toBeTruthy();
+    const camButton = screen.getByTestId('open-cam');
+    expect(camButton.getAttribute('aria-pressed')).toBe('false');
+
+    fireEvent.click(camButton);
+    expect(await screen.findByTestId('cam-tree')).toBeTruthy();
+    expect(await screen.findByTestId('cam-panel')).toBeTruthy();
+    expect(screen.queryByTestId('feature-tree')).toBeNull();
+    expect(screen.queryByRole('toolbar', { name: 'Features' })).toBeNull();
+    expect(camButton.getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(screen.getByTestId('cam-add-setup'));
+    expect(documents.getState().document.cam.setups.map((s) => s.machine)).toEqual([
+      'shapeoko-5-pro-4x4',
+    ]);
+
+    // Print takes over, and Manufacture closes; then the other way round.
+    fireEvent.click(screen.getByTestId('open-print'));
+    expect(screen.getByTestId('print-panel')).toBeTruthy();
+    expect(screen.queryByTestId('cam-tree')).toBeNull();
+    fireEvent.click(screen.getByTestId('open-cam'));
+    expect(await screen.findByTestId('cam-tree')).toBeTruthy();
+    expect(screen.queryByTestId('print-panel')).toBeNull();
+
+    // Closed, the modelling UI is back as it was.
+    fireEvent.click(screen.getByTestId('open-cam'));
+    expect(screen.queryByTestId('cam-tree')).toBeNull();
+    expect(screen.getByTestId('feature-tree')).toBeTruthy();
+    expect(screen.getByRole('toolbar', { name: 'Features' })).toBeTruthy();
+    // The setup is the document's.
+    expect(documents.getState().document.cam.setups).toHaveLength(1);
+  });
+});

@@ -309,6 +309,46 @@ export class ToolLibraryStore {
     });
   }
 
+  /**
+   * How many library files are kept aside under rejected names (files that did not read, set
+   * aside by a save or a reset), for the UI to say so; they stay for the user or a newer build.
+   */
+  keptAside(): Promise<LibraryResult<number>> {
+    return this.#locked(async () => {
+      try {
+        return { ok: true as const, value: (await this.#rejectedFiles()).length };
+      } catch (e) {
+        return fail(`The tool library could not be read: ${describe(e)}`);
+      }
+    });
+  }
+
+  /**
+   * Start an empty library: every library file is first copied aside to a rejected name (so
+   * nothing is lost, as a save keeps a file that does not read), then removed. The way out of a
+   * library whose files this build cannot read, where every save is refused.
+   */
+  reset(): Promise<LibraryResult<{ keptAside: number }>> {
+    return this.#locked(async () => {
+      try {
+        const kept = new Set<string>();
+        for (const n of await this.#revisions()) {
+          const path = `${TOOL_LIBRARY_DIR}/${fileName(n)}`;
+          const bytes = await this.#backend.read(path);
+          if (!bytes) continue;
+          kept.add(await this.#keepRejected(n, bytes));
+          await this.#backend.remove(path);
+        }
+        await this.#pruneRejected(kept).catch((e: unknown) => {
+          console.warn('Tool library: could not prune rejected copies', e);
+        });
+        return { ok: true as const, value: { keptAside: kept.size } };
+      } catch (e) {
+        return fail(`The tool library could not be reset: ${describe(e)}`);
+      }
+    });
+  }
+
   /** The library as JSON text, for a download. */
   async exportJson(): Promise<LibraryResult<string>> {
     const r = await this.list();
