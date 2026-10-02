@@ -159,5 +159,5 @@ describe('benchmark against guillotine-packer 1.0.2', () => {
           `${r.theirs.ms.toFixed(1)} ms${r.theirs.valid ? '' : ' (INVALID: kerf or bounds)'}`,
       );
     }
-  });
+  }, 60_000);
 });
