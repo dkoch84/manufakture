@@ -2,9 +2,10 @@
 // geometry request (`ok` when the stage resolved its sources and evaluated its numbers; `error`
 // with the stage's messages; the sources to re-pick), the outcome of the last generation, and a
 // stale mark when the operation's inputs changed since its toolpath was generated (the stage's
-// per-operation key moved; ADR 0014 decision 8).
+// per-operation key moved; ADR 0014 decision 8), and the workspace's own advice on the setup's
+// order (a 3D finish with nothing roughing before it).
 
-import type { CamOperation } from '@manufakture/core';
+import type { CamOperation, CamSetup } from '@manufakture/core';
 import type { CamGeometryResult, CamOperationResult } from '@manufakture/regen';
 
 /** One operation's toolpath, as the last generation left it. */
@@ -42,14 +43,49 @@ export const STATE_LABELS: Readonly<Record<OperationState, string>> = {
 };
 
 /**
+ * Why a parallel 3D finish needs a roughing before it, or null: a finish with no z-level roughing
+ * (unsuppressed) earlier in its setup takes the stock from the top down to the part in single
+ * passes, and its default boundary (the part's extent) drops the tool to the part's lowest point
+ * wherever the part does not fill it.
+ */
+export function roughingWarning(
+  setup: Pick<CamSetup, 'operations'>,
+  op: CamOperation,
+): string | null {
+  if (op.kind !== 'surface3d' || op.suppressed || (op.strategy ?? 'parallel') !== 'parallel') {
+    return null;
+  }
+  const at = setup.operations.findIndex((o) => o.id === op.id);
+  const roughed = setup.operations
+    .slice(0, Math.max(0, at))
+    .some((o) => o.kind === 'surface3d' && !o.suppressed && o.strategy === 'zlevel');
+  return roughed
+    ? null
+    : 'Nothing roughs before this finish: it takes the stock from the top down to the part in one pass, and goes down to the lowest point wherever the part does not fill its boundary. Add a z-level roughing before it, unless the stock is already close to the part.';
+}
+
+/**
  * The status of `op` from the geometry reply for its setup (null while none has arrived, or
- * `available` false where there is no regen worker) and the last generation's outcomes.
+ * `available` false where there is no regen worker) and the last generation's outcomes. With its
+ * `setup`, the workspace's advice on the setup's order (`roughingWarning`) is among the warnings.
  */
 export function operationStatus(
   op: CamOperation,
   geometry: CamGeometryResult | null,
   generated: ReadonlyMap<string, GeneratedOutcome>,
   available = true,
+  setup?: Pick<CamSetup, 'operations'>,
+): OperationStatus {
+  const advice = setup ? roughingWarning(setup, op) : null;
+  const status = rawStatus(op, geometry, generated, available);
+  return advice ? { ...status, warnings: [...status.warnings, advice] } : status;
+}
+
+function rawStatus(
+  op: CamOperation,
+  geometry: CamGeometryResult | null,
+  generated: ReadonlyMap<string, GeneratedOutcome>,
+  available: boolean,
 ): OperationStatus {
   const done = generated.get(op.id);
   const base = {

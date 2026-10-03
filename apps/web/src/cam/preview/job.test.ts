@@ -72,4 +72,25 @@ describe('previewJob', () => {
     expect(job.toolpath.start).toEqual(rectangle.start);
     expect(job.stats).not.toBeNull();
   });
+
+  it("leaves out a V-carve's clearing with its suppressed V-carve", () => {
+    // The two operations renamed as a V-carve's clearing (the flat) and the carve (the V-bit).
+    const data = fixtureGeneration();
+    const ids = ['vcarve#1/clearing', 'vcarve#1'];
+    const renamed = {
+      ...data,
+      setup: {
+        ...data.setup,
+        operations: data.setup.operations.map((o, i) => ({ ...o, id: ids[i]! })),
+      },
+      operations: data.operations.map((o, i) => ({ ...o, id: ids[i]! })),
+    };
+    expect(previewJob(renamed).operations.map((o) => [o.id, o.included])).toEqual([
+      ['vcarve#1/clearing', true],
+      ['vcarve#1', true],
+    ]);
+    const off = previewJob(renamed, new Set(['vcarve#1']));
+    expect(off.operations.map((o) => o.included)).toEqual([false, false]);
+    expect(off.message).toBe('No generated operation to show.');
+  });
 });

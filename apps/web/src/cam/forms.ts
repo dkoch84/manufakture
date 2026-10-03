@@ -1,9 +1,10 @@
-// The operation dialogs' logic, free of React (M5 plan, T5.3a): a form of strings per operation
-// kind (profile, pocket, facing, drill, V-carve), filled from an operation or with defaults, each
+// The operation dialogs' logic, free of React (M5 plan, T5.3a, T5.5b): a form of strings per
+// operation kind (profile, pocket, facing, drill, V-carve, 3D surface), filled from an operation or
+// with defaults, each
 // field checked for its kind and range as it is typed (`values.ts`), and built into one
 // `addCamOperation` or `editCamOperation` command. Geometry sources are a list of drafts: faces
 // picked in the view (stored under `r<n>` ids from `cam.nextIds`), sketch regions and hole
-// features chosen from lists.
+// features chosen from lists. A 3D surface's faces and regions are its boundary in XY.
 
 import {
   previewIds,
@@ -25,7 +26,7 @@ import type { DialogOperationKind } from './state';
 import { checkField, storedOf, type Rule } from './values';
 
 /** What each kind is called in the UI ("profile operation" for the cut, ADR 0014 decision 4). */
-export const OPERATION_LABELS: Readonly<Record<DialogOperationKind | 'surface3d', string>> = {
+export const OPERATION_LABELS: Readonly<Record<DialogOperationKind, string>> = {
   facing: 'Facing',
   profile: 'Profile',
   pocket: 'Pocket',
@@ -41,6 +42,7 @@ export const DIALOG_KINDS: readonly DialogOperationKind[] = [
   'pocket',
   'drill',
   'vcarve',
+  'surface3d',
 ];
 
 /** One geometry source as the dialog holds it, with its label and whether it was lost. */
@@ -58,6 +60,12 @@ export type SourceDraft = (
 
 export type FeedKey = 'spindle' | 'cut' | 'plunge' | 'ramp' | 'lead';
 export const FEED_KEYS: readonly FeedKey[] = ['spindle', 'cut', 'plunge', 'ramp', 'lead'];
+
+/** An optional boolean of the schema: absent (`auto`, the generator's default), on or off. */
+export type TriState = 'auto' | 'on' | 'off';
+
+/** An optional entry of the schema: absent (`auto`, the generator's default) or one of them. */
+export type OptionalEntry = 'auto' | 'plunge' | 'ramp' | 'helix';
 
 export interface OperationForm {
   kind: DialogOperationKind;
@@ -92,6 +100,31 @@ export interface OperationForm {
   dwell: string;
   maxDepth: string;
   feeds: Record<FeedKey, string>;
+  // Pocket extras (T5.5b).
+  finishPass: TriState;
+  finishStepdown: string;
+  floorAllowance: string;
+  floorPass: TriState;
+  // V-carve extras: the floor stepover, and an end mill that clears the floor first.
+  flatStepover: string;
+  clearing: boolean;
+  clearingTool: string;
+  clearingStepdown: string;
+  clearingStepover: string;
+  clearingEntry: OptionalEntry;
+  clearingEntryAngle: string;
+  clearingEntryRadius: string;
+  clearingFeeds: Record<FeedKey, string>;
+  // 3D surface: `angle`, `stepdown`, `climb`, `entryAngle` and `entryRadius` are shared.
+  strategy: 'parallel' | 'zlevel';
+  /** The distance between raster lines (a length, unlike the 2D operations' fraction). */
+  lineStepover: string;
+  allowance: string;
+  tolerance: string;
+  sampling: string;
+  pattern: 'zigzag' | 'oneway';
+  roughEntry: OptionalEntry;
+  sliceCell: string;
 }
 
 /** A numeric field of the form: its kind, range and whether it may be left empty. */
@@ -116,6 +149,15 @@ type NumericKey = Exclude<
   | 'leadIn'
   | 'leadOut'
   | 'feeds'
+  | 'finishPass'
+  | 'floorPass'
+  | 'clearing'
+  | 'clearingTool'
+  | 'clearingEntry'
+  | 'clearingFeeds'
+  | 'strategy'
+  | 'pattern'
+  | 'roughEntry'
 >;
 
 const spec = (kind: FieldKind, rule: Rule, label: string, optional = false): FieldSpec => ({
@@ -143,6 +185,33 @@ export const FIELD_SPECS: Readonly<Record<NumericKey, FieldSpec>> = {
   peck: spec('length', 'positive', 'Peck depth (optional: one plunge)', true),
   dwell: spec('number', 'nonNegative', 'Dwell at the bottom, seconds (optional)', true),
   maxDepth: spec('length', 'positive', 'Maximum depth (optional: as deep as the bit needs)', true),
+  finishStepdown: spec(
+    'length',
+    'positive',
+    'Finishing stepdown (optional: the whole depth if the flutes reach)',
+    true,
+  ),
+  floorAllowance: spec('length', 'nonNegative', 'Floor allowance (optional)', true),
+  flatStepover: spec(
+    'length',
+    'positive',
+    'Floor stepover (optional: ridges no higher than 0.2 mm)',
+    true,
+  ),
+  clearingStepdown: spec('length', 'positive', 'Clearing stepdown (optional: from the tool)', true),
+  clearingStepover: spec(
+    'number',
+    'fraction',
+    'Clearing stepover, fraction of the diameter (optional)',
+    true,
+  ),
+  clearingEntryAngle: spec('angle', 'entryAngle', 'Clearing entry angle'),
+  clearingEntryRadius: spec('length', 'positive', 'Clearing helix radius'),
+  lineStepover: spec('length', 'positive', 'Stepover between lines'),
+  allowance: spec('length', 'nonNegative', 'Stock to leave (optional)', true),
+  tolerance: spec('length', 'tolerance', 'Tolerance (optional: 0.01 mm)', true),
+  sampling: spec('length', 'sampling', 'Sampling along a line (optional: from the tool)', true),
+  sliceCell: spec('length', 'sliceCell', 'Slice grid cell (optional: 0.2 mm)', true),
 };
 
 export const FEED_SPECS: Readonly<Record<FeedKey, FieldSpec>> = {
@@ -180,13 +249,30 @@ export function activeFields(form: OperationForm): NumericKey[] {
       depthFields();
       out.push('stepdown', 'stepover', 'finishAllowance');
       entryFields();
+      out.push('finishStepdown', 'floorAllowance');
       break;
     case 'drill':
       depthFields();
       out.push('peck', 'dwell');
       break;
     case 'vcarve':
-      out.push('maxDepth');
+      out.push('maxDepth', 'stepdown', 'flatStepover');
+      if (form.clearing) {
+        out.push('clearingStepdown', 'clearingStepover');
+        if (form.clearingEntry === 'ramp' || form.clearingEntry === 'helix') {
+          out.push('clearingEntryAngle');
+        }
+        if (form.clearingEntry === 'helix') out.push('clearingEntryRadius');
+      }
+      break;
+    case 'surface3d':
+      out.push('lineStepover', 'angle', 'allowance');
+      if (form.strategy === 'parallel') out.push('tolerance', 'sampling');
+      else {
+        out.push('stepdown', 'sliceCell');
+        if (form.roughEntry === 'ramp' || form.roughEntry === 'helix') out.push('entryAngle');
+        if (form.roughEntry === 'helix') out.push('entryRadius');
+      }
       break;
   }
   return out;
@@ -197,10 +283,26 @@ export function acceptedSources(kind: DialogOperationKind): readonly CamGeometry
   return kind === 'drill' ? ['hole'] : ['face', 'region'];
 }
 
-/** The tools of the document that suit `kind`, best first: a V-carve takes V-bits and engravers only. */
+/** The tool kinds a 3D surface cuts with (the drop-cutter's shapes). */
+const SURFACE3D_TOOL_KINDS: readonly CamTool['kind'][] = ['ball', 'bull', 'flat', 'vbit'];
+
+/** The tools that clear a V-carve's floor: flat and bull nose end mills. */
+export function clearingTools(doc: ManufaktureDocument): CamTool[] {
+  return doc.cam.tools.filter((t) => t.kind === 'flat' || t.kind === 'bull');
+}
+
+/**
+ * The tools of the document that suit `kind`, best first: a V-carve takes V-bits and engravers
+ * only; a 3D surface ball, bull nose and flat end mills (in that order) and V-bits.
+ */
 export function suitableTools(doc: ManufaktureDocument, kind: DialogOperationKind): CamTool[] {
   const tools = doc.cam.tools;
   if (kind === 'vcarve') return tools.filter((t) => t.kind === 'vbit' || t.kind === 'engraver');
+  if (kind === 'surface3d') {
+    return tools
+      .filter((t) => SURFACE3D_TOOL_KINDS.includes(t.kind))
+      .sort((a, b) => SURFACE3D_TOOL_KINDS.indexOf(a.kind) - SURFACE3D_TOOL_KINDS.indexOf(b.kind));
+  }
   const rank = (t: CamTool) => {
     if (kind === 'drill') return t.kind === 'drill' ? 0 : t.kind === 'vbit' ? 2 : 1;
     return t.kind === 'flat' ? 0 : t.kind === 'vbit' || t.kind === 'drill' ? 2 : 1;
@@ -217,6 +319,9 @@ export function toolProblem(tool: CamTool | undefined, kind: DialogOperationKind
   }
   if (kind === 'vcarve' && tool.kind !== 'vbit' && tool.kind !== 'engraver') {
     return 'A V-carve cuts with a V-bit or an engraver.';
+  }
+  if (kind === 'surface3d' && !SURFACE3D_TOOL_KINDS.includes(tool.kind)) {
+    return 'A 3D surface cuts with a ball, bull nose or flat end mill, or a V-bit.';
   }
   return null;
 }
@@ -299,6 +404,27 @@ export function newOperationForm(
     dwell: '',
     maxDepth: '',
     feeds: { ...NO_FEEDS },
+    finishPass: 'auto',
+    finishStepdown: '',
+    floorAllowance: '',
+    floorPass: 'auto',
+    flatStepover: '',
+    clearing: false,
+    clearingTool: clearingTools(doc)[0]?.id ?? '',
+    clearingStepdown: '',
+    clearingStepover: '',
+    clearingEntry: 'auto',
+    clearingEntryAngle: '3 deg',
+    clearingEntryRadius: '1 mm',
+    clearingFeeds: { ...NO_FEEDS },
+    strategy: 'parallel',
+    lineStepover: '0.5 mm',
+    allowance: '',
+    tolerance: '',
+    sampling: '',
+    pattern: 'zigzag',
+    roughEntry: 'auto',
+    sliceCell: '',
   };
 }
 
@@ -314,7 +440,6 @@ export function formOf(
   op: CamOperation,
   lost: ReadonlySet<number> = new Set(),
 ): OperationForm | null {
-  if (op.kind === 'surface3d') return null;
   const part = doc.parts.find((p) => p.id === setup.part);
   const form = newOperationForm(doc, op.kind, op.name);
   form.tool = op.tool;
@@ -376,17 +501,63 @@ export function formOf(
       form.stepover = text(op.stepover);
       form.finishAllowance = text(op.finishAllowance);
       entry(op.entry);
+      form.finishPass = triOf(op.finishPass);
+      form.finishStepdown = text(op.finishStepdown);
+      form.floorAllowance = text(op.floorAllowance);
+      form.floorPass = triOf(op.floorPass);
       break;
     case 'drill':
       depth(op.depth);
       form.peck = text(op.peck);
       form.dwell = text(op.dwell);
       break;
-    case 'vcarve':
+    case 'vcarve': {
       form.maxDepth = text(op.maxDepth);
+      form.stepdown = text(op.stepdown);
+      form.flatStepover = text(op.flatStepover);
+      const c = op.clearing;
+      if (c) {
+        form.clearing = true;
+        form.clearingTool = c.tool;
+        form.clearingStepdown = text(c.stepdown);
+        form.clearingStepover = text(c.stepover);
+        form.clearingEntry = c.entry?.kind ?? 'auto';
+        if (c.entry && c.entry.kind !== 'plunge') form.clearingEntryAngle = c.entry.angle.source;
+        if (c.entry?.kind === 'helix') form.clearingEntryRadius = c.entry.radius.source;
+        form.clearingFeeds = {
+          spindle: text(c.feeds?.spindle),
+          cut: text(c.feeds?.cut),
+          plunge: text(c.feeds?.plunge),
+          ramp: text(c.feeds?.ramp),
+          lead: text(c.feeds?.lead),
+        };
+      }
+      break;
+    }
+    case 'surface3d':
+      form.strategy = op.strategy ?? 'parallel';
+      form.lineStepover = op.stepover.source;
+      form.angle = op.angle.source;
+      form.allowance = text(op.allowance);
+      form.tolerance = text(op.tolerance);
+      form.sampling = text(op.sampling);
+      form.pattern = op.pattern ?? 'zigzag';
+      form.stepdown = text(op.stepdown);
+      form.sliceCell = text(op.sliceCell);
+      form.climb = op.climb ?? true;
+      form.roughEntry = op.entry?.kind ?? 'auto';
+      if (op.entry && op.entry.kind !== 'plunge') form.entryAngle = op.entry.angle.source;
+      if (op.entry?.kind === 'helix') form.entryRadius = op.entry.radius.source;
       break;
   }
   return form;
+}
+
+const triOf = (v: boolean | undefined): TriState => (v === undefined ? 'auto' : v ? 'on' : 'off');
+
+/** A tri-state as the schema's optional boolean field (nothing for `auto`). */
+function triField<K extends string>(key: K, v: TriState): Partial<Record<K, boolean>> {
+  return (v === 'auto' ? {} : { [key]: v === 'on' }) as Partial<Record<K, boolean>>;
 }
 
 /** Add a picked face; a face already in the list is not added twice. */
@@ -457,13 +628,30 @@ function originalExpression(
       return sub('entry', 'angle');
     case 'entryRadius':
       return sub('entry', 'radius');
+    case 'lineStepover':
+      return pick(o.stepover);
+    case 'clearingStepdown':
+    case 'clearingStepover': {
+      const c = o.clearing as Record<string, unknown> | undefined;
+      return pick(c?.[key === 'clearingStepdown' ? 'stepdown' : 'stepover']);
+    }
+    case 'clearingEntryAngle':
+    case 'clearingEntryRadius': {
+      const e = (o.clearing as { entry?: Record<string, unknown> } | undefined)?.entry;
+      return pick(e?.[key === 'clearingEntryAngle' ? 'angle' : 'radius']);
+    }
     case 'leadInSize':
       return sub('leadIn', 'length') ?? sub('leadIn', 'radius');
     case 'leadOutSize':
       return sub('leadOut', 'length') ?? sub('leadOut', 'radius');
-    default:
+    default: {
       if (key.startsWith('feeds.')) return sub('feeds', key.slice(6));
+      if (key.startsWith('clearingFeeds.')) {
+        const f = (o.clearing as { feeds?: Record<string, unknown> } | undefined)?.feeds;
+        return pick(f?.[key.slice(14)]);
+      }
       return pick(o[key]);
+    }
   }
 }
 
@@ -486,6 +674,16 @@ export function buildOperation(form: OperationForm, ctx: BuildContext): BuildRes
   };
   for (const key of activeFields(form)) take(key, FIELD_SPECS[key], form[key]);
   for (const key of FEED_KEYS) take(`feeds.${key}`, FEED_SPECS[key], form.feeds[key]);
+  if (form.kind === 'vcarve' && form.clearing) {
+    for (const key of FEED_KEYS) {
+      take(`clearingFeeds.${key}`, FEED_SPECS[key], form.clearingFeeds[key]);
+    }
+    const end = doc.cam.tools.find((t) => t.id === form.clearingTool);
+    if (!end || (end.kind !== 'flat' && end.kind !== 'bull')) {
+      errors.clearingTool =
+        'Clear the floor with a flat or bull nose end mill (add one with Tools).';
+    }
+  }
 
   // Sources: what the kind takes, and enough of them.
   const accepted = acceptedSources(form.kind);
@@ -493,7 +691,9 @@ export function buildOperation(form: OperationForm, ctx: BuildContext): BuildRes
     errors.sources =
       form.kind === 'drill'
         ? 'A drill takes hole features (or none: every round hole it can reach).'
-        : 'This operation takes faces and sketch regions.';
+        : form.kind === 'surface3d'
+          ? 'A 3D surface is bounded by faces and sketch regions (or none).'
+          : 'This operation takes faces and sketch regions.';
   } else if (form.sources.some((s) => s.lost)) {
     errors.sources = 'Some geometry was not found: pick it again or remove it.';
   } else if (
@@ -564,6 +764,15 @@ export function buildOperation(form: OperationForm, ctx: BuildContext): BuildRes
       : form.entry === 'ramp'
         ? { kind: 'ramp' as const, angle: v('entryAngle') }
         : { kind: 'helix' as const, angle: v('entryAngle'), radius: v('entryRadius') };
+  /** An optional entry (null for `auto`: the generator's default). */
+  const optionalEntry = (kind: OptionalEntry, angle: string, radius: string) =>
+    kind === 'auto'
+      ? null
+      : kind === 'plunge'
+        ? { kind: 'plunge' as const }
+        : kind === 'ramp'
+          ? { kind: 'ramp' as const, angle: v(angle) }
+          : { kind: 'helix' as const, angle: v(angle), radius: v(radius) };
   const lead = (kind: OperationForm['leadIn'], key: 'leadInSize' | 'leadOutSize') =>
     kind === 'none'
       ? { kind: 'none' as const }
@@ -611,6 +820,10 @@ export function buildOperation(form: OperationForm, ctx: BuildContext): BuildRes
         ...opt('finishAllowance', 'finishAllowance'),
         entry: entry(),
         climb: form.climb,
+        ...triField('finishPass', form.finishPass),
+        ...opt('finishStepdown', 'finishStepdown'),
+        ...opt('floorAllowance', 'floorAllowance'),
+        ...triField('floorPass', form.floorPass),
       };
       break;
     case 'drill':
@@ -622,12 +835,68 @@ export function buildOperation(form: OperationForm, ctx: BuildContext): BuildRes
         ...opt('dwell', 'dwell'),
       };
       break;
-    case 'vcarve':
-      operation = { ...base, kind: 'vcarve', ...opt('maxDepth', 'maxDepth') };
+    case 'vcarve': {
+      const clearingFeeds = FEED_KEYS.filter((k) => values[`clearingFeeds.${k}`]).map(
+        (k) => [k, values[`clearingFeeds.${k}`]!] as const,
+      );
+      const clearingEntry = optionalEntry(
+        form.clearingEntry,
+        'clearingEntryAngle',
+        'clearingEntryRadius',
+      );
+      operation = {
+        ...base,
+        kind: 'vcarve',
+        ...opt('maxDepth', 'maxDepth'),
+        ...opt('stepdown', 'stepdown'),
+        ...opt('flatStepover', 'flatStepover'),
+        ...(form.clearing
+          ? {
+              clearing: {
+                tool: form.clearingTool,
+                ...opt('stepdown', 'clearingStepdown'),
+                ...opt('stepover', 'clearingStepover'),
+                ...(clearingEntry ? { entry: clearingEntry } : {}),
+                ...(clearingFeeds.length > 0 ? { feeds: Object.fromEntries(clearingFeeds) } : {}),
+              },
+            }
+          : {}),
+      };
       break;
+    }
+    case 'surface3d': {
+      const zlevel = form.strategy === 'zlevel';
+      const roughEntry = zlevel
+        ? optionalEntry(form.roughEntry, 'entryAngle', 'entryRadius')
+        : null;
+      operation = {
+        ...base,
+        kind: 'surface3d',
+        stepover: v('lineStepover'),
+        angle: v('angle'),
+        ...opt('allowance', 'allowance'),
+        ...(zlevel ? { strategy: 'zlevel' as const } : {}),
+        ...(zlevel
+          ? {
+              ...opt('stepdown', 'stepdown'),
+              ...(roughEntry ? { entry: roughEntry } : {}),
+              ...(form.climb ? {} : { climb: false }),
+              ...opt('sliceCell', 'sliceCell'),
+            }
+          : {
+              ...opt('tolerance', 'tolerance'),
+              ...opt('sampling', 'sampling'),
+              ...(form.pattern === 'oneway' ? { pattern: 'oneway' as const } : {}),
+            }),
+      };
+      break;
+    }
   }
 
-  const what = `${OPERATION_LABELS[form.kind].toLowerCase()} operation`;
+  // "profile operation", "V-carve operation", "3D surface operation": capitals that are not just
+  // the start of a word stay.
+  const label = OPERATION_LABELS[form.kind];
+  const what = `${/^[A-Z][a-z]/.test(label) ? label[0]!.toLowerCase() + label.slice(1) : label} operation`;
   if (existing) {
     return {
       ok: true,

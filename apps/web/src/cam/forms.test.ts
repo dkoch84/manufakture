@@ -217,6 +217,112 @@ describe('operation forms', () => {
     expect(vcarve).toMatchObject({ kind: 'vcarve', tool: 'tool#2', maxDepth: { source: '3' } });
   });
 
+  it('builds pocket extras, a V-carve clearing and both 3D surfaces (T5.5b)', () => {
+    let doc = withTool(withTool(setupDocument(), 'c3d-301'), 'c3d-101');
+    const pocket = opOf(
+      doc,
+      form(doc, 'pocket', {
+        sources: [region],
+        finishPass: 'on',
+        finishStepdown: '3',
+        floorAllowance: '0.2',
+      }),
+    );
+    expect(pocket).toMatchObject({
+      finishPass: true,
+      finishStepdown: { source: '3' },
+      floorAllowance: { source: '0.2' },
+    });
+    expect(pocket).not.toHaveProperty('floorPass');
+
+    const carve = opOf(
+      doc,
+      form(doc, 'vcarve', {
+        sources: [region],
+        maxDepth: '2',
+        clearing: true,
+        clearingStepdown: '1.5',
+        clearingEntry: 'ramp',
+        clearingEntryAngle: '5 deg',
+      }),
+    );
+    expect(carve).toMatchObject({
+      kind: 'vcarve',
+      tool: 'tool#2',
+      clearing: {
+        tool: 'tool#1',
+        stepdown: { source: '1.5' },
+        entry: { kind: 'ramp', angle: { source: '5 deg' } },
+      },
+    });
+    expect((carve as { clearing: object }).clearing).not.toHaveProperty('feeds');
+    // The clearing takes a flat or bull nose end mill only, and checks its own feeds.
+    const vbitClearing = build(
+      doc,
+      form(doc, 'vcarve', { sources: [region], clearing: true, clearingTool: 'tool#2' }),
+    );
+    expect(!vbitClearing.ok && vbitClearing.errors.clearingTool).toMatch(/flat or bull/);
+    const badFeed = build(
+      doc,
+      form(doc, 'vcarve', {
+        sources: [region],
+        clearing: true,
+        clearingFeeds: { spindle: '', cut: '-5', plunge: '', ramp: '', lead: '' },
+      }),
+    );
+    expect(!badFeed.ok && badFeed.errors['clearingFeeds.cut']).toMatch(/greater than zero/);
+
+    // A 3D surface: the ball first, then the flat; the V-bit last; no drill or engraver.
+    expect(suitableTools(doc, 'surface3d').map((t) => t.id)).toEqual([
+      'tool#3',
+      'tool#1',
+      'tool#2',
+    ]);
+    const finish = opOf(doc, form(doc, 'surface3d', { lineStepover: '0.4', angle: '45' }));
+    expect(finish).toEqual({
+      id: 'surface3d#1',
+      kind: 'surface3d',
+      name: '3D surface 1',
+      suppressed: false,
+      tool: 'tool#3',
+      geometry: [],
+      stepover: { source: '0.4', lengthUnit: 'mm', angleUnit: 'deg' },
+      angle: { source: '45', lengthUnit: 'mm', angleUnit: 'deg' },
+    });
+    const rough = opOf(
+      doc,
+      form(doc, 'surface3d', {
+        strategy: 'zlevel',
+        tool: 'tool#1',
+        lineStepover: '2.5',
+        allowance: '0.5',
+        stepdown: '3',
+        // Parallel-only fields are left out of a roughing.
+        tolerance: '0.02',
+        pattern: 'oneway',
+      }),
+    );
+    expect(rough).toMatchObject({ strategy: 'zlevel', allowance: { source: '0.5' } });
+    expect(rough).not.toHaveProperty('tolerance');
+    expect(rough).not.toHaveProperty('pattern');
+    expect(rough).not.toHaveProperty('climb');
+    // Ranges: a stepover is a length here, the tolerance and sampling have floors.
+    const bad = build(
+      doc,
+      form(doc, 'surface3d', { lineStepover: '0', tolerance: '0.00001', sampling: '0.0001' }),
+    );
+    expect(!bad.ok && Object.keys(bad.errors).sort()).toEqual([
+      'lineStepover',
+      'sampling',
+      'tolerance',
+    ]);
+    const hole3d = build(doc, form(doc, 'surface3d', { sources: [hole] }));
+    expect(!hole3d.ok && hole3d.errors.sources).toMatch(/bounded by faces/);
+    doc = withTool(doc, 'c3d-201');
+    const drillTool = build(doc, form(doc, 'surface3d', { tool: 'tool#9' }));
+    expect(!drillTool.ok && drillTool.errors.tool).toMatch(/Choose a tool/);
+  });
+
   it('checks the sources each kind takes', () => {
     const doc = setupDocument();
     const none = build(doc, form(doc, 'profile'));
@@ -279,6 +385,37 @@ describe('operation forms', () => {
       form(doc, 'pocket', { sources: [region], stepover: '0.4', entry: 'ramp' }),
       form(doc, 'drill', { sources: [hole], depthMode: 'blind', depth: '5' }),
       form(doc, 'vcarve', { sources: [region], tool: 'tool#2' }),
+      form(doc, 'pocket', {
+        sources: [region],
+        finishAllowance: '0.3',
+        finishPass: 'off',
+        finishStepdown: '2',
+        floorAllowance: '0.2',
+        floorPass: 'on',
+      }),
+      form(doc, 'vcarve', {
+        sources: [region],
+        tool: 'tool#2',
+        maxDepth: '2',
+        stepdown: '1',
+        flatStepover: '0.5',
+        clearing: true,
+        clearingTool: 'tool#1',
+        clearingStepover: '0.45',
+        clearingEntry: 'helix',
+        clearingFeeds: { spindle: '', cut: '900', plunge: '', ramp: '', lead: '' },
+      }),
+      form(doc, 'surface3d', { pattern: 'oneway', tolerance: '0.02', sampling: '0.1' }),
+      form(doc, 'surface3d', {
+        sources: [region],
+        strategy: 'zlevel',
+        lineStepover: '2',
+        allowance: '0.5',
+        stepdown: '3',
+        roughEntry: 'ramp',
+        climb: false,
+        sliceCell: '0.25',
+      }),
     ];
     for (const f of forms) {
       const r = build(doc, f);
@@ -306,7 +443,34 @@ describe('operation forms', () => {
     expect(activeFields(form(doc, 'facing'))).toEqual(['depth', 'stepdown', 'stepover', 'angle']);
     expect(activeFields(form(doc, 'profile'))).toEqual(['extra', 'stepdown', 'finishAllowance']);
     expect(activeFields(form(doc, 'drill'))).toEqual(['peck', 'dwell']);
-    expect(activeFields(form(doc, 'vcarve'))).toEqual(['maxDepth']);
+    expect(activeFields(form(doc, 'vcarve'))).toEqual(['maxDepth', 'stepdown', 'flatStepover']);
+    expect(activeFields(form(doc, 'vcarve', { clearing: true, clearingEntry: 'helix' }))).toEqual([
+      'maxDepth',
+      'stepdown',
+      'flatStepover',
+      'clearingStepdown',
+      'clearingStepover',
+      'clearingEntryAngle',
+      'clearingEntryRadius',
+    ]);
+    expect(activeFields(form(doc, 'pocket'))).toEqual([
+      'depth',
+      'stepdown',
+      'stepover',
+      'finishAllowance',
+      'finishStepdown',
+      'floorAllowance',
+    ]);
+    expect(activeFields(form(doc, 'surface3d'))).toEqual([
+      'lineStepover',
+      'angle',
+      'allowance',
+      'tolerance',
+      'sampling',
+    ]);
+    expect(
+      activeFields(form(doc, 'surface3d', { strategy: 'zlevel', roughEntry: 'ramp' })),
+    ).toEqual(['lineStepover', 'angle', 'allowance', 'stepdown', 'sliceCell', 'entryAngle']);
     const f = addSource(addSource(form(doc, 'profile'), region), region);
     expect(f.sources).toHaveLength(1);
     expect(removeSource(f, 0).sources).toEqual([]);

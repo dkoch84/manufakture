@@ -1167,10 +1167,10 @@ function checkDrawing(
 /**
  * The CAM section (ADR 0014 decisions 4 and 6): every id in it (tools, setups, operations, face
  * references) allocated by `cam.nextIds` and used once anywhere in the section, never a split
- * piece; every setup names a part of this document; every operation's tool is in `cam.tools`;
- * every geometry source is of a kind the operation takes (a drill takes hole features, a
- * `surface3d` none, the others faces and sketch regions); every expression parses and names
- * existing variables.
+ * piece; every setup names a part of this document; every operation's tool (and a V-carve's
+ * clearing tool) is in `cam.tools`; every geometry source is of a kind the operation takes (a
+ * drill takes hole features, the others faces and sketch regions, which bound a `surface3d`);
+ * every expression parses and names existing variables.
  *
  * Deliberately not checked: that a setup's body, a WCS or source face, a region's sketch or
  * entities, or a hole feature still exist, or that the machine, post and material ids are in
@@ -1247,19 +1247,24 @@ function checkCam(
           blockers: [op.tool],
         });
       }
+      if (op.kind === 'vcarve' && op.clearing && !toolIds.has(op.clearing.tool)) {
+        out.push({
+          code: 'dependency',
+          message: `${where} clears its floor with tool ${op.clearing.tool}, which is not in the CAM tools`,
+          path: [...opath, 'clearing', 'tool'],
+          blockers: [op.clearing.tool],
+        });
+      }
       op.geometry.forEach((source, gi) => {
         const gpath = [...opath, 'geometry', gi];
         if (source.kind === 'face') checkId(source.face.id, [...gpath, 'face', 'id']);
-        const allowed =
-          op.kind === 'drill'
-            ? source.kind === 'hole'
-            : op.kind !== 'surface3d' && source.kind !== 'hole';
+        const allowed = op.kind === 'drill' ? source.kind === 'hole' : source.kind !== 'hole';
         if (!allowed) {
           out.push({
             code: 'kind-mismatch',
             message:
               op.kind === 'surface3d'
-                ? `${where} machines the setup's body and takes no geometry sources`
+                ? `${where} takes faces and sketch regions as its boundary, not a hole feature`
                 : op.kind === 'drill'
                   ? `${where} drills hole features; a ${source.kind} source is not one`
                   : `${where} takes faces and sketch regions, not a hole feature`,

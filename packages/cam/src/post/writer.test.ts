@@ -5,7 +5,7 @@ import type { Vec3 } from '../types';
 import { compileDialect, isCompiledDialect } from './dialect';
 import type { CompiledDialect, Dialect } from './dialect';
 import { testDialect } from './test-helpers';
-import { postProcess } from './writer';
+import { POST_MAX_LINES, postProcess } from './writer';
 import type { PostJob, PostOptions, PostOutput } from './writer';
 
 const op = 'profile#1';
@@ -161,6 +161,25 @@ describe('postProcess: a whole program', () => {
     expect(post(sampleToolpath(), testDialect()).files[0]!.text).toBe(
       post(sampleToolpath(), testDialect()).files[0]!.text,
     );
+  });
+});
+
+describe('postProcess: the line budget', () => {
+  it('refuses a job past its line budget, and writes it at the budget', () => {
+    expect(POST_MAX_LINES).toBe(2e7);
+    const written = post(sampleToolpath(), testDialect());
+    const n = written.files[0]!.lines.length;
+    expect(post(sampleToolpath(), testDialect(), { maxLines: n })).toEqual(written);
+    // A larger budget is clamped, never raised past POST_MAX_LINES; the output is unchanged.
+    expect(post(sampleToolpath(), testDialect(), { maxLines: 1e12 })).toEqual(written);
+    const r = postProcess(job(sampleToolpath()), testDialect(), { maxLines: n - 1 });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.error.code).toBe('invalid-input');
+      expect(r.error.message).toBe(
+        `The job would be more than ${n - 1} lines of G-code, the most one export may write. Split the setup, or use larger tools, stepdowns or stepovers.`,
+      );
+    }
   });
 });
 

@@ -30,7 +30,16 @@ import { createNodeService } from '@manufakture/kernel/node';
 import { createSolverService, type SolverService } from '@manufakture/sketch';
 import { beforeAll, describe, expect, it } from 'vitest';
 import type { CamGeometryResult, CamLoop, CamOperationResult, CamSourceResult } from './cam';
-import { CAM_MESH_DEFLECTION, CamStage, holeWallPoints, type CamHost } from './cam';
+import {
+  CAM_DRILL_MAX_PECKS,
+  CAM_MESH_DEFLECTION,
+  CAM_MAX_TABS,
+  CAM_MIN_ENTRY_ANGLE,
+  CAM_MIN_TOOL_DIAMETER,
+  CamStage,
+  holeWallPoints,
+  type CamHost,
+} from './cam';
 import { evaluateVariables } from './values';
 import { RegenEngine } from './engine';
 import { PART, add, apply, build, extrude, mm, rectangle, unwrap } from './test-helpers';
@@ -508,6 +517,55 @@ describe('the CAM geometry stage with the real kernel and solver', () => {
     ]);
   }, 60_000);
 
+  it('refuses a peck so small that the deepest hole would take more than 10000 pecks', async () => {
+    const engine = new RegenEngine({ kernel: service, solver });
+    expect(CAM_DRILL_MAX_PECKS).toBe(10000);
+    // The through-hole is 4 mm deep: pecks of 0.0001 mm would be 40000.
+    const tiny = machined([{ ...drill, peck: mm('0.0001') } as CamOperation]);
+    const r = (await engine.camGeometry(tiny, S))!;
+    expect(op(r, 'drill#1').errors).toEqual([
+      expect.objectContaining({
+        field: ['peck'],
+        message: `The peck depth is too small: the deepest hole (4 mm) would take 40000 pecks, and at most ${CAM_DRILL_MAX_PECKS} are allowed`,
+      }),
+    ]);
+    // 0.0004 mm is exactly 10000 pecks: allowed.
+    const most = machined([{ ...drill, peck: mm('0.0004') } as CamOperation]);
+    const m = (await engine.camGeometry(most, S))!;
+    expect(op(m, 'drill#1').errors).toEqual([]);
+  }, 60_000);
+
+  it('refuses more tabs than a loop may have, and a tool finer than 0.01 mm', async () => {
+    const engine = new RegenEngine({ kernel: service, solver });
+    const tabs = { count: mm('1001'), width: mm('6'), height: mm('2') };
+    const many = machined([{ ...profile, tabs } as CamOperation]);
+    const r = (await engine.camGeometry(many, S))!;
+    expect(op(r, 'profile#1').errors).toEqual([
+      expect.objectContaining({
+        field: ['tabs', 'count'],
+        message: `The tab count must be at most ${CAM_MAX_TABS}`,
+      }),
+    ]);
+    expect(CAM_MAX_TABS).toBe(1000);
+    const fine = apply(machined([profile]), {
+      type: 'editCamTool',
+      tool: { ...tool, diameter: mm('0.001') },
+    });
+    const f = (await engine.camGeometry(fine, S))!;
+    expect(op(f, 'profile#1').errors).toEqual([
+      expect.objectContaining({
+        field: ['tool', 'diameter'],
+        message: `${T}: the diameter must be at least ${CAM_MIN_TOOL_DIAMETER} mm`,
+      }),
+    ]);
+    const smallest = apply(machined([profile]), {
+      type: 'editCamTool',
+      tool: { ...tool, diameter: mm(String(CAM_MIN_TOOL_DIAMETER)) },
+    });
+    const ok = (await engine.camGeometry(smallest, S))!;
+    expect(op(ok, 'profile#1').errors.map((e) => e.field)).not.toContainEqual(['tool', 'diameter']);
+  }, 60_000);
+
   it('misses the cache for an edit of a sketch no feature consumes, changing only its operation', async () => {
     const engine = new RegenEngine({ kernel: service, solver });
     let doc = machined();
@@ -975,6 +1033,191 @@ describe('the CAM geometry stage with the real kernel and solver', () => {
       expect(tessellations).toBe(2);
     }
   });
+
+  it("evaluates a pocket's, a V-carve's and a 3D surfacing's optional fields (T5.5b)", async () => {
+    const engine = new RegenEngine({ kernel: service, solver });
+    const vbit: CamTool = {
+      ...tool,
+      id: 'tool#2',
+      name: '60 deg V',
+      kind: 'vbit',
+      angle: deg('60'),
+      presets: [],
+    };
+    const ball: CamTool = {
+      ...tool,
+      id: 'tool#3',
+      name: '1/8" ball',
+      kind: 'ball',
+      diameter: mm('1/8"'),
+    };
+    const pocketExtras = {
+      ...pocket,
+      finishAllowance: mm('0.3'),
+      finishPass: false,
+      finishStepdown: mm('1'),
+      floorAllowance: mm('0.2'),
+      floorPass: true,
+    } as CamOperation;
+    const carve = {
+      id: 'vcarve#1',
+      kind: 'vcarve',
+      name: 'Letters',
+      suppressed: false,
+      tool: 'tool#2',
+      geometry: [{ kind: 'region', sketch: 'sketch#4' }],
+      feeds: { spindle: mm('18000rpm'), cut: mm('800mm/min'), plunge: mm('300mm/min') },
+      maxDepth: mm('1'),
+      stepdown: mm('0.5'),
+      flatStepover: mm('0.3'),
+      clearing: {
+        tool: T,
+        stepover: mm('0.5'),
+        entry: { kind: 'ramp', angle: deg('5') },
+        feeds: { cut: mm('feed') },
+      },
+    } as CamOperation;
+    const finish = {
+      id: 'surface3d#1',
+      kind: 'surface3d',
+      name: 'Finish',
+      suppressed: false,
+      tool: 'tool#3',
+      geometry: [{ kind: 'region', sketch: 'sketch#4' }],
+      stepover: mm('0.5'),
+      angle: deg('90'),
+      strategy: 'parallel',
+      tolerance: mm('0.02'),
+      sampling: mm('0.1'),
+      pattern: 'oneway',
+      climb: false,
+    } as CamOperation;
+    const withTools = (operations: CamOperation[]) =>
+      apply(
+        bracket(),
+        { type: 'setVariable', name: 'feed', expression: mm('1200mm/min') },
+        add(holePoints),
+        add(hole),
+        add(recess),
+        { type: 'addCamTool', tool },
+        { type: 'addCamTool', tool: vbit },
+        { type: 'addCamTool', tool: ball },
+        { type: 'addCamSetup', setup: setup(operations) },
+      );
+    let doc = withTools([pocketExtras, carve, finish]);
+    const r = (await engine.camGeometry(doc, S))!;
+    expect(op(r, 'pocket#1').values).toMatchObject({
+      finishPass: false,
+      finishStepdown: 1,
+      floorAllowance: 0.2,
+      floorPass: true,
+    });
+    const v = op(r, 'vcarve#1');
+    expect(v.errors).toEqual([]);
+    expect(v.values).toMatchObject({
+      maxDepth: 1,
+      stepdown: 0.5,
+      flatStepover: 0.3,
+      clearing: {
+        tool: { id: T, kind: 'flat' },
+        // The cut feed from the operation, the rest from the flat's plywood preset.
+        feeds: { spindle: 18000, cut: 1200, plunge: 500 },
+        stepdown: 2,
+        stepover: 0.5,
+        entry: { kind: 'ramp', angle: expect.closeTo((5 * Math.PI) / 180, 9) },
+      },
+    });
+    const f = op(r, 'surface3d#1');
+    expect(f.errors).toEqual([]);
+    // The region bounds the finish; the mesh comes along for it.
+    expect(f.sources.map((x) => x.kind)).toEqual(['region']);
+    expect(f.values).toEqual(
+      expect.objectContaining({
+        stepover: 0.5,
+        allowance: 0,
+        strategy: 'parallel',
+        tolerance: 0.02,
+        sampling: 0.1,
+        pattern: 'oneway',
+        climb: false,
+      }),
+    );
+    expect(f.values).not.toHaveProperty('stepdown');
+    expect(r.mesh?.indices.length).toBeGreaterThan(0);
+
+    // The clearing tool's definition is in the V-carve's key, and only there.
+    const keys = (x: CamGeometryResult) => x.operations.map((o) => o.key);
+    doc = apply(doc, { type: 'editCamTool', tool: { ...tool, flutes: 3 } });
+    const edited = (await engine.camGeometry(doc, S))!;
+    expect(keys(edited)[1]).not.toBe(keys(r)[1]);
+    expect(keys(edited)[2]).toBe(keys(r)[2]);
+
+    // Out of range, the wrong clearing tool, and a clearing with no maximum depth.
+    const { maxDepth: _m, ...rest } = carve as CamOperation & { maxDepth?: unknown };
+    void _m;
+    const unbound = rest as CamOperation;
+    const bad = withTools([
+      { ...pocketExtras, floorAllowance: mm('4') } as CamOperation,
+      { ...unbound, clearing: { tool: 'tool#2' } } as CamOperation,
+      {
+        ...finish,
+        tolerance: mm('2'),
+        sampling: mm('0.0001'),
+        stepover: mm('5'),
+      } as CamOperation,
+    ]);
+    const b = (await engine.camGeometry(bad, S))!;
+    expect(op(b, 'pocket#1').errors.map((e) => e.field)).toEqual([['floorAllowance']]);
+    expect(op(b, 'vcarve#1').errors).toEqual([
+      expect.objectContaining({
+        field: ['clearing', 'tool'],
+        message: 'The clearing tool must be a flat or bull end mill, not a vbit tool',
+      }),
+    ]);
+    expect(op(b, 'surface3d#1').errors.map((e) => e.field)).toEqual([
+      ['stepover'],
+      ['tolerance'],
+      ['sampling'],
+    ]);
+    const unbounded = withTools([unbound]);
+    const u = (await engine.camGeometry(unbounded, S))!;
+    expect(op(u, 'vcarve#1').warnings.map((w) => w.code)).toEqual(['clearing']);
+
+    // Entry angles below half a degree: a ramp or helix that long would be millions of moves.
+    const shallow = deg('0.1');
+    const steep = withTools([
+      { ...pocketExtras, entry: { kind: 'ramp', angle: shallow } } as CamOperation,
+      {
+        ...carve,
+        clearing: {
+          tool: T,
+          stepover: mm('0.5'),
+          entry: { kind: 'helix', angle: shallow, radius: mm('1') },
+          feeds: { cut: mm('feed') },
+        },
+      } as CamOperation,
+      {
+        ...finish,
+        strategy: 'zlevel',
+        entry: { kind: 'helix', angle: shallow, radius: mm('1') },
+      } as CamOperation,
+    ]);
+    const a = (await engine.camGeometry(steep, S))!;
+    expect(op(a, 'pocket#1').errors).toEqual([
+      expect.objectContaining({
+        field: ['entry', 'angle'],
+        message: 'The entry angle must be at least 0.5 and at most 90 degrees',
+      }),
+    ]);
+    expect(op(a, 'vcarve#1').errors).toEqual([
+      expect.objectContaining({
+        field: ['clearing', 'entry', 'angle'],
+        message: 'The clearing entry angle must be at least 0.5 and at most 90 degrees',
+      }),
+    ]);
+    expect(op(a, 'surface3d#1').errors.map((e) => e.field)).toEqual([['entry', 'angle']]);
+    expect(CAM_MIN_ENTRY_ANGLE).toBeCloseTo((0.5 * Math.PI) / 180, 15);
+  }, 60_000);
 
   it('rejects a setup the document does not have', async () => {
     const engine = new RegenEngine({ kernel: service, solver });

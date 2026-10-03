@@ -19,6 +19,7 @@
 
 import * as Comlink from 'comlink';
 import { LruCache } from '../cache/lru';
+import { moveCount } from '../ops/budget';
 import { DEFAULT_KEY_VERSIONS, toolpathKey, type ToolpathKeyVersions } from '../cache/key';
 import {
   toolpathBounds,
@@ -41,6 +42,7 @@ import {
   clonePacked,
   packToolpath,
   packedBytes,
+  packedLength,
   packedTransferables,
   unpackToolpath,
   type PackedToolpath,
@@ -83,7 +85,12 @@ export type OperationErrorCode =
   /** The generator threw, or returned something that is not a `CamResult`: a bug. */
   | 'internal'
   /** The generator returned a toolpath the IR validator refuses: a bug. */
-  | 'invalid-toolpath';
+  | 'invalid-toolpath'
+  /**
+   * The request's toolpaths together passed `REQUEST_MAX_MOVES`: this operation's toolpath is
+   * not returned, and the operations after it are not generated.
+   */
+  | 'request-too-large';
 
 export interface OperationError {
   readonly code: OperationErrorCode;
@@ -239,6 +246,14 @@ export interface CamWorkerApi {
   clearCache(): Promise<void>;
 }
 
+/**
+ * The most IR entries one `generate` reply may hold, over all its operations. Each operation is
+ * held to `OPERATION_MAX_MOVES` (3 million); a setup of many such operations would still build a
+ * reply of gigabytes, since every toolpath is held until the reply is sent. Ten million entries
+ * are a few hundred MB packed; past that the remaining operations are refused.
+ */
+export const REQUEST_MAX_MOVES = 1e7;
+
 /** A cached outcome: a toolpath, or an expected failure (bugs are never cached). */
 export type CachedOutcome =
   | {
@@ -263,6 +278,11 @@ export interface CamWorkerApiOptions {
   slice?: number;
   /** How to yield; default `createYield()`. */
   yieldNow?: () => Promise<void>;
+  /**
+   * The most entries one reply may hold (internal, for tests): `REQUEST_MAX_MOVES`, or a lower
+   * value; a larger one is clamped to `REQUEST_MAX_MOVES`.
+   */
+  maxRequestMoves?: number;
 }
 
 /** The toolpath cache the API makes by default. */
@@ -332,6 +352,11 @@ export function createCamWorkerApi(options: CamWorkerApiOptions = {}): CamWorker
   const slice = options.slice ?? 8;
   const yieldNow = options.yieldNow ?? createYield();
   const session = options.session ?? new SimulationSession();
+  const asked = options.maxRequestMoves;
+  const maxRequestMoves =
+    typeof asked === 'number' && Number.isFinite(asked) && asked > 0
+      ? Math.min(Math.floor(asked), REQUEST_MAX_MOVES)
+      : REQUEST_MAX_MOVES;
   const channels: Record<CamChannel, Generations> = {
     generate: new Generations(),
     simulate: new Generations(),
@@ -458,6 +483,38 @@ export function createCamWorkerApi(options: CamWorkerApiOptions = {}): CamWorker
         checkpoint: () => work.checkpoint(),
       };
       const results: CamOperationResult[] = [];
+      // Entries held for the reply so far; once an operation would take them past the cap, it
+      // and every operation after it are refused (not generated) instead.
+      let held = 0;
+      let full = false;
+      const tooLarge = (base: { id: string; kind: OperationKind; key: string }) =>
+        result(
+          base,
+          {
+            ok: false,
+            error: {
+              code: 'request-too-large',
+              message: `${base.id}: this setup's toolpaths exceed ${moveCount(maxRequestMoves)} moves in total, the most one generation may hold; this operation and the ones after it are not generated. Split the setup, or use larger tools, stepdowns or stepovers.`,
+            },
+          },
+          false,
+          0,
+        );
+      /** The reply's result for `outcome`, or the refusal when it does not fit. */
+      const fit = (
+        base: { id: string; kind: OperationKind; key: string },
+        outcome: CachedOutcome,
+        cached: boolean,
+        ms: number,
+      ): CamOperationResult => {
+        const n = outcome.ok ? packedLength(outcome.toolpath) : 0;
+        if (held + n > maxRequestMoves) {
+          full = true;
+          return tooLarge(base);
+        }
+        held += n;
+        return result(base, outcome, cached, ms);
+      };
       try {
         for (const op of setup.operations) {
           if (only && !only.has(op.id)) continue;
@@ -466,9 +523,13 @@ export function createCamWorkerApi(options: CamWorkerApiOptions = {}): CamWorker
             request.keys?.[op.id] ??
             toolpathKey({ operation: op, setup, machine: request.machine }, keyVersions);
           const base = { id: op.id, kind: op.kind, key };
+          if (full) {
+            results.push(tooLarge(base));
+            continue;
+          }
           const hit = cache.get(key);
           if (hit) {
-            results.push(result(base, hit, true, 0));
+            results.push(fit(base, hit, true, 0));
             continue;
           }
           const opStarted = now();
@@ -476,7 +537,7 @@ export function createCamWorkerApi(options: CamWorkerApiOptions = {}): CamWorker
           // A generator that caught `CamCancelled` may have returned an error or a partial
           // toolpath: once the request is stale, nothing it returned is trusted for the cache.
           if (cacheable && !context.cancelled) cache.set(key, outcome);
-          results.push(result(base, outcome, false, now() - opStarted));
+          results.push(fit(base, outcome, false, now() - opStarted));
         }
         // A request that arrived during the last slice still wins.
         await yieldNow();

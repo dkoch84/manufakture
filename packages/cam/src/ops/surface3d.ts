@@ -33,8 +33,15 @@ import {
 import { wcsOriginInSetup } from '../wcs';
 import { DropCutter, cutterForTool, meshBounds, type CutterShape } from '../mesh/dropcutter';
 import { fitPolyline, type FitElement } from '../mesh/fit';
-import { heightGrid, superLevelLoops } from '../mesh/slices';
+import { MAX_GRID_NODES, heightGrid, superLevelLoops } from '../mesh/slices';
+import {
+  MoveBudgetExceeded,
+  OPERATION_MAX_MOVES,
+  operationMoveCap,
+  withMoveBudget,
+} from './budget';
 import { facingRaster } from './facing';
+import { entryProblem } from './entry';
 import { generatePocketLayers, type PocketLayer, type PocketOperation } from './pocket';
 import { Emitter, PROFILE_SAFE_ABOVE, levels } from './profile';
 
@@ -71,6 +78,11 @@ export interface Surface3dExtras {
   readonly climb?: boolean;
   /** `zlevel`: the slice grid's cell, mm. Default `SURFACE3D_SLICE_CELL`. */
   readonly sliceCell?: number;
+  /**
+   * `parallel`: a lower cap on the moves than `SURFACE3D_MAX_MOVES` (internal, for tests); a
+   * larger value is ignored.
+   */
+  readonly maxMoves?: number;
 }
 
 export type Surface3dStrategy = 'parallel' | 'zlevel';
@@ -148,6 +160,78 @@ export function scallopHeight(shape: CutterShape, stepover: number): number {
   }
 }
 
+/**
+ * The distance between drop points along a raster line, mm: `op.sampling`, or by default a quarter
+ * of the tool radius within 0.05 to 0.5 mm, then at most the tool radius (coarser samples step
+ * over features the refinement never sees), and for a V-bit at most `4 tol tan(a)` (a its half
+ * angle): a sharp tip drops into a narrow groove between two samples by about `step / (4 tan(a))`
+ * before the midpoint test can see it. Never below 0.001 mm. `clamped` when `op.sampling` was
+ * coarser than allowed.
+ */
+export function surface3dSampling(
+  op: Pick<Surface3dOperation, 'sampling' | 'tool'>,
+  shape: CutterShape,
+  tolerance: number,
+): { sampling: number; clamped: boolean } {
+  const R = op.tool.diameter / 2;
+  const wanted = op.sampling ?? Math.min(0.5, Math.max(0.05, R / 4));
+  let cap = R;
+  if (shape.kind === 'vbit') cap = Math.min(cap, 4 * tolerance * Math.tan(shape.halfAngle));
+  cap = Math.max(SURFACE3D_MIN_SAMPLING, cap);
+  return wanted > cap
+    ? { sampling: cap, clamped: op.sampling !== undefined }
+    : { sampling: wanted, clamped: false };
+}
+
+/** The finest sampling `surface3dSampling` gives, mm. */
+export const SURFACE3D_MIN_SAMPLING = 0.001;
+
+/**
+ * Most drop points a parallel finish samples before refinement (the raster's total length over
+ * the sampling); more is refused. A drop costs about 5 us in Node, and every sample is dropped at
+ * least twice (it and the middle of its chord), so this is a few minutes of work at most; a
+ * 300 mm square part finished with a 6 mm ball at a 0.5 mm stepover samples under 0.4 million.
+ */
+export const SURFACE3D_MAX_SAMPLES = 2e7;
+
+/**
+ * Most drops a parallel finish makes in all, refinement and links included; a surface that needs
+ * more is refused when the count is reached.
+ */
+export const SURFACE3D_MAX_DROPS = 3 * SURFACE3D_MAX_SAMPLES;
+
+/**
+ * Most clearing passes a z-level roughing may plan: levels times the most rings one level can
+ * need (half the narrower side of the boundary's box over the stepover). A 300 mm part roughed
+ * in 1 mm steps 50 mm deep at a 2.4 mm stepover plans under 3,200.
+ */
+export const SURFACE3D_MAX_ROUGH_RINGS = 1e5;
+
+/**
+ * Most slice-grid nodes a z-level roughing traces in all: levels times the grid's nodes. The
+ * default 0.2 mm cell over a 300 mm square part is about 2.3 million nodes a level.
+ */
+export const SURFACE3D_MAX_SLICE_NODES = 2e9;
+
+/**
+ * Most moves a parallel finish may hold: the toolpath's entries plus the cutter locations of the
+ * chord being fitted. Every move is an object of its own, so this bounds the memory as well as
+ * the G-code (a few hundred MB at most); a 300 mm square part finished with a 6 mm ball at a
+ * 0.5 mm stepover emits well under half a million. More is refused when the count is reached.
+ * The general cap every operation's toolpath has (`OPERATION_MAX_MOVES`), here counting the
+ * chord being fitted too.
+ */
+export const SURFACE3D_MAX_MOVES = OPERATION_MAX_MOVES;
+
+/**
+ * A parallel finish awaits `context.checkpoint()` (and so sees a cancel) every this many drops
+ * within a raster line too (some 25 ms of work), not only between lines.
+ */
+const CHECKPOINT_DROPS = 5_000;
+
+/** Thrown out of the drop loop when a parallel finish reaches `SURFACE3D_MAX_DROPS`. */
+class DropBudgetExceeded extends Error {}
+
 function checkMesh(mesh: Mesh): string | undefined {
   const { positions: p, indices: ix } = mesh;
   if (!(p instanceof Float32Array) || !(ix instanceof Uint32Array)) {
@@ -201,6 +285,10 @@ function checkInput(op: Surface3dOperation): string | undefined {
   if (op.stepdown !== undefined && !positive(op.stepdown)) {
     return 'The stepdown must be greater than zero.';
   }
+  if (op.entry !== undefined) {
+    const entry = entryProblem(op.entry);
+    if (entry) return entry;
+  }
   if (op.sliceCell !== undefined && !(finite(op.sliceCell) && op.sliceCell >= 0.01)) {
     return 'The slice cell must be at least 0.01 mm.';
   }
@@ -229,6 +317,13 @@ const rectLoop = (x0: number, y0: number, x1: number, y1: number): Loop2 => {
  * parallel finish by default, z-level roughing with `strategy: 'zlevel'`.
  */
 export async function generateSurface3d(
+  input: Surface3dInput,
+  context: OperationContext,
+): Promise<CamResult<GeneratedToolpath>> {
+  return withMoveBudget(input.id, () => surface3dToolpath(input, context));
+}
+
+async function surface3dToolpath(
   input: Surface3dInput,
   context: OperationContext,
 ): Promise<CamResult<GeneratedToolpath>> {
@@ -263,9 +358,9 @@ async function finishParallel(
   const shape = cutterForTool(op.tool, a);
   if (!shape.ok) return err(shape.error.code, `${op.id}: ${shape.error.message}`);
   const dc = new DropCutter(op.mesh, shape.value);
-  const R = op.tool.diameter / 2;
   const tol = op.tolerance ?? SURFACE3D_TOLERANCE;
-  const sampling = op.sampling ?? Math.min(0.5, Math.max(0.05, R / 4));
+  const sampled = surface3dSampling(op, shape.value, tol);
+  const sampling = sampled.sampling;
   const zigzag = (op.pattern ?? 'zigzag') === 'zigzag';
   const boundary = op.boundary ?? [
     rectLoop(bounds.min[0], bounds.min[1], bounds.max[0], bounds.max[1]),
@@ -280,17 +375,40 @@ async function finishParallel(
   const { area, lines } = raster.value;
   if (lines.length === 0) return err('invalid-input', `${op.id}: the boundary is empty.`);
   const polys = area.map((l) => flattenSegments(l.segments, true, INSIDE_TOLERANCE));
+  // The work budget, before any drop: the raster's samples at this sampling.
+  let samples = 0;
+  for (const line of lines) {
+    for (const chord of line) samples += Math.max(1, Math.ceil(dist2(chord.a, chord.b) / sampling));
+  }
+  if (samples > SURFACE3D_MAX_SAMPLES) {
+    return err(
+      'invalid-input',
+      `${op.id}: a stepover of ${fmt(op.stepover, 3)} mm and a sampling of ${fmt(sampling, 3)} mm need about ${fmt(samples / 1e6)} million drop points over this boundary; at most ${SURFACE3D_MAX_SAMPLES / 1e6} million are allowed. Use a larger stepover or sampling${shape.value.kind === 'vbit' ? ' (a V-bit samples at most 4 tol tan(a) apart: a larger tolerance too)' : ''}.`,
+    );
+  }
 
   const heights = context.setup.heights;
   const retractZ = Math.max(heights.retract, materialTop + SURFACE3D_SAFE_ABOVE);
   const clearanceZ = Math.max(heights.clearance, retractZ);
-  const em = new Emitter(op.id, op.feeds, [0, 0, clearanceZ]);
+  const em = new Emitter(op.id, op.feeds, [0, 0, clearanceZ], operationMoveCap(context));
   let start: Vec3 | undefined;
   let lowest = Infinity;
+  const maxMoves =
+    finite(op.maxMoves) && op.maxMoves > 0
+      ? Math.min(op.maxMoves, em.maxMoves, SURFACE3D_MAX_MOVES)
+      : Math.min(em.maxMoves, SURFACE3D_MAX_MOVES);
+  /** Throws `MoveBudgetExceeded` when `more` moves on top of the toolpath's would pass the cap. */
+  const room = (more: number): void => {
+    if (em.entries.length + more > maxMoves) throw new MoveBudgetExceeded(maxMoves);
+  };
 
   /** The tip height at (x, y): the grown cutter dropped, lifted by the stock to leave. */
   const dropFloor = floor - a;
-  const zAt = (x: number, y: number): number => dc.drop(x, y, dropFloor) + a;
+  let drops = 0;
+  const zAt = (x: number, y: number): number => {
+    if (++drops > SURFACE3D_MAX_DROPS) throw new DropBudgetExceeded();
+    return dc.drop(x, y, dropFloor) + a;
+  };
 
   /**
    * Cutter locations from `p` to `q`: samples `sampling` apart, halved where the middle of a
@@ -298,10 +416,16 @@ async function finishParallel(
    * and the surface still jumps (a wall under a flat end mill), the step goes up first or
    * across first, so it never runs below either end.
    */
-  const locations = (p: Vec2, q: Vec2): Vec3[] => {
+  let checkedAt = 0;
+  const locations = async (p: Vec2, q: Vec2): Promise<Vec3[]> => {
     const len = dist2(p, q);
     const n = Math.max(1, Math.ceil(len / sampling - 1e-9));
     const out: Vec3[] = [];
+    // Each location becomes at most one move: the chord's own count against the cap too.
+    const push = (v: Vec3): void => {
+      room(out.length + 1);
+      out.push(v);
+    };
     const at = (t: number): Vec3 => {
       const x = p[0] + (q[0] - p[0]) * t;
       const y = p[1] + (q[1] - p[1]) * t;
@@ -312,22 +436,26 @@ async function finishParallel(
       const M = at(tm);
       const off = Math.abs(M[2] - (A[2] + B[2]) / 2);
       if (off <= tol / 2) {
-        out.push(B);
+        push(B);
         return;
       }
       if (depth >= MAX_REFINE || (tb - ta) * len <= MIN_STEP) {
         // A jump the halving cannot resolve: up first, or across first, never through.
-        if (B[2] > A[2]) out.push([A[0], A[1], B[2]]);
-        else out.push([B[0], B[1], A[2]]);
-        out.push(B);
+        if (B[2] > A[2]) push([A[0], A[1], B[2]]);
+        else push([B[0], B[1], A[2]]);
+        push(B);
         return;
       }
       refine(ta, A, tm, M, depth + 1);
       refine(tm, M, tb, B, depth + 1);
     };
     let prev = at(0);
-    out.push(prev);
+    push(prev);
     for (let k = 1; k <= n; k++) {
+      if (drops - checkedAt >= CHECKPOINT_DROPS) {
+        await context.checkpoint();
+        checkedAt = drops;
+      }
       const t = k / n;
       const next = at(t);
       refine((k - 1) / n, prev, t, next, 0);
@@ -338,6 +466,7 @@ async function finishParallel(
 
   const emitFit = (pts: readonly Vec3[]): void => {
     const fit: FitElement[] = fitPolyline(pts, tol / 2);
+    room(fit.length);
     for (const e of fit) {
       if (e.kind === 'line') em.linear(e.to, 'cut');
       else em.arc(e.to, e.center, e.ccw, 'cut');
@@ -347,6 +476,7 @@ async function finishParallel(
 
   /** Up (straight) to the retract height, across, down by rapids to above the material, then fed. */
   const approach = (p: Vec3): void => {
+    room(4);
     if (!start) {
       start = [p[0], p[1], clearanceZ];
       em.cur = start;
@@ -376,29 +506,52 @@ async function finishParallel(
   };
 
   let forward = true;
-  for (const line of lines) {
-    await context.checkpoint();
-    const chords = forward ? line : [...line].reverse();
-    for (const chord of chords) {
-      const from = forward ? chord.a : chord.b;
-      const to = forward ? chord.b : chord.a;
-      const pts = locations(from, to);
-      const first = pts[0]!;
-      const here: Vec2 = [em.cur[0], em.cur[1]];
-      if (start && canLink(here, from)) {
-        emitFit(locations(here, from));
-      } else {
-        approach(first);
+  try {
+    for (const line of lines) {
+      await context.checkpoint();
+      checkedAt = drops;
+      const chords = forward ? line : [...line].reverse();
+      for (const chord of chords) {
+        const from = forward ? chord.a : chord.b;
+        const to = forward ? chord.b : chord.a;
+        const pts = await locations(from, to);
+        const first = pts[0]!;
+        const here: Vec2 = [em.cur[0], em.cur[1]];
+        if (start && canLink(here, from)) {
+          emitFit(await locations(here, from));
+        } else {
+          approach(first);
+        }
+        emitFit(pts);
       }
-      emitFit(pts);
+      if (zigzag) forward = !forward;
+      em.pass++;
     }
-    if (zigzag) forward = !forward;
-    em.pass++;
+  } catch (e) {
+    if (e instanceof MoveBudgetExceeded) {
+      return err(
+        'invalid-input',
+        `${op.id}: the finish needs more than ${maxMoves} moves at a tolerance of ${fmt(tol, 4)} mm, the most allowed. Use a larger stepover or tolerance, or a smaller boundary.`,
+      );
+    }
+    if (!(e instanceof DropBudgetExceeded)) throw e;
+    return err(
+      'invalid-input',
+      `${op.id}: the surface needs more than ${SURFACE3D_MAX_DROPS / 1e6} million drop points at a tolerance of ${fmt(tol, 4)} mm. Use a larger stepover, sampling or tolerance.`,
+    );
   }
   em.pass = Math.max(0, em.pass - 1);
   em.rapid([em.cur[0], em.cur[1], clearanceZ]);
 
   const warnings: CamWarning[] = [];
+  if (sampled.clamped) {
+    warnings.push(
+      warn(
+        'sampling-clamped',
+        `The sampling of ${fmt(op.sampling!, 3)} mm is too coarse for this tool; ${fmt(sampling, 3)} mm is used.`,
+      ),
+    );
+  }
   const stockTop = stockTopZ(context.setup);
   if (stockTop - lowest > op.tool.fluteLength) {
     warnings.push(
@@ -454,6 +607,49 @@ function flatHeights(mesh: Mesh): number[] {
   return out;
 }
 
+/**
+ * The roughing levels, descending: the even `steps` plus `flats` lifted by the stock to leave
+ * `a`, where those are below the material top, above the floor and more than `LEVEL_MERGE` from
+ * every level kept before them (steps first, then the flats from the lowest up). Sorted merges, so
+ * n log n in the levels; stops once there are more than `maxLevels` (the caller refuses those).
+ */
+function withFlatLevels(
+  steps: readonly number[],
+  flats: readonly number[],
+  a: number,
+  floor: number,
+  materialTop: number,
+  maxLevels: number,
+): number[] {
+  const sorted = [...steps].sort((x, y) => x - y);
+  /** Whether a step is within `LEVEL_MERGE` of `z` (binary search for the nearest). */
+  const nearStep = (z: number): boolean => {
+    let lo = 0;
+    let hi = sorted.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (sorted[mid]! < z) lo = mid + 1;
+      else hi = mid;
+    }
+    return (
+      (lo < sorted.length && Math.abs(sorted[lo]! - z) <= LEVEL_MERGE) ||
+      (lo > 0 && Math.abs(sorted[lo - 1]! - z) <= LEVEL_MERGE)
+    );
+  };
+  const zs = [...steps];
+  // `flats` ascend, so the nearest flat kept so far is the last one.
+  let lastFlat = -Infinity;
+  for (const h of flats) {
+    const z = h + a;
+    if (z < materialTop - LEVEL_MERGE && z > floor && z - lastFlat > LEVEL_MERGE && !nearStep(z)) {
+      zs.push(z);
+      lastFlat = z;
+      if (zs.length > maxLevels) break;
+    }
+  }
+  return zs.sort((x, y) => y - x);
+}
+
 async function roughZLevel(
   op: Surface3dOperation,
   context: OperationContext,
@@ -486,23 +682,45 @@ async function roughZLevel(
   // horizontal face, so flat areas are roughed to exactly that.
   const base = levels(materialTop, floor, stepdown);
   if (!base.ok) return err(base.error.code, `${op.id}: ${base.error.message}`);
-  const zs = [...base.value];
-  for (const h of flatHeights(op.mesh)) {
-    const z = h + a;
-    if (
-      z < materialTop - LEVEL_MERGE &&
-      z > floor &&
-      zs.every((w) => Math.abs(w - z) > LEVEL_MERGE)
-    ) {
-      zs.push(z);
+  // The work budget, before the grid: clearing passes (levels times the rings one level can need)
+  // and slice-grid nodes traced (levels times the grid).
+  let bx0 = Infinity;
+  let by0 = Infinity;
+  let bx1 = -Infinity;
+  let by1 = -Infinity;
+  for (const l of outer) {
+    for (const [x, y] of flattenSegments(l.segments, true, 0.01)) {
+      bx0 = Math.min(bx0, x);
+      by0 = Math.min(by0, y);
+      bx1 = Math.max(bx1, x);
+      by1 = Math.max(by1, y);
     }
   }
-  zs.sort((x, y) => y - x);
+  const ringsPerLevel = Math.max(1, Math.ceil(Math.min(bx1 - bx0, by1 - by0) / 2 / op.stepover));
+  const tooManyPasses = (count: number) =>
+    err(
+      'invalid-input',
+      `${op.id}: ${count} levels at a stepover of ${fmt(op.stepover, 3)} mm need up to ${count * ringsPerLevel} clearing passes; at most ${SURFACE3D_MAX_ROUGH_RINGS} are allowed. Use a larger stepover or stepdown.`,
+    );
+  const maxLevels = Math.floor(SURFACE3D_MAX_ROUGH_RINGS / ringsPerLevel);
+  if (base.value.length > maxLevels) return tooManyPasses(base.value.length);
+  const zs = withFlatLevels(base.value, flatHeights(op.mesh), a, floor, materialTop, maxLevels);
+  if (zs.length > maxLevels) return tooManyPasses(zs.length);
 
   // The slice grid: highest material within `reach` of each node.
   const reach = cell * Math.SQRT2 + SURFACE3D_SLICE_SIMPLIFY;
   const sampler = new DropCutter(op.mesh, { kind: 'flat', radius: reach });
   const empty = Math.min(floor, bounds.min[2]) - a - 1000;
+  // As `heightGrid` sizes it.
+  const nodes =
+    (Math.ceil((bounds.max[0] - bounds.min[0] + 2 * reach) / cell) + 3) *
+    (Math.ceil((bounds.max[1] - bounds.min[1] + 2 * reach) / cell) + 3);
+  if (nodes <= MAX_GRID_NODES && zs.length * nodes > SURFACE3D_MAX_SLICE_NODES) {
+    return err(
+      'invalid-input',
+      `${op.id}: ${zs.length} levels over a slice grid of ${fmt(nodes / 1e6)} million nodes is too much work; use a larger stepdown or slice cell.`,
+    );
+  }
   const grid = await heightGrid(
     sampler,
     {

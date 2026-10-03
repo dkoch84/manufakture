@@ -36,6 +36,7 @@ const KIND_LABELS: Readonly<Record<string, string>> = {
   pocket: 'Pocket',
   drill: 'Drill',
   vcarve: 'V-carve',
+  vcarveClearing: 'V-carve floor clearing',
   surface3d: '3D surfacing',
 };
 

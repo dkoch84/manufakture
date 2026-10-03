@@ -10,6 +10,7 @@ import { CamClient, type CamEndpoint } from '../client';
 import type { IrEntry, Toolpath } from '../ir';
 import { err, ok, type PocketInput, type Setup, type Surface3dInput } from '../types';
 import {
+  REQUEST_MAX_MOVES,
   createCamWorkerApi,
   createToolpathCache,
   type CamGenerateReply,
@@ -403,6 +404,48 @@ describe('the CAM worker', () => {
     });
     expect(calls).toBe(2);
     client.terminate();
+  });
+
+  it("refuses the operations past the request's move total, without generating the rest", async () => {
+    expect(REQUEST_MAX_MOVES).toBe(1e7);
+    const { generator, calls } = stubPocket();
+    // Each 3 mm pocket at a 1 mm stepdown is 17 entries: two fit in 40, the third does not.
+    const { api } = recording({ operations: registryWith(generator), maxRequestMoves: 40 });
+    const { client } = connected(api);
+    const setup = setupWith(
+      pocket('pocket#1'),
+      pocket('pocket#2'),
+      pocket('pocket#3'),
+      pocket('pocket#4'),
+    );
+    const reply = await client.generate(setup);
+    if (reply?.status !== 'done') throw new Error('expected done');
+    expect(reply.operations.map((o) => o.ok)).toEqual([true, true, false, false]);
+    // The third was generated (and cached) but not returned; the fourth never generated.
+    expect(calls).toEqual(['pocket#1', 'pocket#2', 'pocket#3']);
+    for (const o of reply.operations.slice(2)) {
+      if (o.ok) throw new Error('expected an error');
+      expect(o.error.code).toBe('request-too-large');
+      expect(o.error.message).toBe(
+        `${o.id}: this setup's toolpaths exceed 40 moves in total, the most one generation may hold; this operation and the ones after it are not generated. Split the setup, or use larger tools, stepdowns or stepovers.`,
+      );
+    }
+    // Cache hits count the same; asking for the later ones alone fits.
+    const again = await client.generate(setup);
+    if (again?.status !== 'done') throw new Error('expected done');
+    expect(again.operations.map((o) => o.ok)).toEqual([true, true, false, false]);
+    const rest = await client.generate(setup, { only: ['pocket#3', 'pocket#4'] });
+    if (rest?.status !== 'done') throw new Error('expected done');
+    expect(rest.operations.map((o) => o.ok)).toEqual([true, true]);
+    expect(calls).toEqual(['pocket#1', 'pocket#2', 'pocket#3', 'pocket#4']);
+    client.terminate();
+  });
+
+  it('clamps a request move total above REQUEST_MAX_MOVES', async () => {
+    const { generator } = stubPocket();
+    const { api } = recording({ operations: registryWith(generator), maxRequestMoves: 1e12 });
+    const reply = await api.generate({ generation: 1, setup: setupWith(pocket('pocket#1')) });
+    expect(reply.status === 'done' && reply.operations[0]!.ok).toBe(true);
   });
 
   it('passes the machine row to generators', async () => {

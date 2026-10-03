@@ -679,6 +679,97 @@ describe('job assembly: worker results and posts', () => {
     checkJob(setup, r.value.toolpath, 10);
   });
 
+  it('keeps a V-carve clearing ahead of its V-carve when grouping by tool', async () => {
+    const setup = makeSetup();
+    // The "V-bit" (flat3 here) cuts an outline first, then the clearing (flat6) and its carve.
+    const early = await generated(profileOp({ tool: flat3 }), setup);
+    const clearing: JobOperation = {
+      ...(await generated(pocketOp(), setup)),
+      before: 'profile#2',
+    };
+    const carve = await generated(
+      profileOp({ id: 'profile#2', tool: flat3, loops: [rect(130, 40, 20, 10)] }),
+      setup,
+    );
+    const grouped = assembleJob(setup, [early, clearing, carve], { groupByTool: true });
+    if (!grouped.ok) throw new Error(grouped.error.message);
+    expect(grouped.value.operations.map((s) => s.op)).toEqual([
+      'profile#1',
+      'pocket#1',
+      'profile#2',
+    ]);
+    expect(grouped.value.toolChanges).toEqual(['tool#2', 'tool#1', 'tool#2']);
+    checkJob(setup, grouped.value.toolpath, 10);
+    // When grouping keeps the order anyway, nothing moves and no tool change is added.
+    const later = await generated(
+      pocketOp({ id: 'pocket#2', loops: [rect(10, 100, 30, 30)] }),
+      setup,
+    );
+    const kept = assembleJob(setup, [clearing, carve, later], { groupByTool: true });
+    if (!kept.ok) throw new Error(kept.error.message);
+    expect(kept.value.operations.map((s) => s.op)).toEqual(['pocket#1', 'pocket#2', 'profile#2']);
+    // `jobOperations` marks a clearing to run before its carve.
+    const vcarveClearing = {
+      kind: 'vcarveClearing',
+      id: 'vcarve#1/clearing',
+      name: 'Sign (clearing)',
+      tool: flat6,
+      feeds,
+      carve: { kind: 'vcarve', id: 'vcarve#1' },
+      stepdown: 1,
+      stepover: 0.4,
+    } as unknown as OperationInput;
+    const [marked] = jobOperations({ operations: [vcarveClearing] }, []);
+    expect(marked!.before).toBe('vcarve#1');
+    expect(jobOperations({ operations: [profileOp()] }, [])[0]!.before).toBeUndefined();
+  });
+
+  it('assembles and posts an operation of 300,000 entries (no spread past the call stack)', () => {
+    const setup = makeSetup();
+    const id = 'surface3d#1';
+    const n = 300_000;
+    // A raster at Z -1 over the stock, as a fine 3D finish would emit.
+    const entries: IrEntry[] = [
+      { kind: 'rapid', to: [10, 10, 3], op: id, pass: 0 },
+      { kind: 'linear', to: [10, 10, -1], feed: 300, feedClass: 'plunge', op: id, pass: 0 },
+    ];
+    for (let i = 1; i < n - 2; i++) {
+      const x = 10 + (i % 1000) * 0.1;
+      const y = 10 + Math.floor(i / 1000) * 0.4;
+      entries.push({
+        kind: 'linear',
+        to: [x, y, -1],
+        feed: 1000,
+        feedClass: 'cut',
+        op: id,
+        pass: 0,
+      });
+    }
+    const last = entries.at(-1)!;
+    if (last.kind !== 'linear') throw new Error('expected a linear move');
+    entries.push({ kind: 'rapid', to: [last.to[0], last.to[1], 10], op: id, pass: 0 });
+    expect(entries.length).toBe(n);
+    const op: JobOperation = {
+      id,
+      tool: flat6,
+      feeds,
+      result: { ok: true, toolpath: { start: [10, 10, 10], entries } },
+    };
+    const r = assembleJob(setup, [op]);
+    if (!r.ok) throw new Error(r.error.message);
+    const own = r.value.toolpath.entries.filter((e) => e.op === id && isMove(e));
+    expect(own.length).toBe(entries.length);
+    const grbl = postGrbl({
+      toolpath: r.value.toolpath,
+      job: 'Job test',
+      setup: 'Top',
+      date: '2026-10-02',
+      heights: { clearance: r.value.clearance, retract: r.value.retract },
+    });
+    if (!grbl.ok) throw new Error(grbl.error.message);
+    expect(grbl.value.files[0]!.lines.length).toBeGreaterThan(n - 10);
+  });
+
   it('posts as one file per tool for Grbl and one file with M6 for Carbide Motion', async () => {
     const setup = makeSetup();
     const j = await job(setup, [profileOp(), drillOp()]);

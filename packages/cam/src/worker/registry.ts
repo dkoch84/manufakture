@@ -60,6 +60,11 @@ export interface OperationContext extends WorkContext {
   readonly setup: Setup;
   /** The machine table row the setup uses (T5.1d), as the request sent it; hashed into keys. */
   readonly machine?: unknown;
+  /**
+   * A lower cap on the entries of the operation's toolpath than `OPERATION_MAX_MOVES`
+   * (internal, for tests); a larger value is ignored.
+   */
+  readonly maxMoves?: number;
 }
 
 export type OperationOfKind<K extends OperationKind> = Extract<OperationInput, { kind: K }>;

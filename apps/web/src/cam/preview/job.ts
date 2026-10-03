@@ -19,6 +19,7 @@ import {
   type Toolpath,
   type ToolpathStats,
 } from '@manufakture/cam';
+import { documentOperation } from '../generate';
 
 /** One generation of a setup, kept for the preview. */
 export interface GeneratedToolpaths {
@@ -60,14 +61,18 @@ function statsOf(toolpath: Toolpath, rapidRate: number): ToolpathStats | null {
   return r.ok ? r.value : null;
 }
 
-/** The preview's program and statistics from a generation; `suppressed` ids are left out. */
+/**
+ * The preview's program and statistics from a generation; `suppressed` ids are left out (with a
+ * V-carve, its clearing).
+ */
 export function previewJob(
   data: GeneratedToolpaths,
   suppressed: ReadonlySet<string> = new Set(),
 ): PreviewJob {
   const results = new Map(data.operations.map((r) => [r.id, r]));
+  // A V-carve's clearing goes with its V-carve (`documentOperation`).
   const leftOut = data.setup.operations
-    .filter((o) => suppressed.has(o.id) || !results.get(o.id)?.ok)
+    .filter((o) => suppressed.has(documentOperation(o.id)) || !results.get(o.id)?.ok)
     .map((o) => o.id);
   const jobOps = jobOperations(data.setup, data.operations, leftOut);
   const tools = new Map(data.setup.operations.map((o) => [o.tool.id, o.tool]));

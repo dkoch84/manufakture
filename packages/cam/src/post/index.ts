@@ -54,6 +54,7 @@ export {
   MAX_ARC_SEGMENTS,
   MIN_ARC_CHORD_STEPS,
   MIN_ARC_RADIUS_STEPS,
+  POST_MAX_LINES,
   dialComment,
   postProcess,
   sagitta,

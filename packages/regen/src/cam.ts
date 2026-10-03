@@ -31,6 +31,7 @@
 
 import {
   camExpressions,
+  camOperationTools,
   camSetupOwnExpressions,
   camToolExpressions,
   type CamDepth,
@@ -69,7 +70,7 @@ import type { FeatureResult, FieldPath, LastResolved, ReferenceResolution } from
 import { evaluateField, pathKey, type VariableValues } from './values';
 
 /** Bump with any change that can change the stage's output for the same inputs. */
-export const CAM_STAGE_VERSION = 2;
+export const CAM_STAGE_VERSION = 3;
 
 /**
  * The chordal and angular tolerance of the CAM mesh (ADR 0014 decision 7): finer than the
@@ -83,6 +84,46 @@ export const CAM_LOOP_DEFLECTION = 0.01;
 
 /** A plane or axis within this angle (radians) of the setup's is parallel (`packages/cam`'s). */
 export const CAM_PARALLEL_TOLERANCE = 1e-6;
+
+/**
+ * The smallest 3D surfacing tolerance, drop-point sampling and slice cell, mm: what
+ * `packages/cam`'s `generateSurface3d` accepts (the tolerance also at most 1 mm here: a coarser
+ * one is a typing slip, not a finish).
+ */
+export const SURFACE3D_MIN_TOLERANCE = 1e-4;
+export const SURFACE3D_MIN_SAMPLING = 1e-3;
+export const SURFACE3D_MIN_SLICE_CELL = 0.01;
+
+/**
+ * The shallowest ramp or helix entry angle, radians (half a degree): `packages/cam`'s
+ * `ENTRY_MIN_ANGLE`. A ramp's length and a helix's turns grow as 1 / tan(angle), so a vanishing
+ * angle would ask for millions of moves.
+ */
+export const CAM_MIN_ENTRY_ANGLE = (0.5 * Math.PI) / 180;
+
+/**
+ * The most tabs a profile may ask for on one loop: `packages/cam`'s `PROFILE_MAX_TABS`. Far
+ * above any real part; a larger count is a typing slip, and each tab costs work on every pass.
+ */
+export const CAM_MAX_TABS = 1000;
+
+/**
+ * The most pecks one hole may take: `packages/cam`'s `DRILL_MAX_PECKS`. A peck depth so small that
+ * a hole needs more is refused here, measured over the hole's own depth; the generator checks it
+ * again from the stock top, breakthrough included.
+ */
+export const CAM_DRILL_MAX_PECKS = 10000;
+
+/**
+ * The smallest tool diameter CAM accepts, mm. The finest micro end mills are about 0.1 mm; a
+ * tool far below that makes rings, helix turns and passes without end (each operation's move
+ * budget in `packages/cam` refuses what is left).
+ */
+export const CAM_MIN_TOOL_DIAMETER = 0.01;
+
+/** An entry angle CAM accepts: at least `CAM_MIN_ENTRY_ANGLE` and at most 90 degrees. */
+const entryAngleOk = (angle: number): boolean =>
+  Number.isFinite(angle) && angle >= CAM_MIN_ENTRY_ANGLE - 1e-12 && angle <= Math.PI / 2;
 
 /** Source heights further apart than this (mm) are reported as a `heights` warning. */
 const HEIGHT_TOLERANCE = 1e-6;
@@ -261,6 +302,11 @@ export type CamOperationValues =
       readonly finishAllowance: number;
       readonly entry: CamEntryValues;
       readonly climb: boolean;
+      /** `packages/cam`'s `PocketExtras`, each absent for the generator's default. */
+      readonly finishPass?: boolean;
+      readonly finishStepdown?: number;
+      readonly floorAllowance?: number;
+      readonly floorPass?: boolean;
     })
   | (OperationValuesBase & {
       readonly kind: 'drill';
@@ -272,13 +318,36 @@ export type CamOperationValues =
       /** Machine Z of the surface carved into: the top of the operation's geometry. */
       readonly top: number;
       readonly maxDepth?: number;
+      /** `packages/cam`'s `VCarveExtras`, each absent for the generator's default. */
+      readonly stepdown?: number;
+      readonly flatStepover?: number;
+      readonly clearing?: CamVCarveClearingValues;
     })
   | (OperationValuesBase & {
       readonly kind: 'surface3d';
       readonly stepover: number;
       readonly angle: number;
       readonly allowance: number;
+      /** `packages/cam`'s `Surface3dExtras` (the boundary comes from the sources), each optional. */
+      readonly strategy?: 'parallel' | 'zlevel';
+      readonly tolerance?: number;
+      readonly sampling?: number;
+      readonly pattern?: 'zigzag' | 'oneway';
+      readonly stepdown?: number;
+      readonly entry?: CamEntryValues;
+      readonly climb?: boolean;
+      readonly sliceCell?: number;
     });
+
+/** A V-carve's floor clearing: its end mill, feeds and steps, evaluated (`VCarveClearing`). */
+export interface CamVCarveClearingValues {
+  readonly tool: CamToolValues;
+  readonly feeds: CamFeedValues;
+  readonly stepdown: number;
+  /** Fraction of the clearing tool's diameter. */
+  readonly stepover: number;
+  readonly entry?: CamEntryValues;
+}
 
 /** The setup's own numbers. */
 export interface CamSetupValues {
@@ -368,7 +437,9 @@ export type CamStageWarningCode =
    */
   | 'holes'
   /** For information: the wider steps of a stepped hole (a counterbore) that are left to a pocket. */
-  | 'hole-steps';
+  | 'hole-steps'
+  /** A V-carve's clearing tool with no maximum depth: there may be no flat floor to clear. */
+  | 'clearing';
 
 export interface CamStageWarning {
   readonly code: CamStageWarningCode;
@@ -803,6 +874,15 @@ function evaluateTool(
   };
   size('diameter', 'diameter');
   size('fluteLength', 'flute length');
+  const diameter = get('diameter');
+  if (diameter !== undefined && positive(diameter)) {
+    check(
+      errors,
+      diameter >= CAM_MIN_TOOL_DIAMETER,
+      ['tool', 'diameter'],
+      `${tool.id}: the diameter must be at least ${CAM_MIN_TOOL_DIAMETER} mm`,
+    );
+  }
   if (errors.length > 0) return { tool: null, preset: null, errors };
   const optional = (k: string) => (get(k) === undefined ? {} : { [k]: get(k)! });
   const out: CamToolValues = {
@@ -838,7 +918,8 @@ const TAKES: Record<CamOperation['kind'], readonly string[]> = {
   pocket: ['face', 'region'],
   vcarve: ['face', 'region'],
   drill: ['hole'],
-  surface3d: [],
+  // Faces and regions bound a 3D surfacing in XY (none: the default boundary).
+  surface3d: ['face', 'region'],
 };
 
 /** What resolving the setup gave: everything its operations read. */
@@ -965,7 +1046,9 @@ export class CamStage {
     const key = cacheKey(host.versions, {
       ...common,
       operations: setup.operations,
-      tools: [...new Set(setup.operations.map((op) => op.tool))].map((id) => tools.get(id) ?? id),
+      tools: [...new Set(setup.operations.flatMap(camOperationTools))].map(
+        (id) => tools.get(id) ?? id,
+      ),
       features: [...named].sort().map((id) => [id, featureKey(id)]),
       warnings: setupWarnings.map((w) => w.message),
     });
@@ -1001,6 +1084,9 @@ export class CamStage {
         ...common,
         operation: rest,
         tool: tools.get(op.tool) ?? op.tool,
+        ...(op.kind === 'vcarve' && op.clearing
+          ? { clearingTool: tools.get(op.clearing.tool) ?? op.clearing.tool }
+          : {}),
         features: [...new Set(sources)].sort().map((id) => [id, featureKey(id)]),
       });
     };
@@ -1432,25 +1518,45 @@ export class CamStage {
         });
       }
     };
-    const entryOf = (e: CamEntry): CamEntryValues => {
+    const entryOf = (e: CamEntry, at: readonly string[] = []): CamEntryValues => {
       if (e.kind === 'plunge') return { kind: 'plunge' };
-      const angle = get('entry', 'angle')!;
+      const angle = get(...at, 'entry', 'angle')!;
       check(
         errors,
-        positive(angle) && angle <= Math.PI / 2,
-        ['entry', 'angle'],
-        'The entry angle must be more than 0 and at most 90 degrees',
+        entryAngleOk(angle),
+        [...at, 'entry', 'angle'],
+        'The entry angle must be at least 0.5 and at most 90 degrees',
       );
       if (e.kind === 'ramp') return { kind: 'ramp', angle };
-      const radius = get('entry', 'radius')!;
+      const radius = get(...at, 'entry', 'radius')!;
       check(
         errors,
         positive(radius),
-        ['entry', 'radius'],
+        [...at, 'entry', 'radius'],
         'The helix radius must be greater than zero',
       );
       return { kind: 'helix', angle, radius };
     };
+    /** An optional length that must be greater than zero (or zero or more). */
+    const optionalLength = (k: string, what: string, zero = false): number | undefined => {
+      const v = get(k);
+      if (v !== undefined) {
+        check(
+          errors,
+          zero ? nonNegative(v) : positive(v),
+          [k],
+          `The ${what} must be ${zero ? 'zero or more' : 'greater than zero'}`,
+        );
+      }
+      return v;
+    };
+    /** `o` without its undefined fields (the values type has exact optional fields). */
+    const defined = <T extends Record<string, unknown>>(
+      o: T,
+    ): { [K in keyof T]?: Exclude<T[K], undefined> } =>
+      Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as {
+        [K in keyof T]?: Exclude<T[K], undefined>;
+      };
     const leadOf = (k: 'leadIn' | 'leadOut', lead: CamLead): CamLeadValues => {
       if (lead.kind === 'none') return { kind: 'none' };
       if (lead.kind === 'line') {
@@ -1507,6 +1613,12 @@ export class CamStage {
             Number.isInteger(tabs.count) && tabs.count >= 0,
             ['tabs', 'count'],
             'The tab count must be a whole number, zero or more',
+          );
+          check(
+            errors,
+            !(tabs.count > CAM_MAX_TABS),
+            ['tabs', 'count'],
+            `The tab count must be at most ${CAM_MAX_TABS}`,
           );
           check(
             errors,
@@ -1585,6 +1697,16 @@ export class CamStage {
           ['finishAllowance'],
           'The finishing allowance must be zero or more',
         );
+        const finishStepdown = optionalLength('finishStepdown', 'finishing stepdown');
+        const floorAllowance = optionalLength('floorAllowance', 'floor allowance', true);
+        if (floorAllowance !== undefined) {
+          check(
+            errors,
+            floorAllowance < depth.top - depth.bottom,
+            ['floorAllowance'],
+            'The floor allowance must be less than the pocket depth',
+          );
+        }
         values = {
           ...head,
           kind: 'pocket',
@@ -1594,6 +1716,12 @@ export class CamStage {
           finishAllowance,
           entry: entryOf(op.entry),
           climb: op.climb,
+          ...defined({
+            finishPass: op.finishPass,
+            finishStepdown,
+            floorAllowance,
+            floorPass: op.floorPass,
+          }),
         };
         break;
       }
@@ -1655,6 +1783,20 @@ export class CamStage {
             });
           }
         }
+        if (peck !== undefined && positive(peck)) {
+          let deepest = 0;
+          for (const src of sources) {
+            if (src.kind !== 'hole' && src.kind !== 'holeWalls') continue;
+            for (const pt of src.points) if (pt.depth > deepest) deepest = pt.depth;
+          }
+          const pecks = Math.ceil(deepest / peck);
+          check(
+            errors,
+            pecks <= CAM_DRILL_MAX_PECKS,
+            ['peck'],
+            `The peck depth is too small: the deepest hole (${Math.round(deepest * 1000) / 1000} mm) would take ${pecks} pecks, and at most ${CAM_DRILL_MAX_PECKS} are allowed`,
+          );
+        }
         values = {
           ...head,
           kind: 'drill',
@@ -1673,24 +1815,236 @@ export class CamStage {
             ['maxDepth'],
             'The maximum depth must be greater than zero',
           );
+        const stepdown = optionalLength('stepdown', 'stepdown');
+        const flatStepover = optionalLength('flatStepover', 'floor stepover');
+        let clearing: CamVCarveClearingValues | undefined;
+        if (op.clearing !== undefined) {
+          clearing = this.#clearing(op.clearing, tools, material, host.variables, get, errors);
+          if (clearing && maxDepth === undefined) {
+            warnings.push({
+              code: 'clearing',
+              message: `${op.id} has a clearing tool but no maximum depth: a V-carve has a flat floor to clear only where the maximum depth (or the bit's size) stops it`,
+            });
+          }
+        }
         values = {
           ...head,
           kind: 'vcarve',
           top: geometryTop,
-          ...(maxDepth === undefined ? {} : { maxDepth }),
+          ...defined({ maxDepth, stepdown, flatStepover, clearing }),
         };
         break;
       }
       case 'surface3d': {
         const stepover = get('stepover')!;
         check(errors, positive(stepover), ['stepover'], 'The stepover must be greater than zero');
+        check(
+          errors,
+          !(stepover > tool.tool.diameter),
+          ['stepover'],
+          'The stepover must be at most the tool diameter',
+        );
         const allowance = get('allowance') ?? 0;
         check(errors, nonNegative(allowance), ['allowance'], 'The allowance must be zero or more');
-        values = { ...head, kind: 'surface3d', stepover, angle: get('angle')!, allowance };
+        const tolerance = get('tolerance');
+        if (tolerance !== undefined) {
+          check(
+            errors,
+            Number.isFinite(tolerance) && tolerance >= SURFACE3D_MIN_TOLERANCE && tolerance <= 1,
+            ['tolerance'],
+            `The tolerance must be at least ${SURFACE3D_MIN_TOLERANCE} mm and at most 1 mm`,
+          );
+        }
+        const sampling = get('sampling');
+        if (sampling !== undefined) {
+          check(
+            errors,
+            Number.isFinite(sampling) && sampling >= SURFACE3D_MIN_SAMPLING,
+            ['sampling'],
+            `The sampling must be at least ${SURFACE3D_MIN_SAMPLING} mm`,
+          );
+        }
+        const sliceCell = get('sliceCell');
+        if (sliceCell !== undefined) {
+          check(
+            errors,
+            Number.isFinite(sliceCell) && sliceCell >= SURFACE3D_MIN_SLICE_CELL,
+            ['sliceCell'],
+            `The slice cell must be at least ${SURFACE3D_MIN_SLICE_CELL} mm`,
+          );
+        }
+        const stepdown = optionalLength('stepdown', 'stepdown');
+        values = {
+          ...head,
+          kind: 'surface3d',
+          stepover,
+          angle: get('angle')!,
+          allowance,
+          ...defined({
+            strategy: op.strategy,
+            tolerance,
+            sampling,
+            pattern: op.pattern,
+            stepdown,
+            entry: op.entry ? entryOf(op.entry) : undefined,
+            climb: op.climb,
+            sliceCell,
+          }),
+        };
         break;
       }
     }
     return out(values);
+  }
+
+  /**
+   * A V-carve's floor clearing: its end mill (a flat or bull tool), the feeds from the operation's
+   * overrides or that tool's preset for the stock's material, and the steps, at `clearing.*`.
+   * Null (with errors) when it does not evaluate.
+   */
+  #clearing(
+    c: NonNullable<Extract<CamOperation, { kind: 'vcarve' }>['clearing']>,
+    tools: ReadonlyMap<string, CamTool>,
+    material: string | undefined,
+    variables: VariableValues,
+    get: (...path: (string | number)[]) => number | undefined,
+    errors: CamStageError[],
+  ): CamVCarveClearingValues | undefined {
+    const def = tools.get(c.tool);
+    if (def === undefined) {
+      errors.push({
+        code: 'invalid',
+        field: ['clearing', 'tool'],
+        message: `The document has no tool ${c.tool}`,
+      });
+      return undefined;
+    }
+    if (def.kind !== 'flat' && def.kind !== 'bull') {
+      errors.push({
+        code: 'invalid',
+        field: ['clearing', 'tool'],
+        message: `The clearing tool must be a flat or bull end mill, not a ${def.kind} tool`,
+      });
+      return undefined;
+    }
+    const evaluated = evaluateTool(def, material, variables);
+    errors.push(
+      ...evaluated.errors.map((e) => ({
+        ...e,
+        ...(e.field ? { field: ['clearing', ...e.field] } : {}),
+      })),
+    );
+    if (evaluated.tool === null) return undefined;
+    const preset = evaluated.preset;
+    const noPreset =
+      material === undefined
+        ? 'the stock has no material'
+        : `${def.id} has no preset for ${material}`;
+    let ok = true;
+    const value = (
+      path: readonly string[],
+      from: number | undefined,
+      what: string,
+      valid: (v: number) => boolean,
+      rule: string,
+    ): number => {
+      const v = get(...path) ?? from;
+      if (v === undefined) {
+        errors.push({
+          code: 'feeds',
+          field: [...path],
+          message: `No ${what} for the clearing: set one on the operation (${noPreset})`,
+        });
+        ok = false;
+        return 0;
+      }
+      if (!valid(v)) {
+        errors.push({ code: 'invalid', field: [...path], message: `The clearing ${what} ${rule}` });
+        ok = false;
+      }
+      return v;
+    };
+    const above = (v: number) => positive(v);
+    const gt0 = 'must be greater than zero';
+    const spindle = value(
+      ['clearing', 'feeds', 'spindle'],
+      preset?.spindle,
+      'spindle speed',
+      above,
+      gt0,
+    );
+    const cut = value(['clearing', 'feeds', 'cut'], preset?.feed, 'cutting feed', above, gt0);
+    const plunge = value(
+      ['clearing', 'feeds', 'plunge'],
+      preset?.plunge,
+      'plunge feed',
+      above,
+      gt0,
+    );
+    const ramp = get('clearing', 'feeds', 'ramp');
+    const lead = get('clearing', 'feeds', 'lead');
+    for (const [k, v] of [
+      ['ramp', ramp],
+      ['lead', lead],
+    ] as const) {
+      if (v !== undefined && !positive(v)) {
+        errors.push({
+          code: 'invalid',
+          field: ['clearing', 'feeds', k],
+          message: `The clearing ${k} feed ${gt0}`,
+        });
+        ok = false;
+      }
+    }
+    const stepdown = value(['clearing', 'stepdown'], preset?.stepdown, 'stepdown', above, gt0);
+    const stepover = value(
+      ['clearing', 'stepover'],
+      preset?.stepover,
+      'stepover',
+      (v) => positive(v) && v <= 1,
+      'must be a fraction of the tool diameter, more than 0 and at most 1',
+    );
+    let entry: CamEntryValues | undefined;
+    if (c.entry !== undefined && c.entry.kind !== 'plunge') {
+      const angle = get('clearing', 'entry', 'angle')!;
+      if (!entryAngleOk(angle)) {
+        errors.push({
+          code: 'invalid',
+          field: ['clearing', 'entry', 'angle'],
+          message: 'The clearing entry angle must be at least 0.5 and at most 90 degrees',
+        });
+        ok = false;
+      }
+      if (c.entry.kind === 'ramp') entry = { kind: 'ramp', angle };
+      else {
+        const radius = get('clearing', 'entry', 'radius')!;
+        if (!positive(radius)) {
+          errors.push({
+            code: 'invalid',
+            field: ['clearing', 'entry', 'radius'],
+            message: `The clearing helix radius ${gt0}`,
+          });
+          ok = false;
+        }
+        entry = { kind: 'helix', angle, radius };
+      }
+    } else if (c.entry !== undefined) {
+      entry = { kind: 'plunge' };
+    }
+    if (!ok) return undefined;
+    return {
+      tool: evaluated.tool,
+      feeds: {
+        spindle,
+        cut,
+        plunge,
+        ...(ramp === undefined ? {} : { ramp }),
+        ...(lead === undefined ? {} : { lead }),
+      },
+      stepdown,
+      stepover,
+      ...(entry === undefined ? {} : { entry }),
+    };
   }
 
   async #faceSource(

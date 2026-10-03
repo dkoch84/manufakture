@@ -36,6 +36,7 @@ export type {
   Tool,
   ToolKind,
   UpAxis,
+  VCarveClearingInput,
   VCarveInput,
   Vec2,
   Vec3,
@@ -131,12 +132,19 @@ export * from './cache';
 // T5.2b: the profile operation (registered on the worker by `registerBuiltinOperations`).
 export {
   MAX_DEPTH_LEVELS,
+  PROFILE_MAX_TABS,
   PROFILE_SAFE_ABOVE,
   PROFILE_TAB_MARGIN,
   PROFILE_TAB_MIN_INSIDE_SIZE,
   generateProfile,
 } from './ops/profile';
 export type { ProfileExtras, ProfileOperation } from './ops/profile';
+
+// Ramp and helix entries: the shallowest angle accepted and the caps on an entry's length.
+export { ENTRY_MAX_RAMP_MOVES, ENTRY_MAX_TURNS, ENTRY_MIN_ANGLE, entryProblem } from './ops/entry';
+
+// The move budget every operation's toolpath is held to (an `invalid-input` error above it).
+export { OPERATION_MAX_MOVES } from './ops/budget';
 
 // T5.2c: the pocket operation (registered on the worker by `registerBuiltinOperations`); its
 // geometry and layer clearing are reused by V-carve (T5.2f) and 3D roughing (T5.5a).
@@ -179,6 +187,8 @@ export {
   DRILL_DEFAULT_POINT_ANGLE,
   DRILL_HELIX_ANGLE,
   DRILL_MATCH_TOLERANCE,
+  DRILL_MAX_BORE_RINGS,
+  DRILL_MAX_PECKS,
   DRILL_MIN_BORE_RADIUS,
   DRILL_PECK_CLEARANCE,
   DRILL_SAFE_ABOVE,
@@ -203,6 +213,7 @@ export {
   VCARVE_TOLERANCE,
   generateVCarve,
   generateVCarveClearing,
+  generateVCarveClearingOperation,
 } from './ops/vcarve';
 export type { VCarveClearing, VCarveExtras, VCarveOperation } from './ops/vcarve';
 
@@ -213,9 +224,16 @@ export {
   SURFACE3D_SAFE_ABOVE,
   SURFACE3D_SLICE_CELL,
   SURFACE3D_SLICE_SIMPLIFY,
+  SURFACE3D_MAX_DROPS,
+  SURFACE3D_MAX_MOVES,
+  SURFACE3D_MAX_ROUGH_RINGS,
+  SURFACE3D_MAX_SAMPLES,
+  SURFACE3D_MAX_SLICE_NODES,
+  SURFACE3D_MIN_SAMPLING,
   SURFACE3D_TOLERANCE,
   generateSurface3d,
   scallopHeight,
+  surface3dSampling,
 } from './ops/surface3d';
 export type { Surface3dExtras, Surface3dOperation, Surface3dStrategy } from './ops/surface3d';
 export { DropCutter, cutterForTool, meshBounds } from './mesh/dropcutter';

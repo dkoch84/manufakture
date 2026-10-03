@@ -10,6 +10,9 @@ import {
   CARBIDE_MOTION_DIALECT,
   GRBLHAL_DIALECT,
   GRBL_DIALECT,
+  OperationRegistry,
+  createCamWorkerApi,
+  ok as camOk,
   type Dialect,
   type ToolChangeStyle,
 } from '@manufakture/cam';
@@ -35,7 +38,14 @@ import {
   type ExportPlan,
   type ExportSettings,
 } from './export';
-import { DOC_OPERATIONS, STOCK_WCS, exportGeneration, flat, vbit } from './export.test-fixture';
+import {
+  DOC_OPERATIONS,
+  STOCK_WCS,
+  TOOLPATHS,
+  exportGeneration,
+  flat,
+  vbit,
+} from './export.test-fixture';
 import { setupSheetHtml } from './sheet';
 
 const machine = findMachine('shapeoko-5-pro-4x4')!;
@@ -291,6 +301,33 @@ describe('buildExport', () => {
     expect(ok.ok && ok.plan.toolChanges.map((c) => c.operation)).toEqual(['Clean']);
   });
 
+  it("refuses the operations the worker left out past the request's move total", async () => {
+    // The worker itself, generating the fixture's toolpaths (7 entries each) under a total of 14.
+    const operations = new OperationRegistry()
+      .register('pocket', (op) => camOk({ toolpath: TOOLPATHS[op.id]! }))
+      .register('profile', (op) => camOk({ toolpath: TOOLPATHS[op.id]! }));
+    const api = createCamWorkerApi({ operations, maxRequestMoves: 14 });
+    const generation = exportGeneration();
+    const reply = await api.generate({ generation: 1, setup: generation.setup });
+    if (reply.status !== 'done') throw new Error('expected done');
+    expect(reply.operations.map((o) => o.ok)).toEqual([true, true, false]);
+    const r = buildExport({
+      data: { ...generation, operations: reply.operations },
+      operations: DOC_OPERATIONS,
+      settings: settings(),
+      jobName: 'Sign',
+      setupName: 'Top',
+      machine,
+      date: '2026-10-02',
+    });
+    expect(r).toEqual({
+      ok: false,
+      reasons: [
+        "Outline: profile#1: this setup's toolpaths exceed 14 moves in total, the most one generation may hold; this operation and the ones after it are not generated. Split the setup, or use larger tools, stepdowns or stepovers.",
+      ],
+    });
+  });
+
   it('refuses an operation of the document missing from the generation', () => {
     const r = buildExport({
       data: exportGeneration(),
@@ -318,6 +355,39 @@ describe('buildExport', () => {
     expect(r.plan.operations.map((o) => o.name)).toEqual(['Outline', 'Clean']);
     expect(r.plan.toolChanges).toHaveLength(1);
     expect(r.plan.files[0]!.text).not.toContain('(Recess)');
+  });
+
+  it("cuts a V-carve's clearing just before its V-carve, named after it, and suppresses it with it", () => {
+    // pocket#1's toolpath stands in for the clearing of profile#1 (as a V-carve would have one).
+    const data = exportGeneration();
+    const rename = <T extends { id: string }>(o: T): T =>
+      o.id === 'pocket#1' ? { ...o, id: 'profile#1/clearing' } : o;
+    const renamed = {
+      ...data,
+      setup: { ...data.setup, operations: data.setup.operations.map(rename) },
+      operations: data.operations.map(rename),
+    };
+    const doc = [DOC_OPERATIONS[2]!, DOC_OPERATIONS[1]!];
+    const run = (operations: typeof doc) =>
+      buildExport({
+        data: renamed,
+        operations,
+        settings: settings(),
+        jobName: 'Sign',
+        setupName: 'Top',
+        machine,
+        date: '2026-10-02',
+      });
+    const r = run(doc);
+    if (!r.ok) throw new Error(r.reasons.join('\n'));
+    expect(r.plan.operations.map((o) => [o.id, o.name])).toEqual([
+      ['profile#1/clearing', 'Outline (clearing)'],
+      ['profile#1', 'Outline'],
+      ['pocket#2', 'Recess'],
+    ]);
+    const off = run([{ ...doc[0]!, suppressed: true }, doc[1]!]);
+    if (!off.ok) throw new Error(off.reasons.join('\n'));
+    expect(off.plan.operations.map((o) => o.id)).toEqual(['pocket#2']);
   });
 
   it("refuses with the post's reason when the post cannot write the job", () => {

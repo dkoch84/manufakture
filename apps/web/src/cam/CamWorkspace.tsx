@@ -17,7 +17,7 @@
 
 import type { CamOperation, Command, ManufaktureDocument } from '@manufakture/core';
 import type { CamClient } from '@manufakture/cam/client';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from 'zustand';
 import type { ExportedFile } from '../io/actions';
 import { downloadBytes } from '../io/files';
@@ -101,6 +101,8 @@ export function CamTree({
   const run = useMemo(() => runner(documents, camUi), [documents, camUi]);
   const [renaming, setRenaming] = useState<{ id: string; text: string } | null>(null);
   const [exporting, setExporting] = useState<string | null>(null);
+  /** The running Generate's cancel: its geometry step stops, the worker's job is cancelled. */
+  const abort = useRef<AbortController | null>(null);
 
   // The viewport shows the setup's part: picks and the view are of what it machines.
   const setupPart = setup?.part;
@@ -144,10 +146,6 @@ export function CamTree({
     ? doc.cam.setups.filter((s) => s.id !== setup.id && sameWorkpiece(s, setup))
     : [];
   const edit = (op: CamOperation, repick?: number) => {
-    if (op.kind === 'surface3d') {
-      camUi.getState().setMessage('3D surfacing has no dialog yet.');
-      return;
-    }
     camUi.getState().openDialog({
       kind: 'operation',
       operation: op.kind,
@@ -251,7 +249,13 @@ export function CamTree({
           ) : (
             <ol className="feature-list cam-op-list" data-testid="cam-op-list">
               {ops.map((op, i) => {
-                const status = operationStatus(op, shownGeometry, generated, geometer !== null);
+                const status = operationStatus(
+                  op,
+                  shownGeometry,
+                  generated,
+                  geometer !== null,
+                  setup,
+                );
                 const tool = doc.cam.tools.find((t) => t.id === op.tool);
                 const classes = [
                   'feature-row',
@@ -477,12 +481,34 @@ export function CamTree({
               }
               onClick={() => {
                 if (geometer && client) {
-                  void generateSetup(documents.getState().document, setup, geometer, client, camUi);
+                  const controller = new AbortController();
+                  abort.current = controller;
+                  void generateSetup(
+                    documents.getState().document,
+                    setup,
+                    geometer,
+                    client,
+                    camUi,
+                    controller.signal,
+                  );
                 }
               }}
             >
               Generate toolpaths
             </button>
+            {generating && client && (
+              <button
+                type="button"
+                data-testid="cam-generate-cancel"
+                title="Stop the generation; the toolpaths already kept stay as they were"
+                onClick={() => {
+                  abort.current?.abort();
+                  void client.cancel();
+                }}
+              >
+                Cancel
+              </button>
+            )}
             <button
               type="button"
               data-testid="cam-export"

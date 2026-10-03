@@ -23,7 +23,11 @@ import { CamCancelled, OperationRegistry, type OperationContext } from '../worke
 import {
   SURFACE3D_SAFE_ABOVE,
   generateSurface3d,
+  SURFACE3D_MAX_MOVES,
+  SURFACE3D_MAX_SAMPLES,
+  SURFACE3D_MIN_SAMPLING,
   scallopHeight,
+  surface3dSampling,
   type Surface3dOperation,
 } from './surface3d';
 
@@ -467,12 +471,125 @@ describe('refusals, warnings, cancelling and registration', () => {
     expect(rough.ok).toBe(false);
   });
 
+  it('refuses a finish or a roughing with too much work, before doing it', async () => {
+    const refused = async (op: Surface3dOperation, text: RegExp) => {
+      const t0 = performance.now();
+      const r = await generateSurface3d(op, context);
+      expect(r.ok).toBe(false);
+      if (!r.ok) {
+        expect(r.error.code).toBe('invalid-input');
+        expect(r.error.message).toMatch(text);
+      }
+      // Refused up front: no drop-cutting, no slicing, no clearing.
+      expect(performance.now() - t0).toBeLessThan(3000);
+    };
+    // A tiny stepover and sampling: 40,000 lines of 60,000 samples.
+    await refused(
+      finishOp({ stepover: 0.001, sampling: 0.001 }),
+      /million drop points.*Use a larger stepover or sampling/,
+    );
+    // A V-bit at the finest tolerance samples 0.001 mm apart by default: 400 lines of 60,000.
+    const vbit: Tool = { ...ball6, kind: 'vbit', angle: Math.PI / 3, diameter: 12.7 };
+    await refused(
+      finishOp({ tool: vbit, tolerance: 1e-4, stepover: 0.1 }),
+      /Use a larger stepover or sampling \(a V-bit samples/,
+    );
+    // Z-level: thousands of rings on every level.
+    await refused(roughOp({ stepover: 0.001 }), /clearing passes.*larger stepover or stepdown/);
+    // Z-level: 400 levels over a grid of 6 million nodes.
+    await refused(
+      roughOp({ stepdown: 0.05, sliceCell: 0.02 }),
+      /million nodes is too much work; use a larger stepdown or slice cell/,
+    );
+    expect(SURFACE3D_MAX_SAMPLES).toBeGreaterThanOrEqual(1e7);
+  });
+
+  it('refuses a finish with more moves than the cap, and a vanishing entry angle', async () => {
+    const full = await generate(finishOp({ stepover: 3 }));
+    const n = full.entries.length;
+    expect(n).toBeGreaterThan(100);
+    // A cap below what the finish needs: refused once reached, not after emitting it all.
+    const capped = await generateSurface3d(finishOp({ stepover: 3, maxMoves: 100 }), context);
+    expect(capped.ok).toBe(false);
+    if (!capped.ok) {
+      expect(capped.error.code).toBe('invalid-input');
+      expect(capped.error.message).toMatch(/more than 100 moves.*Use a larger stepover/);
+    }
+    // A chord's cutter locations count too: a fine sampling holds far more locations than the
+    // lines and arcs fitted to them, so a cap the fitted moves fit under can still refuse.
+    const fine = finishOp({ stepover: 3, sampling: 0.02 });
+    const fitted = (await generate(fine)).entries.length;
+    expect(fitted).toBeLessThan(3000);
+    const chord = await generateSurface3d(
+      finishOp({ stepover: 3, sampling: 0.02, maxMoves: fitted + 1 }),
+      context,
+    );
+    expect(chord.ok).toBe(false);
+    // A larger cap than SURFACE3D_MAX_MOVES is ignored; one above the need changes nothing.
+    expect(SURFACE3D_MAX_MOVES).toBeGreaterThanOrEqual(2e6);
+    expect((await generate(finishOp({ stepover: 3, maxMoves: 1e12 }))).entries).toEqual(
+      full.entries,
+    );
+    // The operation's move budget from the context caps a finish and a roughing alike.
+    const budget = await generateSurface3d(finishOp({ stepover: 3 }), {
+      ...context,
+      maxMoves: 100,
+    });
+    expect(budget.ok).toBe(false);
+    if (!budget.ok) expect(budget.error.message).toMatch(/more than 100 moves.*larger stepover/);
+    const roughed = await generateSurface3d(roughOp(), { ...context, maxMoves: 100 });
+    expect(roughed.ok).toBe(false);
+    if (!roughed.ok) {
+      expect(roughed.error.code).toBe('invalid-input');
+      expect(roughed.error.message).toMatch(/this operation would emit more than 100 moves/);
+    }
+    const r = await generateSurface3d(roughOp({ entry: { kind: 'ramp', angle: 1e-8 } }), context);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error.message).toMatch(/ramp angle must be at least 0\.5/);
+  });
+
   it('warns when the finish goes deeper than the flutes', async () => {
     const r = await generateSurface3d(
       finishOp({ tool: { ...ball6, fluteLength: 5 }, stepover: 3 }),
       context,
     );
     expect(r.ok && r.value.warnings?.map((w) => w.code)).toEqual(['depth-exceeds-flutes']);
+  });
+
+  it('samples at most the tool radius apart, and a sharp V-bit at most 4 tol tan(a)', () => {
+    const ball = { kind: 'ball', radius: 3 } as const;
+    // Default: a quarter of the radius, within 0.05 to 0.5 mm.
+    expect(surface3dSampling({ tool: ball6 }, ball, 0.01)).toEqual({
+      sampling: 0.5,
+      clamped: false,
+    });
+    const tiny: Tool = { ...ball6, diameter: 0.2 };
+    expect(surface3dSampling({ tool: tiny }, { kind: 'ball', radius: 0.1 }, 0.01)).toEqual({
+      sampling: 0.05,
+      clamped: false,
+    });
+    expect(surface3dSampling({ tool: ball6, sampling: 0.2 }, ball, 0.01)).toEqual({
+      sampling: 0.2,
+      clamped: false,
+    });
+    expect(surface3dSampling({ tool: ball6, sampling: 5 }, ball, 0.01)).toEqual({
+      sampling: 3,
+      clamped: true,
+    });
+    const v60 = { kind: 'vbit', radius: 6.35, halfAngle: Math.PI / 6, tipRadius: 0 } as const;
+    const cap = 4 * 0.01 * Math.tan(Math.PI / 6);
+    const vbit: Tool = { ...ball6, kind: 'vbit', angle: Math.PI / 3, diameter: 12.7 };
+    const d = surface3dSampling({ tool: vbit }, v60, 0.01);
+    expect(d.sampling).toBeCloseTo(cap, 12);
+    expect(d.clamped).toBe(false);
+    expect(surface3dSampling({ tool: vbit, sampling: 0.5 }, v60, 0.01).clamped).toBe(true);
+    const needle = { ...v60, halfAngle: 1e-6 };
+    expect(surface3dSampling({ tool: vbit }, needle, 1e-4).sampling).toBe(SURFACE3D_MIN_SAMPLING);
+  });
+
+  it('warns when it samples finer than asked', async () => {
+    const r = await generateSurface3d(finishOp({ stepover: 6, sampling: 4 }), context);
+    expect(r.ok && r.value.warnings?.map((w) => w.code)).toEqual(['sampling-clamped']);
   });
 
   it('stops at a checkpoint when superseded', async () => {
@@ -487,6 +604,34 @@ describe('refusals, warnings, cancelling and registration', () => {
     await expect(generateSurface3d(finishOp(), stale)).rejects.toBeInstanceOf(CamCancelled);
     calls = 0;
     await expect(generateSurface3d(roughOp(), stale)).rejects.toBeInstanceOf(CamCancelled);
+  });
+
+  it('checks for a cancel within a raster line, not only between lines', async () => {
+    // A narrow strip: a raster line or two, and a coarse sampling checks once a line.
+    const strip = finishOp({ stepover: 6, boundary: [rect(5, 24, 60, 1)] });
+    let calls = 0;
+    const counting: OperationContext = {
+      ...context,
+      checkpoint: () => {
+        calls++;
+        return Promise.resolve();
+      },
+    };
+    await generate(strip, counting);
+    const lines = calls;
+    expect(lines).toBeLessThanOrEqual(2);
+    // A fine sampling makes tens of thousands of drops a line: it checks more often than once a
+    // line, so a cancel after the per-line checks still stops it.
+    calls = 0;
+    const stale: OperationContext = {
+      ...context,
+      checkpoint: () => {
+        calls++;
+        return calls > lines ? Promise.reject(new CamCancelled()) : Promise.resolve();
+      },
+    };
+    const fineStrip = finishOp({ stepover: 6, boundary: [rect(5, 24, 60, 1)], sampling: 0.002 });
+    await expect(generateSurface3d(fineStrip, stale)).rejects.toBeInstanceOf(CamCancelled);
   });
 
   it('is registered as the surface3d generator', () => {

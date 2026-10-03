@@ -40,10 +40,13 @@ import {
   type Loop2,
   type Segment2,
   type Tool,
+  type VCarveClearingInput,
   type VCarveInput,
   type Vec2,
   type Vec3,
 } from '../types';
+import { operationMoveCap, withMoveBudget } from './budget';
+import { entryProblem } from './entry';
 import { generatePocket, type PocketOperation } from './pocket';
 import {
   Emitter,
@@ -479,6 +482,8 @@ function checkInput(op: VCarveOperation): string | undefined {
       return `The clearing tool must be a flat or bull end mill, not a ${c.tool.kind} tool.`;
     }
     if (!positive(c.tool.diameter)) return 'The clearing tool diameter must be greater than zero.';
+    const entry = c.entry ? entryProblem(c.entry) : undefined;
+    if (entry) return `Clearing entry: ${entry}`;
   }
   return undefined;
 }
@@ -1164,7 +1169,7 @@ class VCarveEmitter {
     this.retractZ = Math.max(heights.retract, this.approachZ);
     this.clearanceZ = Math.max(heights.clearance, this.retractZ);
     this.maxLink = op.tool.diameter;
-    this.em = new Emitter(op.id, op.feeds, [0, 0, this.clearanceZ]);
+    this.em = new Emitter(op.id, op.feeds, [0, 0, this.clearanceZ], operationMoveCap(context));
   }
 
   /** To `to` (on the carve): fed across when the move stays in the carve, else over the top. */
@@ -1292,6 +1297,13 @@ export async function generateVCarve(
   input: VCarveInput,
   context: OperationContext,
 ): Promise<CamResult<GeneratedToolpath>> {
+  return withMoveBudget(input.id, () => vcarveToolpath(input, context));
+}
+
+async function vcarveToolpath(
+  input: VCarveInput,
+  context: OperationContext,
+): Promise<CamResult<GeneratedToolpath>> {
   const prep = prepare(input);
   if (!prep.ok) return prep;
   const { op, source, lim, notes } = prep.value;
@@ -1397,4 +1409,23 @@ export async function generateVCarveClearing(
       ? { toolpath: result.value.toolpath, warnings }
       : { toolpath: result.value.toolpath },
   );
+}
+
+/**
+ * A V-carve's clearing as an operation of its own (`VCarveClearingInput`, registered as the
+ * `vcarveClearing` generator): `generateVCarveClearing` of its carve with its tool, feeds and
+ * steps as the clearing, every move tagged with its own id.
+ */
+export function generateVCarveClearingOperation(
+  input: VCarveClearingInput,
+  context: OperationContext,
+): Promise<CamResult<GeneratedToolpath>> {
+  const { tool, feeds, stepdown, stepover, entry } = input;
+  const carve: VCarveOperation = {
+    ...input.carve,
+    id: input.id,
+    name: input.name,
+    clearing: { tool, feeds, stepdown, stepover, ...(entry ? { entry } : {}) },
+  };
+  return generateVCarveClearing(carve, context);
 }

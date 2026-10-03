@@ -491,10 +491,14 @@ interface CamSetup {
 //   facing:    depth (removed from the stock top), stepdown?, stepover?, angle
 //   profile:   side ('outside' | 'inside' | 'on'), depth, stepdown?, finishAllowance?,
 //              tabs? ({ count, width, height }), entry, leadIn, leadOut, climb
-//   pocket:    depth, stepdown?, stepover?, finishAllowance?, entry, climb
+//   pocket:    depth, stepdown?, stepover?, finishAllowance?, entry, climb,
+//              finishPass? (boolean), finishStepdown?, floorAllowance?, floorPass? (boolean)
 //   drill:     depth? (absent: each hole's), peck?, dwell? (seconds)
-//   vcarve:    maxDepth?
-//   surface3d: stepover (a length here), angle, allowance?
+//   vcarve:    maxDepth?, stepdown?, flatStepover? (a length),
+//              clearing? ({ tool (a flat or bull tool id), stepdown?, stepover?, entry?, feeds? })
+//   surface3d: stepover (a length here), angle, allowance?, strategy? ('parallel' | 'zlevel'),
+//              tolerance?, sampling?, pattern? ('zigzag' | 'oneway'), stepdown?, entry?,
+//              climb? (boolean), sliceCell?
 // depth: { kind: 'blind'; depth } | { kind: 'through'; extra? }
 // entry: { kind: 'plunge' } | { kind: 'ramp'; angle } | { kind: 'helix'; angle; radius }
 // lead:  { kind: 'none' } | { kind: 'line'; length } | { kind: 'arc'; radius }
@@ -505,9 +509,21 @@ type CamGeometrySource =
   | { kind: 'hole'; feature: 'hole#n' }; // a hole feature's points and through-hole diameter
 ```
 
-Absent `stepdown`, `stepover` and feeds come from the tool's preset for the stock's material. A
-drill takes only `hole` sources, a `surface3d` none (it machines the setup's body), and the others
-faces and sketch regions (a `facing` with none faces the whole stock top). "Profile" inside `cam`
+Absent `stepdown`, `stepover` and feeds come from the tool's preset for the stock's material (a
+V-carve clearing's from its own tool's). A drill takes only `hole` sources and the others faces and
+sketch regions (a `facing` with none faces the whole stock top; a `surface3d` machines the setup's
+body, and its faces and regions, when it has any, bound it in XY).
+
+**Optional operation fields** (T5.5b, added to the version 14 schema in place: the format came in
+with M5 and no released document lacks them, so there is no format bump or migration). Every one is
+optional and absent means `packages/cam`'s default, so a document without them reads as before:
+`pocket`'s finishing and floor choices (`PocketExtras`), `vcarve`'s stepdown, floor stepover and
+floor clearing (`VCarveExtras`) and `surface3d`'s strategy and parallel or z-level settings
+(`Surface3dExtras`). Booleans and choices are strict (`z.boolean()`, enums); the numbers are
+`StoredExpression`s of the kind `camExpressions` lists, checked for range by the geometry stage like
+every other CAM number. A V-carve's `clearing.tool` is a second tool reference: validation requires it
+in `cam.tools` (`dependency`), `camToolUsers` counts it (so the tool cannot be deleted under it), and
+`camOperationTools(op)` lists both of an operation's tools. "Profile" inside `cam`
 always means the operation; the sketch region source is `region` (ADR 0014 decision 4).
 
 **Why it is not a feature.** As for print setups: an operation changes no body, acts on the part's

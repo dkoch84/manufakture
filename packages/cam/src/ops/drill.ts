@@ -18,6 +18,8 @@ import {
   type Vec2,
   type Vec3,
 } from '../types';
+import { operationMoveCap, withMoveBudget } from './budget';
+import { ENTRY_MIN_ANGLE, helixTooLong, helixTurns } from './entry';
 import { Emitter, PROFILE_SAFE_ABOVE } from './profile';
 
 /**
@@ -91,6 +93,18 @@ export const DRILL_HELIX_ANGLE = (3 * Math.PI) / 180;
 export const DRILL_BORE_STEPOVER = 0.5;
 
 /**
+ * The most rings one bore may have. Far above any real bore (a 100 mm hole with a 3 mm end mill
+ * at the default stepover has 32); above it the operation is refused.
+ */
+export const DRILL_MAX_BORE_RINGS = 1000;
+
+/**
+ * The most pecks one hole may take. Far above any real hole (50 mm deep in 0.5 mm pecks is 100);
+ * a peck depth so small that a hole needs more is refused before any depth is listed.
+ */
+export const DRILL_MAX_PECKS = 10000;
+
+/**
  * The point angle assumed for a `drill` tool without one, radians: 118 degrees, the common
  * twist drill point.
  */
@@ -145,8 +159,11 @@ function checkInput(op: DrillOperation): string | undefined {
     return 'The match tolerance must be zero or more.';
   }
   const angle = op.helixAngle;
-  if (angle !== undefined && !(finite(angle) && angle > 0 && angle <= Math.PI / 2)) {
-    return 'The helix angle must be greater than 0 and at most 90 degrees.';
+  if (
+    angle !== undefined &&
+    !(finite(angle) && angle >= ENTRY_MIN_ANGLE - 1e-12 && angle <= Math.PI / 2)
+  ) {
+    return 'The helix angle must be at least 0.5 and at most 90 degrees.';
   }
   const s = op.boreStepover;
   if (s !== undefined && !(finite(s) && s > 0 && s <= 1)) {
@@ -302,6 +319,12 @@ function plan(op: DrillOperation, points: readonly MachineDrillPoint[]): CamResu
     // Rings inside out, the innermost within the tool radius so no core is left standing.
     const inner = Math.min(outer, 0.9 * r);
     const n = outer > inner ? Math.ceil((outer - inner) / step - 1e-9) : 0;
+    if (!(n <= DRILL_MAX_BORE_RINGS)) {
+      return err(
+        'invalid-input',
+        `${op.id}: boring the ${fmt(p.diameter)} mm hole at ${where(p)} with the ${fmt(d)} mm tool needs ${n} rings; at most ${DRILL_MAX_BORE_RINGS} are allowed. Use a larger tool or bore stepover.`,
+      );
+    }
     const radii = Array.from({ length: n + 1 }, (_, k) =>
       k === n ? outer : inner + ((outer - inner) * k) / n,
     );
@@ -339,7 +362,12 @@ class DrillCutter {
     this.retractZ = Math.max(heights.retract, this.startZ + DRILL_SAFE_ABOVE);
     this.clearanceZ = Math.max(heights.clearance, this.retractZ);
     this.approachZ = this.startZ + DRILL_SAFE_ABOVE;
-    this.em = new Emitter(op.id, op.feeds, [first[0], first[1], this.clearanceZ]);
+    this.em = new Emitter(
+      op.id,
+      op.feeds,
+      [first[0], first[1], this.clearanceZ],
+      operationMoveCap(context),
+    );
   }
 
   once(code: string, message: string): void {
@@ -349,7 +377,7 @@ class DrillCutter {
   }
 
   private push(entry: IrEntry): void {
-    this.em.entries.push(entry);
+    this.em.push(entry);
   }
 
   /** Over `xy` at the retract height: up to it first, never across below it. */
@@ -360,17 +388,31 @@ class DrillCutter {
     em.rapid([xy[0], xy[1], this.retractZ]);
   }
 
-  /** Straight or peck drilling, wrapped in a `cycle` marker. */
-  drill(p: MachineDrillPoint, bottom: number): void {
+  /**
+   * Straight or peck drilling, wrapped in a `cycle` marker. Returns why the hole is refused (it
+   * needs more than `DRILL_MAX_PECKS` pecks), with nothing emitted for it.
+   */
+  drill(p: MachineDrillPoint, bottom: number): string | undefined {
     const em = this.em;
     const op = this.op;
     const at = p.at;
-    this.over(at);
     const top = this.startZ;
     const depths: number[] = [];
     if (op.peck !== undefined) {
-      for (let z = top - op.peck; z > bottom + EPS; z -= op.peck) depths.push(z);
+      const peck = op.peck;
+      // Counted before any depth is listed, and each depth taken from the top by its index: a
+      // running `z -= peck` stalls once the peck is below the rounding step of z.
+      const pecks = Math.ceil((top - bottom) / peck);
+      if (!(pecks <= DRILL_MAX_PECKS)) {
+        return `the hole at ${where(p)} is ${fmt(top - bottom)} mm deep and needs ${pecks} pecks of ${fmt(peck, 6)} mm; at most ${DRILL_MAX_PECKS} are allowed. Use a larger peck depth.`;
+      }
+      for (let k = 1; k <= pecks; k++) {
+        const z = top - k * peck;
+        if (!(z > bottom + EPS)) break;
+        depths.push(z);
+      }
     }
+    this.over(at);
     depths.push(bottom);
     const dwell = op.dwell !== undefined && op.dwell > 0 ? op.dwell : undefined;
     const drill: DrillCycle = {
@@ -394,16 +436,27 @@ class DrillCutter {
     em.rapid([at[0], at[1], this.retractZ]);
     this.push({ kind: 'cycleEnd', op: op.id });
     em.pass++;
+    return undefined;
   }
 
-  /** A helical bore on `radii` (inside out), each to the bottom with a level turn there. */
-  bore(p: MachineDrillPoint, bottom: number, radii: readonly number[]): void {
+  /**
+   * A helical bore on `radii` (inside out), each to the bottom with a level turn there. Returns
+   * why the bore is refused (a ring's helix has too many turns), with nothing emitted for it.
+   */
+  bore(p: MachineDrillPoint, bottom: number, radii: readonly number[]): string | undefined {
     const em = this.em;
     const op = this.op;
     const c = p.at;
     const r = op.tool.diameter / 2;
     const angle = op.helixAngle ?? DRILL_HELIX_ANGLE;
     const ccw = true; // climb milling with an M3 spindle on the wall of a hole
+    const drop = this.startZ - bottom;
+    for (const rh of radii) {
+      // The slope is the angle at the hole wall, where the tool's edge cuts.
+      const turns = helixTurns(drop, rh + r, angle);
+      const tooLong = helixTooLong(turns, drop, rh + r, angle);
+      if (tooLong) return `the bore at ${where(p)}: ${tooLong}`;
+    }
     radii.forEach((rh, k) => {
       const start: Vec2 = [c[0] + rh, c[1]];
       if (k === 0) {
@@ -415,10 +468,7 @@ class DrillCutter {
       }
       if (em.cur[2] > this.approachZ + EPS) em.rapid([start[0], start[1], this.approachZ]);
       em.linear([start[0], start[1], this.startZ], 'plunge');
-      // The slope is the angle at the hole wall, where the tool's edge cuts.
-      const pitch = 2 * Math.PI * (rh + r) * Math.tan(angle);
-      const drop = this.startZ - bottom;
-      const turns = Math.max(1, Math.ceil(drop / pitch - 1e-9));
+      const turns = helixTurns(drop, rh + r, angle);
       for (let t = 1; t <= turns; t++) {
         const z = t === turns ? bottom : this.startZ - (drop * t) / turns;
         em.arc([start[0], start[1], z], c, ccw, 'ramp', true);
@@ -432,6 +482,7 @@ class DrillCutter {
     em.linear([c[0], c[1], bottom], 'cut');
     em.rapid([c[0], c[1], this.retractZ]);
     em.pass++;
+    return undefined;
   }
 
   result(start: Vec3): GeneratedToolpath {
@@ -444,7 +495,8 @@ class DrillCutter {
 
   /** The deepest the tool reaches below the start of material. */
   depthWarning(plans: readonly Plan[]): void {
-    const deepest = Math.min(...plans.map((p) => p.bottom));
+    let deepest = Infinity;
+    for (const p of plans) deepest = Math.min(deepest, p.bottom);
     const depth = this.startZ - deepest;
     if (depth > this.op.tool.fluteLength) {
       this.once(
@@ -460,6 +512,13 @@ class DrillCutter {
  * nearest-neighbour order from the WCS origin; each peck and each bore ring is one `pass`.
  */
 export async function generateDrill(
+  input: DrillInput,
+  context: OperationContext,
+): Promise<CamResult<GeneratedToolpath>> {
+  return withMoveBudget(input.id, () => drillToolpath(input, context));
+}
+
+async function drillToolpath(
   input: DrillInput,
   context: OperationContext,
 ): Promise<CamResult<GeneratedToolpath>> {
@@ -512,8 +571,11 @@ export async function generateDrill(
   }
   for (const p of plans.value) {
     await context.checkpoint();
-    if (p.kind === 'drill') cutter.drill(p.point, p.bottom);
-    else cutter.bore(p.point, p.bottom, p.radii);
+    const refused =
+      p.kind === 'drill'
+        ? cutter.drill(p.point, p.bottom)
+        : cutter.bore(p.point, p.bottom, p.radii);
+    if (refused) return err('invalid-input', `${op.id}: ${refused}`);
   }
   return ok(cutter.result(start));
 }

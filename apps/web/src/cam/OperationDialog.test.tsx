@@ -406,3 +406,71 @@ describe('editing', () => {
     expect(ops()).toEqual([]);
   });
 });
+
+describe('the 3D surface dialog (T5.5b)', () => {
+  it('finishes with a ball by default, bounded by a picked face, and roughs by z-level', async () => {
+    const doc = withTool(setupDocument(), 'c3d-101');
+    const { ops, pick, documents } = mount('surface3d', { doc });
+    expect(screen.getByRole('dialog').getAttribute('aria-label')).toBe('3D surface: 3D surface 1');
+    // The ball end mill comes first for a 3D surface.
+    expect((screen.getByTestId('cam-op-tool') as HTMLSelectElement).value).toBe('tool#2');
+    for (const id of ['cam-field-lineStepover', 'cam-field-tolerance', 'cam-field-pattern']) {
+      expect(screen.getByTestId(id)).toBeTruthy();
+    }
+    expect(screen.queryByTestId('cam-field-sliceCell')).toBeNull();
+    await pick('extrude#1:cap:end');
+    await waitFor(() =>
+      expect(screen.getByTestId('cam-source-0').textContent).toContain('extrude#1:cap:end'),
+    );
+    type('cam-field-lineStepover', '0');
+    ok();
+    expect(ops()).toHaveLength(0);
+    type('cam-field-lineStepover', '0.3');
+    ok();
+    expect(ops()[0]).toMatchObject({
+      kind: 'surface3d',
+      tool: 'tool#2',
+      geometry: [{ kind: 'face', face: { id: 'r1' } }],
+      stepover: { source: '0.3' },
+    });
+    expect(ops()[0]).not.toHaveProperty('strategy');
+    expect(documents.getState().undoLabel).toBe('Add 3D surface operation 3D surface 1');
+
+    cleanup();
+    const second = mount('surface3d', { doc: documents.getState().document });
+    fireEvent.change(screen.getByTestId('cam-field-strategy'), { target: { value: 'zlevel' } });
+    expect(screen.queryByTestId('cam-field-tolerance')).toBeNull();
+    expect(screen.getByTestId('cam-field-sliceCell')).toBeTruthy();
+    fireEvent.change(screen.getByTestId('cam-op-tool'), { target: { value: 'tool#1' } });
+    type('cam-field-lineStepover', '2.5');
+    type('cam-field-stepdown', '3');
+    ok();
+    expect(second.ops()[1]).toMatchObject({
+      kind: 'surface3d',
+      strategy: 'zlevel',
+      tool: 'tool#1',
+      stepdown: { source: '3' },
+    });
+  });
+});
+
+describe('the V-carve clearing (T5.5b)', () => {
+  it('clears the floor with an end mill chosen in the dialog', () => {
+    const doc = withTool(setupDocument(), 'c3d-301');
+    const { ops } = mount('vcarve', { doc });
+    expect(screen.queryByTestId('cam-field-clearingTool')).toBeNull();
+    fireEvent.click(screen.getByTestId('cam-add-region'));
+    type('cam-field-maxDepth', '2');
+    fireEvent.click(screen.getByTestId('cam-field-clearing'));
+    const end = screen.getByTestId('cam-field-clearingTool') as HTMLSelectElement;
+    expect([...end.options].map((o) => o.value)).toEqual(['tool#1']);
+    type('cam-field-clearingStepover', '0.45');
+    ok();
+    expect(ops()[0]).toMatchObject({
+      kind: 'vcarve',
+      tool: 'tool#2',
+      maxDepth: { source: '2' },
+      clearing: { tool: 'tool#1', stepover: { source: '0.45' } },
+    });
+  });
+});

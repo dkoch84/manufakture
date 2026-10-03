@@ -844,8 +844,29 @@ What it does for the setup:
 - **Profile extras.** `packages/cam`'s `ProfileExtras` are not in core yet; the stage fills them:
   `finishPass` when `finishAllowance` is above zero, `finishStepdown` the whole depth when it is
   within the tool's flute length, else `stepdown`. `tabSpacing` and `tabMinInsideSize` are left to
-  the generator's defaults.
-- **Sources**, each checked against the kinds its operation takes (`unsupported` otherwise):
+  the generator's defaults. A tab count above `CAM_MAX_TABS` (1,000, `packages/cam`'s
+  `PROFILE_MAX_TABS`) is `invalid` on `['tabs', 'count']`.
+- **Tool sizes.** A tool's diameter must be at least `CAM_MIN_TOOL_DIAMETER` (0.01 mm; the finest
+  micro end mills are about 0.1 mm), else `invalid` on `['tool', 'diameter']`: a tool far finer
+  makes rings, helix turns and passes without end. `packages/cam`'s per-operation move budget
+  refuses whatever is still too much to emit.
+- **Pocket, V-carve and 3D surfacing options** (T5.5b, in core's schema): each is passed on only
+  when set, so absent means the generator's default. Lengths must be above zero (a floor
+  allowance zero or more and less than the pocket's depth); a 3D surface's stepover at most the
+  tool diameter, its tolerance from `SURFACE3D_MIN_TOLERANCE` (0.0001 mm) to 1 mm, its sampling at
+  least `SURFACE3D_MIN_SAMPLING` (0.001 mm) and its slice cell at least `SURFACE3D_MIN_SLICE_CELL`
+  (0.01 mm), as `packages/cam` accepts them. A V-carve's `clearing` names a second tool, which
+  must be a flat or bull end mill (`invalid` on `['clearing', 'tool']` otherwise); it is evaluated
+  like the operation's own (`CamVCarveClearingValues`: the tool, its feeds from `clearing.feeds`
+  or its preset for the stock's material, `stepdown` and `stepover` likewise, the entry), its
+  errors on `['clearing', ...]` fields, and its definition goes into the operation's key. A
+  clearing with no `maxDepth` gets a `clearing` warning: there may be no floor to clear.
+- **A 3D surface takes faces and regions as its boundary**: resolved like a profile's (planar,
+  parallel to the setup's XY plane), sent as sources; none means the generator's default
+  boundary. Its mesh is the setup's CAM mesh, sent whenever an unsuppressed operation is
+  `surface3d`.
+- **Sources**, each checked against the kinds its operation takes (`unsupported` otherwise; a
+  drill takes holes, every other kind faces and regions):
   - a **face**: `resolve` on the body, then `faceLoops` by index in a frame whose normal is the
     setup's up direction, so outer loops run counter-clockwise and holes clockwise seen from above;
     each segment is tagged with its edge's name (or `#<index>`). A lost or ambiguous name is

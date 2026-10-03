@@ -40,6 +40,8 @@ import {
   type Vec3,
 } from '../types';
 import { reverseLoop } from '../wcs';
+import { operationMoveCap, withMoveBudget } from './budget';
+import { entryProblem, helixTooLong, helixTurns, rampTooLong } from './entry';
 import {
   Emitter,
   PROFILE_SAFE_ABOVE,
@@ -588,18 +590,7 @@ function checkInput(op: PocketOperation): string | undefined {
   if (op.feeds.lead !== undefined && !positive(op.feeds.lead)) {
     return 'The lead feed must be greater than zero.';
   }
-  const e = op.entry;
-  if (e.kind === 'ramp' || e.kind === 'helix') {
-    if (!(finite(e.angle) && e.angle > 0 && e.angle <= Math.PI / 2)) {
-      return `The ${e.kind} angle must be greater than 0 and at most 90 degrees.`;
-    }
-    if (e.kind === 'helix' && !positive(e.radius)) {
-      return 'The helix radius must be greater than zero.';
-    }
-  } else if (e.kind !== 'plunge') {
-    return 'Unknown entry kind.';
-  }
-  return undefined;
+  return entryProblem(op.entry);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -608,6 +599,8 @@ function checkInput(op: PocketOperation): string | undefined {
 class PocketCutter {
   readonly em: Emitter;
   readonly warnings: CamWarning[] = [];
+  /** Why the toolpath is refused (an entry too long to emit), set by `clearLayer`. */
+  failure: string | undefined;
   private readonly warned = new Set<string>();
   private startPos: Vec3 | undefined;
   private readonly r: number;
@@ -622,7 +615,7 @@ class PocketCutter {
     const heights = context.setup.heights;
     this.retractZ = Math.max(heights.retract, op.depth.top + POCKET_SAFE_ABOVE);
     this.clearanceZ = Math.max(heights.clearance, this.retractZ);
-    this.em = new Emitter(op.id, op.feeds, [0, 0, this.clearanceZ]);
+    this.em = new Emitter(op.id, op.feeds, [0, 0, this.clearanceZ], operationMoveCap(context));
   }
 
   once(code: string, message: string): void {
@@ -715,8 +708,13 @@ class PocketCutter {
       this.moveAbove(start, from);
       const cleared = Math.min(em.cur[2], from);
       if (allowRamp && entry.kind !== 'plunge' && path.length >= op.tool.diameter) {
-        em.linear([start[0], start[1], cleared], 'plunge');
         const rampLength = (cleared - z) / Math.tan(entry.angle);
+        const tooLong = rampTooLong(rampLength, path.length, path.segments.length);
+        if (tooLong) {
+          this.failure ??= tooLong;
+          return;
+        }
+        em.linear([start[0], start[1], cleared], 'plunge');
         cutAlong(path, rampLength + path.length, {
           s0: 0,
           rampEnd: rampLength,
@@ -768,12 +766,14 @@ class PocketCutter {
       const from = fromZ(ring);
       this.moveAbove(start, from);
       const cleared = Math.min(em.cur[2], from);
-      em.linear([start[0], start[1], cleared], 'plunge');
       const drop = cleared - z;
-      const turns = Math.max(
-        1,
-        Math.ceil(drop / (2 * Math.PI * radius * Math.tan(entry.angle)) - 1e-9),
-      );
+      const turns = helixTurns(drop, radius, entry.angle);
+      const tooLong = helixTooLong(turns, drop, radius, entry.angle);
+      if (tooLong) {
+        this.failure ??= tooLong;
+        return;
+      }
+      em.linear([start[0], start[1], cleared], 'plunge');
       for (let k = 1; k <= turns; k++) {
         const zk = k === turns ? z : cleared - (drop * k) / turns;
         em.arc([start[0], start[1], zk], center, op.climb, 'ramp', true);
@@ -1137,6 +1137,13 @@ export async function generatePocket(
   input: PocketInput,
   context: OperationContext,
 ): Promise<CamResult<GeneratedToolpath>> {
+  return withMoveBudget(input.id, () => pocketToolpath(input, context));
+}
+
+async function pocketToolpath(
+  input: PocketInput,
+  context: OperationContext,
+): Promise<CamResult<GeneratedToolpath>> {
   const op = input as PocketOperation;
   const problem = checkInput(op);
   if (problem) return err('invalid-input', `${op.id}: ${problem}`);
@@ -1176,6 +1183,7 @@ export async function generatePocket(
     for (const z of layers) {
       await context.checkpoint();
       await cutter.clearLayer(geom.value, z, previous);
+      if (cutter.failure) return err('invalid-input', `${op.id}: ${cutter.failure}`);
       previous = { geom: geom.value, z };
       cutter.em.pass++;
     }
@@ -1202,6 +1210,14 @@ export async function generatePocket(
  * `op.depth.top`; `op.depth.bottom`, `stepdown` and the finishing fields are not read.
  */
 export async function generatePocketLayers(
+  op: PocketOperation,
+  layers: readonly PocketLayer[],
+  context: OperationContext,
+): Promise<CamResult<GeneratedToolpath>> {
+  return withMoveBudget(op.id, () => pocketLayersToolpath(op, layers, context));
+}
+
+async function pocketLayersToolpath(
   op: PocketOperation,
   layers: readonly PocketLayer[],
   context: OperationContext,
@@ -1240,6 +1256,7 @@ export async function generatePocketLayers(
     }
     if (geom.roots.length === 0) continue;
     await cutter.clearLayer(geom, layer.z, previous);
+    if (cutter.failure) return err('invalid-input', `${op.id}: ${cutter.failure}`);
     if (geom.cuspArea > 0) {
       cutter.once(
         'stepover-cusps',

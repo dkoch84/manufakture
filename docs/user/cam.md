@@ -1,6 +1,6 @@
 # Machining: the Manufacture workspace
 
-The **Manufacture** workspace sets up a part for cutting on a CNC router: which machine, the block of stock it is cut from, where the machine's zero is, the tools, and the operations (facing, profiles, pockets, holes, V-carving) in the order they cut. It makes toolpaths on demand. The Shapeoko 5 Pro 4x4 and the Shapeoko 4 XXL, in their default configurations, are the machines it is built around.
+The **Manufacture** workspace sets up a part for cutting on a CNC router: which machine, the block of stock it is cut from, where the machine's zero is, the tools, and the operations (facing, profiles, pockets, holes, V-carving, 3D surfaces) in the order they cut. It makes toolpaths on demand. The Shapeoko 5 Pro 4x4 and the Shapeoko 4 XXL, in their default configurations, are the machines it is built around.
 
 Open it with **Manufacture** in the toolbar at the top; press it again to go back to modelling. While it is open the feature tree and the modelling tools step aside: the **Manufacture** panel on the left lists the setups and operations, and the **Setup** panel on the right edits the setup shown. The view keeps showing the part, so you can pick its faces. **Print** and **Manufacture** are never open together; opening one closes the other. Manufacture is not available on an assembly tab.
 
@@ -46,17 +46,17 @@ The small diagram under these shows where the zero is on the stock, from above a
 
 **Tools** at the top of the **Manufacture** panel opens the tool list. A document carries its own copies of the tools it uses, so a job does not change when a library does.
 
-- **In this document**: the tools operations can use. **Edit** changes a tool's name, kind, tool number, diameter, flute length, flutes, corner radius (a bull nose), angle (a V-bit or a drill), tip (a V-bit), and its feeds and speeds per material. Sizes are expressions (`1/4"` in a millimetre document works), and out-of-range values are refused with a message: a diameter must be above zero, a corner radius at most half the diameter, a stepover above 0 and at most 1. **Delete** is refused while an operation cuts with the tool; the message names the operations. **New tool** makes one from scratch. A tool copied from a built-in one keeps the **unverified** marks of the numbers that were not checked against Carbide 3D's figures.
+- **In this document**: the tools operations can use. **Edit** changes a tool's name, kind, tool number, diameter, flute length, flutes, corner radius (a bull nose), angle (a V-bit or a drill), tip (a V-bit), and its feeds and speeds per material. Sizes are expressions (`1/4"` in a millimetre document works), and out-of-range values are refused with a message: a diameter must be at least 0.01 mm (shown when toolpaths are made), a corner radius at most half the diameter, a stepover above 0 and at most 1. **Delete** is refused while an operation cuts with the tool; the message names the operations. **New tool** makes one from scratch. A tool copied from a built-in one keeps the **unverified** marks of the numbers that were not checked against Carbide 3D's figures.
 - **Built-in tools (Carbide 3D)**: Carbide 3D's end mills, V-bits and a drill, with their feeds and speeds from Carbide 3D's charts. **Use in document** copies one in. Where a number was not checked against its source (a size, or a material's speeds and feeds), the tool says so.
 - **Your library**: tools you keep in this browser, outside any document. **Import...** reads a tool library file (merging it), **Export** downloads yours. If the library's files cannot be read (written by a newer version, or damaged), it says so and nothing is ever saved over them; the files that could not be read are **kept aside**. **Reset library** sets the current files aside too and starts an empty library. The panel says how many files are kept aside, whether a reset set them aside or they could not be read. Only the newest five files set aside are kept; older ones are deleted.
 
 ## Operations
 
-The buttons under the setup list add an operation: **Facing**, **Profile**, **Pocket**, **Drill**, **V-carve**. Each opens a dialog: OK applies it as one undo step, Cancel or Escape changes nothing. Every number is an expression; a field says at once when a value is of the wrong kind (a length where a feed rate is expected) or out of range (a zero stepover, a negative depth, a fractional tab count), and OK refuses until it is fixed. Fields marked optional can be left empty: the stepdown, stepover and feeds then come from the tool's preset for the stock's material.
+The buttons under the setup list add an operation: **Facing**, **Profile**, **Pocket**, **Drill**, **V-carve**, **3D surface**. Each opens a dialog: OK applies it as one undo step, Cancel or Escape changes nothing. Every number is an expression; a field says at once when a value is of the wrong kind (a length where a feed rate is expected) or out of range (a zero stepover, a negative depth, a fractional tab count), and OK refuses until it is fixed. Fields marked optional can be left empty: the stepdown, stepover and feeds then come from the tool's preset for the stock's material.
 
 Every operation has a **name**, a **tool** and its **geometry**:
 
-- **Faces** are picked in the view: with **Pick faces** active, click flat faces of the part. Curved faces are refused. A face's outline is what a profile or V-carve follows.
+- **Faces** are picked in the view: with **Pick faces** active, click flat faces of the part. Curved faces are refused. A face's outline is what a profile or V-carve follows, and what bounds a 3D surface.
 - **Sketch regions**: choose a sketch and **Add its regions**: every closed region of the sketch, whether or not a feature uses it (lettering to carve, say).
 - **Holes**: for a drill, choose a hole feature and **Add its holes**.
 
@@ -68,11 +68,22 @@ Flattens the stock top: **Depth** is how much it removes, **Raster angle** the d
 
 ### Profile
 
-Cuts around the geometry's outline: **Side** (outside, inside, on the line), **Depth** (**Blind**, a depth below the top of the geometry; or **Through the stock**, with an optional amount below its bottom), stepdown, finish allowance, **Tabs** to hold the part when cutting through (how many per loop, their width and height), **Entry** (plunge, ramp or helix, with their angle and radius), lead-in and lead-out, and climb or conventional milling. A profile needs at least one face or region.
+Cuts around the geometry's outline: **Side** (outside, inside, on the line), **Depth** (**Blind**, a depth below the top of the geometry; or **Through the stock**, with an optional amount below its bottom), stepdown, finish allowance, **Tabs** to hold the part when cutting through (how many per loop, their width and height), **Entry** (plunge, ramp or helix, with their angle and radius; see **Entry angles** below), lead-in and lead-out, and climb or conventional milling. A profile needs at least one face or region.
 
 ### Pocket
 
 Clears the area inside the geometry: depth, stepdown, **stepover** (a fraction of the tool's diameter: 0.4 is 40%), finish allowance, entry and climb. A pocket on a **face** stops at that face: the face is its floor, and the depth does not apply. A pocket on **sketch regions** goes to its depth. One pocket takes floor faces or regions, not both: make two pockets.
+
+The finishing choices below them are optional:
+
+- **Finishing pass on the walls**: by default a pocket with a finish allowance clears to the allowance, then runs one pass along the walls (and round any islands) to take it off. **No** leaves the walls oversize for a later operation; **Yes** runs the pass even with no allowance.
+- **Finishing stepdown**: how deep each step of that pass goes. Empty: the whole depth in one step when the tool's flutes reach, otherwise the stepdown.
+- **Floor allowance**: material the clearing leaves on the floor (empty: none). It must be less than the pocket's depth.
+- **Floor pass**: by default, with a floor allowance, one more clearing pass at the bottom takes it off. **No** leaves it for a later operation.
+
+**Entry angles.** A ramp or helix entry (profile, pocket, a V-carve's clearing and z-level roughing) takes an angle from 0.5 to 90 degrees; 1 to 5 degrees is usual on a router, 3 degrees is the default. Shallower is refused as it is typed: a ramp at a tiny angle would be hundreds of metres long. An entry that would still go round more than 10,000 times to reach one level (a helix with a hair-thin radius, say) is refused when toolpaths are made, with a message: use a steeper angle, a larger radius, a smaller stepdown or a plunge.
+
+**Size limits.** So a document (yours, or one from someone else) cannot make the computer run out of memory, every operation is held to 3 million moves; a real job is far below that (a 300 mm square 3D finish is under half a million). An operation that would emit more, such as a hair-thin tool ramping down many levels, is refused when toolpaths are made with a message: use a larger tool, stepdown, stepover or entry angle. A profile takes at most 1,000 tabs per loop (a tab spacing asking for more places 1,000, with a warning), and a drill bores a hole in at most 1,000 rings and drills it in at most 10,000 pecks (a peck depth so small that a hole needs more is refused). All the operations of one setup together are held to 10 million moves: once they pass it, the operation that would go over and the ones after it show an error instead of a toolpath, and the setup cannot be exported until you split it or coarsen its operations. An export of more than 20 million lines of G-code is refused too.
 
 ### Drill
 
@@ -81,6 +92,25 @@ Drills holes: **Depth** is each hole's own depth, or blind, or through; **Peck d
 ### V-carve
 
 Carves the geometry with a V-bit (or an engraver), deeper where the shape is wider, for lettering and signs. **Maximum depth** limits how deep it goes (empty: as deep as the bit's shape needs). The dialog offers only V-bits and engravers.
+
+- **Stepdown**: carve in levels no deeper than this (empty: one level, the whole depth at once). Use it for deep, wide letters in hard material.
+- **Floor stepover**: where the maximum depth (or the bit's size) stops the carve, the shape has a flat floor, which the V-bit clears in rings this far apart. Empty: rings close enough to leave ridges no higher than 0.2 mm.
+- **Clear the flat floor with an end mill first**: a wide letter's floor cleared by a V-bit takes many rings; an end mill does it much faster. Tick this, choose a **Clearing tool** (a flat or bull nose end mill), and optionally its stepdown, stepover (a fraction of its diameter), entry (by default a 3 degree helix) and feeds; empty ones come from that tool's preset for the stock's material. The end mill then clears the floor first, with a tool change of its own, and the V-bit carves the sloped sides and the corners the end mill cannot reach. The clearing only does something with a **Maximum depth**: without one the operation warns that there may be no floor to clear. In the list and the preview the clearing belongs to its V-carve: suppress the V-carve and the clearing goes too, and if the clearing fails the V-carve shows it as failed. The preview and the export list the clearing as **(clearing)** just before its V-carve.
+
+### 3D surface
+
+Machines a curved part, such as a filleted or sculpted top, from the part's own shape (its surface, meshed finely) rather than from outlines. The dialog offers ball, bull nose and flat end mills and V-bits, a ball first. **Strategy**:
+
+- **Parallel finish**: straight passes a **stepover** apart (a distance here, unlike the 2D operations' fraction: the cusps a ball leaves get smaller as it shrinks; 0.3 to 0.5 mm with a 1/8" ball is a fine finish), at the **raster angle**, with the tool dropped onto the surface along each pass so it touches the part without cutting into it. **Pattern**: zigzag (the passes linked along the surface where that is safe) or one way (lifting between passes). **Tolerance** (default 0.01 mm) is how far the program may stray from the exact path, and **sampling** how far apart the tool is dropped along a pass (by default from the tool's size; it is never coarser than the tool's radius, nor, for a V-bit, than its sharp tip allows; the operation warns when it uses a finer one than you asked for). A V-bit samples very finely: its sharp tip allows only about 4 x tolerance x tan(half angle) between drops (0.023 mm for a 60 degree bit at the default tolerance, down to 0.001 mm at the finest), so a V-bit finish is many times slower than a ball's; keep its area small and its tolerance no finer than needed.
+- **Z-level roughing**: removes the bulk of the stock in flat slices a **stepdown** apart (default half the tool's diameter), each cleared like a pocket, leaving the **stock to leave** on the part's top and sides for the finish. A flat end mill roughs closest; a round tool leaves more between the slices (it warns). Its entry (default a 3 degree helix), climb and slice grid (default 0.2 mm) are set here too; the raster angle and pattern are not used.
+
+**Stock to leave** (empty: none) is material left on the surface; a V-bit cannot leave any.
+
+**Work limits.** So a slip of a digit cannot keep the computer busy for hours, an operation that would take too much work is refused before it starts, with a message saying which numbers to raise: a finish that would drop the tool at more than 20 million points along its passes (the passes' total length over the sampling), and a roughing that would plan more than 100,000 clearing passes (slices times the passes one slice can need at the stepover) or trace its slice grid more than 2 billion times. A finish that needs more than 60 million drops in all, once the refinement where the surface bends is counted, or more than 3 million moves, stops with the same kind of message. Use a larger stepover, sampling, tolerance, stepdown or slice grid, or a smaller boundary.
+
+**Boundary**: the faces and sketch regions you add limit where the tool's centre goes, seen from above. Pick a flat face to finish only inside its outline (its holes stay out), or a sketch region drawn over the area to finish. With none, a finish covers the part's whole extent and a roughing the whole stock.
+
+**Rough first.** A finish follows the part from the stock top down in a single pass wherever there is material, and with no boundary it goes down to the part's lowest point wherever the part does not fill its box. Unless the stock is already close to the part, put a **Z-level roughing** before the finish in the same setup (a flat end mill, a stock to leave of 0.3 to 0.5 mm), then the finish with a ball. Until there is one, the finish's row in the list says **Nothing roughs before this finish**. Simulate the job (below) before cutting: it shows any gouge, and how much is left for the finish.
 
 ## The operations list
 
@@ -94,7 +124,7 @@ After **Generate toolpaths**, a row also says whether its toolpath was generated
 
 On each row: **Edit** (or double-click, or Enter), **Rename** (or F2), **Suppress** / **Unsuppress**, **Up** and **Down** to change the cutting order, **Move to...** another setup of the same part and body (the operation keeps its name and settings), and **Delete** (or the Delete key). Each is one undo step.
 
-**Generate toolpaths** makes the toolpaths of the setup's resolved operations in the background; nothing is generated until you ask. The toolpaths then show in the view (see below); simulating the cut comes in a later version. **Export G-code** writes the setup's program for the machine, with a setup sheet (see Exporting G-code below).
+**Generate toolpaths** makes the toolpaths of the setup's resolved operations in the background; nothing is generated until you ask. A 3D surface over a large part with a fine stepover takes a while; the panel says it is working, and **Cancel** next to the button stops the generation (the toolpaths you had stay as they were). The toolpaths then show in the view, where you can also simulate the cut (see below). **Export G-code** writes the setup's program for the machine, with a setup sheet (see Exporting G-code below).
 
 ## Previewing toolpaths
 
@@ -114,7 +144,7 @@ The preview shows the last generation. When you change an operation afterwards, 
 
 ### Simulation
 
-Tick **Simulate material removal** under the slider to see the stock as the job leaves it. The simulation cuts the stock top on a grid of small squares (by default 16 across the narrowest tool's cut: its diameter, or for a V-bit or an engraver the width of its flat tip, or 1 mm when the tip is narrower; coarser on very large stock so it fits in memory), with each tool's real shape: flat, ball, bull nose and V. It follows the slider, so you can watch the material come off move by move. The panel then reports:
+Tick **Simulate material removal** under the slider to see the stock as the job leaves it. The simulation cuts the stock top on a grid of small squares (by default 16 across the narrowest tool's cut: its diameter, or for a V-bit or an engraver the width of its flat tip, or 1 mm when the tip is narrower; coarser on very large stock so it fits in memory), with each tool's real shape: flat, ball, bull nose and V, so a 3D finish with a ball or a bull nose is checked with the round end it really cuts with. It follows the slider, so you can watch the material come off move by move. The panel then reports:
 
 - **rapids through material**: a rapid (a full-speed move that is not meant to cut) that runs into stock still standing at that moment. On the machine this is a crash; fix it before cutting.
 - **gouges** (red in the view): places where the tool cut into the part itself by more than 0.05 mm, as from a wrong offset or a depth below the part's surface.
@@ -131,7 +161,7 @@ The settings:
 - **Post**: the controller the file is written for. It starts at the setup's post, which a new setup takes from its machine: **Carbide Motion** on the Shapeoko profiles, the sender those machines ship with. **Grbl 1.1**, **grblHAL**, **LinuxCNC** and **Mach3** are the others.
 - **Units**: millimetres (`G21`) or inches (`G20`).
 - **Tool changes**, for a job with several tools, as the post allows: **One file per tool** (Grbl's default, since Grbl refuses `M6`), **One file, M0 pause at each tool change** (Grbl and grblHAL; Grbl does not jog while paused, so zeroing Z there needs a sender that allows it), or **One file, M6 at each tool change** (Carbide Motion, which then asks for each tool; LinuxCNC; Mach3; grblHAL as an option).
-- **Group operations by tool**: runs each tool's operations together, tools in the order they are first used, so there are fewer tool changes. It changes the order material comes off, so the export warns when it moves a cut through the stock ahead of other cuts (the part could come loose before they run).
+- **Group operations by tool**: runs each tool's operations together, tools in the order they are first used, so there are fewer tool changes. It changes the order material comes off, so the export warns when it moves a cut through the stock ahead of other cuts (the part could come loose before they run). A V-carve's clearing always stays ahead of its V-carve: if the V-bit was used earlier in the setup, the V-carve is cut right after its clearing rather than with the V-bit's other cuts (one more tool change), so the V-bit never has to cut the whole floor.
 
 Before anything is saved, the summary lists the files, the tools in the order they are loaded, the estimated time (no acceleration or tool change time, so a real machine takes longer), the extents of the tool tip, and every warning from the job and the post. Under it is the **setup sheet**: the files and their order, the stock size and material, the work zero (WCS origin) and how to set it, the clearance and retract heights, the tools with their numbers, every tool change in order with its spindle speed and router dial setting, and each operation with its tool, top and bottom Z, stepdown, spindle speed and feeds. **Print setup sheet** prints it and **Save setup sheet** saves it as an HTML file.
 

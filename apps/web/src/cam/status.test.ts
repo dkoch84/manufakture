@@ -5,7 +5,7 @@
 import type { CamOperation } from '@manufakture/core';
 import type { CamGeometryResult } from '@manufakture/regen';
 import { describe, expect, it } from 'vitest';
-import { operationStatus, wcsLost, type GeneratedOutcome } from './status';
+import { operationStatus, roughingWarning, wcsLost, type GeneratedOutcome } from './status';
 
 const op = (patch: Partial<CamOperation> = {}) =>
   ({
@@ -123,5 +123,48 @@ describe('operationStatus', () => {
     expect(wcsLost(g)).toBe('The WCS face is gone');
     expect(wcsLost(null)).toBeNull();
     expect(operationStatus(op(), g, none).state).toBe('error');
+  });
+});
+
+describe('roughing advice for a 3D finish', () => {
+  const surface = (id: string, patch: Record<string, unknown> = {}) =>
+    ({
+      id,
+      kind: 'surface3d',
+      name: id,
+      suppressed: false,
+      tool: 'tool#1',
+      geometry: [],
+      stepover: { source: '0.5', lengthUnit: 'mm', angleUnit: 'deg' },
+      angle: { source: '0', lengthUnit: 'mm', angleUnit: 'deg' },
+      ...patch,
+    }) as CamOperation;
+
+  it('warns about a parallel finish with no z-level roughing before it, and only then', () => {
+    const finish = surface('surface3d#2');
+    const rough = surface('surface3d#1', { strategy: 'zlevel' });
+    expect(roughingWarning({ operations: [finish] }, finish)).toMatch(/Nothing roughs/);
+    expect(roughingWarning({ operations: [rough, finish] }, finish)).toBeNull();
+    // After it, or suppressed, a roughing does not count.
+    expect(roughingWarning({ operations: [finish, rough] }, finish)).toMatch(/Nothing roughs/);
+    const off = { ...rough, suppressed: true };
+    expect(roughingWarning({ operations: [off, finish] }, finish)).toMatch(/Nothing roughs/);
+    // A pocket is not a roughing of a 3D surface; the roughing itself needs none.
+    expect(roughingWarning({ operations: [op(), finish] }, finish)).toMatch(/Nothing roughs/);
+    expect(roughingWarning({ operations: [rough] }, rough)).toBeNull();
+    expect(roughingWarning({ operations: [op()] }, op())).toBeNull();
+  });
+
+  it('lists the advice among the warnings when the setup is given, in every state', () => {
+    const finish = surface('surface3d#1');
+    const setup = { operations: [finish] };
+    expect(operationStatus(finish, null, new Map(), true, setup).warnings).toEqual([
+      expect.stringMatching(/Nothing roughs/),
+    ]);
+    expect(operationStatus(finish, null, new Map()).warnings).toEqual([]);
+    const g = geometry({ operationId: 'surface3d#1', kind: 'surface3d', status: 'ok' });
+    const s = operationStatus(finish, g, new Map(), true, setup);
+    expect(s.state).toBe('ok');
+    expect(s.warnings).toHaveLength(1);
   });
 });

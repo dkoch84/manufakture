@@ -60,10 +60,50 @@ The evaluated counterparts of the document's `cam` section (T5.1b), each with it
     optional `DrillExtras` of [the drill operation](#the-drill-operation-opsdrillts));
   - `vcarve`: `loops`, `top`, `maxDepth?` (and, for now, the optional `VCarveExtras` of
     [the V-carve operation](#the-v-carve-operation-opsvcarvets));
+  - `vcarveClearing`: a V-carve's floor clearing as an operation of its own (T5.5b): `tool` and
+    `feeds` of the clearing end mill, `carve` (the V-carve's input), `stepdown`, `stepover`,
+    `entry?`; see the V-carve operation's clearing below;
   - `surface3d`: `mesh`, `stepover` (mm), `angle`, `allowance` (and, for now, the optional
     `Surface3dExtras` of [the 3D surfacing operation](#the-3d-surfacing-operation-opssurface3dts)).
   - `Entry` is `plunge`, `ramp` (`angle`) or `helix` (`angle`, `radius`); `Lead` is `none`,
     `line` (`length`) or `arc` (`radius`).
+
+**Entry limits (`ops/entry.ts`).** A ramp's length and a helix's turns grow as 1 / tan(angle), so
+every operation that takes an `Entry` (profile, pocket, the V-carve's clearing, z-level roughing)
+and the drill's `helixAngle` accept angles from `ENTRY_MIN_ANGLE` (half a degree) to 90 degrees;
+shallower is `invalid-input` (`entryProblem` gives the message). Half a degree is well below the
+1 to 5 degrees used on routers and keeps a ramp at most about 115 times its drop. A ramp or helix
+that would still be too long to emit (a needle-thin helix radius, a drop of metres) is refused too:
+more than `ENTRY_MAX_TURNS` (10,000) helix turns or ramp laps to reach one level, or a ramp of more
+than `ENTRY_MAX_RAMP_MOVES` (1 million) moves (laps times the ring's segments, plus two breaks
+per tab on a profile's ring). The geometry stage checks the same minimum (regen's
+`CAM_MIN_ENTRY_ANGLE`, pinned equal by a test in the app).
+
+**Move budget (`ops/budget.ts`).** Every operation's toolpath is held to `OPERATION_MAX_MOVES`
+(3 million IR entries, a few hundred MB in the worker; a 300 mm square 3D finish emits well under
+half a million). The per-entry caps above bound one ramp or helix, but not a document that asks
+for many of them: a 0.01 mm tool on a 0.008 mm radius 50-gon ramped at half a degree in 1 mm
+steps 60 mm deep is some 114,000 moves a level, under every per-entry cap, and 7 million (1.7 GB)
+in all. So the shared `Emitter` checks the cap on every entry it adds and throws
+`MoveBudgetExceeded`; each generator (`withMoveBudget`) turns that into `invalid-input` ("this
+operation would emit more than 3 million moves, the most allowed. Use a larger tool, stepdown,
+stepover or entry angle.") and returns no partial toolpath. The case above is refused in under a
+second. `OperationContext.maxMoves` lowers the cap (internal, for tests); a higher value is
+clamped to `OPERATION_MAX_MOVES`. `SURFACE3D_MAX_MOVES` is the same cap, counting a finish's chord
+being fitted too. Other per-operation bounds: at most `PROFILE_MAX_TABS` (1,000) tabs a loop (a
+larger `tabs.count` is refused, a `tabSpacing` asking for more places 1,000 with a `tabs-capped`
+warning), at most `DRILL_MAX_BORE_RINGS` (1,000) rings a bore, each ring's helix within
+`ENTRY_MAX_TURNS`, and at most `DRILL_MAX_PECKS` (10,000) pecks a hole (counted before any depth
+is listed, so a peck of 1e-7 mm is refused at once instead of listing 60 million depths).
+
+Above the operations, two more bounds. The worker holds every toolpath of a `generate` request
+until it replies, so the request is held to `REQUEST_MAX_MOVES` (10 million entries over all its
+operations, cache hits included): the operation that would pass it and every one after it come
+back as `request-too-large` error values ("this setup's toolpaths exceed 10 million moves in
+total"), the rest not generated. And the G-code writer refuses a job of more than
+`POST_MAX_LINES` (20 million lines over all its files) as `invalid-input`. Job assembly and the
+writer copy entries with plain loops, never `push(...array)`, which overflows the call stack past
+about 125,000 entries.
 
 ### Geometry inputs
 
@@ -820,7 +860,9 @@ setup's `name` or `post`; one that needs any of them adds it to `toolpathKey` an
 
 **Errors are values.** An expected failure is the generator's `{ ok: false, error }`. A generator
 that throws is a bug, reported as `internal` with the message and stack; one that returns a
-toolpath the IR validator refuses is `invalid-toolpath` with the issues. The validator's `no-tool`
+toolpath the IR validator refuses is `invalid-toolpath` with the issues. Past `REQUEST_MAX_MOVES`
+entries in one reply, the remaining operations are `request-too-large` (above); the option
+`maxRequestMoves` of `createCamWorkerApi` lowers it for tests. The validator's `no-tool`
 and `spindle-off` are not checked on an operation's own toolpath, since linking (T5.2g) puts the
 tool change and spindle start in front of it.
 
@@ -927,7 +969,9 @@ has a bounding box narrower than `tabMinInsideSize` get none (`tabs-skipped`); t
 finishing tab that cannot be carried to its roughing loop (it would cross that loop's start) is
 also reported as `tabs-dropped`, saying plainly that the roughing cuts through there and the part
 is held at that spot only by a sliver as thin as the allowance. Tabs as high as the cut is deep
-make nothing (`tabs-unused`).
+make nothing (`tabs-unused`). A loop has at most `PROFILE_MAX_TABS` (1,000) tabs: a larger
+`tabs.count` is `invalid-input`, and a `tabSpacing` asking for more places that many
+(`tabs-capped`).
 
 **Errors and warnings.** Bad numbers, no loops, open loops and a tool that fits nowhere are
 `invalid-input` errors. Warnings: `depth-exceeds-flutes`, `loop-too-small` (an inside loop, or a
@@ -1126,7 +1170,11 @@ drill here); chamfer them by hand or with a V-carve.
 
 **Errors and warnings.** Bad numbers (a peck or helix angle not above zero, a negative dwell or
 breakthrough, a bore stepover outside (0, 1], a hole whose bottom is not below its top), no holes,
-and the tool cases above are `invalid-input` errors. Warnings: `depth-exceeds-flutes` when the
+the tool cases above, a bore of more than `DRILL_MAX_BORE_RINGS` (1,000) rings, a hole of more
+than `DRILL_MAX_PECKS` (10,000) pecks (measured from where material starts to the bottom, the
+breakthrough included) and a bore ring whose helix needs more than `ENTRY_MAX_TURNS` turns are
+`invalid-input` errors. Peck depths are taken from the top by index (`top - k * peck`), not by a
+running subtraction. Warnings: `depth-exceeds-flutes` when the
 deepest hole goes further below the start of material than the flutes are long,
 `breakthrough-capped`, `sloped-entry` and `merged-below-floor` (above).
 
@@ -1202,6 +1250,13 @@ cannot reach lies that close to the floor's edge. The pocket's `unreachable` war
 (the V-bit cuts those corners). No floor (`no-floor`) or an end mill that fits nowhere on it
 (`clearing-tool-does-not-fit`) gives an empty toolpath with a warning.
 
+The clearing is also an operation kind of its own, `vcarveClearing` (`VCarveClearingInput`,
+registered as `generateVCarveClearingOperation`), so a job can cut it with its own tool change:
+its `tool` and `feeds` are the end mill's, `carve` the V-carve whose floor it clears, and its moves
+carry its own id. The app sends a V-carve with a clearing tool as two operations, the clearing
+first (id `<V-carve id>/clearing`), and the V-carve still with its `clearing`, so the V-bit
+leaves the floor to the end mill.
+
 **Moves.** One IR `pass` per depth level: `stepdown` levels down to the deepest point the carve
 has (each centre line cut only where it is deeper than the level before, clamped to the level),
 or one level. In each level the pieces (centre lines, rings) are cut nearest first, open lines
@@ -1270,12 +1325,17 @@ than on a flat (the stepover is measured in XY).
 
 **Fields.** From the core schema: `stepover` (mm between raster lines; at most the tool diameter),
 `angle` (raster direction, radians from machine +X) and `allowance` (stock to leave, mm, zero or
-more). The rest are `Surface3dExtras` (all optional, not in the core schema yet; they need a format
-bump when the UI (T5.5b) adds them): `strategy` (`parallel` or `zlevel`), `boundary` (loops the
+more). The rest are `Surface3dExtras`, all optional; the core schema stores all of them but
+`boundary` (which the app builds from the operation's face and region sources) and `floor` since
+T5.5b: `strategy` (`parallel` or `zlevel`), `boundary` (loops the
 tool centre stays inside, machine XY; default the mesh's XY bounding box for `parallel`, the stock
 outline grown by half the tool diameter for `zlevel`), `tolerance` (default
 `SURFACE3D_TOLERANCE`, 0.01 mm), `sampling` (drop points along a line, default a quarter of the
-tool radius, between 0.05 and 0.5 mm), `floor` (the lowest tip Z; default the mesh's lowest point),
+tool radius, between 0.05 and 0.5 mm; `surface3dSampling` then caps it at the tool radius, and for
+a V-bit at `4 tol tan(a)`, `a` the half angle, since a sharp tip sinks into a groove between two
+samples by about `step / (4 tan(a))` before the midpoint test sees it; never below
+`SURFACE3D_MIN_SAMPLING`, 0.001 mm; a `sampling-clamped` warning when an asked sampling is
+capped), `floor` (the lowest tip Z; default the mesh's lowest point),
 `pattern` (`zigzag`, the default, or `oneway`), and for `zlevel` `stepdown` (default half the tool
 diameter), `entry` (default a 3 degree helix, `SURFACE3D_ROUGH_ENTRY`), `climb` (default true)
 and `sliceCell` (default `SURFACE3D_SLICE_CELL`, 0.2 mm). For `zlevel` the stepover becomes the
@@ -1349,11 +1409,24 @@ tool's edge stays 0.65 mm from the wall (the allowance plus the slice's reach). 
 too, with a `rough-round-tool` warning: they leave more than the allowance between levels.
 
 **Errors and warnings.** Bad numbers (a stepover outside (0, diameter], a negative allowance, a
-non-finite angle, a tolerance below 0.0001 mm, an unknown strategy or pattern), an empty or
+non-finite angle, a tolerance below 0.0001 mm, an unknown strategy or pattern, an entry angle below
+half a degree), an empty or
 malformed mesh (indices out of range, coordinates not finite), an empty boundary, a floor not
 below the stock top, a V-bit with an allowance and a drill or engraver are `invalid-input` errors.
-Warnings: `depth-exceeds-flutes` (the finish reaches, or the roughing goes, deeper below the stock
-top than the flute length) and `rough-round-tool`.
+So is too much work, refused before any of it is done: a finish whose raster (total chord length
+over the sampling) needs more than `SURFACE3D_MAX_SAMPLES` (20 million) drop points, a roughing whose
+levels times rings per level (half the narrower side of the boundary's box over the stepover)
+exceed `SURFACE3D_MAX_ROUGH_RINGS` (100,000), and one whose levels times slice-grid nodes exceed
+`SURFACE3D_MAX_SLICE_NODES` (2 billion); and a finish is stopped with the same error when it
+reaches `SURFACE3D_MAX_DROPS` (60 million) drops, refinement and links included, or holds
+`SURFACE3D_MAX_MOVES` (3 million) moves: the toolpath's entries plus the cutter locations of the
+chord being fitted (`maxMoves` lowers the cap, for tests). A finish checks for a cancel every 5,000
+drops within a raster line as well as between lines. A drop costs about 5 us in Node, so a V-bit finish,
+sampled at most `4 tol tan(a)` apart, is the case these limits mostly catch. Warnings:
+`depth-exceeds-flutes` (the finish reaches, or the roughing goes, deeper below the stock
+top than the flute length), `rough-round-tool` and `sampling-clamped` (a finish's asked sampling
+was coarser than `surface3dSampling` allows). That a finish has no roughing before it is a
+question of the setup's order, which a generator may not read; the app warns about it.
 
 ### Point filtering (`mesh/fit.ts`)
 
@@ -1395,7 +1468,11 @@ heights, stock and WCS only.
 **Order.** The user's order by default; `groupByTool: true` groups operations by tool, tools in
 the order they are first used and each tool's operations in the user's order. Grouping changes
 the order material comes off (a profile can then run before a pocket that was listed after it),
-which is why it is an option. Suppressed operations are left out. An operation with an error (or a
+which is why it is an option. An operation with `before` set (`jobOperations` sets it on a
+`vcarveClearing`, naming its V-carve) stays ahead of that operation: when grouping would put the
+V-carve first (its V-bit cut something earlier in the setup), the V-carve is cut right after its
+clearing instead, at the cost of one more tool change, so the V-bit never cuts the whole floor.
+Suppressed operations are left out. An operation with an error (or a
 spindle speed not above zero) fails the job: `{ ok: false, error }` with `error.failures` naming
 every such operation, so an export never silently drops a cut; suppress it to go on. A job with
 nothing left to cut is an error too. Operations with no moves are left out with an

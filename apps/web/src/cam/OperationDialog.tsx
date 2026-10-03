@@ -1,5 +1,6 @@
-// The operation dialogs (M5 plan, T5.3a): one panel per operation kind (facing, profile, pocket,
-// drill, V-carve), new or existing, built from `ExpressionField` like the feature dialogs. Faces
+// The operation dialogs (M5 plan, T5.3a, T5.5b): one panel per operation kind (facing, profile,
+// pocket, drill, V-carve, 3D surface), new or existing, built from `ExpressionField` like the
+// feature dialogs. A 3D surface's faces and sketch regions are its boundary in XY. Faces
 // are picked in the viewport (planar faces of the setup's part, named by the kernel's `pick` op);
 // sketch regions and hole features are chosen from lists. Every field is checked for its kind and
 // range as it is typed; OK applies the whole dialog as one core command (one undo step), Cancel or
@@ -29,6 +30,7 @@ import {
   addFace,
   addSource,
   buildOperation,
+  clearingTools,
   formOf,
   newOperationForm,
   newOperationName,
@@ -318,7 +320,20 @@ export function OperationDialog({
     />,
   );
 
-  const select = <K extends 'side' | 'entry' | 'leadIn' | 'leadOut' | 'depthMode'>(
+  const select = <
+    K extends
+      | 'side'
+      | 'entry'
+      | 'leadIn'
+      | 'leadOut'
+      | 'depthMode'
+      | 'finishPass'
+      | 'floorPass'
+      | 'clearingEntry'
+      | 'strategy'
+      | 'pattern'
+      | 'roughEntry',
+  >(
     key: K,
     text: string,
     options: readonly (readonly [OperationForm[K], string])[],
@@ -340,7 +355,7 @@ export function OperationDialog({
       </label>
     </div>
   );
-  const check = (key: 'climb' | 'tabs', text: string) => (
+  const check = (key: 'climb' | 'tabs' | 'clearing', text: string) => (
     <label key={key} className="dialog-check">
       <input
         type="checkbox"
@@ -429,6 +444,18 @@ export function OperationDialog({
         expression('entryAngle'),
         expression('entryRadius'),
         check('climb', 'Climb milling (off: conventional)'),
+        select('finishPass', 'Finishing pass on the walls', [
+          ['auto', 'When there is a finish allowance'],
+          ['on', 'Yes'],
+          ['off', 'No: leave the allowance for a later operation'],
+        ]),
+        expression('finishStepdown'),
+        expression('floorAllowance'),
+        select('floorPass', 'Floor pass', [
+          ['auto', 'When there is a floor allowance'],
+          ['on', 'Yes'],
+          ['off', 'No: leave the floor allowance'],
+        ]),
       );
       break;
     case 'drill':
@@ -440,8 +467,125 @@ export function OperationDialog({
         expression('dwell'),
       );
       break;
-    case 'vcarve':
-      body.push(expression('maxDepth'));
+    case 'vcarve': {
+      const ends = clearingTools(doc);
+      body.push(
+        expression('maxDepth'),
+        expression('stepdown', 'Stepdown (optional: one level)'),
+        expression('flatStepover'),
+        check('clearing', 'Clear the flat floor with an end mill first'),
+      );
+      if (form.clearing) {
+        body.push(
+          <div key="clearingTool" className="dialog-field">
+            <label>
+              Clearing tool
+              <select
+                data-testid="cam-field-clearingTool"
+                value={form.clearingTool}
+                aria-invalid={errors.clearingTool !== undefined}
+                onChange={(e) => set('clearingTool', e.target.value)}
+              >
+                {!ends.some((t) => t.id === form.clearingTool) && (
+                  <option value={form.clearingTool}>
+                    {form.clearingTool === '' ? 'Choose an end mill' : form.clearingTool}
+                  </option>
+                )}
+                {ends.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name} ({TOOL_KIND_LABELS[t.kind]}, {t.diameter.source})
+                  </option>
+                ))}
+              </select>
+            </label>
+            {errors.clearingTool && (
+              <span className="field-error" data-testid="cam-clearing-tool-error">
+                {errors.clearingTool}
+              </span>
+            )}
+          </div>,
+          <p key="clearingNote" className="field-note">
+            The end mill clears the floor a maximum depth leaves, before the V-bit; it cuts with its
+            own tool change.
+          </p>,
+          expression('clearingStepdown'),
+          expression('clearingStepover'),
+          select('clearingEntry', 'Clearing entry', [
+            ['auto', 'Helix (3 degrees)'],
+            ['plunge', 'Plunge'],
+            ['ramp', 'Ramp'],
+            ['helix', 'Helix'],
+          ]),
+          expression('clearingEntryAngle'),
+          expression('clearingEntryRadius'),
+          <details key="clearingFeeds" className="cam-feeds" data-testid="cam-clearing-feeds">
+            <summary>Clearing feeds and speed</summary>
+            <p className="field-note">
+              Empty fields take the clearing tool&apos;s preset for the stock&apos;s material.
+            </p>
+            {FEED_KEYS.map((k) => (
+              <ExpressionField
+                key={k}
+                label={FEED_SPECS[k].label}
+                testId={`cam-field-clearingFeeds-${k}`}
+                value={form.clearingFeeds[k]}
+                kind={FEED_SPECS[k].kind}
+                units={units}
+                variables={variables}
+                names={names}
+                validate={validator(FEED_SPECS[k].rule)}
+                error={errors[`clearingFeeds.${k}`]}
+                onChange={(v) =>
+                  setForm((f) => ({ ...f, clearingFeeds: { ...f.clearingFeeds, [k]: v } }))
+                }
+              />
+            ))}
+          </details>,
+        );
+      }
+      break;
+    }
+    case 'surface3d':
+      body.push(
+        select('strategy', 'Strategy', [
+          ['parallel', 'Parallel finish (raster lines on the surface)'],
+          ['zlevel', 'Z-level roughing (slices cleared like a pocket)'],
+        ]),
+        expression('lineStepover'),
+        expression(
+          'angle',
+          form.strategy === 'parallel' ? 'Raster angle' : 'Raster angle (not used by z-level)',
+        ),
+        expression('allowance'),
+      );
+      if (form.strategy === 'parallel') {
+        body.push(
+          select('pattern', 'Pattern', [
+            ['zigzag', 'Zigzag (linked along the surface)'],
+            ['oneway', 'One way (retract between lines)'],
+          ]),
+          expression('tolerance'),
+          expression('sampling'),
+          <p key="roughing" className="field-note">
+            A finish follows the part from the stock top down: rough first (a z-level roughing
+            before it in this setup) unless the stock is already close to the part.
+          </p>,
+        );
+      } else {
+        body.push(
+          expression('stepdown', 'Stepdown (optional: half the tool diameter)'),
+          select('roughEntry', 'Entry', [
+            ['auto', 'Helix (3 degrees)'],
+            ['plunge', 'Plunge'],
+            ['ramp', 'Ramp'],
+            ['helix', 'Helix'],
+          ]),
+          expression('entryAngle'),
+          expression('entryRadius'),
+          check('climb', 'Climb milling (off: conventional)'),
+          expression('sliceCell'),
+        );
+      }
       break;
   }
 
@@ -551,13 +695,15 @@ function Sources({
   const [sketch, setSketch] = useState(sketches[0]?.id ?? '');
   const [hole, setHole] = useState(holes[0]?.id ?? '');
   const note =
-    form.kind === 'facing'
-      ? 'None: the whole stock top.'
-      : form.kind === 'drill'
-        ? 'None: every round hole of the part that can be drilled from above.'
-        : form.kind === 'pocket'
-          ? 'Floor faces, or sketch regions.'
-          : 'Faces (their outlines) or sketch regions.';
+    form.kind === 'surface3d'
+      ? "Optional boundary: faces or sketch regions, as outlines in XY. None: the part's whole extent (a roughing: the stock's)."
+      : form.kind === 'facing'
+        ? 'None: the whole stock top.'
+        : form.kind === 'drill'
+          ? 'None: every round hole of the part that can be drilled from above.'
+          : form.kind === 'pocket'
+            ? 'Floor faces, or sketch regions.'
+            : 'Faces (their outlines) or sketch regions.';
   return (
     <fieldset
       className={`dialog-field ref-field${picking ? ' active' : ''}`}

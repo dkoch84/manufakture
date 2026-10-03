@@ -719,19 +719,45 @@ export function camExpressions(op: CamOperation): CamExpressionSite[] {
       add(['stepover'], op.stepover, 'number');
       add(['finishAllowance'], op.finishAllowance, 'length');
       entrySites(add, op.entry);
+      add(['finishStepdown'], op.finishStepdown, 'length');
+      add(['floorAllowance'], op.floorAllowance, 'length');
       break;
     case 'drill':
       depthSites(add, op.depth);
       add(['peck'], op.peck, 'length');
       add(['dwell'], op.dwell, 'number');
       break;
-    case 'vcarve':
+    case 'vcarve': {
       add(['maxDepth'], op.maxDepth, 'length');
+      add(['stepdown'], op.stepdown, 'length');
+      add(['flatStepover'], op.flatStepover, 'length');
+      const c = op.clearing;
+      if (c) {
+        add(['clearing', 'stepdown'], c.stepdown, 'length');
+        add(['clearing', 'stepover'], c.stepover, 'number');
+        if (c.entry) {
+          if (c.entry.kind !== 'plunge')
+            add(['clearing', 'entry', 'angle'], c.entry.angle, 'angle');
+          if (c.entry.kind === 'helix') {
+            add(['clearing', 'entry', 'radius'], c.entry.radius, 'length');
+          }
+        }
+        add(['clearing', 'feeds', 'spindle'], c.feeds?.spindle, 'spindleSpeed');
+        for (const key of ['cut', 'plunge', 'ramp', 'lead'] as const) {
+          add(['clearing', 'feeds', key], c.feeds?.[key], 'feed');
+        }
+      }
       break;
+    }
     case 'surface3d':
       add(['stepover'], op.stepover, 'length');
       add(['angle'], op.angle, 'angle');
       add(['allowance'], op.allowance, 'length');
+      add(['tolerance'], op.tolerance, 'length');
+      add(['sampling'], op.sampling, 'length');
+      add(['stepdown'], op.stepdown, 'length');
+      if (op.entry) entrySites(add, op.entry);
+      add(['sliceCell'], op.sliceCell, 'length');
       break;
   }
   return out;
@@ -772,11 +798,18 @@ export function camSetupIds(setup: CamSetup): string[] {
   return [...camSetupOwnIds(setup), ...setup.operations.flatMap(camOperationIds)];
 }
 
+/** The tools an operation cuts with: its own, then a V-carve's clearing tool. */
+export function camOperationTools(op: CamOperation): string[] {
+  return op.kind === 'vcarve' && op.clearing ? [op.tool, op.clearing.tool] : [op.tool];
+}
+
 /** Operations, in any setup, that cut with tool `toolId`, as `<setup id>/<operation id>`. */
 export function camToolUsers(cam: CamData, toolId: string): string[] {
   const out: string[] = [];
   for (const setup of cam.setups) {
-    for (const op of setup.operations) if (op.tool === toolId) out.push(`${setup.id}/${op.id}`);
+    for (const op of setup.operations) {
+      if (camOperationTools(op).includes(toolId)) out.push(`${setup.id}/${op.id}`);
+    }
   }
   return out;
 }

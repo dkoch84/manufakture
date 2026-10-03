@@ -11,6 +11,7 @@ import {
   type ManufaktureDocument,
   type StoredExpression,
 } from '@manufakture/core';
+import { ENTRY_MIN_ANGLE, PROFILE_MAX_TABS } from '@manufakture/cam';
 import { analyzeExpression, type FieldKind } from '../components/expression';
 import { evaluateVariables, type Variables } from '../sketcher/values';
 
@@ -23,10 +24,22 @@ export function camVariables(doc: ManufaktureDocument): Variables {
 /**
  * The range a field's value must be in: `positive` above zero (a depth, a diameter, a feed),
  * `nonNegative` zero or more (an allowance, a margin, a dwell), `fraction` above zero and at most
- * one (a stepover, a fraction of the tool diameter), `whole` a whole number of at least one (a tab
- * count), `entryAngle` above zero and below 90 degrees (a ramp or helix angle), `any` anything.
+ * one (a stepover, a fraction of the tool diameter), `whole` a whole number of at least one and at
+ * most `PROFILE_MAX_TABS` (a tab count), `entryAngle` at least half a degree (`ENTRY_MIN_ANGLE`)
+ * and below 90 degrees (a ramp or helix angle), `tolerance`, `sampling` and `sliceCell` the 3D
+ * surface's (at least 0.0001 mm and at most 1 mm, at least 0.001 mm, at least 0.01 mm, as the
+ * geometry stage checks them), `any` anything.
  */
-export type Rule = 'positive' | 'nonNegative' | 'fraction' | 'whole' | 'entryAngle' | 'any';
+export type Rule =
+  | 'positive'
+  | 'nonNegative'
+  | 'fraction'
+  | 'whole'
+  | 'entryAngle'
+  | 'tolerance'
+  | 'sampling'
+  | 'sliceCell'
+  | 'any';
 
 const QUARTER_TURN = Math.PI / 2;
 
@@ -43,13 +56,21 @@ export function ruleProblem(rule: Rule, value: number): string | null {
         ? null
         : 'A stepover is a fraction of the tool diameter: greater than 0 and at most 1 (0.4 is 40 %).';
     case 'whole':
-      return Number.isInteger(value) && value >= 1
+      return Number.isInteger(value) && value >= 1 && value <= PROFILE_MAX_TABS
         ? null
-        : 'The value must be a whole number, 1 or more.';
+        : `The value must be a whole number from 1 to ${PROFILE_MAX_TABS}.`;
     case 'entryAngle':
-      return value > 0 && value < QUARTER_TURN
+      return value >= ENTRY_MIN_ANGLE - 1e-12 && value < QUARTER_TURN
         ? null
-        : 'The angle must be greater than 0 and less than 90 degrees.';
+        : 'The angle must be at least 0.5 and less than 90 degrees.';
+    case 'tolerance':
+      return value >= 1e-4 && value <= 1
+        ? null
+        : 'The tolerance must be at least 0.0001 mm and at most 1 mm.';
+    case 'sampling':
+      return value >= 1e-3 ? null : 'The sampling must be at least 0.001 mm.';
+    case 'sliceCell':
+      return value >= 0.01 ? null : 'The slice cell must be at least 0.01 mm.';
     case 'any':
       return null;
   }

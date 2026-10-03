@@ -203,11 +203,16 @@ export {
   type OrientedStats,
 } from './oriented';
 export {
+  CAM_DRILL_MAX_PECKS,
   CAM_LOOP_DEFLECTION,
+  CAM_MAX_TABS,
   CAM_MESH_DEFLECTION,
+  CAM_MIN_ENTRY_ANGLE,
+  CAM_MIN_TOOL_DIAMETER,
   CAM_PARALLEL_TOLERANCE,
   CAM_STAGE_VERSION,
   CamStage,
+  SURFACE3D_MIN_SAMPLING,
   camTransferables,
   type CamBody,
   type CamBox,

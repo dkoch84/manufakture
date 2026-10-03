@@ -78,6 +78,11 @@ export interface JobOperation {
   readonly feeds: Pick<Feeds, 'spindle'>;
   /** A suppressed operation is left out of the job, error or not. */
   readonly suppressed?: boolean;
+  /**
+   * The id of an operation that must run after this one, also when grouping by tool: a V-carve's
+   * clearing, so the V-bit never cuts the whole floor. `jobOperations` sets it.
+   */
+  readonly before?: string;
   readonly result: JobOperationOutcome;
 }
 
@@ -296,7 +301,11 @@ export function orderPieces<P extends JobPiece>(from: Vec3, pieces: readonly P[]
   return bestLength < given - 1e-9 ? best : [...pieces];
 }
 
-/** Stable grouping by tool: tools in order of first use, each tool's operations in order. */
+/**
+ * Stable grouping by tool: tools in order of first use, each tool's operations in order. An
+ * operation that must run after another (`before`) and that grouping would move ahead of it is
+ * taken out of its group and cut right after that operation instead (one more tool change).
+ */
 function groupByTool(ops: readonly JobOperation[]): JobOperation[] {
   const groups = new Map<string, JobOperation[]>();
   for (const op of ops) {
@@ -304,7 +313,24 @@ function groupByTool(ops: readonly JobOperation[]): JobOperation[] {
     if (g) g.push(op);
     else groups.set(op.tool.id, [op]);
   }
-  return [...groups.values()].flat();
+  const grouped = [...groups.values()].flat();
+  const at = new Map(grouped.map((o, i) => [o.id, i]));
+  // Operations grouping moved ahead of the one they must follow, by that one's id.
+  const moved = new Map<string, JobOperation>();
+  for (const op of grouped) {
+    const next = op.before !== undefined ? at.get(op.before) : undefined;
+    if (next !== undefined && next < at.get(op.id)!) moved.set(op.id, grouped[next]!);
+  }
+  if (moved.size === 0) return grouped;
+  const held = new Set([...moved.values()].map((o) => o.id));
+  const out: JobOperation[] = [];
+  const place = (op: JobOperation): void => {
+    out.push(op);
+    const next = moved.get(op.id);
+    if (next) place(next);
+  };
+  for (const op of grouped) if (!held.has(op.id)) place(op);
+  return out;
 }
 
 const positive = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v > 0;
@@ -411,7 +437,7 @@ export function assembleJob(
       const cycles = cyclePieces(result.toolpath);
       if (cycles) {
         prefix = cycles.prefix;
-        own.push(...cycles.pieces);
+        for (const c of cycles.pieces) own.push(c);
       } else {
         own.push(result.toolpath);
       }
@@ -458,7 +484,8 @@ export function assembleJob(
 
     const from = entries.length;
     if (op.name) entries.push({ kind: 'comment', text: op.name, op: op.id });
-    entries.push(...prefix);
+    // Plain loops, not `push(...)`: spreading a large array overflows the call stack.
+    for (const e of prefix) entries.push(e);
     if (reorder && pieces.length > 1) {
       // Order from where the tool will be over the first piece's area: here.
       pieces = orderPieces(cur, pieces);
@@ -466,7 +493,7 @@ export function assembleJob(
     pieces.forEach((p, k) => {
       // Between operations at the clearance; between pieces of one at the retract height.
       link(p.start, k === 0 ? clearance : retract);
-      entries.push(...p.entries);
+      for (const e of p.entries) entries.push(e);
       cur = p.end;
     });
     spans.push({ op: op.id, tool: op.tool.id, from, to: entries.length });
@@ -532,6 +559,7 @@ export function jobOperations(
       tool: op.tool,
       feeds: op.feeds,
       ...(skip.has(op.id) ? { suppressed: true } : {}),
+      ...(op.kind === 'vcarveClearing' ? { before: op.carve.id } : {}),
       result,
     };
   });

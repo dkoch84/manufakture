@@ -1,7 +1,12 @@
 // The CAM worker's API, registry and packed toolpaths, without the worker entry (`worker.ts`,
 // which exposes the API on the worker's global scope when it is evaluated).
 
-export { createCamWorkerApi, createToolpathCache, generateTransferables } from './api';
+export {
+  REQUEST_MAX_MOVES,
+  createCamWorkerApi,
+  createToolpathCache,
+  generateTransferables,
+} from './api';
 export type {
   CachedOutcome,
   CamCacheInfo,

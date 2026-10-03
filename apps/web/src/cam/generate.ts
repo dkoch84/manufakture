@@ -1,13 +1,15 @@
 // Generate on demand (M5 plan, T5.3a; ADR 0014 decisions 7 and 8): the geometry stage's reply for
 // one setup (regen worker: sources resolved on the final body, expressions evaluated, depths in
 // machine Z) turned into `packages/cam`'s evaluated `Setup` (stock box, WCS frame, loops and drill
-// points in machine coordinates), which the CAM worker generates. Only operations whose geometry
-// resolved go to the worker; the others keep the stage's errors. Nothing here evaluates an
-// expression or resolves a name: the stage did both.
+// points in machine coordinates, the body's mesh for a 3D surfacing), which the CAM worker
+// generates. Only operations whose geometry resolved go to the worker; the others keep the stage's
+// errors. A V-carve with a clearing tool goes as two operations, its clearing first. Nothing here
+// evaluates an expression or resolves a name: the stage did both.
 
 import {
   boundsInSetup,
   drillPointToMachine,
+  meshToMachine,
   planarLoopsToMachine,
   pointsBoundsInSetup,
   setupRotation,
@@ -17,12 +19,28 @@ import {
   wcsOriginInSetup,
   type Loop2,
   type MachineDrillPoint,
+  type Mesh,
   type OperationInput,
+  type VCarveClearing,
+  type VCarveClearingInput,
+  type VCarveOperation,
   type Setup,
   type Stock,
   type WcsFrame,
 } from '@manufakture/cam';
 import type { CamGeometryResult, CamOperationResult, CamSourceResult } from '@manufakture/regen';
+
+/**
+ * A V-carve with a clearing tool is generated as two operations (T5.5b): its clearing, with the
+ * end mill and this suffix on the V-carve's id, then the carve itself. The clearing has no row of
+ * its own in the document; the workspace reports it on its V-carve (`documentOperation`).
+ */
+export const CLEARING_SUFFIX = '/clearing';
+
+/** The document operation a generated operation id belongs to: a clearing's V-carve, else itself. */
+export function documentOperation(id: string): string {
+  return id.endsWith(CLEARING_SUFFIX) ? id.slice(0, -CLEARING_SUFFIX.length) : id;
+}
 
 export type SetupBuild =
   | {
@@ -108,11 +126,15 @@ function pointsOf(
   return { ok: true, points };
 }
 
-/** One resolved operation as the CAM worker's input, or why it cannot be. */
+/**
+ * One resolved operation as the CAM worker's input, or why it cannot be. `mesh` is the body's mesh
+ * in machine coordinates, which a 3D surfacing machines (null when the stage sent none).
+ */
 export function operationInput(
   op: CamOperationResult,
   frame: WcsFrame,
   facingArea: Loop2,
+  mesh: Mesh | null = null,
 ): { ok: true; input: OperationInput } | { ok: false; message: string } | null {
   const v = op.values;
   if (op.status !== 'ok' || v === null) return null;
@@ -134,9 +156,46 @@ export function operationInput(
       if (!p.ok) return p;
       return { ok: true, input: { ...v, points: p.points } };
     }
-    case 'surface3d':
-      return { ok: false, message: '3D surfacing is not generated from this workspace yet.' };
+    case 'surface3d': {
+      if (!mesh || mesh.indices.length === 0) {
+        return { ok: false, message: 'The body has no mesh to machine: generate again.' };
+      }
+      // Faces and regions, when picked, bound the surfacing in machine XY.
+      const l = loopsOf(frame, op.sources);
+      if (!l.ok) return l;
+      return {
+        ok: true,
+        input: { ...v, mesh, ...(l.loops.length > 0 ? { boundary: l.loops } : {}) },
+      };
+    }
   }
+}
+
+/** A V-carve input with a clearing tool (the clearing comes from the core schema's extras). */
+function hasClearing(
+  input: OperationInput,
+): input is VCarveOperation & { readonly clearing: VCarveClearing } {
+  return input.kind === 'vcarve' && 'clearing' in input && input.clearing !== undefined;
+}
+
+/**
+ * The clearing of a V-carve input that has a clearing tool, as an operation of its own to cut
+ * before it (`CLEARING_SUFFIX`); null for any other input.
+ */
+export function clearingInput(input: OperationInput): VCarveClearingInput | null {
+  if (!hasClearing(input)) return null;
+  const { clearing, ...carve } = input;
+  return {
+    kind: 'vcarveClearing',
+    id: `${input.id}${CLEARING_SUFFIX}`,
+    name: `${input.name} (clearing)`,
+    tool: clearing.tool,
+    feeds: clearing.feeds,
+    carve,
+    stepdown: clearing.stepdown,
+    stepover: clearing.stepover,
+    ...(clearing.entry ? { entry: clearing.entry } : {}),
+  };
 }
 
 /** The evaluated setup the CAM worker takes, with every operation whose geometry resolved. */
@@ -160,11 +219,25 @@ export function setupInput(
   const facingArea = stockOutline(stock.stock, origin);
   const operations: OperationInput[] = [];
   const failed: Record<string, string> = {};
+  // The body's mesh in machine coordinates, once, for every 3D surfacing.
+  let mesh: Mesh | null | undefined;
+  const machineMesh = () =>
+    (mesh ??= geometry.mesh ? meshToMachine(geometry.mesh, frame.value) : null);
   for (const op of geometry.operations) {
-    const r = operationInput(op, frame.value, facingArea);
+    const r = operationInput(
+      op,
+      frame.value,
+      facingArea,
+      op.kind === 'surface3d' ? machineMesh() : null,
+    );
     if (r === null) continue;
-    if (r.ok) operations.push(r.input);
-    else failed[op.operationId] = r.message;
+    if (!r.ok) {
+      failed[op.operationId] = r.message;
+      continue;
+    }
+    const clearing = clearingInput(r.input);
+    if (clearing) operations.push(clearing);
+    operations.push(r.input);
   }
   return {
     ok: true,

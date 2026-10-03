@@ -106,7 +106,7 @@ export function flattenSegments(
   tol = FLATTEN_TOLERANCE,
 ): Vec2[] {
   const out: Vec2[] = [];
-  for (const s of segments) out.push(...segmentVertices(s, tol));
+  for (const s of segments) for (const v of segmentVertices(s, tol)) out.push(v);
   if (!closed && segments.length > 0) out.push(segments[segments.length - 1]!.end);
   return out;
 }

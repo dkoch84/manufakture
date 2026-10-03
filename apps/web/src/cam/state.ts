@@ -10,8 +10,8 @@ import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { GeneratedToolpaths } from './preview/job';
 import type { GeneratedOutcome } from './status';
 
-/** The operation kinds the workspace has a dialog for (`surface3d` is T5.5a's). */
-export type DialogOperationKind = Exclude<CamOperationKind, 'surface3d'>;
+/** The operation kinds the workspace has a dialog for: all of them (3D surfaces since T5.5b). */
+export type DialogOperationKind = CamOperationKind;
 
 export type CamDialog =
   | {

@@ -27,6 +27,7 @@ import {
   type PreviewPath,
 } from './geometry';
 import { PLAYBACK_SPEEDS, formatLength, formatMinutes } from './format';
+import { CLEARING_SUFFIX } from '../generate';
 import { previewJob } from './job';
 import { previewPlacement } from './placement';
 import { MOVE_COLORS, PreviewOverlay, operationColor } from './scene';
@@ -98,7 +99,12 @@ export function ToolpathPreview({
       part: partMesh,
     };
   }, [setup.id, job, placement, partMesh]);
-  const opOrder = setup.operations.map((o) => o.id).join('\n');
+  // A V-carve's clearing is generated as an operation of its own, just before it.
+  const opOrder = setup.operations
+    .flatMap((o) =>
+      o.kind === 'vcarve' && o.clearing ? [`${o.id}${CLEARING_SUFFIX}`, o.id] : [o.id],
+    )
+    .join('\n');
   const colors = useMemo(
     () => new Map(opOrder.split('\n').map((id, i) => [id, operationColor(i)])),
     [opOrder],

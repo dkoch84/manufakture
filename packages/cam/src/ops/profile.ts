@@ -32,6 +32,13 @@ import {
   type Vec3,
 } from '../types';
 import { reverseLoop } from '../wcs';
+import {
+  MoveBudgetExceeded,
+  OPERATION_MAX_MOVES,
+  operationMoveCap,
+  withMoveBudget,
+} from './budget';
+import { entryProblem, helixTooLong, helixTurns, rampTooLong } from './entry';
 
 /**
  * Fields of a profile operation that `ProfileInput` (types.ts) does not have yet. All optional;
@@ -70,6 +77,13 @@ export const PROFILE_TAB_MIN_INSIDE_SIZE = 25;
 
 /** A tab is kept at least this far, along the path, from a corner, a short arc or the start, mm. */
 export const PROFILE_TAB_MARGIN = 0.5;
+
+/**
+ * The most tabs on one loop: `tabs.count` above it is refused, and a `tabSpacing` asking for more
+ * gets this many. Far above any real part (a 1,200 mm square sheet's outline with a tab every
+ * 50 mm has 96).
+ */
+export const PROFILE_MAX_TABS = 1000;
 
 /** How close to the source outline a lead or helix may come beyond the cut itself, mm. */
 const CLEARANCE_TOLERANCE = 0.005;
@@ -137,6 +151,7 @@ function checkInput(op: ProfileOperation): string | undefined {
   if (op.tabs) {
     const { count, width, height } = op.tabs;
     if (!Number.isInteger(count) || count < 0) return 'The tab count must be a whole number.';
+    if (count > PROFILE_MAX_TABS) return `The tab count must be at most ${PROFILE_MAX_TABS}.`;
     if (!positive(width) || !positive(height)) {
       return 'The tab width and height must be greater than zero.';
     }
@@ -150,18 +165,9 @@ function checkInput(op: ProfileOperation): string | undefined {
   ) {
     return 'The smallest inside size for tabs must be zero or more.';
   }
-  const e = op.entry;
-  if (e.kind === 'ramp' || e.kind === 'helix') {
-    if (!(finite(e.angle) && e.angle > 0 && e.angle <= Math.PI / 2)) {
-      return `The ${e.kind} angle must be greater than 0 and at most 90 degrees.`;
-    }
-    if (e.kind === 'helix' && !positive(e.radius)) {
-      return 'The helix radius must be greater than zero.';
-    }
-  } else if (e.kind !== 'plunge') {
-    return 'Unknown entry kind.';
-  }
-  return checkLead(op.leadIn, 'lead-in') ?? checkLead(op.leadOut, 'lead-out');
+  return (
+    entryProblem(op.entry) ?? checkLead(op.leadIn, 'lead-in') ?? checkLead(op.leadOut, 'lead-out')
+  );
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -488,11 +494,22 @@ export class Emitter {
   readonly entries: IrEntry[] = [];
   pass = 0;
 
+  /**
+   * `maxMoves` caps the entries (`OPERATION_MAX_MOVES` by default, `operationMoveCap` of the
+   * context in the generators): adding one more throws `MoveBudgetExceeded`.
+   */
   constructor(
     private readonly op: string,
     private readonly feeds: ProfileInput['feeds'],
     public cur: Vec3,
+    readonly maxMoves: number = OPERATION_MAX_MOVES,
   ) {}
+
+  /** Adds `entry`, or throws `MoveBudgetExceeded` when the toolpath is already at its cap. */
+  push(entry: IrEntry): void {
+    if (this.entries.length >= this.maxMoves) throw new MoveBudgetExceeded(this.maxMoves);
+    this.entries.push(entry);
+  }
 
   private feed(cls: FeedClass): number {
     switch (cls) {
@@ -513,7 +530,7 @@ export class Emitter {
 
   rapid(to: Vec3): void {
     if (this.same(to)) return;
-    this.entries.push({ kind: 'rapid', to, op: this.op, pass: this.pass });
+    this.push({ kind: 'rapid', to, op: this.op, pass: this.pass });
     this.cur = to;
   }
 
@@ -527,7 +544,7 @@ export class Emitter {
       op: this.op,
       pass: this.pass,
     };
-    this.entries.push(move);
+    this.push(move);
     this.cur = to;
   }
 
@@ -548,7 +565,7 @@ export class Emitter {
       op: this.op,
       pass: this.pass,
     };
-    this.entries.push(move);
+    this.push(move);
     this.cur = to;
   }
 
@@ -735,6 +752,13 @@ export async function generateProfile(
   input: ProfileInput,
   context: OperationContext,
 ): Promise<CamResult<GeneratedToolpath>> {
+  return withMoveBudget(input.id, () => profileToolpath(input, context));
+}
+
+async function profileToolpath(
+  input: ProfileInput,
+  context: OperationContext,
+): Promise<CamResult<GeneratedToolpath>> {
   const op = input as ProfileOperation;
   const problem = checkInput(op);
   if (problem) return err('invalid-input', `${op.id}: ${problem}`);
@@ -836,10 +860,17 @@ export async function generateProfile(
           skipped++;
           continue;
         }
-        const count =
+        let count =
           op.tabSpacing !== undefined
             ? Math.max(1, Math.round(path.length / op.tabSpacing))
             : tabs.count;
+        if (count > PROFILE_MAX_TABS) {
+          count = PROFILE_MAX_TABS;
+          once(
+            'tabs-capped',
+            `The tab spacing of ${op.tabSpacing} mm asks for more than ${PROFILE_MAX_TABS} tabs on a loop; ${PROFILE_MAX_TABS} are placed.`,
+          );
+        }
         const placed = placeTabs(path, count, span, op.loops);
         dropped += placed.dropped;
         for (const c of placed.centres) points.push(pointAt(path, c));
@@ -964,7 +995,7 @@ export async function generateProfile(
   const clearanceZ = Math.max(heights.clearance, retractZ);
   const check = new ClearanceCheck(side, op.loops);
 
-  const em = new Emitter(op.id, op.feeds, [0, 0, clearanceZ]);
+  const em = new Emitter(op.id, op.feeds, [0, 0, clearanceZ], operationMoveCap(context));
   let startPos: Vec3 | undefined;
 
   if (op.entry.kind === 'ramp' && op.leadIn.kind !== 'none') {
@@ -1045,17 +1076,23 @@ export async function generateProfile(
       let s1 = path.length;
       let zp: ZProfile = { s0: 0, rampEnd: 0, from: z, to: z };
       if (op.entry.kind === 'ramp') {
-        em.linear([entryXY[0], entryXY[1], Math.min(em.cur[2], cleared)], 'plunge');
         const rampLength = (cleared - z) / Math.tan(op.entry.angle);
+        const tooLong = rampTooLong(
+          rampLength,
+          path.length,
+          path.segments.length,
+          plan.tabs.length,
+        );
+        if (tooLong) return err('invalid-input', `${op.id}: ${tooLong}`);
+        em.linear([entryXY[0], entryXY[1], Math.min(em.cur[2], cleared)], 'plunge');
         zp = { s0: 0, rampEnd: rampLength, from: cleared, to: z };
         s1 = rampLength + path.length;
       } else if (helix) {
-        em.linear([entryXY[0], entryXY[1], Math.min(em.cur[2], cleared)], 'plunge');
         const drop = cleared - z;
-        const turns = Math.max(
-          1,
-          Math.ceil(drop / (2 * Math.PI * helix.radius * Math.tan(helix.angle)) - 1e-9),
-        );
+        const turns = helixTurns(drop, helix.radius, helix.angle);
+        const tooLong = helixTooLong(turns, drop, helix.radius, helix.angle);
+        if (tooLong) return err('invalid-input', `${op.id}: ${tooLong}`);
+        em.linear([entryXY[0], entryXY[1], Math.min(em.cur[2], cleared)], 'plunge');
         for (let k = 1; k <= turns; k++) {
           const zk = k === turns ? z : cleared - (drop * k) / turns;
           em.arc([entryXY[0], entryXY[1], zk], helix.center, path.scrapOnLeft, 'ramp', true);

@@ -15,6 +15,7 @@ import {
   VCARVE_SAFE_ABOVE,
   generateVCarve,
   generateVCarveClearing,
+  generateVCarveClearingOperation,
   vcarveLinkAllowed,
   type VCarveOperation,
 } from './vcarve';
@@ -583,6 +584,38 @@ describe('V-carve: maximum depth and the flat floor', () => {
   });
 });
 
+describe('V-carve: the clearing as an operation of its own', () => {
+  it('cuts what generateVCarveClearing cuts, tagged with its own id, and is registered', async () => {
+    const loops = [rect(0, 0, 50, 24), hole(circle([25, 12], 3))];
+    const clearing = { tool: flat6, feeds, stepdown: 2, stepover: 0.4 };
+    const carve = vcarve({ loops, maxDepth: 2, clearing });
+    const direct = await generateVCarveClearing(carve, context());
+    const own = await generateVCarveClearingOperation(
+      {
+        kind: 'vcarveClearing',
+        id: 'vcarve#1/clearing',
+        name: 'Letters (clearing)',
+        tool: flat6,
+        feeds,
+        carve: vcarve({ loops, maxDepth: 2 }),
+        stepdown: 2,
+        stepover: 0.4,
+      },
+      context(),
+    );
+    if (!direct.ok || !own.ok) throw new Error('expected both to generate');
+    const moves = (tp: Toolpath) => tp.entries.filter(isMove);
+    expect(moves(own.value.toolpath).map((m) => m.to)).toEqual(
+      moves(direct.value.toolpath).map((m) => m.to),
+    );
+    expect(new Set(moves(own.value.toolpath).map((m) => m.op))).toEqual(
+      new Set(['vcarve#1/clearing']),
+    );
+    const registry = registerBuiltinOperations(new OperationRegistry());
+    expect(registry.get('vcarveClearing')).toBe(generateVCarveClearingOperation);
+  }, 30_000);
+});
+
 describe('V-carve: moves and heights', () => {
   it('cuts in stepdown levels, each level only where the carve is deeper than the last', async () => {
     const op = vcarve({ loops: [slot([20, 10], 30, 6)], stepdown: 1 });
@@ -814,6 +847,11 @@ describe('V-carve: refusals and plumbing', () => {
     expect(await bad({ clearing: { tool: vbit60, feeds, stepdown: 1, stepover: 0.5 } })).toMatch(
       /clearing tool/,
     );
+    // A vanishing clearing entry angle would ramp for millions of moves: refused up front.
+    const clearing = { tool: flat6, feeds, stepdown: 1, stepover: 0.5 };
+    expect(await bad({ clearing: { ...clearing, entry: { kind: 'ramp', angle: 1e-8 } } })).toMatch(
+      /Clearing entry: The ramp angle must be at least 0\.5/,
+    );
   });
 
   it('warns about areas narrower than a flat tip', async () => {
@@ -842,5 +880,20 @@ describe('V-carve: refusals and plumbing', () => {
   it('is registered as the vcarve generator', () => {
     const registry = registerBuiltinOperations(new OperationRegistry());
     expect(registry.get('vcarve')).toBe(generateVCarve);
+  });
+
+  it('refuses a carve past the move budget, with no partial toolpath', async () => {
+    const full = await generateVCarve(vcarve(), context());
+    if (!full.ok) throw new Error(full.error.message);
+    const n = full.value.toolpath.entries.length;
+    expect(await generateVCarve(vcarve(), { ...context(), maxMoves: n })).toEqual(full);
+    const over = await generateVCarve(vcarve(), { ...context(), maxMoves: n - 1 });
+    expect(over.ok).toBe(false);
+    if (!over.ok) {
+      expect(over.error.code).toBe('invalid-input');
+      expect(over.error.message).toBe(
+        `vcarve#1: this operation would emit more than ${n - 1} moves, the most allowed. Use a larger tool, stepdown, stepover or entry angle.`,
+      );
+    }
   });
 });

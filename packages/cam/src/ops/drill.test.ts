@@ -12,6 +12,7 @@ import { OperationRegistry, type OperationContext } from '../worker/registry';
 import {
   DRILL_BREAKTHROUGH_MARGIN,
   DRILL_CAVITY_CLEARANCE,
+  DRILL_MAX_PECKS,
   DRILL_MIN_BORE_RADIUS,
   DRILL_PECK_CLEARANCE,
   generateDrill,
@@ -446,10 +447,40 @@ describe('generateDrill', () => {
     expect(await bad(op({ dwell: -1 }))).toMatch(/dwell/);
     expect(await bad(op({ breakthrough: -1 }))).toMatch(/breakthrough/);
     expect(await bad(op({ helixAngle: 0 }))).toMatch(/helix angle/);
+    expect(await bad(op({ helixAngle: 1e-8 }))).toMatch(/at least 0\.5/);
     expect(await bad(op({ boreStepover: 1.5 }))).toMatch(/stepover/);
     expect(await bad(op({ points: [hole([0, 0], 6, -6, 0)] }))).toMatch(/bottom/);
     expect(await bad(op({ points: [hole([0, Number.NaN], 6)] }))).toMatch(/not finite/);
     expect(await bad(op({ feeds: { ...feeds, plunge: 0 } }))).toMatch(/plunge/);
+  });
+
+  it('refuses a peck so small that a hole needs more than DRILL_MAX_PECKS pecks', async () => {
+    // 6 mm in pecks of 1e-7 mm would be 60 million depths; refused before any is listed.
+    const r = await generateDrill(op({ peck: 1e-7 }), context());
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.error.code).toBe('invalid-input');
+      expect(r.error.message).toMatch(
+        new RegExp(
+          `drill#1: the hole at \\(10, 10\\) is 6 mm deep and needs 60000000 pecks.*at most ${DRILL_MAX_PECKS}`,
+        ),
+      );
+    }
+    // A peck far below the rounding step of the hole's depth must not stall either.
+    const far = await generateDrill(
+      op({ points: [hole([10, 10], 6, 1e9, 1e9 - 6)], peck: 1e-9 }),
+      context(),
+    );
+    expect(far.ok).toBe(false);
+    if (!far.ok) expect(far.error.message).toMatch(/needs \d+ pecks/);
+    // Exactly at the cap is allowed: 6 mm in 10000 pecks.
+    const most = await run(op({ peck: 6 / DRILL_MAX_PECKS }));
+    const plunges = most.toolpath.entries.filter((e) => e.kind === 'linear');
+    expect(plunges.length).toBe(DRILL_MAX_PECKS);
+    expect(plunges.at(-1)!.kind === 'linear' && plunges.at(-1)!.to[2]).toBe(-6);
+    // Depths go down by one peck each, measured from the top by index (no running sum drift).
+    const zs = plunges.map((e) => (e.kind === 'linear' ? e.to[2] : 0));
+    expect(zs[4999]).toBe(-5000 * (6 / DRILL_MAX_PECKS));
   });
 
   it('visits holes in nearest-neighbour order from the WCS origin and merges duplicates', async () => {

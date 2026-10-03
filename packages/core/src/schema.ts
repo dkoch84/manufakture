@@ -2315,6 +2315,23 @@ export const CamFeedsSchema = z
     }
   });
 
+/** The 3D surfacing strategies: parallel (raster) finishing and z-level roughing. */
+export const CAM_SURFACE3D_STRATEGIES = ['parallel', 'zlevel'] as const;
+
+/**
+ * The flat-floor clearing of a V-carve: an end mill (a `flat` or `bull` tool of `cam.tools`, by
+ * id; which kind is checked when toolpaths are generated) that clears the floor a `maxDepth`
+ * leaves, before the V-bit. `stepdown` a length and `stepover` a fraction of its diameter, absent:
+ * from its preset; `entry` absent: a 3 degree helix; `feeds` absent: its preset's.
+ */
+export const CamVCarveClearingSchema = z.strictObject({
+  tool: CamToolIdSchema,
+  stepdown: camExpression.exactOptional(),
+  stepover: camExpression.exactOptional(),
+  entry: CamEntrySchema.exactOptional(),
+  feeds: CamFeedsSchema.exactOptional(),
+});
+
 const camOperationBase = <K extends CamOperationKind>(kind: K) => ({
   id: counted(new RegExp(`^${kind}#[1-9][0-9]{0,14}$`), `${kind}#1`),
   kind: z.literal(kind),
@@ -2332,9 +2349,10 @@ const camOperationBase = <K extends CamOperationKind>(kind: K) => ({
  * tasks may add fields, each with a format bump). Absent `stepdown`, `stepover` and feeds come
  * from the tool's preset. A `stepover` is a fraction of the tool diameter (a plain number), except
  * a `surface3d`'s, which is the distance between raster lines (a length). Angles are from machine
- * +X. Which geometry sources a kind takes is checked by validation: a drill takes hole features, a
- * `surface3d` none (it machines the setup's body), the others faces and sketch regions (a
- * `facing` with none faces the whole stock top).
+ * +X. Which geometry sources a kind takes is checked by validation: a drill takes hole features,
+ * the others faces and sketch regions (a `facing` with none faces the whole stock top; a
+ * `surface3d` machines the setup's body, and its faces and regions, when it has any, bound it in
+ * XY).
  */
 export const CamOperationSchema = z.discriminatedUnion('kind', [
   z.strictObject({
@@ -2371,6 +2389,17 @@ export const CamOperationSchema = z.discriminatedUnion('kind', [
     finishAllowance: camExpression.exactOptional(),
     entry: CamEntrySchema,
     climb: z.boolean(),
+    /**
+     * A finishing pass along the walls after the clearing; absent: one when `finishAllowance` is
+     * more than zero. False with an allowance leaves the walls oversize for a later operation.
+     */
+    finishPass: z.boolean().exactOptional(),
+    /** Depth step of the finishing pass (a length); absent: the whole depth when it fits the flutes. */
+    finishStepdown: camExpression.exactOptional(),
+    /** Material the clearing leaves on the floor (a length); absent: none. */
+    floorAllowance: camExpression.exactOptional(),
+    /** One more pass at the bottom to clear the floor allowance; absent: one when there is one. */
+    floorPass: z.boolean().exactOptional(),
   }),
   z.strictObject({
     ...camOperationBase('drill'),
@@ -2385,6 +2414,15 @@ export const CamOperationSchema = z.discriminatedUnion('kind', [
     ...camOperationBase('vcarve'),
     /** The deepest the carve may go (a length); absent: as deep as the V-bit's geometry needs. */
     maxDepth: camExpression.exactOptional(),
+    /** Depth step (a length): the carve is cut in levels no deeper than this; absent: one level. */
+    stepdown: camExpression.exactOptional(),
+    /**
+     * Distance between the V-bit's rings on a flat floor (a length); absent: close enough to leave
+     * ridges no higher than 0.2 mm.
+     */
+    flatStepover: camExpression.exactOptional(),
+    /** An end mill that clears the flat floor before the V-bit carves (with `maxDepth`). */
+    clearing: CamVCarveClearingSchema.exactOptional(),
   }),
   z.strictObject({
     ...camOperationBase('surface3d'),
@@ -2394,6 +2432,22 @@ export const CamOperationSchema = z.discriminatedUnion('kind', [
     angle: camExpression,
     /** Material left on the surface (a length); absent: none. */
     allowance: camExpression.exactOptional(),
+    /** `parallel` (finishing) or `zlevel` (roughing); absent: `parallel`. */
+    strategy: z.enum(CAM_SURFACE3D_STRATEGIES).exactOptional(),
+    /** How far the posted path may stray from the cutter locations (a length); absent: 0.01 mm. */
+    tolerance: camExpression.exactOptional(),
+    /** Distance between drop points along a raster line (a length); absent: from the tool. */
+    sampling: camExpression.exactOptional(),
+    /** `parallel`: `zigzag` or `oneway`; absent: `zigzag`. */
+    pattern: z.enum(['zigzag', 'oneway']).exactOptional(),
+    /** `zlevel`: the most one slice goes below the one above (a length); absent: half the tool diameter. */
+    stepdown: camExpression.exactOptional(),
+    /** `zlevel`: how each slice is entered; absent: a 3 degree helix. */
+    entry: CamEntrySchema.exactOptional(),
+    /** `zlevel`: climb milling when true, conventional when false; absent: climb. */
+    climb: z.boolean().exactOptional(),
+    /** `zlevel`: the slice grid's cell (a length); absent: 0.2 mm. */
+    sliceCell: camExpression.exactOptional(),
   }),
 ]);
 
@@ -2668,6 +2722,8 @@ export type CamDepth = z.infer<typeof CamDepthSchema>;
 export type CamEntry = z.infer<typeof CamEntrySchema>;
 export type CamLead = z.infer<typeof CamLeadSchema>;
 export type CamFeeds = z.infer<typeof CamFeedsSchema>;
+export type CamVCarveClearing = z.infer<typeof CamVCarveClearingSchema>;
+export type CamSurface3dStrategy = (typeof CAM_SURFACE3D_STRATEGIES)[number];
 export type CamOperation = z.infer<typeof CamOperationSchema>;
 export type CamSetup = z.infer<typeof CamSetupSchema>;
 export type CamData = z.infer<typeof CamDataSchema>;

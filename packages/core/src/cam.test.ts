@@ -638,7 +638,7 @@ describe('validation', () => {
       ['cam', 'setups', 0, 'operations', 1, 'geometry', 0, 'kind'],
     ],
     [
-      'a 3D surfacing with a source',
+      'a 3D surfacing bounded by a hole feature',
       (d) => {
         d.cam.nextIds.surface3d = 2;
         d.cam.setups[0]!.operations.push({
@@ -647,7 +647,7 @@ describe('validation', () => {
           name: 'Finish',
           suppressed: false,
           tool: T,
-          geometry: [{ kind: 'region', sketch: 'sketch#1' }],
+          geometry: [{ kind: 'hole', feature: 'hole#1' }],
           stepover: mm('0.3'),
           angle: deg('0'),
         });
@@ -1399,5 +1399,192 @@ describe('saving', () => {
       'vcarve',
       'surface3d',
     ]);
+  });
+});
+
+/** The optional operation fields T5.5b folded into the v14 schema in place (no format bump). */
+describe('operation extras', () => {
+  const B = 'tool#2';
+  const pocketExtras = (): CamOperation =>
+    pocket('pocket#1', {
+      finishAllowance: mm('0.3'),
+      finishPass: false,
+      finishStepdown: mm('4'),
+      floorAllowance: mm('0.2'),
+      floorPass: true,
+    } as Partial<CamOperation>);
+  const carve = (extra: Record<string, unknown> = {}): CamOperation =>
+    ({
+      id: 'vcarve#1',
+      kind: 'vcarve',
+      name: 'Letters',
+      suppressed: false,
+      tool: B,
+      geometry: [{ kind: 'region', sketch: 'sketch#2' }],
+      maxDepth: mm('3'),
+      stepdown: mm('1.5'),
+      flatStepover: mm('0.4'),
+      clearing: {
+        tool: T,
+        stepdown: mm('1'),
+        stepover: mm('0.4'),
+        entry: { kind: 'helix', angle: deg('3'), radius: mm('1') },
+        feeds: { cut: mm('feed') },
+      },
+      ...extra,
+    }) as CamOperation;
+  const surface = (extra: Record<string, unknown> = {}): CamOperation =>
+    ({
+      id: 'surface3d#1',
+      kind: 'surface3d',
+      name: 'Finish',
+      suppressed: false,
+      tool: B,
+      geometry: [{ kind: 'region', sketch: 'sketch#2' }],
+      stepover: mm('0.5'),
+      angle: deg('0'),
+      allowance: mm('0'),
+      strategy: 'parallel',
+      tolerance: mm('0.01'),
+      sampling: mm('0.2'),
+      pattern: 'oneway',
+      stepdown: mm('2'),
+      entry: { kind: 'ramp', angle: deg('3') },
+      climb: false,
+      sliceCell: mm('0.25'),
+      ...extra,
+    }) as CamOperation;
+
+  /** The bracket with tool#1 (flat), tool#2 (V-bit) and the three operations above. */
+  function extras(): ManufaktureDocument {
+    let doc = apply(bracket(), {
+      type: 'setVariable',
+      name: 'feed',
+      expression: mm('1200mm/min'),
+    }).document;
+    doc = apply(doc, { type: 'addCamTool', tool: tool(T) }).document;
+    doc = apply(doc, {
+      type: 'addCamTool',
+      tool: tool(B, { kind: 'vbit', angle: deg('60') }),
+    }).document;
+    return apply(doc, {
+      type: 'addCamSetup',
+      setup: setup({ operations: [pocketExtras(), carve(), surface()] }),
+    }).document;
+  }
+
+  it('accepts every new field, each optional', () => {
+    for (const op of [pocketExtras(), carve(), surface(), surface({ strategy: 'zlevel' })]) {
+      expect([op.id, CamOperationSchema.safeParse(op).success]).toEqual([op.id, true]);
+    }
+    const bare = carve({ clearing: { tool: T } });
+    expect(CamOperationSchema.safeParse(bare).success).toBe(true);
+    expect(CamOperationSchema.safeParse(pocket()).success).toBe(true);
+    const doc = extras();
+    expect(validateDocument(doc)).toEqual([]);
+  });
+
+  const refusals: [string, CamOperation][] = [
+    ['a finish pass that is not a boolean', pocket('pocket#1', { finishPass: 'yes' } as never)],
+    ['a floor allowance that is a number', pocket('pocket#1', { floorAllowance: 0.2 } as never)],
+    ['a V-carve stepdown with no units', carve({ stepdown: { source: '1' } })],
+    ['a clearing with no tool', carve({ clearing: { stepdown: mm('1') } })],
+    ['a clearing tool that is not a tool id', carve({ clearing: { tool: 'setup#1' } })],
+    ['a clearing with an unknown field', carve({ clearing: { tool: T, depth: mm('1') } })],
+    ['a clearing with empty feeds', carve({ clearing: { tool: T, feeds: {} } })],
+    ['an unknown entry on a clearing', carve({ clearing: { tool: T, entry: { kind: 'dive' } } })],
+    ['an unknown strategy', surface({ strategy: 'waterline' })],
+    ['an unknown pattern', surface({ pattern: 'spiral' })],
+    [
+      'a tolerance over the length limit',
+      surface({ tolerance: mm('1'.repeat(MAX_CAM_EXPRESSION + 1)) }),
+    ],
+    ['a climb that is not a boolean', surface({ climb: 1 })],
+    ['a sampling that is a number', surface({ sampling: 0.2 })],
+    ['an unknown surfacing field', surface({ waterline: true })],
+    ['a flat stepover on a pocket', pocket('pocket#1', { flatStepover: mm('1') } as never)],
+  ];
+  for (const [what, op] of refusals) {
+    it(`refuses ${what}`, () => {
+      expect(CamOperationSchema.safeParse(op).success).toBe(false);
+    });
+  }
+
+  it('lists the new expressions with the kind each expects', () => {
+    const sites = (op: CamOperation) =>
+      camExpressions(op).map((s) => [s.path.join('.'), s.expected]);
+    expect(sites(pocketExtras())).toEqual(
+      expect.arrayContaining([
+        ['finishStepdown', 'length'],
+        ['floorAllowance', 'length'],
+      ]),
+    );
+    expect(sites(carve())).toEqual([
+      ['maxDepth', 'length'],
+      ['stepdown', 'length'],
+      ['flatStepover', 'length'],
+      ['clearing.stepdown', 'length'],
+      ['clearing.stepover', 'number'],
+      ['clearing.entry.angle', 'angle'],
+      ['clearing.entry.radius', 'length'],
+      ['clearing.feeds.cut', 'feed'],
+    ]);
+    expect(sites(surface())).toEqual([
+      ['stepover', 'length'],
+      ['angle', 'angle'],
+      ['allowance', 'length'],
+      ['tolerance', 'length'],
+      ['sampling', 'length'],
+      ['stepdown', 'length'],
+      ['entry.angle', 'angle'],
+      ['sliceCell', 'length'],
+    ]);
+  });
+
+  it('checks the clearing tool exists, and refuses to delete it while a V-carve clears with it', () => {
+    const doc = extras();
+    expect(camToolUsers(doc.cam, T)).toEqual([`${S}/pocket#1`, `${S}/vcarve#1`]);
+    const error = refused(doc, { type: 'deleteCamTool', toolId: T }, 'dependency');
+    expect(error?.blockers).toEqual([`${S}/pocket#1`, `${S}/vcarve#1`]);
+    const missing = clone(doc);
+    const op = missing.cam.setups[0]!.operations[1]!;
+    if (op.kind === 'vcarve') op.clearing = { tool: 'tool#9' };
+    missing.cam.nextIds.tool = 10;
+    const errors = validateDocument(missing);
+    expect(errors.map((e) => [e.code, e.path])).toEqual([
+      ['dependency', ['cam', 'setups', 0, 'operations', 1, 'clearing', 'tool']],
+    ]);
+  });
+
+  it('checks the new expressions, and renames a variable in them', () => {
+    const doc = extras();
+    const bad = clone(doc);
+    const op = bad.cam.setups[0]!.operations[2]!;
+    if (op.kind === 'surface3d') op.sampling = mm('#nope');
+    expect(validateDocument(bad).map((e) => [e.code, e.path])).toEqual([
+      ['unknown-variable', ['cam', 'setups', 0, 'operations', 2, 'sampling', 'source']],
+    ]);
+    const done = apply(doc, unwrap(renameVariable(doc, 'feed', 'cutFeed')));
+    const v = done.document.cam.setups[0]!.operations[1]!;
+    expect(v.kind === 'vcarve' && v.clearing?.feeds).toEqual({ cut: mm('#cutFeed') });
+    expect(apply(done.document, done.inverse).document).toEqual(doc);
+  });
+
+  it('edits and undoes the new fields, and round trips them through a file and a restore', () => {
+    const doc = extras();
+    roundTrip(doc, {
+      type: 'editCamOperation',
+      setupId: S,
+      operation: surface({ strategy: 'zlevel', pattern: 'zigzag', climb: true }),
+    });
+    const { clearing: _c, ...unclearing } = carve() as CamOperation & { clearing?: unknown };
+    void _c;
+    roundTrip(doc, { type: 'editCamOperation', setupId: S, operation: unclearing as CamOperation });
+    const text = serialize(doc);
+    const loaded = unwrap(deserialize(text));
+    expect(loaded.migrated).toBe(false);
+    expect(loaded.document).toEqual(doc);
+    expect(serialize(loaded.document)).toBe(text);
+    expect(restoredDocument(bracket(), doc).cam).toEqual(doc.cam);
   });
 });

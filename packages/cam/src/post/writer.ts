@@ -44,6 +44,12 @@ export const MIN_ARC_RADIUS_STEPS = 10;
 export const LINE_SAGITTA_FRACTION = 1 / 20;
 /** The most lines one arc may become; more is refused. */
 export const MAX_ARC_SEGMENTS = 10000;
+/**
+ * The most lines one job may become, over all its files; more is refused. A job is held to about
+ * `REQUEST_MAX_MOVES` (10 million) entries by the CAM worker, but an entry can become many lines
+ * (an arc written as lines, a tool change template), and every line is a string held at once.
+ */
+export const POST_MAX_LINES = 2e7;
 /** The largest angle one line of a linearised arc spans, radians. */
 const MAX_SEGMENT_ANGLE = Math.PI / 2;
 
@@ -98,6 +104,11 @@ export interface PostOptions {
   readonly cannedCycles?: boolean;
   /** Overrides the dialect's `toolLengthOffset` (`G43 H<n>` after each `M6 T<n>`). */
   readonly toolLengthOffset?: boolean;
+  /**
+   * The most lines the job may become (internal, for tests): `POST_MAX_LINES`, or a lower value;
+   * a larger one is clamped to `POST_MAX_LINES`.
+   */
+  readonly maxLines?: number;
 }
 
 export interface PostFile {
@@ -248,6 +259,14 @@ function run(job: PostJob, d: CompiledDialect, options: PostOptions): PostOutput
   }
 
   const stats = { arcs: 0, arcsAsLines: 0, fullCirclesSplit: 0 };
+  const asked = options.maxLines;
+  const budget = {
+    lines: 0,
+    max:
+      typeof asked === 'number' && Number.isFinite(asked) && asked > 0
+        ? Math.min(Math.floor(asked), POST_MAX_LINES)
+        : POST_MAX_LINES,
+  };
   let irPos: Vec3 = job.toolpath.start;
   const files: PostFile[] = plans.map((plan, n) => {
     const w = new FileWriter({
@@ -258,6 +277,7 @@ function run(job: PostJob, d: CompiledDialect, options: PostOptions): PostOutput
       tolerance,
       offsets,
       stats,
+      budget,
       cycles,
       lengthOffset,
       fileIndex: n + 1,
@@ -333,6 +353,8 @@ interface WriterInput {
   /** Write `G43 H<n>` after each `M6 T<n>`. */
   readonly lengthOffset: boolean;
   readonly stats: { arcs: number; arcsAsLines: number; fullCirclesSplit: number };
+  /** Lines written so far over all the job's files, and the most allowed. */
+  readonly budget: { lines: number; readonly max: number };
   readonly fileIndex: number;
   readonly fileCount: number;
   readonly plan: FilePlan;
@@ -414,7 +436,7 @@ class FileWriter {
 
   write(): string[] {
     const { d, plan } = this.input;
-    if (d.dialect.programDelimiter) this.lines.push('%');
+    if (d.dialect.programDelimiter) this.add('%');
     this.template('header');
     for (const t of plan.tools) this.template('tool', t);
     this.preamble();
@@ -426,7 +448,7 @@ class FileWriter {
     this.retract();
     if (this.spindleOn) this.spindle({ kind: 'spindle', state: 'off' });
     this.template('footer');
-    if (d.dialect.programDelimiter) this.lines.push('%');
+    if (d.dialect.programDelimiter) this.add('%');
     return this.lines;
   }
 
@@ -437,6 +459,18 @@ class FileWriter {
     const max = this.d.dialect.maxLineLength;
     if (line.length > max) {
       refuse('unsupported', `The line '${line}' is longer than ${max} characters.`);
+    }
+    this.add(line);
+  }
+
+  /** Adds `line`, refusing the job once it passes its line budget. */
+  private add(line: string): void {
+    const budget = this.input.budget;
+    if (++budget.lines > budget.max) {
+      refuse(
+        'invalid-input',
+        `The job would be more than ${budget.max} lines of G-code, the most one export may write. Split the setup, or use larger tools, stepdowns or stepovers.`,
+      );
     }
     this.lines.push(line);
   }

@@ -7,7 +7,7 @@
 import type { CamSetup, ManufaktureDocument } from '@manufakture/core';
 import type { CamClient } from '@manufakture/cam/client';
 import { machineById } from './commands';
-import { setupInput } from './generate';
+import { documentOperation, setupInput } from './generate';
 import type { CamGeometer } from './geometer';
 import { activeCamSetup, type CamUiStore } from './state';
 import type { GeneratedOutcome } from './status';
@@ -16,9 +16,9 @@ import type { GeneratedOutcome } from './status';
  * Generate the setup's toolpaths: its geometry from the stage (fresh, for the document as it is
  * now), converted to the CAM worker's evaluated setup, then one `generate` call for every
  * operation whose geometry resolved. The outcomes are kept per operation with the geometry key
- * they came from, so a later edit marks them stale. An abort of `signal` (the export's Cancel)
- * stops it between the geometry and the generation; during the generation the caller cancels the
- * client, whose reply then comes back null.
+ * they came from, so a later edit marks them stale. An abort of `signal` (the workspace's or the
+ * export's Cancel) stops it between the geometry and the generation; during the generation the
+ * caller also cancels the client, whose reply then comes back null and is reported as cancelled.
  */
 export async function generateSetup(
   doc: ManufaktureDocument,
@@ -74,7 +74,10 @@ export async function generateSetup(
     const reply = await client.generate(built.setup, { machine });
     if (dropped()) return;
     if (reply === null) {
-      ui.setGenerating(false, 'Superseded by a newer request.');
+      ui.setGenerating(
+        false,
+        signal?.aborted ? 'Generation cancelled.' : 'Superseded by a newer request.',
+      );
       return;
     }
     if (reply.status === 'failed') {
@@ -87,27 +90,28 @@ export async function generateSetup(
       rapidRate: machine.maxRapid.value,
       operations: reply.operations,
     });
-    let ok = 0;
+    // A V-carve's clearing is reported on its V-carve (`documentOperation`): the two together
+    // generated only when both did, with the clearing's warnings marked.
+    const sent = new Set<string>();
     for (const r of reply.operations) {
-      const key = keys.get(r.id) ?? '';
-      if (r.ok) {
-        ok++;
-        generated.set(r.id, {
-          key,
-          ok: true,
-          warnings: r.warnings.map((w) => w.message),
-          cached: r.cached,
-        });
-      } else {
-        generated.set(r.id, { key, ok: false, message: r.error.message, warnings: [] });
-      }
+      const id = documentOperation(r.id);
+      const tag = id === r.id ? '' : 'Clearing: ';
+      const key = keys.get(id) ?? '';
+      const outcome: GeneratedOutcome = r.ok
+        ? { key, ok: true, warnings: r.warnings.map((w) => tag + w.message), cached: r.cached }
+        : { key, ok: false, message: tag + r.error.message, warnings: [] };
+      const before = sent.has(id) ? generated.get(id) : undefined;
+      sent.add(id);
+      generated.set(id, before ? combined(before, outcome) : outcome);
     }
-    const failed = reply.operations.length - ok;
+    const total = sent.size;
+    const ok = [...sent].filter((id) => generated.get(id)?.ok).length;
+    const failed = total - ok;
     camUi
       .getState()
       .setGenerated(
         generated,
-        `Generated ${ok} of ${reply.operations.length} ${reply.operations.length === 1 ? 'operation' : 'operations'}${failed > 0 ? `; ${failed} failed` : ''}.`,
+        `Generated ${ok} of ${total} ${total === 1 ? 'operation' : 'operations'}${failed > 0 ? `; ${failed} failed` : ''}.`,
       );
   } catch (e) {
     if (dropped()) return;
@@ -115,4 +119,16 @@ export async function generateSetup(
       .getState()
       .setGenerated(new Map(), `Generation failed: ${e instanceof Error ? e.message : String(e)}`);
   }
+}
+
+/** Two outcomes of one document operation (a V-carve's clearing and the carve) as one. */
+function combined(a: GeneratedOutcome, b: GeneratedOutcome): GeneratedOutcome {
+  const message = a.ok ? b.message : a.message;
+  return {
+    key: a.key,
+    ok: a.ok && b.ok,
+    ...(message === undefined ? {} : { message }),
+    warnings: [...a.warnings, ...b.warnings],
+    cached: (a.cached ?? false) && (b.cached ?? false),
+  };
 }

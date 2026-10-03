@@ -1,7 +1,8 @@
 // The Manufacture workspace's panels with a fake geometry stage and CAM worker: a new setup on the
 // default machine, the operation list (status from the stage, rename, suppress, reorder, move,
-// delete, each one undo step), re-pick for lost geometry, Generate and stale marks, and the setup
-// panel (machine, post, stock and heights checks, WCS origin and a WCS face picked in the view).
+// delete, each one undo step), re-pick for lost geometry, Generate (and its Cancel) and stale
+// marks, and the setup panel (machine, post, stock and heights checks, WCS origin and a WCS face
+// picked in the view).
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { CamClient } from '@manufakture/cam/client';
@@ -138,26 +139,38 @@ function fakeGeometer(): CamGeometer & { calls: number } {
   return g;
 }
 
-function fakeClient() {
+/** A worker that answers each operation ok; `hold` keeps the reply until cancelled (null). */
+function fakeClient(hold = false) {
+  let release: ((v: null) => void) | null = null;
   const generate = vi.fn(
-    async (setup: { id: string; operations: readonly { id: string; kind: string }[] }) => ({
-      status: 'done' as const,
-      generation: 1,
-      setup: setup.id,
-      operations: setup.operations.map((o) => ({
-        id: o.id,
-        kind: o.kind,
-        key: `tp-${o.id}`,
-        cached: false,
-        ms: 1,
-        ok: true as const,
-        toolpath: {} as never,
-        warnings: [],
-      })),
-      ms: 1,
-    }),
+    async (setup: { id: string; operations: readonly { id: string; kind: string }[] }) => {
+      if (hold) return new Promise<null>((resolve) => (release = resolve));
+      return reply(setup);
+    },
   );
-  return { client: { generate } as unknown as CamClient, generate };
+  const cancel = vi.fn(async () => {
+    release?.(null);
+  });
+  return { client: { generate, cancel } as unknown as CamClient, generate, cancel };
+}
+
+function reply(setup: { id: string; operations: readonly { id: string; kind: string }[] }) {
+  return {
+    status: 'done' as const,
+    generation: 1,
+    setup: setup.id,
+    operations: setup.operations.map((o) => ({
+      id: o.id,
+      kind: o.kind,
+      key: `tp-${o.id}`,
+      cached: false,
+      ms: 1,
+      ok: true as const,
+      toolpath: {} as never,
+      warnings: [],
+    })),
+    ms: 1,
+  };
 }
 
 function mount(
@@ -166,6 +179,7 @@ function mount(
     geometer?: CamGeometer | null;
     disabled?: boolean;
     bodies?: readonly { id: string; name: string }[];
+    hold?: boolean;
   } = {},
 ) {
   const documents = createDocumentStore(doc);
@@ -174,7 +188,7 @@ function mount(
   camUi.getState().setOpen(true);
   const selection = createSelectionStore();
   const geometer = options.geometer === undefined ? fakeGeometer() : options.geometer;
-  const { client, generate } = fakeClient();
+  const { client, generate, cancel } = fakeClient(options.hold ?? false);
   render(
     <>
       <CamTree
@@ -197,7 +211,7 @@ function mount(
     </>,
   );
   const cam = () => documents.getState().document.cam;
-  return { documents, camUi, selection, generate, cam, geometer };
+  return { documents, camUi, selection, generate, cancel, cam, geometer };
 }
 
 const TWO_BODIES = [
@@ -414,6 +428,30 @@ describe('CamTree', () => {
       documents.getState().undo();
     });
     await waitFor(() => expect(status('facing#1').dataset.stale).toBe('false'));
+  });
+
+  it('cancels a running generation: the worker job is cancelled and nothing is kept', async () => {
+    let doc = setupDocument();
+    doc = apply(doc, {
+      type: 'addCamOperation',
+      setupId: 'setup#1',
+      operation: facing('facing#1', 'Face'),
+    });
+    const { generate, cancel, camUi } = mount(doc, { hold: true });
+    await waitFor(() => expect(status('facing#1').dataset.state).toBe('ok'));
+    expect(screen.queryByTestId('cam-generate-cancel')).toBeNull();
+    fireEvent.click(screen.getByTestId('cam-generate'));
+    await waitFor(() => expect(generate).toHaveBeenCalled());
+    expect((screen.getByTestId('cam-generate') as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByTestId('cam-generate-cancel'));
+    expect(cancel).toHaveBeenCalled();
+    await waitFor(() =>
+      expect(screen.getByTestId('cam-generate-message').textContent).toBe('Generation cancelled.'),
+    );
+    expect(camUi.getState().generating).toBe(false);
+    expect(camUi.getState().toolpaths).toBeNull();
+    expect(screen.queryByTestId('cam-generate-cancel')).toBeNull();
+    expect((screen.getByTestId('cam-generate') as HTMLButtonElement).disabled).toBe(false);
   });
 
   it('says the geometry is not available without a regen worker, and cannot generate', () => {

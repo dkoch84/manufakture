@@ -17,6 +17,7 @@ import {
   type Vec2,
   type Vec3,
 } from '../types';
+import { operationMoveCap, withMoveBudget } from './budget';
 import { Emitter, PROFILE_SAFE_ABOVE, levels } from './profile';
 
 /**
@@ -246,6 +247,13 @@ export async function generateFacing(
   input: FacingInput,
   context: OperationContext,
 ): Promise<CamResult<GeneratedToolpath>> {
+  return withMoveBudget(input.id, () => facingToolpath(input, context));
+}
+
+async function facingToolpath(
+  input: FacingInput,
+  context: OperationContext,
+): Promise<CamResult<GeneratedToolpath>> {
   const op = input as FacingOperation;
   const problem = checkInput(op);
   if (problem) return err('invalid-input', `${op.id}: ${problem}`);
@@ -287,7 +295,7 @@ export async function generateFacing(
   const retractZ = Math.max(heights.retract, top + FACING_SAFE_ABOVE);
   const clearanceZ = Math.max(heights.clearance, retractZ);
   const polys = area.map((l) => flattenSegments(l.segments, true, INSIDE_TOLERANCE));
-  const em = new Emitter(op.id, op.feeds, [0, 0, clearanceZ]);
+  const em = new Emitter(op.id, op.feeds, [0, 0, clearanceZ], operationMoveCap(context));
   let start: Vec3 | undefined;
 
   /** Over `xy` and down to just above `cleared` (the floor already cut there), by rapids. */

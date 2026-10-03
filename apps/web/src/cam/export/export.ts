@@ -44,6 +44,7 @@ import { MM_PER_INCH } from '@manufakture/units';
 import { zipSync, strToU8, type Zippable } from 'fflate';
 import type { ExportedFile } from '../../io/actions';
 import { POST_IDS, postName } from '../commands';
+import { documentOperation } from '../generate';
 import type { GeneratedToolpaths } from '../preview/job';
 import { operationStatus, type GeneratedOutcome } from '../status';
 
@@ -387,6 +388,7 @@ function depthOf(op: OperationInput): { stepdown: number | null } {
     case 'facing':
     case 'profile':
     case 'pocket':
+    case 'vcarveClearing':
       return { stepdown: op.stepdown };
     default:
       return { stepdown: null };
@@ -409,6 +411,15 @@ export function buildExport(input: ExportInput): ExportBuild {
   const setup: Setup = data.setup;
   const suppressed = new Set(input.operations.filter((o) => o.suppressed).map((o) => o.id));
   const docNames = new Map(input.operations.map((o) => [o.id, o.name]));
+  // A V-carve's clearing (generated as an operation of its own) goes with its V-carve: suppressed
+  // with it, cut just before it, named after it.
+  for (const op of data.setup.operations) {
+    const parent = documentOperation(op.id);
+    if (parent === op.id) continue;
+    if (suppressed.has(parent)) suppressed.add(op.id);
+    const name = docNames.get(parent);
+    if (name !== undefined) docNames.set(op.id, `${name} (clearing)`);
+  }
 
   // Every active operation of the document must be in the generation, generated.
   const reasons: string[] = [];
@@ -420,6 +431,11 @@ export function buildExport(input: ExportInput): ExportBuild {
   // The document's list is the authority: an operation deleted since the generation is left
   // out, and the job cuts in the document's order (a reorder does not make a toolpath stale).
   const docOrder = new Map(input.operations.map((o, i) => [o.id, i]));
+  for (const op of setup.operations) {
+    const parent = docOrder.get(documentOperation(op.id));
+    if (op.id !== documentOperation(op.id) && parent !== undefined)
+      docOrder.set(op.id, parent - 0.5);
+  }
   for (const op of setup.operations) if (!docOrder.has(op.id)) suppressed.add(op.id);
   const ops: JobOperation[] = jobOperations(setup, data.operations, suppressed).sort(
     (a, b) => (docOrder.get(a.id) ?? Infinity) - (docOrder.get(b.id) ?? Infinity),
