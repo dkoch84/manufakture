@@ -120,6 +120,64 @@ describe('the takeoff model from the shown model', () => {
     expect(money(takeoff.cost.total, takeoff.cost.currency)).toBe('$1,708.90');
   });
 
+  it('counts both gable fills of a closed wall that carries both gable ends', () => {
+    // The shed's four walls as one closed path (as the Wall tool draws a loop): both gable ends
+    // stand on the one wall's sheathing layer, and each fill is a face of its own.
+    const doc = shedDocument();
+    const data = documentConstruction(doc);
+    if (!data.ok) throw new Error(data.message);
+    const features = shedFeatures()
+      .filter((f) => ![B, 'extension#5', D, 'extension#9'].includes(f.featureId))
+      .map((f) => {
+        const meta = f.metadata as Record<string, unknown>;
+        if (f.featureId === A)
+          return {
+            ...f,
+            metadata: {
+              ...meta,
+              points: [
+                [0, 0],
+                [192 * IN, 0],
+                [192 * IN, 144 * IN],
+                [0, 144 * IN],
+              ],
+              closed: true,
+            } as unknown as NonNullable<typeof f.metadata>,
+          };
+        if (f.featureId === ROOF)
+          return {
+            ...f,
+            metadata: {
+              ...meta,
+              walls: [A],
+              gables: [
+                { edge: 2, wall: A, body: `${ROOF}:layer/gable-e2-sheathing` },
+                { edge: 4, wall: A, body: `${ROOF}:layer/gable-e4-sheathing` },
+              ],
+            } as unknown as NonNullable<typeof f.metadata>,
+          };
+        return f;
+      });
+    const model = takeoffModel({
+      document: doc,
+      partId: PART,
+      features,
+      sets: [],
+      settings: data.data?.settings,
+      stock: undefined,
+    });
+    const walls = model.input.faces!.filter((f) => f.layer === 'sheathing');
+    expect(walls.map((f) => [f.id, inches(f.width), inches(f.height)])).toEqual([
+      [`${A}:layer/sheathing/s1`, 192, 97.125],
+      [`${A}:layer/sheathing/s2`, 144, 97.125],
+      [`${A}:layer/sheathing/s3`, 192, 97.125],
+      [`${A}:layer/sheathing/s4`, 144, 97.125],
+      // 144 / 2 x 6/12 = 36" high, one per gable end.
+      [`${ROOF}:layer/gable-e2-sheathing`, 144, 36],
+      [`${ROOF}:layer/gable-e4-sheathing`, 144, 36],
+    ]);
+  });
+
   it('notes a sheet layer with no stock instead of counting it', () => {
     const doc = shedDocument();
     const data = documentConstruction(doc);

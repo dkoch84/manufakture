@@ -368,6 +368,12 @@ export interface MemberBodiesOptions {
   volumes?: boolean;
   /** Export every member built as one STEP file, each body named by its full member id. */
   step?: boolean;
+  /**
+   * Bodies the kernel already holds (a part's layer bodies, by the shapes a regen reported),
+   * written into the STEP file first, under these names, next to the members. They are only read:
+   * never released here.
+   */
+  with?: readonly { shape: ShapeId; name: string }[];
 }
 
 /** One group's members as a regen framed them (from the member cache or just now). */
@@ -2083,8 +2089,9 @@ export class RegenEngine {
           }
         }
       }
-      if (options.step && kept.length > 0) {
-        const reply = await submit([{ op: 'exportStep', bodies: kept }]);
+      const written = [...(options.with ?? []), ...kept];
+      if (options.step && written.length > 0) {
+        const reply = await submit([{ op: 'exportStep', bodies: written }]);
         const r = reply.results[0]!;
         if (!r.ok) throw new Error(`the STEP export of the members failed: ${r.error.message}`);
         step = (r.value as { data: Uint8Array }).data;

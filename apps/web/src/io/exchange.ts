@@ -30,6 +30,7 @@ import type {
   VertexRef,
 } from '@manufakture/kernel';
 import type { KernelClient } from '@manufakture/kernel/client';
+import type { RegenClient } from '@manufakture/regen/client';
 import type { Measurer } from '../measure/measurer';
 import type { BodyInput } from '../viewport/bodies';
 import { fillPlaceholderNames } from '../viewport/naming';
@@ -74,6 +75,18 @@ export interface Exchanger {
     names?: ReadonlyMap<string, string>,
     assembly?: StepAssemblyLayout,
   ): Promise<ExchangeResult<Uint8Array>>;
+  /**
+   * One STEP file of the bodies (as `exportStep`, none allowed) and of framing members of the
+   * last regen of `partId` (full ids), whose B-reps the regen worker builds on demand, one kernel
+   * batch per owner, and releases at once. `failed` lists the members it could not build or no
+   * longer has. Optional: only a regen worker's kernel holds members.
+   */
+  exportStepWithMembers?(
+    ids: readonly string[],
+    names: ReadonlyMap<string, string> | undefined,
+    partId: string,
+    memberIds: readonly string[],
+  ): Promise<ExchangeResult<{ data: Uint8Array; members: number; failed: string[] }>>;
   /**
    * Read a STEP file into a reference body named after the import feature
    * `featureId`; the body's viewport id is `bodyId` (default: the feature id), which the app
@@ -128,14 +141,28 @@ export interface Referencer {
 }
 
 const DROPPED = 'The kernel dropped the request; try again.';
+export const RESTARTED = 'The kernel restarted during the export; try again.';
+
+/**
+ * Whether a member export failed because the kernel was recycled under it: the bodies written
+ * with the members were shapes of the old instance (the kernel's `unknown-shape` error, which the
+ * regen worker passes on as its message), or the regen worker's own retries ran out.
+ */
+export function lostToRecycle(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /unknown shape id|kernel shapes were lost to a recycle/.test(message);
+}
 
 /**
  * The kernel side of export, import and measuring for the bodies in
  * `registry` (viewport id to kernel shape). `client` is read on every call,
  * since the loader spawns it lazily.
  */
+/** The kernel client export runs on: a regen worker's also builds member B-reps. */
+export type ExchangeClient = KernelClient & Partial<Pick<RegenClient, 'memberBodies'>>;
+
 export function kernelExchange(
-  client: () => KernelClient | null,
+  client: () => ExchangeClient | null,
   registry: Map<string, KernelBody>,
 ): { exchanger: Exchanger; measurer: Measurer; referencer: Referencer } {
   const shapesOf = (
@@ -259,6 +286,34 @@ export function kernelExchange(
       const [r] = reply.results;
       if (!r.ok) return { ok: false, message: `STEP export failed: ${r.error.message}` };
       return { ok: true, value: r.value.data };
+    },
+
+    async exportStepWithMembers(ids, names, partId, memberIds) {
+      const c = client();
+      const found: ExchangeResult<KernelBody[]> =
+        ids.length === 0 ? { ok: true, value: [] } : shapesOf(ids, names);
+      if (!found.ok) return found;
+      if (c === null) return { ok: false, message: 'The kernel is not running.' };
+      if (c.memberBodies === undefined) {
+        return { ok: false, message: 'This kernel builds no framing members.' };
+      }
+      let r: Awaited<ReturnType<NonNullable<ExchangeClient['memberBodies']>>>;
+      try {
+        r = await c.memberBodies(partId, memberIds, {
+          step: true,
+          with: found.value.map((b) => ({ shape: b.shape, name: b.name })),
+        });
+      } catch (error) {
+        if (lostToRecycle(error)) return { ok: false, message: RESTARTED };
+        throw error;
+      }
+      if (r === null) return { ok: false, message: DROPPED };
+      if (r.step === null) return { ok: false, message: 'There is nothing to export.' };
+      const failed = [...r.bodies.filter((b) => !b.ok).map((b) => b.id), ...r.missing];
+      return {
+        ok: true,
+        value: { data: r.step, members: r.bodies.filter((b) => b.ok).length, failed },
+      };
     },
 
     async section(bodyId, frame, height, deflection) {

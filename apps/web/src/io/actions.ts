@@ -30,6 +30,7 @@ import type { Exchanger } from './exchange';
 import { MIME, formatBytes } from './files';
 import { shownMemberExports } from './memberExport';
 import { meshBody } from './meshBody';
+import { withStepDescription } from './stepHeader';
 import { importBodyId } from './restorable';
 
 export type ExportFormat = 'stl' | 'stl-each' | '3mf' | 'step';
@@ -58,8 +59,12 @@ export interface ExportChoice {
  *
  * Framing members (`options.members`, by default the ones the viewport shows) go into mesh
  * exports after the bodies (ADR 0015 decision 4): one 3MF object per member named by its full id,
- * appended to a merged STL, or one more STL of them all when each body gets a file. STEP leaves
- * them out (member B-reps are built on demand, a later task).
+ * appended to a merged STL, or one more STL of them all when each body gets a file. STEP writes
+ * them as B-reps in the same file as the bodies, each a product named by its full id, built on
+ * demand in the regen worker (`Exchanger.exportStepWithMembers`) when `options.partId` names the
+ * part they belong to; an exchanger that builds no members leaves them out and says so. With
+ * `options.stepDescription`, a STEP file's header description is that text (the construction
+ * disclaimer).
  */
 export async function exportBodies(
   exchanger: Exchanger,
@@ -72,11 +77,20 @@ export async function exportBodies(
     fileBase?: string;
     /** Framing members, placed and named (default: the members the viewport shows). */
     members?: readonly ExportBody[];
+    /** The part studio the members belong to: STEP builds their B-reps there. */
+    partId?: string;
+    /** The STEP header's description (FILE_DESCRIPTION), in place of the kernel's. */
+    stepDescription?: string;
   } = {},
 ): Promise<ActionResult<ExportedFile[]>> {
   const bodies = options.bodies ?? exchanger.bodies();
   const members = options.members ?? shownMemberExports();
-  if (bodies.length === 0 && (members.length === 0 || format === 'step')) {
+  const stepMembers =
+    format === 'step' &&
+    members.length > 0 &&
+    options.partId !== undefined &&
+    exchanger.exportStepWithMembers !== undefined;
+  if (bodies.length === 0 && (members.length === 0 || (format === 'step' && !stepMembers))) {
     return { ok: false, message: 'There is nothing to export.' };
   }
   const ids = bodies.map((b) => b.id);
@@ -85,10 +99,30 @@ export async function exportBodies(
     options.fileBase ??
     (bodies.length === 1 ? bodies[0]!.name : (options.documentName ?? 'bodies'));
   let files: ExportedFile[];
+  let note = '';
   if (format === 'step') {
-    const step = names ? await exchanger.exportStep(ids, names) : await exchanger.exportStep(ids);
-    if (!step.ok) return step;
-    files = [{ name: fileName(base, 'step'), bytes: step.value, type: MIME.step }];
+    let bytes: Uint8Array;
+    if (stepMembers) {
+      const step = await exchanger.exportStepWithMembers!(
+        ids,
+        names,
+        options.partId!,
+        members.map((m) => m.name),
+      );
+      if (!step.ok) return step;
+      bytes = step.value.data;
+      note = ` ${step.value.members} framing ${step.value.members === 1 ? 'member' : 'members'} as B-reps.`;
+      if (step.value.failed.length > 0)
+        note += ` Left out, not built: ${step.value.failed.join(', ')}.`;
+    } else {
+      const step = names ? await exchanger.exportStep(ids, names) : await exchanger.exportStep(ids);
+      if (!step.ok) return step;
+      bytes = step.value;
+      if (members.length > 0) note = ' Framing members are not exported to STEP here.';
+    }
+    if (options.stepDescription !== undefined)
+      bytes = withStepDescription(bytes, options.stepDescription);
+    files = [{ name: fileName(base, 'step'), bytes, type: MIME.step }];
   } else {
     const tolerance = EXPORT_TOLERANCES[options.tolerance ?? 'normal'];
     const deflection = deflectionOf(tolerance);
@@ -129,9 +163,7 @@ export async function exportBodies(
     }
   }
   const summary = files.map((f) => `${f.name} (${formatBytes(f.bytes.length)})`).join(', ');
-  const skipped =
-    format === 'step' && members.length > 0 ? ' Framing members are not exported to STEP yet.' : '';
-  return { ok: true, value: files, message: `Exported ${summary}.${skipped}` };
+  return { ok: true, value: files, message: `Exported ${summary}.${note}` };
 }
 
 /** Largest file an import accepts (core's limit): it is kept inside the document, as base64. */

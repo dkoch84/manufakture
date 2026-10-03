@@ -117,12 +117,20 @@ const SHEET_KINDS: Readonly<Record<string, SheetLayerKind>> = {
   drywall: 'drywall',
 };
 
+/** A gable fill the roof carried up from a wall's sheet layer. */
+interface Gable {
+  body: string;
+  pitch: number;
+  width: number;
+  roof: string;
+}
+
 function wallFaces(
   wallId: string,
   meta: WallMetadata,
   stockOf: (layerId: string) => string | undefined,
   openings: readonly OpeningMetadata[],
-  gables: ReadonlyMap<string, { body: string; pitch: number; width: number; roof: string }>,
+  gables: ReadonlyMap<string, readonly Gable[]>,
   out: { faces: SheetFace[]; bodies: Map<string, string[]>; notes: string[] },
 ): void {
   const framing = meta.layers.find((l) => l.kind === 'framing');
@@ -140,7 +148,9 @@ function wallFaces(
     // The framing's face on the layer's side: its exterior edge for layers outside it.
     const outside = layer.t[1] <= framing.t[0] + EPS;
     const spans = faceSpans(meta, outside ? framing.t[0] : framing.t[1]);
-    const gable = gables.get(`${wallId}|${layer.id}`);
+    // A closed wall can carry both gable ends of a roof on one layer.
+    const fills = gables.get(`${wallId}|${layer.id}`) ?? [];
+    const gable = fills.length === 1 ? fills[0] : undefined;
     for (const span of spans) {
       const length = span.end - span.start;
       if (!(length > EPS)) continue;
@@ -168,22 +178,23 @@ function wallFaces(
       );
       out.bodies.set(id, onWall ? [layer.body, gable.body] : [layer.body]);
     }
-    if (gable !== undefined && spans.length !== 1) {
-      const rise = (gable.width / 2) * Math.tan(gable.pitch);
+    if (spans.length === 1 && fills.length < 2) continue;
+    for (const fill of fills) {
+      const rise = (fill.width / 2) * Math.tan(fill.pitch);
       out.faces.push({
-        id: gable.body,
-        owner: gable.roof,
+        id: fill.body,
+        owner: fill.roof,
         layer: kind,
         stock,
-        width: gable.width,
+        width: fill.width,
         height: rise,
         outline: [
           [0, 0],
-          [gable.width, 0],
-          [gable.width / 2, rise],
+          [fill.width, 0],
+          [fill.width / 2, rise],
         ],
       });
-      out.bodies.set(gable.body, [gable.body]);
+      out.bodies.set(fill.body, [fill.body]);
     }
   }
 }
@@ -239,7 +250,7 @@ export function takeoffModel(src: TakeoffSources): TakeoffModel {
   const walls = new Map<string, WallMetadata>();
   const openings = new Map<string, OpeningMetadata[]>();
   const levels: Record<string, string> = {};
-  const gables = new Map<string, { body: string; pitch: number; width: number; roof: string }>();
+  const gables = new Map<string, Gable[]>();
   const out = {
     faces: [] as SheetFace[],
     bodies: new Map<string, string[]>(),
@@ -288,12 +299,16 @@ export function takeoffModel(src: TakeoffSources): TakeoffModel {
         const prefix = `gable-e${g.edge}-`;
         const at = g.body.lastIndexOf(prefix);
         if (at < 0) continue;
-        gables.set(`${g.wall}|${g.body.slice(at + prefix.length)}`, {
-          body: g.body,
-          pitch: roof.input.pitch,
-          width: roof.input.footprint.width,
-          roof: f.featureId,
-        });
+        const key = `${g.wall}|${g.body.slice(at + prefix.length)}`;
+        gables.set(key, [
+          ...(gables.get(key) ?? []),
+          {
+            body: g.body,
+            pitch: roof.input.pitch,
+            width: roof.input.footprint.width,
+            roof: f.featureId,
+          },
+        ]);
       }
     }
   }

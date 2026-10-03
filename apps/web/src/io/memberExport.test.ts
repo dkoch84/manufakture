@@ -84,12 +84,69 @@ describe('member export', () => {
 
     const step = await exportBodies(ex, 'step', { members });
     if (!step.ok) throw new Error(step.message);
-    expect(step.message).toMatch(/Framing members are not exported to STEP yet\.$/);
+    expect(step.message).toMatch(/Framing members are not exported to STEP here\.$/);
 
     // Members alone still export as meshes.
     const only = await exportBodies(ex, '3mf', { bodies: [], members, fileBase: 'Shed' });
     if (!only.ok) throw new Error(only.message);
     expect(validate3mf(only.value[0]!.bytes).parsed!.objects).toHaveLength(members.length);
     expect((await exportBodies(ex, 'step', { bodies: [], members })).ok).toBe(false);
+  });
+
+  it('STEP: members as B-reps built on demand, in one file with the bodies, under a disclaimer', async () => {
+    const shed = shedFixture();
+    const members = memberExportBodies(shed.view);
+    const ex = fakeExchanger();
+    const header = [
+      'ISO-10303-21;',
+      'HEADER;',
+      "FILE_DESCRIPTION(('Open CASCADE Model'),'2;1');",
+      "FILE_NAME('x','t',(''),(''),'p','o','u');",
+      'ENDSEC;',
+      'DATA;',
+      "#1 = PRODUCT('Sheathing','Sheathing','',(#2));",
+      'ENDSEC;',
+    ].join('\n');
+    const withMembers = vi.fn(async () => ({
+      ok: true as const,
+      value: {
+        data: new TextEncoder().encode(header),
+        members: members.length - 1,
+        failed: ['door-1:header:2'],
+      },
+    }));
+    ex.exportStepWithMembers = withMembers;
+    const text = "Not an engineering tool: don't build from this alone.";
+    const r = await exportBodies(ex, 'step', {
+      members,
+      partId: 'part#1',
+      stepDescription: text,
+      fileBase: 'Shed',
+    });
+    if (!r.ok) throw new Error(r.message);
+    // The bodies and every member's full id go to the regen worker in one request.
+    expect(withMembers).toHaveBeenCalledWith(
+      ['body1'],
+      undefined,
+      'part#1',
+      members.map((m) => m.name),
+    );
+    expect(ex.exportStep).not.toHaveBeenCalled();
+    expect(r.message).toBe(
+      `Exported Shed.step (${r.value[0]!.bytes.length} B). ${members.length - 1} framing members as B-reps. Left out, not built: door-1:header:2.`,
+    );
+    const out = new TextDecoder().decode(r.value[0]!.bytes);
+    expect(out).toContain(
+      "FILE_DESCRIPTION(('Not an engineering tool: don''t build from this alone.'),'2;1');",
+    );
+    expect(out).toContain("#1 = PRODUCT('Sheathing'");
+
+    // Members alone, no bodies: still one STEP file.
+    const only = await exportBodies(ex, 'step', { bodies: [], members, partId: 'part#1' });
+    expect(only.ok).toBe(true);
+    // No part named: the members cannot be built, and the bodies go alone.
+    const plain = await exportBodies(ex, 'step', { members });
+    if (!plain.ok) throw new Error(plain.message);
+    expect(plain.message).toMatch(/Framing members are not exported to STEP here\.$/);
   });
 });

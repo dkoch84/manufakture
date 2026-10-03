@@ -63,6 +63,73 @@ describe('kernelExchange', () => {
     expect(sent[0]!.ops).toEqual([{ op: 'exportStep', bodies: [{ shape: 3, name: 'Demo part' }] }]);
   });
 
+  it('exports STEP with members through the regen worker, the bodies written with them', async () => {
+    const data = new TextEncoder().encode('ISO-10303-21;');
+    const { client } = scripted([]);
+    const memberBodies = vi.fn(async () => ({
+      generation: 7,
+      partId: 'part#1',
+      bodies: [
+        { id: 'wall:s0', ok: true },
+        { id: 'wall:s1', ok: false, error: 'no' },
+      ],
+      missing: ['wall:gone'],
+      step: data as Uint8Array | null,
+      batches: 2,
+      ms: 1,
+    }));
+    const withMembers = { ...client, memberBodies } as typeof client & {
+      memberBodies: typeof memberBodies;
+    };
+    const { exchanger } = kernelExchange(() => withMembers, registry());
+    const names = new Map([['demo-part', 'Sheathing']]);
+    expect(
+      await exchanger.exportStepWithMembers!(['demo-part'], names, 'part#1', [
+        'wall:s0',
+        'wall:s1',
+        'wall:gone',
+      ]),
+    ).toEqual({ ok: true, value: { data, members: 1, failed: ['wall:s1', 'wall:gone'] } });
+    expect(memberBodies).toHaveBeenCalledWith('part#1', ['wall:s0', 'wall:s1', 'wall:gone'], {
+      step: true,
+      with: [{ shape: 3, name: 'Sheathing' }],
+    });
+    // Superseded by a newer regen, or nothing built: no file.
+    memberBodies.mockResolvedValueOnce(null as never);
+    expect((await exchanger.exportStepWithMembers!([], undefined, 'part#1', ['x'])).ok).toBe(false);
+    // A plain kernel client builds no members.
+    const plain = kernelExchange(() => client, registry()).exchanger;
+    expect(await plain.exportStepWithMembers!([], undefined, 'part#1', ['x'])).toEqual({
+      ok: false,
+      message: 'This kernel builds no framing members.',
+    });
+  });
+
+  it('says the kernel restarted when it was recycled during a STEP member export', async () => {
+    const { client } = scripted([]);
+    // The bodies written with the members belong to the instance before the recycle: the
+    // export op fails with `unknown-shape`, and the regen worker rejects with its message.
+    const memberBodies = vi.fn(async (): Promise<null> => {
+      throw new Error('the STEP export of the members failed: unknown shape id 3');
+    });
+    const withMembers = { ...client, memberBodies } as typeof client & {
+      memberBodies: typeof memberBodies;
+    };
+    const { exchanger } = kernelExchange(() => withMembers, registry());
+    const want = { ok: false, message: 'The kernel restarted during the export; try again.' };
+    expect(
+      await exchanger.exportStepWithMembers!(['demo-part'], undefined, 'part#1', ['x']),
+    ).toEqual(want);
+    // The worker's retries ran out against repeated recycles: the same message.
+    memberBodies.mockRejectedValueOnce(new Error('kernel shapes were lost to a recycle'));
+    expect(await exchanger.exportStepWithMembers!([], undefined, 'part#1', ['x'])).toEqual(want);
+    // Any other failure is not mistaken for one.
+    memberBodies.mockRejectedValueOnce(new Error('member bodies need a completed regen'));
+    await expect(exchanger.exportStepWithMembers!([], undefined, 'part#1', ['x'])).rejects.toThrow(
+      'member bodies need a completed regen',
+    );
+  });
+
   it('sections a part body at the latest generation, and refuses an unknown one', async () => {
     const section = { height: 2, regions: [], open: [] };
     const { client, sent } = scripted([

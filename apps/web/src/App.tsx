@@ -94,6 +94,7 @@ import {
   type HistoryTarget,
 } from './history/history';
 import { ConfigurationsPanel } from './configurations/ConfigurationsPanel';
+import { DISCLAIMER_SHORT } from '@manufakture/domain-construction';
 import { ConstructionToolbar } from './construction/ConstructionToolbar';
 import {
   constructionHasLevel,
@@ -1468,6 +1469,10 @@ export function App({
             exportBodies(exchanger, format, {
               tolerance,
               documentName: document.name,
+              // STEP builds the framing members' B-reps in the part they belong to, and a
+              // construction document's file carries the disclaimer in its header.
+              partId: shownPartId,
+              ...(withConstruction ? { stepDescription: DISCLAIMER_SHORT } : {}),
               // The active part's chosen bodies; a scene without regen exports what it holds.
               ...(loader.regenerator
                 ? { bodies: exportable.filter((b) => ids.includes(b.id)) }
@@ -1489,6 +1494,8 @@ export function App({
       loader,
       document.name,
       exportable,
+      shownPartId,
+      withConstruction,
       assemblyId,
       shownDocument,
       allParts,

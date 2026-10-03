@@ -396,13 +396,16 @@ registry.registerDomain({
   normals, indices, transferred; the worker keeps its own copy) and the keys no member uses any
   more (`removed`), absent when neither changed. As for body meshes, a caller that drops a
   completed result must not rely on `changed` afterwards.
-- **Member B-reps on demand** (`engine.memberBodies(partId, fullIds, { generation, volumes, step })`,
+- **Member B-reps on demand** (`engine.memberBodies(partId, fullIds, { generation, volumes, step, with })`,
   the worker API and `RegenClient.memberBodies`): for STEP export of framing and drawings that need
   hidden lines through members. The members of the last completed regen are built in one kernel
   batch per owner, each its cross-section extruded along its length and a `tools` feature with a
   box per cut (a notch needs perpendicular planes, as a birdsmouth has; others are reported per
   member). Volumes are measured and one STEP file (each body named by its full id) exported as
-  asked, then every shape is released at once, whatever happened: member B-reps are never kept
+  asked; `with` adds bodies the kernel already holds (the part's layer bodies, by the shapes a
+  regen reported, under the names given) to that file, first, so the app's STEP export of a
+  building is one file. Then every member shape is released at once (the `with` bodies are only
+  read), whatever happened: member B-reps are never kept
   between requests. On the regen chain at the client's current generation: a newer regen cancels
   it between batches (null), and a recycle between batches restarts it on the new instance. Ids
   the last regen has no member for are `missing`.
@@ -871,9 +874,11 @@ arc's radius. Values are formatted in the document's display units with the dime
 and one that does not evaluate or is not positive is a diagnostic and no display list (never a
 `RangeError`). Title block fields map to the title block's cells by label (`Title`, `Drawing
 number`, `Revision`, `Sheet`, `Scale`, `Company`, `Drawn by`, `Date`, `Material`, `Units`,
-`Projection`); other labels are a `title-field` warning. A note on a view sits relative to the
-view's position. No collision nudging of dimensions and notes is done here (the plan does not give
-it to this task; `packages/drawing` places each where its offset says).
+`Projection`); other labels are a `title-field` warning. Unless a `Sheet` field has a value, the
+sheet cell is the sheet's place in its drawing (`2 / 4`), so every sheet of a set is numbered. A
+note on a view sits relative to the view's position. No collision nudging of dimensions and notes
+is done here (the plan does not give it to this task; `packages/drawing` places each where its
+offset says).
 
 **Domain views** (format v15; M6 plan T6.4a, ADR 0015 decision 9). A view whose source is
 `{ domain, part, schemaVersion, params }` is drawn by the registered domain's `drawings`

@@ -17,7 +17,7 @@ const FORMATS: readonly [ExportFormat, string, string][] = [
   ['stl', 'STL', 'Binary STL, every body in one file'],
   ['stl-each', 'STL, one file per body', 'Binary STL, a file for each body'],
   ['3mf', '3MF', '3MF for slicers: millimetres, one named object per body'],
-  ['step', 'STEP', 'STEP AP214: the exact B-rep, one named product per body'],
+  ['step', 'STEP', 'STEP AP214: the exact B-rep, one named product per body and framing member'],
 ];
 
 /** In an assembly: the whole assembly, each part once and placed per instance; one file. */

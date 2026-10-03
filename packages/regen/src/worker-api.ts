@@ -15,6 +15,7 @@ import {
   meshBuffers,
   type KernelService,
   type KernelWorkerApi,
+  type ShapeId,
   type WorkerApiOptions,
 } from '@manufakture/kernel';
 import { createSolverService } from '@manufakture/sketch';
@@ -143,7 +144,12 @@ export interface RegenWorkerApi extends KernelWorkerApi {
   memberBodies(
     partId: string,
     memberIds: readonly string[],
-    options: { generation: number; volumes?: boolean; step?: boolean },
+    options: {
+      generation: number;
+      volumes?: boolean;
+      step?: boolean;
+      with?: readonly { shape: ShapeId; name: string }[];
+    },
   ): Promise<MemberBodiesResult | null>;
   /** Cumulative engine counters. */
   regenStats(): Promise<EngineStats>;

@@ -15,7 +15,7 @@ Click **Export** and pick a format:
 
 Export saves the bodies of the part studio you are in. Imported reference bodies are never exported, whether they are shown or hidden by **Undo**: they belong to another file, and you already have it.
 
-When the part has several [bodies](bodies.md), the menu lists them with a checkbox each: the shown ones are ticked, the hidden ones are not, and the ticks follow the view while the menu is open until you change one. Tick the bodies to export, then pick the format. A part whose only body is hidden exports nothing: the menu says so instead. Each body is written under its name from the Bodies list: an object in 3MF, a product in STEP, a file of its own in **STL, one file per body**.
+When the part has several [bodies](bodies.md), the menu lists them with a checkbox each: the shown ones are ticked, the hidden ones are not, and the ticks follow the view while the menu is open until you change one. Tick the bodies to export, then pick the format. A part whose only body is hidden exports nothing: the menu says so instead. Each body is written under its name from the Bodies list: an object in 3MF, a product in STEP, a file of its own in **STL, one file per body**. A building's framing members go into every format after the bodies (see [Exporting framing](viewport.md#exporting-framing)).
 
 In a document with [configurations](configurations.md), **Every configuration** in the menu exports one file per configuration.
 

@@ -13,7 +13,7 @@ manufakture lays out framing by rules you choose: stud spacing, plate counts, co
 
 manufakture is free software under the GNU General Public License, version 3 or later (see [LICENSE](../../LICENSE)), and comes with no warranty, to the extent permitted by applicable law; sections 15 and 16 of the license say so in full. This page describes what the software does; it is not legal advice.
 
-A short form of this notice appears in the construction tools, on every drawing title block and in every takeoff export.
+A short form of this notice appears in the construction tools, on every drawing title block, in every takeoff export and in the header of the IFC and STEP files of a construction document.
 
 ## Getting started
 

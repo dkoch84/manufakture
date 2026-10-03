@@ -9,6 +9,7 @@
 import type { DragTarget } from '@manufakture/assembly';
 import type { ManufaktureDocument } from '@manufakture/core';
 import type { IfcBuildingInput } from '@manufakture/io';
+import type { ShapeId } from '@manufakture/kernel';
 import { KernelClient } from '@manufakture/kernel/kernel-client';
 import * as Comlink from 'comlink';
 import type { CamGeometryOptions, CamGeometryResult } from './cam';
@@ -210,7 +211,12 @@ export class RegenClient extends KernelClient {
   memberBodies(
     partId: string,
     memberIds: readonly string[],
-    options: { volumes?: boolean; step?: boolean } = {},
+    options: {
+      volumes?: boolean;
+      step?: boolean;
+      /** Bodies the kernel holds (layer bodies) to write into the STEP file first. */
+      with?: readonly { shape: ShapeId; name: string }[];
+    } = {},
   ): Promise<MemberBodiesResult | null> {
     return this.droppable(
       this.worker<RegenWorkerApi>().memberBodies(partId, memberIds, {

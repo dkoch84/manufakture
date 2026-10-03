@@ -567,6 +567,39 @@ describe('member B-reps on demand (real kernel)', () => {
     const bodies = (await engine.memberBodies(PART, ['extension#2:rafter'], { volumes: true }))!;
     expect(bodies.bodies[0]!.volume! / rafterVolume()).toBeCloseTo(1, 9);
   }, 60_000);
+
+  it('writes bodies the kernel holds into the members STEP file, and keeps them', async () => {
+    const registry = new ExtensionRegistry();
+    registry.registerDomain(domain());
+    const engine = new RegenEngine({
+      kernel: service,
+      solver: new FakeSolver(),
+      extensions: registry,
+    });
+    const doc = build([
+      add(rectangle('sketch#1', { width: '40', depth: '30' })),
+      add(extrude('extrude#1', 'sketch#1', '20')),
+      add(wallFeature('extension#2', '1200', { rafter: true })),
+    ]);
+    const r = await regen(engine, doc);
+    const body = r.parts[0]!.bodies.find((b) => b.bodyId === 'extrude#1')!;
+    const before = service.stats().shapeCount;
+    const out = (await engine.memberBodies(PART, ['extension#2:rafter', 'extension#2:s0'], {
+      step: true,
+      with: [{ shape: body.shape, name: 'Layer body' }],
+    }))!;
+    const text = new TextDecoder().decode(out.step!);
+    expect(text).toContain("PRODUCT('Layer body'");
+    expect(text).toContain("PRODUCT('extension#2:rafter'");
+    expect(text.split('MANIFOLD_SOLID_BREP(').length - 1).toBe(3);
+    // The held body is only read: still there, the members released.
+    expect(service.stats().shapeCount).toBe(before);
+    const again = (await engine.memberBodies(PART, [], {
+      step: true,
+      with: [{ shape: body.shape, name: 'Layer body' }],
+    }))!;
+    expect(new TextDecoder().decode(again.step!)).toContain("PRODUCT('Layer body'");
+  }, 60_000);
 });
 
 // Through the worker protocol ---------------------------------------------------------------

@@ -1,0 +1,13 @@
+{
+  "note": "Wall-clock times of one e2e run, ms: estimates, not benchmarks.",
+  "timings": {
+    "walls": 143,
+    "floor": 86,
+    "roof": 108,
+    "takeoff": 456,
+    "drawing set": 87,
+    "drawings pdf": 88,
+    "ifc": 265,
+    "step": 1218
+  }
+}
