@@ -51,7 +51,8 @@ function describeToken(token: Token): string {
 /**
  * Recursive-descent parser. Grammar (lowest to highest precedence):
  *
- *   expression := term (('+' | '-') term)*
+ *   expression := slope (('+' | '-') slope)*
+ *   slope      := term (':' term | '%')?           -- a pitch or a percent slope, never chained
  *   term       := unary (('*' | '/') unary)*
  *   unary      := ('-' | '+') unary | power
  *   power      := primary ('^' unary)?            -- right-associative, `2^-1` allowed
@@ -66,7 +67,14 @@ class Parser {
   private nesting = 0;
   private readonly depths = new WeakMap<Expression, number>();
 
-  constructor(private readonly tokens: readonly Token[]) {}
+  constructor(
+    private readonly tokens: readonly Token[],
+    private readonly text: string,
+  ) {}
+
+  private source(node: Expression): string {
+    return this.text.slice(node.start, node.end);
+  }
 
   private tok(i: number): Token {
     // The token list always ends with `eof`; clamp so look-ahead past it stays on `eof`.
@@ -159,11 +167,11 @@ class Parser {
   }
 
   private parseExpression(): Expression {
-    let left = this.parseTerm();
+    let left = this.parseSlope();
     while (this.isOp(this.cur(), '+', '-')) {
       const op = this.cur().text as BinaryOperator;
       this.pos++;
-      const right = this.parseTerm();
+      const right = this.parseSlope();
       left = this.node(
         { type: 'binary', op, left, right, start: left.start, end: right.end },
         left,
@@ -171,6 +179,65 @@ class Parser {
       );
     }
     return left;
+  }
+
+  /**
+   * A roof pitch `rise:run` or a percent slope `term%`. Both bind looser than `*`, `/` and `^`
+   * and tighter than `+` and `-`, so `#rise*2:12` is `(#rise*2):12` and `2*12.5%` is `25%`.
+   * Neither chains or combines with the other: `1:2:3`, `6:12%` and `25%:4` are errors.
+   */
+  private parseSlope(): Expression {
+    const left = this.parseTerm();
+    const token = this.cur();
+    let slope: Expression;
+    if (token.kind === ':') {
+      this.pos++;
+      const run = this.parseTerm();
+      slope = this.node(
+        { type: 'pitch', rise: left, run, start: left.start, end: run.end },
+        left,
+        run,
+      );
+    } else if (token.kind === '%') {
+      this.pos++;
+      slope = this.node(
+        { type: 'percent', operand: left, start: left.start, end: token.end },
+        left,
+      );
+    } else {
+      return left;
+    }
+    const next = this.cur();
+    if (next.kind === ':') {
+      this.fail(
+        'syntax',
+        slope.type === 'pitch'
+          ? 'A pitch has one colon: write rise:run'
+          : 'Write a slope as a percent or as rise:run, not both',
+        next.start,
+        next.end,
+      );
+    }
+    if (next.kind === '%') {
+      this.fail(
+        'syntax',
+        slope.type === 'pitch'
+          ? 'Write a slope as rise:run or as a percent, not both'
+          : "Unexpected '%'",
+        next.start,
+        next.end,
+      );
+    }
+    if (slope.type === 'percent' && this.isOp(next, '*', '/', '^')) {
+      const percent = this.source(slope);
+      this.fail(
+        'syntax',
+        `A percent applies to everything before it up to '+' or '-': write (${percent})${next.text}…`,
+        next.start,
+        next.end,
+      );
+    }
+    return slope;
   }
 
   private parseTerm(): Expression {
@@ -549,7 +616,7 @@ export function parseExpression(source: string): Result<Expression> {
   const tokens = tokenize(source);
   if (!tokens.ok) return tokens;
   try {
-    return ok(new Parser(tokens.value).parseAll());
+    return ok(new Parser(tokens.value, source).parseAll());
   } catch (e) {
     if (e instanceof ParseFailure) return e.result;
     throw e;

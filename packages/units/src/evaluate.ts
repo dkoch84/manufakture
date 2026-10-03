@@ -1,4 +1,4 @@
-import type { CallNode, Expression } from './ast';
+import type { BinaryNode, CallNode, Expression, PercentNode, PitchNode } from './ast';
 import {
   ANGLE,
   DIMENSIONLESS,
@@ -38,19 +38,31 @@ export interface EvaluationContext {
 export interface EvaluateOptions extends EvaluationContext {
   /** What the input must evaluate to. */
   readonly expected: QuantityKind;
+  /**
+   * A slope field (a roof or ramp pitch): with `expected: 'angle'`, a division of two bare
+   * numbers is a pitch (`6/12`) when it is the whole input or an operand of `+` or `-`, a percent
+   * is a slope (`25%`), and a bare number in those places is an error because it could be degrees
+   * or a rise. Ignored for other kinds. Default `false`.
+   */
+  readonly slope?: boolean;
 }
 
 interface Environment {
   readonly lengthFactor: number;
   readonly angleFactor: number;
+  readonly angleUnit: AngleUnit;
   readonly variables: VariableLookup;
+  /** Whether percent slopes are allowed (slope fields only). */
+  readonly slope: boolean;
 }
 
-function environment(context: EvaluationContext): Environment {
+function environment(context: EvaluationContext, slope = false): Environment {
   return {
     lengthFactor: lengthUnitFactor(context.lengthUnit ?? 'mm'),
     angleFactor: angleUnitFactor(context.angleUnit ?? 'deg'),
+    angleUnit: context.angleUnit ?? 'deg',
     variables: context.variables ?? (() => undefined),
+    slope,
   };
 }
 
@@ -298,6 +310,110 @@ function evaluateCall(node: CallNode, env: Environment): Result<Quantity> {
   return spec.apply(args, node, env);
 }
 
+interface Span {
+  readonly start: number;
+  readonly end: number;
+}
+
+/**
+ * The angle of a pitch: `atan(rise / run)`. Rise and run are lengths or bare numbers; a bare one
+ * next to a length is read in the display length unit. The run must be positive.
+ */
+function pitchAngle(
+  rise: Quantity,
+  run: Quantity,
+  node: Span,
+  runSpan: Span,
+  env: Environment,
+): Result<Quantity> {
+  const pair = unify(rise, run, env);
+  if (pair === undefined) {
+    return err(
+      'dimension',
+      `A pitch's rise and run must have the same dimension: got ${describeDimension(rise.dimension)} and ${describeDimension(run.dimension)}`,
+      node.start,
+      node.end,
+    );
+  }
+  const [r, h] = pair;
+  if (!isDimensionless(r.dimension) && !dimensionsEqual(r.dimension, LENGTH)) {
+    return err(
+      'dimension',
+      `A pitch's rise and run must be lengths or numbers, got ${describeDimension(r.dimension)}`,
+      node.start,
+      node.end,
+    );
+  }
+  if (!(h.value > 0)) {
+    return err('domain', "A pitch's run must be greater than zero", runSpan.start, runSpan.end);
+  }
+  return ok({ value: Math.atan2(r.value, h.value), dimension: ANGLE });
+}
+
+function evaluatePitch(node: PitchNode, env: Environment): Result<Quantity> {
+  const rise = evaluateNode(node.rise, env);
+  if (!rise.ok) return rise;
+  const run = evaluateNode(node.run, env);
+  if (!run.ok) return run;
+  return pitchAngle(rise.value, run.value, node, node.run, env);
+}
+
+function evaluatePercent(node: PercentNode, env: Environment): Result<Quantity> {
+  if (!env.slope) {
+    return err(
+      'syntax',
+      'A percent is a slope, and is allowed only in a slope field',
+      node.start,
+      node.end,
+    );
+  }
+  const pitch = bareDivision(node.operand, env);
+  if (pitch !== undefined) {
+    if (!pitch.ok) return pitch;
+    return err(
+      'syntax',
+      'In a slope field rise/run is already a pitch: write it without % (6/12), or as a percent (50%)',
+      node.start,
+      node.end,
+    );
+  }
+  const operand = evaluateNode(node.operand, env);
+  if (!operand.ok) return operand;
+  if (!isDimensionless(operand.value.dimension)) {
+    return err(
+      'dimension',
+      `A percent slope needs a number, got ${describeDimension(operand.value.dimension)}`,
+      node.start,
+      node.end,
+    );
+  }
+  return ok({ value: Math.atan(operand.value.value / 100), dimension: ANGLE });
+}
+
+/** `a + b` or `a - b` for the binary node `node`, bringing bare operands to a common dimension. */
+function addOrSubtract(
+  node: BinaryNode,
+  a: Quantity,
+  b: Quantity,
+  env: Environment,
+): Result<Quantity> {
+  const pair = unify(a, b, env);
+  if (pair === undefined) {
+    const verb = node.op === '+' ? 'add' : 'subtract';
+    const joiner = node.op === '+' ? 'and' : 'from';
+    const [first, second] = node.op === '+' ? [a, b] : [b, a];
+    return err(
+      'dimension',
+      `Cannot ${verb} ${describeDimension(first.dimension)} ${joiner} ${describeDimension(second.dimension)}`,
+      node.start,
+      node.end,
+    );
+  }
+  const [x, y] = pair;
+  const value = node.op === '+' ? x.value + y.value : x.value - y.value;
+  return ok({ value, dimension: x.dimension });
+}
+
 /**
  * Evaluates one node and rejects a non-finite result right there, so an overflow is reported
  * where it happens rather than disappearing later (`1/1e300^2` would otherwise give 0).
@@ -344,6 +460,10 @@ function evaluateUnchecked(node: Expression, env: Environment): Result<Quantity>
     }
     case 'call':
       return evaluateCall(node, env);
+    case 'pitch':
+      return evaluatePitch(node, env);
+    case 'percent':
+      return evaluatePercent(node, env);
     case 'binary': {
       const left = evaluateNode(node.left, env);
       if (!left.ok) return left;
@@ -353,23 +473,8 @@ function evaluateUnchecked(node: Expression, env: Environment): Result<Quantity>
       const b = right.value;
       switch (node.op) {
         case '+':
-        case '-': {
-          const pair = unify(a, b, env);
-          if (pair === undefined) {
-            const verb = node.op === '+' ? 'add' : 'subtract';
-            const joiner = node.op === '+' ? 'and' : 'from';
-            const [first, second] = node.op === '+' ? [a, b] : [b, a];
-            return err(
-              'dimension',
-              `Cannot ${verb} ${describeDimension(first.dimension)} ${joiner} ${describeDimension(second.dimension)}`,
-              node.start,
-              node.end,
-            );
-          }
-          const [x, y] = pair;
-          const value = node.op === '+' ? x.value + y.value : x.value - y.value;
-          return ok({ value, dimension: x.dimension });
-        }
+        case '-':
+          return addOrSubtract(node, a, b, env);
         case '*':
           return ok({
             value: a.value * b.value,
@@ -408,6 +513,81 @@ function withoutNegativeZero(q: Quantity): Quantity {
   return q.value === 0 ? { value: 0, dimension: q.dimension } : q;
 }
 
+/**
+ * If `node` is a division of two bare numbers (`6/12`, `#ratio*24/12`), the pitch it stands for
+ * in a slope field; otherwise `undefined`. An error evaluating either side is returned as is.
+ */
+function bareDivision(node: Expression, env: Environment): Result<Quantity> | undefined {
+  if (node.type !== 'binary' || node.op !== '/') return undefined;
+  const rise = evaluateNode(node.left, env);
+  if (!rise.ok) return rise;
+  const run = evaluateNode(node.right, env);
+  if (!run.ok) return run;
+  if (!isDimensionless(rise.value.dimension) || !isDimensionless(run.value.dimension)) {
+    return undefined;
+  }
+  return pitchAngle(rise.value, run.value, node, node.right, env);
+}
+
+/**
+ * A slope field's expression, or an operand of `+`, `-` or a sign within it. A division of two
+ * bare numbers is a pitch (`6/12`), anything else evaluates as usual, and a result without a
+ * unit is an error at the operand that produced it: `30` in `30 + 2°` could be degrees or a rise.
+ */
+function evaluateSlope(node: Expression, env: Environment): Result<Quantity> {
+  if (node.type === 'binary' && (node.op === '+' || node.op === '-')) {
+    const left = evaluateSlope(node.left, env);
+    if (!left.ok) return left;
+    const right = evaluateSlope(node.right, env);
+    if (!right.ok) return right;
+    const result = addOrSubtract(node, left.value, right.value, env);
+    if (result.ok && !Number.isFinite(result.value.value)) {
+      return err('domain', 'Result is not a finite number', node.start, node.end);
+    }
+    return result;
+  }
+  if (node.type === 'unary') {
+    const operand = evaluateSlope(node.operand, env);
+    if (!operand.ok || node.op === '+') return operand;
+    return ok({ value: -operand.value.value, dimension: operand.value.dimension });
+  }
+  const pitch = bareDivision(node, env);
+  if (pitch !== undefined) return pitch;
+  const result = evaluateNode(node, env);
+  if (!result.ok || !isDimensionless(result.value.dimension)) return result;
+  // A division reaching here had operands with dimensions (`#rise/#run`).
+  if (node.type === 'binary' && node.op === '/') {
+    return err(
+      'dimension',
+      'A ratio of lengths is not a slope: write it as rise:run',
+      node.start,
+      node.end,
+    );
+  }
+  const n = String(Number(result.value.value.toPrecision(6)));
+  const unit = env.angleUnit === 'rad' ? ' rad' : '°';
+  return err('dimension', `Ambiguous: write ${n}${unit} or ${n}/12`, node.start, node.end);
+}
+
+function containsPitch(node: Expression): boolean {
+  switch (node.type) {
+    case 'pitch':
+      return true;
+    case 'number':
+    case 'measure':
+    case 'variable':
+      return false;
+    case 'unit':
+    case 'unary':
+    case 'percent':
+      return containsPitch(node.operand);
+    case 'binary':
+      return containsPitch(node.left) || containsPitch(node.right);
+    case 'call':
+      return node.args.some(containsPitch);
+  }
+}
+
 /** Evaluates an already-parsed expression without imposing an expected kind. */
 export function evaluateParsedQuantity(
   expression: Expression,
@@ -422,11 +602,22 @@ export function evaluateParsedQuantity(
  * value in internal units: millimetres, radians, mm/min, rpm, or a plain number.
  */
 export function evaluateParsed(expression: Expression, options: EvaluateOptions): Result<number> {
-  const env = environment(options);
-  const result = evaluateNode(expression, env);
+  const slope = options.slope === true && options.expected === 'angle';
+  const env = environment(options, slope);
+  const result = slope ? evaluateSlope(expression, env) : evaluateNode(expression, env);
   if (!result.ok) return result;
   const target = dimensionOfKind(options.expected);
   const value = promote(result.value, target, env);
+  if (!dimensionsEqual(value.dimension, target) && dimensionsEqual(value.dimension, ANGLE)) {
+    if (containsPitch(expression)) {
+      return err(
+        'dimension',
+        `A pitch is an angle, but ${describeDimension(target)} is expected`,
+        expression.start,
+        expression.end,
+      );
+    }
+  }
   if (!dimensionsEqual(value.dimension, target)) {
     return err(
       'dimension',

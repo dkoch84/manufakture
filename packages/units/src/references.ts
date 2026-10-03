@@ -23,6 +23,7 @@ function collect(node: Expression, out: VariableReference[]): void {
       return;
     case 'unit':
     case 'unary':
+    case 'percent':
       collect(node.operand, out);
       return;
     case 'binary':
@@ -31,6 +32,10 @@ function collect(node: Expression, out: VariableReference[]): void {
       return;
     case 'call':
       for (const a of node.args) collect(a, out);
+      return;
+    case 'pitch':
+      collect(node.rise, out);
+      collect(node.run, out);
       return;
   }
 }

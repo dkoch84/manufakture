@@ -57,5 +57,29 @@ export interface CallNode extends Span {
   readonly args: readonly Expression[];
 }
 
+/**
+ * A roof pitch `rise:run`, an angle of `atan(rise / run)`. Both sides are lengths or bare
+ * numbers (README, "Roof pitch").
+ */
+export interface PitchNode extends Span {
+  readonly type: 'pitch';
+  readonly rise: Expression;
+  readonly run: Expression;
+}
+
+/** A percent slope `25%`, the angle `atan(25 / 100)`. Only valid in slope fields. */
+export interface PercentNode extends Span {
+  readonly type: 'percent';
+  readonly operand: Expression;
+}
+
 export type Expression =
-  NumberNode | MeasureNode | VariableNode | UnitNode | UnaryNode | BinaryNode | CallNode;
+  | NumberNode
+  | MeasureNode
+  | VariableNode
+  | UnitNode
+  | UnaryNode
+  | BinaryNode
+  | CallNode
+  | PitchNode
+  | PercentNode;

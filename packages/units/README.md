@@ -150,15 +150,17 @@ meaning applies:
 ## Expressions
 
 ```
-expression := term (('+' | '-') term)*
+expression := slope (('+' | '-') slope)*
+slope      := term (':' term | '%')?         a pitch or a percent slope, never chained
 term       := unary (('*' | '/') unary)*
 unary      := ('-' | '+') unary | power
 power      := primary ('^' unary)?           right-associative: 2^3^2 = 2^9
 primary    := number-literal | '(' expression ')' unit? | #name | name | name '(' args ')'
 ```
 
-- Precedence from lowest to highest: `+ -`, then `* /`, then unary minus, then `^`. So
-  `-2^2 = -4` and `2^-1 = 0.5`. `×` and the Unicode minus `−` are accepted too.
+- Precedence from lowest to highest: `+ -`, then the pitch colon `:` and the percent sign `%`,
+  then `* /`, then unary minus, then `^`. So `-2^2 = -4` and `2^-1 = 0.5`. See
+  [Roof pitch and slopes](#roof-pitch-and-slopes) for `:` and `%`. `×` and the Unicode minus `−` are accepted too.
 - Numbers: `12`, `1.5`, `.5`, `1e3`. A literal too large for a float64 (`1e400`, `1e308ft`) is
   a `domain` error "Number is too large". A number and a name glued together must be a unit:
   `2pi` is an error that suggests `2*pi`.
@@ -186,6 +188,60 @@ primary    := number-literal | '(' expression ')' unit? | #name | name | name '(
   and a spindle speed to whole rpm. Any other
   value (a number, an area) is rounded as it is, in internal units. With a step they round
   to a multiple of it: `round(width, 1/16")`. `round` rounds halves away from zero.
+
+### Roof pitch and slopes
+
+A roof pitch `p/12` is `p` units of rise per 12 units of run, the angle `atan(p / 12)`: `4/12` is
+18.435°, `6/12` is 26.565° and `12/12` is 45°. Since `6/12` is also a division, which meaning
+applies depends on the field.
+
+1. **`rise:run` is a pitch in any expression.** `6:12` is `atan(6/12)`, an angle. Both sides are
+   lengths or bare numbers: `7.5:12`, `#rise:#run`, `6in:1ft`. A bare side next to a length is
+   read in the display length unit, so `#rise:12` in an inch document is 12 inches of run. The
+   colon binds looser than `*`, `/` and `^` and tighter than `+` and `-`, so `#rise*2:12` is
+   `(#rise*2):12`, `6:24/2` is `6:12`, and `6:12 + 2°` adds two degrees to the pitch. A unary
+   minus belongs to the rise: `-6:12` is a negative pitch. It does not chain: `1:2:3` is a
+   `syntax` error. The run must be greater than zero, and sides that are angles or other
+   dimensions are a `dimension` error.
+2. **A pitch is an angle.** In a length or number field, `6:12` is a `dimension` error, "A pitch
+   is an angle, but a length is expected". Inside an expression it is an angle like any other:
+   `tan(6:12)` is 0.5 in a number field.
+3. **`6/12` is a pitch only in slope fields.** A slope field is an angle field that a roof or ramp
+   feature marks with `slope: true` ([Evaluating](#evaluating)). There, a division of two bare
+   numbers is a pitch when it is the whole input or an operand of `+` or `-` (with or without a
+   sign or parentheses): `6/12`, `7.5/12`, `-6/12`, `(6/12)`, `3*2/12`, and `6/12 + 2°` is
+   28.565°. Everywhere else `6/12` is ordinary division, so in a plain angle field it is still 0.5
+   of the display angle unit (half a degree), as it always was, and `6/12 + 2°` is 2.5°. Inside a
+   product or a function argument it divides as usual in a slope field too: `2*(6/12)` is the
+   number 1, so an ambiguity error (rule 4), not a doubled pitch; write `2*(6:12)`. A division whose operands have a dimension divides as
+   usual (`53.13°/2` is an angle); a ratio of two lengths (`#rise/#run`) is an error that
+   suggests `#rise:#run`.
+4. **A bare number is ambiguous in a slope field.** `30` could be 30° or a 30/12 pitch, so it is a
+   `dimension` error, "Ambiguous: write 30° or 30/12". The rule covers the same places as rule 3:
+   the whole input and every operand of `+` and `-`, and the error highlights the operand without
+   a unit. So `30 + 2°`, `6:12 - 2` and `6/12 + 1` are errors at `30`, `2` and `1`, and `2*15` is
+   an error at `2*15`. (In a plain angle field those operands still take the display angle unit:
+   `30 + 2°` is 32°.) Anything with an angle unit is an angle as before: `26.57°`, `0.5rad`,
+   `atan2(6, 12)`, `6:12`. Inside a function argument a bare number keeps its usual reading, as
+   the function defines it (`atan2(6, 12)`, `round(6:12, 1)`).
+5. **Percent slopes**, in slope fields only. `25%` is a slope of 25 percent, the angle
+   `atan(25 / 100)` (14.036°); it is the pitch `25:100`, and displays as `3/12`. The percent sign
+   sits at the same level as the colon and applies to the whole term before it: `2*12.5%` is 25%,
+   and `#grade%` takes a number variable as percent. A percent combines with `+` and `-` like any
+   angle (`25% + 2°`, `6:12 - 25%`), and inside parentheses or function arguments
+   (`(25%)*2`, `max(25%, 4:12)`). These are errors:
+   - `%` outside a slope field, including plain angle, length and number fields and
+     `evaluateQuantity`: "A percent is a slope, and is allowed only in a slope field" (`syntax`).
+   - `25%*2` and `25%/2`: write `(25%)*2`, or put the factor first (`2*12.5%`).
+   - A percent of a value with a dimension (`25mm%`), `25%%`, and mixing the two notations
+     (`25%:4`, `6:12%`).
+   - A percent of a division of bare numbers, `6/12%` or `50/2%`: in a slope field that division
+     is already a pitch, so it is a `syntax` error, "In a slope field rise/run is already a
+     pitch: write it without % (6/12), or as a percent (50%)". Write `6/12`, or the percent
+     itself (`50%`, `25%`).
+
+Which fields are slope fields is fixed by each feature's schema, and a stored expression keeps
+its source text, so no existing `6/12` changes meaning.
 
 ### Dimensional analysis
 
@@ -234,6 +290,7 @@ import {
   formatNumber,
   formatFeed,
   formatSpindleSpeed,
+  slopeDisplayUnit,
   lengthQuantity,
   angleQuantity,
   numberQuantity,
@@ -253,6 +310,7 @@ interface EvaluateOptions {
   lengthUnit?: 'mm' | 'cm' | 'm' | 'in' | 'ft'; // bare-number length unit (and feed unit per min), default 'mm'
   angleUnit?: 'deg' | 'rad'; // bare-number angle unit, default 'deg'
   variables?: (name: string) => Quantity | undefined; // name has no '#'
+  slope?: boolean; // a slope field: pitch `6/12`, percent `25%`, bare numbers ambiguous (with expected 'angle' only)
 }
 
 interface Quantity {
@@ -348,6 +406,19 @@ formatLength(mm: number, format?: LengthFormat): string
 
 `formatAngle(rad, { unit?: 'deg' | 'rad', decimals? })` gives `45.00°` or `0.7854 rad`.
 
+`formatAngle(rad, { unit: 'pitch', run?: 12, decimals?: 2, slope? })` writes a roof pitch. The
+rise gets `decimals` digits with trailing zeros dropped (`6/12`, `7.5/12`, `6.13/12`), never a
+hyphenated fraction, since `7-1/2/12` could not parse back. With `slope: true` it writes `6/12`,
+otherwise `6:12`. The formatter cannot tell a slope field from an angle field, so pass `slope`
+from the same field option as `EvaluateOptions.slope`: then the output parses back to the
+displayed value. Angles steeper than 89.9° either way fall back to degrees (`89.95°`, `90.00°`),
+since the rise grows without bound near 90° (89.9° is already `6875.49/12`), and a `run`
+that is not a positive finite number falls back to 12.
+
+`slopeDisplayUnit(lengthFormatUnit, angleUnit = 'deg')` gives the default display of a slope
+field: `'pitch'` in documents whose length format is `ft-in` or `in-fraction`, and the
+document's angle unit otherwise (metric roofs are usually given in degrees). The user can switch.
+
 ```ts
 formatFeed(mmPerMinute: number, format?: FeedFormat): string
 formatSpindleSpeed(rpm: number, decimals = 0): string
@@ -373,9 +444,6 @@ non-finite values like `formatLength`.
 
 ## Not yet supported
 
-- **Roof pitch notation** (`6/12` as an angle input) is deferred to M6 (construction). For now,
-  write the angle as `atan2(6, 12)` or `atan(6/12)`. When it is added, pitch notation should
-  apply only to angle fields, so `6/12` keeps its meaning as division everywhere else.
 - A `time` expected kind (for dwells): times evaluate, but no field can ask for one yet.
 - Comparison and conditional operators.
 - Locale decimal commas. The comma separates function arguments.

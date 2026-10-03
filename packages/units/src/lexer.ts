@@ -15,6 +15,10 @@ export type TokenKind =
   | 'inch-mark'
   /** `°` */
   | 'degree-mark'
+  /** `:`, between the rise and the run of a roof pitch */
+  | ':'
+  /** `%`, after a percent slope */
+  | '%'
   | 'eof';
 
 export interface Token {
@@ -47,6 +51,8 @@ const SINGLE_CHAR: Readonly<Record<string, { kind: TokenKind; text: string }>> =
   '"': { kind: 'inch-mark', text: '"' },
   '″': { kind: 'inch-mark', text: '"' }, // double prime
   '°': { kind: 'degree-mark', text: '°' },
+  ':': { kind: ':', text: ':' },
+  '%': { kind: '%', text: '%' },
 };
 
 function isDigit(c: string | undefined): boolean {

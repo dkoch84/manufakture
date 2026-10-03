@@ -10,7 +10,7 @@ Product decisions (license, local-first storage, target machines, what comes fir
 - [0002: Kernel binary, loading and memory lifecycle](0002-kernel-build-and-loading.md). Accepted.
 - [0003: Sketch solver: planegcs in a worker, behind our own wrapper](0003-sketch-solver.md). Accepted.
 - [0004: Document format: a versioned JSON feature list, with names as references](0004-document-format.md). Accepted.
-- [0005: Units: millimetres and radians inside, per-document display units outside](0005-units.md). Accepted.
+- [0005: Units: millimetres and radians inside, per-document display units outside](0005-units.md). Accepted, amended 2026-10-03 (roof pitch notation and percent slopes).
 - [0006: Licensing: GPL-3.0-or-later, and what we may depend on](0006-licensing.md). Accepted, amended 2026-10-01 (fonts, by 0011).
 - [0007: Worker protocol: Comlink, coarse calls, errors as data, named meshes](0007-worker-protocol.md). Accepted, amended 2026-09-26, 2026-10-01 (the print-analysis worker) and 2026-10-02 (the CAM worker, by 0014).
 - [0008: Assembly mate solver: our own joint-coordinate solver in TypeScript](0008-assembly-mate-solver.md). Accepted.
