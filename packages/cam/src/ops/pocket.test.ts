@@ -8,6 +8,7 @@ import { distToLoops, pointInLoops } from '../offset/geometry';
 import { circle, dumbbell, hole, polygon, rect, slot } from '../offset/test-shapes';
 import type { Loop2, Setup, Vec2, Vec3 } from '../types';
 import { validateToolpath } from '../validate';
+import { rapidsIntoStockTop } from '../test-helpers';
 import { registerBuiltinOperations } from '../worker/builtin';
 import { CamCancelled, OperationRegistry, type OperationContext } from '../worker/registry';
 import {
@@ -738,5 +739,68 @@ describe('pocket operation: layers, refusals, plumbing', () => {
   it('is registered as the pocket generator', () => {
     const registry = registerBuiltinOperations(new OperationRegistry());
     expect(registry.get('pocket')).toBe(generatePocket);
+  });
+});
+
+describe('pocket operation: origin on the stock bottom', () => {
+  // Stock 19 mm thick (an 18 mm part and a 1 mm top margin), origin on the bottom: the stock top
+  // is Z 19 while the part's top is Z 18. A retract of 5 is below both.
+  function bottomContext(heights = { clearance: 30, retract: 5 }): OperationContext {
+    return {
+      ...context(),
+      setup: {
+        ...setup,
+        stock: { min: [-50, -50, 0], max: [350, 250, 19] },
+        wcs: { ...setup.wcs, origin: { xy: 'front-left', z: 'bottom' } },
+        heights,
+      },
+    };
+  }
+  // Two pockets and an island: rapids between regions, rings and depth levels.
+  const loops = [rect(0, 0, 40, 30), hole(rect(15, 10, 10, 10)), rect(100, 0, 30, 20)];
+
+  it('never rapids sideways below the stock top when the operation starts below it', async () => {
+    for (const entry of [
+      { kind: 'plunge' } as const,
+      { kind: 'ramp', angle: (5 * Math.PI) / 180 } as const,
+      { kind: 'helix', angle: (3 * Math.PI) / 180, radius: 2 } as const,
+    ]) {
+      const op = pocket({ loops, depth: { top: 18, bottom: 12 }, entry, finishAllowance: 0.3 });
+      const r = await generatePocket(op, bottomContext());
+      if (!r.ok) throw new Error(r.error.message);
+      expect(rapidsIntoStockTop(r.value.toolpath, 19, POCKET_SAFE_ABOVE)).toEqual([]);
+      expect(r.value.toolpath.start[2]).toBe(30);
+      expect(r.value.warnings?.map((w) => w.code)).toContain('top-below-stock');
+    }
+  });
+
+  it('raises the retract above the stock top when the operation starts at it', async () => {
+    const r = await generatePocket(
+      pocket({ loops, depth: { top: 19, bottom: 13 } }),
+      bottomContext(),
+    );
+    if (!r.ok) throw new Error(r.error.message);
+    expect(rapidsIntoStockTop(r.value.toolpath, 19, POCKET_SAFE_ABOVE)).toEqual([]);
+    const sideways = withStarts(r.value.toolpath).filter(
+      ({ from, move }) =>
+        move.kind === 'rapid' && Math.hypot(move.to[0] - from[0], move.to[1] - from[1]) > 0,
+    );
+    expect(sideways.length).toBeGreaterThan(0);
+    for (const { move } of sideways) expect(move.to[2]).toBeGreaterThanOrEqual(19.5);
+    expect(r.value.warnings?.map((w) => w.code) ?? []).not.toContain('top-below-stock');
+  });
+
+  it('keeps a retract that is already above the stock top', async () => {
+    const r = await generatePocket(
+      pocket({ loops, depth: { top: 19, bottom: 13 } }),
+      bottomContext({ clearance: 30, retract: 22 }),
+    );
+    if (!r.ok) throw new Error(r.error.message);
+    const sideways = withStarts(r.value.toolpath).filter(
+      ({ from, move }) =>
+        move.kind === 'rapid' && Math.hypot(move.to[0] - from[0], move.to[1] - from[1]) > 0,
+    );
+    expect(sideways.length).toBeGreaterThan(0);
+    for (const { move } of sideways) expect(move.to[2]).toBe(22);
   });
 });

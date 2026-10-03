@@ -6,6 +6,7 @@ import { distToLoops, pointInLoops } from '../offset/geometry';
 import { polygon, rect } from '../offset/test-shapes';
 import type { Loop2, Setup, Vec2, Vec3 } from '../types';
 import { validateToolpath } from '../validate';
+import { rapidsIntoStockTop } from '../test-helpers';
 import { registerBuiltinOperations } from '../worker/builtin';
 import { CamCancelled, OperationRegistry, type OperationContext } from '../worker/registry';
 import { FACING_SAFE_ABOVE, facingRaster, generateFacing, type FacingOperation } from './facing';
@@ -442,5 +443,55 @@ describe('facingRaster', () => {
     for (const line of raster.value.lines) {
       for (const c of line) expect(c.b[0]).toBeGreaterThan(c.a[0]);
     }
+  });
+});
+
+describe('generateFacing: origin on the stock bottom', () => {
+  // Stock 19 mm thick (an 18 mm part and a 1 mm top margin), origin on the bottom: the stock top
+  // is Z 19. A retract of 5 is below it.
+  function bottomContext(h = { clearance: 30, retract: 5 }): OperationContext {
+    const ctx = context(h);
+    return {
+      ...ctx,
+      setup: {
+        ...ctx.setup,
+        stock: { min: [0, 0, 0], max: [100, 60, 19] },
+        wcs: { ...ctx.setup.wcs, origin: { xy: 'front-left', z: 'bottom' } },
+      },
+    };
+  }
+  const sidewaysRapids = (tp: Toolpath) =>
+    withStarts(tp).filter(
+      ({ from, move }) =>
+        move.kind === 'rapid' && Math.hypot(move.to[0] - from[0], move.to[1] - from[1]) > 0,
+    );
+
+  it('faces from the stock top with every rapid above it (one way, so it retracts per line)', async () => {
+    const r = await run(
+      facing({ depth: { top: 19, bottom: 18 }, stepdown: 0.5, pattern: 'oneway' }),
+      bottomContext(),
+    );
+    expect(rapidsIntoStockTop(r.toolpath, 19, FACING_SAFE_ABOVE)).toEqual([]);
+    const sideways = sidewaysRapids(r.toolpath);
+    expect(sideways.length).toBeGreaterThan(2);
+    for (const { move } of sideways) expect(move.to[2]).toBeCloseTo(19.5, 9);
+    expect(r.warnings?.map((w) => w.code) ?? []).not.toContain('top-below-stock');
+  });
+
+  it('stays above the stock top when the operation starts below it, with a warning', async () => {
+    const r = await run(
+      facing({ depth: { top: 18.5, bottom: 18 }, stepdown: 0.5, pattern: 'oneway' }),
+      bottomContext(),
+    );
+    expect(rapidsIntoStockTop(r.toolpath, 19, FACING_SAFE_ABOVE)).toEqual([]);
+    expect(r.warnings?.map((w) => w.code)).toContain('top-below-stock');
+  });
+
+  it('keeps a retract that is already above the stock top', async () => {
+    const r = await run(
+      facing({ depth: { top: 19, bottom: 18 }, stepdown: 0.5, pattern: 'oneway' }),
+      bottomContext({ clearance: 30, retract: 22 }),
+    );
+    for (const { move } of sidewaysRapids(r.toolpath)) expect(move.to[2]).toBe(22);
   });
 });

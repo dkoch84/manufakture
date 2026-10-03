@@ -375,6 +375,102 @@ describe('job assembly: structure', () => {
     checkJob(setup, j.toolpath, JOB_SAFE_ABOVE);
   });
 
+  it('refuses an operation that rapids sideways below the stock top, and allows rapids straight down', () => {
+    const setup = makeSetup();
+    const op = 'pocket#1';
+    const cut = (to: Vec3): IrEntry => ({
+      kind: 'linear',
+      to,
+      feed: 300,
+      feedClass: 'cut',
+      op,
+      pass: 0,
+    });
+    const operation = (entries: IrEntry[]): JobOperation => ({
+      id: op,
+      tool: flat6,
+      feeds,
+      result: { ok: true, toolpath: { start: [10, 10, 5], entries } },
+    });
+    // Down by rapid to just above the stock top, fed in, then up by rapid: fine.
+    const ok = assembleJob(setup, [
+      operation([
+        { kind: 'rapid', to: [10, 10, 0.5], op, pass: 0 },
+        cut([10, 10, -2]),
+        cut([40, 10, -2]),
+        { kind: 'rapid', to: [40, 10, -1.5], op, pass: 0 },
+        cut([40, 10, -4]),
+        { kind: 'rapid', to: [40, 10, 5], op, pass: 0 },
+      ]),
+    ]);
+    expect(ok.ok).toBe(true);
+    // Sideways at Z -1.5, even over material the operation has cut: refused, naming the operation.
+    const bad = assembleJob(setup, [
+      operation([
+        { kind: 'rapid', to: [10, 10, 0.5], op, pass: 0 },
+        cut([10, 10, -2]),
+        cut([40, 10, -2]),
+        { kind: 'rapid', to: [40, 10, -1.5], op, pass: 0 },
+        { kind: 'rapid', to: [10, 10, -1.5], op, pass: 0 },
+        { kind: 'rapid', to: [10, 10, 5], op, pass: 0 },
+      ]),
+    ]);
+    expect(bad.ok).toBe(false);
+    if (!bad.ok) {
+      expect(bad.error.failures).toEqual([
+        expect.objectContaining({ op, code: 'rapid-below-stock' }),
+      ]);
+      expect(bad.error.message).toContain('below the stock top');
+    }
+    // A sideways rapid that dives below the stock top on the way: refused too.
+    const diving = assembleJob(setup, [
+      operation([{ kind: 'rapid', to: [30, 10, -0.2], op, pass: 0 }, cut([30, 10, -2])]),
+    ]);
+    expect(diving.ok).toBe(false);
+    // Across exactly at the stock top: allowed (nothing is above it to hit).
+    const level = assembleJob(setup, [
+      operation([
+        { kind: 'rapid', to: [10, 10, 0], op, pass: 0 },
+        { kind: 'rapid', to: [30, 10, 0], op, pass: 0 },
+        cut([30, 10, -2]),
+      ]),
+    ]);
+    expect(level.ok).toBe(true);
+  });
+
+  it('assembles a bottom-origin job with a top margin, rapids all above the stock top', async () => {
+    // Stock 19 mm thick (an 18 mm part and a 1 mm top margin), origin on the bottom: the stock
+    // top is Z 19; a retract of 5 is far below it.
+    const setup = makeSetup({
+      stock: { min: [0, 0, 0], max: [200, 150, 19] },
+      wcs: { up: { kind: 'axis', axis: '+z' }, origin: { xy: 'front-left', z: 'bottom' } },
+      heights: { clearance: 30, retract: 5 },
+    });
+    expect(stockTopZ(setup)).toBe(19);
+    const j = await job(setup, [
+      facingOp({ depth: { top: 19, bottom: 18 }, stepdown: 0.5, pattern: 'oneway' }),
+      // The part's top, not the stock's: what the review measured rapiding at Z 18.5.
+      pocketOp({ depth: { top: 18, bottom: 14 } }),
+      profileOp({
+        depth: { top: 18, bottom: 12 },
+        loops: [rect(20, 20, 60, 40), rect(20, 80, 40, 40)],
+      }),
+      drillOp({
+        points: [
+          { at: [10, 10], depth: { top: 19, bottom: 13 }, diameter: 3 },
+          { at: [190, 140], depth: { top: 19, bottom: 13 }, diameter: 3 },
+        ],
+      }),
+    ]);
+    checkJob(setup, j.toolpath, 30);
+    for (const { from, move } of movesWithStarts(j.toolpath)) {
+      if (move.kind !== 'rapid') continue;
+      if (Math.hypot(move.to[0] - from[0], move.to[1] - from[1]) > 1e-9) {
+        expect(Math.min(from[2], move.to[2])).toBeGreaterThanOrEqual(19.5 - 1e-9);
+      }
+    }
+  });
+
   it("passes the operations' warnings through, tagged with their ids", async () => {
     const setup = makeSetup();
     const j = await job(setup, [profileOp({ tool: { ...flat6, fluteLength: 2 } })]);

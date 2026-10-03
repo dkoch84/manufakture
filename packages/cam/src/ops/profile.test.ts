@@ -9,7 +9,8 @@ import { validateToolpath } from '../validate';
 import { createCamWorkerApi } from '../worker/api';
 import { registerBuiltinOperations } from '../worker/builtin';
 import { CamCancelled, OperationRegistry, type OperationContext } from '../worker/registry';
-import { generateProfile, type ProfileOperation } from './profile';
+import { PROFILE_SAFE_ABOVE, generateProfile, type ProfileOperation } from './profile';
+import { rapidsIntoStockTop } from '../test-helpers';
 
 const tool = {
   id: 'tool#1',
@@ -898,5 +899,74 @@ describe('profile operation: the plywood sign outline', () => {
       }
     }
     expect(below).toBeGreaterThan(10);
+  });
+});
+
+describe('profile operation: origin on the stock bottom', () => {
+  // Stock 19 mm thick (an 18 mm part and a 1 mm top margin), origin on the bottom: the stock top
+  // is Z 19 while the part's top is Z 18. A retract of 5 is below both.
+  function bottomContext(heights = { clearance: 30, retract: 5 }): OperationContext {
+    return {
+      ...context(),
+      setup: {
+        ...setup,
+        stock: { min: [-50, -50, 0], max: [350, 250, 19] },
+        wcs: { ...setup.wcs, origin: { xy: 'front-left', z: 'bottom' } },
+        heights,
+      },
+    };
+  }
+
+  it('never rapids sideways below the stock top when the operation starts below it', async () => {
+    for (const entry of [
+      { kind: 'plunge' } as const,
+      { kind: 'ramp', angle: (5 * Math.PI) / 180 } as const,
+      { kind: 'helix', angle: (3 * Math.PI) / 180, radius: 2 } as const,
+    ]) {
+      const op = profile({
+        depth: { top: 18, bottom: 12 },
+        stepdown: 2,
+        entry,
+        finishAllowance: 0.3,
+      });
+      const r = await generateProfile(op, bottomContext());
+      if (!r.ok) throw new Error(r.error.message);
+      const tp = r.value.toolpath;
+      expect(rapidsIntoStockTop(tp, 19, PROFILE_SAFE_ABOVE)).toEqual([]);
+      expect(tp.start[2]).toBe(30);
+      expect(r.value.warnings?.map((w) => w.code)).toContain('top-below-stock');
+    }
+  });
+
+  it('raises the retract above the stock top when the operation starts at it, with no warning', async () => {
+    const r = await generateProfile(
+      profile({
+        depth: { top: 19, bottom: 13 },
+        loops: [rect(0, 0, 40, 20), rect(100, 0, 40, 20)],
+      }),
+      bottomContext(),
+    );
+    if (!r.ok) throw new Error(r.error.message);
+    expect(rapidsIntoStockTop(r.value.toolpath, 19, PROFILE_SAFE_ABOVE)).toEqual([]);
+    const sideways = withStarts(r.value.toolpath).filter(
+      ({ from, move }) =>
+        move.kind === 'rapid' && Math.hypot(move.to[0] - from[0], move.to[1] - from[1]) > 0,
+    );
+    expect(sideways.length).toBeGreaterThan(0);
+    for (const { move } of sideways) expect(move.to[2]).toBeGreaterThanOrEqual(19.5);
+    expect(r.value.warnings?.map((w) => w.code) ?? []).not.toContain('top-below-stock');
+  });
+
+  it('keeps a retract that is already above the stock top', async () => {
+    const r = await generateProfile(
+      profile({
+        depth: { top: 19, bottom: 13 },
+        loops: [rect(0, 0, 40, 20), rect(100, 0, 40, 20)],
+      }),
+      bottomContext({ clearance: 30, retract: 22 }),
+    );
+    if (!r.ok) throw new Error(r.error.message);
+    const rapids = r.value.toolpath.entries.filter((e) => e.kind === 'rapid');
+    expect(rapids.some((e) => isMove(e) && e.to[2] === 22)).toBe(true);
   });
 });

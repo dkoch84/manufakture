@@ -17,7 +17,9 @@
 //
 // A rapid of the job's own never runs below the stock top while moving sideways: every crossing
 // is at or above `stockTop + JOB_SAFE_ABOVE`, and the only moves below that are straight up out of
-// the operation's own last cut. When unsure, the job uses the clearance height.
+// the operation's own last cut. When unsure, the job uses the clearance height. An operation's
+// own rapids are checked too: one that moves sideways with either end below the stock top fails
+// the job, since it would cross uncut stock at the rapid rate (`sidewaysRapidBelow`).
 
 import type { IrEntry, RapidMove, Toolpath } from './ir';
 import { isMove } from './ir';
@@ -172,6 +174,27 @@ function endOf(start: Vec3, entries: readonly IrEntry[]): Vec3 {
     if (isMove(e)) return e.to;
   }
   return start;
+}
+
+/**
+ * The first rapid of `p` that moves in XY with either end below `z`, with where it starts; rapids
+ * straight up or down are allowed (an operation comes down to just above what it cut by rapids).
+ * Canned-cycle markers carry no motion; the expanded moves between them are checked like any other.
+ */
+export function sidewaysRapidBelow(
+  p: Pick<JobPiece, 'start' | 'entries'>,
+  z: number,
+): { readonly index: number; readonly from: Vec3; readonly to: Vec3 } | undefined {
+  let cur = p.start;
+  for (let i = 0; i < p.entries.length; i++) {
+    const e = p.entries[i]!;
+    if (!isMove(e)) continue;
+    if (e.kind === 'rapid' && dxy(cur, e.to) > EPS && Math.min(cur[2], e.to[2]) < z - EPS) {
+      return { index: i, from: cur, to: e.to };
+    }
+    cur = e.to;
+  }
+  return undefined;
 }
 
 const piece = (tp: Toolpath): JobPiece => ({
@@ -337,8 +360,8 @@ const positive = (v: unknown): v is number => typeof v === 'number' && Number.is
 
 /**
  * Assembles a setup's operations into one program. Fails, naming every operation, when any
- * operation that is not suppressed has an error, has no spindle speed, or starts below the stock
- * top; fails when nothing is left to cut.
+ * operation that is not suppressed has an error, has no spindle speed, starts below the stock
+ * top, or rapids sideways below the stock top; fails when nothing is left to cut.
  */
 export function assembleJob(
   setup: JobSetup,
@@ -457,6 +480,22 @@ export function assembleJob(
       return fail(
         `${op.id} starts at Z ${low.start[2]} mm, not above the stock top (${top} mm): the job will not rapid down to it.`,
         [{ op: op.id, code: 'invalid-input', message: `${op.id} starts below the stock top.` }],
+      );
+    }
+
+    for (const p of pieces) {
+      const bad = sidewaysRapidBelow(p, top);
+      if (!bad) continue;
+      const at = (v: Vec3): string => `(${v.map((c) => Math.round(c * 1000) / 1000).join(', ')})`;
+      return fail(
+        `${op.id} rapids sideways below the stock top (${top} mm), from ${at(bad.from)} to ${at(bad.to)}: it would cross uncut stock at the rapid rate. Raise the retract height or regenerate the operation.`,
+        [
+          {
+            op: op.id,
+            code: 'rapid-below-stock',
+            message: `${op.id} rapids sideways below the stock top.`,
+          },
+        ],
       );
     }
 

@@ -18,7 +18,7 @@ import {
   type Vec3,
 } from '../types';
 import { operationMoveCap, withMoveBudget } from './budget';
-import { Emitter, PROFILE_SAFE_ABOVE, levels } from './profile';
+import { Emitter, PROFILE_SAFE_ABOVE, levels, operationHeights } from './profile';
 
 /**
  * Fields of a facing operation that `FacingInput` (types.ts) does not have yet. All optional; the
@@ -291,9 +291,9 @@ async function facingToolpath(
     );
   }
 
-  const heights = context.setup.heights;
-  const retractZ = Math.max(heights.retract, top + FACING_SAFE_ABOVE);
-  const clearanceZ = Math.max(heights.clearance, retractZ);
+  const heights = operationHeights(context, top, FACING_SAFE_ABOVE);
+  const { materialTop, retractZ, clearanceZ } = heights;
+  if (heights.warning) warnings.push(heights.warning);
   const polys = area.map((l) => flattenSegments(l.segments, true, INSIDE_TOLERANCE));
   const em = new Emitter(op.id, op.feeds, [0, 0, clearanceZ], operationMoveCap(context));
   let start: Vec3 | undefined;
@@ -324,7 +324,8 @@ async function facingToolpath(
   const depths = levels(top, bottom, op.stepdown);
   if (!depths.ok) return err(depths.error.code, `${op.id}: ${depths.error.message}`);
   let order = lines.map((chords) => [...chords]);
-  let previous = top;
+  // The first level comes down from above the material, not the operation's top.
+  let previous = materialTop;
   for (const z of depths.value) {
     await context.checkpoint();
     // Zigzag: the first chord runs from whichever end the tool is nearer to.

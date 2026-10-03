@@ -474,7 +474,9 @@ property tests).
 other tests running: the spike's bracket offset both ways in about 5 ms, a 10,000-vertex outline
 in about 140 ms, and the 50 rings of the spike's pocket, each from the source, in about 450 ms (the
 spike measured 264 ms for the offsets alone; the engine also re-flattens the source per call and
-refits every ring). `perf.test.ts` fails only at ten times the spike's figures.
+refits every ring). `perf.test.ts` always logs the medians, but enforces its budgets (ten times
+the spike's figures) only with `CAM_PERF=1` set, since a loaded machine running the full suite can
+miss any wall-clock bound: `CAM_PERF=1 node_modules/.bin/vitest run packages/cam/src/offset/perf.test.ts`.
 
 ## The post-processor engine (`post/`)
 
@@ -934,8 +936,12 @@ had roughing loops), so no finishing move ever runs deeper than one step into st
 cut. Each loop at each level is one
 IR `pass`, numbered from 0. Between levels of one
 loop the tool goes straight on down when it is already at the entry point; otherwise it rapids to
-`retract` (at least 0.5 mm above `top`), across, and down to 0.5 mm (`PROFILE_SAFE_ABOVE`) above
-the depth already cut there, and feeds from there. The program starts at `clearance` above the
+`retract` (at least 0.5 mm above the stock top, or `top` when higher: `operationHeights`), across,
+and down to 0.5 mm (`PROFILE_SAFE_ABOVE`) above the depth already cut there (above the stock top
+before the first level), and feeds from there. The floor is the stock top, not `top` alone: with the
+origin on the stock bottom and a top margin, `top` (the part's top) can lie below the stock top,
+and a retract floor of `top + 0.5` would rapid sideways through the margin. Such an operation also
+gets a `top-below-stock` warning, since its first pass cuts whatever stock is left above `top`. The program starts at `clearance` above the
 first entry and ends with a rapid to `clearance`. `context.checkpoint()` runs before every pass.
 
 **Entries.** `plunge` feeds straight down. `ramp` descends along the path itself at the given angle
@@ -1020,8 +1026,10 @@ than a stepover); failing that, by running on along the ring just cut (cleared
 already) to its point nearest the next ring, possibly by way of one other ring cut in the level;
 failing that, by a retract and a plunge where the ring passes within the tool radius of what is
 cut; and only then by a retract and a new entry. Rapids go up to `retract` (at least
-`POCKET_SAFE_ABOVE`, 0.5 mm, above `top`), across, and down to 0.5 mm above the floor the levels
-before left under the whole tool there (the top on the first level); everything below that is fed,
+`POCKET_SAFE_ABOVE`, 0.5 mm, above the stock top, or `top` when higher), across, and down to 0.5 mm
+above the floor the levels before left under the whole tool there (the stock top, or `top` when
+higher, on the first level; `top-below-stock` warns when `top` is below the stock top, as for the
+profile); everything below that is fed,
 even where part of the tool is over material this level has already cleared.
 `context.checkpoint()` runs before every level and every ring.
 
@@ -1084,8 +1092,9 @@ steps over to the next line as a `cut` feed move at depth, when the straight ste
 grown area (always, for a convex one); between levels it feeds straight down where it stopped.
 `oneway` cuts every line along the raster direction. Whenever the tool cannot step over at depth
 (every line of a one-way raster, a stretch beyond a gap, a step that would leave the area) it
-rapids up to `retract` (at least `FACING_SAFE_ABOVE`, 0.5 mm, above `top`), across, and down to
-0.5 mm above the floor the level before left there (the top on the first level), then plunges at
+rapids up to `retract` (at least `FACING_SAFE_ABOVE`, 0.5 mm, above the stock top, or `top` when
+higher), across, and down to 0.5 mm above the floor the level before left there (the stock top, or
+`top` when higher, on the first level; `top-below-stock` warns when `top` is below it), then plunges at
 the `plunge` feed. Nothing rapids through material. The program starts at `clearance` above the
 first line's start and ends with a rapid to `clearance`. `context.checkpoint()` runs before every
 level and every line.
@@ -1483,7 +1492,11 @@ nothing left to cut is an error too. Operations with no moves are left out with 
 above the stock top (`clearance-raised` warning). Between operations the tool rises straight up to
 the clearance (or stays higher), crosses there, and comes down to where the next operation's
 toolpath starts. An operation that claims to start below `stockTop + JOB_SAFE_ABOVE` is refused,
-since the job would rapid down to it. The program starts at `options.start` (default the WCS
+since the job would rapid down to it. So is an operation with a rapid of its own that moves
+sideways with either end below the stock top (`rapid-below-stock`, `sidewaysRapidBelow`): it would
+cross uncut stock at the rapid rate, and the job cannot tell cleared material from stock. Rapids
+straight up or down are allowed (operations come down by rapid into what they have cut). The
+program starts at `options.start` (default the WCS
 origin at the clearance) and ends with a rise to the clearance and the spindle off.
 
 **Tool changes and the spindle.** At every change of tool: a rise to the clearance, spindle off,

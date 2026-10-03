@@ -47,6 +47,7 @@ import {
   PROFILE_SAFE_ABOVE,
   closestOnPath,
   levels,
+  operationHeights,
   pointAt,
   roughingCovers,
   scrapNormalAt,
@@ -606,15 +607,19 @@ class PocketCutter {
   private readonly r: number;
   private readonly retractZ: number;
   private readonly clearanceZ: number;
+  /** Where the material starts: the stock top, or the operation's top when that is higher. */
+  private readonly materialTop: number;
 
   constructor(
     private readonly op: PocketOperation,
     private readonly context: OperationContext,
   ) {
     this.r = op.tool.diameter / 2;
-    const heights = context.setup.heights;
-    this.retractZ = Math.max(heights.retract, op.depth.top + POCKET_SAFE_ABOVE);
-    this.clearanceZ = Math.max(heights.clearance, this.retractZ);
+    const heights = operationHeights(context, op.depth.top, POCKET_SAFE_ABOVE);
+    this.materialTop = heights.materialTop;
+    this.retractZ = heights.retractZ;
+    this.clearanceZ = heights.clearanceZ;
+    if (heights.warning) this.once(heights.warning.code, heights.warning.message);
     this.em = new Emitter(op.id, op.feeds, [0, 0, this.clearanceZ], operationMoveCap(context));
   }
 
@@ -648,7 +653,8 @@ class PocketCutter {
     const em = this.em;
     const r = this.r;
     const s = geom.options.stepover;
-    const top = op.depth.top;
+    // Uncut material reaches up to the stock top, not just the operation's top.
+    const top = this.materialTop;
     const cut: Loop2[] = [];
     const visited: Vec2[] = [];
     let atDepth = false;
@@ -1043,7 +1049,7 @@ class PocketCutter {
       // Rapids stop above what is cleared under the entry: the clearing's floor where the entry is
       // in the cleared pocket, else the top (the allowance at the wall, or a wall nothing cleared),
       // and after that the level this pass reached.
-      let cleared = covered && !atWall ? floor : op.depth.top;
+      let cleared = covered && !atWall ? floor : this.materialTop;
       for (const z of lv) {
         await this.context.checkpoint();
         this.moveAbove(entryXY, Math.max(z, cleared));

@@ -8,6 +8,7 @@
 // describes the order of passes, the conventions and the warnings.
 
 import type { ArcMove, FeedClass, IrEntry, LinearMove, Toolpath } from '../ir';
+import { stockTopZ } from '../job';
 import { offsetLoops, regionLoops } from '../offset/engine';
 import { checkSegments } from '../offset/flatten';
 import {
@@ -71,6 +72,48 @@ export type ProfileOperation = ProfileInput & ProfileExtras;
 
 /** Rapids stop this far above material the tool has already cut down to, mm. */
 export const PROFILE_SAFE_ABOVE = 0.5;
+
+/** The heights an operation that cuts down from `top` moves at, machine Z. */
+export interface OperationHeights {
+  /** Where the material starts: the stock top, or the operation's top when that is higher. */
+  readonly materialTop: number;
+  /** Sideways rapids within the operation: never below `materialTop + safeAbove`. */
+  readonly retractZ: number;
+  /** Where the operation starts and ends: at least the retract height. */
+  readonly clearanceZ: number;
+  /** Set when the operation's top is below the stock top (stock is left above it). */
+  readonly warning?: CamWarning;
+}
+
+/**
+ * The heights for an operation whose own top is `top`. The floor of the retract height is the
+ * material's top, not the operation's: with the stock top above `top` (the origin on the stock
+ * bottom with a top margin, say), a retract floor of `top + safeAbove` rapids sideways through
+ * the stock. The first approach also feeds down from above the material for the same reason.
+ */
+export function operationHeights(
+  context: OperationContext,
+  top: number,
+  safeAbove: number = PROFILE_SAFE_ABOVE,
+): OperationHeights {
+  const heights = context.setup.heights;
+  const stockTop = stockTopZ(context.setup);
+  const materialTop = Math.max(stockTop, top);
+  const retractZ = Math.max(heights.retract, materialTop + safeAbove);
+  const clearanceZ = Math.max(heights.clearance, retractZ);
+  if (top >= stockTop - EPS) return { materialTop, retractZ, clearanceZ };
+  return {
+    materialTop,
+    retractZ,
+    clearanceZ,
+    warning: warn(
+      'top-below-stock',
+      `The operation's top (Z ${fmtMm(top)} mm) is ${fmtMm(stockTop - top)} mm below the stock top (Z ${fmtMm(stockTop)} mm). Rapids stay above the stock and the tool feeds down from there; the first pass also cuts any stock left above its top.`,
+    ),
+  };
+}
+
+const fmtMm = (v: number): string => String(Math.round(v * 1000) / 1000);
 
 /** Default `tabMinInsideSize`, mm. */
 export const PROFILE_TAB_MIN_INSIDE_SIZE = 25;
@@ -990,9 +1033,9 @@ async function profileToolpath(
     }
   }
 
-  const heights = context.setup.heights;
-  const retractZ = Math.max(heights.retract, top + PROFILE_SAFE_ABOVE);
-  const clearanceZ = Math.max(heights.clearance, retractZ);
+  const opHeights = operationHeights(context, top);
+  const { materialTop, retractZ, clearanceZ } = opHeights;
+  if (opHeights.warning) once(opHeights.warning.code, opHeights.warning.message);
   const check = new ClearanceCheck(side, op.loops);
 
   const em = new Emitter(op.id, op.feeds, [0, 0, clearanceZ], operationMoveCap(context));
@@ -1061,7 +1104,8 @@ async function profileToolpath(
       em.cur = startPos;
     }
 
-    let cleared = top;
+    // The first pass of each loop comes down from above the material, not the operation's top.
+    let cleared = materialTop;
     for (const z of plan.levels) {
       await context.checkpoint();
       // Move to the entry point, unless the last pass left the tool right there.

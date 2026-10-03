@@ -171,3 +171,27 @@ export function seededRandom(seed: number): () => number {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
+
+/**
+ * Where an operation's rapids go wrong over stock whose top is at `stockTop`: a sideways rapid
+ * below `stockTop + safeAbove`, or a rapid down below that before any feed move has gone below
+ * it (a rapid plunge into stock nothing has cut yet). Empty when the rapids are safe.
+ */
+export function rapidsIntoStockTop(tp: Toolpath, stockTop: number, safeAbove: number): string[] {
+  const floor = stockTop + safeAbove - 1e-9;
+  const out: string[] = [];
+  let lowestFed = Infinity;
+  for (const { from, move } of movesWithStarts(tp)) {
+    if (move.kind !== 'rapid') {
+      lowestFed = Math.min(lowestFed, move.to[2]);
+      continue;
+    }
+    const sideways = Math.hypot(move.to[0] - from[0], move.to[1] - from[1]) > 1e-9;
+    if (sideways && Math.min(from[2], move.to[2]) < floor) {
+      out.push(`sideways rapid at Z ${Math.min(from[2], move.to[2])}`);
+    } else if (move.to[2] < floor && move.to[2] < lowestFed) {
+      out.push(`rapid down to Z ${move.to[2]} into uncut stock`);
+    }
+  }
+  return out;
+}

@@ -7,6 +7,7 @@
 // The README's "Drill operation" section describes the moves, the heights and the warnings.
 
 import type { DrillCycle, IrEntry } from '../ir';
+import { stockTopZ } from '../job';
 import type { CamWarning, GeneratedToolpath, OperationContext } from '../worker/registry';
 import {
   err,
@@ -258,12 +259,6 @@ export function nearestNeighbourOrder<T extends { readonly at: Vec2 }>(
   return out;
 }
 
-/** The machine Z of the stock's top. */
-function stockTopZ(context: OperationContext): number {
-  const { stock, wcs } = context.setup;
-  return wcs.origin.z === 'top' ? 0 : stock.max[2] - stock.min[2];
-}
-
 type Plan =
   | { readonly kind: 'drill'; readonly point: MachineDrillPoint; readonly bottom: number }
   | {
@@ -357,7 +352,7 @@ class DrillCutter {
     first: Vec2,
   ) {
     const tops = op.points.map((p) => p.depth.top);
-    this.startZ = Math.max(stockTopZ(context), ...tops);
+    this.startZ = Math.max(stockTopZ(context.setup), ...tops);
     const heights = context.setup.heights;
     this.retractZ = Math.max(heights.retract, this.startZ + DRILL_SAFE_ABOVE);
     this.clearanceZ = Math.max(heights.clearance, this.retractZ);
