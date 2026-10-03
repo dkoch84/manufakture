@@ -14,10 +14,14 @@
 // (`<assembly id>/<instance id>/<body id>`) with its source body's shape, so a pick on an
 // instance can be turned into a stored reference like a pick on a part (the shape is in the
 // part's own coordinates, which is what references and connectors name).
+//
+// Framing members (ADR 0015 decision 5) go to the member store, if one is given, from every
+// result applied here, in the same order: regen sends a member mesh or an unchanged set only once.
 
 import type { ManufaktureDocument } from '@manufakture/core';
 import type { BodyResult, RegenResult } from '@manufakture/regen';
 import type { KernelBody } from '../io/exchange';
+import type { MemberRegenResult } from '../viewport/memberStore';
 import type { BodyInput } from '../viewport/bodies';
 import { fillPlaceholderNames } from '../viewport/naming';
 import { bodyName, instanceViewId, viewBodyId } from './bodies';
@@ -42,9 +46,15 @@ function byId(list: readonly BodyResult[]): Map<string, BodyResult> {
   return new Map(list.map((b) => [b.bodyId, b]));
 }
 
+/** Where the regenerator puts each applied result's framing members (the member store). */
+export interface MemberSink {
+  getState(): { applyRegen(result: MemberRegenResult): void };
+}
+
 export function kernelRegenerator(
   client: () => RegenSource | null,
   registry: Map<string, KernelBody>,
+  members?: MemberSink,
 ): KernelRegenerator {
   // The last mesh of every body, by part and regen body id (a body keeps its mesh while the
   // engine reports it unchanged, whatever its viewport id is now).
@@ -185,7 +195,9 @@ export function kernelRegenerator(
       // order; an older one arriving late would carry meshes the newer one already reported.
       if (result.generation <= applied) return null;
       applied = result.generation;
-      return apply(document, result);
+      const view = apply(document, result);
+      members?.getState().applyRegen(result);
+      return view;
     },
     onInvalidated(listener) {
       listeners.add(listener);

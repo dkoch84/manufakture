@@ -100,4 +100,30 @@ describe('member store', () => {
     expect(store.getState().shown).toBeNull();
     expect(store.getState().meshes.size).toBe(0);
   });
+
+  it('hides the sets after a document switch until the next regen, keeping meshes and sets', () => {
+    const store = createMemberStore();
+    const wall = changed('wall#1', [stud('wall#1', 's1', 0)]);
+    const shape = wall.instances![0]!.shape;
+    store.getState().applyRegen({
+      parts: [{ partId: 'part#1', members: [wall] }],
+      memberMeshes: { added: [{ key: shape, ...boxMesh(2352.675, 38.1, 88.9) }], removed: [] },
+    });
+    store.getState().show('part#1');
+    store.getState().documentSwitched();
+    expect(shownMemberView(store.getState())).toBe(EMPTY_MEMBER_VIEW);
+    // The new document frames the same wall: regen reports it unchanged and sends no mesh, and
+    // it shows again from what the store kept.
+    store.getState().applyRegen({ parts: [{ partId: 'part#1', members: [unchanged(wall)] }] });
+    const view = shownMemberView(store.getState());
+    expect(view.sets.map((s) => s.group)).toEqual(['wall#1']);
+    expect([...view.meshes.keys()]).toEqual([shape]);
+  });
+
+  it("keeps a set's metadata (an opening's header report)", () => {
+    const store = createMemberStore();
+    const wall = { ...changed('wall#1', [stud('wall#1', 's1', 0)]), metadata: { openings: [] } };
+    store.getState().applyRegen({ parts: [{ partId: 'part#1', members: [wall] }] });
+    expect(store.getState().parts.get('part#1')![0]!.metadata).toEqual({ openings: [] });
+  });
 });

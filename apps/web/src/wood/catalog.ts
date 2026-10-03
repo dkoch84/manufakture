@@ -55,12 +55,18 @@ export function stockLabel(entry: StockEntry, units: DisplayUnits): string {
   return entry.name.includes(actual) ? entry.name : `${entry.name} (${actual})`;
 }
 
-/** The picker's groups for a region, for a board form: sticks are cut from lumber only. */
+/**
+ * The picker's groups for a region, for a board form: sticks are cut from lumber only. `only`
+ * keeps one kind whatever the form (construction's stud and sheathing pickers).
+ */
 export function stockGroups(
   region: StockRegion,
   form: BoardParams['form'],
+  only?: 'lumber' | 'sheet',
 ): { label: string; entries: StockEntry[] }[] {
   const { lumber, sheet } = stockByRegion(region);
+  if (only === 'lumber') return [{ label: 'Lumber', entries: lumber }];
+  if (only === 'sheet') return [{ label: 'Sheet goods', entries: sheet }];
   const groups = [
     { label: 'Sheet goods', entries: sheet },
     { label: 'Lumber', entries: lumber },

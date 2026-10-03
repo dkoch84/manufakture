@@ -140,7 +140,7 @@ export function kernelLoader(
   // Viewport body id to kernel shape: the part bodies from regen, then imported STEP bodies.
   const registry = new Map<string, KernelBody>();
   const { exchanger, measurer, referencer } = kernelExchange(() => client, registry);
-  const regenerator = kernelRegenerator(() => client, registry);
+  const regenerator = kernelRegenerator(() => client, registry, memberStore);
   const assembler: Assembler = {
     // Built as a regen builds it: in the active configuration row, rows of instances from the
     // stored document.

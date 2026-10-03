@@ -94,6 +94,15 @@ import {
   type HistoryTarget,
 } from './history/history';
 import { ConfigurationsPanel } from './configurations/ConfigurationsPanel';
+import { ConstructionToolbar } from './construction/ConstructionToolbar';
+import {
+  constructionReady,
+  hasConstruction,
+  isOpening as isConstructionOpening,
+  isWall as isConstructionWall,
+  partHasWalls,
+} from './construction/kinds';
+import { createConstructionUiStore, type ConstructionUiStore } from './construction/state';
 import { DrawingTabs } from './drawing/DrawingTabs';
 import { createDrawingUiStore } from './drawing/state';
 import { ConfigurationSwitcher } from './configurations/ConfigurationSwitcher';
@@ -136,6 +145,7 @@ import { loaderForLocation, type LoadStatus, type SceneLoader } from './viewport
 import { SelectionPanel, Toolbar } from './viewport/Toolbar';
 import { Viewport, type EngineFactory, type ViewportApi } from './viewport/Viewport';
 import { ThreadOverlay } from './viewport/ThreadOverlay';
+import { memberStore, type MemberStore } from './viewport/memberStore';
 import { GrainOverlay } from './wood/GrainOverlay';
 import { isBoard, isJoint } from './wood/kinds';
 import { StockPanel } from './wood/StockPanel';
@@ -184,6 +194,13 @@ const LaserDialog = lazy(() =>
 // The Cut list panel (woodworking, M4) likewise, with the nesting and the PDF writer.
 const CutListPanel = lazy(() =>
   import('./wood/cutlist/CutListPanel').then((m) => ({ default: m.CutListPanel })),
+);
+// The Construction panel and its Wall and Opening tools (M6), with the construction domain.
+const ConstructionPanel = lazy(() =>
+  import('./construction/ConstructionPanel').then((m) => ({ default: m.ConstructionPanel })),
+);
+const ConstructionTools = lazy(() =>
+  import('./construction/ConstructionTools').then((m) => ({ default: m.ConstructionTools })),
 );
 
 /** The open dialog: a feature dialog, or the Board or Joint dialog (`wood.*` extensions). */
@@ -244,6 +261,10 @@ export interface AppProps {
    * library). Null: the Tools dialog offers the built-in tools only.
    */
   openToolLibrary?: (() => Promise<ToolLibraryStore>) | null;
+  /** The construction toolbar group's and panels' state (default: the app's own). */
+  constructionUi?: ConstructionUiStore;
+  /** The framing members regen sent (default: the app's member store). */
+  members?: MemberStore;
 }
 
 /** Whether `doc` has imported reference bodies, which live outside regen and must be read again. */
@@ -305,7 +326,11 @@ export function App({
   camUi: givenCamUi,
   createCamClient = spawnCamClient,
   openToolLibrary,
+  constructionUi: givenConstructionUi,
+  members = memberStore,
 }: AppProps) {
+  const [ownConstructionUi] = useState(createConstructionUiStore);
+  const constructionUi = givenConstructionUi ?? ownConstructionUi;
   const [ownAssemblyUi] = useState(createAssemblyUiStore);
   const assemblyUi = givenAssemblyUi ?? ownAssemblyUi;
   // The drawing tab shown over the part studio, if any (M4 T4.4g).
@@ -466,6 +491,24 @@ export function App({
   // The assembly tab shown instead of the part studio, if any: its instances share the part
   // bodies' meshes, each placed by its solved transform (or a drag's or a preview's pose).
   const assemblyId = useStore(shownDocuments, (s) => s.activeAssemblyId);
+  // Framing members of the part studio shown (none on an assembly tab).
+  const memberPartId = assemblyId === null ? shownPartId : null;
+  useEffect(() => {
+    members.getState().show(memberPartId);
+  }, [members, memberPartId]);
+  // The construction group: the panel opens by itself for a document with construction in it.
+  const constructionOpen = useStore(constructionUi, (s) => s.open);
+  const constructionTool = useStore(constructionUi, (s) => s.tool);
+  const withConstruction = hasConstruction(document);
+  const constructionDoc = useRef<string | null>(null);
+  useEffect(() => {
+    const switched = constructionDoc.current !== document.id;
+    constructionDoc.current = document.id;
+    if (withConstruction) constructionUi.getState().setOpen(true);
+    else if (switched) {
+      constructionUi.setState({ open: false, tool: null, editingWall: null, level: null });
+    }
+  }, [constructionUi, document.id, withConstruction]);
   const modelAssemblies = useModel(shownModel, (s) => s.assemblies);
   const modelSources = useModel(shownModel, (s) => s.sources);
   const assemblyPanel = useStore(assemblyUi, (s) => s.panel);
@@ -690,6 +733,8 @@ export function App({
     ) => {
       loader.exchanger?.retain(new Set());
       setImports([]);
+      // Members of the document before are hidden until this one's first regen.
+      if (doc.id !== documents.getState().document.id) members.getState().documentSwitched();
       documents.getState().load(doc);
       setRestoreRequest(hasReferenceImports(doc) ? doc : null);
       const on = options.stored ? (options.branch ?? MAIN_BRANCH) : MAIN_BRANCH;
@@ -699,7 +744,7 @@ export function App({
       showBranchInUrl(options.stored && on !== MAIN_BRANCH ? on : null);
       if (!options.stayHome) setView('editor');
     },
-    [loader, documents, branchStore],
+    [loader, documents, branchStore, members],
   );
   const restoring = useRef<ManufaktureDocument | null>(null);
   useEffect(() => {
@@ -1606,7 +1651,14 @@ export function App({
       const feature = findPart(doc, partId)?.features.find((f) => f.id === featureId);
       if (!feature) return;
       if (feature.kind === 'sketch') sketching.enter({ kind: 'edit', featureId });
-      else if (isBoard(feature)) setDialog({ kind: 'board', featureId });
+      else if (isConstructionWall(feature)) {
+        constructionUi.getState().setOpen(true);
+        constructionUi.getState().editWall(featureId);
+      } else if (isConstructionOpening(feature)) {
+        constructionUi
+          .getState()
+          .startTool({ kind: 'opening', featureId, wall: feature.dependsOn[0] ?? null });
+      } else if (isBoard(feature)) setDialog({ kind: 'board', featureId });
       else if (isJoint(feature)) setDialog({ kind: 'joint', featureId });
       else if (isDialogKind(feature.kind)) {
         setDialog({
@@ -1616,7 +1668,7 @@ export function App({
         });
       }
     },
-    [documents, sketching],
+    [documents, sketching, constructionUi],
   );
   useSketchShortcuts(session, sketching.active);
   // The laser export shares the side panel with the feature dialogs and the workspaces, so it is
@@ -2016,6 +2068,12 @@ export function App({
         assemblyId === null && (
           <div className="feature-bar">
             <FeatureToolbar disabled={dialog !== null} onOpen={(kind) => setDialog({ kind })} />
+            <ConstructionToolbar
+              ui={constructionUi}
+              disabled={dialog !== null}
+              ready={constructionReady(document)}
+              hasWalls={partHasWalls(document, activePartId)}
+            />
           </div>
         )}
       {!locked && !printing && !drawingOpen && assemblyId !== null && (
@@ -2142,6 +2200,7 @@ export function App({
           )}
           <Viewport
             bodies={shownBodies}
+            members={members}
             onReady={setViewport}
             {...(createEngine ? { createEngine } : {})}
             {...stores}
@@ -2324,6 +2383,23 @@ export function App({
                 createVersion={autosave ? autosave.createVersion : null}
                 onClose={() => assemblyUi.getState().close()}
               />
+            ) : constructionTool !== null && !locked && assemblyId === null && dialog === null ? (
+              <Suspense
+                fallback={
+                  <aside className="selection-panel" aria-busy="true">
+                    Opening...
+                  </aside>
+                }
+              >
+                <ConstructionTools
+                  documents={documents}
+                  model={model}
+                  selection={selection}
+                  ui={constructionUi}
+                  partId={activePartId}
+                  viewport={viewport}
+                />
+              </Suspense>
             ) : dialog?.kind === 'board' ? (
               <Suspense
                 fallback={
@@ -2408,6 +2484,19 @@ export function App({
                       sizer={loader.sizer ?? null}
                       disabled={exportAll !== null}
                       onClose={() => setCutListOpen(false)}
+                    />
+                  </Suspense>
+                )}
+                {!locked && constructionOpen && assemblyId === null && (
+                  <Suspense fallback={<aside className="selection-panel" aria-busy="true" />}>
+                    <ConstructionPanel
+                      documents={documents}
+                      model={model}
+                      members={members}
+                      selection={selection}
+                      ui={constructionUi}
+                      partId={activePartId}
+                      disabled={exportAll !== null}
                     />
                   </Suspense>
                 )}

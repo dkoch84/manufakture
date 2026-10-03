@@ -13,6 +13,8 @@ export interface StockPickerProps {
   units: DisplayUnits;
   /** Sticks are cut from lumber only; without a form every stock is offered. */
   form?: BoardParams['form'];
+  /** Offer one kind of stock only (construction: studs from lumber, layers from sheets). */
+  only?: 'lumber' | 'sheet' | undefined;
   label?: string;
   testId?: string;
   error?: string | undefined;
@@ -25,6 +27,7 @@ export function StockPicker({
   value,
   units,
   form = 'panel',
+  only,
   label = 'Stock',
   testId = 'field-stock',
   error,
@@ -33,7 +36,7 @@ export function StockPicker({
   const chosen = findStock(value);
   // The chosen stock's region when there is one (an edited board), else the units'.
   const [region, setRegion] = useState<StockRegion>(() => chosen?.region ?? documentRegion(units));
-  const groups = stockGroups(region, form);
+  const groups = stockGroups(region, form, only);
   const inRegion = groups.some((g) => g.entries.some((e) => e.id === value));
   return (
     <div className="dialog-field stock-picker">

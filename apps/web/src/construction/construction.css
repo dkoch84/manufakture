@@ -1,0 +1,125 @@
+/* The Construction panel and its tools (Wall, Opening). Heads and buttons follow the Variables
+   panel; dialog fields follow the feature dialogs (features.css). */
+.construction-panel button,
+.construction-panel select,
+.construction-panel input,
+.construction-tool button,
+.construction-tool select,
+.construction-tool input {
+  font: inherit;
+  font-size: 0.78rem;
+}
+
+.construction-notice {
+  border: 1px solid #d9a400;
+  background: #fff8db;
+  border-radius: 4px;
+  padding: 0.4rem 0.5rem;
+  margin-bottom: 0.4rem;
+  font-size: 0.75rem;
+}
+
+.construction-notice p {
+  margin: 0 0 0.3rem;
+}
+
+.construction-help {
+  font-size: 0.75rem;
+  margin-bottom: 0.4rem;
+}
+
+.construction-help ul {
+  padding-left: 1.2rem;
+  margin: 0.3rem 0;
+}
+
+.construction-section {
+  border-top: 1px solid #e2e2e2;
+  padding-top: 0.4rem;
+  margin-top: 0.4rem;
+}
+
+.construction-section h3 {
+  font-size: 0.85rem;
+  margin: 0 0 0.3rem;
+}
+
+.construction-list,
+.construction-openings,
+.role-counts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.construction-openings {
+  padding-left: 0.8rem;
+  margin-top: 0.25rem;
+}
+
+.role-counts {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 0.2rem 0.6rem;
+  font-size: 0.72rem;
+  color: #555;
+}
+
+.construction-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.35rem;
+}
+
+.wall-count {
+  font-size: 0.75rem;
+  color: #444;
+}
+
+.construction-form {
+  border: 1px solid #e2e2e2;
+  border-radius: 4px;
+  padding: 0.4rem;
+  margin: 0.3rem 0;
+}
+
+.construction-form h4 {
+  margin: 0 0 0.3rem;
+  font-size: 0.8rem;
+}
+
+.construction-layers {
+  padding-left: 1.2rem;
+  margin: 0.2rem 0;
+}
+
+.construction-header {
+  border: 1px dashed #ccc;
+  margin: 0.3rem 0;
+  padding: 0.3rem;
+}
+
+.construction-header legend {
+  font-size: 0.72rem;
+}
+
+.construction-steps {
+  padding-left: 1.3rem;
+  margin: 0.2rem 0;
+  font-size: 0.78rem;
+}
+
+.level-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  align-items: flex-end;
+}
+
+.level-row .dialog-field input {
+  width: 6.5rem;
+}

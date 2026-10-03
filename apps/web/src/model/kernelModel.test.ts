@@ -156,4 +156,22 @@ describe('kernelRegenerator', () => {
     expect(registry.has('assembly#1/inst#2/extrude#1')).toBe(false);
     expect(registry.has('assembly#1/inst#1/extrude#1')).toBe(true);
   });
+
+  it('passes every applied result to the member sink, in order, and no superseded one', async () => {
+    const replies = [
+      result(2, [body('extrude#1', 1, true)]),
+      result(1, [body('extrude#1', 1, true)]),
+    ];
+    const seen: number[] = [];
+    const regen = kernelRegenerator(() => ({ regen: async () => replies.shift()! }), new Map(), {
+      getState: () => ({
+        applyRegen: (r) => seen.push((r as unknown as { generation: number }).generation),
+      }),
+    });
+    const doc = createDocument({ id: 'd', name: 'D' });
+    await regen.regen(doc);
+    // An older result arriving late is dropped, for members as for bodies.
+    expect(await regen.regen(doc)).toBeNull();
+    expect(seen).toEqual([2]);
+  });
 });

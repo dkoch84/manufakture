@@ -14,6 +14,7 @@ import type {
   MemberMeshData,
   MemberMeshUpdate,
   MemberSetResult,
+  JsonValue,
 } from '@manufakture/regen';
 import type { SelectableItem } from '../state/selection';
 
@@ -77,6 +78,8 @@ export interface MemberSetView {
   features: readonly string[];
   members: readonly MemberData[];
   instances: readonly MemberInstances[];
+  /** What the domain's member stage reported with the set (a wall's opening headers). */
+  metadata?: JsonValue;
 }
 
 /** What the viewport draws: the shape meshes by key, and the active part's member sets. */
@@ -121,6 +124,7 @@ export function applySetResults(
         features: r.features,
         members: r.members,
         instances: r.instances,
+        ...(r.metadata === undefined ? {} : { metadata: r.metadata }),
       });
       continue;
     }

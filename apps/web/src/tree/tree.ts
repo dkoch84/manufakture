@@ -14,6 +14,7 @@ import {
   type Part,
 } from '@manufakture/core';
 import type { FeatureResult, RegenError } from '@manufakture/regen';
+import { constructionLabel } from '../construction/kinds';
 import { boardStockName, extensionLabel, jointDetail } from '../wood/kinds';
 
 /**
@@ -70,7 +71,7 @@ export const KIND_LABELS: Record<FeatureKind, string> = {
 
 /** What a feature is, for its row's icon title: the domain's name for a known extension type. */
 export function featureKindLabel(feature: Feature): string {
-  return extensionLabel(feature) ?? KIND_LABELS[feature.kind];
+  return extensionLabel(feature) ?? constructionLabel(feature) ?? KIND_LABELS[feature.kind];
 }
 
 /**

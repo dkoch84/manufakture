@@ -5,9 +5,10 @@ import { openScene, settle, type Vec3 } from './helpers';
 
 // Framing members in the viewport (T6.5c): instanced drawing, picking a member as a whole, its
 // info panel, hiding a wall layer, the level cut, 3MF export and a frame time on the house.
-// No construction UI exists yet, so the members come from the app's framing fixtures
-// (src/viewport/memberFixtures.ts): `?scene=framing` shows a fixture with no kernel, and the
-// `loadMemberFixture` hook loads one next to a kernel part for the export check.
+// The members come from the app's framing fixtures (src/viewport/memberFixtures.ts), which fix the
+// scene exactly; walls drawn with the construction tools are construction-walls.spec.ts's.
+// `?scene=framing` shows a fixture with no kernel, and the `loadMemberFixture` hook loads one
+// next to a kernel part for the export check.
 
 interface MemberStats {
   sets: number;
