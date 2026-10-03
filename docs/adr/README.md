@@ -20,6 +20,7 @@ Product decisions (license, local-first storage, target machines, what comes fir
 - [0012: 3D printing: a document-level print section, a print package and worker, standard 3MF by download](0012-3d-printing.md). Accepted.
 - [0013: Domain packages: extension features that make bodies, namespaced domain data, a generic takeoff](0013-domain-packages.md). Accepted.
 - [0014: CAM architecture: a document-level cam section, a pure cam package and worker, posts as data](0014-cam-architecture.md). Accepted.
+- [0015: The construction domain: walls, openings, floors and roofs as extensions, framing members as data](0015-construction-domain.md). Accepted.
 
 ## Adding an ADR
 
