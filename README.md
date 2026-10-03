@@ -80,6 +80,7 @@ The user guide lives in `docs/user`:
 - [Text](docs/user/text.md): raised and sunk lettering, fonts, and editing the text later
 - [Threads](docs/user/threads.md): external and internal screw threads, sizes, clearance and cosmetic threads
 - [Woodworking](docs/user/woodworking.md): boards cut from real stock, their grain, the Stock panel, joints, the cut list and sheet layouts
+- [Construction](docs/user/construction.md): not an engineering tool; walls, openings, floors, roofs, framing, takeoff and drawings (in progress)
 - [Configurations](docs/user/configurations.md): variants in a table, switching them, exporting every one
 - [Version history](docs/user/history.md): named versions, the timeline, viewing and restoring a past state
 - [Derived parts](docs/user/derived.md): a part from a version of another document, placed, and updated to newer versions
