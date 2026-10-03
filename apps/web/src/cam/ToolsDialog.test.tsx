@@ -50,7 +50,13 @@ describe('ToolsDialog', () => {
       diameter: { source: '0.25in', lengthUnit: 'in' },
       source: { library: 'builtin', id: 'c3d-201' },
     });
-    expect(screen.getByTestId('cam-tool-tool#1').textContent).toContain('#201');
+    // The built-in name already starts with the number: it is not shown twice.
+    expect(within(screen.getByTestId('cam-tool-tool#1')).getByText(/^#201/).textContent).toBe(
+      findBuiltinTool('c3d-201')!.name,
+    );
+    expect(
+      within(screen.getByTestId('cam-library-tool-c3d-201')).getByText(/^#201/).textContent,
+    ).toBe(findBuiltinTool('c3d-201')!.name);
     expect(documents.getState().undoLabel).toBe(`Add tool ${findBuiltinTool('c3d-201')!.name}`);
   });
 

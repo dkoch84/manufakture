@@ -1,0 +1,67 @@
+{
+  "note": "Estimates. Timings are wall-clock times of this end-to-end run (a production build in headless Chromium with software WebGL), on the computer named below; the cut time is the app's estimate from the feeds and the machine's rapid rate, ignoring acceleration.",
+  "computer": {
+    "cpu": "AMD Ryzen 5 7600X 6-Core Processor",
+    "cores": 12,
+    "os": "linux 7.2.7-arch1-1"
+  },
+  "machine": {
+    "id": "shapeoko-5-pro-4x4",
+    "name": "Shapeoko 5 Pro 4x4",
+    "configuration": "default"
+  },
+  "sign": { "size": [400, 200, 11.6], "stock": [420, 220, 11.6], "volume": 891956.9248401319 },
+  "generate": { "ms": 2334, "operations": 4, "moves": 9718 },
+  "simulation": {
+    "ms": 9958,
+    "status": "Simulated to move 9718 of 9718, on 2761 x 1447 cells of 0.15 mm.",
+    "gouges": "none",
+    "collisions": "none",
+    "leftover": "Left on the part: 148915 cells, up to 1.94 mm.",
+    "leftoverOutsideLettering": 0
+  },
+  "arcsWrittenAsLines": { "carbide-motion": 1, "grbl": 1 },
+  "estimatedCutTime": {
+    "preview": "19:26",
+    "export": "19:26",
+    "seconds": 1166,
+    "job": "16,996 mm cut; Rapids 3,750 mm, 9718 moves, 3 tool changes",
+    "operations": [
+      { "name": "Pocket 1", "cut": "4,366 mm", "time": "5:13" },
+      { "name": "Drill 1", "cut": "594 mm", "time": "0:47" },
+      { "name": "V-carve 1 (clearing)", "cut": "2,089 mm", "time": "2:42" },
+      { "name": "V-carve 1", "cut": "7,530 mm", "time": "9:14" },
+      { "name": "Profile 1", "cut": "2,417 mm", "time": "0:58" }
+    ]
+  },
+  "files": [
+    {
+      "post": "carbide-motion",
+      "name": "Plywood sign - Setup 1.nc",
+      "bytes": 221489,
+      "lines": 9978,
+      "toolChanges": 3
+    },
+    {
+      "post": "grbl",
+      "name": "Plywood sign - Setup 1 - 1 of 3 - #102 1_8_ flat end mill.nc",
+      "bytes": 54768,
+      "lines": 2134,
+      "toolChanges": 0
+    },
+    {
+      "post": "grbl",
+      "name": "Plywood sign - Setup 1 - 2 of 3 - #301 90 deg V-bit.nc",
+      "bytes": 166103,
+      "lines": 7792,
+      "toolChanges": 0
+    },
+    {
+      "post": "grbl",
+      "name": "Plywood sign - Setup 1 - 3 of 3 - #201 1_4_ flat end mill.nc",
+      "bytes": 969,
+      "lines": 63,
+      "toolChanges": 0
+    }
+  ]
+}

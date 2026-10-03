@@ -701,6 +701,15 @@ export function formatFeed(mmPerMin: number, units: PostUnits): string {
     : `${Math.round(mmPerMin)} mm/min`;
 }
 
+/**
+ * A date as `2026-10-02` in the computer's own time zone: the day the user is in, which
+ * `toISOString` (UTC) is not in the evening west of Greenwich or the morning east of it.
+ */
+export function localDate(at: Date): string {
+  const two = (n: number) => String(n).padStart(2, '0');
+  return `${at.getFullYear()}-${two(at.getMonth() + 1)}-${two(at.getDate())}`;
+}
+
 /** A size as `60 x 40 x 12 mm`. */
 export function formatSize(size: Vec3, units: PostUnits): string {
   const unit = units === 'inch' ? ' in' : ' mm';

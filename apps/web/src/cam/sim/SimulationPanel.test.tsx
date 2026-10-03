@@ -1,6 +1,7 @@
 // The simulation panel on its own, with an in-process session for a client: the part's mesh is
 // fetched when the preview has none, and fetched again for another loader or another setup; the
-// gouge line states the sideways allowance; the preview is told when the simulated stock shows.
+// gouge line states the sideways allowance; the preview is told when the simulated stock shows;
+// the test hook says where the gouge and leftover cells are.
 
 import {
   SIM_DEFLECTION,
@@ -12,7 +13,7 @@ import {
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SimulationClient } from './runner';
-import { SimulationPanel, type SimulationSource } from './SimulationPanel';
+import { SimulationPanel, type CamSimHook, type SimulationSource } from './SimulationPanel';
 
 afterEach(cleanup);
 
@@ -140,5 +141,32 @@ describe('SimulationPanel', () => {
         `No gouge (tolerance ${SIM_TOLERANCE.toFixed(2)} mm; a cut within ${(SIM_TOLERANCE + SIM_DEFLECTION).toFixed(2)} mm of a wall is not checked).`,
       ),
     );
+  });
+
+  it('gives the test hook the gouge and leftover cells, in model X and Y', async () => {
+    // The WCS origin at model (100, 50, 0): the plunge at machine (5, 5) is at model (105, 55).
+    const shifted = { ...frame, origin: [100, 50, 0] } as const;
+    const part: Mesh = {
+      positions: new Float32Array([100, 50, 0, 130, 50, 0, 130, 60, 0, 100, 60, 0]),
+      indices: new Uint32Array([0, 1, 2, 0, 2, 3]),
+    };
+    render(
+      <SimulationPanel
+        source={{ ...source('setup#1'), frame: shifted, part }}
+        done={3}
+        client={client()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('cam-sim-toggle'));
+    await waitFor(() =>
+      expect(screen.getByTestId('cam-sim-gouges').textContent).toMatch(/^Gouges: /),
+    );
+    const hook = window.__manufakture!.camSim as CamSimHook;
+    const gouges = hook.cells('gouge');
+    expect(gouges.length).toBeGreaterThan(0);
+    for (const [x, y] of gouges) {
+      expect(Math.hypot(x - 105, y - 55)).toBeLessThanOrEqual(tool.diameter / 2 + 1);
+    }
+    expect(hook.cells('leftover')).toEqual([]);
   });
 });

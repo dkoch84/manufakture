@@ -32,6 +32,7 @@ import {
   formatLength,
   formatSize,
   groupingWarnings,
+  localDate,
   multiToolModes,
   originText,
   withPost,
@@ -104,6 +105,14 @@ describe('export settings', () => {
     expect(withPost(withPost(grbl, 'linuxcnc'), 'grbl').multiTool).toBe('files');
     expect(multiToolModes('grbl')).toEqual(['files', 'pause']);
     expect(multiToolModes('constructor')).toEqual([]);
+  });
+});
+
+describe('localDate', () => {
+  it("is the computer's own date, not the UTC one", () => {
+    expect(localDate(new Date(2026, 9, 2, 23, 59))).toBe('2026-10-02');
+    expect(localDate(new Date(2026, 9, 3, 0, 1))).toBe('2026-10-03');
+    expect(localDate(new Date(2027, 0, 9))).toBe('2027-01-09');
   });
 });
 

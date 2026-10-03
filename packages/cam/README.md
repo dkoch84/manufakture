@@ -1561,7 +1561,10 @@ the tolerance (`SIM_TOLERANCE`, 0.05 mm) plus the chord deflection of the mesh a
 0.07 mm by default. `partBands` gives each cell under the part the lowest and the highest the
 part's surface gets within that distance of its centre, from the triangles seen from above (facing
 up by the mesh's winding, read by `upSign`, or edge-on walls; never the underside), each bounded
-by its plane's slope. `compare()` gives each cell a class (`SIM_CLASS`): a **gouge** where the
+by its plane's slope; a wall that reaches the part's lowest point (a through hole's, the
+outline's) sets no lower bound, since nothing of the part lies under it, so a through cut's
+breakthrough next to it is not a gouge (where the mesh's chords stand into a bored hole, cell
+centres under the part's top in the mesh are rightly cut to below the bottom). `compare()` gives each cell a class (`SIM_CLASS`): a **gouge** where the
 material is more than the tolerance below the lowest; **leftover** where it is more than the
 tolerance above the highest; otherwise **ok** under the part and **none** where the part is not
 under the centre. So a tool running exactly along a wall, curved ones included, is not a gouge,

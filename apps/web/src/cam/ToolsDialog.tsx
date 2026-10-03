@@ -30,6 +30,7 @@ import {
   TOOL_KIND_LABELS,
   buildTool,
   newToolForm,
+  numberedName,
   toolFields,
   toolFormOf,
   unverifiedText,
@@ -106,10 +107,7 @@ export function ToolsDialog({ documents, openLibrary, onClose }: ToolsDialogProp
             <ul className="cam-tool-list" data-testid="cam-doc-tools">
               {doc.cam.tools.map((t) => (
                 <li key={t.id} data-testid={`cam-tool-${t.id}`}>
-                  <span className="cam-tool-name">
-                    {t.number !== undefined ? `#${t.number} ` : ''}
-                    {t.name}
-                  </span>
+                  <span className="cam-tool-name">{numberedName(t.number, t.name)}</span>
                   <span className="cam-tool-detail">
                     {TOOL_KIND_LABELS[t.kind]}, {t.diameter.source}, {t.flutes} flute
                     {t.flutes === 1 ? '' : 's'}
@@ -210,10 +208,7 @@ function LibraryList({
             const unverified = unverifiedText(t);
             return (
               <li key={t.id} data-testid={`cam-library-tool-${t.id}`}>
-                <span className="cam-tool-name">
-                  {t.vendor ? `#${t.vendor.number} ` : ''}
-                  {t.name}
-                </span>
+                <span className="cam-tool-name">{numberedName(t.vendor?.number, t.name)}</span>
                 <span className="cam-tool-detail">
                   {TOOL_KIND_LABELS[t.kind]}, {t.diameter} {t.unit}
                 </span>

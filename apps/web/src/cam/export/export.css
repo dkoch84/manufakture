@@ -100,9 +100,12 @@
   padding-left: 1.2rem;
 }
 
+/* The sheet takes the room the dialog has left and scrolls itself, so that the buttons below it
+   stay in view in a short window. */
 .cam-export-sheet {
+  flex: 1 1 22rem;
   width: 100%;
-  min-height: 22rem;
+  min-height: 10rem;
   border: 1px solid #d5dbe2;
 }
 

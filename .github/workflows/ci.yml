@@ -74,7 +74,7 @@ jobs:
       - name: Install Chromium and its system libraries
         run: pnpm --filter @manufakture/web exec playwright install --with-deps chromium
       - name: Run e2e tests
-        # Includes the acceptance walkthroughs of M1, M2 and M3 (e2e/m1-*, m2-*, m3-*.spec.ts):
+        # Includes the acceptance walkthroughs of M1 to M5 (e2e/m1-* to m5-*.spec.ts):
         # viewport screenshots against the committed baselines (never rewritten here), and the
         # performance budgets, which are written to this job's summary.
         run: pnpm --filter @manufakture/web e2e
@@ -94,6 +94,17 @@ jobs:
         with:
           name: m3-jig
           path: apps/web/test-results/m3-jig/
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Upload the M5 sign G-code for the gcode-validate job
+        # The plywood sign's exports (e2e/m5-sign.spec.ts): Grbl's one file per tool and the
+        # Carbide Motion file, every one already through the G-code verifier, with numbers.json
+        # (timings, file sizes, the estimated cut time). For the cut (docs/m5-acceptance.md).
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: m5-sign
+          path: apps/web/test-results/m5-sign/
           if-no-files-found: warn
           retention-days: 30
       - name: Upload the Playwright report
@@ -181,11 +192,16 @@ jobs:
 
   gcode-validate:
     # Optional: the firmware's own G-code parsers read every golden G-code file
-    # (packages/cam/test/grbl): `gvalidate` from grbl-sim, which builds Grbl 1.1h's parser on the
-    # host, and `grblHAL_validator` from the grblHAL Simulator, each from a pinned commit (both
-    # GPL-3.0-or-later, built and run here only, never shipped). A validator whose checkout or
-    # build fails is skipped with a warning, and the job never blocks a merge. The required check
-    # is the `cam-gcode` project in the `check` job (packages/cam/test/verify-gcode.ts).
+    # (packages/cam/test/grbl) and the M5 sign's Grbl files from the e2e job (the m5-sign
+    # artifact; the Carbide Motion file has M6, which neither validator takes): `gvalidate` from
+    # grbl-sim, which builds Grbl 1.1h's parser on the host, and `grblHAL_validator` from the
+    # grblHAL Simulator, each from a pinned commit (both GPL-3.0-or-later, built and run here
+    # only, never shipped). A validator whose checkout or build fails is skipped with a warning,
+    # as are the sign's files when the artifact is missing, and the job never blocks a merge. The
+    # required checks are the `cam-gcode` project in the `check` job and the G-code verifier in
+    # e2e/m5-sign.spec.ts (packages/cam/test/verify-gcode.ts).
+    needs: e2e
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     continue-on-error: true
@@ -242,8 +258,20 @@ jobs:
           cmake -S firmware/grblhal -B firmware/grblhal/build -DCMAKE_C_FLAGS="-include math.h"
           cmake --build firmware/grblhal/build --target grblHAL_validator -j "$(nproc)"
           echo "GRBLHAL_VALIDATOR=$PWD/firmware/grblhal/build/grblHAL_validator" >> "$GITHUB_ENV"
-      - name: Validate the golden G-code files
+      - name: Download the M5 sign G-code
+        continue-on-error: true
+        uses: actions/download-artifact@v7
+        with:
+          name: m5-sign
+          path: m5-sign
+      - name: Validate the golden G-code files and the M5 sign's
         run: |
+          files=(packages/cam/test/grbl/*.nc)
+          if compgen -G "m5-sign/grbl/*.nc" > /dev/null; then
+            files+=(m5-sign/grbl/*.nc)
+          else
+            echo "::warning::no M5 sign G-code from the e2e job; only the golden files are validated"
+          fi
           status=0
           for name in GVALIDATE GRBLHAL_VALIDATOR; do
             if [ -z "${!name:-}" ] || [ ! -x "${!name}" ]; then
@@ -251,6 +279,6 @@ jobs:
               continue
             fi
             echo "== ${!name}"
-            bash packages/cam/test/firmware-validate.sh "${!name}" packages/cam/test/grbl/*.nc || status=1
+            bash packages/cam/test/firmware-validate.sh "${!name}" "${files[@]}" || status=1
           done
           exit "$status"

@@ -764,6 +764,53 @@ describe('the gouge check at the default cell', () => {
     }
   });
 
+  it('a through hole bored past its bottom is not a gouge where the chords stand into it', () => {
+    // An 8 mm hole through a 6 mm plate in 64 chords (standing 0.005 mm into the hole), cut with
+    // a 1/8" flat on the circle that puts its edge on the hole's wall, 0.5 mm past the bottom (a
+    // bore's breakthrough). A cell centre between a chord and the circle is under the part's top
+    // in the mesh and cut to below the bottom: next to a wall with nothing under it, not a gouge
+    // (the M5 sign's mounting holes, docs/m5-acceptance.md). Bored 0.3 mm over, it still is.
+    const eighth: Tool = { ...flat6, id: 'tool#5', name: '1/8" flat', diameter: 3.175 };
+    const part = plateWithHole(40, 4, 6, 64);
+    const bore = (r: number): Toolpath => ({
+      start: [20 + r, 20, 5],
+      entries: [
+        tc(eighth),
+        rapid([20 + r, 20, 1]),
+        line([20 + r, 20, -6.5]),
+        {
+          kind: 'arc',
+          to: [20 + r, 20, -6.5],
+          center: [20, 20],
+          direction: 'ccw',
+          fullCircle: true,
+          feed: 1000,
+          feedClass: 'cut',
+          op: 't',
+          pass: 0,
+        },
+        rapid([20 + r, 20, 5]),
+      ],
+    });
+    const exact = 4 - eighth.diameter / 2;
+    const box: Box3 = { min: [-5, -5, -6], max: [45, 45, 0] };
+    for (const cell of [0.1, 0.141, 0.2]) {
+      for (const d of SHIFTS) {
+        const stockAt = shifted(box, d * (cell / 0.375));
+        const ok = simulate({ toolpath: bore(exact), tools: [eighth], stock: stockAt, part }, cell);
+        expect(ok.compare()!.gougeCells, `cell ${cell}, shift ${d}`).toBe(0);
+        const bad = simulate(
+          { toolpath: bore(exact + 0.3), tools: [eighth], stock: stockAt, part },
+          cell,
+        );
+        const cmp = bad.compare()!;
+        expect(cmp.gougeCells).toBeGreaterThan(10);
+        // Through the part's top, down to the cut's bottom.
+        expect(cmp.worstGouge!.depth).toBeCloseTo(6.5, 5);
+      }
+    }
+  });
+
   it('reports a gouge into a pocket floor next to its wall', async () => {
     // The pocket job, and the part's pocket 0.5 mm shallower than cut: the whole floor is a
     // gouge, right up to the walls but for the sideways allowance.

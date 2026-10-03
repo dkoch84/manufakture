@@ -32,6 +32,7 @@ import {
   exportFiles,
   exportReadiness,
   formatLength,
+  localDate,
   multiToolModes,
   sheetFileName,
   toolLabel,
@@ -57,7 +58,7 @@ export interface ExportDialogProps {
   date?: string;
 }
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => localDate(new Date());
 
 export function ExportDialog({
   documents,

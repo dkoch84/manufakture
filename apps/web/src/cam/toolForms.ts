@@ -240,3 +240,13 @@ export function unverifiedText(tool: LibraryTool): string | null {
   });
   return `Not checked against the source: ${parts.join(', ')}.`;
 }
+
+/**
+ * A tool's title in a list: its number before its name ("#5 Facing mill"), unless the name already
+ * starts with that number, as the built-in Carbide 3D tools' names do ("#201 1/4" flat end mill").
+ */
+export function numberedName(number: number | undefined, name: string): string {
+  if (number === undefined) return name;
+  const tag = `#${number}`;
+  return name === tag || name.startsWith(`${tag} `) ? name : `${tag} ${name}`;
+}

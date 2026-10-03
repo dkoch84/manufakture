@@ -80,7 +80,12 @@ export function rasterPart(mesh: Mesh, g: SimGrid): Float32Array {
  * the kernel tessellates; `upSign` reads it from the mesh) and walls (triangles seen edge-on), never
  * the part's underside. Each triangle's contribution is bounded by its plane: over the disc of
  * radius `side` about the centre, a plane of slope G ranges over its value at the centre plus or
- * minus G times `side`, clamped to the triangle's own Z range. A wall contributes its Z range.
+ * minus G times `side`, clamped to the triangle's own Z range. A wall contributes its Z range,
+ * but a wall that reaches the part's lowest point (a through hole's, the outline's) bounds nothing
+ * below: there is no part under it, so a through cut's breakthrough next to it is not a gouge.
+ * That matters where the mesh's chords stand into a hole: a cell centre between a chord and the
+ * true circle is under the part's top in the mesh, though the tool rightly cuts it, and through to
+ * the spoilboard.
  */
 export function partBands(
   mesh: Mesh,
@@ -95,6 +100,8 @@ export function partBands(
   const p = mesh.positions;
   const idx = mesh.indices;
   const up = upSign(mesh);
+  let bottom = Infinity;
+  for (let i = 2; i < p.length; i += 3) if (p[i]! < bottom) bottom = p[i]!;
   for (let t = 0; t + 2 < idx.length; t += 3) {
     const a = idx[t]! * 3;
     const b = idx[t + 1]! * 3;
@@ -142,7 +149,8 @@ export function partBands(
         ) {
           continue;
         }
-        let lo = zMin;
+        // A wall down to the part's bottom has nothing under it (see above).
+        let lo = !planar && zMin <= bottom ? -Infinity : zMin;
         let hi = zMax;
         if (planar) {
           const z = az + ga * (x - ax) + gb * (y - ay);

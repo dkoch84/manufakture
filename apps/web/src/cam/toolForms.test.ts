@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { apply, setupDocument } from './cam.test-fixture';
-import { buildTool, newToolForm, toolFields, toolFormOf } from './toolForms';
+import { buildTool, newToolForm, numberedName, toolFields, toolFormOf } from './toolForms';
 import { camVariables } from './values';
 
 const ctx = (doc: ReturnType<typeof setupDocument>, existing?: (typeof doc.cam.tools)[number]) => ({
@@ -79,5 +79,12 @@ describe('tool forms', () => {
       tool: { id: 'tool#2', name: 'Six', kind: 'flat', number: 6, flutes: 2, presets: [] },
     });
     expect(apply(doc, r.command).cam.tools.map((t) => t.id)).toEqual(['tool#1', 'tool#2']);
+  });
+
+  it('puts the number before the name once, not again when the name starts with it', () => {
+    expect(numberedName(5, 'Facing mill')).toBe('#5 Facing mill');
+    expect(numberedName(201, '#201 1/4" flat end mill')).toBe('#201 1/4" flat end mill');
+    expect(numberedName(20, '#201 1/4" flat end mill')).toBe('#20 #201 1/4" flat end mill');
+    expect(numberedName(undefined, 'Facing mill')).toBe('Facing mill');
   });
 });

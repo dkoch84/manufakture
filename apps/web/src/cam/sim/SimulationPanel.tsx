@@ -12,7 +12,9 @@
 // translucent stock box (`onShownChange`), which would veil the simulated stock.
 
 import {
+  SIM_CLASS,
   packToolpath,
+  toModel,
   type Box3,
   type CamSimFrame,
   type Mesh,
@@ -24,12 +26,19 @@ import {
 import type { CamClient } from '@manufakture/cam/client';
 import { useEffect, useRef, useState } from 'react';
 import { useStore } from 'zustand';
+import { testHooksEnabled } from '../../testHooks';
 import { liveViewport } from '../../viewport/live';
 import { spawnCamClient } from '../spawn';
 import { SIM_COLORS } from './geometry';
 import { SimulationOverlay } from './overlay';
 import { SimulationRunner, type SimulationClient } from './runner';
 import './sim.css';
+
+/** The test hook (`window.__manufakture.camSim`). */
+export interface CamSimHook {
+  /** Model X and Y of the centres of the last frame's gouge or leftover cells. */
+  cells(kind: 'gouge' | 'leftover'): [number, number][];
+}
 
 /** What the preview simulates. */
 export interface SimulationSource {
@@ -178,6 +187,45 @@ export function SimulationPanel({
   useEffect(() => {
     runner?.request(done);
   }, [runner, done]);
+
+  // The test hook: where the gouge and leftover cells of the last frame lie on the part.
+  const hookSource = useRef(source);
+  useEffect(() => {
+    hookSource.current = source;
+  });
+  useEffect(() => {
+    if (!testHooksEnabled) return;
+    const hook: CamSimHook = {
+      cells(kind) {
+        const frame = lastFrame.current;
+        const src = hookSource.current;
+        if (!frame?.classes || !src) return [];
+        const want = kind === 'gouge' ? SIM_CLASS.gouge : SIM_CLASS.leftover;
+        const { origin, cell, nx, heights } = frame.heightmap;
+        const out: [number, number][] = [];
+        frame.classes.forEach((c, k) => {
+          if (c !== want) return;
+          const i = k % nx;
+          const j = (k - i) / nx;
+          const at = toModel(src.frame, [
+            origin[0] + (i + 0.5) * cell,
+            origin[1] + (j + 0.5) * cell,
+            heights[k]!,
+          ]);
+          out.push([at[0], at[1]]);
+        });
+        return out;
+      },
+    };
+    window.__manufakture = { ...window.__manufakture, camSim: hook };
+    return () => {
+      if (window.__manufakture?.camSim === hook) {
+        const rest = { ...window.__manufakture };
+        delete rest.camSim;
+        window.__manufakture = rest;
+      }
+    };
+  }, []);
 
   return (
     <div className="cam-sim" data-testid="cam-sim">
