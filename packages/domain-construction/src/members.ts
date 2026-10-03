@@ -20,7 +20,22 @@ export type Role =
   | 'cripple'
   | 'blocking'
   | 'corner'
-  | 'backing';
+  | 'backing'
+  // Floors (T6.2b); floor blocking uses `blocking`.
+  | 'joist'
+  | 'rim'
+  | 'skid'
+  // Roofs (T6.2c); gable studs belong to the roof.
+  | 'common-rafter'
+  | 'jack-rafter'
+  | 'hip-rafter'
+  | 'fly-rafter'
+  | 'ridge'
+  | 'ceiling-joist'
+  | 'rafter-tie'
+  | 'gable-stud'
+  | 'sub-fascia'
+  | 'fascia';
 
 /**
  * The stock a member is cut from: a catalog entry (with overrides), dressed sizes in mm. `width`

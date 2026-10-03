@@ -9,9 +9,7 @@ under GPL-3.0-or-later.
 **Not an engineering tool.** The generator lays framing out by geometric rules the user chooses
 (spacing, plate counts, header sizes, corner style). It computes no loads, checks no spans, sizes
 no members and checks nothing against a building code. Its warnings are layout warnings, and the
-ones that come from framing practice are labelled as rules of thumb. `DISCLAIMER_SHORT` is the
-one string the app, drawing title blocks and takeoff exports show (a placeholder until T6.0c's
-wording is approved by the maintainer).
+ones that come from framing practice are labelled as rules of thumb. See [Disclaimer](#disclaimer).
 
 **Dependencies.** At run time only `@manufakture/units` (for `MM_PER_INCH` in the defaults), so
 everything runs in Node with no `.wasm`. ADR 0015 decision 1 also allows `core`, `takeoff`,
@@ -23,6 +21,16 @@ id, nominal name, dressed sizes), so the package does not read the stock catalog
 
 **Units.** Millimetres everywhere inside (ADR 0005). The tests write their fixtures in inches
 and convert.
+
+## Disclaimer
+
+`DISCLAIMER_SHORT` (`src/disclaimer.ts`, exported from the package root) is the short "not an
+engineering tool" text, one string for the construction tools in the app (T6.1d), every drawing
+title block (T6.4a), every takeoff export (T6.3b) and the IFC header (T6.6a); each of those tasks
+tests that it is shown (ADR 0015 decision 8). The long form opens
+[`docs/user/construction.md`](../../docs/user/construction.md); change the two together. Neither,
+nor any warning message, may call anything "safe", "compliant" or "OK"; `wall.test.ts` checks the
+constant and the warnings for those words.
 
 ## Members
 
@@ -226,6 +234,292 @@ summarising search, not the primary source.
 | `headerRules`       | empty                  | ADR 0015 decision 7: no shipped header table                                             |
 
 Framing practice varies by region and framer; every choice above is a setting.
+
+## Floor framing: `frameFloor`
+
+```ts
+import { frameFloor } from '@manufakture/domain-construction';
+
+const { members, warnings, overrides, top, subfloor } = frameFloor({
+  floor: 'extension#9', // the owner of every member
+  outline: [
+    [0, 0],
+    [3657.6, 0],
+    [3657.6, 4876.8],
+    [0, 4876.8],
+  ], // 12' x 16', in plan
+  direction: [1, 0], // the joists span along x (12')
+  elevation: 0, // the bottom of the joists and rims
+  settings: {
+    joistStock: s2x6,
+    blocking: { kind: 'mid-span' },
+    skids: { stock: s4x6, count: 3 },
+    subfloor: osb2332,
+  },
+  walls: [{ id: 'extension#3', start: [0, 1625.6], end: [3657.6, 1625.6] }],
+  overrides: [{ id: 'j5', delete: true }],
+});
+```
+
+**Outline.** A simple polygon in plan, either winding, with every edge along or across the joist
+`direction`: a rectangle, or an L, T or U shape, at any rotation. Repeated and collinear points
+are dropped. An edge at an angle to the joists, fewer than four corners, a self-crossing outline,
+an edge shorter than two joists, or any floor `openings` (stairs, out of scope in M6) throw a
+`FramingInputError`.
+
+**Rims** (band joists, `rimStock`, the joist stock by default) stand on edge along every outline
+edge across the joists, full length, inside the outline; longer than the longest `stockLengths`
+they are spliced at the longest length. **Joists** (`joistStock`, on edge) run between the rims.
+Layout is a wall's (Part 1): `j0` flush with the side layout starts from (the least extent along
+the layout axis, which is the joist direction turned 90 degrees left, or the greatest with
+`layoutFrom: 'end'`), `j<k>` centred on `layoutOrigin + k x spacing`, the last flush with the far
+side, so 4' sheet edges land on joist centres. Every inner outline edge along the joists (an L, T
+or U) gets a flush joist inside the outline along it (`f<n>`); a layout joist within 3 mm of
+that position takes its place, any other layout joist overlapping it is left out. Where the
+outline splits a band of joists (a U's two arms), each piece is its own member.
+
+**Doubled joists under walls** (`doubleUnderWalls`, on by default): each wall in `walls` (its
+centre line in plan) that runs along the joists gets a pair of joists centred under it, full span
+between the rims; layout joists in their way are left out and come back under their old ids when
+the wall moves. A wall across the joists needs nothing; a wall at an angle, a pair outside the
+floor or running into an end or flush joist warns and is left out.
+
+**Blocking** (`blocking`): `none`, `mid-span` (in each bay, the middle of the two joists' common
+span), or rows `at` distances along the span from the outline's least extent along the joists.
+Blocks are joist stock on edge, from face to face, only inside the outline (never across the gap
+between a U's arms). A bay is any stretch where two joists' spans overlap with no joist between
+them, so a full-span joist under a U's two arms has a bay up into each arm. A row that falls in no
+bay warns.
+
+**Skids** (`skids`, optional): `count` skids (or beams) of `stock` on edge under the joists,
+across them, the outer two flush with the outline and the rest spread evenly (or centred at
+`positions` along the span), each running the outline's extent plus `overhang` at both ends.
+
+**Subfloor** (`subfloor`, a sheet stock whose `width` is its thickness) is not a member: the result
+reports it as a sheet layer for the takeoff (`subfloor: { stock, outline, area, z }`), sitting on
+`top`, the top of the framing. The layer body is the floor feature's (T6.1c).
+
+**Overrides** are the floor's params, keyed by local id: `delete`, `stock`, `move` (mm along the
+layout axis). Each reports `applied` or `lost`, and a lost one warns `override-lost`.
+
+**Warnings** are layout warnings only: `wall-not-parallel`, `wall-outside-floor`,
+`framing-conflict`, `longer-than-stock` (a joist or skid longer than the longest stock length;
+nothing about the span), `blocking-row-outside`, `skid-outside`, `override-lost`. The generator
+checks no span, load or code; joist stock and spacing are the user's choice.
+
+**Floor member ids** (owned by the floor, ADR 0015 decision 6). `:<p>` is the piece along the span
+where the outline splits a band (or a rim splice): the first piece has no suffix, then `:2`, `:3`.
+
+| Form             | Example          | Meaning                                                                                       |
+| ---------------- | ---------------- | --------------------------------------------------------------------------------------------- |
+| `j<k>[:<p>]`     | `j12`, `j3:2`    | Layout slot k: `j0` flush where layout starts, `j<k>` centred, the last flush at the far side |
+| `f<n>[:<p>]`     | `f1`             | Flush joist along the n-th inner outline edge along the joists, in layout order               |
+| `w<i>a`, `w<i>b` | `w1a`, `w2b:2`   | The doubled pair under the i-th wall along the joists, in layout order; `a` nearer the start  |
+| `rim<n>[:<p>]`   | `rim1`, `rim2:2` | Rim on the n-th outline edge across the joists, along the span, then along the layout         |
+| `block<r>:<n>`   | `block1:4`       | Blocking row r, block n along the layout                                                      |
+| `skid<n>`        | `skid3`          | Skid n along the span                                                                         |
+
+`parseFloorMemberId` and `formatFloorMemberId` round-trip every form and refuse other spellings
+(`j3:1`, `j01`, `rim1:1`).
+
+### Floor defaults
+
+`DEFAULT_FLOOR_SETTINGS`; the joist stock has no default (the user's choice) and the rim stock
+defaults to it.
+
+| Setting            | Default               | Source                                                     |
+| ------------------ | --------------------- | ---------------------------------------------------------- |
+| `spacing`          | 16" (406.4 mm)        | Common practice, as walls; spacing is the user's choice    |
+| `layoutOrigin`     | 0, from the start     | As walls: sheet edges on joist centres (Fine Homebuilding) |
+| `blocking`         | `none`                | The user's choice                                          |
+| `stockLengths`     | 8' to 20' in 2' steps | Common retail lengths (unverified)                         |
+| `doubleUnderWalls` | on                    | Common practice (unverified)                               |
+| `skids`            | none                  | The user's choice                                          |
+
+**Tests.** `src/framing/floor.test.ts` holds the hand-computed shed fixtures: a 12' x 16' floor
+with 2x6 joists at 16" spanning 12' has 13 joists of 141" (12' less two 1-1/2" rims) at 0,
+16k and 190-1/2", 2 rims of 16', three 4x6 skids of 16' and a mid-span row of 12 blocks (10 of
+14-1/2" and, in the end bays from 1-1/2" to 15-1/4" and from 176-3/4" to 190-1/2", 2 of
+13-3/4"); plus 9 joists at 24", L and U outlines, rotation, walls, splices, overrides, refusals
+and the id forms. `src/framing/floor.property.test.ts` frames 300 seeded random rectangles and
+L, T and U floors and checks that no two members overlap, every member but the skids stays inside
+the outline, every joist end bears fully on a rim, every block has a joist each side, ids are
+unique and parse, and output is deterministic.
+
+## Roof framing: `frameRoof`
+
+```ts
+import { frameRoof } from '@manufakture/domain-construction';
+
+const { members, warnings, geometry, overrides } = frameRoof({
+  roof: 'extension#9', // owns every member below, gable studs included
+  kind: 'gable', // or 'hip'
+  pitch: Math.atan(6 / 12), // radians; the feature layer parses `6/12`
+  footprint: {
+    origin: [0, 0], // corner c1, in plan
+    direction: 0, // plan angle of the length axis (e1)
+    length: 4876.8, // 16 ft, along the ridge
+    width: 3657.6, // 12 ft span
+    plate: 2466.975, // elevation of the top of the top plates
+    wallThickness: 88.9, // the birdsmouth seat
+  },
+  settings: {
+    rafterStock: s2x6,
+    ridgeStock: s2x8,
+    overhang: 304.8,
+    ties: { kind: 'rafter-ties', stock: s2x4, every: 2, height: 609.6 },
+    gableStuds: { stock: s2x4, spacing: 406.4 },
+  },
+  overrides: [{ id: 'e1:c3', delete: true }],
+});
+```
+
+**Footprint and frame.** A rectangle at the outside line of the walls' top plates, in the roof's
+own plan frame: `u` along the length, `v` across, `z` up. Its edges, counter-clockwise from the
+origin: `e1` (v = 0), `e2` (u = length), `e3` (v = width), `e4` (u = 0). A gable's eaves are e1
+and e3 and its gable ends e2 and e4; a hip roof has eaves all round and its ridge along the
+length, so a hip footprint's length must be at least its width (the feature layer orients it).
+Along every edge, positions are measured from its end with the smaller coordinate (end `a`; the
+other is `b`), so slot k on e1 faces slot k on e3, and a jack on one side of a hip meets the hip
+where the jack on the other side does. Corners `c1` to `c4` are where e1 to e4 start: (0, 0),
+(length, 0), (length, width), (0, width). The roof is placed by one rotation and move, so the
+members' local cuts do not depend on where it stands.
+
+**Pitch math** (M6 plan, Part 1, "Roof pitch math"), returned in `geometry`:
+
+- **Common rafter.** Run = half the span less half the ridge board's thickness (71-1/4" for a
+  12' span and a 1-1/2" ridge). Line length = run x `sqrt(12^2 + p^2) / 12` (79.66" at 6/12).
+- **Birdsmouth.** A level seat of the wall's thickness on the plates and a plumb heel at the wall
+  line: heel `seat x tan`, depth square to the rafter `seat x sin` (1.565" for 3-1/2" at 6/12).
+  The bottom edge meets the plates at the seat's inside edge, so the rafter's top stands
+  `depth / cos - seat x tan` above the plates at the wall line (height above plate, 4.399" for a
+  2x6 at 6/12).
+- **Ridge.** Its top is flush with the rafters' top corners at its faces: run x rise / run plus
+  the height above plate above the plates (40.024" for the shed).
+- **Hip.** 45 degrees in plan, angle `atan(p / 16.97)`, length factor `sqrt(16.97^2 + p^2) / 12`
+  per unit of common run (1.5 at 6/12). It is **dropped** (not backed) by half its width off the
+  hip line times the roof's slope across it, `(width / 2) x tan / sqrt(2)`, so its top corners
+  lie in the roof planes; its seat is wherever its bottom edge meets the plates. Jacks shorten
+  by `spacing x common factor` each (17.89" at 16" and 6/12).
+
+**Members** (roles in brackets), every one cut from a blank with its cuts as half-spaces in its
+own frame (ADR 0015 decision 4); a cut that removes nothing is dropped:
+
+- **Common rafters** (`common-rafter`): local x up the slope, y level across it, the depth
+  square to the top edge. Cuts: a tail cut (`tail: 'plumb'` at the overhang, or `square`, then
+  the square end's top corner is at the overhang and no cut is needed), the birdsmouth as one
+  `notch` (heel and seat), and a plumb cut at the ridge face. A gable lays them out like a wall:
+  slot 0 flush with end a, slot k centred on k x spacing, the last flush with end b (13 pairs on
+  16' at 16"). A hip roof puts one at each ridge end and others on layout between them on e1 and
+  e3, one in the middle when the ridge ends are closer than a rafter, and one king common on e2
+  and e4, which butts the ridge's end.
+- **Jack rafters** (`jack-rafter`, hip): on layout from the ridge-end commons out towards each
+  corner, as far as a jack still stands on its edge and reaches past its seat; top end a plumb
+  side cut at 45 degrees in plan against the hip's face.
+- **Hip rafters** (`hip-rafter`): from each outside corner to the ridge end, dropped as above;
+  tail cut plumb on both eave lines; top end two plumb cuts, against the ridge's end face and
+  the king common's side; a birdsmouth when the hip reaches the plates, else a `hip-above-plate`
+  layout warning. A hip roof needs a ridge at least as thick as a rafter.
+- **Ridge** (`ridge`): on edge along the length. Gable: the full length plus the rake overhangs.
+  Hip: length less width plus one ridge thickness, so the king commons have the side commons'
+  run; a square footprint gets a block one ridge thickness long (a pyramid). Longer than the
+  longest of `stockLengths`, it is spliced at the farthest rafter centre that keeps each piece
+  within stock.
+- **Fly rafters** (`fly-rafter`, gable): with `rakeOverhang` (at least a rafter's width), one
+  pair at each end with its outer face at the overhang, like a common but with no birdsmouth.
+  Lookouts and barge boards are not framed.
+- **Ceiling joists or rafter ties** (`ceiling-joist`, `rafter-tie`; `ties`): beside the common
+  pairs, every `every`-th eligible pair from the first. Gable: the pairs over the gable walls are
+  not eligible. Hip: the commons on e1 and e3, as far as the tie stays between the ridge's ends.
+  A tie goes on the rafter's side towards the middle, else the other side, else it is left out
+  with a `tie-skipped` layout warning. Ceiling joists sit on the plates and run wall line to wall
+  line; rafter ties stand `height` above the plates and run to where their underside meets the
+  roof; both are cut where their upper corners rise above the roof's top plane. Ties that would
+  reach the ridge are refused.
+- **Gable studs** (`gable-stud`, gable; `gableStuds`): on each gable wall's layout (stud k
+  centred on `origin + k x spacing` from v = 0, per end), inside the wall's thickness, standing
+  on the top plates and cut to the end rafters' underside, and flat at the ridge board's
+  underside where they meet it. A stud shorter than its own width (near the eaves) is left out.
+- **Sub-fascia and fascia** (`sub-fascia`, `fascia`, plumb tails only): on edge against the tail
+  cuts, the fascia outside the sub-fascia, tops flush with the rafters' tails. Gable: along the
+  eaves, rake to rake. Hip: all four eaves, the long sides running past the corners and the ends
+  butting between them. Spliced at rafter centres like the ridge.
+
+**Who owns the gable studs.** ADR 0015 does not say. The roof does: they are cut to the roof
+line, T6.1c says a pitch change "re-runs only the roof and its gable studs", and the gable wall
+(T6.2a) ends at its top plates. So the roof's input names the gable walls' stud stock, spacing
+and layout origin, and the studs' ids are the roof's (`e2:g4`).
+
+**Roof member ids** (owned by the roof; `parseRoofMemberId` and `formatRoofMemberId`
+round-trip every form and refuse other spellings: `e1:c01`, `ridge:0`, `e1:ja0`):
+
+| Form                              | Example          | Meaning                                                                       |
+| --------------------------------- | ---------------- | ----------------------------------------------------------------------------- |
+| `e<n>:c<k>`                       | `e1:c4`, `e2:c0` | Common rafter at slot k on eave n (hip: slot 0 at the ridge end nearer end a) |
+| `e<n>:ja<k>`, `e<n>:jb<k>`        | `e1:ja2`         | Jack k on edge n, k spacings from the ridge-end common towards end a or b     |
+| `e<n>:fly-a`, `e<n>:fly-b`        | `e3:fly-b`       | Fly rafter beyond end a or b of eave n                                        |
+| `e<n>:g<k>`                       | `e4:g3`          | Gable stud at layout position k on gable end n                                |
+| `e<n>:sub:<p>`, `e<n>:fascia:<p>` | `e1:sub:2`       | Sub-fascia or fascia piece p along edge n                                     |
+| `hip<c>`                          | `hip2`           | Hip rafter at corner c                                                        |
+| `ridge:<p>`                       | `ridge:1`        | Ridge board piece p                                                           |
+| `tie<k>`                          | `tie5`           | Ceiling joist or rafter tie beside the common pair at slot k                  |
+
+Changing the spacing or the footprint's length renumbers slots; the hip roof's commons and jacks
+are numbered from the ridge ends, so lengthening a hip roof keeps its jacks' ids.
+
+**Warnings** (`kind` `rule-of-thumb` for framing practice, `layout` for what could not be laid out
+as asked; none is a structural assessment, and no message calls anything safe, compliant or OK):
+
+| Code                | Kind            | When                                                                                            |
+| ------------------- | --------------- | ----------------------------------------------------------------------------------------------- |
+| `birdsmouth-deep`   | `rule-of-thumb` | The birdsmouth is deeper than a third of the rafter's (or the hip's) depth (Part 1, unverified) |
+| `low-slope-no-ties` | `rule-of-thumb` | Below 3/12 with no ceiling joists or ties: framers often use a ridge beam there (IRC R802.3)    |
+| `ridge-shallow`     | `rule-of-thumb` | The ridge board is shallower than the rafters' plumb cut against it (IRC R802.3)                |
+| `hip-above-plate`   | `layout`        | The hips do not reach the plates, so they get no birdsmouth                                     |
+| `tie-skipped`       | `layout`        | No room beside a common pair for its tie                                                        |
+| `override-lost`     | `layout`        | An override names a member the roof no longer has                                               |
+
+Warnings carry the measured `value` and the rule's `limit` in mm where there is one.
+
+**Overrides** are the roof's params keyed by local id, as the wall's: `delete`, `stock` (same
+placement and cuts; the generator does not re-cut a member for new stock) and `move` (mm along
+the member's edge; along the length for the ridge, ties and hips).
+
+**Errors** (`FramingInputError`): a roof id that is not a feature id; a pitch not between 0 and 90
+degrees; an empty footprint or no wall thickness; spacing not wider than a rafter (or leaving no
+room for ties); a negative overhang; a rake overhang narrower than a rafter; a seat so long the
+birdsmouth would cut through the rafter; a span too narrow for the rafters to reach past their
+seats; ties that reach the ridge; a fascia on square tails; a hip roof wider than long, with no
+hip stock, or with a ridge thinner than a rafter.
+
+Out of scope (ADR 0015 decision 12): unequal pitches, valleys, dormers, trusses, irregular
+footprints, lookouts and barge boards.
+
+### Roof defaults
+
+`DEFAULT_ROOF_SETTINGS`; rafter, ridge and hip stock have no default (the user's choice, ADR 0015
+decision 7), nor do ties, gable studs or fascia boards.
+
+| Setting        | Default         | Source                                                                               |
+| -------------- | --------------- | ------------------------------------------------------------------------------------ |
+| `spacing`      | 16" (406.4 mm)  | Common practice, as walls; IRC R802.4.1's tables use 12" to 24" (cited, not checked) |
+| `overhang`     | 12" (304.8 mm)  | Common practice (unverified); the shed in T6.7 uses it                               |
+| `rakeOverhang` | 0               | The user's choice                                                                    |
+| `tail`         | `plumb`         | Common practice where a fascia is hung (unverified)                                  |
+| `ties`         | none            | The user's choice                                                                    |
+| `stockLengths` | 8' to 16' by 2' | Common retail lengths (unverified)                                                   |
+
+**Tests.** `src/framing/roof.test.ts` holds the hand-computed fixtures with their working in
+comments: the 12' x 16' shed gable at 6/12 (13 pairs, run 71-1/4", line length 79.66", blank
+95.826", height above plate 4.399", ridge 40.024" above the plates, birdsmouth 1.565"), the
+warnings, square tails, fly rafters and a spliced ridge, ties, gable studs, fascia boards,
+overrides and placement; and the shed as a 16' x 12' hip roof (10 commons, 32 jacks shortening
+by 17.889", hips with factor 1.5, run 100.763", line length 106.875", drop 0.265").
+`src/framing/roof.property.test.ts` frames 120 seeded random gable and hip roofs and checks that
+no two members overlap, cuts included (each member as convex pieces, by the separating axis
+test), every seated rafter's seat is level at the plates with its heel on the wall line, every
+common meets the ridge at its top, members stay inside the roof's envelope, ids are unique and
+round-trip, and output is deterministic.
 
 ## Tests
 
