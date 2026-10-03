@@ -1,7 +1,9 @@
 import { DEFAULT_UNITS, type ExtensionFeature } from '@manufakture/core';
 import {
   CONSTRUCTION_NAMESPACE,
+  FLOOR_TYPE,
   OPENING_TYPE,
+  ROOF_TYPE,
   WALL_TYPE,
   readWallParams,
   type WallMetadata,
@@ -17,7 +19,14 @@ import {
   run,
   settingsOf,
 } from './construction.test-fixture';
-import { CONSTRUCTION_DOMAIN, OPENING_FEATURE, WALL_FEATURE, constructionLabel } from './kinds';
+import {
+  CONSTRUCTION_DOMAIN,
+  FLOOR_FEATURE,
+  OPENING_FEATURE,
+  ROOF_FEATURE,
+  WALL_FEATURE,
+  constructionLabel,
+} from './kinds';
 import { MAX_LENGTH_TEXT, checkLength, coordinateSource } from './lengths';
 import { memberActionCommand, memberOwner } from './memberActions';
 import {
@@ -89,7 +98,16 @@ describe('the construction kinds', () => {
   it('name the domain types and namespace as the domain does', () => {
     expect(WALL_FEATURE).toBe(WALL_TYPE);
     expect(OPENING_FEATURE).toBe(OPENING_TYPE);
+    expect(FLOOR_FEATURE).toBe(FLOOR_TYPE);
+    expect(ROOF_FEATURE).toBe(ROOF_TYPE);
     expect(CONSTRUCTION_DOMAIN).toBe(CONSTRUCTION_NAMESPACE);
+  });
+
+  it('label floors and roofs in the tree', () => {
+    const f = (extension: string) =>
+      ({ kind: 'extension', extension, params: {} }) as unknown as ExtensionFeature;
+    expect(constructionLabel(f(FLOOR_TYPE))).toBe('Floor');
+    expect(constructionLabel(f(ROOF_TYPE))).toBe('Roof');
   });
 });
 

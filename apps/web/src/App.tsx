@@ -96,9 +96,12 @@ import {
 import { ConfigurationsPanel } from './configurations/ConfigurationsPanel';
 import { ConstructionToolbar } from './construction/ConstructionToolbar';
 import {
+  constructionHasLevel,
   constructionReady,
   hasConstruction,
+  isFloor as isConstructionFloor,
   isOpening as isConstructionOpening,
+  isRoof as isConstructionRoof,
   isWall as isConstructionWall,
   partHasWalls,
 } from './construction/kinds';
@@ -504,10 +507,11 @@ export function App({
   useEffect(() => {
     const switched = constructionDoc.current !== document.id;
     constructionDoc.current = document.id;
-    if (withConstruction) constructionUi.getState().setOpen(true);
-    else if (switched) {
+    // Another document: no tool, wall or level of the last one carries over.
+    if (switched) {
       constructionUi.setState({ open: false, tool: null, editingWall: null, level: null });
     }
+    if (withConstruction) constructionUi.getState().setOpen(true);
   }, [constructionUi, document.id, withConstruction]);
   const modelAssemblies = useModel(shownModel, (s) => s.assemblies);
   const modelSources = useModel(shownModel, (s) => s.sources);
@@ -1658,6 +1662,10 @@ export function App({
         constructionUi
           .getState()
           .startTool({ kind: 'opening', featureId, wall: feature.dependsOn[0] ?? null });
+      } else if (isConstructionFloor(feature) || isConstructionRoof(feature)) {
+        constructionUi
+          .getState()
+          .startTool({ kind: isConstructionFloor(feature) ? 'floor' : 'roof', featureId });
       } else if (isBoard(feature)) setDialog({ kind: 'board', featureId });
       else if (isJoint(feature)) setDialog({ kind: 'joint', featureId });
       else if (isDialogKind(feature.kind)) {
@@ -2072,6 +2080,7 @@ export function App({
               ui={constructionUi}
               disabled={dialog !== null}
               ready={constructionReady(document)}
+              hasLevel={constructionHasLevel(document)}
               hasWalls={partHasWalls(document, activePartId)}
             />
           </div>

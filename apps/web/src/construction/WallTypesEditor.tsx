@@ -133,22 +133,24 @@ function stockName(id: string | undefined): string | undefined {
 }
 
 /** The default header's fields, every one chosen by the user. */
-function HeaderFields({
+export function HeaderFields({
   value,
   units,
   errors,
   prefix,
+  legend = 'Default header (used when no header rule covers an opening)',
   onChange,
 }: {
   value: { stock: string; plies: string; jacks: string };
   units: DisplayUnits;
   errors: Record<string, string>;
   prefix: string;
+  legend?: string;
   onChange: (v: { stock: string; plies: string; jacks: string }) => void;
 }) {
   return (
     <fieldset className="construction-header">
-      <legend>Default header (used when no header rule covers an opening)</legend>
+      <legend>{legend}</legend>
       <StockPicker
         value={value.stock}
         units={units}
@@ -270,7 +272,7 @@ function NewWallTypeForm({
   );
 }
 
-function OptionalSheet({
+export function OptionalSheet({
   label,
   testId,
   value,

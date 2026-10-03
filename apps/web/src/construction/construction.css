@@ -123,3 +123,22 @@
 .level-row .dialog-field input {
   width: 6.5rem;
 }
+
+.construction-summary {
+  display: inline;
+  font-size: inherit;
+}
+
+/* The Roof tool's pitch label over the view, at the middle of the previewed ridge. */
+.roof-pitch-label {
+  position: fixed;
+  transform: translate(-50%, -140%);
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+  background: rgba(20, 24, 32, 0.85);
+  color: #fff;
+  font-size: 0.85rem;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 5;
+}

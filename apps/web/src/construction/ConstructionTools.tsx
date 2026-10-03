@@ -1,4 +1,4 @@
-// The construction tool that has the side panel (the Wall tool or the Opening tool), with the
+// The construction tool that has the side panel (the Wall, Opening, Floor or Roof tool), with the
 // document's construction settings read for it. Loaded on demand with the Construction panel, so
 // the construction domain stays out of the app's start-up chunk.
 
@@ -8,7 +8,9 @@ import type { ModelStore } from '../model/model';
 import type { DocumentStoreApi } from '../state/document';
 import type { SelectionStore } from '../state/selection';
 import type { ViewportApi } from '../viewport/Viewport';
+import { FloorTool } from './floor/FloorTool';
 import { OpeningTool } from './OpeningTool';
+import { RoofTool } from './roof/RoofTool';
 import { documentConstruction } from './settings';
 import type { ConstructionUiStore } from './state';
 import { WallTool } from './WallTool';
@@ -44,6 +46,34 @@ export function ConstructionTools({
         ui={ui}
         partId={partId}
         settings={settings}
+        viewport={viewport}
+        onClose={close}
+      />
+    );
+  }
+  if (tool.kind === 'floor') {
+    return (
+      <FloorTool
+        key={`${partId}/${tool.featureId ?? 'new'}`}
+        documents={documents}
+        ui={ui}
+        partId={partId}
+        settings={settings}
+        featureId={tool.featureId}
+        onClose={close}
+      />
+    );
+  }
+  if (tool.kind === 'roof') {
+    return (
+      <RoofTool
+        key={`${partId}/${tool.featureId ?? 'new'}`}
+        documents={documents}
+        model={model}
+        ui={ui}
+        partId={partId}
+        settings={settings}
+        featureId={tool.featureId}
         viewport={viewport}
         onClose={close}
       />

@@ -21,6 +21,8 @@ import { twoFaces } from './measure/fixtures';
 import type { Measurer } from './measure/measurer';
 import { demoDocument } from './model/demo';
 import { createModelStore, type Regenerator, type RegenView } from './model/model';
+import { constructionDocument } from './construction/construction.test-fixture';
+import { createConstructionUiStore, type ConstructionUiStore } from './construction/state';
 import { createDocumentStore } from './state/document';
 import { createMeasureStore } from './state/measure';
 import { createSelectionStore, geometryRef, type GeometryRef } from './state/selection';
@@ -92,7 +94,12 @@ function fakeEngine() {
 }
 
 function setup(
-  options: { measurer?: Measurer; exchanger?: Exchanger; regenerator?: Regenerator } = {},
+  options: {
+    measurer?: Measurer;
+    exchanger?: Exchanger;
+    regenerator?: Regenerator;
+    constructionUi?: ConstructionUiStore;
+  } = {},
 ) {
   const manual = manualLoader(options.measurer, options.exchanger, options.regenerator);
   const engine = fakeEngine();
@@ -111,6 +118,7 @@ function setup(
       documents={documents}
       sketchSession={sketchSession}
       measure={measure}
+      {...(options.constructionUi ? { constructionUi: options.constructionUi } : {})}
     />,
   );
   return {
@@ -185,6 +193,25 @@ describe('App', () => {
     await waitFor(() => expect(t.engine.api.setBodies).toHaveBeenCalledWith(bodies));
     expect(screen.queryByTestId('splash')).toBeNull();
     expect(screen.getByTestId('viewport-canvas')).toBeDefined();
+  });
+
+  it('resets the construction tool, wall and level on every document switch', async () => {
+    const ui = createConstructionUiStore();
+    const t = setup({ constructionUi: ui });
+    await act(async () => t.resolve([]));
+    const switchTo = (doc: ReturnType<typeof constructionDocument>) =>
+      act(() => {
+        ui.setState({ tool: { kind: 'roof', featureId: null }, editingWall: 'w', level: 'l' });
+        t.documents.getState().load(doc);
+      });
+    // To a document with construction: the panel opens, nothing of the last one carries over.
+    switchTo({ ...constructionDocument(), id: 'shed-a' });
+    await waitFor(() => expect(ui.getState().open).toBe(true));
+    expect(ui.getState()).toMatchObject({ tool: null, editingWall: null, level: null });
+    // And to another one with construction, too.
+    switchTo({ ...constructionDocument(), id: 'shed-b' });
+    await waitFor(() => expect(ui.getState().tool).toBeNull());
+    expect(ui.getState()).toMatchObject({ open: true, editingWall: null, level: null });
   });
 
   it('reports a load failure on the splash', async () => {

@@ -310,7 +310,11 @@ export function WallTool({
           type="button"
           data-testid="wall-step-undo"
           disabled={steps.length === 0}
-          onClick={() => setSteps((s) => s.slice(0, -1))}
+          onClick={() => {
+            // Emptying the path makes the next click in the view a new start point.
+            if (steps.length <= 1) clickedStart.current = false;
+            setSteps((s) => s.slice(0, -1));
+          }}
         >
           Remove last
         </button>

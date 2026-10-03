@@ -1,12 +1,15 @@
 // What the construction toolbar group and panels show, not stored anywhere: whether the
-// Construction panel is open, which tool takes the side panel (the Wall tool, the Opening tool,
-// or none), the active level the Wall tool draws on, and which documents' disclaimer notice was
+// Construction panel is open, which tool takes the side panel (the Wall, Opening, Floor or Roof
+// tool, or none), the active level the Wall tool draws on, and which documents' disclaimer notice was
 // put away (shown again with Help).
 
 import { createStore, type StoreApi } from 'zustand/vanilla';
 
 export type ConstructionTool =
-  { kind: 'wall' } | { kind: 'opening'; featureId: string | null; wall: string | null };
+  | { kind: 'wall' }
+  | { kind: 'opening'; featureId: string | null; wall: string | null }
+  | { kind: 'floor'; featureId: string | null }
+  | { kind: 'roof'; featureId: string | null };
 
 export interface ConstructionUiState {
   open: boolean;

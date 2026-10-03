@@ -8,6 +8,7 @@ import { createDocumentStore } from '../state/document';
 import { createSelectionStore } from '../state/selection';
 import { memberRef } from '../viewport/members';
 import { createMemberStore } from '../viewport/memberStore';
+import type { ViewportApi } from '../viewport/Viewport';
 import { FT_IN, PART, constructionDocument, settingsOf } from './construction.test-fixture';
 import { ConstructionPanel } from './ConstructionPanel';
 import { ConstructionTools } from './ConstructionTools';
@@ -269,6 +270,44 @@ describe('the wall tool', () => {
     const wall = t.documents.getState().document.parts[0]!.features[0]!;
     expect(wall.kind === 'extension' && wall.params.closed).toBe(true);
     expect(wall.kind === 'extension' && wall.expressions.x2!.source).toBe('138.5');
+  });
+});
+
+describe('the wall tool in the view', () => {
+  it('takes a new start point from the next click after Remove last empties the path', () => {
+    let delegate: { down: (e: unknown, p: { x: number; y: number }) => boolean } | null = null;
+    const viewport = {
+      setPointerDelegate: (d: typeof delegate) => (delegate = d),
+      // Canvas pixels are millimetres on the level's plane, for the test.
+      canvasToPlane: (x: number, y: number) => [x, y, 0],
+      setPreviewLines: () => {},
+    } as unknown as ViewportApi;
+    const documents = createDocumentStore(constructionDocument());
+    const ui = createConstructionUiStore();
+    render(
+      <ConstructionTools
+        documents={documents}
+        model={createModelStore()}
+        selection={createSelectionStore()}
+        ui={ui}
+        partId={PART}
+        viewport={viewport}
+      />,
+    );
+    act(() => ui.getState().startTool({ kind: 'wall' }));
+    const click = (x: number, y: number) => act(() => void delegate!.down({}, { x, y }));
+    const value = (id: string) => (screen.getByTestId(id) as HTMLInputElement).value;
+    click(0, 0);
+    click(10 * FT, 0);
+    expect(screen.getAllByTestId(/^wall-step-\d+$/)).toHaveLength(1);
+    fireEvent.click(screen.getByTestId('wall-step-undo'));
+    expect(screen.queryAllByTestId(/^wall-step-\d+$/)).toHaveLength(0);
+    // The next click is a new start, not a segment from the old one.
+    click(4 * FT, 2 * FT);
+    expect([value('wall-start-x'), value('wall-start-y')]).toEqual(['48', '24']);
+    expect(screen.queryAllByTestId(/^wall-step-\d+$/)).toHaveLength(0);
+    click(4 * FT, 8 * FT);
+    expect(screen.getByTestId('wall-step-1').textContent).toBe(`6' 0" up (+y)`);
   });
 });
 
