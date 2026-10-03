@@ -1504,7 +1504,12 @@ export class DrawingStage {
     let titleBlock: TitleBlockInput | false = false;
     if (sheet.titleBlock !== undefined) {
       const t = titleBlockInput(sheet.titleBlock);
-      titleBlock = t.input;
+      // The sheet's place in its drawing ("2 / 4"), unless the title block gives its own.
+      const index = drawing.sheets.findIndex((s) => s.id === sheet.id);
+      titleBlock =
+        t.input.sheet === undefined && index >= 0
+          ? { ...t.input, sheet: `${index + 1} / ${drawing.sheets.length}` }
+          : t.input;
       if (t.unknown.length > 0) {
         diagnostics.push({
           code: 'title-field',

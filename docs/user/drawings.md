@@ -15,7 +15,7 @@ Drawings have their own tabs, to the right of the part studio and assembly tabs 
 
 ## Sheets
 
-The buttons at the left of the drawing toolbar are the drawing's sheets. **+ Sheet** adds another sheet of the same size, orientation and title block; **Delete sheet** removes the one shown (a drawing keeps at least one). The **Sheet** section of the side panel changes the sheet's name, size and orientation, turns its title block on or off and edits the title block's fields; a field commits when you press Enter or leave it.
+The buttons at the left of the drawing toolbar are the drawing's sheets. **+ Sheet** adds another sheet of the same size, orientation and title block; **Delete sheet** removes the one shown (a drawing keeps at least one). The **Sheet** section of the side panel changes the sheet's name, size and orientation, turns its title block on or off and edits the title block's fields; a field commits when you press Enter or leave it. The title block's **Sheet** cell numbers the sheet within its drawing (`2 / 4` on the second of four sheets, `1 / 1` on a lone sheet); a **Sheet** field with a value takes its place.
 
 **-**, **Fit** and **+** zoom the sheet.
 

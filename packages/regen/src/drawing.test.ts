@@ -22,6 +22,7 @@ import type {
   Vec3,
   ViewFrame,
 } from '@manufakture/kernel';
+import type { DisplayList } from '@manufakture/drawing';
 import { viewFrame } from '@manufakture/kernel';
 import { createNodeService } from '@manufakture/kernel/node';
 import { createSolverService, type SolverService } from '@manufakture/sketch';
@@ -545,6 +546,53 @@ describe("the stage's caches", () => {
     }
     // Only the last reference stayed cached, so the second round asked for the others again.
     expect(stage.stats.resolveOps).toBe(n + (n - 1));
+  });
+
+  it("numbers each sheet's title block by its place in the drawing, unless the block says", async () => {
+    const page = (id: string, fields: { label: string; value: string }[]): Sheet => ({
+      id,
+      name: id,
+      size: 'A3',
+      orientation: 'landscape',
+      views: [],
+      dimensions: [],
+      notes: [],
+      titleBlock: { fields },
+    });
+    const sheetCell = (display: DisplayList | null) =>
+      display!.items.flatMap((i) =>
+        i.kind === 'text' && i.owner === 'titleBlock' && /^\d+ \/ \d+$/.test(i.text)
+          ? [i.text]
+          : [],
+      );
+    const title = [{ label: 'Title', value: 'Shed' }];
+    const sheets = [
+      page('sheet#1', title),
+      page('sheet#2', title),
+      page('sheet#3', [...title, { label: 'Sheet', value: 'A-3' }]),
+      page('sheet#4', [...title, { label: 'Sheet', value: '' }]),
+    ];
+    const drawing: Drawing = {
+      id: 'drawing#1',
+      name: 'D',
+      nextIds: { sheet: 5, view: 1, note: 1 },
+      sheets,
+    };
+    const stage = new DrawingStage();
+    const host = fakeHost(0);
+    const document = bracket();
+    const got = await Promise.all(sheets.map((x) => stage.sheet(host, document, drawing, x)));
+    expect(got.map((r) => r.input!.titleBlock && r.input!.titleBlock.sheet)).toEqual([
+      '1 / 4',
+      '2 / 4',
+      'A-3',
+      '4 / 4',
+    ]);
+    expect(sheetCell(got[1]!.display)).toEqual(['2 / 4']);
+    // A lone sheet is 1 / 1.
+    const lone: Drawing = { ...drawing, sheets: [sheets[1]!] };
+    const one = await stage.sheet(host, document, lone, sheets[1]!);
+    expect(sheetCell(one.display)).toEqual(['1 / 1']);
   });
 });
 
