@@ -278,6 +278,20 @@ export const migrateV13ToV14: Migration = {
   },
 };
 
+/**
+ * Version 15 added the domain view source (`{ domain, part, schemaVersion, params }`, M6 plan
+ * T6.4a: construction floor plans and framing elevations, ADR 0015 decision 9). Nothing in a
+ * version 14 file changes: its views all show a part or an assembly.
+ */
+export const migrateV14ToV15: Migration = {
+  from: 14,
+  to: 15,
+  description: 'Add domain view sources',
+  migrate(doc) {
+    return { ...doc, version: 15 };
+  },
+};
+
 /** File format migrations, in order: `FORMAT_MIGRATIONS[i]` goes from version i to i + 1. */
 export const FORMAT_MIGRATIONS: readonly Migration[] = [
   migrateV0ToV1,
@@ -294,6 +308,7 @@ export const FORMAT_MIGRATIONS: readonly Migration[] = [
   migrateV11ToV12,
   migrateV12ToV13,
   migrateV13ToV14,
+  migrateV14ToV15,
 ];
 
 /**

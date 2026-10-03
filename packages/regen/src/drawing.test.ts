@@ -486,6 +486,8 @@ describe("the stage's caches", () => {
       versions: { kernelBuild: 'fake', namingScheme: 1, implementation: 1 },
       deflection: undefined,
       bodies: async () => ({ bodies, diagnostics: [] }),
+      domainView: async () => ({ output: null, bodies: [], diagnostics: [] }),
+      titleNotes: () => [],
       run: async (ops) =>
         ops.map((op) => ({ ok: true, op: op.op, value: reply(op), ms: 0 }) as OpResult),
     };

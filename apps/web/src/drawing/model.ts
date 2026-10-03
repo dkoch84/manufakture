@@ -141,6 +141,7 @@ export function pickPrompt(kind: DimensionKind, picked: number): string {
 export function sourceLabel(doc: ManufaktureDocument, source: ViewSource): string {
   if ('part' in source) {
     const name = doc.parts.find((p) => p.id === source.part)?.name ?? source.part;
+    if ('domain' in source) return `${name} (${source.domain} view)`;
     return source.bodies ? `${name} (${source.bodies.length} of its bodies)` : name;
   }
   const assembly = doc.assemblies.find((a) => a.id === source.assembly);

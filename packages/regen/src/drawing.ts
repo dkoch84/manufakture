@@ -26,7 +26,9 @@
 
 import {
   STANDARD_VIEWS,
+  isDomainViewSource,
   type Dimension,
+  type DomainViewSource,
   type DimensionRef,
   type Drawing,
   type DrawingView,
@@ -40,15 +42,19 @@ import {
 } from '@manufakture/core';
 import {
   layoutSheet,
+  type ChainDimensionInput,
+  type Curve2,
   type DimensionInput,
   type DisplayList,
   type DrawingInput,
   type NoteInput,
+  type PitchSymbolInput,
   type Scale,
   type SheetInput,
   type TitleBlockInput,
   type ValueFormat,
   type ViewInput,
+  type ViewOverlayItem,
 } from '@manufakture/drawing';
 import {
   projectPoint,
@@ -78,6 +84,7 @@ import {
 } from '@manufakture/kernel';
 import type { LengthFormat } from '@manufakture/units';
 import { REGEN_IMPLEMENTATION_VERSION, type KeyVersions } from './cache';
+import type { DomainArc, DomainViewOutput } from './domain-views';
 import { hashValue } from './hash';
 import type { FieldPath, ReferenceResolution, RegenError, RegenWarning } from './types';
 import { evaluateField, type VariableValues } from './values';
@@ -116,6 +123,9 @@ const ALIGNED = 1e-9;
  * - `sheet-size`: a custom sheet size that is not a positive length; the sheet is not laid out.
  * - `title-field`: title block fields with labels the title block has no cell for (`labels`).
  * - `kernel`: the `project` op failed.
+ * - `domain-view`: a domain view (format v15) that this build cannot draw (no such domain, a newer
+ *   version of its params, domain data that does not read, or the domain failing), an error and
+ *   an empty view; or what the domain could not draw as asked, a warning.
  */
 export interface DrawingDiagnostic {
   code:
@@ -127,7 +137,8 @@ export interface DrawingDiagnostic {
     | 'expression'
     | 'sheet-size'
     | 'title-field'
-    | 'kernel';
+    | 'kernel'
+    | 'domain-view';
   severity: 'error' | 'warning';
   /** The view, sheet or drawing it is about. */
   subject: string;
@@ -251,6 +262,12 @@ export interface DrawingViewResult {
   pick: ViewPickData | null;
   /** The projection came from the stage's cache: no `project` op was sent. */
   cached: boolean;
+  /** A domain view's chained dimension strings, for `layoutSheet`; absent for other views. */
+  chains?: ChainDimensionInput[];
+  /** A domain view's roof pitch symbols, for `layoutSheet`; absent for other views. */
+  symbols?: PitchSymbolInput[];
+  /** A domain view's note for the title block (the construction disclaimer); absent when none. */
+  titleNote?: string;
 }
 
 export interface DrawingSheetResult {
@@ -296,6 +313,20 @@ export interface DrawingHost {
   readonly deflection: Partial<Deflection> | undefined;
   /** The bodies a view shows at their poses, built through the cache (memoised per request). */
   bodies(source: ViewSource): Promise<{ bodies: DrawingBody[]; diagnostics: DrawingDiagnostic[] }>;
+  /**
+   * A domain view (format v15): what the domain draws (null when it cannot), and the bodies of
+   * the part it asks to project, at their poses.
+   */
+  domainView(source: DomainViewSource): Promise<{
+    output: DomainViewOutput | null;
+    bodies: DrawingBody[];
+    diagnostics: DrawingDiagnostic[];
+  }>;
+  /**
+   * The registered domains' title notes for a sheet showing these sources (their domain views'
+   * namespaces, and those of the extension features of every part shown), each once.
+   */
+  titleNotes(sources: readonly ViewSource[]): string[];
   /** One batch on these bodies' shapes; throws when superseded or the shapes are stale. */
   run(ops: KernelOp[], bodies: readonly DrawingBody[]): Promise<readonly OpResult[]>;
 }
@@ -1119,6 +1150,120 @@ const refKey = (bodyKey: string, ref: DimensionRef): string => {
   return hashValue({ bodyKey, named });
 };
 
+// Domain views --------------------------------------------------------------------------------
+
+/** Segments a domain arc that the view does not see face on is drawn with. */
+const ARC_SEGMENTS = 24;
+
+function unionBounds2(a: Bounds2 | null, b: Bounds2 | null): Bounds2 | null {
+  if (a === null) return b;
+  if (b === null) return a;
+  return {
+    min: [Math.min(a.min[0], b.min[0]), Math.min(a.min[1], b.min[1])],
+    max: [Math.max(a.max[0], b.max[0]), Math.max(a.max[1], b.max[1])],
+  };
+}
+
+/** A domain arc in view coordinates: an arc seen face on, a polyline otherwise. */
+function arcCurve(arc: DomainArc, frame: ViewFrame): Curve2 {
+  const n = unit3([...arc.normal] as Vec3);
+  const c = [...arc.center] as Vec3;
+  const u = sub3([...arc.from] as Vec3, c);
+  const v = sub3([...arc.to] as Vec3, c);
+  const radius = norm3(u);
+  // The sweep counter-clockwise about n from u to v, in (0, 2 pi].
+  let sweep = Math.atan2(dot3(cross3(u, v), n), dot3(u, v));
+  if (sweep <= 1e-12) sweep += 2 * Math.PI;
+  const facing = dot3(n, frame.z);
+  if (Math.abs(facing) > 1 - ALIGNED && radius > 0) {
+    const centre = projectPoint(frame, c);
+    const a = projectPoint(frame, arc.from as Vec3);
+    const b = projectPoint(frame, arc.to as Vec3);
+    const angle = (p: Vec2) => Math.atan2(p[1] - centre[1], p[0] - centre[0]);
+    // Seen from behind its normal, the arc runs clockwise on paper: from `to` back to `from`.
+    const start = facing > 0 ? angle(a) : angle(b);
+    return { kind: 'arc', center: centre, radius, start, end: start + sweep };
+  }
+  const w = cross3(n, u);
+  const points: Vec2[] = [];
+  for (let i = 0; i <= ARC_SEGMENTS; i++) {
+    const t = (sweep * i) / ARC_SEGMENTS;
+    points.push(projectPoint(frame, add3(c, add3(mul3(u, Math.cos(t)), mul3(w, Math.sin(t))))));
+  }
+  return { kind: 'polyline', points };
+}
+
+/**
+ * What a domain view draws besides its projected bodies, in view coordinates: the overlay (lines
+ * and arcs on their layers), the chained strings (their sides turned into `packages/drawing`'s
+ * signed offsets) and the pitch symbols, with the bounds of all of it. Linear in the output.
+ */
+export function domainParts(
+  domain: DomainViewOutput,
+  frame: ViewFrame,
+  viewId: string,
+): {
+  overlay: ViewOverlayItem[];
+  chains: ChainDimensionInput[];
+  symbols: PitchSymbolInput[];
+  bounds: Bounds2 | null;
+} {
+  const overlay: ViewOverlayItem[] = [];
+  let lo: [number, number] = [Infinity, Infinity];
+  let hi: [number, number] = [-Infinity, -Infinity];
+  const grow = (p: Vec2) => {
+    lo = [Math.min(lo[0], p[0]), Math.min(lo[1], p[1])];
+    hi = [Math.max(hi[0], p[0]), Math.max(hi[1], p[1])];
+  };
+  const P = (p: readonly [number, number, number]) => projectPoint(frame, p as Vec3);
+  for (const l of domain.lines ?? []) {
+    const a = P(l.a);
+    const b = P(l.b);
+    grow(a);
+    grow(b);
+    overlay.push({ curve: { kind: 'line', a, b }, layer: l.layer ?? 'visible' });
+  }
+  for (const arc of domain.arcs ?? []) {
+    const curve = arcCurve(arc, frame);
+    if (curve.kind === 'arc') {
+      grow([curve.center[0] - curve.radius, curve.center[1] - curve.radius]);
+      grow([curve.center[0] + curve.radius, curve.center[1] + curve.radius]);
+    } else if (curve.kind === 'polyline') curve.points.forEach(grow);
+    overlay.push({ curve, layer: arc.layer ?? 'visible' });
+  }
+  const chains: ChainDimensionInput[] = [];
+  for (const c of domain.chains ?? []) {
+    const points = c.points.map(P);
+    if (points.length < 2) continue;
+    const side = [dot3([...c.side] as Vec3, frame.x), dot3([...c.side] as Vec3, frame.y)] as const;
+    let positive: boolean;
+    if (c.kind === 'horizontal') positive = side[1] >= 0;
+    else if (c.kind === 'vertical') positive = side[0] >= 0;
+    else {
+      const d = sub2(points[points.length - 1]!, points[0]!);
+      positive = dot2(side, perp2(d)) >= 0;
+    }
+    chains.push({
+      id: `${viewId}/${c.id}`,
+      view: viewId,
+      kind: c.kind,
+      points,
+      offset: positive ? Math.abs(c.offset) : -Math.abs(c.offset),
+      ...(c.overall === undefined ? {} : { overall: c.overall }),
+      ...(c.marks === undefined ? {} : { marks: c.marks.map(P) }),
+    });
+  }
+  const symbols: PitchSymbolInput[] = (domain.pitches ?? []).map((p) => ({
+    id: `${viewId}/${p.id}`,
+    view: viewId,
+    at: P(p.at),
+    pitch: p.pitch,
+    rises: dot3([...p.rises] as Vec3, frame.x) >= 0 ? 'right' : 'left',
+  }));
+  const bounds: Bounds2 | null = lo[0] <= hi[0] ? { min: lo, max: hi } : null;
+  return { overlay, chains, symbols, bounds };
+}
+
 /**
  * The drawing stage of one engine: its caches (plain data, valid for as long as the body keys
  * are, whatever the kernel instance) and the requests. The engine gives it a `DrawingHost` per
@@ -1150,7 +1295,24 @@ export class DrawingStage {
     options: { pick?: boolean } = {},
   ): Promise<DrawingViewResult> {
     const diagnostics: DrawingDiagnostic[] = [];
-    const { direction, up } = viewDirection(view);
+    // A domain view's frame, section and bodies come from its domain (format v15).
+    let domain: DomainViewOutput | null = null;
+    let source: { bodies: DrawingBody[]; diagnostics: DrawingDiagnostic[] };
+    const isDomain = isDomainViewSource(view.source);
+    if (isDomainViewSource(view.source)) {
+      const got = await host.domainView(view.source);
+      domain = got.output;
+      source = { bodies: got.bodies, diagnostics: got.diagnostics };
+    } else {
+      source = await host.bodies(view.source);
+    }
+    const { direction, up } =
+      domain === null
+        ? viewDirection(view)
+        : {
+            direction: [...domain.direction] as Vec3,
+            up: [...domain.up] as Vec3,
+          };
     const frame = viewFrame({ direction, up });
     const scale = evaluateScale(view.scale, host.variables);
     if (!scale.ok) {
@@ -1164,7 +1326,13 @@ export class DrawingStage {
     }
     let section: { origin: Vec3; normal: Vec3 } | undefined;
     let sectionFailed = false;
-    if (view.options.section !== undefined) {
+    if (domain?.section !== undefined) {
+      // Core's convention (the normal points into the removed side); the kernel keeps its side.
+      section = {
+        origin: [...domain.section.origin] as Vec3,
+        normal: mul3(unit3([...domain.section.normal] as Vec3), -1),
+      };
+    } else if (!isDomain && view.options.section !== undefined) {
       const r = evaluateField(
         view.options.section.offset,
         'length',
@@ -1187,7 +1355,6 @@ export class DrawingStage {
       }
     }
 
-    const source = await host.bodies(view.source);
     diagnostics.push(...source.diagnostics.map((d) => ({ ...d, subject: view.id })));
     const bodies = source.bodies;
     const items: DrawingItem[] = bodies.map((b, item) => ({
@@ -1201,7 +1368,10 @@ export class DrawingStage {
 
     let projected: ProjectResult = { keys: [], edges: [], bounds: null };
     let cached = false;
-    if (bodies.length === 0) {
+    if (bodies.length === 0 && isDomain) {
+      // A domain view of analytic parts only (a framing elevation), or one its domain could not
+      // draw (reported already): nothing to project.
+    } else if (bodies.length === 0) {
       diagnostics.push({
         code: 'empty-view',
         severity: 'warning',
@@ -1261,10 +1431,23 @@ export class DrawingStage {
     );
     const pick = options.pick ? await this.#pick(host, bodies, frame) : null;
 
+    const drawn = domain === null ? null : domainParts(domain, frame, view.id);
+    if (drawn !== null && drawn.overlay.length === 0 && bodies.length === 0) {
+      diagnostics.push({
+        code: 'empty-view',
+        severity: 'warning',
+        subject: view.id,
+        message: `${view.id} shows nothing`,
+      });
+    }
+
     let input: ViewInput | null = null;
     if (scale.ok) {
       const s = scale.scale.paper / scale.scale.model;
-      const b = projected.bounds ?? { min: [0, 0] as Vec2, max: [0, 0] as Vec2 };
+      const b = unionBounds2(projected.bounds, drawn?.bounds ?? null) ?? {
+        min: [0, 0] as Vec2,
+        max: [0, 0] as Vec2,
+      };
       const centre: Vec2 = [(b.min[0] + b.max[0]) / 2, (b.min[1] + b.max[1]) / 2];
       const sections = projected.sections?.map((x) => ({
         item: x.item,
@@ -1279,6 +1462,7 @@ export class DrawingStage {
         // Core anchors a view at its model origin; packages/drawing at the centre of its bounds.
         position: [view.position[0] + s * centre[0], view.position[1] + s * centre[1]],
         ...(sections === undefined ? {} : { sections }),
+        ...(drawn === null || drawn.overlay.length === 0 ? {} : { overlay: drawn.overlay }),
         display: { hidden: view.options.hidden, smooth: view.options.smooth ? 'thin' : 'omit' },
       };
     }
@@ -1299,6 +1483,8 @@ export class DrawingStage {
       input,
       pick,
       cached,
+      ...(drawn === null ? {} : { chains: drawn.chains, symbols: drawn.symbols }),
+      ...(domain?.titleNote === undefined ? {} : { titleNote: domain.titleNote }),
     };
   }
 
@@ -1350,15 +1536,27 @@ export class DrawingStage {
           : [origin[0] + n.position[0], origin[1] + n.position[1]];
       return { id: n.id, text: n.text, at };
     });
+    // Title block notes (the construction disclaimer), each once: the domains the sheet shows,
+    // whether or not their views drew, and any a drawn domain view added.
+    const titleNotes = [
+      ...new Set([
+        ...host.titleNotes(sheet.views.map((v) => v.source)),
+        ...views.flatMap((v) => (v.titleNote === undefined ? [] : [v.titleNote])),
+      ]),
+    ];
+    const placedViews = views.filter((v) => v.input !== null);
     const input: DrawingInput = {
       sheet: size.sheet,
       projection: 'third',
-      views: views.flatMap((v) => (v.input === null ? [] : [v.input])),
+      views: placedViews.map((v) => v.input!),
       dimensions: views.flatMap((v) =>
         v.dimensions.flatMap((d) => (d.input === null ? [] : [d.input])),
       ),
+      chains: placedViews.flatMap((v) => v.chains ?? []),
+      symbols: placedViews.flatMap((v) => v.symbols ?? []),
       notes,
       titleBlock,
+      ...(titleNotes.length === 0 ? {} : { disclaimer: titleNotes.join(' ') }),
       format: valueFormat(document.units),
     };
     return {

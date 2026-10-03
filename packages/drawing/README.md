@@ -61,9 +61,13 @@ list.warnings; // unknown or duplicate views, degenerate dimensions, views outsi
 | view `align`    | `{ parent, direction, side }`: a projected view stays on its parent's row (`horizontal`) or column (`vertical`), at the parent's scale; only the other coordinate of `position` is used. Without a position it goes beside the parent on `side`, named for third angle: `after` (default; right or above: right and top views) or `before` (left or below: left and bottom views). First angle flips both. |
 | view `sections` | T4.4b's section loops per item, hatched.                                                                                                                                                                                                                                                                                                                                                                   |
 | view `display`  | `hidden` (default true), `smooth` (`'thin'` or `'omit'`), `sewn` (default false), `centreMarks` (default true), hatch angle and spacing.                                                                                                                                                                                                                                                                   |
+| view `overlay`  | Geometry a domain draws itself, view coordinates (`{ curve, layer, item? }`): member outlines in a framing elevation, member sections and door swings in a plan. Drawn as is on its layer, after the edges; part of the bounds when the view gives none.                                                                                                                                                   |
 | `dimensions`    | Already projected anchors in a view's coordinates (regen resolves the model references and projects them): two points (`horizontal`, `vertical`, `aligned`), a circle (`radius`, `diameter`), two silhouette lines (`diameter` of a cylinder seen across) or a vertex and two legs (`angle`).                                                                                                              |
+| `chains`        | Chained dimension strings (M6 plan T6.4a): points in order along one line in a view, `kind` and `offset` as a linear dimension's, `overall` (default: more than one span) and layout `marks`. Derived by regen, never stored.                                                                                                                                                                              |
+| `symbols`       | Roof pitch symbols: `at` in a view, `pitch` in radians, `rises` `left` or `right`, `size` and `lift` in paper mm.                                                                                                                                                                                                                                                                                          |
 | `notes`         | Text on paper, lines split at `\n`, with an optional leader to a paper point or a point in a view.                                                                                                                                                                                                                                                                                                         |
 | `titleBlock`    | Title, drawing number, revision, sheet, scale (default: the views' shared scale or `AS SHOWN`), company, drawn by, date, material, units, projection. `false` for none.                                                                                                                                                                                                                                    |
+| `disclaimer`    | Small text in a box on top of the title block (or in the frame's bottom right corner without one): the construction domain's "not an engineering tool" text.                                                                                                                                                                                                                                               |
 | `format`        | The document's display units (ADR 0005), for every value: `{ length: { unit: 'ft-in', denominator: 16 } }` and so on. A dimension may carry its own.                                                                                                                                                                                                                                                       |
 
 ## The display list
@@ -121,6 +125,28 @@ complement): an arc at `radius` between the legs, with extension lines along leg
 it. When the arc is too short for both arrowheads, they go outside pointing in and the arc runs on
 under them.
 
+**Chained strings.** `layoutChain` lays out a row of consecutive linear dimensions on one line
+(each span through `layoutDimension`, so it looks like the single dimensions beside it; the
+extension line two spans share is drawn once), the line `offset` paper mm past the farthest point
+on its side, then the overall dimension a row further out (`rowGap`, default two text heights and
+two gaps plus 1 mm, past any value nudged that way) and an X on the first row at each layout mark.
+Placement is the M4 rule, a fixed offset with collision nudging only: a value that would overlap
+the one before it on its row moves across the line, a row at a time, at most `MAX_NUDGE` (3) rows,
+so a string of short spans comes out staggered. `chainSpans` gives the values. A chain with fewer
+than two distinct points, more than `MAX_CHAIN_POINTS` (1,000) points or more than
+`MAX_CHAIN_MARKS` (5,000) marks is a `degenerate-dimension` warning and is not drawn.
+
+**Pitch symbol.** `layoutPitchSymbol` draws a right triangle `lift` (default 3) mm above `at`: the
+run leg level and `size` (default 8) mm long, labelled with the run (`12`), the rise leg plumb at
+the high end labelled with the rise, the hypotenuse at the roof's slope (up to a rise of three
+runs). The labels come from `packages/units` (`formatAngle` with `unit: 'pitch'` in a slope
+field, `6/12`), through `pitchLabels`. Text 2.5 mm.
+
+**Disclaimer.** `layoutDisclaimer` wraps the text to the title block's width (`wrapText`: words,
+0.85 cap heights a character so it stays inside the box in Helvetica and in a monospaced fallback,
+at most `MAX_DISCLAIMER_LINES` (24, enough for the longest text) lines of 1.8 mm text, the text cut to `MAX_DISCLAIMER_LENGTH`
+(2,000) characters first, a cut ending in an ellipsis) and draws it on the `titleBlock` layer.
+
 **Text.** `'aligned'` (default) puts text along the dimension line, above it, readable from the
 bottom or the right; `'horizontal'` writes it horizontally in a break in the line. Text widths
 are estimated (0.6 cap heights per character) to decide what fits; the writers use real fonts.
@@ -147,9 +173,9 @@ which an extent fits a space (`METRIC_SCALES`, or `IMPERIAL_SCALES` from 3" = 1'
 - Ordinate and baseline dimensions (conveniences, Part 1 of the M4 plan).
 - Centre lines along the axis of a cylinder seen across (the view edges carry no axis; regen
   could pass one).
-- Collision avoidance: nothing here nudges dimensions, text or notes apart. Each is placed where
-  its `offset` or position says; moving them clear of each other is left to the regen drawing
-  stage (T4.4e) or the app.
+- Collision avoidance between dimensions, notes and views: nothing here moves them apart. Each
+  is placed where its `offset` or position says; only the values inside one chained string are
+  nudged clear of each other (above).
 
 ## Tests
 

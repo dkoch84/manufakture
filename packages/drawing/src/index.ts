@@ -1,6 +1,14 @@
 export const packageName = '@manufakture/drawing';
 
 export {
+  MAX_CHAIN_MARKS,
+  MAX_CHAIN_POINTS,
+  MAX_NUDGE,
+  chainSpans,
+  layoutChain,
+  type ChainDimensionInput,
+} from './chain';
+export {
   DEFAULT_DIMENSION_STYLE,
   arrowhead,
   estimateTextWidth,
@@ -93,10 +101,21 @@ export {
   type SheetSizeName,
 } from './sheet';
 export {
+  PITCH_TEXT_HEIGHT,
+  layoutPitchSymbol,
+  pitchLabels,
+  type PitchSymbolInput,
+} from './symbols';
+export {
+  DISCLAIMER_TEXT_HEIGHT,
+  MAX_DISCLAIMER_LENGTH,
+  MAX_DISCLAIMER_LINES,
   TITLE_BLOCK_HEIGHT,
   TITLE_BLOCK_WIDTH,
+  layoutDisclaimer,
   layoutTitleBlock,
   titleBlockBounds,
+  wrapText,
   type TitleBlockInput,
 } from './title-block';
 export {
@@ -107,5 +126,6 @@ export {
   type ViewAlignment,
   type ViewDisplay,
   type ViewInput,
+  type ViewOverlayItem,
   type ViewSection,
 } from './view';

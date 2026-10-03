@@ -2,6 +2,7 @@
 // and trimmed where visible lines cover them, centre marks, section hatching), the dimensions
 // and the notes, as one display list in paper millimetres.
 
+import { layoutChain, type ChainDimensionInput } from './chain';
 import {
   DEFAULT_DIMENSION_STYLE,
   arrowhead,
@@ -34,7 +35,13 @@ import {
 import { removeHiddenUnderVisible, type ViewEdge } from './hidden';
 import { FULL_SIZE, formatScale, scaleFactor, type Scale } from './scale';
 import { sheetGeometry, type SheetInput } from './sheet';
-import { layoutTitleBlock, type TitleBlockInput } from './title-block';
+import { layoutPitchSymbol, type PitchSymbolInput } from './symbols';
+import {
+  TITLE_BLOCK_HEIGHT,
+  layoutDisclaimer,
+  layoutTitleBlock,
+  type TitleBlockInput,
+} from './title-block';
 import { placeViews, type PlacedView, type ViewInput } from './view';
 
 export interface NoteInput {
@@ -82,9 +89,18 @@ export interface DrawingInput {
   readonly projection?: 'first' | 'third';
   readonly views: readonly ViewInput[];
   readonly dimensions?: readonly DimensionInput[];
+  /** Chained dimension strings (derived, never stored; M6 plan T6.4a). */
+  readonly chains?: readonly ChainDimensionInput[];
+  /** Roof pitch symbols. */
+  readonly symbols?: readonly PitchSymbolInput[];
   readonly notes?: readonly NoteInput[];
   /** The title block's fields; `false` for none. Default: an empty title block. */
   readonly titleBlock?: TitleBlockInput | false;
+  /**
+   * A disclaimer drawn as small text in a box on top of the title block (or in the frame's
+   * bottom right corner without one): the construction domain's "not an engineering tool" text.
+   */
+  readonly disclaimer?: string;
   /** Display units of the values (the document's, ADR 0005). Default millimetres. */
   readonly format?: ValueFormat;
   readonly style?: {
@@ -178,6 +194,13 @@ function viewItems(view: ViewInput, placed: PlacedView, style: DrawingStyle): Di
       owner,
       item: section.item,
     });
+  for (const o of view.overlay ?? [])
+    items.push(
+      stroke(transformCurve(placed.transform, o.curve), o.layer, {
+        owner,
+        ...(o.item === undefined ? {} : { item: o.item }),
+      }),
+    );
   if (view.label) {
     const b = placed.paperBounds;
     items.push({
@@ -314,6 +337,15 @@ export function layoutSheet(input: DrawingInput): DisplayList {
       ),
     );
 
+  if (input.disclaimer !== undefined && input.disclaimer.trim() !== '')
+    items.push(
+      ...layoutDisclaimer(
+        input.disclaimer,
+        frame,
+        input.titleBlock === false ? frame.min[1] : frame.min[1] + TITLE_BLOCK_HEIGHT,
+      ).items,
+    );
+
   // Only the first of views sharing an id is placed and drawn (placeViews warns about the rest).
   const drawn = new Set<string>();
   for (const view of input.views) {
@@ -340,6 +372,34 @@ export function layoutSheet(input: DrawingInput): DisplayList {
     );
     if (warning) warnings.push(warning);
     items.push(...dimItems);
+  }
+
+  for (const chain of input.chains ?? []) {
+    const view = placed.get(chain.view);
+    if (!view) {
+      warnings.push({
+        code: 'unknown-view',
+        subject: chain.id,
+        message: `${chain.id} is in ${chain.view}, which is not on the sheet`,
+      });
+      continue;
+    }
+    const laid = layoutChain(chain, view.transform, input.format, style.dimension);
+    warnings.push(...laid.warnings);
+    items.push(...laid.items);
+  }
+
+  for (const symbol of input.symbols ?? []) {
+    const view = placed.get(symbol.view);
+    if (!view) {
+      warnings.push({
+        code: 'unknown-view',
+        subject: symbol.id,
+        message: `${symbol.id} is in ${symbol.view}, which is not on the sheet`,
+      });
+      continue;
+    }
+    items.push(...layoutPitchSymbol(symbol, view.transform));
   }
 
   for (const note of input.notes ?? []) items.push(...noteItems(note, placed, style, warnings));

@@ -21,6 +21,9 @@ import {
   DrawingSchema,
   ExplodedViewSchema,
   MAX_PAPER_COORDINATE,
+  MAX_VIEW_PARAMS_DEPTH,
+  MAX_VIEW_PARAMS_LENGTH,
+  isDomainViewSource,
   NoteSchema,
   SheetSchema,
   ViewSchema,
@@ -363,6 +366,66 @@ describe('drawings (schema)', () => {
     expect(ViewSchema.safeParse(partView({ id: 'dim#1' })).success).toBe(false);
     expect(DrawingSchema.safeParse(drawing({ id: 'drawing#0' })).success).toBe(false);
     expect(NoteSchema.safeParse(note({ id: 'note#1x' })).success).toBe(false);
+  });
+});
+
+describe('domain view sources (format v15)', () => {
+  const plan = (over: Record<string, unknown> = {}) =>
+    partView({
+      source: {
+        domain: 'construction',
+        part: PART,
+        schemaVersion: 1,
+        params: { kind: 'plan', level: 'level-1', cut: { source: "4'" } },
+        ...over,
+      } as DrawingView['source'],
+      id: 'view#3',
+      direction: 'top',
+    });
+
+  it('accepts a domain view of a part, and tells it from a part view', () => {
+    expect(ViewSchema.safeParse(plan()).success).toBe(true);
+    expect(isDomainViewSource(plan().source)).toBe(true);
+    expect(isDomainViewSource(partView().source)).toBe(false);
+    const doc = applied(drawn(), { type: 'addView', drawingId: D, sheetId: S, view: plan({}) });
+    expect(validateDocument(doc)).toEqual([]);
+    // It round-trips through the file as it is.
+    const again = unwrap(deserialize(serialize(doc))).document;
+    expect(sheetOf(again).views.at(-1)).toEqual(sheetOf(doc).views.at(-1));
+  });
+
+  it.each([
+    ['a namespace that is not one', { domain: 'Construction' }],
+    ['no part', { part: undefined }],
+    ['a schema version of 0', { schemaVersion: 0 }],
+    ['params that are not an object', { params: [1, 2] }],
+    ['an unknown key', { bodies: ['extrude#1'] }],
+  ])('refuses %s', (_label, over) => {
+    const view = plan(over);
+    const source = view.source as Record<string, unknown>;
+    for (const [k, v] of Object.entries(source)) if (v === undefined) delete source[k];
+    expect(ViewSchema.safeParse(view).success).toBe(false);
+  });
+
+  it('bounds the params: depth and length, without recursing', () => {
+    let deep: unknown = 1;
+    for (let i = 0; i < MAX_VIEW_PARAMS_DEPTH; i++) deep = { a: deep };
+    expect(ViewSchema.safeParse(plan({ params: deep })).success).toBe(true);
+    expect(ViewSchema.safeParse(plan({ params: { a: deep } })).success).toBe(false);
+    let crafted: unknown = 1;
+    for (let i = 0; i < 100_000; i++) crafted = [crafted];
+    expect(ViewSchema.safeParse(plan({ params: { a: crafted } })).success).toBe(false);
+    expect(ViewSchema.safeParse(plan({ params: { n: BigInt(1) } })).success).toBe(false);
+    const long = { text: 'x'.repeat(MAX_VIEW_PARAMS_LENGTH) };
+    expect(ViewSchema.safeParse(plan({ params: long })).success).toBe(false);
+  });
+
+  it('reports a domain view of a part that does not exist, and blocks deleting its part', () => {
+    const doc = applied(drawn(), { type: 'addView', drawingId: D, sheetId: S, view: plan({}) });
+    const bad = clone(doc);
+    (sheetOf(bad).views.at(-1)!.source as { part: string }).part = 'part#9';
+    expect(validateDocument(bad).map((e) => e.code)).toEqual(['dependency']);
+    expect(partViews(doc, PART)).toEqual([`${D}/${S}/view#1`, `${D}/${S}/view#3`]);
   });
 });
 

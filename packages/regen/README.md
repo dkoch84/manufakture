@@ -875,6 +875,45 @@ number`, `Revision`, `Sheet`, `Scale`, `Company`, `Drawn by`, `Date`, `Material`
 view's position. No collision nudging of dimensions and notes is done here (the plan does not give
 it to this task; `packages/drawing` places each where its offset says).
 
+**Domain views** (format v15; M6 plan T6.4a, ADR 0015 decision 9). A view whose source is
+`{ domain, part, schemaVersion, params }` is drawn by the registered domain's `drawings`
+(`ExtensionDomain.drawings`, `src/domain-views.ts`): a `DomainDrawings` with the newest
+`schemaVersion` of view params it reads and a pure `view(context)`. The context holds the params
+as stored, the part's built extensions of the domain's namespace with their metadata, the part's
+member sets (framed through the member cache, so after a regen no group is framed again), the
+domain data it reads, the part's body ids, and `evaluate` for expressions in the params. The
+domain returns the view's frame (`direction`, `up`), an optional section (core's convention), the
+body ids the kernel projects with it (layer bodies cut by a plan), and the analytic parts in
+model space: lines and arcs on the `visible`, `hidden`, `smooth`, `centre` or `section` layer
+(member outlines and cut lines, member sections, door swings), chained dimension strings (points,
+a model `side` and a paper `offset`), roof pitch symbols and a `titleNote` (the construction
+disclaimer, also declared once as `DomainDrawings.titleNote`). `checkDomainView` checks it first, every list bounded before it is read
+(`MAX_DOMAIN_VIEW_LINES` 400,000, `MAX_DOMAIN_VIEW_ARCS`, `MAX_DOMAIN_VIEW_CHAINS`,
+`MAX_DOMAIN_CHAIN_POINTS`, `MAX_DOMAIN_CHAIN_MARKS`, `MAX_DOMAIN_VIEW_CHAIN_ITEMS`,
+`MAX_DOMAIN_VIEW_SYMBOLS`, `MAX_DOMAIN_VIEW_BODIES`), every number finite and within
+`MAX_MEMBER_SIZE`, directions non-zero, text bounded. The stage projects the parts with the
+view's frame (`domainParts`: an arc seen face on stays an arc, an oblique one becomes a polyline;
+a string's side becomes `packages/drawing`'s signed offset; a pitch symbol rises left or right),
+hands them to `packages/drawing` as the view's `overlay`, the sheet's `chains` and `symbols`, and
+and unions their bounds with the projection's. The sheet's `disclaimer` is every title note
+of the domains the sheet shows, once each (`DrawingHost.titleNotes`, `src/title-notes.ts`):
+those with a domain view on the sheet, drawn or not, and those with an extension feature in a part
+a view shows, directly, as an assembly's instance, or through a derived feature or pinned instance
+(each assembly read once, each pinned document parsed once, each part visited once and breadth first, pins followed at most
+`MAX_DERIVED_DEPTH` deep; assemblies do not nest), so a building elevation drawn as a plain part
+view carries the construction disclaimer too. Per request, each (domain, part) context is built
+and frozen once and each distinct view (domain, part, version, SHA-256 of the params' canonical text) drawn once, so
+copies of a view cost no more work; and one budget, `MAX_REQUEST_DOMAIN_ITEMS` (four times a
+view's line cap; the engine option `domainViewBudget`), bounds all its domain views together.
+A distinct view is charged the members and features it scans, checked before the domain is
+called, so a view that scans everything and draws nothing (a plan cut above the walls) still
+spends budget; then every copy is charged what it draws (`domainViewCost`: lines, arcs, string
+points and marks, symbols). Once spent, later domain views are refused unread, with a
+`domain-view` warning. An unknown domain, a newer params version, domain data that does not read, a throw
+or a malformed result is a `domain-view` error and an empty view; the domain's own warnings are
+`domain-view` warnings. Nothing a domain view draws is cached between requests or stored: chained
+strings are derived at every request, and the projection of its bodies is cached as for any view.
+
 **Picking.** With `pick: true` a view carries, per body, its named edges as 3D polylines (the
 mesh's), its vertices and its cylindrical faces (axis, radius, extent and the arc the face
 covers), each with the reference a dimension stores (the kernel's `pick` op), placed at the body's

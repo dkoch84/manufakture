@@ -123,3 +123,86 @@ export function layoutTitleBlock(input: TitleBlockInput, frame: Bounds): Display
   });
   return items;
 }
+
+/** The longest disclaimer drawn, in characters; a longer one is cut with an ellipsis. */
+export const MAX_DISCLAIMER_LENGTH = 2_000;
+/**
+ * The most lines a disclaimer wraps to; the last one ends in an ellipsis when cut. Enough for
+ * `MAX_DISCLAIMER_LENGTH` characters across the title block (about 115 a line), so only text
+ * longer than that is ever cut.
+ */
+export const MAX_DISCLAIMER_LINES = 24;
+/** The disclaimer's text height, paper mm. */
+export const DISCLAIMER_TEXT_HEIGHT = 1.8;
+const DISCLAIMER_PAD = 1.5;
+const LINE_PITCH = 1.5;
+
+/**
+ * Words of `text` wrapped to lines of at most `width` paper mm at `height`, at most
+ * `MAX_DISCLAIMER_LINES` lines. A character is taken as 0.85 cap heights wide: wider than the
+ * dimensions' estimate, because running text must stay inside its box in Helvetica (about 0.7 cap
+ * heights a character) and in a monospaced fallback (about 0.84). A word longer than a line
+ * stands on its own line. Linear in the text, which is cut to `MAX_DISCLAIMER_LENGTH` first.
+ */
+export function wrapText(text: string, width: number, height: number): string[] {
+  const perChar = height * 0.85;
+  const max = Math.max(1, Math.floor(width / perChar));
+  let source = text.replace(/\s+/g, ' ').trim();
+  if (source.length > MAX_DISCLAIMER_LENGTH)
+    source = `${source.slice(0, MAX_DISCLAIMER_LENGTH)}...`;
+  const lines: string[] = [];
+  let line = '';
+  for (const word of source.split(' ')) {
+    if (word === '') continue;
+    const next = line === '' ? word : `${line} ${word}`;
+    if ([...next].length <= max || line === '') line = next;
+    else {
+      lines.push(line);
+      line = word;
+    }
+    if (lines.length >= MAX_DISCLAIMER_LINES) break;
+  }
+  if (line !== '' && lines.length < MAX_DISCLAIMER_LINES) lines.push(line);
+  if (lines.length === MAX_DISCLAIMER_LINES && lines.join(' ').length < source.length) {
+    lines[lines.length - 1] = `${lines[lines.length - 1]!.replace(/\.*$/, '')}...`;
+  }
+  return lines;
+}
+
+/**
+ * A disclaimer as a box of small text the title block's width, its bottom at `bottom` (paper mm),
+ * right-aligned with the frame: drawn on top of the title block, or in the frame's bottom right
+ * corner when the sheet has none. Its bottom edge is the title block's top line or the frame, so
+ * only its left and top edges are drawn. Owned by `titleBlock`. Returns its items and its height.
+ */
+export function layoutDisclaimer(
+  text: string,
+  frame: Bounds,
+  bottom: number,
+): { items: DisplayItem[]; height: number } {
+  const lines = wrapText(text, TITLE_BLOCK_WIDTH - 2 * DISCLAIMER_PAD, DISCLAIMER_TEXT_HEIGHT);
+  if (lines.length === 0) return { items: [], height: 0 };
+  const step = DISCLAIMER_TEXT_HEIGHT * LINE_PITCH;
+  const height = lines.length * step + 2 * DISCLAIMER_PAD - (step - DISCLAIMER_TEXT_HEIGHT);
+  const x0 = frame.max[0] - TITLE_BLOCK_WIDTH;
+  const x1 = frame.max[0];
+  const top = bottom + height;
+  const items: DisplayItem[] = [
+    { kind: 'line', layer: 'titleBlock', a: [x0, bottom], b: [x0, top], owner: OWNER },
+    { kind: 'line', layer: 'titleBlock', a: [x0, top], b: [x1, top], owner: OWNER },
+  ];
+  lines.forEach((t, i) =>
+    items.push({
+      kind: 'text',
+      layer: 'text',
+      at: [x0 + DISCLAIMER_PAD, top - DISCLAIMER_PAD - i * step],
+      text: t,
+      height: DISCLAIMER_TEXT_HEIGHT,
+      rotation: 0,
+      anchor: 'start',
+      baseline: 'top',
+      owner: OWNER,
+    }),
+  );
+  return { items, height };
+}

@@ -32,7 +32,7 @@ import { MATERIAL_IDS } from './materials';
  */
 
 /** The file format version this code reads and writes. Bump it only together with a migration. */
-export const FORMAT_VERSION = 14;
+export const FORMAT_VERSION = 15;
 /** The topological naming scheme version (T0.5) that stored references are written in. */
 export const NAMING_SCHEME = 1;
 export const FORMAT_TAG = 'manufakture';
@@ -1804,9 +1804,55 @@ export const TitleBlockSchema = z.strictObject({
     .max(MAX_TITLE_FIELDS),
 });
 
+/** How deeply a domain view's `params` may nest arrays and objects (a scalar is 0, `{}` is 1). */
+export const MAX_VIEW_PARAMS_DEPTH = 8;
+/** The longest a domain view's `params` may be as JSON, in UTF-16 code units. */
+export const MAX_VIEW_PARAMS_LENGTH = 16_384;
+
+/**
+ * A domain view's params (since version 15): opaque JSON owned by the domain, nested at most
+ * `MAX_VIEW_PARAMS_DEPTH` levels and at most `MAX_VIEW_PARAMS_LENGTH` long as JSON. Both are
+ * checked before `z.json()` walks it, without recursion, so a crafted value is a schema error.
+ */
+const ViewParamsSchema = z
+  .unknown()
+  .check((ctx) => {
+    const v = ctx.value;
+    if (v === null || typeof v !== 'object' || Array.isArray(v)) {
+      ctx.issues.push({ code: 'custom', message: 'view params are a JSON object', input: v });
+    } else if (nestsDeeperThan(v, MAX_VIEW_PARAMS_DEPTH)) {
+      ctx.issues.push({
+        code: 'custom',
+        message: `view params may nest at most ${MAX_VIEW_PARAMS_DEPTH} levels`,
+        input: v,
+      });
+    } else {
+      // JSON.stringify throws on a BigInt (an in-memory command can hold anything).
+      let length: number;
+      try {
+        length = JSON.stringify(v)?.length ?? 0;
+      } catch {
+        ctx.issues.push({ code: 'custom', message: 'view params are not plain JSON', input: v });
+        return;
+      }
+      if (length > MAX_VIEW_PARAMS_LENGTH) {
+        ctx.issues.push({
+          code: 'custom',
+          message: `view params are at most ${MAX_VIEW_PARAMS_LENGTH} characters as JSON`,
+          input: v,
+        });
+      }
+    }
+  })
+  .pipe(z.record(z.string(), z.json()));
+
 /**
  * What a view shows: a part studio of this document (all its bodies, or the listed ones, by body
- * id in that part), or an assembly of this document, assembled or as one of its exploded views.
+ * id in that part), or an assembly of this document, assembled or as one of its exploded views,
+ * or (since version 15) a domain view of a part: a view a domain draws from its own data (a
+ * construction floor plan or framing elevation, ADR 0015 decision 9). `domain` names the domain
+ * by namespace; `params` (its own, at its own `schemaVersion`) say what it draws, and the domain
+ * chooses the view's frame and section from them. Core checks only this envelope and the part.
  */
 export const ViewSourceSchema = z.union([
   z.strictObject({
@@ -1816,6 +1862,15 @@ export const ViewSourceSchema = z.union([
   z.strictObject({
     assembly: AssemblyIdSchema,
     explodedView: ExplodedViewIdSchema.exactOptional(),
+  }),
+  z.strictObject({
+    domain: z
+      .string()
+      .max(MAX_DOMAIN_NAMESPACE_LENGTH, { abort: true })
+      .regex(DOMAIN_NAMESPACE_PATTERN, 'Expected a domain namespace like "construction"'),
+    part: z.string().min(1).max(MAX_PART_ID_LENGTH),
+    schemaVersion: z.int().min(1).max(Number.MAX_SAFE_INTEGER),
+    params: ViewParamsSchema,
   }),
 ]);
 
@@ -2735,6 +2790,12 @@ export type ExplodedView = z.infer<typeof ExplodedViewSchema>;
 export type SheetSize = z.infer<typeof SheetSizeSchema>;
 export type TitleBlock = z.infer<typeof TitleBlockSchema>;
 export type ViewSource = z.infer<typeof ViewSourceSchema>;
+/** A domain view's source (since version 15). */
+export type DomainViewSource = Extract<ViewSource, { domain: string }>;
+/** Whether a view's source is a domain view (it also has `part`, so test this first). */
+export function isDomainViewSource(source: ViewSource): source is DomainViewSource {
+  return 'domain' in source;
+}
 export type ViewDirection = z.infer<typeof ViewDirectionSchema>;
 export type ViewScale = z.infer<typeof ViewScaleSchema>;
 export type ViewOptions = z.infer<typeof ViewOptionsSchema>;

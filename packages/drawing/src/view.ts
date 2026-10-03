@@ -2,7 +2,7 @@
 // parent. A view's geometry is in view coordinates (model millimetres, x right and y up on
 // paper, the frame of T4.4a's `views.ts`); placing it gives the transform to paper millimetres.
 
-import type { DrawingWarning } from './display';
+import type { DrawingWarning, LayerName } from './display';
 import {
   applyPoint,
   curveBounds,
@@ -57,6 +57,18 @@ export interface ViewDisplay {
   readonly hatchSpacing?: number;
 }
 
+/**
+ * Geometry a view draws besides its projected edges, view coordinates: what a domain draws itself
+ * (framing members in an elevation, member sections and door swings in a plan; M6 plan T6.4a).
+ * Drawn as is on its layer: no hidden-line removal, no centre marks.
+ */
+export interface ViewOverlayItem {
+  readonly curve: Curve2;
+  readonly layer: LayerName;
+  /** The owner's item index, as on edges; default none. */
+  readonly item?: number;
+}
+
 export interface ViewInput {
   /** `'view#1'`; dimensions name their view by it. */
   readonly id: string;
@@ -77,6 +89,8 @@ export interface ViewInput {
   readonly align?: ViewAlignment;
   /** T4.4b's `sections`, for hatching. */
   readonly sections?: readonly ViewSection[];
+  /** Drawn over the edges, on their own layers. */
+  readonly overlay?: readonly ViewOverlayItem[];
   readonly display?: ViewDisplay;
 }
 
@@ -103,11 +117,12 @@ export interface PlacementOptions {
   readonly gap?: number;
 }
 
-/** A view's bounds in view coordinates, from its input or its edges. */
+/** A view's bounds in view coordinates, from its input or its edges and overlay. */
 export function viewBounds(view: ViewInput): Bounds {
   if (view.bounds) return view.bounds;
-  if (view.edges.length === 0) return { min: [0, 0], max: [0, 0] };
-  return unionBounds(view.edges.map((e) => curveBounds(e.curve)));
+  const curves = [...view.edges, ...(view.overlay ?? [])];
+  if (curves.length === 0) return { min: [0, 0], max: [0, 0] };
+  return unionBounds(curves.map((e) => curveBounds(e.curve)));
 }
 
 const centreOf = (b: Bounds): Vec2 => [(b.min[0] + b.max[0]) / 2, (b.min[1] + b.max[1]) / 2];

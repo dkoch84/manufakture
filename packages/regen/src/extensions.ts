@@ -35,6 +35,7 @@ import type {
   TopoRef,
   Via,
 } from '@manufakture/kernel';
+import { MAX_DOMAIN_TITLE_NOTE_LENGTH, type DomainDrawings } from './domain-views';
 import { stableStringify } from './hash';
 import type { MemberStage } from './members';
 
@@ -203,6 +204,11 @@ export interface ExtensionDomain {
    * are data, never bodies; `implementation` keys their cache as it keys translator results.
    */
   members?: MemberStage;
+  /**
+   * Its views (M6 plan T6.4a): drawing views whose source names this domain
+   * (`domain-views.ts`). Pure; computed on request, never cached between requests.
+   */
+  drawings?: DomainDrawings;
 }
 
 interface DomainEntry {
@@ -212,6 +218,15 @@ interface DomainEntry {
   data: Map<string, DomainDataReader>;
   types: Map<string, ExtensionType>;
   members: MemberStage | undefined;
+  drawings: DomainDrawings | undefined;
+}
+
+/** A registered domain's views, with the namespaces its view reads. */
+export interface RegisteredDomainDrawings {
+  namespace: string;
+  implementation: number;
+  reads: readonly string[];
+  drawings: DomainDrawings;
 }
 
 /** A registered domain's member stage, with what keys and feeds it. */
@@ -279,7 +294,27 @@ export class ExtensionRegistry {
       data,
       types: new Map(),
       members: domain.members,
+      drawings: domain.drawings,
     };
+    if (
+      domain.drawings !== undefined &&
+      (typeof domain.drawings.view !== 'function' ||
+        !Number.isSafeInteger(domain.drawings.schemaVersion) ||
+        domain.drawings.schemaVersion < 1)
+    ) {
+      throw new TypeError(
+        `domain "${ns}": its drawings need a view function and a schema version from 1`,
+      );
+    }
+    const note = domain.drawings?.titleNote;
+    if (
+      note !== undefined &&
+      (typeof note !== 'string' || note.length > MAX_DOMAIN_TITLE_NOTE_LENGTH)
+    ) {
+      throw new TypeError(
+        `domain "${ns}": its title note is text of at most ${MAX_DOMAIN_TITLE_NOTE_LENGTH} characters`,
+      );
+    }
     if (
       domain.members !== undefined &&
       (typeof domain.members.groups !== 'function' || typeof domain.members.frame !== 'function')
@@ -362,6 +397,18 @@ export class ExtensionRegistry {
         reads: d.reads,
         stage: d.members!,
       }));
+  }
+
+  /** A registered domain's views, or undefined when it has none (or is not registered). */
+  domainDrawings(namespace: string): RegisteredDomainDrawings | undefined {
+    const d = this.#domains.get(namespace);
+    if (d?.drawings === undefined) return undefined;
+    return {
+      namespace: d.namespace,
+      implementation: d.implementation,
+      reads: d.reads,
+      drawings: d.drawings,
+    };
   }
 
   /** Registered domain namespaces, sorted. */

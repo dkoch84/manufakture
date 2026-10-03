@@ -704,7 +704,10 @@ interface Sheet {
 interface DrawingView {
   id: 'view#1';
   label?: string; // a caption, 'SECTION A-A'
-  source: { part: string; bodies?: string[] } | { assembly: string; explodedView?: string };
+  source:
+    | { part: string; bodies?: string[] }
+    | { assembly: string; explodedView?: string }
+    | { domain: string; part: string; schemaVersion: number; params: Json }; // since version 15
   direction:
     | 'front'
     | 'back'
@@ -752,6 +755,18 @@ interface Note {
 from the eye into the model) and `up`, for a Z-up model in third-angle convention, as the spike
 used: front looks along +Y, right along -X, top down -Z, and isometric looks down from the front
 right. A custom direction gives both vectors (non-zero, not parallel). Views are orthographic.
+
+**Domain views** (since version 15; M6 plan T6.4a): a view whose source is
+`{ domain, part, schemaVersion, params }` is drawn by the domain that owns the namespace (the
+construction domain's floor plans, framing elevations and roof framing plans). `params` is opaque
+JSON at the domain's own `schemaVersion`, nested at most `MAX_VIEW_PARAMS_DEPTH` (8) levels and at
+most `MAX_VIEW_PARAMS_LENGTH` (16,384) characters as JSON, both checked without recursion. Core
+checks the envelope and that the part exists; the domain checks its params when regen draws the
+view, and chooses the view's frame and section from them, so `direction` and `options.section`
+are not used for such a view. A domain view's source also has `part`, so a test of `'part' in
+source` matches it: test `isDomainViewSource(source)` first. It blocks deleting its part like a
+part view (`partViews` lists it). Nothing a domain view draws is stored: its dimension strings are
+derived at every request (ADR 0015).
 
 **Scale and position.** The scale is two length expressions so imperial scales keep their text and
 a scale can read a variable; the ratio is what they evaluate to. A view's `position` places the
@@ -1628,7 +1643,8 @@ to exactly `v4-bracket.json` and that to exactly `v5-bracket.json` and that to e
 `v6-bracket.json` and that to exactly `v7-bracket.json` and that to exactly `v8-bracket.json`
 and that to exactly `v9-bracket.json` and that to exactly `v10-bracket.json` and that to exactly
 `v11-bracket.json` and that to exactly `v12-bracket.json` and that to exactly `v13-bracket.json`
-and that to exactly `v14-bracket.json` (and every older fixture loads as exactly the current one),
+and that to exactly `v14-bracket.json` and that to exactly `v15-bracket.json` (and every older
+fixture loads as exactly the current one),
 and
 `v3-two-bodies.json` to
 exactly `v4-two-bodies.json`. Version 5 added the optional configuration table; `migrateV4ToV5`
@@ -1662,7 +1678,11 @@ exactly `v13-bracket.json`. Version 14 added CAM (ADR 0014, M5 T5.1b); `migrateV
 `cam: { tools: [], setups: [], nextIds: {} }` right after `fonts` (where a saved file has it) and
 changes nothing else, since a version 13 document has no CAM and every CAM counter starts at 1; a
 version 13 file that already has a `cam` key is refused (`migration`), never repaired;
-`v13-bracket.json` migrates to exactly `v14-bracket.json`.
+`v13-bracket.json` migrates to exactly `v14-bracket.json`. Version 15 added the domain view
+source (`{ domain, part, schemaVersion, params }`, M6 plan T6.4a: construction floor plans,
+framing elevations and roof framing plans); `migrateV14ToV15` only bumps the version, since a
+version 14 file's views all show a part or an assembly; `v14-bracket.json` migrates to exactly
+`v15-bracket.json`.
 
 To change the file shape:
 

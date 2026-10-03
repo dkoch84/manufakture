@@ -61,6 +61,9 @@ import {
   type Part,
   type Pose,
   type Vec3,
+  type DomainViewSource,
+  StoredExpressionSchema,
+  isDomainViewSource,
 } from '@manufakture/core';
 import {
   frameOnPlane,
@@ -119,6 +122,14 @@ import {
 } from './assembly';
 import { DerivedSources, carriedProps, describeSource, effectiveProps, tooDeep } from './derived';
 import {
+  MAX_REQUEST_DOMAIN_ITEMS,
+  checkDomainView,
+  domainViewCost,
+  type DomainViewContext,
+  type DomainViewOutput,
+  type DomainViewSet,
+} from './domain-views';
+import {
   DrawingStage,
   IDENTITY_POSE,
   findView,
@@ -168,6 +179,7 @@ import {
   type GeometryAnswer,
   type GeometryQuery,
   type NamespaceRead,
+  type RegisteredDomainDrawings,
   type ResolvedReference,
 } from './extensions';
 import {
@@ -179,6 +191,7 @@ import {
   type RoutedBody,
 } from './graph';
 import { stableStringify } from './hash';
+import { shownNamespaces } from './title-notes';
 import { importSourceMatches, keyInput } from './imports';
 import {
   MemberGroupCache,
@@ -229,7 +242,7 @@ import type {
   RegenWarning,
   SourceResult,
 } from './types';
-import { evaluateFeature, evaluateVariables, type VariableValues } from './values';
+import { evaluateFeature, evaluateField, evaluateVariables, type VariableValues } from './values';
 import { profileOf } from './sketches';
 
 /**
@@ -288,6 +301,11 @@ export interface RegenEngineOptions {
    * `loadManifold` (`manifold-3d`'s glue, which finds its `.wasm` next to itself).
    */
   manifold?: ManifoldLoader;
+  /**
+   * What the domain views of one drawing request may draw together: lines, arcs, string points
+   * and marks and pitch symbols (`domainViewCost`). Default `MAX_REQUEST_DOMAIN_ITEMS`.
+   */
+  domainViewBudget?: number;
 }
 
 export interface RegenOptions {
@@ -577,6 +595,12 @@ function emptyCounters(): RegenCounters {
   return { featureOps: 0, otherOps: 0, batches: 0, solves: 0, cacheHits: 0, cacheMisses: 0 };
 }
 
+/** The lower-case hex SHA-256 of a text's UTF-8 (Web Crypto: the browser worker and Node). */
+async function sha256Hex(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 /** A deep copy of plain data, frozen all the way down: what domain code is given to read. */
 function frozenCopy<T>(value: T): T {
   const copy = structuredClone(value);
@@ -671,6 +695,8 @@ export class RegenEngine {
   #dragging = false;
   /** Interference checks asked to stop (`cancelInterference`), by assembly id. */
   #stopChecks = new Set<string>();
+  /** What the domain views of one drawing request may draw together. */
+  readonly #domainBudget: number;
   /** Drawing views, resolved dimension references and picking data, cached by body key. */
   readonly #drawings = new DrawingStage();
   /** Oriented box sizes of bodies, by body key (`orientedSizes`). */
@@ -699,6 +725,7 @@ export class RegenEngine {
     this.#deflection = options.deflection;
     this.#onRecycled = options.onKernelRecycled;
     this.#extensions = options.extensions ?? defaultExtensions;
+    this.#domainBudget = options.domainViewBudget ?? MAX_REQUEST_DOMAIN_ITEMS;
     this.#memberMeshes = new MemberMeshCache(options.manifold);
     this.#unsubscribe = options.kernel.onRecycle?.(() => {
       // Runs inside the service's queue: only forget, never submit from here.
@@ -2297,6 +2324,237 @@ export class RegenEngine {
       kernelInstance: b.instance,
       ...extra,
     });
+    // Domain views (format v15). Per request: each (domain, part) context is built and frozen
+    // once, each distinct view drawn once, and one budget bounds what all of them draw.
+    type DomainDrawn = {
+      output: DomainViewOutput | null;
+      bodies: DrawingBody[];
+      diagnostics: DrawingDiagnostic[];
+      /** What reading the part cost (its members and features), charged when it was drawn. */
+      work: number;
+      /** Not drawn: the budget could not cover reading the part. Never cached. */
+      refused?: boolean;
+    };
+    type DomainBase = {
+      diagnostics: DrawingDiagnostic[];
+      /** Members of every set plus features: what one view scans of the part, at most. */
+      cost: number;
+      base: Omit<DomainViewContext, 'evaluate' | 'params' | 'schemaVersion'>;
+      state: PartState;
+      all: readonly LiveBody[];
+    };
+    const domainOutputs = new Map<string, DomainDrawn>();
+    const domainBases = new Map<string, DomainBase | DrawingDiagnostic[]>();
+    let domainSpent = 0;
+    const overBudget = (): DrawingDiagnostic => ({
+      code: 'domain-view',
+      severity: 'warning',
+      subject: '',
+      message: `The domain views of this request scan and draw more than ${this.#domainBudget} members, lines, arcs, string points and marks and pitch symbols together: this one is left out`,
+    });
+    const domainBase = async (
+      registered: RegisteredDomainDrawings,
+      partId: string,
+    ): Promise<DomainBase | DrawingDiagnostic[]> => {
+      const key = `${registered.namespace}\n${partId}`;
+      const hit = domainBases.get(key);
+      if (hit !== undefined) return hit;
+      const made = await makeDomainBase(registered, partId);
+      domainBases.set(key, made);
+      return made;
+    };
+    const makeDomainBase = async (
+      registered: RegisteredDomainDrawings,
+      partId: string,
+    ): Promise<DomainBase | DrawingDiagnostic[]> => {
+      const diagnostics: DrawingDiagnostic[] = [];
+      const state = await partFor(partId);
+      if (state === undefined) {
+        return [
+          {
+            code: 'unknown-source',
+            severity: 'error',
+            subject: '',
+            message: `The document has no part ${partId}`,
+          },
+        ];
+      }
+      this.#checkInstances(run, [state]);
+      // The member sets, from the member cache after a regen: plain data, no kernel ops.
+      const framed = await this.#frameMembers(run, state, document);
+      const failed = failedFeatures(state);
+      if (failed.length > 0) {
+        diagnostics.push({
+          code: 'source-errors',
+          severity: 'warning',
+          subject: '',
+          failed,
+          message: `${failed.length === 1 ? 'A feature' : `${failed.length} features`} of ${state.part.name} failed (${failed.join(', ')}): the view shows what was built without ${failed.length === 1 ? 'it' : 'them'}`,
+        });
+      }
+      const features: MemberFeature[] = [];
+      for (const f of state.part.features) {
+        if (f.kind !== 'extension' || extensionNamespace(f.extension) !== registered.namespace)
+          continue;
+        if (state.results.get(f.id)?.status !== 'ok') continue;
+        const metadata = state.extensions.get(f.id)?.metadata;
+        features.push({
+          id: f.id,
+          type: f.extension,
+          schemaVersion: f.schemaVersion,
+          dependsOn: [...f.dependsOn],
+          ...(metadata === undefined ? {} : { metadata }),
+        });
+      }
+      const sets: DomainViewSet[] = framed
+        .filter((x) => x.entry.namespace === registered.namespace && x.entry.result.ok)
+        .map((x) => {
+          const r = x.entry.result;
+          const metadata = r.ok ? r.metadata : undefined;
+          return {
+            group: x.entry.group.id,
+            members: x.members,
+            ...(metadata === undefined ? {} : { metadata }),
+          };
+        });
+      const data = readDomainData(this.#extensions, registered, document.domains, new Map());
+      if (!data.ok) {
+        return [
+          ...diagnostics,
+          { code: 'domain-view', severity: 'error', subject: '', message: data.error.message },
+        ];
+      }
+      const all = state.broken ? [] : state.bodies;
+      try {
+        const base = frozenCopy({
+          partId: state.part.id,
+          features,
+          sets,
+          data: data.data,
+          bodies: all.map((b) => b.id),
+        });
+        const cost = features.length + sets.reduce((n, x) => n + x.members.length, 0);
+        return { diagnostics, base, state, all, cost };
+      } catch (error) {
+        return [
+          ...diagnostics,
+          {
+            code: 'domain-view',
+            severity: 'error',
+            subject: '',
+            message: `The "${registered.namespace}" view got data that is not plain: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ];
+      }
+    };
+    const drawDomainView = async (source: DomainViewSource): Promise<DomainDrawn> => {
+      let work = 0;
+      const none = (diagnostics: DrawingDiagnostic[]): DomainDrawn => ({
+        output: null,
+        bodies: [],
+        diagnostics,
+        work,
+      });
+      const registered = this.#extensions.domainDrawings(source.domain);
+      if (registered === undefined) {
+        return none([
+          {
+            code: 'domain-view',
+            severity: 'error',
+            subject: '',
+            message: `This build draws no "${source.domain}" views: open the document in a build that ships the "${source.domain}" domain`,
+          },
+        ]);
+      }
+      if (source.schemaVersion > registered.drawings.schemaVersion) {
+        return none([
+          {
+            code: 'domain-view',
+            severity: 'error',
+            subject: '',
+            message: `This "${source.domain}" view is version ${source.schemaVersion}, newer than this build reads (version ${registered.drawings.schemaVersion}): open the document in a newer build`,
+          },
+        ]);
+      }
+      const prepared = await domainBase(registered, source.part);
+      if (Array.isArray(prepared)) return none([...prepared]);
+      const diagnostics = [...prepared.diagnostics];
+      // Refused before the domain scans the part when the budget cannot cover the scan: a view
+      // that draws nothing still reads every member (a plan cut above the walls).
+      if (domainSpent + prepared.cost > this.#domainBudget) {
+        return { ...none([...diagnostics, overBudget()]), refused: true };
+      }
+      work = prepared.cost;
+      let params: DomainViewContext['params'];
+      try {
+        params = frozenCopy(source.params);
+      } catch (error) {
+        return none([
+          ...diagnostics,
+          {
+            code: 'domain-view',
+            severity: 'error',
+            subject: '',
+            message: `The "${source.domain}" view's params are not plain: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ]);
+      }
+      const context: DomainViewContext = {
+        ...prepared.base,
+        params,
+        schemaVersion: source.schemaVersion,
+        evaluate: (expression, kind) => {
+          const parsed = StoredExpressionSchema.safeParse(expression);
+          if (!parsed.success) return { ok: false, message: 'not an expression' };
+          const r = evaluateField(parsed.data, kind, [], variables);
+          return r.ok ? r : { ok: false, message: r.error.message };
+        },
+      };
+      const out = guard(source.domain, 'view', () => registered.drawings.view(context));
+      const checked = out.ok
+        ? checkDomainView(out.value)
+        : { ok: false as const, message: out.error.message };
+      if (!checked.ok) {
+        return none([
+          ...diagnostics,
+          {
+            code: 'domain-view',
+            severity: 'error',
+            subject: '',
+            message: `The "${source.domain}" view could not be drawn: ${checked.message}`,
+          },
+        ]);
+      }
+      const output = checked.view;
+      for (const w of output.warnings ?? []) {
+        diagnostics.push({
+          code: 'domain-view',
+          severity: 'warning',
+          subject: '',
+          message: w.message,
+        });
+      }
+      const listed = new Set(output.bodies);
+      const present = new Set(prepared.all.map((b) => b.id));
+      const missing = output.bodies.filter((id) => !present.has(id));
+      if (missing.length > 0) {
+        diagnostics.push({
+          code: 'missing-body',
+          severity: 'warning',
+          subject: '',
+          missing,
+          message: `${prepared.state.part.name} has no body ${missing.join(', ')}`,
+        });
+      }
+      return {
+        output,
+        bodies: prepared.all
+          .filter((b) => listed.has(b.id))
+          .map((b) => live(b, { key: b.id, pose: IDENTITY_POSE })),
+        diagnostics,
+        work,
+      };
+    };
     return {
       generation: run.generation,
       variables,
@@ -2304,6 +2562,10 @@ export class RegenEngine {
       deflection: this.#deflection,
       bodies: async (source) => {
         const diagnostics: DrawingDiagnostic[] = [];
+        if (isDomainViewSource(source)) {
+          // Drawn through `domainView`; as a plain source it shows no bodies.
+          return { bodies: [], diagnostics };
+        }
         if ('part' in source) {
           const state = await partFor(source.part);
           if (state === undefined) {
@@ -2413,6 +2675,50 @@ export class RegenEngine {
           }
         }
         return { bodies, diagnostics };
+      },
+      domainView: async (source) => {
+        // Views of a request are drawn one at a time (the stage awaits each): the cache and the
+        // budget below assume it.
+        // One output per distinct view in a request (copies of a view are drawn once), and one
+        // budget across all of them, charged for the members a view scans when it is drawn and
+        // for what each copy draws: once spent, later views draw nothing (a warning).
+        // The params by the SHA-256 of their canonical text: no collisions to fear, and no 16 KB
+        // key kept per view.
+        const key = `${source.domain}\n${source.part}\n${source.schemaVersion}\n${await sha256Hex(stableStringify(source.params))}`;
+        let drawn = domainOutputs.get(key);
+        if (drawn === undefined) {
+          if (domainSpent >= this.#domainBudget) {
+            return { output: null, bodies: [], diagnostics: [overBudget()] };
+          }
+          drawn = await drawDomainView(source);
+          if (drawn.refused === true)
+            return { output: null, bodies: [], diagnostics: drawn.diagnostics };
+          domainOutputs.set(key, drawn);
+          // The scan happened whether or not the view draws anything; at least 1, so a part with
+          // nothing to scan still cannot be drawn without end.
+          domainSpent += Math.max(1, drawn.work);
+        }
+        const diagnostics = [...drawn.diagnostics];
+        if (drawn.output === null) return { output: null, bodies: [], diagnostics };
+        const cost = domainViewCost(drawn.output);
+        if (domainSpent + cost > this.#domainBudget) {
+          // Clamped to the budget, not left below it: every later view is refused at once, so a
+          // run of views each just over what is left cannot each be computed and dropped.
+          domainSpent = this.#domainBudget;
+          return { output: null, bodies: [], diagnostics: [...diagnostics, overBudget()] };
+        }
+        domainSpent += cost;
+        return { output: drawn.output, bodies: drawn.bodies, diagnostics };
+      },
+      titleNotes: (sources) => {
+        // Every domain the sheet shows (`title-notes.ts`), drawn or not.
+        const namespaces = shownNamespaces(document, sources);
+        const notes: string[] = [];
+        for (const ns of namespaces) {
+          const note = this.#extensions.domainDrawings(ns)?.drawings.titleNote;
+          if (note !== undefined && !notes.includes(note)) notes.push(note);
+        }
+        return notes;
       },
       run: async (ops, bodies) => {
         if (ops.length === 0) return [];

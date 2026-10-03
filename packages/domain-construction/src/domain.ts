@@ -2,7 +2,8 @@
 // namespace `construction`, the reader of the document data it owns (`domains.construction`), and
 // `reads: ['stock']` for the shared stock overrides, the wall and opening types (T6.1b) and the
 // member stage that frames each wall with its openings (ADR 0015 decision 5), the floor and roof
-// types (T6.1c), each framed as a group of its own. The app's regen worker entry calls
+// types (T6.1c), each framed as a group of its own, and its drawing views (T6.4a: floor plans,
+// framing elevations, roof framing plans). The app's regen worker entry calls
 // `registerConstruction(registry)` at start-up; regen imports no domain package.
 
 import type {
@@ -13,6 +14,7 @@ import type {
 } from '@manufakture/regen';
 import { STOCK_NAMESPACE, registerStock, type Json } from '@manufakture/stock';
 import { CONSTRUCTION_DATA_VERSION, CONSTRUCTION_NAMESPACE, readConstructionData } from './data';
+import { constructionDrawings } from './drawings/views';
 import { FLOOR_TYPE, floorGroups, floorType, frameFloorGroup } from './features/floor';
 import { OPENING_TYPE, openingType } from './features/opening';
 import { ROOF_TYPE, frameRoofGroup, roofGroups, roofType } from './features/roof';
@@ -59,6 +61,7 @@ export const constructionDomain: ExtensionDomain = {
     [ROOF_TYPE]: roofType as ExtensionType,
   },
   members: constructionMembers,
+  drawings: constructionDrawings,
 };
 
 /**

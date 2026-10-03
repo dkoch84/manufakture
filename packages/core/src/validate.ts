@@ -39,6 +39,7 @@ import {
   svgCommandCount,
   SKETCH_ORIGIN,
   codePointLength,
+  isDomainViewSource,
   type Assembly,
   type CamData,
   type ConfigRow,
@@ -1067,7 +1068,18 @@ function checkDrawing(
       const vpath = [...spath, 'views', vi];
       checkId(view.id, [...vpath, 'id']);
       const source = view.source;
-      if ('part' in source) {
+      if (isDomainViewSource(source)) {
+        // The domain checks its own params when it draws the view; core checks the part.
+        views.set(view.id, null);
+        if (!partIds.has(source.part)) {
+          out.push({
+            code: 'dependency',
+            message: `View ${view.id} of ${drawing.id} shows part ${source.part}, which does not exist`,
+            path: [...vpath, 'source', 'part'],
+            blockers: [source.part],
+          });
+        }
+      } else if ('part' in source) {
         views.set(view.id, null);
         if (!partIds.has(source.part)) {
           out.push({
