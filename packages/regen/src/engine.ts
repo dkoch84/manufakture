@@ -42,6 +42,7 @@ import {
   type MateInput,
 } from '@manufakture/assembly';
 import {
+  bodyCreator,
   configurationRow,
   configured,
   type Assembly,
@@ -3162,6 +3163,17 @@ export class RegenEngine {
     const consumedBefore = state.consumed.length;
     for (const [i, input] of built.inputs.entries()) {
       const read = new Set(routeBodies(bodyUse(f, at.lookup)!, state.bodies));
+      // A `new` extension's `tools` input also reads the bodies its items name, when this
+      // feature or one it names in dependsOn made them (a wall joining its layers with an earlier
+      // wall's): it reads only what it depends on, as every extension does.
+      if (f.operation === 'new' && input.kind === 'tools') {
+        for (const item of input.items) {
+          const creator = bodyCreator(item.body);
+          if (creator === f.id || (creator !== undefined && f.dependsOn.includes(creator))) {
+            read.add(item.body);
+          }
+        }
+      }
       const reads = state.bodies.filter((b) => read.has(b.id));
       const key = this.#key(state, {
         extension: extensionKey(extension, f, i, built.inputs.length),

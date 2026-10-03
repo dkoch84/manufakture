@@ -983,4 +983,76 @@ describe('extensions with the real kernel', () => {
     await service.idle();
     expect(service.leaks()).toEqual([]);
   });
+
+  it("lets a new extension's tools change its own bodies and its dependencies', not others", async () => {
+    // A board that also cuts x < 10 mm out of the bodies its params list (as a wall trims the
+    // layers of an earlier wall it joins).
+    const joiner: ExtensionType<{ sketch: string; cut: string[] }> = {
+      schemaVersion: 1,
+      expressions: { thickness: 'length' },
+      translate(ctx) {
+        const made = board.translate(ctx as never, []);
+        if ('error' in made) return made;
+        return {
+          inputs: [
+            ...made.inputs,
+            {
+              kind: 'tools',
+              id: ctx.feature.id,
+              items: ctx.params.cut.map((body, i) => ({
+                id: `cut${i + 1}`,
+                body,
+                mode: 'subtract' as const,
+                primitive: {
+                  type: 'box' as const,
+                  frame: { origin: [-1, -1, -1], xDir: [1, 0, 0], normal: [0, 0, 1] },
+                  size: [11, 32, 100],
+                },
+              })),
+            },
+          ],
+        };
+      },
+    };
+    const extensions = new ExtensionRegistry();
+    extensions.registerDomain({
+      namespace: 'fake',
+      implementation: 1,
+      types: { 'fake.board': board as ExtensionType, 'fake.joiner': joiner as ExtensionType },
+    });
+    const engine = new RegenEngine({ kernel: service, solver, extensions });
+    const joined = (cut: string[], dependsOn: string[]) =>
+      extension('extension#3', '6', {
+        extension: 'fake.joiner',
+        dependsOn: ['sketch#1', ...dependsOn],
+        params: { sketch: 'sketch#1', cut },
+      });
+    const base = [
+      setVariable('t', '18'),
+      add(rectangle('sketch#1', { width: '40', depth: '30' })),
+      add(extension('extension#1', 't')),
+      add(extension('extension#2', 't')),
+    ];
+    const vol = async (r: RegenResult, id: string) =>
+      volume(engine, r.parts[0]!.bodies.find((b) => b.bodyId === id)!.shape);
+
+    // Its own body and extension#1's (in dependsOn) are cut; extension#2 is untouched.
+    const ok = (await engine.regen(
+      build([...base, add(joined(['extension#3', 'extension#1'], ['extension#1']))]),
+    ))!;
+    expect(statuses(ok)).toMatchObject({ 'extension#3': 'ok' });
+    expect(await vol(ok, 'extension#1')).toBeCloseTo(30 * 30 * 18, 6);
+    expect(await vol(ok, 'extension#2')).toBeCloseTo(40 * 30 * 18, 6);
+    expect(await vol(ok, 'extension#3')).toBeCloseTo(30 * 30 * 6, 6);
+
+    // extension#2 is not in its dependsOn: the kernel never gets it, so its tool is lost.
+    const lost = (await engine.regen(build([...base, add(joined(['extension#2'], []))])))!;
+    const f = lost.parts[0]!.features.find((x) => x.featureId === 'extension#3')!;
+    expect(f.status).toBe('error');
+    expect(f.errors[0]).toMatchObject({ code: 'reference-lost', missing: ['extension#2'] });
+
+    await engine.dispose();
+    await service.idle();
+    expect(service.leaks()).toEqual([]);
+  });
 });

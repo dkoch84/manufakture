@@ -22,7 +22,12 @@ import {
   setVariable,
   twoBodies,
 } from './test-helpers';
-import type { DerivedFeature, ImportFeature, ManufaktureDocument } from '@manufakture/core';
+import type {
+  DerivedFeature,
+  ExtensionFeature,
+  ImportFeature,
+  ManufaktureDocument,
+} from '@manufakture/core';
 
 const part = (doc: ManufaktureDocument) => doc.parts[0]!;
 
@@ -376,5 +381,49 @@ describe('dirty subgraph', () => {
     expect([...changedVariables(a.variables, b.variables)].sort()).toEqual(['w', 'x', 'y']);
     const c = apply(a, { type: 'deleteVariable', name: 'z' });
     expect([...changedVariables(a.variables, c.variables)]).toEqual(['z']);
+  });
+});
+
+describe('a new extension that changes the bodies of what it depends on', () => {
+  const ext = (id: string, extra: Partial<ExtensionFeature>): ExtensionFeature => ({
+    id,
+    kind: 'extension',
+    name: id,
+    suppressed: false,
+    extension: 'construction.wall',
+    schemaVersion: 1,
+    dependsOn: [],
+    references: [],
+    expressions: {},
+    params: { length: 1 },
+    ...extra,
+  });
+  // Wall A, wall B joining its layers with A's (its tools change A's body), then an opening in
+  // A scoped to A's body: it reads A's body as B left it.
+  const doc = build([
+    add(ext('extension#1', { operation: 'new' })),
+    add(ext('extension#2', { operation: 'new', dependsOn: ['extension#1'] })),
+    add(
+      ext('extension#3', {
+        extension: 'construction.opening',
+        dependsOn: ['extension#1'],
+        scope: ['extension#1'],
+      }),
+    ),
+  ]);
+
+  it('is the last to change those bodies, so editing it dirties their later readers', () => {
+    const g = buildGraph(part(doc), doc.variables);
+    expect(g.body.get('extension#3')).toEqual(['extension#2']);
+    const edited = apply(doc, {
+      type: 'editFeature',
+      partId: PART,
+      feature: ext('extension#2', {
+        operation: 'new',
+        dependsOn: ['extension#1'],
+        params: { length: 2 },
+      }),
+    });
+    expect(dirtyFeaturesOf(doc, edited, PART)).toEqual(['extension#2', 'extension#3']);
   });
 });

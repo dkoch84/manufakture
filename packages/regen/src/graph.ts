@@ -230,7 +230,8 @@ interface StaticBody extends RoutedBody {
 /**
  * The bodies a feature acts on (changes), as far as the document says: the bodies in its scope,
  * or every body without one; for fillets, chamfers, shells and threads the bodies owning their
- * references. `read` is what `routeBodies` gave; a `new` feature changes none (it adds a body).
+ * references. `read` is what `routeBodies` gave; a `new` feature changes none (it adds a body),
+ * except that a `new` extension may change the bodies of the features in its dependsOn.
  */
 function actsOn(
   f: Feature,
@@ -253,7 +254,18 @@ function actsOn(
       return { ids: scoped(f.scope), merges: false };
     case 'extension':
       // Without an operation it changes what its scope lists, through inputs that name them.
-      if (f.operation === 'new') return { ids: [], merges: false };
+      // A `new` one may change, through a `tools` input, the bodies made by the features in its
+      // dependsOn (as the engine routes them, #1172). Whether it has such an input is known only
+      // after it translates, so this estimate counts them all: more edges, never fewer.
+      if (f.operation === 'new') {
+        return {
+          ids: all.filter((id) => {
+            const creator = bodyCreator(id);
+            return creator !== undefined && f.dependsOn.includes(creator);
+          }),
+          merges: false,
+        };
+      }
       return { ids: scoped(f.scope), merges: f.operation === 'add' };
     case 'fillet':
     case 'chamfer':

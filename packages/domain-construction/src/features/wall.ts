@@ -15,11 +15,15 @@
 //   wall's height. The outline follows the whole path, so the layers are mitred at the wall's own
 //   corners (and around a closed path). Faces: `<id>:side:<layer>.ext<i>` and `.int<i>` (the
 //   exterior and interior faces along segment i), `.start` and `.end` (an open wall's ends),
-//   `<id>:cap.<layer>:start` (bottom) and `:end` (top). Separate walls that meet are not joined
-//   in their layers, neither mitred nor butted: each wall's layers stop square at its own path
-//   ends, so at an L they leave a notch on one face and overlap on the other, and at a tee the
-//   meeting wall's layers run into the other wall's. Only their framing joins (in the member
-//   stage). Joining the layers is follow-up task #1172.
+//   `<id>:cap.<layer>:start` (bottom) and `:end` (top).
+// - **Layer joins** (#1172): a wall joins its layers with the walls it names in `dependsOn` where
+//   the wall graph joins their framing (`layerJoins` in `graph.ts`). At an L both walls' layers
+//   end on the corner's bisector, as at a corner of one path; at a tee the branch's layers end on
+//   the host's layer face and the host's layers on that side are notched where the branch's
+//   framing passes. This wall's own outline takes its share; the other wall's bodies (and, as a
+//   tee's host, its own) change through one `tools` input after the extrusions, so the layer face
+//   names stay as they were. Walls that do not name each other are not joined: their layers stop
+//   square at their path ends. Only their framing joins then (in the member stage).
 // - **Operation**: `new` makes the layer bodies; a wall with no operation makes none (a wall type
 //   with no sheet layers, or framing only). Openings cut the layers through `tools` (`opening.ts`).
 // - **Metadata** (decision 5): the wall's geometry, layers and resolved framing settings, which
@@ -28,7 +32,13 @@
 // Not an engineering tool (decision 8): every size is the user's choice; nothing here checks
 // loads, spans or a code.
 
-import type { ExtrudeInput, ProfileEntity, ProfileLoop } from '@manufakture/kernel';
+import type {
+  ExtrudeInput,
+  FeatureInput,
+  ProfileEntity,
+  ProfileLoop,
+  ToolItem,
+} from '@manufakture/kernel';
 import type {
   ExpressionKind,
   ExtensionContext,
@@ -75,6 +85,7 @@ import {
   MIN_FEATURE_SPACING,
   Refusal,
   WALL_TYPE,
+  add2,
   constructionData,
   cross2,
   dot2,
@@ -84,8 +95,11 @@ import {
   planSegments,
   readOptionalCount,
   readOverrides,
+  readWallMetadata,
   resolveOverrides,
+  scale2,
   stockData,
+  sub2,
   stockFor,
   toJson,
   type LayerMetadata,
@@ -94,6 +108,7 @@ import {
   type StoredOverride,
   type WallMetadata,
 } from './common';
+import { intoWall, layerJoins, type GraphWall, type LayerJoin, type WallEnd } from './graph';
 
 /** The framing settings a wall may override in its params (lengths are expressions). */
 export interface WallFramingParams {
@@ -357,6 +372,30 @@ export function wallSettings(
 
 /** Turns sharper than this (the cosine between directions) make the mitres too long. */
 const SHARPEST_TURN = -0.9;
+/** The same bound for a wall meeting another's side: the sine of the angle between them. */
+const SHALLOWEST_TEE = Math.sqrt(1 - SHARPEST_TURN * SHARPEST_TURN);
+
+/**
+ * A line in plan that a layer's end lies on instead of the square end at the path point: the
+ * points X with (X - c) . nu = 0, `nu` a unit normal pointing past the end (away from the wall).
+ */
+export interface EndLine {
+  readonly c: P2;
+  readonly nu: P2;
+}
+
+/** The lines a wall's layers end on at its start and end, when they join another wall's. */
+export interface EndLines {
+  readonly start?: EndLine;
+  readonly end?: EndLine;
+}
+
+/** Where the line `t` across `seg` (through `p`, along the segment) meets `line`. */
+function meetLine(p: P2, seg: PlanSegment, t: number, line: EndLine): P2 {
+  const q = add2(p, scale2(seg.n, t));
+  const u = dot2(sub2(line.c, q), line.nu) / dot2(seg.d, line.nu);
+  return add2(q, scale2(seg.d, u));
+}
 
 /**
  * The path offset by `t` (positive to the left), mitred at every corner: one point per path
@@ -367,15 +406,26 @@ function offsetPath(
   segs: readonly PlanSegment[],
   closed: boolean,
   t: number,
+  ends: EndLines = {},
 ): P2[] {
   const at = (p: P2, n: P2, s: number): P2 => [p[0] + n[0] * s, p[1] + n[1] * s];
   const out: P2[] = [];
   for (let k = 0; k < points.length; k++) {
     const before = closed ? segs[(k - 1 + segs.length) % segs.length] : segs[k - 1];
     const after = k < segs.length ? segs[k] : undefined;
-    if (before === undefined) out.push(at(points[k]!, after!.n, t));
-    else if (after === undefined) out.push(at(points[k]!, before.n, t));
-    else {
+    if (before === undefined) {
+      out.push(
+        ends.start === undefined
+          ? at(points[k]!, after!.n, t)
+          : meetLine(points[k]!, after!, t, ends.start),
+      );
+    } else if (after === undefined) {
+      out.push(
+        ends.end === undefined
+          ? at(points[k]!, before.n, t)
+          : meetLine(points[k]!, before, t, ends.end),
+      );
+    } else {
       // The mitre: the corner's offset lines meet at p + t (n1 + n2) / (1 + n1 . n2).
       const m = 1 + dot2(before.n, after.n);
       const n: P2 = [(before.n[0] + after.n[0]) / m, (before.n[1] + after.n[1]) / m];
@@ -412,10 +462,11 @@ export function layerLoops(
   closed: boolean,
   lo: number,
   hi: number,
+  ends: EndLines = {},
 ): ProfileLoop[] {
   const segs = planSegments(points, closed);
-  const ext = offsetPath(points, segs, closed, lo);
-  const int = offsetPath(points, segs, closed, hi);
+  const ext = offsetPath(points, segs, closed, lo, ends);
+  const int = offsetPath(points, segs, closed, hi, ends);
   const name = (side: string, i: number) => `${layer}.${side}${i + 1}`;
   if (!closed) {
     const ring = [...ext, ...[...int].reverse()];
@@ -440,13 +491,336 @@ export function layerLoops(
     : [intLoop, extLoop];
 }
 
-/** The plan area of a layer's outline, mm2 (for tests and the takeoff). */
-export function layerArea(points: readonly P2[], closed: boolean, lo: number, hi: number): number {
+/**
+ * Whether every edge of a layer's outline runs forward along its segment, so the outline does
+ * not cross itself (a segment too short for the mitres or joins at its ends).
+ */
+function outlineRunsForward(
+  points: readonly P2[],
+  closed: boolean,
+  lo: number,
+  hi: number,
+  ends: EndLines,
+): boolean {
   const segs = planSegments(points, closed);
-  const ext = offsetPath(points, segs, closed, lo);
-  const int = offsetPath(points, segs, closed, hi);
+  for (const t of [lo, hi]) {
+    const path = offsetPath(points, segs, closed, t, ends);
+    for (let i = 0; i < segs.length; i++) {
+      const a = path[i]!;
+      const b = path[(i + 1) % path.length]!;
+      if (!(dot2(sub2(b, a), segs[i]!.d) > 1e-6)) return false;
+    }
+  }
+  return true;
+}
+
+/** The plan area of a layer's outline, mm2 (for tests and the takeoff). */
+export function layerArea(
+  points: readonly P2[],
+  closed: boolean,
+  lo: number,
+  hi: number,
+  ends: EndLines = {},
+): number {
+  const segs = planSegments(points, closed);
+  const ext = offsetPath(points, segs, closed, lo, ends);
+  const int = offsetPath(points, segs, closed, hi, ends);
   if (!closed) return Math.abs(signedArea([...ext, ...[...int].reverse()]));
   return Math.abs(Math.abs(signedArea(ext)) - Math.abs(signedArea(int)));
+}
+
+// Layer joins between walls ----------------------------------------------------------------------
+
+/** How far a cutting tool reaches past what it must cut, mm (so no tool face is flush). */
+const TOOL_MARGIN = 1;
+/** Lengths shorter than this are nothing, mm. */
+const JOIN_EPS = 1e-6;
+
+const leftOf = (d: P2): P2 => [-d[1], d[0]];
+const unit = (v: P2): P2 => scale2(v, 1 / Math.hypot(v[0], v[1]));
+
+/** A box tool on one body: `x` along `xDir` from `origin` (plan), `y` to its left, `z` up. */
+function box(
+  id: string,
+  body: string,
+  mode: 'add' | 'subtract',
+  origin: P2,
+  xDir: P2,
+  size: [number, number],
+  z: readonly [number, number],
+): ToolItem {
+  return {
+    id,
+    body,
+    mode,
+    primitive: {
+      type: 'box',
+      frame: {
+        origin: [origin[0], origin[1], z[0]],
+        xDir: [xDir[0], xDir[1], 0],
+        normal: [0, 0, 1],
+      },
+      size: [size[0], size[1], z[1] - z[0]],
+    },
+  };
+}
+
+/** The extent of a wall's whole layer stack across its path: [lowest t, highest t]. */
+const stackOf = (meta: WallMetadata): [number, number] => [
+  Math.min(...meta.layers.map((l) => l.t[0])),
+  Math.max(...meta.layers.map((l) => l.t[1])),
+];
+
+/** The framing layer's extent across the path. */
+const framingOf = (meta: WallMetadata): readonly [number, number] =>
+  meta.layers.find((l) => l.kind === 'framing')?.t ??
+  framingBand(meta.justification, meta.thickness);
+
+/** The wall's sheet layers with bodies that exist before this feature. */
+const bodiesOf = (meta: WallMetadata, present: readonly string[]) =>
+  meta.layers.filter(
+    (l): l is LayerMetadata & { body: string } => l.body !== null && present.includes(l.body),
+  );
+
+/**
+ * Tools that make an earlier wall's layer bodies end on `line` at its `end` instead of square at
+ * its path point: an added box where a layer falls short of the line, then a cut past the line.
+ */
+function trimItems(
+  prefix: string,
+  otherId: string,
+  meta: WallMetadata,
+  end: WallEnd,
+  line: EndLine,
+  present: readonly string[],
+): ToolItem[] {
+  const segs = planSegments(meta.points, meta.closed);
+  const p = end === 'start' ? segs[0]!.a : segs.at(-1)!.b;
+  const seg = end === 'start' ? segs[0]! : segs.at(-1)!;
+  const d = scale2(intoWall(segs, end), -1); // toward the end
+  const n = leftOf(d);
+  const flip = dot2(n, seg.n) > 0 ? 1 : -1;
+  const den = dot2(d, line.nu);
+  const x = leftOf(scale2(line.nu, -1)); // along the line, with nu to its left
+  const top = meta.base + meta.height;
+  const items: ToolItem[] = [];
+  for (const l of bodiesOf(meta, present)) {
+    const w0 = Math.min(l.t[0] * flip, l.t[1] * flip);
+    const w1 = Math.max(l.t[0] * flip, l.t[1] * flip);
+    const reach = (w: number) => (dot2(sub2(line.c, p), line.nu) - w * dot2(n, line.nu)) / den;
+    const a0 = reach(w0);
+    const a1 = reach(w1);
+    const far = Math.max(0, a0, a1);
+    const near = Math.min(0, a0, a1);
+    // The cut must stay on the end segment, or it would take a whole short wall's layer away.
+    if (-near >= seg.length - JOIN_EPS) {
+      throw new Refusal(
+        `${otherId}'s ${end === 'start' ? 'first' : 'last'} segment is too short for its layer "${l.id}" to join this wall: lengthen it, or take ${otherId} out of dependsOn`,
+        ['dependsOn'],
+      );
+    }
+    if (far > JOIN_EPS) {
+      items.push(
+        box(
+          `${prefix}-ext-${l.id}`,
+          l.body,
+          'add',
+          add2(p, scale2(n, w0)),
+          d,
+          [far, w1 - w0],
+          [meta.base, top],
+        ),
+      );
+    }
+    // What lies past the line: inside the band, between `near` and `far` along the wall.
+    const corners = [near, far].flatMap((a) =>
+      [w0, w1].map((w) => sub2(add2(p, add2(scale2(d, a), scale2(n, w))), line.c)),
+    );
+    const xs = corners.map((c) => dot2(c, x));
+    const ys = corners.map((c) => dot2(c, line.nu));
+    const depth = Math.max(...ys);
+    if (depth <= JOIN_EPS) continue;
+    const x0 = Math.min(...xs) - TOOL_MARGIN;
+    const x1 = Math.max(...xs) + TOOL_MARGIN;
+    items.push(
+      box(
+        `${prefix}-trim-${l.id}`,
+        l.body,
+        'subtract',
+        add2(line.c, scale2(x, x0)),
+        x,
+        [x1 - x0, depth + TOOL_MARGIN],
+        [meta.base - TOOL_MARGIN, top + TOOL_MARGIN],
+      ),
+    );
+  }
+  return items;
+}
+
+/**
+ * Tools that notch a tee's host layers on the branch's side where the branch's framing passes
+ * through them to the host's framing: a box across the branch's framing band per layer body.
+ */
+function notchItems(
+  prefix: string,
+  host: WallMetadata,
+  segment: number,
+  branch: WallMetadata,
+  end: WallEnd,
+  bodies: readonly (LayerMetadata & { body: string })[],
+): ToolItem[] {
+  const hseg = planSegments(host.points, host.closed)[segment]!;
+  const bsegs = planSegments(branch.points, branch.closed);
+  const p = end === 'start' ? bsegs[0]!.a : bsegs.at(-1)!.b;
+  const into = intoWall(bsegs, end);
+  const side = dot2(into, hseg.n) > 0 ? 1 : -1;
+  const [h0, h1] = framingOf(host);
+  const [s0, s1] = stackOf(host);
+  const face = side > 0 ? h1 : h0;
+  const outer = side > 0 ? s1 : s0;
+  const notched = bodies.filter((l) =>
+    side > 0 ? l.t[0] >= h1 - JOIN_EPS : l.t[1] <= h0 + JOIN_EPS,
+  );
+  if (notched.length === 0 || Math.abs(outer - face) <= JOIN_EPS) return [];
+  const left = leftOf(into);
+  const bseg = end === 'start' ? bsegs[0]! : bsegs.at(-1)!;
+  const [b0, b1] = framingOf(branch);
+  const [y0, y1] = dot2(left, bseg.n) > 0 ? [b0, b1] : [-b1, -b0];
+  const sp = dot2(sub2(p, hseg.a), hseg.n);
+  const ci = dot2(into, hseg.n);
+  const cl = dot2(left, hseg.n);
+  const xs = [face, outer].flatMap((sv) => [y0, y1].map((y) => (sv - sp - y * cl) / ci));
+  const x0 = Math.min(...xs) - TOOL_MARGIN;
+  const x1 = Math.max(...xs) + TOOL_MARGIN;
+  const hostTop = host.base + host.height;
+  const branchTop = branch.base + branch.height;
+  const z: [number, number] = [
+    branch.base <= host.base + JOIN_EPS ? host.base - TOOL_MARGIN : branch.base,
+    branchTop >= hostTop - JOIN_EPS ? hostTop + TOOL_MARGIN : branchTop,
+  ];
+  if (!(z[1] > z[0])) return [];
+  const origin = add2(add2(p, scale2(left, y0)), scale2(into, x0));
+  return notched.map((l) =>
+    box(`${prefix}-notch-${l.id}`, l.body, 'subtract', origin, into, [x1 - x0, y1 - y0], z),
+  );
+}
+
+/** The line along another wall's layer stack face on the side `into` comes from. */
+function stackFaceLine(meta: WallMetadata, segment: number, into: P2): EndLine {
+  const seg = planSegments(meta.points, meta.closed)[segment]!;
+  const side = dot2(into, seg.n) > 0 ? 1 : -1;
+  const [s0, s1] = stackOf(meta);
+  return { c: add2(seg.a, scale2(seg.n, side > 0 ? s1 : s0)), nu: scale2(seg.n, -side) };
+}
+
+/**
+ * Join this wall's layers with the walls it names in `dependsOn` (`graph.ts`'s `layerJoins`):
+ *
+ * - at an L, both walls' layers end on the corner's bisector, as at a corner of one path (a
+ *   mitre): this wall's outline ends there, and the other wall's bodies get an added box where
+ *   they fall short of it and a cut past it;
+ * - as a tee's branch, this wall's layers end on the other wall's layer face, and the other
+ *   wall's layers on this side are notched where this wall's framing passes to its framing.
+ *
+ * - as a tee's host (the earlier wall ends on this one), the other wall's layers are cut back (or
+ *   extended) to this wall's layer face, and this wall's layers on that side are notched for the
+ *   other wall's framing.
+ *
+ * The bodies change through one `tools` input after the layer extrusions; regen hands a `new`
+ * extension's tools the bodies it made and those of the features in its dependsOn.
+ * Returns the end lines of this wall's own outline and the tools for the bodies.
+ */
+function joinLayers(
+  ctx: ExtensionContext<WallParams>,
+  self: WallMetadata,
+): { ends: EndLines; items: ToolItem[] } {
+  const f = ctx.feature;
+  const upstream: GraphWall[] = [];
+  for (const [id, u] of ctx.upstream) {
+    if (u.type !== WALL_TYPE) continue;
+    const meta = readWallMetadata(u.metadata);
+    if (meta !== undefined) upstream.push({ id, meta });
+  }
+  if (upstream.length === 0) return { ends: {}, items: [] };
+  let joins: LayerJoin[];
+  try {
+    joins = layerJoins({ id: f.id, meta: self }, upstream);
+  } catch (error) {
+    throw new Refusal(error instanceof Error ? error.message : String(error), ['dependsOn']);
+  }
+  const segs = planSegments(self.points, self.closed);
+  const own = self.layers.filter((l): l is LayerMetadata & { body: string } => l.body !== null);
+  const ends: { start?: EndLine; end?: EndLine } = {};
+  const items: ToolItem[] = [];
+  const tees = joins
+    .filter((j): j is Extract<LayerJoin, { kind: 'host' }> => j.kind === 'host')
+    .map((j) => {
+      const osegs = planSegments(j.other.meta.points, j.other.meta.closed);
+      const at = j.otherEnd === 'start' ? osegs[0]!.a : osegs.at(-1)!.b;
+      return { j, along: dot2(sub2(at, segs[j.segment]!.a), segs[j.segment]!.d) };
+    })
+    .sort((a, b) => a.j.segment - b.j.segment || a.along - b.along);
+  const shallow = (other: string): Refusal =>
+    new Refusal(
+      `${f.id} meets ${other} at too sharp an angle to join their layers: take ${other} out of dependsOn, or widen the angle`,
+      ['dependsOn'],
+    );
+  for (const j of joins) {
+    if (j.kind === 'host') continue;
+    const into = intoWall(segs, j.end);
+    const p = j.end === 'start' ? segs[0]!.a : segs.at(-1)!.b;
+    if (j.kind === 'corner') {
+      const osegs = planSegments(j.other.meta.points, j.other.meta.closed);
+      const oInto = intoWall(osegs, j.otherEnd);
+      if (dot2(into, oInto) > -SHARPEST_TURN) throw shallow(j.other.id);
+      const b = unit(add2(into, oInto));
+      let nu = leftOf(b);
+      if (dot2(nu, into) > 0) nu = scale2(nu, -1);
+      ends[j.end] = { c: p, nu };
+      items.push(
+        ...trimItems(
+          j.end,
+          j.other.id,
+          j.other.meta,
+          j.otherEnd,
+          { c: p, nu: scale2(nu, -1) },
+          ctx.bodies,
+        ),
+      );
+    } else {
+      const oseg = planSegments(j.other.meta.points, j.other.meta.closed)[j.segment]!;
+      if (Math.abs(dot2(into, oseg.n)) < SHALLOWEST_TEE) throw shallow(j.other.id);
+      ends[j.end] = stackFaceLine(j.other.meta, j.segment, into);
+      items.push(
+        ...notchItems(
+          j.end,
+          j.other.meta,
+          j.segment,
+          self,
+          j.end,
+          bodiesOf(j.other.meta, ctx.bodies),
+        ),
+      );
+    }
+  }
+  tees.forEach(({ j }, k) => {
+    const osegs = planSegments(j.other.meta.points, j.other.meta.closed);
+    const oInto = intoWall(osegs, j.otherEnd);
+    if (Math.abs(dot2(oInto, segs[j.segment]!.n)) < SHALLOWEST_TEE) throw shallow(j.other.id);
+    const prefix = `tee${k + 1}`;
+    items.push(
+      ...trimItems(
+        prefix,
+        j.other.id,
+        j.other.meta,
+        j.otherEnd,
+        stackFaceLine(self, j.segment, oInto),
+        ctx.bodies,
+      ),
+      ...notchItems(prefix, self, j.segment, j.other.meta, j.otherEnd, own),
+    );
+  });
+  return { ends, items };
 }
 
 // The translator ---------------------------------------------------------------------------------
@@ -499,7 +873,7 @@ function readPath(ctx: ExtensionContext<WallParams>): P2[] {
 }
 
 function build(ctx: ExtensionContext<WallParams>): {
-  inputs: ExtrudeInput[];
+  inputs: FeatureInput[];
   metadata: WallMetadata;
 } {
   const f = ctx.feature;
@@ -582,24 +956,6 @@ function build(ctx: ExtensionContext<WallParams>): {
     t: ts[i]!,
   }));
   const base = level.elevation;
-  const inputs: ExtrudeInput[] = layers.flatMap((l): ExtrudeInput[] =>
-    l.body === null
-      ? []
-      : [
-          {
-            kind: 'extrude',
-            id: f.id,
-            body: l.body,
-            capRole: `cap.${l.id}`,
-            profile: {
-              frame: { origin: [0, 0, base], xDir: [1, 0, 0], normal: [0, 0, 1] },
-              loops: layerLoops(l.id, points, p.closed, l.t[0], l.t[1]),
-            },
-            extent: { type: 'blind', distance: height },
-            mode: 'new',
-          },
-        ],
-  );
   const metadata: WallMetadata = {
     kind: 'wall',
     level: level.id,
@@ -614,6 +970,32 @@ function build(ctx: ExtensionContext<WallParams>): {
     settings,
     overrides: resolveOverrides(p.overrides, ctx.values, stock),
   };
+  // Only a wall that makes layer bodies joins them with the walls it names in dependsOn.
+  const joined = makes ? joinLayers(ctx, metadata) : { ends: {}, items: [] };
+  const inputs: FeatureInput[] = layers.flatMap((l): ExtrudeInput[] => {
+    if (l.body === null) return [];
+    if (!outlineRunsForward(points, p.closed, l.t[0], l.t[1], joined.ends)) {
+      throw new Refusal(
+        `a segment of the path is too short for the corners and joins of layer "${l.id}"`,
+        ['expressions'],
+      );
+    }
+    return [
+      {
+        kind: 'extrude',
+        id: f.id,
+        body: l.body,
+        capRole: `cap.${l.id}`,
+        profile: {
+          frame: { origin: [0, 0, base], xDir: [1, 0, 0], normal: [0, 0, 1] },
+          loops: layerLoops(l.id, points, p.closed, l.t[0], l.t[1], joined.ends),
+        },
+        extent: { type: 'blind', distance: height },
+        mode: 'new',
+      },
+    ];
+  });
+  if (joined.items.length > 0) inputs.push({ kind: 'tools', id: f.id, items: joined.items });
   return { inputs, metadata };
 }
 

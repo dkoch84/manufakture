@@ -17,10 +17,9 @@
 //   Three or more wall ends at one point, or an end on another wall's corner point, are left free
 //   with a layout warning. An end set to `free` never joins.
 //
-// Layer bodies are the wall translator's and do not depend on this graph: a wall's layers are
-// mitred at its own corners and square at its own ends. The L and tee joins here are framing
-// only; the layers of walls that meet are neither mitred nor butted (they leave a notch or
-// overlap at an L and overlap at a tee) until follow-up task #1172 joins them.
+// Layer bodies are the wall translator's, which cannot see this graph: a translator reads only
+// the walls it names in `dependsOn`. `layerJoins` finds, by the same rules, where a wall joins its
+// layers with those walls (task #1172); walls that do not name each other keep square layer ends.
 
 import type { WallJoin, WallSegment, WallTee } from '../framing/wall';
 import {
@@ -355,4 +354,133 @@ function teeCentre(meta: WallMetadata, seg: PlanSegment, tee: TeeOn): number {
   const start = add2(tee.at, scale2(o.seg.n, theirs));
   const u = (mine - dot2(sub2(start, seg.a), seg.n)) / dot2(tee.into, seg.n);
   return dot2(sub2(add2(start, scale2(tee.into, u)), seg.a), seg.d);
+}
+
+// Layer joins ------------------------------------------------------------------------------------
+
+/**
+ * The most walls one wall joins its layers with: the walls in its `dependsOn`. Each is checked
+ * against the wall's two ends and its segments, so the work is linear in this bound.
+ */
+export const MAX_LAYER_JOIN_WALLS = 64;
+
+/**
+ * Where a wall's layers join another wall's, found by the wall whose `dependsOn` names the other
+ * (the later of the two), with the wall graph's rules so the layers join where the framing does:
+ *
+ * - `corner`: this wall's `end` meets `other`'s `otherEnd` (an L);
+ * - `branch`: this wall's `end` lies inside `other`'s segment `segment` (0-based): a tee in it;
+ * - `host`: `other`'s `otherEnd` lies inside this wall's segment `segment`: a tee in this wall.
+ *
+ * Ends set `free`, ends where three or more walls meet (of those this wall sees), ends on a corner
+ * point of the other wall's path and collinear walls do not join, as in `wallGraph`.
+ */
+export type LayerJoin =
+  | {
+      readonly kind: 'corner';
+      readonly other: GraphWall;
+      readonly end: End;
+      readonly otherEnd: End;
+    }
+  | {
+      readonly kind: 'branch';
+      readonly other: GraphWall;
+      readonly end: End;
+      readonly segment: number;
+    }
+  | {
+      readonly kind: 'host';
+      readonly other: GraphWall;
+      readonly otherEnd: End;
+      readonly segment: number;
+    };
+
+export type WallEnd = End;
+
+/** A wall's joinable ends: open, not `free`, with the end point. */
+function openEnds(meta: WallMetadata, segs: readonly PlanSegment[]): { end: End; point: P2 }[] {
+  if (meta.closed || segs.length === 0) return [];
+  const out: { end: End; point: P2 }[] = [];
+  if (!meta.free.start) out.push({ end: 'start', point: segs[0]!.a });
+  if (!meta.free.end) out.push({ end: 'end', point: segs.at(-1)!.b });
+  return out;
+}
+
+/** The direction from a wall's end into the wall, along its end segment. */
+export function intoWall(segs: readonly PlanSegment[], end: End): P2 {
+  return end === 'start' ? segs[0]!.d : scale2(segs.at(-1)!.d, -1);
+}
+
+/** Which segment of `segs` (0-based) has `p` on its path inside it, or undefined. */
+function segmentAt(
+  segs: readonly PlanSegment[],
+  p: P2,
+): { segment: number; inside: boolean } | undefined {
+  for (let j = 0; j < segs.length; j++) {
+    const s = segs[j]!;
+    const along = dot2(sub2(p, s.a), s.d);
+    const off = dot2(sub2(p, s.a), s.n);
+    if (Math.abs(off) > MEET || along < -MEET || along > s.length + MEET) continue;
+    return { segment: j, inside: along > MEET && along < s.length - MEET };
+  }
+  return undefined;
+}
+
+/**
+ * The layer joins of `self` with the walls it names in `dependsOn` (`upstream`). Throws when
+ * `upstream` holds more than `MAX_LAYER_JOIN_WALLS` walls.
+ */
+export function layerJoins(self: GraphWall, upstream: readonly GraphWall[]): LayerJoin[] {
+  if (upstream.length > MAX_LAYER_JOIN_WALLS) {
+    throw new Error(
+      `the wall names ${upstream.length} walls in dependsOn; it joins its layers with at most ${MAX_LAYER_JOIN_WALLS}`,
+    );
+  }
+  const others = upstream
+    .filter((w) => w.id !== self.id && sameLevel(w.meta, self.meta))
+    .sort((a, b) => (before(a.id, b.id) ? -1 : 1));
+  const segsOf = new Map(
+    [self, ...others].map((w) => [w.id, planSegments(w.meta.points, w.meta.closed)] as const),
+  );
+  const mySegs = segsOf.get(self.id)!;
+  const mine = openEnds(self.meta, mySegs);
+  const theirs = others.flatMap((w) =>
+    openEnds(w.meta, segsOf.get(w.id)!).map((e) => ({ wall: w, ...e })),
+  );
+  const joins: LayerJoin[] = [];
+
+  for (const e of mine) {
+    const into = intoWall(mySegs, e.end);
+    const at = theirs.filter((o) => near(o.point, e.point));
+    if (at.length > 1) continue;
+    if (at.length === 1) {
+      const o = at[0]!;
+      const oInto = intoWall(segsOf.get(o.wall.id)!, o.end);
+      // Collinear walls meeting end to end are not a corner.
+      if (Math.abs(cross2(into, oInto)) < 1e-6) continue;
+      joins.push({ kind: 'corner', other: o.wall, end: e.end, otherEnd: o.end });
+      continue;
+    }
+    for (const w of others) {
+      const hit = segmentAt(segsOf.get(w.id)!, e.point);
+      if (hit === undefined) continue;
+      const s = segsOf.get(w.id)![hit.segment]!;
+      if (hit.inside && Math.abs(dot2(into, s.n)) >= 1e-6) {
+        joins.push({ kind: 'branch', other: w, end: e.end, segment: hit.segment });
+      }
+      break;
+    }
+  }
+
+  // Their ends on this wall's segments (not at one of its ends, nor where they meet each other).
+  for (const o of theirs) {
+    if (mine.some((e) => near(e.point, o.point))) continue;
+    if (theirs.some((x) => x !== o && near(x.point, o.point))) continue;
+    const hit = segmentAt(mySegs, o.point);
+    if (hit === undefined || !hit.inside) continue;
+    const oInto = intoWall(segsOf.get(o.wall.id)!, o.end);
+    if (Math.abs(dot2(oInto, mySegs[hit.segment]!.n)) < 1e-6) continue;
+    joins.push({ kind: 'host', other: o.wall, otherEnd: o.end, segment: hit.segment });
+  }
+  return joins;
 }
