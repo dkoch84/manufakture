@@ -194,6 +194,36 @@ describe('construction settings', () => {
     const again = run(after, r2.ok ? r2.command : null);
     expect((again.parts[0]!.features[0] as ExtensionFeature).operation).toBe('new');
   });
+
+  it("keep each opening's scope on its host's layer bodies as the wall type's layers change", () => {
+    const { doc: walled, wall } = withWall();
+    const form = { ...newOpeningForm(wall.id), width: `3'`, height: `6' 8"` };
+    const built = buildOpening(form, {
+      doc: walled,
+      partId: PART,
+      variables: {},
+      segmentLength: 12 * FT,
+    });
+    if (!built.ok) throw new Error(JSON.stringify(built.errors));
+    let doc = run(walled, built.command);
+    const scopeOf = (d: typeof doc) =>
+      (d.parts[0]!.features.find((f) => f.id === built.feature.id) as ExtensionFeature).scope;
+    expect(scopeOf(doc)).toEqual([`${wall.id}:layer/sheathing`]);
+    const type = settingsOf(doc).stored.wallTypes[0]!;
+    const more = withLayer(type, 'drywall', 'us-gyp-1-2-8ft');
+    if (typeof more === 'string') throw new Error(more);
+    const r = editWallType(doc, more, 'Edit');
+    doc = run(doc, r.ok ? r.command : null);
+    expect(scopeOf(doc)).toEqual([`${wall.id}:layer/sheathing`, `${wall.id}:layer/drywall`]);
+    // A framing-only wall makes no bodies: the opening has no scope and cuts nothing.
+    const bare = withoutLayer(withoutLayer(more, 'sheathing'), 'drywall');
+    const r2 = editWallType(doc, bare, 'Edit');
+    doc = run(doc, r2.ok ? r2.command : null);
+    expect(scopeOf(doc)).toBeUndefined();
+    // Unchanged layers edit no opening.
+    const r3 = editWallType(doc, bare, 'Edit');
+    expect(r3.ok && r3.command).toBeNull();
+  });
 });
 
 describe('the wall path', () => {
@@ -377,6 +407,8 @@ describe('openings', () => {
     if (!r.ok) return;
     expect(r.feature.name).toBe('Door 1');
     expect(r.feature.dependsOn).toEqual([wall.id]);
+    // Scoped to the host's layer bodies, so it reads only those.
+    expect(r.feature.scope).toEqual([`${wall.id}:layer/sheathing`]);
     expect(r.feature.expressions.position!.source).toBe('72');
     expect(r.feature.params).toEqual({
       kind: 'door',

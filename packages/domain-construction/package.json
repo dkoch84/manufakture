@@ -5,11 +5,13 @@
   "type": "module",
   "license": "GPL-3.0-or-later",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./fixtures/house": "./src/fixtures/house.ts"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run --root ../.. --project packages packages/domain-construction"
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p bench/tsconfig.json",
+    "test": "vitest run --root ../.. --project packages packages/domain-construction",
+    "bench": "vitest run --config bench/vitest.config.ts --silent=false --reporter=verbose"
   },
   "dependencies": {
     "@manufakture/core": "workspace:*",

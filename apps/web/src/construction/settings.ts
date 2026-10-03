@@ -23,6 +23,7 @@ import {
   MAX_LEVELS,
   MAX_TYPES,
   defaultConstructionSettings,
+  openingScope,
   readConstructionData,
   writeConstructionData,
   type ConstructionData,
@@ -35,7 +36,7 @@ import {
 } from '@manufakture/domain-construction';
 import { evaluate } from '@manufakture/units';
 import { documentRegion } from '../wood/catalog';
-import { isWall, omit } from './kinds';
+import { isOpening, isWall, omit } from './kinds';
 import { coordinateExpression } from './lengths';
 
 export type Outcome<T = Command | null> =
@@ -248,18 +249,31 @@ export function makesBodies(type: { layers: readonly { kind: LayerKind }[] }): b
 
 /**
  * The edits that keep every wall of `type` building after its layers change: a wall makes its
- * layer bodies (operation `new`) exactly when its type has sheet layers.
+ * layer bodies (operation `new`) exactly when its type has sheet layers, and each opening it hosts
+ * keeps its `scope` on exactly those bodies (`openingScope`): a layer added or removed adds or
+ * removes its body there.
  */
 export function wallsFollowing(doc: ManufaktureDocument, type: StoredWallType): Command[] {
   const makes = makesBodies(type);
   const out: Command[] = [];
   for (const part of doc.parts) {
+    const walls = new Map<string, ExtensionFeature>();
     for (const f of part.features) {
       if (!isWall(f) || f.params.wallType !== type.id) continue;
       const has = f.operation === 'new';
-      if (has === makes) continue;
       const rest = omit(f, 'operation');
       const feature: ExtensionFeature = makes ? { ...rest, operation: 'new' } : rest;
+      walls.set(f.id, feature);
+      if (has !== makes) out.push({ type: 'editFeature', partId: part.id, feature });
+    }
+    for (const f of part.features) {
+      if (!isOpening(f)) continue;
+      const wall = walls.get(f.dependsOn[0] ?? '');
+      if (wall === undefined) continue;
+      const scope = openingScope(wall, type);
+      if (JSON.stringify(f.scope) === JSON.stringify(scope)) continue;
+      const rest = omit(f, 'scope');
+      const feature: ExtensionFeature = scope === undefined ? rest : { ...rest, scope };
       out.push({ type: 'editFeature', partId: part.id, feature });
     }
   }

@@ -276,6 +276,23 @@ export function readWallParams(params: Json, schemaVersion: number): Read<WallPa
   return readCurrent(migrated.value);
 }
 
+/** The id of a wall's layer body: `<wall id>:layer/<layer id>` (decision 3). */
+export function layerBodyId(wallId: string, layerId: string): string {
+  return `${wallId}:layer/${layerId}`;
+}
+
+/**
+ * The layer bodies a wall makes, by its feature and its wall type as stored: one per sheet layer
+ * when its operation is `new`, none otherwise (as `translateWall` names them).
+ */
+export function wallLayerBodies(
+  wall: { readonly id: string; readonly operation?: string | undefined },
+  type: { readonly layers: readonly { readonly id: string; readonly kind: string }[] } | undefined,
+): string[] {
+  if (wall.operation !== 'new' || type === undefined) return [];
+  return type.layers.filter((l) => l.kind !== 'framing').map((l) => layerBodyId(wall.id, l.id));
+}
+
 // Settings ---------------------------------------------------------------------------------------
 
 /** A stored header with its stocks looked up (lumber, and a sheet spacer). */
@@ -952,7 +969,7 @@ function build(ctx: ExtensionContext<WallParams>): {
   const layers: LayerMetadata[] = type.layers.map((l, i) => ({
     id: l.id,
     kind: l.kind,
-    body: makes && l.kind !== 'framing' ? `${f.id}:layer/${l.id}` : null,
+    body: makes && l.kind !== 'framing' ? layerBodyId(f.id, l.id) : null,
     t: ts[i]!,
   }));
   const base = level.elevation;

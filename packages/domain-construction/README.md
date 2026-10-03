@@ -182,6 +182,15 @@ line), `width`, `height` (the rough opening), `sill` (0 for a door, required for
 opening from every layer body (faces `<opening id>:<layer>:<role>`); with a `scope`, every body it
 cuts must be listed there. It is refused when it does not fit its segment or its wall's height.
 
+An opening is written with its host's layer bodies as its `scope` (`openingScope(wall, type)`,
+from `wallLayerBodies`: `<wall id>:layer/<layer id>` per sheet layer of a wall whose operation is
+`new`; none for a framing-only wall), so it reads only those. Without one it reads every body of
+the part, and moving one opening rebuilds every opening after it in the feature list. The scope
+names bodies, so it holds while layer joins (#1172) trim and notch them; it changes only when the
+host's wall type gains or loses a sheet layer, and the app's wall type editor rewrites the scopes
+of the openings of that type's walls in the same step (`wallsFollowing`). A stale scope fails
+visibly: a missing body is regen's `reference-lost` on `scope`, an unlisted layer body a refusal.
+
 **Member stage** (`stage.ts`, `graph.ts`). A group per wall: the wall, every built opening it
 hosts, and the walls it meets or crosses (they decide its ends, so they are in its cache key;
 moving an opening re-frames only its wall). `wallGraph` works out, per level, the joins:
@@ -766,6 +775,56 @@ test), every seated rafter's seat is level at the plates with its heel on the wa
 common meets the ridge at its top, members stay inside the roof's envelope, ids are unique and
 round-trip, and output is deterministic.
 
+## Drawings
+
+`src/drawings/` (M6 plan T6.4a; ADR 0015 decision 9, the analytic drawing path) is the domain's
+`drawings` entry: regen calls `constructionDrawings.view` for a drawing view whose source is
+`{ domain: 'construction', part, schemaVersion: 1, params }` (core format v15). The params
+(`params.ts`, version 1):
+
+| `kind`      | Fields                                                                                                                                       |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `plan`      | `level`; `cut` (an expression, the cut above the level's datum, default 4'); `openings` (`rough`, the default, `centre` or `none`)           |
+| `elevation` | `wall`; `segment` (1-based, default 1); `from` (`outside`, the default, or `inside`); `openings` as above; `marks` (stud layout marks, true) |
+| `roof-plan` | `roof`                                                                                                                                       |
+
+- **Floor plan.** Looks down, cut by the horizontal plane `cut` above the level's datum: the
+  kernel projects the level's wall layer bodies and floor subfloors with that section (the cut
+  layers hatched), and the view draws each wall member's section by the plane (`memberSection`),
+  a door's leaf and swing (`swing` `in`, the default, is the interior side; `hand` as seen from
+  the side it swings into, `left` by default), a window as three lines across its rough opening
+  (the framing's faces and its middle), and one string per wall segment outside it (right of the
+  path): the corner, each opening's rough opening edges (or centre), the other corner, and the
+  overall.
+- **Framing elevation.** Looks at one wall segment square on, from outside (along the interior
+  normal) or inside. It draws every member whose blank lies in the segment's framing slab (within
+  1 mm across, overlapping it along): the wall's and its openings', a neighbour's corner studs, a
+  floor's rim below and a gable's studs and end rafters above. Each member is its outline from the
+  viewer (`memberOutline`: the side of its blank facing the viewer, less its plane cuts, with a
+  notch's two sides drawn where it cuts that side). Strings: along the bottom (corner, rough
+  opening edges or centres, corner, overall) with an X at each stud of the wall, and up the
+  start's side (base, each opening's sill and head, top, overall). A roof that bears on the wall
+  and slopes across the view (a gable roof's end walls, every wall of a hip roof) gets a pitch
+  symbol a quarter of the way up its slope.
+- **Roof framing plan.** The roof's members from above, a string along the eave with an X at each
+  common rafter, and one along the gable end.
+
+The short disclaimer (`DISCLAIMER_SHORT`) is the domain's title note (`constructionDrawings.titleNote`):
+regen draws it on top of the title block of every sheet showing a construction view (drawn or
+not) or any view of a part with construction features. Dimension strings are derived from wall, opening and member data
+at every request and never stored (ADR 0015: core has no domain reference or chain dimension); a
+"convert to dimensions" action that turns a string into ordinary dimensions on layer faces is not
+here yet. The output is bounded as regen bounds it (`MAX_VIEW_LINES` 400,000 lines, then a
+warning), and every loop is over the part's walls, openings or members.
+
+Tests: `outline.test.ts` (outlines with plane cuts and notches, sections), `views.test.ts`
+(params, each view from hand-made metadata, checked by regen's `checkDomainView`), and
+`drawings.regen.test.ts`, the shed with a door through the real kernel: the plan at 4' shows the
+four walls' sheathing cut (the front wall's in two) and the door's 36" swing, its front string
+reads `2' 6"`, `3' 0"`, `10' 6"`, `16' 0"`; the door wall's elevation has every one of its
+members' rectangles; the gable wall's elevation has the `6/12` symbol; moving the door 12" moves
+the strings; the title block has the disclaimer, also when the sheet's only construction view fails and on a plain part view of the shed; forty copies of one view are drawn once and stop at the request budget.
+
 ## Takeoff
 
 `constructionTakeoff({ members, faces, levels?, stock?, settings? })` (`src/takeoff/`, T6.3a,
@@ -862,3 +921,44 @@ covers the params readers, layer outlines and the wall graph at 90 and 45 degree
 ```sh
 pnpm --filter @manufakture/domain-construction test
 ```
+
+## Performance: the house benchmark (T6.5d)
+
+`src/fixtures/house.ts` (also exported as `@manufakture/domain-construction/fixtures/house`) is a
+scripted 50' x 40' (2,000 sq ft) single-storey house built with the real features: four 2x6
+exterior walls and seven 2x4 interior walls (tees), two doors and eight windows, two floor spans of
+2x10 joists, and a 6/12 hip roof with ceiling joists. It frames 794 members in 14 groups (88 shared
+shapes) and builds 28 layer bodies. `src/fixtures/house.test.ts` checks that, that moving a window
+re-frames only its wall, and is the CI check: it fails when a regen takes more than five times its
+T6.5a budget, so only an order-of-magnitude regression fails a noisy runner.
+
+`bench/house.bench.ts` (`make bench-house`, about a minute) measures against the budgets of the
+[T6.5a spike](../../docs/spikes/T6.5a-framing.md) ("4. Budgets for T6.5d"), on medians, each cold
+sample and heap probe in a fresh Node process. `apps/web/e2e/perf-house.spec.ts` measures the same
+house in headless Chromium. Measured 2026-10-03 on a 6-core desktop CPU (AMD Ryzen 5 7600X, Node 26):
+
+| Measure                                        | Measured                      | Budget (T6.5a) |
+| ---------------------------------------------- | ----------------------------- | -------------- |
+| Framing, cold (members, meshes, Manifold load) | 48.5 ms                       | 150 ms         |
+| Framing, warm (move a window)                  | 2.1 ms                        | 10 ms          |
+| Whole regen, cold (kernel start excluded)      | 740 ms                        | 3 s            |
+| Whole regen, warm (move a window)              | 67 ms                         | 150 ms         |
+| Kernel instance start                          | 482 ms                        | excluded       |
+| Kernel heap per full regen (`heapInUse`)       | 3.9 MiB (262 regens to 1 GiB) | none           |
+| Browser: first render (regen to viewport)      | 860 to 960 ms                 | none           |
+| Browser: draw calls per frame                  | 207 (88 of them members)      | 250            |
+| Browser: frame time, SwiftShader, mean         | 26.5 to 28.7 ms               | 30 ms          |
+| Browser: pick, SwiftShader, median             | 3.7 ms                        | none           |
+
+SwiftShader is software GL on the CPU: its frame times are a regression check, not GPU numbers,
+and the 60 fps target on a laptop GPU is not measured headless. The heap figure compares N = 10
+and N = 60 full regens; the probe reads low by up to 30 % (T6.5a), so take it as a lower bound.
+
+**The warm regen.** Moving a window rebuilds that opening and the one after it in the same wall
+(each opening is scoped to its host's two layer bodies, as the app writes it), re-frames one group
+and re-meshes the wall's two changed layer bodies: 67 ms. Before the openings had a `scope` it
+rebuilt every opening after the moved one in the feature list (9 of the 10) and took 247 to
+263 ms. A regen where every feature is a cache hit but the document changed (the window moved back
+to a position already built) takes about 21 ms, about 13 ms of it the tessellation and topology of
+the two layer bodies that differ from the last regen's (regen re-meshes any body whose key differs
+from the one it last reported).

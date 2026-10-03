@@ -4,7 +4,9 @@
 // decision 7: an opening's header is its own explicit one, else the narrowest of the user's
 // header rules that covers its width, else its wall type's default; the tool says which one
 // applies before the opening is added (`headerPreview`), and the panel says which one regen used
-// (`headerUsed`, from the member stage's report).
+// (`headerUsed`, from the member stage's report). An opening is written with its host's layer
+// bodies as its `scope` (`openingScope`), so it reads only those: moving one opening rebuilds the
+// openings after it in the same wall, not every opening in the part.
 
 import {
   previewIds,
@@ -17,6 +19,7 @@ import {
 import {
   OPENING_SCHEMA_VERSION,
   OPENING_TYPE,
+  openingScope,
   readOpeningParams,
   type ConstructionSettings,
   type HeaderData,
@@ -26,7 +29,7 @@ import { findStock } from '@manufakture/stock';
 import { formatLength } from '@manufakture/units';
 import { lengthFormat, type Variables } from '../sketcher/values';
 import { checkLength, coordinateExpression } from './lengths';
-import { isOpening, isWall } from './settings';
+import { documentConstruction, isOpening, isWall } from './settings';
 import { newFeatureName } from './walls';
 
 export type OpeningKind = 'door' | 'window' | 'opening';
@@ -193,6 +196,7 @@ export function buildOpening(form: OpeningForm, ctx: OpeningContext): OpeningBui
       KIND_LABELS[form.kind],
       (f) => isOpening(f) && f.params.kind === form.kind,
     );
+  const scope = wall && isWall(wall) ? hostScope(doc, wall) : undefined;
   const feature: ExtensionFeature = {
     id,
     kind: 'extension',
@@ -204,11 +208,27 @@ export function buildOpening(form: OpeningForm, ctx: OpeningContext): OpeningBui
     references: [],
     expressions,
     params: params as ExtensionFeature['params'],
+    ...(scope === undefined ? {} : { scope }),
   };
   const command: Command = ctx.existing
     ? { type: 'editFeature', partId, feature }
     : { type: 'addFeature', partId, feature };
   return { ok: true, feature, command, label: `${ctx.existing ? 'Edit' : 'Add'} ${name}` };
+}
+
+// Scope ------------------------------------------------------------------------------------------
+
+/**
+ * The scope of an opening in `wall`: the wall's layer bodies, by the wall type the document stores
+ * (`openingScope`); undefined when it makes none or the settings cannot be read.
+ */
+export function hostScope(doc: ManufaktureDocument, wall: ExtensionFeature): string[] | undefined {
+  const r = documentConstruction(doc);
+  const types = r.ok ? (r.data?.stored.wallTypes ?? []) : [];
+  return openingScope(
+    wall,
+    types.find((t) => t.id === wall.params.wallType),
+  );
 }
 
 // Headers ------------------------------------------------------------------------------------------

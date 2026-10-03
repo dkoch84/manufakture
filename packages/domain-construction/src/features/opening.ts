@@ -16,6 +16,12 @@
 // - **Cuts** (decision 3): one `tools` input with a box per layer body of the host, through the
 //   whole wall at the rough opening (`<id>:<layer id>:<role>` faces). With a `scope`, every body
 //   it cuts must be listed there. No operation: an opening makes no body of its own.
+// - **Scope** (T6.5d): an opening is written with its host's layer bodies as its `scope`
+//   (`openingScope`), so regen's graph and cache see it read only those. Without one it reads every
+//   body in the part, and moving one opening rebuilds every opening after it. The scope names
+//   bodies, not layers' geometry, so it holds while joins (#1172) trim and notch them; it changes
+//   only with the host's layers (a wall type gaining or losing a sheet layer), and the app rewrites
+//   it then.
 // - **Members** (decision 6): framed with the host wall by the member stage, owned by the
 //   opening (`extension#7:king-l`).
 
@@ -60,7 +66,7 @@ import {
   type OpeningMetadata,
   type StoredOverride,
 } from './common';
-import { headerSpec } from './wall';
+import { headerSpec, wallLayerBodies } from './wall';
 
 export type OpeningKind = 'door' | 'window' | 'opening';
 
@@ -189,6 +195,18 @@ export function readOpeningParams(params: Json, schemaVersion: number): Read<Ope
   const migrated = migrate(OPENING_PARAMS, params, schemaVersion);
   if (!migrated.ok) return migrated;
   return readCurrent(migrated.value);
+}
+
+/**
+ * The `scope` an opening in `wall` is written with: the wall's layer bodies (`wallLayerBodies`),
+ * or undefined when the wall makes none (a framing-only wall: the opening then cuts nothing).
+ */
+export function openingScope(
+  wall: { readonly id: string; readonly operation?: string | undefined },
+  type: { readonly layers: readonly { readonly id: string; readonly kind: string }[] } | undefined,
+): string[] | undefined {
+  const bodies = wallLayerBodies(wall, type);
+  return bodies.length === 0 ? undefined : bodies;
 }
 
 // The translator ---------------------------------------------------------------------------------
