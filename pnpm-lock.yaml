@@ -160,6 +160,12 @@ importers:
         specifier: ^4.6.5
         version: 4.6.5
 
+  packages/domain-construction:
+    dependencies:
+      '@manufakture/units':
+        specifier: workspace:*
+        version: link:../units
+
   packages/domain-wood:
     dependencies:
       '@manufakture/core':

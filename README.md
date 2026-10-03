@@ -102,6 +102,7 @@ packages/io           Import/export adapters
 packages/print        Printability checks, printers and fit defaults
 packages/text         Fonts and text layout for sketches
 packages/domain-wood  Woodworking: stock catalog, boards, joints, cut list
+packages/domain-construction  Construction: wall framing as member data
 packages/takeoff      Generic quantity takeoff rows, merging and totals
 packages/nesting      Sheet and stick layouts for cut plans
 packages/drawing      Drawing sheets as 2D geometry: views, dimensions, title block

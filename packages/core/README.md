@@ -920,6 +920,33 @@ straight from `e2`), and a deleted piece brought back: once `e2` is gone, nothin
 again. `addFeature` has no earlier state, so it refuses split ids altogether. The same rule
 applies to every sub-id kind (`e`, `k`, `r`); only entities are split in practice.
 
+#### Construction member ids (M6)
+
+Framing members are data, not bodies ([ADR 0015](../../docs/adr/0015-construction-domain.md)
+decision 4): they have no counter and no face names. A member's full id is
+`<owner feature id>:<local id>` (decision 6): the owner is the wall, opening, floor or roof
+feature the member belongs to, so every full id holds exactly one feature id, at its front, and a
+local id may itself contain a colon (split at the first colon only). The wall framing generator
+(`@manufakture/domain-construction`, T6.2a) defines these local id forms, stable by role and
+layout and fragile by design. Nothing in the document stores them except per-member overrides in
+the owner's params, keyed by local id, which report `lost` when their member disappears.
+
+| Owner   | Local id form                                                                               | Full id example            | Meaning                                                                    |
+| ------- | ------------------------------------------------------------------------------------------- | -------------------------- | -------------------------------------------------------------------------- |
+| wall    | `s<k>`                                                                                      | `extension#3:s12`          | Stud layout slot k                                                         |
+| wall    | `bottom<c>:<n>`, `top<c>:<n>`                                                               | `extension#3:top1:2`       | Plate course c, piece n (splices)                                          |
+| wall    | `block<r>:<n>`                                                                              | `extension#3:block1:4`     | Blocking row r, block n                                                    |
+| wall    | `start:<m>`, `end:<m>`                                                                      | `extension#3:start:corner` | Corner framing at an L corner (`corner`, `corner-2`, `backing<r>`)         |
+| wall    | `t<i>:<m>`                                                                                  | `extension#3:t1:corner-l`  | Framing at the i-th tee (`corner-l`, `corner-r`, `corner-c`, `backing<r>`) |
+| wall    | `seg<n>/<id>`                                                                               | `extension#3:seg2/s0`      | Any wall form, in segment n >= 2 of a multi-segment wall                   |
+| opening | `king-l`, `jack-r2`, `header`, `header-2`, `spacer`, `sill`, `cripple-a<n>`, `cripple-b<n>` | `extension#7:king-l`       | The opening's own members                                                  |
+
+Each member has one spelling (`king-l`, never `king-l1`; `header`, never `header-1`). Since the
+only feature id is the owner in front, M7's name parser and id remap (T7.1a) treat a member id as
+any other `<feature id>:<suffix>` name and need nothing inside `params`. Core has no name parser
+or remap yet, so these forms live in `domain-construction` (`parseWallMemberId`,
+`parseOpeningMemberId`, `splitMemberFullId`) until T7.1a picks them up.
+
 ### References
 
 Geometry is referenced by name, never by index (T0.5, ADR 0004 decision 5):

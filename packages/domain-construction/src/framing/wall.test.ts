@@ -1,0 +1,724 @@
+// Hand-computed fixtures for the wall framing generator (M6 plan, T6.2a acceptance). Inputs and
+// expectations are in inches; the generator works in millimetres.
+
+import { describe, expect, it } from 'vitest';
+import { DISCLAIMER_SHORT } from '../disclaimer';
+import { memberFullId } from '../member-ids';
+import { countByRole, type Member } from '../members';
+import {
+  DOUBLE_2X8,
+  S2X10,
+  S2X4,
+  S2X6,
+  S2X8,
+  extentIn,
+  extentInches,
+  inch,
+  straightWall,
+  toInches,
+} from '../test-helpers';
+import {
+  FramingInputError,
+  frameWall,
+  type FrameWallInput,
+  type WallFraming,
+  type WallOpening,
+} from './wall';
+
+const DOOR: WallOpening = {
+  id: 'extension#7',
+  position: inch(48),
+  width: inch(36),
+  height: inch(80),
+  sill: 0,
+};
+const WINDOW: WallOpening = {
+  id: 'extension#8',
+  position: inch(112),
+  width: inch(36),
+  height: inch(48),
+  sill: inch(36),
+};
+
+/** The wall's own members by local id, the openings' by full id (`extension#7:king-l`). */
+const WALL = 'extension#3';
+const key = (m: Member) => (m.owner === WALL ? m.id : memberFullId(m));
+
+function frame(input: FrameWallInput): WallFraming & { byId: Map<string, Member> } {
+  const r = frameWall(input);
+  return { ...r, byId: new Map(r.members.map((m) => [key(m), m])) };
+}
+
+const ids = (ms: readonly Member[], role: string) => ms.filter((m) => m.role === role).map(key);
+
+describe('frameWall: layout', () => {
+  it('frames a 16 ft wall at 16 in on centre with 13 studs, 1 bottom and 2 top plates', () => {
+    const input = straightWall(192);
+    const seg = input.segments[0]!;
+    const r = frame(input);
+    expect(r.warnings).toEqual([]);
+    expect(countByRole(r.members)).toEqual({ 'bottom-plate': 1, stud: 13, 'top-plate': 2 });
+    const studs = r.members.filter((m) => m.role === 'stud');
+    expect(studs.map((m) => m.id)).toEqual(Array.from({ length: 13 }, (_, k) => `s${k}`));
+    // s0 flush at the start, s1..s11 centred on 16k, s12 flush at the end.
+    const expected = [
+      [0, 1.5],
+      ...Array.from({ length: 11 }, (_, i) => [16 * (i + 1) - 0.75, 16 * (i + 1) + 0.75]),
+      [190.5, 192],
+    ];
+    expect(studs.map((m) => extentInches(seg, m).s)).toEqual(expected);
+    for (const m of studs) {
+      expect(m.length).toBe(inch(92.625));
+      expect(extentInches(seg, m).z).toEqual([1.5, 94.125]);
+      expect(extentInches(seg, m).t).toEqual([0, 3.5]);
+    }
+    const plates = r.members.filter((m) => m.role !== 'stud');
+    expect(plates.map((m) => [m.id, toInches(m.length), extentInches(seg, m).z])).toEqual([
+      ['bottom1:1', 192, [0, 1.5]],
+      ['top1:1', 192, [94.125, 95.625]],
+      ['top2:1', 192, [95.625, 97.125]],
+    ]);
+    for (const m of r.members) expect(m.owner).toBe(WALL);
+  });
+
+  it('has 9 studs at 24 in on centre', () => {
+    const r = frame(straightWall(192, {}, { spacing: inch(24) }));
+    const seg = straightWall(192).segments[0]!;
+    const studs = r.members.filter((m) => m.role === 'stud');
+    expect(studs).toHaveLength(9);
+    expect(studs.map((m) => m.id)).toEqual(['s0', 's1', 's2', 's3', 's4', 's5', 's6', 's7', 's8']);
+    expect(extentInches(seg, studs[3]!).s).toEqual([71.25, 72.75]);
+  });
+
+  it('lays out from the end when asked, numbering slots from there', () => {
+    const input = straightWall(100, {}, { layoutFrom: 'end' });
+    const seg = input.segments[0]!;
+    const r = frame(input);
+    const s0 = r.byId.get('s0')!;
+    const s1 = r.byId.get('s1')!;
+    expect(extentInches(seg, s0).s).toEqual([98.5, 100]);
+    expect(extentInches(seg, s1).s).toEqual([83.25, 84.75]);
+    // The last slot is flush with the start.
+    expect(extentInches(seg, r.byId.get('s7')!).s).toEqual([0, 1.5]);
+  });
+
+  it('shifts the layout by its origin', () => {
+    const input = straightWall(100, {}, { layoutOrigin: inch(-3.5) });
+    const r = frame(input);
+    expect(extentInches(input.segments[0]!, r.byId.get('s1')!).s).toEqual([11.75, 13.25]);
+  });
+
+  it('snaps studs to a precut length only when the wall height is within 0.5 mm of one', () => {
+    const r = frame(straightWall(96, { height: inch(100) }));
+    expect(toInches(r.byId.get('s1')!.length)).toBe(95.5);
+    const nine = frame(straightWall(96, { height: inch(1.5 + 104.625 + 3) + 0.4 })).byId.get('s1')!;
+    expect(nine.length).toBe(inch(104.625));
+  });
+
+  it('brings a layout origin of a spacing or more back, leaving no gap after s0', () => {
+    const seg = straightWall(100).segments[0]!;
+    const plain = frame(straightWall(100, {}, { layoutOrigin: inch(-3.5) }));
+    for (const origin of [inch(12.5), inch(28.5), inch(-19.5), inch(44.5)]) {
+      const r = frame(straightWall(100, {}, { layoutOrigin: origin }));
+      expect(ids(r.members, 'stud'), `${origin}`).toEqual(ids(plain.members, 'stud'));
+      expect(extentInches(seg, r.byId.get('s1')!).s).toEqual([11.75, 13.25]);
+    }
+    // An origin of a whole number of spacings is the default layout.
+    const whole = frame(straightWall(100, {}, { layoutOrigin: inch(32) }));
+    expect(whole.members).toEqual(frame(straightWall(100)).members);
+    // 8 in: slot 1 is centred at 8 in, not 24 in.
+    const half = frame(straightWall(100, {}, { layoutOrigin: inch(8) }));
+    expect(extentInches(seg, half.byId.get('s1')!).s).toEqual([7.25, 8.75]);
+  });
+
+  it('places members in world coordinates for a wall at any angle', () => {
+    // A wall along +y: the left face of the line is towards -x.
+    const input = straightWall(96, {
+      start: [1000, 2000],
+      end: [1000, 2000 + inch(96)],
+      base: 500,
+    });
+    const r = frame(input);
+    const s1 = r.byId.get('s1')!;
+    expect(s1.placement.x).toEqual([0, 0, 1]);
+    expect(s1.placement.y).toEqual([0, 1, 0]);
+    expect(s1.placement.origin[0]).toBeCloseTo(1000, 9);
+    expect(s1.placement.origin[1]).toBeCloseTo(2000 + inch(15.25), 9);
+    expect(s1.placement.origin[2]).toBeCloseTo(500 + inch(1.5), 9);
+    // Its depth runs along z = x cross y = -x, the wall's left side.
+    expect(extentInches(input.segments[0]!, s1).t).toEqual([0, 3.5]);
+  });
+
+  it('centres or right-justifies the framing on the reference line', () => {
+    const centre = straightWall(96, { justification: 'center' });
+    const right = straightWall(96, { justification: 'right' });
+    expect(extentInches(centre.segments[0]!, frame(centre).byId.get('s1')!).t).toEqual([
+      -1.75, 1.75,
+    ]);
+    expect(extentInches(right.segments[0]!, frame(right).byId.get('top1:1')!).t).toEqual([-3.5, 0]);
+  });
+});
+
+describe('frameWall: plates', () => {
+  it('splices plates longer than the stock with top splices at least 24 in apart', () => {
+    const input = straightWall(360);
+    const seg = input.segments[0]!;
+    const r = frame(input);
+    const pieces = (prefix: string) =>
+      r.members.filter((m) => m.id.startsWith(prefix)).map((m) => [m.id, extentInches(seg, m).s]);
+    expect(pieces('bottom')).toEqual([
+      ['bottom1:1', [0, 192]],
+      ['bottom1:2', [192, 360]],
+    ]);
+    expect(pieces('top1')).toEqual([
+      ['top1:1', [0, 192]],
+      ['top1:2', [192, 360]],
+    ]);
+    expect(pieces('top2')).toEqual([
+      ['top2:1', [0, 168]],
+      ['top2:2', [168, 360]],
+    ]);
+    expect(r.warnings).toEqual([]);
+    for (const m of r.members)
+      if (m.role.endsWith('plate')) expect(m.length).toBeLessThanOrEqual(inch(192) + 1e-9);
+  });
+
+  it('splices to the longest stock length given', () => {
+    const input = straightWall(
+      250,
+      {},
+      { plateStockLengths: [inch(96), inch(120)], spliceOffset: inch(24) },
+    );
+    const r = frame(input);
+    const top2 = r.members.filter((m) => m.id.startsWith('top2')).map((m) => toInches(m.length));
+    const top1 = r.members.filter((m) => m.id.startsWith('top1')).map((m) => toInches(m.length));
+    expect(top1).toEqual([120, 106, 24]);
+    expect(Math.max(...top2)).toBeLessThanOrEqual(120);
+    expect(top2.reduce((a, b) => a + b, 0)).toBeCloseTo(250, 9);
+  });
+
+  it('laps the cap plate at L corners: short where the wall runs through, long where it butts', () => {
+    const input = straightWall(192, {
+      joins: {
+        start: { kind: 'L', through: true, otherThickness: inch(3.5) },
+        end: { kind: 'L', through: false, otherThickness: inch(3.5) },
+      },
+    });
+    const r = frame(input);
+    const seg = input.segments[0]!;
+    expect(extentInches(seg, r.byId.get('top2:1')!).s).toEqual([3.5, 195.5]);
+    expect(extentInches(seg, r.byId.get('top1:1')!).s).toEqual([0, 192]);
+    expect(extentInches(seg, r.byId.get('bottom1:1')!).s).toEqual([0, 192]);
+  });
+
+  it('runs two bottom plates when asked, studs on the upper one', () => {
+    const input = straightWall(96, { height: inch(3 + 92.625 + 3) }, { bottomPlates: 2 });
+    const r = frame(input);
+    const seg = input.segments[0]!;
+    expect(extentInches(seg, r.byId.get('bottom2:1')!).z).toEqual([1.5, 3]);
+    expect(extentInches(seg, r.byId.get('s1')!).z).toEqual([3, 95.625]);
+  });
+});
+
+describe('frameWall: corners and tees', () => {
+  const corner = (style: 'two-stud' | 'three-stud' | 'ladder') => {
+    const input = straightWall(
+      192,
+      { joins: { start: { kind: 'L', through: true, otherThickness: inch(3.5) } } },
+      { cornerStyle: style },
+    );
+    return { seg: input.segments[0]!, r: frame(input) };
+  };
+
+  it('adds one corner stud past the other wall for a two-stud corner', () => {
+    const { seg, r } = corner('two-stud');
+    expect(countByRole(r.members)).toEqual({
+      'bottom-plate': 1,
+      corner: 1,
+      stud: 13,
+      'top-plate': 2,
+    });
+    expect(extentInches(seg, r.byId.get('start:corner')!).s).toEqual([3.5, 5]);
+    expect(r.byId.get('start:corner')!.length).toBe(inch(92.625));
+  });
+
+  it('adds two corner studs for a three-stud corner', () => {
+    const { seg, r } = corner('three-stud');
+    expect(ids(r.members, 'corner')).toEqual(['start:corner', 'start:corner-2']);
+    expect(extentInches(seg, r.byId.get('start:corner-2')!).s).toEqual([1.5, 3]);
+  });
+
+  it('adds a corner stud and ladder backing for a ladder corner', () => {
+    const { seg, r } = corner('ladder');
+    expect(ids(r.members, 'corner')).toEqual(['start:corner']);
+    expect(extentInches(seg, r.byId.get('start:corner')!).s).toEqual([5, 6.5]);
+    // Rows every 24 in above the bottom plate: centres at 25.5, 49.5 and 73.5 in.
+    expect(ids(r.members, 'backing')).toEqual([
+      'start:backing1',
+      'start:backing2',
+      'start:backing3',
+    ]);
+    const b = r.byId.get('start:backing2')!;
+    expect(extentInches(seg, b)).toEqual({ s: [1.5, 5], t: [0, 3.5], z: [48.75, 50.25] });
+  });
+
+  it('mirrors corner framing at the end of the wall', () => {
+    const input = straightWall(192, {
+      joins: { end: { kind: 'L', through: true, otherThickness: inch(5.5) } },
+    });
+    const r = frame(input);
+    expect(extentInches(input.segments[0]!, r.byId.get('end:corner')!).s).toEqual([185, 186.5]);
+    expect(extentInches(input.segments[0]!, r.byId.get('top2:1')!).s).toEqual([0, 186.5]);
+  });
+
+  it('frames a tee with a stud each side and stops the cap plate for the other wall', () => {
+    const input = straightWall(192, { tees: [{ at: inch(100), otherThickness: inch(3.5) }] });
+    const seg = input.segments[0]!;
+    const r = frame(input);
+    expect(extentInches(seg, r.byId.get('t1:corner-l')!).s).toEqual([96.75, 98.25]);
+    expect(extentInches(seg, r.byId.get('t1:corner-r')!).s).toEqual([101.75, 103.25]);
+    // s6 (96 in) only touches the left tee stud, so it stays.
+    expect(r.byId.has('s6')).toBe(true);
+    expect(
+      r.members.filter((m) => m.id.startsWith('top2')).map((m) => extentInches(seg, m).s),
+    ).toEqual([
+      [0, 98.25],
+      [101.75, 192],
+    ]);
+  });
+
+  it('keeps the layout stud where a tee stud would stand on it', () => {
+    // A tee centred at 98.5 in puts its left stud at 95.25 to 96.75 in, exactly s6.
+    const r = frame(straightWall(192, { tees: [{ at: inch(98.5), otherThickness: inch(3.5) }] }));
+    expect(r.byId.has('s6')).toBe(true);
+    expect(r.byId.has('t1:corner-l')).toBe(false);
+    expect(r.byId.has('t1:corner-r')).toBe(true);
+  });
+});
+
+describe('frameWall: openings', () => {
+  it('frames a 36 x 80 in door in a wall of 92-5/8 in precut studs', () => {
+    const input = straightWall(192, { openings: [DOOR] });
+    const seg = input.segments[0]!;
+    const r = frame(input);
+    expect(r.warnings).toEqual([]);
+    const at = (id: string) => extentInches(seg, r.byId.get(`extension#7:${id}`)!);
+    const len = (id: string) => toInches(r.byId.get(`extension#7:${id}`)!.length);
+
+    expect(len('king-l')).toBe(92.625);
+    expect(len('king-r')).toBe(92.625);
+    expect(at('king-l').s).toEqual([27, 28.5]);
+    expect(at('king-r').s).toEqual([67.5, 69]);
+    // Jacks: the 80 in rough opening less the bottom plate.
+    expect(len('jack-l')).toBe(78.5);
+    expect(len('jack-r')).toBe(78.5);
+    expect(at('jack-l')).toEqual({ s: [28.5, 30], t: [0, 3.5], z: [1.5, 80] });
+    // A doubled 2x8 header with a 1/2 in spacer, on the jacks.
+    expect(r.byId.get('extension#7:header')!.stock).toBe(S2X8);
+    expect(at('header')).toEqual({ s: [28.5, 67.5], t: [0, 1.5], z: [80, 87.25] });
+    expect(at('spacer')).toEqual({ s: [28.5, 67.5], t: [1.5, 2], z: [80, 87.25] });
+    expect(at('header-2')).toEqual({ s: [28.5, 67.5], t: [2, 3.5], z: [80, 87.25] });
+    expect(r.byId.get('extension#7:spacer')!.role).toBe('header-spacer');
+    // Cripples on layout (32, 48 and 64 in) above the header: 92-5/8 - 78-1/2 - 7-1/4 = 6-7/8.
+    expect(ids(r.members, 'cripple')).toEqual([
+      'extension#7:cripple-a1',
+      'extension#7:cripple-a2',
+      'extension#7:cripple-a3',
+    ]);
+    for (const [i, c] of [32, 48, 64].entries()) {
+      expect(len(`cripple-a${i + 1}`)).toBe(6.875);
+      expect(at(`cripple-a${i + 1}`).s).toEqual([c - 0.75, c + 0.75]);
+    }
+    // The layout studs inside the opening are gone; the others keep their slots.
+    expect(ids(r.members, 'stud')).toEqual([
+      's0',
+      's1',
+      's5',
+      's6',
+      's7',
+      's8',
+      's9',
+      's10',
+      's11',
+      's12',
+    ]);
+    // The bottom plate is cut out across the rough opening.
+    expect(
+      r.members.filter((m) => m.role === 'bottom-plate').map((m) => [m.id, at2(seg, m)]),
+    ).toEqual([
+      ['bottom1:1', [0, 30]],
+      ['bottom1:2', [66, 192]],
+    ]);
+    expect(r.openings).toEqual([
+      {
+        id: 'extension#7',
+        segment: 1,
+        header: { source: 'default', stock: '2x8', plies: 2, jacks: 1 },
+        kings: 1,
+        framed: true,
+      },
+    ]);
+  });
+
+  it('frames a 36 x 48 in window at a 36 in sill with a rough sill and cripples below', () => {
+    const input = straightWall(192, { openings: [WINDOW] });
+    const seg = input.segments[0]!;
+    const r = frame(input);
+    expect(r.warnings).toEqual([]);
+    const at = (id: string) => extentInches(seg, r.byId.get(`extension#8:${id}`)!);
+    const len = (id: string) => toInches(r.byId.get(`extension#8:${id}`)!.length);
+    expect(r.byId.get('extension#8:sill')!.role).toBe('rough-sill');
+    expect(at('sill')).toEqual({ s: [94, 130], t: [0, 3.5], z: [34.5, 36] });
+    // Jacks to the 84 in head; the header's top at 91.25 leaves 2-7/8 in cripples above.
+    expect(len('jack-l')).toBe(82.5);
+    expect(at('header').z).toEqual([84, 91.25]);
+    const cripples = r.members.filter((m) => m.role === 'cripple');
+    expect(cripples.map((m) => [key(m), toInches(m.length), extentInches(seg, m).s])).toEqual(
+      [
+        ['extension#8:cripple-b1', 33, [95.25, 96.75]],
+        ['extension#8:cripple-b2', 33, [111.25, 112.75]],
+        ['extension#8:cripple-b3', 33, [127.25, 128.75]],
+        ['extension#8:cripple-a1', 2.875, [95.25, 96.75]],
+        ['extension#8:cripple-a2', 2.875, [111.25, 112.75]],
+        ['extension#8:cripple-a3', 2.875, [127.25, 128.75]],
+      ].sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+    );
+    // A window keeps the bottom plate whole.
+    expect(ids(r.members, 'bottom-plate')).toEqual(['bottom1:1']);
+  });
+
+  it('puts the header under the top plates with no cripples when it reaches them', () => {
+    // 2x10 (9-1/4 in) on an 84-7/8 in head reaches the studs' top at 94-1/8 in.
+    const input = straightWall(192, {
+      openings: [{ ...DOOR, height: inch(84.875), header: { stock: S2X10, plies: 2, jacks: 1 } }],
+    });
+    const r = frame(input);
+    expect(ids(r.members, 'cripple')).toEqual([]);
+    // jack = king - header - cripples above: 92-5/8 - 9-1/4 = 83-3/8.
+    expect(toInches(r.byId.get('extension#7:jack-l')!.length)).toBe(83.375);
+    expect(r.openings[0]!.header.source).toBe('opening');
+  });
+
+  it('frames doubled jacks and kings when asked', () => {
+    const input = straightWall(192, { openings: [{ ...DOOR, kings: 2, jacks: 2 }] });
+    const seg = input.segments[0]!;
+    const r = frame(input);
+    expect(ids(r.members, 'jack')).toEqual([
+      'extension#7:jack-l',
+      'extension#7:jack-l2',
+      'extension#7:jack-r',
+      'extension#7:jack-r2',
+    ]);
+    expect(ids(r.members, 'king')).toEqual([
+      'extension#7:king-l',
+      'extension#7:king-l2',
+      'extension#7:king-r',
+      'extension#7:king-r2',
+    ]);
+    expect(extentInches(seg, r.byId.get('extension#7:king-l2')!).s).toEqual([24, 25.5]);
+    expect(extentInches(seg, r.byId.get('extension#7:header')!).s).toEqual([27, 69]);
+  });
+
+  it('keeps stud ids before an opening when the wall is lengthened', () => {
+    const short = frame(straightWall(192, { openings: [DOOR] }));
+    const long = frame(straightWall(240, { openings: [DOOR] }));
+    const seg = straightWall(240).segments[0]!;
+    for (const m of short.members) {
+      if (m.role === 'stud' && m.id !== 's12') {
+        const same = long.byId.get(m.id);
+        expect(same, m.id).toBeDefined();
+        expect(extentInches(seg, same!)).toEqual(extentInches(seg, m));
+      }
+      if (m.owner === 'extension#7')
+        expect(extentInches(seg, long.byId.get(key(m))!)).toEqual(extentInches(seg, m));
+    }
+    expect(ids(long.members, 'stud').at(-1)).toBe('s15');
+  });
+
+  it('uses the narrowest header rule that fits and reports it', () => {
+    const rules = [
+      { maxWidth: inch(72), header: { stock: S2X10, plies: 2, jacks: 2 } },
+      { maxWidth: inch(48), header: { stock: S2X6, plies: 2, jacks: 1 } },
+    ];
+    const r = frame(straightWall(192, { openings: [DOOR] }, { headerRules: rules }));
+    expect(r.openings[0]!.header).toEqual({
+      source: 'rule',
+      rule: 1,
+      stock: '2x6',
+      plies: 2,
+      jacks: 1,
+    });
+    expect(r.byId.get('extension#7:header')!.stock).toBe(S2X6);
+    expect(r.warnings).toEqual([]);
+  });
+
+  it('says, as a layout warning, when an opening is wider than every rule', () => {
+    const rules = [{ maxWidth: inch(30), header: { stock: S2X6, plies: 2, jacks: 1 } }];
+    const r = frame(straightWall(192, { openings: [DOOR] }, { headerRules: rules }));
+    expect(r.openings[0]!.header.source).toBe('default');
+    expect(r.warnings).toEqual([
+      expect.objectContaining({
+        code: 'no-header-rule',
+        kind: 'layout',
+        opening: 'extension#7',
+        segment: 1,
+      }),
+    ]);
+  });
+
+  it('skips an opening that does not fit, with a warning, and keeps the layout studs', () => {
+    const r = frame(straightWall(192, { openings: [{ ...DOOR, position: inch(10) }] }));
+    expect(r.warnings.map((w) => w.code)).toEqual(['opening-outside-wall']);
+    expect(r.openings[0]!.framed).toBe(false);
+    expect(ids(r.members, 'stud')).toHaveLength(13);
+    const tall = frame(straightWall(192, { openings: [{ ...DOOR, height: inch(90) }] }));
+    expect(tall.warnings.map((w) => w.code)).toEqual(['opening-does-not-fit']);
+    const both = frame(straightWall(192, { openings: [DOOR, { ...WINDOW, position: inch(60) }] }));
+    expect(both.warnings.map((w) => [w.code, w.opening])).toEqual([
+      ['openings-overlap', 'extension#8'],
+    ]);
+  });
+});
+
+describe('frameWall: blocking', () => {
+  it('puts a mid-height row between studs, outside openings', () => {
+    const input = straightWall(192, { openings: [DOOR] }, { blocking: { kind: 'mid-height' } });
+    const seg = input.segments[0]!;
+    const r = frame(input);
+    const blocks = r.members.filter((m) => m.role === 'blocking');
+    // Bays: s0-s1, s1-king-l, king-r-s5, s5-s6, ... s11-s12: 2 + 8.
+    expect(blocks.map((m) => m.id)).toEqual(
+      Array.from({ length: 10 }, (_, i) => `block1:${i + 1}`),
+    );
+    expect(extentInches(seg, blocks[0]!).s).toEqual([1.5, 15.25]);
+    // Centred between the bottom plate (1-1/2 in) and the studs' top (94-1/8 in).
+    const z = extentIn(seg, blocks[0]!).z;
+    expect(z[0]).toBeCloseTo(inch(47.0625), 9);
+    expect(z[1]).toBeCloseTo(inch(48.5625), 9);
+    expect(extentInches(seg, blocks[1]!).s).toEqual([16.75, 27]);
+    expect(extentInches(seg, blocks[2]!).s).toEqual([69, 79.25]);
+  });
+
+  it('puts rows at given heights, leaving out a row outside the studs', () => {
+    const r = frame(
+      straightWall(
+        48,
+        {},
+        { blocking: { kind: 'heights', heights: [inch(60), inch(30), inch(200)] } },
+      ),
+    );
+    expect(ids(r.members, 'blocking')).toEqual([
+      'block1:1',
+      'block1:2',
+      'block1:3',
+      'block2:1',
+      'block2:2',
+      'block2:3',
+    ]);
+    expect(r.warnings.map((w) => w.code)).toEqual(['blocking-row-outside']);
+  });
+});
+
+describe('frameWall: overrides', () => {
+  it('deletes, restocks and moves members by id, and reports overrides it cannot apply', () => {
+    const input = straightWall(
+      192,
+      {},
+      {},
+      {
+        overrides: [
+          { id: 's5', delete: true },
+          { id: 's6', stock: S2X6 },
+          { id: 's7', move: inch(2) },
+          { id: 's40', delete: true },
+        ],
+      },
+    );
+    const r = frame(input);
+    expect(r.byId.has('s5')).toBe(false);
+    expect(r.byId.get('s6')!.stock).toBe(S2X6);
+    expect(extentInches(input.segments[0]!, r.byId.get('s7')!).s).toEqual([113.25, 114.75]);
+    expect(r.overrides).toEqual([
+      { owner: WALL, id: 's5', status: 'applied' },
+      { owner: WALL, id: 's6', status: 'applied' },
+      { owner: WALL, id: 's7', status: 'applied' },
+      { owner: WALL, id: 's40', status: 'lost' },
+    ]);
+    expect(r.warnings).toEqual([
+      expect.objectContaining({
+        code: 'override-lost',
+        member: 'extension#3:s40',
+        message: 'The override of s40 on extension#3 is lost: the wall no longer has that member.',
+      }),
+    ]);
+    expect(r.members.filter((m) => m.role === 'stud')).toHaveLength(12);
+  });
+
+  it("applies an opening's overrides to the opening's own members, by local id", () => {
+    const r = frame(
+      straightWall(192, {
+        openings: [
+          {
+            ...DOOR,
+            overrides: [
+              { id: 'king-l', stock: S2X6 },
+              { id: 'cripple-a2', delete: true },
+              { id: 'sill', delete: true },
+            ],
+          },
+        ],
+      }),
+    );
+    expect(r.byId.get('extension#7:king-l')!.stock).toBe(S2X6);
+    expect(r.byId.has('extension#7:cripple-a2')).toBe(false);
+    expect(r.overrides).toEqual([
+      { owner: 'extension#7', id: 'king-l', status: 'applied' },
+      { owner: 'extension#7', id: 'cripple-a2', status: 'applied' },
+      { owner: 'extension#7', id: 'sill', status: 'lost' },
+    ]);
+    // A door has no rough sill.
+    expect(r.warnings).toEqual([
+      expect.objectContaining({
+        code: 'override-lost',
+        opening: 'extension#7',
+        member: 'extension#7:sill',
+        message:
+          'The override of sill on extension#7 is lost: the opening no longer has that member.',
+      }),
+    ]);
+  });
+
+  it('says why an override is lost when its opening is not framed', () => {
+    const r = frame(
+      straightWall(192, {
+        openings: [{ ...DOOR, position: inch(10), overrides: [{ id: 'king-l', delete: true }] }],
+      }),
+    );
+    expect(r.overrides).toEqual([{ owner: 'extension#7', id: 'king-l', status: 'lost' }]);
+    expect(r.warnings.map((w) => w.message)).toContain(
+      'The override of king-l on extension#7 is lost: the opening is not framed.',
+    );
+  });
+
+  it('does not claim a member is gone from the wall when an earlier override deleted it', () => {
+    const r = frame(
+      straightWall(
+        192,
+        {},
+        {},
+        {
+          overrides: [
+            { id: 's5', delete: true },
+            { id: 's5', stock: S2X6 },
+          ],
+        },
+      ),
+    );
+    expect(r.overrides).toEqual([
+      { owner: WALL, id: 's5', status: 'applied' },
+      { owner: WALL, id: 's5', status: 'lost' },
+    ]);
+    expect(r.warnings).toEqual([
+      expect.objectContaining({
+        code: 'override-lost',
+        member: 'extension#3:s5',
+        message:
+          'The override of s5 on extension#3 is lost: an earlier override of the same member deletes it.',
+      }),
+    ]);
+  });
+
+  it('keeps the wall and an opening apart when their local ids could meet', () => {
+    // Both owners are separate: an override of the wall never reaches an opening's member.
+    const r = frame(
+      straightWall(192, { openings: [DOOR] }, {}, { overrides: [{ id: 'king-l', delete: true }] }),
+    );
+    expect(r.byId.has('extension#7:king-l')).toBe(true);
+    expect(r.overrides).toEqual([{ owner: WALL, id: 'king-l', status: 'lost' }]);
+  });
+});
+
+describe('frameWall: segments', () => {
+  it('prefixes every id but opening members with the segment in later segments', () => {
+    const input: FrameWallInput = {
+      wall: WALL,
+      segments: [
+        {
+          start: [0, 0],
+          end: [inch(96), 0],
+          height: inch(97.125),
+          thickness: inch(3.5),
+          justification: 'left',
+          joins: { end: { kind: 'L', through: true, otherThickness: inch(3.5) } },
+        },
+        {
+          start: [inch(96), inch(3.5)],
+          end: [inch(96), inch(99.5)],
+          height: inch(97.125),
+          thickness: inch(3.5),
+          justification: 'left',
+          joins: { start: { kind: 'L', through: false, otherThickness: inch(3.5) } },
+          openings: [{ ...WINDOW, position: inch(48) }],
+        },
+      ],
+      settings: { studStock: S2X4, defaultHeader: DOUBLE_2X8 },
+    };
+    const r = frame(input);
+    expect(r.byId.has('s0')).toBe(true);
+    expect(r.byId.has('seg2/s0')).toBe(true);
+    expect(r.byId.has('seg2/top2:1')).toBe(true);
+    expect(r.byId.has('end:corner')).toBe(true);
+    expect(r.byId.has('extension#8:header')).toBe(true);
+    expect(r.openings[0]!.segment).toBe(2);
+    expect(new Set(r.members.map(memberFullId)).size).toBe(r.members.length);
+    expect(r.byId.get('extension#8:header')!.owner).toBe('extension#8');
+  });
+});
+
+describe('frameWall: input errors', () => {
+  it('refuses input it cannot frame', () => {
+    expect(() => frameWall(straightWall(2))).toThrow(FramingInputError);
+    expect(() => frameWall(straightWall(96, { thickness: inch(5.5) }))).toThrow(/thick/);
+    expect(() => frameWall(straightWall(96, {}, { spacing: inch(1) }))).toThrow(/spacing/);
+    expect(() => frameWall(straightWall(96, { height: inch(5) }))).toThrow(/too low/);
+    expect(() => frameWall(straightWall(96, { openings: [{ ...DOOR, id: 'door' }] }))).toThrow(
+      /feature id/,
+    );
+    expect(() => frameWall({ ...straightWall(96), segments: [] })).toThrow(/segment/);
+  });
+
+  it('is deterministic', () => {
+    const input = straightWall(
+      300,
+      { openings: [DOOR, WINDOW], tees: [{ at: inch(200), otherThickness: inch(3.5) }] },
+      { blocking: { kind: 'mid-height' } },
+    );
+    expect(frameWall(input)).toEqual(frameWall(input));
+  });
+});
+
+describe('wording', () => {
+  it('never calls anything safe, compliant or OK', () => {
+    const r = frameWall(
+      straightWall(
+        192,
+        {
+          openings: [
+            { ...DOOR, position: inch(10) },
+            WINDOW,
+            { ...DOOR, id: 'extension#9', position: inch(120) },
+          ],
+        },
+        { headerRules: [{ maxWidth: inch(1), header: DOUBLE_2X8 }] },
+        { overrides: [{ id: 'king-l', delete: true }] },
+      ),
+    );
+    const text = [DISCLAIMER_SHORT, ...r.warnings.map((w) => w.message)].join(' ');
+    expect(r.warnings.length).toBeGreaterThan(2);
+    expect(text).not.toMatch(/\bsafe\b|complian|\bOK\b/i);
+  });
+});
+
+function at2(seg: Parameters<typeof extentInches>[0], m: Member): [number, number] {
+  return extentInches(seg, m).s;
+}
