@@ -9,7 +9,13 @@
 
 import * as Comlink from 'comlink';
 import type { StatsOptions } from './stats';
+import type {
+  CamSimProgram,
+  CamSimulateProgramReply,
+  CamSimulateProgramRequest,
+} from './sim/session';
 import type { Setup } from './types';
+import { packedTransferables } from './worker/pack';
 import type {
   CamCacheInfo,
   CamChannel,
@@ -28,6 +34,10 @@ export interface CamEndpoint {
 
 export type CamGenerateResult = Extract<CamGenerateReply, { status: 'done' | 'failed' }>;
 export type CamSimulateResult = Extract<CamSimulateReply, { status: 'done' | 'failed' }>;
+export type CamSimulateProgramResult = Extract<
+  CamSimulateProgramReply,
+  { status: 'done' | 'failed' | 'needs-program' }
+>;
 
 export interface CamGenerateOptions {
   /** Generate only these operation ids. */
@@ -101,6 +111,28 @@ export class CamClient {
     return reply.status === 'cancelled' ? null : reply;
   }
 
+  /**
+   * Simulate a program up to a move (T5.3c), superseding every earlier simulation; null when
+   * stale. The program's packed toolpath buffers are transferred (the caller's arrays are detached
+   * afterwards); the part mesh, if any, is copied unless `transferPart` is set.
+   */
+  async simulateProgram(
+    request: Omit<CamSimulateProgramRequest, 'generation'>,
+    options: { transferPart?: boolean } = {},
+  ): Promise<CamSimulateProgramResult | null> {
+    const generation = ++this.generations.simulate;
+    let message: CamSimulateProgramRequest = { ...request, generation };
+    if (request.program) {
+      const buffers = programTransferables(request.program, options.transferPart);
+      message = Comlink.transfer(message, buffers);
+    }
+    const reply = await this.call<CamSimulateProgramReply>((remote) =>
+      remote.simulateProgram(message),
+    );
+    if (reply === null || generation !== this.generations.simulate) return null;
+    return reply.status === 'cancelled' ? null : reply;
+  }
+
   /** Statistics of cached toolpaths by key; all null (and no worker started) before any call. */
   async stats(
     keys: readonly string[],
@@ -160,4 +192,16 @@ export class CamClient {
     }
     return this.remote;
   }
+}
+
+/** The buffers of a program to transfer: the packed toolpath's, and the part mesh's on request. */
+function programTransferables(program: CamSimProgram, part = false): ArrayBuffer[] {
+  const buffers = packedTransferables(program.toolpath);
+  if (part && program.part) {
+    buffers.push(
+      program.part.mesh.positions.buffer as ArrayBuffer,
+      program.part.mesh.indices.buffer as ArrayBuffer,
+    );
+  }
+  return [...new Set(buffers)];
 }

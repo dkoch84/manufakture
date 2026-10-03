@@ -101,6 +101,7 @@ export class PreviewOverlay {
   private hidden: ReadonlySet<string> = new Set();
   private done = 0;
   private readonly path: PreviewPath | null;
+  private stockFill: Mesh | null = null;
 
   constructor(private readonly input: PreviewSceneInput) {
     this.root.name = 'cam-preview';
@@ -156,6 +157,11 @@ export class PreviewOverlay {
   setHidden(ops: ReadonlySet<string>): void {
     this.hidden = ops;
     this.update();
+  }
+
+  /** Show or hide the translucent stock box (its edges stay): hidden under the simulated stock. */
+  setStockVisible(visible: boolean): void {
+    if (this.stockFill) this.stockFill.visible = visible;
   }
 
   /** Draw the first `done` moves and put the tool where the last of them ends. */
@@ -225,6 +231,7 @@ export class PreviewOverlay {
     fill.name = 'cam-preview-stock';
     fill.position.set(...center);
     fill.renderOrder = 11;
+    this.stockFill = fill;
     const edges = new LineSegments(
       this.geometry(new EdgesGeometry(box)),
       this.material(new LineBasicMaterial({ color: new Color(STOCK_COLOR).multiplyScalar(0.7) })),

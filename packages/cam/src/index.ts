@@ -231,6 +231,10 @@ export {
 } from './mesh/slices';
 export type { HeightGrid } from './mesh/slices';
 
+// T5.3c: the material-removal simulation and gouge check (served by the CAM worker's
+// `simulateProgram` and `simulate`).
+export * from './sim';
+
 // T5.2g: linking and job assembly (a setup's operations as one program for the posts).
 export {
   JOB_LINK_OP,

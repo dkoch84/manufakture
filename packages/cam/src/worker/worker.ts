@@ -11,6 +11,7 @@ import * as Comlink from 'comlink';
 import { createCamWorkerApi } from './api';
 import { registerBuiltinOperations } from './builtin';
 import { defaultOperations } from './registry';
+import { simulateHeightmap } from '../sim/session';
 
 registerBuiltinOperations(defaultOperations);
-Comlink.expose(createCamWorkerApi({ operations: defaultOperations }));
+Comlink.expose(createCamWorkerApi({ operations: defaultOperations, simulator: simulateHeightmap }));

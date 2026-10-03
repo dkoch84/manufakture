@@ -54,6 +54,12 @@ import {
   type WorkContext,
 } from './registry';
 import { createYield, now } from './yield';
+import {
+  SimulationSession,
+  frameTransferables,
+  type CamSimulateProgramReply,
+  type CamSimulateProgramRequest,
+} from '../sim/session';
 
 // ---------------------------------------------------------------------------------------------
 // Generation
@@ -216,6 +222,13 @@ export interface CamWorkerApi {
   /** Simulate cached toolpaths; superseded like `generate`, on a channel of its own. */
   simulate(request: CamSimulateRequest): Promise<CamSimulateReply>;
   /**
+   * Simulate a whole program (T5.3c, `sim/`) up to a move, against the part's mesh when given:
+   * the heightmap, the gouge and leftover classes per cell, and the rapids through material. The
+   * worker keeps the program last sent under its `programId`, so playback sends it once and then
+   * only move numbers (`needs-program` when it is not held). On the `simulate` channel.
+   */
+  simulateProgram(request: CamSimulateProgramRequest): Promise<CamSimulateProgramReply>;
+  /**
    * Statistics and bounds of cached toolpaths, by key: null for a key not in the cache (or whose
    * statistics fail, as for a rapid rate of zero).
    */
@@ -240,6 +253,8 @@ export interface CamWorkerApiOptions {
   operations?: OperationRegistry;
   /** The simulation; without one `simulate` fails with `no-simulator`. */
   simulator?: Simulator;
+  /** Holds `simulateProgram`'s program; default a new `SimulationSession`. */
+  session?: SimulationSession;
   /** The toolpath cache; default 512 entries or 256 MiB. */
   cache?: LruCache<CachedOutcome>;
   /** Versions hashed into computed keys; default `DEFAULT_KEY_VERSIONS`. */
@@ -316,6 +331,7 @@ export function createCamWorkerApi(options: CamWorkerApiOptions = {}): CamWorker
   const keyVersions = options.keyVersions ?? DEFAULT_KEY_VERSIONS;
   const slice = options.slice ?? 8;
   const yieldNow = options.yieldNow ?? createYield();
+  const session = options.session ?? new SimulationSession();
   const channels: Record<CamChannel, Generations> = {
     generate: new Generations(),
     simulate: new Generations(),
@@ -531,6 +547,34 @@ export function createCamWorkerApi(options: CamWorkerApiOptions = {}): CamWorker
         ms: now() - started,
       };
       return Comlink.transfer(reply, [outcome.heightmap.heights.buffer as ArrayBuffer]);
+    },
+
+    async simulateProgram(request) {
+      const { generation } = request;
+      const channel = channels.simulate;
+      if (!channel.begin(generation)) return { status: 'cancelled', generation };
+      const started = now();
+      let outcome;
+      try {
+        outcome = await session.run(request, workContext(channel, generation));
+        await yieldNow();
+        if (channel.stale(generation)) return { status: 'cancelled', generation };
+      } catch (error) {
+        if (error instanceof CamCancelled) return { status: 'cancelled', generation };
+        return { status: 'failed', generation, code: 'internal', message: errorMessage(error) };
+      }
+      if (!outcome.ok) {
+        return outcome.needsProgram
+          ? { status: 'needs-program', generation, programId: request.programId }
+          : { status: 'failed', generation, ...outcome.error };
+      }
+      const reply: CamSimulateProgramReply = {
+        status: 'done',
+        generation,
+        frame: outcome.frame,
+        ms: now() - started,
+      };
+      return Comlink.transfer(reply, frameTransferables(outcome.frame));
     },
 
     async stats(keys, statsOptions) {

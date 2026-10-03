@@ -8,10 +8,12 @@
 //   operation and move class (`geometry.ts`, `scene.ts`);
 // - per-operation visibility, statistics per operation and for the job (lengths, estimated time
 //   from the machine's rapid rate and the feeds), and a playback scrubber with a tool marker:
-//   at move n the tool sits where move n ends, and only the moves up to it are drawn.
+//   at move n the tool sits where move n ends, and only the moves up to it are drawn;
+// - the material-removal simulation and gouge check (T5.3c, `../sim/`), toggled here and
+//   following the scrubber.
 
 import type { CamSetup } from '@manufakture/core';
-import { JOB_LINK_OP, toModel, type Vec3 } from '@manufakture/cam';
+import { JOB_LINK_OP, toModel, type Mesh, type Vec3 } from '@manufakture/cam';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from 'zustand';
 import { testHooksEnabled } from '../../testHooks';
@@ -28,6 +30,8 @@ import { PLAYBACK_SPEEDS, formatLength, formatMinutes } from './format';
 import { previewJob } from './job';
 import { previewPlacement } from './placement';
 import { MOVE_COLORS, PreviewOverlay, operationColor } from './scene';
+import { SimulationPanel, type SimulationSource } from '../sim/SimulationPanel';
+import type { SimulationClient } from '../sim/runner';
 
 /** What the test hook reports. */
 export interface CamPreviewHookState {
@@ -47,9 +51,18 @@ export interface CamPreviewHookState {
 export interface ToolpathPreviewProps {
   setup: CamSetup;
   camUi: CamUiStore;
+  /** The simulation's CAM worker client; default a worker of the simulation's own. */
+  simulationClient?: SimulationClient | null;
+  /** Fetches the part's mesh (model coordinates) for the gouge check when the geometry has none. */
+  loadPartMesh?: () => Promise<Mesh | null>;
 }
 
-export function ToolpathPreview({ setup, camUi }: ToolpathPreviewProps) {
+export function ToolpathPreview({
+  setup,
+  camUi,
+  simulationClient,
+  loadPartMesh,
+}: ToolpathPreviewProps) {
   const toolpaths = useStore(camUi, (s) => s.toolpaths);
   const geometry = useStore(camUi, (s) => s.geometry);
   const api = useStore(liveViewport, (s) => s.api);
@@ -73,6 +86,18 @@ export function ToolpathPreview({ setup, camUi }: ToolpathPreviewProps) {
   const job = built && 'job' in built ? built.job : null;
   const path: PreviewPath | null = built && 'path' in built ? built.path : null;
   const placement = useMemo(() => previewPlacement(data, shownGeometry), [data, shownGeometry]);
+  const partMesh = shownGeometry?.mesh ?? null;
+  const simulation = useMemo((): SimulationSource | null => {
+    if (!job || !placement || job.toolpath.entries.length === 0) return null;
+    return {
+      setupId: setup.id,
+      toolpath: job.toolpath,
+      tools: [...job.tools.values()],
+      stock: placement.stock,
+      frame: placement.frame,
+      part: partMesh,
+    };
+  }, [setup.id, job, placement, partMesh]);
   const opOrder = setup.operations.map((o) => o.id).join('\n');
   const colors = useMemo(
     () => new Map(opOrder.split('\n').map((id, i) => [id, operationColor(i)])),
@@ -92,6 +117,8 @@ export function ToolpathPreview({ setup, camUi }: ToolpathPreviewProps) {
 
   // The overlay: made again when what it draws changes, and removed when the preview goes.
   const overlay = useRef<PreviewOverlay | null>(null);
+  // The simulated stock replaces the translucent stock box while it is shown.
+  const [simShown, setSimShown] = useState(false);
   useEffect(() => {
     if (!api || typeof api.addOverlay !== 'function' || !placement) return;
     const o = new PreviewOverlay({
@@ -112,8 +139,9 @@ export function ToolpathPreview({ setup, camUi }: ToolpathPreviewProps) {
   useEffect(() => {
     overlay.current?.setHidden(hidden);
     overlay.current?.setProgress(done);
+    overlay.current?.setStockVisible(!simShown);
     api?.requestRender();
-  }, [api, hidden, done, placement, path, colors, job]);
+  }, [api, hidden, done, simShown, placement, path, colors, job]);
 
   // Playback: estimated machine time advances `speed` times faster than real time.
   useEffect(() => {
@@ -336,6 +364,13 @@ export function ToolpathPreview({ setup, camUi }: ToolpathPreviewProps) {
         Move {done} of {path.moveCount} ({currentName}), {formatMinutes(minutesAt(path, done))} of{' '}
         {formatMinutes(total)}
       </p>
+      <SimulationPanel
+        source={simulation}
+        done={done}
+        {...(simulationClient !== undefined ? { client: simulationClient } : {})}
+        {...(loadPartMesh ? { loadPartMesh } : {})}
+        onShownChange={setSimShown}
+      />
     </div>
   );
 }

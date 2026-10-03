@@ -783,10 +783,17 @@ if (reply?.status === 'done') {
   The reply is `done`, `cancelled` (superseded) or `failed` (a malformed request).
 - **`simulate({ generation, toolpaths: [{ key, tool }], stock, cell })`**: the material-removal
   simulation (T5.3c) of cached toolpaths, returning a `Heightmap` (`origin`, `cell`, `nx`, `ny`,
-  `heights`). Until a `Simulator` is passed to `createCamWorkerApi`, it fails with `no-simulator`;
+  `heights`). Until a `Simulator` is passed to `createCamWorkerApi`, it fails with `no-simulator`
+  (the worker entry passes `simulateHeightmap`, see [the simulation](#the-simulation-sim));
   a key not in the cache fails with `missing-toolpath` and the keys. The simulator gets the
   cache's own toolpaths and must never mutate them or transfer their buffers; the `heights` it
   returns are transferred.
+- **`simulateProgram({ generation, programId, program?, upTo?, classes? })`**: the simulation of
+  a whole program (the linked job the preview plays) up to move `upTo`, with the gouge check
+  against the part, for the preview's playback. The worker keeps the program last sent under its
+  `programId`, so later requests carry only move numbers; one naming a program it does not hold
+  gets `needs-program`. `CamClient.simulateProgram` transfers the program's packed toolpath in.
+  On the `simulate` channel. See [the simulation](#the-simulation-sim).
 - **`stats(keys, { rapidRate })`**: `toolpathStats` and `toolpathBounds` of cached toolpaths, null
   for a key not in the cache.
 - **`cancel(channel, generation?)`**, **`cacheInfo()`**, **`clearCache()`**.
@@ -1427,6 +1434,92 @@ inside themselves, where they know what they have cut.
 retract it used (for the post's `heights`), and with `rapidRate` the whole program's
 `toolpathStats`. The assembled toolpath is run through `validateToolpath`; an issue is an error.
 
+## The simulation (`sim/`)
+
+The material-removal simulation and gouge check (T5.3c), run in the CAM worker. Exported from the
+package root.
+
+**The heightfield** (`sim/heightfield.ts`). One Z per cell over the stock's XY, from the stock top:
+cells of `cell` mm from the stock's XY minimum, row by row in X (`j * nx + i`), each standing for
+its centre. The default cell is the narrowest cut width over `SIM_CELLS_PER_DIAMETER` (16), at
+least `SIM_MIN_CELL` (0.05 mm): a tool's diameter, but for a V-bit or an engraver its tip diameter
+when wider than `SIM_VBIT_CUT_WIDTH` (1 mm, a 90 degree V 0.5 mm deep), else that width, never more
+than the diameter (`simCutWidth`). Then it is coarsened until the grid holds at most `SIM_MAX_CELLS`
+(4,000,000 cells: 16 MiB of Float32 heights, plus as much again for the part's heights and its
+two tolerance bands when there is a part). A tool is its profile f(r), the height of its surface
+above the tip at radius r (`toolProfile`): flat, ball, bull nose, V (a V-bit or an engraver with
+an angle, with its flat tip), a drill as a cone of its point angle (118 degrees when none is
+given), an engraver with no angle as a flat end mill. A move lowers every cell it reaches to the
+lowest its surface gets there (`sweepMove`): lines and arcs at one Z exactly, from the cell
+centre's distance to the path (rows clipped to the path's reach, so a long diagonal never visits
+its bounding box); plunges, ramps and helices by stamping the tool at points no more than half a
+cell apart in XY and no more than half the tolerance apart in Z (`zStep`), which may leave a ramp
+high by the smaller of its slope times the XY spacing and that Z step, but never cuts it deep. A
+plunge straight down is stamped at its two ends.
+Rapids cut too (a crash still removes material), after the collision check.
+
+**The program** (`sim/simulation.ts`, `MaterialSimulation`). `MaterialSimulation.create({
+toolpath, tools, stock, part? }, options)` takes a program in machine coordinates, the tools its
+tool changes name (moves before the first tool change are cut by the first tool), the stock box
+and the part's mesh in machine coordinates. `runTo(n)` simulates up to n moves done, moves
+numbered as the preview numbers them (rapids, lines and arcs; nothing else); `advance(n,
+checkpoint)` does the same in the worker, checkpointing every 32 moves, and a cancelled run stops
+between moves with its state consistent. Going back restores the nearest snapshot at or before n
+and simulates forward: snapshots are taken at even intervals, at most `SIM_MAX_SNAPSHOTS` (16) and
+at most `SIM_SNAPSHOT_BYTES` (64 MiB) of them.
+
+**Rapids through material.** Before a rapid cuts, its sweep is checked against the material left
+at that moment, with the tool taken `SIM_GRAZE` (0.05 mm) narrower so that running along a cut's
+wall does not count, but never narrower than half its radius (so a tool of 0.1 mm or less is still
+checked); material more than `SIM_COLLISION_TOLERANCE` (0.01 mm) above the tool's
+surface makes it a collision: `{ move, at, depth }`, the worst cell's centre and material top.
+
+**The gouge check** (`sim/part.ts`). The part's mesh, taken to machine coordinates with the setup's
+WCS frame (`meshToMachine`), is rastered top-down on the same grid (`rasterPart`): each cell holds
+the highest point of the mesh over its centre, or -Infinity where the part is not under it. A
+heightfield holds no undercut, and neither can a 3-axis cut. The comparison allows a stated
+distance sideways, the **sideways allowance** (`sideAllowance` on the simulation and the report):
+the tolerance (`SIM_TOLERANCE`, 0.05 mm) plus the chord deflection of the mesh and the toolpath
+(`SIM_DEFLECTION`, 0.02 mm, covering the app's 0.004 mm part mesh and 0.01 mm loop flattening),
+0.07 mm by default. `partBands` gives each cell under the part the lowest and the highest the
+part's surface gets within that distance of its centre, from the triangles seen from above (facing
+up by the mesh's winding, read by `upSign`, or edge-on walls; never the underside), each bounded
+by its plane's slope. `compare()` gives each cell a class (`SIM_CLASS`): a **gouge** where the
+material is more than the tolerance below the lowest; **leftover** where it is more than the
+tolerance above the highest; otherwise **ok** under the part and **none** where the part is not
+under the centre. So a tool running exactly along a wall, curved ones included, is not a gouge,
+and every cell further in than the allowance is checked, next to a profile's wall too. Measured on
+a straight wall at the default 0.375 mm cell over 40 grid alignments: a wall gouge is never seen
+up to 0.07 mm wide (the allowance), sometimes from 0.08 mm, always from 0.45 mm (the allowance plus
+one cell, where a row of centres must fall in it). Material off the part (the
+waste around a profile, tabs) is never leftover. The report (`report()`) holds the counts, the worst gouge and
+leftover (`{ at, depth }`), the collisions and the grid.
+
+**In the worker** (`sim/session.ts`). `SimulationSession` holds one program per worker API for
+`simulateProgram`, and lets the old one go before building a new one (a reload never holds two);
+its reply's `frame` holds a copy of the heights (`Heightmap`), the classes (a
+`Uint8Array`, with a part and unless `classes: false`) and the report, both arrays transferred.
+The part's mesh comes in model coordinates with the setup's frame, or in machine coordinates
+without one. `simulateHeightmap` is the `Simulator` the worker entry gives the older `simulate`
+call: the cached toolpaths one after another, each with its own tool, linked above the stock.
+`simulateProgram` and `simulate` share one generation channel (`simulate`): a newer request of
+either kind supersedes an older one of either kind still running, which is why the preview's
+simulation runs on a worker of its own.
+
+**Performance**, an estimate: Node 26 on one core of a desktop x86-64, medians of 3, for the
+fixture job of `sim/sim.test.ts` (the M1 bracket's plate, 40 x 20 x 6 mm, profiled outside with
+four tabs in three 2 mm passes, and a 14 x 12 x 2 mm pocket in two 1 mm layers with a helical
+entry, all with a 6 mm flat end mill, linked by `assembleJob`: 105 moves) on a 60 x 40 x 6 mm
+stock, including rastering the part, the snapshots and the comparison:
+
+| Cell     | Cells   | Whole job |
+| -------- | ------- | --------- |
+| 0.375 mm | 17,120  | 5 ms      |
+| 0.1 mm   | 240,000 | 84 ms     |
+| 0.05 mm  | 960,000 | 0.51 s    |
+
+The default cell for this job is 0.375 mm (6 mm over 16).
+
 ## Tests
 
 `./node_modules/.bin/vitest run packages/cam` from the repository root:
@@ -1441,6 +1534,25 @@ retract it used (for the post's `heights`), and with `rapidRate` the whole progr
 - `stats.test.ts`: lengths per class, time estimate and bounds on a sample program;
 - `validate.test.ts`: a valid program and each issue code, canned-cycle markers included;
 - `boundary.test.ts`: the import allowlist above, and a self-test of its scanner.
+- `sim/sim.test.ts`: tool profiles, the cell size cap and a V-bit's cell from its cut width; a straight cut leaves a slot of the
+  tool's width and depth with round ends; a ball's groove is round with the ball's radius (exact
+  at cell centres, and a circle fitted through three points); bull and V sections; arcs, full
+  circles and a helical entry; a steep ramp within the Z step of the exact sweep and never below
+  it, and a plunge stamped once at each end; playback forwards and back equal to simulating from
+  scratch; a rapid through stock reported and one inside a fresh cut not, and a 0.1 mm tool's
+  rapids checked; on the M1 bracket, a profile with
+  tabs (from `generateProfile`, linked by `assembleJob`) leaves four tabs of the right height and
+  width and no gouge or leftover, the same profile run on an outline 1 mm too small is reported as
+  gouges in that band only, and a profile plus a pocket leaves material only in the pocket's
+  corners; at the default cell and seven grid alignments, a profile 0.3 mm inside the bracket
+  reported as gouges in that band beyond the allowance while the exact one (fillet included) is
+  not, a 10 mm hole in 48 chords cut exactly not a gouge and 0.3 mm oversize one, and a pocket
+  floor cut too deep a gouge right up to its walls; the part rastered in a rotated setup frame;
+  the performance above.
+- `sim/session.test.ts`: `simulateProgram` over a real `MessageChannel` (the program transferred
+  in, move numbers after, back to the start, `needs-program`, a failure as a value), a session
+  superseded midway carrying on from the moves it did, and `simulate` on cached toolpaths with
+  `simulateHeightmap` (each tool its own width, links over the stock, the cache intact).
 - `job.test.ts`: jobs from the real generators on fixtures and on 40 seeded random jobs
   (profiles, pockets, facings, straight, peck and bored holes; random stock, heights, tools,
   grouping): the IR validator passes on the whole job, it starts and ends at the clearance, every

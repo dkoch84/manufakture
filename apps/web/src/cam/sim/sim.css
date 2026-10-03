@@ -1,0 +1,12 @@
+/* The simulation toggle and report under the toolpath preview (T5.3c). */
+
+.cam-sim {
+  margin-top: 0.35rem;
+  padding-top: 0.3rem;
+  border-top: 1px solid #eef1f5;
+  font-size: 0.8rem;
+}
+
+.cam-sim-report p {
+  margin: 0.2rem 0;
+}
