@@ -513,10 +513,12 @@ describe('wall type thickness', () => {
 });
 
 describe('the construction registration (ADR 0015 decision 1)', () => {
-  it('owns `construction`, reads `stock`, and builds walls and openings', () => {
+  it('owns `construction`, reads `stock`, and builds walls, openings, floors and roofs', () => {
     expect(constructionDomain.namespace).toBe('construction');
     expect(Object.keys(constructionDomain.types!).sort()).toEqual([
+      'construction.floor',
       'construction.opening',
+      'construction.roof',
       'construction.wall',
     ]);
     expect(constructionDomain.reads).toEqual(['stock']);

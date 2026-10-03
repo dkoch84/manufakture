@@ -243,9 +243,11 @@ registry.register('wood.dado', dado); // one more type of a registered domain
 registry.unregister('wood.dado');
 ```
 
-An `ExtensionType` declares its newest `schemaVersion`, the kind (`length`, `angle`, `number`) of
-each named expression, an optional `params(params, schemaVersion)` that migrates and validates the
-stored params, and `translate(ctx, answers)`. The context holds the feature (a frozen copy), its
+An `ExtensionType` declares its newest `schemaVersion`, the kind (`length`, `angle`, `number`, or
+`slope`: an angle read as a slope field, where `6/12` is a roof pitch and a bare number an error,
+ADR 0005 as amended by T6.0b) of each named expression, an optional
+`params(params, schemaVersion)` that migrates and validates the stored params, and
+`translate(ctx, answers)`. The context holds the feature (a frozen copy), its
 params as `params` returned them, its expressions evaluated by the declared kinds (an undeclared one
 is a plain number in internal units), its references resolved on the bodies before it with their
 geometry (`body`, `target`, `via`, `fragile`, plane, line or circle; the kernel's `resolve` op), the
@@ -262,7 +264,10 @@ it) or `{ type: 'obb', body }` (a body's oriented box). Regen answers them with 
 asks for the faces of the boards it joins this way.
 
 **Bodies.** An extension is placed in the graph like an extrude, by its `operation` and `scope`
-(`bodyUse`, `actsOn`): `new` reads only the bodies its references lie on and makes a body; `add`,
+(`bodyUse`, `actsOn`): `new` reads only the bodies its references lie on and makes a body, and its
+`tools` inputs also read and may change the bodies it made and those made by the features in its
+`dependsOn` (a wall joining its layers with an earlier wall's, #1172; the graph counts every such
+body as changed by it, since only the translator knows which it touches); `add`,
 `cut` and `intersect` read their scope, or every body; with no operation it reads its scope, or
 every body, since it may change bodies through inputs that name them (a joint's `tools` items).
 Regen gives the translator's inputs those semantics (`checkOutput`): with an operation, every input

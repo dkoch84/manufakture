@@ -251,6 +251,12 @@ const MIN_MEMBER = 1;
 const SAME_JOIST = 3;
 /** Outline points closer than this are one point; edges within this of square are square, mm. */
 const SNAP = 0.01;
+/**
+ * The most joists a floor with blocking may have. The blocking pass compares each pair of joists
+ * whose spans overlap against every other joist, so its cost grows with the cube of the joists;
+ * past this the floor is refused rather than framed slowly on every regen.
+ */
+export const MAX_BLOCKING_JOISTS = 400;
 /** A wall within this angle of the joists runs along them (sine). */
 const PARALLEL = 1e-3;
 
@@ -586,6 +592,10 @@ export function frameFloor(input: FrameFloorInput): FloorFraming {
     });
     budget.expect(joists.length);
   }
+  if (st.blocking.kind !== 'none' && joists.length > MAX_BLOCKING_JOISTS)
+    throw new FramingInputError(
+      `The floor has ${joists.length} joists, more than the ${MAX_BLOCKING_JOISTS} blocking can be laid out between: split it into several floors or leave out the blocking.`,
+    );
   const kept = joists.sort((p, q) => ell(p.v[0]) - ell(q.v[0]) || p.u[0] - q.u[0]);
   const jd = st.joistStock.depth;
   for (const j of kept) {

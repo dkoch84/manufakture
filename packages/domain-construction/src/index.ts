@@ -163,7 +163,12 @@ export {
   stockThickness,
   stockWidth,
 } from './stock';
-export { CONSTRUCTION_IMPLEMENTATION, constructionDomain, registerConstruction } from './domain';
+export {
+  CONSTRUCTION_IMPLEMENTATION,
+  constructionDomain,
+  constructionMembers,
+  registerConstruction,
+} from './domain';
 export {
   MAX_COORDINATE,
   MAX_OVERRIDES,
@@ -212,6 +217,51 @@ export {
   type GraphWall,
   type WallGraph,
 } from './features/graph';
+export { MAX_LAYER_JOIN_WALLS } from './features/graph';
+export {
+  FLOOR_EXPRESSIONS,
+  FLOOR_PARAMS,
+  FLOOR_SCHEMA_VERSION,
+  FLOOR_TYPE,
+  MAX_FLOOR_JOISTS,
+  MAX_FLOOR_SLOTS,
+  MAX_FLOOR_WALLS,
+  MAX_FLOOR_WALL_SEGMENTS,
+  MAX_OUTLINE_POINTS,
+  MAX_SKIDS,
+  exteriorRing,
+  floorGroups,
+  floorType,
+  frameFloorGroup,
+  readFloorMetadata,
+  readFloorParams,
+  translateFloor,
+  type FloorMetadata,
+  type FloorOutlineSource,
+  type FloorParams,
+  type RingEdge,
+  type WallRing,
+} from './features/floor';
+export {
+  MAX_OVERHANG,
+  MAX_PITCH,
+  MAX_TIE_EVERY,
+  ROOF_EXPRESSIONS,
+  ROOF_PARAMS,
+  ROOF_SCHEMA_VERSION,
+  ROOF_TYPE,
+  frameRoofGroup,
+  readRoofMetadata,
+  readRoofParams,
+  roofGroups,
+  roofType,
+  sheathingArea,
+  sheathingOutlines,
+  translateRoof,
+  type RoofMetadata,
+  type RoofParams,
+  type RoofTiesParams,
+} from './features/roof';
 export {
   constructionGroups,
   constructionMemberStage,

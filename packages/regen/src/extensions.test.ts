@@ -15,6 +15,7 @@ import { MemoryCache } from './cache';
 import { RegenEngine } from './engine';
 import {
   ExtensionRegistry,
+  evaluateExtension,
   type ExtensionContext,
   type ExtensionDomain,
   type ExtensionType,
@@ -24,6 +25,7 @@ import { FakeKernel, FakeSolver } from './fake-kernel';
 import { dirtyFeatures } from './graph';
 import { add, apply, build, extrude, mm, rectangle, setVariable, statuses } from './test-helpers';
 import type { FeatureResult, RegenResult } from './types';
+import { evaluateVariables } from './values';
 
 // A fake woodworking domain ---------------------------------------------------------------------
 
@@ -1034,5 +1036,46 @@ describe('the registry', () => {
     expect(registry.reader('stock')?.schemaVersion).toBe(1);
     expect(registry.unregisterDomain('fake')).toBe(true);
     expect(registry.namespaces).toEqual([]);
+  });
+});
+
+describe('slope expressions', () => {
+  const pitched: ExtensionType = {
+    schemaVersion: 1,
+    expressions: { pitch: 'slope', tilt: 'angle' },
+    translate: () => ({ inputs: [] }),
+  };
+  const registered = {
+    type: 'fake.roof',
+    definition: pitched,
+    namespace: 'fake',
+    implementation: 1,
+    reads: ['fake'],
+  };
+  const values = (expressions: Record<string, string>) =>
+    evaluateExtension(
+      registered,
+      ext('extension#1', 'fake.roof', {
+        expressions: Object.fromEntries(Object.entries(expressions).map(([k, v]) => [k, mm(v)])),
+      }),
+      evaluateVariables([]),
+    );
+
+  it('reads a slope field as a pitch, a percent or degrees, in radians', () => {
+    const r = values({ pitch: '6/12', tilt: '6/12' });
+    expect(r.errors).toEqual([]);
+    expect(r.values.pitch).toBeCloseTo(Math.atan(0.5), 12);
+    // The same text in an ordinary angle field is half a degree (ADR 0005 decision 8, unchanged).
+    expect(r.values.tilt).toBeCloseTo((0.5 * Math.PI) / 180, 12);
+    expect(values({ pitch: '25%' }).values.pitch).toBeCloseTo(Math.atan(0.25), 12);
+    expect(values({ pitch: '30deg' }).values.pitch).toBeCloseTo(Math.PI / 6, 12);
+  });
+
+  it('refuses a bare number in a slope field and a percent in an angle field', () => {
+    expect(values({ pitch: '30' }).errors[0]).toMatchObject({
+      code: 'expression',
+      field: ['expressions', 'pitch'],
+    });
+    expect(values({ tilt: '25%' }).errors[0]).toMatchObject({ field: ['expressions', 'tilt'] });
   });
 });

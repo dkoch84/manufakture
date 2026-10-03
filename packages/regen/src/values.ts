@@ -73,9 +73,11 @@ export function evaluateField(
   expected: 'length' | 'angle' | 'number' | 'feed' | 'spindleSpeed',
   field: FieldPath,
   variables: VariableValues,
+  options: { readonly slope?: boolean } = {},
 ): { ok: true; value: number } | { ok: false; error: RegenError } {
   const r = evaluate(expression.source, {
     expected,
+    ...(options.slope === true ? { slope: true } : {}),
     lengthUnit: expression.lengthUnit,
     angleUnit: expression.angleUnit,
     variables: (n) => variables.values.get(n),

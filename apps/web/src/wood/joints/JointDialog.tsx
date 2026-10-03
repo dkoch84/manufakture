@@ -8,7 +8,6 @@
 
 import { findPart, type DisplayUnits, type ExtensionFeature } from '@manufakture/core';
 import {
-  JOINT_EXPRESSIONS,
   JOINT_KINDS,
   KIND_EXPRESSIONS,
   type JointKind,
@@ -30,6 +29,7 @@ import {
   isJoint,
   JOINT_LABELS,
   jointBoards,
+  jointExpressionKind,
   jointFormOf,
   jointPreviewLines,
   newJointForm,
@@ -353,7 +353,7 @@ export function JointDialog({
     }
     for (const name of KIND_EXPRESSIONS[form.kind]) {
       if (name === 'stop' && form.stopped === 'none') continue;
-      const kind = JOINT_EXPRESSIONS[name] ?? 'length';
+      const kind = jointExpressionKind(name);
       body.push(
         <ExpressionField
           key={`${form.kind}/${name}`}

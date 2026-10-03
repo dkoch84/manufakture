@@ -62,8 +62,12 @@ import { evaluateQuantity } from '@manufakture/units';
 /** Plain JSON, as core stores extension params and domain data. */
 export type JsonValue = DomainData['data'];
 
-/** The kind a domain declares for a named expression (ADR 0013 decision 2). */
-export type ExpressionKind = 'length' | 'angle' | 'number';
+/**
+ * The kind a domain declares for a named expression (ADR 0013 decision 2). `slope` is an angle
+ * read as a slope field (ADR 0005, amended by T6.0b): `6/12` and `6:12` are a roof pitch, `25%`
+ * is `atan(0.25)`, and a bare number is an error; the value is in radians, as an angle's.
+ */
+export type ExpressionKind = 'length' | 'angle' | 'number' | 'slope';
 
 /** A domain's answer to "can I read this": the value, or why not. Pure data. */
 export type ReadResult<T> =
@@ -571,7 +575,10 @@ export function evaluateExtension(
     const field = ['expressions', name];
     const kind = Object.hasOwn(kinds, name) ? kinds[name] : undefined;
     if (kind !== undefined) {
-      const r = evaluateField(expression, kind, field, variables);
+      const r =
+        kind === 'slope'
+          ? evaluateField(expression, 'angle', field, variables, { slope: true })
+          : evaluateField(expression, kind, field, variables);
       if (r.ok) values[name] = r.value;
       else errors.push(r.error);
       continue;

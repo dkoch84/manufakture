@@ -142,11 +142,32 @@ member), height up to 30 m, stock sizes 1 mm to 2 m (with overrides), 500 overri
   elevation up the wall's height. Faces: `<id>:side:<layer>.ext<i>` and `.int<i>` along segment
   i, `.start` and `.end` at an open wall's ends, and `<id>:cap.<layer>:start` (bottom) and `:end`
   (top), through the kernel's `capRole`, so names stay unique across the wall's bodies. They keep
-  their names when the wall lengthens. Separate walls that meet are neither mitred nor butted in
-  their layers: each wall's layers stop square at its own path ends, so at an L they leave a
-  notch on one face and overlap on the other, and at a tee the meeting wall's layers overlap the
-  other wall's. Only the framing joins (below). Draw connected walls as one path to mitre them;
-  joining the layers of separate walls is follow-up task #1172.
+  their names when the wall lengthens.
+- **Layer joins between walls.** A wall joins its layers with the walls it names in `dependsOn`
+  (the later wall names the earlier, so the one that joins can read the other's metadata), where
+  the wall graph (below) joins their framing; `layerJoins` in `graph.ts` finds them by the same
+  rules. At an **L** both walls' layers end on the corner's bisector, exactly as at a corner of
+  one path: the later wall's outline ends there, and the earlier wall's bodies get an added box
+  where they fall short of it and a cut past it. At a **tee** the branch's layers end on the
+  host's layer face, and the host's layers on the branch's side are notched where the branch's
+  framing passes to the host's framing (that splits a drywall layer, as on site); this works
+  whichever wall is later. Changes to another wall's bodies, and the host's notches in its own,
+  are one `tools` input after the extrusions (items `<end>-ext-<layer>`, `<end>-trim-<layer>`,
+  `<end>-notch-<layer>`, `tee<k>-...`, faces `<wall id>:<item>:<role>`), so the layer face names
+  above stay as they were and references to them resolve `exact`. Regen gives a `new`
+  extension's `tools` input the bodies it made and those of the features in its `dependsOn`.
+  Walls meeting at under about 26 degrees (the mitre limit inside one path) are refused, naming
+  the wall to take out of `dependsOn`. A wall joins at most `MAX_LAYER_JOIN_WALLS` (64) walls, and
+  the search is linear in them. Walls that do not name each other keep square layer ends (an L
+  then leaves a notch on one face and an overlap on the other); a wall with no operation joins
+  nothing. A wall sees only the walls it names: where three or more wall ends meet at one point
+  it joins nothing if it names two or more of the others, but if it names just one it joins that
+  one at an L, although the wall graph frames every end there as free (with a `join-unresolved`
+  warning). Keep at most two wall ends at a point. A join that would cut an earlier wall's layer
+  past the start of its end segment (a very short wall) is refused, naming the wall. The tests (`src/features/joins.test.ts`) check, with the real kernel, an L at 90, 60
+  and 120 degrees, tees from either wall, at 60 degrees and from the exterior, and a 12' x 16'
+  shed of four walls: every layer body's volume exact, their fuse as large as their sum (no
+  overlap), and the shed's layers identical to one closed wall's.
 - **Metadata** (`WallMetadata`): level, base, height, path, justification, the framing
   thickness, each layer's extent across the path and body, the resolved settings and overrides.
 
@@ -182,6 +203,79 @@ each opening's position is moved by its segment's shift. `frameWall`'s warnings 
 or on the opening they name, with their code; rule-of-thumb ones start with "Rule of thumb:".
 The group's metadata lists each opening's header and where it came from (`rule`, `default`, or
 `opening` when explicit) and each override as `applied` or `lost`.
+
+## Floors and roofs: `construction.floor`, `construction.roof`
+
+Two more extension types (T6.1c) in `src/features/`, `schemaVersion` 1 with empty migrations
+lists (`FLOOR_PARAMS`, `ROOF_PARAMS`). Each is framed as a member group of its own (the floor or
+the roof alone; its metadata already holds what it read from the walls), by `frameFloor` and
+`frameRoof`; `constructionMembers` in `domain.ts` adds those groups to the wall groups.
+
+**Floor** (`floor.ts`). Params: `level` and `floorType`, `outline` (`walls`: the outside line of
+the framing of the walls in `dependsOn`, which must close a ring, running counter-clockwise with
+their exteriors out; `points`: the length expressions `x1`, `y1` .. `xn`, `yn` with `points` their
+count, 4 to 64; `sketch`: the outer loop of straight lines of the one sketch in `dependsOn`, on a
+horizontal plane), `joists` (`short`, the default, spans the outline's shorter side, `long` the
+longer; the angle expression `direction` overrides both), `blocking` (`none` or `mid-span`),
+`skids` (`{ stock, count }`, 1 to 20), `doubleUnderWalls` (default true: with an outline from
+points or a sketch, the walls in `dependsOn` stand on the floor and those along the joists get
+doubled joists) and `overrides`. Expressions: `spacing`, `layoutOrigin` (over the floor type's),
+`skidOverhang`, `move_<n>`. The level's elevation is the top of the subfloor, where the walls
+stand: the joists and rims hang below it by the subfloor's thickness, the skids below them. With
+operation `new` the subfloor is one body, `<id>:layer/subfloor` (faces `<id>:side:subfloor.e<i>`,
+`<id>:cap.subfloor:start` and `:end`); a floor type without a subfloor makes no body.
+
+**Roof** (`roof.ts`). It bears on the walls in its `dependsOn`, a graph edge, so it re-runs when
+they change and never because of feature order alone: the outside of their framing must close a
+rectangle, their tops (base plus height) must agree, and their framed thickness is the birdsmouth
+seat. With no walls it bears on its `level`, a rectangle from the expressions `x`, `y`, `length`,
+`width` and `rotation`, its plates at the level's elevation plus `plate` (default the level's
+height), its seat `wallThickness`. Params: `level`, `roofType`, `kind` (`gable` or `hip`), `ridge`
+(`long`, the default, or `short`, gable only), `ties` (`ceiling-joists` or `rafter-ties` with
+`stock` and `every`; a tie's height is the expression `tieHeight`), `gableStuds` (default true)
+and `overrides`. The pitch is the expression `pitch`, declared with regen's `slope` expression
+kind: a **slope field** (ADR 0005 as amended by T6.0b), so `6/12` and `6:12` are a pitch, `25%`
+is `atan(0.25)`, degrees work, and a bare `30` is an error. `overhang`, `rakeOverhang` and
+`spacing` override the roof type's.
+
+- **Sheathing**, with operation `new` and a roof type with `sheathing`: one body per roof plane,
+  `<id>:layer/sheathing-e<n>` (the generator's edge numbers: e1 and e3 the eaves, e2 and e4 the
+  hip ends). Each plane's outline lies on the rafters' top plane, from the eave overhang's outer
+  line to the ridge's centre line, along the length plus the rake overhangs on a gable; a hip
+  roof's planes are cut at the hips' centre lines, 45 degrees in plan. The outline is extruded
+  square to the plane by the sheathing's thickness, so each underside is exactly the hand value,
+  `plan area / cos(pitch)`, as the takeoff's `roofSheathingFaces` lays it out. Square-cut sheets
+  meet at the ridge and hips on their undersides, as real sheathing does.
+- **Gable ends** extend to the roof line: each exterior sheet layer (siding, sheathing) of the wall
+  under a gable end gets a triangle body `<id>:layer/gable-e<n>-<layer id>` in its own plane, from
+  the wall's top up `width / 2 x tan(pitch)` at mid-span (the takeoff's `gableRise`). The gable
+  studs are roof members from `frameRoof`. Each end's studs line up with that gable wall's stud
+  layout (where its framed segment's layout starts, from the walls in `dependsOn` only), but one
+  stud stock and spacing serve both ends: the e4 wall's, else the e2 wall's, so a gable wall at a
+  different spacing gets gable studs at the other's spacing. Both belong to the roof, so a change
+  of pitch re-runs only the roof's translator and its member group: walls and floor stay cached.
+
+**Bounds.** A document is input, so both translators bound every loop before the generators run:
+at most 64 outline points or ring segments (`MAX_OUTLINE_POINTS`), 64 walls read
+(`MAX_FLOOR_WALLS`), 64 wall segments doubling joists (`MAX_FLOOR_WALL_SEGMENTS`), 256 layout
+slots (`MAX_FLOOR_SLOTS`) and an estimate of at most 400 joists (`MAX_FLOOR_JOISTS`: the pieces
+an outline can cut a band into, a quarter of its corners, times the bands: layout slots, doubled
+pairs and flush joists), since the floor generator's blocking pass is cubic in the joists (the
+largest floor accepted frames in about half a second); `frameFloor` itself also refuses a floor
+with blocking and more than 400 joists (`MAX_BLOCKING_JOISTS`), whatever its caller; one blocking
+row; a hip roof square within 0.5 mm has its ends meet at a point; overhangs up to 5 m, a pitch below 80 degrees, roof sides up to
+100 m, ties on every 1 to 10 pairs, and the generators' member budget.
+
+Tests: `src/features/floor-roof.regen.test.ts` regenerates the 12' x 16' shed with the real
+kernel (floor from its four walls with 13 joists of 141", 2 rims and 3 skids, as T6.2b; a `6/12`
+gable with 26 common rafters, a ridge and 16 gable studs, as T6.2c; the subfloor and each roof
+plane's sheathing volume exact, 18,031.65 sq in a plane; the gable triangles), changes the pitch
+to `4/12` and checks only the roof re-runs, reads `6:12`, `25%` and degrees and refuses `30`, cuts
+a hip roof's four planes to their hand areas, and fails the roof when its walls stop closing.
+`src/features/floor-roof.test.ts` covers the params readers, the wall ring, outlines from points
+and a sketch, joist direction, doubled joists, the bounds (a 2,000-slot floor, a 64-corner comb
+and a comb with 64 walls doubling joists in every tooth refused by the translator and by
+`frameFloor`, the largest accepted floor timed) and the sheathing outlines against the takeoff.
 
 ## Members
 

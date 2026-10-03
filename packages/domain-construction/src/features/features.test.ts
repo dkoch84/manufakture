@@ -355,9 +355,11 @@ describe('the wall graph', () => {
 });
 
 describe('the domain registration', () => {
-  it('registers the wall and opening types and the member stage', () => {
+  it('registers the wall, opening, floor and roof types and the member stage', () => {
     expect(Object.keys(constructionDomain.types ?? {}).sort()).toEqual([
+      'construction.floor',
       'construction.opening',
+      'construction.roof',
       'construction.wall',
     ]);
     expect(typeof constructionDomain.members?.frame).toBe('function');

@@ -39,6 +39,15 @@ import { checkExpression } from '../../features/forms';
 import { evaluateVariables } from '../../sketcher/values';
 import { isBoard, JOINT_LABELS } from '../kinds';
 
+/**
+ * The kind of a joint expression, as the forms take it. Joints declare only lengths, angles and
+ * counts; regen's `slope` kind (roof pitches) never occurs here, and would be an angle.
+ */
+export function jointExpressionKind(name: string): 'length' | 'angle' | 'number' {
+  const kind = JOINT_EXPRESSIONS[name] ?? 'length';
+  return kind === 'slope' ? 'angle' : kind;
+}
+
 export { JOINT_TYPE };
 export { isJoint, JOINT_LABELS } from '../kinds';
 
@@ -195,7 +204,7 @@ export function buildJoint(
   for (const name of KIND_EXPRESSIONS[form.kind]) {
     const source = (form.values[name] ?? '').trim();
     if (source === '') continue;
-    const kind = JOINT_EXPRESSIONS[name] ?? 'length';
+    const kind = jointExpressionKind(name);
     const r = checkExpression(source, kind, units, variables, {
       ...(kind === 'number' ? { integer: true, positive: true } : {}),
     });
@@ -322,7 +331,7 @@ export function previewJoint(
   const variables = evaluateVariables(ctx.doc);
   const values: Record<string, number> = {};
   for (const [k, e] of Object.entries(feature.expressions)) {
-    const r = checkExpression(e.source, JOINT_EXPRESSIONS[k] ?? 'length', ctx.doc.units, variables);
+    const r = checkExpression(e.source, jointExpressionKind(k), ctx.doc.units, variables);
     if (!r.ok) return { state: 'waiting', message: r.message };
     values[k] = r.value;
   }
