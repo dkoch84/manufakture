@@ -5,7 +5,8 @@
 //   reorder, delete, move to another setup, per-operation status (geometry resolved or the stage's
 //   errors, toolpath generated or failed, stale after an edit) and re-pick for lost geometry; and
 //   Generate, which asks the CAM worker for the setup's toolpaths (ADR 0014 decision 8: CAM is
-//   lazy, nothing is generated until asked).
+//   lazy, nothing is generated until asked); under it the toolpath preview and playback
+//   (`preview/`), drawn into the viewport while the workspace is open.
 // - `CamSidePanel`, in the side panel: the open operation dialog or the Tools dialog, else the
 //   setup panel (part, machine, post, stock, WCS, heights).
 //
@@ -38,6 +39,7 @@ import {
 import { DIALOG_KINDS, OPERATION_LABELS } from './forms';
 import type { CamGeometer } from './geometer';
 import { OperationDialog } from './OperationDialog';
+import { ToolpathPreview } from './preview/ToolpathPreview';
 import { setupFaceReference, type CamFaceResolver } from './picking';
 import { SetupPanel } from './SetupPanel';
 import { activeCamSetup, type CamUiStore, type DialogOperationKind } from './state';
@@ -470,6 +472,7 @@ export function CamTree({
               </p>
             )}
           </div>
+          <ToolpathPreview setup={setup} camUi={camUi} />
         </>
       )}
     </section>

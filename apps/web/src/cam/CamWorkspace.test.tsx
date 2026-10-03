@@ -374,7 +374,7 @@ describe('CamTree', () => {
       setupId: 'setup#1',
       operation: facing('facing#1', 'Face'),
     });
-    const { generate, documents } = mount(doc);
+    const { generate, documents, camUi } = mount(doc);
     await waitFor(() => expect(status('facing#1').dataset.state).toBe('ok'));
     expect(generate).not.toHaveBeenCalled();
     fireEvent.click(screen.getByTestId('cam-generate'));
@@ -391,6 +391,12 @@ describe('CamTree', () => {
     expect(screen.getByTestId('cam-generate-message').textContent).toBe(
       'Generated 1 of 1 operation.',
     );
+    // The reply is kept for the preview (T5.3b), with the setup it was generated for.
+    expect(camUi.getState().toolpaths).toMatchObject({
+      setupId: 'setup#1',
+      setup: { id: 'setup#1' },
+    });
+    expect(camUi.getState().toolpaths!.operations.map((o) => o.id)).toEqual(['facing#1']);
     expect(status('facing#1').dataset.stale).toBe('false');
     act(() => {
       documents.getState().execute(

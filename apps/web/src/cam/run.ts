@@ -74,6 +74,12 @@ export async function generateSetup(
       ui.setGenerated(generated, `Generation failed: ${reply.message}`);
       return;
     }
+    camUi.getState().setToolpaths({
+      setupId: setup.id,
+      setup: built.setup,
+      rapidRate: machine.maxRapid.value,
+      operations: reply.operations,
+    });
     let ok = 0;
     for (const r of reply.operations) {
       const key = keys.get(r.id) ?? '';

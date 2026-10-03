@@ -234,3 +234,75 @@
 .cam-feeds {
   margin: 0.5rem 0;
 }
+
+/* The toolpath preview (T5.3b): statistics, visibility, playback. */
+.cam-preview {
+  margin: 0.25rem;
+  padding-top: 0.35rem;
+  border-top: 1px solid #eef1f5;
+}
+
+.cam-preview h3 {
+  font-size: 0.85rem;
+  margin: 0 0 0.25rem;
+}
+
+.cam-preview-stats {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.75rem;
+}
+
+.cam-preview-stats th,
+.cam-preview-stats td {
+  padding: 0.1rem 0.2rem;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.cam-preview-stats td:nth-child(3),
+.cam-preview-stats td:nth-child(4) {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.cam-preview-stats tr.excluded {
+  color: #8a96a3;
+}
+
+.cam-preview-stats tfoot th,
+.cam-preview-stats tfoot td {
+  border-top: 1px solid #dfe4ea;
+}
+
+.cam-preview-swatch {
+  display: inline-block;
+  width: 0.7rem;
+  height: 0.25rem;
+  margin-right: 0.3rem;
+  vertical-align: middle;
+  border-radius: 1px;
+}
+
+.cam-preview-swatch.dashed {
+  background: repeating-linear-gradient(90deg, #5c6b7a 0 3px, transparent 3px 5px);
+}
+
+.cam-preview-legend {
+  display: flex;
+  gap: 0.6rem;
+  margin: 0.3rem 0;
+  font-size: 0.75rem;
+  color: #5b6673;
+}
+
+.cam-preview-playback {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.cam-preview-playback input[type='range'] {
+  flex: 1;
+  min-width: 0;
+}

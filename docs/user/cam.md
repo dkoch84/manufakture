@@ -94,7 +94,23 @@ After **Generate toolpaths**, a row also says whether its toolpath was generated
 
 On each row: **Edit** (or double-click, or Enter), **Rename** (or F2), **Suppress** / **Unsuppress**, **Up** and **Down** to change the cutting order, **Move to...** another setup of the same part and body (the operation keeps its name and settings), and **Delete** (or the Delete key). Each is one undo step.
 
-**Generate toolpaths** makes the toolpaths of the setup's resolved operations in the background; nothing is generated until you ask. Showing the toolpaths in the view, simulating the cut and exporting G-code come in later versions.
+**Generate toolpaths** makes the toolpaths of the setup's resolved operations in the background; nothing is generated until you ask. The toolpaths then show in the view (see below); simulating the cut and exporting G-code come in later versions.
+
+## Previewing toolpaths
+
+While the workspace is open, the view shows the setup's stock as a translucent box and the work coordinates as three short axes at the WCS origin (X red, Y green, Z blue), as soon as the setup resolves. After **Generate toolpaths** it also shows the toolpaths, placed on the part where the setup puts them, and the **Preview** section under the operations list says what they add up to. Closing the workspace takes all of it away again.
+
+The preview plays the job as it would be exported: the operations in their order, joined by the moves between them (up to the clearance height, across, and down again) and with the tool changes they need. Operations that failed or are suppressed are left out. In the view:
+
+- cuts are drawn in their operation's colour (the swatch beside its name);
+- plunges (straight down into the material) are red and ramps (sloped or helical entries) orange;
+- rapids, where the machine moves at full speed without cutting, are dashed grey lines.
+
+The table lists each operation's cutting length and estimated time, with a box to show or hide it in the view (**Linking moves** shows or hides the moves between operations), and the job's totals under it: cutting and rapid length, the number of moves and tool changes, and the estimated time. The estimate runs every move at its programmed feed and every rapid at the machine's rapid rate; a real machine takes longer, since it accelerates, changes tools and spins the spindle up.
+
+The slider under the table steps through the job one move at a time: at move n only the moves up to n are drawn, and the tool (its diameter and shape, from the tool library) sits where move n ends. **Play** runs through the job at the chosen speed (1x is the estimated machine time); dragging the slider stops it. The line under the slider names the operation of the current move and the estimated time so far.
+
+The preview shows the last generation. When you change an operation afterwards, its row in the list is marked **stale** and the preview keeps showing the old toolpath until you generate again.
 
 ## Variables
 

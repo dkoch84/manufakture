@@ -7,6 +7,7 @@ import {
 import { testHooksEnabled } from '../testHooks';
 import type { BodyInput } from './bodies';
 import { ViewportEngine, type EngineStores } from './engine';
+import { liveViewport } from './live';
 
 /** The part of the engine the UI and tests use. */
 export type ViewportApi = Pick<
@@ -36,6 +37,7 @@ export type ViewportApi = Pick<
   | 'setThreadLines'
   | 'setGrainLines'
   | 'setPreviewLines'
+  | 'addOverlay'
   | 'frameBox'
   | 'dispose'
 >;
@@ -96,6 +98,7 @@ export function Viewport({
       }
       setError(null);
       setEngine(api);
+      liveViewport.setState({ api });
       if (testHooksEnabled) {
         window.__manufakture = { ...window.__manufakture, viewport: api, selection, settings };
       }
@@ -109,6 +112,7 @@ export function Viewport({
           if (Object.keys(rest).length > 0) window.__manufakture = rest;
           else delete window.__manufakture;
         }
+        if (liveViewport.getState().api === api) liveViewport.setState({ api: null });
         api.dispose();
         setEngine(null);
       };

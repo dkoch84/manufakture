@@ -585,6 +585,21 @@ export class ViewportEngine {
     this.invalidate();
   }
 
+  /**
+   * Add a caller's object to the scene (a workspace overlay: toolpaths, a stock box), drawn with
+   * the model and never picked. Returns the function that removes it again. The caller owns the
+   * object's geometries and materials (and disposes them), and calls `requestRender` after
+   * changing it.
+   */
+  addOverlay(object: Object3D): () => void {
+    this.scene.add(object);
+    this.invalidate();
+    return () => {
+      this.scene.remove(object);
+      if (!this.disposed) this.invalidate();
+    };
+  }
+
   /** Colour faces by overhang class or wall thickness (the print workspace); null: normally. */
   setShading(shading: ViewShading | null): void {
     this.shading = shading;

@@ -1,12 +1,13 @@
 // What the Manufacture workspace shows besides the document (M5 plan, T5.3a): whether it is open,
 // the setup and operation being worked on, the open dialog (an operation, the tools), whether the
-// next face clicked sets the WCS up direction, and the last message. Not document state: none of
-// it is saved or undone. Setups, operations and tools live in the document (`doc.cam`, ADR 0014
-// decision 2).
+// next face clicked sets the WCS up direction, the last message, and the last generation's
+// toolpaths for the preview. Not document state: none of it is saved or undone. Setups,
+// operations and tools live in the document (`doc.cam`, ADR 0014 decision 2).
 
 import type { CamOperationKind, CamSetup, ManufaktureDocument } from '@manufakture/core';
 import type { CamGeometryResult } from '@manufakture/regen';
 import { createStore, type StoreApi } from 'zustand/vanilla';
+import type { GeneratedToolpaths } from './preview/job';
 import type { GeneratedOutcome } from './status';
 
 /** The operation kinds the workspace has a dialog for (`surface3d` is T5.5a's). */
@@ -42,6 +43,8 @@ export interface CamUiState {
   generating: boolean;
   /** What the last generation said as a whole (a summary, or why it could not run). */
   generateMessage: string | null;
+  /** The last generation's toolpaths for the active setup (packed), for the preview; or null. */
+  toolpaths: GeneratedToolpaths | null;
 
   setOpen(open: boolean): void;
   setSetup(setupId: string | null): void;
@@ -55,6 +58,7 @@ export interface CamUiState {
     generateMessage: string | null,
   ): void;
   setGenerating(generating: boolean, generateMessage?: string | null): void;
+  setToolpaths(toolpaths: GeneratedToolpaths | null): void;
 }
 
 export type CamUiStore = StoreApi<CamUiState>;
@@ -71,6 +75,7 @@ export function createCamUiStore(): CamUiStore {
     generated: new Map(),
     generating: false,
     generateMessage: null,
+    toolpaths: null,
     setOpen: (open) =>
       set(open ? { open, message: null } : { open, dialog: null, pickingWcs: false }),
     // Another setup: its geometry and toolpaths are another setup's, so they go.
@@ -84,6 +89,7 @@ export function createCamUiStore(): CamUiStore {
         geometry: null,
         generated: new Map(),
         generateMessage: null,
+        toolpaths: null,
       }),
     setOperation: (operationId) => set({ operationId }),
     openDialog: (dialog) => set({ dialog, pickingWcs: false, message: null }),
@@ -93,6 +99,7 @@ export function createCamUiStore(): CamUiStore {
     setGenerated: (generated, generateMessage) =>
       set({ generated, generateMessage, generating: false }),
     setGenerating: (generating, generateMessage = null) => set({ generating, generateMessage }),
+    setToolpaths: (toolpaths) => set({ toolpaths }),
   }));
 }
 
