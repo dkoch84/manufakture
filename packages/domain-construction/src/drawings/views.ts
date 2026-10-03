@@ -48,7 +48,7 @@ import { ROOF_TYPE, readRoofMetadata } from '../features/roof';
 import type { RoofGeometry } from '../framing/roof';
 import { dot, type Vec3 } from '../geom';
 import { cornerRange, memberOutline, memberSection, type Segment3 } from './outline';
-import { VIEW_PARAMS_VERSION, readViewParams, type OpeningStops } from './params';
+import { VIEW_PARAMS_VERSION, readViewParams, type OpeningStops, type PlanStrings } from './params';
 
 /** regen's `MAX_DOMAIN_VIEW_LINES` (this package may not load regen at run time; a test pins it). */
 export const MAX_VIEW_LINES = 400_000;
@@ -66,6 +66,11 @@ const MAX_WARNINGS = 100;
 export const DEFAULT_PLAN_CUT = 1219.2;
 /** Paper mm from the wall to a plan's or elevation's first string row. */
 export const CHAIN_OFFSET = 10;
+/**
+ * Paper mm between an architectural plan's three strings: clear of a string's values staggered
+ * the most `packages/drawing` staggers them (its `MAX_NUDGE` rows of 3.5 mm text).
+ */
+export const STRING_GAP = 14;
 /** Model mm a member may stand outside a wall's framing slab and still be drawn in its elevation. */
 const SLAB_TOLERANCE = 1;
 /** Points closer than this along a string are one, mm. */
@@ -264,6 +269,7 @@ function floorPlan(
   level: string,
   cutExpression: unknown,
   stops: OpeningStops,
+  strings: PlanStrings,
 ): DomainViewOutput | { error: string } {
   const lv = data.settings.levels.find((l) => l.id === level);
   if (lv === undefined)
@@ -316,6 +322,39 @@ function floorPlan(
     if (stops === 'none') continue;
     segs.forEach((seg, i) => {
       const on = list.filter((o) => o.meta.segment === i + 1);
+      // Outside: right of the path (the exterior).
+      const side: Vec3 = [-seg.n[0], -seg.n[1], 0];
+      if (strings === 'architectural') {
+        // Opening centres nearest the wall, rough openings, then the overall; a segment with no
+        // openings only its overall.
+        const rows: { id: string; ts: number[] }[] = [];
+        if (on.length > 0) {
+          rows.push({
+            id: 'centres',
+            ts: [0, ...openingStops(on, 'centre', seg.length), seg.length],
+          });
+          rows.push({
+            id: 'openings',
+            ts: [0, ...openingStops(on, 'rough', seg.length), seg.length],
+          });
+        }
+        rows.push({ id: 'overall', ts: [0, seg.length] });
+        rows.forEach((row, k) =>
+          pushChain(out, {
+            id: `${w.id}:s${i + 1}:${row.id}`,
+            kind: 'aligned',
+            points: capPoints(
+              out,
+              row.ts.map((t) => v3(along(seg, t), z)),
+              `of ${w.id}`,
+            ),
+            side,
+            offset: CHAIN_OFFSET + k * STRING_GAP,
+            overall: false,
+          }),
+        );
+        return;
+      }
       const ts = [0, ...openingStops(on, stops, seg.length), seg.length];
       pushChain(out, {
         id: `${w.id}:s${i + 1}`,
@@ -325,8 +364,7 @@ function floorPlan(
           ts.map((t) => v3(along(seg, t), z)),
           `of ${w.id}`,
         ),
-        // Outside: right of the path (the exterior).
-        side: [-seg.n[0], -seg.n[1], 0],
+        side,
         offset: CHAIN_OFFSET,
         overall: ts.length > 2,
       });
@@ -553,14 +591,21 @@ export function constructionView(ctx: DomainViewContext): DomainViewOutput | { e
     return { error: `${params.message}${at}` };
   }
   const p = params.value;
+  let view: DomainViewOutput | { error: string };
   if (p.kind === 'elevation')
-    return framingElevation(ctx, p.wall, p.segment, p.from, p.openings, p.marks);
-  if (p.kind === 'roof-plan') return roofPlan(ctx, p.roof);
-  const data = Object.hasOwn(ctx.data, CONSTRUCTION_NAMESPACE)
-    ? (ctx.data[CONSTRUCTION_NAMESPACE] as ConstructionData)
-    : undefined;
-  if (data === undefined) return { error: 'the document has no construction settings (levels)' };
-  return floorPlan(ctx, data, p.level, p.cut, p.openings);
+    view = framingElevation(ctx, p.wall, p.segment, p.from, p.openings, p.marks);
+  else if (p.kind === 'roof-plan') view = roofPlan(ctx, p.roof);
+  else {
+    const data = Object.hasOwn(ctx.data, CONSTRUCTION_NAMESPACE)
+      ? (ctx.data[CONSTRUCTION_NAMESPACE] as ConstructionData)
+      : undefined;
+    if (data === undefined) return { error: 'the document has no construction settings (levels)' };
+    view = floorPlan(ctx, data, p.level, p.cut, p.openings, p.strings);
+  }
+  // Strings the view hides (put away, or converted to dimensions): linear in the strings.
+  if ('error' in view || p.hide.length === 0 || view.chains === undefined) return view;
+  const hide = new Set(p.hide);
+  return { ...view, chains: view.chains.filter((c) => !hide.has(c.id)) };
 }
 
 /** The construction domain's views, as `ExtensionDomain.drawings` takes them. */

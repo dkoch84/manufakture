@@ -24,8 +24,15 @@ import type {
 import { pickInView, type DrawingSheetResult } from '@manufakture/regen';
 import { useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
 import { useStore } from 'zustand';
+import {
+  ConstructionSetPanel,
+  ConstructionStrings,
+} from '../construction/drawings/ConstructionDrawingPanels';
+import { canMakeSet, constructionSetCommand, type SetOptions } from '../construction/drawings/set';
+import { constructionSource } from '../construction/drawings/strings';
 import { downloadBytes } from '../io/files';
 import type { DocumentStoreApi } from '../state/document';
+import { testHooksEnabled } from '../testHooks';
 import {
   DimensionList,
   InsertViewPanel,
@@ -176,6 +183,9 @@ export function DrawingWorkspace({
   const [zoom, setZoom] = useState(1);
   const [drag, setDrag] = useState<{ owner: Owner; from: Vec2; to: Vec2 } | null>(null);
   const [busy, setBusy] = useState(false);
+  // The New construction set form (M6 T6.4b), and why it last refused.
+  const [settingUp, setSettingUp] = useState(false);
+  const [setError, setSetError] = useState<string | null>(null);
   const sheetRef = useRef<HTMLDivElement | null>(null);
 
   // A drawing undone away (or deleted) closes.
@@ -195,6 +205,22 @@ export function DrawingWorkspace({
 
   const sheetState = useSheet(drawer, doc, drawing?.id ?? null, sheet?.id ?? null, generation);
   const result = sheetState.result;
+  // Test hook (see testHooks.ts): the sheet as last drawn, views, strings and picking data.
+  const shownResult = useRef(result);
+  useEffect(() => {
+    shownResult.current = result;
+  }, [result]);
+  useEffect(() => {
+    if (!testHooksEnabled) return;
+    const hook = { sheet: () => shownResult.current };
+    window.__manufakture = { ...window.__manufakture, drawingSheet: hook };
+    return () => {
+      if (window.__manufakture?.drawingSheet !== hook) return;
+      const rest = { ...window.__manufakture };
+      delete rest.drawingSheet;
+      window.__manufakture = rest;
+    };
+  }, []);
   const display = result?.display ?? null;
   const paper = sheet ? sheetPaperSize(sheet, display) : { width: 297, height: 210 };
   const svg = useMemo(() => (display ? screenSvg(display) : null), [display]);
@@ -284,6 +310,23 @@ export function DrawingWorkspace({
   };
 
   const viewResult = (viewId: string) => result?.views.find((v) => v.viewId === viewId);
+
+  const makeSet = (options: SetOptions) => {
+    const c = constructionSetCommand(doc, drawing, sheet, options);
+    if (!c.ok) {
+      setSetError(c.message);
+      return;
+    }
+    setSetError(null);
+    if (run(c.command, c.label)) {
+      setChosenSheet(c.sheetIds[0] ?? null);
+      setSettingUp(false);
+      setMessage({
+        error: false,
+        text: `Added ${c.sheetIds.length} sheets; each is drawn when it is shown.`,
+      });
+    }
+  };
 
   const insertView = (s: InsertViewSettings) => {
     if (!sheet) return;
@@ -551,6 +594,20 @@ export function DrawingWorkspace({
             >
               Insert view
             </button>
+            {canMakeSet(doc) && (
+              <button
+                type="button"
+                aria-pressed={settingUp}
+                data-testid="drawing-construction-set"
+                title="Plans, elevations and framing elevations of a building, a sheet each"
+                onClick={() => {
+                  setSettingUp(!settingUp);
+                  setInserting(false);
+                }}
+              >
+                Construction set
+              </button>
+            )}
             <button
               type="button"
               aria-pressed={tool === 'select'}
@@ -752,6 +809,14 @@ export function DrawingWorkspace({
           )}
         </div>
         <aside className="drawing-panel" aria-label="Drawing panel">
+          {settingUp && !readOnly && (
+            <ConstructionSetPanel
+              doc={doc}
+              error={setError}
+              onCreate={makeSet}
+              onClose={() => setSettingUp(false)}
+            />
+          )}
           {inserting && !readOnly && sheet && (
             <InsertViewPanel
               doc={doc}
@@ -781,6 +846,18 @@ export function DrawingWorkspace({
                   sheet && deleteCommand(drawing, sheet, { kind: 'view', id: selectedView.id });
                 if (c && run(c.command, c.label)) setSelected(null);
               }}
+            />
+          )}
+          {selectedView && sheet && constructionSource(selectedView) && (
+            <ConstructionStrings
+              key={`strings-${selectedView.id}`}
+              doc={doc}
+              drawing={drawing}
+              sheet={sheet}
+              view={selectedView}
+              result={viewResult(selectedView.id)}
+              readOnly={readOnly}
+              run={run}
             />
           )}
           {selectedNote && sheet && (

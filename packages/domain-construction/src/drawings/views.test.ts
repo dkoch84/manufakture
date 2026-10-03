@@ -134,7 +134,13 @@ describe('construction view params', () => {
   it('reads each kind with its defaults', () => {
     expect(readViewParams({ kind: 'plan', level: 'level-1' }, 1)).toEqual({
       ok: true,
-      value: { kind: 'plan', level: 'level-1', openings: 'rough' },
+      value: {
+        kind: 'plan',
+        level: 'level-1',
+        openings: 'rough',
+        strings: 'single',
+        hide: [],
+      },
     });
     expect(readViewParams({ kind: 'elevation', wall: 'extension#1' }, 1)).toEqual({
       ok: true,
@@ -145,9 +151,32 @@ describe('construction view params', () => {
         from: 'outside',
         openings: 'rough',
         marks: true,
+        hide: [],
       },
     });
     expect(readViewParams({ kind: 'roof-plan', roof: 'extension#6' }, 1).ok).toBe(true);
+  });
+
+  it('reads the strings a view hides, once each, and the architectural plan', () => {
+    const r = readViewParams(
+      {
+        kind: 'plan',
+        level: 'level-1',
+        strings: 'architectural',
+        hide: ['extension#1:s1:overall', 'extension#1:s1:overall', 'extension#2:s1:centres'],
+      },
+      1,
+    );
+    expect(r.ok && r.value).toMatchObject({
+      strings: 'architectural',
+      hide: ['extension#1:s1:overall', 'extension#2:s1:centres'],
+    });
+    const roof = readViewParams({ kind: 'roof-plan', roof: 'extension#6', hide: ['x:eave'] }, 1);
+    expect(roof.ok && roof.value).toEqual({
+      kind: 'roof-plan',
+      roof: 'extension#6',
+      hide: ['x:eave'],
+    });
   });
 
   it.each([
@@ -160,6 +189,14 @@ describe('construction view params', () => {
     ['a side that is not one', { kind: 'elevation', wall: 'extension#1', from: 'above' }, 1],
     ['marks that are not true or false', { kind: 'elevation', wall: 'extension#1', marks: 1 }, 1],
     ['stops that are not ones', { kind: 'plan', level: 'level-1', openings: 'edges' }, 1],
+    ['strings that are not a style', { kind: 'plan', level: 'level-1', strings: 'double' }, 1],
+    ['hide that is not a list', { kind: 'plan', level: 'level-1', hide: 'extension#1:s1' }, 1],
+    ['hide with an empty id', { kind: 'roof-plan', roof: 'extension#6', hide: [''] }, 1],
+    [
+      'hide with too many ids',
+      { kind: 'plan', level: 'level-1', hide: Array.from({ length: 257 }, (_, i) => `w${i}`) },
+      1,
+    ],
     ['an array', [], 1],
   ])('refuses %s', (_label, params, version) => {
     expect(readViewParams(params, version).ok).toBe(false);
@@ -218,6 +255,47 @@ describe('construction views', () => {
   it('moving the door moves the string', () => {
     const v = drawn({ kind: 'elevation', wall: 'extension#1' }, 60);
     expect(inches(v.chains![0]!.points, 0)).toEqual([0, 42, 78, 192]);
+  });
+
+  it('an architectural plan: centres, rough openings and the overall, outward in that order', () => {
+    const v = drawn({ kind: 'plan', level: 'level-1', strings: 'architectural' });
+    expect(v.chains!.map((c) => c.id)).toEqual([
+      'extension#1:s1:centres',
+      'extension#1:s1:openings',
+      'extension#1:s1:overall',
+    ]);
+    expect(v.chains!.map((c) => inches(c.points, 0))).toEqual([
+      [0, 48, 192],
+      [0, 30, 66, 192],
+      [0, 192],
+    ]);
+    expect(v.chains!.map((c) => c.offset)).toEqual([10, 24, 38]);
+    expect(v.chains!.every((c) => c.overall === false)).toBe(true);
+    // A wall with no openings: its overall alone.
+    const plain = constructionView({
+      ...context({ kind: 'plan', level: 'level-1', strings: 'architectural' }),
+      features: context({}).features.slice(0, 1),
+    });
+    expect('error' in plain ? [] : plain.chains!.map((c) => c.id)).toEqual([
+      'extension#1:s1:overall',
+    ]);
+  });
+
+  it('hides the strings a view lists, and nothing else', () => {
+    const v = drawn({
+      kind: 'plan',
+      level: 'level-1',
+      strings: 'architectural',
+      hide: ['extension#1:s1:openings', 'no-such-string'],
+    });
+    expect(v.chains!.map((c) => c.id)).toEqual([
+      'extension#1:s1:centres',
+      'extension#1:s1:overall',
+    ]);
+    // The rest of the view is as drawn without `hide`.
+    expect(v.lines).toHaveLength(3 * 4 + 1);
+    const e = drawn({ kind: 'elevation', wall: 'extension#1', hide: ['extension#1:s1:up'] });
+    expect(e.chains!.map((c) => c.id)).toEqual(['extension#1:s1:along']);
   });
 
   it('says what it cannot draw', () => {

@@ -1,0 +1,32 @@
+/* The construction side of the drawing workspace (M6 T6.4b). */
+.construction-drawings-hint {
+  margin: 0 0 0.4rem;
+  font-size: 0.8rem;
+  color: #555;
+}
+
+.construction-strings {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.construction-strings li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.25rem;
+  padding: 0.2rem 0;
+  border-bottom: 1px solid #eee;
+  font-size: 0.85rem;
+}
+
+.construction-string-actions {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.construction-string-hidden {
+  color: #777;
+}

@@ -190,8 +190,20 @@ The **Sheet layouts** tab draws every face to scale with its pieces (numbered by
 
 **Takeoff CSV** writes one line per row (section, number, item, stock, size, quantity, total, other totals such as board feet, price, cost, what a row to buy is cut into, notes), then the subtotals and the cost; the title and the short disclaimer come first. **PDF** writes the same rows by section on Letter landscape pages for inch and foot documents, A4 landscape otherwise, with the disclaimer at the top of the first page and the foot of every page.
 
-## Still to come
+## Drawings
 
-These are being built in the M6 milestone; until each task fills in its section, the feature is not in the app.
+Open a drawing (**+ Drawing** in the tab bar, or an existing one) and click **Construction set** in its toolbar. The button shows once a part studio has a wall. Pick the part studio, the sheet size (tabloid, 11" x 17", for inch and foot documents; A3 otherwise) and orientation, and a scale for plans and elevations and one for framing, or leave both at **Largest that fits**. **Create sheets** adds, as one undo step:
 
-- **Drawings**: plans, building elevations, framing elevations of each wall and a roof framing plan, with dimension strings.
+- **Plan:** _level name_, for each level with walls: the level cut 4' above its floor, with the walls' layers cut and hatched, the studs cut, door swings and window symbols. Outside each wall run **three dimension strings**: the opening centres nearest the wall, then the rough opening edges, then the overall. A wall with no openings gets its overall alone, since the other two would repeat it.
+- **Elevations**: the building from the front, right, back and left, as ordinary part views of the layer bodies (sheathing, roof sheathing, subfloor).
+- **Framing:** _wall name_, for each wall: a framing elevation of each of its segments, seen from outside, with every member of the wall at its size, a string along the bottom (corners and rough openings, stud layout marks and the overall), one up the side (sills, heads and the top) and the pitch symbol of a roof that slopes across it. A wall of several segments shows them in order, row by row.
+- **Roof framing:** _roof name_, for each roof: its members from above, with strings along the eave (rafter layout marks) and across the gable end.
+
+Scales are architectural (`1/2" = 1'` down to `1/16" = 1'`) for inch and foot documents and metric (`1:20` to `1:500`) otherwise; the automatic choice is the largest at which every view of the sheet fits its place clear of the title block. When the open drawing has only an empty sheet (a drawing just made), the set takes its place. Nothing is drawn when the set is made: each sheet is drawn when you show it or export it, so a large house's set costs nothing until then.
+
+Sheets, views, notes and dimensions of a set are edited as on any drawing: move or delete a view, add a sheet, add your own dimensions and notes. The dimension strings are **derived**: they are worked out from the walls, openings and members every time the sheet is drawn and are never stored, so moving a door moves its strings. Select a plan, framing elevation or roof plan to list its strings in **Dimension strings**:
+
+- **Hide** puts a string away in that view; it then shows in the list as hidden, with **Show** to bring it back.
+- **Convert to dimensions** replaces a string with ordinary dimensions, one per span (and its overall when it has one), measured between corners of the wall layers and placed where the string was, and hides the string; one undo step undoes both. They then behave like any dimension: drag them, re-pick them or delete them, and they follow the model by name, so a moved opening moves its jamb's dimension. A framing elevation projects no layer bodies (its members are drawn from their data), so its strings can be hidden but not converted, and a string with a point that is on no layer corner (an opening's centre line) says so instead of converting.
+
+Export works as for any drawing: **PDF** writes every sheet of the drawing, a page each; **SVG** and **DXF** write the sheet shown. Every sheet that shows a construction view or a part studio with construction features carries the short "not an engineering tool" text above its title block, on screen and in every file.

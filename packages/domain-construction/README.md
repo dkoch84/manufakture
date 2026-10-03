@@ -782,11 +782,19 @@ round-trip, and output is deterministic.
 `{ domain: 'construction', part, schemaVersion: 1, params }` (core format v15). The params
 (`params.ts`, version 1):
 
-| `kind`      | Fields                                                                                                                                       |
-| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `plan`      | `level`; `cut` (an expression, the cut above the level's datum, default 4'); `openings` (`rough`, the default, `centre` or `none`)           |
-| `elevation` | `wall`; `segment` (1-based, default 1); `from` (`outside`, the default, or `inside`); `openings` as above; `marks` (stud layout marks, true) |
-| `roof-plan` | `roof`                                                                                                                                       |
+| `kind`      | Fields                                                                                                                                                                                    |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `plan`      | `level`; `cut` (an expression, the cut above the level's datum, default 4'); `openings` (`rough`, the default, `centre` or `none`); `strings` (`single`, the default, or `architectural`) |
+| `elevation` | `wall`; `segment` (1-based, default 1); `from` (`outside`, the default, or `inside`); `openings` as above; `marks` (stud layout marks, true)                                              |
+| `roof-plan` | `roof`                                                                                                                                                                                    |
+
+Every kind also takes `hide`: the ids of strings the view does not draw (at most
+`MAX_HIDDEN_STRINGS`, 256, each at most 256 characters; repeats dropped), as the view names them:
+`<wall>:s<segment>` for a plan's single string, `<wall>:s<segment>:centres`, `:openings` and
+`:overall` for an architectural plan's three, `<wall>:s<segment>:along` and `:up` in an elevation,
+`<roof>:eave` and `<roof>:end` in a roof plan. Strings are filtered after the view is drawn, so a
+hidden string costs its share of the bounds like a shown one. The app hides a string when the
+user puts it away or converts it to dimensions (M6 plan T6.4b).
 
 - **Floor plan.** Looks down, cut by the horizontal plane `cut` above the level's datum: the
   kernel projects the level's wall layer bodies and floor subfloors with that section (the cut
@@ -795,7 +803,9 @@ round-trip, and output is deterministic.
   the side it swings into, `left` by default), a window as three lines across its rough opening
   (the framing's faces and its middle), and one string per wall segment outside it (right of the
   path): the corner, each opening's rough opening edges (or centre), the other corner, and the
-  overall.
+  overall. With `strings: 'architectural'` (what the app's construction set uses), three strings
+  instead, outward from the wall `STRING_GAP` (14 mm) apart: the opening centres, the rough
+  opening edges and the overall; a segment with no openings gets only its overall.
 - **Framing elevation.** Looks at one wall segment square on, from outside (along the interior
   normal) or inside. It draws every member whose blank lies in the segment's framing slab (within
   1 mm across, overlapping it along): the wall's and its openings', a neighbour's corner studs, a
@@ -812,9 +822,9 @@ round-trip, and output is deterministic.
 The short disclaimer (`DISCLAIMER_SHORT`) is the domain's title note (`constructionDrawings.titleNote`):
 regen draws it on top of the title block of every sheet showing a construction view (drawn or
 not) or any view of a part with construction features. Dimension strings are derived from wall, opening and member data
-at every request and never stored (ADR 0015: core has no domain reference or chain dimension); a
-"convert to dimensions" action that turns a string into ordinary dimensions on layer faces is not
-here yet. The output is bounded as regen bounds it (`MAX_VIEW_LINES` 400,000 lines, then a
+at every request and never stored (ADR 0015: core has no domain reference or chain dimension); the
+app's "convert to dimensions" (`apps/web/src/construction/drawings/strings.ts`, T6.4b) turns a
+string into ordinary dimensions between layer body corners and hides it through `hide`. The output is bounded as regen bounds it (`MAX_VIEW_LINES` 400,000 lines, then a
 warning), and every loop is over the part's walls, openings or members.
 
 Tests: `outline.test.ts` (outlines with plane cuts and notches, sections), `views.test.ts`
