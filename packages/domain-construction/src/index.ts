@@ -1,6 +1,7 @@
 // @manufakture/domain-construction: the construction domain (M6). Framing generators that turn
-// walls (and, later, floors and roofs) into member data, the member data shape and its ids, and
-// the "not an engineering tool" text. See README.md.
+// walls, floors and roofs into member data, the member data shape and its ids, the document-level
+// construction data (`domains.construction`: levels, wall, floor and roof types, framing settings,
+// header rules) and its regen registration, and the "not an engineering tool" text. See README.md.
 
 export const packageName = '@manufakture/domain-construction';
 
@@ -106,3 +107,54 @@ export {
   type RoofWarningCode,
   type TailCut,
 } from './framing/roof';
+export {
+  CONSTRUCTION_DATA,
+  CONSTRUCTION_DATA_VERSION,
+  CONSTRUCTION_NAMESPACE,
+  EMPTY_CONSTRUCTION_DATA,
+  EMPTY_CONSTRUCTION_SETTINGS,
+  LAYER_KINDS,
+  MAX_HEADER_RULES,
+  MAX_LAYERS,
+  MAX_LENGTHS,
+  MAX_TYPES,
+  defaultConstructionSettings,
+  layerThickness,
+  mapLengths,
+  newWallType,
+  readConstructionData,
+  wallTypeThickness,
+  writeConstructionData,
+  type BlockingRowsData,
+  type ConstructionData,
+  type ConstructionSettings,
+  type FloorType,
+  type FramingLayer,
+  type FramingSettings,
+  type HeaderData,
+  type HeaderRuleData,
+  type LayerKind,
+  type NewWallTypeInput,
+  type RoofType,
+  type SheetLayer,
+  type StoredConstructionSettings,
+  type WallLayer,
+  type WallType,
+} from './data';
+export {
+  DATA_ID_PATTERN,
+  MAX_LEVELS,
+  findLevel,
+  readLevels,
+  type Level,
+  type StoredLevel,
+} from './levels';
+export {
+  CONSTRUCTION_STOCK,
+  PRECUT_STUD_IDS,
+  stockKind,
+  stockRef,
+  stockThickness,
+  stockWidth,
+} from './stock';
+export { CONSTRUCTION_IMPLEMENTATION, constructionDomain, registerConstruction } from './domain';

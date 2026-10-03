@@ -12,6 +12,11 @@
     "test": "vitest run --root ../.. --project packages packages/domain-construction"
   },
   "dependencies": {
+    "@manufakture/core": "workspace:*",
+    "@manufakture/stock": "workspace:*",
     "@manufakture/units": "workspace:*"
+  },
+  "devDependencies": {
+    "@manufakture/regen": "workspace:*"
   }
 }

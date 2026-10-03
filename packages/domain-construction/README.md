@@ -11,13 +11,16 @@ under GPL-3.0-or-later.
 no members and checks nothing against a building code. Its warnings are layout warnings, and the
 ones that come from framing practice are labelled as rules of thumb. See [Disclaimer](#disclaimer).
 
-**Dependencies.** At run time only `@manufakture/units` (for `MM_PER_INCH` in the defaults), so
-everything runs in Node with no `.wasm`. ADR 0015 decision 1 also allows `core`, `takeoff`,
-`nesting` and `stock` at run time, and `regen` and `kernel` as types only; never the kernel,
-regen, Manifold, the app or another domain. `src/boundary.test.ts` enforces that allowlist. The generator's input is this package's own type: the feature layer
-(T6.1b) evaluates the wall feature's expressions, resolves the wall graph and the construction
-domain data (T6.1a), and passes plain numbers in. Stock is passed in as a `StockRef` (catalog
-id, nominal name, dressed sizes), so the package does not read the stock catalog itself.
+**Dependencies.** At run time `@manufakture/units` (for `MM_PER_INCH` in the defaults) and the
+shared `@manufakture/stock` (the catalog, the `stock` namespace and the JSON readers), with
+`@manufakture/core` for types, so everything runs in Node with no `.wasm`. ADR 0015 decision 1
+also allows `takeoff` and `nesting` at run time, and `regen` and `kernel` as types only (`regen` is
+a devDependency for the registration's types); never the kernel, regen, Manifold, the app or
+another domain. `src/boundary.test.ts` enforces that allowlist. The generators' input is this
+package's own type: the feature layer (T6.1b) evaluates the wall feature's expressions, resolves
+the wall graph and the construction domain data (below), and passes plain numbers in. Stock is
+passed to the generators as a `StockRef` (catalog id, nominal name, dressed sizes); `stockRef(id,
+stockData)` makes one from the catalog with the document's overrides applied.
 
 **Units.** Millimetres everywhere inside (ADR 0005). The tests write their fixtures in inches
 and convert.
@@ -31,6 +34,79 @@ tests that it is shown (ADR 0015 decision 8). The long form opens
 [`docs/user/construction.md`](../../docs/user/construction.md); change the two together. Neither,
 nor any warning message, may call anything "safe", "compliant" or "OK"; `wall.test.ts` checks the
 constant and the warnings for those words.
+
+## Domain data: `domains.construction`
+
+The document-level construction settings (ADR 0015 decision 2, T6.1a), version 1, read by
+`readConstructionData(data, schemaVersion)` (migrate in memory, validate, evaluate lengths; gives
+`{ stored, settings }`: as typed for editors, and in mm) and written by
+`writeConstructionData(stored)` (validated first; `undefined` when there is nothing to store, so
+the app removes the namespace). Settings, not model (ADR 0013 decision 3): every length is a
+`StoredExpression` that must be a constant (`8'`, `2.4m`), and one naming a variable is refused
+with the same message as a stock override's ("domain settings hold constants only: #h is a
+variable; type the measured value instead"). Stock is named by catalog id. Every field is
+optional; absent lists are empty.
+
+```ts
+{
+  levels: [{ id, name, elevation, height }],    // elevation may be negative; height is the default wall height
+  wallTypes: [{ id, name, layers: [              // exterior to interior
+    { id, kind: 'siding' | 'sheathing', stock?, thickness? },
+    { id, kind: 'framing', stock, spacing?, bottomPlates?, topPlates?,
+      header: { stock, plies, jacks, spacer? } }, // the wall type's default header
+    { id, kind: 'drywall', stock?, thickness? },
+  ] }],
+  floorTypes: [{ id, name, joistStock, rimStock?, spacing?, subfloor? }],
+  roofTypes: [{ id, name, rafterStock, ridgeStock, hipStock?, spacing?, overhang?, rakeOverhang?,
+                tail?, subFascia?, fascia?, sheathing? }],
+  framing: { spacing?, layoutOrigin?, layoutFrom?, bottomPlates?, topPlates?, kings?,
+             cornerStyle?, blocking?, spliceOffset?, plateStockLengths?, precutLengths?,
+             ladderSpacing? },              // blocking: { kind: 'none' | 'mid-height' } or
+                                            //   { kind: 'heights', heights: [...] }
+  headerRules: [{ maxWidth, header: { stock, plies, jacks, spacer? } }],
+}
+```
+
+- **Levels** (`levels.ts`) are constants in M6 (ADR 0015 decision 2): a variable in an elevation
+  is refused. Variables reach construction geometry through the features' own expressions.
+- **Wall types** are layer stacks: siding, sheathing, exactly one framing layer, drywall, in that
+  order (several of a sheet kind are allowed, in order). A sheet layer needs a sheet `stock` or a
+  `thickness` (which wins). `wallTypeThickness(type, stockData)` sums the layers: a framing layer
+  is as thick as its stud is wide, a sheet layer as its sheet is thick, both with the document's
+  stock overrides; 2x4 plus 7/16" OSB plus 1/2" drywall is 4-7/16".
+- **Framing settings** are document defaults (T6.2a's `WallSettings`) that a wall type's framing
+  layer and a wall may override; absent ones use `DEFAULT_WALL_SETTINGS`. Every `WallSettings`
+  field is here except `studStock` and `defaultHeader` (the wall type's framing layer holds them)
+  and `headerRules` (the document's own table, below). `layoutOrigin` may be negative (the
+  generator keeps only its remainder by the spacing). `blocking` is `{ kind: 'none' }`,
+  `{ kind: 'mid-height' }` or `{ kind: 'heights', heights }`: one to 20 heights above the wall's
+  base, each greater than zero.
+- **Header rules** are the user's table, `opening width up to maxWidth: header, jack studs`. A new
+  document has none, and nothing here offers template rows or code values (ADR 0015 decision 7,
+  the project owner's decision). Two rules for the same width are refused. **A new wall type asks
+  for its default header**: `newWallType({ id, name, studStock, header, sheathing?, drywall? })`
+  takes it as a required argument.
+- **Defaults.** `defaultConstructionSettings(region)` is what a new document starts with: one
+  level, `Level 1` at `0`, 97-1/8" high (92-5/8" precut studs on one bottom and two top plates, a
+  layout default from common practice) in US documents and 2400 mm otherwise; no types, no framing
+  overrides, no header rules.
+- **Stock kinds.** A known stock must be of the right kind (studs, headers, joists, rafters from
+  lumber; layers, subfloor and roof sheathing from sheets). An id this build's catalog lacks is
+  kept (it may come from a newer build) and fails only where it is resolved (`layerThickness`).
+- **Bounds.** At most 100 levels, 100 of each type, 100 header rules, 8 layers per wall type and
+  20 lengths per list; ids are lower case, digits and hyphens, up to 64 characters, unique per list.
+
+**Registration.** `constructionDomain` is a data-only domain for now (`types` is optional in
+regen): namespace `construction`, `reads: ['stock']`, the reader of `domains.construction`. The
+app's regen worker entry calls `registerConstruction(defaultExtensions)`, which also registers the
+shared stock reader unless it is already there. Unknown versions are regen's: a newer
+`schemaVersion` fails the readers of the namespace as `unsupported` while the document still loads.
+
+**Construction stock** lives in the shared catalog (`@manufakture/stock`, ADR 0015 decision 1):
+dimensional lumber 2x4 to 2x12 and 4x4, 4x6 (PS 20-25, verified), precut studs 2x4 and 2x6 at
+92-5/8" and 104-5/8" (`us-2x4-precut-92-5-8`; lengths unverified), 7/16" OSB (`us-osb-7-16`),
+plywood, and 1/2" and 5/8" gypsum board in 4 x 8 and 4 x 12 ft (`us-gyp-1-2-8ft`; unverified).
+Prices come from the stock overrides (`domains.stock`).
 
 ## Members
 
@@ -530,8 +606,11 @@ and 9 at 24", plates and splices, corner styles, tees, the 36" x 80" door with 7
 overlap, every member stays inside the wall's envelope, every stud bears fully on the bottom
 plate, top plate splices keep their offset, full ids are unique, every local id parses for its
 owner, and output is deterministic. `src/member-ids.test.ts` round-trips every id form and
-refuses non-canonical spellings. `src/boundary.test.ts` checks every import against ADR 0015's
-allowlist.
+refuses non-canonical spellings. `src/data.test.ts` covers `domains.construction`: valid and
+invalid data with the field at fault, a variable in a level refused, newer versions, the writer's
+round trip, the defaults (one level, no header rules), `newWallType`, wall type thickness (4-7/16"
+for 2x4, 7/16" OSB and 1/2" drywall, and with a stock override) and the registration.
+`src/boundary.test.ts` checks every import against ADR 0015's allowlist.
 
 ```sh
 pnpm --filter @manufakture/domain-construction test

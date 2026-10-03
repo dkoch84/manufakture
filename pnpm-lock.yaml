@@ -56,6 +56,9 @@ importers:
       '@manufakture/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@manufakture/domain-construction':
+        specifier: workspace:*
+        version: link:../../packages/domain-construction
       '@manufakture/domain-wood':
         specifier: workspace:*
         version: link:../../packages/domain-wood
@@ -80,6 +83,9 @@ importers:
       '@manufakture/sketch':
         specifier: workspace:*
         version: link:../../packages/sketch
+      '@manufakture/stock':
+        specifier: workspace:*
+        version: link:../../packages/stock
       '@manufakture/takeoff':
         specifier: workspace:*
         version: link:../../packages/takeoff
@@ -162,15 +168,28 @@ importers:
 
   packages/domain-construction:
     dependencies:
+      '@manufakture/core':
+        specifier: workspace:*
+        version: link:../core
+      '@manufakture/stock':
+        specifier: workspace:*
+        version: link:../stock
       '@manufakture/units':
         specifier: workspace:*
         version: link:../units
+    devDependencies:
+      '@manufakture/regen':
+        specifier: workspace:*
+        version: link:../regen
 
   packages/domain-wood:
     dependencies:
       '@manufakture/core':
         specifier: workspace:*
         version: link:../core
+      '@manufakture/stock':
+        specifier: workspace:*
+        version: link:../stock
       '@manufakture/takeoff':
         specifier: workspace:*
         version: link:../takeoff
@@ -279,6 +298,19 @@ importers:
       '@salusoft89/planegcs':
         specifier: 1.2.0
         version: 1.2.0
+
+  packages/stock:
+    dependencies:
+      '@manufakture/core':
+        specifier: workspace:*
+        version: link:../core
+      '@manufakture/units':
+        specifier: workspace:*
+        version: link:../units
+    devDependencies:
+      '@manufakture/regen':
+        specifier: workspace:*
+        version: link:../regen
 
   packages/takeoff:
     dependencies:

@@ -1,16 +1,16 @@
 # @manufakture/domain-wood
 
 The woodworking domain ([ADR 0013](../../docs/adr/0013-domain-packages.md), M4 plan T4.1c): the
-**stock catalog** (lumber and sheet goods with nominal and actual sizes), the **board** feature
-(`wood.board`, a body cut from real stock with a grain) and its translator to kernel inputs, and
-the document data the domain owns (`domains.wood` settings, `domains.stock` overrides), and the
-**joint** feature (`wood.joint`, T4.2b: six kinds of joint cut between two boards), and the **cut
-list** (T4.3a: the woodworking producer of `@manufakture/takeoff`). Plain TypeScript under
-GPL-3.0-or-later.
+**board** feature (`wood.board`, a body cut from real stock with a grain) and its translator to
+kernel inputs, the document data the domain owns (`domains.wood` settings; it reads the
+`domains.stock` overrides, which the shared `@manufakture/stock` owns with the **stock catalog**,
+both re-exported here), the **joint** feature (`wood.joint`, T4.2b: six kinds of joint cut
+between two boards), and the **cut list** (T4.3a: the woodworking producer of
+`@manufakture/takeoff`). Plain TypeScript under GPL-3.0-or-later.
 
 **Dependencies.** At run time only `@manufakture/core`, `@manufakture/units` and the shared
-`@manufakture/takeoff` (ADR 0013 decision 8), so everything
-here runs in Node with no `.wasm`. `@manufakture/regen` (the translator contract) and
+`@manufakture/takeoff` (ADR 0013 decision 8) and `@manufakture/stock` (ADR 0015 decision 1), so
+everything here runs in Node with no `.wasm`. `@manufakture/regen` (the translator contract) and
 `@manufakture/kernel` (the `FeatureInput` types) are type-only imports, and devDependencies, as
 `packages/print` does with kernel types; `@manufakture/sketch` is a devDependency for the solver of
 the real-kernel tests. Regen imports no domain package.
@@ -26,72 +26,29 @@ const unregister = registerWood(defaultExtensions); // the app's regen worker en
 
 `woodDomain` is the definition it registers: namespace `wood`, implementation version
 `WOOD_IMPLEMENTATION` (bump it with any change that can alter a translator's output, so regen's
-cache never serves results of older domain code), `reads: ['stock']`, the readers of the two
-namespaces it owns (`wood`, `stock`) and the types `wood.board` and `wood.joint`.
+cache never serves results of older domain code), `reads: ['stock']`, the reader of the namespace
+it owns (`wood`) and the types `wood.board` and `wood.joint`. Since T6.1a `stock` is owned by
+`@manufakture/stock`; `registerWood` registers that reader too unless it is already there
+(`registerStock`), and unregistering wood leaves it in place.
 
 ## The stock catalog
 
-`STOCK` lists every entry; `findStock(id)` looks one up; `stockByRegion(region)` gives a region's
-lumber and sheets in picker order; `defaultRegion(lengthFormat)` picks the region a picker opens
-on from the document's display units (`us` for `in`, `ft`, `ft-in` and `in-fraction`, `metric`
-otherwise).
-
-| Field                        | Meaning                                                                                                                    |
-| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `id`                         | Permanent, stored in boards and overrides (`us-2x4`, `us-ply-23-32`, `mm-ply-18`). Never removed or reused.                |
-| `name`, `actualLabel`        | As sold (`3/4" plywood`) and the real size in the entry's own units (`23/32"`).                                            |
-| `region`, `kind`, `category` | `us` or `metric`; `lumber` or `sheet`; `softwood`, `hardwood`, `plywood`, `osb`, `mdf`.                                    |
-| `nominal`, `actual`          | `{ thickness, width? }` in mm. Lumber without a `width` is sold in random widths (hardwood).                               |
-| `lengths`, `sheet`           | Lengths sold (lumber) and the sheet size, length by width (sheets), mm.                                                    |
-| `boardFeetBasis`             | `nominal` (surfaced softwood), `rough` (hardwood quarters), `none` (sheets). Read by the cut list.                         |
-| `material`, `grain`          | The core `MaterialId` a board of it gets, and whether it has a grain (plywood and solid wood yes; MDF and OSB no).         |
-| `source`, `verified`         | Where the actual size and the sold sizes come from, and whether each was checked against that source. Unverified is shown. |
-
-Sizes are exact: computed from the source's inch fraction (`23/32"` is `(23 / 32) x 25.4` mm) or
-millimetre figure, never a rounded decimal.
-
-| Group                         | Entries                                                                          | Source                                                               | Verified |
-| ----------------------------- | -------------------------------------------------------------------------------- | -------------------------------------------------------------------- | -------- |
-| US softwood boards, dimension | Every Table 3 board (3/4 to 1-1/2 thick) and dimension size (2 to 4-1/2 thick)   | PS 20-25 Table 3, minimum dressed dry sizes (`PS20_*` rows exported) | yes      |
-| US hardwood                   | 4/4, 5/4, 6/4, 8/4: rough thickness and the usual S2S thickness                  | NHLA quarters; S2S from a rules card and a retailer summary          | no       |
-| US plywood, OSB, MDF          | Plywood 1/4 to 3/4 by Performance Category (3/4" is 23/32"), OSB, MDF; 4 x 8 ft  | Secondary summaries of PS 1 and PS 2; maker data                     | no       |
-| Metric                        | 38 x 63, 38 x 89, 38 x 140 mm lumber; 12, 15, 18 mm plywood and MDF, 2440 x 1220 | CLS and UK regularised sizes; maker data                             | no       |
-
-Retail lengths are common practice, not from a standard (`verified.sold` false). Not in the
-catalog yet: timbers (5" nominal and up, partly unverified in the plan), green sizes, hardwood
-plywood (HP-1). Core has no OSB material, so OSB boards get `plywood` (the nearest density).
+The catalog (`STOCK`, `findStock`, `stockByRegion`, `defaultRegion`, the `PS20_*` rows) moved to
+the shared [`@manufakture/stock`](../stock/README.md) in T6.1a (ADR 0015 decision 1). This package
+re-exports all of it, so its users' imports did not change.
 
 ## Document data
 
-Both namespaces are settings, not model (ADR 0013 decision 3): lengths are `StoredExpression`s that
-must be constants (`18.2mm`, `23/32"`), and one that names a variable is refused. Each has a reader
-(`readStockData`, `readWoodData`: migrate in memory to the current version, then validate) and a
-writer for the app (`writeStockData`, `writeWoodData`: the entry to pass to core's `setDomainData`
+Both namespaces it uses are settings, not model (ADR 0013 decision 3): lengths are
+`StoredExpression`s that must be constants (`18.2mm`, `23/32"`), and one that names a variable is
+refused. Each has a reader (`readStockData`, re-exported from `@manufakture/stock`, and
+`readWoodData`: migrate in memory to the current version, then validate) and a writer for the app (`writeStockData`, `writeWoodData`: the entry to pass to core's `setDomainData`
 at the current version, or `undefined` to remove the namespace). Keys are looked up with
 `Object.hasOwn`, so stored keys like `__proto__` are only ever data.
 
-**`domains.stock`** (version 1), the document's stock overrides by catalog id:
-
-```json
-{
-  "overrides": {
-    "us-ply-23-32": {
-      "thickness": { "source": "18.2mm", "lengthUnit": "mm", "angleUnit": "deg" },
-      "sheet": {
-        "length": { "source": "97", "lengthUnit": "in", "angleUnit": "deg" },
-        "width": { "source": "49", "lengthUnit": "in", "angleUnit": "deg" }
-      },
-      "price": { "amount": 62.5, "per": "sheet", "currency": "USD" }
-    },
-    "us-2x4": { "width": { "source": "3-9/16", "lengthUnit": "in", "angleUnit": "deg" } }
-  }
-}
-```
-
-`thickness` and `width` are the measured actual sizes, `sheet` the sheet size in stock, `price` an
-amount `per` `piece`, `sheet`, `board-foot`, `metre` or `foot`. `resolveStock(id, data)` gives the
-catalog entry with the override applied (`thickness`, `width`, `sheet`, `price`, and which of them
-were `overridden`). An override for an id this build does not know is kept and ignored.
+**`domains.stock`**, the document's stock overrides, is owned by `@manufakture/stock` (schema and
+an example in its README); `readStockData`, `writeStockData` and `resolveStock` are re-exported
+here.
 
 **`domains.wood`** (version 1), the cut list and layout settings, named after
 `@manufakture/nesting`'s settings: `kerf`, `sheetTrims` (`lengthStart`, `lengthEnd`, `widthStart`,

@@ -15,6 +15,7 @@
   "dependencies": {
     "@manufakture/cam": "workspace:*",
     "@manufakture/core": "workspace:*",
+    "@manufakture/domain-construction": "workspace:*",
     "@manufakture/domain-wood": "workspace:*",
     "@manufakture/drawing": "workspace:*",
     "@manufakture/io": "workspace:*",
@@ -23,6 +24,7 @@
     "@manufakture/print": "workspace:*",
     "@manufakture/regen": "workspace:*",
     "@manufakture/sketch": "workspace:*",
+    "@manufakture/stock": "workspace:*",
     "@manufakture/takeoff": "workspace:*",
     "@manufakture/units": "workspace:*",
     "fflate": "^0.8.3",

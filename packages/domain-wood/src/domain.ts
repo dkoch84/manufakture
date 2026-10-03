@@ -1,13 +1,14 @@
 // The woodworking domain as regen registers it (ADR 0013 decisions 1 and 5): namespace `wood`,
-// its extension types, and the readers of the two namespaces of document data it owns in M4
-// (`wood` for settings, `stock` for stock overrides). The app's regen worker entry calls
-// `registerWood(registry)` at start-up; regen imports no domain package.
+// its extension types, and the reader of the document data it owns (`wood`, its settings). It
+// reads `stock` (stock overrides), which the shared `@manufakture/stock` owns since T6.1a (ADR
+// 0015 decision 1). The app's regen worker entry calls `registerWood(registry)` at start-up;
+// regen imports no domain package.
 
 import type { ExtensionDomain, ExtensionRegistry, ExtensionType } from '@manufakture/regen';
+import { STOCK_NAMESPACE, registerStock } from '@manufakture/stock';
 import { BOARD_TYPE, boardType } from './board';
 import { JOINT_TYPE, jointType } from './joints';
 import type { Json } from './migrations';
-import { STOCK_DATA_VERSION, STOCK_NAMESPACE, readStockData } from './stock-data';
 import { WOOD_DATA_VERSION, WOOD_NAMESPACE, readWoodData } from './wood-data';
 
 /**
@@ -20,16 +21,13 @@ export const WOOD_IMPLEMENTATION = 1;
 export const woodDomain: ExtensionDomain = {
   namespace: WOOD_NAMESPACE,
   implementation: WOOD_IMPLEMENTATION,
-  // Boards read stock overrides. The settings (`wood`) are the domain's own namespace.
+  // Boards read stock overrides, owned by `@manufakture/stock`. The settings (`wood`) are the
+  // domain's own namespace.
   reads: [STOCK_NAMESPACE],
   data: {
     [WOOD_NAMESPACE]: {
       schemaVersion: WOOD_DATA_VERSION,
       read: (data, schemaVersion) => readWoodData(data as Json, schemaVersion),
-    },
-    [STOCK_NAMESPACE]: {
-      schemaVersion: STOCK_DATA_VERSION,
-      read: (data, schemaVersion) => readStockData(data as Json, schemaVersion),
     },
   },
   types: {
@@ -38,7 +36,14 @@ export const woodDomain: ExtensionDomain = {
   },
 };
 
-/** Register the woodworking domain on a regen registry. Returns a function that unregisters it. */
-export function registerWood(registry: Pick<ExtensionRegistry, 'registerDomain'>): () => void {
+/**
+ * Register the woodworking domain on a regen registry, and the shared stock reader unless it is
+ * already there (`registerStock`). Returns a function that unregisters the woodworking domain; the
+ * stock reader stays, since other domains may read `stock` too.
+ */
+export function registerWood(
+  registry: Pick<ExtensionRegistry, 'registerDomain' | 'reader'>,
+): () => void {
+  registerStock(registry);
   return registry.registerDomain(woodDomain);
 }

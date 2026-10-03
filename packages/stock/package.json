@@ -1,5 +1,5 @@
 {
-  "name": "@manufakture/domain-wood",
+  "name": "@manufakture/stock",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -9,17 +9,13 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run --root ../.. --project packages packages/domain-wood"
+    "test": "vitest run --root ../.. --project packages packages/stock"
   },
   "dependencies": {
     "@manufakture/core": "workspace:*",
-    "@manufakture/stock": "workspace:*",
-    "@manufakture/takeoff": "workspace:*",
     "@manufakture/units": "workspace:*"
   },
   "devDependencies": {
-    "@manufakture/kernel": "workspace:*",
-    "@manufakture/regen": "workspace:*",
-    "@manufakture/sketch": "workspace:*"
+    "@manufakture/regen": "workspace:*"
   }
 }
