@@ -1,0 +1,585 @@
+{
+  "host": {
+    "cpu": "AMD Ryzen 5 7600X 6-Core Processor",
+    "logicalCpus": 12,
+    "memoryGiB": 62,
+    "node": "v26.10.0",
+    "platform": "linux x64",
+    "libcascade": "3.0.2",
+    "manifold": "3.5.4",
+    "three": "0.186.1",
+    "measuredAt": "2026-10-03T06:01:04.293Z"
+  },
+  "counts": {
+    "shed": {
+      "members": 147,
+      "byRole": {
+        "bottom-plate": 5,
+        "common-rafter": 26,
+        "corner-stud": 4,
+        "cripple": 6,
+        "gable-stud": 16,
+        "header": 6,
+        "jack": 6,
+        "joist": 11,
+        "king": 6,
+        "rafter-tie": 4,
+        "ridge": 1,
+        "rim": 4,
+        "sill": 2,
+        "skid": 3,
+        "stud": 39,
+        "top-plate": 8
+      },
+      "groups": {
+        "floor": 18,
+        "wall-s": 25,
+        "wall-e": 19,
+        "wall-n": 25,
+        "wall-w": 13,
+        "roof": 31,
+        "gable-wall-e": 8,
+        "gable-wall-w": 8
+      },
+      "cutMembers": 46,
+      "notched": 26,
+      "distinctShapes": 33,
+      "distinctCutShapes": 18,
+      "largestShareCount": 49,
+      "clip": {
+        "members": 147,
+        "meshes": 33,
+        "meshTriangles": 412,
+        "sceneTriangles": 2180,
+        "meshBytes": 24672,
+        "matrixBytes": 9408
+      },
+      "manifold": {
+        "members": 147,
+        "meshes": 33,
+        "meshTriangles": 408,
+        "sceneTriangles": 2076,
+        "meshBytes": 29952,
+        "matrixBytes": 9408
+      },
+      "dirty": { "wall": "wall-s", "opening": "opening#2", "by": 12, "members": 27 }
+    },
+    "house": {
+      "members": 834,
+      "byRole": {
+        "beam": 12,
+        "blocking": 38,
+        "bottom-plate": 29,
+        "ceiling-joist": 76,
+        "common-rafter": 20,
+        "corner-stud": 4,
+        "cripple": 47,
+        "header": 30,
+        "hip-rafter": 4,
+        "jack": 20,
+        "jack-rafter": 114,
+        "joist": 74,
+        "king": 20,
+        "ridge": 1,
+        "rim": 12,
+        "sill": 8,
+        "sill-plate": 14,
+        "stud": 231,
+        "tee-stud": 22,
+        "top-plate": 58
+      },
+      "groups": {
+        "floor": 150,
+        "wall-s": 82,
+        "wall-e": 49,
+        "wall-n": 91,
+        "wall-w": 66,
+        "wall-i1": 58,
+        "wall-i2": 22,
+        "wall-i3": 22,
+        "wall-i4": 22,
+        "wall-i5": 22,
+        "wall-i6": 24,
+        "wall-i7": 11,
+        "roof": 139,
+        "ceiling": 76
+      },
+      "cutMembers": 214,
+      "notched": 138,
+      "distinctShapes": 108,
+      "distinctCutShapes": 66,
+      "largestShareCount": 141,
+      "clip": {
+        "members": 834,
+        "meshes": 108,
+        "meshTriangles": 2252,
+        "sceneTriangles": 12212,
+        "meshBytes": 132288,
+        "matrixBytes": 53376
+      },
+      "manifold": {
+        "members": 834,
+        "meshes": 108,
+        "meshTriangles": 2012,
+        "sceneTriangles": 11660,
+        "meshBytes": 156912,
+        "matrixBytes": 53376
+      },
+      "dirty": { "wall": "wall-s", "opening": "opening#2", "by": 12, "members": 83 }
+    }
+  },
+  "bcCold": [
+    {
+      "fixture": "shed",
+      "rep": "B",
+      "loadMs": 0,
+      "generateMs": 4.76,
+      "meshMs": 0.59,
+      "instancesMs": 0.32,
+      "totalMs": 5.7,
+      "lists": 33,
+      "members": 147,
+      "meshes": 33,
+      "meshTriangles": 412,
+      "sceneTriangles": 2180,
+      "meshBytes": 24672,
+      "matrixBytes": 9408,
+      "heapUsedGrowthMiB": 1.53,
+      "rssMiB": 86
+    },
+    {
+      "fixture": "shed",
+      "rep": "C",
+      "loadMs": 7.33,
+      "generateMs": 6.23,
+      "meshMs": 8.03,
+      "instancesMs": 0.35,
+      "totalMs": 21.88,
+      "lists": 33,
+      "members": 147,
+      "meshes": 33,
+      "meshTriangles": 408,
+      "sceneTriangles": 2076,
+      "meshBytes": 29952,
+      "matrixBytes": 9408,
+      "heapUsedGrowthMiB": 2.91,
+      "rssMiB": 92
+    },
+    {
+      "fixture": "house",
+      "rep": "B",
+      "loadMs": 0,
+      "generateMs": 9.25,
+      "meshMs": 2.46,
+      "instancesMs": 1.06,
+      "totalMs": 12.86,
+      "lists": 108,
+      "members": 834,
+      "meshes": 108,
+      "meshTriangles": 2252,
+      "sceneTriangles": 12212,
+      "meshBytes": 132288,
+      "matrixBytes": 53376,
+      "heapUsedGrowthMiB": 2.6,
+      "rssMiB": 89
+    },
+    {
+      "fixture": "house",
+      "rep": "C",
+      "loadMs": 7.26,
+      "generateMs": 10.9,
+      "meshMs": 31.81,
+      "instancesMs": 1.61,
+      "totalMs": 51.64,
+      "lists": 108,
+      "members": 834,
+      "meshes": 108,
+      "meshTriangles": 2012,
+      "sceneTriangles": 11660,
+      "meshBytes": 156912,
+      "matrixBytes": 53376,
+      "heapUsedGrowthMiB": 3.82,
+      "rssMiB": 103
+    }
+  ],
+  "bcWarm": [
+    {
+      "fixture": "shed",
+      "rep": "B",
+      "wall": "wall-s",
+      "firstMs": 0.36,
+      "medianMs": 0.14,
+      "newShapesOnFirstMove": 0,
+      "allGroupsWarmCacheMs": 0.96,
+      "runs": 41
+    },
+    {
+      "fixture": "shed",
+      "rep": "C",
+      "wall": "wall-s",
+      "firstMs": 0.28,
+      "medianMs": 0.14,
+      "newShapesOnFirstMove": 0,
+      "allGroupsWarmCacheMs": 1.38,
+      "runs": 41
+    },
+    {
+      "fixture": "house",
+      "rep": "B",
+      "wall": "wall-s",
+      "firstMs": 0.9,
+      "medianMs": 0.66,
+      "newShapesOnFirstMove": 0,
+      "allGroupsWarmCacheMs": 5.24,
+      "runs": 41
+    },
+    {
+      "fixture": "house",
+      "rep": "C",
+      "wall": "wall-s",
+      "firstMs": 0.84,
+      "medianMs": 0.63,
+      "newShapesOnFirstMove": 0,
+      "allGroupsWarmCacheMs": 4.85,
+      "runs": 41
+    }
+  ],
+  "meshers": {
+    "shapes": 84,
+    "clipMsPerShape": 0.0072,
+    "manifoldMsPerShape": 0.1964,
+    "clipTriangles": 1980,
+    "manifoldTriangles": 1736,
+    "maxVolumeRelDiff": 2.1759757518549302e-8,
+    "boxMsPerMember": 0.0026
+  },
+  "manifoldLeak": [
+    {
+      "n": 10,
+      "leak": false,
+      "created": 3760,
+      "deleted": 3760,
+      "memoryBytes": 16777216,
+      "usedBytes": 131072
+    },
+    {
+      "n": 60,
+      "leak": false,
+      "created": 22560,
+      "deleted": 22560,
+      "memoryBytes": 16777216,
+      "usedBytes": 131072
+    },
+    {
+      "n": 10,
+      "leak": true,
+      "created": 3760,
+      "deleted": 0,
+      "memoryBytes": 16777216,
+      "usedBytes": 15532032
+    },
+    {
+      "n": 60,
+      "leak": true,
+      "created": 22560,
+      "deleted": 0,
+      "memoryBytes": 104529920,
+      "usedBytes": 92471296
+    }
+  ],
+  "aCold": [
+    {
+      "fixture": "shed",
+      "initMs": 487.6,
+      "regenMs": 1183.5,
+      "members": 147,
+      "ops": 487,
+      "failed": 0,
+      "errors": [],
+      "triangles": 2076,
+      "transferMiB": 0.87,
+      "transferMs": 16.3,
+      "heapMiB": 128,
+      "liveShapes": 147
+    },
+    {
+      "fixture": "house",
+      "initMs": 487.7,
+      "regenMs": 5483.2,
+      "members": 834,
+      "ops": 2716,
+      "failed": 0,
+      "errors": [],
+      "triangles": 11660,
+      "transferMiB": 4.83,
+      "transferMs": 90.3,
+      "heapMiB": 128,
+      "liveShapes": 834
+    }
+  ],
+  "aWarm": [
+    {
+      "fixture": "shed",
+      "wall": "wall-s",
+      "members": 27,
+      "firstMs": 70.1,
+      "medianMs": 67,
+      "runs": 11
+    },
+    {
+      "fixture": "house",
+      "wall": "wall-s",
+      "members": 83,
+      "firstMs": 203.2,
+      "medianMs": 200.2,
+      "runs": 11
+    }
+  ],
+  "aOnDemand": [
+    {
+      "fixture": "shed",
+      "bodies": 147,
+      "buildMs": 895.5,
+      "exportMs": 184.6,
+      "stepMiB": 2.77,
+      "exportOk": true,
+      "heapGrowthMiB": 0,
+      "failed": 0
+    },
+    {
+      "fixture": "house",
+      "bodies": 834,
+      "buildMs": 4071.9,
+      "exportMs": 825.3,
+      "stepMiB": 16.16,
+      "exportOk": true,
+      "heapGrowthMiB": 25.6,
+      "failed": 0
+    }
+  ],
+  "aLeak": [
+    { "fixture": "shed", "n": 10, "ms": 10079.4, "heapBytes": 134217728, "usedBytes": 107020288 },
+    { "fixture": "shed", "n": 60, "ms": 58273, "heapBytes": 577437696, "usedBytes": 540803072 },
+    { "fixture": "house", "n": 5, "ms": 25928.7, "heapBytes": 278396928, "usedBytes": 267911168 },
+    { "fixture": "house", "n": 20, "ms": 103093.7, "heapBytes": 989462528, "usedBytes": 929234944 }
+  ],
+  "aLeakPerRegen": [
+    { "fixture": "shed", "n": "10 / 60", "in use MiB": "102.1 / 515.8", "MiB per regen": 8.27 },
+    { "fixture": "house", "n": "5 / 20", "in use MiB": "255.5 / 886.2", "MiB per regen": 42.05 }
+  ],
+  "aRecycle": {
+    "regensBeforeRecycle": 22,
+    "recycleMs": 350.3,
+    "heapAtRecycleMiB": 1132.4,
+    "heapTraceMiB": [
+      128, 128, 184.4, 221.3, 265.5, 318.6, 382.4, 382.4, 458.9, 550.7, 550.7, 550.7, 660.9, 660.9,
+      660.9, 793.1, 793.1, 793.1, 943.6, 943.6, 943.6, 128
+    ],
+    "medianRegenMs": 5093.5
+  },
+  "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+  "viewport": [
+    {
+      "fixture": "shed",
+      "rep": "A",
+      "case": "object per member (A, as bodies.ts)",
+      "members": 147,
+      "scene ms": 9.2,
+      "first frame ms": 59.2,
+      "draw calls": 266,
+      "triangles": 2012,
+      "frame ms (median)": 12,
+      "frame ms (p95)": 18.5,
+      "GPU geometry KiB": 177
+    },
+    {
+      "fixture": "shed",
+      "rep": "B",
+      "case": "InstancedMesh per role and shape",
+      "members": 147,
+      "scene ms": 10.6,
+      "first frame ms": 52.1,
+      "draw calls": 46,
+      "triangles": 2180,
+      "frame ms (median)": 9.2,
+      "frame ms (p95)": 12.3,
+      "GPU geometry KiB": 78.7
+    },
+    {
+      "fixture": "shed",
+      "rep": "C",
+      "case": "InstancedMesh, Manifold cut meshes",
+      "members": 147,
+      "scene ms": 10.1,
+      "first frame ms": 51,
+      "draw calls": 46,
+      "triangles": 2076,
+      "frame ms (median)": 9.4,
+      "frame ms (p95)": 10.1,
+      "GPU geometry KiB": 80.2
+    },
+    {
+      "fixture": "shed",
+      "rep": "B",
+      "case": "BatchedMesh",
+      "members": 147,
+      "scene ms": 11.8,
+      "first frame ms": 59.1,
+      "draw calls": 9,
+      "triangles": 2180,
+      "frame ms (median)": 9.1,
+      "frame ms (p95)": 10.4,
+      "GPU geometry KiB": 72.2
+    },
+    {
+      "fixture": "shed",
+      "rep": "B",
+      "case": "InstancedMesh, no edges",
+      "members": 147,
+      "scene ms": 9.3,
+      "first frame ms": 37.6,
+      "draw calls": 38,
+      "triangles": 2180,
+      "frame ms (median)": 7.4,
+      "frame ms (p95)": 8.2,
+      "GPU geometry KiB": 28.2
+    },
+    {
+      "fixture": "shed",
+      "rep": "B",
+      "case": "LOD near: blocking and cripples hidden",
+      "members": 141,
+      "scene ms": 10.5,
+      "first frame ms": 50.2,
+      "draw calls": 43,
+      "triangles": 2108,
+      "frame ms (median)": 9.3,
+      "frame ms (p95)": 10,
+      "GPU geometry KiB": 74.8
+    },
+    {
+      "fixture": "shed",
+      "rep": "B",
+      "case": "LOD far: one merged mesh per group",
+      "members": 147,
+      "scene ms": 10.6,
+      "first frame ms": 48.2,
+      "draw calls": 16,
+      "triangles": 2180,
+      "frame ms (median)": 8.9,
+      "frame ms (p95)": 9.9,
+      "GPU geometry KiB": 177
+    },
+    {
+      "fixture": "house",
+      "rep": "A",
+      "case": "object per member (A, as bodies.ts)",
+      "members": 834,
+      "scene ms": 22.5,
+      "first frame ms": 74.6,
+      "draw calls": 996,
+      "triangles": 7480,
+      "frame ms (median)": 34.1,
+      "frame ms (p95)": 38.2,
+      "GPU geometry KiB": 992.1
+    },
+    {
+      "fixture": "house",
+      "rep": "B",
+      "case": "InstancedMesh per role and shape",
+      "members": 834,
+      "scene ms": 22.5,
+      "first frame ms": 62.5,
+      "draw calls": 137,
+      "triangles": 12212,
+      "frame ms (median)": 20.4,
+      "frame ms (p95)": 22.2,
+      "GPU geometry KiB": 426
+    },
+    {
+      "fixture": "house",
+      "rep": "C",
+      "case": "InstancedMesh, Manifold cut meshes",
+      "members": 834,
+      "scene ms": 24.1,
+      "first frame ms": 62,
+      "draw calls": 137,
+      "triangles": 11660,
+      "frame ms (median)": 21,
+      "frame ms (p95)": 22.9,
+      "GPU geometry KiB": 430.6
+    },
+    {
+      "fixture": "house",
+      "rep": "B",
+      "case": "BatchedMesh",
+      "members": 834,
+      "scene ms": 21.2,
+      "first frame ms": 66.9,
+      "draw calls": 15,
+      "triangles": 12212,
+      "frame ms (median)": 20.6,
+      "frame ms (p95)": 21.7,
+      "GPU geometry KiB": 399
+    },
+    {
+      "fixture": "house",
+      "rep": "B",
+      "case": "InstancedMesh, no edges",
+      "members": 834,
+      "scene ms": 19.9,
+      "first frame ms": 46.1,
+      "draw calls": 123,
+      "triangles": 12212,
+      "frame ms (median)": 15.5,
+      "frame ms (p95)": 17,
+      "GPU geometry KiB": 143
+    },
+    {
+      "fixture": "house",
+      "rep": "B",
+      "case": "LOD near: blocking and cripples hidden",
+      "members": 749,
+      "scene ms": 22.3,
+      "first frame ms": 61.3,
+      "draw calls": 130,
+      "triangles": 11192,
+      "frame ms (median)": 20.1,
+      "frame ms (p95)": 21.6,
+      "GPU geometry KiB": 396.8
+    },
+    {
+      "fixture": "house",
+      "rep": "B",
+      "case": "LOD far: one merged mesh per group",
+      "members": 834,
+      "scene ms": 23.9,
+      "first frame ms": 59.2,
+      "draw calls": 28,
+      "triangles": 12212,
+      "frame ms (median)": 19.1,
+      "frame ms (p95)": 20.2,
+      "GPU geometry KiB": 992.1
+    }
+  ],
+  "picking": [
+    {
+      "fixture": "shed",
+      "picks": 200,
+      "hits": 200,
+      "agree": 200,
+      "gpuMedianMs": 0.6999999997206032,
+      "rayMedianMs": 0,
+      "mismatches": []
+    },
+    {
+      "fixture": "house",
+      "picks": 200,
+      "hits": 200,
+      "agree": 200,
+      "gpuMedianMs": 2.7999999998137355,
+      "rayMedianMs": 0.10000000009313226,
+      "mismatches": []
+    }
+  ]
+}

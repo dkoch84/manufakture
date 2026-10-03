@@ -15,6 +15,7 @@ import {
 import { Kernel } from './kernel';
 import { createNodeInstance } from './node';
 import { threadSolid, type ThreadGeometry } from './threads';
+import { heapInUse as probeHeap, occtAllocator } from './heap-probe';
 import { track, type Tracker } from './track';
 import type { Frame, ProfileLoop, ShapeId, Vec3 } from './types';
 
@@ -181,25 +182,9 @@ function jointedBoards(kernel: Kernel = k): ShapeId[] {
   return set.map((b) => b.shape);
 }
 
-/**
- * Bytes of wasm heap in use: the memory's size less what the allocator can still hand out in
- * 64 KiB blocks before the memory grows. Coarse (64 KiB, and fragmentation counts as used), but
- * unlike `heapBytes` it moves with every allocation. It grows the memory, so call it once per
- * instance.
- */
+/** Bytes of wasm heap in use (`heap-probe.ts`). It grows the memory, so call it once per instance. */
 function heapInUse(kernel: Kernel): number {
-  const oc = kernel.oc as unknown as {
-    wasmMemory: WebAssembly.Memory;
-    _emscripten_builtin_malloc(size: number): number;
-    _emscripten_builtin_free(ptr: number): void;
-  };
-  const size = 65536;
-  const start = oc.wasmMemory.buffer.byteLength;
-  const blocks: number[] = [];
-  while (oc.wasmMemory.buffer.byteLength === start)
-    blocks.push(oc._emscripten_builtin_malloc(size));
-  for (const b of blocks) oc._emscripten_builtin_free(b);
-  return start - (blocks.length - 1) * size;
+  return probeHeap(occtAllocator(kernel.oc));
 }
 
 /** A small feature tree: profile, extrude, cut, fillet, then every query. */

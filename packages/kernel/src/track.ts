@@ -109,3 +109,5 @@ export function track(oc: Oc): Tracker {
     },
   };
 }
+
+export { heapInUse, occtAllocator, type WasmAllocator } from './heap-probe';
