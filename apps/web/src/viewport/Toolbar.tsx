@@ -1,6 +1,7 @@
 import { useStore } from 'zustand';
 import { GEOMETRY_KINDS, selectionStore, type SelectionStore } from '../state/selection';
 import { viewSettingsStore, type Axis, type ViewSettingsStore } from '../state/viewSettings';
+import { MEMBER_KIND } from './members';
 import { PRESETS, isPresetId } from './navigation';
 import type { StandardView } from './viewMath';
 import type { ViewportApi } from './Viewport';
@@ -13,6 +14,12 @@ const VIEWS: readonly [StandardView, string][] = [
 ];
 
 const KIND_LABELS = { face: 'Faces', edge: 'Edges', vertex: 'Vertices' } as const;
+
+/** The selection filter's kinds: body geometry, then framing members picked as a whole. */
+const FILTER_KINDS: readonly [string, string][] = [
+  ...GEOMETRY_KINDS.map((kind): [string, string] => [kind, KIND_LABELS[kind]]),
+  [MEMBER_KIND, 'Members'],
+];
 
 export interface ToolbarProps {
   viewport: ViewportApi | null;
@@ -82,14 +89,14 @@ export function Toolbar({
 
       <fieldset className="toolbar-group">
         <legend>Select</legend>
-        {GEOMETRY_KINDS.map((kind) => (
+        {FILTER_KINDS.map(([kind, label]) => (
           <label key={kind}>
             <input
               type="checkbox"
               checked={!disabledKinds.includes(kind)}
               onChange={(e) => setKindEnabled(kind, e.target.checked)}
             />
-            {KIND_LABELS[kind]}
+            {label}
           </label>
         ))}
       </fieldset>

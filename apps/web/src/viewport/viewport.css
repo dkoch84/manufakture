@@ -197,3 +197,42 @@ body,
   text-align: center;
   pointer-events: none;
 }
+
+/* A picked framing member's stock, length and cuts, over the viewport's bottom left corner. */
+.member-info {
+  position: absolute;
+  left: 0.75rem;
+  bottom: 0.75rem;
+  max-width: 20rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #d6dce3;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.94);
+  font-size: 0.8rem;
+}
+
+.member-info h2 {
+  margin: 0 0 0.35rem;
+  font-size: 0.9rem;
+}
+
+.member-info dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.15rem 0.6rem;
+  margin: 0;
+}
+
+.member-info dt {
+  color: #5b6673;
+}
+
+.member-info dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.member-info ul {
+  margin: 0;
+  padding-left: 1.1em;
+}

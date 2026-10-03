@@ -4,9 +4,12 @@ import type { KernelClientOptions } from '@manufakture/kernel/client';
 import type { RegenResult } from '@manufakture/regen';
 import type { RegenClient } from '@manufakture/regen/client';
 import { describe, expect, it, vi } from 'vitest';
+import { bodyLayer } from './members';
+import { createMemberStore, shownMemberView } from './memberStore';
 import { isPlaceholderName } from './naming';
 import {
   DEFAULT_PERF_TRIANGLES,
+  framingLoader,
   kernelLoadStatus,
   kernelLoader,
   loaderForLocation,
@@ -60,6 +63,22 @@ describe('scene choice', () => {
     });
     expect(sceneFromSearch('?scene=perf&triangles=-4').triangles).toBe(DEFAULT_PERF_TRIANGLES);
     expect(sceneFromSearch('?scene=perf&triangles=1e12').triangles).toBe(5_000_000);
+  });
+
+  it('reads the framing scene and its fixture, the shed by default', () => {
+    expect(sceneFromSearch('?scene=framing')).toMatchObject({ scene: 'framing', fixture: 'shed' });
+    expect(sceneFromSearch('?scene=framing&fixture=house').fixture).toBe('house');
+    expect(sceneFromSearch('?scene=demo').fixture).toBeUndefined();
+  });
+});
+
+describe('framing scene', () => {
+  it('resolves with the layer bodies and loads the members into the store', async () => {
+    const members = createMemberStore();
+    const bodies = await framingLoader('shed', members).load(() => {});
+    expect(bodies.map((b) => bodyLayer(b.id))).toEqual(Array(4).fill('sheathing'));
+    expect(members.getState().shown).toBe('shed');
+    expect(shownMemberView(members.getState()).sets).toHaveLength(4);
   });
 });
 

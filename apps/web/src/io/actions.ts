@@ -20,6 +20,7 @@ import {
   parseStl,
   sniffFormat,
   stepProductNames,
+  type ExportBody,
   type ExportTolerancePreset,
   type TriMesh,
 } from '@manufakture/io';
@@ -27,6 +28,7 @@ import type { DocumentStoreApi } from '../state/document';
 import type { BodyInput } from '../viewport/bodies';
 import type { Exchanger } from './exchange';
 import { MIME, formatBytes } from './files';
+import { shownMemberExports } from './memberExport';
 import { meshBody } from './meshBody';
 import { importBodyId } from './restorable';
 
@@ -53,6 +55,11 @@ export interface ExportChoice {
  * when there are several (`options.fileBase` overrides both). Binary STL (all bodies in one file, or one file per body),
  * 3MF (one named object per body) or STEP (one named product per body). Mesh exports are
  * tessellated at `tolerance` and must be watertight.
+ *
+ * Framing members (`options.members`, by default the ones the viewport shows) go into mesh
+ * exports after the bodies (ADR 0015 decision 4): one 3MF object per member named by its full id,
+ * appended to a merged STL, or one more STL of them all when each body gets a file. STEP leaves
+ * them out (member B-reps are built on demand, a later task).
  */
 export async function exportBodies(
   exchanger: Exchanger,
@@ -63,10 +70,15 @@ export async function exportBodies(
     bodies?: readonly ExportChoice[];
     /** The file name, without extension, whatever the bodies are (default: see below). */
     fileBase?: string;
+    /** Framing members, placed and named (default: the members the viewport shows). */
+    members?: readonly ExportBody[];
   } = {},
 ): Promise<ActionResult<ExportedFile[]>> {
   const bodies = options.bodies ?? exchanger.bodies();
-  if (bodies.length === 0) return { ok: false, message: 'There is nothing to export.' };
+  const members = options.members ?? shownMemberExports();
+  if (bodies.length === 0 && (members.length === 0 || format === 'step')) {
+    return { ok: false, message: 'There is nothing to export.' };
+  }
   const ids = bodies.map((b) => b.id);
   const names = options.bodies ? new Map(bodies.map((b) => [b.id, b.name])) : undefined;
   const base =
@@ -80,31 +92,46 @@ export async function exportBodies(
   } else {
     const tolerance = EXPORT_TOLERANCES[options.tolerance ?? 'normal'];
     const deflection = deflectionOf(tolerance);
-    const meshes = names
-      ? await exchanger.tessellate(ids, deflection, names)
-      : await exchanger.tessellate(ids, deflection);
+    const meshes =
+      ids.length === 0
+        ? { ok: true as const, value: [] }
+        : names
+          ? await exchanger.tessellate(ids, deflection, names)
+          : await exchanger.tessellate(ids, deflection);
     if (!meshes.ok) return meshes;
+    const all = [...meshes.value, ...members];
     try {
-      files =
-        format === '3mf'
-          ? [
-              {
-                name: fileName(base, '3mf'),
-                bytes: export3mf(meshes.value, { title: base }),
-                type: MIME['3mf'],
-              },
-            ]
-          : exportStl(meshes.value, { merge: format === 'stl', fileName: base }).map((f) => ({
-              ...f,
-              type: MIME.stl,
-            }));
+      if (format === '3mf') {
+        files = [
+          {
+            name: fileName(base, '3mf'),
+            bytes: export3mf(all, { title: base }),
+            type: MIME['3mf'],
+          },
+        ];
+      } else if (format === 'stl') {
+        files = exportStl(all, { merge: true, fileName: base }).map((f) => ({
+          ...f,
+          type: MIME.stl,
+        }));
+      } else {
+        // One file per body; the members, often hundreds, together in one more.
+        files = [
+          ...exportStl(meshes.value, { merge: false }),
+          ...(members.length > 0
+            ? exportStl(members, { merge: true, fileName: `${base} members` })
+            : []),
+        ].map((f) => ({ ...f, type: MIME.stl }));
+      }
     } catch (e) {
       if (e instanceof NotWatertightError) return { ok: false, message: e.message };
       throw e;
     }
   }
   const summary = files.map((f) => `${f.name} (${formatBytes(f.bytes.length)})`).join(', ');
-  return { ok: true, value: files, message: `Exported ${summary}.` };
+  const skipped =
+    format === 'step' && members.length > 0 ? ' Framing members are not exported to STEP yet.' : '';
+  return { ok: true, value: files, message: `Exported ${summary}.${skipped}` };
 }
 
 /** Largest file an import accepts (core's limit): it is kept inside the document, as base64. */

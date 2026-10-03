@@ -126,6 +126,8 @@ export async function exportConfigurations(
       ...(request.tolerance ? { tolerance: request.tolerance } : {}),
       bodies,
       fileBase: configurationFileBase(document.name, row.name),
+      // The viewport's members are the active row's; another row's are not built here.
+      members: [],
     });
     if (!r.ok) {
       failures.push({ row, message: r.message });

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { documentStore as defaultDocuments, type DocumentStoreApi } from '../state/document';
 import { selectionStore as defaultSelection, type SelectionStore } from '../state/selection';
 import {
   viewSettingsStore as defaultSettings,
@@ -8,6 +9,8 @@ import { testHooksEnabled } from '../testHooks';
 import type { BodyInput } from './bodies';
 import { ViewportEngine, type EngineStores } from './engine';
 import { liveViewport } from './live';
+import { MemberInfo } from './MemberInfo';
+import { memberStore as defaultMembers, shownMemberView, type MemberStore } from './memberStore';
 
 /** The part of the engine the UI and tests use. */
 export type ViewportApi = Pick<
@@ -40,7 +43,20 @@ export type ViewportApi = Pick<
   | 'addOverlay'
   | 'frameBox'
   | 'dispose'
->;
+> &
+  // Framing members (optional, so engines made for tests need not draw them).
+  Partial<
+    Pick<
+      ViewportEngine,
+      | 'setMembers'
+      | 'setMembersVisible'
+      | 'setHiddenLayers'
+      | 'setLevelCut'
+      | 'memberAt'
+      | 'memberInfo'
+      | 'memberColor'
+    >
+  >;
 
 export type EngineFactory = (canvas: HTMLCanvasElement, stores: EngineStores) => ViewportApi;
 
@@ -54,6 +70,10 @@ export interface TestHookRegistry {
   viewport?: ViewportApi;
   selection?: SelectionStore;
   settings?: ViewSettingsStore;
+  /** The framing members the viewport draws (memberStore.ts). */
+  members?: MemberStore;
+  /** Loads a framing fixture's members into the store, for a part id (memberFixtures.ts). */
+  loadMemberFixture?: (name: 'shed' | 'house', partId?: string) => Promise<void>;
   [key: string]: unknown;
 }
 
@@ -69,6 +89,10 @@ export interface ViewportProps {
   createEngine?: EngineFactory;
   selection?: SelectionStore;
   settings?: ViewSettingsStore;
+  /** The framing members to draw: the shown part's sets (default: the app's member store). */
+  members?: MemberStore;
+  /** For the member info panel's units (default: the app's document store). */
+  documents?: DocumentStoreApi;
   /** Overlays drawn over the canvas (the sketcher), in the viewport's element. */
   children?: ReactNode;
 }
@@ -79,6 +103,8 @@ export function Viewport({
   createEngine = createDefaultEngine,
   selection = defaultSelection,
   settings = defaultSettings,
+  members = defaultMembers,
+  documents = defaultDocuments,
   children,
 }: ViewportProps) {
   const [engine, setEngine] = useState<ViewportApi | null>(null);
@@ -100,7 +126,18 @@ export function Viewport({
       setEngine(api);
       liveViewport.setState({ api });
       if (testHooksEnabled) {
-        window.__manufakture = { ...window.__manufakture, viewport: api, selection, settings };
+        window.__manufakture = {
+          ...window.__manufakture,
+          viewport: api,
+          selection,
+          settings,
+          members,
+          loadMemberFixture: async (name, partId) => {
+            const { memberFixture } = await import('./memberFixtures');
+            const f = memberFixture(name, partId);
+            members.getState().load(f.partId, f.view);
+          },
+        };
       }
       return () => {
         const hooks = window.__manufakture;
@@ -109,6 +146,8 @@ export function Viewport({
           delete rest.viewport;
           delete rest.selection;
           delete rest.settings;
+          delete rest.members;
+          delete rest.loadMemberFixture;
           if (Object.keys(rest).length > 0) window.__manufakture = rest;
           else delete window.__manufakture;
         }
@@ -117,12 +156,20 @@ export function Viewport({
         setEngine(null);
       };
     },
-    [createEngine, selection, settings],
+    [createEngine, selection, settings, members],
   );
 
   useEffect(() => {
     engine?.setBodies(bodies);
   }, [engine, bodies]);
+
+  // Members follow the store: the engine applies what changed (shapes, batches, edges).
+  useEffect(() => {
+    const setMembers = engine?.setMembers?.bind(engine);
+    if (!setMembers) return;
+    setMembers(shownMemberView(members.getState()));
+    return members.subscribe((s) => setMembers(shownMemberView(s)));
+  }, [engine, members]);
 
   useEffect(() => {
     onReady?.(engine);
@@ -138,6 +185,7 @@ export function Viewport({
         data-testid="viewport-canvas"
       />
       {children}
+      {engine && <MemberInfo selection={selection} members={members} documents={documents} />}
       {error !== null && (
         <div className="viewport-error" role="alert">
           The 3D view could not start: {error}. It needs a browser with WebGL 2.

@@ -3,7 +3,8 @@
 // Three test scenes are only honoured where the test hooks are on (see testHooks.ts):
 // `?scene=demo` opens the demo part as a document (model/demo.ts), and two kernel-free scenes
 // serve tests: `?scene=test` (a named box, for the e2e pick check) and `?scene=perf&triangles=N`
-// (a dense sphere, for frame time measurements).
+// (a dense sphere, for frame time measurements). `?scene=framing&fixture=shed|house` shows a
+// framing fixture's layer bodies and members (memberFixtures.ts), with no kernel.
 
 import type { ManufaktureDocument } from '@manufakture/core';
 import type { LoadProgress } from '@manufakture/kernel';
@@ -21,6 +22,8 @@ import type { Texter } from '../sketcher/text';
 import type { Sizer } from '../wood/cutlist/sizer';
 import { testHooksEnabled } from '../testHooks';
 import type { BodyInput } from './bodies';
+import type { MemberFixtureName } from './memberFixtures';
+import { memberStore } from './memberStore';
 import { fillPlaceholderNames } from './naming';
 import { spawnAppRegenWorker } from './regen-spawn';
 import { boxBody, denseSphereBody } from './testMeshes';
@@ -239,11 +242,13 @@ export function staticLoader(label: string, make: () => BodyInput[]): SceneLoade
   });
 }
 
-export type SceneName = 'default' | 'demo' | 'test' | 'perf';
+export type SceneName = 'default' | 'demo' | 'test' | 'perf' | 'framing';
 
 export interface SceneChoice {
   scene: SceneName;
   triangles: number;
+  /** The framing scene's fixture. */
+  fixture?: MemberFixtureName;
 }
 
 export const DEFAULT_PERF_TRIANGLES = 200_000;
@@ -251,11 +256,13 @@ export const DEFAULT_PERF_TRIANGLES = 200_000;
 export function sceneFromSearch(search: string): SceneChoice {
   const params = new URLSearchParams(search);
   const s = params.get('scene');
-  const scene: SceneName = s === 'test' || s === 'perf' || s === 'demo' ? s : 'default';
+  const scene: SceneName =
+    s === 'test' || s === 'perf' || s === 'demo' || s === 'framing' ? s : 'default';
   const t = Number(params.get('triangles'));
   const triangles =
     Number.isFinite(t) && t > 0 ? Math.min(Math.floor(t), 5_000_000) : DEFAULT_PERF_TRIANGLES;
-  return { scene, triangles };
+  if (scene !== 'framing') return { scene, triangles };
+  return { scene, triangles, fixture: params.get('fixture') === 'house' ? 'house' : 'shed' };
 }
 
 /** The test scene: a named 40 x 30 x 20 box standing on the origin. */
@@ -274,6 +281,19 @@ export function perfLoader(triangles: number): SceneLoader {
 }
 
 /**
+ * A framing fixture: its layer bodies as the scene's bodies, its members loaded into the member
+ * store for the viewport (the fixture code loads on demand, so it stays out of the main chunk).
+ */
+export function framingLoader(fixture: MemberFixtureName, members = memberStore): SceneLoader {
+  return loaderFrom({ label: `Framing the ${fixture}`, fraction: null }, async () => {
+    const { memberFixture } = await import('./memberFixtures');
+    const f = memberFixture(fixture);
+    members.getState().load(f.partId, f.view);
+    return f.bodies.map((b) => ({ ...b, names: fillPlaceholderNames(b.mesh, b.names) }));
+  });
+}
+
+/**
  * The scene named in the page URL; the kernel with an empty document by default, and always
  * when `testScenes` is off.
  */
@@ -287,6 +307,7 @@ export function loaderForLocation(
     : { scene: 'default', triangles: 0 };
   if (choice.scene === 'test') return testLoader();
   if (choice.scene === 'perf') return perfLoader(choice.triangles);
+  if (choice.scene === 'framing') return framingLoader(choice.fixture ?? 'shed');
   if (choice.scene === 'demo') return kernelLoader(spawn, { initialDocument: demoDocument() });
   return kernelLoader(spawn);
 }

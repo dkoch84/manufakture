@@ -16,6 +16,10 @@
 // each keeping only its own colours and pick ids. Picks still return the name in
 // the body's own mesh, so a transform never changes what a click names. A
 // change of transforms alone (a drag, a solve) moves the objects in place.
+//
+// Framing members (ADR 0015 decision 4) are drawn apart from bodies, instanced per shape
+// (memberObjects.ts), picked as a whole through pick ids of their own range (members.ts). A level
+// cut clips bodies and members alike; wall layer bodies can be hidden by layer.
 
 import {
   AmbientLight,
@@ -66,6 +70,7 @@ import {
   selectModeFor,
   type GeometryKind,
   type GeometryRef,
+  type SelectableItem,
   type SelectionState,
   type SelectionStore,
 } from '../state/selection';
@@ -93,6 +98,17 @@ import {
   type ViewShading,
 } from './printView';
 import { createGridMaterial, createPickMaterial, createSilhouetteMaterial } from './materials';
+import { MemberObjects, type MemberHighlight, type MemberObjectStats } from './memberObjects';
+import {
+  MEMBER_KIND,
+  bodyLayer,
+  isMemberRef,
+  levelCutPlanes,
+  memberRef,
+  type LevelCut,
+  type MemberRef,
+  type MemberView,
+} from './members';
 import { PLACEHOLDER_PREFIX, nameFromFeature } from './naming';
 import {
   NO_MODIFIERS,
@@ -106,6 +122,7 @@ import {
 import {
   PICK_TOLERANCE_PX,
   choosePick,
+  decodePickId,
   edgeCandidates,
   hitToRef,
   readPickWindow,
@@ -170,6 +187,8 @@ interface BodyObjects {
   /** Edges and vertices in the pick scene. */
   pickEdges: LineSegments<BufferGeometry, ShaderMaterial>;
   pickVertices: Points<BufferGeometry, ShaderMaterial>;
+  /** Hidden with its wall layer (`setHiddenLayers`). */
+  hidden: boolean;
   /** Projected segments (x0 y0 x1 y1) and vertices (x y), cached per camera version. */
   screenSegments: Float32Array;
   screenVertices: Float32Array;
@@ -293,6 +312,15 @@ export class ViewportEngine {
   } | null = null;
 
   private bodies: BodyObjects[] = [];
+  /** Framing members: instanced per shape, picked per instance. */
+  private readonly memberMaterial: MeshStandardMaterial;
+  private readonly memberPickMaterial: ShaderMaterial;
+  private readonly memberEdgeMaterial: LineBasicMaterial;
+  private readonly members: MemberObjects;
+  /** The level cut's planes (none, one or two), also in `clipPlanes`; the section cap uses only these. */
+  private readonly levelPlanes: Plane[] = [];
+  private levelCut: LevelCut | null = null;
+  private hiddenLayers = new Set<string>();
   private view: ViewState = {
     target: new Vector3(),
     orientation: orientationFor(STANDARD_VIEWS.iso),
@@ -456,10 +484,37 @@ export class ViewportEngine {
         stencilZPass: ReplaceStencilOp,
       }),
     );
+    this.cap.material.clippingPlanes = this.levelPlanes;
     this.cap.renderOrder = 2;
     this.cap.onAfterRender = (renderer) => renderer.clearStencil();
     this.cap.visible = false;
     this.scene.add(this.cap);
+
+    this.memberMaterial = new MeshStandardMaterial({
+      roughness: 0.8,
+      metalness: 0,
+      polygonOffset: true,
+      polygonOffsetFactor: 1,
+      polygonOffsetUnits: 1,
+      clippingPlanes: this.clipPlanes,
+      // A member the level cut opens shows its inside rather than a hole.
+      side: DoubleSide,
+    });
+    this.memberPickMaterial = createPickMaterial(this.clipPlanes);
+    this.memberEdgeMaterial = new LineBasicMaterial({
+      color: COLORS.edge,
+      clippingPlanes: this.clipPlanes,
+    });
+    this.members = new MemberObjects(
+      this.scene,
+      this.pickScene,
+      {
+        shaded: this.memberMaterial,
+        pick: this.memberPickMaterial,
+        edges: this.memberEdgeMaterial,
+      },
+      { hover: COLORS.faceHover, selected: COLORS.faceSelected },
+    );
 
     this.resizeObserver =
       typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => this.resize());
@@ -517,9 +572,95 @@ export class ViewportEngine {
     if (!changed) return;
     // Fitting frames the bodies where they are now; the camera itself stays.
     this.updateSceneSphere();
-    this.applySection(this.stores.settings.getState().section);
+    this.applyClipping(this.stores.settings.getState().section);
     this.refreshHighlights();
     this.invalidate(true);
+  }
+
+  /**
+   * Draw these framing members (the shown part's member sets with every shape mesh), replacing
+   * the ones before. Incremental: shapes, batches and edges that did not change are kept. The
+   * camera fits them when they are the first thing shown.
+   */
+  setMembers(view: MemberView): void {
+    const empty = this.bodies.length === 0 && this.members.stats().members === 0;
+    if (!this.members.set(view)) return;
+    // Members that are gone leave the selection.
+    this.stores.selection
+      .getState()
+      .prune((item) => !isMemberRef(item) || this.members.has(item.id));
+    this.updateSceneSphere();
+    this.applyClipping(this.stores.settings.getState().section);
+    this.refreshHighlights();
+    if (empty && view.sets.length > 0) this.fitAll(false);
+    this.invalidate(true);
+  }
+
+  /** Draw framing members or not (layer bodies stay as they are). */
+  setMembersVisible(visible: boolean): void {
+    if (this.members.isVisible() === visible) return;
+    this.members.setVisible(visible);
+    if (!visible) {
+      this.stores.selection.getState().prune((item) => !isMemberRef(item));
+    }
+    this.invalidate();
+  }
+
+  /**
+   * Hide the wall layer bodies of these layers (`<feature id>:layer/<layer id>`, ADR 0015
+   * decision 3): `['sheathing', 'drywall']` shows the framing. An empty list shows every layer.
+   */
+  setHiddenLayers(layers: readonly string[]): void {
+    const next = new Set(layers);
+    if (next.size === this.hiddenLayers.size && [...next].every((l) => this.hiddenLayers.has(l))) {
+      return;
+    }
+    this.hiddenLayers = next;
+    for (const b of this.bodies) {
+      b.hidden = this.layerHidden(b.body.id);
+      this.showBody(b);
+    }
+    this.applySettings(this.stores.settings.getState());
+    this.refreshHighlights();
+  }
+
+  /**
+   * Show one level as a plan does: clip bodies and members above the cut height and, with
+   * `below`, under the level (see `LevelCut`); null: no level cut. Works with the section view.
+   */
+  setLevelCut(cut: LevelCut | null): void {
+    this.levelCut = cut ? { ...cut } : null;
+    this.applyClipping(this.stores.settings.getState().section);
+    this.invalidate(true);
+  }
+
+  /** The member under a canvas point (CSS pixels), whatever the filter says, or null. */
+  memberAt(x: number, y: number): MemberRef | null {
+    if (this.members.stats().members === 0) return null;
+    const id = this.pickCentre(x, y);
+    const fullId = id === null ? null : this.members.idAtPick(id);
+    return fullId === null ? null : memberRef(fullId);
+  }
+
+  /** What the members look like now, for tests and tooling. */
+  memberInfo(): MemberObjectStats & {
+    visible: boolean;
+    hiddenLayers: string[];
+    levelCut: LevelCut | null;
+    clipPlanes: number;
+  } {
+    return {
+      ...this.members.stats(),
+      visible: this.members.isVisible(),
+      hiddenLayers: [...this.hiddenLayers],
+      levelCut: this.levelCut,
+      clipPlanes: this.clipPlanes.length,
+    };
+  }
+
+  /** The colour a member is drawn in now (`#rrggbb`), or null; for tests. */
+  memberColor(fullId: string): string | null {
+    return this.members.instanceColor(fullId);
   }
 
   /**
@@ -651,19 +792,25 @@ export class ViewportEngine {
     this.goTo(fitSphere(this.currentView(), this.sceneSphere, this.aspect()), animate);
   }
 
-  /** What is under a canvas point (CSS pixels from the canvas's top left). */
-  pickAt(x: number, y: number): GeometryRef | null {
-    if (this.bodies.length === 0) return null;
+  /**
+   * What is under a canvas point (CSS pixels from the canvas's top left): a face, edge or vertex
+   * by name, or a framing member as a whole. A visible edge or vertex near the cursor wins over
+   * the member under it, as it does over a face.
+   */
+  pickAt(x: number, y: number): GeometryRef | MemberRef | null {
+    const hasMembers = this.members.stats().members > 0;
+    if (this.bodies.length === 0 && !hasMembers) return null;
     const views = this.bodies.map((b) => b.body);
     const selection = this.stores.selection.getState();
     const enabled = (k: GeometryKind) => selection.isKindEnabled(k);
     // Kinds the filter excludes stay out of the pick pass, so they cannot
     // cover the face under them.
     for (const b of this.bodies) {
-      b.pickEdges.visible = enabled('edge');
-      b.pickVertices.visible = enabled('vertex');
+      b.pickEdges.visible = enabled('edge') && !b.hidden;
+      b.pickVertices.visible = enabled('vertex') && !b.hidden;
     }
     const window = this.renderPickWindow(x, y);
+    const centre = this.centrePickId();
     const edges: Candidate[] = [];
     const vertices: Candidate[] = [];
     this.bodies.forEach((b, i) => {
@@ -674,6 +821,10 @@ export class ViewportEngine {
       vertices.push(...vertexCandidates(i, b.screenVertices, { x, y }, PICK_TOLERANCE_PX));
     });
     const hit = choosePick({ window, edges, vertices }, enabled);
+    if (hit && hit.kind !== 'face') return hitToRef(views, hit);
+    // A member covering the centre pixel: the window's face is null then.
+    const member = hasMembers ? this.members.idAtPick(centre) : null;
+    if (member !== null) return selection.isKindEnabled(MEMBER_KIND) ? memberRef(member) : null;
     return hit ? hitToRef(views, hit) : null;
   }
 
@@ -723,9 +874,8 @@ export class ViewportEngine {
   hiddenDepth(points: readonly Vec3[], marginPx = 0): number[] {
     this.updateCameras();
     const camera = this.activeCamera();
-    const faces = this.bodies.map((b) => b.meshes[2]!);
-    const clipped = (q: Vector3) =>
-      this.clipPlanes.length > 0 && this.clipPlane.distanceToPoint(q) < 0;
+    const faces = this.raycastTargets();
+    const clipped = (q: Vector3) => this.isClipped(q);
     const depthOf = (q: Vector3, ndc: Vector3): number => {
       if (clipped(q)) return Infinity;
       this.raycaster.setFromCamera(new Vector2(ndc.x, ndc.y), camera);
@@ -842,6 +992,7 @@ export class ViewportEngine {
       threadLines: this.threadLineCount,
       grainLines: this.grainLineCount,
       previewLines: this.previewLineCount,
+      members: this.members.stats().members,
       projection: this.stores.settings.getState().projection,
       halfHeight: this.view.halfHeight,
       animating: this.transition !== null || this.wheelZoom !== null,
@@ -876,7 +1027,9 @@ export class ViewportEngine {
             sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))]!;
           resolve({
             frames: intervals.length,
-            triangles: this.bodies.reduce((n, b) => n + b.body.mesh.indices.length / 3, 0),
+            triangles:
+              this.bodies.reduce((n, b) => n + b.body.mesh.indices.length / 3, 0) +
+              this.members.stats().triangles,
             meanMs: mean,
             p50Ms: q(0.5),
             p95Ms: q(0.95),
@@ -897,6 +1050,7 @@ export class ViewportEngine {
     this.detachEvents();
     for (const u of this.unsubscribe) u();
     this.clearBodies();
+    this.members.dispose();
     this.clearVolume();
     this.cube.dispose();
     const materials: Material[] = [
@@ -915,6 +1069,9 @@ export class ViewportEngine {
       this.threadMaterial,
       this.grainMaterial,
       this.previewMaterial,
+      this.memberMaterial,
+      this.memberPickMaterial,
+      this.memberEdgeMaterial,
       this.vertexMarkers.material,
       this.grid.material,
       this.cap.material,
@@ -1020,35 +1177,35 @@ export class ViewportEngine {
       edgeGeometry,
       pickEdges,
       pickVertices,
+      hidden: this.layerHidden(body.id),
       screenSegments: new Float32Array(body.segmentEdges.length * 4),
       screenVertices: new Float32Array(body.vertices.length * 2),
       screenVersion: -1,
     };
     this.place(objects);
+    this.showBody(objects);
     return objects;
+  }
+
+  /** Whether a body is a wall layer that `setHiddenLayers` hides. */
+  private layerHidden(bodyId: string): boolean {
+    if (this.hiddenLayers.size === 0) return false;
+    const layer = bodyLayer(bodyId);
+    return layer !== null && this.hiddenLayers.has(layer);
+  }
+
+  /** Show or hide a body's faces, rim and face picks (edges and section passes follow settings). */
+  private showBody(b: BodyObjects): void {
+    for (const k of [2, 3, 4]) b.meshes[k]!.visible = !b.hidden;
+    b.pickEdges.visible = !b.hidden;
+    b.pickVertices.visible = !b.hidden;
   }
 
   /** The sphere fitting frames: around every body's box, where the body is now, and the volume. */
   private updateSceneSphere(): void {
-    let bounds = unionBounds(this.bodies.map((b) => b.body));
+    let bounds = this.modelBounds();
     const volume = this.volume?.bounds ?? null;
-    if (volume) {
-      const b = bounds;
-      bounds = b
-        ? {
-            min: [
-              Math.min(b.min[0], volume.min[0]),
-              Math.min(b.min[1], volume.min[1]),
-              Math.min(b.min[2], volume.min[2]),
-            ],
-            max: [
-              Math.max(b.max[0], volume.max[0]),
-              Math.max(b.max[1], volume.max[1]),
-              Math.max(b.max[2], volume.max[2]),
-            ],
-          }
-        : volume;
-    }
+    if (volume) bounds = bounds ? unionBox(bounds, volume) : volume;
     if (!bounds) return;
     const min = new Vector3(...bounds.min);
     const max = new Vector3(...bounds.max);
@@ -1056,6 +1213,14 @@ export class ViewportEngine {
       center: min.clone().add(max).multiplyScalar(0.5),
       radius: Math.max(min.distanceTo(max) / 2, 1e-3),
     };
+  }
+
+  /** The box around every body (where it is now) and every member; null when there is none. */
+  private modelBounds(): { min: Vec3; max: Vec3 } | null {
+    const bodies = unionBounds(this.bodies.map((b) => b.body));
+    const members = this.members.bounds();
+    if (!members) return bodies;
+    return bodies ? unionBox(bodies, members) : members;
   }
 
   /** Put a body's objects where its transform says, and forget its projected picks. */
@@ -1200,6 +1365,9 @@ export class ViewportEngine {
     };
     for (const item of selected) if (isGeometryRef(item)) mark(item, 'selected');
     if (hovered && isGeometryRef(hovered)) mark(hovered, 'hover');
+    this.members.setHighlights(
+      memberHighlights(selected, hovered, this.members.current().layout.slots),
+    );
     // A feature hovered in the feature tree: every face it made.
     if (isFeatureItem(hovered)) {
       for (const b of this.bodies) {
@@ -1263,19 +1431,33 @@ export class ViewportEngine {
   }
 
   private applySettings(s: ViewSettingsState): void {
-    for (const b of this.bodies) b.edges.visible = s.showEdges;
+    for (const b of this.bodies) b.edges.visible = s.showEdges && !b.hidden;
     this.grid.visible = s.showGrid;
-    this.applySection(s.section);
+    this.applyClipping(s.section);
     this.invalidate(true);
   }
 
-  private applySection(section: SectionSettings): void {
-    const bounds = unionBounds(this.bodies.map((b) => b.body));
-    const enabled = section.enabled && bounds !== null;
+  /**
+   * Fill `clipPlanes` (shared by every clipped material): the section plane when it is on, then
+   * the level cut's planes.
+   */
+  private applyClipping(section: SectionSettings): void {
     this.clipPlanes.length = 0;
+    this.applySection(section);
+    this.levelPlanes.length = 0;
+    for (const p of levelCutPlanes(this.levelCut)) {
+      this.levelPlanes.push(new Plane(new Vector3(...p.normal), p.constant));
+    }
+    this.clipPlanes.push(...this.levelPlanes);
+    for (const b of this.bodies) b.screenVersion = -1;
+  }
+
+  private applySection(section: SectionSettings): void {
+    const bounds = this.modelBounds();
+    const enabled = section.enabled && bounds !== null;
     for (const b of this.bodies) {
-      b.meshes[0]!.visible = enabled;
-      b.meshes[1]!.visible = enabled;
+      b.meshes[0]!.visible = enabled && !b.hidden;
+      b.meshes[1]!.visible = enabled && !b.hidden;
     }
     this.cap.visible = enabled;
     if (!enabled || !bounds) return;
@@ -1416,6 +1598,10 @@ export class ViewportEngine {
   private render(): void {
     this.dirty = false;
     this.updateCameras();
+    this.members.updateEdges(
+      this.stores.settings.getState().showEdges,
+      worldPerPixel(this.view.halfHeight, this.height),
+    );
     const r = this.renderer;
     r.setRenderTarget(null);
     r.setViewport(0, 0, this.width, this.height);
@@ -1478,6 +1664,20 @@ export class ViewportEngine {
     );
   }
 
+  /** The pick id of the centre pixel of the last pick window. */
+  private centrePickId(): number {
+    const half = (this.pickSize - 1) / 2;
+    const i = (half * this.pickSize + half) * 4;
+    const p = this.pickPixels;
+    return decodePickId(p[i]!, p[i + 1]!, p[i + 2]!);
+  }
+
+  /** Render the pick window at a canvas point and return its centre pixel's id. */
+  private pickCentre(x: number, y: number): number {
+    this.renderPickWindow(x, y);
+    return this.centrePickId();
+  }
+
   /** Project a body's edge segments and vertices to CSS pixels, once per camera change. */
   private projectBody(b: BodyObjects): void {
     if (b.screenVersion === this.cameraVersion) return;
@@ -1485,8 +1685,7 @@ export class ViewportEngine {
     const camera: Camera = this.activeCamera();
     const v = new Vector3();
     const c = new Vector3();
-    const clipped = (x: number, y: number, z: number) =>
-      this.clipPlanes.length > 0 && this.clipPlane.distanceToPoint(c.set(x, y, z)) < 0;
+    const clipped = (x: number, y: number, z: number) => this.isClipped(c.set(x, y, z));
     const m = b.body.transform ? b.matrix : null;
     const toWorld = (x: number, y: number, z: number) =>
       m ? v.set(x, y, z).applyMatrix4(m) : v.set(x, y, z);
@@ -1656,7 +1855,8 @@ export class ViewportEngine {
         dragAction(preset, e.buttons, modifiersOf(e)) === 'none'
       ) {
         const start = { x: drag.startX, y: drag.startY };
-        if (this.objectDrag.start(this.pickAt(start.x, start.y), start)) {
+        const under = this.pickAt(start.x, start.y);
+        if (this.objectDrag.start(under && isGeometryRef(under) ? under : null, start)) {
           drag.object = true;
           this.objectDrag.move(p);
           return;
@@ -1761,13 +1961,21 @@ export class ViewportEngine {
     this.updateCameras();
     const ndc = this.ndc(x, y);
     this.raycaster.setFromCamera(new Vector2(ndc.x, ndc.y), this.activeCamera());
-    const faces = this.bodies.map((b) => b.meshes[2]!);
-    for (const hit of this.raycaster.intersectObjects(faces, false)) {
-      if (this.clipPlanes.length === 0 || this.clipPlane.distanceToPoint(hit.point) >= 0) {
-        return hit.point;
-      }
+    for (const hit of this.raycaster.intersectObjects(this.raycastTargets(), false)) {
+      if (!this.isClipped(hit.point)) return hit.point;
     }
     return null;
+  }
+
+  /** What a ray can hit: the shaded faces of shown bodies, and the members. */
+  private raycastTargets(): Object3D[] {
+    const faces: Object3D[] = this.bodies.filter((b) => !b.hidden).map((b) => b.meshes[2]!);
+    return [...faces, ...this.members.raycastTargets()];
+  }
+
+  /** Whether the section or the level cut clips a world point away. */
+  private isClipped(p: Vector3): boolean {
+    return this.clipPlanes.some((plane) => plane.distanceToPoint(p) < 0);
   }
 
   private onKey(e: KeyboardEvent): void {
@@ -1824,6 +2032,36 @@ interface SharedBuffers {
   edgeGeometry: LineSegmentsGeometry;
   segments: BufferAttribute;
   vertexPoints: BufferAttribute | null;
+}
+
+/** The box around two boxes. */
+function unionBox(
+  a: { min: Vec3; max: Vec3 },
+  b: { min: Vec3; max: Vec3 },
+): { min: Vec3; max: Vec3 } {
+  return {
+    min: [Math.min(a.min[0], b.min[0]), Math.min(a.min[1], b.min[1]), Math.min(a.min[2], b.min[2])],
+    max: [Math.max(a.max[0], b.max[0]), Math.max(a.max[1], b.max[1]), Math.max(a.max[2], b.max[2])],
+  };
+}
+
+/**
+ * Which members to colour: the selected and hovered ones, and while a feature is hovered in the
+ * tree, every member it owns (full ids start with its id). Selected wins over hover.
+ */
+export function memberHighlights(
+  selected: readonly SelectableItem[],
+  hovered: SelectableItem | null,
+  ids: readonly string[],
+): Map<string, MemberHighlight> {
+  const out = new Map<string, MemberHighlight>();
+  if (isFeatureItem(hovered)) {
+    const prefix = `${hovered.id}:`;
+    for (const id of ids) if (id.startsWith(prefix)) out.set(id, 'hover');
+  }
+  if (isMemberRef(hovered)) out.set(hovered.id, 'hover');
+  for (const item of selected) if (isMemberRef(item)) out.set(item.id, 'selected');
+  return out;
 }
 
 function sameTransform(a: BodyTransform | undefined, b: BodyTransform | undefined): boolean {

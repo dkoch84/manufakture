@@ -35,7 +35,7 @@ The ground grid lies on the XY plane, with the X axis in red and the Y axis in g
 - **Click** selects one item, replacing the selection. **Shift + click** adds to it. **Ctrl + click** (Cmd on macOS) adds or removes one item. A plain click on empty space clears the selection.
 - Edges and vertices are picked within a few pixels of the pointer, and win over the face around them.
 - Only what you can see can be picked. A face, edge or vertex hidden behind the model is out of reach, even where a face next to it is in view (a fillet's far edge, say, just behind the rounded surface). When an edge is partly hidden, only its visible part counts.
-- **Select: Faces, Edges, Vertices** is the selection filter. Clear a box to make that kind unpickable, for example to click a face right next to an edge. Items already selected stay selected.
+- **Select: Faces, Edges, Vertices, Members** is the selection filter. Clear a box to make that kind unpickable, for example to click a face right next to an edge. Items already selected stay selected.
 
 The side panel lists the selection in the order you picked it, by name. Two tags may appear next to a name:
 
@@ -51,3 +51,24 @@ The side panel lists the selection in the order you picked it, by name. Two tags
 - **Flip** keeps the other side.
 
 The cut surface is filled with a solid colour (the cap), so the model still looks solid. What is cut away cannot be hovered or selected, and the cap itself is not selectable.
+
+## Framing members
+
+A building's framing members (studs, plates, headers, joists, rafters) are drawn next to its bodies. Members are not bodies: each is a piece of stock with a length, a position and its cuts, and identical members share one shape, so even a house of hundreds of members draws quickly.
+
+- **Picking**: a member is picked as a whole, never one of its faces. Hover lights it up; click selects it, with Shift and Ctrl working as for faces. A visible edge or vertex of a body near the pointer still wins over the member under it. Members can be switched off in the selection filter like any other kind.
+- **Colours**: members are coloured by role (plates, studs, headers, rafters each in their own lumber tone). Hovering a wall, opening, floor or roof in the feature tree lights up every member it owns.
+- **The member panel**: with a member selected, a panel in the bottom left corner of the viewport shows its role and id (`<feature id>:<member id>`, for example `opening#2:king-l`), its stock with the actual sizes, its length (the blank cut from stock) and its cuts: square ends, end cuts with their angle off square (plumb and side cuts), face cuts (seats) and notches (birdsmouths). Lengths follow the document's display units. Press **Escape** to clear it.
+- **Measuring**: the measure tool works on bodies only. Members have no faces or edges to measure; their sizes are in the member panel.
+- **Edges**: member outlines are drawn while the stock is at least a few pixels wide on screen; zoomed far out they are left off, which keeps large buildings fast. **Show edges** switches them off and on with the rest.
+
+### Layers and levels
+
+The construction tools drive two more ways to see inside a building:
+
+- **Hiding layers**: a wall's sheathing, drywall and siding are bodies named after their layer. Hiding a layer (sheathing, say) hides it on every wall, so the framing behind shows; members and other bodies stay.
+- **Level cut**: shows one level the way a floor plan does. Everything more than a cut height above the level (4' by default) is cut away, and, when asked, everything under the level too, so the levels below are hidden. Bodies and members are cut alike, and what is cut away cannot be hovered or selected. It works together with the section view.
+
+## Exporting framing
+
+STL and 3MF export include the members of the part being exported, after its bodies. In 3MF each member is an object of its own, named by its id; in STL they are added to the one file, or, with one file per body, written together into one more file named `<name> members.stl`. STEP export leaves members out for now, and says so when it does.
