@@ -11,7 +11,6 @@ import {
   drillPointToMachine,
   meshToMachine,
   planarLoopsToMachine,
-  pointsBoundsInSetup,
   setupRotation,
   stockFromBounds,
   stockFromSize,
@@ -42,6 +41,9 @@ export function documentOperation(id: string): string {
   return id.endsWith(CLEARING_SUFFIX) ? id.slice(0, -CLEARING_SUFFIX.length) : id;
 }
 
+/** How far, mm, the stock's machine Z range may be from the stage's before `setupInput` refuses. */
+export const STOCK_Z_TOLERANCE = 1e-6;
+
 export type SetupBuild =
   | {
       ok: true;
@@ -51,7 +53,14 @@ export type SetupBuild =
     }
   | { ok: false; message: string };
 
-/** The stock box in the setup frame, from the body's bounds (and mesh, when sent) and the values. */
+/**
+ * The stock box in the setup frame, from the body's model-space bounds and the values. It is the
+ * box of the bounds' corners in the setup frame (`boundsInSetup`), the same box the geometry stage
+ * measures the stock's Z range on (`stockZ`, and from it every machine-Z depth, hole depth and
+ * source height). It never depends on the mesh: for a tilted face up the mesh's tight bounds are
+ * shorter than the corners' box, so a stock from them would put machine Z 0 somewhere other than
+ * the stage's, and every depth would cut by the difference. `setupInput` checks the two agree.
+ */
 export function stockOf(
   geometry: CamGeometryResult,
 ): { ok: true; stock: Stock } | { ok: false; message: string } {
@@ -60,9 +69,7 @@ export function stockOf(
     return { ok: false, message: 'The setup has no body to machine.' };
   const rotation = setupRotation(values.wcs.up);
   if (!rotation.ok) return { ok: false, message: rotation.error.message };
-  const body = geometry.mesh
-    ? pointsBoundsInSetup(rotation.value, geometry.mesh.positions)
-    : boundsInSetup(rotation.value, geometry.bounds);
+  const body = boundsInSetup(rotation.value, geometry.bounds);
   const s = values.stock;
   const r =
     s.kind === 'fromBody'
@@ -216,6 +223,19 @@ export function setupInput(
   const frame = wcsFrame(wcs, stock.stock);
   if (!frame.ok) return { ok: false, message: frame.error.message };
   const origin = wcsOriginInSetup(stock.stock, wcs.origin);
+  // The stage gave every depth in machine Z measured from its own stock: refuse rather than cut
+  // with depths whose zero is not this stock's.
+  const top = stock.stock.max[2] - origin[2];
+  const bottom = stock.stock.min[2] - origin[2];
+  if (
+    !(Math.abs(top - values.stockZ.top) <= STOCK_Z_TOLERANCE) ||
+    !(Math.abs(bottom - values.stockZ.bottom) <= STOCK_Z_TOLERANCE)
+  ) {
+    return {
+      ok: false,
+      message: `The stock's machine Z range (${top.toFixed(6)} to ${bottom.toFixed(6)} mm) does not match the depths' (${values.stockZ.top.toFixed(6)} to ${values.stockZ.bottom.toFixed(6)} mm): generate again, and report this if it persists.`,
+    };
+  }
   const facingArea = stockOutline(stock.stock, origin);
   const operations: OperationInput[] = [];
   const failed: Record<string, string> = {};

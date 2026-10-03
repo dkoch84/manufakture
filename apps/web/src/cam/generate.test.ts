@@ -242,6 +242,8 @@ describe('setupInput', () => {
           size: [60, 40, 10] as const,
           offset: [5, 5, 2] as const,
         },
+        // As the stage measures it: 10 mm of stock, its top the origin.
+        stockZ: { top: 0, bottom: -10 },
       },
     };
     const r = setupInput(explicit, { id: 'setup#1', name: 'Top' });

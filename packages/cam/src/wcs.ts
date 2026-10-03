@@ -97,7 +97,10 @@ export function toSetup(rotation: SetupRotation, p: Vec3): Vec3 {
 /**
  * The bounds, in the setup frame, of a model-space box: the box of its eight corners. Exact for
  * the six axis ups (the rotation only permutes and flips axes); for a tilted face up it encloses
- * the body but may be loose, so pass the body's points to `pointsBoundsInSetup` for a tight box.
+ * the body but may be loose. A setup's stock must still come from this box: the regen geometry
+ * stage measures the stock's machine Z range (and from it every depth) on the same corners, so a
+ * stock from any other box puts machine Z 0 somewhere else (ADR 0014 decision 7). For bounds that
+ * are not the stock, `pointsBoundsInSetup` gives a tight box from a mesh's points.
  */
 export function boundsInSetup(rotation: SetupRotation, box: Box3): Box3 {
   const corners: Vec3[] = [];
@@ -109,7 +112,11 @@ export function boundsInSetup(rotation: SetupRotation, box: Box3): Box3 {
   return boxOf(corners);
 }
 
-/** Tight bounds, in the setup frame, of xyz points (a mesh's `positions`). */
+/**
+ * Tight bounds, in the setup frame, of xyz points (a mesh's `positions`). Never for a setup's
+ * stock, which is `boundsInSetup`'s corner box. Nothing in the repository calls it outside its
+ * tests; it stays exported for callers that want a body's true extent, not its stock.
+ */
 export function pointsBoundsInSetup(rotation: SetupRotation, positions: ArrayLike<number>): Box3 {
   const points: Vec3[] = [];
   for (let i = 0; i + 2 < positions.length; i += 3) {
