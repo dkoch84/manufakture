@@ -454,8 +454,7 @@ function TakeoffTable({
         <tr>
           <th scope="col">#</th>
           <th scope="col">Item</th>
-          <th scope="col">Stock</th>
-          <th scope="col">Size</th>
+          <th scope="col">Stock, size</th>
           <th scope="col">Qty</th>
           <th scope="col">Total</th>
           <th scope="col">Cost</th>
@@ -466,7 +465,7 @@ function TakeoffTable({
         return (
           <tbody key={s.category} data-testid={`takeoff-section-${s.category}`}>
             <tr className="cutlist-group">
-              <th colSpan={7} scope="rowgroup">
+              <th colSpan={6} scope="rowgroup">
                 {SECTIONS[s.category].title}
                 <p className="takeoff-section-note">{SECTIONS[s.category].note}</p>
               </th>
@@ -493,8 +492,12 @@ function TakeoffTable({
                     </span>
                   ))}
                 </td>
-                <td data-testid="takeoff-stock">{r.stock}</td>
-                <td data-testid="takeoff-size">{r.size}</td>
+                <td className="takeoff-stock-size">
+                  <span data-testid="takeoff-stock">{r.stock}</span>
+                  <span className="takeoff-size" data-testid="takeoff-size">
+                    {r.size}
+                  </span>
+                </td>
                 <td data-testid="takeoff-qty">{r.quantity}</td>
                 <td data-testid="takeoff-total">{r.extended}</td>
                 <td data-testid="takeoff-row-cost">{r.cost}</td>
@@ -503,7 +506,7 @@ function TakeoffTable({
             {totals.length > 0 && (
               <tr data-testid={`takeoff-totals-${s.category}`}>
                 <td />
-                <td colSpan={6} className="field-note">
+                <td colSpan={5} className="field-note">
                   In all: {totalsText(totals, units)}
                 </td>
               </tr>

@@ -1,7 +1,17 @@
 /* The Takeoff panel: the cut list panel's table, layouts and files (cutlist.css), plus what the
    construction takeoff adds: section notes, cost, face layouts and the disclaimer. */
+/* The side panel is 16rem, too narrow for the table: while the takeoff is open it widens so every
+   column of a row fits without scrolling sideways (all of them at 1280 px and wider windows). */
+.side-panel:has(.takeoff-panel) {
+  width: clamp(26rem, 40vw, 40rem);
+}
+
 .selection-panel.takeoff-panel {
   width: 26rem;
+}
+
+.side-panel .selection-panel.takeoff-panel {
+  width: auto;
 }
 
 .takeoff-panel .takeoff-disclaimer {
@@ -16,9 +26,30 @@
   color: #5b6673;
 }
 
+/* Columns: #, item, stock and size, qty, total, cost. The item wraps; the numbers keep to one line
+   and line up. */
+.takeoff-panel .cutlist-table td:nth-child(2) {
+  overflow-wrap: anywhere;
+}
+
+.takeoff-panel .cutlist-table td:nth-child(1),
+.takeoff-panel .cutlist-table td:nth-child(4),
 .takeoff-panel .cutlist-table td:nth-child(5),
-.takeoff-panel .cutlist-table td:nth-child(7) {
+.takeoff-panel .cutlist-table td:nth-child(6) {
   text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.takeoff-panel .cutlist-table thead th:nth-child(n + 4) {
+  text-align: right;
+}
+
+.takeoff-size {
+  display: block;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  color: #3b4652;
 }
 
 .takeoff-counted {

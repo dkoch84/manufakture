@@ -266,6 +266,23 @@ test("the shed's takeoff equals T6.3a's rows and cost", async () => {
   await expect(page.getByTestId('takeoff-cost')).toHaveText('Cost of what to buy: $1,710.40');
   // As framed only: no estimating row.
   await expect(page.getByTestId('takeoff-panel')).not.toContainText(/rule of thumb|estimate/i);
+  // The table fits its panel: no row runs past the panel's right edge, so nothing scrolls sideways.
+  for (const width of [1600, 1280]) {
+    await page.setViewportSize({ width, height: 800 });
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const panel = document.querySelector<HTMLElement>('[data-testid="takeoff-panel"]')!;
+          const right = panel.getBoundingClientRect().right;
+          const cells = [...panel.querySelectorAll('[data-testid="takeoff-row"] td')];
+          return {
+            sideways: panel.scrollWidth > panel.clientWidth,
+            cut: cells.filter((c) => c.getBoundingClientRect().right > right + 0.5).length,
+          };
+        }),
+      )
+      .toEqual({ sideways: false, cut: 0 });
+  }
 });
 
 test('studs at 24" change the stud rows', async () => {

@@ -58,6 +58,21 @@ describe('the takeoff panel', () => {
     );
   });
 
+  it('fits the side panel: six columns, the stock and its size in one cell', () => {
+    setup();
+    const table = screen.getByTestId('takeoff-table');
+    expect(
+      within(table)
+        .getAllByRole('columnheader')
+        .map((h) => h.textContent),
+    ).toEqual(['#', 'Item', 'Stock, size', 'Qty', 'Total', 'Cost']);
+    const row = within(section('sheet')).getAllByTestId('takeoff-row')[0]!;
+    expect(row.querySelectorAll('td')).toHaveLength(6);
+    const stock = within(row).getByTestId('takeoff-stock');
+    expect(stock.parentElement).toBe(within(row).getByTestId('takeoff-size').parentElement);
+    expect(stock.textContent).toBe('7/16" OSB');
+  });
+
   it('selects the members of a row when it is clicked', () => {
     const t = setup();
     const precut = screen
