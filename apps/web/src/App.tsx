@@ -52,7 +52,7 @@ import {
   showDocIdInUrl,
   showPartIdInUrl,
 } from './persistence/url';
-import type { ExportFormat, ImportedBody } from './io/actions';
+import type { ExportFormat, ExportedFile, ImportedBody } from './io/actions';
 import { importBodyId, restorableImportIds } from './io/restorable';
 import { downloadBytes, readFileBytes } from './io/files';
 import type { ConfigurationExportFormat } from './io/configExport';
@@ -175,6 +175,10 @@ const DrawingWorkspace = lazy(() =>
 const CamTree = lazy(() => import('./cam/CamWorkspace').then((m) => ({ default: m.CamTree })));
 const CamSidePanel = lazy(() =>
   import('./cam/CamWorkspace').then((m) => ({ default: m.CamSidePanel })),
+);
+// The laser and plasma export dialog (M5 T5.6b), with the DXF and SVG writers, when first opened.
+const LaserDialog = lazy(() =>
+  import('./cam/laser/LaserDialog').then((m) => ({ default: m.LaserDialog })),
 );
 
 // The Cut list panel (woodworking, M4) likewise, with the nesting and the PDF writer.
@@ -345,6 +349,7 @@ export function App({
   const [imports, setImports] = useState<readonly ImportedBody[]>([]);
   const [ioStatus, setIoStatus] = useState<{ error: boolean; text: string } | null>(null);
   const [ioBusy, setIoBusy] = useState(false);
+  const [laserOpen, setLaserOpen] = useState(false);
   // An export of every configuration in progress: which row, and how to cancel it.
   const [exportAll, setExportAll] = useState<{
     index: number;
@@ -1443,6 +1448,37 @@ export function App({
     ],
   );
 
+  // The laser and plasma export: the active part's bodies (with their bounds, for a section's
+  // default plane), the geometry stage and the kernel's section.
+  const laserBodies = useMemo(
+    () =>
+      activeBodies.map((b) => {
+        const p = b.view.mesh.positions;
+        const min = [Infinity, Infinity, Infinity];
+        const max = [-Infinity, -Infinity, -Infinity];
+        for (let i = 0; i + 2 < p.length; i += 3)
+          for (let k = 0; k < 3; k++) {
+            min[k] = Math.min(min[k]!, p[i + k]!);
+            max[k] = Math.max(max[k]!, p[i + k]!);
+          }
+        return {
+          bodyId: b.bodyId,
+          viewId: b.viewId,
+          name: b.name,
+          bounds: p.length >= 3 ? { min, max } : null,
+        };
+      }),
+    [activeBodies],
+  );
+  const laserServices = useMemo(
+    () => ({ geometer: loader.camGeometer ?? null, section: loader.exchanger?.section }),
+    [loader],
+  );
+  const onLaserSave = useCallback((file: ExportedFile, message: string) => {
+    downloadBytes(file.bytes, file.name, file.type);
+    setIoStatus({ error: false, text: message });
+  }, []);
+
   // Every configuration, one file per row, each from its own regen; the files download as they
   // are made, so a cancelled export keeps the ones it finished.
   const onExportAll = useCallback(
@@ -1583,6 +1619,17 @@ export function App({
     [documents, sketching],
   );
   useSketchShortcuts(session, sketching.active);
+  // The laser export shares the side panel with the feature dialogs and the workspaces, so it is
+  // offered only when none of them is open and closes when one opens (a feature dialog, a sketch,
+  // Print, Manufacture, a drawing or an assembly tab), rather than hiding it or being hidden.
+  const laserBlocked =
+    dialog !== null ||
+    sketching.active ||
+    printing ||
+    machining ||
+    drawingOpen ||
+    assemblyId !== null;
+  if (laserOpen && laserBlocked) setLaserOpen(false);
   // The Board and Joint dialogs' preview of the board or the joint's tools they would build.
   const onBoardPreview = useCallback(
     (lines: Vec3[][]) => viewport?.setPreviewLines(lines),
@@ -1894,6 +1941,7 @@ export function App({
             onExport={onExport}
             configurations={shared ? configurationCount : 0}
             onExportAll={onExportAll}
+            {...(laserBlocked ? {} : { onLaser: () => setLaserOpen(true) })}
           />
           <ImportButton
             disabled={sketching.active || ioBusy || locked || assemblyId !== null}
@@ -2171,6 +2219,26 @@ export function App({
                 <SketchSelectionList session={session} />
                 <TextPanel session={session} texter={loader.texter ?? null} />
               </aside>
+            ) : laserOpen && !laserBlocked ? (
+              <Suspense
+                fallback={
+                  <aside className="selection-panel" aria-busy="true">
+                    Opening...
+                  </aside>
+                }
+              >
+                <LaserDialog
+                  key={shownPartId}
+                  documents={shownDocuments}
+                  partId={shownPartId}
+                  bodies={laserBodies}
+                  selection={selection}
+                  resolveFace={resolveCamFace}
+                  services={laserServices}
+                  onSave={onLaserSave}
+                  onClose={() => setLaserOpen(false)}
+                />
+              </Suspense>
             ) : printing ? (
               <>
                 <PrintPanel

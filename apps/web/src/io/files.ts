@@ -4,6 +4,8 @@ export const MIME = {
   stl: 'model/stl',
   '3mf': 'model/3mf',
   step: 'model/step',
+  dxf: 'application/dxf',
+  svg: 'image/svg+xml',
 } as const;
 
 /** Save bytes as a download named `fileName`. */

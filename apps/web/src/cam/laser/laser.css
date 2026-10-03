@@ -1,0 +1,41 @@
+/* The laser and plasma export dialog: source rows with their layer names. */
+
+.laser-add-source {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0.35rem 0;
+}
+
+.laser-add-source select {
+  flex: 1 1 6rem;
+  min-width: 0;
+}
+
+.laser-source-list {
+  list-style: none;
+  margin: 0.35rem 0;
+  padding: 0;
+}
+
+.laser-source-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0;
+  border-bottom: 1px solid #eef1f5;
+}
+
+.laser-source-list li > span {
+  flex: 1 1 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.laser-source-list input {
+  width: 8rem;
+  margin-left: 0.25rem;
+}

@@ -105,6 +105,7 @@ export {
   distToSegment,
   flattenSegments,
   intersectLoops,
+  kerfLoops,
   loopArea,
   loopLength,
   offsetLoops,
@@ -116,7 +117,7 @@ export {
   signedSweep,
   unionLoops,
 } from './offset';
-export type { OffsetOptions, OpenOffsetOptions, OpenPath2, Region2 } from './offset';
+export type { KerfResult, OffsetOptions, OpenOffsetOptions, OpenPath2, Region2 } from './offset';
 
 // T5.4a: the post-processor engine (dialect records, formatting, Grbl arc checks, the writer).
 // T5.4b: the GRBL post (`GRBL_DIALECT`, `postGrbl`) and posted file names, from the same module.

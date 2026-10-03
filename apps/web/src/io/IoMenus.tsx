@@ -2,7 +2,8 @@
 // several bodies, which bodies to write: the shown ones unless changed; a hidden
 // body is never written unless ticked; in an assembly, the whole assembly with
 // its parts placed), the choice to export every configuration with its
-// progress, and the Import button (a STEP or STL file picker), in the app
+// progress, the laser and plasma export (DXF or SVG outlines, which opens its
+// own dialog), and the Import button (a STEP or STL file picker), in the app
 // header.
 
 import { EXPORT_TOLERANCES, type ExportTolerancePreset } from '@manufakture/io';
@@ -59,6 +60,8 @@ export interface ExportMenuProps {
     tolerance: ExportTolerancePreset,
     ids: string[],
   ) => void;
+  /** Open the laser and plasma export (a part studio only); absent: not offered. */
+  onLaser?: () => void;
 }
 
 const NO_BODIES: readonly ExportableBody[] = [];
@@ -71,6 +74,7 @@ export function ExportMenu({
   onExport,
   configurations: givenConfigurations = 0,
   onExportAll,
+  onLaser,
 }: ExportMenuProps) {
   const bodies = assembly ? NO_BODIES : givenBodies;
   const configurations = assembly ? 0 : givenConfigurations;
@@ -140,6 +144,20 @@ export function ExportMenu({
               {label}
             </button>
           ))}
+          {!assembly && onLaser && (
+            <button
+              type="button"
+              role="menuitem"
+              title="DXF or SVG outlines of faces, sketch regions or a section, for laser and plasma cutting, with kerf compensation"
+              data-testid="export-laser"
+              onClick={() => {
+                setOpen(false);
+                onLaser();
+              }}
+            >
+              Laser or plasma (DXF, SVG)...
+            </button>
+          )}
           {nothing && (
             <p className="io-note" role="note" data-testid="export-nothing">
               {several

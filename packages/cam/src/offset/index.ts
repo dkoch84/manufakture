@@ -11,6 +11,8 @@ export {
 } from './engine';
 export type { OffsetOptions, OpenOffsetOptions, OpenPath2, Region2 } from './engine';
 export { arcChordCount, flattenSegments } from './flatten';
+export { kerfLoops } from './kerf';
+export type { KerfResult } from './kerf';
 export {
   arcRadius,
   distToLoops,

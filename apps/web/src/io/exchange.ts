@@ -20,8 +20,10 @@ import type {
   ExportStepOp,
   FaceRef,
   FeatureOutcome,
+  Frame,
   KernelOp,
   MeshData,
+  SectionLoops,
   ShapeId,
   StepAssemblyLayout,
   Topology,
@@ -95,6 +97,17 @@ export interface Exchanger {
    * released again); returns the ids rebuilt. The viewport meshes stay as they are.
    */
   reimport(files: ReadonlyMap<string, Uint8Array>): Promise<string[]>;
+  /**
+   * The section of a part body (by viewport id) by `frame`'s plane moved `height` along its
+   * normal: nested loops in the frame's 2D coordinates (the kernel's `section` op), for the laser
+   * and plasma export. Optional: scenes without a kernel have none.
+   */
+  section?(
+    bodyId: string,
+    frame: Frame,
+    height: number,
+    deflection?: number,
+  ): Promise<ExchangeResult<SectionLoops>>;
 }
 
 /**
@@ -246,6 +259,30 @@ export function kernelExchange(
       const [r] = reply.results;
       if (!r.ok) return { ok: false, message: `STEP export failed: ${r.error.message}` };
       return { ok: true, value: r.value.data };
+    },
+
+    async section(bodyId, frame, height, deflection) {
+      const c = client();
+      const found = shapesOf([bodyId]);
+      if (!found.ok) return found;
+      if (c === null) return { ok: false, message: 'The kernel is not running.' };
+      // At the current generation: an export never cancels an edit in flight.
+      const reply = await c.submit(
+        [
+          {
+            op: 'section',
+            shape: found.value[0]!.shape,
+            frame,
+            height,
+            ...(deflection === undefined ? {} : { deflection }),
+          },
+        ] as const,
+        c.latestGeneration,
+      );
+      if (reply === null || reply.status !== 'done') return { ok: false, message: DROPPED };
+      const [r] = reply.results;
+      if (!r.ok) return { ok: false, message: `The section failed: ${r.error.message}` };
+      return { ok: true, value: r.value };
     },
 
     async importStep(bytes, featureId, name, bodyId = featureId) {

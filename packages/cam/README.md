@@ -362,6 +362,10 @@ sweep, a non-finite offset) is an `invalid-input` error.
 - **`unionLoops(loops)`**, **`differenceLoops(subject, clip)`** (stock minus part, pocket minus
   islands), **`intersectLoops(subject, clip)`**.
 - `regionLoops(regions)` lists every loop; `regionArea(region)` is exact (arcs included).
+- **`kerfLoops(loops, kerf)`** (`offset/kerf.ts`, T5.6b): laser and plasma kerf compensation,
+  each loop on its own by half the kerf (outer loops out, holes in, arcs kept; loops never
+  merge), with `lost` counting holes that closed up. A zero kerf returns the loops as given; a
+  negative one is an `invalid-input` error.
 - Geometry helpers, exported for operations and tests: `loopArea` (exact, signed), `loopLength`,
   `segmentLength`, `segmentPoint`, `signedSweep`, `arcRadius`, `distToSegment`, `distToLoops`,
   and `flattenSegments(segments, closed, tol?)` (a polyline with its vertices on the arcs).

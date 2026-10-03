@@ -2,7 +2,7 @@
 // generation, and how it reads the replies. The ops themselves run against
 // the real kernel in packages/kernel (exchange.test.ts) and in the e2e.
 
-import type { BatchReply, FeatureOutcome, KernelOp, OpResult } from '@manufakture/kernel';
+import type { BatchReply, FeatureOutcome, Frame, KernelOp, OpResult } from '@manufakture/kernel';
 import type { KernelClient } from '@manufakture/kernel/client';
 import { describe, expect, it, vi } from 'vitest';
 import { boxBody } from '../viewport/testMeshes';
@@ -61,6 +61,28 @@ describe('kernelExchange', () => {
     const { exchanger } = kernelExchange(() => client, registry());
     expect(await exchanger.exportStep(['demo-part'])).toEqual({ ok: true, value: data });
     expect(sent[0]!.ops).toEqual([{ op: 'exportStep', bodies: [{ shape: 3, name: 'Demo part' }] }]);
+  });
+
+  it('sections a part body at the latest generation, and refuses an unknown one', async () => {
+    const section = { height: 2, regions: [], open: [] };
+    const { client, sent } = scripted([
+      { results: [ok('section', section)] },
+      { results: [failed('section', 'no plane')] },
+    ]);
+    const { exchanger } = kernelExchange(() => client, registry());
+    const f: Frame = { origin: [0, 0, 0], xDir: [1, 0, 0], normal: [0, 0, 1] };
+    expect(await exchanger.section!('demo-part', f, 2)).toEqual({ ok: true, value: section });
+    expect(sent).toEqual([
+      { ops: [{ op: 'section', shape: 3, frame: f, height: 2 }], generation: 7 },
+    ]);
+    expect(await exchanger.section!('demo-part', f, 2, 0.05)).toEqual({
+      ok: false,
+      message: 'The section failed: no plane',
+    });
+    expect(sent[1]!.ops).toEqual([
+      { op: 'section', shape: 3, frame: f, height: 2, deflection: 0.05 },
+    ]);
+    expect((await exchanger.section!('nope', f, 0)).ok).toBe(false);
   });
 
   it('imports STEP as an import feature, registers the body and fills its names', async () => {

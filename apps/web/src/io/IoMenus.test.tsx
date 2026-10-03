@@ -34,6 +34,22 @@ describe('the Export menu', () => {
     expect(onExport).toHaveBeenCalledWith('step', 'normal', ['only']);
   });
 
+  it('opens the laser and plasma export in a part studio, never in an assembly', () => {
+    const onLaser = vi.fn();
+    const { unmount } = render(
+      <ExportMenu bodies={[body('only')]} onExport={vi.fn()} onLaser={onLaser} />,
+    );
+    open();
+    expect(item('laser').textContent).toBe('Laser or plasma (DXF, SVG)...');
+    fireEvent.click(item('laser'));
+    expect(onLaser).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('menu')).toBeNull();
+    unmount();
+    render(<ExportMenu assembly bodies={[]} onExport={vi.fn()} onLaser={onLaser} />);
+    open();
+    expect(screen.queryByTestId('export-laser')).toBeNull();
+  });
+
   it('keeps the ticks in step with visibility while it is open', () => {
     const onExport = vi.fn();
     const { rerender } = render(<ExportMenu bodies={[body('a'), body('b')]} onExport={onExport} />);
