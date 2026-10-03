@@ -1,0 +1,62 @@
+/* The Takeoff panel: the cut list panel's table, layouts and files (cutlist.css), plus what the
+   construction takeoff adds: section notes, cost, face layouts and the disclaimer. */
+.selection-panel.takeoff-panel {
+  width: 26rem;
+}
+
+.takeoff-panel .takeoff-disclaimer {
+  margin: 0.2rem 0 0.4rem;
+  font-size: 0.72rem;
+  color: #5b6673;
+}
+
+.takeoff-section-note {
+  margin: 0 0 0.2rem;
+  font-size: 0.72rem;
+  color: #5b6673;
+}
+
+.takeoff-panel .cutlist-table td:nth-child(5),
+.takeoff-panel .cutlist-table td:nth-child(7) {
+  text-align: right;
+}
+
+.takeoff-counted {
+  display: block;
+  font-size: 0.7rem;
+  color: #5b6673;
+}
+
+.takeoff-cost {
+  margin: 0.4rem 0;
+  font-size: 0.8rem;
+}
+
+.takeoff-face.highlighted figcaption strong {
+  background: #ffd98a;
+}
+
+.takeoff-piece-offcut rect {
+  stroke-dasharray: 4 3;
+}
+
+.takeoff-piece-new rect {
+  fill: #e4ecfa;
+}
+
+.takeoff-cutout {
+  fill: #fbe3e3;
+  stroke: #a33;
+  stroke-dasharray: 2 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.takeoff-lengths label {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-size: 0.75rem;
+}
+
+.takeoff-lengths input {
+  width: 100%;
+}

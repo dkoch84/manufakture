@@ -188,7 +188,10 @@ export interface CostSummary {
   readonly currency?: string;
   /** Sum of the priced rows' costs. */
   readonly total: number;
-  /** Keys of the bought rows left out of the total (no price, wrong unit, other currency). */
+  /**
+   * Keys of the rows left out of the total: bought rows with no price, a wrong unit or another
+   * currency, then the rows of a stock the catalog lacks (`stock-unknown`), which nothing buys.
+   */
   readonly unpriced: string[];
 }
 

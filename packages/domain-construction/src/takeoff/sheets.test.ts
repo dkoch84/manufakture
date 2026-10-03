@@ -186,6 +186,19 @@ describe('sheet faces', () => {
       )!.flags,
     ).toEqual(['price-unit']);
   });
+  it('lists a face of a sheet stock the catalog lacks as unpriced, and buys none of it', () => {
+    const face = wallFace({
+      id: 'extension#3:sheathing',
+      owner: 'extension#3',
+      layer: 'sheathing',
+      stock: 'us-osb-9-99',
+      length: inch(96),
+      height: inch(96),
+    });
+    const t = sheetsOf([face]);
+    expect(t.rows.map((r) => [r.category, r.flags])).toEqual([['faces', ['stock-unknown']]]);
+    expect(t.cost.unpriced).toEqual(['faces|us-osb-9-99|sheathing']);
+  });
 });
 
 describe('faces from the model', () => {

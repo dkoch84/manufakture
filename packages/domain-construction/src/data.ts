@@ -26,6 +26,8 @@
 //                spliceOffset?: SE, plateStockLengths?: SE[], precutLengths?: SE[],
 //                ladderSpacing?: SE },                              // document defaults
 //     headerRules: [{ maxWidth: SE, header: { stock: id, plies: n, jacks: n, spacer?: id } }],
+//     takeoff: { precuts?: boolean, wastePercent?: n, currency?: 'USD',
+//                lengths?: { [lumber stock id]: SE[] } },             // the takeoff panel's (T6.3b)
 //   }
 //
 // Header rules (ADR 0015 decision 7): a user-edited table, `opening width up to maxWidth: header,
@@ -174,6 +176,25 @@ export interface HeaderRuleData<L = number> {
   readonly header: HeaderData;
 }
 
+/**
+ * The takeoff panel's settings (M6 plan T6.3b): how the takeoff counts and what the yard sells.
+ * Every field is optional; an absent one takes the takeoff's default (precuts on, no waste, the
+ * currency the prices state, the catalog's lengths).
+ */
+export interface TakeoffSettingsData<L = number> {
+  /** Match studs, kings and corner studs to precut stud stock by length. */
+  readonly precuts?: boolean;
+  /** Added to the sheets the layout needs, percent, 0 to `MAX_WASTE_PERCENT`. */
+  readonly wastePercent?: number;
+  /** An ISO 4217 code (`USD`); prices stating another currency are left out of the cost. */
+  readonly currency?: string;
+  /**
+   * Lengths sold, by lumber stock id; the catalog's for a stock not listed. An empty list buys
+   * each member at its own length.
+   */
+  readonly lengths?: Readonly<Record<string, readonly L[]>>;
+}
+
 export interface ConstructionSettings<L = number> {
   readonly levels: readonly Level<L>[];
   readonly wallTypes: readonly WallType<L>[];
@@ -181,6 +202,8 @@ export interface ConstructionSettings<L = number> {
   readonly roofTypes: readonly RoofType<L>[];
   readonly framing: FramingSettings<L>;
   readonly headerRules: readonly HeaderRuleData<L>[];
+  /** Absent: the takeoff's defaults. */
+  readonly takeoff?: TakeoffSettingsData<L>;
 }
 
 export type StoredConstructionSettings = ConstructionSettings<StoredExpression>;
@@ -214,6 +237,10 @@ export const MAX_TYPES = 100;
 export const MAX_HEADER_RULES = 100;
 export const MAX_LAYERS = 8;
 export const MAX_LENGTHS = 20;
+/** The most lumber stocks the takeoff settings list lengths for. */
+export const MAX_TAKEOFF_STOCKS = 100;
+/** The largest waste percentage the takeoff settings take. */
+export const MAX_WASTE_PERCENT = 100;
 
 /**
  * Bounds on the lengths the settings hold, so a hostile document cannot make the framing
@@ -312,6 +339,57 @@ function defined<T extends object>(o: T): Defined<T> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(o)) if (v !== undefined) out[k] = v;
   return out as Defined<T>;
+}
+
+const CURRENCY = /^[A-Z]{3}$/;
+
+function readTakeoff(v: unknown, at: Path): Read<TakeoffSettingsData<StoredExpression>> {
+  if (!isObject(v)) return fail('expected takeoff settings', at);
+  const keys = onlyKeys(v, ['precuts', 'wastePercent', 'currency', 'lengths'], at);
+  if (!keys.ok) return keys;
+  const precuts = own(v, 'precuts');
+  if (precuts !== undefined && typeof precuts !== 'boolean') {
+    return fail('expected true or false', [...at, 'precuts']);
+  }
+  const waste = own(v, 'wastePercent');
+  if (
+    waste !== undefined &&
+    (typeof waste !== 'number' || !(waste >= 0) || !(waste <= MAX_WASTE_PERCENT))
+  ) {
+    return fail(`expected a percentage from 0 to ${MAX_WASTE_PERCENT}`, [...at, 'wastePercent']);
+  }
+  const currency = own(v, 'currency');
+  if (currency !== undefined && (typeof currency !== 'string' || !CURRENCY.test(currency))) {
+    return fail('expected a three-letter currency code such as USD', [...at, 'currency']);
+  }
+  const raw = own(v, 'lengths');
+  let lengths: Record<string, StoredExpression[]> | undefined;
+  if (raw !== undefined) {
+    const lat = [...at, 'lengths'];
+    if (!isObject(raw)) return fail('expected lengths sold by stock id', lat);
+    const ids = Object.keys(raw);
+    if (ids.length > MAX_TAKEOFF_STOCKS) {
+      return fail(`at most ${MAX_TAKEOFF_STOCKS} stocks are allowed`, lat);
+    }
+    const entries: [string, StoredExpression[]][] = [];
+    for (const id of ids) {
+      const sid = stockId(id, [...lat, id], 'lumber');
+      if (!sid.ok) return sid;
+      const list = lengthList(raw, id, lat, false, MIN_PLATE_STOCK);
+      if (!list.ok) return list;
+      entries.push([id, list.value ?? []]);
+    }
+    // Own data properties only, whatever the key (`__proto__` included).
+    lengths = Object.fromEntries(entries);
+  }
+  return ok(
+    defined({
+      precuts: precuts as boolean | undefined,
+      wastePercent: waste as number | undefined,
+      currency: currency as string | undefined,
+      lengths,
+    }),
+  );
 }
 
 /** Run readers in order; the first failure wins. */
@@ -614,7 +692,7 @@ function readCurrent(data: Json): Read<StoredConstructionSettings> {
   if (!isObject(data)) return fail('expected construction settings');
   const keys = onlyKeys(
     data,
-    ['levels', 'wallTypes', 'floorTypes', 'roofTypes', 'framing', 'headerRules'],
+    ['levels', 'wallTypes', 'floorTypes', 'roofTypes', 'framing', 'headerRules', 'takeoff'],
     [],
   );
   if (!keys.ok) return keys;
@@ -622,6 +700,9 @@ function readCurrent(data: Json): Read<StoredConstructionSettings> {
   const levels = rawLevels === undefined ? ok([]) : readLevels(rawLevels, ['levels']);
   if (!levels.ok) return levels;
   const rawFraming = own(data, 'framing');
+  const rawTakeoff = own(data, 'takeoff');
+  const takeoff = rawTakeoff === undefined ? ok(undefined) : readTakeoff(rawTakeoff, ['takeoff']);
+  if (!takeoff.ok) return takeoff;
   const r = all({
     wallTypes: readList(data, 'wallTypes', MAX_TYPES, 'wall types', readWallType),
     floorTypes: readList(data, 'floorTypes', MAX_TYPES, 'floor types', readFloorType),
@@ -644,7 +725,11 @@ function readCurrent(data: Json): Read<StoredConstructionSettings> {
       ]);
     }
   }
-  return ok({ levels: levels.value, ...r.value });
+  return ok({
+    levels: levels.value,
+    ...r.value,
+    ...(takeoff.value === undefined ? {} : { takeoff: takeoff.value }),
+  });
 }
 
 /** A stored length already validated by the reader, in mm. */
@@ -695,6 +780,19 @@ export function mapLengths<A, B>(
       ladderSpacing: opt(s.framing.ladderSpacing),
     }),
     headerRules: s.headerRules.map((r) => ({ ...r, maxWidth: f(r.maxWidth) })),
+    ...(s.takeoff === undefined
+      ? {}
+      : {
+          takeoff: defined({
+            ...s.takeoff,
+            lengths:
+              s.takeoff.lengths === undefined
+                ? undefined
+                : Object.fromEntries(
+                    Object.entries(s.takeoff.lengths).map(([id, l]) => [id, l.map(f)]),
+                  ),
+          }),
+        }),
   };
 }
 
@@ -731,6 +829,9 @@ export function writeConstructionData(
     if (settings[key].length > 0) out[key] = toJson(settings[key]);
   }
   if (Object.keys(settings.framing).length > 0) out.framing = toJson(settings.framing);
+  if (settings.takeoff !== undefined && Object.keys(settings.takeoff).length > 0) {
+    out.takeoff = toJson(settings.takeoff);
+  }
   const checked = readCurrent(out);
   if (!checked.ok) return checked;
   if (Object.keys(out).length === 0) return ok(undefined);

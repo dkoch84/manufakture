@@ -174,6 +174,9 @@ describe('framing takeoff: other cases', () => {
     const odd = { id: 'us-2x7', name: '2x7', width: inch(1.5), depth: inch(6.5) };
     const t = constructionTakeoff({ members: [member('s0', 'stud', odd, 90)] });
     expect(t.rows.map((r) => [r.category, r.flags])).toEqual([['framing', ['stock-unknown']]]);
+    // Not bought, so not costed: listed as unpriced, never left out of the total in silence.
+    expect(t.cost.unpriced).toEqual([t.rows[0]!.key]);
+    expect(t.cost.total).toBe(0);
   });
 
   it('matches only studs, kings and corner studs to precuts', () => {

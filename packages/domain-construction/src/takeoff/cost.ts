@@ -70,7 +70,8 @@ export function stickPrice(entry: StockEntry, data: StockData, length: number): 
 }
 
 /**
- * Prices the bought rows (`lumber`, `sheet`) in place and sums them. The currency is
+ * Prices the bought rows (`lumber`, `sheet`) in place and sums them. Rows of a stock the catalog
+ * lacks (`stock-unknown`) are listed as unpriced too. The currency is
  * `currency`, or else the first stated currency among the priced rows.
  */
 export function priceRows(
@@ -114,6 +115,11 @@ export function priceRows(
     }
     r.cost = each * r.quantity;
     total += r.cost;
+  }
+  // A stock this build's catalog lacks is never bought, so it has no bought row to flag; its
+  // as-framed or as-laid rows are listed instead, so the total never leaves it out in silence.
+  for (const r of rows) {
+    if (r.flags.includes('stock-unknown') && !unpriced.includes(r.key)) unpriced.push(r.key);
   }
   return { ...(cur === undefined ? {} : { currency: cur }), total, unpriced };
 }

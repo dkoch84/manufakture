@@ -120,7 +120,9 @@ export {
   MAX_LAYERS,
   MAX_LENGTHS,
   MAX_SETTING_LENGTH,
+  MAX_TAKEOFF_STOCKS,
   MAX_TYPES,
+  MAX_WASTE_PERCENT,
   MIN_PLATE_STOCK,
   MIN_SPACING,
   defaultConstructionSettings,
@@ -138,6 +140,7 @@ export {
   type FramingSettings,
   type HeaderData,
   type HeaderRuleData,
+  type TakeoffSettingsData,
   type LayerKind,
   type NewWallTypeInput,
   type RoofType,
@@ -262,6 +265,20 @@ export {
   type RoofParams,
   type RoofTiesParams,
 } from './features/roof';
+export {
+  readViewParams,
+  VIEW_PARAMS_VERSION,
+  type ConstructionViewParams,
+  type OpeningStops,
+} from './drawings/params';
+export { cornerRange, memberOutline, memberSection, type Segment3 } from './drawings/outline';
+export {
+  CHAIN_OFFSET,
+  DEFAULT_PLAN_CUT,
+  MAX_VIEW_LINES,
+  constructionDrawings,
+  constructionView,
+} from './drawings/views';
 export {
   constructionGroups,
   constructionMemberStage,

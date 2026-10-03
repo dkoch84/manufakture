@@ -415,6 +415,60 @@ describe('domains.construction: writing', () => {
   });
 });
 
+describe('domains.construction: takeoff settings (T6.3b)', () => {
+  const takeoff = {
+    precuts: false,
+    wastePercent: 10,
+    currency: 'USD',
+    lengths: { 'us-2x4': [inch("8'"), inch("12'")], 'us-2x6': [] },
+  };
+
+  it('reads, evaluates and round-trips them', () => {
+    const data = read({ ...full(), takeoff } as Json);
+    expect(data.stored.takeoff).toEqual(takeoff);
+    const evaluated = data.settings.takeoff!;
+    expect({ ...evaluated, lengths: undefined }).toEqual({ ...takeoff, lengths: undefined });
+    expect(evaluated.lengths!['us-2x6']).toEqual([]);
+    const sold = evaluated.lengths!['us-2x4']!;
+    expect(sold).toHaveLength(2);
+    expect(sold[0]).toBeCloseTo(96 * IN, 9);
+    expect(sold[1]).toBeCloseTo(144 * IN, 9);
+    const written = writeConstructionData(data.stored);
+    if (!written.ok || written.value === undefined) throw new Error('nothing written');
+    expect(read(written.value.data).stored).toEqual(data.stored);
+    // Absent settings stay absent, and empty ones are not written.
+    expect(read(full()).stored.takeoff).toBeUndefined();
+    const empty = writeConstructionData({ ...defaultConstructionSettings('us'), takeoff: {} });
+    expect(empty.ok && empty.value && Object.keys(empty.value.data as object)).toEqual(['levels']);
+  });
+
+  it('refuses bad values with the field at fault, and bounds the lists', () => {
+    const t = (patch: Record<string, unknown>) => ({ ...full(), takeoff: patch }) as Json;
+    refused(t({ precuts: 'yes' }), ['takeoff', 'precuts']);
+    refused(t({ wastePercent: -1 }), ['takeoff', 'wastePercent']);
+    refused(t({ wastePercent: 101 }), ['takeoff', 'wastePercent']);
+    refused(t({ wastePercent: Number.NaN }), ['takeoff', 'wastePercent']);
+    refused(t({ currency: 'usd' }), ['takeoff', 'currency'], /currency code/);
+    refused(t({ currency: 'DOLLARS' }), ['takeoff', 'currency']);
+    refused(t({ extra: 1 }), ['takeoff', 'extra']);
+    refused(t({ lengths: [] }), ['takeoff', 'lengths']);
+    refused(t({ lengths: { 'us-osb-7-16': [] } }), ['takeoff', 'lengths', 'us-osb-7-16']);
+    refused(t({ lengths: { 'us-2x4': [inch('2"')] } }), ['takeoff', 'lengths', 'us-2x4', 0]);
+    refused(t({ lengths: { 'us-2x4': [inch('#l')] } }), ['takeoff', 'lengths', 'us-2x4', 0]);
+    const many = Object.fromEntries(Array.from({ length: 101 }, (_, i) => [`x-${i}`, []]));
+    refused(t({ lengths: many }), ['takeoff', 'lengths'], /at most 100/);
+    const long = Array.from({ length: 21 }, () => inch("8'"));
+    refused(t({ lengths: { 'us-2x4': long } }), ['takeoff', 'lengths', 'us-2x4']);
+  });
+
+  it('keeps a stock id key as data, even `__proto__`', () => {
+    const lengths = JSON.parse('{"__proto__": [], "us-2x4": []}') as Json;
+    const data = read({ ...full(), takeoff: { lengths } } as Json);
+    expect(Object.keys(data.stored.takeoff!.lengths!)).toEqual(['__proto__', 'us-2x4']);
+    expect(Object.getPrototypeOf(data.stored.takeoff!.lengths)).toBe(Object.prototype);
+  });
+});
+
 describe('domains.construction: defaults', () => {
   it('a new document has one level and no types, and no header rules (ADR 0015 decision 7)', () => {
     for (const region of ['us', 'metric'] as const) {
