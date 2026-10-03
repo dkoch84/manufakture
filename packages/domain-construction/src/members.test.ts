@@ -1,6 +1,7 @@
+import { MAX_GROUP_MEMBERS } from '@manufakture/regen';
 import { describe, expect, it } from 'vitest';
 import { placementMatrix, toLocal, toWorld, type Placement } from './geom';
-import { countByRole, memberCorners, shapeKey, type Member } from './members';
+import { MEMBER_BUDGET, countByRole, memberCorners, shapeKey, type Member } from './members';
 import { S2X4, S2X6 } from './test-helpers';
 
 const P: Placement = { origin: [10, 20, 30], x: [0, 0, 1], y: [1, 0, 0] };
@@ -16,6 +17,10 @@ const stud = (over: Partial<Member> = {}): Member => ({
 });
 
 describe('member data', () => {
+  it('budgets as many members per generator call as regen accepts in a group', () => {
+    expect(MEMBER_BUDGET).toBe(MAX_GROUP_MEMBERS);
+  });
+
   it('shares a shape between members that differ only in placement', () => {
     const a = stud();
     const b = stud({ id: 's2', placement: { ...P, origin: [500, 0, 0] } });

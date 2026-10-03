@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import { DISCLAIMER_SHORT } from '../disclaimer';
 import { memberFullId } from '../member-ids';
-import { countByRole, type Member } from '../members';
+import { MEMBER_BUDGET, countByRole, type Member } from '../members';
 import {
   DOUBLE_2X8,
   S2X10,
@@ -19,6 +19,7 @@ import {
 } from '../test-helpers';
 import {
   FramingInputError,
+  MemberBudget,
   frameWall,
   type FrameWallInput,
   type WallFraming,
@@ -685,6 +686,140 @@ describe('frameWall: input errors', () => {
       /feature id/,
     );
     expect(() => frameWall({ ...straightWall(96), segments: [] })).toThrow(/segment/);
+  });
+
+  it('refuses a wall past the member budget as soon as it passes, not after building it', () => {
+    // The review's case: 64 points 100 m apart, 50 mm spacing, 20 blocking rows. Built in full it
+    // was 2.6 million members (2.27 GB, 6.5 s) before regen's cap refused it.
+    const zigzag = Array.from({ length: 64 }, (_, i) => [0, (i % 2) * 100_000] as const);
+    const heights = Array.from({ length: 20 }, (_, r) => 200 + r * 100);
+    const base = straightWall(96, {}, { spacing: 50, blocking: { kind: 'heights', heights } });
+    const seg = base.segments[0]!;
+    const input: FrameWallInput = {
+      ...base,
+      segments: zigzag.slice(1).map((p, i) => ({
+        ...seg,
+        start: [i * 1000, zigzag[i]![1]],
+        end: [i * 1000, p[1]],
+      })),
+    };
+    const t0 = performance.now();
+    expect(() => frameWall(input)).toThrow(
+      new FramingInputError(
+        `The wall would have more than ${MEMBER_BUDGET} members, the most one may have: widen its spacing, shorten it or drop some blocking rows.`,
+      ),
+    );
+    expect(performance.now() - t0).toBeLessThan(500);
+    // A wall whose layout alone is far past the budget is refused before it is laid out.
+    const t1 = performance.now();
+    expect(() => frameWall(straightWall(1e9 / 25.4))).toThrow(/more than 50000 members/);
+    expect(performance.now() - t1).toBeLessThan(200);
+  });
+
+  it('refuses many ladder tees before building their backing rows', () => {
+    // The review's case: 5,000 tees, 30 m high, ladder rows every 50 mm. Each tee built its own
+    // rows before any was counted (997 MB before the refusal).
+    const L = 5000 * 300;
+    const base = straightWall(
+      L / 25.4,
+      {
+        height: 30_000,
+        tees: Array.from({ length: 5000 }, (_, i) => ({ at: 150 + i * 300, otherThickness: 89 })),
+      },
+      { cornerStyle: 'ladder', ladderSpacing: 50, spacing: 300 },
+    );
+    const t0 = performance.now();
+    expect(() => frameWall(base)).toThrow(/more than 50000 members/);
+    expect(performance.now() - t0).toBeLessThan(200);
+    // Two through corners with a set of rows each are counted too.
+    const corners = straightWall(
+      96,
+      {
+        height: 30_000,
+        joins: {
+          start: { kind: 'L', through: true, otherThickness: 89 },
+          end: { kind: 'L', through: true, otherThickness: 89 },
+        },
+      },
+      { cornerStyle: 'ladder', ladderSpacing: 50 },
+    );
+    expect(() => frameWall({ ...corners, maxMembers: 1000 })).toThrow(/more than 1000 members/);
+  });
+
+  it('refuses many openings before comparing each with every accepted one', () => {
+    // The review's case: 20,000 openings, each compared with every accepted one before anything
+    // was counted (13.7 s before the member budget refused).
+    const n = 20_000;
+    const pitch = inch(12);
+    const input = straightWall((n * pitch) / 25.4 + 24, {
+      openings: Array.from({ length: n }, (_, i) => ({
+        id: `extension#${100 + i}`,
+        position: inch(12) + i * pitch,
+        width: inch(4),
+        height: inch(24),
+        sill: inch(36),
+      })),
+    });
+    const t0 = performance.now();
+    expect(() => frameWall(input)).toThrow(/more than 50000 members/);
+    expect(performance.now() - t0).toBeLessThan(200);
+  });
+
+  it('frames thousands of openings over close-set slots without comparing every pair', () => {
+    // The audit's case: openings packed along a wall whose studs are just over a stud apart, so
+    // ~36,000 slots each met every accepted opening (3.6 s before the budget refused at 8,300
+    // openings; 1.3 s to frame 4,000).
+    const sw = inch(1.5);
+    const pitch = 4 * sw + 20;
+    const wall = (n: number, layoutFrom: 'start' | 'end', sill: number) =>
+      straightWall(
+        (n * pitch + 40) / 25.4,
+        {
+          openings: Array.from({ length: n }, (_, i) => ({
+            id: `extension#${100 + i}`,
+            position: 20 + pitch / 2 + i * pitch,
+            width: 10,
+            height: inch(24),
+            sill,
+          })),
+        },
+        { spacing: sw + 0.1, layoutFrom, blocking: { kind: 'mid-height' } },
+      );
+    for (const from of ['start', 'end'] as const)
+      for (const sill of [inch(36), 0]) {
+        const t0 = performance.now();
+        expect(() => frameWall(wall(8000, from, sill))).toThrow(/more than 50000 members/);
+        expect(performance.now() - t0).toBeLessThan(200);
+        const t1 = performance.now();
+        const r = frameWall(wall(4000, from, sill));
+        expect(performance.now() - t1).toBeLessThan(300);
+        expect(r.openings.every((o) => o.framed)).toBe(true);
+        expect(countByRole(r.members).cripple).toBeGreaterThan(0);
+      }
+  });
+
+  it('refuses a wall type with too many blocking heights', () => {
+    const heights = Array.from({ length: 1001 }, (_, r) => 200 + r);
+    const t0 = performance.now();
+    expect(() =>
+      frameWall(straightWall(96, {}, { blocking: { kind: 'heights', heights } })),
+    ).toThrow(/at most 1000 blocking heights/);
+    expect(performance.now() - t0).toBeLessThan(200);
+  });
+
+  it('frames up to the budget it is given and refuses one member past it', () => {
+    const input = straightWall(192);
+    const n = frameWall(input).members.length;
+    expect(frameWall({ ...input, maxMembers: n }).members).toHaveLength(n);
+    expect(() => frameWall({ ...input, maxMembers: n - 1 })).toThrow(/more than 15 members/);
+    for (const bad of [0, 1.5, MEMBER_BUDGET + 1, Number.NaN])
+      expect(() => frameWall({ ...input, maxMembers: bad })).toThrow(/member budget/);
+    const budget = new MemberBudget(undefined, 'The floor');
+    expect(budget.limit).toBe(MEMBER_BUDGET);
+    budget.take(MEMBER_BUDGET);
+    expect(budget.count).toBe(MEMBER_BUDGET);
+    expect(() => budget.expect(1)).toThrow(/The floor would have more than/);
+    expect(() => budget.take()).toThrow(FramingInputError);
   });
 
   it('is deterministic', () => {

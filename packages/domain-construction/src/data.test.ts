@@ -305,6 +305,52 @@ describe('domains.construction: reading', () => {
     for (const [data, field] of cases) refused(data, field);
   });
 
+  it('bounds the lengths, so a crafted document cannot make the generators lay out without end', () => {
+    refused(
+      edited((d) => (d.framing = { spacing: mm('49') })),
+      ['framing', 'spacing'],
+      /at least 50 mm/,
+    );
+    refused(
+      edited((d) => (d.wallTypes[0].layers[2].spacing = mm('0.001'))),
+      ['wallTypes', 0, 'layers', 2, 'spacing'],
+      /at least 50 mm/,
+    );
+    refused(
+      edited((d) => (d.framing = { ladderSpacing: mm('10') })),
+      ['framing', 'ladderSpacing'],
+    );
+    refused(
+      edited((d) => (d.framing = { plateStockLengths: [mm('299')] })),
+      ['framing', 'plateStockLengths', 0],
+      /at least 300 mm/,
+    );
+    refused(
+      edited((d) => (d.framing = { spliceOffset: mm('100001') })),
+      ['framing', 'spliceOffset'],
+      /at most 100 m/,
+    );
+    refused(
+      edited((d) => (d.wallTypes[0].layers[0].thickness = mm('200000'))),
+      ['wallTypes', 0, 'layers', 0, 'thickness'],
+    );
+    refused(
+      edited((d) => (d.levels[0].height = mm('100001'))),
+      ['levels', 0, 'height'],
+      /100 m/,
+    );
+    refused(
+      edited((d) => (d.levels[0].elevation = mm('-100001'))),
+      ['levels', 0, 'elevation'],
+    );
+    expect(
+      readConstructionData(
+        edited((d) => (d.framing = { spacing: mm('50') })),
+        1,
+      ).ok,
+    ).toBe(true);
+  });
+
   it('keeps a stock id this build does not know (it may come from a newer build)', () => {
     const data = read(edited((d) => (d.wallTypes[0].layers[1].stock = 'us-zip-7-16')));
     expect(data.settings.wallTypes[0]!.layers[1]).toMatchObject({ stock: 'us-zip-7-16' });
@@ -467,9 +513,12 @@ describe('wall type thickness', () => {
 });
 
 describe('the construction registration (ADR 0015 decision 1)', () => {
-  it('is a data-only domain that owns `construction` and reads `stock`', () => {
+  it('owns `construction`, reads `stock`, and builds walls and openings', () => {
     expect(constructionDomain.namespace).toBe('construction');
-    expect(constructionDomain.types).toBeUndefined();
+    expect(Object.keys(constructionDomain.types!).sort()).toEqual([
+      'construction.opening',
+      'construction.wall',
+    ]);
     expect(constructionDomain.reads).toEqual(['stock']);
     expect(Object.keys(constructionDomain.data!)).toEqual(['construction']);
     const r = constructionDomain.data!.construction!.read(full(), 1);

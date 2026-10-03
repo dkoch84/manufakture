@@ -1106,6 +1106,7 @@ export class RegenEngine {
         const t0 = now();
         const groupFeatures = group.features.map((id) => byId.get(id)!);
         const key = memberGroupKey({
+          partId,
           namespace: st.namespace,
           implementation: st.implementation,
           regen: REGEN_IMPLEMENTATION_VERSION,

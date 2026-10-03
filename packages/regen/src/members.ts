@@ -536,14 +536,25 @@ const MEMBER_ERROR = (namespace: string, step: string, why: string): RegenError 
 const isFiniteNumber = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 
 function vec3Of(v: unknown, what: string): MemberVec3 {
-  if (!Array.isArray(v) || v.length !== 3 || !v.every(isFiniteNumber)) {
-    throw new TypeError(`${what} is not three finite numbers`);
+  if (!Array.isArray(v) || v.length !== 3 || !v.every(isBounded)) {
+    throw new TypeError(`${what} is not three numbers of at most ${MAX_MEMBER_SIZE} mm`);
   }
   const [x, y, z] = v as [number, number, number];
   return [x, y, z];
 }
 
 const TOLERANCE = 1e-6;
+
+/**
+ * Bounds on what one group may return, so a hostile document cannot make the worker mesh or send
+ * without end: members per group, cuts per member, and every length, size and coordinate (mm).
+ */
+export const MAX_GROUP_MEMBERS = 50_000;
+export const MAX_MEMBER_CUTS = 16;
+export const MAX_MEMBER_SIZE = 1e6;
+
+/** A finite number no larger than `MAX_MEMBER_SIZE` in magnitude. */
+const isBounded = (v: unknown): v is number => isFiniteNumber(v) && Math.abs(v) <= MAX_MEMBER_SIZE;
 
 function unitOf(v: unknown, what: string): MemberVec3 {
   const u = vec3Of(v, what);
@@ -555,7 +566,7 @@ function unitOf(v: unknown, what: string): MemberVec3 {
 
 function planeOf(v: unknown, what: string): MemberPlane {
   const p = v as { n?: unknown; k?: unknown } | null;
-  if (typeof p !== 'object' || p === null || !isFiniteNumber(p.k)) {
+  if (typeof p !== 'object' || p === null || !isBounded(p.k)) {
     throw new TypeError(`${what} is not a plane`);
   }
   return { n: unitOf(p.n, `${what}.n`), k: p.k };
@@ -580,15 +591,19 @@ function memberOf(raw: unknown, i: number, owners: ReadonlySet<string>): MemberD
     s === null ||
     typeof s.id !== 'string' ||
     typeof s.name !== 'string' ||
-    !isFiniteNumber(s.width) ||
-    !isFiniteNumber(s.depth) ||
+    !isBounded(s.width) ||
+    !isBounded(s.depth) ||
     s.width <= 0 ||
     s.depth <= 0
   ) {
-    throw new TypeError(`${name} has no well-formed stock (id, name, width and depth over 0)`);
+    throw new TypeError(
+      `${name} has no well-formed stock (id, name, width and depth over 0 and at most ${MAX_MEMBER_SIZE} mm)`,
+    );
   }
-  if (!isFiniteNumber(m.length) || m.length <= 0) {
-    throw new TypeError(`${name} has a length that is not a number over 0`);
+  if (!isBounded(m.length) || m.length <= 0) {
+    throw new TypeError(
+      `${name} has a length that is not a number over 0 and at most ${MAX_MEMBER_SIZE} mm`,
+    );
   }
   const p = m.placement as Record<string, unknown> | null;
   if (typeof p !== 'object' || p === null) throw new TypeError(`${name} has no placement`);
@@ -601,6 +616,9 @@ function memberOf(raw: unknown, i: number, owners: ReadonlySet<string>): MemberD
     throw new TypeError(`${name} placement axes are not perpendicular`);
   }
   if (!Array.isArray(m.cuts)) throw new TypeError(`${name} has no list of cuts`);
+  if (m.cuts.length > MAX_MEMBER_CUTS) {
+    throw new TypeError(`${name} has ${m.cuts.length} cuts, more than ${MAX_MEMBER_CUTS}`);
+  }
   const cuts: MemberCut[] = m.cuts.map((c: unknown, j: number) => {
     const cut = c as Record<string, unknown> | null;
     const where = `${name} cut ${j}`;
@@ -631,9 +649,11 @@ export type CheckedMembers =
   | { ok: false; error: RegenError };
 
 /**
- * What `frame` returned, checked: members well formed (unit, perpendicular placement axes; unit
- * cut normals; positive sizes), owned by a feature of the group, full ids unique; warnings on the
- * group's features. A failure value is an `invalid` error, anything malformed an `extension` one.
+ * What `frame` returned, checked: at most `MAX_GROUP_MEMBERS` members, well formed (unit,
+ * perpendicular placement axes; unit cut normals; positive sizes; at most `MAX_MEMBER_CUTS` cuts;
+ * lengths, sizes and coordinates within `MAX_MEMBER_SIZE`), owned by a feature of the group, full
+ * ids unique; warnings on the group's features. A failure value is an `invalid` error, anything
+ * malformed or over a bound an `extension` one.
  */
 export function checkMembers(namespace: string, group: MemberGroup, out: unknown): CheckedMembers {
   try {
@@ -650,6 +670,11 @@ export function checkMembers(namespace: string, group: MemberGroup, out: unknown
     const o = out as { members?: unknown; warnings?: unknown; metadata?: unknown } | null;
     if (typeof o !== 'object' || o === null || !Array.isArray(o.members)) {
       throw new TypeError('expected { members } or { error }');
+    }
+    if (o.members.length > MAX_GROUP_MEMBERS) {
+      throw new TypeError(
+        `it has ${o.members.length} members, more than the ${MAX_GROUP_MEMBERS} a group may have`,
+      );
     }
     const owners = new Set(group.features);
     const seen = new Set<string>();
@@ -767,8 +792,13 @@ export interface FramedGroup {
   result: CheckedMembers;
 }
 
-/** The key of a group (ADR 0015 decision 5): its features' metadata, the data, the versions. */
+/**
+ * The key of a group (ADR 0015 decision 5): its part, its features' metadata, the data, the
+ * versions. The part is in it because group ids are unique only within a part: two parts with
+ * equal walls frame equal members, but their sets are reported per part.
+ */
 export function memberGroupKey(parts: {
+  partId: string;
   namespace: string;
   implementation: number;
   regen: number;

@@ -24,7 +24,7 @@ import { MM_PER_INCH } from '@manufakture/units';
 import { dot, zAxis, type Placement, type Plane, type Vec2, type Vec3 } from '../geom';
 import { memberFullId } from '../member-ids';
 import type { Cut, Member, Role, StockRef } from '../members';
-import { FramingInputError, type MemberOverride, type OverrideReport } from './wall';
+import { FramingInputError, MemberBudget, type MemberOverride, type OverrideReport } from './wall';
 
 // Member ids -----------------------------------------------------------------------------------
 //
@@ -221,6 +221,8 @@ export interface FrameRoofInput {
   readonly settings: RoofSettingsInput;
   /** Overrides of the roof's members, keyed by local id (`e1:c4`, `ridge:1`). */
   readonly overrides?: readonly MemberOverride[];
+  /** The most members to make before refusing; `MEMBER_BUDGET` (regen's cap) when absent. */
+  readonly maxMembers?: number;
 }
 
 // Output -------------------------------------------------------------------------------------
@@ -431,6 +433,8 @@ interface Ctx {
   readonly hap: number;
   readonly ridgeTop: number;
   readonly edges: Record<RoofEdge, EdgeFrame>;
+  /** Counts every draft `push` adds. */
+  readonly budget: MemberBudget;
 }
 
 const v2 = {
@@ -445,7 +449,7 @@ const planPlane = (n: Vec2, k: number): Plane => ({ n: [n[0], n[1], 0], k });
 /** Frames a roof: its members, layout warnings, its hand-checkable geometry and override results. */
 export function frameRoof(input: FrameRoofInput): RoofFraming {
   const st = resolveRoofSettings(input.settings);
-  const ctx = context(input, st);
+  const ctx = context(input, st, new MemberBudget(input.maxMembers, 'The roof'));
   const drafts: Draft[] = [];
   const warnings: RoofWarning[] = [];
   const full = (id: string) => memberFullId({ owner: input.roof, id });
@@ -521,7 +525,7 @@ export function frameRoof(input: FrameRoofInput): RoofFraming {
   };
 }
 
-function context(input: FrameRoofInput, st: RoofSettings): Ctx {
+function context(input: FrameRoofInput, st: RoofSettings, budget: MemberBudget): Ctx {
   const fail = (msg: string): never => {
     throw new FramingInputError(msg);
   };
@@ -576,6 +580,8 @@ function context(input: FrameRoofInput, st: RoofSettings): Ctx {
     if (f.plate + h + st.ties.stock.depth > ridgeTop - rd + EPS)
       fail('The ties reach the ridge board: lower them.');
   }
+  // Refuse a layout far past the budget before laying it out: a rafter per slot along the eave.
+  budget.expect(Math.floor(L / st.spacing));
   return {
     kind: input.kind,
     st,
@@ -595,6 +601,7 @@ function context(input: FrameRoofInput, st: RoofSettings): Ctx {
     hap,
     ridgeTop,
     edges,
+    budget,
   };
 }
 
@@ -791,6 +798,7 @@ function frameGable(ctx: Ctx, out: Draft[]): Framed {
     const e = ctx.edges[n];
     for (const { k, t } of slots)
       push(
+        ctx,
         out,
         rafter(
           ctx,
@@ -810,6 +818,7 @@ function frameGable(ctx: Ctx, out: Draft[]): Framed {
         ['b', tb],
       ] as const)
         push(
+          ctx,
           out,
           rafter(
             ctx,
@@ -839,6 +848,7 @@ function ridge(ctx: Ctx, a: number, b: number, joints: readonly number[], out: D
   const { W, rw, rd } = ctx;
   splicePieces(a, b, Math.max(...ctx.st.stockLengths), joints).forEach(([p, q], i) =>
     push(
+      ctx,
       out,
       board(
         formatRoofMemberId({ form: 'ridge', piece: i + 1 }),
@@ -931,6 +941,7 @@ function frameHip(ctx: Ctx, out: Draft[]): Framed {
     const hi = n === 1 || n === 3 ? tb : W / 2;
     commons.forEach((t, k) =>
       push(
+        ctx,
         out,
         rafter(
           ctx,
@@ -956,6 +967,7 @@ function frameHip(ctx: Ctx, out: Draft[]): Framed {
             : [(e.R[0] + e.T[0]) / SQRT2, (e.R[1] + e.T[1]) / SQRT2];
         const k0 = v2.dot(n2, e.C) + (end === 'a' ? 0 : e.E / SQRT2) - wh / 2;
         push(
+          ctx,
           out,
           rafter(
             ctx,
@@ -995,6 +1007,7 @@ function frameHip(ctx: Ctx, out: Draft[]): Framed {
     const notch: readonly [Plane, Plane] | undefined =
       h.seat > EPS ? [planPlane(D, v2.dot(D, C)), { n: [0, 0, -1], k: -ctx.plate }] : undefined;
     push(
+      ctx,
       out,
       sloped({
         id: formatRoofMemberId({ form: 'hip', corner: c }),
@@ -1070,6 +1083,7 @@ function frameTies(
     taken.push(iv);
     // Along v, thin face along u, depth up: x = +v, y = -u, z = x cross y = up.
     push(
+      ctx,
       out,
       board(
         id,
@@ -1122,6 +1136,7 @@ function frameGableStuds(ctx: Ctx, g: GableStuds, out: Draft[]): void {
       const planes = underRidge ? [...sides, { n: [0, 0, 1] as Vec3, k: ridgeBottom }] : sides;
       // Up, thin face along v, depth across the wall: x = up, y = +v, z = x cross y = -u.
       push(
+        ctx,
         out,
         board(
           formatRoofMemberId({ form: 'gable-stud', edge: n, slot: k }),
@@ -1178,6 +1193,7 @@ function frameBoards(ctx: Ctx, out: Draft[]): void {
       splicePieces(a, b, max, centres[n]).forEach(([p, q], i) => {
         const P = v2.add(v2.add(e.C, v2.scale(e.T, p)), v2.scale(e.R, rOrigin));
         push(
+          ctx,
           out,
           board(
             formatRoofMemberId({ form: 'board', edge: n, board: layer.board, piece: i + 1 }),
@@ -1213,8 +1229,10 @@ function rafterCentres(drafts: readonly Draft[], ctx: Ctx): Record<RoofEdge, num
   return out;
 }
 
-function push(out: Draft[], d: Draft | undefined): void {
-  if (d) out.push(d);
+function push(ctx: Ctx, out: Draft[], d: Draft | undefined): void {
+  if (!d) return;
+  ctx.budget.take();
+  out.push(d);
 }
 
 /** From the roof's frame to the world: a rotation about z by the footprint's direction and a move. */

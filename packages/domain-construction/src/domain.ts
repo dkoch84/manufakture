@@ -1,12 +1,16 @@
 // The construction domain as regen registers it (ADR 0013 decisions 1 and 5, ADR 0015 decision 1):
 // namespace `construction`, the reader of the document data it owns (`domains.construction`), and
-// `reads: ['stock']` for the shared stock overrides. Data only for now: the wall, opening, floor
-// and roof types (T6.1b, T6.1c) and the member stage add themselves here. The app's regen worker
-// entry calls `registerConstruction(registry)` at start-up; regen imports no domain package.
+// `reads: ['stock']` for the shared stock overrides, the wall and opening types (T6.1b) and the
+// member stage that frames each wall with its openings (ADR 0015 decision 5). The floor and roof
+// types (T6.1c) add themselves here. The app's regen worker entry calls
+// `registerConstruction(registry)` at start-up; regen imports no domain package.
 
-import type { ExtensionDomain, ExtensionRegistry } from '@manufakture/regen';
+import type { ExtensionDomain, ExtensionRegistry, ExtensionType } from '@manufakture/regen';
 import { STOCK_NAMESPACE, registerStock, type Json } from '@manufakture/stock';
 import { CONSTRUCTION_DATA_VERSION, CONSTRUCTION_NAMESPACE, readConstructionData } from './data';
+import { OPENING_TYPE, openingType } from './features/opening';
+import { constructionMemberStage } from './features/stage';
+import { WALL_TYPE, wallType } from './features/wall';
 
 /**
  * Bump with any change that can alter what a translator or the member stage returns, so results
@@ -14,7 +18,7 @@ import { CONSTRUCTION_DATA_VERSION, CONSTRUCTION_NAMESPACE, readConstructionData
  */
 export const CONSTRUCTION_IMPLEMENTATION = 1;
 
-/** The domain definition: what `registerConstruction` registers. `types` is optional in regen. */
+/** The domain definition: what `registerConstruction` registers. */
 export const constructionDomain: ExtensionDomain = {
   namespace: CONSTRUCTION_NAMESPACE,
   implementation: CONSTRUCTION_IMPLEMENTATION,
@@ -25,6 +29,11 @@ export const constructionDomain: ExtensionDomain = {
       read: (data, schemaVersion) => readConstructionData(data as Json, schemaVersion),
     },
   },
+  types: {
+    [WALL_TYPE]: wallType as ExtensionType,
+    [OPENING_TYPE]: openingType as ExtensionType,
+  },
+  members: constructionMemberStage,
 };
 
 /**

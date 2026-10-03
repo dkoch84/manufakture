@@ -14,9 +14,11 @@ ones that come from framing practice are labelled as rules of thumb. See [Discla
 **Dependencies.** At run time `@manufakture/units` (for `MM_PER_INCH` in the defaults) and the
 shared `@manufakture/stock` (the catalog, the `stock` namespace and the JSON readers), with
 `@manufakture/core` for types, so everything runs in Node with no `.wasm`. ADR 0015 decision 1
-also allows `takeoff` and `nesting` at run time, and `regen` and `kernel` as types only (`regen` is
-a devDependency for the registration's types); never the kernel, regen, Manifold, the app or
-another domain. `src/boundary.test.ts` enforces that allowlist. The generators' input is this
+also allows `takeoff` and `nesting` at run time, and `regen` and `kernel` as types only (both are
+devDependencies, for the registration's and the translators' types); never the kernel, regen,
+Manifold, the app or another domain. Tests may also load regen and the kernel, as `domain-wood`'s
+do, to run the features through regen with the real kernel. `src/boundary.test.ts` enforces that
+allowlist. The generators' input is this
 package's own type: the feature layer (T6.1b) evaluates the wall feature's expressions, resolves
 the wall graph and the construction domain data (below), and passes plain numbers in. Stock is
 passed to the generators as a `StockRef` (catalog id, nominal name, dressed sizes); `stockRef(id,
@@ -95,9 +97,14 @@ optional; absent lists are empty.
   kept (it may come from a newer build) and fails only where it is resolved (`layerThickness`).
 - **Bounds.** At most 100 levels, 100 of each type, 100 header rules, 8 layers per wall type and
   20 lengths per list; ids are lower case, digits and hyphens, up to 64 characters, unique per list.
+  So that a crafted document cannot make the generators lay out without end, every length is at
+  most 100 m (`MAX_SETTING_LENGTH`; a level's elevation and height too), layout spacings
+  (`spacing`, `ladderSpacing`) at least 50 mm (`MIN_SPACING`) and plate stock lengths at least
+  300 mm (`MIN_PLATE_STOCK`). These are far outside framing practice, not sizings.
 
-**Registration.** `constructionDomain` is a data-only domain for now (`types` is optional in
-regen): namespace `construction`, `reads: ['stock']`, the reader of `domains.construction`. The
+**Registration.** `constructionDomain`: namespace `construction`, `reads: ['stock']`, the reader
+of `domains.construction`, the `construction.wall` and `construction.opening` types and the
+member stage (see [Walls and openings](#walls-and-openings-constructionwall-constructionopening)). The
 app's regen worker entry calls `registerConstruction(defaultExtensions)`, which also registers the
 shared stock reader unless it is already there. Unknown versions are regen's: a newer
 `schemaVersion` fails the readers of the namespace as `unsupported` while the document still loads.
@@ -107,6 +114,74 @@ dimensional lumber 2x4 to 2x12 and 4x4, 4x6 (PS 20-25, verified), precut studs 2
 92-5/8" and 104-5/8" (`us-2x4-precut-92-5-8`; lengths unverified), 7/16" OSB (`us-osb-7-16`),
 plywood, and 1/2" and 5/8" gypsum board in 4 x 8 and 4 x 12 ft (`us-gyp-1-2-8ft`; unverified).
 Prices come from the stock overrides (`domains.stock`).
+
+## Walls and openings: `construction.wall`, `construction.opening`
+
+Two extension types (T6.1b, ADR 0015 decisions 2, 3, 5 and 6) in `src/features/`, each with
+`schemaVersion` 1 and an empty migrations list (`WALL_PARAMS`, `OPENING_PARAMS`), registered by
+`constructionDomain` with regen's member stage.
+
+**Wall** (`wall.ts`). Params: `level` and `wallType` (ids in `domains.construction`: data, not
+model ids), `points` (2 to 64; the coordinates are the length expressions `x1`, `y1` .. `xn`,
+`yn`, in plan), `closed`, `justification` (`left`, the default, puts the framing left of the path,
+so the path is the framing's exterior face; the exterior is always right of the path), `joins`
+(`start`, `end`: `auto` or `free`), `framing` (`layoutFrom`, `bottomPlates`, `topPlates`,
+`kings`, `cornerStyle`, `blocking`: `none` or `mid-height`) and `overrides` (`{ id, delete?,
+stock? }` keyed by local member id). Expressions: `height` (default the level's), `spacing`,
+`layoutOrigin`, and `move_<n>`, the nudge of the n-th override. Settings resolve wall over wall
+type over `domains.construction` framing over `DEFAULT_WALL_SETTINGS`; the header rules are the
+document's. Operation `new` makes the layer bodies; a wall with no operation makes none (framing
+only). Bounds: 64 points, segments up to 100 m, coordinates within 500 m (half of regen's 1 km
+member bound, so a wall near the limit is refused with a clear message rather than as a malformed
+member), height up to 30 m, stock sizes 1 mm to 2 m (with overrides), 500 overrides, and
+`MEMBER_BUDGET` (50,000, regen's `MAX_GROUP_MEMBERS`) members per wall.
+
+- **Layer bodies.** Each siding, sheathing and drywall layer is one body
+  `<wall id>:layer/<layer id>`: its outline in plan (the band it occupies across the path, mitred
+  at every corner of the path, a ring with a hole for a closed path) extruded from the level's
+  elevation up the wall's height. Faces: `<id>:side:<layer>.ext<i>` and `.int<i>` along segment
+  i, `.start` and `.end` at an open wall's ends, and `<id>:cap.<layer>:start` (bottom) and `:end`
+  (top), through the kernel's `capRole`, so names stay unique across the wall's bodies. They keep
+  their names when the wall lengthens. Separate walls that meet are neither mitred nor butted in
+  their layers: each wall's layers stop square at its own path ends, so at an L they leave a
+  notch on one face and overlap on the other, and at a tee the meeting wall's layers overlap the
+  other wall's. Only the framing joins (below). Draw connected walls as one path to mitre them;
+  joining the layers of separate walls is follow-up task #1172.
+- **Metadata** (`WallMetadata`): level, base, height, path, justification, the framing
+  thickness, each layer's extent across the path and body, the resolved settings and overrides.
+
+**Opening** (`opening.ts`). Its host is the one `construction.wall` in its `dependsOn`. Params:
+`kind` (`door`, `window`, `opening`), `segment` (default 1), `from` (`start` or `end` of the
+segment), `sizing` (`rough`, or `unit` with the `allowance` expression added to width and
+height), `header` (`auto`: the narrowest header rule covering the width, else the wall type's
+default; `default`; `explicit` with `stock`, `plies`, `jacks`, `spacer?`), `kings`, `jacks`,
+`swing` and `hand` (doors, for drawings) and `overrides`. Expressions: `position` (to the centre
+line), `width`, `height` (the rough opening), `sill` (0 for a door, required for a window) and
+`move_<n>`. It has no operation: one `tools` input cuts a box through the whole wall at the rough
+opening from every layer body (faces `<opening id>:<layer>:<role>`); with a `scope`, every body it
+cuts must be listed there. It is refused when it does not fit its segment or its wall's height.
+
+**Member stage** (`stage.ts`, `graph.ts`). A group per wall: the wall, every built opening it
+hosts, and the walls it meets or crosses (they decide its ends, so they are in its cache key;
+moving an opening re-frames only its wall). `wallGraph` works out, per level, the joins:
+
+- inside one wall, segment i runs through at its end and segment i + 1 butts (a closed path is a
+  pinwheel);
+- two open wall ends at one point (0.5 mm) make an L: the wall with the lower feature number runs
+  through, the other butts (by number, so reordering features changes nothing);
+- an open end on the inside of another wall's segment makes a tee in that segment;
+- three or more ends at a point, or an end on another wall's corner, stay free with a
+  `join-unresolved` layout warning; ends set `free` never join;
+- walls crossing away from their ends are refused (an error on both);
+- at most 5,000 wall segments per part (`MAX_GRAPH_SEGMENTS`).
+
+Running through means the framing reaches the far side of the other wall's framing; butting
+means it stops at the near side, both measured on the framing's centre line, at any angle.
+`framedWall` turns that into `frameWall`'s segments (moved ends, `L` and `T` joins, tees), and
+each opening's position is moved by its segment's shift. `frameWall`'s warnings go on the wall,
+or on the opening they name, with their code; rule-of-thumb ones start with "Rule of thumb:".
+The group's metadata lists each opening's header and where it came from (`rule`, `default`, or
+`opening` when explicit) and each override as `applied` or `lost`.
 
 ## Members
 
@@ -597,6 +672,77 @@ test), every seated rafter's seat is level at the plates with its heel on the wa
 common meets the ridge at its top, members stay inside the roof's envelope, ids are unique and
 round-trip, and output is deterministic.
 
+## Takeoff
+
+`constructionTakeoff({ members, faces, levels?, stock?, settings? })` (`src/takeoff/`, T6.3a,
+ADR 0015 decision 10) counts lumber and sheet goods and prices them, as rows on
+`@manufakture/takeoff`'s model (`ConstructionRow` adds `price` and `cost`), with the 1D and 2D
+layouts of `@manufakture/nesting`. Its input is plain data, so it runs in Node with no kernel:
+`members` as the generators return them (`TakeoffMember` is `id`, `owner`, `role`, `stock`,
+`length`), `faces` as flattened sheet faces (`SheetFace`: a box, or a convex `outline` in it, less
+rectangular `holes`), `levels` mapping feature ids to level ids, and the document's stock
+overrides for sizes and prices.
+
+**As framed only.** Every row counts what the generators framed and the faces laid, then what to
+buy for exactly that. There is no estimating row ("one stud per foot of wall" is how many yards
+quote; the project owner decided against showing it). Hardware (nails, hangers, anchors) is not
+counted. The result carries `DISCLAIMER_SHORT` as `disclaimer` for every export.
+
+| Category  | Rows                                                      | Unit                       |
+| --------- | --------------------------------------------------------- | -------------------------- |
+| `framing` | members by stock and blank length; items name their roles | each, + length             |
+| `linear`  | plates, blocking (and backing), fascia (and sub-fascia)   | length                     |
+| `faces`   | sheet layers as laid, by stock and layer: area and pieces | area                       |
+| `lumber`  | to buy: precut studs, and lumber by length sold           | each, + length, board feet |
+| `sheet`   | to buy: sheets per stock                                  | sheet, + area              |
+
+**Lumber.** Studs, kings and corner studs whose length is within 0.5 mm of a precut stud of their
+stock (`us-2x4-precut-92-5-8`) are bought as precuts (`precuts: false` turns this off). Every
+other member of a lumber stock goes to `layoutSticks` on the lengths sold (`settings.lengths` by
+stock id, else the catalog's), with `kerf` (default 1/8") and `trims`; each stick is then the
+shortest length that holds its cuts, and when every length has a price the layout is ranked by
+price. The wall and roof generators splice plates and ridges at their own stock lengths; a plate,
+rim, ridge or fascia still longer than every length sold is bought in pieces (`spliced`), and any
+other member that long is listed at its own length (`longer-than-stock`). A stock with no lengths
+sold is bought at the members' lengths (`no-stock-lengths`). Members cut from sheet stock (a
+header's plywood spacer) go to the sheet layout as parts.
+
+**Sheets.** Each face is laid with whole sheets from its starting corner (`from`, default its
+start) and bottom, `vertical` (wall sheathing, siding) or `horizontal` (drywall, subfloor, roof
+sheathing: across the framing) by default. Each grid cell gives one piece, the bounding rectangle
+of the face inside it; a hole inside a piece is cut out of it, and the cut-out is an offcut when
+it is at least `minOffcut` (default 12" by 3"). The face's partial pieces are packed onto its own
+cut-outs first, then every partial piece left, across all faces of that stock, onto the offcuts
+left anywhere and then onto new sheets (`layoutSheets`, offcuts at no cost so they are used
+first). Sheets bought are whole plus new, plus `wastePercent`, rounded up. Sheets have no grain
+here; a piece the outline only partly covers (a gable's slope) is a rectangle, and the triangle
+beside it is waste. Helpers build faces: `wallFace` (length by height less rough openings, with an
+optional gable on top), `subfloorFace` (T6.2b's `SubfloorReport`, x across the joists; a
+rectilinear outline becomes its box with the missing parts as holes) and `roofSheathingFaces`
+(the same input as `frameRoof`: each plane from the eave's overhang line to the ridge's centre
+line, `(overhang + width / 2) x the common factor` up the slope; gable planes as long as the
+footprint plus both rakes, hip planes as trapezoids and triangles).
+
+**Cost.** A bought row's quantity times its stock's price from `domains.stock`: lumber per piece
+(per stick, any length), per foot or metre (of the row's length) or per board foot (on the
+stock's basis); sheets per sheet or piece. Rows with no price (`no-price`), a price per a unit
+that does not fit (`price-unit`) or a currency other than `settings.currency` (`other-currency`)
+are left out of `cost.total` and listed in `cost.unpriced`. With no `currency` setting, the first
+stated currency is the takeoff's.
+
+**Subtotals** (`subtotals`) are the as-framed and as-laid rows' totals per feature (a member's
+owner, so an opening's members are the opening's) and, when `levels` is given, per level. What to
+buy is laid out across the whole building, so it has no per-feature split.
+
+Tests: `src/takeoff/framing.test.ts` (the T6.2a 16' wall's rows: 13 precut studs and three 16'
+plates, plates as 12' pieces, precuts off, cost per piece, foot, metre and board foot, flags),
+`src/takeoff/sheets.test.ts` (a 16' x 8' face with a door is 4 sheets of 4 x 8 with the cut-out
+noted; 4 x 12 drywall; offcut reuse on a face and across faces; waste; faces from walls, an L
+floor and gable and hip roofs) and `src/takeoff/shed.test.ts`, the 12' x 16' shed framed with the
+real generators, every count derived by hand in its comments: 51 precut studs; 2x4 13 x 16', 4 x
+14', 1 x 12'; 2x6 18 x 16', 13 x 12'; 2x8 1 x 16', 1 x 8'; 4x6 3 x 16'; 25 sheets of 7/16" OSB
+(18 whole, 7 new for the partial pieces) and 6 of 23/32" OSB; $1,708.90 at the test's prices.
+
 ## Tests
 
 `src/framing/wall.test.ts` holds hand-computed fixtures in inches (13 studs on a 16' wall at 16"
@@ -609,7 +755,14 @@ owner, and output is deterministic. `src/member-ids.test.ts` round-trips every i
 refuses non-canonical spellings. `src/data.test.ts` covers `domains.construction`: valid and
 invalid data with the field at fault, a variable in a level refused, newer versions, the writer's
 round trip, the defaults (one level, no header rules), `newWallType`, wall type thickness (4-7/16"
-for 2x4, 7/16" OSB and 1/2" drywall, and with a stock override) and the registration.
+for 2x4, 7/16" OSB and 1/2" drywall, and with a stock override), the length bounds and the
+registration. `src/features/regen.test.ts` runs walls and openings through regen with the real
+kernel: a 16' wall's layer volumes exact and T6.2a's 13 studs, an L path's mitred layers, a closed
+12' x 16' outline, a 36" x 80" door cutting sheathing and drywall exactly with its members, a moved
+opening re-framing only its wall, L corners and tees between walls, crossings refused, a
+suppressed host, a stock override widening the wall, face names kept as a wall lengthens, opening
+scope and fit, header sources and the `no-header-rule` warning, overrides. `src/features/features.test.ts`
+covers the params readers, layer outlines and the wall graph at 90 and 45 degrees.
 `src/boundary.test.ts` checks every import against ADR 0015's allowlist.
 
 ```sh

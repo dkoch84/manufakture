@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { diffDocuments } from './changes';
 import { applyCommand, CommandSchema, type Command } from './commands';
-import { featureDependencies } from './features';
+import { featureDependencies, featureIdsInName } from './features';
 import { deserialize, parseDocument, serialize } from './format';
 import type { CoreErrorCode } from './result';
 import {
@@ -115,6 +115,38 @@ describe('extension body creators', () => {
     const f = board(operation === undefined ? {} : { operation });
     expect(bodyCreationProblem(f, 'extension#1')).toMatch(message);
     expect(bodyCreationProblem(f, 'extension#1:a')).toMatch(message);
+  });
+
+  it('accepts construction layer bodies (`<id>:layer/<layer id>`) and an opening scoping them', () => {
+    // ADR 0015 decisions 3 and 6: a wall makes one body per sheet layer; an opening, with no
+    // operation, cuts the ones in its scope. Validation only: no format change.
+    const wall = board({
+      extension: 'construction.wall',
+      dependsOn: [],
+      operation: 'new',
+      params: { level: 'level-1', wallType: 'ext-2x4', points: 2 },
+    });
+    const opening = board({
+      id: 'extension#2',
+      name: 'Door 1',
+      extension: 'construction.opening',
+      dependsOn: ['extension#1'],
+      scope: ['extension#1:layer/sheathing', 'extension#1:layer/drywall'],
+      params: { kind: 'door' },
+    });
+    const doc = applied(applied(applied(bracket(), add(wall)), add(opening)), {
+      type: 'setBodyProps',
+      partId: PART,
+      bodyId: 'extension#1:layer/sheathing',
+      props: { name: 'OSB' },
+    });
+    expect(validateDocument(doc)).toEqual([]);
+    expect(bodyCreationProblem(wall, 'extension#1:layer/sheathing')).toBeUndefined();
+    expect(featureDependencies(opening)).toEqual(['extension#1']);
+    expect(featureIdsInName('extension#1:side:sheathing.ext1')).toEqual(['extension#1']);
+    expect(featureIdsInName('extension#1:cap.sheathing:end')).toEqual(['extension#1']);
+    expect(featureIdsInName('extension#2:sheathing:xmin')).toEqual(['extension#2']);
+    expect(unwrap(deserialize(serialize(doc))).document).toEqual(doc);
   });
 
   it('its bodies take props, and a later feature may scope them', () => {

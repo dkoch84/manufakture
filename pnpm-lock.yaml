@@ -171,13 +171,22 @@ importers:
       '@manufakture/core':
         specifier: workspace:*
         version: link:../core
+      '@manufakture/nesting':
+        specifier: workspace:*
+        version: link:../nesting
       '@manufakture/stock':
         specifier: workspace:*
         version: link:../stock
+      '@manufakture/takeoff':
+        specifier: workspace:*
+        version: link:../takeoff
       '@manufakture/units':
         specifier: workspace:*
         version: link:../units
     devDependencies:
+      '@manufakture/kernel':
+        specifier: workspace:*
+        version: link:../kernel
       '@manufakture/regen':
         specifier: workspace:*
         version: link:../regen

@@ -8,6 +8,9 @@ import { heapInUse, type WasmAllocator } from '@manufakture/kernel/testing';
 import type { ManifoldToplevel } from 'manifold-3d/manifold';
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
+  MAX_GROUP_MEMBERS,
+  MAX_MEMBER_CUTS,
+  MAX_MEMBER_SIZE,
   MemberMeshCache,
   boxMesh,
   checkGroups,
@@ -16,6 +19,7 @@ import {
   manifoldMesh,
   memberInstances,
   memberShapeKey,
+  memberGroupKey,
   meshVolume,
   type ManifoldCounter,
   type MemberData,
@@ -278,6 +282,46 @@ describe('checking what a member stage returns', () => {
     expect(
       bad({ owner: 'x' }).ok ? '' : (bad({ owner: 'x' }) as { error: { code: string } }).error.code,
     ).toBe('extension');
+  });
+
+  it('caps what a group may return: members, cuts, lengths, sizes and coordinates', () => {
+    const message = (r: ReturnType<typeof check>) => (r.ok ? '' : r.error.message);
+    const many = Array.from({ length: MAX_GROUP_MEMBERS + 1 }, (_, i) => stud(`s${i}`, i));
+    expect(message(check({ members: many }))).toMatch(
+      `has ${MAX_GROUP_MEMBERS + 1} members, more than the ${MAX_GROUP_MEMBERS}`,
+    );
+    expect(check({ members: many.slice(0, MAX_GROUP_MEMBERS) }).ok).toBe(true);
+    const plane = { kind: 'plane', n: [1, 0, 0], k: 2000 } as const;
+    const cuts = (n: number) =>
+      check({ members: [{ ...stud('s1', 0), cuts: Array(n).fill(plane) }] });
+    expect(cuts(MAX_MEMBER_CUTS).ok).toBe(true);
+    expect(message(cuts(MAX_MEMBER_CUTS + 1))).toMatch(`more than ${MAX_MEMBER_CUTS}`);
+    const big = MAX_MEMBER_SIZE * 1.01;
+    const bad = (m: Partial<MemberData>) => check({ members: [{ ...stud('s1', 0), ...m }] });
+    expect(bad({ length: MAX_MEMBER_SIZE }).ok).toBe(true);
+    expect(message(bad({ length: big }))).toMatch(/length/);
+    expect(message(bad({ stock: { ...STOCK, depth: big } }))).toMatch(/stock/);
+    expect(
+      message(bad({ placement: { origin: [big, 0, 0], x: [0, 0, 1], y: [1, 0, 0] } })),
+    ).toMatch(/origin/);
+    expect(message(bad({ cuts: [{ kind: 'plane', n: [1, 0, 0], k: -big }] }))).toMatch(/plane/);
+  });
+
+  it('keys a group by its part too', () => {
+    const parts = {
+      namespace: 'frame',
+      implementation: 1,
+      regen: 1,
+      group,
+      features: [],
+      data: {},
+    };
+    expect(memberGroupKey({ ...parts, partId: 'part#1' })).not.toBe(
+      memberGroupKey({ ...parts, partId: 'part#2' }),
+    );
+    expect(memberGroupKey({ ...parts, partId: 'part#1' })).toBe(
+      memberGroupKey({ ...parts, partId: 'part#1' }),
+    );
   });
 
   it('turns a failure value into an invalid error, and checks warnings', () => {

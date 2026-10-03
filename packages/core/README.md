@@ -947,6 +947,30 @@ any other `<feature id>:<suffix>` name and need nothing inside `params`. Core ha
 or remap yet, so these forms live in `domain-construction` (`parseWallMemberId`,
 `parseOpeningMemberId`, `splitMemberFullId`) until T7.1a picks them up.
 
+#### Construction layer bodies and member references (M6)
+
+Two more forms come from the wall and opening features (`construction.wall`,
+`construction.opening`, T6.1b; [ADR 0015](../../docs/adr/0015-construction-domain.md) decisions 3
+and 6). Neither changes the document's shape, so neither needs a format bump.
+
+| Form                         | Example                       | Where it appears                                                                                                         |
+| ---------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `<feature id>:layer/<layer>` | `extension#3:layer/sheathing` | A body id: one body per sheet layer of a wall, `<layer>` the layer id from its wall type; in `scope`, `bodies` and props |
+| `<feature id>:<local id>`    | `extension#7:king-l`          | A member reference: the owner's per-member overrides store the local id only (`king-l`), keyed in the owner's params     |
+
+- **Layer bodies** are extension bodies under a key (see Bodies), so `bodyCreationProblem` and
+  `bodyCreator` read them like any `<id>:<key>` body: the creator is the id up to the first `:`.
+  An opening, which has no operation, lists the layer bodies it cuts in its `scope`, so
+  `featureDependencies` counts the wall through them as well as through `dependsOn`. Their face
+  names are `extension#3:side:<layer>.ext<i>` and `.int<i>` (the exterior and interior faces along
+  segment i), `.start` and `.end` (an open wall's ends), and `extension#3:cap.<layer>:start` and
+  `:end` (bottom and top); an opening's cuts add `extension#7:<layer>:<role>`. Every one starts
+  with exactly one feature id, so `featureIdsInName` reads it. Removing a layer from a wall type
+  loses the body and the references to its faces, as removing any body does.
+- **Member references** name exactly one feature, the owner at the front; the overrides inside
+  the owner's params hold only the local id, so nothing inside `params` names a feature.
+- Core has no name parser or id remap yet; M7's T7.1a takes both forms from here.
+
 ### References
 
 Geometry is referenced by name, never by index (T0.5, ADR 0004 decision 5):

@@ -33,6 +33,9 @@ export type StoredLevel = Level<StoredExpression>;
 /** The most levels one document may hold. */
 export const MAX_LEVELS = 100;
 
+/** The largest level elevation or height, mm (100 m), so a crafted level cannot hang the framing. */
+export const MAX_LEVEL_LENGTH = 100_000;
+
 /** Ids of levels, types and layers: lower case, digits and hyphens, at most 64 characters. */
 export const DATA_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
@@ -65,8 +68,17 @@ export function readLevel(v: unknown, at: Path): Read<StoredLevel> {
     signed: true,
   });
   if (!elevation.ok) return elevation;
+  if (Math.abs(elevation.value.value) > MAX_LEVEL_LENGTH) {
+    return fail(`expected an elevation of at most ${MAX_LEVEL_LENGTH / 1000} m`, [
+      ...at,
+      'elevation',
+    ]);
+  }
   const height = readConstantLength(own(v, 'height'), [...at, 'height'], { positive: true });
   if (!height.ok) return height;
+  if (height.value.value > MAX_LEVEL_LENGTH) {
+    return fail(`expected a height of at most ${MAX_LEVEL_LENGTH / 1000} m`, [...at, 'height']);
+  }
   return ok({
     id: id.value,
     name: name.value,

@@ -4,24 +4,93 @@ export type Interval = readonly [number, number];
 
 const EPS = 1e-6;
 
-/** `[a, b]` less the given holes, dropping pieces shorter than `minLength`. */
+/**
+ * `[a, b]` less the given holes, dropping pieces shorter than `minLength`. The pieces stay sorted
+ * and apart while the holes run forwards, so each hole only cuts the run of pieces it reaches,
+ * found by binary search: linear for holes given in order along the run (a wall's doors).
+ */
 export function subtract(
   a: number,
   b: number,
   holes: readonly Interval[],
   minLength = EPS,
 ): Interval[] {
-  let parts: Interval[] = [[a, b]];
-  for (const [h0, h1] of holes) {
-    parts = parts.flatMap(([p0, p1]): Interval[] => {
-      if (h1 <= p0 + EPS || h0 >= p1 - EPS) return [[p0, p1]];
-      const out: Interval[] = [];
-      if (h0 > p0) out.push([p0, h0]);
-      if (h1 < p1) out.push([h1, p1]);
-      return out;
-    });
+  if (!holes.every(([h0, h1]) => h0 <= h1)) return subtractEach(a, b, holes, minLength);
+  const parts: Interval[] = [[a, b]];
+  for (const hole of holes) {
+    const [h0, h1] = hole;
+    // Pieces a hole leaves alone: those it ends before (a suffix) or starts after (a prefix).
+    const i = firstIndex(parts.length, (k) => !(h0 >= parts[k]![1] - EPS));
+    const j = firstIndex(parts.length, (k) => h1 <= parts[k]![0] + EPS);
+    if (j <= i) continue;
+    // At most two pieces are left: before the hole in the first piece, after it in the last.
+    parts.splice(i, j - i, ...parts.slice(i, j).flatMap((p) => cutHole(p, hole)));
   }
   return parts.filter(([p0, p1]) => p1 - p0 >= minLength);
+}
+
+/** `subtract` hole by hole over every piece, for holes whose ends are reversed. */
+function subtractEach(
+  a: number,
+  b: number,
+  holes: readonly Interval[],
+  minLength: number,
+): Interval[] {
+  let parts: Interval[] = [[a, b]];
+  for (const hole of holes) parts = parts.flatMap((p) => cutHole(p, hole));
+  return parts.filter(([p0, p1]) => p1 - p0 >= minLength);
+}
+
+function cutHole([p0, p1]: Interval, [h0, h1]: Interval): Interval[] {
+  if (h1 <= p0 + EPS || h0 >= p1 - EPS) return [[p0, p1]];
+  const out: Interval[] = [];
+  if (h0 > p0) out.push([p0, h0]);
+  if (h1 < p1) out.push([h1, p1]);
+  return out;
+}
+
+/** The first of `0..n-1` where `pred` holds, or `n`; `pred` must be false then true. */
+export function firstIndex(n: number, pred: (k: number) => boolean): number {
+  let lo = 0;
+  let hi = n;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (pred(mid)) hi = mid;
+    else lo = mid + 1;
+  }
+  return lo;
+}
+
+/**
+ * Intervals sorted by start, with the highest end so far, for overlap and containment lookups in
+ * logarithmic time plus the intervals near the one asked about. The answers are exactly those of
+ * testing every interval.
+ */
+export class IntervalIndex {
+  readonly #items: Interval[];
+  readonly #reach: number[] = [];
+
+  constructor(intervals: readonly Interval[]) {
+    this.#items = [...intervals].sort((p, q) => p[0] - q[0]);
+    let r = -Infinity;
+    for (const it of this.#items) this.#reach.push((r = Math.max(r, it[1])));
+  }
+
+  /** Whether any interval `overlaps` `q` by more than `tol` (at least 0). */
+  overlapsAny(q: Interval, tol: number): boolean {
+    const items = this.#items;
+    // An interval starting at or past q's end, or ending at or before its start, shares nothing.
+    let k = firstIndex(items.length, (i) => items[i]![0] >= q[1]) - 1;
+    for (; k >= 0 && this.#reach[k]! > q[0]; k--) if (overlaps(items[k]!, q, tol)) return true;
+    return false;
+  }
+
+  /** Whether any interval holds `q` to within `eps` at each end. */
+  containsAny(q: Interval, eps: number): boolean {
+    const items = this.#items;
+    const n = firstIndex(items.length, (i) => !(q[0] >= items[i]![0] - eps));
+    return n > 0 && q[1] <= this.#reach[n - 1]! + eps;
+  }
 }
 
 /** Whether two intervals share more than `tol` of length. */

@@ -9,8 +9,9 @@ import { describe, expect, it } from 'vitest';
 // kernel, regen, Manifold or any `.wasm`, the sketch package, another domain (`domain-wood`
 // included) or the app, so the generators run in Node tests. Type-only imports may also name
 // `@manufakture/regen` and `@manufakture/kernel` (as in `domain-wood`); they are erased. Tests may
-// also load `vitest` and Node built-ins. This is an allowlist, so a new dependency fails here
-// until it is added on purpose.
+// also load `vitest` and Node built-ins, and, as `domain-wood`'s do, regen and the kernel, to run
+// the features through regen with the real kernel. This is an allowlist, so a new dependency fails
+// here until it is added on purpose.
 
 const RUNTIME = [
   '@manufakture/core',
@@ -20,7 +21,7 @@ const RUNTIME = [
   '@manufakture/stock',
 ];
 const TYPE_ONLY = [...RUNTIME, '@manufakture/regen', '@manufakture/kernel'];
-const TEST_ONLY = ['vitest'];
+const TEST_ONLY = ['vitest', '@manufakture/regen', '@manufakture/kernel'];
 
 const SRC = fileURLToPath(new URL('.', import.meta.url));
 
@@ -75,7 +76,11 @@ describe('package boundary', () => {
       ).toEqual([[kernel, true]]);
       expect(allowed(found[0]!.spec, true, false, SRC + 'x.ts')).toBe(true);
     }
-    for (const text of [`// import ${q}${kernel}${q};`, `/* import ${q}${kernel}${q}; */`]) {
+    for (const text of [
+      `// import ${q}${kernel}${q};`,
+      `/* import ${q}${kernel}${q}; */`,
+      `const keys = [${q}${F}${q}, ${q}sizing${q}];`,
+    ]) {
       expect(importsOf(text), text).toEqual([]);
     }
   });
@@ -106,6 +111,8 @@ describe('package boundary', () => {
     expect(allowed('@manufakture/units', false, false, file)).toBe(true);
     expect(allowed('@manufakture/core', false, false, file)).toBe(true);
     expect(allowed('node:fs', false, true, file)).toBe(true);
+    expect(allowed('@manufakture/kernel/node', false, true, file)).toBe(true);
+    expect(allowed('@manufakture/regen', false, true, file)).toBe(true);
   });
 });
 
@@ -133,8 +140,9 @@ function importsOf(text: string): Found[] {
     found.push({ spec, typeOnly: true });
     return '';
   });
+  // `from` as a word, not inside a string (`'from'` is a params key).
   const runtime =
-    /\bfrom\s*(['"`])([^'"`]+)\1|\bimport\s*\(\s*(['"`])([^'"`]+)\3|\brequire\s*\(\s*(['"`])([^'"`]+)\5|^\s*import\s*(['"`])([^'"`]+)\7/gm;
+    /(?<!['"`])\bfrom\s*(['"`])([^'"`]+)\1|\bimport\s*\(\s*(['"`])([^'"`]+)\3|\brequire\s*\(\s*(['"`])([^'"`]+)\5|^\s*import\s*(['"`])([^'"`]+)\7/gm;
   for (const m of code.matchAll(runtime)) {
     const spec = m[2] ?? m[4] ?? m[6] ?? m[8];
     if (spec !== undefined) found.push({ spec, typeOnly: false });

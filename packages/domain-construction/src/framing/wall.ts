@@ -8,8 +8,8 @@
 import { MM_PER_INCH } from '@manufakture/units';
 import type { Vec2, Vec3 } from '../geom';
 import { memberFullId, memberIds, type CornerMemberName, type TeeMemberName } from '../member-ids';
-import type { Member, Role, StockRef } from '../members';
-import { overlaps, splice, subtract, type Interval } from './intervals';
+import { MEMBER_BUDGET, type Member, type Role, type StockRef } from '../members';
+import { IntervalIndex, firstIndex, overlaps, splice, subtract, type Interval } from './intervals';
 
 // Input --------------------------------------------------------------------------------------
 
@@ -178,6 +178,8 @@ export interface FrameWallInput {
   readonly settings: WallSettingsInput;
   /** Overrides of the wall's own members, keyed by local id (`s12`, `top1:2`). */
   readonly overrides?: readonly MemberOverride[];
+  /** The most members to make before refusing; `MEMBER_BUDGET` (regen's cap) when absent. */
+  readonly maxMembers?: number;
 }
 
 // Output -------------------------------------------------------------------------------------
@@ -250,6 +252,53 @@ export class FramingInputError extends Error {
   override readonly name = 'FramingInputError';
 }
 
+/**
+ * Counts the members a generator makes against its budget (`MEMBER_BUDGET` unless the input sets
+ * a lower one) and refuses as soon as the count passes it, before the rest is built.
+ */
+export class MemberBudget {
+  #count = 0;
+  readonly limit: number;
+
+  /** `what` names the thing framed, for the message: `The wall`, `The floor`. */
+  constructor(
+    limit: number | undefined,
+    readonly what: string,
+  ) {
+    const l = limit ?? MEMBER_BUDGET;
+    if (!(Number.isInteger(l) && l >= 1 && l <= MEMBER_BUDGET))
+      throw new FramingInputError(
+        `The member budget must be a whole number from 1 to ${MEMBER_BUDGET}.`,
+      );
+    this.limit = l;
+  }
+
+  /** Members counted so far. */
+  get count(): number {
+    return this.#count;
+  }
+
+  /** Counts `n` members made; refuses once the count passes the budget. */
+  take(n = 1): void {
+    this.#count += n;
+    if (this.#count > this.limit) this.#refuse();
+  }
+
+  /**
+   * Refuses up front when `n` more members (an estimate from the input: layout slots, ladder
+   * rows) would pass the budget, so a layout far too big to frame is not even laid out.
+   */
+  expect(n: number): void {
+    if (!(this.#count + n <= this.limit)) this.#refuse();
+  }
+
+  #refuse(): never {
+    throw new FramingInputError(
+      `${this.what} would have more than ${this.limit} members, the most one may have: widen its spacing, shorten it or drop some blocking rows.`,
+    );
+  }
+}
+
 // Defaults -----------------------------------------------------------------------------------
 
 const IN = MM_PER_INCH;
@@ -287,6 +336,8 @@ const PRECUT_TOLERANCE = 0.5;
 const MIN_MEMBER = 1;
 /** A corner stud this close to a layout stud is that stud, mm. */
 const SAME_STUD = 3;
+/** The most blocking heights a wall type may list (each is checked against the last kept). */
+const MAX_BLOCKING_HEIGHTS = 1000;
 
 const FEATURE_ID = /^[a-z][a-zA-Z0-9]*#[1-9][0-9]*$/;
 
@@ -323,6 +374,8 @@ export function resolveWallSettings(input: WallSettingsInput): WallSettings {
     fail('Plate stock lengths must be given and above 0.');
   if (!(s.ladderSpacing > s.studStock.width))
     fail('Ladder spacing must be more than a stud width.');
+  if (s.blocking.kind === 'heights' && s.blocking.heights.length > MAX_BLOCKING_HEIGHTS)
+    fail(`A wall type may have at most ${MAX_BLOCKING_HEIGHTS} blocking heights.`);
   if (s.blocking.kind === 'heights' && !s.blocking.heights.every(Number.isFinite))
     fail('Blocking heights must be numbers.');
   return { ...s, layoutOrigin: normalOrigin(s.layoutOrigin, s.spacing) };
@@ -359,6 +412,7 @@ function checkHeader(h: HeaderSpec, what: string): void {
 /** Frames a wall: its members, layout warnings, the header each opening used, and override results. */
 export function frameWall(input: FrameWallInput): WallFraming {
   const settings = resolveWallSettings(input.settings);
+  const budget = new MemberBudget(input.maxMembers, 'The wall');
   if (input.segments.length === 0)
     throw new FramingInputError('A wall needs at least one segment.');
   const openingIds = new Set<string>();
@@ -376,7 +430,7 @@ export function frameWall(input: FrameWallInput): WallFraming {
   const openings: OpeningReport[] = [];
   const dirOf = new Map<string, Vec3>();
   input.segments.forEach((seg, i) => {
-    const framed = frameSegment(input.wall, seg, i + 1, settings, warnings, openings);
+    const framed = frameSegment(input.wall, seg, i + 1, settings, budget, warnings, openings);
     for (const m of framed.members) {
       members.push(m);
       dirOf.set(memberFullId(m), framed.dir);
@@ -486,6 +540,7 @@ function frameSegment(
   seg: WallSegment,
   index: number,
   st: WallSettings,
+  budget: MemberBudget,
   warnings: FramingWarning[],
   reports: OpeningReport[],
 ): { members: Member[]; dir: Vec3 } {
@@ -553,8 +608,42 @@ function frameSegment(
   };
   const warn = (w: Omit<FramingWarning, 'segment'>) => warnings.push({ ...w, segment: index });
 
+  // Refuse a layout far past the budget before laying it out: a stud per slot, a plate per stock
+  // length in each course, and with ladder corners a backing block per row.
+  budget.expect(Math.floor(L / st.spacing));
+  budget.expect(
+    (st.bottomPlates + st.topPlates) * Math.floor(L / Math.max(...st.plateStockLengths)),
+  );
+  // Each through corner and each tee gets its own set of ladder rows, and each tee two studs at
+  // least: refuse before any of their lists is built.
+  const tees = seg.tees ?? [];
+  const joins = seg.joins ?? {};
+  const throughCorners = (['start', 'end'] as const).filter((e) => {
+    const j = joins[e];
+    return j?.kind === 'L' && j.through;
+  }).length;
+  budget.expect(2 * tees.length);
+  let ladder: Interval[] = [];
+  if (st.cornerStyle === 'ladder') {
+    budget.expect(Math.floor((studTop - zbot) / st.ladderSpacing));
+    ladder = ladderRows(zbot, studTop, sw, st.ladderSpacing);
+    budget.expect(2 * tees.length + (tees.length + throughCorners) * ladder.length);
+  }
+
   // Openings: resolve headers, check fit, accept in order along the wall.
   const accepted: Accepted[] = [];
+  // Members the accepted openings make at least (kings and jacks on both sides, the header's
+  // plies), counted before each overlap check so a hostile opening count is refused early.
+  let openingMembers = 0;
+  // The highest zone end among accepted[0..k], so the overlap check below scans back only as far
+  // as an accepted zone could still reach: the same answer as checking every one, in near
+  // constant time for openings accepted in order along the wall.
+  const reach: number[] = [];
+  const overlapsAccepted = (zone: Interval): boolean => {
+    for (let k = accepted.length - 1; k >= 0 && reach[k]! >= zone[0]; k--)
+      if (overlaps(accepted[k]!.zone, zone, TOUCH)) return true;
+    return false;
+  };
   const sorted = [...(seg.openings ?? [])].sort((a, b) => a.position - b.position);
   for (const o of sorted) {
     const resolved = resolveHeader(o, st);
@@ -605,7 +694,9 @@ function frameSegment(
       );
       continue;
     }
-    if (accepted.some((a) => overlaps(a.zone, zone, TOUCH))) {
+    const least = 2 * (kings + jacks) + resolved.header.plies;
+    budget.expect(openingMembers + least);
+    if (overlapsAccepted(zone)) {
       skip(
         'openings-overlap',
         `Opening ${o.id}'s framing overlaps another opening's; it is not framed.`,
@@ -629,13 +720,14 @@ function frameSegment(
       );
       continue;
     }
+    openingMembers += least;
+    reach.push(Math.max(reach.at(-1) ?? -Infinity, zone[1]));
     accepted.push({ o, header: resolved.header, jacks, kings, ro, zone, door });
     reports.push(report(true));
   }
 
   // Corner and tee framing, in the wall that runs through.
   const fixed: FixedGroup[] = [];
-  const joins = seg.joins ?? {};
   for (const end of ['start', 'end'] as const) {
     const j = joins[end];
     if (j?.kind !== 'L' || !j.through) continue;
@@ -647,9 +739,7 @@ function frameSegment(
     const cid = (name: CornerMemberName) => memberIds.corner(index, end, name);
     if (st.cornerStyle === 'ladder') {
       local.push({ id: cid('corner'), e: [T2 + sw, T2 + 2 * sw] });
-      ladderRows(zbot, studTop, sw, st.ladderSpacing).forEach((z, r) =>
-        local.push({ id: cid(`backing${r + 1}`), e: [sw, T2 + sw], z }),
-      );
+      ladder.forEach((z, r) => local.push({ id: cid(`backing${r + 1}`), e: [sw, T2 + sw], z }));
     } else {
       if (T2 < sw - EPS)
         warn({
@@ -676,7 +766,7 @@ function frameSegment(
       backing: local.flatMap((x) => (x.z ? [{ id: x.id, s: at(x.e), z: x.z }] : [])),
     });
   }
-  (seg.tees ?? []).forEach((tee, i) => {
+  tees.forEach((tee, i) => {
     checkThickness(tee.otherThickness, where);
     const half = tee.otherThickness / 2;
     const tid = (name: TeeMemberName) => memberIds.tee(index, i + 1, name);
@@ -688,7 +778,7 @@ function frameSegment(
     if (st.cornerStyle === 'three-stud' && tee.otherThickness >= sw - EPS)
       studs.push({ id: tid('corner-c'), s: [tee.at - sw / 2, tee.at + sw / 2] });
     if (st.cornerStyle === 'ladder')
-      ladderRows(zbot, studTop, sw, st.ladderSpacing).forEach((z, r) =>
+      ladder.forEach((z, r) =>
         backing.push({ id: tid(`backing${r + 1}`), s: [tee.at - half, tee.at + half], z }),
       );
     const zone: Interval = [tee.at - half - sw, tee.at + half + sw];
@@ -709,12 +799,13 @@ function frameSegment(
     });
   });
   // A corner or tee that runs into an opening's framing, or an earlier corner or tee, is dropped.
+  const openingZones = new IntervalIndex(accepted.map((a) => a.zone));
   const placedFixed: FixedGroup[] = [];
+  const placedZones = new PlacedZones();
   for (const g of fixed) {
     const parts = [...g.studs.map((x) => x.s), ...g.backing.map((x) => x.s)];
     const clash =
-      accepted.some((a) => parts.some((p) => overlaps(p, a.zone, TOUCH))) ||
-      placedFixed.some((f) => overlaps(f.zone, g.zone, TOUCH));
+      parts.some((p) => openingZones.overlapsAny(p, TOUCH)) || placedZones.overlapsAny(g.zone);
     if (clash) {
       warn({
         code: 'framing-conflict',
@@ -724,27 +815,55 @@ function frameSegment(
       continue;
     }
     placedFixed.push(g);
+    placedZones.add(g.zone);
   }
 
   // Layout studs on their slots.
   const slots = layoutSlots(L, sw, st);
   const fixedStuds = placedFixed.flatMap((g) => g.studs);
   const fixedBacking = placedFixed.flatMap((g) => g.backing);
+  // A group's backing rows all span the same stretch of wall: the slots check each stretch once.
+  const backingSpans = placedFixed.flatMap((g) => {
+    const seen = new Set<string>();
+    return g.backing.flatMap((b) => {
+      const key = `${b.s[0]}:${b.s[1]}`;
+      if (seen.has(key)) return [];
+      seen.add(key);
+      return [b.s];
+    });
+  });
+  // Each slot is looked up in sorted lists rather than checked against every opening, corner and
+  // tee: the same answers, without a cost of slots times openings.
+  const fixedStudIndex = new IntervalIndex(fixedStuds.map((f) => f.s));
+  const backingIndex = new IntervalIndex(backingSpans);
+  /** Fixed studs by their low face, with their place in `fixedStuds` (the first match wins). */
+  const byFace = fixedStuds.map((f, i) => ({ at: f.s[0], i })).sort((p, q) => p.at - q.at);
+  const sameStud = (at: number): (typeof fixedStuds)[number] | undefined => {
+    let first = Infinity;
+    for (
+      let k = firstIndex(byFace.length, (j) => !(byFace[j]!.at - at <= -SAME_STUD));
+      k < byFace.length && byFace[k]!.at - at < SAME_STUD;
+      k++
+    )
+      first = Math.min(first, byFace[k]!.i);
+    return fixedStuds[first];
+  };
   const droppedFixed = new Set<string>();
   const studs: Array<{ id: string; k: number; s: Interval }> = [];
   for (const slot of slots) {
-    if (accepted.some((a) => overlaps(slot.s, a.zone, TOUCH))) continue;
-    const same = fixedStuds.find((f) => Math.abs(f.s[0] - slot.s[0]) < SAME_STUD);
+    if (openingZones.overlapsAny(slot.s, TOUCH)) continue;
+    const same = sameStud(slot.s[0]);
     if (same) droppedFixed.add(same.id);
-    else if (
-      fixedStuds.some((f) => overlaps(f.s, slot.s, TOUCH)) ||
-      fixedBacking.some((b) => overlaps(b.s, slot.s, TOUCH))
-    )
+    else if (fixedStudIndex.overlapsAny(slot.s, TOUCH) || backingIndex.overlapsAny(slot.s, TOUCH))
       continue;
     studs.push({ id: memberIds.slot(index, slot.k), k: slot.k, s: slot.s });
   }
 
   const out: Member[] = [];
+  const emit = (m: Member) => {
+    budget.take();
+    out.push(m);
+  };
   const stud = st.studStock;
 
   // Plates.
@@ -765,7 +884,7 @@ function frameSegment(
     const r = splice(subtract(0, L, doors, MIN_MEMBER), maxStock, below, st.spliceOffset);
     spliceWarn('bottom', r.tooClose);
     r.pieces.forEach((p, i) =>
-      out.push(
+      emit(
         box(memberIds.plate(index, 'bottom', c, i + 1), 'bottom-plate', stud, 'flat', p, across, z),
       ),
     );
@@ -790,21 +909,31 @@ function frameSegment(
     const r = splice(runs, maxStock, below, st.spliceOffset);
     spliceWarn('top', r.tooClose);
     r.pieces.forEach((p, i) =>
-      out.push(
-        box(memberIds.plate(index, 'top', c, i + 1), 'top-plate', stud, 'flat', p, across, z),
-      ),
+      emit(box(memberIds.plate(index, 'top', c, i + 1), 'top-plate', stud, 'flat', p, across, z)),
     );
     below = [...below, ...r.splices];
   }
 
   // Studs, corners and tees.
   const full: Interval = [zbot, studTop];
-  for (const s of studs) out.push(box(s.id, 'stud', stud, 'vertical', s.s, across, full));
+  for (const s of studs) emit(box(s.id, 'stud', stud, 'vertical', s.s, across, full));
   for (const f of fixedStuds)
-    if (!droppedFixed.has(f.id)) out.push(box(f.id, 'corner', stud, 'vertical', f.s, across, full));
-  for (const b of fixedBacking) out.push(box(b.id, 'backing', stud, 'flat', b.s, across, b.z));
+    if (!droppedFixed.has(f.id)) emit(box(f.id, 'corner', stud, 'vertical', f.s, across, full));
+  for (const b of fixedBacking) emit(box(b.id, 'backing', stud, 'flat', b.s, across, b.z));
 
-  // Openings.
+  // Openings. Their cripples stand on the centred slots, found by binary search in these sorted
+  // by their low face (a stable sort, so slots at the same place keep their order).
+  const centred = slots.filter((x) => x.centred).sort((p, q) => p.s[0] - q.s[0]);
+  const centredWithin = (lo: Interval): Slot[] => {
+    const out: Slot[] = [];
+    for (
+      let k = firstIndex(centred.length, (j) => centred[j]!.s[0] >= lo[0] - EPS);
+      k < centred.length && centred[k]!.s[0] <= lo[1] + EPS;
+      k++
+    )
+      if (centred[k]!.s[1] <= lo[1] + EPS) out.push(centred[k]!);
+    return out;
+  };
   for (const a of accepted) {
     const id = a.o.id;
     const head = a.o.sill + a.o.height;
@@ -818,7 +947,7 @@ function frameSegment(
       const piece = (n: number): Interval =>
         sign < 0 ? [edge - n * sw, edge - (n - 1) * sw] : [edge + (n - 1) * sw, edge + n * sw];
       for (let n = 1; n <= a.jacks; n++)
-        out.push(
+        emit(
           box(
             memberIds.opening({ form: 'jack', side, n }),
             'jack',
@@ -831,7 +960,7 @@ function frameSegment(
           ),
         );
       for (let n = 1; n <= a.kings; n++)
-        out.push(
+        emit(
           box(
             memberIds.opening({ form: 'king', side, n }),
             'king',
@@ -860,7 +989,7 @@ function frameSegment(
     for (let p = 1; p <= h.plies; p++) {
       const t: Interval =
         p === 1 ? [t0, t0 + w] : [t0 + T - (h.plies - p + 1) * w, t0 + T - (h.plies - p) * w];
-      out.push(
+      emit(
         box(
           memberIds.opening({ form: 'header', n: p }),
           'header',
@@ -884,7 +1013,7 @@ function frameSegment(
         });
       else {
         const spacer: StockRef = { ...h.spacer, depth: h.stock.depth };
-        out.push(
+        emit(
           box(
             memberIds.opening({ form: 'spacer' }),
             'header-spacer',
@@ -900,7 +1029,7 @@ function frameSegment(
     }
     // Rough sill and cripples on layout.
     if (!a.door) {
-      out.push(
+      emit(
         box(
           memberIds.opening({ form: 'sill' }),
           'rough-sill',
@@ -913,44 +1042,37 @@ function frameSegment(
         ),
       );
     }
-    const centred = slots.filter((x) => x.centred);
     if (studTop - headerTop >= MIN_MEMBER) {
-      centred
-        .filter((x) => x.s[0] >= span[0] - EPS && x.s[1] <= span[1] + EPS)
-        .sort((p, q) => p.s[0] - q.s[0])
-        .forEach((x, i) =>
-          out.push(
-            box(
-              memberIds.opening({ form: 'cripple', where: 'above', n: i + 1 }),
-              'cripple',
-              stud,
-              'vertical',
-              x.s,
-              across,
-              [headerTop, studTop],
-              id,
-            ),
+      centredWithin(span).forEach((x, i) =>
+        emit(
+          box(
+            memberIds.opening({ form: 'cripple', where: 'above', n: i + 1 }),
+            'cripple',
+            stud,
+            'vertical',
+            x.s,
+            across,
+            [headerTop, studTop],
+            id,
           ),
-        );
+        ),
+      );
     }
     if (!a.door && a.o.sill - sw - zbot >= MIN_MEMBER) {
-      centred
-        .filter((x) => x.s[0] >= a.ro[0] - EPS && x.s[1] <= a.ro[1] + EPS)
-        .sort((p, q) => p.s[0] - q.s[0])
-        .forEach((x, i) =>
-          out.push(
-            box(
-              memberIds.opening({ form: 'cripple', where: 'below', n: i + 1 }),
-              'cripple',
-              stud,
-              'vertical',
-              x.s,
-              across,
-              [zbot, a.o.sill - sw],
-              id,
-            ),
+      centredWithin(a.ro).forEach((x, i) =>
+        emit(
+          box(
+            memberIds.opening({ form: 'cripple', where: 'below', n: i + 1 }),
+            'cripple',
+            stud,
+            'vertical',
+            x.s,
+            across,
+            [zbot, a.o.sill - sw],
+            id,
           ),
-        );
+        ),
+      );
     }
   }
 
@@ -971,16 +1093,23 @@ function frameSegment(
       .filter((m) => m.role === 'stud' || m.role === 'king' || m.role === 'corner')
       .map((m) => alongOf(m, seg.start, dir))
       .sort((p, q) => p[0] - q[0]);
-    const keepOut = [...accepted.map((a) => a.zone), ...placedFixed.map((g) => g.zone)];
-    rows.forEach((z, r) => {
-      let n = 0;
-      for (let i = 0; i + 1 < verticals.length; i++) {
-        const bay: Interval = [verticals[i]![1], verticals[i + 1]![0]];
-        if (bay[1] - bay[0] < MIN_MEMBER) continue;
-        if (keepOut.some((k) => bay[0] >= k[0] - EPS && bay[1] <= k[1] + EPS)) continue;
-        out.push(box(memberIds.block(index, r + 1, ++n), 'blocking', stud, 'flat', bay, across, z));
-      }
-    });
+    const keepOut = new IntervalIndex([
+      ...accepted.map((a) => a.zone),
+      ...placedFixed.map((g) => g.zone),
+    ]);
+    // The bays are the same in every row: find them once.
+    const bays: Interval[] = [];
+    for (let i = 0; i + 1 < verticals.length; i++) {
+      const bay: Interval = [verticals[i]![1], verticals[i + 1]![0]];
+      if (bay[1] - bay[0] < MIN_MEMBER) continue;
+      if (keepOut.containsAny(bay, EPS)) continue;
+      bays.push(bay);
+    }
+    rows.forEach((z, r) =>
+      bays.forEach((bay, n) =>
+        emit(box(memberIds.block(index, r + 1, n + 1), 'blocking', stud, 'flat', bay, across, z)),
+      ),
+    );
   }
 
   return { members: out, dir };
@@ -1005,6 +1134,36 @@ function resolveHeader(
   if (best !== undefined)
     return { header: st.headerRules[best]!.header, source: 'rule', rule: best };
   return { header: st.defaultHeader, source: 'default' };
+}
+
+/**
+ * The zones of the corners and tees placed so far, sorted by start, to test the next one against.
+ * Placed zones overlap by no more than `TOUCH`, so (leaving out zones no longer than that, which
+ * overlap nothing) their ends are in the same order as their starts. A zone that overlaps any of
+ * them then overlaps the last one starting at or before its start or the first one after it: two
+ * lookups instead of one per placed zone.
+ */
+class PlacedZones {
+  readonly #zones: Interval[] = [];
+
+  overlapsAny(z: Interval): boolean {
+    const zones = this.#zones;
+    const k = firstIndex(zones.length, (i) => zones[i]![0] > z[0]);
+    return (
+      (k > 0 && overlaps(zones[k - 1]!, z, TOUCH)) ||
+      (k < zones.length && overlaps(zones[k]!, z, TOUCH))
+    );
+  }
+
+  add(z: Interval): void {
+    if (!overlaps(z, z, TOUCH)) return;
+    const zones = this.#zones;
+    zones.splice(
+      firstIndex(zones.length, (i) => zones[i]![0] > z[0]),
+      0,
+      z,
+    );
+  }
 }
 
 interface Slot {
@@ -1058,7 +1217,9 @@ function blockingRows(
   for (const c of centres) {
     const row: Interval = [c - sw / 2, c + sw / 2];
     if (row[0] < zbot - EPS || row[1] > studTop + EPS) outside(c, 'blocking-row-outside');
-    else if (out.some((r) => overlaps(r, row, TOUCH))) outside(c, 'blocking-row-overlap');
+    // Sorted and all one width: a row can only overlap the last row kept.
+    else if (out.length > 0 && overlaps(out[out.length - 1]!, row, TOUCH))
+      outside(c, 'blocking-row-overlap');
     else out.push(row);
   }
   return out;

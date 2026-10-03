@@ -424,6 +424,21 @@ describe('frameFloor: input it refuses', () => {
     expect(() => frameFloor(input)).toThrow(msg);
   };
 
+  it('refuses a floor past its member budget, before laying out one far past it', () => {
+    const n = frameFloor(shed()).members.length;
+    expect(frameFloor(shed({ maxMembers: n })).members).toHaveLength(n);
+    refuses(
+      shed({ maxMembers: n - 1 }),
+      new RegExp(`The floor would have more than ${n - 1} members`),
+    );
+    const t0 = performance.now();
+    refuses(
+      shed({ outline: pts([0, 0], [144, 0], [144, 4e7], [0, 4e7]) }),
+      /more than 50000 members/,
+    );
+    expect(performance.now() - t0).toBeLessThan(200);
+  });
+
   it('refuses floor openings (stairs) with a message', () => {
     refuses(shed({ openings: [{ kind: 'stair' }] }), /openings \(stairs\) are not framed/);
   });

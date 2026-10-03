@@ -170,6 +170,15 @@ export interface ExtrudeInput extends MakesBody {
    * plane.
    */
   draft?: number;
+  /**
+   * The role its caps are named by: `<id>:<capRole>:start` and `:end`
+   * (default `cap`). Face names are unique across a part's bodies, so a
+   * feature that makes several bodies with one id (an extension's
+   * `<id>:<key>` bodies, ADR 0013 decision 6) names each body's caps apart
+   * (`cap.sheathing`); the sides are already apart by their edge ids. A
+   * lower-case token: letters, digits, `.` and `-`.
+   */
+  capRole?: string;
   mode: ResultMode;
 }
 
@@ -486,6 +495,9 @@ export interface ToolsInput {
   id: string;
   items: readonly ToolItem[];
 }
+
+/** An extrude's `capRole`: a lower-case token that cannot read as a split, a name or a path. */
+const CAP_ROLE = /^[a-z][a-z0-9.-]{0,127}$/;
 
 /** How far a subtracting tool is moved past a body face it is flush with, mm. */
 export const TOOL_OVERLAP = 0.01;
@@ -1685,7 +1697,10 @@ function extrudeTool(
     const profile = temp(ctx, { shape: k.profile({ ...frame, origin: start }, loops) });
     const prism = temp(ctx, k.extrude(profile.shape, scale(dir, length)));
     const topology = k.topology(prism.shape);
-    const born = nameSweep(input.id, prism, topology, region === undefined ? {} : { region });
+    const born = nameSweep(input.id, prism, topology, {
+      ...(region === undefined ? {} : { region }),
+      ...(input.capRole === undefined ? {} : { cap: input.capRole }),
+    });
     return { shape: prism.shape, faces: born.faces, topology, unnamed: born.unnamed };
   });
   if (input.draft === undefined || input.draft === 0) {
@@ -3467,7 +3482,10 @@ export function validateFeature(input: unknown): string | null {
         const e =
           profile(v.profile) ??
           mode(v.mode) ??
-          (v.draft === undefined ? null : num(v.draft, 'draft'));
+          (v.draft === undefined ? null : num(v.draft, 'draft')) ??
+          (v.capRole === undefined || (typeof v.capRole === 'string' && CAP_ROLE.test(v.capRole))
+            ? null
+            : 'capRole must be a lower-case token (letters, digits, "." and "-")');
         if (e) return e;
         const x = v.extent;
         if (!isObj(x)) return 'extent must be an object';

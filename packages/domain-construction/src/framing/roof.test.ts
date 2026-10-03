@@ -449,6 +449,19 @@ describe('frameRoof: gable options', () => {
     ];
     for (const input of bad) expect(() => frameRoof(input)).toThrow(FramingInputError);
   });
+
+  it('refuses a roof past its member budget, before laying out one far past it', () => {
+    const n = frameRoof(shed()).members.length;
+    expect(frameRoof(shed({}, { maxMembers: n })).members).toHaveLength(n);
+    expect(() => frameRoof(shed({}, { maxMembers: n - 1 }))).toThrow(
+      new RegExp(`The roof would have more than ${n - 1} members`),
+    );
+    const t0 = performance.now();
+    expect(() => frameRoof(shed({}, { footprint: { ...shed().footprint, length: 1e9 } }))).toThrow(
+      /more than 50000 members/,
+    );
+    expect(performance.now() - t0).toBeLessThan(200);
+  });
 });
 
 /** The shed as a hip roof: 16' x 12', 2x6 commons and jacks, 2x8 ridge. */

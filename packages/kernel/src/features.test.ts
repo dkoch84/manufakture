@@ -190,6 +190,32 @@ describe('extrude', () => {
     expect(faceNames(named(k, bodies[1]!.shape))).toContain('extrude#2:side:f3');
   });
 
+  it('capRole names the caps apart, so one feature can make several bodies with unique names', () => {
+    const second: ExtrudeInput = {
+      ...block(),
+      body: 'extrude#1:b',
+      capRole: 'cap.b',
+      profile: profile(XY, rectangle(100, 0, 110, 10, ['f1', 'f2', 'f3', 'f4'])),
+    };
+    const { bodies } = build(k, [block(), second]);
+    expect(bodies.map((b) => b.id)).toEqual(['extrude#1', 'extrude#1:b']);
+    const names = faceNames(named(k, bodies[1]!.shape)).sort();
+    expect(names).toEqual(
+      [
+        'extrude#1:cap.b:end',
+        'extrude#1:cap.b:start',
+        'extrude#1:side:f1',
+        'extrude#1:side:f2',
+        'extrude#1:side:f3',
+        'extrude#1:side:f4',
+      ].sort(),
+    );
+    for (const capRole of ['Cap', 'cap:x', 'cap/x', 'cap#1', '', 5]) {
+      const out = apply(k, null, { ...block(), capRole } as unknown as ExtrudeInput);
+      expect(out.errors[0], String(capRole)).toMatchObject({ code: 'invalid' });
+    }
+  });
+
   it('a profile with a hole names the hole wall too', () => {
     const f: ExtrudeInput = {
       ...block(),

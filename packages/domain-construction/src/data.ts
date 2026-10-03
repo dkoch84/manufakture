@@ -215,21 +215,44 @@ export const MAX_HEADER_RULES = 100;
 export const MAX_LAYERS = 8;
 export const MAX_LENGTHS = 20;
 
+/**
+ * Bounds on the lengths the settings hold, so a hostile document cannot make the framing
+ * generators lay out without end (a stud spacing of a micrometre along a long wall): every length
+ * at most `MAX_SETTING_LENGTH` (100 m) in size, layout spacings at least `MIN_SPACING` (50 mm), plate
+ * stock lengths at least `MIN_PLATE_STOCK` (300 mm). None is a sizing; they are far outside any
+ * framing practice.
+ */
+export const MAX_SETTING_LENGTH = 100_000;
+export const MIN_SPACING = 50;
+export const MIN_PLATE_STOCK = 300;
+
+/** Bounds of one stored length, mm, besides the sign rules of `LengthOptions`. */
+interface Bounds extends LengthOptions {
+  readonly min?: number;
+}
+
 // Reading -------------------------------------------------------------------------------------
 
 type Obj = Readonly<Record<string, unknown>>;
 
-/** A stored constant length (validated, kept as typed). */
-function length(v: unknown, at: Path, options: LengthOptions): Read<StoredExpression> {
+/** A stored constant length (validated, bounded, kept as typed). */
+function length(v: unknown, at: Path, options: Bounds): Read<StoredExpression> {
   const r = readConstantLength(v, at, options);
-  return r.ok ? ok(r.value.expression) : r;
+  if (!r.ok) return r;
+  if (Math.abs(r.value.value) > MAX_SETTING_LENGTH) {
+    return fail(`expected a length of at most ${MAX_SETTING_LENGTH / 1000} m`, at);
+  }
+  if (options.min !== undefined && r.value.value < options.min) {
+    return fail(`expected a length of at least ${options.min} mm`, at);
+  }
+  return ok(r.value.expression);
 }
 
 function optionalLength(
   o: Obj,
   key: string,
   at: Path,
-  options: LengthOptions,
+  options: Bounds,
 ): Read<StoredExpression | undefined> {
   const v = own(o, key);
   return v === undefined ? ok(undefined) : length(v, [...at, key], options);
@@ -335,7 +358,7 @@ function readLayer(v: unknown, at: Path): Read<WallLayer<StoredExpression>> {
     if (!keys.ok) return keys;
     const r = all({
       stock: stockId(own(v, 'stock'), [...at, 'stock'], 'lumber'),
-      spacing: optionalLength(v, 'spacing', at, { positive: true }),
+      spacing: optionalLength(v, 'spacing', at, { positive: true, min: MIN_SPACING }),
       bottomPlates: optionalCount(v, 'bottomPlates', at, 1, 3),
       topPlates: optionalCount(v, 'topPlates', at, 1, 3),
       header: readHeader(own(v, 'header'), [...at, 'header']),
@@ -405,7 +428,7 @@ function readFloorType(v: unknown, at: Path): Read<FloorType<StoredExpression>> 
     name: readName(own(v, 'name'), [...at, 'name']),
     joistStock: stockId(own(v, 'joistStock'), [...at, 'joistStock'], 'lumber'),
     rimStock: optionalStock(v, 'rimStock', at, 'lumber'),
-    spacing: optionalLength(v, 'spacing', at, { positive: true }),
+    spacing: optionalLength(v, 'spacing', at, { positive: true, min: MIN_SPACING }),
     subfloor: optionalStock(v, 'subfloor', at, 'sheet'),
   });
   return r.ok ? ok(defined(r.value)) : r;
@@ -441,7 +464,7 @@ function readRoofType(v: unknown, at: Path): Read<RoofType<StoredExpression>> {
     rafterStock: stockId(own(v, 'rafterStock'), [...at, 'rafterStock'], 'lumber'),
     ridgeStock: stockId(own(v, 'ridgeStock'), [...at, 'ridgeStock'], 'lumber'),
     hipStock: optionalStock(v, 'hipStock', at, 'lumber'),
-    spacing: optionalLength(v, 'spacing', at, { positive: true }),
+    spacing: optionalLength(v, 'spacing', at, { positive: true, min: MIN_SPACING }),
     overhang: optionalLength(v, 'overhang', at, {}),
     rakeOverhang: optionalLength(v, 'rakeOverhang', at, {}),
     tail: tail === undefined ? ok(undefined) : readEnum(tail, TAILS, [...at, 'tail']),
@@ -461,6 +484,7 @@ function lengthList(
   key: string,
   at: Path,
   nonEmpty: boolean,
+  min?: number,
 ): Read<StoredExpression[] | undefined> {
   const v = own(o, key);
   if (v === undefined) return ok(undefined);
@@ -471,7 +495,11 @@ function lengthList(
   if (nonEmpty && v.length === 0) return fail('expected at least one length', kat);
   const out: StoredExpression[] = [];
   for (let i = 0; i < v.length; i++) {
-    const r = length(v[i], [...kat, i], { positive: true });
+    const r = length(
+      v[i],
+      [...kat, i],
+      min === undefined ? { positive: true } : { positive: true, min },
+    );
     if (!r.ok) return r;
     out.push(r.value);
   }
@@ -520,7 +548,7 @@ function readFraming(v: unknown, at: Path): Read<FramingSettings<StoredExpressio
   const corner = own(v, 'cornerStyle');
   const blocking = own(v, 'blocking');
   const r = all({
-    spacing: optionalLength(v, 'spacing', at, { positive: true }),
+    spacing: optionalLength(v, 'spacing', at, { positive: true, min: MIN_SPACING }),
     layoutOrigin: optionalLength(v, 'layoutOrigin', at, { signed: true }),
     layoutFrom:
       layoutFrom === undefined
@@ -535,9 +563,9 @@ function readFraming(v: unknown, at: Path): Read<FramingSettings<StoredExpressio
         : readEnum(corner, CORNER_STYLES, [...at, 'cornerStyle']),
     blocking: blocking === undefined ? ok(undefined) : readBlocking(blocking, [...at, 'blocking']),
     spliceOffset: optionalLength(v, 'spliceOffset', at, {}),
-    plateStockLengths: lengthList(v, 'plateStockLengths', at, true),
+    plateStockLengths: lengthList(v, 'plateStockLengths', at, true, MIN_PLATE_STOCK),
     precutLengths: lengthList(v, 'precutLengths', at, false),
-    ladderSpacing: optionalLength(v, 'ladderSpacing', at, { positive: true }),
+    ladderSpacing: optionalLength(v, 'ladderSpacing', at, { positive: true, min: MIN_SPACING }),
   });
   return r.ok ? ok(defined(r.value)) : r;
 }

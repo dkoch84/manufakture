@@ -13,10 +13,13 @@
   },
   "dependencies": {
     "@manufakture/core": "workspace:*",
+    "@manufakture/nesting": "workspace:*",
     "@manufakture/stock": "workspace:*",
+    "@manufakture/takeoff": "workspace:*",
     "@manufakture/units": "workspace:*"
   },
   "devDependencies": {
+    "@manufakture/kernel": "workspace:*",
     "@manufakture/regen": "workspace:*"
   }
 }

@@ -50,6 +50,9 @@ export {
   type ResolvedReference,
 } from './extensions';
 export {
+  MAX_GROUP_MEMBERS,
+  MAX_MEMBER_CUTS,
+  MAX_MEMBER_SIZE,
   MEMBER_STAGE_VERSION,
   boxMesh,
   loadManifold,

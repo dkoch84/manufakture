@@ -38,6 +38,15 @@ export type Role =
   | 'fascia';
 
 /**
+ * The most members one generator call may make: regen's `MAX_GROUP_MEMBERS` (one wall, floor or
+ * roof is one member group). This package may not load regen at run time (ADR 0015 decision 1),
+ * so the number is repeated here and `members.test.ts` pins the two equal. The generators count
+ * against it as they build and refuse with a `FramingInputError` the moment it is passed, so a
+ * hostile document fails fast instead of building millions of members for regen to throw away.
+ */
+export const MEMBER_BUDGET = 50_000;
+
+/**
  * The stock a member is cut from: a catalog entry (with overrides), dressed sizes in mm. `width`
  * is the thin face (38.1 for 2x stock), `depth` the wide one. `id` is the stock catalog id
  * (`us-2x4`), so the takeoff can price it; `name` is the nominal name (`2x4`).

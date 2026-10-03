@@ -12,7 +12,7 @@ import type { Vec2, Vec3 } from '../geom';
 import { memberFullId } from '../member-ids';
 import type { Member, Role, StockRef } from '../members';
 import { overlaps, splice, subtract, type Interval } from './intervals';
-import { FramingInputError, type MemberOverride, type OverrideReport } from './wall';
+import { FramingInputError, MemberBudget, type MemberOverride, type OverrideReport } from './wall';
 
 // Member ids ---------------------------------------------------------------------------------
 //
@@ -178,6 +178,8 @@ export interface FrameFloorInput {
   readonly openings?: readonly unknown[];
   /** Overrides of the floor's members, keyed by local id (`j3`, `rim1`). `move` is along the layout. */
   readonly overrides?: readonly MemberOverride[];
+  /** The most members to make before refusing; `MEMBER_BUDGET` (regen's cap) when absent. */
+  readonly maxMembers?: number;
 }
 
 // Output -------------------------------------------------------------------------------------
@@ -325,6 +327,7 @@ interface Band {
 /** Frames a floor: its members, layout warnings, override results and the subfloor layer. */
 export function frameFloor(input: FrameFloorInput): FloorFraming {
   const st = resolveFloorSettings(input.settings);
+  const budget = new MemberBudget(input.maxMembers, 'The floor');
   const owner = input.floor;
   if (!FEATURE_ID.test(owner))
     throw new FramingInputError(`Floor id "${owner}" is not a feature id.`);
@@ -370,6 +373,10 @@ export function frameFloor(input: FrameFloorInput): FloorFraming {
   const warnings: FloorWarning[] = [];
   const full = (id: string) => memberFullId({ owner, id });
   const out: Member[] = [];
+  const emit = (m: Member) => {
+    budget.take();
+    out.push(m);
+  };
   const box = (
     id: string,
     role: Role,
@@ -413,11 +420,15 @@ export function frameFloor(input: FrameFloorInput): FloorFraming {
         throw new FramingInputError('The floor is too narrow for its rims.');
   const maxStock = Math.max(...st.stockLengths);
   const rimDepth = st.rimStock.depth;
+  // Refuse a layout far past the budget before laying it out: a rim piece per stock length, a
+  // joist per layout slot.
+  budget.expect(rims.reduce((n, r) => n + Math.floor((r.v[1] - r.v[0]) / maxStock), 0));
+  budget.expect(Math.floor((vmax - vmin) / st.spacing));
   rims.forEach((r, i) => {
     const pieces = splice([r.v], maxStock, [], 0).pieces;
     const ordered = fromEnd ? [...pieces].reverse() : pieces;
     ordered.forEach((p, k) =>
-      out.push(
+      emit(
         box(
           formatFloorMemberId({ form: 'rim', n: i + 1, piece: k + 1 }),
           'rim',
@@ -573,11 +584,12 @@ export function frameFloor(input: FrameFloorInput): FloorFraming {
     pieces.forEach((u, i) => {
       for (const j of band.make(i + 1)) joists.push({ id: j.id, u, v: j.v });
     });
+    budget.expect(joists.length);
   }
   const kept = joists.sort((p, q) => ell(p.v[0]) - ell(q.v[0]) || p.u[0] - q.u[0]);
   const jd = st.joistStock.depth;
   for (const j of kept) {
-    out.push(box(j.id, 'joist', st.joistStock, 'span', j.u, j.v, [0, jd]));
+    emit(box(j.id, 'joist', st.joistStock, 'span', j.u, j.v, [0, jd]));
     if (j.u[1] - j.u[0] > maxStock + EPS)
       warnings.push({
         code: 'longer-than-stock',
@@ -631,6 +643,7 @@ export function frameFloor(input: FrameFloorInput): FloorFraming {
           )
             continue;
           blocks.push({ u, v });
+          budget.expect(blocks.length);
         }
       }
     }
@@ -644,7 +657,7 @@ export function frameFloor(input: FrameFloorInput): FloorFraming {
     blocks
       .sort((p, q) => ell(p.v[0]) - ell(q.v[0]) || p.u[0] - q.u[0])
       .forEach((b, n) =>
-        out.push(
+        emit(
           box(
             formatFloorMemberId({ form: 'block', row: r + 1, n: n + 1 }),
             'blocking',
@@ -693,7 +706,7 @@ export function frameFloor(input: FrameFloorInput): FloorFraming {
           Math.min(...along.map((a) => a[0])) - overhang,
           Math.max(...along.map((a) => a[1])) + overhang,
         ];
-        out.push(box(id, 'skid', k.stock, 'across', u, v, [-k.stock.depth, 0]));
+        emit(box(id, 'skid', k.stock, 'across', u, v, [-k.stock.depth, 0]));
         if (v[1] - v[0] > maxStock + EPS)
           warnings.push({
             code: 'longer-than-stock',

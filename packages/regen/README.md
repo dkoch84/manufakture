@@ -360,9 +360,12 @@ registry.registerDomain({
   `invalid` for `{ error }`), never the regen. The features keep their bodies; their status becomes
   `error` with the stage's message. Members are checked and copied to frozen plain data: unit,
   perpendicular placement axes, unit cut normals, sizes over 0, an `owner` among the group's
-  features, full ids unique in the group. Warnings name one of the group's features and arrive
+  features, full ids unique in the group. A hostile document cannot make the worker mesh or send
+  without end: a group has at most `MAX_GROUP_MEMBERS` (50,000) members, a member at most
+  `MAX_MEMBER_CUTS` (16) cuts, and every length, stock size, coordinate and cut offset is at most
+  `MAX_MEMBER_SIZE` (1e6 mm); a group over a bound fails like a malformed one. Warnings name one of the group's features and arrive
   there as `{ code: 'members', group, domainCode?, member? }`.
-- **Caching per group**, by a hash of the group, its features (with their metadata), the domain
+- **Caching per group**, by a hash of the part, the group, its features (with their metadata), the domain
   data the domain reads, the domain's `implementation`, `REGEN_IMPLEMENTATION_VERSION` and
   `MEMBER_STAGE_VERSION`. A cached group's `frame` does not run. Moving an opening misses only its
   wall's group. The member cache holds plain data, so a kernel recycle keeps it; it is pruned to the
