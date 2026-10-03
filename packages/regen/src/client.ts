@@ -8,6 +8,7 @@
 
 import type { DragTarget } from '@manufakture/assembly';
 import type { ManufaktureDocument } from '@manufakture/core';
+import type { IfcBuildingInput } from '@manufakture/io';
 import { KernelClient } from '@manufakture/kernel/kernel-client';
 import * as Comlink from 'comlink';
 import type { CamGeometryOptions, CamGeometryResult } from './cam';
@@ -239,6 +240,16 @@ export class RegenClient extends KernelClient {
     return this.droppable(
       this.worker<RegenWorkerApi>().readFont(fileName, bytes) as Promise<FontReadReply>,
     ).then((reply) => reply ?? null);
+  }
+
+  /**
+   * A building as an IFC4 file, written in the worker (web-ifc loads there on the first call).
+   * Needs no kernel and takes no generation. Null when the worker was stopped before it answered.
+   */
+  exportIfc(building: IfcBuildingInput): Promise<Uint8Array | null> {
+    return this.droppable(
+      this.worker<RegenWorkerApi>().exportIfc(building) as Promise<Uint8Array>,
+    ).then((bytes) => bytes ?? null);
   }
 
   regenStats(): Promise<EngineStats> {

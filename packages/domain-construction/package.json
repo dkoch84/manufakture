@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@manufakture/core": "workspace:*",
+    "@manufakture/io": "workspace:*",
     "@manufakture/nesting": "workspace:*",
     "@manufakture/stock": "workspace:*",
     "@manufakture/takeoff": "workspace:*",

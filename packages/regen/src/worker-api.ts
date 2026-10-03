@@ -9,6 +9,7 @@
 
 import type { DragTarget } from '@manufakture/assembly';
 import type { ManufaktureDocument } from '@manufakture/core';
+import type { IfcBuildingInput } from '@manufakture/io';
 import {
   createKernelWorkerApi,
   meshBuffers,
@@ -163,6 +164,13 @@ export interface RegenWorkerApi extends KernelWorkerApi {
    * host without the watchdog refuses.
    */
   readFont(fileName: string, bytes: Uint8Array): Promise<FontReadReply>;
+  /**
+   * A building as an IFC4 file (`writeIfc` of `@manufakture/io`, T6.6a), its bytes transferred.
+   * web-ifc and its `.wasm` load on the first call only, in this worker; nothing else here
+   * imports them. Needs no kernel. Rejects with the writer's `IfcExportError` message when the
+   * building is malformed or too large.
+   */
+  exportIfc(building: IfcBuildingInput): Promise<Uint8Array>;
 }
 
 /** What a sketcher's `outlineText` call says besides the request. */
@@ -186,6 +194,11 @@ export interface RegenWorkerApiOptions extends WorkerApiOptions {
   engine?: Omit<RegenEngineOptions, 'kernel' | 'solver'>;
   /** Makes the budget of a preview pass (`outlineText`); default a `TextBudget` with its defaults. */
   previewBudget?: () => TextBudget;
+  /**
+   * Where `web-ifc.wasm` is (a bundler's asset URL; `worker.ts` passes Vite's). Absent: web-ifc
+   * finds its own file (Node).
+   */
+  ifcWasmUrl?: string;
 }
 
 /** Build the API object; `worker.ts` passes it to `Comlink.expose`. */
@@ -322,6 +335,17 @@ export function createRegenWorkerApi(options: RegenWorkerApiOptions): RegenWorke
       const reply = previews.then(() => text.outline(request, { budget }));
       previews = reply.catch(() => undefined);
       return reply;
+    },
+
+    async exportIfc(building) {
+      // The writer and web-ifc load here, on the first export: their own chunks and `.wasm`.
+      const { writeIfc } = await import('@manufakture/io/ifc');
+      const url = options.ifcWasmUrl;
+      const bytes = await writeIfc(
+        building,
+        url === undefined ? {} : { locateFile: (path) => (path.endsWith('.wasm') ? url : path) },
+      );
+      return Comlink.transfer(bytes, [bytes.buffer]);
     },
 
     async readFont(fileName, bytes) {

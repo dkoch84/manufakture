@@ -1497,6 +1497,33 @@ export function App({
     ],
   );
 
+  // IFC export of a construction part studio (T6.6a): mapped from the last regen and the member
+  // sets the app holds, written in the regen worker; the code loads on first use.
+  const ifcExporter = loader.ifcExporter;
+  const onIfc = useCallback(() => {
+    if (!ifcExporter) return;
+    setIoBusy(true);
+    setIoStatus({ error: false, text: 'Exporting IFC...' });
+    import('./io/ifcExport')
+      .then(({ exportIfc }) =>
+        exportIfc(ifcExporter, {
+          document: shownDocument,
+          partId: shownPartId,
+          features: parts[0]?.features ?? [],
+          sets: members.getState().parts.get(shownPartId) ?? [],
+        }),
+      )
+      .then(
+        (r) => {
+          if (r.ok) for (const f of r.value) downloadBytes(f.bytes, f.name, f.type);
+          setIoStatus({ error: !r.ok, text: r.message });
+        },
+        (e: unknown) =>
+          setIoStatus({ error: true, text: e instanceof Error ? e.message : String(e) }),
+      )
+      .finally(() => setIoBusy(false));
+  }, [ifcExporter, shownDocument, shownPartId, parts, members]);
+
   // The laser and plasma export: the active part's bodies (with their bounds, for a section's
   // default plane), the geometry stage and the kernel's section.
   const laserBodies = useMemo(
@@ -2002,6 +2029,7 @@ export function App({
             configurations={shared ? configurationCount : 0}
             onExportAll={onExportAll}
             {...(laserBlocked ? {} : { onLaser: () => setLaserOpen(true) })}
+            {...(withConstruction && ifcExporter && !printing ? { onIfc } : {})}
           />
           <ImportButton
             disabled={sketching.active || ioBusy || locked || assemblyId !== null}

@@ -14,6 +14,7 @@ import type { Assembler } from '../assembly/assembly';
 import type { CamGeometer } from '../cam/geometer';
 import type { Drawer } from '../drawing/drawer';
 import { kernelExchange, type Exchanger, type KernelBody, type Referencer } from '../io/exchange';
+import type { IfcExporter } from '../io/ifcExport';
 import type { Measurer } from '../measure/measurer';
 import { demoDocument } from '../model/demo';
 import { kernelRegenerator } from '../model/kernelModel';
@@ -61,6 +62,8 @@ export interface SceneLoader {
   drawer?: Drawer;
   /** The CAM geometry of a setup, in the regen worker; absent for kernel-free scenes. */
   camGeometer?: CamGeometer;
+  /** IFC export of a building, in the regen worker (T6.6a); absent for kernel-free scenes. */
+  ifcExporter?: IfcExporter;
   /** A document the scene opens with (the demo scene); the app loads it once the scene is loaded. */
   initialDocument?: ManufaktureDocument;
 }
@@ -229,6 +232,13 @@ export function kernelLoader(
     drawer,
     sizer,
     camGeometer,
+    ifcExporter: {
+      async exportIfc(building) {
+        const bytes = client === null ? null : await client.exportIfc(building);
+        if (bytes === null) throw new Error('the geometry worker is not running');
+        return bytes;
+      },
+    },
     ...(options.initialDocument ? { initialDocument: options.initialDocument } : {}),
   };
 }

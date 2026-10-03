@@ -2,7 +2,8 @@
 // plain TypeScript; STEP geometry goes through the kernel (OCCT's
 // translators), and this package only reads STEP text (product names). 2D
 // sheets (drawings, and laser and plasma outlines) are written as SVG, DXF and PDF,
-// and SVG artwork is read as lines and arcs for sketches.
+// and SVG artwork is read as lines and arcs for sketches. Buildings are written as
+// IFC through web-ifc, which is imported only when an IFC export runs (`./ifc`).
 
 export const packageName = '@manufakture/io';
 
@@ -194,3 +195,55 @@ export {
   type SvgShape,
   type XmlElement,
 } from './svg-import';
+export {
+  IFC_GUID_ALPHABET,
+  IFC_GUID_PATTERN,
+  IFC_SCHEMA,
+  IFC_UNIT_MM,
+  IFC_VIEW_DEFINITION,
+  IfcExportError,
+  MAX_IFC_COORDINATE,
+  MAX_IFC_WORK,
+  MAX_IFC_FLOORS,
+  MAX_IFC_HEADER_STRING,
+  MAX_IFC_HEADER_STRINGS,
+  MAX_IFC_ID,
+  MAX_IFC_LABEL,
+  MAX_IFC_LAYERS,
+  MAX_IFC_LEVELS,
+  MAX_IFC_MEMBERS,
+  MAX_IFC_OPENINGS,
+  MAX_IFC_OPENINGS_PER_SEGMENT,
+  MAX_IFC_OUTLINE_POINTS,
+  MAX_IFC_ROOFS,
+  MAX_IFC_SHEETS,
+  MAX_IFC_SIZE,
+  MAX_IFC_TEXT,
+  MAX_IFC_WALL_POINTS,
+  MAX_IFC_WALLS,
+  checkIfcBuilding,
+  compressGuid,
+  expandGuid,
+  faceRects,
+  ifcGlobalId,
+  ifcHeaderStrings,
+  ifcString,
+  loadWebIfc,
+  memberClass,
+  writeIfc,
+  type IfcBuildingInput,
+  type IfcFloorInput,
+  type IfcLengthUnit,
+  type IfcLevelInput,
+  type IfcMemberInput,
+  type IfcOpeningInput,
+  type IfcPlaneInput,
+  type IfcRoofInput,
+  type IfcRoofKind,
+  type IfcSheetInput,
+  type IfcVec2,
+  type IfcVec3,
+  type IfcWallInput,
+  type IfcWallLayerInput,
+  type IfcWriteOptions,
+} from './ifc';

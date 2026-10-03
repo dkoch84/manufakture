@@ -20,12 +20,14 @@
     "@manufakture/assembly": "workspace:*",
     "@manufakture/core": "workspace:*",
     "@manufakture/drawing": "workspace:*",
+    "@manufakture/io": "workspace:*",
     "@manufakture/kernel": "workspace:*",
     "@manufakture/sketch": "workspace:*",
     "@manufakture/text": "workspace:*",
     "@manufakture/units": "workspace:*",
     "comlink": "^4.4.2",
     "libcascade": "3.0.2",
-    "manifold-3d": "3.5.4"
+    "manifold-3d": "3.5.4",
+    "web-ifc": "0.0.78"
   }
 }

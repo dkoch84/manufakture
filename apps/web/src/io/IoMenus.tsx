@@ -3,8 +3,8 @@
 // body is never written unless ticked; in an assembly, the whole assembly with
 // its parts placed), the choice to export every configuration with its
 // progress, the laser and plasma export (DXF or SVG outlines, which opens its
-// own dialog), and the Import button (a STEP or STL file picker), in the app
-// header.
+// own dialog), IFC of a construction document's building (written in the regen
+// worker), and the Import button (a STEP or STL file picker), in the app header.
 
 import { EXPORT_TOLERANCES, type ExportTolerancePreset } from '@manufakture/io';
 import { useEffect, useRef, useState } from 'react';
@@ -62,6 +62,8 @@ export interface ExportMenuProps {
   ) => void;
   /** Open the laser and plasma export (a part studio only); absent: not offered. */
   onLaser?: () => void;
+  /** Export the part studio's building as IFC (a construction document only); absent: not offered. */
+  onIfc?: () => void;
 }
 
 const NO_BODIES: readonly ExportableBody[] = [];
@@ -75,6 +77,7 @@ export function ExportMenu({
   configurations: givenConfigurations = 0,
   onExportAll,
   onLaser,
+  onIfc,
 }: ExportMenuProps) {
   const bodies = assembly ? NO_BODIES : givenBodies;
   const configurations = assembly ? 0 : givenConfigurations;
@@ -156,6 +159,20 @@ export function ExportMenu({
               }}
             >
               Laser or plasma (DXF, SVG)...
+            </button>
+          )}
+          {!assembly && onIfc && (
+            <button
+              type="button"
+              role="menuitem"
+              title="IFC4 for BIM tools: levels, walls, openings, floors, roofs and every framing member"
+              data-testid="export-ifc"
+              onClick={() => {
+                setOpen(false);
+                onIfc();
+              }}
+            >
+              IFC (building)
             </button>
           )}
           {nothing && (

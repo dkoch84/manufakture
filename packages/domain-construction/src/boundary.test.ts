@@ -8,9 +8,11 @@ import { describe, expect, it } from 'vitest';
 // `@manufakture/takeoff`, `@manufakture/nesting` and `@manufakture/stock`. It never loads the
 // kernel, regen, Manifold or any `.wasm`, the sketch package, another domain (`domain-wood`
 // included) or the app, so the generators run in Node tests. Type-only imports may also name
-// `@manufakture/regen` and `@manufakture/kernel` (as in `domain-wood`); they are erased. Tests may
-// also load `vitest` and Node built-ins, and, as `domain-wood`'s do, regen and the kernel, to run
-// the features through regen with the real kernel. This is an allowlist, so a new dependency fails
+// `@manufakture/regen` and `@manufakture/kernel` (as in `domain-wood`), and `@manufakture/io` (the
+// IFC writer's input types, which `ifc/adapter.ts` fills); they are erased. Tests, and their
+// helpers (`test-helpers.ts`, `test-*.ts`), may also load `vitest` and Node built-ins, and, as
+// `domain-wood`'s do, regen and the kernel, to run the features through regen with the real
+// kernel, and `@manufakture/io`, to write the IFC and read it back. This is an allowlist, so a new dependency fails
 // here until it is added on purpose.
 
 const RUNTIME = [
@@ -20,8 +22,8 @@ const RUNTIME = [
   '@manufakture/nesting',
   '@manufakture/stock',
 ];
-const TYPE_ONLY = [...RUNTIME, '@manufakture/regen', '@manufakture/kernel'];
-const TEST_ONLY = ['vitest', '@manufakture/regen', '@manufakture/kernel'];
+const TYPE_ONLY = [...RUNTIME, '@manufakture/regen', '@manufakture/kernel', '@manufakture/io'];
+const TEST_ONLY = ['vitest', '@manufakture/regen', '@manufakture/kernel', '@manufakture/io'];
 
 const SRC = fileURLToPath(new URL('.', import.meta.url));
 
@@ -33,7 +35,10 @@ describe('package boundary', () => {
     for (const file of files) {
       const text = readFileSync(file, 'utf8');
       const name = relative(SRC, file);
-      const isTest = file.endsWith('.test.ts') || name === 'test-helpers.ts';
+      const isTest =
+        file.endsWith('.test.ts') ||
+        name === 'test-helpers.ts' ||
+        /(^|[\\/])test-[\w-]+\.ts$/.test(name);
       for (const { spec, typeOnly } of importsOf(text)) {
         expect(allowed(spec, typeOnly, isTest, file), `${name} imports '${spec}'`).toBe(true);
       }

@@ -50,6 +50,26 @@ describe('the Export menu', () => {
     expect(screen.queryByTestId('export-laser')).toBeNull();
   });
 
+  it('offers IFC for a building only when asked to, and not in an assembly', () => {
+    const onIfc = vi.fn();
+    const { unmount } = render(
+      <ExportMenu bodies={[body('only')]} onExport={vi.fn()} onIfc={onIfc} />,
+    );
+    open();
+    expect(item('ifc').textContent).toBe('IFC (building)');
+    fireEvent.click(item('ifc'));
+    expect(onIfc).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('menu')).toBeNull();
+    unmount();
+    const again = render(<ExportMenu bodies={[body('only')]} onExport={vi.fn()} />);
+    open();
+    expect(screen.queryByTestId('export-ifc')).toBeNull();
+    again.unmount();
+    render(<ExportMenu assembly bodies={[]} onExport={vi.fn()} onIfc={onIfc} />);
+    open();
+    expect(screen.queryByTestId('export-ifc')).toBeNull();
+  });
+
   it('keeps the ticks in step with visibility while it is open', () => {
     const onExport = vi.fn();
     const { rerender } = render(<ExportMenu bodies={[body('a'), body('b')]} onExport={onExport} />);

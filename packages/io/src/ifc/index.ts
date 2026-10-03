@@ -1,0 +1,56 @@
+// IFC export (T6.6a): a building as IFC4 through web-ifc, which is loaded on the first export
+// only. See writer.ts.
+
+export {
+  IFC_UNIT_MM,
+  IfcExportError,
+  MAX_IFC_COORDINATE,
+  MAX_IFC_WORK,
+  MAX_IFC_FLOORS,
+  MAX_IFC_ID,
+  MAX_IFC_LAYERS,
+  MAX_IFC_LEVELS,
+  MAX_IFC_MEMBERS,
+  MAX_IFC_OPENINGS,
+  MAX_IFC_OPENINGS_PER_SEGMENT,
+  MAX_IFC_OUTLINE_POINTS,
+  MAX_IFC_ROOFS,
+  MAX_IFC_SHEETS,
+  MAX_IFC_SIZE,
+  MAX_IFC_WALL_POINTS,
+  MAX_IFC_WALLS,
+  checkIfcBuilding,
+  isWellFormed,
+  type IfcBuildingInput,
+  type IfcFloorInput,
+  type IfcLengthUnit,
+  type IfcLevelInput,
+  type IfcMemberInput,
+  type IfcOpeningInput,
+  type IfcPlaneInput,
+  type IfcRoofInput,
+  type IfcRoofKind,
+  type IfcSheetInput,
+  type IfcVec2,
+  type IfcVec3,
+  type IfcWallInput,
+  type IfcWallLayerInput,
+} from './model';
+export { IFC_GUID_ALPHABET, IFC_GUID_PATTERN, compressGuid, expandGuid, ifcGlobalId } from './guid';
+export {
+  MAX_IFC_HEADER_STRING,
+  MAX_IFC_HEADER_STRINGS,
+  MAX_IFC_LABEL,
+  MAX_IFC_TEXT,
+  ifcHeaderStrings,
+  ifcString,
+} from './strings';
+export {
+  IFC_SCHEMA,
+  IFC_VIEW_DEFINITION,
+  faceRects,
+  loadWebIfc,
+  memberClass,
+  writeIfc,
+  type IfcWriteOptions,
+} from './writer';

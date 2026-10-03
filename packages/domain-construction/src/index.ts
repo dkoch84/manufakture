@@ -322,3 +322,4 @@ export {
   type TakeoffSubtotal,
   type WallFaceInput,
 } from './takeoff';
+export * from './ifc/adapter';
