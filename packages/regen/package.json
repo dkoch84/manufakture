@@ -25,6 +25,7 @@
     "@manufakture/text": "workspace:*",
     "@manufakture/units": "workspace:*",
     "comlink": "^4.4.2",
-    "libcascade": "3.0.2"
+    "libcascade": "3.0.2",
+    "manifold-3d": "3.5.4"
   }
 }

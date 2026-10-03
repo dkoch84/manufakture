@@ -16,6 +16,7 @@ import type { MeshData, ShapeId, ThreadReport, Topology, Via } from '@manufaktur
 import type { OutlineShape, RegionDiagnosticCode, SketchPlacement } from '@manufakture/sketch';
 import type { UnitsError } from '@manufakture/units';
 import type { ExplodedViewResult } from './explode';
+import type { MemberMeshUpdate, MemberSetResult } from './members';
 
 /**
  * - `ok`: built (possibly with warnings);
@@ -167,7 +168,12 @@ export type RegenWarning =
    * A bundled font is not the file the document's text was made with (an app update changed
    * it): the text is built with the font this build ships, and may look different.
    */
-  | { code: 'font-changed'; message: string; fontId: string };
+  | { code: 'font-changed'; message: string; fontId: string }
+  /**
+   * A layout warning a domain's member stage reported on this feature while framing `group`
+   * (ADR 0015 decision 7): `domainCode` is the domain's own code, `member` a full member id.
+   */
+  | { code: 'members'; message: string; group: string; domainCode?: string; member?: string };
 
 /** How one reference of a feature resolved (ADR 0004 decision 6: recomputed, never stored). */
 export interface ReferenceResolution {
@@ -276,6 +282,12 @@ export interface PartResult {
   bodies: BodyResult[];
   /** Bodies that ended in a merge during the part, in feature order. */
   consumed: ConsumedBody[];
+  /**
+   * The part's framing member sets (ADR 0015 decision 5), one per group a domain's member stage
+   * framed, in domain then group order. Absent when there are none: a group missing from a
+   * completed regen is gone.
+   */
+  members?: MemberSetResult[];
 }
 
 export interface RegenCounters {
@@ -302,6 +314,11 @@ export interface RegenResult {
    * (and meshes, as for parts); empty when no instance shows one.
    */
   sources: SourceResult[];
+  /**
+   * Member shape meshes new to the main thread and those no member uses any more (worker-wide,
+   * every part's sets together). Absent when neither changed.
+   */
+  memberMeshes?: MemberMeshUpdate;
   counters: RegenCounters;
   ms: number;
 }
@@ -457,5 +474,33 @@ export interface InterferenceReport {
    * the next regen.
    */
   status: 'done' | 'cancelled' | 'stale';
+  ms: number;
+}
+
+// Member B-reps ------------------------------------------------------------------------------
+
+/** One member's B-rep as `memberBodies` built it. */
+export interface MemberBodyResult {
+  /** The full member id. */
+  id: string;
+  ok: boolean;
+  /** Its volume in mm3, when asked for and built. */
+  volume?: number;
+  /** Why it could not be built. */
+  error?: string;
+}
+
+/** Member B-reps built on request (STEP export, drawings), used and released at once. */
+export interface MemberBodiesResult {
+  generation: number;
+  partId: string;
+  /** In request order, the ids that were found. */
+  bodies: MemberBodyResult[];
+  /** Ids the last completed regen has no member for. */
+  missing: string[];
+  /** One AP214 STEP file of every member built, each named by its full id, when asked for. */
+  step: Uint8Array | null;
+  /** Kernel batches: one per owner, plus the export. */
+  batches: number;
   ms: number;
 }

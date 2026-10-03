@@ -7,6 +7,8 @@ export {
   RegenEngine,
   type EngineStats,
   type AssemblyOptions,
+  type MemberBodiesOptions,
+  type MemberStats,
   type InterferenceCheckOptions,
   type RegenEngineOptions,
   type RegenKernel,
@@ -44,8 +46,37 @@ export {
   type JsonValue,
   type ReadResult,
   type RegisteredExtension,
+  type RegisteredMemberStage,
   type ResolvedReference,
 } from './extensions';
+export {
+  MEMBER_STAGE_VERSION,
+  boxMesh,
+  loadManifold,
+  memberFullId,
+  memberInstances,
+  memberShapeKey,
+  meshVolume,
+  type ManifoldLoader,
+  type MemberCut,
+  type MemberData,
+  type MemberFeature,
+  type MemberGroup,
+  type MemberGroupContext,
+  type MemberInstances,
+  type MemberMesh,
+  type MemberMeshData,
+  type MemberMeshUpdate,
+  type MemberOutput,
+  type MemberPlacement,
+  type MemberPlane,
+  type MemberSetResult,
+  type MemberStage,
+  type MemberStageContext,
+  type MemberStock,
+  type MemberVec3,
+  type MemberWarning,
+} from './members';
 export {
   BODY_KINDS,
   bodyUse,
@@ -246,7 +277,7 @@ export {
   type CamWcsUp,
 } from './cam';
 export { hashString, hashValue, stableStringify } from './hash';
-export { regenTransferables } from './transfer';
+export { memberBodiesTransferables, regenTransferables } from './transfer';
 export {
   createRegenWorkerApi,
   type RegenWorkerApi,

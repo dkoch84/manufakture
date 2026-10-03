@@ -20,6 +20,7 @@ import type {
   DragResult,
   InstanceInterference,
   InterferenceReport,
+  MemberBodiesResult,
   RegenResult,
 } from './types';
 import type { RegenWorkerApi, TextPreviewOptions } from './worker-api';
@@ -196,6 +197,25 @@ export class RegenClient extends KernelClient {
         ...options,
         generation: this.latestGeneration,
       }) as Promise<CamGeometryResult | null>,
+    ).then((result) => result ?? null);
+  }
+
+  /**
+   * B-reps of framing members of the last regen (full ids), for a STEP export (`step: true`) or a
+   * check of their volumes: built and released in the worker before it answers, never kept. At
+   * the current generation, so it never cancels a regen. Null when a newer regen superseded it or
+   * the worker was stopped.
+   */
+  memberBodies(
+    partId: string,
+    memberIds: readonly string[],
+    options: { volumes?: boolean; step?: boolean } = {},
+  ): Promise<MemberBodiesResult | null> {
+    return this.droppable(
+      this.worker<RegenWorkerApi>().memberBodies(partId, memberIds, {
+        ...options,
+        generation: this.latestGeneration,
+      }) as Promise<MemberBodiesResult | null>,
     ).then((result) => result ?? null);
   }
 

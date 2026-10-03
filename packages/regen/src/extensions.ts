@@ -36,6 +36,24 @@ import type {
   Via,
 } from '@manufakture/kernel';
 import { stableStringify } from './hash';
+import type { MemberStage } from './members';
+
+// The member stage's types, for domains that import from this subpath (`members.ts`).
+export type {
+  MemberCut,
+  MemberData,
+  MemberFeature,
+  MemberGroup,
+  MemberGroupContext,
+  MemberOutput,
+  MemberPlacement,
+  MemberPlane,
+  MemberStage,
+  MemberStageContext,
+  MemberStock,
+  MemberVec3,
+  MemberWarning,
+} from './members';
 import type { SketchResult } from './sketches';
 import type { FieldPath, RegenError } from './types';
 import { evaluateField, type VariableValues } from './values';
@@ -175,6 +193,12 @@ export interface ExtensionDomain {
   data?: Readonly<Record<string, DomainDataReader>>;
   /** Its extension types by full type (`wood.board`). */
   types?: Readonly<Record<string, ExtensionType>>;
+  /**
+   * Its member stage (ADR 0015 decision 5): framing members produced from the metadata of a
+   * part's built extensions of this namespace, after the part's features (`members.ts`). Members
+   * are data, never bodies; `implementation` keys their cache as it keys translator results.
+   */
+  members?: MemberStage;
 }
 
 interface DomainEntry {
@@ -183,6 +207,16 @@ interface DomainEntry {
   reads: readonly string[];
   data: Map<string, DomainDataReader>;
   types: Map<string, ExtensionType>;
+  members: MemberStage | undefined;
+}
+
+/** A registered domain's member stage, with what keys and feeds it. */
+export interface RegisteredMemberStage {
+  namespace: string;
+  implementation: number;
+  /** Every namespace of domain data it is given, as for its domain's translators. */
+  reads: readonly string[];
+  stage: MemberStage;
 }
 
 /** A registered type with the domain it belongs to. */
@@ -240,7 +274,14 @@ export class ExtensionRegistry {
       reads: [...new Set([ns, ...(domain.reads ?? [])])],
       data,
       types: new Map(),
+      members: domain.members,
     };
+    if (
+      domain.members !== undefined &&
+      (typeof domain.members.groups !== 'function' || typeof domain.members.frame !== 'function')
+    ) {
+      throw new TypeError(`domain "${ns}": a member stage needs groups and frame functions`);
+    }
     for (const [type, definition] of Object.entries(domain.types ?? {})) {
       checkType(entry, type, definition);
       entry.types.set(type, definition);
@@ -304,6 +345,19 @@ export class ExtensionRegistry {
       if (r !== undefined) return r;
     }
     return undefined;
+  }
+
+  /** The member stages of the registered domains, by namespace, sorted. */
+  memberStages(): RegisteredMemberStage[] {
+    return [...this.#domains.values()]
+      .filter((d) => d.members !== undefined)
+      .sort((a, b) => a.namespace.localeCompare(b.namespace))
+      .map((d) => ({
+        namespace: d.namespace,
+        implementation: d.implementation,
+        reads: d.reads,
+        stage: d.members!,
+      }));
   }
 
   /** Registered domain namespaces, sorted. */
@@ -399,7 +453,7 @@ export function supported(
  */
 export function readDomainData(
   registry: ExtensionRegistry,
-  extension: RegisteredExtension,
+  extension: Pick<RegisteredExtension, 'reads'>,
   domains: Domains | undefined,
   memo: Map<string, NamespaceRead>,
 ): { ok: true; data: Record<string, unknown> } | { ok: false; error: RegenError } {

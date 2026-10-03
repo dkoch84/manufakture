@@ -25,6 +25,11 @@
 // `packages/assembly` places them (`assembly.ts`). Drags reuse the last regen's solver input and
 // never touch the kernel.
 //
+// Member sets: after a part's features, each registered domain's member stage frames the part's
+// built extensions of its namespace into members (ADR 0015 decision 5, `members.ts`): plain data,
+// cached per group and meshed once per distinct shape in this worker, never kernel objects, so a
+// kernel recycle keeps them. Member B-reps are built only on request (`memberBodies`).
+//
 // Cancellation: every regen has a generation. A newer regen cancels the kernel batches of the
 // older one (`KernelService.cancel`) and the older one stops at its next await, returning null.
 // Regens run one at a time, so they never race on the cache.
@@ -66,6 +71,7 @@ import {
   type Deflection,
   type FeatureInput,
   type FeatureOutcome,
+  type MeasureResult,
   type InterferenceOp,
   type InterferenceResult,
   type KernelOp,
@@ -174,6 +180,24 @@ import {
 import { stableStringify } from './hash';
 import { importSourceMatches, keyInput } from './imports';
 import {
+  MemberGroupCache,
+  MemberMeshCache,
+  checkGroups,
+  checkMembers,
+  memberFeatureInputs,
+  memberFullId,
+  memberGroupKey,
+  memberInstances,
+  memberShapeKey,
+  type FramedGroup,
+  type ManifoldLoader,
+  type MemberData,
+  type MemberFeature,
+  type MemberMesh,
+  type MemberMeshUpdate,
+  type MemberSetResult,
+} from './members';
+import {
   explicitPlacement,
   sketchFontKey,
   sketchKeyDefinition,
@@ -194,6 +218,8 @@ import type {
   InstanceSourceRef,
   InterferenceReport,
   MateResult,
+  MemberBodiesResult,
+  MemberBodyResult,
   PartResult,
   RegenCounters,
   RegenError,
@@ -256,6 +282,11 @@ export interface RegenEngineOptions {
    * current document again (the next regen rebuilds; nothing is lost but time).
    */
   onKernelRecycled?: () => void;
+  /**
+   * Loads Manifold for meshing members with cuts, once, on the first such member. Default:
+   * `loadManifold` (`manifold-3d`'s glue, which finds its `.wasm` next to itself).
+   */
+  manifold?: ManifoldLoader;
 }
 
 export interface RegenOptions {
@@ -292,6 +323,40 @@ export interface EngineStats extends RegenCounters {
   regens: number;
   superseded: number;
   retries: number;
+}
+
+/** What the member stage did over the engine's lifetime (`RegenEngine.memberStats`). */
+export interface MemberStats {
+  /** Groups the domain's `frame` ran for. */
+  framed: number;
+  /** Groups served from the member cache. */
+  cacheHits: number;
+  /** Member shape meshes made (boxes and cut members). */
+  meshesMade: number;
+  /** Shape meshes held now, and framed groups held now. */
+  meshes: number;
+  groups: number;
+  /** Manifold objects made and deleted (equal after every mesh). */
+  manifoldCreated: number;
+  manifoldDeleted: number;
+}
+
+/** What `memberBodies` builds besides the bodies. */
+export interface MemberBodiesOptions {
+  /** As for `AssemblyOptions.generation`. */
+  generation?: number;
+  /** Measure each body's volume. */
+  volumes?: boolean;
+  /** Export every member built as one STEP file, each body named by its full member id. */
+  step?: boolean;
+}
+
+/** One group's members as a regen framed them (from the member cache or just now). */
+interface FramedSet {
+  entry: FramedGroup;
+  members: readonly MemberData[];
+  cached: boolean;
+  ms: number;
 }
 
 class Superseded extends Error {
@@ -611,6 +676,17 @@ export class RegenEngine {
   readonly #oriented = new OrientedCache();
   /** The CAM geometry stage's caches (`camGeometry`). */
   readonly #cam = new CamStage();
+  /** Framed member groups by key (plain data: a kernel recycle keeps them). */
+  readonly #memberGroups = new MemberGroupCache();
+  /** One mesh per distinct member shape, for every part and group (T6.5a recommendation 3). */
+  readonly #memberMeshes: MemberMeshCache;
+  /** Set key per part and group as last reported, to send a set only when it changed. */
+  #reportedSets = new Map<string, string>();
+  /** Member shape keys the main thread has the mesh of. */
+  #reportedMeshes = new Set<string>();
+  /** The members of the last completed regen, per part, by full id (`memberBodies`). */
+  #lastMembers = new Map<string, Map<string, MemberData>>();
+  #memberCounts = { framed: 0, cacheHits: 0 };
 
   constructor(options: RegenEngineOptions) {
     this.#kernel = options.kernel;
@@ -622,6 +698,7 @@ export class RegenEngine {
     this.#deflection = options.deflection;
     this.#onRecycled = options.onKernelRecycled;
     this.#extensions = options.extensions ?? defaultExtensions;
+    this.#memberMeshes = new MemberMeshCache(options.manifold);
     this.#unsubscribe = options.kernel.onRecycle?.(() => {
       // Runs inside the service's queue: only forget, never submit from here.
       void this.#cache.dropBodies(null);
@@ -633,6 +710,19 @@ export class RegenEngine {
   /** Cumulative counters over every regen. */
   get stats(): Readonly<EngineStats> {
     return { ...this.#stats };
+  }
+
+  /** Member stage counters over every regen, and what its caches hold now. */
+  get memberStats(): Readonly<MemberStats> {
+    const m = this.#memberMeshes;
+    return {
+      ...this.#memberCounts,
+      meshesMade: m.made,
+      meshes: m.size,
+      groups: this.#memberGroups.size,
+      manifoldCreated: m.manifoldObjects.created,
+      manifoldDeleted: m.manifoldObjects.deleted,
+    };
   }
 
   /** The newest generation requested. */
@@ -681,6 +771,11 @@ export class RegenEngine {
     const dropped = await this.#cache.clear();
     await this.#releaseEntries(dropped);
     this.#reported.clear();
+    this.#memberGroups.clear();
+    this.#memberMeshes.clear();
+    this.#reportedSets.clear();
+    this.#reportedMeshes.clear();
+    this.#lastMembers.clear();
     this.#lastDocument = null;
   }
 
@@ -813,6 +908,13 @@ export class RegenEngine {
       built.push({ state, features, dirty });
     }
 
+    // Member sets, after each part's features: plain data, no kernel ops.
+    const framed = new Map<string, FramedSet[]>();
+    for (const { state } of built) {
+      const sets = await this.#frameMembers(run, state, document);
+      if (sets.length > 0) framed.set(state.part.id, sets);
+    }
+
     // Assemblies, after the parts they show.
     const partStates = new Map(built.map(({ state }) => [state.part.id, state]));
     const assembled = await this.#assemble(run, document, variables, async (id) =>
@@ -895,13 +997,18 @@ export class RegenEngine {
           topology: topologies.get(slot) ?? null,
         };
       });
-    const parts: PartResult[] = built.map(({ state, features, dirty }) => ({
-      partId: state.part.id,
-      features,
-      dirty,
-      bodies: bodyResults(state, (id) => slotOf(state.part.id, id)),
-      consumed: state.consumed,
-    }));
+    const members = this.#memberResults(framed);
+    const parts: PartResult[] = built.map(({ state, features, dirty }) => {
+      const sets = members.sets.get(state.part.id);
+      return {
+        partId: state.part.id,
+        features,
+        dirty,
+        bodies: bodyResults(state, (id) => slotOf(state.part.id, id)),
+        consumed: state.consumed,
+        ...(sets === undefined ? {} : { members: sets }),
+      };
+    });
     const sources: SourceResult[] = [...assembled.sources].map(([key, { info, state }]) => ({
       key,
       ...info,
@@ -923,8 +1030,212 @@ export class RegenEngine {
       parts,
       assemblies: assembled.results,
       sources,
+      ...(members.meshes === null ? {} : { memberMeshes: members.meshes }),
       counters: run.counters,
       ms: 0,
+    };
+  }
+
+  /**
+   * The member stage of a part (ADR 0015 decision 5): for each domain with a member stage, its
+   * built extensions with their metadata are grouped by the domain, each group framed (or served
+   * from the member cache by its key) and its new shapes meshed. A throw, a malformed result or a
+   * shape that cannot be meshed is an error on the group's features; layout warnings go on the
+   * features they name. Only the document's own parts are framed.
+   */
+  async #frameMembers(
+    run: Run,
+    state: PartState,
+    document: ManufaktureDocument,
+  ): Promise<FramedSet[]> {
+    const stages = this.#extensions.memberStages();
+    if (stages.length === 0) return [];
+    const partId = state.part.id;
+    const sets: FramedSet[] = [];
+    const domainReads = new Map<string, NamespaceRead>();
+    const fail = (ids: readonly string[], error: RegenError) => {
+      for (const id of ids) {
+        const r = state.results.get(id);
+        if (r === undefined) continue;
+        r.status = 'error';
+        r.cached = false;
+        r.errors = [...r.errors, error];
+      }
+    };
+    for (const st of stages) {
+      const features: MemberFeature[] = [];
+      for (const f of state.part.features) {
+        if (f.kind !== 'extension' || extensionNamespace(f.extension) !== st.namespace) continue;
+        if (state.results.get(f.id)?.status !== 'ok') continue;
+        const metadata = state.extensions.get(f.id)?.metadata;
+        features.push({
+          id: f.id,
+          type: f.extension,
+          schemaVersion: f.schemaVersion,
+          dependsOn: [...f.dependsOn],
+          ...(metadata === undefined ? {} : { metadata }),
+        });
+      }
+      if (features.length === 0) continue;
+      const ids = features.map((f) => f.id);
+      const data = readDomainData(this.#extensions, st, document.domains, domainReads);
+      if (!data.ok) {
+        fail(ids, data.error);
+        continue;
+      }
+      let given: { features: MemberFeature[]; data: Record<string, unknown> };
+      try {
+        given = frozenCopy({ features, data: data.data });
+      } catch (error) {
+        fail(ids, {
+          code: 'extension',
+          message: `The "${st.namespace}" member stage got data that is not plain: ${error instanceof Error ? error.message : String(error)}`,
+        });
+        continue;
+      }
+      const byId = new Map(given.features.map((f) => [f.id, f]));
+      const asked = guard(st.namespace, 'member grouping', () =>
+        st.stage.groups({ partId, features: given.features, data: given.data }),
+      );
+      const groups = asked.ok ? checkGroups(st.namespace, asked.value, new Set(ids)) : asked;
+      if (!groups.ok) {
+        fail(ids, groups.error);
+        continue;
+      }
+      for (const group of groups.groups) {
+        const t0 = now();
+        const groupFeatures = group.features.map((id) => byId.get(id)!);
+        const key = memberGroupKey({
+          namespace: st.namespace,
+          implementation: st.implementation,
+          regen: REGEN_IMPLEMENTATION_VERSION,
+          group,
+          features: groupFeatures,
+          data: given.data,
+        });
+        let entry = this.#memberGroups.get(key);
+        const cached = entry !== undefined;
+        if (entry === undefined) {
+          const out = guard(st.namespace, `member stage (group ${group.id})`, () =>
+            st.stage.frame(
+              frozenCopy({ partId, group, features: groupFeatures, data: given.data }),
+            ),
+          );
+          entry = {
+            key,
+            namespace: st.namespace,
+            group,
+            result: out.ok
+              ? checkMembers(st.namespace, group, out.value)
+              : { ok: false, error: out.error },
+          };
+          this.#memberGroups.set(entry);
+          this.#memberCounts.framed++;
+        } else {
+          this.#memberCounts.cacheHits++;
+        }
+        const result = entry.result;
+        if (!result.ok) {
+          fail(group.features, result.error);
+          continue;
+        }
+        for (const w of result.warnings) {
+          const r = state.results.get(w.feature);
+          if (r === undefined) continue;
+          r.warnings = [
+            ...r.warnings,
+            {
+              code: 'members',
+              message: w.message,
+              group: group.id,
+              ...(w.code === undefined ? {} : { domainCode: w.code }),
+              ...(w.member === undefined ? {} : { member: w.member }),
+            },
+          ];
+        }
+        const failed = await this.#memberMeshes.ensure(result.members);
+        this.#checkStale(run);
+        if (failed.size > 0) {
+          const bad = result.members.filter((m) => failed.has(memberShapeKey(m)));
+          const first = bad[0]!;
+          fail(group.features, {
+            code: 'extension',
+            message: `${bad.length === 1 ? 'Member' : `${bad.length} members, the first`} ${memberFullId(first)} could not be meshed: ${failed.get(memberShapeKey(first))}`,
+          });
+          continue;
+        }
+        sets.push({ entry, members: result.members, cached, ms: now() - t0 });
+      }
+    }
+    return sets;
+  }
+
+  /**
+   * The member sets of a completed regen as reported (a set's members and instance lists only
+   * when it changed), the shape meshes the main thread lacks and those it can drop. Becomes the
+   * state the next regen is compared with; the member caches keep only what this regen used.
+   */
+  #memberResults(framed: ReadonlyMap<string, readonly FramedSet[]>): {
+    sets: Map<string, MemberSetResult[]>;
+    meshes: MemberMeshUpdate | null;
+  } {
+    const sets = new Map<string, MemberSetResult[]>();
+    const reported = new Map<string, string>();
+    const usedMeshes = new Set<string>();
+    const usedGroups = new Set<string>();
+    const lastMembers = new Map<string, Map<string, MemberData>>();
+    for (const [partId, list] of framed) {
+      const byId = new Map<string, MemberData>();
+      lastMembers.set(partId, byId);
+      sets.set(
+        partId,
+        list.map(({ entry, members, cached, ms }): MemberSetResult => {
+          usedGroups.add(entry.key);
+          for (const m of members) {
+            usedMeshes.add(memberShapeKey(m));
+            byId.set(memberFullId(m), m);
+          }
+          const slot = slotOf(partId, `members\n${entry.namespace}\n${entry.group.id}`);
+          const changed = this.#reportedSets.get(slot) !== entry.key;
+          reported.set(slot, entry.key);
+          const metadata = entry.result.ok ? entry.result.metadata : undefined;
+          return {
+            group: entry.group.id,
+            namespace: entry.namespace,
+            features: [...entry.group.features],
+            setKey: entry.key,
+            cached,
+            changed,
+            members: changed ? [...members] : null,
+            instances: changed ? memberInstances(members) : null,
+            ...(changed && metadata !== undefined ? { metadata } : {}),
+            count: members.length,
+            ms,
+          };
+        }),
+      );
+    }
+    const added: MemberMesh[] = [];
+    for (const key of usedMeshes) {
+      if (this.#reportedMeshes.has(key)) continue;
+      const mesh = this.#memberMeshes.get(key)!;
+      // Copies: the cache keeps its own, and these are transferred to the main thread.
+      added.push({
+        key,
+        positions: mesh.positions.slice(),
+        normals: mesh.normals.slice(),
+        indices: mesh.indices.slice(),
+      });
+    }
+    const removed = [...this.#reportedMeshes].filter((key) => !usedMeshes.has(key));
+    this.#memberMeshes.retain(usedMeshes);
+    this.#memberGroups.retain(usedGroups);
+    this.#reportedSets = reported;
+    this.#reportedMeshes = usedMeshes;
+    this.#lastMembers = lastMembers;
+    return {
+      sets,
+      meshes: added.length === 0 && removed.length === 0 ? null : { added, removed },
     };
   }
 
@@ -1626,6 +1937,144 @@ export class RegenEngine {
   /** The oriented-size counters: `obb` ops sent and bodies answered from the cache. */
   get orientedStats(): Readonly<OrientedStats> {
     return { ...this.#oriented.stats };
+  }
+
+  /**
+   * B-reps of members of the last completed regen, on request (STEP export of framing, drawings
+   * that need hidden lines through members; ADR 0015 decision 4): built in one kernel batch per
+   * owner (cancelled between batches by a newer regen), measured and exported as asked, then
+   * released at once, whatever happens: member B-reps are never kept between requests (T6.5a
+   * memory rule 4). At the client's current generation, on the regen chain; null when a newer
+   * regen superseded it. `memberIds` are full ids; ids the last regen has no member for are
+   * `missing`. Rejects before any regen has completed.
+   */
+  memberBodies(
+    partId: string,
+    memberIds: readonly string[],
+    options: MemberBodiesOptions = {},
+  ): Promise<MemberBodiesResult | null> {
+    const document = this.#lastDocument;
+    if (document === null) {
+      return Promise.reject(new Error('member bodies need a completed regen'));
+    }
+    return this.#onDemand(document, options, (run) =>
+      this.#memberBodies(run, partId, memberIds, options),
+    );
+  }
+
+  async #memberBodies(
+    run: Run,
+    partId: string,
+    memberIds: readonly string[],
+    options: MemberBodiesOptions,
+  ): Promise<MemberBodiesResult> {
+    const t0 = now();
+    const known = this.#lastMembers.get(partId);
+    const missing: string[] = [];
+    const byOwner = new Map<string, { member: MemberData; result: MemberBodyResult }[]>();
+    const bodies: MemberBodyResult[] = [];
+    for (const id of new Set(memberIds)) {
+      const member = known?.get(id);
+      if (member === undefined) {
+        missing.push(id);
+        continue;
+      }
+      const result: MemberBodyResult = { id, ok: false };
+      bodies.push(result);
+      const list = byOwner.get(member.owner);
+      if (list) list.push({ member, result });
+      else byOwner.set(member.owner, [{ member, result }]);
+    }
+    const kept: { shape: ShapeId; name: string }[] = [];
+    let instance: number | null = null;
+    let batches = 0;
+    let step: Uint8Array | null = null;
+    let n = 0;
+    const submit = async (ops: KernelOp[]): Promise<BatchReply> => {
+      const reply = await this.#submit(run, ops);
+      batches++;
+      run.counters.otherOps += ops.length;
+      // Bodies of an earlier batch died with a recycle: start over on the new instance.
+      if (instance !== null && reply.instance !== instance) throw new StaleShapes(reply.instance);
+      instance = reply.instance;
+      return reply;
+    };
+    try {
+      for (const list of byOwner.values()) {
+        const ops: KernelOp[] = [];
+        const metas: { result: MemberBodyResult; body: string; last: number }[] = [];
+        for (const { member, result } of list) {
+          let inputs: FeatureInput[];
+          try {
+            inputs = memberFeatureInputs(member, ++n);
+          } catch (error) {
+            result.error = error instanceof Error ? error.message : String(error);
+            continue;
+          }
+          inputs.forEach((feature, i) => {
+            ops.push({
+              op: 'feature',
+              featureId: feature.id,
+              bodies: i === 0 ? [] : { result: ops.length - 1 },
+              feature,
+              keep: i === inputs.length - 1,
+            });
+          });
+          const last = ops.length - 1;
+          const body = inputs[0]!.id;
+          if (options.volumes) {
+            ops.push({ op: 'measure', shape: { result: last, body }, targets: [], body: true });
+          }
+          metas.push({ result, body, last });
+        }
+        if (ops.length === 0) continue;
+        const reply = await submit(ops);
+        for (const { result, body, last } of metas) {
+          const r = reply.results[last]!;
+          if (!r.ok) {
+            result.error = r.error.message;
+            continue;
+          }
+          const outcome = r.value as FeatureOutcome;
+          if (!outcome.ok) {
+            result.error = outcome.errors.map((e) => e.message).join('; ');
+            continue;
+          }
+          const made = outcome.bodies.find((b) => b.id === body);
+          for (const b of outcome.bodies) kept.push({ shape: b.shape, name: result.id });
+          if (made === undefined) {
+            result.error = 'the kernel made no body for it';
+            continue;
+          }
+          result.ok = true;
+          if (options.volumes) {
+            const m = reply.results[last + 1]!;
+            if (m.ok) result.volume = (m.value as MeasureResult).body?.volume ?? 0;
+            else result.error = m.error.message;
+          }
+        }
+      }
+      if (options.step && kept.length > 0) {
+        const reply = await submit([{ op: 'exportStep', bodies: kept }]);
+        const r = reply.results[0]!;
+        if (!r.ok) throw new Error(`the STEP export of the members failed: ${r.error.message}`);
+        step = (r.value as { data: Uint8Array }).data;
+      }
+    } finally {
+      // Released whatever happened, unless a recycle already took them.
+      if (kept.length > 0 && instance !== null && instance === this.#instance) {
+        await this.#kernel.release(kept.map((k) => k.shape));
+      }
+    }
+    return {
+      generation: run.generation,
+      partId,
+      bodies,
+      missing,
+      step,
+      batches,
+      ms: now() - t0,
+    };
   }
 
   /**

@@ -30,6 +30,11 @@ export default defineConfig({
   },
   // The kernel worker is started with { type: 'module' } (packages/kernel README).
   worker: { format: 'es' },
+  // Manifold's glue (loaded lazily by the regen worker for framing members with cuts) finds its
+  // .wasm with `new URL('manifold.wasm', import.meta.url)`. The production build emits that file
+  // as its own asset; the dev server's dependency pre-bundling would move the glue away from it,
+  // so the dev server serves the package as it is.
+  optimizeDeps: { exclude: ['manifold-3d'] },
   test: {
     name: 'web',
     environment: 'jsdom',

@@ -267,6 +267,9 @@ importers:
       libcascade:
         specifier: 3.0.2
         version: 3.0.2
+      manifold-3d:
+        specifier: 3.5.4
+        version: 3.5.4(@gltf-transform/core@4.5.1)(@gltf-transform/extensions@4.5.1)(@gltf-transform/functions@4.5.1(@types/node@22.20.4))(esbuild-wasm@0.27.7)
 
   packages/sketch:
     dependencies:

@@ -29,6 +29,7 @@ const clash = await engine.interference('assembly#1', { generation, onPair }); /
 const view = await engine.drawingView(document, 'drawing#1', 'view#1', { generation, pick: true });
 const sheet = await engine.drawingSheet(document, 'drawing#1', 'sheet#1', { generation });
 const cam = await engine.camGeometry(document, 'setup#1', { generation, mesh: true });
+const step = await engine.memberBodies('part#1', ['extension#3:s12'], { generation, step: true });
 ```
 
 That is the engine's own API, as tests and a custom host use it. apps/web does not construct an
@@ -313,6 +314,107 @@ data inside a guard, so domain code never fails the regen itself.
 A failed extension makes no body; later features that name its bodies are `upstream-error`, and
 features that do not depend on it build. A translator's metadata (a board's frame) is reported as
 `FeatureResult.metadata`, recomputed on every regen and never stored.
+
+## Member sets
+
+Framing members are data, not bodies ([ADR 0015](../../docs/adr/0015-construction-domain.md)
+decisions 4 and 5, from the [T6.5a spike](../../docs/spikes/T6.5a-framing.md)). A wall frames the
+openings that come after it, so members do not come from each feature's translator: a domain's
+registration has an optional **member stage** (`ExtensionDomain.members`, `src/members.ts`), which
+regen runs after a part's features. Regen imports no domain package; `MemberData` is a generic
+shape that the construction domain's `Member` satisfies structurally:
+
+```ts
+interface MemberData {
+  id: string; // local to its owner: 's12', 'top1:2', 'king-l'; full id `<owner>:<id>`
+  owner: string; // the feature that owns it
+  role: string;
+  stock: { id: string; name: string; width: number; depth: number }; // mm, width the thin face
+  length: number; // the blank along local x
+  placement: { origin: Vec3; x: Vec3; y: Vec3 }; // orthonormal, right-handed, never mirrored
+  cuts: ({ kind: 'plane'; n: Vec3; k: number } | { kind: 'notch'; a: Plane; b: Plane })[];
+}
+
+registry.registerDomain({
+  namespace: 'construction',
+  implementation: 1,
+  types: { 'construction.wall': wall, 'construction.opening': opening },
+  members: {
+    // Every `ok` extension of the namespace in the part (id, type, schemaVersion, dependsOn and
+    // its translator's metadata), plus the domain data it reads: which features frame together.
+    groups: ({ partId, features, data }) => [
+      { id: 'extension#3', features: ['extension#3', 'extension#7'] },
+    ],
+    // One group: its features in the group's order, the same data.
+    frame: ({ partId, group, features, data }) => ({ members, warnings, metadata }), // or { error }
+  },
+});
+```
+
+- **What the stage sees.** Only extensions of the domain's namespace whose status is `ok` (not
+  suppressed, failed, upstream errors or after the rollback bar), as frozen copies. Only the
+  document's own parts are framed; derived parts' sources and parts in other configuration rows
+  are not.
+- **Containment.** A throw in `groups` or a malformed result fails every feature given to it; a
+  throw or malformed result in `frame`, or `{ error }`, fails the group's features (`extension`, or
+  `invalid` for `{ error }`), never the regen. The features keep their bodies; their status becomes
+  `error` with the stage's message. Members are checked and copied to frozen plain data: unit,
+  perpendicular placement axes, unit cut normals, sizes over 0, an `owner` among the group's
+  features, full ids unique in the group. Warnings name one of the group's features and arrive
+  there as `{ code: 'members', group, domainCode?, member? }`.
+- **Caching per group**, by a hash of the group, its features (with their metadata), the domain
+  data the domain reads, the domain's `implementation`, `REGEN_IMPLEMENTATION_VERSION` and
+  `MEMBER_STAGE_VERSION`. A cached group's `frame` does not run. Moving an opening misses only its
+  wall's group. The member cache holds plain data, so a kernel recycle keeps it; it is pruned to the
+  keys the last completed regen used.
+- **Meshes.** One mesh per distinct shape (`memberShapeKey`: stock, blank length to 0.001 mm,
+  sorted local cuts; never the placement, the same form as the domain's `shapeKey`), in one
+  worker-wide cache shared by every part and group and kept across regens. A member with no cuts
+  is a 12-triangle box computed in TypeScript (`boxMesh`). A member with cuts is meshed by
+  [Manifold](https://github.com/elalish/manifold) (`manifold-3d` 3.5.4, pinned): its box,
+  `trimByPlane` per plane cut, minus each notch's wedge, one closed shell. The module is loaded on
+  the first member with a cut (`RegenEngineOptions.manifold`, default `loadManifold`), once per
+  worker; every Manifold object, intermediates included, is deleted in a `finally` right after
+  `getMesh` (the tests check created equals deleted, and the heap probe stays flat over 1,000 cut
+  members). A shape that cannot be meshed (Manifold did not load, or the cuts leave nothing) fails
+  the group's features; a failed load is retried on the next regen that needs it.
+- **What is sent.** `PartResult.members` lists a `MemberSetResult` per group (domain, then group
+  order): `group`, `namespace`, `features`, `setKey`, `cached`, `count`, `ms`, and when `changed`
+  (its key differs from the one last reported for that part and group) its `members`, its
+  `instances` (one list per shape: `shape` key, full `ids`, `roles` and a column-major 4x4 per
+  member in a transferred `Float32Array`, 64 bytes a member) and its `metadata`; unchanged sets
+  carry nulls and the main thread keeps the last. A group missing from a completed result is gone.
+  `RegenResult.memberMeshes` has the shape meshes new to the main thread (`added`: key, positions,
+  normals, indices, transferred; the worker keeps its own copy) and the keys no member uses any
+  more (`removed`), absent when neither changed. As for body meshes, a caller that drops a
+  completed result must not rely on `changed` afterwards.
+- **Member B-reps on demand** (`engine.memberBodies(partId, fullIds, { generation, volumes, step })`,
+  the worker API and `RegenClient.memberBodies`): for STEP export of framing and drawings that need
+  hidden lines through members. The members of the last completed regen are built in one kernel
+  batch per owner, each its cross-section extruded along its length and a `tools` feature with a
+  box per cut (a notch needs perpendicular planes, as a birdsmouth has; others are reported per
+  member). Volumes are measured and one STEP file (each body named by its full id) exported as
+  asked, then every shape is released at once, whatever happened: member B-reps are never kept
+  between requests. On the regen chain at the client's current generation: a newer regen cancels
+  it between batches (null), and a recycle between batches restarts it on the new instance. Ids
+  the last regen has no member for are `missing`.
+
+**Packaging Manifold.** `manifold-3d` is an npm dependency of this package, pinned exactly, rather
+than its two files vendored. Its declared dependencies serve the ManifoldCAD tooling and are
+install-time only: `manifold.js` imports nothing but Node built-ins inside Emscripten's
+environment checks, so nothing of them is bundled (the app build emits a 43 KB glue chunk and the
+541 KB `manifold.wasm` as its own asset, loaded on first use). They were already in the lockfile
+through the spike, so adopting the package added three lines to it. Vendoring would put a binary in
+the repository on every upgrade and lose the lockfile's integrity check for a saving that only
+affects `node_modules`. The license is in [ADR 0006](../../docs/adr/0006-licensing.md). The app's
+dev server must not pre-bundle the package (`optimizeDeps.exclude` in `apps/web/vite.config.ts`),
+since the glue finds its `.wasm` next to itself.
+
+**Size of a shed's set** (`member-sets.test.ts`, through Comlink on a MessageChannel, 147 members
+in 19 shapes in a fake framing domain shaped like T6.5a's shed): a cold regen transfers 9,408 bytes
+of matrices and 17,904 bytes of meshes, and structured-clones 35,312 bytes of member data and 5,464
+bytes of ids, roles and shape keys (as JSON; measured 2026-10-03). An unchanged regen sends none of
+it again.
 
 ## Text
 
@@ -1012,6 +1114,7 @@ interface RegenResult {
   parts: PartResult[]; // per part: features, dirty, bodies, consumed
   assemblies?: AssemblyResult[]; // per assembly (always set by the engine; see Assemblies)
   sources?: SourceResult[]; // pinned parts and parts in another row that instances show: key, pin details, partName, row, bodies with meshes
+  memberMeshes?: MemberMeshUpdate; // member shape meshes added and removed (see Member sets)
   counters: RegenCounters; // featureOps, otherOps, batches, solves, cacheHits, cacheMisses
   ms: number;
 }
@@ -1022,6 +1125,7 @@ interface PartResult {
   dirty: string[];
   bodies: BodyResult[]; // after the last feature, in creator order
   consumed: { bodyId: string; featureId: string }[]; // bodies an `add` merged away
+  members?: MemberSetResult[]; // framing member sets, one per group (see Member sets)
 }
 
 interface BodyResult {
@@ -1066,7 +1170,8 @@ sketch on a face where regen put it. `shape` is the body's arena id for `pick`, 
 `measure` ops, valid until a later regen evicts it or the kernel recycles. Body ids follow the
 kernel's convention (M2 plan, decision 1), in the ops regen sends as in the result. A part whose
 kernel failed as a whole has no bodies. `regenTransferables(result)` lists the mesh buffers of
-every body for `Comlink.transfer`.
+every body, and the matrices of changed member sets and the new member meshes, for
+`Comlink.transfer`.
 
 ## Tests
 
@@ -1093,6 +1198,21 @@ pnpm --filter @manufakture/regen test
   and unowned data failing its readers only; the two-step form (resolve and `obb` queries answered
   before the build), resolved and lost references, results of earlier extensions of the namespace;
   a pattern of an extension refused; and the registry's checks.
+- `members.test.ts`: member data alone: shape keys (placement-free, cut order and `-0`
+  insensitive), 100 identical studs as one instance list, box meshes in TypeScript, cut members
+  through Manifold to their hand volumes with every object deleted (also when a boolean throws),
+  the mesh cache loading Manifold only for a cut member and retrying a failed load, the Manifold
+  heap flat between 10 and 1,000 cut members (the `heapInUse` probe on fresh modules), and the
+  checks of a stage's members, warnings and groups.
+- `member-sets.test.ts`: member sets through the engine with a fake framing domain (walls framing
+  the openings that name them). Scripted kernel: 100 identical studs arriving with one shared
+  mesh, openings' members owned by the opening and a suppressed opening left out, cache hits on an
+  unchanged regen with nothing re-sent, an edit re-sending only that wall's set, sets kept through
+  a recycle while the bodies are rebuilt, a deleted wall's set and meshes dropped, cut members
+  meshed by Manifold once per shape, a throwing or malformed stage failing only its group, warnings
+  on features, and a Manifold load failure retried. Real kernel: member B-reps with exact volumes
+  (box, plane cut and notch), one STEP file, every shape released, and sets surviving a real
+  recycle. Through Comlink: a shed-sized set's transfer, measured.
 - `engine.test.ts`: the engine against a scripted kernel and solver: ops sent, cache hits on
   unrelated edits, same-value rewrites, eviction and release, undo from spare entries, upstream
   versus independent failures, cached failures, reference errors and warnings, sketch conflicts,

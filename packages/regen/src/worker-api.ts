@@ -38,12 +38,13 @@ import {
   type TextReply,
   type TextRequest,
 } from './text';
-import { regenTransferables } from './transfer';
+import { memberBodiesTransferables, regenTransferables } from './transfer';
 import type {
   AssemblyResult,
   DragResult,
   InstanceInterference,
   InterferenceReport,
+  MemberBodiesResult,
   RegenResult,
 } from './types';
 
@@ -133,6 +134,16 @@ export interface RegenWorkerApi extends KernelWorkerApi {
     setupId: string,
     options: CamGeometryOptions & { generation: number },
   ): Promise<CamGeometryResult | null>;
+  /**
+   * B-reps of framing members of the last regen (`RegenEngine.memberBodies`), built per owner,
+   * measured and exported to one STEP file as asked (transferred), and released before the
+   * reply. At the client's current generation; null when a newer regen superseded it.
+   */
+  memberBodies(
+    partId: string,
+    memberIds: readonly string[],
+    options: { generation: number; volumes?: boolean; step?: boolean },
+  ): Promise<MemberBodiesResult | null>;
   /** Cumulative engine counters. */
   regenStats(): Promise<EngineStats>;
   /**
@@ -294,6 +305,11 @@ export function createRegenWorkerApi(options: RegenWorkerApiOptions): RegenWorke
     async camGeometry(document, setupId, options) {
       const result = await (await engineFor()).camGeometry(document, setupId, options);
       return result === null ? null : Comlink.transfer(result, camTransferables(result));
+    },
+
+    async memberBodies(partId, memberIds, options) {
+      const result = await (await engineFor()).memberBodies(partId, memberIds, options);
+      return result === null ? null : Comlink.transfer(result, memberBodiesTransferables(result));
     },
 
     async regenStats() {
