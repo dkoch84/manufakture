@@ -694,6 +694,10 @@ describe('App export and import', () => {
       expect(screen.getByTestId('io-status').textContent).toMatch(/^Imported ref\.step/),
     );
     expect(exchanger.reimport).not.toHaveBeenCalled();
+    // The status shows at the commit, but the app learns of the new import in a passive effect,
+    // which React may run a scheduler task later; flush it before the kernel loses its shapes, or
+    // a loaded machine sees an invalidation with no import held and nothing to read again.
+    await act(async () => {});
     // A recycle (or a restart) of the kernel.
     act(() => lost.forEach((l) => l()));
     await waitFor(() => expect(exchanger.reimport).toHaveBeenCalledTimes(1));

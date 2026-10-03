@@ -97,8 +97,9 @@ describe('the derived part dialog', () => {
     );
     expect(screen.getByTestId('pin-part')).toHaveProperty('value', 'part#1');
 
-    // Both bodies of the source, all of them by default; just the second one.
-    const bodies = screen.getByTestId('field-bodies');
+    // Both bodies of the source, all of them by default; just the second one. The field shows
+    // once the chosen version has been read from the library, which can lag the part picker.
+    const bodies = await screen.findByTestId('field-bodies');
     await waitFor(() => expect(within(bodies).getByText('All bodies')).toBeTruthy());
     fireEvent.click(within(bodies).getByRole('checkbox', { name: 'All bodies' }));
     fireEvent.click(within(bodies).getByRole('checkbox', { name: 'Extrude 1' }));

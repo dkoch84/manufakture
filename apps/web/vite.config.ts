@@ -36,5 +36,9 @@ export default defineConfig({
     setupFiles: ['./src/test/setup.ts'],
     // Playwright specs in e2e/ run in a real browser, never in the unit run.
     include: ['src/**/*.test.{ts,tsx}'],
+    // Some component tests run real work in process (the CAM simulation of the toolpath preview,
+    // archive inflation in persistence) and take a few seconds alone; under a full parallel run
+    // they can pass vitest's 5 s default without anything being wrong. A hang still fails.
+    testTimeout: 30_000,
   },
 });
