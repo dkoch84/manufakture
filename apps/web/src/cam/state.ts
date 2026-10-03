@@ -37,6 +37,11 @@ export interface CamUiState {
   message: string | null;
   /** The last geometry reply for the active setup (regen worker), or null while none came. */
   geometry: CamGeometryResult | null;
+  /**
+   * The document `geometry` was resolved for (by identity), or null when unknown. A geometry made
+   * for another document may be out of date: the export treats it as pending.
+   */
+  geometryDocument: ManufaktureDocument | null;
   /** The last generation's outcome per operation id, for the active setup. */
   generated: ReadonlyMap<string, GeneratedOutcome>;
   /** A generation is running. */
@@ -52,7 +57,8 @@ export interface CamUiState {
   openDialog(dialog: CamDialog | null): void;
   setPickingWcs(on: boolean): void;
   setMessage(message: string | null): void;
-  setGeometry(geometry: CamGeometryResult | null): void;
+  /** Keep a geometry reply with the document it was resolved for (null: unknown). */
+  setGeometry(geometry: CamGeometryResult | null, document?: ManufaktureDocument | null): void;
   setGenerated(
     generated: ReadonlyMap<string, GeneratedOutcome>,
     generateMessage: string | null,
@@ -72,6 +78,7 @@ export function createCamUiStore(): CamUiStore {
     pickingWcs: false,
     message: null,
     geometry: null,
+    geometryDocument: null,
     generated: new Map(),
     generating: false,
     generateMessage: null,
@@ -87,6 +94,7 @@ export function createCamUiStore(): CamUiStore {
         pickingWcs: false,
         message: null,
         geometry: null,
+        geometryDocument: null,
         generated: new Map(),
         generateMessage: null,
         toolpaths: null,
@@ -95,7 +103,7 @@ export function createCamUiStore(): CamUiStore {
     openDialog: (dialog) => set({ dialog, pickingWcs: false, message: null }),
     setPickingWcs: (pickingWcs) => set({ pickingWcs, message: null }),
     setMessage: (message) => set({ message }),
-    setGeometry: (geometry) => set({ geometry }),
+    setGeometry: (geometry, document = null) => set({ geometry, geometryDocument: document }),
     setGenerated: (generated, generateMessage) =>
       set({ generated, generateMessage, generating: false }),
     setGenerating: (generating, generateMessage = null) => set({ generating, generateMessage }),

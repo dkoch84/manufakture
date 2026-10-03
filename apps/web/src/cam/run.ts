@@ -16,7 +16,9 @@ import type { GeneratedOutcome } from './status';
  * Generate the setup's toolpaths: its geometry from the stage (fresh, for the document as it is
  * now), converted to the CAM worker's evaluated setup, then one `generate` call for every
  * operation whose geometry resolved. The outcomes are kept per operation with the geometry key
- * they came from, so a later edit marks them stale.
+ * they came from, so a later edit marks them stale. An abort of `signal` (the export's Cancel)
+ * stops it between the geometry and the generation; during the generation the caller cancels the
+ * client, whose reply then comes back null.
  */
 export async function generateSetup(
   doc: ManufaktureDocument,
@@ -24,6 +26,7 @@ export async function generateSetup(
   geometer: CamGeometer,
   client: CamClient,
   camUi: CamUiStore,
+  signal?: AbortSignal,
 ): Promise<void> {
   const ui = camUi.getState();
   // The workspace still shows this setup. When it does not, nothing is stored (another setup's
@@ -44,11 +47,15 @@ export async function generateSetup(
     }
     const geometry = await geometer.geometry(doc, setup.id);
     if (dropped()) return;
+    if (signal?.aborted) {
+      ui.setGenerating(false, 'Generation cancelled.');
+      return;
+    }
     if (geometry === null) {
       ui.setGenerating(false, 'The model changed meanwhile; generate again.');
       return;
     }
-    ui.setGeometry(geometry);
+    ui.setGeometry(geometry, doc);
     const built = setupInput(geometry, setup);
     if (!built.ok) {
       ui.setGenerated(new Map(), built.message);

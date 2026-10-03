@@ -1,0 +1,113 @@
+/* The G-code export dialog: a modal over the app, settings, summary and the setup sheet. */
+
+.cam-export-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(20 26 33 / 35%);
+}
+
+.cam-export {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: min(60rem, 94vw);
+  max-height: 92vh;
+  overflow: auto;
+  padding: 0.8rem 1rem;
+  background: #fff;
+  border-radius: 6px;
+  box-shadow: 0 8px 30px rgb(0 0 0 / 25%);
+  font-size: 0.85rem;
+}
+
+.cam-export-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.cam-export-head h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.cam-export-settings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.5rem 1rem;
+}
+
+.cam-export-settings label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.cam-export-settings label.cam-export-check {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.cam-export-progress {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.cam-export-refused {
+  color: #9b2c1c;
+}
+
+.cam-export-refused p,
+.cam-export-refused ul {
+  margin: 0.15rem 0;
+}
+
+.cam-export-summary h3 {
+  margin: 0 0 0.25rem;
+  font-size: 0.9rem;
+}
+
+.cam-export-summary dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.2rem 0.75rem;
+  margin: 0;
+}
+
+.cam-export-summary dt {
+  font-weight: 600;
+}
+
+.cam-export-summary dd,
+.cam-export-summary ol {
+  margin: 0;
+}
+
+.cam-export-summary ol {
+  padding-left: 1.2rem;
+}
+
+.cam-export-warnings {
+  margin: 0.35rem 0 0;
+  padding-left: 1.2rem;
+}
+
+.cam-export-sheet {
+  width: 100%;
+  min-height: 22rem;
+  border: 1px solid #d5dbe2;
+}
+
+.cam-export-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}

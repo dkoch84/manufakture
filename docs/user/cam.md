@@ -94,7 +94,7 @@ After **Generate toolpaths**, a row also says whether its toolpath was generated
 
 On each row: **Edit** (or double-click, or Enter), **Rename** (or F2), **Suppress** / **Unsuppress**, **Up** and **Down** to change the cutting order, **Move to...** another setup of the same part and body (the operation keeps its name and settings), and **Delete** (or the Delete key). Each is one undo step.
 
-**Generate toolpaths** makes the toolpaths of the setup's resolved operations in the background; nothing is generated until you ask. The toolpaths then show in the view (see below); simulating the cut and exporting G-code come in later versions.
+**Generate toolpaths** makes the toolpaths of the setup's resolved operations in the background; nothing is generated until you ask. The toolpaths then show in the view (see below); simulating the cut comes in a later version. **Export G-code** writes the setup's program for the machine, with a setup sheet (see Exporting G-code below).
 
 ## Previewing toolpaths
 
@@ -111,6 +111,33 @@ The table lists each operation's cutting length and estimated time, with a box t
 The slider under the table steps through the job one move at a time: at move n only the moves up to n are drawn, and the tool (its diameter and shape, from the tool library) sits where move n ends. **Play** runs through the job at the chosen speed (1x is the estimated machine time); dragging the slider stops it. The line under the slider names the operation of the current move and the estimated time so far.
 
 The preview shows the last generation. When you change an operation afterwards, its row in the list is marked **stale** and the preview keeps showing the old toolpath until you generate again.
+
+### Simulation
+
+Tick **Simulate material removal** under the slider to see the stock as the job leaves it. The simulation cuts the stock top on a grid of small squares (by default 16 across the narrowest tool's cut: its diameter, or for a V-bit or an engraver the width of its flat tip, or 1 mm when the tip is narrower; coarser on very large stock so it fits in memory), with each tool's real shape: flat, ball, bull nose and V. It follows the slider, so you can watch the material come off move by move. The panel then reports:
+
+- **rapids through material**: a rapid (a full-speed move that is not meant to cut) that runs into stock still standing at that moment. On the machine this is a crash; fix it before cutting.
+- **gouges** (red in the view): places where the tool cut into the part itself by more than 0.05 mm, as from a wrong offset or a depth below the part's surface.
+- **material left on the part** (amber): places above the part's surface by more than 0.05 mm, such as the inside corners of a pocket, where a round tool cannot reach. Until the slider is at the end, this counts what is still to be cut too.
+
+The check compares against the part's own shape seen from above, and allows 0.07 mm sideways (the 0.05 mm tolerance plus 0.02 mm for the small flat facets that curved surfaces are drawn with), so the tool running exactly along a wall, straight or curved, is not a gouge. The panel states this allowance. A cut into a wall wider than that is checked, but only where the centre of a grid square falls in it: at the default grid for a 6 mm tool (0.375 mm squares) a wall gouge from 0.08 mm wide may show, and one 0.45 mm wide or more always does. Material outside the part (the waste around a profile, tabs) is never reported as left over. When the part's shape is not available the panel says so and simulates the stock alone. A grid cannot show overhangs; that is fine for a 3-axis job, which cannot cut them either.
+
+## Exporting G-code
+
+**Export G-code**, under **Generate toolpaths**, exports the setup shown. It first generates every operation that has no toolpath yet or whose toolpath is stale, with the progress on its line and a **Cancel** button; nothing is exported from an out-of-date toolpath. It first resolves the geometry of the document as it is at that moment, so an edit made just before opening it (the stock, the heights, the feeds or the model) is never missed, and an edit made while it is open generates the changed operations again before **Save** is available.
+
+The settings:
+
+- **Post**: the controller the file is written for. It starts at the setup's post, which a new setup takes from its machine: **Carbide Motion** on the Shapeoko profiles, the sender those machines ship with. **Grbl 1.1**, **grblHAL**, **LinuxCNC** and **Mach3** are the others.
+- **Units**: millimetres (`G21`) or inches (`G20`).
+- **Tool changes**, for a job with several tools, as the post allows: **One file per tool** (Grbl's default, since Grbl refuses `M6`), **One file, M0 pause at each tool change** (Grbl and grblHAL; Grbl does not jog while paused, so zeroing Z there needs a sender that allows it), or **One file, M6 at each tool change** (Carbide Motion, which then asks for each tool; LinuxCNC; Mach3; grblHAL as an option).
+- **Group operations by tool**: runs each tool's operations together, tools in the order they are first used, so there are fewer tool changes. It changes the order material comes off, so the export warns when it moves a cut through the stock ahead of other cuts (the part could come loose before they run).
+
+Before anything is saved, the summary lists the files, the tools in the order they are loaded, the estimated time (no acceleration or tool change time, so a real machine takes longer), the extents of the tool tip, and every warning from the job and the post. Under it is the **setup sheet**: the files and their order, the stock size and material, the work zero (WCS origin) and how to set it, the clearance and retract heights, the tools with their numbers, every tool change in order with its spindle speed and router dial setting, and each operation with its tool, top and bottom Z, stepdown, spindle speed and feeds. **Print setup sheet** prints it and **Save setup sheet** saves it as an HTML file.
+
+**Save G-code** downloads the file, named after the document and the setup (`Bracket - Setup 1.nc`). One file per tool is saved as one zip holding the files, numbered in the order to run them and named after their tool (`Bracket - Setup 1 - 2 of 2 - #102 1_8_ flat end mill.nc`), and the setup sheet.
+
+The export refuses, and says why, when an operation of the setup has an error (its geometry or its toolpath), when its geometry did not resolve, or when the post cannot write the job (Carbide Motion needs a tool number on every tool, for example). Fix the operation, or suppress it to export the rest.
 
 ## Variables
 

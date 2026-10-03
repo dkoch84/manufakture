@@ -6,7 +6,8 @@
 //   errors, toolpath generated or failed, stale after an edit) and re-pick for lost geometry; and
 //   Generate, which asks the CAM worker for the setup's toolpaths (ADR 0014 decision 8: CAM is
 //   lazy, nothing is generated until asked); under it the toolpath preview and playback
-//   (`preview/`), drawn into the viewport while the workspace is open.
+//   (`preview/`), drawn into the viewport while the workspace is open; and Export G-code, which
+//   opens the export dialog (`export/`) for the setup shown.
 // - `CamSidePanel`, in the side panel: the open operation dialog or the Tools dialog, else the
 //   setup panel (part, machine, post, stock, WCS, heights).
 //
@@ -18,6 +19,8 @@ import type { CamOperation, Command, ManufaktureDocument } from '@manufakture/co
 import type { CamClient } from '@manufakture/cam/client';
 import { useEffect, useMemo, useState } from 'react';
 import { useStore } from 'zustand';
+import type { ExportedFile } from '../io/actions';
+import { downloadBytes } from '../io/files';
 import { useModel, type ModelStore } from '../model/model';
 import type { DocumentStoreApi } from '../state/document';
 import {
@@ -36,6 +39,7 @@ import {
   suppressOperationCommand,
   wcsFaceCommand,
 } from './commands';
+import { ExportDialog } from './export/ExportDialog';
 import { DIALOG_KINDS, OPERATION_LABELS } from './forms';
 import type { CamGeometer } from './geometer';
 import { OperationDialog } from './OperationDialog';
@@ -57,8 +61,12 @@ export interface CamTreeProps {
   geometer: CamGeometer | null;
   /** The CAM worker's client (its worker starts on the first generation); null: none. */
   client: CamClient | null;
+  /** Save an exported file; the app's download by default. */
+  onSave?: (file: ExportedFile) => void;
   disabled?: boolean;
 }
+
+const download = (file: ExportedFile) => downloadBytes(file.bytes, file.name, file.type);
 
 /** Run a command, reporting a refusal in the workspace's message line. */
 function runner(documents: DocumentStoreApi, camUi: CamUiStore) {
@@ -75,6 +83,7 @@ export function CamTree({
   camUi,
   geometer,
   client,
+  onSave = download,
   disabled = false,
 }: CamTreeProps) {
   const doc = useStore(documents, (s) => s.document);
@@ -91,6 +100,7 @@ export function CamTree({
   const setup = activeCamSetup(doc, setupId);
   const run = useMemo(() => runner(documents, camUi), [documents, camUi]);
   const [renaming, setRenaming] = useState<{ id: string; text: string } | null>(null);
+  const [exporting, setExporting] = useState<string | null>(null);
 
   // The viewport shows the setup's part: picks and the view are of what it machines.
   const setupPart = setup?.part;
@@ -108,7 +118,7 @@ export function CamTree({
     let live = true;
     geometer.geometry(doc, shownId).then(
       (r) => {
-        if (live && r && r.setupId === camUiSetup(camUi, doc)) camUi.getState().setGeometry(r);
+        if (live && r && r.setupId === camUiSetup(camUi, doc)) camUi.getState().setGeometry(r, doc);
       },
       (e: unknown) => {
         if (live) camUi.getState().setMessage(`The geometry could not be resolved: ${String(e)}`);
@@ -118,6 +128,13 @@ export function CamTree({
       live = false;
     };
   }, [geometer, doc, shownId, generation, camUi]);
+
+  // The part's mesh for the simulation's gouge check, fetched for this document and setup.
+  const loadPartMesh = useMemo(() => {
+    const id = activeCamSetup(doc, setupId)?.id;
+    if (!geometer || id === undefined) return undefined;
+    return () => geometer.geometry(doc, id, { mesh: true }).then((g) => g?.mesh ?? null);
+  }, [geometer, doc, setupId]);
 
   const shownGeometry = geometry?.setupId === setup?.id ? geometry : null;
   const ops = setup?.operations ?? [];
@@ -466,13 +483,37 @@ export function CamTree({
             >
               Generate toolpaths
             </button>
+            <button
+              type="button"
+              data-testid="cam-export"
+              disabled={disabled || dialog !== null || ops.length === 0}
+              title="Export this setup as G-code, with its setup sheet"
+              onClick={() => setExporting(setup.id)}
+            >
+              Export G-code
+            </button>
             {generateMessage && (
               <p className="field-note" role="status" data-testid="cam-generate-message">
                 {generateMessage}
               </p>
             )}
           </div>
-          <ToolpathPreview setup={setup} camUi={camUi} />
+          <ToolpathPreview
+            setup={setup}
+            camUi={camUi}
+            {...(loadPartMesh ? { loadPartMesh } : {})}
+          />
+          {exporting === setup.id && (
+            <ExportDialog
+              documents={documents}
+              camUi={camUi}
+              setupId={setup.id}
+              geometer={geometer}
+              client={client}
+              onSave={onSave}
+              onClose={() => setExporting(null)}
+            />
+          )}
         </>
       )}
     </section>
