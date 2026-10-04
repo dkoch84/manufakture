@@ -25,6 +25,7 @@
     "@manufakture/regen": "workspace:*",
     "@manufakture/sketch": "workspace:*",
     "@manufakture/stock": "workspace:*",
+    "@manufakture/sync": "workspace:*",
     "@manufakture/takeoff": "workspace:*",
     "@manufakture/units": "workspace:*",
     "fflate": "^0.8.3",

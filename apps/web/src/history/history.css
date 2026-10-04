@@ -159,3 +159,35 @@
 .history-branch-form {
   margin-top: 0.3rem;
 }
+
+/* Merge, in the History panel: pick a branch, preview, merge. */
+.history-merge-pick {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+}
+
+.history-merge-pick select {
+  font: inherit;
+  margin-left: 0.3rem;
+}
+
+.history-merge-plan {
+  margin: 0.3rem 0;
+  padding: 0.3rem 0.4rem;
+  border: 1px solid #e3e7ec;
+  border-radius: 4px;
+}
+
+.history-merge-list {
+  margin: 0.1rem 0 0.3rem;
+  padding-left: 1.5em;
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}
+
+.history-merge-dropped {
+  color: #a3261b;
+}

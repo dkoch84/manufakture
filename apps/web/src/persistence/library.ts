@@ -45,15 +45,19 @@
 // opened or saved: another tab saved in between, and overwriting would silently drop its work.
 
 import {
+  FORMAT_VERSION,
   MAX_DOCUMENT_NAME,
   applyCommand,
+  createdIds,
   migrateJson,
   parseDocument,
   serialize,
   type Command,
   type ManufaktureDocument,
+  type SyncEntry,
 } from '@manufakture/core';
 import { fileName, fromBase64, sha256Hex } from '@manufakture/io';
+import { SyncClient, changedObjects, documentObjects } from '@manufakture/sync';
 import type { BackendKind, StorageBackend } from './backend';
 import { BlobStore, blobRefs, externalize, hydrateFrom, isSha256 } from './blobs';
 
@@ -2118,6 +2122,195 @@ export class DocumentLibrary {
   }
 
   /**
+   * What merging branch `from` into branch `into` would do, without saving anything: the
+   * commands `from` made since the two branches forked, rebased onto `into` by `SyncClient`'s
+   * replay and id remap (ADR 0009 decision 9). With `options.document`, that is taken as `into`'s
+   * current state instead of its saved head (the editor's, with changes not saved yet). See
+   * `rebaseOnto` for what the plan reports.
+   */
+  previewMerge(
+    id: string,
+    from: string,
+    into: string,
+    options: { document?: ManufaktureDocument } = {},
+  ): Promise<LibraryResult<MergePlan>> {
+    return this.#run(async () => {
+      if (!isStorableId(id)) return { ok: false, message: `There is no document "${id}".` };
+      if (!isBranchId(from) || !isBranchId(into)) return NO_BRANCH;
+      return this.#locked(id, () => this.#planMerge(id, from, into, options.document));
+    });
+  }
+
+  /**
+   * Merge branch `from` into branch `into`: `previewMerge`'s result committed as one new revision
+   * of `into`, whose log holds one `replaceDocument` command labelled `mergeLabel(name)`, so the
+   * merge is one step in its history and undoes as one. Nothing is saved when nothing applies
+   * (`saved` is null then). Throws as `save` does (a `RevisionConflict` when another tab saved
+   * `into` since this library last opened or saved it). The app merges into the open branch
+   * through the editor instead (`mergeCommand`), so the merge is on its undo stack.
+   */
+  mergeBranch(
+    id: string,
+    from: string,
+    into: string,
+  ): Promise<LibraryResult<{ plan: MergePlan; saved: DocumentSummary | null }>> {
+    return this.#run(async () => {
+      if (!isStorableId(id)) return { ok: false, message: `There is no document "${id}".` };
+      if (!isBranchId(from) || !isBranchId(into)) return NO_BRANCH;
+      return this.#locked(id, async () => {
+        const planned = await this.#planMerge(id, from, into);
+        if (!planned.ok) return planned;
+        const plan = planned.value;
+        if (!plan.changed) return { ok: true, value: { plan, saved: null } };
+        const entry: LogEntry = {
+          cause: 'execute',
+          label: mergeLabel(plan.fromName),
+          command: mergeCommand(plan),
+          at: this.#now().toISOString(),
+        };
+        const saved = await this.#save(plan.document, [entry], into);
+        return { ok: true, value: { plan, saved } };
+      });
+    });
+  }
+
+  async #planMerge(
+    id: string,
+    from: string,
+    into: string,
+    current?: ManufaktureDocument,
+  ): Promise<LibraryResult<MergePlan>> {
+    if (from === into) return { ok: false, message: 'A branch cannot be merged into itself.' };
+    const names = await this.#backend.list(this.#dir(id));
+    if (names.length === 0) return { ok: false, message: `There is no document "${id}".` };
+    const mainHead = await this.#head(id);
+    const branches = await this.#readList(BRANCH_LIST, id, mainHead, names);
+    if (!branches.ok) return branches;
+    const versions = await this.#readList(VERSION_LIST, id, mainHead, names);
+    if (!versions.ok) return versions;
+    const a = await this.#lineage(id, from, branches.items, versions.items);
+    if (!a.ok) return a;
+    const b = await this.#lineage(id, into, branches.items, versions.items);
+    if (!b.ok) return b;
+    const fork = forkOf(a.value, b.value);
+    if (!fork) return { ok: false, message: 'The two branches have no common history.' };
+
+    // The commands `from` made since the fork: the rest of the stretch they share, then each
+    // later stretch of its lineage whole.
+    const entries: LogEntry[] = [];
+    for (let i = fork.index; i < a.value.length; i++) {
+      const s = a.value[i]!;
+      const after = i === fork.index ? fork.revision : s.from;
+      const read = await this.#logEntries(id, s.branch, after, s.to);
+      if (!read.ok) return read;
+      entries.push(...read.value);
+    }
+    const base = await this.#readRevision(id, fork.branch, fork.revision);
+    if (!base.ok) {
+      return { ok: false, message: `The state the branches share cannot be read: ${base.message}` };
+    }
+    let target = current;
+    if (target === undefined) {
+      const opened = await this.#open(id, into);
+      if (!opened.ok) return opened;
+      target = opened.value.document;
+    }
+    const nameOf = (branch: string) =>
+      branch === MAIN_BRANCH
+        ? MAIN_BRANCH_NAME
+        : (branches.items.find((x) => x.id === branch)?.name ?? branch);
+    const rebased = rebaseOnto(base.value.document, target, entries);
+    if (!rebased.ok) return rebased;
+    return {
+      ok: true,
+      value: {
+        ...rebased.value,
+        from,
+        into,
+        fromName: nameOf(from),
+        intoName: nameOf(into),
+        fork: { branch: fork.branch, revision: fork.revision },
+      },
+    };
+  }
+
+  /**
+   * Where branch `branch`'s states come from, oldest first: main's revisions up to the version
+   * the first branch was made from, that branch's up to the version the next one was made from,
+   * and so on down to `branch`'s own, up to its head. A branch's revision 1 is the version it was
+   * made from, so its own commands start at revision 2.
+   */
+  async #lineage(
+    id: string,
+    branch: string,
+    branches: readonly Branch[],
+    versions: readonly Version[],
+  ): Promise<LibraryResult<Stretch[]>> {
+    const out: Stretch[] = [];
+    let on = branch;
+    let to: number | null = null;
+    for (let depth = 0; depth <= MAX_BRANCHES + 1; depth++) {
+      if (on !== MAIN_BRANCH && !branches.some((x) => x.id === on)) return NO_BRANCH;
+      if (to === null) {
+        const head = await this.#head(id, on);
+        if (!head) {
+          const opened = await this.#open(id, on);
+          if (!opened.ok) return opened;
+          to = opened.value.revision;
+        } else to = head.revision;
+      }
+      if (on === MAIN_BRANCH) {
+        out.unshift({ branch: on, from: 0, to });
+        return { ok: true, value: out };
+      }
+      out.unshift({ branch: on, from: 1, to });
+      const made = branches.find((x) => x.id === on)!;
+      const version = versions.find((v) => v.id === made.fromVersion);
+      if (!version) {
+        return {
+          ok: false,
+          message: `The version the branch "${made.name}" was made from is gone.`,
+        };
+      }
+      on = versionBranch(version);
+      to = version.revision;
+    }
+    return { ok: false, message: 'The branches are nested too deeply to merge.' };
+  }
+
+  /** The logged commands of branch `branch` that led from revision `after` to revision `to`. */
+  async #logEntries(
+    id: string,
+    branch: string,
+    after: number,
+    to: number,
+  ): Promise<LibraryResult<LogEntry[]>> {
+    if (to <= after) return { ok: true, value: [] };
+    const chain = await this.#logChain(id, branch);
+    if (!chain.ok) return chain;
+    const segments = chain.value.filter((s) => s.revision > after && s.revision <= to);
+    // The segments must lead from `after` without a gap: a history that starts later (or a
+    // damaged segment) cannot say what the branch did.
+    const first = segments[0];
+    if (first && first.base !== null && first.base < after) {
+      return { ok: false, message: `The command log cannot be read from revision ${after}.` };
+    }
+    if (first && first.base === null && after > 0) {
+      return { ok: false, message: `The command log starts after revision ${after}.` };
+    }
+    const blobs = this.#blobs(id);
+    const out: LogEntry[] = [];
+    try {
+      for (const segment of segments) {
+        out.push(...((await hydrateFrom(segment.entries, (sha) => blobs.read(sha))) as LogEntry[]));
+      }
+    } catch (e) {
+      return { ok: false, message: e instanceof Error ? e.message : String(e) };
+    }
+    return { ok: true, value: out };
+  }
+
+  /**
    * The document as a `.mfk` file (see mfk.ts), of branch `options.branch` (default: main); with
    * `versions`, its named versions (of every branch) and their documents go in too (the
    * manifest), so pins in other documents still resolve after an import.
@@ -2322,4 +2515,227 @@ async function readManifest(
     out.push({ version, document: decoded.document });
   }
   return { ok: true, value: out };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Merging branches by replay (ADR 0009 decision 9)
+
+/** Revisions `(from, to]` of one branch: one piece of where a branch's states come from. */
+interface Stretch {
+  branch: string;
+  from: number;
+  to: number;
+}
+
+/**
+ * Where two lineages part: the branch and revision whose state both start from, and the index
+ * of that stretch (the same in both). Null when they share nothing (they always share main).
+ */
+function forkOf(
+  a: readonly Stretch[],
+  b: readonly Stretch[],
+): { branch: string; revision: number; index: number } | null {
+  let fork: { branch: string; revision: number; index: number } | null = null;
+  for (let i = 0; i < Math.min(a.length, b.length); i++) {
+    const x = a[i]!;
+    const y = b[i]!;
+    if (x.branch !== y.branch) break;
+    fork = { branch: x.branch, revision: Math.min(x.to, y.to), index: i };
+    if (x.to !== y.to) break;
+  }
+  return fork;
+}
+
+/** A command of the merged branch the replay kept, as the preview lists it. */
+export interface MergeStep {
+  cause: LogEntry['cause'];
+  label: string;
+}
+
+/** What rebasing a branch's commands onto another's state gives (`rebaseOnto`). */
+export interface Rebased {
+  /** The state of the branch merged into before the merge. */
+  before: ManufaktureDocument;
+  /** Its state after: `before` with the kept commands replayed on top. */
+  document: ManufaktureDocument;
+  /** The commands that apply, in order, after their ids were renamed where needed. */
+  applied: MergeStep[];
+  /**
+   * The commands that do not apply on the other branch (an edit of a feature it deleted, a
+   * delete of a feature it made something depend on), each with why. They are left out.
+   */
+  dropped: (MergeStep & { message: string })[];
+  /** Ids the merged commands made that the other branch had taken meanwhile, and their new ids. */
+  renamed: { from: string; to: string }[];
+  /**
+   * Objects (a feature, a variable, a part's settings, ...) the branch merged into changed since
+   * the fork that the merge changes again: the merged branch's version replaces its own whole.
+   * The merge is last-writer-wins per object, never per field (ADR 0009 decision 7), with the
+   * merged branch as the later writer. Named for the user.
+   */
+  replaced: string[];
+  /** Whether the merge changes anything. */
+  changed: boolean;
+}
+
+/** `Rebased` for two branches of a stored document. */
+export interface MergePlan extends Rebased {
+  from: string;
+  into: string;
+  fromName: string;
+  intoName: string;
+  /** The branch and revision the two branches share. */
+  fork: { branch: string; revision: number };
+}
+
+/** The label of a merge in the history and on the undo stack. */
+export const mergeLabel = (fromName: string): string => `Merge "${fromName}"`;
+
+/** The one command that makes a merge: undone as one step. */
+export function mergeCommand(plan: Pick<Rebased, 'document'>): Command {
+  return { type: 'replaceDocument', document: plan.document };
+}
+
+const MERGE_CLIENT = 'merge';
+const MERGE_TARGET = 'merge-target';
+
+/**
+ * The commands `entries` (a branch's, made on `base`) replayed onto `into` (another branch's
+ * state that also descends from `base`), the way a sync client rebases its queue (ADR 0009
+ * decisions 4 and 5): the commands go into an offline `SyncClient` at `base` as its pending
+ * queue, and `into` arrives as the other side's change. Fresh ids the other branch took are
+ * renamed, commands that no longer apply are dropped, and a restore is replayed as its intent
+ * (decision 9, amendment item 11). Fails when the commands do not apply to `base` itself, which
+ * means the history is not the branch's.
+ */
+export function rebaseOnto(
+  base: ManufaktureDocument,
+  into: ManufaktureDocument,
+  entries: readonly LogEntry[],
+): LibraryResult<Rebased> {
+  const client = new SyncClient(base, 0, { clientId: MERGE_CLIENT, online: false });
+  const dropped: Rebased['dropped'] = [];
+  const renames = new Map<string, string>();
+  client.on('dropped', ({ drops }) => {
+    for (const d of drops) {
+      dropped.push({ cause: causeOf(entries, d.label), label: d.label, message: d.error.message });
+    }
+  });
+  client.on('remapped', ({ table }) => {
+    for (const scope of Object.values(table)) {
+      for (const [old, now] of Object.entries(scope)) {
+        if (now !== null && old !== now) renames.set(old, now);
+      }
+    }
+  });
+  const causes = new Map<number, LogEntry['cause']>();
+  for (const [i, e] of entries.entries()) {
+    const r = client.submit(
+      e.command.type === 'replaceDocument'
+        ? { restore: { document: e.command.document }, label: e.label, at: e.at }
+        : { command: e.command, label: e.label, at: e.at },
+    );
+    if (!r.ok) {
+      return {
+        ok: false,
+        message: `"${e.label}" (step ${i + 1}) does not apply where the branches part: ${r.error.message}`,
+      };
+    }
+    causes.set(r.value.local, e.cause);
+  }
+  const command: Command = { type: 'replaceDocument', document: into };
+  const created = createdIds(base, command);
+  if (!created.ok) {
+    return { ok: false, message: `The branch cannot be merged into: ${created.error.message}` };
+  }
+  const received = client.receive([
+    {
+      rev: 1,
+      entry: {
+        clientId: MERGE_TARGET,
+        clientSeq: 1,
+        baseRev: 0,
+        format: FORMAT_VERSION,
+        cause: 'execute',
+        label: MERGE_TARGET,
+        command,
+        created: created.value as SyncEntry['created'],
+        at: entries.at(-1)?.at ?? '',
+      },
+    },
+  ]);
+  if (!received.ok) {
+    return { ok: false, message: `The branch cannot be merged into: ${received.error.message}` };
+  }
+  const document = client.document;
+  const applied = client.pending.map((p) => ({
+    cause: causes.get(p.local) ?? 'execute',
+    label: p.label,
+  }));
+  return {
+    ok: true,
+    value: {
+      before: into,
+      document,
+      applied,
+      dropped,
+      renamed: [...renames].map(([from, to]) => ({ from, to })),
+      replaced: replacedObjects(base, into, document),
+      changed: serialize(document) !== serialize(into),
+    },
+  };
+}
+
+function causeOf(entries: readonly LogEntry[], label: string): LogEntry['cause'] {
+  return entries.find((e) => e.label === label)?.cause ?? 'execute';
+}
+
+/**
+ * The objects the branch merged into changed since `base` (`into`'s own work: added, edited or
+ * deleted) that the merge changes again: what the merged branch's version replaced whole.
+ */
+function replacedObjects(
+  base: ManufaktureDocument,
+  into: ManufaktureDocument,
+  merged: ManufaktureDocument,
+): string[] {
+  const ours = changedObjects(base, into);
+  if (ours.length === 0) return [];
+  const intoObjects = documentObjects(into);
+  const mergedObjects = documentObjects(merged);
+  const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  return ours
+    .filter((k) => !same(mergedObjects.get(k), intoObjects.get(k)))
+    .map((k) => objectName(k, [into, base]));
+}
+
+/** How the preview names an object key of `documentObjects` (sync's `ObjectKey`). */
+function objectName(key: string, docs: readonly ManufaktureDocument[]): string {
+  const [kind, a = '', b = ''] = key.split('\u0000');
+  const first = <T>(pick: (doc: ManufaktureDocument) => T | undefined): T | undefined => {
+    for (const doc of docs) {
+      const found = pick(doc);
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  };
+  const partName = first((d) => d.parts.find((p) => p.id === a)?.name) ?? a;
+  switch (kind) {
+    case 'f': {
+      const name = first(
+        (d) => d.parts.find((p) => p.id === a)?.features.find((f) => f.id === b)?.name,
+      );
+      return `${name ?? b} (${partName})`;
+    }
+    case 'p':
+      return `the settings of ${partName}`;
+    case 'v':
+      return `the variable #${a}`;
+    case 'a':
+      return first((d) => d.assemblies.find((x) => x.id === a)?.name) ?? a;
+    case 'd':
+      return first((d) => d.drawings?.find((x) => x.id === a)?.name) ?? a;
+    default:
+      return `the document's ${a}`;
+  }
 }

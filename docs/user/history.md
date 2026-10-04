@@ -49,13 +49,38 @@ A **branch** is a second line of work in the same document, started from a versi
 - **Rename branch** and **Delete branch** sit next to the list while a branch other than Main is open. Main cannot be renamed or deleted. Deleting asks first, removes the branch and its history for good, and opens Main; Main is not touched. A branch that has a named version cannot be deleted, since versions are kept for good and other documents may rely on them.
 - **Versions remember their branch.** A version made while a branch is open names that branch's state, and opens from it wherever you view it. You can branch from any version, whichever branch is open. Another document that pins a version (a derived part) sees the versions of every branch.
 
-There is no merging. To bring a branch's work onto Main, name it as a version on the branch, switch to Main, **View** that version and **Restore** it: Main then takes the branch's whole state, as one step that **Undo** takes back. The same works in the other direction, and between any two branches.
+To bring a branch's work into another one, merge it (below). To take another branch's whole state instead, name it as a version on that branch, switch back, **View** the version and **Restore** it: the open branch then takes the other one's whole state, as one step that **Undo** takes back.
 
 Branches are for trying alternatives inside one document. To make an independent copy, use **Duplicate** on the home screen: the copy has its own name and history, and lives on as a document of its own.
 
 On the home screen a document is its Main branch: the name shown is Main's, and **Rename** and **Export** act on Main, even for the document you have open on another branch (to export a branch, **Duplicate** the document while the branch is open and export the copy). **Duplicate** of the open document copies it as it is open, on its branch. An export with every version includes the versions of all branches (imported again, they all become versions of Main; branches themselves are not exported).
 
 If another tab deletes the branch you are on, your next change cannot be saved and the conflict banner shows; **Load the newer version** then opens Main and drops the changes made on the deleted branch, and **Keep this version as a copy** saves them as a new document.
+
+## Merging a branch
+
+**Merge** brings another branch's work into the branch you have open. It sits in the **History** panel, above the timeline, whenever the document has more than one branch.
+
+1. Open the branch you want to merge **into** (say Main).
+2. In **History**, under **Merge**, pick the branch to merge **from**, then **Preview merge**.
+3. Read the preview, then **Merge** (or **Cancel**).
+
+A merge takes the changes the other branch made since the two branches parted (the version one of them was made from) and makes them again, one by one and in their order, on top of what you have open, including anything not saved yet. The preview shows, before anything changes:
+
+- **Applies**: the changes that go in, by the names the timeline gives them ("Edit variable #thickness", "Add Fillet 2").
+- **Renamed ids**: when both branches added something with the same id (both made `fillet#2`, say), the merged one gets the next free id here (`fillet#2 becomes fillet#3`), and every later merged change that names it follows. What you already have keeps its ids.
+- **Does not apply**: changes that no longer make sense here, each with the reason: an edit of a feature this branch deleted, or a delete of a feature something here now depends on. They are left out; the other branch still has them.
+- **Replaced whole**: things this branch changed since the branches parted that the merge changes again. **A merge never combines two edits of the same thing field by field.** The unit is the whole object: a feature, a variable, a part studio's settings, an assembly. When both branches changed the same feature, the merged branch's version of the whole feature replaces this one's, so if you made a fillet's radius 2 here and the other branch made the same fillet's radius 4 and renamed it, you get radius 4 and the new name. If you edited a different field of that feature here, that edit is gone too. Check this list before you merge; to keep your side, cancel, and change the other branch first (or merge, then edit).
+
+A restore on the other branch (**Restore** of a version) is merged as what it means: the document becomes that version's state again, on top of what you have here, with fresh ids for anything newer. So it replaces this branch's work too, and the preview lists what it replaces.
+
+**Merge** is one step: the Undo button says "Undo Merge "10 mm"", and **Undo** takes the whole merge back, **Redo** brings it again. It is saved as one revision in the timeline, labelled with the merge, so the state before it stays in the history. The branch you merged from is not changed. If the document changed after the preview, **Merge** shows the preview again as it is now instead of merging the old one.
+
+Merging needs no server and no connection: it works on the copy in your browser.
+
+Merging the same branch twice makes its changes again: anything it added is added a second time, under new ids. After a merge, carry on in one of the two branches, or make a new branch from a version of the merged result.
+
+Merging is offered for the open branch only, so to merge Main into a branch, open the branch and merge from Main.
 
 ## Example
 
@@ -69,3 +94,6 @@ If another tab deletes the branch you are on, your next change cannot be saved a
 8. **View** `6 mm` again, **Branch**, name it `Thick walls`, **Create branch**: the bracket is 6 mm again, on the new branch.
 9. Change `#thickness` to 10 mm there.
 10. Pick **Main** in the branch list: the bracket is 8 mm. Reload: still 8 mm, on Main. Pick `Thick walls`: 10 mm.
+11. On `Thick walls`, round the inside corner with a 4 mm **Fillet**.
+12. Pick **Main**, then in **History** under **Merge** pick `Thick walls` and **Preview merge**. **Applies** lists the thickness edit and the fillet; **Replaced whole** lists `the variable #thickness`, since Main changed it to 8 mm and the branch's 10 mm replaces it.
+13. **Merge**: Main has the 10 mm bracket with the fillet. **Undo** takes the whole merge back to 8 mm without the fillet; **Redo** brings it again.

@@ -117,6 +117,9 @@ importers:
       '@manufakture/stock':
         specifier: workspace:*
         version: link:../../packages/stock
+      '@manufakture/sync':
+        specifier: workspace:*
+        version: link:../../packages/sync
       '@manufakture/takeoff':
         specifier: workspace:*
         version: link:../../packages/takeoff

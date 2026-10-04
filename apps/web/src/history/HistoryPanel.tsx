@@ -3,7 +3,8 @@
 // version and each readable revision can be viewed; viewing, restoring and going back are the
 // app's (App.tsx, with the viewer banner). With a `branch`, the timeline is that branch's own;
 // the versions are every branch's, each tagged with its branch when it is not this one, so a
-// version of another branch can be viewed and restored here. The logic is in history.ts.
+// version of another branch can be viewed and restored here. With other branches, another one can
+// be merged into the open one (MergeBranch). The logic is in history.ts.
 
 import { useEffect, useState, type FormEvent } from 'react';
 import {
@@ -23,11 +24,14 @@ import {
   type HistoryTarget,
   type Session,
 } from './history';
+import { MergeBranch, type MergeSource } from './MergeBranch';
 import { VersionList } from './VersionList';
+import type { DocumentStoreApi } from '../state/document';
 import './history.css';
 
 export interface HistoryPanelProps {
-  source: HistorySource & { has(id: string): Promise<boolean> };
+  /** With `previewMerge` (the library has it), another branch can be merged into this one. */
+  source: HistorySource & { has(id: string): Promise<boolean> } & Partial<MergeSource>;
   documentId: string;
   /**
    * The branch whose history it shows, and its name (shown when it is not the main one). Absent:
@@ -49,6 +53,8 @@ export interface HistoryPanelProps {
   /** Creating a version is off (a past state is being viewed: go back first). */
   createDisabled?: boolean;
   onClose?: () => void;
+  /** The editor's store, which a merge runs on (default: the app's). */
+  documents?: DocumentStoreApi;
 }
 
 type Loaded =
@@ -78,6 +84,7 @@ export function HistoryPanel({
   disabled = false,
   createDisabled = false,
   onClose,
+  documents,
 }: HistoryPanelProps) {
   const [loaded, setLoaded] = useState<Loaded>({ state: 'loading' });
   const [reload, setReload] = useState(0);
@@ -259,6 +266,17 @@ export function HistoryPanel({
                   }
             }
           />
+          {loaded.saved && source.previewMerge && branches && branches.length > 1 && (
+            <MergeBranch
+              key={branch ?? MAIN_BRANCH}
+              source={source as MergeSource}
+              documentId={documentId}
+              branch={branch ?? MAIN_BRANCH}
+              branches={branches}
+              disabled={disabled || createDisabled}
+              {...(documents && { documents })}
+            />
+          )}
           <h3>Timeline</h3>
           {!loaded.saved && <p className="field-note">Nothing is saved yet.</p>}
           {loaded.saved && loaded.sessions.length === 0 && (

@@ -3,13 +3,24 @@
 // is committed by the main head. Crash safety is checked per branch: a crash on one branch
 // leaves every other one byte for byte as it was.
 
+import {
+  applyCommand,
+  serialize,
+  type Command,
+  type Feature,
+  type ManufaktureDocument,
+} from '@manufakture/core';
 import { describe, expect, it } from 'vitest';
+import { createDocumentStore } from '../state/document';
 import { MemoryBackend } from './backend';
 import {
   BranchDeleted,
   DocumentLibrary,
   MAIN_BRANCH,
   RevisionConflict,
+  mergeCommand,
+  mergeLabel,
+  rebaseOnto,
   type LogEntry,
 } from './library';
 import { unpackMfk } from './mfk';
@@ -743,5 +754,306 @@ describe('documents stored before branches', () => {
     expect(value(await reader.open('doc-1')).document.name).toBe('Main three');
     expect(value(await reader.open('doc-1', b.id)).document.name).toBe('On new');
     expect(value(await reader.listBranches('doc-1')).map((x) => x.name)).toEqual(['Main', 'New']);
+  });
+});
+
+// Merging by replay (T7.1f): a branch's commands since the fork, rebased onto the other branch
+// with the sync client's replay and id remap, committed as one undoable revision.
+describe('merging branches', () => {
+  const mm = (source: string) => ({ source, lengthUnit: 'mm' as const, angleUnit: 'deg' as const });
+
+  /** A fillet on one edge of the demo block, with a fresh edge reference id. */
+  const fillet = (id: string, name: string, radius: string, ref = 'r13'): Feature => ({
+    id,
+    kind: 'fillet',
+    name,
+    suppressed: false,
+    edges: [{ id: ref, ref: { faces: ['extrude#1:side:e1', 'extrude#1:side:e2'] } }],
+    radius: mm(radius),
+  });
+
+  const feature = (doc: ManufaktureDocument, id: string) =>
+    doc.parts[0]!.features.find((f) => f.id === id);
+
+  /** Apply `steps` to `doc` and save them as one revision of `branch`. */
+  async function commit(
+    lib: DocumentLibrary,
+    doc: ManufaktureDocument,
+    branch: string,
+    ...steps: [string, Command][]
+  ): Promise<ManufaktureDocument> {
+    const entries: LogEntry[] = [];
+    let current = doc;
+    for (const [label, command] of steps) {
+      const r = applyCommand(current, command);
+      if (!r.ok) throw new Error(`${label}: ${r.error.message}`);
+      current = r.value.document;
+      entries.push({ cause: 'execute', label, command, at: `at ${label}` });
+    }
+    await lib.save(current, entries, branch);
+    return current;
+  }
+
+  /** Main and the branch "Thick" (`b-1`), both from version "Base" of the demo part. */
+  async function forked() {
+    const backend = new MemoryBackend();
+    const lib = new DocumentLibrary(backend, { now, locks: null, newId: () => 'b-1' });
+    const base = partDocument('doc-1', 'Doc');
+    await lib.save(base);
+    const v = value(await lib.createVersion('doc-1', { name: 'Base' }));
+    const branch = value(await lib.createBranch('doc-1', v.id, 'Thick'));
+    value(await lib.open('doc-1', branch.id));
+    return { backend, lib, base, branch: branch.id };
+  }
+
+  const editHole = (doc: ManufaktureDocument, distance: string): Command => ({
+    type: 'editFeature',
+    partId: 'part#1',
+    feature: {
+      ...(feature(doc, 'extrude#2') as Feature & { kind: 'extrude' }),
+      extent: { type: 'blind', distance: mm(distance) },
+    } as Feature,
+  });
+
+  it('merges cleanly: both sides kept, one revision with the merge label', async () => {
+    const { lib, base, branch } = await forked();
+    const onMain = await commit(lib, base, MAIN_BRANCH, [
+      'Set #w',
+      { type: 'setVariable', name: 'w', expression: mm('5') },
+    ]);
+    await commit(
+      lib,
+      base,
+      branch,
+      ['Hole 40', editHole(base, '40')],
+      [
+        'Rename Sketch 2',
+        { type: 'renameFeature', partId: 'part#1', featureId: 'sketch#2', name: 'Circle' },
+      ],
+    );
+
+    const plan = value(await lib.previewMerge('doc-1', branch, MAIN_BRANCH));
+    expect(plan).toMatchObject({
+      fromName: 'Thick',
+      intoName: 'Main',
+      fork: { branch: MAIN_BRANCH, revision: 1 },
+      applied: [
+        { cause: 'execute', label: 'Hole 40' },
+        { cause: 'execute', label: 'Rename Sketch 2' },
+      ],
+      dropped: [],
+      renamed: [],
+      replaced: [],
+      changed: true,
+    });
+    expect(plan.before).toEqual(onMain);
+    expect(plan.document.variables.map((v) => v.name)).toEqual(['w']);
+    expect(feature(plan.document, 'sketch#2')!.name).toBe('Circle');
+    // A preview saves nothing.
+    expect(value(await lib.open('doc-1')).revision).toBe(2);
+
+    const merged = value(await lib.mergeBranch('doc-1', branch, MAIN_BRANCH));
+    expect(merged.saved!.revision).toBe(3);
+    expect(serialize(value(await lib.open('doc-1')).document)).toBe(serialize(plan.document));
+    // One step in main's history, labelled as the merge; the branch is as it was.
+    const history = value(await lib.readHistory('doc-1'));
+    expect(history.at(-1)).toEqual({
+      revision: 3,
+      entries: [{ cause: 'execute', label: mergeLabel('Thick'), at: expect.any(String) as string }],
+    });
+    expect(feature(value(await lib.open('doc-1', branch)).document, 'sketch#2')!.name).toBe(
+      'Circle',
+    );
+    expect(value(await lib.open('doc-1', branch)).document.variables).toEqual([]);
+  });
+
+  it('renames ids the other branch took meanwhile, in every later command', async () => {
+    const { lib, base, branch } = await forked();
+    // Both add fillet#2 with edge reference r13: the same fresh ids on each side.
+    await commit(lib, base, MAIN_BRANCH, [
+      'Main fillet',
+      { type: 'addFeature', partId: 'part#1', feature: fillet('fillet#2', 'Main fillet', '1') },
+    ]);
+    const afterAdd = applyCommand(base, {
+      type: 'addFeature',
+      partId: 'part#1',
+      feature: fillet('fillet#2', 'Branch fillet', '2'),
+    });
+    if (!afterAdd.ok) throw new Error(afterAdd.error.message);
+    await commit(
+      lib,
+      base,
+      branch,
+      [
+        'Branch fillet',
+        { type: 'addFeature', partId: 'part#1', feature: fillet('fillet#2', 'Branch fillet', '2') },
+      ],
+      [
+        'Branch fillet 2.5',
+        {
+          type: 'editFeature',
+          partId: 'part#1',
+          feature: fillet('fillet#2', 'Branch fillet', '2.5'),
+        },
+      ],
+    );
+    const plan = value(await lib.previewMerge('doc-1', branch, MAIN_BRANCH));
+    expect(plan.dropped).toEqual([]);
+    expect(plan.applied.map((s) => s.label)).toEqual(['Branch fillet', 'Branch fillet 2.5']);
+    expect(plan.renamed).toEqual(
+      expect.arrayContaining([
+        { from: 'fillet#2', to: 'fillet#3' },
+        { from: 'r13', to: 'r14' },
+      ]),
+    );
+    // Main's fillet is untouched; the branch's is renamed, and its edit followed it.
+    expect(feature(plan.document, 'fillet#2')).toMatchObject({
+      name: 'Main fillet',
+      radius: mm('1'),
+    });
+    expect(feature(plan.document, 'fillet#3')).toMatchObject({
+      name: 'Branch fillet',
+      radius: mm('2.5'),
+      edges: [{ id: 'r14' }],
+    });
+    expect(plan.document.parts[0]!.nextIds).toMatchObject({ fillet: 4, r: 15 });
+  });
+
+  it('drops what no longer applies, and shows where the branch replaced a whole object', async () => {
+    const { lib, base, branch } = await forked();
+    const fillet1 = feature(base, 'fillet#1') as Feature & { kind: 'fillet' };
+    await commit(
+      lib,
+      base,
+      MAIN_BRANCH,
+      ['Delete Hole', { type: 'deleteFeature', partId: 'part#1', featureId: 'extrude#2' }],
+      [
+        'Fillet 1 at 2',
+        { type: 'editFeature', partId: 'part#1', feature: { ...fillet1, radius: mm('2') } },
+      ],
+    );
+    await commit(
+      lib,
+      base,
+      branch,
+      ['Hole 40', editHole(base, '40')],
+      [
+        'Fillet 1 at 4',
+        { type: 'editFeature', partId: 'part#1', feature: { ...fillet1, radius: mm('4') } },
+      ],
+      ['Set #w', { type: 'setVariable', name: 'w', expression: mm('5') }],
+    );
+    const plan = value(await lib.previewMerge('doc-1', branch, MAIN_BRANCH));
+    expect(plan.applied.map((s) => s.label)).toEqual(['Fillet 1 at 4', 'Set #w']);
+    expect(plan.dropped).toEqual([
+      { cause: 'execute', label: 'Hole 40', message: expect.any(String) as string },
+    ]);
+    // Last writer wins per feature: the branch's whole fillet replaces main's.
+    expect(plan.replaced).toEqual(['Fillet 1 (Demo part)']);
+    expect(feature(plan.document, 'fillet#1')).toMatchObject({ radius: mm('4') });
+    expect(feature(plan.document, 'extrude#2')).toBeUndefined();
+    expect(plan.document.variables.map((v) => v.name)).toEqual(['w']);
+  });
+
+  it('merges main into a branch, from the version the branch was made from', async () => {
+    const { lib, base, branch } = await forked();
+    await commit(lib, base, MAIN_BRANCH, [
+      'Set #w',
+      { type: 'setVariable', name: 'w', expression: mm('5') },
+    ]);
+    await commit(lib, base, branch, ['Hole 40', editHole(base, '40')]);
+    const plan = value(await lib.previewMerge('doc-1', MAIN_BRANCH, branch));
+    expect(plan.applied.map((s) => s.label)).toEqual(['Set #w']);
+    expect(plan.fork).toEqual({ branch: MAIN_BRANCH, revision: 1 });
+    const done = value(await lib.mergeBranch('doc-1', MAIN_BRANCH, branch));
+    expect(done.saved!.revision).toBe(3);
+    const opened = value(await lib.open('doc-1', branch)).document;
+    expect(opened.variables.map((v) => v.name)).toEqual(['w']);
+    expect(feature(opened, 'extrude#2')).toMatchObject({ extent: { distance: mm('40') } });
+    // Main is as it was.
+    expect(value(await lib.open('doc-1')).revision).toBe(2);
+  });
+
+  it('merges a sibling branch, and saves nothing when nothing applies', async () => {
+    const { backend, base, branch } = await forked();
+    const lib = new DocumentLibrary(backend, { now, locks: null, newId: () => 'b-2' });
+    const v = value(await lib.listVersions('doc-1'))[0]!;
+    const sibling = value(await lib.createBranch('doc-1', v.id, 'Other')).id;
+    value(await lib.open('doc-1', branch));
+    await commit(lib, base, branch, [
+      'Set #w',
+      { type: 'setVariable', name: 'w', expression: mm('5') },
+    ]);
+    const plan = value(await lib.previewMerge('doc-1', branch, sibling));
+    expect(plan.applied.map((s) => s.label)).toEqual(['Set #w']);
+    // The sibling has made nothing since: merging it into the branch changes nothing.
+    const none = value(await lib.mergeBranch('doc-1', sibling, branch));
+    expect(none).toMatchObject({ saved: null, plan: { changed: false, applied: [] } });
+    expect(value(await lib.open('doc-1', branch)).revision).toBe(2);
+  });
+
+  it('refuses a branch into itself and branches that are not there', async () => {
+    const { lib, branch } = await forked();
+    expect(await lib.previewMerge('doc-1', branch, branch)).toMatchObject({ ok: false });
+    expect(await lib.previewMerge('doc-1', 'nope', MAIN_BRANCH)).toMatchObject({
+      ok: false,
+      noBranch: true,
+    });
+    expect(await lib.mergeBranch('doc-1', '../x', MAIN_BRANCH)).toMatchObject({ ok: false });
+  });
+
+  it('takes the editor state as given, and the merge undoes as one step', async () => {
+    const { lib, base, branch } = await forked();
+    await commit(
+      lib,
+      base,
+      branch,
+      ['Hole 40', editHole(base, '40')],
+      ['Set #w', { type: 'setVariable', name: 'w', expression: mm('5') }],
+    );
+    // Main open in the editor, with an unsaved change.
+    const store = createDocumentStore(value(await lib.open('doc-1')).document);
+    expect(store.getState().execute({ type: 'renameDocument', name: 'Unsaved' }).ok).toBe(true);
+    const before = store.getState().document;
+    const plan = value(await lib.previewMerge('doc-1', branch, MAIN_BRANCH, { document: before }));
+    expect(plan.document.name).toBe('Unsaved');
+    const r = store.getState().execute(mergeCommand(plan), mergeLabel(plan.fromName));
+    expect(r.ok).toBe(true);
+    expect(store.getState().undoLabel).toBe('Merge "Thick"');
+    expect(store.getState().document.variables.map((x) => x.name)).toEqual(['w']);
+    expect(store.getState().undo().ok).toBe(true);
+    expect(serialize(store.getState().document)).toBe(serialize(before));
+  });
+
+  it('rebaseOnto: a restore on the branch is replayed as its intent', () => {
+    const base = partDocument('doc-1', 'Doc');
+    const into = applyCommand(base, { type: 'setVariable', name: 'w', expression: mm('5') });
+    if (!into.ok) throw new Error(into.error.message);
+    const renamed = applyCommand(base, { type: 'renameDocument', name: 'Later' });
+    if (!renamed.ok) throw new Error(renamed.error.message);
+    // The branch renamed, then restored the base: its net change is nothing.
+    const entries: LogEntry[] = [
+      {
+        cause: 'execute',
+        label: 'Rename',
+        command: { type: 'renameDocument', name: 'Later' },
+        at: 'a',
+      },
+      {
+        cause: 'execute',
+        label: 'Restore',
+        command: { type: 'replaceDocument', document: base },
+        at: 'b',
+      },
+    ];
+    const r = rebaseOnto(base, into.value.document, entries);
+    if (!r.ok) throw new Error(r.message);
+    // A restore brings the whole state back, re-derived on the other branch: its variable goes,
+    // and the preview says so.
+    expect(r.value.document.name).toBe('Doc');
+    expect(r.value.document.variables).toEqual([]);
+    expect(r.value.replaced).toEqual(['the variable #w']);
+    expect(r.value.applied.map((s) => s.label)).toEqual(['Rename', 'Restore']);
+    expect(rebaseOnto(into.value.document, base, [entries[0]!]).ok).toBe(true);
   });
 });
