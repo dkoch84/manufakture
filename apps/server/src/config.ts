@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { MAX_ENTRIES_PER_MESSAGE } from '@manufakture/sync';
 import { z } from 'zod';
 import { DEFAULT_LIMITS, type Limits } from './limits';
+import { DEFAULT_SHARE_CONFIG, MAX_EXPIRY_DAYS, type ShareConfig } from './shares';
 
 /** The server's configuration, from environment variables (README, "Configuration"). */
 export interface Config {
@@ -13,6 +14,8 @@ export interface Config {
   readonly trustProxy: boolean;
   readonly logLevel: string;
   readonly limits: Limits;
+  /** Share links (shares.ts), or null when `MANUFAKTURE_SHARES=off`. */
+  readonly shares: ShareConfig | null;
 }
 
 /**
@@ -46,6 +49,62 @@ const LIMIT_VARS: Record<keyof Limits, string> = {
 
 const positive = z.coerce.number().int().min(1).max(Number.MAX_SAFE_INTEGER);
 
+const SHARE_VARS = {
+  maxBytes: 'MANUFAKTURE_SHARE_MAX_BYTES',
+  maxShares: 'MANUFAKTURE_SHARE_MAX_COUNT',
+  defaultExpiryDays: 'MANUFAKTURE_SHARE_EXPIRY_DAYS',
+  maxConcurrentReads: 'MANUFAKTURE_SHARE_MAX_CONCURRENT_READS',
+} as const;
+
+function parseOrigins(variable: string, raw: string | undefined): string[] {
+  const origins = (raw ?? '')
+    .split(',')
+    .map((o) => o.trim())
+    .filter((o) => o.length > 0);
+  for (const o of origins) {
+    if (!ORIGIN.test(o))
+      throw new Error(`${variable}: "${o}" is not an origin (scheme://host[:port])`);
+  }
+  return origins;
+}
+
+function flag(variable: string, raw: string | undefined, fallback: boolean): boolean {
+  if (raw === undefined || raw === '') return fallback;
+  if (['1', 'true', 'on', 'yes'].includes(raw)) return true;
+  if (['0', 'false', 'off', 'no'].includes(raw)) return false;
+  throw new Error(`${variable} must be on or off`);
+}
+
+/** The share settings, or null when shares are switched off. */
+function loadShareConfig(env: NodeJS.ProcessEnv, origins: readonly string[]): ShareConfig | null {
+  if (!flag('MANUFAKTURE_SHARES', env.MANUFAKTURE_SHARES, true)) return null;
+  const numbers: Record<string, number> = {};
+  for (const [name, variable] of Object.entries(SHARE_VARS)) {
+    const raw = env[variable];
+    if (raw === undefined || raw === '') continue;
+    const v = positive.safeParse(raw);
+    if (!v.success) throw new Error(`${variable} must be a positive integer`);
+    numbers[name] = v.data;
+  }
+  if ((numbers.defaultExpiryDays ?? 0) > MAX_EXPIRY_DAYS) {
+    throw new Error(`MANUFAKTURE_SHARE_EXPIRY_DAYS must be at most ${MAX_EXPIRY_DAYS}`);
+  }
+  const viewer = env.MANUFAKTURE_VIEWER_ORIGINS;
+  return {
+    ...DEFAULT_SHARE_CONFIG,
+    ...numbers,
+    allowNever: flag(
+      'MANUFAKTURE_SHARE_ALLOW_NEVER',
+      env.MANUFAKTURE_SHARE_ALLOW_NEVER,
+      DEFAULT_SHARE_CONFIG.allowNever,
+    ),
+    viewerOrigins:
+      viewer === undefined || viewer.trim() === ''
+        ? [...origins]
+        : parseOrigins('MANUFAKTURE_VIEWER_ORIGINS', viewer),
+  };
+}
+
 /** Reads the configuration; throws with a message naming the variable on any bad value. */
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const fromFile = env.MANUFAKTURE_TOKEN_FILE;
@@ -55,14 +114,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       'MANUFAKTURE_TOKEN (or MANUFAKTURE_TOKEN_FILE) must hold at least 32 characters of A-Z, a-z, 0-9 and ._~-',
     );
   }
-  const origins = (env.MANUFAKTURE_ORIGINS ?? '')
-    .split(',')
-    .map((o) => o.trim())
-    .filter((o) => o.length > 0);
-  for (const o of origins) {
-    if (!ORIGIN.test(o))
-      throw new Error(`MANUFAKTURE_ORIGINS: "${o}" is not an origin (scheme://host[:port])`);
-  }
+  const origins = parseOrigins('MANUFAKTURE_ORIGINS', env.MANUFAKTURE_ORIGINS);
   const port = positive.max(65535).safeParse(env.MANUFAKTURE_PORT ?? '8787');
   if (!port.success) throw new Error('MANUFAKTURE_PORT must be a port number');
   const limits: Record<string, number> = { ...DEFAULT_LIMITS };
@@ -87,5 +139,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     trustProxy: env.MANUFAKTURE_TRUST_PROXY === '1' || env.MANUFAKTURE_TRUST_PROXY === 'true',
     logLevel: env.MANUFAKTURE_LOG_LEVEL ?? 'info',
     limits: limits as unknown as Limits,
+    shares: loadShareConfig(env, origins),
   };
 }

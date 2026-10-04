@@ -66,6 +66,21 @@ Limits (all positive integers; `src/limits.ts` documents each):
 | `MANUFAKTURE_MAX_SOCKET_BUFFER_BYTES`    | 64 MiB                             |
 | `MANUFAKTURE_HELLO_TIMEOUT_MS`           | 10,000                             |
 
+Share links (`src/shares.ts`; the user guide is `docs/user/sharing.md`):
+
+| Variable                                 | Default               | Meaning                                                    |
+| ---------------------------------------- | --------------------- | ---------------------------------------------------------- |
+| `MANUFAKTURE_SHARES`                     | on                    | `off` removes the share routes, the only public ones       |
+| `MANUFAKTURE_SHARE_MAX_BYTES`            | 50 MiB                | The largest bundle, counted while the upload streams in    |
+| `MANUFAKTURE_SHARE_MAX_COUNT`            | 100                   | Active shares per token                                    |
+| `MANUFAKTURE_SHARE_EXPIRY_DAYS`          | 30                    | Expiry of a share that asks for none (at most 3650)        |
+| `MANUFAKTURE_SHARE_ALLOW_NEVER`          | on                    | `off` refuses shares that never expire                     |
+| `MANUFAKTURE_SHARE_MAX_CONCURRENT_READS` | 8                     | Public downloads at once; more get 503 with `Retry-After`  |
+| `MANUFAKTURE_VIEWER_ORIGINS`             | `MANUFAKTURE_ORIGINS` | Origins allowed by CORS on the public download (no others) |
+
+Whoever runs a server is responsible for what it hosts; there is no hosted service and no takedown
+contact (`docs/user/sharing.md`, "If you run the server").
+
 ## Routing `/api` to the server
 
 Everything the server answers is under `/api`, which the app never uses for itself: the service
@@ -94,7 +109,7 @@ origin in `MANUFAKTURE_ORIGINS`.
 
 ## The API
 
-Every route but `GET /api/health` needs `Authorization: Bearer <token>`. No cookies are read or
+Every route but `GET /api/health` and `GET /api/shares/:id` needs `Authorization: Bearer <token>`. No cookies are read or
 set. JSON responses carry `Cache-Control: no-store`; an error is `{ code, message }` with a 4xx
 status, plus `messages` when protocol messages explain it.
 
@@ -110,6 +125,10 @@ status, plus `messages` when protocol messages explain it.
 | `PUT /api/blobs/:sha256`               | `application/octet-stream`, at most `MAX_IMPORT_BYTES`; refused unless the bytes hash to the name. `201` stored, `200` already there                             |
 | `GET /api/blobs/:sha256`               | The bytes, or 404                                                                                                                                                |
 | `GET /api/documents/:id/socket`        | The WebSocket (below)                                                                                                                                            |
+| `POST /api/shares?name=&expires=`      | A `.mfkview` as `application/vnd.manufakture.view+zip`; `expires` is days or `never`. `201 { id, name, size, createdAt, expiresAt }`; 409 at the count limit     |
+| `GET /api/shares`                      | `{ shares, limits }`: the active shares, newest first                                                                                                            |
+| `GET /api/shares/:id`                  | The bundle, **no token**, CORS for `MANUFAKTURE_VIEWER_ORIGINS` only; 404 for unknown, revoked and expired ids alike                                             |
+| `DELETE /api/shares/:id`               | Revokes: `204`, or 404                                                                                                                                           |
 
 The messages are `@manufakture/sync`'s protocol (`ClientMessageSchema`, `ServerMessageSchema`), so
 a client feeds every message of `messages` to `SyncClient.handle` whatever the status was.

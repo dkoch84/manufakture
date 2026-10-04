@@ -113,6 +113,8 @@ import { createConstructionUiStore, type ConstructionUiStore } from './construct
 import { DrawingTabs } from './drawing/DrawingTabs';
 import { createDrawingUiStore } from './drawing/state';
 import { ConfigurationSwitcher } from './configurations/ConfigurationSwitcher';
+import { viewerUrlFor } from './sharing/client';
+import { SharePanel, type BundleResult } from './sharing/SharePanel';
 import { documentStore, historyShortcut, type DocumentStoreApi } from './state/document';
 import { measureStore, type MeasureStore } from './state/measure';
 import {
@@ -171,6 +173,8 @@ import './assembly/assembly.css';
 import './print/print.css';
 
 const defaultSolver = () => lazySolver(spawnDefaultSolver);
+/** The read-only viewer next to the app: what share links open. */
+const VIEWER_URL = viewerUrlFor(location, import.meta.env.BASE_URL);
 
 // The feature dialogs (and their forms and hole tables) load when one is first opened.
 const FeatureDialog = lazy(() =>
@@ -1558,36 +1562,24 @@ export function App({
 
   // Publish a view (T7.3a): the shown part studio's bodies or the shown assembly as a `.mfkview`,
   // from the meshes the viewport holds; with Include source, the document as a `.mfk` inside.
-  const onPublish = useCallback(
-    (includeSource: boolean) => {
-      setIoBusy(true);
-      setIoStatus({ error: false, text: 'Publishing...' });
-      Promise.all([import('./io/publishView'), import('./persistence/library')])
-        .then(async ([{ assemblyPublishPlan, partPublishPlan, publishView }, { packDocument }]) => {
-          const plan =
-            assemblyId !== null
-              ? assemblyPublishPlan(shownDocument, assemblyId, {
-                  parts: allParts,
-                  assemblies: modelAssemblies,
-                  sources: modelSources,
-                })
-              : partPublishPlan(shownDocument, shownPartId, activeBodies);
-          if (!plan.ok) return plan;
-          return publishView(plan.value, {
-            displayUnits: shownDocument.units.length.unit,
-            measurer,
-            source: includeSource ? (await packDocument(shownDocument)).bytes : null,
-          });
-        })
-        .then(
-          (r) => {
-            if (r.ok) for (const f of r.value) downloadBytes(f.bytes, f.name, f.type);
-            setIoStatus({ error: !r.ok, text: r.message });
-          },
-          (e: unknown) =>
-            setIoStatus({ error: true, text: e instanceof Error ? e.message : String(e) }),
-        )
-        .finally(() => setIoBusy(false));
+  const buildView = useCallback(
+    async (includeSource: boolean) => {
+      const [{ assemblyPublishPlan, partPublishPlan, publishView }, { packDocument }] =
+        await Promise.all([import('./io/publishView'), import('./persistence/library')]);
+      const plan =
+        assemblyId !== null
+          ? assemblyPublishPlan(shownDocument, assemblyId, {
+              parts: allParts,
+              assemblies: modelAssemblies,
+              sources: modelSources,
+            })
+          : partPublishPlan(shownDocument, shownPartId, activeBodies);
+      if (!plan.ok) return plan;
+      return publishView(plan.value, {
+        displayUnits: shownDocument.units.length.unit,
+        measurer,
+        source: includeSource ? (await packDocument(shownDocument)).bytes : null,
+      });
     },
     [
       assemblyId,
@@ -1599,6 +1591,38 @@ export function App({
       modelSources,
       measurer,
     ],
+  );
+  const onPublish = useCallback(
+    (includeSource: boolean) => {
+      setIoBusy(true);
+      setIoStatus({ error: false, text: 'Publishing...' });
+      buildView(includeSource)
+        .then(
+          (r) => {
+            if (r.ok) for (const f of r.value) downloadBytes(f.bytes, f.name, f.type);
+            setIoStatus({ error: !r.ok, text: r.message });
+          },
+          (e: unknown) =>
+            setIoStatus({ error: true, text: e instanceof Error ? e.message : String(e) }),
+        )
+        .finally(() => setIoBusy(false));
+    },
+    [buildView],
+  );
+  // Share a view (T7.3d): the same bundle, uploaded to the configured server (src/sharing/).
+  const shareBundle = useCallback(
+    async (includeSource: boolean): Promise<BundleResult> => {
+      try {
+        const r = await buildView(includeSource);
+        if (!r.ok) return r;
+        const file = r.value.find((f) => f.name.endsWith('.mfkview'));
+        if (!file) return { ok: false, message: 'There is nothing to publish.' };
+        return { ok: true, bytes: file.bytes, name: file.name.replace(/\.mfkview$/, '') };
+      } catch (e) {
+        return { ok: false, message: e instanceof Error ? e.message : String(e) };
+      }
+    },
+    [buildView],
   );
 
   // The laser and plasma export: the active part's bodies (with their bounds, for a section's
@@ -2109,6 +2133,11 @@ export function App({
             {...(laserBlocked ? {} : { onLaser: () => setLaserOpen(true) })}
             {...(withConstruction && ifcExporter && !printing ? { onIfc } : {})}
             onPublish={onPublish}
+          />
+          <SharePanel
+            disabled={sketching.active || ioBusy || !loader.exchanger || locked}
+            makeBundle={shareBundle}
+            viewerUrl={VIEWER_URL}
           />
           <ImportButton
             disabled={sketching.active || ioBusy || locked || assemblyId !== null}

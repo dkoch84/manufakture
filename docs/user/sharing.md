@@ -2,7 +2,7 @@
 
 You can share a model with someone who does not use manufakture, or who should look but not edit: publish a **view** of it. A view is one file holding what the viewport shows, as triangle meshes with the names of their faces and edges, and what you set on the bodies (names, colours, materials) with their volumes and masses. It opens without the geometry kernel and without the editor.
 
-Everything here works offline: publishing is done in your browser, from the model already on screen, and nothing is sent anywhere.
+Publishing works offline: it is done in your browser, from the model already on screen, and nothing is sent anywhere. Only [share links](#share-links) upload a view, and only to a server you run yourself.
 
 ## Publishing a view
 
@@ -73,7 +73,7 @@ location ~ \.mfkview$ {
 
 GitHub Pages sends `Access-Control-Allow-Origin: *` with every file, so a view in a GitHub Pages site works as it is. A host that redirects the download is fine as long as the redirect also goes to an https address.
 
-Share links made in one step from the app, through a manufakture server, are coming (they will be links of the same shape).
+Or let the app do all of this in one click, through your own manufakture server: see [Share links](#share-links).
 
 ### What the viewer refuses
 
@@ -84,6 +84,53 @@ Share links made in one step from the app, through a manufakture server, are com
 ### Offline
 
 The viewer is part of the installed app (see [Install](install.md)): after manufakture has been opened once in the browser, `viewer.html` also opens offline, and a view from a file works without a network. A link needs the network to download its view.
+
+## Share links
+
+A share link is a [link](#links) made in one step: **Share** publishes the view, uploads it to your own manufakture server, and gives you the link. Whoever has the link can open the view in the viewer, with no account and no token; nobody can list or find links they were not given. You can revoke a link at any time.
+
+There is no hosted manufakture service: share links need a server you run (the `apps/server` program, see its README). One server has one token and one user.
+
+### Setting up the server
+
+1. Run the server and put it behind https (its README, "Routing `/api` to the server", shows how).
+2. Set `MANUFAKTURE_ORIGINS` to the address of the app you use, so the app may talk to the server. The viewer is allowed to download shares from the same addresses, unless you set `MANUFAKTURE_VIEWER_ORIGINS` to the viewer's own.
+3. In the app, click **Share** in the header, enter the server's address (`https://...`, without `/api`) and its token (`MANUFAKTURE_TOKEN`), and click **Save**. The address and token are kept in this browser only, never in a document or a file. **Forget** removes them.
+
+### Making a link
+
+1. Open the part studio or assembly, as for [publishing](#publishing-a-view).
+2. Click **Share**. Pick when the link **Expires** (30 days unless you choose otherwise, or **never**), and tick **Include the document** if whoever opens the link should be able to edit a copy (see [Include source](#include-source)).
+3. Click **Create link**. The link appears in the panel and is copied when the browser allows it; **Copy** copies it again.
+
+The link has the shape `https://<viewer>/viewer.html#src=https://<server>/api/shares/<id>`. The id is 128 random bits, so links cannot be guessed. The view that was uploaded is a snapshot: later edits to the model do not change it; share again for a new one.
+
+**Active links** lists the links the server still holds, with their size and expiry. **Revoke** deletes the view from the server; the link stops working at once (the server tells browsers not to keep a copy). An expired link is deleted the same way the next time anyone asks for it, lists the links or makes a new one.
+
+### Limits
+
+The server ships with these defaults; whoever runs it can change each one:
+
+| Limit                          | Default   | Setting                                     |
+| ------------------------------ | --------- | ------------------------------------------- |
+| Largest view                   | 50 MB     | `MANUFAKTURE_SHARE_MAX_BYTES` (bytes)       |
+| Active links per token         | 100       | `MANUFAKTURE_SHARE_MAX_COUNT`               |
+| Expiry when none is picked     | 30 days   | `MANUFAKTURE_SHARE_EXPIRY_DAYS`             |
+| Links that never expire        | allowed   | `MANUFAKTURE_SHARE_ALLOW_NEVER=off` forbids |
+| Downloads served at once       | 8         | `MANUFAKTURE_SHARE_MAX_CONCURRENT_READS`    |
+| Origins the viewer may read at | the app's | `MANUFAKTURE_VIEWER_ORIGINS`                |
+| Share links at all             | on        | `MANUFAKTURE_SHARES=off` turns them off     |
+
+A view over the size limit is refused before it is uploaded; the server also stops reading an upload as soon as it passes the limit. When the server holds as many links as it allows, revoke one first.
+
+### If you run the server
+
+Share links are the one part of the server anyone can reach without the token: `GET /api/shares/<id>`. Things to know:
+
+- **You are responsible for what your server hosts.** It is your server and your token: manufakture offers no hosted service and no takedown address. Whoever has your token can publish views through your server, so keep it secret.
+- Downloads are answered with a type no browser displays (`application/vnd.manufakture.view+zip`), as an attachment, with `X-Content-Type-Options: nosniff`, a `Content-Security-Policy` that allows nothing, and `Cache-Control: no-store`. Unknown, revoked and expired ids get the same 404. CORS allows only the viewer's origins, without credentials.
+- Views are stored in the server's SQLite database. Revoking deletes the row; SQLite may keep the freed bytes in the file until it reuses the space or you run `VACUUM`, and in backups you made before.
+- The server limits how many downloads run at once, but not how often one address may ask. Put a rate limit in your reverse proxy if your server is reachable by the public, and make sure the proxy allows request bodies up to the size limit (nginx: `client_max_body_size`).
 
 ## Safety
 

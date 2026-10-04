@@ -366,6 +366,11 @@ export class SqliteStore implements SyncStore {
     return this.stmt.blobBytes.get() as number;
   }
 
+  /** The open database, for tables kept beside the sync store's (shares.ts). */
+  get database(): Database.Database {
+    return this.db;
+  }
+
   close(): void {
     if (this.db.open) this.db.close();
   }

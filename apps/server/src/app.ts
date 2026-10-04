@@ -11,6 +11,13 @@ import Fastify, {
 import type { WebSocket } from 'ws';
 import { TokenBucket, checkJsonShape, type Limits } from './limits';
 import { SyncService, type Reply, type ReplyError } from './service';
+import {
+  isShareRead,
+  registerShareRoutes,
+  type PublicRouteConfig,
+  type ShareConfig,
+  type ShareStore,
+} from './shares';
 import type { SyncStore } from './store';
 
 /**
@@ -22,8 +29,10 @@ import type { SyncStore } from './store';
  *   `GET /api/documents/:id/entries?since=` (pull): protocol messages in `{ messages }`.
  * - `PUT` and `GET /api/blobs/:sha256`.
  * - `GET /api/documents/:id/socket`: a WebSocket carrying the same protocol messages, and pushes.
+ * - `POST`/`GET /api/shares`, `GET`/`DELETE /api/shares/:id`: share links (shares.ts), when
+ *   `shares` is given. `GET /api/shares/:id` is public, with CORS for the viewer's origins only.
  *
- * Every route but `health` needs the instance's bearer token: `Authorization: Bearer <token>`,
+ * Every route but `health` and the public share download needs the instance's bearer token: `Authorization: Bearer <token>`,
  * or for a WebSocket (browsers cannot set its headers) the subprotocol `bearer.<token>` next to
  * `manufakture-sync`. No cookies; CORS only for the configured origins.
  */
@@ -47,6 +56,13 @@ export interface AppOptions {
   readonly trustProxy?: boolean;
   /** Passed to `SyncService` (version-skew tests). */
   readonly service?: SyncService;
+  /** Share links (shares.ts); without it the share routes do not exist. */
+  readonly shares?: {
+    readonly store: ShareStore;
+    readonly config: ShareConfig;
+    /** The clock expiry is judged by (tests). */
+    readonly now?: () => number;
+  };
 }
 
 interface Connection {
@@ -130,13 +146,32 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     c.socket.send(text);
   };
 
+  // The app's origins for everything, except a public share download (or its preflight), which
+  // is allowed for the viewer's origins only, without credentials or extra headers.
+  const viewerOrigins = new Set(options.shares?.config.viewerOrigins ?? []);
   await app.register(fastifyCors, {
-    origin: (origin, cb) => cb(null, origin !== undefined && origins.has(origin)),
-    credentials: false,
-    methods: ['GET', 'HEAD', 'POST', 'PUT'],
-    allowedHeaders: ['Authorization', 'Content-Type', CLIENT_KEY_HEADER],
-    exposedHeaders: ['Retry-After'],
-    maxAge: 600,
+    delegator: (req, cb) => {
+      const origin = req.headers.origin;
+      if (options.shares !== undefined && isShareRead(req, API_PREFIX)) {
+        cb(null, {
+          origin: origin !== undefined && viewerOrigins.has(origin),
+          credentials: false,
+          methods: ['GET', 'HEAD'],
+          allowedHeaders: [],
+          exposedHeaders: ['Content-Length'],
+          maxAge: 600,
+        });
+        return;
+      }
+      cb(null, {
+        origin: origin !== undefined && origins.has(origin),
+        credentials: false,
+        methods: ['GET', 'HEAD', 'POST', 'PUT', 'DELETE'],
+        allowedHeaders: ['Authorization', 'Content-Type', CLIENT_KEY_HEADER],
+        exposedHeaders: ['Retry-After'],
+        maxAge: 600,
+      });
+    },
   });
   await app.register(fastifyWebsocket, {
     options: {
@@ -181,6 +216,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       api.addHook('onRequest', async (req, reply) => {
         if (req.method === 'OPTIONS') return;
         if (req.routeOptions.url === `${API_PREFIX}/health`) return;
+        if ((req.routeOptions.config as PublicRouteConfig | undefined)?.public === true) return;
         if (!authorized(req)) {
           return reply.code(401).header('www-authenticate', 'Bearer').send({
             code: 'unauthorized',
@@ -204,6 +240,17 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       });
 
       api.get('/health', async () => ({ ok: true }));
+
+      if (options.shares !== undefined) {
+        const owner = tokenHash.toString('hex');
+        registerShareRoutes(api, {
+          store: options.shares.store,
+          config: options.shares.config,
+          // One token per instance: every share belongs to it.
+          ownerOf: () => owner,
+          ...(options.shares.now && { now: options.shares.now }),
+        });
+      }
 
       api.post('/documents', async (req, reply) => {
         const r = service.createDocument(req.body);

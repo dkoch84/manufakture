@@ -1,5 +1,6 @@
 import { buildApp } from './app';
 import { loadConfig } from './config';
+import { SqliteShareStore } from './shares';
 import { SqliteStore } from './sqlite';
 
 /** `pnpm --filter @manufakture/server start`: reads the environment, opens the database, listens. */
@@ -19,6 +20,9 @@ async function main(): Promise<void> {
     origins: config.origins,
     trustProxy: config.trustProxy,
     logger: { level: config.logLevel },
+    ...(config.shares && {
+      shares: { store: new SqliteShareStore(store.database), config: config.shares },
+    }),
   });
   let closing = false;
   const shutdown = (signal: string) => {
