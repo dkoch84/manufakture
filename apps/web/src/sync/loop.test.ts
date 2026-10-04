@@ -33,11 +33,19 @@ interface Side {
 
 let persistOk = true;
 
-function side(hub: Hub, clientId: string, doc: ManufaktureDocument = hub.server.head): Side {
+function side(
+  hub: Hub,
+  clientId: string,
+  doc: ManufaktureDocument = hub.server.head,
+  maxEntryBytes?: number,
+): Side {
   const created = DocumentStore.create(doc);
   if (!created.ok) throw new Error(created.error.message);
   const store = created.value;
-  const client = new SyncClient(doc, hub.server.revision, { clientId });
+  const client = new SyncClient(doc, hub.server.revision, {
+    clientId,
+    ...(maxEntryBytes !== undefined && { maxEntryBytes }),
+  });
   const persisted: Side['persisted'] = [];
   const events: ChangeEvent[] = [];
   store.subscribe((e) => events.push(e));
@@ -311,5 +319,73 @@ describe('SyncLoop', () => {
     const after = hub.server.head.parts[0]!.features;
     expect(after.some((f) => f.name === 'From B')).toBe(true);
     expect(after.some((f) => f.name === 'From A')).toBe(false);
+  });
+  it('takes a change too large to sync back out of the store, and syncs the next one', async () => {
+    const hub = new Hub(partDocument());
+    const a = side(hub, 'a', hub.server.head, 400);
+    hub.open(a.conn);
+    await hub.settle();
+    const before = a.store.document.name;
+    // A 200-character name (the most a name takes) makes the entry larger than this client sends.
+    expect(a.store.execute(rename('x'.repeat(200)), 'Long rename').ok).toBe(true);
+    expect(a.dropped).toEqual([['Long rename']]);
+    expect(a.store.document).toEqual(a.client.document);
+    expect(a.store.document.name).toBe(before);
+    expect(a.store.canUndo).toBe(false);
+    await hub.settle();
+    expect(submits(a.conn)).toHaveLength(0);
+
+    a.store.execute(rename('Plate'), 'Rename');
+    await hub.settle();
+    expect(hub.server.head.name).toBe('Plate');
+    expect(a.store.document).toEqual(a.client.document);
+    expect(a.loop.status).toEqual({ kind: 'synced' });
+  });
+
+  it('does not show a change made while an earlier entry is held, until it is resolved', async () => {
+    const hub = new Hub(partDocument());
+    const a = side(hub, 'a');
+    const b = side(hub, 'b');
+    hub.open(a.conn);
+    hub.open(b.conn);
+    await hub.settle();
+    a.store.execute(renameFillet('Round'), 'Rename fillet');
+    await flushPromises();
+    expect(submits(a.conn)).toHaveLength(1);
+    b.store.execute(
+      { type: 'deleteFeature', partId: 'part#1', featureId: 'fillet#1' },
+      'Delete fillet',
+    );
+    await flushPromises();
+    hub.process(b.conn);
+    // B's delete reaches A before the verdict on A's rename: the rename is held.
+    hub.deliver(a.conn);
+    expect(a.client.pending.map((e) => e.state)).toEqual(['held']);
+    const before = a.store.document.name;
+    a.store.execute(rename('Plate'), 'Rename');
+    expect(a.client.pending.map((e) => e.state)).toEqual(['held', 'held']);
+    expect(a.store.document).toEqual(a.client.document);
+    expect(a.store.document.name).toBe(before);
+
+    await hub.settle();
+    expect(a.dropped).toEqual([['Rename fillet']]);
+    expect(hub.server.head.name).toBe('Plate');
+    expect(a.store.document.name).toBe('Plate');
+    expect(a.store.document).toEqual(a.client.document);
+    expect(a.loop.status).toEqual({ kind: 'synced' });
+  });
+
+  it('does not replace the store for an accepted local change', async () => {
+    const hub = new Hub(partDocument());
+    const a = side(hub, 'a');
+    hub.open(a.conn);
+    await hub.settle();
+    a.store.execute(rename('Plate'), 'Rename');
+    a.store.execute(rename('Plate 2'), 'Rename again');
+    expect(a.events.filter((e) => e.cause === 'remote')).toHaveLength(0);
+    expect(a.store.undoStack).toHaveLength(2);
+    await hub.settle();
+    expect(a.events.filter((e) => e.cause === 'remote')).toHaveLength(0);
+    expect(hub.server.head.name).toBe('Plate 2');
   });
 });

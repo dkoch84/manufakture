@@ -220,8 +220,15 @@ export class SyncLoop {
       this.#options.onProblem?.(`"${label}" could not be synced: ${r.error.message}`);
       this.#showClientDocument();
     } else {
-      // The store already holds this document (an equal one): no remote change to show.
-      this.#shown = this.client.document;
+      const entry = this.client.pending.find((e) => e.local === r.value.local);
+      if (entry === undefined || HIDDEN.has(entry.state)) {
+        // The client took the change but does not show it: dropped at once (too large to sync)
+        // or held behind an earlier held entry. The store must not keep showing it.
+        this.#showClientDocument(true);
+      } else {
+        // The store already holds this document (an equal one): no remote change to show.
+        this.#shown = this.client.document;
+      }
     }
     this.#pump(false);
     this.#report();
@@ -301,13 +308,16 @@ export class SyncLoop {
     }, this.#options.saveDelayMs ?? 1_000);
   }
 
-  /** Brings the store to the client's document, as a remote change. */
-  #showClientDocument(): void {
+  /**
+   * Brings the store to the client's document, as a remote change. `force`: even when the store
+   * was last given this very document (a local change made since put something else there).
+   */
+  #showClientDocument(force = false): void {
     const doc = this.client.document;
     const hidden = this.client.pending.some((e) => HIDDEN.has(e.state));
     if (!hidden) this.#beforeHidden = null;
     else this.#beforeHidden ??= this.#store.document;
-    if (doc === this.#shown) return;
+    if (doc === this.#shown && !force) return;
     const r = this.#store.applyRemote(doc);
     if (r.ok) this.#shown = doc;
     else this.#options.onProblem?.(`A synced change could not be shown: ${r.error.message}`);
