@@ -290,6 +290,52 @@ describe('limits', () => {
   });
 });
 
+describe('slow readers', () => {
+  it('holds a download slot only until the read deadline, then cuts the connection', async () => {
+    await server.close();
+    server = await start({
+      maxBytes: 64 * 1024 * 1024,
+      maxConcurrentReads: 1,
+      readTimeoutMs: 1000,
+    });
+    // Far more than the socket buffers take, so a reader that stops reading stalls the response.
+    const c = await create('', bundle(48 * 1024 * 1024));
+    expect(c.status).toBe(201);
+    const stalled = httpRequest({
+      host: '127.0.0.1',
+      port: server.port,
+      path: `/api/shares/${c.body.id}`,
+    });
+    stalled.on('response', (res) => {
+      res.pause(); // never reads the body
+      res.on('error', () => undefined);
+    });
+    stalled.on('error', () => undefined);
+    stalled.end();
+    try {
+      // While the stalled reader holds the only slot, others are turned away.
+      await new Promise((r) => setTimeout(r, 150));
+      const t0 = Date.now();
+      const busy = await read(c.body.id);
+      expect(busy.status).toBe(503);
+      await busy.body?.cancel();
+      // At the deadline the server cuts that connection and frees the slot. (The stalled client
+      // may never notice: the server's FIN queues behind the bytes it does not read.)
+      let after = busy;
+      while (after.status === 503 && Date.now() - t0 < 5_000) {
+        await new Promise((r) => setTimeout(r, 50));
+        after = await read(c.body.id);
+        if (after.status === 503) await after.body?.cancel();
+      }
+      expect(after.status).toBe(200);
+      expect(Date.now() - t0).toBeGreaterThanOrEqual(700);
+      expect((await after.arrayBuffer()).byteLength).toBe(48 * 1024 * 1024);
+    } finally {
+      stalled.destroy();
+    }
+  });
+});
+
 describe('revoking', () => {
   it('removes the share for good', async () => {
     const c = await create();
@@ -369,6 +415,7 @@ describe('configuration', () => {
       defaultExpiryDays: 30,
       allowNever: true,
       maxConcurrentReads: 8,
+      readTimeoutMs: 120_000,
       viewerOrigins: [APP],
     });
   });
@@ -382,6 +429,7 @@ describe('configuration', () => {
         MANUFAKTURE_SHARE_EXPIRY_DAYS: '7',
         MANUFAKTURE_SHARE_ALLOW_NEVER: 'off',
         MANUFAKTURE_SHARE_MAX_CONCURRENT_READS: '2',
+        MANUFAKTURE_SHARE_READ_TIMEOUT_MS: '5000',
         MANUFAKTURE_VIEWER_ORIGINS: VIEWER,
       }).shares,
     ).toEqual({
@@ -390,6 +438,7 @@ describe('configuration', () => {
       defaultExpiryDays: 7,
       allowNever: false,
       maxConcurrentReads: 2,
+      readTimeoutMs: 5000,
       viewerOrigins: [VIEWER],
     });
     expect(loadConfig({ ...base, MANUFAKTURE_SHARES: 'off' }).shares).toBeNull();

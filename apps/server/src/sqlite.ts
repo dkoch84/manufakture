@@ -323,10 +323,37 @@ export class SqliteStore implements SyncStore {
     })();
   }
 
-  entries(documentId: string, branch: string, since: number, limit: number): PushedEntry[] {
+  entries(
+    documentId: string,
+    branch: string,
+    since: number,
+    limit: number,
+    maxBytes = Number.POSITIVE_INFINITY,
+  ): PushedEntry[] {
     const b = this.stmt.branch.get(documentId, branch) as { head: number } | undefined;
     if (b === undefined) return [];
-    return this.readEntries(documentId, branch, since, b.head, limit);
+    if (maxBytes === Number.POSITIVE_INFINITY) {
+      return this.readEntries(documentId, branch, since, b.head, limit);
+    }
+    // Row by row, stopping once the stored JSON passes `maxBytes`: the first row always comes, so
+    // a pull makes progress even past an entry larger than the cap.
+    const out: PushedEntry[] = [];
+    let bytes = 0;
+    for (const r of this.stmt.entries.iterate(
+      documentId,
+      branch,
+      since,
+      b.head,
+      limit,
+    ) as Iterable<{
+      rev: number;
+      entry: string;
+    }>) {
+      bytes += Buffer.byteLength(r.entry);
+      if (out.length > 0 && bytes > maxBytes) break;
+      out.push({ rev: r.rev, entry: JSON.parse(r.entry) as PushedEntry['entry'] });
+    }
+    return out;
   }
 
   private readEntries(

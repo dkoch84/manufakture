@@ -95,8 +95,17 @@ export interface SyncStore {
   documentCount(): number;
   hasDocument(id: string): boolean;
   loadBranch(documentId: string, branch: string): LoadedBranch | undefined;
-  /** Accepted entries after `since`, at most `limit`. */
-  entries(documentId: string, branch: string, since: number, limit: number): PushedEntry[];
+  /**
+   * Accepted entries after `since`, at most `limit`, and no more than `maxBytes` of stored JSON
+   * (the first entry is always included, whatever its size).
+   */
+  entries(
+    documentId: string,
+    branch: string,
+    since: number,
+    limit: number,
+    maxBytes?: number,
+  ): PushedEntry[];
 
   client(documentId: string, branch: string, clientId: string): ClientRecord | undefined;
   clientCount(documentId: string, branch: string): number;

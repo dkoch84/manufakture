@@ -91,6 +91,8 @@ interface BranchState {
   head: ManufaktureDocument;
   highWater: CounterTable;
   rev: number;
+  /** When it was last used (`now()`), for idle eviction. */
+  used: number;
 }
 
 export function sha256(bytes: Buffer | string): Buffer {
@@ -106,10 +108,21 @@ function fail(
   return { ok: false, status, code, message, ...extra };
 }
 
+/** A schema key as the path shows it; anything else (a record's key, chosen by the sender) is `*`. */
+const SCHEMA_KEY = /^[A-Za-z]{1,40}$/;
+
+/**
+ * Where a message fails its schema, without quoting it: zod's own messages can repeat what was
+ * sent (an unrecognized key), so the answer names the issue's kind and its path, with indices and
+ * schema field names kept and any other key replaced by `*`.
+ */
 function describe(error: z.ZodError): string {
   const first = error.issues[0];
   if (first === undefined) return 'invalid message';
-  return `${first.message} at ${first.path.map(String).join('.') || '(root)'}`;
+  const path = first.path
+    .map((p) => (typeof p === 'number' || (typeof p === 'string' && SCHEMA_KEY.test(p)) ? p : '*'))
+    .join('.');
+  return `Invalid message (${first.code}) at ${path || '(root)'}`;
 }
 
 function invalid(message: string): ReplyError {
@@ -123,21 +136,55 @@ export interface SyncServiceOptions {
   /** The versions this server runs (default: this build's), for version-skew tests. */
   readonly versions?: Versions;
   readonly now?: () => number;
+  /**
+   * Milliseconds a cached branch head or rate bucket may go unused before it is dropped from
+   * memory (default `DEFAULT_IDLE_EVICT_MS`). The store is the truth, so an evicted head is only
+   * loaded again (snapshot plus replay) on its next use.
+   */
+  readonly idleEvictMs?: number;
 }
+
+/** How long an unused document's head stays in memory by default: ten minutes. */
+export const DEFAULT_IDLE_EVICT_MS = 10 * 60_000;
 
 export class SyncService {
   private readonly store: SyncStore;
   private readonly limits: Limits;
   private readonly versions: Versions;
   private readonly now: () => number;
+  private readonly idleEvictMs: number;
   private readonly branches = new Map<string, BranchState>();
-  private readonly buckets = new Map<string, TokenBucket>();
+  private readonly buckets = new Map<string, { bucket: TokenBucket; used: number }>();
+  private lastSweep: number;
 
   constructor(store: SyncStore, options: SyncServiceOptions) {
     this.store = store;
     this.limits = options.limits;
     this.versions = options.versions ?? CURRENT_VERSIONS;
     this.now = options.now ?? Date.now;
+    this.idleEvictMs = options.idleEvictMs ?? DEFAULT_IDLE_EVICT_MS;
+    this.lastSweep = this.now();
+  }
+
+  /** How many branch heads and rate buckets are held in memory (tests). */
+  cached(): { branches: number; buckets: number } {
+    return { branches: this.branches.size, buckets: this.buckets.size };
+  }
+
+  /**
+   * Drops branch heads and rate buckets unused for `idleEvictMs`, at most once per a quarter of
+   * that, so memory follows the documents in use rather than every document ever opened. A bucket
+   * idle that long is full again anyway (it refills in a minute), so dropping it changes nothing.
+   */
+  private evictIdle(t: number): void {
+    if (t - this.lastSweep < this.idleEvictMs / 4) return;
+    this.lastSweep = t;
+    for (const [key, b] of this.branches) {
+      if (t - b.used >= this.idleEvictMs) this.branches.delete(key);
+    }
+    for (const [key, b] of this.buckets) {
+      if (t - b.used >= this.idleEvictMs) this.buckets.delete(key);
+    }
   }
 
   /** Whether the document has branch `branch` (main included), for the WebSocket route. */
@@ -150,13 +197,15 @@ export class SyncService {
     const parsed = CreateDocumentSchema.safeParse(body);
     if (!parsed.success) return invalid(describe(parsed.error));
     const loaded = parseDocument(parsed.data.document);
-    if (!loaded.ok) return fail(400, 'invalid-document', loaded.error.message.slice(0, 2000));
+    if (!loaded.ok) {
+      return fail(400, 'invalid-document', `The document is invalid (${loaded.error.code})`);
+    }
     const doc = loaded.value.document;
     if (!DOCUMENT_ID.test(doc.id)) {
       return fail(400, 'invalid-document', `Document id must match ${DOCUMENT_ID.source}`);
     }
     if (this.store.hasDocument(doc.id)) {
-      return fail(409, 'exists', `Document ${doc.id} already exists`);
+      return fail(409, 'exists', 'The document already exists');
     }
     if (this.store.documentCount() >= this.limits.maxDocuments) {
       return fail(
@@ -170,7 +219,7 @@ export class SyncService {
       doc,
       documentCounters(doc),
     );
-    if (!created) return fail(409, 'exists', `Document ${doc.id} already exists`);
+    if (!created) return fail(409, 'exists', 'The document already exists');
     return { ok: true, status: 201, id: doc.id, head: 0 };
   }
 
@@ -470,7 +519,15 @@ export class SyncService {
     const b = this.branch(documentId, branch);
     if (b === undefined) return fail(404, 'not-found', 'No such document');
     const entries =
-      since >= b.rev ? [] : this.store.entries(documentId, branch, since, MAX_ENTRIES_PER_MESSAGE);
+      since >= b.rev
+        ? []
+        : this.store.entries(
+            documentId,
+            branch,
+            since,
+            MAX_ENTRIES_PER_MESSAGE,
+            this.limits.maxPullBytes,
+          );
     return { ok: true, status: 200, messages: [{ type: 'push', entries }] };
   }
 
@@ -503,19 +560,28 @@ export class SyncService {
 
   private bucket(documentId: string, clientId: string): TokenBucket {
     const key = `${documentId}\u0000${clientId}`;
+    const t = this.now();
+    this.evictIdle(t);
     let b = this.buckets.get(key);
     if (b === undefined) {
-      this.buckets.set(key, (b = new TokenBucket(this.limits.entriesPerMinute, this.now)));
+      b = { bucket: new TokenBucket(this.limits.entriesPerMinute, this.now), used: t };
+      this.buckets.set(key, b);
     }
-    return b;
+    b.used = t;
+    return b.bucket;
   }
 
   /** The cached head of a document's branch, loaded (snapshot plus replay) on first use. */
   private branch(documentId: string, branch: string = MAIN_BRANCH): BranchState | undefined {
     if (!DOCUMENT_ID.test(documentId) || !BRANCH_ID.test(branch)) return undefined;
     const key = `${documentId}\u0000${branch}`;
+    const t = this.now();
+    this.evictIdle(t);
     const cached = this.branches.get(key);
-    if (cached !== undefined) return cached;
+    if (cached !== undefined) {
+      cached.used = t;
+      return cached;
+    }
     const loaded = this.store.loadBranch(documentId, branch);
     if (loaded === undefined) return undefined;
     let head = loaded.snapshot.document;
@@ -535,7 +601,7 @@ export class SyncService {
     }
     if (rev !== loaded.head)
       throw new Error(`Document ${documentId}: the log ends at ${rev}, not ${loaded.head}`);
-    const state: BranchState = { head, highWater: loaded.highWater, rev };
+    const state: BranchState = { head, highWater: loaded.highWater, rev, used: t };
     this.branches.set(key, state);
     return state;
   }

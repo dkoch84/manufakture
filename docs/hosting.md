@@ -38,7 +38,7 @@ The image listens on plain HTTP, port 8080, as a non-root user (65532), and writ
 `deploy/k8s/` holds a Deployment, a Service and an Ingress, written for a small self-hosted cluster (k3s or k3d, whose built-in ingress controller is Traefik). Nothing about a real deployment is in the repository: `deploy/render.sh` fills in the host name, the TLS secret and the image from the environment and prints the manifests.
 
 ```sh
-kubectl create namespace manufakture            # once
+kubectl apply -f deploy/k8s/namespace.yaml     # once, as a cluster admin
 MANUFAKTURE_HOST=manufakture.example.internal \
 MANUFAKTURE_TLS_SECRET=manufakture-tls \
 MANUFAKTURE_IMAGE=ghcr.io/OWNER/manufakture-web:1.2.3 \
@@ -46,7 +46,9 @@ MANUFAKTURE_IMAGE=ghcr.io/OWNER/manufakture-web:1.2.3 \
 kubectl -n manufakture rollout status deployment/manufakture-web
 ```
 
-Optional: `MANUFAKTURE_NAMESPACE` (default `manufakture`) and `MANUFAKTURE_INGRESS_CLASS` (default `traefik`). The TLS secret must hold a certificate for the host: from cert-manager with your own issuer, or one you create with `kubectl -n manufakture create secret tls manufakture-tls --cert=... --key=...`. The service worker and installing the app need a secure context, so serve it over HTTPS (browsers count only `localhost` as secure without it). If the cluster is reachable only inside a private network, the certificate's issuer must be trusted by the devices that open the app.
+`deploy/k8s/namespace.yaml` makes a namespace of its own for the app, with Pod Security Admission enforcing the `restricted` profile (the Deployment meets it). Keep nothing else in that namespace: whoever can change the Deployment can read every Secret in it (see [Self-hosted rollout runner](#self-hosted-rollout-runner)).
+
+Optional: `MANUFAKTURE_NAMESPACE` (default `manufakture`; edit the name in `namespace.yaml` and `rollout-rbac.example.yaml` to match) and `MANUFAKTURE_INGRESS_CLASS` (default `traefik`). The TLS secret must hold a certificate for the host: from cert-manager with your own issuer, or one you create with `kubectl -n manufakture create secret tls manufakture-tls --cert=... --key=...`. The service worker and installing the app need a secure context, so serve it over HTTPS (browsers count only `localhost` as secure without it). If the cluster is reachable only inside a private network, the certificate's issuer must be trusted by the devices that open the app.
 
 The pod runs with a read-only root file system, no capabilities, no service account token and the `RuntimeDefault` seccomp profile. One replica is enough: the app is static, and a restart costs users nothing, since the service worker serves the app from its cache meanwhile.
 
@@ -65,9 +67,20 @@ A self-hosted runner executes whatever a workflow tells it to, and the deploy wo
 - **Fork pull requests need approval.** Under Actions settings, choose "Require approval for all outside collaborators" for workflows from fork pull requests, so no fork's workflow runs before a maintainer has read it. On a public repository GitHub recommends against self-hosted runners for this reason; the approval is the minimum.
 - **A runner group limited to this workflow**, where the plan offers runner groups (organizations): allow only this repository and only `.github/workflows/deploy.yml` at version tags, and leave public repositories off unless needed. A runner registered on the repository alone cannot be limited this way, which makes the two rules above the only gate.
 - **An ephemeral or dedicated runner.** Register it with `--ephemeral` (one job, then it deregisters; a fresh one per rollout) or on a machine or container that does nothing else, holds no other credentials and is not reachable from the rest of the network beyond the cluster's API.
-- **kubectl credentials limited to the app.** The runner's kubeconfig must not be an admin's. Use a service account bound by RBAC to the target namespace, able to change only the Deployment, Service and Ingress: `deploy/k8s/rollout-rbac.example.yaml` is such a Role and RoleBinding (not applied by `render.sh`; apply it once as a cluster admin and give the runner a token for `manufakture-rollout`). With it, even a hostile job can at worst replace the app in that namespace; it cannot read Secrets, exec into pods or touch the rest of the cluster.
+- **kubectl credentials limited to the app.** The runner's kubeconfig must not be an admin's. Use a service account bound by RBAC to the app's namespace, able only to read and patch the `manufakture-web` Deployment, Service and Ingress by name: `deploy/k8s/rollout-rbac.example.yaml` is such a Role and RoleBinding (not applied by `render.sh`; apply it once as a cluster admin and give the runner a short-lived token for `manufakture-rollout`). It has no `create`, `update` or `delete`, so do the first rollout by hand as an admin. It has no direct access to Secrets, Pods or `pods/exec`, and nothing outside the namespace. It is not harmless, though: patching the Deployment changes its pod template, so a hostile job can run any image in that namespace, and such a pod can mount any Secret there (the TLS secret included) and use any service account there. That is why the namespace must hold nothing but the app's objects and its TLS secret: then the worst a hostile job can do is replace the app and read that certificate's key, not touch the rest of the cluster. If the key matters more than that, let cert-manager or the ingress controller keep the certificate in a namespace the runner cannot patch anything in.
 
 Rolling back is deploying the older image again (see [Updates and rollback](#updates-and-rollback)).
+
+### Sync server behind a reverse proxy
+
+The sync server (`apps/server/README.md`) takes its token as `Authorization: Bearer <token>` on HTTP, but a browser cannot set headers on a WebSocket, so the app sends it in the `Sec-WebSocket-Protocol` request header as the subprotocol `bearer.<token>` (next to `manufakture-sync` and the client's `client.<key>`). Access logs that record request headers, or that a debug log level makes verbose, therefore record the instance's token. Make sure the proxy in front of the server does not log that header:
+
+- **Caddy** logs request headers in its access log when `log` is on. It redacts `Authorization` by default but not this header; drop it with `log { format filter { fields { request>headers>Sec-Websocket-Protocol delete } } }` (Go's spelling of the name), or leave the access log off for `/api/*`.
+- **nginx** logs only what `log_format` names: do not add `$http_sec_websocket_protocol` or `$http_authorization` to it.
+- **Traefik** and other ingress controllers: keep access-log header capture off (Traefik drops all headers unless `accessLog.fields.headers` asks for them), or name `Sec-WebSocket-Protocol` and `Authorization` as dropped headers.
+- Do not turn on header logging in a load balancer or a web application firewall in front of the server either. If a token has been logged, replace it (`MANUFAKTURE_TOKEN`) and clear the logs.
+
+The server itself never logs the token, request headers or bodies.
 
 ## Headers
 

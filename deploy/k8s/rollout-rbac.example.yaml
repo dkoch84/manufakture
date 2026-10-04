@@ -1,15 +1,24 @@
 # An example, not applied by deploy/render.sh: the narrowest credentials for the optional
 # self-hosted `rollout` job in .github/workflows/deploy.yml (docs/hosting.md, "Publishing and
-# rolling out"). A service account that can change the app's Deployment, Service and Ingress in
-# one namespace and nothing else: no Secrets, no Pods/exec, no other namespace, nothing
-# cluster-wide. Replace `manufakture` if you deploy to another namespace, then, as a cluster
-# admin:
+# rolling out"). A service account that can read and patch the app's own Deployment, Service and
+# Ingress (by name) in one namespace and nothing else: no `create`, `update` or `delete`, no direct
+# access to Secrets, Pods or pods/exec, no other namespace, nothing cluster-wide.
+#
+# What it can still do, by design: patching the Deployment changes the pod template, so a hostile
+# job can run any image in this namespace, and that pod can mount any Secret in the namespace and
+# use any service account in it. Keep the namespace dedicated to the app (deploy/k8s/namespace.yaml)
+# with nothing in it but the app's objects and its TLS secret, and treat that secret as readable by
+# whoever holds this credential.
+#
+# Apply deploy/k8s/namespace.yaml first and do the first `render.sh | kubectl apply` by hand as an
+# admin (this Role cannot create the objects), then, as a cluster admin:
 #
 #   kubectl apply -f deploy/k8s/rollout-rbac.example.yaml
 #   kubectl -n manufakture create token manufakture-rollout --duration=24h
 #
 # and give the runner a kubeconfig with only that token, for that cluster and namespace. Prefer a
-# short-lived token renewed outside the runner over a long-lived Secret-bound one.
+# short-lived token renewed outside the runner over a long-lived Secret-bound one. Replace
+# `manufakture` everywhere if you deploy to another namespace.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -23,16 +32,21 @@ metadata:
   name: manufakture-rollout
   namespace: manufakture
 rules:
-  # `kubectl apply` reads, creates and patches; `kubectl rollout status` watches the Deployment.
+  # `kubectl apply` gets each object by name and patches it; `kubectl rollout status` gets and
+  # watches the Deployment (list and watch with a metadata.name field selector, which
+  # resourceNames allows).
   - apiGroups: ['apps']
     resources: ['deployments']
-    verbs: ['get', 'list', 'watch', 'create', 'patch', 'update']
+    resourceNames: ['manufakture-web']
+    verbs: ['get', 'list', 'watch', 'patch']
   - apiGroups: ['']
     resources: ['services']
-    verbs: ['get', 'list', 'create', 'patch', 'update']
+    resourceNames: ['manufakture-web']
+    verbs: ['get', 'patch']
   - apiGroups: ['networking.k8s.io']
     resources: ['ingresses']
-    verbs: ['get', 'list', 'create', 'patch', 'update']
+    resourceNames: ['manufakture-web']
+    verbs: ['get', 'patch']
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

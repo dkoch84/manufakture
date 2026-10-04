@@ -118,8 +118,11 @@ The server ships with these defaults; whoever runs it can change each one:
 | Expiry when none is picked     | 30 days   | `MANUFAKTURE_SHARE_EXPIRY_DAYS`             |
 | Links that never expire        | allowed   | `MANUFAKTURE_SHARE_ALLOW_NEVER=off` forbids |
 | Downloads served at once       | 8         | `MANUFAKTURE_SHARE_MAX_CONCURRENT_READS`    |
+| Time one download may take     | 2 minutes | `MANUFAKTURE_SHARE_READ_TIMEOUT_MS` (ms)    |
 | Origins the viewer may read at | the app's | `MANUFAKTURE_VIEWER_ORIGINS`                |
 | Share links at all             | on        | `MANUFAKTURE_SHARES=off` turns them off     |
+
+A download that takes longer than its deadline is cut off, so a slow or stalled reader cannot hold one of the download slots. At the defaults, a 50 MB view needs about 3.3 Mbit/s to arrive in two minutes; if the people you share with have slower connections, or you raise the size limit, raise `MANUFAKTURE_SHARE_READ_TIMEOUT_MS` to match.
 
 A view over the size limit is refused before it is uploaded; the server also stops reading an upload as soon as it passes the limit. When the server holds as many links as it allows, revoke one first.
 

@@ -1,7 +1,7 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import fastifyCors from '@fastify/cors';
 import fastifyWebsocket from '@fastify/websocket';
-import type { PushMessage, ServerMessage } from '@manufakture/sync';
+import type { PushMessage, PushedEntry, ServerMessage } from '@manufakture/sync';
 import Fastify, {
   type FastifyError,
   type FastifyInstance,
@@ -111,6 +111,29 @@ function protocolsOf(req: FastifyRequest): string[] {
     .filter((p) => p.length > 0);
 }
 
+/**
+ * `push` cut into pushes of at most `maxBytes` of entries (as JSON; at least one entry each), the
+ * same bound as a pull, so a large submit's push never passes the app's inbound limit
+ * (`limits.ts`, `maxPullBytes`). Clients take pushed entries in any order.
+ */
+export function splitPush(push: PushMessage, maxBytes: number): PushMessage[] {
+  const parts: PushMessage[] = [];
+  let entries: PushedEntry[] = [];
+  let bytes = 0;
+  for (const e of push.entries) {
+    const size = Buffer.byteLength(JSON.stringify(e.entry));
+    if (entries.length > 0 && bytes + size > maxBytes) {
+      parts.push({ type: 'push', entries });
+      entries = [];
+      bytes = 0;
+    }
+    entries.push(e);
+    bytes += size;
+  }
+  if (entries.length > 0 || parts.length === 0) parts.push({ type: 'push', entries });
+  return parts;
+}
+
 function errorBody(e: ReplyError) {
   return { code: e.code, message: e.message, ...(e.messages && { messages: e.messages }) };
 }
@@ -128,6 +151,13 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     bodyLimit: limits.maxBodyBytes,
     trustProxy: options.trustProxy ?? false,
     return503OnClosing: true,
+    // Fastify leaves requestTimeout off (0), which also lifts Node's own 300 s default: without
+    // these, a client trickling a 40 MiB body byte by byte would hold its connection and buffer
+    // for as long as it liked. A WebSocket is not affected once upgraded (its idle peers are
+    // bounded by the hello timeout and the socket buffer limit).
+    requestTimeout: limits.requestTimeoutMs,
+    connectionTimeout: limits.connectionTimeoutMs,
+    keepAliveTimeout: limits.keepAliveTimeoutMs,
   });
 
   const authorized = (req: FastifyRequest): boolean => {
@@ -159,11 +189,13 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   const broadcast = (group: string, push: PushMessage) => {
     const set = sockets.get(group);
     if (set === undefined) return;
-    const text = JSON.stringify(push);
-    for (const c of set) {
-      if (c.clientId === undefined) continue;
-      if (options.testReplyDelay) deliver(c, push);
-      else sendText(c, text);
+    for (const part of splitPush(push, limits.maxPullBytes)) {
+      const text = JSON.stringify(part);
+      for (const c of set) {
+        if (c.clientId === undefined) continue;
+        if (options.testReplyDelay) deliver(c, part);
+        else sendText(c, text);
+      }
     }
   };
 
@@ -237,13 +269,16 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       req.log.error(error);
       return reply.code(500).send({ code: 'internal', message: 'Internal server error' });
     }
-    const code =
+    // Fixed messages: Fastify's own (a JSON syntax error, a bad header) can quote the request.
+    const [code, message] =
       error.code === 'FST_ERR_CTP_BODY_TOO_LARGE'
-        ? 'too-large'
+        ? ['too-large', 'The body is too large']
         : error.code === 'FST_ERR_CTP_INVALID_MEDIA_TYPE'
-          ? 'unsupported-media-type'
-          : 'invalid-request';
-    return reply.code(status).send({ code, message: error.message.slice(0, 500) });
+          ? ['unsupported-media-type', 'Unsupported content type']
+          : status === 408
+            ? ['timeout', 'The request took too long']
+            : ['invalid-request', 'The request is invalid'];
+    return reply.code(status).send({ code, message });
   });
   app.setNotFoundHandler((_req, reply) =>
     reply.code(404).send({ code: 'not-found', message: 'Not found' }),
@@ -270,6 +305,11 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       api.addHook('preValidation', async (req, reply) => {
         if (req.body === undefined || Buffer.isBuffer(req.body)) return;
         const shape = checkJsonShape(req.body, limits.maxJsonDepth, limits.maxJsonNodes);
+        if (!shape.ok && shape.forbiddenKey) {
+          return reply
+            .code(400)
+            .send({ code: 'invalid-request', message: 'The body holds a forbidden key' });
+        }
         if (!shape.ok) {
           return reply
             .code(413)
@@ -471,7 +511,9 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
               send({
                 type: 'error',
                 code: 'invalid-message',
-                message: `The message is ${shape.message}`,
+                message: shape.forbiddenKey
+                  ? 'The message holds a forbidden key'
+                  : `The message is ${shape.message}`,
               });
               return;
             }
@@ -511,7 +553,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
                 ok: false,
                 status: 400,
                 code: 'invalid-message',
-                message: `Unexpected ${String(type)}`,
+                message: 'Unexpected message type',
               };
             }
             if (!r.ok) {

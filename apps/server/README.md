@@ -50,7 +50,7 @@ Limits (all positive integers; `src/limits.ts` documents each):
 | ---------------------------------------- | ---------------------------------- |
 | `MANUFAKTURE_MAX_BODY_BYTES`             | 40 MiB                             |
 | `MANUFAKTURE_MAX_MESSAGE_BYTES`          | 40 MiB                             |
-| `MANUFAKTURE_MAX_ENTRY_BYTES`            | 32 MiB                             |
+| `MANUFAKTURE_MAX_ENTRY_BYTES`            | 12 MiB (under the app's 16 MiB)    |
 | `MANUFAKTURE_MAX_JSON_DEPTH`             | 64                                 |
 | `MANUFAKTURE_MAX_JSON_NODES`             | 1,000,000                          |
 | `MANUFAKTURE_MAX_CREATED_IDS_PER_SUBMIT` | 100,000                            |
@@ -67,6 +67,19 @@ Limits (all positive integers; `src/limits.ts` documents each):
 | `MANUFAKTURE_HELLO_TIMEOUT_MS`           | 10,000                             |
 | `MANUFAKTURE_MAX_VERSIONS_PER_DOCUMENT`  | 2,000                              |
 | `MANUFAKTURE_MAX_BRANCHES_PER_DOCUMENT`  | 100                                |
+| `MANUFAKTURE_MAX_PULL_BYTES`             | 8 MiB (at least one entry a pull)  |
+| `MANUFAKTURE_REQUEST_TIMEOUT_MS`         | 120,000 (a whole HTTP request)     |
+| `MANUFAKTURE_CONNECTION_TIMEOUT_MS`      | 300,000 (an idle connection)       |
+| `MANUFAKTURE_KEEP_ALIVE_TIMEOUT_MS`      | 72,000 (above the proxy's own)     |
+
+The app refuses any message from the server over 16 MiB (`MAX_INBOUND_BYTES` in
+`apps/web/src/sync/transport.ts`). Every accepted entry is pushed to every client and may come
+back alone in a pull, so keep `MANUFAKTURE_MAX_ENTRY_BYTES` and `MANUFAKTURE_MAX_PULL_BYTES` well
+under that: an entry the app cannot receive closes its socket again on every reconnect. Raising
+them needs the app's limit raised too.
+
+A document's head is cached in memory while it is in use and dropped after ten minutes unused; the
+next request loads it again from the database.
 
 Share links (`src/shares.ts`; the user guide is `docs/user/sharing.md`):
 
@@ -78,6 +91,7 @@ Share links (`src/shares.ts`; the user guide is `docs/user/sharing.md`):
 | `MANUFAKTURE_SHARE_EXPIRY_DAYS`          | 30                    | Expiry of a share that asks for none (at most 3650)        |
 | `MANUFAKTURE_SHARE_ALLOW_NEVER`          | on                    | `off` refuses shares that never expire                     |
 | `MANUFAKTURE_SHARE_MAX_CONCURRENT_READS` | 8                     | Public downloads at once; more get 503 with `Retry-After`  |
+| `MANUFAKTURE_SHARE_READ_TIMEOUT_MS`      | 120,000               | One download's deadline; a slower reader is cut off        |
 | `MANUFAKTURE_VIEWER_ORIGINS`             | `MANUFAKTURE_ORIGINS` | Origins allowed by CORS on the public download (no others) |
 
 Whoever runs a server is responsible for what it hosts; there is no hosted service and no takedown
@@ -244,8 +258,14 @@ as a server fault (T7.1d), so restore the newest backup there is.
 - Validation runs core on the event loop. The size, depth, node and per-submit time limits bound
   one request, but a single entry near the limits (a large `replaceDocument`) still holds other
   requests while it is judged. Moving judging to a worker thread is the next step if that shows up.
-- Every document's head stays in memory once loaded. Fine for one user's documents; a hosted
-  service would evict them.
+- A document's head (its current document, replayed from the newest snapshot) is cached in
+  memory while the document is in use, and dropped after ten minutes without a request, as are the
+  per-client rate buckets; the next request loads it again from the database. What stays in memory
+  is therefore bounded by the documents in use at once, each up to a full document.
+- Entries are capped at 12 MiB so that the app can always receive them, which refuses an import
+  over about 9 MiB (its bytes travel base64 inside the entry) until imports move out to blobs.
+  A server that stored larger entries under an older default (32 MiB) serves them to no app client:
+  their sockets close on that message and reconnect to it again.
 - Imports still carry their bytes inline in the document and its commands (core's schema), so
   entries do not name blobs yet and the server has no check that a named blob exists; the blob
   routes are ready for the format change that moves `data` out by hash.

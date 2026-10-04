@@ -1,0 +1,14 @@
+# The app's own namespace, applied once by a cluster admin (not by deploy/render.sh, and not by
+# the rollout credential): `kubectl apply -f deploy/k8s/namespace.yaml`. Keep it dedicated to the
+# app: anyone who can patch the Deployment can read every Secret here (rollout-rbac.example.yaml).
+# Pod Security Admission enforces the `restricted` profile, which the Deployment already meets.
+# Replace `manufakture` if you deploy to another namespace (MANUFAKTURE_NAMESPACE).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: manufakture
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

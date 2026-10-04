@@ -1,0 +1,30 @@
+# Build context of apps/server/Dockerfile (the repository root). The image installs and builds
+# from source, so nothing built or installed locally is sent, and neither are local databases,
+# secrets or history. deploy/Dockerfile uses deploy/ as its context, with its own .dockerignore.
+.git
+.github
+**/node_modules
+**/dist
+**/coverage
+**/.vite
+**/*.tsbuildinfo
+**/*.log
+**/test-results
+**/playwright-report
+**/.pnpm-store
+packages/assembly/build
+
+# Local databases (the server's SQLite file and its WAL and shared-memory files).
+**/*.db
+**/*.db-wal
+**/*.db-shm
+**/*.sqlite
+**/*.sqlite3
+
+# Secrets and editor droppings.
+**/.env
+**/.env.*
+**/token
+**/*.pem
+**/*.key
+**/.DS_Store

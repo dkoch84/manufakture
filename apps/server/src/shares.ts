@@ -48,6 +48,12 @@ export interface ShareConfig {
   readonly allowNever: boolean;
   /** Public downloads served at once; more get 503 with Retry-After. */
   readonly maxConcurrentReads: number;
+  /**
+   * Milliseconds one public download may take before its connection is cut, so a slow (or
+   * stalled) reader cannot hold one of the `maxConcurrentReads` slots, and the bundle's bytes in
+   * memory, for ever.
+   */
+  readonly readTimeoutMs: number;
   /** Origins allowed by CORS on the public download: where the viewer is served. */
   readonly viewerOrigins: readonly string[];
 }
@@ -58,6 +64,7 @@ export const DEFAULT_SHARE_CONFIG: ShareConfig = {
   defaultExpiryDays: 30,
   allowNever: true,
   maxConcurrentReads: 8,
+  readTimeoutMs: 120_000,
   viewerOrigins: [],
 };
 
@@ -231,7 +238,15 @@ export class SqliteShareStore implements ShareStore {
   }
 }
 
-/** The headers of a public download: nothing a browser would render, run or keep. */
+/**
+ * The headers of a public download: nothing a browser would render, run or keep.
+ *
+ * `Cross-Origin-Resource-Policy` only governs no-cors loads (an `<img>`, `<script>` or `<object>`
+ * on another site pointing at the link): `same-origin` refuses those. It does not affect the
+ * viewer, which fetches the bundle in CORS mode; that is decided by `Access-Control-Allow-Origin`
+ * alone, sent for the viewer's origins only (app.ts). Neither keeps the bytes from anyone holding
+ * the link: a non-browser client ignores both.
+ */
 export const SHARE_READ_HEADERS: Readonly<Record<string, string>> = {
   'content-type': SHARE_MIME,
   'content-disposition': 'attachment; filename="shared.mfkview"',
@@ -362,7 +377,14 @@ export function registerShareRoutes(api: FastifyInstance, options: ShareRoutesOp
           .send({ code: 'busy', message: 'Too many downloads at once: try again shortly' });
       }
       reading += 1;
-      reply.raw.once('close', () => (reading -= 1));
+      // The bundle is one SQLite value, read whole (better-sqlite3 has no incremental blob
+      // reads); what a slow reader can hold is bounded by the slot count, the size cap and this
+      // deadline, after which the connection is cut and the slot freed.
+      const deadline = setTimeout(() => reply.raw.destroy(), config.readTimeoutMs);
+      reply.raw.once('close', () => {
+        clearTimeout(deadline);
+        reading -= 1;
+      });
       const bytes = store.read(id, now());
       if (bytes === undefined) return reply.code(404).send(notFound);
       return reply.headers(SHARE_READ_HEADERS).send(bytes);

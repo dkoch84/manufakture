@@ -47,6 +47,10 @@ const LIMIT_VARS: Record<keyof Limits, string> = {
   helloTimeoutMs: 'MANUFAKTURE_HELLO_TIMEOUT_MS',
   maxVersionsPerDocument: 'MANUFAKTURE_MAX_VERSIONS_PER_DOCUMENT',
   maxBranchesPerDocument: 'MANUFAKTURE_MAX_BRANCHES_PER_DOCUMENT',
+  maxPullBytes: 'MANUFAKTURE_MAX_PULL_BYTES',
+  requestTimeoutMs: 'MANUFAKTURE_REQUEST_TIMEOUT_MS',
+  connectionTimeoutMs: 'MANUFAKTURE_CONNECTION_TIMEOUT_MS',
+  keepAliveTimeoutMs: 'MANUFAKTURE_KEEP_ALIVE_TIMEOUT_MS',
 };
 
 const positive = z.coerce.number().int().min(1).max(Number.MAX_SAFE_INTEGER);
@@ -56,6 +60,7 @@ const SHARE_VARS = {
   maxShares: 'MANUFAKTURE_SHARE_MAX_COUNT',
   defaultExpiryDays: 'MANUFAKTURE_SHARE_EXPIRY_DAYS',
   maxConcurrentReads: 'MANUFAKTURE_SHARE_MAX_CONCURRENT_READS',
+  readTimeoutMs: 'MANUFAKTURE_SHARE_READ_TIMEOUT_MS',
 } as const;
 
 function parseOrigins(variable: string, raw: string | undefined): string[] {
