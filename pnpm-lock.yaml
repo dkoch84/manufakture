@@ -338,6 +338,18 @@ importers:
         specifier: 0.0.78
         version: 0.0.78
 
+  packages/script:
+    dependencies:
+      '@jitl/quickjs-wasmfile-release-sync':
+        specifier: 0.32.0
+        version: 0.32.0
+      quickjs-emscripten-core:
+        specifier: 0.32.0
+        version: 0.32.0
+      sucrase:
+        specifier: 3.35.1
+        version: 3.35.1
+
   packages/sketch:
     dependencies:
       '@manufakture/units':
@@ -359,6 +371,15 @@ importers:
       '@manufakture/regen':
         specifier: workspace:*
         version: link:../regen
+
+  packages/sync:
+    dependencies:
+      '@manufakture/core':
+        specifier: workspace:*
+        version: link:../core
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
 
   packages/takeoff:
     dependencies:
@@ -400,9 +421,6 @@ importers:
       '@manufakture/kernel':
         specifier: workspace:*
         version: link:../../packages/kernel
-      comlink:
-        specifier: ^4.4.2
-        version: 4.4.2
       libcascade:
         specifier: 3.0.2
         version: 3.0.2
