@@ -4,7 +4,9 @@
 // its parts placed), the choice to export every configuration with its
 // progress, the laser and plasma export (DXF or SVG outlines, which opens its
 // own dialog), IFC of a construction document's building (written in the regen
-// worker), and the Import button (a STEP or STL file picker), in the app header.
+// worker), publishing a view for sharing (a `.mfkview` bundle of the meshes, names and
+// metadata, with the document itself when Include source is ticked), and the Import button (a
+// STEP or STL file picker), in the app header.
 
 import { EXPORT_TOLERANCES, type ExportTolerancePreset } from '@manufakture/io';
 import { useEffect, useRef, useState } from 'react';
@@ -64,6 +66,11 @@ export interface ExportMenuProps {
   onLaser?: () => void;
   /** Export the part studio's building as IFC (a construction document only); absent: not offered. */
   onIfc?: () => void;
+  /**
+   * Publish a view of what is shown (`.mfkview`), with the document itself when `includeSource`;
+   * absent: not offered.
+   */
+  onPublish?: (includeSource: boolean) => void;
 }
 
 const NO_BODIES: readonly ExportableBody[] = [];
@@ -78,6 +85,7 @@ export function ExportMenu({
   onExportAll,
   onLaser,
   onIfc,
+  onPublish,
 }: ExportMenuProps) {
   const bodies = assembly ? NO_BODIES : givenBodies;
   const configurations = assembly ? 0 : givenConfigurations;
@@ -87,6 +95,7 @@ export function ExportMenu({
   // so hiding or showing one with the menu open is reflected at once.
   const [ticks, setTicks] = useState<ReadonlyMap<string, boolean>>(new Map());
   const [every, setEvery] = useState(false);
+  const [includeSource, setIncludeSource] = useState(false);
   const several = bodies.length > 1;
   // One body has no tick: it is written unless it is hidden.
   const ids = chosenBodies(bodies, several ? ticks : NO_TICKS);
@@ -174,6 +183,38 @@ export function ExportMenu({
             >
               IFC (building)
             </button>
+          )}
+          {onPublish && (
+            <button
+              type="button"
+              role="menuitem"
+              title={
+                assembly
+                  ? 'A file to share that shows the assembly without the editor: meshes, names, colours, materials and placements'
+                  : 'A file to share that shows the shown bodies without the editor: meshes, names, colours, materials, volumes and masses'
+              }
+              data-testid="export-publish"
+              onClick={() => {
+                setOpen(false);
+                onPublish(includeSource);
+              }}
+            >
+              Publish view (.mfkview)
+            </button>
+          )}
+          {onPublish && (
+            <label
+              className="io-every"
+              title="Put the document itself (a .mfk) in the published view, so whoever opens it can edit a copy"
+            >
+              <input
+                type="checkbox"
+                checked={includeSource}
+                data-testid="export-include-source"
+                onChange={(e) => setIncludeSource(e.target.checked)}
+              />
+              Include source
+            </label>
           )}
           {nothing && (
             <p className="io-note" role="note" data-testid="export-nothing">

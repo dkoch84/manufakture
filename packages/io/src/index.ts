@@ -4,6 +4,8 @@
 // sheets (drawings, and laser and plasma outlines) are written as SVG, DXF and PDF,
 // and SVG artwork is read as lines and arcs for sketches. Buildings are written as
 // IFC through web-ifc, which is imported only when an IFC export runs (`./ifc`).
+// A published view (`.mfkview`: meshes, names and metadata in a zip) is written with
+// three's GLTFExporter, imported only when one is written, and read without three.
 
 export const packageName = '@manufakture/io';
 
@@ -195,6 +197,32 @@ export {
   type SvgShape,
   type XmlElement,
 } from './svg-import';
+export {
+  MFKVIEW_EXTENSION,
+  MFKVIEW_FORMAT,
+  MFKVIEW_LIMITS,
+  MFKVIEW_MANIFEST,
+  MFKVIEW_MIME,
+  MFKVIEW_SOURCE,
+  MFKVIEW_VERSION,
+  MFKVIEW_VIEWER_LIMITS,
+  MfkviewError,
+  isRigidMatrix,
+  mfkviewBodyEntry,
+  parseMfkviewManifest,
+  readMfkview,
+  writeMfkview,
+  type Mfkview,
+  type MfkviewBodyInfo,
+  type MfkviewInput,
+  type MfkviewInstance,
+  type MfkviewLimits,
+  type MfkviewManifest,
+  type MfkviewMaterial,
+  type MfkviewMesh,
+  type MfkviewPart,
+} from './mfkview';
+export { ZipReadError, formatByteCount, readZip, type ZipReadLimits, type ZipWanted } from './zip';
 export {
   IFC_GUID_ALPHABET,
   IFC_GUID_PATTERN,

@@ -44,6 +44,8 @@ import { HomeScreen } from './home/HomeScreen';
 import { startAutosave, type Autosave, type SaveStatus } from './persistence/autosave';
 import { MAIN_BRANCH, type Branch, type DocumentLibrary } from './persistence/library';
 import { requestPersistence, storageInfo } from './persistence/storage';
+import { registerAutosave } from './pwa/saveGate';
+import { markStartupDone } from './pwa/startup';
 import {
   branchFromSearch,
   docIdFromSearch,
@@ -931,6 +933,8 @@ export function App({
       },
     });
     setAutosave(auto);
+    // A new app version waits for this autosave to flush before it is offered (src/pwa).
+    const unregisterSaveGate = registerAutosave(auto);
     // Save before the page goes away (best effort: the browser may not wait).
     const onHide = () => {
       if (window.document.visibilityState === 'hidden') void auto.flush();
@@ -951,6 +955,7 @@ export function App({
       window.removeEventListener('visibilitychange', onHide);
       window.removeEventListener('pagehide', onHide);
       window.removeEventListener('beforeunload', onBeforeUnload);
+      unregisterSaveGate();
       void auto.stop();
     };
   }, [library, documents, autosaveDelays, branchStore]);
@@ -1316,6 +1321,10 @@ export function App({
               : [...bodies, ...partBodies, ...shownImports.map((i) => i.body)],
     [bodies, partBodies, shownImports, assemblyId, instanceBodies, printing, print.bodies],
   );
+  // The kernel is ready and the first model shown: the service worker may precache (src/pwa).
+  useEffect(() => {
+    if (shownBodies !== null) markStartupDone();
+  }, [shownBodies]);
   // Dragging instances of the assembly shown, through the regen worker; not while viewing.
   const instanceBodiesRef = useRef(instanceBodies);
   useEffect(() => {
@@ -1530,6 +1539,51 @@ export function App({
       )
       .finally(() => setIoBusy(false));
   }, [ifcExporter, shownDocument, shownPartId, parts, members]);
+
+  // Publish a view (T7.3a): the shown part studio's bodies or the shown assembly as a `.mfkview`,
+  // from the meshes the viewport holds; with Include source, the document as a `.mfk` inside.
+  const onPublish = useCallback(
+    (includeSource: boolean) => {
+      setIoBusy(true);
+      setIoStatus({ error: false, text: 'Publishing...' });
+      Promise.all([import('./io/publishView'), import('./persistence/library')])
+        .then(async ([{ assemblyPublishPlan, partPublishPlan, publishView }, { packDocument }]) => {
+          const plan =
+            assemblyId !== null
+              ? assemblyPublishPlan(shownDocument, assemblyId, {
+                  parts: allParts,
+                  assemblies: modelAssemblies,
+                  sources: modelSources,
+                })
+              : partPublishPlan(shownDocument, shownPartId, activeBodies);
+          if (!plan.ok) return plan;
+          return publishView(plan.value, {
+            displayUnits: shownDocument.units.length.unit,
+            measurer,
+            source: includeSource ? (await packDocument(shownDocument)).bytes : null,
+          });
+        })
+        .then(
+          (r) => {
+            if (r.ok) for (const f of r.value) downloadBytes(f.bytes, f.name, f.type);
+            setIoStatus({ error: !r.ok, text: r.message });
+          },
+          (e: unknown) =>
+            setIoStatus({ error: true, text: e instanceof Error ? e.message : String(e) }),
+        )
+        .finally(() => setIoBusy(false));
+    },
+    [
+      assemblyId,
+      shownDocument,
+      shownPartId,
+      activeBodies,
+      allParts,
+      modelAssemblies,
+      modelSources,
+      measurer,
+    ],
+  );
 
   // The laser and plasma export: the active part's bodies (with their bounds, for a section's
   // default plane), the geometry stage and the kernel's section.
@@ -2037,6 +2091,7 @@ export function App({
             onExportAll={onExportAll}
             {...(laserBlocked ? {} : { onLaser: () => setLaserOpen(true) })}
             {...(withConstruction && ifcExporter && !printing ? { onIfc } : {})}
+            onPublish={onPublish}
           />
           <ImportButton
             disabled={sketching.active || ioBusy || locked || assemblyId !== null}

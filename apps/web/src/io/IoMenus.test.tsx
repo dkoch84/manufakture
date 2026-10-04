@@ -70,6 +70,38 @@ describe('the Export menu', () => {
     expect(screen.queryByTestId('export-ifc')).toBeNull();
   });
 
+  it('publishes a view, with the source only when Include source is ticked', () => {
+    const onPublish = vi.fn();
+    render(<ExportMenu bodies={[body('only')]} onExport={vi.fn()} onPublish={onPublish} />);
+    open();
+    expect(item('publish').textContent).toBe('Publish view (.mfkview)');
+    const source = screen.getByTestId('export-include-source') as HTMLInputElement;
+    expect(source.checked).toBe(false);
+    expect(source.parentElement!.textContent).toBe('Include source');
+    fireEvent.click(item('publish'));
+    expect(onPublish).toHaveBeenLastCalledWith(false);
+    expect(screen.queryByRole('menu')).toBeNull();
+    open();
+    fireEvent.click(screen.getByTestId('export-include-source'));
+    fireEvent.click(item('publish'));
+    expect(onPublish).toHaveBeenLastCalledWith(true);
+  });
+
+  it('publishes an assembly too, and offers nothing without a handler', () => {
+    const onPublish = vi.fn();
+    const { unmount } = render(
+      <ExportMenu assembly bodies={[]} onExport={vi.fn()} onPublish={onPublish} />,
+    );
+    open();
+    fireEvent.click(item('publish'));
+    expect(onPublish).toHaveBeenCalledWith(false);
+    unmount();
+    render(<ExportMenu bodies={[body('only')]} onExport={vi.fn()} />);
+    open();
+    expect(screen.queryByTestId('export-publish')).toBeNull();
+    expect(screen.queryByTestId('export-include-source')).toBeNull();
+  });
+
   it('keeps the ticks in step with visibility while it is open', () => {
     const onExport = vi.fn();
     const { rerender } = render(<ExportMenu bodies={[body('a'), body('b')]} onExport={onExport} />);
