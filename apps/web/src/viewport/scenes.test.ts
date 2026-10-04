@@ -2,7 +2,7 @@ import { createDocument } from '@manufakture/core';
 import { validateOp, type KernelStatus, type ShapeId } from '@manufakture/kernel';
 import type { KernelClientOptions } from '@manufakture/kernel/client';
 import type { RegenResult } from '@manufakture/regen';
-import type { RegenClient } from '@manufakture/regen/client';
+import type { RegenClient, RegenClientOptions } from '@manufakture/regen/client';
 import { describe, expect, it, vi } from 'vitest';
 import { bodyLayer } from './members';
 import { createMemberStore, shownMemberView } from './memberStore';
@@ -169,6 +169,36 @@ describe('kernel loader', () => {
     expect(loader.initialDocument).toBeUndefined();
     loader.dispose();
     expect(fake.terminate).toHaveBeenCalled();
+  });
+
+  it('gives the worker the script policy at spawn, and every change after', async () => {
+    const { createScriptGrantsStore } = await import('../scripts/policy');
+    const grants = createScriptGrantsStore(() => null);
+    grants.getState().allowDocument('doc-a');
+    let options!: RegenClientOptions;
+    const setScriptPolicy = vi.fn(async () => undefined);
+    const scriptDeclarations = vi.fn(async () => ({ ok: true, params: [] }));
+    const loader = kernelLoader(
+      (o) => {
+        options = o;
+        return asClient(Object.assign(fakeKernel(o), { setScriptPolicy, scriptDeclarations }));
+      },
+      { scriptGrants: grants },
+    );
+    await loader.load(() => {});
+    expect(options.scriptPolicy).toEqual({ auto: false, documents: ['doc-a'], scripts: [] });
+    grants.getState().allowDocument('doc-b');
+    expect(setScriptPolicy).toHaveBeenCalledWith({
+      auto: false,
+      documents: ['doc-a', 'doc-b'],
+      scripts: [],
+    });
+    const script = { id: 'script#1', source: 'x', language: 'js' as const, apiVersion: 1 };
+    await loader.scripter!.declarations(script, 'doc-a');
+    expect(scriptDeclarations).toHaveBeenCalledWith(script, 'doc-a');
+    loader.dispose();
+    grants.getState().allowDocument('doc-c');
+    expect(setScriptPolicy).toHaveBeenCalledTimes(1);
   });
 
   it('stops reporting to a listener whose signal aborted', async () => {

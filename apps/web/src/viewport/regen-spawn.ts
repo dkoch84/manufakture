@@ -2,10 +2,9 @@
 // registered). A module of its own, since Vite bundles the worker of every module that holds a
 // `new Worker(new URL(...))` call; only the kernel scene loader imports it.
 
-import type { KernelClientOptions } from '@manufakture/kernel/kernel-client';
-import { RegenClient } from '@manufakture/regen/client';
+import { RegenClient, type RegenClientOptions } from '@manufakture/regen/client';
 
-export function spawnAppRegenWorker(options: KernelClientOptions = {}): RegenClient {
+export function spawnAppRegenWorker(options: RegenClientOptions = {}): RegenClient {
   return new RegenClient(() => {
     const worker = new Worker(new URL('./regen-worker.ts', import.meta.url), {
       type: 'module',

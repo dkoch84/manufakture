@@ -183,7 +183,16 @@ export type RegenWarning =
    * Features of a derived part's source failed (or could not be built) at that version: the
    * derived bodies are what the source built without them. `features` lists them in order.
    */
-  | { code: 'derived-source'; message: string; features: string[] }
+  | {
+      code: 'derived-source';
+      message: string;
+      features: string[];
+      /**
+       * Scripted features of the source that did not run because the host's policy does not
+       * allow the document's scripts (`scriptsNotRunError`): the app offers Run scripts then.
+       */
+      scriptsNotRun?: string[];
+    }
   /** An instance shows its part as regenerated, and the part's rollback bar is not at its end. */
   | { code: 'rollback'; message: string; partId: string }
   /**

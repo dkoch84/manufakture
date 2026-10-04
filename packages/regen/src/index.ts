@@ -25,7 +25,19 @@ export {
   ScriptRun,
   type ScriptRunOutcome,
 } from './script-api';
-export { ScriptHost, type ScriptOptions, type ScriptRunEvent, type ScriptStats } from './scripted';
+export {
+  DENY_ALL_SCRIPTS,
+  MAX_POLICY_ENTRIES,
+  ScriptHost,
+  checkScriptPolicy,
+  scriptAllowed,
+  scriptsNotRunError,
+  sourceSha256,
+  type ScriptOptions,
+  type ScriptPolicy,
+  type ScriptRunEvent,
+  type ScriptStats,
+} from './scripted';
 export {
   DEFAULT_KERNEL_BUILD,
   DEFAULT_SOLVER_BUILD,
@@ -326,6 +338,8 @@ export {
   createRegenWorkerApi,
   type RegenWorkerApi,
   type RegenWorkerApiOptions,
+  type ScriptDeclarationSource,
+  type ScriptDeclarationsReply,
   type TextPreviewOptions,
 } from './worker-api';
 export type * from './types';

@@ -422,3 +422,14 @@
   gap: 0.25rem;
   padding: 0.25rem 0;
 }
+
+/* A scripted feature's row: the script it runs. */
+.script-mark {
+  margin-left: 0.3rem;
+  padding: 0 0.3rem;
+  border-radius: 3px;
+  background: #eef0fb;
+  color: #3b3f8f;
+  font-size: 0.72rem;
+  white-space: nowrap;
+}

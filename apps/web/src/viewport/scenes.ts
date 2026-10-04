@@ -8,8 +8,8 @@
 
 import type { ManufaktureDocument } from '@manufakture/core';
 import type { LoadProgress } from '@manufakture/kernel';
-import type { KernelClientOptions } from '@manufakture/kernel/client';
-import type { RegenClient } from '@manufakture/regen/client';
+import type { ScriptDeclarationsReply, ScriptStats } from '@manufakture/regen';
+import type { RegenClient, RegenClientOptions } from '@manufakture/regen/client';
 import type { Assembler } from '../assembly/assembly';
 import type { CamGeometer } from '../cam/geometer';
 import type { Drawer } from '../drawing/drawer';
@@ -19,6 +19,7 @@ import type { Measurer } from '../measure/measurer';
 import { demoDocument } from '../model/demo';
 import { kernelRegenerator } from '../model/kernelModel';
 import { buildable, type Regenerator } from '../model/model';
+import { scriptGrantsStore, type ScriptGrantsStore } from '../scripts/policy';
 import type { Texter } from '../sketcher/text';
 import type { Sizer } from '../wood/cutlist/sizer';
 import { testHooksEnabled } from '../testHooks';
@@ -64,8 +65,24 @@ export interface SceneLoader {
   camGeometer?: CamGeometer;
   /** IFC export of a building, in the regen worker (T6.6a); absent for kernel-free scenes. */
   ifcExporter?: IfcExporter;
+  /** Scripts' declarations and run counts, in the regen worker; absent for kernel-free scenes. */
+  scripter?: Scripter;
   /** A document the scene opens with (the demo scene); the app loads it once the scene is loaded. */
   initialDocument?: ManufaktureDocument;
+}
+
+/** What the app asks of the regen worker's script host (T7.2d). */
+export interface Scripter {
+  /**
+   * A script's parameter declarations, for the scripted feature's dialog; the worker reads them
+   * only when the policy lets this script of `documentId` run.
+   */
+  declarations(
+    script: { id: string; source: string; language: 'js' | 'ts'; apiVersion: number },
+    documentId: string,
+  ): Promise<ScriptDeclarationsReply | null>;
+  /** How many declaration reads and runs the worker made (for tests and the stats page). */
+  stats(): Promise<ScriptStats | null>;
 }
 
 /** Shared plumbing: one load, status fan-out, late subscribers get the latest status. */
@@ -136,10 +153,14 @@ export function kernelLoadStatus(p: LoadProgress): LoadStatus {
  * start-up so kernel loading overlaps UI start-up (ADR 0002).
  */
 export function kernelLoader(
-  spawn: (options: KernelClientOptions) => RegenClient,
-  options: { initialDocument?: ManufaktureDocument } = {},
+  spawn: (options: RegenClientOptions) => RegenClient,
+  options: { initialDocument?: ManufaktureDocument; scriptGrants?: ScriptGrantsStore } = {},
 ): SceneLoader {
   let client: RegenClient | null = null;
+  // Which scripts may run (scripts/policy.ts): sent to the worker before its first regen and on
+  // every change; the app regenerates after a change.
+  const grants = options.scriptGrants ?? scriptGrantsStore;
+  let unwatchGrants: (() => void) | null = null;
   // Viewport body id to kernel shape: the part bodies from regen, then imported STEP bodies.
   const registry = new Map<string, KernelBody>();
   const { exchanger, measurer, referencer } = kernelExchange(() => client, registry);
@@ -214,13 +235,29 @@ export function kernelLoader(
         },
         // Likewise after a stuck worker was replaced.
         onRestarted: () => regenerator.invalidate(),
+        // Given at spawn, so the worker has it before anything else (and it fails closed anyway).
+        scriptPolicy: grants.getState().policy(),
       });
       client = c;
+      unwatchGrants = grants.subscribe((now, before) => {
+        if (now.revision === before.revision) return;
+        void client
+          ?.setScriptPolicy(now.policy())
+          .catch((e: unknown) => console.error('The regen worker refused the script policy:', e));
+      });
       await c.ready;
       return [];
     },
-    () => client?.terminate(),
+    () => {
+      unwatchGrants?.();
+      client?.terminate();
+    },
   );
+  const scripter: Scripter = {
+    declarations: (script, documentId) =>
+      client === null ? Promise.resolve(null) : client.scriptDeclarations(script, documentId),
+    stats: () => (client === null ? Promise.resolve(null) : client.scriptStats()),
+  };
   return {
     ...loader,
     regenerator,
@@ -232,6 +269,7 @@ export function kernelLoader(
     drawer,
     sizer,
     camGeometer,
+    scripter,
     ifcExporter: {
       async exportIfc(building) {
         const bytes = client === null ? null : await client.exportIfc(building);
@@ -309,7 +347,7 @@ export function framingLoader(fixture: MemberFixtureName, members = memberStore)
  */
 export function loaderForLocation(
   search: string = window.location.search,
-  spawn: (options: KernelClientOptions) => RegenClient = spawnAppRegenWorker,
+  spawn: (options: RegenClientOptions) => RegenClient = spawnAppRegenWorker,
   testScenes: boolean = testHooksEnabled,
 ): SceneLoader {
   const choice: SceneChoice = testScenes

@@ -40,7 +40,14 @@ import {
   type TextReply,
   type TextRequest,
 } from './text';
-import type { ScriptRunEvent } from './scripted';
+import type { ParamSpec } from '@manufakture/script';
+import {
+  DENY_ALL_SCRIPTS,
+  checkScriptPolicy,
+  type ScriptPolicy,
+  type ScriptRunEvent,
+  type ScriptStats,
+} from './scripted';
 import { memberBodiesTransferables, regenTransferables } from './transfer';
 import type {
   AssemblyResult,
@@ -48,8 +55,22 @@ import type {
   InstanceInterference,
   InterferenceReport,
   MemberBodiesResult,
+  RegenError,
   RegenResult,
 } from './types';
+
+/** A script as `scriptDeclarations` reads it (the document's stored fields that count). */
+export interface ScriptDeclarationSource {
+  /** Its id in the document's library: what the policy's grants name. */
+  id: string;
+  source: string;
+  language: 'js' | 'ts';
+  apiVersion: number;
+}
+
+/** What `scriptDeclarations` answers: the parameters, or why they could not be read. */
+export type ScriptDeclarationsReply =
+  { ok: true; params: ParamSpec[] } | { ok: false; error: RegenError };
 
 export interface RegenWorkerApi extends KernelWorkerApi {
   /**
@@ -189,6 +210,23 @@ export interface RegenWorkerApi extends KernelWorkerApi {
     onRun: ((event: ScriptRunEvent) => unknown) | null,
     runaway: readonly string[],
   ): Promise<void>;
+  /**
+   * Which documents' scripts may run (`ScriptPolicy`, the app's opt-in). Fails closed: until a
+   * policy arrives no script runs, and anything that is not a policy (null included) denies
+   * every script and rejects. Kept for the engine made later; applies from the next regen.
+   */
+  setScriptPolicy(policy: ScriptPolicy): Promise<void>;
+  /**
+   * A script's parameter declarations, for the feature dialog (`RegenEngine.scriptDeclarations`):
+   * its top-level code runs here, under the limits and the watchdog, and only when the policy
+   * lets this script of `documentId` run. Waits for the kernel.
+   */
+  scriptDeclarations(
+    script: ScriptDeclarationSource,
+    documentId: string,
+  ): Promise<ScriptDeclarationsReply>;
+  /** What scripted features cost so far (null without scripts); waits for the kernel. */
+  scriptStats(): Promise<ScriptStats | null>;
 }
 
 /** What a sketcher's `outlineText` call says besides the request. */
@@ -228,6 +266,9 @@ export function createRegenWorkerApi(options: RegenWorkerApiOptions): RegenWorke
   // Set by `watchScripts`, possibly before the engine exists.
   let scriptMonitor: ((event: ScriptRunEvent) => void) | null = null;
   const runawayScripts = new Set<string>();
+  // Set by `setScriptPolicy`, possibly before the engine exists.
+  // Fail closed: nothing runs until the host says what may.
+  let scriptPolicy: ScriptPolicy = DENY_ALL_SCRIPTS;
   const solver = options.solver ?? createSolverService();
   let engine: RegenEngine | null = null;
   // The engine's outliner when the host passed one (the regen worker's watchdog outliner),
@@ -260,6 +301,7 @@ export function createRegenWorkerApi(options: RegenWorkerApiOptions): RegenWorke
       engine = new RegenEngine({ ...options.engine, kernel: service, solver });
       if (scriptMonitor !== null) engine.setScriptMonitor(scriptMonitor);
       engine.addRunawayScripts([...runawayScripts]);
+      engine.setScriptPolicy(scriptPolicy);
     }
     return engine;
   };
@@ -386,6 +428,36 @@ export function createRegenWorkerApi(options: RegenWorkerApiOptions): RegenWorke
         engine.setScriptMonitor(scriptMonitor);
         engine.addRunawayScripts([...runawayScripts]);
       }
+    },
+
+    async setScriptPolicy(policy) {
+      const checked = checkScriptPolicy(policy);
+      scriptPolicy = checked ?? DENY_ALL_SCRIPTS;
+      engine?.setScriptPolicy(scriptPolicy);
+      if (checked === null) throw new TypeError('not a script policy: every script is denied');
+    },
+
+    async scriptDeclarations(script, documentId) {
+      const s = script as Partial<ScriptDeclarationSource> | null;
+      if (typeof documentId !== 'string') throw new TypeError('not a document id');
+      if (
+        s === null ||
+        typeof s !== 'object' ||
+        typeof s.id !== 'string' ||
+        typeof s.source !== 'string' ||
+        (s.language !== 'js' && s.language !== 'ts') ||
+        typeof s.apiVersion !== 'number'
+      ) {
+        throw new TypeError('not a script');
+      }
+      return (await engineFor()).scriptDeclarations(
+        { id: s.id, source: s.source, language: s.language, apiVersion: s.apiVersion },
+        documentId,
+      );
+    },
+
+    async scriptStats() {
+      return (await engineFor()).scriptStats;
     },
 
     async readFont(fileName, bytes) {

@@ -1,0 +1,145 @@
+/* Scripts: the panel, the editor, and the banner over a document whose scripts have not run. */
+.scripts-head {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.scripts-head h2 {
+  margin-right: auto;
+}
+
+.scripts-head button,
+.script-actions button {
+  font: inherit;
+  font-size: 0.78rem;
+}
+
+.script-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.script-item {
+  padding: 0.3rem 0.4rem;
+  border: 1px solid #d6dce3;
+  border-radius: 4px;
+}
+
+.script-main {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.script-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.script-users {
+  margin: 0.15rem 0;
+  color: #5b6673;
+  font-size: 0.78rem;
+}
+
+.script-actions {
+  display: flex;
+  gap: 0.3rem;
+}
+
+.script-auto {
+  margin-top: 0.6rem;
+}
+
+/* The editor floats over the viewport, wide enough for code, clear of the controls that float at
+   the bottom left. */
+.script-editor {
+  position: fixed;
+  z-index: 20;
+  top: 4.5rem;
+  left: 1rem;
+  bottom: 3.25rem;
+  width: min(48rem, calc(100vw - 20rem));
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.5rem 0.75rem;
+  background: #fff;
+  border: 1px solid #b9c3cf;
+  border-radius: 6px;
+  box-shadow: 0 6px 24px rgb(0 0 0 / 18%);
+  font-size: 0.85rem;
+}
+
+.script-editor-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.script-editor-head h2 {
+  font-size: 0.95rem;
+  margin: 0 auto 0 0;
+}
+
+.script-editor-head label {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.script-editor-body {
+  flex: 1;
+  min-height: 8rem;
+  border: 1px solid #d6dce3;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.code-editor {
+  height: 100%;
+}
+
+.script-problems {
+  max-height: 8rem;
+  overflow: auto;
+  margin: 0;
+  padding: 0.3rem 0.5rem 0.3rem 1.5rem;
+  background: #fdecea;
+  border-radius: 4px;
+  color: #a3261b;
+}
+
+.script-at {
+  color: #6b2a22;
+}
+
+.scripts-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.75rem;
+  padding: 0.4rem 0.75rem;
+  background: #fff4e5;
+  border-bottom: 1px solid #f0c48a;
+  font-size: 0.85rem;
+}
+
+.scripts-banner p {
+  margin: 0;
+}
+
+.scripts-banner ul {
+  flex-basis: 100%;
+  margin: 0;
+  padding-left: 1.5em;
+}

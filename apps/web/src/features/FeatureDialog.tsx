@@ -53,9 +53,11 @@ import {
 import type { CreateVersion } from '../history/history';
 import type { PinLibrary } from './derived';
 import { DerivedDialog } from './DerivedDialog';
+import { Check, RefFieldView, Select } from './fields';
 import { ProfileRegions } from './ProfileRegions';
 import type { PickOutcome } from './references';
 import { ScopePicker } from './ScopePicker';
+import { ScriptedDialog, type ScriptedServices } from './ScriptedDialog';
 import {
   bestSize,
   cylinderLabel,
@@ -88,6 +90,8 @@ export interface FeatureDialogProps {
   library?: PinLibrary | null;
   /** Name the open document's current state (a derived part pinning a version of it). */
   createVersion?: CreateVersion | null;
+  /** Reading scripts' parameters and whether they may run; without it, scripted features cannot be edited. */
+  scripts?: ScriptedServices | null;
 }
 
 const OPERATIONS: readonly [Operation, string][] = [
@@ -98,7 +102,20 @@ const OPERATIONS: readonly [Operation, string][] = [
 ];
 
 export function FeatureDialog(props: FeatureDialogProps) {
-  const { request, library = null, createVersion = null, ...rest } = props;
+  const { request, library = null, createVersion = null, scripts = null, ...rest } = props;
+  if (request.kind === 'scripted') {
+    return (
+      <ScriptedDialog
+        {...rest}
+        request={{
+          kind: 'scripted',
+          ...(request.featureId !== undefined ? { featureId: request.featureId } : {}),
+          ...(request.repick !== undefined ? { repick: request.repick } : {}),
+        }}
+        scripts={scripts}
+      />
+    );
+  }
   if (request.kind === 'derived') {
     return (
       <DerivedDialog
@@ -115,7 +132,10 @@ export function FeatureDialog(props: FeatureDialogProps) {
   return <PartFeatureDialog {...rest} request={{ ...request, kind: request.kind }} />;
 }
 
-type PartFeatureDialogProps = Omit<FeatureDialogProps, 'request' | 'library' | 'createVersion'> & {
+type PartFeatureDialogProps = Omit<
+  FeatureDialogProps,
+  'request' | 'library' | 'createVersion' | 'scripts'
+> & {
   request: DialogRequest & { kind: FormKind };
 };
 
@@ -849,95 +869,6 @@ function PartFeatureDialog({
   );
 }
 
-function RefFieldView({
-  field,
-  refs,
-  active,
-  error,
-  onActivate,
-  onRemove,
-}: {
-  field: RefField;
-  refs: readonly { label: string; lost?: boolean }[];
-  active: boolean;
-  error: string | undefined;
-  onActivate: () => void;
-  onRemove: (index: number) => void;
-}) {
-  const what = field.accepts.map((k) => (field.max === 1 ? `a ${k}` : `${k}s`)).join(' or ');
-  return (
-    <fieldset
-      className={`dialog-field ref-field${active ? ' active' : ''}`}
-      data-testid={`ref-${field.key}`}
-      onClick={onActivate}
-    >
-      <legend>{field.label}</legend>
-      <button type="button" aria-pressed={active} onClick={onActivate}>
-        {active ? `Picking: click ${what} in the view` : `Pick ${what}`}
-      </button>
-      {refs.length > 0 && (
-        <ul>
-          {refs.map((r, i) => (
-            <li key={`${r.label}/${i}`} className={r.lost ? 'lost' : undefined}>
-              <span title={r.label}>
-                {r.lost ? `${r.label} (not found: pick it again)` : r.label}
-              </span>
-              <button
-                type="button"
-                aria-label={`Remove ${r.label}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onRemove(i);
-                }}
-              >
-                Remove
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-      {error && <span className="field-error">{error}</span>}
-    </fieldset>
-  );
-}
-
-function Select({
-  label,
-  name,
-  value,
-  options,
-  error,
-  onChange,
-}: {
-  label: string;
-  name: string;
-  value: string;
-  options: readonly (readonly [string, string])[];
-  error?: string | undefined;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <div className="dialog-field">
-      <label>
-        {label}
-        <select
-          value={value}
-          data-testid={`field-${name}`}
-          aria-invalid={error !== undefined}
-          onChange={(e) => onChange(e.target.value)}
-        >
-          {options.map(([v, text]) => (
-            <option key={v} value={v}>
-              {text}
-            </option>
-          ))}
-        </select>
-      </label>
-      {error && <span className="field-error">{error}</span>}
-    </div>
-  );
-}
-
 function SketchSelect({
   value,
   sketches,
@@ -961,22 +892,5 @@ function SketchSelect({
       error={error}
       onChange={onChange}
     />
-  );
-}
-
-function Check({
-  label,
-  checked,
-  onChange,
-}: {
-  label: string;
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-}) {
-  return (
-    <label className="dialog-check">
-      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
-      {label}
-    </label>
   );
 }

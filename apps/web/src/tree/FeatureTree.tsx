@@ -102,6 +102,8 @@ export function FeatureTree({
   const regenError = useModel(model, (s) => s.error);
   const selected = useStore(selection, (s) => s.selected);
   const part = findPart(document, partId);
+  // A scripted feature's row names the script it runs (ADR 0010 amendment, item 11).
+  const scriptName = (id: string) => document.scripts?.find((x) => x.id === id)?.name ?? id;
 
   const rows = useMemo(() => {
     if (!part) return [];
@@ -411,6 +413,7 @@ export function FeatureTree({
     const classes = [
       'feature-row',
       f.kind === 'derived' ? 'derived' : '',
+      f.kind === 'scripted' ? 'scripted' : '',
       `status-${row.status}`,
       isSelected ? 'selected' : '',
       row.stale ? 'stale' : '',
@@ -470,6 +473,15 @@ export function FeatureTree({
         {detail !== null && (
           <span className="detail" data-testid={`detail-${f.id}`}>
             {detail}
+          </span>
+        )}
+        {f.kind === 'scripted' && (
+          <span
+            className="script-mark"
+            data-testid={`script-mark-${f.id}`}
+            title={`Scripted: computed by the script ${scriptName(f.script)}`}
+          >
+            Script: {scriptName(f.script)}
           </span>
         )}
         <button

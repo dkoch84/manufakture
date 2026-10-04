@@ -13,6 +13,12 @@
     "e2e:install": "playwright install --with-deps chromium"
   },
   "dependencies": {
+    "@codemirror/commands": "6.11.1",
+    "@codemirror/lang-javascript": "6.2.5",
+    "@codemirror/language": "6.12.4",
+    "@codemirror/lint": "6.9.7",
+    "@codemirror/state": "6.7.6",
+    "@codemirror/view": "6.43.13",
     "@manufakture/cam": "workspace:*",
     "@manufakture/core": "workspace:*",
     "@manufakture/domain-construction": "workspace:*",

@@ -11,10 +11,14 @@ export type DialogKind =
   | 'pattern'
   | 'mirror'
   | 'thread'
-  | 'derived';
+  | 'derived'
+  | 'scripted';
 
-/** The kinds edited through a feature form (forms.ts); a derived part has a dialog of its own. */
-export type FormKind = Exclude<DialogKind, 'derived'>;
+/**
+ * The kinds edited through a feature form (forms.ts); a derived part and a scripted feature have
+ * dialogs of their own (DerivedDialog.tsx, ScriptedDialog.tsx).
+ */
+export type FormKind = Exclude<DialogKind, 'derived' | 'scripted'>;
 
 export const DIALOG_KINDS: readonly DialogKind[] = [
   'extrude',
@@ -27,6 +31,7 @@ export const DIALOG_KINDS: readonly DialogKind[] = [
   'mirror',
   'thread',
   'derived',
+  'scripted',
 ];
 
 /**

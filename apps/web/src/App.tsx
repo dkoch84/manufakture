@@ -147,6 +147,11 @@ import type { GeometryRef, SelectableItem } from './state/selection';
 import { useSketchShortcuts } from './sketcher/shortcuts';
 import { useSketching } from './sketcher/useSketching';
 import { VariablesPanel } from './variables/VariablesPanel';
+import { forgettingScriptGrants } from './scripts/libraryGuard';
+import { mayRunScript, scriptGrantsStore, type ScriptGrantsStore } from './scripts/policy';
+import { ScriptsBanner } from './scripts/ScriptsBanner';
+import { ScriptsPanel } from './scripts/ScriptsPanel';
+import type { ScriptedServices } from './features/ScriptedDialog';
 import { acceptViewSource } from './viewer/handoff';
 import { MAX_MFK_FILE_BYTES } from './persistence/limits';
 import { testHooksEnabled } from './testHooks';
@@ -179,6 +184,10 @@ const VIEWER_URL = viewerUrlFor(location, import.meta.env.BASE_URL);
 // The feature dialogs (and their forms and hole tables) load when one is first opened.
 const FeatureDialog = lazy(() =>
   import('./features/FeatureDialog').then((m) => ({ default: m.FeatureDialog })),
+);
+// The script editor (T7.2d), with CodeMirror behind it, when a script is first opened.
+const ScriptEditor = lazy(() =>
+  import('./scripts/ScriptEditor').then((m) => ({ default: m.ScriptEditor })),
 );
 // The Board dialog (woodworking, M4) likewise, with the board logic it needs.
 const BoardDialog = lazy(() =>
@@ -279,6 +288,8 @@ export interface AppProps {
   constructionUi?: ConstructionUiStore;
   /** The framing members regen sent (default: the app's member store). */
   members?: MemberStore;
+  /** Which documents' scripts may run on this device (default: the app's, in localStorage). */
+  scriptGrants?: ScriptGrantsStore;
 }
 
 /** Whether `doc` has imported reference bodies, which live outside regen and must be read again. */
@@ -342,6 +353,7 @@ export function App({
   openToolLibrary,
   constructionUi: givenConstructionUi,
   members = memberStore,
+  scriptGrants = scriptGrantsStore,
 }: AppProps) {
   const [ownConstructionUi] = useState(createConstructionUiStore);
   const constructionUi = givenConstructionUi ?? ownConstructionUi;
@@ -470,10 +482,14 @@ export function App({
     () => (loader.regenerator ? shareRegenerator(loader.regenerator) : null),
     [loader],
   );
+  // A change of which scripts may run (Run scripts, a script saved in the editor, the setting)
+  // starts the regen again, so the document is rebuilt under the new policy (the loader has sent
+  // it to the worker already). Only scripted features miss the cache.
+  const scriptsRevision = useStore(scriptGrants, (s) => s.revision);
   useEffect(() => {
     if (!loaded || !shared) return;
     return startRegen(shared.regenerator, documents, model);
-  }, [loaded, shared, documents, model]);
+  }, [loaded, shared, documents, model, scriptsRevision]);
   const configurationError = useModel(shownModel, (s) => s.configurationError);
   // Regen builds every part studio; the viewport, the sketches and the picks see the active one.
   const activePartId = useStore(documents, (s) => s.activePartId);
@@ -991,7 +1007,7 @@ export function App({
     () =>
       library
         ? homeActions({
-            library,
+            library: forgettingScriptGrants(library, scriptGrants),
             documents,
             autosave,
             show,
@@ -999,7 +1015,7 @@ export function App({
             branch: () => branchStore.getState().id,
           })
         : null,
-    [library, documents, autosave, show, branchStore],
+    [library, documents, autosave, show, branchStore, scriptGrants],
   );
 
   // Open in manufakture from the read-only viewer (src/viewer/handoff.ts): this tab was opened
@@ -1777,6 +1793,45 @@ export function App({
   const sketching = useSketching(session, documents, viewport, placements);
   // The open feature dialog, if any: a new feature from the toolbar, or one opened from the tree.
   const [dialog, setDialog] = useState<OpenDialog | null>(null);
+  // The script editor, if open: the script (null: a new one not saved yet), and a number that
+  // moves each time it is opened afresh (saving a new script keeps the same editor).
+  const [scriptEditor, setScriptEditor] = useState<{
+    scriptId: string | null;
+    session: number;
+  } | null>(null);
+  const openScript = useCallback(
+    (scriptId: string | null) =>
+      setScriptEditor((e) => ({ scriptId, session: (e?.session ?? 0) + 1 })),
+    [],
+  );
+  // What the scripted feature's dialog asks of the regen worker and of the opt-in.
+  const scripter = loader.scripter;
+  const scriptServices = useMemo<ScriptedServices | null>(() => {
+    if (!scripter) return null;
+    return {
+      async declarations(script, doc) {
+        const r = await scripter.declarations(
+          {
+            id: script.id,
+            source: script.source,
+            language: script.language,
+            apiVersion: script.apiVersion,
+          },
+          doc.id,
+        );
+        if (r === null || r.ok) return r;
+        const e = r.error;
+        return {
+          ok: false,
+          message: e.message,
+          ...('line' in e && e.line !== undefined ? { line: e.line } : {}),
+          ...('column' in e && e.column !== undefined ? { column: e.column } : {}),
+        };
+      },
+      mayRun: (doc, script) => mayRunScript(scriptGrants.getState(), doc.id, script),
+      openScript: (scriptId) => openScript(scriptId),
+    };
+  }, [scripter, scriptGrants, openScript]);
   const onEditFeature = useCallback(
     (featureId: string, options: { repick?: string } = {}) => {
       const { document: doc, activePartId: partId } = documents.getState();
@@ -1853,6 +1908,10 @@ export function App({
       sketcher: { store: session, toClient },
       document: documents,
       model,
+      scripts: {
+        grants: scriptGrants,
+        stats: () => loader.scripter?.stats() ?? Promise.resolve(null),
+      },
     };
     return () => {
       const hooks = window.__manufakture;
@@ -1860,9 +1919,10 @@ export function App({
       delete hooks.sketcher;
       delete hooks.document;
       delete hooks.model;
+      delete hooks.scripts;
       if (Object.keys(hooks).length === 0) delete window.__manufakture;
     };
-  }, [viewport, session, documents, model]);
+  }, [viewport, session, documents, model, scriptGrants, loader]);
 
   const selected = useStore(selection, (s) => s.selected);
   const hoveredFeature = useStore(selection, (s) =>
@@ -2197,6 +2257,7 @@ export function App({
           branchName={viewing.target.kind === 'version' ? viewing.target.version.name : ''}
         />
       )}
+      {!locked && <ScriptsBanner document={document} grants={scriptGrants} model={model} />}
       {/* The part tools; in a sketch the sketch toolbar takes this row. While a past state is
         viewed there is nothing to edit, so they step aside. */}
       {printing && !sketching.active && (
@@ -2598,6 +2659,7 @@ export function App({
                   resolve={resolveReference}
                   library={library}
                   createVersion={autosave ? autosave.createVersion : null}
+                  scripts={scriptServices}
                   onClose={() => setDialog(null)}
                 />
               </Suspense>
@@ -2652,6 +2714,12 @@ export function App({
                       selection={selection}
                       printSetupId={fitSetupId}
                     />
+                    <ScriptsPanel
+                      documents={documents}
+                      grants={scriptGrants}
+                      onEdit={openScript}
+                      disabled={exportAll !== null}
+                    />
                     <ConfigurationsPanel
                       documents={documents}
                       configurationError={configurationError}
@@ -2674,6 +2742,25 @@ export function App({
             )}
           </div>
         </div>
+        {scriptEditor !== null && !locked && (
+          <Suspense
+            fallback={
+              <section className="script-editor" aria-busy="true">
+                Opening the script editor...
+              </section>
+            }
+          >
+            <ScriptEditor
+              key={scriptEditor.session}
+              documents={documents}
+              model={model}
+              grants={scriptGrants}
+              scriptId={scriptEditor.scriptId}
+              onSaved={(scriptId) => setScriptEditor((e) => (e ? { ...e, scriptId } : e))}
+              onClose={() => setScriptEditor(null)}
+            />
+          </Suspense>
+        )}
         {drawingOpen && (
           <Suspense
             fallback={

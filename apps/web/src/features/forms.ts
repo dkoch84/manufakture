@@ -589,7 +589,8 @@ function printedFitOf(diameter: StoredExpression): { size: string; fit: FitKind 
   return size ? { size: size.size, fit: p.fit } : null;
 }
 
-function refItems(refs: readonly Reference[], lost: ReadonlySet<string>): RefItem[] {
+/** Stored references as reference field items, marking the ones regen could not resolve. */
+export function refItems(refs: readonly Reference[], lost: ReadonlySet<string>): RefItem[] {
   return refs.map((r) => ({
     id: r.id,
     ref: r.ref,

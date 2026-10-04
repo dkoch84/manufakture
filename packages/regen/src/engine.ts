@@ -194,7 +194,7 @@ import {
   routeBodies,
   type RoutedBody,
 } from './graph';
-import { stableStringify } from './hash';
+import { hashValue, stableStringify } from './hash';
 import { shownNamespaces } from './title-notes';
 import { importSourceMatches, keyInput } from './imports';
 import {
@@ -228,6 +228,11 @@ import { faceRef, topoRef, translateFeature } from './translate';
 import { SCRIPT_APIS, ScriptRun, type ScriptRunOutcome } from './script-api';
 import {
   ScriptHost,
+  DENY_ALL_SCRIPTS,
+  checkScriptPolicy,
+  scriptAllowed,
+  scriptsNotRunError,
+  type ScriptPolicy,
   apiVersionError,
   runawayError,
   scriptParamValues,
@@ -238,7 +243,13 @@ import {
   type ScriptRunEvent,
   type ScriptStats,
 } from './scripted';
-import { resolveParams, type ScriptInstance, type ScriptValue } from '@manufakture/script';
+import {
+  QUICKJS_BUILD,
+  resolveParams,
+  type ParamSpec,
+  type ScriptInstance,
+  type ScriptValue,
+} from '@manufakture/script';
 import type {
   AssemblyResult,
   BodyResult,
@@ -618,13 +629,18 @@ function sourceFailures(built: PartState, where: string, consequence: string): R
     })
     .map((x) => x.id);
   if (failed.length === 0) return [];
-  return [
-    {
-      code: 'derived-source',
-      features: failed,
-      message: `${failed.length === 1 ? 'A feature' : `${failed.length} features`} of ${where} failed (${failed.join(', ')}): ${consequence} it built without ${failed.length === 1 ? 'it' : 'them'}`,
-    },
-  ];
+  const notRun = failed.filter((id) =>
+    built.results
+      .get(id)
+      ?.errors.some((e) => e.code === 'script' && e.scriptCode === 'not-allowed'),
+  );
+  const warning: RegenWarning = {
+    code: 'derived-source',
+    features: failed,
+    message: `${failed.length === 1 ? 'A feature' : `${failed.length} features`} of ${where} failed (${failed.join(', ')}): ${consequence} it built without ${failed.length === 1 ? 'it' : 'them'}${notRun.length > 0 ? ` (scripts not run: ${notRun.join(', ')})` : ''}`,
+  };
+  if (notRun.length > 0) warning.scriptsNotRun = notRun;
+  return [warning];
 }
 
 function emptyCounters(): RegenCounters {
@@ -751,6 +767,8 @@ export class RegenEngine {
   #lastMembers = new Map<string, Map<string, MemberData>>();
   #memberCounts = { framed: 0, cacheHits: 0 };
   readonly #scripts: ScriptHost | null;
+  /** Which scripts may run (the app's opt-in); null: all of them. */
+  #scriptPolicy: ScriptPolicy | null = null;
 
   constructor(options: RegenEngineOptions) {
     this.#scripts = options.scripts === undefined ? null : new ScriptHost(options.scripts);
@@ -807,6 +825,86 @@ export class RegenEngine {
    */
   addRunawayScripts(keys: readonly string[]): void {
     this.#scripts?.addRunaway(keys);
+  }
+
+  /**
+   * Which documents' scripts may run (`ScriptPolicy`); null lets every script run (an engine a
+   * trusted host drives, as in Node; the regen worker never passes null). Applies from the next
+   * scripted feature built. Something that is not a policy denies every script, then throws.
+   */
+  setScriptPolicy(policy: ScriptPolicy | null): void {
+    if (policy === null) {
+      this.#scriptPolicy = null;
+      return;
+    }
+    const checked = checkScriptPolicy(policy);
+    if (checked === null) {
+      this.#scriptPolicy = DENY_ALL_SCRIPTS;
+      throw new TypeError('not a script policy');
+    }
+    this.#scriptPolicy = checked;
+  }
+
+  /**
+   * A script's parameter declarations, for the feature dialog: its top-level code run in the
+   * document's instance (no `ctx`), under the run limits and the watchdog like any run. Only
+   * when the policy lets script `script.id` of `documentId` run, with this source; otherwise it
+   * fails with `scriptsNotRunError` and nothing runs.
+   */
+  async scriptDeclarations(
+    script: { id: string; source: string; language: 'js' | 'ts'; apiVersion: number },
+    documentId: string,
+  ): Promise<{ ok: true; params: ParamSpec[] } | { ok: false; error: RegenError }> {
+    const scripts = this.#scripts;
+    const scriptId = script.id;
+    if (!(await scriptAllowed(this.#scriptPolicy, documentId, true, script))) {
+      return { ok: false, error: scriptsNotRunError(scriptId) };
+    }
+    if (scripts === null) {
+      return {
+        ok: false,
+        error: { code: 'unsupported', message: 'This build of the app cannot run scripts' },
+      };
+    }
+    const versionError = apiVersionError(scriptId, script.apiVersion);
+    if (versionError !== null) return { ok: false, error: versionError };
+    const key = `declarations:${hashValue({
+      source: script.source,
+      language: script.language,
+      apiVersion: script.apiVersion,
+      quickjs: QUICKJS_BUILD,
+    })}`;
+    if (scripts.isRunaway(key)) return { ok: false, error: runawayError(scriptId) };
+    let instance: ScriptInstance;
+    try {
+      instance = await scripts.instance('');
+    } catch (error) {
+      return {
+        ok: false,
+        error: {
+          code: 'script',
+          scriptCode: 'internal',
+          scriptId,
+          message: 'The script engine could not be loaded',
+          detail: error instanceof Error ? error.message : String(error),
+        },
+      };
+    }
+    scripts.event('start', 'declarations', key);
+    scripts.stats.declarations++;
+    try {
+      const declared = await instance.readDeclarations({
+        source: script.source,
+        language: script.language,
+        apiVersion: script.apiVersion,
+        limits: scripts.limits,
+      });
+      return declared.ok
+        ? { ok: true, params: declared.value.params }
+        : { ok: false, error: scriptRegenError(scriptId, declared.error) };
+    } finally {
+      scripts.event('end', 'declarations', key);
+    }
   }
 
   /** The newest generation requested. */
@@ -1594,6 +1692,11 @@ export class RegenEngine {
       fail([
         { code: 'invalid', field: ['script'], message: `The document has no script ${f.script}` },
       ]);
+      return;
+    }
+    // Before the cache: a document the user has not allowed shows no script's work at all.
+    if (!(await scriptAllowed(this.#scriptPolicy, run.stored.id, state.ns === null, script))) {
+      fail([scriptsNotRunError(script.id)]);
       return;
     }
     const versionError = apiVersionError(script.id, script.apiVersion);

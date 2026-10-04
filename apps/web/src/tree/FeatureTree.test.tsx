@@ -240,3 +240,53 @@ describe('the feature tree', () => {
     expect(t.ids()).toHaveLength(5);
   });
 });
+
+describe('FeatureTree: scripted features', () => {
+  it('marks a scripted feature with the script it runs; a double-click opens its dialog', async () => {
+    const { scriptedDocument } = await import('../scripts/scripts.test-fixture');
+    const documents = createDocumentStore(scriptedDocument());
+    const model = createModelStore();
+    const onEdit = vi.fn();
+    model.setState({
+      available: true,
+      generation: 1,
+      document: documents.getState().document,
+      parts: [
+        {
+          partId: 'part#1',
+          bodies: [],
+          features: [
+            result('scripted#1', {
+              kind: 'scripted',
+              status: 'error',
+              errors: [
+                {
+                  code: 'script',
+                  scriptCode: 'not-allowed',
+                  scriptId: 'script#1',
+                  message: 'Scripts not run: not allowed',
+                },
+              ],
+            }),
+            result('scripted#2', { kind: 'scripted' }),
+          ],
+        },
+      ],
+    });
+    render(
+      <FeatureTree
+        documents={documents}
+        model={model}
+        selection={createSelectionStore()}
+        onEdit={onEdit}
+      />,
+    );
+    expect(screen.getByTestId('script-mark-scripted#1').textContent).toBe('Script: Box');
+    expect(screen.getByTestId('script-mark-scripted#2').textContent).toBe('Script: Other');
+    const row = screen.getByTestId('feature-scripted#1');
+    expect(row.className).toContain('scripted');
+    expect(row.getAttribute('data-status')).toBe('error');
+    fireEvent.doubleClick(row);
+    expect(onEdit).toHaveBeenCalledWith('scripted#1');
+  });
+});

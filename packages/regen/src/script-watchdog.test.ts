@@ -122,6 +122,7 @@ describe('the regen worker watchdog on a real thread', () => {
       restarted = resolve;
     });
     const client = new RegenClient(() => spawn(300), {
+      scriptPolicy: { auto: true, documents: [], scripts: [] },
       scriptTimeoutMs: 1500,
       onScriptTimeout: (e) => timeouts.push(e.featureId),
       onRestarted: () => restarted(),

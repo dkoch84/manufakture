@@ -18,6 +18,7 @@ const TITLES: Record<DialogKind, string> = {
   mirror: 'Mirror features or the body about a face',
   thread: 'Thread a shaft or a hole (pick its round face)',
   derived: 'Insert the bodies of a part from a version of a document',
+  scripted: 'A feature computed by a script of the document (write one in the Scripts panel)',
 };
 
 /** Button text where the tree's kind label is too short to say what the tool does. */

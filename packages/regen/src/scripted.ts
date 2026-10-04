@@ -149,6 +149,98 @@ export class ScriptHost {
   }
 }
 
+/**
+ * Which scripts the host lets run (ADR 0010 amendment, item 11): until the human security sign-off
+ * (T7.6b), the app runs a document's scripts only where the user allowed them on this device. The
+ * policy is the app's, sent to the worker; a document it does not allow regenerates without
+ * running any script, and each scripted feature fails with `scriptsNotRunError`, which is never
+ * cached. Without a policy (Node, tests, other hosts) every script runs.
+ */
+export interface ScriptPolicy {
+  /** Run every document's scripts (the setting "Run scripts in documents automatically"). */
+  auto: boolean;
+  /** Documents whose scripts all run (the user chose Run scripts), by document id. */
+  documents: readonly string[];
+  /**
+   * Single scripts the user wrote or edited on this device: a script of `document` runs when its
+   * source, as stored, has one of these SHA-256 digests (lower-case hex). Only the document's own
+   * scripts: a derived part's source document needs `documents`.
+   */
+  scripts: readonly { document: string; script: string; sha256: string }[];
+}
+
+/** The policy that runs nothing: the regen worker's until the host sends one (fail closed). */
+export const DENY_ALL_SCRIPTS: ScriptPolicy = Object.freeze({
+  auto: false,
+  documents: Object.freeze([]) as readonly string[],
+  scripts: Object.freeze([]) as ScriptPolicy['scripts'],
+});
+
+/** The most entries of each list a policy may hold (the worker refuses larger ones). */
+export const MAX_POLICY_ENTRIES = 100_000;
+
+/** A policy as the worker received it, checked: null when it is not one. */
+export function checkScriptPolicy(value: unknown): ScriptPolicy | null {
+  if (value === null || typeof value !== 'object') return null;
+  const p = value as Record<string, unknown>;
+  if (typeof p.auto !== 'boolean') return null;
+  const { documents, scripts } = p;
+  if (!Array.isArray(documents) || documents.length > MAX_POLICY_ENTRIES) return null;
+  if (!Array.isArray(scripts) || scripts.length > MAX_POLICY_ENTRIES) return null;
+  if (!documents.every((d) => typeof d === 'string')) return null;
+  for (const s of scripts as unknown[]) {
+    if (s === null || typeof s !== 'object') return null;
+    const g = s as Record<string, unknown>;
+    if (typeof g.document !== 'string' || typeof g.script !== 'string') return null;
+    if (typeof g.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(g.sha256)) return null;
+  }
+  return {
+    auto: p.auto,
+    documents: [...(documents as string[])],
+    scripts: (scripts as { document: string; script: string; sha256: string }[]).map((g) => ({
+      document: g.document,
+      script: g.script,
+      sha256: g.sha256,
+    })),
+  };
+}
+
+/** The SHA-256 of a script source as stored (its UTF-8 bytes), as lower-case hex. */
+export async function sourceSha256(source: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(source));
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Whether `policy` lets a script of `documentId` run: always without a policy; then the setting,
+ * the document's grant, and (for the document's own scripts, `own`) a grant of this exact source.
+ */
+export async function scriptAllowed(
+  policy: ScriptPolicy | null,
+  documentId: string,
+  own: boolean,
+  script: { id: string; source: string },
+): Promise<boolean> {
+  if (policy === null || policy.auto) return true;
+  if (policy.documents.includes(documentId)) return true;
+  if (!own) return false;
+  const grants = policy.scripts.filter((g) => g.document === documentId && g.script === script.id);
+  if (grants.length === 0) return false;
+  const sha = await sourceSha256(script.source);
+  return grants.some((g) => g.sha256 === sha);
+}
+
+/** The error of a scripted feature whose scripts the policy does not let run. */
+export function scriptsNotRunError(scriptId: string): RegenError {
+  return {
+    code: 'script',
+    scriptCode: 'not-allowed',
+    scriptId,
+    message:
+      "Scripts not run: this document's scripts have not been allowed on this device (choose Run scripts)",
+  };
+}
+
 /** What the user sees for a `host-error`: a bug on our side, whose raw text is not for the UI. */
 export const HOST_ERROR_MESSAGE =
   'The script stopped because of an internal error in the app (not in the script)';

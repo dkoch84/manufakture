@@ -20,7 +20,7 @@ import type { CamGeometryOptions, CamGeometryResult } from './cam';
 import type { DrawingSheetResult, DrawingViewResult } from './drawing';
 import type { EngineStats } from './engine';
 import type { OrientedSizesOptions, OrientedSizesResult } from './oriented';
-import type { ScriptRunEvent } from './scripted';
+import type { ScriptPolicy, ScriptRunEvent, ScriptStats } from './scripted';
 import type { FontReadReply, TextReply, TextRequest } from './text';
 import type {
   AssemblyResult,
@@ -30,7 +30,12 @@ import type {
   MemberBodiesResult,
   RegenResult,
 } from './types';
-import type { RegenWorkerApi, TextPreviewOptions } from './worker-api';
+import type {
+  RegenWorkerApi,
+  ScriptDeclarationSource,
+  ScriptDeclarationsReply,
+  TextPreviewOptions,
+} from './worker-api';
 import type { InitReport } from '@manufakture/kernel';
 
 /**
@@ -52,6 +57,12 @@ export interface RegenClientOptions extends KernelClientOptions {
    * fails with `timeout` instead of running again).
    */
   onScriptTimeout?: (event: { featureId: string; key: string }) => void;
+  /**
+   * Which documents' scripts may run (`ScriptPolicy`), sent to every worker before anything else;
+   * change it with `setScriptPolicy`. Default null: none is sent, and the worker, which fails
+   * closed, runs no script. Pass `{ auto: true, documents: [], scripts: [] }` to run every one.
+   */
+  scriptPolicy?: ScriptPolicy | null;
 }
 
 export class RegenClient extends KernelClient {
@@ -62,12 +73,14 @@ export class RegenClient extends KernelClient {
   /** The worker whose script events count; events from an older one are ignored. */
   #watching = 0;
   #timer: { key: string; featureId: string; handle: ReturnType<typeof setTimeout> } | null = null;
+  #scriptPolicy: ScriptPolicy | null;
 
   constructor(connect: () => KernelEndpoint, options: RegenClientOptions = {}) {
     const ms = options.scriptTimeoutMs ?? SCRIPT_HARD_TIMEOUT_MS;
     // Checked before a worker is started for nothing.
     if (!(ms > 0)) throw new RangeError('scriptTimeoutMs must be above 0');
     super(connect, options);
+    this.#scriptPolicy = options.scriptPolicy ?? null;
     this.#scriptTimeoutMs = ms;
     this.#onScriptTimeout = options.onScriptTimeout;
     this.#watch();
@@ -113,6 +126,60 @@ export class RegenClient extends KernelClient {
     void Promise.resolve(
       this.worker<RegenWorkerApi>().watchScripts(Comlink.proxy(onRun), [...this.#runaway]),
     ).catch(() => undefined);
+    if (this.#scriptPolicy !== null) {
+      // The worker denies every script when it refuses a policy; say so where it can be seen.
+      this.#sendPolicy(this.#scriptPolicy).catch((e: unknown) =>
+        console.error('The regen worker refused the script policy:', e),
+      );
+    }
+  }
+
+  #sendPolicy(policy: ScriptPolicy): Promise<void> {
+    return Promise.resolve(this.worker<RegenWorkerApi>().setScriptPolicy(policy));
+  }
+
+  /** The script policy in force (see `RegenClientOptions.scriptPolicy`). */
+  get scriptPolicy(): ScriptPolicy | null {
+    return this.#scriptPolicy;
+  }
+
+  /**
+   * Change which documents' scripts may run. Sent before any request made after this call (and
+   * to every worker started later); regenerate to apply it to what is shown. Rejects when the
+   * worker refuses it (it then denies every script).
+   */
+  setScriptPolicy(policy: ScriptPolicy): Promise<void> {
+    this.#scriptPolicy = policy;
+    return this.#sendPolicy(policy);
+  }
+
+  /**
+   * A script's parameter declarations, read in the worker under the script limits and the
+   * watchdog, if the policy lets this script of `documentId` run. Null when the worker was
+   * stopped before it answered.
+   */
+  scriptDeclarations(
+    script: ScriptDeclarationSource,
+    documentId: string,
+  ): Promise<ScriptDeclarationsReply | null> {
+    return this.droppable(
+      this.worker<RegenWorkerApi>().scriptDeclarations(
+        {
+          id: script.id,
+          source: script.source,
+          language: script.language,
+          apiVersion: script.apiVersion,
+        },
+        documentId,
+      ) as Promise<ScriptDeclarationsReply>,
+    ).then((r) => r ?? null);
+  }
+
+  /** What scripted features cost so far in the current worker (null without scripts). */
+  scriptStats(): Promise<ScriptStats | null> {
+    return this.droppable(
+      this.worker<RegenWorkerApi>().scriptStats() as Promise<ScriptStats | null>,
+    ).then((r) => r ?? null);
   }
 
   #runawayFired(watching: number): void {
