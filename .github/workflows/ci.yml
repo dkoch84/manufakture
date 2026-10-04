@@ -29,9 +29,10 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm lint
-      # Unit tests, and the G-code verifier over every golden G-code file (the `cam-gcode`
-      # project); the kernel goldens run in their own job below.
-      - run: pnpm test --project packages --project cam-gcode --project web
+      # Unit tests, the G-code verifier over every golden G-code file (the `cam-gcode`
+      # project) and the sync server's integration tests over a real server and SQLite file (the
+      # `server` project); the kernel goldens run in their own job below.
+      - run: pnpm test --project packages --project cam-gcode --project server --project web
       - run: pnpm build
 
   site:

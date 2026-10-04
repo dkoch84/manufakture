@@ -47,6 +47,15 @@ export default defineConfig({
           include: ['packages/cam/test/**/*.test.ts'],
         },
       },
+      {
+        // apps/server: integration tests over a real server on an ephemeral port.
+        test: {
+          name: 'server',
+          environment: 'node',
+          testTimeout: HEAVY_TEST_TIMEOUT,
+          include: ['apps/server/{src,test}/**/*.test.ts'],
+        },
+      },
       'apps/web',
     ],
   },

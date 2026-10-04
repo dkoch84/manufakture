@@ -1,0 +1,32 @@
+{
+  "name": "@manufakture/server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "GPL-3.0-or-later",
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "vite build",
+    "start": "node dist/main.js",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --root ../.. --project server"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.3.0",
+    "@fastify/websocket": "^11.3.3",
+    "better-sqlite3": "^13.0.3",
+    "fastify": "^5.12.5",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@manufakture/core": "workspace:*",
+    "@manufakture/sync": "workspace:*",
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/ws": "^8.18.2"
+  }
+}

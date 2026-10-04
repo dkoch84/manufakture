@@ -2,3 +2,10 @@ packages:
   - apps/*
   - packages/*
   - spikes/*
+
+# Packages whose install scripts may run: better-sqlite3 (apps/server) installs its native
+# module. pnpm 11 reads allowBuilds; pnpm 10 read onlyBuiltDependencies.
+allowBuilds:
+  better-sqlite3: true
+onlyBuiltDependencies:
+  - better-sqlite3
