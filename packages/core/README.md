@@ -1112,8 +1112,12 @@ ids come from the part's counter like any feature's. Whether the values fit the 
 regen's to check by running the script. `seed` (0 to `MAX_SCRIPT_SEED`) seeds the script's
 `Math.random` together with the source hash, never with the feature id, so a remap or a merge never
 changes geometry. A scripted feature depends on `dependsOn`, on every feature its reference names
-mention, and needs its script to exist. Its faces are named `<id>:<operation id>/<name>`
-(decision 6); the name parser learns that form with regen in T7.2c. `serialize` writes `params`
+mention, and needs its script to exist. Every face it makes is named
+`<feature id>:<operation id>/<name>` (decision 6; `scriptOperationPrefix`), for example
+`scripted#2:boss/cap:end`, and every body `<feature id>:<operation id>` (`scripted#2:boss`). The
+operation id matches `SCRIPT_OPERATION_ID_PATTERN` (a lower-case letter, then letters, digits and
+`_`, at most 64 characters); `scriptOperationOf(name)` reads the prefix back (null past that
+limit). See Face names for how the parser and the remap treat it. `serialize` writes `params`
 sorted by name.
 
 ### Threads
@@ -1705,7 +1709,13 @@ left-to-right pass with no recursion (linear on hostile input, like the old scan
 So born names `extrude#1:side:e2#a`, region edges `e2#1`, nested names
 `shell#5:offset:extrude#1:cap:end`, pieces `X#2`, merges `(A+B)`, corners `A&B&C`, instance
 prefixes `pattern#7:i2/X` and `mirror#8:image/X`, `import#9:face:4`, `?face3` and derived
-prefixes all parse, and so do edge names (`A|B[C,D]#2`, display only). `mapName(name, maps)`
+prefixes all parse, and so do edge names (`A|B[C,D]#2`, display only). A scripted feature's
+operation prefix `<feature id>:<operation id>/` (`scripted#2:boss/cap:end`) is a `feature` part
+followed by the text `:boss/`; the rest is parsed on, so feature ids of member names after it
+(`scripted#2:rnd/round:extrude#1:cap:end&extrude#1:side:e2`) are `feature` parts, while the
+script's roles and local ids (`cap:end`, `side:s1`, even `side:e2`) stay text. A remap therefore
+rewrites the feature id of the prefix and never the operation or local ids, and an operation id
+is never read as a derived prefix, even `from`. `mapName(name, maps)`
 rewrites the feature ids and sub-id tails (keeping suffixes) and of a derived prefix only its own
 id. `featureIdsInName` is the `feature` parts of the parse, so validation and the remap read names
 the same way.

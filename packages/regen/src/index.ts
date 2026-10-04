@@ -15,6 +15,18 @@ export {
   type RegenOptions,
 } from './engine';
 export {
+  MAX_COORDINATE,
+  MAX_HANDLES_PER_CALL,
+  MAX_SKETCH_ENTITIES,
+  MAX_SKETCH_LOOPS,
+  SCRIPT_APIS,
+  SCRIPT_API_V1_SURFACE,
+  SCRIPT_LOCAL_ID_PATTERN,
+  ScriptRun,
+  type ScriptRunOutcome,
+} from './script-api';
+export { ScriptHost, type ScriptOptions, type ScriptRunEvent, type ScriptStats } from './scripted';
+export {
   DEFAULT_KERNEL_BUILD,
   DEFAULT_SOLVER_BUILD,
   MemoryCache,

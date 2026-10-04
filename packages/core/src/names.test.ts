@@ -2,7 +2,12 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { featureIdsInName } from './features';
+import {
+  SCRIPT_OPERATION_ID_PATTERN,
+  featureIdsInName,
+  scriptOperationOf,
+  scriptOperationPrefix,
+} from './features';
 import { mapName, parseName, printName, subIdsInName, type NamePart } from './names';
 import { FEATURE_KINDS } from './schema';
 import { Rng } from './sync-test-generator';
@@ -129,6 +134,68 @@ describe('parseName: every naming form', () => {
     ],
     ['bare body id is text', 'extrude#3', [text('extrude#3')]],
     ['unknown kind is text', 'cut#4:side:s3', [text('cut#4:side:s3')]],
+    [
+      'script operation, role only',
+      'scripted#2:boss/cap:end',
+      [feature('scripted#2'), text(':boss/cap:end')],
+    ],
+    [
+      'script operation, local id (never a sub-id, even e2)',
+      'scripted#2:boss/side:e2',
+      [feature('scripted#2'), text(':boss/side:e2')],
+    ],
+    [
+      'script fillet round named by member faces',
+      'scripted#2:rnd/round:extrude#1:cap:end&extrude#1:side:e2',
+      [
+        feature('scripted#2'),
+        text(':rnd/round:'),
+        feature('extrude#1'),
+        text(':cap:end&'),
+        feature('extrude#1'),
+        text(':side:'),
+        sub('e2'),
+      ],
+    ],
+    [
+      'script round over the script own faces',
+      'scripted#3:rnd/round:scripted#2:boss/cap:end&scripted#2:boss/side:s1',
+      [
+        feature('scripted#3'),
+        text(':rnd/round:'),
+        feature('scripted#2'),
+        text(':boss/cap:end&'),
+        feature('scripted#2'),
+        text(':boss/side:s1'),
+      ],
+    ],
+    [
+      'script pattern instance',
+      'scripted#2:holes/i3/scripted#2:hole/side:c1',
+      [feature('scripted#2'), text(':holes/i3/'), feature('scripted#2'), text(':hole/side:c1')],
+    ],
+    [
+      'script operation named from is not a derived prefix',
+      'scripted#2:from/round:extrude#1:side:e2',
+      [
+        feature('scripted#2'),
+        text(':from/round:'),
+        feature('extrude#1'),
+        text(':side:'),
+        sub('e2'),
+      ],
+    ],
+    ['script body id', 'scripted#2:boss', [feature('scripted#2'), text(':boss')]],
+    [
+      'script face in a derived source stays source',
+      'derived#1:from/scripted#2:boss/cap:end',
+      [feature('derived#1'), text(':from/'), source('scripted#2:boss/cap:end')],
+    ],
+    [
+      'script edge name',
+      'scripted#2:boss/cap:end|scripted#2:boss/side:s1',
+      [feature('scripted#2'), text(':boss/cap:end|'), feature('scripted#2'), text(':boss/side:s1')],
+    ],
   ])('%s: %s', (_form, name, parts) => {
     expect(parseName(name)).toEqual(parts);
     expect(printName(parseName(name))).toBe(name);
@@ -208,6 +275,51 @@ describe('round trips over the test goldens', () => {
   });
 });
 
+describe('script operation names (ADR 0010 decision 6)', () => {
+  it.each<[string, string[], string[]]>([
+    ['scripted#2:boss/side:s1', ['scripted#2'], []],
+    ['scripted#2:boss/side:e2', ['scripted#2'], []],
+    ['scripted#2:rnd/round:scripted#2:boss/cap:end&scripted#2:boss/side:s1', ['scripted#2'], []],
+    [
+      'scripted#3:rnd/round:extrude#1:cap:end&extrude#1:side:e2',
+      ['scripted#3', 'extrude#1'],
+      ['e2'],
+    ],
+    ['scripted#3:from/round:extrude#1:side:e2', ['scripted#3', 'extrude#1'], ['e2']],
+    ['scripted#3:boss', ['scripted#3'], []],
+    ['derived#1:from/scripted#2:boss/cap:end', ['derived#1'], []],
+  ])('%s', (name, features, subs) => {
+    // Feature ids after the prefix are dependencies; the script's local ids are not sub-ids.
+    expect(featureIdsInName(name)).toEqual(features);
+    expect(subIdsInName(name)).toEqual(subs);
+  });
+
+  it('builds and reads the prefix', () => {
+    expect(scriptOperationPrefix('scripted#2', 'boss')).toBe('scripted#2:boss/');
+    expect(scriptOperationOf('scripted#2:boss/cap:end')).toEqual({
+      featureId: 'scripted#2',
+      operationId: 'boss',
+    });
+    expect(scriptOperationOf('scripted#2:boss')).toBeNull();
+    expect(scriptOperationOf('extrude#1:cap:end')).toBeNull();
+    expect(scriptOperationOf('fillet#3:round:scripted#2:boss/cap:end')).toBeNull();
+    // The same 64-character limit as the operation id pattern.
+    const longest = 'a'.repeat(64);
+    expect(scriptOperationOf(`scripted#2:${longest}/cap:end`)).toEqual({
+      featureId: 'scripted#2',
+      operationId: longest,
+    });
+    expect(scriptOperationOf(`scripted#2:${'a'.repeat(65)}/cap:end`)).toBeNull();
+  });
+
+  it('accepts only operation ids that cannot structure a name', () => {
+    for (const ok of ['boss', 'hole1', 'a', 'rim_2', 'bossTop', 'from'])
+      expect(SCRIPT_OPERATION_ID_PATTERN.test(ok), ok).toBe(true);
+    for (const bad of ['', 'Boss', '1a', 'a-b', 'a/b', 'a:b', 'a#1', 'a b', 'a'.repeat(65)])
+      expect(SCRIPT_OPERATION_ID_PATTERN.test(bad), bad).toBe(false);
+  });
+});
+
 /** A random name of every form, nested a few levels. */
 function randomName(rng: Rng, depth = 0): string {
   const fid = () => `${rng.pick(FEATURE_KINDS)}#${1 + rng.int(30)}`;
@@ -221,6 +333,8 @@ function randomName(rng: Rng, depth = 0): string {
       () => `?face${1 + rng.int(9)}`,
       () => `${fid()}:thread:root:${rng.int(5)}`,
       () => `${fid()}:t${rng.int(3)}:xmax`,
+      () =>
+        `scripted#${1 + rng.int(9)}:${rng.pick(['boss', 'from', 'e2', 'hole_1'])}/side:s${rng.int(9)}`,
       () => fid(),
     ])();
   if (depth >= 3) return leaf();
@@ -233,6 +347,8 @@ function randomName(rng: Rng, depth = 0): string {
     () => `${fid()}:i${rng.int(5)}/${inner()}`,
     () => `${fid()}:image/${inner()}`,
     () => `derived#${1 + rng.int(3)}:from/${inner()}`,
+    () =>
+      `scripted#${1 + rng.int(3)}:${rng.pick(['rnd', 'from', 'p'])}/round:${inner()}&${inner()}`,
     () => `${inner()}#${1 + rng.int(3)}`,
     () => `${inner()}|${inner()}`,
   ])();
@@ -249,7 +365,23 @@ describe('round trips over generated names', () => {
 
   it('prints back arbitrary strings, junk included', () => {
     const rng = new Rng(11);
-    const alphabet = ['(', ')', '+', '&', ':', '/', '#', '|', 'e', '1', 'extrude#1:', 'from/', '?'];
+    const alphabet = [
+      '(',
+      ')',
+      '+',
+      '&',
+      ':',
+      '/',
+      '#',
+      '|',
+      'e',
+      '1',
+      'extrude#1:',
+      'scripted#2:',
+      'from/',
+      'op/',
+      '?',
+    ];
     for (let i = 0; i < 2000; i++) {
       let s = '';
       for (let k = rng.int(30); k > 0; k--) s += rng.pick(alphabet);
@@ -263,6 +395,10 @@ describe('round trips over generated names', () => {
     expect(printName(parseName(deep))).toBe(deep);
     const chain = 'shell#1:offset:'.repeat(50_000) + 'extrude#1:side:e1';
     expect(printName(parseName(chain))).toBe(chain);
+    const ops = 'scripted#1:op/round:'.repeat(50_000) + 'extrude#1:side:e1';
+    expect(printName(parseName(ops))).toBe(ops);
+    const longOp = `scripted#1:${'a'.repeat(200_000)}`;
+    expect(printName(parseName(longOp))).toBe(longOp);
     expect(performance.now() - start).toBeLessThan(2000);
   });
 });
@@ -270,7 +406,14 @@ describe('round trips over generated names', () => {
 describe('mapName', () => {
   const maps = {
     feature: (id: string) =>
-      ({ 'extrude#1': 'extrude#4', 'fillet#3': 'fillet#9', 'derived#1': 'derived#2' })[id] ?? id,
+      (
+        ({
+          'extrude#1': 'extrude#4',
+          'fillet#3': 'fillet#9',
+          'derived#1': 'derived#2',
+          'scripted#4': 'scripted#8',
+        }) as Record<string, string>
+      )[id] ?? id,
     sub: (id: string) => ({ e7: 'e9', r1: 'r5' })[id] ?? id,
   };
 
@@ -282,6 +425,14 @@ describe('mapName', () => {
     ['derived#1:from/extrude#1:side:e7', 'derived#2:from/extrude#1:side:e7'],
     ['extension#3:layer/sheathing', 'extension#3:layer/sheathing'],
     ['?face', '?face'],
+    // A script's operation and local ids are never rewritten; feature ids after the prefix are.
+    ['scripted#4:boss/side:e7', 'scripted#8:boss/side:e7'],
+    [
+      'scripted#4:rnd/round:extrude#1:cap:end&extrude#1:side:e7',
+      'scripted#8:rnd/round:extrude#4:cap:end&extrude#4:side:e9',
+    ],
+    ['scripted#4:from/round:extrude#1:side:e7', 'scripted#8:from/round:extrude#4:side:e9'],
+    ['scripted#4:p/i2/scripted#4:hole/side:r1', 'scripted#8:p/i2/scripted#8:hole/side:r1'],
   ])('%s', (from, to) => {
     expect(mapName(from, maps)).toBe(to);
   });

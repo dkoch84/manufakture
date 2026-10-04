@@ -4,11 +4,10 @@
 // (apps/web's regen-worker.ts, with its domains registered) imports `RegenClient` from
 // `@manufakture/regen/client` and never pulls this worker into its build.
 
-import type { KernelClientOptions } from '@manufakture/kernel/kernel-client';
-import { RegenClient } from './client';
+import { RegenClient, type RegenClientOptions } from './client';
 
 /** Start the regen worker (the kernel plus the regen engine) and connect to it. */
-export function spawnRegenWorker(options: KernelClientOptions = {}): RegenClient {
+export function spawnRegenWorker(options: RegenClientOptions = {}): RegenClient {
   return new RegenClient(() => {
     const worker = new Worker(new URL('./worker.ts', import.meta.url), {
       type: 'module',

@@ -320,6 +320,57 @@ A failed extension makes no body; later features that name its bodies are `upstr
 features that do not depend on it build. A translator's metadata (a board's frame) is reported as
 `FeatureResult.metadata`, recomputed on every regen and never stored.
 
+## Scripted features
+
+A `scripted` feature (core README, "Scripts"; [ADR 0010](../../docs/adr/0010-scripting-sandbox.md)) is built by running its script of the document's library in QuickJS (`@manufakture/script`), in this worker, against the `ctx` of its script API version (`src/script-api.ts`). Host functions call the synchronous kernel directly, inside one `KernelService.session` (the exclusive slot, owning the shapes it makes): each operation is a kernel part feature (`applyFeature`), so faces are named by the same rules as the GUI features'.
+
+```ts
+const engine = new RegenEngine({
+  kernel: service,
+  solver,
+  scripts: { engine: () => ScriptEngine.load({ url: quickjsWasmUrl }) }, // Node: nodeScriptEngine
+});
+```
+
+`worker.ts` passes the `.wasm` as a Vite `?url` asset; a host with its own worker entry (apps/web's) passes `engine.scripts` itself. Without `scripts`, or with a kernel that has no `session`, a scripted feature fails with `unsupported`.
+
+**The API, version 1** (`SCRIPT_API_V1_SURFACE` pins it; a test checks it is exactly what `ctx` holds). Every call that makes geometry takes an operation id first, `[a-z][A-Za-z0-9_]*` up to 64 characters, unique in the run:
+
+| Call                                                                                                                  | What                                                                                                                                                                                                                  |
+| --------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sketch(id, { plane, loops \| regions })`                                                                             | a profile from data: `plane` `'XY'`, `'XZ'`, `'YZ'`, a planar face or `{ origin, normal, xDir? }`; entities `line`, `arc`, `circle`, `bezier` in mm, each with a local id (`[a-z][A-Za-z0-9_]*`) naming its side face |
+| `extrude(id, sketch, { distance, symmetric?, through?, reverse?, draft?, mode?, bodies? })`                           | `mode` `new` (default), `add`, `cut`, `intersect`; `bodies` the scope                                                                                                                                                 |
+| `revolve(id, sketch, { axis, angle?, symmetric?, mode?, bodies? })`                                                   | a full turn by default                                                                                                                                                                                                |
+| `fillet(id, edges, radius)`, `chamfer(id, edges, distance)`                                                           | rounds and bevels named by their edges' faces                                                                                                                                                                         |
+| `shell(id, faces, thickness, { outward? })`                                                                           | no faces: a closed hollow                                                                                                                                                                                             |
+| `boolean(id, 'union' \| 'subtract' \| 'intersect', targets, tools)`                                                   | the kernel's `combine`: tools are consumed                                                                                                                                                                            |
+| `pattern(id, source, { linear } \| { circular })`                                                                     | `source` operations (extrudes, revolves, rebuilt per copy) or bodies (`mode` `new` or `add`)                                                                                                                          |
+| `mirror(id, source, plane, { mode? })`, `transform(id, bodies, { translate } \| { rotate } \| { mirror })`            | copies, and the kernel's `move`                                                                                                                                                                                       |
+| `bodies(op?)`, `faces(target?, { surface?, normal?, role? })`, `edges(target?, { curve?, direction? })`, `name(face)` | queries: what an operation made (FeatureScript's `qCreatedBy`), a body's or a face's; sorted by name                                                                                                                  |
+| `measure.volume`, `.area`, `.bounds`, `.face`, `.edge`                                                                | measurements, plain data                                                                                                                                                                                              |
+
+Operations return handles (`op`, `body`, `face`, `edge`, `sketch`); queries and measurements return handles and plain data. A failed kernel operation, and every malformed argument, throws an ordinary `Error` the script can catch (`ScriptHostError`), with the operation in the message.
+
+**Validation.** The host functions are the attack surface, so every argument is checked before the kernel sees it: numbers finite and within 1 km (`MAX_COORDINATE`; NaN, the infinities and `-0` refused or normalised), counts bounded (`MAX_SKETCH_ENTITIES`, `MAX_SKETCH_LOOPS`, `MAX_HANDLES_PER_CALL`, pattern counts up to the kernel's 1,000), ids well formed and unique, unknown options refused (so no script relies on one a later version adds), handles of the expected kind, and bodies still there (known ids only). Operations count against the sandbox's `kernelOps` limit, queries against `hostCalls`. `script-api.test.ts` feeds each hostile shape.
+
+**Names.** An operation runs under a temporary feature id and its names are rewritten before the next operation: every face it makes is `<feature id>:<operation id>/<kernel name without the feature id>` (ADR 0010 decision 6): `scripted#2:boss/cap:end`, `scripted#2:boss/side:front` (a local id), `scripted#2:round/round:scripted#2:boss/side:front&scripted#2:boss/side:right`, `scripted#2:circle/i3/scripted#2:drill/side:c`. Faces of earlier features keep their names. A body an operation makes is `<feature id>:<operation id>` (`scripted#2:boss`; pattern and mirror copies `scripted#2:circle/i2`). Core's name parser reads the prefix, so sync renames the feature ids and never the operation or local ids, and references into a scripted feature are names like any other. **Renaming an operation id in the script breaks references to its faces**, like renaming a sketch entity.
+
+**Parameters.** The script's declarations are read with a cheap first run; numeric values are evaluated as the declared kind (`length` in mm, `angle` in radians, so units and variables work and `30deg` in a length is an `expression` error), booleans and choices passed as stored, references resolved on the bodies before the feature into handles (a lost one is `reference-lost` and nothing runs; each resolution is reported in `references`). Then `resolveParams` fills defaults and checks ranges.
+
+**Cache key** (decision 5): the script as stored (source, language, API version), `QUICKJS_BUILD`, the `seed`, every stored parameter value (an expression by its source and units) and the values of the variables they read, and the keys of the bodies it reads (a script reads every body), and the feature id: every body and face a run makes carries it (`scripted#2:boss`, `scripted#2:boss/cap:end`) and a cache hit is not renamed, so a remapped id (sync, a duplicated part), a delete and re-add, or the same script in another part misses instead of serving another feature's names. Equal keys give equal runs, so script errors are cached like results; a kernel trap is not.
+
+**Errors** are `{ code: 'script', scriptCode, scriptId, message, line?, column?, stack?, detail? }`: `scriptCode` is `@manufakture/script`'s (`runtime`, `syntax`, `timeout`, `heap-limit`, `op-limit`, `api-version`, `bad-param`, ...), positions 1-based in the source as written, mapped back through the TypeScript erasure. A `host-error` (a host function or the kernel failing in a way the script did not cause) and an engine that cannot load get a fixed `message` (`HOST_ERROR_MESSAGE`); the raw exception text, which can hold internals, goes to `detail`, for debug logs only and never shown.
+
+**Session-fatal runs.** A run whose kernel session fails fatally (the kernel ran out of memory or trapped) recycles the kernel, and a recycle makes the host regenerate. Run again, the same key would recycle again without end, so an untrusted document could keep the app busy. The engine remembers such keys like runaway ones (`ScriptHost.addSessionFatal`): the feature then fails with `scriptCode: 'session-fatal'` without running, until an edit changes its key. The list lives in the regen engine, so a regen worker restart clears it.
+
+**Versions.** `SCRIPT_APIS` maps every script API version to its `ctx`; a version the sandbox or regen does not have fails with `api-version` before anything runs. A version is a promise: within it only additions that cannot change what an existing script sees; anything else is a new version, and the old one stays.
+
+**The hard bound.** A script holds this worker for its whole run, so ADR 0007's cancellation by generation cannot stop it; the soft limits can, except for the residual native loops of `@manufakture/script`'s README (unary `+` on a huge string, object spread of a huge object, ...). The engine reports every run's start and end with the feature's cache key (`ScriptRunEvent`, through the worker API's `watchScripts`); `RegenClient` terminates and restarts the worker when a run has not ended after `SCRIPT_HARD_TIMEOUT_MS` (10 s, `RECOMMENDED_HARD_TIMEOUT_MS`; option `scriptTimeoutMs`), tells `onScriptTimeout`, and hands every new worker the runaway keys first: such a feature then fails with `timeout` without running again, until an edit changes its key. A pending regen resolves to null and the owner regenerates through `onRestarted`, as after any restart.
+
+**Instances.** QuickJS is compiled once per engine and instantiated once per document (the document being regenerated, and each pinned source document a derived part carries: decision 4), each with its own linear memory and QuickJS runtime. Every run (declarations and `run` alike) gets a fresh QuickJS context in that runtime, disposed when it ends (the whole runtime is dropped instead when a run leaves it unsafe to dispose: pending promise jobs, a fatal error), so no global, prototype change or closure of one run is seen by the next, even of the same script; only the memory and the runtime are reused.
+
+Not here: whether a document's scripts may run at all (the per-document opt-in and the security sign-off, T7.2d).
+
 ## Member sets
 
 Framing members are data, not bodies ([ADR 0015](../../docs/adr/0015-construction-domain.md)
@@ -1250,6 +1301,24 @@ pnpm --filter @manufakture/regen test
   and unowned data failing its readers only; the two-step form (resolve and `obb` queries answered
   before the build), resolved and lost references, results of earlier extensions of the namespace;
   a pattern of an extension refused; and the registry's checks.
+- `scripted.test.ts`: scripted features with the real kernel, solver and QuickJS: the plan's
+  example scripts (a parametric box with fillets on the edges it made, in TypeScript; a bolt
+  circle; a spiral of holes) with volumes and names; a script on a GUI body through a reference
+  parameter, and a GUI fillet resolving an edge the script made through an edit; what a
+  parameter, seed, source or unrelated variable change rebuilds; units and dimension errors of
+  parameters; script errors with mapped positions, failed and caught operations, refused
+  arguments, the soft time limit, declarations, API versions, the runaway list, no engine.
+- `script-api.test.ts`: the host functions directly on the Node kernel: revolve, shell, chamfer,
+  boolean, transform and mirror with their names; the outcome of a run on given bodies; and
+  hostile arguments (operation ids, non-finite and huge numbers, unbounded counts, imitation and
+  stale handles, unknown options) refused before the kernel.
+- `client-watchdog.test.ts`: `RegenClient`'s hard bound against a fake worker: a run that does
+  not end restarts the worker, whose first message carries the runaway key; a run that ends in
+  time and events of a replaced worker are left alone.
+- `script-watchdog.test.ts`: the same bound on a real worker thread (the worker entry bundled with
+  Vite into a temporary directory): a script defeating the soft limits (unary `+` on a 1 MB
+  string in a loop) is stopped at the hard limit, and the feature fails with `timeout` on the
+  restarted worker without running again.
 - `members.test.ts`: member data alone: shape keys (placement-free, cut order and `-0`
   insensitive), 100 identical studs as one instance list, box meshes in TypeScript, cut members
   through Manifold to their hand volumes with every object deleted (also when a boolean throws),

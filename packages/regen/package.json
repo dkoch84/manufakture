@@ -17,11 +17,13 @@
     "test": "vitest run --root ../.. --project packages packages/regen"
   },
   "dependencies": {
+    "@jitl/quickjs-wasmfile-release-sync": "0.32.0",
     "@manufakture/assembly": "workspace:*",
     "@manufakture/core": "workspace:*",
     "@manufakture/drawing": "workspace:*",
     "@manufakture/io": "workspace:*",
     "@manufakture/kernel": "workspace:*",
+    "@manufakture/script": "workspace:*",
     "@manufakture/sketch": "workspace:*",
     "@manufakture/text": "workspace:*",
     "@manufakture/units": "workspace:*",

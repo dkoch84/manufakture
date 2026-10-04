@@ -38,6 +38,7 @@ export {
 } from './features';
 export type {
   ChamferInput,
+  CombineInput,
   ConnectorInference,
   ConnectorOrigin,
   ConnectorReport,
@@ -59,6 +60,7 @@ export type {
   ImportInput,
   InstanceSource,
   MirrorInput,
+  MoveInput,
   OutcomeBody,
   PatternInput,
   PatternLayout,
@@ -89,6 +91,7 @@ export {
   invalidSketchId,
   isPositional,
   isUnnamed,
+  nameShape,
   pickEdge,
   pickFace,
   refName,
@@ -231,6 +234,9 @@ export type {
   RecycleReason,
   RecycleReport,
   ReplayHook,
+  SessionFunction,
+  SessionReply,
+  SessionRequest,
 } from './service';
 export { createKernelWorkerApi } from './worker-api';
 export type { InitReport, KernelWorkerApi, WorkerApiOptions } from './worker-api';

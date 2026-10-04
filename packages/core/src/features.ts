@@ -132,6 +132,34 @@ export function bodyCreator(bodyId: string): string | undefined {
   return FEATURE_ID_PATTERN.test(head) ? head : undefined;
 }
 
+/**
+ * An operation id a script gives each call (`ctx.extrude('boss', ...)`, ADR 0010 decision 6): a
+ * lower-case letter, then letters, digits and `_`, at most 64 characters. It names what the
+ * operation makes, so it never holds a character that structures names.
+ */
+export const SCRIPT_OPERATION_ID_PATTERN = /^[a-z][A-Za-z0-9_]{0,63}$/;
+
+/**
+ * The prefix of every face a scripted feature's operation makes: `<feature id>:<operation id>/`
+ * (`scripted#2:boss/`), followed by the kernel's name for it without a feature id
+ * (`scripted#2:boss/cap:end`, `scripted#2:boss/side:s1`, where `s1` is the script's own local
+ * id). Core's name parser reads the prefix (`parseName`), so sync rewrites the feature id and
+ * never the operation or local ids.
+ */
+export function scriptOperationPrefix(featureId: string, operationId: string): string {
+  return `${featureId}:${operationId}/`;
+}
+
+/**
+ * The scripted feature and operation a face name was born in (`scripted#2:boss/cap:end` gives
+ * `scripted#2` and `boss`), or null when the name does not start with an operation prefix (an
+ * operation id longer than `SCRIPT_OPERATION_ID_PATTERN` allows is not one).
+ */
+export function scriptOperationOf(name: string): { featureId: string; operationId: string } | null {
+  const m = /^(scripted#[1-9][0-9]*):([a-z][A-Za-z0-9_]{0,63})\//.exec(name);
+  return m === null ? null : { featureId: m[1]!, operationId: m[2]! };
+}
+
 /** The body ids a feature's `scope` lists; empty when it has none (every body). */
 export function featureScope(feature: Feature): readonly string[] {
   return 'scope' in feature && feature.scope !== undefined ? feature.scope : [];

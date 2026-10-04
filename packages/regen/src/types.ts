@@ -107,6 +107,34 @@ export type RegenError =
     }
   | {
       /**
+       * A scripted feature's script failed (ADR 0010): it did not parse, threw, passed a bad
+       * argument to `ctx`, hit a limit (`timeout`, `heap-limit`, `op-limit` and the others of
+       * `@manufakture/script`), needs a script API version this build does not run
+       * (`api-version`), or declares parameters its stored values do not fit (`bad-param`).
+       * `line` and `column` are 1-based in the script's source as written (TypeScript included,
+       * mapped back through the type erasure), for the editor's marker.
+       */
+      code: 'script';
+      message: string;
+      /**
+       * `ScriptError.code` of `@manufakture/script`, `timeout` for the worker's hard limit, or
+       * `session-fatal` for a run that took the kernel down before (until its key changes).
+       */
+      scriptCode: string;
+      /** The script of the document's library that failed. */
+      scriptId: string;
+      line?: number;
+      column?: number;
+      /** The script's backtrace with mapped positions, when there is one. */
+      stack?: string;
+      /**
+       * Raw text behind a fixed `message` (a `host-error`'s exception, an engine load failure):
+       * for debug logs only, never shown in the UI.
+       */
+      detail?: string;
+    }
+  | {
+      /**
        * A derived part's pinned source cannot be built: its data does not match its SHA-256, it
        * is not a readable document, it was saved by a newer version, it has no such part, or it
        * nests derived parts deeper than `MAX_DERIVED_DEPTH`. `field` is the part of `source` at

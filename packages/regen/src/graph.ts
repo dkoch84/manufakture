@@ -45,6 +45,8 @@ export const BODY_KINDS: ReadonlySet<Feature['kind']> = new Set([
   // Built through its domain's translator (ADR 0013 decision 5); one whose type no domain builds
   // fails and changes nothing, but is still placed in the graph by its `operation` and `scope`.
   'extension',
+  // Built by running its script (ADR 0010), which may read and change any body.
+  'scripted',
 ]);
 
 export function isBodyFeature(feature: Feature): boolean {
@@ -104,6 +106,9 @@ export function bodyUse(
       }
       return { all: feature.scope === undefined, scope, refs };
     }
+    case 'scripted':
+      // A script may combine, cut or move any body, so it reads them all.
+      return { all: true, scope: [], refs };
     case 'extension':
       if (feature.operation === 'new') return { all: false, scope: [], refs };
       return { all: feature.scope === undefined, scope: feature.scope ?? [], refs };
@@ -272,6 +277,10 @@ function actsOn(
     case 'shell':
     case 'thread':
       return { ids: [...read], merges: false };
+    case 'scripted':
+      // Whatever the script does is known only once it runs: every body, maybe merged. The
+      // bodies it makes (`<id>:<operation id>`) appear when a later scope names them.
+      return { ids: all, merges: true };
     case 'pattern':
     case 'mirror': {
       // `new` copies stay bodies of their own; `add` (the default) fuses them where they touch.

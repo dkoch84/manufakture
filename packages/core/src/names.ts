@@ -21,6 +21,7 @@ import { FEATURE_KINDS } from './schema';
  * | imported faces                        | `import#9:face:4`                         |
  * | placeholders                          | `?face3`, `hole#2:?face3`                 |
  * | derived prefixes (M2 decision 6)      | `derived#1:from/X`, `X` opaque            |
+ * | script operation prefixes (ADR 0010)  | `scripted#2:boss/cap:end`, `scripted#2:rnd/round:A&B` |
  * | edge names (display only)             | `A|B`, `A|B[C,D]#2`                       |
  *
  * The parse is flat: a list of parts that print back to the name exactly
@@ -35,6 +36,13 @@ import { FEATURE_KINDS } from './schema';
  *   `wall`, `4` and other tails are text.
  * - `source`: what follows `<id>:from/`, up to the end of that merge or corner member: a name
  *   in a derived part's source document, never read for ids.
+ * - A scripted feature's operation prefix, `<scripted id>:<operation id>/` (ADR 0010 decision
+ *   6), is the feature part and then the text `:<operation id>/`; what follows is parsed on as
+ *   any other text, so the feature ids in member names after it (a fillet round in a script,
+ *   `scripted#2:rnd/round:extrude#1:cap:end&extrude#1:side:e2`) are feature parts, while the
+ *   script's own roles and local ids (`cap:end`, `side:s1`) stay text and are never rewritten,
+ *   even when a local id looks like a part sub-id (`side:e2`). An operation id is never read
+ *   as a derived prefix, even `from`.
  * - `text`: everything else: roles, punctuation, opaque tails, placeholders, junk.
  *
  * It is one left-to-right pass with no recursion, linear in the length of the name, so no input
@@ -56,6 +64,10 @@ const HEAD = new RegExp(`(?:${KIND_ALTERNATION})#[1-9][0-9]*:`, 'y');
 const SUB_TAIL = /^([ekr][1-9][0-9]*)((?:#[a-z]+)*(?:#[1-9][0-9]*)*)$/;
 /** What follows `<id>:` when the rest of the member is a name in another document. */
 const FROM = 'from/';
+/** The kind of feature whose faces carry an operation prefix (`scripted#2:boss/`). */
+const SCRIPTED = 'scripted#';
+/** A script operation id and its `/`, after `scripted#n:` (ADR 0010 decision 6). */
+const OPERATION = /[a-z][A-Za-z0-9_]*\//y;
 
 function isIdChar(c: number): boolean {
   return (
@@ -114,9 +126,21 @@ export function parseName(name: string): NamePart[] {
       continue;
     }
     flush();
-    out.push({ kind: 'feature', id: name.slice(i, i + head - 1) });
+    const id = name.slice(i, i + head - 1);
+    out.push({ kind: 'feature', id });
     text = ':';
     i += head;
+    if (id.startsWith(SCRIPTED)) {
+      // A script operation prefix: the operation id is text, and what follows is a name of the
+      // script's own (roles, local ids) with feature ids of member names in it, parsed on.
+      OPERATION.lastIndex = i;
+      const m = OPERATION.exec(name);
+      if (m) {
+        text += m[0];
+        i += m[0].length;
+        continue;
+      }
+    }
     if (name.startsWith(FROM, i)) {
       // A derived prefix: the source name runs to the end of this member. Brackets inside it
       // are skipped whole (an unclosed one runs to the end); a `)` that closes an enclosing

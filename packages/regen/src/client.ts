@@ -10,12 +10,17 @@ import type { DragTarget } from '@manufakture/assembly';
 import type { ManufaktureDocument } from '@manufakture/core';
 import type { IfcBuildingInput } from '@manufakture/io';
 import type { ShapeId } from '@manufakture/kernel';
-import { KernelClient } from '@manufakture/kernel/kernel-client';
+import {
+  KernelClient,
+  type KernelClientOptions,
+  type KernelEndpoint,
+} from '@manufakture/kernel/kernel-client';
 import * as Comlink from 'comlink';
 import type { CamGeometryOptions, CamGeometryResult } from './cam';
 import type { DrawingSheetResult, DrawingViewResult } from './drawing';
 import type { EngineStats } from './engine';
 import type { OrientedSizesOptions, OrientedSizesResult } from './oriented';
+import type { ScriptRunEvent } from './scripted';
 import type { FontReadReply, TextReply, TextRequest } from './text';
 import type {
   AssemblyResult,
@@ -26,8 +31,110 @@ import type {
   RegenResult,
 } from './types';
 import type { RegenWorkerApi, TextPreviewOptions } from './worker-api';
+import type { InitReport } from '@manufakture/kernel';
+
+/**
+ * How long one script run may hold the regen worker before the client terminates and restarts it
+ * (ADR 0010 amendment, item 4): `RECOMMENDED_HARD_TIMEOUT_MS` of `@manufakture/script`, copied
+ * here so the main thread does not load the sandbox to read one number (a test checks they agree).
+ */
+export const SCRIPT_HARD_TIMEOUT_MS = 10_000;
+
+/** The most runaway runs a client remembers (each a cache key the next worker refuses to run). */
+const MAX_RUNAWAY = 1000;
+
+export interface RegenClientOptions extends KernelClientOptions {
+  /** The hard limit on one script run, in ms (default `SCRIPT_HARD_TIMEOUT_MS`). */
+  scriptTimeoutMs?: number;
+  /**
+   * Told when the watchdog stopped a runaway script: the worker is being restarted, and
+   * `onRestarted` follows once the new one is ready (the owner regenerates; the feature then
+   * fails with `timeout` instead of running again).
+   */
+  onScriptTimeout?: (event: { featureId: string; key: string }) => void;
+}
 
 export class RegenClient extends KernelClient {
+  readonly #scriptTimeoutMs: number;
+  readonly #onScriptTimeout: RegenClientOptions['onScriptTimeout'];
+  /** Cache keys of runs a worker was terminated for, handed to every new worker. */
+  readonly #runaway = new Set<string>();
+  /** The worker whose script events count; events from an older one are ignored. */
+  #watching = 0;
+  #timer: { key: string; featureId: string; handle: ReturnType<typeof setTimeout> } | null = null;
+
+  constructor(connect: () => KernelEndpoint, options: RegenClientOptions = {}) {
+    const ms = options.scriptTimeoutMs ?? SCRIPT_HARD_TIMEOUT_MS;
+    // Checked before a worker is started for nothing.
+    if (!(ms > 0)) throw new RangeError('scriptTimeoutMs must be above 0');
+    super(connect, options);
+    this.#scriptTimeoutMs = ms;
+    this.#onScriptTimeout = options.onScriptTimeout;
+    this.#watch();
+  }
+
+  /** Cache keys of the script runs the watchdog stopped so far. */
+  get runawayScripts(): readonly string[] {
+    return [...this.#runaway];
+  }
+
+  override restart(): Promise<InitReport> {
+    this.#clearTimer();
+    const ready = super.restart();
+    this.#watch();
+    return ready;
+  }
+
+  override terminate(): void {
+    this.#clearTimer();
+    this.#watching++;
+    super.terminate();
+  }
+
+  /**
+   * Listen to the current worker's script runs (and give it the runaway list) before anything
+   * else is asked of it: a run that has not ended after the limit terminates the worker.
+   */
+  #watch(): void {
+    const watching = ++this.#watching;
+    const onRun = (event: ScriptRunEvent) => {
+      if (watching !== this.#watching) return;
+      if (event.phase === 'start') {
+        this.#clearTimer();
+        this.#timer = {
+          key: event.key,
+          featureId: event.featureId,
+          handle: setTimeout(() => this.#runawayFired(watching), this.#scriptTimeoutMs),
+        };
+      } else if (this.#timer?.key === event.key) {
+        this.#clearTimer();
+      }
+    };
+    void Promise.resolve(
+      this.worker<RegenWorkerApi>().watchScripts(Comlink.proxy(onRun), [...this.#runaway]),
+    ).catch(() => undefined);
+  }
+
+  #runawayFired(watching: number): void {
+    const timer = this.#timer;
+    if (timer === null || watching !== this.#watching) return;
+    this.#timer = null;
+    if (this.#runaway.size >= MAX_RUNAWAY)
+      this.#runaway.delete(this.#runaway.values().next().value!);
+    this.#runaway.add(timer.key);
+    void this.restart().catch(() => undefined);
+    try {
+      this.#onScriptTimeout?.({ featureId: timer.featureId, key: timer.key });
+    } catch {
+      // A broken listener must not stop the restart.
+    }
+  }
+
+  #clearTimer(): void {
+    if (this.#timer !== null) clearTimeout(this.#timer.handle);
+    this.#timer = null;
+  }
+
   /**
    * Regenerate `document` at a new generation. Resolves to null when a newer request superseded
    * it in the worker (a newer regen, or any batch submitted at a new generation), or when the

@@ -40,6 +40,7 @@ import {
   type TextReply,
   type TextRequest,
 } from './text';
+import type { ScriptRunEvent } from './scripted';
 import { memberBodiesTransferables, regenTransferables } from './transfer';
 import type {
   AssemblyResult,
@@ -177,6 +178,17 @@ export interface RegenWorkerApi extends KernelWorkerApi {
    * building is malformed or too large.
    */
   exportIfc(building: IfcBuildingInput): Promise<Uint8Array>;
+  /**
+   * The watchdog channel for scripted features (ADR 0010 amendment, item 4): `onRun` (a
+   * `Comlink.proxy`) hears of every script run's start and end with the feature's cache key, so
+   * the main thread can terminate this worker when one runs too long; `runaway` lists the keys
+   * of runs an earlier worker was terminated for, which fail with `timeout` instead of running
+   * again. The client calls it on every worker it starts, before anything else.
+   */
+  watchScripts(
+    onRun: ((event: ScriptRunEvent) => unknown) | null,
+    runaway: readonly string[],
+  ): Promise<void>;
 }
 
 /** What a sketcher's `outlineText` call says besides the request. */
@@ -213,6 +225,9 @@ export function createRegenWorkerApi(options: RegenWorkerApiOptions): RegenWorke
   readonly engine: RegenEngine | null;
 } {
   const kernelApi = createKernelWorkerApi(options);
+  // Set by `watchScripts`, possibly before the engine exists.
+  let scriptMonitor: ((event: ScriptRunEvent) => void) | null = null;
+  const runawayScripts = new Set<string>();
   const solver = options.solver ?? createSolverService();
   let engine: RegenEngine | null = null;
   // The engine's outliner when the host passed one (the regen worker's watchdog outliner),
@@ -241,7 +256,11 @@ export function createRegenWorkerApi(options: RegenWorkerApiOptions): RegenWorke
     // After a recycle every cached body is gone. The main thread hears of it through the
     // kernel's `recycled` status and asks for a regen of its current document; the engine only
     // forgets here (its hook runs inside the service's queue, where nothing may be submitted).
-    engine ??= new RegenEngine({ ...options.engine, kernel: service, solver });
+    if (engine === null) {
+      engine = new RegenEngine({ ...options.engine, kernel: service, solver });
+      if (scriptMonitor !== null) engine.setScriptMonitor(scriptMonitor);
+      engine.addRunawayScripts([...runawayScripts]);
+    }
     return engine;
   };
 
@@ -352,6 +371,21 @@ export function createRegenWorkerApi(options: RegenWorkerApiOptions): RegenWorke
         url === undefined ? {} : { locateFile: (path) => (path.endsWith('.wasm') ? url : path) },
       );
       return Comlink.transfer(bytes, [bytes.buffer]);
+    },
+
+    async watchScripts(onRun, runaway) {
+      if (!Array.isArray(runaway)) throw new TypeError('runaway must be a list of cache keys');
+      for (const key of runaway.slice(0, 10_000))
+        if (typeof key === 'string') runawayScripts.add(key);
+      // Fire and forget: a script run holds this worker, so nothing here may wait for the reply.
+      scriptMonitor =
+        typeof onRun === 'function'
+          ? (event) => void Promise.resolve(onRun(event)).catch(() => undefined)
+          : null;
+      if (engine !== null) {
+        engine.setScriptMonitor(scriptMonitor);
+        engine.addRunawayScripts([...runawayScripts]);
+      }
     },
 
     async readFont(fileName, bytes) {

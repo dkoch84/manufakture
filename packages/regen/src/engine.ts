@@ -50,6 +50,7 @@ import {
   type ConfigRow,
   type CoreResult,
   type DerivedFeature,
+  type ScriptedFeature,
   type DerivedSource,
   type DocumentChange,
   type DocumentFont,
@@ -83,6 +84,9 @@ import {
   type OpResult,
   type OrientedBox,
   type ReferenceReport,
+  type SessionFunction,
+  type SessionReply,
+  type SessionRequest,
   type ShapeId,
   type TessellateOp,
   type Topology,
@@ -221,6 +225,20 @@ import {
 } from './sketches';
 import { TextBudget, lazyTextOutliner, type TextOutliner } from './text';
 import { faceRef, topoRef, translateFeature } from './translate';
+import { SCRIPT_APIS, ScriptRun, type ScriptRunOutcome } from './script-api';
+import {
+  ScriptHost,
+  apiVersionError,
+  runawayError,
+  scriptParamValues,
+  scriptRegenError,
+  scriptedKeyParts,
+  sessionFatalError,
+  type ScriptOptions,
+  type ScriptRunEvent,
+  type ScriptStats,
+} from './scripted';
+import { resolveParams, type ScriptInstance, type ScriptValue } from '@manufakture/script';
 import type {
   AssemblyResult,
   BodyResult,
@@ -264,6 +282,12 @@ export interface RegenKernel {
    * submits batches the kernel would treat as stale.
    */
   stats?(): { generation: number; cancelledThrough?: number };
+  /**
+   * A synchronous session on the kernel in its exclusive slot (`KernelService.session`), for
+   * scripted features: a script's operations are function calls into the kernel, not batches.
+   * Without it, scripted features fail with `unsupported`.
+   */
+  session?<T>(request: SessionRequest, fn: SessionFunction<T>): Promise<SessionReply<T>>;
 }
 
 export interface RegenEngineOptions {
@@ -306,6 +330,12 @@ export interface RegenEngineOptions {
    * and marks and pitch symbols (`domainViewCost`). Default `MAX_REQUEST_DOMAIN_ITEMS`.
    */
   domainViewBudget?: number;
+  /**
+   * Running scripted features (ADR 0010; `scripted.ts`): how to load QuickJS, limits, and the
+   * run monitor the main thread's watchdog listens to. Absent: scripted features fail with
+   * `unsupported`.
+   */
+  scripts?: ScriptOptions;
 }
 
 export interface RegenOptions {
@@ -720,8 +750,10 @@ export class RegenEngine {
   /** The members of the last completed regen, per part, by full id (`memberBodies`). */
   #lastMembers = new Map<string, Map<string, MemberData>>();
   #memberCounts = { framed: 0, cacheHits: 0 };
+  readonly #scripts: ScriptHost | null;
 
   constructor(options: RegenEngineOptions) {
+    this.#scripts = options.scripts === undefined ? null : new ScriptHost(options.scripts);
     this.#kernel = options.kernel;
     this.#solver = options.solver;
     this.#cache = options.cache ?? new MemoryCache();
@@ -757,6 +789,24 @@ export class RegenEngine {
       manifoldCreated: m.manifoldObjects.created,
       manifoldDeleted: m.manifoldObjects.deleted,
     };
+  }
+
+  /** What scripted features cost so far: declaration runs, runs, instances. Null without scripts. */
+  get scriptStats(): Readonly<ScriptStats> | null {
+    return this.#scripts === null ? null : { ...this.#scripts.stats };
+  }
+
+  /** Who hears of every script run's start and end (the worker's watchdog channel). */
+  setScriptMonitor(monitor: ((event: ScriptRunEvent) => void) | null): void {
+    this.#scripts?.setMonitor(monitor);
+  }
+
+  /**
+   * Cache keys of script runs the main thread's watchdog stopped (it restarted the worker): such
+   * a feature fails with `timeout` without running again, until its key changes.
+   */
+  addRunawayScripts(keys: readonly string[]): void {
+    this.#scripts?.addRunaway(keys);
   }
 
   /** The newest generation requested. */
@@ -811,6 +861,7 @@ export class RegenEngine {
     this.#reportedMeshes.clear();
     this.#lastMembers.clear();
     this.#lastDocument = null;
+    await this.#scripts?.dispose();
   }
 
   // Internals ------------------------------------------------------------------------------
@@ -1412,6 +1463,16 @@ export class RegenEngine {
         continue;
       }
 
+      if (f.kind === 'scripted') {
+        await this.#scripted(run, state, f, document, variables, {
+          result,
+          started,
+          lookup,
+          variablesRead: graph.variables.get(f.id) ?? [],
+        });
+        continue;
+      }
+
       if (f.kind === 'sketch') {
         await this.#sketch(run, state, f, values.values, variables, result, started, lookup);
         continue;
@@ -1498,6 +1559,293 @@ export class RegenEngine {
       if (sourceWarnings.length > 0) result.warnings = [...result.warnings, ...sourceWarnings];
     }
     return state;
+  }
+
+  /**
+   * A scripted feature (ADR 0010; `scripted.ts`, `script-api.ts`): keyed by its script, stored
+   * parameter values, seed and the bodies it reads, served from the cache when the key is known;
+   * otherwise its declarations are read, its parameters evaluated as declared, and `run` called
+   * in one kernel session, whose result is cached and applied like any feature's outcome. A
+   * script error is a deterministic result of the key, so it is cached too; a kernel trap is not.
+   */
+  async #scripted(
+    run: Run,
+    state: PartState,
+    f: ScriptedFeature,
+    document: ManufaktureDocument,
+    variables: VariableValues,
+    context: {
+      result: FeatureResult;
+      started: number;
+      lookup: (id: string) => Feature | undefined;
+      variablesRead: readonly string[];
+    },
+  ): Promise<void> {
+    const { result, started, lookup } = context;
+    const fail = (errors: RegenError[], references: ReferenceResolution[] = []) => {
+      result.status = 'error';
+      result.errors = errors;
+      result.references = references;
+      result.ms = now() - started;
+      state.unavailable.set(f.id, 'error');
+    };
+    const script = document.scripts?.find((s) => s.id === f.script);
+    if (script === undefined) {
+      fail([
+        { code: 'invalid', field: ['script'], message: `The document has no script ${f.script}` },
+      ]);
+      return;
+    }
+    const versionError = apiVersionError(script.id, script.apiVersion);
+    if (versionError !== null) {
+      fail([versionError]);
+      return;
+    }
+    const read = new Set(routeBodies(bodyUse(f, lookup)!, state.bodies));
+    const reads = state.bodies.filter((b) => read.has(b.id));
+    const key = this.#key(state, {
+      scripted: scriptedKeyParts(f, script, variables, context.variablesRead),
+      bodies: reads.map((b) => [b.id, b.key]),
+    });
+    run.used.add(key);
+    result.key = key;
+    const hit = await this.#cache.get(key);
+    if (hit !== undefined && hit.type === 'body' && hit.outcome !== undefined) {
+      run.counters.cacheHits++;
+      this.#applyOutcome(state, f.id, key, hit.outcome);
+      this.#fill(result, hit, started);
+      result.cached = true;
+      if (!hit.ok) state.unavailable.set(f.id, 'error');
+      return;
+    }
+    const scripts = this.#scripts;
+    if (scripts === null || this.#kernel.session === undefined) {
+      fail([{ code: 'unsupported', message: 'This build of the app cannot run scripts' }]);
+      return;
+    }
+    if (scripts.isRunaway(key)) {
+      fail([runawayError(script.id)]);
+      return;
+    }
+    if (scripts.isSessionFatal(key)) {
+      fail([sessionFatalError(script.id)]);
+      return;
+    }
+    run.counters.cacheMisses++;
+    await this.#flush(run, state);
+    let instance: ScriptInstance;
+    try {
+      instance = await scripts.instance(state.ns ?? '');
+    } catch (error) {
+      // QuickJS could not be fetched or compiled (offline before it was cached, say): not cached.
+      fail([
+        {
+          code: 'script',
+          scriptCode: 'internal',
+          scriptId: script.id,
+          message: 'The script engine could not be loaded',
+          detail: error instanceof Error ? error.message : String(error),
+        },
+      ]);
+      return;
+    }
+    this.#checkStale(run);
+    const source = {
+      source: script.source,
+      language: script.language,
+      apiVersion: script.apiVersion,
+    };
+    // Every cached failure below is a deterministic result of the key.
+    const store = async (
+      ok: boolean,
+      errors: RegenError[],
+      outcome: CachedOutcome,
+      extra: { warnings?: RegenWarning[]; references?: ReferenceResolution[]; ms: number },
+    ) => {
+      const entry: CacheEntry = {
+        key,
+        featureId: f.id,
+        type: 'body',
+        ok,
+        errors,
+        warnings: extra.warnings ?? [],
+        references: extra.references ?? [],
+        outcome,
+        ms: extra.ms,
+      };
+      await this.#cache.set(key, entry);
+      this.#applyOutcome(state, f.id, key, outcome);
+      this.#fill(result, entry, started);
+      if (!ok) state.unavailable.set(f.id, 'error');
+    };
+    const nothing: CachedOutcome = { instance: null, bodies: [], consumed: [] };
+
+    scripts.event('start', f.id, key);
+    scripts.stats.declarations++;
+    let declared: Awaited<ReturnType<ScriptInstance['readDeclarations']>>;
+    try {
+      declared = await instance.readDeclarations({ ...source, limits: scripts.limits });
+    } finally {
+      scripts.event('end', f.id, key);
+    }
+    if (!declared.ok) {
+      await store(false, [scriptRegenError(script.id, declared.error)], nothing, {
+        ms: declared.stats.ms,
+      });
+      return;
+    }
+    const specs = declared.value.params;
+    const values = scriptParamValues(specs, f.params, variables, script.id);
+    if (!values.ok) {
+      // Expression errors depend on variables, which are in the key; still not worth caching.
+      fail(values.errors);
+      return;
+    }
+
+    type Ran =
+      | { type: 'stale' }
+      | { type: 'failed'; errors: RegenError[]; references: ReferenceResolution[]; ms: number }
+      | ({ type: 'done'; references: ReferenceResolution[]; ms: number } & ScriptRunOutcome);
+    const api = SCRIPT_APIS.get(script.apiVersion)!;
+    const reply = await this.#session(
+      run,
+      f.id,
+      async (kernel): Promise<{ value: Ran; keep: ShapeId[] }> => {
+        if (reads.some((b) => !kernel.has(b.shape))) return { value: { type: 'stale' }, keep: [] };
+        const scriptRun = new ScriptRun(kernel, f.id, reads);
+        const params: Record<string, ScriptValue> = { ...values.values };
+        const references: ReferenceResolution[] = [];
+        const errors: RegenError[] = [];
+        for (const spec of specs) {
+          if (spec.kind !== 'reference') continue;
+          const stored = f.params[spec.name];
+          if (stored === undefined || stored.kind !== 'reference') continue;
+          const handles: ScriptValue[] = [];
+          for (const r of stored.references) {
+            const got = scriptRun.referenceHandle(topoRef(r.ref), spec.select);
+            if (got.ok) {
+              handles.push(got.handle);
+              references.push({
+                referenceId: r.id,
+                target: got.target,
+                via: got.via,
+                fragile: got.fragile,
+              });
+              continue;
+            }
+            const target = 'face' in r.ref ? r.ref.face : r.ref.faces.join('|');
+            errors.push(
+              got.candidates.length > 0
+                ? {
+                    code: 'reference-ambiguous',
+                    referenceId: r.id,
+                    candidates: got.candidates,
+                    target,
+                    message: `Parameter "${spec.label ?? spec.name}": ${target} is ambiguous: re-pick it`,
+                  }
+                : {
+                    code: 'reference-lost',
+                    referenceId: r.id,
+                    missing: got.missing,
+                    target,
+                    message: `Parameter "${spec.label ?? spec.name}": ${target} ${got.message}: re-pick it`,
+                  },
+            );
+          }
+          params[spec.name] = spec.multiple === true ? handles : (handles[0] ?? null);
+        }
+        if (errors.length > 0) {
+          return { value: { type: 'failed', errors, references, ms: 0 }, keep: [] };
+        }
+        const resolved = resolveParams(specs, params);
+        if (!resolved.ok) {
+          const e = [scriptRegenError(script.id, resolved.error)];
+          return { value: { type: 'failed', errors: e, references, ms: 0 }, keep: [] };
+        }
+        scripts.event('start', f.id, key);
+        scripts.stats.runs++;
+        let out: Awaited<ReturnType<ScriptInstance['run']>>;
+        try {
+          out = await instance.run({
+            ...source,
+            seed: f.seed,
+            params: resolved.value,
+            host: api(scriptRun),
+            limits: scripts.limits,
+          });
+        } finally {
+          scripts.event('end', f.id, key);
+        }
+        if (!out.ok) {
+          const e = [scriptRegenError(script.id, out.error)];
+          return { value: { type: 'failed', errors: e, references, ms: out.stats.ms }, keep: [] };
+        }
+        const done = scriptRun.finish();
+        return {
+          value: { type: 'done', ...done, references, ms: out.stats.ms },
+          keep: done.keep,
+        };
+      },
+    );
+    if (reply.result === undefined) throw new Superseded();
+    if (!reply.result.ok) {
+      // The session failed as a whole (a wasm trap): no usable bodies are left. A fatal one
+      // recycles the kernel, which makes the host regenerate: remember the key so that regen
+      // does not run it again (and recycle again, without end).
+      if (reply.result.error.code === 'fatal') scripts.addSessionFatal(key);
+      result.status = 'error';
+      result.errors = [mapFailure(reply.result.error)];
+      result.ms = now() - started;
+      state.unavailable.set(f.id, 'error');
+      state.broken = true;
+      return;
+    }
+    const ran = reply.result.value;
+    if (ran.type === 'stale') throw new StaleShapes(reply.instance);
+    if (reads.some((b) => b.instance !== null && b.instance !== reply.instance)) {
+      throw new StaleShapes(reply.instance);
+    }
+    if (ran.type === 'failed') {
+      await store(false, ran.errors, nothing, { references: ran.references, ms: ran.ms });
+      return;
+    }
+    run.counters.featureOps++;
+    const outcome = ran.outcome;
+    const made = new Set([...outcome.created, ...outcome.changed]);
+    const stored: CachedOutcome =
+      made.size === 0 && outcome.consumed.length === 0
+        ? nothing
+        : {
+            instance: reply.instance,
+            bodies: outcome.bodies
+              .filter((b) => made.has(b.id))
+              .map((b) => ({
+                id: b.id,
+                shape: b.shape,
+                solids: b.solids,
+                created: outcome.created.includes(b.id),
+              })),
+            consumed: [...outcome.consumed],
+          };
+    await store(true, [], stored, {
+      warnings: ran.warnings,
+      references: ran.references,
+      ms: ran.ms,
+    });
+  }
+
+  /** Run a kernel session for `run` (see `RegenKernel.session`), like `#submit` for a batch. */
+  async #session<T>(run: Run, featureId: string, fn: SessionFunction<T>): Promise<SessionReply<T>> {
+    this.#checkStale(run);
+    const reply = await this.#kernel.session!({ generation: run.generation, featureId }, fn);
+    run.counters.batches++;
+    if (reply.status === 'cancelled') throw new Superseded();
+    if (this.#instance !== reply.instance) {
+      if (this.#instance !== null) await this.#cache.dropBodies(reply.instance);
+      this.#instance = reply.instance;
+    }
+    run.instance = reply.instance;
+    return reply;
   }
 
   /**

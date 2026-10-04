@@ -294,7 +294,12 @@ export class IdWalker {
     return this.visit(scope, base, false) + p.split;
   }
 
-  /** A face name of a part (`undefined`: the part is not known; left as it is). */
+  /**
+   * A face name of a part (`undefined`: the part is not known; left as it is). Through the
+   * parse, so a scripted feature's operation name (`scripted#2:boss/side:s1`, ADR 0010 decision
+   * 6) has its feature ids renamed, those after the prefix included, and never its operation id
+   * or the script's local ids.
+   */
   name(part: string | undefined, name: string): string {
     if (part === undefined) {
       this.report.unresolved++;

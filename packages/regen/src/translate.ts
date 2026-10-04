@@ -500,9 +500,14 @@ function translateInput(f: Feature, ctx: TranslateContext): FeatureInput {
     case 'thread':
       return threadInput(ctx, f);
     case 'scripted':
-      // Stopgap until T7.2c runs scripts: a scripted feature is a feature error, never a crash.
+      // Built by the engine through its script (`script-api.ts`), never as one kernel input;
+      // reached only when a pattern or mirror names one as a feature to repeat.
       throw new Failed([
-        { code: 'unsupported', message: 'Regen does not run scripted features yet' },
+        {
+          code: 'unsupported',
+          message:
+            'A pattern or mirror cannot repeat a scripted feature; repeat the bodies it makes instead',
+        },
       ]);
     case 'sketch':
     case 'extension':

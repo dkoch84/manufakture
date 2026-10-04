@@ -243,6 +243,70 @@ describe('remapIds: one case per naming form', () => {
     });
   });
 
+  it('a script operation name renames feature ids, never operation or local ids', () => {
+    // ADR 0010 decision 6: `<feature id>:<operation id>/<name>`. The operation id `from` must not
+    // be read as a derived prefix, and the local id `e7` must not be read as the part's sub-id.
+    const table: RenameTable = {
+      [P1]: { 'scripted#2': 'scripted#6', 'extrude#1': 'extrude#4', e7: 'e9', r1: 'r3' },
+    };
+    const out = one(
+      {
+        type: 'addFeature',
+        partId: PART,
+        feature: {
+          id: 'fillet#5',
+          kind: 'fillet',
+          name: 'F',
+          suppressed: false,
+          edges: [
+            {
+              id: 'r1',
+              ref: {
+                faces: ['scripted#2:boss/cap:end', 'scripted#2:boss/side:e7'],
+                ends: [
+                  'scripted#2:from/round:extrude#1:side:e7&scripted#2:boss/side:s1',
+                  'scripted#2:p/i2/scripted#2:boss/side:e7',
+                ],
+              },
+            },
+          ],
+          radius: mm('1'),
+        },
+      },
+      table,
+    );
+    expect(out).toMatchObject({
+      feature: {
+        edges: [
+          {
+            id: 'r3',
+            ref: {
+              faces: ['scripted#6:boss/cap:end', 'scripted#6:boss/side:e7'],
+              ends: [
+                'scripted#6:from/round:extrude#4:side:e9&scripted#6:boss/side:s1',
+                'scripted#6:p/i2/scripted#6:boss/side:e7',
+              ],
+            },
+          },
+        ],
+      },
+    });
+    // A body a script made, in a scope.
+    const cut: ExtrudeFeature = {
+      id: 'extrude#2',
+      kind: 'extrude',
+      name: 'Cut',
+      suppressed: false,
+      profile: { sketch: 'sketch#2' },
+      operation: 'cut',
+      extent: { type: 'throughAll' },
+      reverse: false,
+      scope: ['scripted#2:boss', 'scripted#2:p/i2'],
+    };
+    const scoped = one({ type: 'addFeature', partId: PART, feature: cut }, table);
+    expect(scoped).toMatchObject({ feature: { scope: ['scripted#6:boss', 'scripted#6:p/i2'] } });
+  });
+
   it('renames a feature id only in the part the table names', () => {
     const table: RenameTable = { [partScopeOf('part#2')]: { 'extrude#1': 'extrude#6' } };
     expect(

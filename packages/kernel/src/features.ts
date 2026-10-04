@@ -217,6 +217,13 @@ export interface FilletInput {
   id: string;
   radius: number;
   edges: readonly EdgeReference[];
+  /**
+   * Name each round by the two faces of its edge (`<id>:round:A&B`), as a round OCCT adds along
+   * a tangent chain is named, instead of by the reference id (`<id>:round:r1`). A script's
+   * fillets use it (ADR 0010 decision 6): the names then do not depend on the order or the ids
+   * the script lists its edges in.
+   */
+  nameByFaces?: boolean;
 }
 
 export interface ChamferInput {
@@ -228,6 +235,8 @@ export interface ChamferInput {
    * edge's adjacent face whose name sorts first.
    */
   edges: readonly (EdgeReference & { face?: FaceRef })[];
+  /** As for `FilletInput.nameByFaces`: `<id>:bevel:A&B`. */
+  nameByFaces?: boolean;
 }
 
 export interface ShellInput {
@@ -502,7 +511,37 @@ const CAP_ROLE = /^[a-z][a-z0-9.-]{0,127}$/;
 /** How far a subtracting tool is moved past a body face it is flush with, mm. */
 export const TOOL_OVERLAP = 0.01;
 
+/**
+ * Bodies of the part combined with others (a script's boolean, ADR 0010 decision 6): every
+ * `tools` body is fused with (`add`), cut from (`subtract`) or intersected with (`intersect`)
+ * the bodies in `scope` (absent: every other body), by the same rules as an extrusion's tool,
+ * and is consumed: it is not a body after the feature. Faces keep their names through the
+ * history; the feature names no face of its own. An added tool that touches no body in scope
+ * stays the body it was (with a `detached` warning), unchanged. A tool listed in `scope`, or a
+ * tool or scope entry that is not a body, is an error.
+ */
+export interface CombineInput extends Scoped {
+  kind: 'combine';
+  id: string;
+  tools: readonly string[];
+  mode: 'add' | 'subtract' | 'intersect';
+}
+
+/**
+ * Bodies of the part moved (or mirrored) in place, by a rigid motion: each listed body gets a
+ * new shape, its faces keeping their names (a script's transform, ADR 0010 decision 6). A body
+ * listed that is not there is `lost` on `bodies`.
+ */
+export interface MoveInput {
+  kind: 'move';
+  id: string;
+  bodies: readonly string[];
+  motion: Transform;
+}
+
 export type FeatureInput =
+  | CombineInput
+  | MoveInput
   | ToolsInput
   | ExtrudeInput
   | RevolveInput
@@ -874,7 +913,67 @@ function run(ctx: Ctx, slots: readonly Slot[], input: FeatureInput): Slot[] | nu
       return 'face' in input ? threadOnFace(ctx, slots, input) : thread(ctx, slots, input);
     case 'tools':
       return tools(ctx, slots, input);
+    case 'combine':
+      return combineBodies(ctx, slots, input);
+    case 'move':
+      return moveBodies(ctx, slots, input);
   }
+}
+
+/** A `combine` feature: the tool bodies taken out of the set and combined like an extrusion's tool. */
+function combineBodies(ctx: Ctx, slots: readonly Slot[], input: CombineInput): Slot[] {
+  const missing = input.tools.filter((id) => !slots.some((s) => s.body.id === id));
+  if (missing.length > 0) {
+    fail(
+      ctx,
+      'lost',
+      `${ctx.id} combines ${missing.join(', ')}, which ${missing.length === 1 ? 'is not a body' : 'are not bodies'} at this point`,
+      { ref: 'tools', target: missing.join(', '), missing },
+    );
+  }
+  if (input.scope?.some((id) => input.tools.includes(id))) {
+    fail(ctx, 'invalid', `${ctx.id} lists a body both as a tool and in its scope`, {
+      ref: 'scope',
+    });
+  }
+  const toolSlots = input.tools.map((id) => slots.find((s) => s.body.id === id)!);
+  const rest = slots.filter((s) => !input.tools.includes(s.body.id));
+  const scoped = needBodies(ctx, inScope(ctx, rest, input.scope));
+  const tools: Placed[] = toolSlots.map((s) => ({
+    shape: s.body.shape,
+    faces: s.body.names.faces,
+    topology: s.body.topology,
+    unnamed: [],
+    bodyId: s.body.id,
+  }));
+  const after =
+    input.mode === 'add'
+      ? fuseTools(ctx, rest, scoped, tools)
+      : cutTools(ctx, rest, scoped, tools, input.mode);
+  // An added tool that touched nothing comes back as a "new" body made of its own shape: it is
+  // the input body, unchanged, and must not be reported as made (its shape is not new).
+  return after.map((slot) => {
+    const original = toolSlots.find((t) => slot.made?.shape === t.body.shape);
+    return original === undefined ? slot : original;
+  });
+}
+
+/** A `move` feature: each listed body moved by the motion, its faces keeping their names. */
+function moveBodies(ctx: Ctx, slots: readonly Slot[], input: MoveInput): Slot[] {
+  const missing = input.bodies.filter((id) => !slots.some((s) => s.body.id === id));
+  if (missing.length > 0) {
+    fail(
+      ctx,
+      'lost',
+      `${ctx.id} moves ${missing.join(', ')}, which ${missing.length === 1 ? 'is not a body' : 'are not bodies'} at this point`,
+      { ref: 'bodies', target: missing.join(', '), missing },
+    );
+  }
+  return slots.map((slot) => {
+    if (!input.bodies.includes(slot.body.id)) return slot;
+    const moved = temp(ctx, ctx.k.transform(slot.body.shape, input.motion));
+    return changedSlot(slot, propagated(ctx, moved.shape, [slot.body.names.faces], moved.history));
+  });
 }
 
 /**
@@ -2600,10 +2699,11 @@ function blendNamer(
   body: Body,
   role: string,
   refOfEdge: Map<number, string>,
+  byFaces = false,
 ): GeneratedNamer {
   return (entry) => {
     if (entry.input.kind === 'edge') {
-      const ref = refOfEdge.get(entry.input.index);
+      const ref = byFaces ? undefined : refOfEdge.get(entry.input.index);
       return `${ctx.id}:${role}:${ref ?? edgeFacesName(body.names.faces, body.topology, entry.input.index)}`;
     }
     if (entry.input.kind === 'vertex') {
@@ -2653,7 +2753,7 @@ function fillet(ctx: Ctx, slots: readonly Slot[], input: FilletInput): Slot[] {
           result.shape,
           [body.names.faces],
           result.history,
-          blendNamer(ctx, body, 'round', refOfEdge),
+          blendNamer(ctx, body, 'round', refOfEdge, input.nameByFaces === true),
         ),
       ),
     );
@@ -2697,7 +2797,7 @@ function chamfer(ctx: Ctx, slots: readonly Slot[], input: ChamferInput): Slot[] 
           result.shape,
           [body.names.faces],
           result.history,
-          blendNamer(ctx, body, 'bevel', refOfEdge),
+          blendNamer(ctx, body, 'bevel', refOfEdge, input.nameByFaces === true),
         ),
       ),
     );
@@ -3411,6 +3511,14 @@ export function validateFeature(input: unknown): string | null {
     typeof v === 'string' && MODES.includes(v) ? null : `mode must be one of ${MODES.join(', ')}`;
   const bodyId = (v: unknown, name: string) =>
     typeof v === 'string' && v.length > 0 ? null : `${name} must be a non-empty body id`;
+  const bodyIds = (v: unknown, name: string): string | null => {
+    if (!Array.isArray(v) || v.length === 0) return `${name} must be a non-empty array of body ids`;
+    for (const [i, id] of (v as unknown[]).entries()) {
+      const bad = bodyId(id, `${name}[${i}]`);
+      if (bad) return bad;
+    }
+    return new Set(v).size === v.length ? null : `${name} names a body twice`;
+  };
   // Which bodies a feature acts on, and the id of the body it makes.
   const targets = (v: Record<string, unknown>, makes: boolean): string | null => {
     if (v.scope !== undefined) {
@@ -3584,9 +3692,13 @@ export function validateFeature(input: unknown): string | null {
     case 'hole':
       return tool(f);
     case 'fillet':
-      return num(f.radius, 'radius') ?? refList(f.edges, 'edges', edgeRef, true);
+      return (
+        num(f.radius, 'radius') ??
+        refList(f.edges, 'edges', edgeRef, true) ??
+        flip(f.nameByFaces, 'nameByFaces')
+      );
     case 'chamfer': {
-      const e = refList(f.edges, 'edges', edgeRef, true);
+      const e = refList(f.edges, 'edges', edgeRef, true) ?? flip(f.nameByFaces, 'nameByFaces');
       if (e) return e;
       for (const [i, item] of (f.edges as Record<string, unknown>[]).entries()) {
         if (item.face !== undefined) {
@@ -3714,6 +3826,29 @@ export function validateFeature(input: unknown): string | null {
         seen.add(item.id as string);
       }
       return null;
+    }
+    case 'combine': {
+      const e = targets(f, false);
+      if (e) return e;
+      if (f.mode !== 'add' && f.mode !== 'subtract' && f.mode !== 'intersect') {
+        return 'mode must be add, subtract or intersect';
+      }
+      return bodyIds(f.tools, 'tools');
+    }
+    case 'move': {
+      const e = bodyIds(f.bodies, 'bodies');
+      if (e) return e;
+      const m = f.motion;
+      if (!isObj(m)) return 'motion must be an object';
+      if (m.kind === 'translate') return vec3(m.vector, 'motion.vector');
+      if (m.kind === 'rotate') return axis(m.axis, 'motion.axis') ?? num(m.angle, 'motion.angle');
+      if (m.kind === 'mirror') {
+        return isObj(m.plane)
+          ? (vec3(m.plane.origin, 'motion.plane.origin') ??
+              vec3(m.plane.normal, 'motion.plane.normal'))
+          : 'motion.plane must be a plane';
+      }
+      return 'motion.kind must be translate, rotate or mirror';
     }
     case 'import':
       return typeof f.step === 'string' || f.step instanceof Uint8Array

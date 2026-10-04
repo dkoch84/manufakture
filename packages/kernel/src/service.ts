@@ -80,6 +80,45 @@ export interface BatchReply<T extends readonly KernelOp[] = readonly KernelOp[]>
   recycle: RecycleReason | null;
 }
 
+/**
+ * A synchronous session on the kernel (ADR 0010 amendment, item 2): `fn` gets the synchronous
+ * `Kernel` in the service's exclusive slot, so nothing else runs on the kernel meanwhile, and a
+ * script's operations and queries are plain function calls, not batches. A newer generation
+ * cannot stop it once it has started (only its own limits can); a session queued behind a newer
+ * request is `cancelled` without running, and one that finishes after a newer request arrived is
+ * `cancelled` and keeps nothing.
+ */
+export interface SessionRequest {
+  /** As for a batch. */
+  generation: number;
+  /** Stamped on every shape the session makes (leak reports). */
+  featureId?: string;
+}
+
+/**
+ * What a session function gives back: its value, and the shapes it made that the caller owns
+ * from now on. Every other shape made during the session is released when it ends.
+ */
+export type SessionFunction<T> = (
+  kernel: Kernel,
+) => { value: T; keep: readonly ShapeId[] } | Promise<{ value: T; keep: readonly ShapeId[] }>;
+
+export interface SessionReply<T> {
+  generation: number;
+  /** The kernel instance the session ran on (and its kept shapes live in). */
+  instance: number;
+  status: 'done' | 'cancelled';
+  /**
+   * The function's value, or the failure it threw (errors as data, ADR 0007 decision 5): a trap
+   * is `fatal` and recycles the instance, as for a batch op. Absent when cancelled.
+   */
+  result?: { ok: true; value: T } | { ok: false; error: KernelFailure };
+  heapBytes: number;
+  shapeCount: number;
+  ms: number;
+  recycle: RecycleReason | null;
+}
+
 export interface RecycleReport {
   reason: RecycleReason;
   /** The new instance number. */
@@ -258,6 +297,31 @@ export class KernelService {
     return this.exclusive(async () => {
       this.queued--;
       return (await this.runBatch(request)) as BatchReply<T>;
+    });
+  }
+
+  /**
+   * Run a synchronous session on the kernel in the exclusive slot (see `SessionRequest`). Kept
+   * shapes that are not live, or were made before the session, are ignored. Rejects only for a
+   * malformed request.
+   */
+  session<T>(request: SessionRequest, fn: SessionFunction<T>): Promise<SessionReply<T>> {
+    if (
+      typeof request !== 'object' ||
+      request === null ||
+      !Number.isSafeInteger(request.generation)
+    ) {
+      return Promise.reject(new TypeError('a session request needs an integer generation'));
+    }
+    if (typeof fn !== 'function') {
+      return Promise.reject(new TypeError('a session needs a function'));
+    }
+    const { generation, featureId } = request;
+    this.latest = Math.max(this.latest, generation);
+    this.queued++;
+    return this.exclusive(async () => {
+      this.queued--;
+      return this.runSession(generation, featureId, fn);
     });
   }
 
@@ -492,6 +556,66 @@ export class KernelService {
       ms: performance.now() - t0,
       recycle: this.scheduled,
     };
+  }
+
+  private async runSession<T>(
+    generation: number,
+    featureId: string | undefined,
+    fn: SessionFunction<T>,
+  ): Promise<SessionReply<T>> {
+    const t0 = performance.now();
+    if (this.scheduled !== null) {
+      try {
+        await this.doRecycle(this.scheduled);
+      } catch {
+        // Reported through an 'error' status; the session below fails as 'fatal'.
+      }
+    }
+    const kernel = this.current;
+    const reply = (
+      status: 'done' | 'cancelled',
+      result?: SessionReply<T>['result'],
+    ): SessionReply<T> => ({
+      generation,
+      instance: this.instanceNo,
+      status,
+      ...(result === undefined ? {} : { result }),
+      heapBytes: kernel.heapBytes(),
+      shapeCount: kernel.shapeCount,
+      ms: performance.now() - t0,
+      recycle: this.scheduled,
+    });
+    if (this.isStale(generation)) return reply('cancelled');
+    const mark = kernel.checkpoint();
+    const releaseSince = (keep: ReadonlySet<ShapeId>) => {
+      if (kernel.lostReason !== null) return;
+      for (const shape of kernel.liveShapes()) {
+        if (shape.id >= mark && !keep.has(shape.id)) kernel.release(shape.id);
+      }
+    };
+    kernel.setContext({ generation, ...(featureId === undefined ? {} : { featureId }) });
+    let out: { value: T; keep: readonly ShapeId[] };
+    try {
+      out = await fn(kernel);
+    } catch (error) {
+      kernel.setContext({});
+      releaseSince(new Set());
+      this.afterBatch(kernel);
+      return reply('done', { ok: false, error: failureOf(error, 'session', featureId) });
+    }
+    kernel.setContext({});
+    // As after a batch: a newer request seen only now makes the session cancelled.
+    await this.yield();
+    const cancelled = this.isStale(generation) || kernel.lostReason !== null;
+    releaseSince(cancelled ? new Set() : new Set(out.keep));
+    this.afterBatch(kernel);
+    if (kernel.lostReason !== null) {
+      return reply('done', {
+        ok: false,
+        error: failureOf(new Error(kernel.lostReason), 'session', featureId),
+      });
+    }
+    return cancelled ? reply('cancelled') : reply('done', { ok: true, value: out.value });
   }
 
   private afterBatch(kernel: Kernel): void {
