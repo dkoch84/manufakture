@@ -158,6 +158,42 @@ jobs:
             apps/web/test-results/
           retention-days: 14
 
+  script-browsers:
+    # Scripted features give the same result in every browser (T7.2e, ADR 0010 decision 5): the
+    # example scripts run in a module worker of Chromium, Firefox and WebKit under the production
+    # worker policy, and each browser's recorded host calls, results and errors must equal a Node
+    # run bit for bit (apps/web/e2e/scripting-cross-browser.spec.ts). It needs no app build, so it
+    # runs on every push: about two runner minutes, most of it installing the three browsers.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Install Chromium, Firefox and WebKit with their system libraries
+        run: pnpm --filter @manufakture/web exec playwright install --with-deps chromium firefox webkit
+      - name: Run the example scripts in every browser
+        env:
+          E2E_CROSS_BROWSER: '1'
+          E2E_SKIP_APP: '1'
+        run: pnpm --filter @manufakture/web exec playwright test scripting-cross-browser
+      - name: Upload the Playwright report
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: script-browsers-report
+          path: |
+            apps/web/playwright-report/
+            apps/web/test-results/
+          retention-days: 14
+
   interop:
     # Optional: FreeCAD reopens our STEP and PrusaSlicer slices our 3MF and STL
     # (packages/io/src/interop.test.ts), for a part made in Node and for the

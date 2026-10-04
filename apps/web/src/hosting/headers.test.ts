@@ -51,6 +51,21 @@ describe('headersFor', () => {
     expect(WORKER_CSP).toContain("'unsafe-eval'");
   });
 
+  it('keeps worker scripts to their own origin (T7.2e: user scripts run in the regen worker)', () => {
+    expect(WORKER_CSP).toContain("connect-src 'self';");
+    expect(WORKER_CSP).not.toContain('https:');
+    expect(
+      headersFor('/assets/regen-worker-Di5uZo1s.js', { local: true })['Content-Security-Policy'],
+    ).toContain("connect-src 'self';");
+    // Everything else in the worker policy is the page policy's.
+    expect(
+      WORKER_CSP.replace(" 'unsafe-eval'", '').replace(
+        "connect-src 'self'",
+        "connect-src 'self' https:",
+      ),
+    ).toBe(DOCUMENT_CSP);
+  });
+
   it('widens connect-src for localhost only in the local variant', () => {
     expect(DOCUMENT_CSP).toContain("connect-src 'self' https:;");
     expect(localPolicy(DOCUMENT_CSP)).toContain('http://localhost:*');

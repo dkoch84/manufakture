@@ -76,6 +76,7 @@ export const PRELUDE_SOURCE = String.raw`(function setup(hostCall, hostTick, hos
   const mapGet = Map.prototype.get;
   const mapSet = Map.prototype.set;
   const TypeErr = TypeError;
+  const RangeErr = RangeError;
   const ErrorC = Error;
   const PromiseC = Promise;
   const StringC = String;
@@ -453,6 +454,184 @@ export const PRELUDE_SOURCE = String.raw`(function setup(hostCall, hostTick, hos
   // The string iterator is itself the Symbol.iterator entry: no alias to install.
   guardIterators(String.prototype, [Symbol.iterator], undefined);
 
+  // Map and Set hash a string key in full on every lookup, and compare it in full on a hit, so a
+  // loop of m.has(k) with a 1 MB key ran 3.9 s past a 300 ms limit (T7.2e). A string key longer
+  // than KEY_FREE is charged by its length; every other key is hashed in constant time and costs
+  // nothing, so these lean wrappers (called often, on small keys) read no clock. Object.is
+  // compares two strings of equal length in full (0.7 s late on 1 MB strings).
+  const KEY_FREE = 256;
+  // The set methods hash every element of their inputs natively, so a Set holding long string keys
+  // costs their total length per call, which its size does not show (a loop of union() on a Set of
+  // 40 keys of 1 MB ran 4.8 s late). Each Set records an upper bound on the length of the long
+  // keys added to it (deletes are not subtracted: it can only overcharge), and a set method's
+  // result inherits its inputs' bound.
+  const heavyKeys = new WeakMapC();
+  const weightOf = (x) => {
+    if (x === null || typeof x !== 'object') return 0;
+    const w = apply(wmGet, heavyKeys, [x]);
+    return w === undefined ? 0 : w;
+  };
+  const addWeight = (x, w) => {
+    if (w > 0 && x !== null && typeof x === 'object') apply(wmSet, heavyKeys, [x, weightOf(x) + w]);
+  };
+  const guardKeyed = (proto, names) => {
+    for (const name of names) {
+      const d = getOwnPropertyDescriptor(proto, name);
+      if (d === undefined || typeof d.value !== 'function') continue;
+      const orig = d.value;
+      const wrapper = {
+        [name](key) {
+          if (stopped) stopNow();
+          if (typeof key === 'string' && key.length > KEY_FREE) {
+            charge(key.length);
+            if (name === 'add') addWeight(this, key.length);
+          }
+          return apply(orig, this, arguments);
+        },
+      }[name];
+      defineProperty(wrapper, 'length', { value: orig.length });
+      defineProperty(proto, name, { value: wrapper, writable: d.writable, enumerable: d.enumerable, configurable: d.configurable });
+    }
+  };
+  // Maps need no key weight: no Map method hashes another Map's keys in bulk (new Map(m) and
+  // Map.groupBy insert through set() or the wrapped groupBy callback, both charged per key).
+  guardKeyed(Map.prototype, ['get', 'has', 'set', 'delete', 'getOrInsert', 'getOrInsertComputed']);
+  guardKeyed(Set.prototype, ['has', 'add', 'delete']);
+  const origIs = Object.is;
+  defineProperty(Object, 'is', {
+    value: {
+      is(a, b) {
+        if (stopped) stopNow();
+        if (typeof a === 'string' && typeof b === 'string' && a.length === b.length && a.length > KEY_FREE) charge(a.length);
+        return origIs(a, b);
+      },
+    }.is,
+    writable: true, enumerable: false, configurable: true,
+  });
+  // groupBy inserts every key the callback returns internally, past the guarded set(): the
+  // callback is wrapped so a long string key is charged by its length, and a key that is an object
+  // (Object.groupBy converts it with its own toString or valueOf, then hashes the result) reads the
+  // clock. A loop of Map.groupBy over 1,000 elements with a 1 MB key ran 6 s past a 300 ms limit.
+  for (const C of [Map, Set, Object]) {
+    const d = getOwnPropertyDescriptor(C, 'groupBy');
+    if (d === undefined || typeof d.value !== 'function') continue;
+    const orig = d.value;
+    const wrapper = {
+      groupBy(items, callback) {
+        if (stopped) stopNow();
+        charge(sizeOf(items) + MIN_CHARGE);
+        const cb = typeof callback !== 'function' ? callback : function (v, i) {
+          const key = apply(callback, this, [v, i]);
+          if (typeof key === 'string') {
+            if (key.length > KEY_FREE) charge(key.length);
+          } else if (key !== null && (typeof key === 'object' || typeof key === 'function')) {
+            charge(UNTRUSTED);
+          }
+          return key;
+        };
+        return apply(orig, this, [items, cb]);
+      },
+    }.groupBy;
+    defineProperty(wrapper, 'length', { value: orig.length });
+    defineProperty(C, 'groupBy', { value: wrapper, writable: d.writable, enumerable: d.enumerable, configurable: d.configurable });
+  }
+  // The set methods walk a whole Set natively (a loop of difference() on a 200,000-element Set
+  // ran 0.2 s late): charged by both sizes and both key weights. Their argument may be any
+  // set-like ({ size, has, keys }), whose keys() the method drains natively, hashing every key it
+  // yields (a loop of union() with a set-like yielding a 1 MB key ran 2.8 s late, one union() with
+  // a 4 MB key 11.9 s). So unless the argument is a plain Set whose size, has and keys are the
+  // ones installed here (no own overrides, prototype unchanged), the wrapper reads size, has and
+  // keys once itself, as GetSetRecord would, and hands the method a record whose keys() iterator
+  // charges every long string key it passes on. The has() path needs nothing: has is script code,
+  // and the keys it is asked about are this Set's own, charged by its weight.
+  const installedHas = getOwnPropertyDescriptor(Set.prototype, 'has').value;
+  const installedKeys = getOwnPropertyDescriptor(Set.prototype, 'keys').value;
+  // The native method drains keys() through the iterator's next, looked up on the Set iterator
+  // prototype: a script that replaces it would make a plain Set yield its own keys uncharged.
+  const SetIteratorProto = getPrototypeOf(apply(installedKeys, new Set(), []));
+  const setIteratorNext = getOwnPropertyDescriptor(SetIteratorProto, 'next').value;
+  const isPlainSet = (x) => {
+    if (isProxy(x) || getPrototypeOf(x) !== Set.prototype || slot(setSize, x) < 0) return false;
+    if (apply(hasOwn, x, ['size']) || apply(hasOwn, x, ['has']) || apply(hasOwn, x, ['keys'])) return false;
+    const proto = Set.prototype;
+    const sizeD = getOwnPropertyDescriptor(proto, 'size');
+    const hasD = getOwnPropertyDescriptor(proto, 'has');
+    const keysD = getOwnPropertyDescriptor(proto, 'keys');
+    const nextD = getOwnPropertyDescriptor(SetIteratorProto, 'next');
+    return sizeD !== undefined && sizeD.get === setSize && hasD !== undefined && hasD.value === installedHas &&
+      keysD !== undefined && keysD.value === installedKeys && nextD !== undefined && nextD.value === setIteratorNext;
+  };
+  for (const name of ['union', 'intersection', 'difference', 'symmetricDifference', 'isSubsetOf',
+    'isSupersetOf', 'isDisjointFrom']) {
+    const d = getOwnPropertyDescriptor(Set.prototype, name);
+    if (d === undefined || typeof d.value !== 'function') continue;
+    const orig = d.value;
+    const wrapper = {
+      [name](other) {
+        if (stopped) stopNow();
+        const keys = weightOf(this) + weightOf(other);
+        charge(sizeOf(this) + sizeOf(other) + keys + MIN_CHARGE);
+        if (other === null || (typeof other !== 'object' && typeof other !== 'function') || isPlainSet(other)) {
+          const result = apply(orig, this, [other]);
+          addWeight(result, keys);
+          return result;
+        }
+        // GetSetRecord's order: size read and checked before has and keys are read.
+        const size = +other.size;
+        if (size !== size) throw new TypeErr('The size of the set-like argument is not a number.');
+        // ToIntegerOrInfinity(size) < 0 exactly when size <= -1 (-0.5 truncates to 0).
+        if (size <= -1) throw new RangeErr('The size of the set-like argument is negative.');
+        const has = other.has;
+        if (typeof has !== 'function') throw new TypeErr('The set-like argument has no has() method.');
+        const keysFn = other.keys;
+        if (typeof keysFn !== 'function') throw new TypeErr('The set-like argument has no keys() method.');
+        let yielded = 0;
+        const record = {
+          size,
+          has(key) {
+            return apply(has, other, [key]);
+          },
+          keys() {
+            const it = apply(keysFn, other, []);
+            if (it === null || (typeof it !== 'object' && typeof it !== 'function')) {
+              throw new TypeErr('keys() of the set-like argument did not return an object.');
+            }
+            const next = it.next;
+            return {
+              next() {
+                if (stopped) stopNow();
+                const r = apply(next, it, []);
+                if (r === null || (typeof r !== 'object' && typeof r !== 'function')) {
+                  throw new TypeErr('An iterator result is not an object.');
+                }
+                const done = r.done;
+                if (done) return { done: true, value: undefined };
+                const value = r.value;
+                if (typeof value === 'string' && value.length > KEY_FREE) {
+                  charge(value.length);
+                  yielded += value.length;
+                }
+                return { done: false, value };
+              },
+              // Methods that stop early (isDisjointFrom, isSupersetOf) close the iterator: the
+              // script's own return() (a generator's finally) runs, as it would natively.
+              return() {
+                const ret = it.return;
+                if (ret === undefined || ret === null) return { done: true, value: undefined };
+                return apply(ret, it, []);
+              },
+            };
+          },
+        };
+        const result = apply(orig, this, [record]);
+        addWeight(result, keys + yielded);
+        return result;
+      },
+    }[name];
+    defineProperty(wrapper, 'length', { value: orig.length });
+    defineProperty(Set.prototype, name, { value: wrapper, writable: d.writable, enumerable: d.enumerable, configurable: d.configurable });
+  }
+
   // Constructors that also work as plain calls and parse their argument natively: Number (and
   // new Number) by the string's length, RegExp by the pattern's. Statics, subclassing,
   // instanceof and the constructor property keep working; the originals stay out of reach.
@@ -505,6 +684,14 @@ export const PRELUDE_SOURCE = String.raw`(function setup(hostCall, hostTick, hos
   });
   // Annex B compile() recompiles in place.
   guard(RegExp.prototype, ['compile'], false, (self, args) => patternCost(args[0]) + sizeOf(args[1]));
+  // new ArrayBuffer(n) zeroes n bytes, and transfer() and resize() copy or zero up to their
+  // length: charged by the length asked for (a loop of new ArrayBuffer(16e6) ran 0.2 s late).
+  // Anything but a number is converted natively (a string, or an object's valueOf): priced at
+  // UNTRUSTED, which reads the clock, rather than run the conversion twice.
+  const byteCount = (x) => (typeof x === 'number' ? (x > 0 ? x : 0) : x === undefined ? 0 : UNTRUSTED);
+  wrapCallable('ArrayBuffer', (args) => byteCount(args[0]));
+  guard(ArrayBuffer.prototype, ['transfer', 'transferToFixedLength', 'resize'], false,
+    (self, args) => sizeOf(self) + byteCount(args[0]));
 
   // Typed array constructors copy an array or iterable natively: charged by the argument's size
   // (or the length asked for). The wrapper keeps new, subclassing and instanceof working.

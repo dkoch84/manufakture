@@ -38,12 +38,15 @@ export const DOCUMENT_CSP = [
  * from its own script's response, not from the page. The kernel's Emscripten glue (libcascade's
  * embind) builds its function invokers with `new Function`, which needs `'unsafe-eval'`; the
  * workers run only our code on data the page posts them, and the page's own policy stays without
- * it.
+ * it. `connect-src 'self'` (T7.2e): the workers fetch only the app's own `.wasm` and font assets,
+ * never another origin, so the regen worker, where user scripts run in QuickJS, cannot reach the
+ * network even if a script escaped the sandbox (sync and sharing talk to other origins from the
+ * page).
  */
 export const WORKER_CSP = DOCUMENT_CSP.replace(
   "script-src 'self' 'wasm-unsafe-eval'",
   "script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval'",
-);
+).replace("connect-src 'self' https:", "connect-src 'self'");
 
 /**
  * The same policy for a page served from localhost (`vite preview`, the end-to-end tests): the

@@ -110,6 +110,8 @@ export function parseParamDeclarations(value: ScriptValue): Result<ParamSpec[]> 
     const d = value[name];
     const where = `Parameter "${name}"`;
     if (!NAME.test(name)) return bad(`${where}: a parameter name must be an identifier.`);
+    // An identifier, but as a key it sets an object's prototype (resolveParams, the dialog).
+    if (name === '__proto__') return bad(`${where}: this name is reserved.`);
     if (!isRecord(d)) return bad(`${where} must be an object with a kind.`);
     const kind = d.kind;
     if (typeof kind !== 'string' || !(KINDS as readonly string[]).includes(kind)) {
@@ -250,7 +252,13 @@ export function resolveParams(
         error: scriptError('bad-param', `Parameter "${spec.label ?? spec.name}" is ${why}.`),
       };
     }
-    out[spec.name] = value;
+    // Defined, not assigned: a spec built by hand named __proto__ must not set the prototype.
+    Object.defineProperty(out, spec.name, {
+      value,
+      writable: true,
+      enumerable: true,
+      configurable: true,
+    });
   }
   return { ok: true, value: out };
 }

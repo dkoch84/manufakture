@@ -201,8 +201,17 @@ export function encodeValue(
         true,
       );
     }
-    if (Array.isArray(v))
+    if (Array.isArray(v)) {
+      // map() skips holes and JSON writes each as null, so a sparse array's length is checked
+      // before anything walks it (`new Array(1e9)` would otherwise become gigabytes of JSON).
+      if (v.length > limits.maxElements) {
+        throw new CodecError(
+          `A value crossing the script boundary has more than ${limits.maxElements} elements.`,
+          true,
+        );
+      }
       return v.map((item) => (item === undefined ? null : visit(item, depth + 1)));
+    }
     const proto: unknown = Object.getPrototypeOf(v);
     if (proto !== Object.prototype && proto !== null) {
       throw new CodecError('Only plain objects and arrays can cross to a script.', false);

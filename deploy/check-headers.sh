@@ -140,7 +140,8 @@ for file in $wasm_files; do
   head -c 4 "$tmp/b" | od -An -tx1 | grep -q '00 61 73 6d' || fail "$path: not a WebAssembly file"
 done
 
-# Worker scripts get the worker policy, which allows eval for the kernel's Emscripten glue. The
+# Worker scripts get the worker policy, which allows eval for the kernel's Emscripten glue and
+# connects to the app's own origin only. The
 # service worker's precache list names every one of them.
 fetch /sw.js
 workers="$(grep -oE 'assets/[A-Za-z0-9_.-]*worker[A-Za-z0-9_.-]*\.js' "$tmp/b" | sort -u || true)"
@@ -149,6 +150,8 @@ for file in $workers; do
   fetch "/$file"
   expect_status 200 "/$file"
   expect_header_contains content-security-policy "'wasm-unsafe-eval' 'unsafe-eval'" "/$file"
+  # Workers reach their own origin only (user scripts run in the regen worker).
+  expect_header_contains content-security-policy "connect-src 'self';" "/$file"
 done
 
 fetch /healthz

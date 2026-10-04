@@ -32,7 +32,8 @@
 	@hashed path_regexp ^/assets/[^/]+-[A-Za-z0-9_-]{8}\.[A-Za-z0-9]+$
 	@unhashed not path_regexp ^/assets/[^/]+-[A-Za-z0-9_-]{8}\.[A-Za-z0-9]+$
 	# Worker scripts get their own policy: a dedicated worker takes its CSP from its script's
-	# response, and the kernel's Emscripten glue needs 'unsafe-eval' (embind's invokers).
+	# response, and the kernel's Emscripten glue needs 'unsafe-eval' (embind's invokers). Workers
+	# connect to their own origin only: user scripts run in the regen worker.
 	@worker path_regexp ^/assets/[^/]*worker[^/]*\.js$
 	@page not path_regexp ^/assets/[^/]*worker[^/]*\.js$
 	# Only for a file that exists: a missing .wasm is a plain 404, not one labelled WebAssembly.
@@ -44,7 +45,7 @@
 
 	import security_headers
 	header @page Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https:; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
-	header @worker Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval'; style-src 'self'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https:; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+	header @worker Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval'; style-src 'self'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
 	# index.html, viewer.html, source.html, sw.js, the manifest and icons: revalidated on every use.
 	header @unhashed Cache-Control "no-cache"
 	header @hashed Cache-Control "public, max-age=31536000, immutable"

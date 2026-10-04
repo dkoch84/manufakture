@@ -12,7 +12,14 @@ import { defineConfig, devices } from '@playwright/test';
 // unpacked copy and it is passed to the browser process only. CI installs the
 // libraries with `playwright install --with-deps` and leaves it unset.
 
+// E2E_CROSS_BROWSER=1 adds Firefox and WebKit projects that run only the cross-browser script
+// determinism spec (T7.2e); the default run stays Chromium only. E2E_SKIP_APP=1 skips building and
+// serving the app, for runs of specs that need none of it (that spec serves its own harness).
+
 const port = Number(process.env.E2E_PORT ?? 4317);
+const crossBrowser = process.env.E2E_CROSS_BROWSER === '1';
+const skipApp = process.env.E2E_SKIP_APP === '1';
+const CROSS_BROWSER_SPECS = /scripting-cross-browser\.spec\.ts$/;
 const ci = !!process.env.CI;
 const extraLibs = process.env.PLAYWRIGHT_BROWSER_LD_LIBRARY_PATH;
 const appDir = 'dist/e2e-app';
@@ -57,14 +64,29 @@ export default defineConfig({
       ...(extraLibs ? { env: { ...process.env, LD_LIBRARY_PATH: extraLibs } } : {}),
     },
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
-  webServer: {
-    command:
-      `pnpm exec vite build --outDir ${appDir} && ` +
-      `pnpm exec vite preview --outDir ${appDir} --port ${port} --strictPort`,
-    env: { VITE_E2E: '1' },
-    url: `http://localhost:${port}`,
-    reuseExistingServer: !ci,
-    timeout: 180_000,
-  },
+  projects: [
+    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+    ...(crossBrowser
+      ? (['firefox', 'webkit'] as const).map((name) => ({
+          name,
+          testMatch: CROSS_BROWSER_SPECS,
+          use: {
+            ...devices[name === 'firefox' ? 'Desktop Firefox' : 'Desktop Safari'],
+            // No Chromium flags; only the unpacked libraries, where a machine needs them.
+            launchOptions: extraLibs ? { env: { ...process.env, LD_LIBRARY_PATH: extraLibs } } : {},
+          },
+        }))
+      : []),
+  ],
+  webServer: skipApp
+    ? []
+    : {
+        command:
+          `pnpm exec vite build --outDir ${appDir} && ` +
+          `pnpm exec vite preview --outDir ${appDir} --port ${port} --strictPort`,
+        env: { VITE_E2E: '1' },
+        url: `http://localhost:${port}`,
+        reuseExistingServer: !ci,
+        timeout: 180_000,
+      },
 });
