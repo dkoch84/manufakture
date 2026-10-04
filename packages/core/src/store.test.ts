@@ -234,4 +234,57 @@ describe('DocumentStore', () => {
       },
     });
   });
+
+  describe('remote changes (sync)', () => {
+    it('applies a remote document with the remote cause, keeping the history', () => {
+      const s = store();
+      unwrap(s.execute({ type: 'renameFeature', partId: PART, featureId: 'fillet#1', name: 'X' }));
+      const events: ChangeEvent[] = [];
+      s.subscribe((e) => events.push(e));
+      const remote = { ...clone(s.document), name: 'Renamed elsewhere' };
+      unwrap(s.applyRemote(remote, 'From another browser'));
+      expect(s.document).toBe(remote);
+      expect(events).toHaveLength(1);
+      expect(events[0]!.cause).toBe('remote');
+      expect(events[0]!.label).toBe('From another browser');
+      expect(events[0]!.command).toEqual({ type: 'replaceDocument', document: remote });
+      expect(events[0]!.change.nameChanged).toBe(true);
+      expect(s.undoStack).toHaveLength(1);
+      unwrap(s.undo());
+      expect(s.document.parts[0]!.features[4]!.name).toBe('Fillet 1');
+      expect(s.document.name).toBe('Renamed elsewhere');
+    });
+
+    it('adopts an equal document quietly and refuses another id or an invalid one', () => {
+      const s = store();
+      const events: ChangeEvent[] = [];
+      s.subscribe((e) => events.push(e));
+      const same = clone(s.document);
+      expect(unwrap(s.applyRemote(same)).empty).toBe(true);
+      expect(s.document).toBe(same);
+      expect(events).toHaveLength(0);
+      const r = s.applyRemote(createDocument({ id: 'other', name: 'Other' }));
+      expect(r.ok).toBe(false);
+      const broken = clone(s.document);
+      // sketch#2 sits on extrude#1's face: without extrude#1 the document is invalid.
+      (broken.parts[0]!.features as unknown[]).splice(1, 1);
+      expect(s.applyRemote(broken).ok).toBe(false);
+      expect(s.document).toBe(same);
+    });
+
+    it('rewrites the history, dropping from the first step that cannot be kept', () => {
+      const s = store();
+      for (const name of ['a', 'b', 'c']) {
+        unwrap(s.execute({ type: 'renameFeature', partId: PART, featureId: 'fillet#1', name }));
+      }
+      s.rewriteHistory((c) =>
+        c.type === 'renameFeature' && c.name === 'a' ? null : { ...c, featureId: 'fillet#1' },
+      );
+      // The steps undo to 'a' and 'b'; the one undoing to 'a' is dropped, and every older one.
+      expect(s.undoStack.map((e) => (e.command as { name: string }).name)).toEqual(['b']);
+      s.clearHistory();
+      expect(s.canUndo).toBe(false);
+      expect(s.canRedo).toBe(false);
+    });
+  });
 });

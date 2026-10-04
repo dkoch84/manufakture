@@ -115,6 +115,9 @@ import { createDrawingUiStore } from './drawing/state';
 import { ConfigurationSwitcher } from './configurations/ConfigurationSwitcher';
 import { viewerUrlFor } from './sharing/client';
 import { SharePanel, type BundleResult } from './sharing/SharePanel';
+import type { SyncController } from './sync/controller';
+import { followDialog, followSelection } from './sync/follow';
+import { SyncRoot } from './sync/SyncRoot';
 import { documentStore, historyShortcut, type DocumentStoreApi } from './state/document';
 import { measureStore, type MeasureStore } from './state/measure';
 import {
@@ -290,6 +293,8 @@ export interface AppProps {
   members?: MemberStore;
   /** Which documents' scripts may run on this device (default: the app's, in localStorage). */
   scriptGrants?: ScriptGrantsStore;
+  /** Sync (src/sync, started by main.tsx): the Sync button, and renames the selection follows. */
+  sync?: Promise<SyncController> | null;
 }
 
 /** Whether `doc` has imported reference bodies, which live outside regen and must be read again. */
@@ -354,6 +359,7 @@ export function App({
   constructionUi: givenConstructionUi,
   members = memberStore,
   scriptGrants = scriptGrantsStore,
+  sync = null,
 }: AppProps) {
   const [ownConstructionUi] = useState(createConstructionUiStore);
   const constructionUi = givenConstructionUi ?? ownConstructionUi;
@@ -1799,6 +1805,24 @@ export function App({
     scriptId: string | null;
     session: number;
   } | null>(null);
+  // Sync renamed ids (src/sync/follow.ts): the selection and an open dialog follow.
+  useEffect(() => {
+    if (!sync) return;
+    let live = true;
+    let off = () => {};
+    void sync.then((c) => {
+      if (!live) return;
+      off = c.onRemapped((table) => {
+        const partId = documents.getState().activePartId;
+        followSelection(selection, table, partId);
+        setDialog((d) => followDialog(d, table, partId));
+      });
+    });
+    return () => {
+      live = false;
+      off();
+    };
+  }, [sync, documents, selection]);
   const openScript = useCallback(
     (scriptId: string | null) =>
       setScriptEditor((e) => ({ scriptId, session: (e?.session ?? 0) + 1 })),
@@ -2199,6 +2223,7 @@ export function App({
             makeBundle={shareBundle}
             viewerUrl={VIEWER_URL}
           />
+          {sync && <SyncRoot sync={sync} />}
           <ImportButton
             disabled={sketching.active || ioBusy || locked || assemblyId !== null}
             onFile={onImport}

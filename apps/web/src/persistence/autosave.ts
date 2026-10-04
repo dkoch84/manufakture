@@ -12,6 +12,13 @@
 // Changes wait per document and branch: each change is recorded with the branch the open
 // document was on when it was made (the `branch` option), and saved to that branch, so a change
 // made while the app switches branches never lands on the other one.
+//
+// Sync (T7.1d): a change from the server (`remote`) is saved like any other, its log entry a
+// `replaceDocument` (so replay reproduces it). While a document syncs, `src/sync` registers a
+// source of its sync state (`registerSyncSource`), and every save of the document's main branch
+// carries the state as it is at that moment, with every change made up to then: the snapshot and
+// the queue are one commit (persistence README, "Sync"). `flushForSync` is how the sync loop
+// saves before it sends.
 
 import type { ChangeEvent, ManufaktureDocument } from '@manufakture/core';
 import { createStore, type StoreApi } from 'zustand/vanilla';
@@ -23,6 +30,7 @@ import {
   type DocumentSummary,
   type LibraryResult,
   type LogEntry,
+  type SyncRecord,
   type Version,
   type VersionMeta,
 } from './library';
@@ -77,6 +85,38 @@ export interface AutosaveOptions {
   branch?: () => string;
 }
 
+/** The sync state to save with document `documentId`'s branch, or null when it does not sync. */
+export type SyncSource = (documentId: string, branch: string) => SyncRecord | null;
+
+let syncSource: SyncSource | null = null;
+
+/** Register where sync state comes from (src/sync); returns the function that unregisters it. */
+export function registerSyncSource(source: SyncSource): () => void {
+  syncSource = source;
+  return () => {
+    if (syncSource === source) syncSource = null;
+  };
+}
+
+interface Running {
+  flush(): Promise<boolean>;
+  pendingFor(id: string): boolean;
+}
+
+/** Every autosave running now (one per App). */
+const running = new Set<Running>();
+
+/**
+ * Save everything pending now, in every running autosave: true when, once that is done, nothing
+ * of document `id` waits to be saved (checked as the promise resolves, before any other task
+ * runs), so the library's head then holds exactly what the document store holds.
+ */
+export async function flushForSync(id: string): Promise<boolean> {
+  const all = [...running];
+  const results = await Promise.all(all.map((a) => a.flush()));
+  return results.every(Boolean) && all.every((a) => !a.pendingFor(id));
+}
+
 interface Pending {
   document: ManufaktureDocument;
   entries: LogEntry[];
@@ -115,7 +155,10 @@ export function startAutosave(
   const deleted = new Set<string>();
   /** Branches of documents (`keyOf`) another tab saved meanwhile: not saved until `forget`. */
   const conflicted = new Set<string>();
-  const pendingFor = (id: string) => [...pending.keys()].some((k) => isOf(k, id));
+  const pendingFor = (id: string) =>
+    [...pending.keys()].some((k) => isOf(k, id)) || savingIds.has(id);
+  /** Documents whose save is under way (by id, counted). */
+  const savingIds = new Map<string, number>();
   /** Changes a flush has taken whose save has not finished yet. */
   let saving = 0;
   let failures = 0;
@@ -155,8 +198,26 @@ export function startAutosave(
       (openDocument().id === id && branchNow() === take.branch) ||
       (status.getState().documentId === id && statusBranch === take.branch);
     if (shown()) setStatus('saving', take.document, null, take.branch);
+    // A syncing document is saved with its sync state as it is now, and so with every change
+    // made up to now: the changes that came after this batch are taken into it.
+    const sync = syncSource?.(id, take.branch) ?? null;
+    if (sync !== null) {
+      const newer = pending.get(key);
+      if (newer) {
+        pending.delete(key);
+        take = {
+          document: newer.document,
+          entries: [...take.entries, ...newer.entries],
+          branch: take.branch,
+        };
+      }
+    }
+    savingIds.set(id, (savingIds.get(id) ?? 0) + 1);
     try {
-      const summary = await library.save(take.document, take.entries, take.branch);
+      const summary =
+        sync !== null
+          ? await library.save(take.document, take.entries, take.branch, sync)
+          : await library.save(take.document, take.entries, take.branch);
       if (shown()) {
         const newer = pending.get(key);
         setStatus(newer ? 'pending' : 'saved', newer?.document ?? take.document, null, take.branch);
@@ -183,6 +244,9 @@ export function startAutosave(
       return false;
     } finally {
       saving -= 1;
+      const n = (savingIds.get(id) ?? 1) - 1;
+      if (n > 0) savingIds.set(id, n);
+      else savingIds.delete(id);
     }
   };
 
@@ -236,11 +300,12 @@ export function startAutosave(
     }
     if (!event.command) return;
     deleted.delete(doc.id);
+    // A change from the server is logged as what it is to the log: a whole-document replace.
     // The branch the change is made on, read now: a switch that completes later does not move it.
     const branch = branchNow();
     const key = keyOf(doc.id, branch);
     const entry: LogEntry = {
-      cause: event.cause,
+      cause: event.cause === 'remote' ? 'execute' : event.cause,
       label: event.label,
       command: event.command,
       at: now().toISOString(),
@@ -257,6 +322,8 @@ export function startAutosave(
     if (!conflicted.has(key)) schedule();
   };
   const unsubscribe = documents.core.subscribe(onChange);
+  const registered: Running = { flush: () => flush(), pendingFor };
+  running.add(registered);
 
   const drop = (id: string) => {
     for (const key of [...pending.keys()]) if (isOf(key, id)) pending.delete(key);
@@ -299,6 +366,7 @@ export function startAutosave(
     async stop() {
       stopped = true;
       unsubscribe();
+      running.delete(registered);
       await flush();
       clearTimers();
     },

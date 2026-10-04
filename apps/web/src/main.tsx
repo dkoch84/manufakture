@@ -5,6 +5,8 @@ import { logCrossOriginIsolation } from './isolation';
 import { openBrowserLibrary } from './persistence/storage';
 import { startPwa } from './pwa';
 import { PwaStatus } from './pwa/PwaStatus';
+import { documentStore } from './state/document';
+import { startSync } from './sync/start';
 import { testHooksEnabled } from './testHooks';
 import { sceneFromSearch } from './viewport/scenes';
 
@@ -20,12 +22,16 @@ if (!container) {
 const persisted = !testHooksEnabled || sceneFromSearch(window.location.search).scene === 'default';
 const library = persisted ? openBrowserLibrary() : null;
 
+// Sync with the user's server (src/sync): the app's own document store, so the document it
+// shows is the one that syncs.
+const sync = library ? startSync(documentStore, library) : null;
+
 // The service worker (production builds only; src/pwa/register.ts says when).
 const pwa = startPwa();
 
 createRoot(container).render(
   <StrictMode>
-    <App library={library} />
+    <App library={library} sync={sync} />
     {pwa && <PwaStatus flow={pwa.flow} status={pwa.status} />}
   </StrictMode>,
 );

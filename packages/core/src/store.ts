@@ -13,11 +13,19 @@ export interface HistoryEntry {
   readonly command: Command;
 }
 
-export type ChangeCause = 'execute' | 'undo' | 'redo' | 'load';
+/**
+ * Why the document changed: a local command, its undo or redo, a `load` (open, revert), or
+ * `remote`: entries from another client arrived through sync (T7.1d), or a rebase renamed or
+ * dropped pending ones. A remote change leaves the undo and redo stacks as they are.
+ */
+export type ChangeCause = 'execute' | 'undo' | 'redo' | 'load' | 'remote';
 
 export interface ChangeEvent {
   readonly cause: ChangeCause;
-  /** The command that was applied; absent for `load`. Recording these gives the op log. */
+  /**
+   * The command that was applied; absent for `load`. Recording these gives the op log. For
+   * `remote` it is a `replaceDocument` of the new document: a rebase is not one command.
+   */
   readonly command?: Command;
   readonly label: string;
   readonly previous: ManufaktureDocument;
@@ -121,6 +129,55 @@ export class DocumentStore {
     this.#redo = [];
     const change = diffDocuments(this.#document, document);
     return ok(this.#commit('load', undefined, 'load', document, change));
+  }
+
+  /**
+   * Puts `document` in place as a change from another client (sync, T7.1d): validated like a
+   * load, notified with the cause `remote` and a `replaceDocument` command (so the op log can
+   * replay it), and the undo and redo stacks are kept. A document with another id is refused, as
+   * is an invalid one; one equal to the current document changes nothing.
+   */
+  applyRemote(document: ManufaktureDocument, label = 'Synced changes'): CoreResult<DocumentChange> {
+    if (document.id !== this.#document.id) {
+      return fail('invalid-id', `A remote change is for document "${document.id}", not this one`);
+    }
+    if (document === this.#document) return ok(diffDocuments(document, document));
+    const checked = checkDocument(document);
+    if (!checked.ok) return checked;
+    const change = diffDocuments(this.#document, document);
+    if (change.empty) {
+      // Same content (another object): adopt it quietly, so later remote changes diff against it.
+      this.#document = document;
+      return ok(change);
+    }
+    return ok(
+      this.#commit('remote', { type: 'replaceDocument', document }, label, document, change),
+    );
+  }
+
+  /**
+   * Rewrites the undo and redo stacks with `rewrite` (sync renamed ids, ADR 0009 decision 5);
+   * an entry it maps to null is dropped together with every older one, since an older step would
+   * no longer undo onto the state it was recorded on. Notifies nobody: the next change does.
+   */
+  rewriteHistory(rewrite: (command: Command) => Command | null): void {
+    const map = (stack: HistoryEntry[]): HistoryEntry[] => {
+      const out: HistoryEntry[] = [];
+      for (let i = stack.length - 1; i >= 0; i--) {
+        const command = rewrite(stack[i]!.command);
+        if (command === null) break;
+        out.unshift({ label: stack[i]!.label, command });
+      }
+      return out;
+    };
+    this.#undo = map(this.#undo);
+    this.#redo = map(this.#redo);
+  }
+
+  /** Empties the undo and redo stacks (sync dropped commands they may build on). */
+  clearHistory(): void {
+    this.#undo = [];
+    this.#redo = [];
   }
 
   #step(

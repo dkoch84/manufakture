@@ -1,0 +1,131 @@
+/* In the header next to Share: a header button with a status dot. */
+.sync-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.sync-dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: #9aa5b1;
+}
+
+.sync-dot-synced {
+  background: #2e9d4f;
+}
+
+.sync-dot-pending,
+.sync-dot-connecting,
+.sync-dot-starting {
+  background: #d9a40b;
+}
+
+.sync-dot-offline,
+.sync-dot-other-tab,
+.sync-dot-branch {
+  background: #6b7785;
+}
+
+.sync-dot-error,
+.sync-dot-fault,
+.sync-dot-problem,
+.sync-dot-update-app,
+.sync-dot-upgrade-server,
+.sync-dot-no-server {
+  background: #c8372d;
+}
+
+.sync-badge {
+  min-width: 1.1rem;
+  padding: 0 0.25rem;
+  font-size: 0.75rem;
+  color: #fff;
+  background: #c8372d;
+  border-radius: 0.6rem;
+}
+
+.sync-panel {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 2px);
+  /* The button sits towards the right of the header: open leftwards from its right edge. */
+  right: 0;
+  font-size: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  width: 24rem;
+  max-width: calc(100vw - 1.5rem);
+  max-height: 70vh;
+  overflow: auto;
+  box-sizing: border-box;
+  padding: 0.6rem;
+  background: #fff;
+  border: 1px solid #c2cad3;
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 12%);
+}
+
+.sync-panel h4,
+.sync-panel p {
+  margin: 0;
+}
+
+.sync-panel input,
+.sync-panel button {
+  font: inherit;
+}
+
+.sync-server,
+.sync-server label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.sync-server-line,
+.sync-switch {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.sync-server-line span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sync-detail {
+  color: #4a5561;
+}
+
+.sync-error {
+  color: #b3261e;
+}
+
+.sync-documents ul,
+.sync-notices {
+  margin: 0.3rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sync-documents li,
+.sync-notices li {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0;
+  border-top: 1px solid #eef1f4;
+}
+
+.sync-documents li span,
+.sync-notices li span {
+  flex: 1;
+  min-width: 0;
+}

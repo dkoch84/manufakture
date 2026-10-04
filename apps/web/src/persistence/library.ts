@@ -10,6 +10,7 @@
 //   log-<rev>.json          the commands that led from the previous revision to <rev>
 //   versions-<n>.json       the named versions, the n-th time the list was written
 //   branches-<n>.json       the branches besides main, the n-th time the list was written
+//   sync-<n>.json           the sync state (T7.1d), the n-th write, for the revision it names
 //   blobs/<sha256>          each imported file, once
 //   branches/<branch>/      a branch's own head.json, snapshot-<rev>.json and log-<rev>.json
 //
@@ -67,6 +68,7 @@ const SNAPSHOT = /^snapshot-(\d{1,12})\.json$/;
 const LOG = /^log-(\d{1,12})\.json$/;
 const VERSIONS = /^versions-(\d{1,12})\.json$/;
 const BRANCHES = /^branches-(\d{1,12})\.json$/;
+const SYNC = /^sync-(\d{1,12})\.json$/;
 /** The directory, in a document's, that holds the branches besides main. */
 const BRANCH_DIR = 'branches';
 
@@ -75,6 +77,7 @@ const snapshotName = (rev: number) => `snapshot-${pad(rev)}.json`;
 const logName = (rev: number) => `log-${pad(rev)}.json`;
 const versionsName = (n: number) => `versions-${pad(n)}.json`;
 const branchesName = (n: number) => `branches-${pad(n)}.json`;
+const syncName = (n: number) => `sync-${pad(n)}.json`;
 
 /**
  * The main branch: the document's own directory. Every operation that takes a branch means this
@@ -238,10 +241,42 @@ interface Head {
    * main branch's head names lists; a branch's head has 0 for both.
    */
   branches: number;
+  /**
+   * Which `sync-<n>.json` is current (T7.1d): the document's sync state, for the revision the
+   * file names. 0 (or absent, before sync existed): the document does not sync. Main only.
+   */
+  sync?: number;
 }
 
-/** The two lists a main head commits: how many times each was written. */
-type Lists = Pick<Head, 'versions' | 'branches'>;
+/** What a main head commits besides its revision: how many times each list was written. */
+type Lists = Pick<Head, 'versions' | 'branches' | 'sync'>;
+
+/**
+ * A document's sync state (T7.1d, ADR 0009 decision 4), saved with the revision it belongs to:
+ * `sync-<n>.json`, committed by the main head like the lists, and written before that head by the
+ * same save that writes the snapshot, so a reload never pairs a queue with another revision.
+ */
+export interface SyncRecord {
+  /** The server's base address (`ServerSettings.url`); never the token. */
+  server: string;
+  /** The client key this browser proves its client id with (apps/server binds it at the first hello). */
+  clientKey: string;
+  /** The server's last confirmed document, the one `state` builds on. */
+  confirmed: ManufaktureDocument;
+  /** `SyncClient.save()`: plain JSON, validated by `SyncClient.restore`. */
+  state: unknown;
+}
+
+/** A sync record as read back, and whether it belongs to the revision the head names. */
+export interface StoredSync {
+  record: SyncRecord;
+  /**
+   * The record was saved with the head's revision. False when a later save of the document did
+   * not carry sync state (another tab, an older app): the document then holds changes the queue
+   * does not.
+   */
+  paired: boolean;
+}
 
 /**
  * A named version: a revision given a name, kept for good. Its id is permanent, so other
@@ -318,7 +353,10 @@ function parseHead(bytes: Uint8Array | null, id: string): Head | null {
       typeof h.savedAt === 'string' &&
       (h.versions === undefined || (Number.isInteger(h.versions) && h.versions >= 0)) &&
       (h.branches === undefined || (Number.isInteger(h.branches) && h.branches >= 0));
-    return valid ? ({ ...h, versions: h.versions ?? 0, branches: h.branches ?? 0 } as Head) : null;
+    if (h.sync !== undefined && !(Number.isInteger(h.sync) && h.sync >= 0)) return null;
+    return valid
+      ? ({ ...h, versions: h.versions ?? 0, branches: h.branches ?? 0, sync: h.sync ?? 0 } as Head)
+      : null;
   } catch {
     return null;
   }
@@ -474,7 +512,7 @@ export function parseVersions(value: unknown): Version[] | null {
  */
 interface ListKind<T> {
   /** The head's field naming the current list, and the file's field holding the items. */
-  field: keyof Lists;
+  field: 'versions' | 'branches';
   pattern: RegExp;
   file: (n: number) => string;
   format: string;
@@ -542,11 +580,53 @@ function isStale(name: string, rev: number, lists: Lists): boolean {
   if (later !== undefined) return Number(later) > rev;
   const versions = VERSIONS.exec(name)?.[1];
   if (versions !== undefined) return Number(versions) > lists.versions;
+  const sync = SYNC.exec(name)?.[1];
+  if (sync !== undefined) return Number(sync) > (lists.sync ?? 0);
   const branches = BRANCHES.exec(name)?.[1];
   return branches !== undefined && Number(branches) > lists.branches;
 }
 
-const NO_LISTS: Lists = { versions: 0, branches: 0 };
+const NO_LISTS: Lists = { versions: 0, branches: 0, sync: 0 };
+
+/** The parsed file `sync-<n>.json` of document `id`, or null when it is missing, torn or wrong. */
+function parseSyncFile(
+  bytes: Uint8Array | null,
+  id: string,
+  n: number,
+): {
+  revision: number;
+  server: string;
+  clientKey: string;
+  confirmed: unknown;
+  state: unknown;
+} | null {
+  if (!bytes) return null;
+  let v: unknown;
+  try {
+    v = JSON.parse(decoder.decode(bytes));
+  } catch {
+    return null;
+  }
+  if (!isRecord(v) || v.format !== 'manufakture-sync' || v.id !== id || v.generation !== n) {
+    return null;
+  }
+  const ok =
+    Number.isInteger(v.revision) &&
+    (v.revision as number) > 0 &&
+    typeof v.server === 'string' &&
+    typeof v.clientKey === 'string' &&
+    isRecord(v.confirmed) &&
+    isRecord(v.state);
+  return ok
+    ? {
+        revision: v.revision as number,
+        server: v.server as string,
+        clientKey: v.clientKey as string,
+        confirmed: v.confirmed,
+        state: v.state,
+      }
+    : null;
+}
 
 /** How a warning names a branch: nothing for main, " (branch <id>)" for the others. */
 const onBranch = (branch: string) => (branch === MAIN_BRANCH ? '' : ` (branch ${branch})`);
@@ -900,7 +980,12 @@ export class DocumentLibrary {
     // The lists the main head names; without a head, the newest ones that read (a list is
     // complete before the head naming it is written, so a torn head leaves the new one). A
     // branch's head names none.
-    const lists = branch === MAIN_BRANCH ? await this.#lists(id, head, names) : NO_LISTS;
+    let lists = branch === MAIN_BRANCH ? await this.#lists(id, head, names) : NO_LISTS;
+    // The sync state that belongs to the revision found: what the head names, or after a crash
+    // the newest file saved with that revision (written before the head that would name it).
+    if (branch === MAIN_BRANCH && recovered) {
+      lists = { ...lists, sync: await this.#syncFor(id, rev, names) };
+    }
     if (recovered) await this.#repair(id, branch, rev, bytes, document, head, lists);
     // Only what lies above both the head and the revision found: never the snapshot the head
     // named (even when it could not be read) or anything below it.
@@ -915,7 +1000,18 @@ export class DocumentLibrary {
     return {
       versions: versions.ok ? versions.n : (head?.versions ?? 0),
       branches: branches.ok ? branches.n : (head?.branches ?? 0),
+      sync: head?.sync ?? 0,
     };
+  }
+
+  /** The newest `sync-<n>.json` that reads and was saved with revision `rev`, or 0. */
+  async #syncFor(id: string, rev: number, names: readonly string[]): Promise<number> {
+    const dir = this.#dir(id);
+    for (const n of revisions(names, SYNC)) {
+      const file = parseSyncFile(await this.#backend.read(`${dir}/${syncName(n)}`), id, n);
+      if (file?.revision === rev) return n;
+    }
+    return 0;
   }
 
   /**
@@ -1059,9 +1155,13 @@ export class DocumentLibrary {
     doc: ManufaktureDocument,
     entries: readonly LogEntry[] = [],
     branch?: string,
+    sync?: SyncRecord,
   ): Promise<DocumentSummary> {
     const on = branch ?? MAIN_BRANCH;
-    return this.#run(() => this.#locked(doc.id, () => this.#save(doc, entries, on)));
+    if (sync !== undefined && on !== MAIN_BRANCH) {
+      return Promise.reject(new Error('Only the main branch of a document syncs.'));
+    }
+    return this.#run(() => this.#locked(doc.id, () => this.#save(doc, entries, on, sync)));
   }
 
   /** Whether `head` commits the snapshot this library itself last wrote on the branch. */
@@ -1081,6 +1181,7 @@ export class DocumentLibrary {
     doc: ManufaktureDocument,
     entries: readonly LogEntry[],
     branch: string = MAIN_BRANCH,
+    sync?: SyncRecord,
   ): Promise<DocumentSummary> {
     const id = doc.id;
     const key = this.#key(id, branch);
@@ -1125,7 +1226,9 @@ export class DocumentLibrary {
     // for lists above the ones the head names. Without a head (and no snapshot that reads), the
     // newest lists that read are kept and named by the new head: never lost. A branch's
     // directory holds no lists.
-    let lists: Lists = head ? { versions: head.versions, branches: head.branches } : NO_LISTS;
+    let lists: Lists = head
+      ? { versions: head.versions, branches: head.branches, sync: head.sync ?? 0 }
+      : NO_LISTS;
     if (!head && main) lists = await this.#lists(id, null, names);
     const stale = names.filter((n) => isStale(n, head?.revision ?? Infinity, lists));
     for (const name of stale) await this.#backend.remove(`${dir}/${name}`);
@@ -1163,6 +1266,13 @@ export class DocumentLibrary {
       );
     }
 
+    // The sync state of this revision, before its snapshot: the head commits both at once.
+    if (sync !== undefined) {
+      const n = (lists.sync ?? 0) + 1;
+      await this.#writeSync(id, n, rev, sync);
+      lists = { ...lists, sync: n };
+    }
+
     const snapshot = encoder.encode(stored.text);
     const snapshotSha256 = await sha256Hex(snapshot);
     await this.#backend.write(`${dir}/${snapshotName(rev)}`, snapshot);
@@ -1175,7 +1285,8 @@ export class DocumentLibrary {
       (current?.revision ?? null) !== (head?.revision ?? null) ||
       (current?.snapshotSha256 ?? null) !== (head?.snapshotSha256 ?? null) ||
       (current?.versions ?? null) !== (head?.versions ?? null) ||
-      (current?.branches ?? null) !== (head?.branches ?? null)
+      (current?.branches ?? null) !== (head?.branches ?? null) ||
+      (current?.sync ?? null) !== (head?.sync ?? null)
     ) {
       throw new RevisionConflict(id, current?.revision ?? 0, head?.revision ?? 0);
     }
@@ -1213,7 +1324,158 @@ export class DocumentLibrary {
     // snapshots go, except the history: what a version names, the checkpoints, and a revision
     // nothing leads to (the first of an imported history). Best effort.
     if (head) await this.#prune(id, branch, head.revision, names, listed).catch(() => undefined);
+    if (head && sync !== undefined) await this.#pruneSync(id, head.sync ?? 0);
     return summaryOf(next);
+  }
+
+  /** Write `sync-<n>.json`: `record` as saved with revision `rev`, its files as blobs. */
+  async #writeSync(id: string, n: number, rev: number, record: SyncRecord): Promise<void> {
+    const blobs = this.#blobs(id);
+    const confirmed = encodeStored(record.confirmed);
+    for (const [sha, data] of confirmed.blobs) await blobs.put(sha, data);
+    const state = externalize(record.state);
+    for (const [sha, data] of state.blobs) await blobs.put(sha, data);
+    const file = {
+      format: 'manufakture-sync',
+      id,
+      generation: n,
+      revision: rev,
+      server: record.server,
+      clientKey: record.clientKey,
+      confirmed: JSON.parse(confirmed.text) as unknown,
+      state: state.value,
+    };
+    await this.#backend.write(
+      `${this.#dir(id)}/${syncName(n)}`,
+      encoder.encode(`${JSON.stringify(file)}\n`),
+    );
+  }
+
+  /** Delete the sync files below `keep` (best effort): `keep`, the one before, is the spare. */
+  async #pruneSync(id: string, keep: number): Promise<void> {
+    const dir = this.#dir(id);
+    const names = await this.#backend.list(dir).catch(() => [] as string[]);
+    for (const n of revisions(names, SYNC)) {
+      if (n < keep) await this.#backend.remove(`${dir}/${syncName(n)}`).catch(() => undefined);
+    }
+  }
+
+  /**
+   * Save the sync state alone (T7.1d): for the revision the main head names, which must be what
+   * the caller shows (nothing waits to be saved). `sync-<n+1>.json`, then the head naming it, as
+   * for a list. Throws `RevisionConflict`, having committed nothing, when another tab saved the
+   * document since this library opened or saved it, and when the head moves meanwhile.
+   */
+  saveSync(id: string, record: SyncRecord): Promise<void> {
+    return this.#run(() =>
+      this.#locked(id, async () => {
+        if (!isStorableId(id)) throw new Error(`There is no document "${id}".`);
+        const dir = this.#dir(id);
+        const head = await this.#head(id);
+        if (!head) throw new Error('The document is not saved yet.');
+        this.#checkRevision(id, MAIN_BRANCH, head);
+        // What a sync save that died left above the head.
+        const names = await this.#backend.list(dir);
+        for (const n of revisions(names, SYNC)) {
+          if (n > (head.sync ?? 0)) await this.#backend.remove(`${dir}/${syncName(n)}`);
+        }
+        const n = (head.sync ?? 0) + 1;
+        await this.#writeSync(id, n, head.revision, record);
+        const current = await this.#head(id);
+        if (
+          current?.revision !== head.revision ||
+          current.snapshotSha256 !== head.snapshotSha256 ||
+          current.versions !== head.versions ||
+          current.branches !== head.branches ||
+          current.sync !== head.sync
+        ) {
+          throw new RevisionConflict(id, current?.revision ?? 0, head.revision);
+        }
+        const next: Head = { ...head, sync: n };
+        await this.#backend.write(
+          `${dir}/${HEAD}`,
+          encoder.encode(`${JSON.stringify(next, null, 2)}\n`),
+        );
+        await this.#pruneSync(id, head.sync ?? 0);
+      }),
+    );
+  }
+
+  /**
+   * The sync state the main head names, with its files put back, or null when the document does
+   * not sync. Falls back to the newest older state that reads when the named one does not.
+   */
+  readSync(id: string): Promise<LibraryResult<StoredSync | null>> {
+    return this.#run(async () => {
+      if (!isStorableId(id)) return { ok: false, message: `There is no document "${id}".` };
+      return this.#locked(id, async () => {
+        const head = await this.#head(id);
+        if (!head || !head.sync) return { ok: true, value: null };
+        const dir = this.#dir(id);
+        const names = await this.#backend.list(dir);
+        const candidates = revisions(names, SYNC).filter((n) => n <= head.sync!);
+        const blobs = this.#blobs(id);
+        let problem = 'Its sync state cannot be read.';
+        for (const n of candidates) {
+          const file = parseSyncFile(await this.#backend.read(`${dir}/${syncName(n)}`), id, n);
+          if (!file) continue;
+          const confirmed = await decodeStored(JSON.stringify(file.confirmed), (sha) =>
+            blobs.read(sha),
+          );
+          if (!confirmed.ok) {
+            problem = `Its sync state cannot be read: ${confirmed.message}`;
+            continue;
+          }
+          let state: unknown;
+          try {
+            state = await hydrateFrom(file.state, (sha) => blobs.read(sha));
+          } catch (e) {
+            problem = `Its sync state cannot be read: ${e instanceof Error ? e.message : String(e)}`;
+            continue;
+          }
+          if (n !== head.sync) {
+            this.#warn(
+              `manufakture: the sync state of document ${id} the head names cannot be read; an older one is used.`,
+            );
+          }
+          return {
+            ok: true,
+            value: {
+              record: {
+                server: file.server,
+                clientKey: file.clientKey,
+                confirmed: confirmed.document,
+                state,
+              },
+              paired: file.revision === head.revision,
+            },
+          };
+        }
+        return { ok: false, message: problem };
+      });
+    });
+  }
+
+  /** Stop syncing the document: a head naming no sync state (the commit), then its files go. */
+  dropSync(id: string): Promise<void> {
+    return this.#run(() =>
+      this.#locked(id, async () => {
+        if (!isStorableId(id)) return;
+        const dir = this.#dir(id);
+        const head = await this.#head(id);
+        if (head?.sync) {
+          const next: Head = { ...head, sync: 0 };
+          await this.#backend.write(
+            `${dir}/${HEAD}`,
+            encoder.encode(`${JSON.stringify(next, null, 2)}\n`),
+          );
+        }
+        if (!head) return;
+        for (const n of revisions(await this.#backend.list(dir), SYNC)) {
+          await this.#backend.remove(`${dir}/${syncName(n)}`).catch(() => undefined);
+        }
+      }),
+    );
   }
 
   async #prune(
@@ -1441,7 +1703,8 @@ export class DocumentLibrary {
       current?.revision !== head.revision ||
       current.snapshotSha256 !== head.snapshotSha256 ||
       current.versions !== head.versions ||
-      current.branches !== head.branches
+      current.branches !== head.branches ||
+      current.sync !== head.sync
     ) {
       throw new RevisionConflict(id, current?.revision ?? 0, head.revision);
     }

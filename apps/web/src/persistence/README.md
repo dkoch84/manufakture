@@ -28,6 +28,7 @@ documents/<id>/snapshot-<rev>.json    the document at revision <rev>, storage fo
 documents/<id>/log-<rev>.json         the commands from the previous revision to <rev>
 documents/<id>/versions-<n>.json      the named versions, the n-th write of the list
 documents/<id>/branches-<n>.json      the branches besides main, the n-th write of the list
+documents/<id>/sync-<n>.json          the sync state (T7.1d), the n-th write, for the revision it names
 documents/<id>/branches/<b>/head.json, snapshot-<rev>.json, log-<rev>.json, damaged-*
                                       branch <b>: its own head, snapshots and log
 documents/<id>/blobs/<sha256>         each imported file, user font and pinned version, once
@@ -322,6 +323,55 @@ A release from before branches reads a document with branches as its main branch
 the `branches` field of the head; if it saves the document, it writes a head without it, so the
 branches are no longer listed (their directories stay; the next branch change deletes those no
 version names, and keeps the others so their versions still read).
+
+## Sync
+
+A document that syncs ([docs/user/sync.md](../../../../docs/user/sync.md), `src/sync/`) keeps its
+sync state beside its snapshots: `sync-<n>.json`, the `n`-th write, named by the **main** head's
+`sync: n` (0 or absent: the document does not sync; branches never sync). It holds the server's
+address (never the token), the client key the browser proves its client id with, the server's
+last confirmed document in storage form (files as blobs), and `SyncClient.save()` (packages/sync
+README, "The saved queue state") with its files as blobs too, plus `revision`: the revision it was
+saved with.
+
+```json
+{
+  "format": "manufakture-sync",
+  "id": "<document id>",
+  "generation": 4,
+  "revision": 12,
+  "server": "https://...",
+  "clientKey": "...",
+  "confirmed": { "...": "the confirmed document, storage form" },
+  "state": { "...": "SyncQueueState" }
+}
+```
+
+The state and the document must never come from different revisions: a queue paired with an older
+document would resend entries the document already shows, and a newer document with an older
+queue would hold changes the server never gets. So both are committed by one head:
+
+- `save(doc, entries, main, sync)` writes `sync-<n+1>.json` after the log segment and before the
+  snapshot, and the head names both (step 5 above). Autosave passes the state whenever the
+  document syncs, taken when the save starts, together with every change made up to then.
+- `saveSync(id, sync)` writes the state alone for the revision the head names, when nothing waits
+  to be saved (the sync loop checks that first): `sync-<n+1>.json`, then the head naming it, as for
+  a list. It is how the loop saves before it sends.
+- `readSync(id)` reads what the head names and says whether it was saved with the head's
+  revision (`paired`). A save without the state (another tab, an older release) leaves an older
+  state; the loop then puts this browser's document on top as one change.
+- `dropSync(id)` commits a head naming none, then deletes the files.
+
+Crash rules are those of the lists: a sync file above the head's is what a save that died left,
+deleted by the next open or save; after a commit the one before stays as the spare. Recovering a
+torn head takes the newest sync file whose `revision` is the revision recovered, so a crash
+between the snapshot and the head finds the new pair, and one before the snapshot is complete the
+old pair. `library-sync.test.ts` crashes a save with state and a `saveSync` at every step, clean
+and torn, and checks the reopened document and state are the old pair or the new pair.
+
+A change from the server reaches the document store as a `remote` change (core `DocumentStore`
+`applyRemote`), which autosave logs as an `execute` of `replaceDocument` with the whole new
+document: a rebase is not one command, and replay must reproduce the revision.
 
 ## Not done
 

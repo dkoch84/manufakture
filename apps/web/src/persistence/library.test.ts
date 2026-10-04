@@ -990,7 +990,7 @@ async function edit(lib: DocumentLibrary, saves: number, from = 1): Promise<Map<
   );
   const entries: LogEntry[] = [];
   store.core.subscribe((e) => {
-    if (e.command && e.cause !== 'load') {
+    if (e.command && e.cause !== 'load' && e.cause !== 'remote') {
       entries.push({ cause: e.cause, label: e.label, command: e.command, at: 'x' });
     }
   });

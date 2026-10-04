@@ -56,6 +56,15 @@ export interface AppOptions {
   readonly trustProxy?: boolean;
   /** Passed to `SyncService` (version-skew tests). */
   readonly service?: SyncService;
+  /**
+   * Test only (the app's end-to-end sync test, T7.1d): how long to hold each WebSocket message
+   * to a connection, in milliseconds (0: send now), so a test can deliver a verdict or a push
+   * late. A held message is dropped if its connection closes meanwhile. Never set by `main.ts`.
+   */
+  readonly testReplyDelay?: (
+    to: { readonly documentId: string; readonly clientId: string | undefined },
+    message: ServerMessage,
+  ) => number;
   /** Share links (shares.ts); without it the share routes do not exist. */
   readonly shares?: {
     readonly store: ShareStore;
@@ -133,7 +142,18 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     const set = sockets.get(documentId);
     if (set === undefined) return;
     const text = JSON.stringify(push);
-    for (const c of set) if (c.clientId !== undefined) sendText(c, text);
+    for (const c of set) {
+      if (c.clientId === undefined) continue;
+      if (options.testReplyDelay) deliver(c, push);
+      else sendText(c, text);
+    }
+  };
+
+  /** Sends `m` to `c`, held as long as the test hook says (when there is one). */
+  const deliver = (c: Connection, m: ServerMessage) => {
+    const delay = options.testReplyDelay?.({ documentId: c.documentId, clientId: c.clientId }, m);
+    if (delay === undefined || delay <= 0) sendText(c, JSON.stringify(m));
+    else setTimeout(() => sendText(c, JSON.stringify(m)), delay);
   };
 
   const sendText = (c: Connection, text: string) => {
@@ -346,7 +366,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
             set.delete(c);
             if (set.size === 0) sockets.delete(documentId);
           });
-          const send = (m: ServerMessage) => sendText(c, JSON.stringify(m));
+          const send = (m: ServerMessage) => deliver(c, m);
           const sendError = (e: ReplyError) => {
             if (e.messages !== undefined) for (const m of e.messages) send(m);
             else
