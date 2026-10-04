@@ -1,0 +1,26 @@
+{
+  "name": "@manufakture/spike-t7-0c-quickjs",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "GPL-3.0-or-later",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "measure": "vitest run --config vitest.measure.config.ts"
+  },
+  "dependencies": {
+    "@jitl/quickjs-ng-wasmfile-release-asyncify": "0.32.0",
+    "@jitl/quickjs-ng-wasmfile-release-sync": "0.32.0",
+    "@jitl/quickjs-wasmfile-release-asyncify": "0.32.0",
+    "@jitl/quickjs-wasmfile-release-sync": "0.32.0",
+    "@manufakture/kernel": "workspace:*",
+    "libcascade": "3.0.2",
+    "quickjs-emscripten-core": "0.32.0",
+    "sucrase": "3.35.1",
+    "ts-blank-space": "0.9.0"
+  },
+  "devDependencies": {
+    "playwright": "^1.63.0"
+  }
+}

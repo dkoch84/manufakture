@@ -1,0 +1,237 @@
+{
+  "host": {
+    "cpu": "AMD Ryzen 5 7600X 6-Core Processor",
+    "logicalCpus": 12,
+    "memoryGiB": 62,
+    "node": "v26.10.0",
+    "platform": "linux x64",
+    "measuredAt": "2026-10-04T13:32:14.435Z"
+  },
+  "wasm": [
+    {
+      "variant": "quickjs-sync",
+      "package": "@jitl/quickjs-wasmfile-release-sync",
+      "rawBytes": 503134,
+      "gzipBytes": 231494,
+      "brotliBytes": 199016
+    },
+    {
+      "variant": "ng-sync",
+      "package": "@jitl/quickjs-ng-wasmfile-release-sync",
+      "rawBytes": 528551,
+      "gzipBytes": 247144,
+      "brotliBytes": 212245
+    },
+    {
+      "variant": "quickjs-asyncify",
+      "package": "@jitl/quickjs-wasmfile-release-asyncify",
+      "rawBytes": 1027523,
+      "gzipBytes": 360469,
+      "brotliBytes": 284509
+    },
+    {
+      "variant": "ng-asyncify",
+      "package": "@jitl/quickjs-ng-wasmfile-release-asyncify",
+      "rawBytes": 1075905,
+      "gzipBytes": 381841,
+      "brotliBytes": 301428
+    }
+  ],
+  "bundles": [
+    { "entry": "quickjs-host", "rawBytes": 53986, "brotliBytes": 14247 },
+    { "entry": "ts-blank-space", "rawBytes": 3477772, "brotliBytes": 734865 },
+    { "entry": "sucrase", "rawBytes": 201072, "brotliBytes": 38384 }
+  ],
+  "erasure": [
+    {
+      "tool": "ts-blank-space",
+      "firstMs": 7.44,
+      "medianMs": 0.25,
+      "sampleChars": 1824,
+      "linesKept": true,
+      "columnsKept": true,
+      "quickjsParsesOutput": true
+    },
+    {
+      "tool": "sucrase",
+      "firstMs": 5.69,
+      "medianMs": 0.307,
+      "sampleChars": 1824,
+      "linesKept": true,
+      "columnsKept": true,
+      "quickjsParsesOutput": true
+    }
+  ],
+  "nonErasable": [
+    {
+      "case": "enum",
+      "tool": "ts-blank-space",
+      "outcome": "reports unsupported (1); output: enum Side { Left, Right } export const s = Side.Left;"
+    },
+    {
+      "case": "enum",
+      "tool": "sucrase",
+      "outcome": "output: var Side; (function (Side) { const Left = 0; Side[Side[\"Left\"] = Left] = \"Left\"; const Rig"
+    },
+    {
+      "case": "const enum",
+      "tool": "ts-blank-space",
+      "outcome": "reports unsupported (1); output: const enum Side { Left, Right } export const s = Side.Right;"
+    },
+    {
+      "case": "const enum",
+      "tool": "sucrase",
+      "outcome": "output: var Side; (function (Side) { const Left = 0; Side[Side[\"Left\"] = Left] = \"Left\"; const Rig"
+    },
+    {
+      "case": "namespace",
+      "tool": "ts-blank-space",
+      "outcome": "reports unsupported (1); output: namespace Geo { export const k = 2; } export const g = Geo.k;"
+    },
+    { "case": "namespace", "tool": "sucrase", "outcome": "output: export const g = Geo.k;" },
+    {
+      "case": "parameter property",
+      "tool": "ts-blank-space",
+      "outcome": "reports unsupported (1); output: class P { constructor(private x ) {} get() { return this.x; } } export const v = new P(3)."
+    },
+    {
+      "case": "parameter property",
+      "tool": "sucrase",
+      "outcome": "output: class P { constructor( x) {;this.x = x;} get() { return this.x; } } export const v = new P"
+    },
+    {
+      "case": "import = require",
+      "tool": "ts-blank-space",
+      "outcome": "reports unsupported (1); output: import fs = require('fs');"
+    },
+    { "case": "import = require", "tool": "sucrase", "outcome": "output: ;" },
+    {
+      "case": "decorator",
+      "tool": "ts-blank-space",
+      "outcome": "output: function d(t ) { return t; } @d class C {} export const c = new C();"
+    },
+    {
+      "case": "decorator",
+      "tool": "sucrase",
+      "outcome": "output: function d(t) { return t; } @d class C {} export const c = new C();"
+    },
+    {
+      "case": "angle-bracket assertion",
+      "tool": "ts-blank-space",
+      "outcome": "reports unsupported (1); output: const x = <number>(1 ); export const y = x;"
+    },
+    {
+      "case": "angle-bracket assertion",
+      "tool": "sucrase",
+      "outcome": "output: const x = (1 ); export const y = x;"
+    },
+    {
+      "case": "type-only import",
+      "tool": "ts-blank-space",
+      "outcome": "output: export const z = null;"
+    },
+    { "case": "type-only import", "tool": "sucrase", "outcome": "output: export const z = null;" },
+    {
+      "case": "satisfies",
+      "tool": "ts-blank-space",
+      "outcome": "output: export const o = { a: 1 } ;"
+    },
+    { "case": "satisfies", "tool": "sucrase", "outcome": "output: export const o = { a: 1 } ;" },
+    {
+      "case": "const type parameter",
+      "tool": "ts-blank-space",
+      "outcome": "output: export function f (x ) { return x; }"
+    },
+    {
+      "case": "const type parameter",
+      "tool": "sucrase",
+      "outcome": "output: export function f(x) { return x; }"
+    },
+    {
+      "case": "generic arrow",
+      "tool": "ts-blank-space",
+      "outcome": "output: export const id = (x ) => x;"
+    },
+    {
+      "case": "generic arrow",
+      "tool": "sucrase",
+      "outcome": "output: export const id = (x) => x;"
+    },
+    {
+      "case": "accessor field",
+      "tool": "ts-blank-space",
+      "outcome": "output: export class A { accessor n = 1; }"
+    },
+    {
+      "case": "accessor field",
+      "tool": "sucrase",
+      "outcome": "output: export class A { accessor n = 1; }"
+    },
+    {
+      "case": "definite assignment",
+      "tool": "ts-blank-space",
+      "outcome": "output: let x ; x = 1; export const y = x;"
+    },
+    {
+      "case": "definite assignment",
+      "tool": "sucrase",
+      "outcome": "output: let x; x = 1; export const y = x;"
+    }
+  ],
+  "licenses": [
+    {
+      "name": "quickjs-emscripten-core",
+      "version": "0.32.0",
+      "license": "MIT",
+      "licenseFile": "LICENSE: The MIT License"
+    },
+    {
+      "name": "@jitl/quickjs-ffi-types",
+      "version": "0.32.0",
+      "license": "MIT",
+      "licenseFile": "LICENSE: The MIT License"
+    },
+    {
+      "name": "@jitl/quickjs-wasmfile-release-sync",
+      "version": "0.32.0",
+      "license": "MIT",
+      "licenseFile": "LICENSE: quickjs-emscripten:"
+    },
+    {
+      "name": "@jitl/quickjs-ng-wasmfile-release-sync",
+      "version": "0.32.0",
+      "license": "MIT",
+      "licenseFile": "LICENSE: quickjs-emscripten:"
+    },
+    {
+      "name": "@jitl/quickjs-wasmfile-release-asyncify",
+      "version": "0.32.0",
+      "license": "MIT",
+      "licenseFile": "LICENSE: quickjs-emscripten:"
+    },
+    {
+      "name": "@jitl/quickjs-ng-wasmfile-release-asyncify",
+      "version": "0.32.0",
+      "license": "MIT",
+      "licenseFile": "LICENSE: quickjs-emscripten:"
+    },
+    {
+      "name": "ts-blank-space",
+      "version": "0.9.0",
+      "license": "Apache-2.0",
+      "licenseFile": "LICENSE: Apache License"
+    },
+    {
+      "name": "typescript",
+      "version": "6.0.3",
+      "license": "Apache-2.0",
+      "licenseFile": "LICENSE.txt: Apache License"
+    },
+    {
+      "name": "sucrase",
+      "version": "3.35.1",
+      "license": "MIT",
+      "licenseFile": "LICENSE: The MIT License (MIT)"
+    }
+  ]
+}

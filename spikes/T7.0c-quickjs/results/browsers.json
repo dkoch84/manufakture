@@ -1,0 +1,2339 @@
+{
+  "host": {
+    "cpu": "AMD Ryzen 5 7600X 6-Core Processor",
+    "logicalCpus": 12,
+    "memoryGiB": 62,
+    "node": "v26.10.0",
+    "platform": "linux x64",
+    "measuredAt": "2026-10-04T13:40:38.278Z"
+  },
+  "loads": {
+    "chromium": [
+      [
+        {
+          "variant": "quickjs-sync",
+          "compileMs": 7.8,
+          "instantiateMs": 4.81,
+          "firstRunMs": 9.14,
+          "secondRunMs": 0.73,
+          "totalMs": 21.75,
+          "memoryBytes": 16777216
+        },
+        {
+          "variant": "ng-sync",
+          "compileMs": 7.86,
+          "instantiateMs": 4.28,
+          "firstRunMs": 5.8,
+          "secondRunMs": 0.55,
+          "totalMs": 17.93,
+          "memoryBytes": 16777216
+        },
+        {
+          "variant": "quickjs-asyncify",
+          "compileMs": 14.59,
+          "instantiateMs": 4.8,
+          "firstRunMs": 9.8,
+          "secondRunMs": 0.58,
+          "totalMs": 29.19,
+          "memoryBytes": 16777216
+        },
+        {
+          "variant": "ng-asyncify",
+          "compileMs": 12.84,
+          "instantiateMs": 7.32,
+          "firstRunMs": 13.2,
+          "secondRunMs": 0.73,
+          "totalMs": 33.37,
+          "memoryBytes": 16777216
+        }
+      ],
+      [
+        {
+          "variant": "quickjs-sync",
+          "compileMs": 7.38,
+          "instantiateMs": 4.34,
+          "firstRunMs": 8.64,
+          "secondRunMs": 0.52,
+          "totalMs": 20.35,
+          "memoryBytes": 16777216
+        },
+        {
+          "variant": "ng-sync",
+          "compileMs": 8.05,
+          "instantiateMs": 7.24,
+          "firstRunMs": 5.52,
+          "secondRunMs": 0.57,
+          "totalMs": 20.81,
+          "memoryBytes": 16777216
+        },
+        {
+          "variant": "quickjs-asyncify",
+          "compileMs": 16.07,
+          "instantiateMs": 4.41,
+          "firstRunMs": 9.63,
+          "secondRunMs": 0.59,
+          "totalMs": 30.11,
+          "memoryBytes": 16777216
+        },
+        {
+          "variant": "ng-asyncify",
+          "compileMs": 14.83,
+          "instantiateMs": 5.18,
+          "firstRunMs": 13.43,
+          "secondRunMs": 0.92,
+          "totalMs": 33.44,
+          "memoryBytes": 16777216
+        }
+      ],
+      [
+        {
+          "variant": "quickjs-sync",
+          "compileMs": 7.5,
+          "instantiateMs": 4.13,
+          "firstRunMs": 9.35,
+          "secondRunMs": 0.52,
+          "totalMs": 20.98,
+          "memoryBytes": 16777216
+        },
+        {
+          "variant": "ng-sync",
+          "compileMs": 7.88,
+          "instantiateMs": 3.77,
+          "firstRunMs": 5.64,
+          "secondRunMs": 0.57,
+          "totalMs": 17.3,
+          "memoryBytes": 16777216
+        },
+        {
+          "variant": "quickjs-asyncify",
+          "compileMs": 13.73,
+          "instantiateMs": 6.02,
+          "firstRunMs": 10.84,
+          "secondRunMs": 0.69,
+          "totalMs": 30.59,
+          "memoryBytes": 16777216
+        },
+        {
+          "variant": "ng-asyncify",
+          "compileMs": 14.22,
+          "instantiateMs": 4.42,
+          "firstRunMs": 12.43,
+          "secondRunMs": 0.74,
+          "totalMs": 31.08,
+          "memoryBytes": 16777216
+        }
+      ]
+    ],
+    "firefox": [
+      [
+        {
+          "variant": "quickjs-sync",
+          "compileMs": 9.06,
+          "instantiateMs": 11.76,
+          "firstRunMs": 0.68,
+          "secondRunMs": 0.52,
+          "totalMs": 21.5,
+          "memoryBytes": 16777216
+        },
+        {
+          "variant": "ng-sync",
+          "compileMs": 11.02,
+          "instantiateMs": 6.24,
+          "firstRunMs": 0.62,
+          "secondRunMs": 0.44,
+          "totalMs": 17.88,
+          "memoryBytes": 16777216
+        },
+        {
+          "variant": "quickjs-asyncify",
+          "compileMs": 19.98,
+          "instantiateMs": 16.86,
+          "firstRunMs": 0.64,
+          "secondRunMs": 0.46,
+          "totalMs": 37.48,
+          "memoryBytes": 16777216
+        },
+        {
+          "variant": "ng-asyncify",
+          "compileMs": 13.36,
+          "instantiateMs": 6.92,
+          "firstRunMs": 0.7,
+          "secondRunMs": 0.5,
+          "totalMs": 20.98,
+          "memoryBytes": 16777216
+        }
+      ],
+      [
+        {
+          "variant": "quickjs-sync",
+          "compileMs": 8.42,
+          "instantiateMs": 13.12,
+          "firstRunMs": 0.86,
+          "secondRunMs": 0.62,
+          "totalMs": 22.4,
+          "memoryBytes": 16777216
+        },
+        {
+          "variant": "ng-sync",
+          "compileMs": 18.98,
+          "instantiateMs": 6.2,
+          "firstRunMs": 0.56,
+          "secondRunMs": 0.42,
+          "totalMs": 25.74,
+          "memoryBytes": 16777216
+        },
+        {
+          "variant": "quickjs-asyncify",
+          "compileMs": 15.44,
+          "instantiateMs": 7.1,
+          "firstRunMs": 0.66,
+          "secondRunMs": 0.44,
+          "totalMs": 23.2,
+          "memoryBytes": 16777216
+        },
+        {
+          "variant": "ng-asyncify",
+          "compileMs": 22.28,
+          "instantiateMs": 8.08,
+          "firstRunMs": 0.74,
+          "secondRunMs": 0.52,
+          "totalMs": 31.1,
+          "memoryBytes": 16777216
+        }
+      ],
+      [
+        {
+          "variant": "quickjs-sync",
+          "compileMs": 12.78,
+          "instantiateMs": 7.08,
+          "firstRunMs": 0.68,
+          "secondRunMs": 0.52,
+          "totalMs": 20.54,
+          "memoryBytes": 16777216
+        },
+        {
+          "variant": "ng-sync",
+          "compileMs": 7.58,
+          "instantiateMs": 12.3,
+          "firstRunMs": 0.7,
+          "secondRunMs": 0.48,
+          "totalMs": 20.58,
+          "memoryBytes": 16777216
+        },
+        {
+          "variant": "quickjs-asyncify",
+          "compileMs": 16.16,
+          "instantiateMs": 7.8,
+          "firstRunMs": 0.64,
+          "secondRunMs": 0.46,
+          "totalMs": 24.6,
+          "memoryBytes": 16777216
+        },
+        {
+          "variant": "ng-asyncify",
+          "compileMs": 14.44,
+          "instantiateMs": 14.6,
+          "firstRunMs": 0.74,
+          "secondRunMs": 0.52,
+          "totalMs": 29.78,
+          "memoryBytes": 16777216
+        }
+      ]
+    ],
+    "webkit": [
+      [
+        {
+          "variant": "quickjs-sync",
+          "compileMs": 11,
+          "instantiateMs": 14,
+          "firstRunMs": 3,
+          "secondRunMs": 1,
+          "totalMs": 28,
+          "memoryBytes": 16777216
+        },
+        {
+          "variant": "ng-sync",
+          "compileMs": 9,
+          "instantiateMs": 4,
+          "firstRunMs": 2,
+          "secondRunMs": 1,
+          "totalMs": 15,
+          "memoryBytes": 16777216
+        },
+        {
+          "variant": "quickjs-asyncify",
+          "compileMs": 14,
+          "instantiateMs": 4,
+          "firstRunMs": 3,
+          "secondRunMs": 1,
+          "totalMs": 21,
+          "memoryBytes": 16777216
+        },
+        {
+          "variant": "ng-asyncify",
+          "compileMs": 16,
+          "instantiateMs": 5,
+          "firstRunMs": 3,
+          "secondRunMs": 1,
+          "totalMs": 24,
+          "memoryBytes": 16777216
+        }
+      ],
+      [
+        {
+          "variant": "quickjs-sync",
+          "compileMs": 10,
+          "instantiateMs": 11,
+          "firstRunMs": 3,
+          "secondRunMs": 1,
+          "totalMs": 24,
+          "memoryBytes": 16777216
+        },
+        {
+          "variant": "ng-sync",
+          "compileMs": 9,
+          "instantiateMs": 4,
+          "firstRunMs": 3,
+          "secondRunMs": 0,
+          "totalMs": 16,
+          "memoryBytes": 16777216
+        },
+        {
+          "variant": "quickjs-asyncify",
+          "compileMs": 13,
+          "instantiateMs": 4,
+          "firstRunMs": 3,
+          "secondRunMs": 1,
+          "totalMs": 20,
+          "memoryBytes": 16777216
+        },
+        {
+          "variant": "ng-asyncify",
+          "compileMs": 15,
+          "instantiateMs": 3,
+          "firstRunMs": 4,
+          "secondRunMs": 0,
+          "totalMs": 22,
+          "memoryBytes": 16777216
+        }
+      ],
+      [
+        {
+          "variant": "quickjs-sync",
+          "compileMs": 10,
+          "instantiateMs": 14,
+          "firstRunMs": 3,
+          "secondRunMs": 0,
+          "totalMs": 27,
+          "memoryBytes": 16777216
+        },
+        {
+          "variant": "ng-sync",
+          "compileMs": 9,
+          "instantiateMs": 3,
+          "firstRunMs": 3,
+          "secondRunMs": 0,
+          "totalMs": 15,
+          "memoryBytes": 16777216
+        },
+        {
+          "variant": "quickjs-asyncify",
+          "compileMs": 14,
+          "instantiateMs": 4,
+          "firstRunMs": 3,
+          "secondRunMs": 1,
+          "totalMs": 21,
+          "memoryBytes": 16777216
+        },
+        {
+          "variant": "ng-asyncify",
+          "compileMs": 14,
+          "instantiateMs": 3,
+          "firstRunMs": 3,
+          "secondRunMs": 1,
+          "totalMs": 20,
+          "memoryBytes": 16777216
+        }
+      ]
+    ]
+  },
+  "runs": [
+    {
+      "browser": "chromium",
+      "version": "153.0.8010.12",
+      "ok": true,
+      "isolated": true,
+      "timerMs": 0.004999995231628418,
+      "results": {
+        "load": [
+          {
+            "variant": "quickjs-sync",
+            "compileMs": 7.38,
+            "instantiateMs": 3.98,
+            "firstRunMs": 8.59,
+            "secondRunMs": 0.56,
+            "totalMs": 19.95,
+            "memoryBytes": 16777216
+          },
+          {
+            "variant": "ng-sync",
+            "compileMs": 8.83,
+            "instantiateMs": 3.87,
+            "firstRunMs": 5.56,
+            "secondRunMs": 0.49,
+            "totalMs": 18.27,
+            "memoryBytes": 16777216
+          },
+          {
+            "variant": "quickjs-asyncify",
+            "compileMs": 14.02,
+            "instantiateMs": 4.66,
+            "firstRunMs": 10.6,
+            "secondRunMs": 0.59,
+            "totalMs": 29.28,
+            "memoryBytes": 16777216
+          },
+          {
+            "variant": "ng-asyncify",
+            "compileMs": 14.8,
+            "instantiateMs": 5.64,
+            "firstRunMs": 16.08,
+            "secondRunMs": 0.64,
+            "totalMs": 36.52,
+            "memoryBytes": 16777216
+          }
+        ],
+        "loadMs": 110,
+        "hostCalls": [
+          {
+            "variant": "quickjs-sync",
+            "calls": 100000,
+            "loopUs": 0.019,
+            "numberUs": 1.188,
+            "vec3Us": 4.112,
+            "jsonUs": 2.97
+          },
+          {
+            "variant": "ng-sync",
+            "calls": 100000,
+            "loopUs": 0.067,
+            "numberUs": 1.181,
+            "vec3Us": 4.958,
+            "jsonUs": 3.131
+          }
+        ],
+        "hostCallsMs": 3338,
+        "asyncCalls": [
+          {
+            "variant": "quickjs-asyncify",
+            "disposeError": "QuickJSRuntime(rt = 5333416) not found when trying to free HostRef(id = -2147483648)",
+            "loopUs": 0.07,
+            "syncNumberUs": 1.321,
+            "asyncResolvedUs": 9.072,
+            "asyncMacrotaskUs": 17.003
+          },
+          {
+            "variant": "ng-asyncify",
+            "disposeError": "QuickJSRuntime(rt = 5343160) not found when trying to free HostRef(id = -2147483648)",
+            "loopUs": 0.103,
+            "syncNumberUs": 1.434,
+            "asyncResolvedUs": 9.905,
+            "asyncMacrotaskUs": 17.253
+          }
+        ],
+        "asyncCallsMs": 3782,
+        "kernel": {
+          "kernelLoadMs": 582,
+          "sessions": [
+            {
+              "workload": "24 boolean cuts",
+              "hostCalls": 98,
+              "directSyncMs": 74.02,
+              "directServiceMs": 72.39,
+              "scriptSyncMs": 69.53,
+              "scriptAsyncMs": 73.61,
+              "results": [54772.566612]
+            },
+            {
+              "workload": "300 volume queries",
+              "hostCalls": 302,
+              "directSyncMs": 101.6,
+              "directServiceMs": 114.83,
+              "scriptSyncMs": 103.58,
+              "scriptAsyncMs": 125.76,
+              "results": [1800000]
+            }
+          ]
+        },
+        "kernelMs": 5167,
+        "interrupts": {
+          "quickjs-sync": [
+            {
+              "case": "empty for(;;)",
+              "overshootMs": 0.82,
+              "callsPerMs": 23.89,
+              "error": "InternalError: interrupted"
+            },
+            {
+              "case": "arithmetic loop",
+              "overshootMs": 0.3,
+              "callsPerMs": 4.04,
+              "error": "InternalError: interrupted"
+            },
+            {
+              "case": "recursion in a loop",
+              "overshootMs": 0.1,
+              "callsPerMs": 7.33,
+              "error": "InternalError: interrupted"
+            },
+            {
+              "case": "string building",
+              "overshootMs": 0.44,
+              "callsPerMs": 1.39,
+              "error": "InternalError: interrupted"
+            },
+            {
+              "case": "regex backtracking",
+              "overshootMs": 0.2,
+              "callsPerMs": 5.82,
+              "error": "InternalError: interrupted"
+            },
+            {
+              "case": "sort 1e5 numbers, comparator, in a loop",
+              "overshootMs": 1.67,
+              "callsPerMs": 3.91,
+              "error": "InternalError: interrupted"
+            },
+            {
+              "case": "sort 2e4 numbers, default order, in a loop",
+              "overshootMs": 9951.08,
+              "callsPerMs": 0,
+              "error": "InternalError: interrupted"
+            },
+            {
+              "case": "JSON round trip of 500 objects, in a loop",
+              "overshootMs": 2122.04,
+              "callsPerMs": 0,
+              "error": "InternalError: interrupted"
+            }
+          ],
+          "ng-sync": [
+            {
+              "case": "empty for(;;)",
+              "overshootMs": 0.94,
+              "callsPerMs": 26.53,
+              "error": "InternalError: interrupted"
+            },
+            {
+              "case": "arithmetic loop",
+              "overshootMs": 0.21,
+              "callsPerMs": 2.82,
+              "error": "InternalError: interrupted"
+            },
+            {
+              "case": "recursion in a loop",
+              "overshootMs": 0.17,
+              "callsPerMs": 5,
+              "error": "InternalError: interrupted"
+            },
+            {
+              "case": "string building",
+              "overshootMs": 0.73,
+              "callsPerMs": 0.83,
+              "error": "InternalError: interrupted"
+            },
+            {
+              "case": "regex backtracking",
+              "overshootMs": 0.09,
+              "callsPerMs": 8.91,
+              "error": "InternalError: interrupted"
+            },
+            {
+              "case": "sort 1e5 numbers, comparator, in a loop",
+              "overshootMs": 1.64,
+              "callsPerMs": 3.05,
+              "error": "InternalError: interrupted"
+            },
+            {
+              "case": "sort 2e4 numbers, default order, in a loop",
+              "overshootMs": 11941.78,
+              "callsPerMs": 0,
+              "error": "InternalError: interrupted"
+            },
+            {
+              "case": "JSON round trip of 500 objects, in a loop",
+              "overshootMs": 2922.08,
+              "callsPerMs": 0,
+              "error": "InternalError: interrupted"
+            }
+          ]
+        },
+        "interruptsMs": 28573,
+        "memory": {
+          "quickjs-sync": {
+            "report": "QuickJS memory usage -- 2025-09-13 version, 32-bit, malloc limit: 4294967295 / malloc_usable_size unavailable",
+            "memoryMaximum": [
+              {
+                "case": "arrays of doubles",
+                "mode": "memory-maximum",
+                "limitMiB": 64,
+                "error": "InternalError: out of memory",
+                "ms": 37.5,
+                "wasmMiB": 79.9,
+                "runtimeUsable": true,
+                "instanceUsable": true
+              },
+              {
+                "case": "one Float64Array of 1.6 GB",
+                "mode": "memory-maximum",
+                "limitMiB": 64,
+                "error": "InternalError: out of memory",
+                "ms": 0.3,
+                "wasmMiB": 16,
+                "runtimeUsable": true,
+                "instanceUsable": true
+              },
+              {
+                "case": "string doubling",
+                "mode": "memory-maximum",
+                "limitMiB": 64,
+                "error": "InternalError: string too long",
+                "ms": 0,
+                "wasmMiB": 16,
+                "runtimeUsable": true,
+                "instanceUsable": true
+              },
+              {
+                "case": "objects in a Map",
+                "mode": "memory-maximum",
+                "limitMiB": 64,
+                "error": "thrown: ",
+                "ms": 125.2,
+                "wasmMiB": 79.9,
+                "runtimeUsable": null,
+                "instanceUsable": false
+              }
+            ]
+          },
+          "ng-sync": {
+            "report": "QuickJS-ng memory usage -- 0.12.1 version, 32-bit, Little Endian, malloc limit: 0 / malloc_usable_size unavailable",
+            "memoryMaximum": [
+              {
+                "case": "arrays of doubles",
+                "mode": "memory-maximum",
+                "limitMiB": 64,
+                "error": "InternalError: out of memory",
+                "ms": 45.5,
+                "wasmMiB": 79.9,
+                "runtimeUsable": true,
+                "instanceUsable": true
+              },
+              {
+                "case": "one Float64Array of 1.6 GB",
+                "mode": "memory-maximum",
+                "limitMiB": 64,
+                "error": "InternalError: out of memory",
+                "ms": 0.3,
+                "wasmMiB": 16,
+                "runtimeUsable": true,
+                "instanceUsable": true
+              },
+              {
+                "case": "string doubling",
+                "mode": "memory-maximum",
+                "limitMiB": 64,
+                "error": "InternalError: string too long",
+                "ms": 0,
+                "wasmMiB": 16,
+                "runtimeUsable": true,
+                "instanceUsable": true
+              },
+              {
+                "case": "objects in a Map",
+                "mode": "memory-maximum",
+                "limitMiB": 64,
+                "error": "thrown: null",
+                "ms": 214.1,
+                "wasmMiB": 79.9,
+                "runtimeUsable": null,
+                "instanceUsable": false
+              }
+            ]
+          }
+        },
+        "memoryMs": 535,
+        "stack": {
+          "quickjs-sync": [
+            {
+              "maxStackKiB": 64,
+              "depth": 339,
+              "error": "InternalError: stack overflow",
+              "instanceUsable": true
+            },
+            {
+              "maxStackKiB": 128,
+              "depth": 680,
+              "error": "InternalError: stack overflow",
+              "instanceUsable": true
+            },
+            {
+              "maxStackKiB": 192,
+              "depth": 1022,
+              "error": "InternalError: stack overflow",
+              "instanceUsable": true
+            },
+            {
+              "maxStackKiB": 256,
+              "depth": -1,
+              "error": "host exception: RangeError: Maximum call stack size exceeded",
+              "instanceUsable": true
+            },
+            {
+              "maxStackKiB": 384,
+              "depth": -1,
+              "error": "host exception: RangeError: Maximum call stack size exceeded",
+              "instanceUsable": true
+            },
+            {
+              "maxStackKiB": 512,
+              "depth": -1,
+              "error": "host exception: RangeError: Maximum call stack size exceeded",
+              "instanceUsable": true
+            },
+            {
+              "maxStackKiB": 1024,
+              "depth": -1,
+              "error": "host exception: RangeError: Maximum call stack size exceeded",
+              "instanceUsable": true
+            },
+            {
+              "maxStackKiB": 0,
+              "depth": -1,
+              "error": "host exception: RangeError: Maximum call stack size exceeded",
+              "instanceUsable": true
+            }
+          ],
+          "ng-sync": [
+            {
+              "maxStackKiB": 64,
+              "depth": 369,
+              "error": "RangeError: Maximum call stack size exceeded",
+              "instanceUsable": true
+            },
+            {
+              "maxStackKiB": 128,
+              "depth": 742,
+              "error": "RangeError: Maximum call stack size exceeded",
+              "instanceUsable": true
+            },
+            {
+              "maxStackKiB": 192,
+              "depth": -1,
+              "error": "host exception: RangeError: Maximum call stack size exceeded",
+              "instanceUsable": true
+            },
+            {
+              "maxStackKiB": 256,
+              "depth": -1,
+              "error": "host exception: RangeError: Maximum call stack size exceeded",
+              "instanceUsable": true
+            },
+            {
+              "maxStackKiB": 384,
+              "depth": -1,
+              "error": "host exception: RangeError: Maximum call stack size exceeded",
+              "instanceUsable": true
+            },
+            {
+              "maxStackKiB": 512,
+              "depth": -1,
+              "error": "host exception: RangeError: Maximum call stack size exceeded",
+              "instanceUsable": true
+            },
+            {
+              "maxStackKiB": 1024,
+              "depth": -1,
+              "error": "host exception: RangeError: Maximum call stack size exceeded",
+              "instanceUsable": true
+            },
+            {
+              "maxStackKiB": 0,
+              "depth": -1,
+              "error": "host exception: RangeError: Maximum call stack size exceeded",
+              "instanceUsable": true
+            }
+          ]
+        },
+        "stackMs": 44,
+        "values": [
+          { "case": "string 1 MiB, script to host (getString)", "ms": 6.53 },
+          { "case": "string 1 MiB, host to script (newString)", "ms": 4.67 },
+          { "case": "string 16 MiB, script to host (getString)", "ms": 100.46 },
+          { "case": "string 16 MiB, host to script (newString)", "ms": 55.56 },
+          { "case": "array of 10000 numbers, script to host (dump)", "ms": 5.14 },
+          { "case": "array of 10000 numbers, host to script (newArray + setProp)", "ms": 2.16 },
+          {
+            "case": "array of 10000 numbers, host to script (JSON string, parsed in script)",
+            "ms": 1.58
+          },
+          { "case": "array of 100000 numbers, script to host (dump)", "ms": 48.3 },
+          { "case": "array of 100000 numbers, host to script (newArray + setProp)", "ms": 12.25 },
+          {
+            "case": "array of 100000 numbers, host to script (JSON string, parsed in script)",
+            "ms": 15.64
+          }
+        ],
+        "valuesMs": 264,
+        "instances": [
+          {
+            "variant": "quickjs-sync",
+            "instances": 10,
+            "perInstanceMs": 0.47,
+            "firstInstanceMs": 1.06,
+            "memoryMiBPerInstance": 16
+          },
+          {
+            "variant": "ng-sync",
+            "instances": 10,
+            "perInstanceMs": 0.74,
+            "firstInstanceMs": 6.15,
+            "memoryMiBPerInstance": 16
+          },
+          {
+            "variant": "quickjs-asyncify",
+            "instances": 10,
+            "perInstanceMs": 1.18,
+            "firstInstanceMs": 10.27,
+            "memoryMiBPerInstance": 16
+          },
+          {
+            "variant": "ng-asyncify",
+            "instances": 10,
+            "perInstanceMs": 1.09,
+            "firstInstanceMs": 12.55,
+            "memoryMiBPerInstance": 16
+          }
+        ],
+        "instancesMs": 113,
+        "asyncify": {
+          "quickjs-asyncify": {
+            "sharedModule": "host exception: QuickJSAsyncifyError: Already suspended at: QuickJSAsyncifySuspended: (0)",
+            "separateModules": "a = 20, b = 200 (expected 20 and 200)",
+            "nestedSuspend": "error QuickJSAsyncifyError: Already suspended at: QuickJSAsyncifySuspended: (0)"
+          },
+          "ng-asyncify": {
+            "sharedModule": "host exception: QuickJSAsyncifyError: Already suspended at: QuickJSAsyncifySuspended: (0)",
+            "separateModules": "a = 20, b = 200 (expected 20 and 200)",
+            "nestedSuspend": "error QuickJSAsyncifyError: Already suspended at: QuickJSAsyncifySuspended: (0)"
+          }
+        },
+        "asyncifyMs": 45,
+        "arithmetic": [
+          {
+            "variant": "quickjs-sync",
+            "iterations": 10000,
+            "quickjsMs": 0.864,
+            "hostMs": 0.025,
+            "ratio": 34.2,
+            "sameResult": true
+          },
+          {
+            "variant": "quickjs-sync",
+            "iterations": 1000000,
+            "quickjsMs": 84.495,
+            "hostMs": 2.495,
+            "ratio": 33.9,
+            "sameResult": true
+          },
+          {
+            "variant": "ng-sync",
+            "iterations": 10000,
+            "quickjsMs": 1.1,
+            "hostMs": 0.025,
+            "ratio": 44,
+            "sameResult": true
+          },
+          {
+            "variant": "ng-sync",
+            "iterations": 1000000,
+            "quickjsMs": 106.455,
+            "hostMs": 2.495,
+            "ratio": 42.7,
+            "sameResult": true
+          }
+        ],
+        "arithmeticMs": 2301,
+        "determinismMs": 92,
+        "globals": {
+          "globals": [
+            "AggregateError",
+            "Array",
+            "ArrayBuffer",
+            "BigInt",
+            "BigInt64Array",
+            "BigUint64Array",
+            "Boolean",
+            "DataView",
+            "Error",
+            "EvalError",
+            "Float16Array",
+            "Float32Array",
+            "Float64Array",
+            "Function",
+            "Infinity",
+            "Int16Array",
+            "Int32Array",
+            "Int8Array",
+            "InternalError",
+            "Iterator",
+            "JSON",
+            "Map",
+            "Math",
+            "NaN",
+            "Number",
+            "Object",
+            "Promise",
+            "Proxy",
+            "RangeError",
+            "ReferenceError",
+            "Reflect",
+            "RegExp",
+            "Set",
+            "SharedArrayBuffer",
+            "String",
+            "Symbol",
+            "SyntaxError",
+            "TypeError",
+            "URIError",
+            "Uint16Array",
+            "Uint32Array",
+            "Uint8Array",
+            "Uint8ClampedArray",
+            "WeakMap",
+            "WeakSet",
+            "decodeURI",
+            "decodeURIComponent",
+            "encodeURI",
+            "encodeURIComponent",
+            "escape",
+            "eval",
+            "globalThis",
+            "isFinite",
+            "isNaN",
+            "parseFloat",
+            "parseInt",
+            "undefined",
+            "unescape"
+          ],
+          "date": "undefined",
+          "random": [0.011704753153026104, 0.06195825757458806]
+        },
+        "globalsMs": 7,
+        "memoryUnbounded": {
+          "quickjs-sync": [
+            {
+              "case": "arrays of doubles",
+              "mode": "setMemoryLimit",
+              "limitMiB": 64,
+              "error": "InternalError: out of memory",
+              "ms": 974.4,
+              "wasmMiB": 2048,
+              "runtimeUsable": true,
+              "instanceUsable": true
+            },
+            {
+              "case": "one Float64Array of 1.6 GB",
+              "mode": "setMemoryLimit",
+              "limitMiB": 64,
+              "error": "InternalError: out of memory",
+              "ms": 0.2,
+              "wasmMiB": 16,
+              "runtimeUsable": true,
+              "instanceUsable": true
+            },
+            {
+              "case": "string doubling",
+              "mode": "setMemoryLimit",
+              "limitMiB": 64,
+              "error": "InternalError: string too long",
+              "ms": 0.1,
+              "wasmMiB": 16,
+              "runtimeUsable": true,
+              "instanceUsable": true
+            },
+            {
+              "case": "objects in a Map",
+              "mode": "setMemoryLimit",
+              "limitMiB": 64,
+              "error": "thrown: ",
+              "ms": 698.6,
+              "wasmMiB": 429,
+              "runtimeUsable": null,
+              "instanceUsable": true
+            }
+          ],
+          "ng-sync": [
+            {
+              "case": "arrays of doubles",
+              "mode": "setMemoryLimit",
+              "limitMiB": 64,
+              "error": "InternalError: out of memory",
+              "ms": 1196.1,
+              "wasmMiB": 2048,
+              "runtimeUsable": true,
+              "instanceUsable": true
+            },
+            {
+              "case": "one Float64Array of 1.6 GB",
+              "mode": "setMemoryLimit",
+              "limitMiB": 64,
+              "error": "InternalError: out of memory",
+              "ms": 0.2,
+              "wasmMiB": 16,
+              "runtimeUsable": true,
+              "instanceUsable": true
+            },
+            {
+              "case": "string doubling",
+              "mode": "setMemoryLimit",
+              "limitMiB": 64,
+              "error": "InternalError: string too long",
+              "ms": 0.1,
+              "wasmMiB": 16,
+              "runtimeUsable": true,
+              "instanceUsable": true
+            },
+            {
+              "case": "objects in a Map",
+              "mode": "setMemoryLimit",
+              "limitMiB": 64,
+              "error": "thrown: ",
+              "ms": 933.3,
+              "wasmMiB": 429,
+              "runtimeUsable": null,
+              "instanceUsable": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "browser": "firefox",
+      "version": "155.0",
+      "ok": true,
+      "isolated": true,
+      "timerMs": 0.01999999999679858,
+      "results": {
+        "load": [
+          {
+            "variant": "quickjs-sync",
+            "compileMs": 8.48,
+            "instantiateMs": 10.14,
+            "firstRunMs": 0.82,
+            "secondRunMs": 0.52,
+            "totalMs": 19.44,
+            "memoryBytes": 16777216
+          },
+          {
+            "variant": "ng-sync",
+            "compileMs": 7.98,
+            "instantiateMs": 15.4,
+            "firstRunMs": 0.56,
+            "secondRunMs": 0.42,
+            "totalMs": 23.94,
+            "memoryBytes": 16777216
+          },
+          {
+            "variant": "quickjs-asyncify",
+            "compileMs": 13.94,
+            "instantiateMs": 7.8,
+            "firstRunMs": 0.66,
+            "secondRunMs": 0.48,
+            "totalMs": 22.4,
+            "memoryBytes": 16777216
+          },
+          {
+            "variant": "ng-asyncify",
+            "compileMs": 20.36,
+            "instantiateMs": 13,
+            "firstRunMs": 0.74,
+            "secondRunMs": 0.54,
+            "totalMs": 34.1,
+            "memoryBytes": 16777216
+          }
+        ],
+        "loadMs": 103,
+        "hostCalls": [
+          {
+            "variant": "quickjs-sync",
+            "calls": 100000,
+            "loopUs": 0.06,
+            "numberUs": 2.103,
+            "vec3Us": 5.822,
+            "jsonUs": 4.21
+          },
+          {
+            "variant": "ng-sync",
+            "calls": 100000,
+            "loopUs": 0.06,
+            "numberUs": 2.249,
+            "vec3Us": 6.907,
+            "jsonUs": 4.553
+          }
+        ],
+        "hostCallsMs": 5141,
+        "asyncCalls": [
+          {
+            "variant": "quickjs-asyncify",
+            "disposeError": "QuickJSRuntime(rt = 5333416) not found when trying to free HostRef(id = -2147483648)",
+            "loopUs": 0.067,
+            "syncNumberUs": 2.516,
+            "asyncResolvedUs": 22.648,
+            "asyncMacrotaskUs": 36.603
+          },
+          {
+            "variant": "ng-asyncify",
+            "disposeError": "QuickJSRuntime(rt = 5343160) not found when trying to free HostRef(id = -2147483648)",
+            "loopUs": 0.087,
+            "syncNumberUs": 2.49,
+            "asyncResolvedUs": 22.269,
+            "asyncMacrotaskUs": 38.093
+          }
+        ],
+        "asyncCallsMs": 7720,
+        "kernel": {
+          "kernelLoadMs": 1278,
+          "sessions": [
+            {
+              "workload": "24 boolean cuts",
+              "hostCalls": 98,
+              "directSyncMs": 85.88,
+              "directServiceMs": 87.24,
+              "scriptSyncMs": 80.66,
+              "scriptAsyncMs": 92.12,
+              "results": [54772.566612]
+            },
+            {
+              "workload": "300 volume queries",
+              "hostCalls": 302,
+              "directSyncMs": 149.62,
+              "directServiceMs": 174.58,
+              "scriptSyncMs": 156.04,
+              "scriptAsyncMs": 192.54,
+              "results": [1800000]
+            }
+          ]
+        },
+        "kernelMs": 7674,
+        "interrupts": {
+          "quickjs-sync": [
+            {
+              "case": "empty for(;;)",
+              "overshootMs": 0.26,
+              "callsPerMs": 35.03,
+              "error": "InternalError: interrupted"
+            },
+            {
+              "case": "arithmetic loop",
+              "overshootMs": 0.3,
+              "callsPerMs": 4.6,
+              "error": "InternalError: interrupted"
+            },
+            {
+              "case": "recursion in a loop",
+              "overshootMs": 0.56,
+              "callsPerMs": 7.1,
+              "error": "InternalError: interrupted"
+            },
+            {
+              "case": "string building",
+              "overshootMs": 0.74,
+              "callsPerMs": 1.14,
+              "error": "InternalError: interrupted"
+            },
+            {
+              "case": "regex backtracking",
+              "overshootMs": 0.18,
+              "callsPerMs": 6.16,
+              "error": "InternalError: interrupted"
+            },
+            {
+              "case": "sort 1e5 numbers, comparator, in a loop",
+              "overshootMs": 0.88,
+              "callsPerMs": 3.68,
+              "error": "InternalError: interrupted"
+            },
+            {
+              "case": "sort 2e4 numbers, default order, in a loop",
+              "overshootMs": 8678.38,
+              "callsPerMs": 0,
+              "error": "InternalError: interrupted"
+            },
+            {
+              "case": "JSON round trip of 500 objects, in a loop",
+              "overshootMs": 2060.16,
+              "callsPerMs": 0,
+              "error": "InternalError: interrupted"
+            }
+          ],
+          "ng-sync": [
+            {
+              "case": "empty for(;;)",
+              "overshootMs": 0.22,
+              "callsPerMs": 33.32,
+              "error": "InternalError: interrupted"
+            },
+            {
+              "case": "arithmetic loop",
+              "overshootMs": 0.42,
+              "callsPerMs": 3.08,
+              "error": "InternalError: interrupted"
+            },
+            {
+              "case": "recursion in a loop",
+              "overshootMs": 0.28,
+              "callsPerMs": 5.29,
+              "error": "InternalError: interrupted"
+            },
+            {
+              "case": "string building",
+              "overshootMs": 0.14,
+              "callsPerMs": 0.8,
+              "error": "InternalError: interrupted"
+            },
+            {
+              "case": "regex backtracking",
+              "overshootMs": 0.2,
+              "callsPerMs": 8.43,
+              "error": "InternalError: interrupted"
+            },
+            {
+              "case": "sort 1e5 numbers, comparator, in a loop",
+              "overshootMs": 1.3,
+              "callsPerMs": 3,
+              "error": "InternalError: interrupted"
+            },
+            {
+              "case": "sort 2e4 numbers, default order, in a loop",
+              "overshootMs": 8668.98,
+              "callsPerMs": 0,
+              "error": "InternalError: interrupted"
+            },
+            {
+              "case": "JSON round trip of 500 objects, in a loop",
+              "overshootMs": 3198.1,
+              "callsPerMs": 0,
+              "error": "InternalError: interrupted"
+            }
+          ]
+        },
+        "interruptsMs": 24239,
+        "memory": {
+          "quickjs-sync": {
+            "report": "QuickJS memory usage -- 2025-09-13 version, 32-bit, malloc limit: 4294967295 / malloc_usable_size unavailable",
+            "memoryMaximum": [
+              {
+                "case": "arrays of doubles",
+                "mode": "memory-maximum",
+                "limitMiB": 64,
+                "error": "InternalError: out of memory",
+                "ms": 44.4,
+                "wasmMiB": 79.9,
+                "runtimeUsable": true,
+                "instanceUsable": true
+              },
+              {
+                "case": "one Float64Array of 1.6 GB",
+                "mode": "memory-maximum",
+                "limitMiB": 64,
+                "error": "InternalError: out of memory",
+                "ms": 0.1,
+                "wasmMiB": 16,
+                "runtimeUsable": true,
+                "instanceUsable": true
+              },
+              {
+                "case": "string doubling",
+                "mode": "memory-maximum",
+                "limitMiB": 64,
+                "error": "InternalError: string too long",
+                "ms": 0.1,
+                "wasmMiB": 16,
+                "runtimeUsable": true,
+                "instanceUsable": true
+              },
+              {
+                "case": "objects in a Map",
+                "mode": "memory-maximum",
+                "limitMiB": 64,
+                "error": "thrown: ",
+                "ms": 159.6,
+                "wasmMiB": 79.9,
+                "runtimeUsable": null,
+                "instanceUsable": false
+              }
+            ]
+          },
+          "ng-sync": {
+            "report": "QuickJS-ng memory usage -- 0.12.1 version, 32-bit, Little Endian, malloc limit: 0 / malloc_usable_size unavailable",
+            "memoryMaximum": [
+              {
+                "case": "arrays of doubles",
+                "mode": "memory-maximum",
+                "limitMiB": 64,
+                "error": "InternalError: out of memory",
+                "ms": 44.7,
+                "wasmMiB": 79.9,
+                "runtimeUsable": true,
+                "instanceUsable": true
+              },
+              {
+                "case": "one Float64Array of 1.6 GB",
+                "mode": "memory-maximum",
+                "limitMiB": 64,
+                "error": "InternalError: out of memory",
+                "ms": 0.2,
+                "wasmMiB": 16,
+                "runtimeUsable": true,
+                "instanceUsable": true
+              },
+              {
+                "case": "string doubling",
+                "mode": "memory-maximum",
+                "limitMiB": 64,
+                "error": "InternalError: string too long",
+                "ms": 0.1,
+                "wasmMiB": 16,
+                "runtimeUsable": true,
+                "instanceUsable": true
+              },
+              {
+                "case": "objects in a Map",
+                "mode": "memory-maximum",
+                "limitMiB": 64,
+                "error": "thrown: null",
+                "ms": 262.8,
+                "wasmMiB": 79.9,
+                "runtimeUsable": null,
+                "instanceUsable": false
+              }
+            ]
+          }
+        },
+        "memoryMs": 604,
+        "stack": {
+          "quickjs-sync": [
+            {
+              "maxStackKiB": 64,
+              "depth": 339,
+              "error": "InternalError: stack overflow",
+              "instanceUsable": true
+            },
+            {
+              "maxStackKiB": 128,
+              "depth": 680,
+              "error": "InternalError: stack overflow",
+              "instanceUsable": true
+            },
+            {
+              "maxStackKiB": 192,
+              "depth": 1022,
+              "error": "InternalError: stack overflow",
+              "instanceUsable": true
+            },
+            {
+              "maxStackKiB": 256,
+              "depth": 1363,
+              "error": "InternalError: stack overflow",
+              "instanceUsable": true
+            },
+            {
+              "maxStackKiB": 384,
+              "depth": 2046,
+              "error": "InternalError: stack overflow",
+              "instanceUsable": true
+            },
+            {
+              "maxStackKiB": 512,
+              "depth": 2728,
+              "error": "InternalError: stack overflow",
+              "instanceUsable": true
+            },
+            {
+              "maxStackKiB": 1024,
+              "depth": -1,
+              "error": "host exception: InternalError: too much recursion",
+              "instanceUsable": true
+            },
+            {
+              "maxStackKiB": 0,
+              "depth": -1,
+              "error": "host exception: InternalError: too much recursion",
+              "instanceUsable": true
+            }
+          ],
+          "ng-sync": [
+            {
+              "maxStackKiB": 64,
+              "depth": 369,
+              "error": "RangeError: Maximum call stack size exceeded",
+              "instanceUsable": true
+            },
+            {
+              "maxStackKiB": 128,
+              "depth": 742,
+              "error": "RangeError: Maximum call stack size exceeded",
+              "instanceUsable": true
+            },
+            {
+              "maxStackKiB": 192,
+              "depth": 1114,
+              "error": "RangeError: Maximum call stack size exceeded",
+              "instanceUsable": true
+            },
+            {
+              "maxStackKiB": 256,
+              "depth": 1486,
+              "error": "RangeError: Maximum call stack size exceeded",
+              "instanceUsable": true
+            },
+            {
+              "maxStackKiB": 384,
+              "depth": 2231,
+              "error": "RangeError: Maximum call stack size exceeded",
+              "instanceUsable": true
+            },
+            {
+              "maxStackKiB": 512,
+              "depth": -1,
+              "error": "host exception: InternalError: too much recursion",
+              "instanceUsable": true
+            },
+            {
+              "maxStackKiB": 1024,
+              "depth": -1,
+              "error": "host exception: InternalError: too much recursion",
+              "instanceUsable": true
+            },
+            {
+              "maxStackKiB": 0,
+              "depth": -1,
+              "error": "host exception: InternalError: too much recursion",
+              "instanceUsable": true
+            }
+          ]
+        },
+        "stackMs": 58,
+        "values": [
+          { "case": "string 1 MiB, script to host (getString)", "ms": 6.6 },
+          { "case": "string 1 MiB, host to script (newString)", "ms": 4.24 },
+          { "case": "string 16 MiB, script to host (getString)", "ms": 70.58 },
+          { "case": "string 16 MiB, host to script (newString)", "ms": 57.4 },
+          { "case": "array of 10000 numbers, script to host (dump)", "ms": 9.72 },
+          { "case": "array of 10000 numbers, host to script (newArray + setProp)", "ms": 2.8 },
+          {
+            "case": "array of 10000 numbers, host to script (JSON string, parsed in script)",
+            "ms": 2.12
+          },
+          { "case": "array of 100000 numbers, script to host (dump)", "ms": 51.22 },
+          { "case": "array of 100000 numbers, host to script (newArray + setProp)", "ms": 18.1 },
+          {
+            "case": "array of 100000 numbers, host to script (JSON string, parsed in script)",
+            "ms": 18.32
+          }
+        ],
+        "valuesMs": 254,
+        "instances": [
+          {
+            "variant": "quickjs-sync",
+            "instances": 10,
+            "perInstanceMs": 0.72,
+            "firstInstanceMs": 4.06,
+            "memoryMiBPerInstance": 16
+          },
+          {
+            "variant": "ng-sync",
+            "instances": 10,
+            "perInstanceMs": 0.76,
+            "firstInstanceMs": 1.12,
+            "memoryMiBPerInstance": 16
+          },
+          {
+            "variant": "quickjs-asyncify",
+            "instances": 10,
+            "perInstanceMs": 0.72,
+            "firstInstanceMs": 1.42,
+            "memoryMiBPerInstance": 16
+          },
+          {
+            "variant": "ng-asyncify",
+            "instances": 10,
+            "perInstanceMs": 0.92,
+            "firstInstanceMs": 1.48,
+            "memoryMiBPerInstance": 16
+          }
+        ],
+        "instancesMs": 91,
+        "asyncify": {
+          "quickjs-asyncify": {
+            "sharedModule": "host exception: QuickJSAsyncifyError: Already suspended at: io@https://spike.test/assets/worker-nRbhsqRb.js:69:2767",
+            "separateModules": "a = 20, b = 200 (expected 20 and 200)",
+            "nestedSuspend": "error QuickJSAsyncifyError: Already suspended at: io@https://spike.test/assets/worker-nRbhsqRb.js:69:2767"
+          },
+          "ng-asyncify": {
+            "sharedModule": "host exception: QuickJSAsyncifyError: Already suspended at: io@https://spike.test/assets/worker-nRbhsqRb.js:69:2767",
+            "separateModules": "a = 20, b = 200 (expected 20 and 200)",
+            "nestedSuspend": "error QuickJSAsyncifyError: Already suspended at: io@https://spike.test/assets/worker-nRbhsqRb.js:69:2767"
+          }
+        },
+        "asyncifyMs": 43,
+        "arithmetic": [
+          {
+            "variant": "quickjs-sync",
+            "iterations": 10000,
+            "quickjsMs": 0.966,
+            "hostMs": 0.115,
+            "ratio": 8.4,
+            "sameResult": true
+          },
+          {
+            "variant": "quickjs-sync",
+            "iterations": 1000000,
+            "quickjsMs": 95.08,
+            "hostMs": 2.78,
+            "ratio": 34.2,
+            "sameResult": true
+          },
+          {
+            "variant": "ng-sync",
+            "iterations": 10000,
+            "quickjsMs": 1.235,
+            "hostMs": 0.114,
+            "ratio": 10.8,
+            "sameResult": true
+          },
+          {
+            "variant": "ng-sync",
+            "iterations": 1000000,
+            "quickjsMs": 123.64,
+            "hostMs": 2.78,
+            "ratio": 44.5,
+            "sameResult": true
+          }
+        ],
+        "arithmeticMs": 2782,
+        "determinismMs": 125,
+        "globals": {
+          "globals": [
+            "AggregateError",
+            "Array",
+            "ArrayBuffer",
+            "BigInt",
+            "BigInt64Array",
+            "BigUint64Array",
+            "Boolean",
+            "DataView",
+            "Error",
+            "EvalError",
+            "Float16Array",
+            "Float32Array",
+            "Float64Array",
+            "Function",
+            "Infinity",
+            "Int16Array",
+            "Int32Array",
+            "Int8Array",
+            "InternalError",
+            "Iterator",
+            "JSON",
+            "Map",
+            "Math",
+            "NaN",
+            "Number",
+            "Object",
+            "Promise",
+            "Proxy",
+            "RangeError",
+            "ReferenceError",
+            "Reflect",
+            "RegExp",
+            "Set",
+            "SharedArrayBuffer",
+            "String",
+            "Symbol",
+            "SyntaxError",
+            "TypeError",
+            "URIError",
+            "Uint16Array",
+            "Uint32Array",
+            "Uint8Array",
+            "Uint8ClampedArray",
+            "WeakMap",
+            "WeakSet",
+            "decodeURI",
+            "decodeURIComponent",
+            "encodeURI",
+            "encodeURIComponent",
+            "escape",
+            "eval",
+            "globalThis",
+            "isFinite",
+            "isNaN",
+            "parseFloat",
+            "parseInt",
+            "undefined",
+            "unescape"
+          ],
+          "date": "undefined",
+          "random": [0.011704753153026104, 0.06195825757458806]
+        },
+        "globalsMs": 14,
+        "memoryUnbounded": {
+          "quickjs-sync": [
+            {
+              "case": "arrays of doubles",
+              "mode": "setMemoryLimit",
+              "limitMiB": 64,
+              "error": "InternalError: out of memory",
+              "ms": 1104.4,
+              "wasmMiB": 2048,
+              "runtimeUsable": true,
+              "instanceUsable": true
+            },
+            {
+              "case": "one Float64Array of 1.6 GB",
+              "mode": "setMemoryLimit",
+              "limitMiB": 64,
+              "error": "InternalError: out of memory",
+              "ms": 0.1,
+              "wasmMiB": 16,
+              "runtimeUsable": true,
+              "instanceUsable": true
+            },
+            {
+              "case": "string doubling",
+              "mode": "setMemoryLimit",
+              "limitMiB": 64,
+              "error": "InternalError: string too long",
+              "ms": 0.1,
+              "wasmMiB": 16,
+              "runtimeUsable": true,
+              "instanceUsable": true
+            },
+            {
+              "case": "objects in a Map",
+              "mode": "setMemoryLimit",
+              "limitMiB": 64,
+              "error": "thrown: ",
+              "ms": 746.7,
+              "wasmMiB": 429,
+              "runtimeUsable": null,
+              "instanceUsable": true
+            }
+          ],
+          "ng-sync": [
+            {
+              "case": "arrays of doubles",
+              "mode": "setMemoryLimit",
+              "limitMiB": 64,
+              "error": "InternalError: out of memory",
+              "ms": 1145.3,
+              "wasmMiB": 2048,
+              "runtimeUsable": true,
+              "instanceUsable": true
+            },
+            {
+              "case": "one Float64Array of 1.6 GB",
+              "mode": "setMemoryLimit",
+              "limitMiB": 64,
+              "error": "InternalError: out of memory",
+              "ms": 0.1,
+              "wasmMiB": 16,
+              "runtimeUsable": true,
+              "instanceUsable": true
+            },
+            {
+              "case": "string doubling",
+              "mode": "setMemoryLimit",
+              "limitMiB": 64,
+              "error": "InternalError: string too long",
+              "ms": 0.1,
+              "wasmMiB": 16,
+              "runtimeUsable": true,
+              "instanceUsable": true
+            },
+            {
+              "case": "objects in a Map",
+              "mode": "setMemoryLimit",
+              "limitMiB": 64,
+              "error": "thrown: ",
+              "ms": 1062.5,
+              "wasmMiB": 429,
+              "runtimeUsable": null,
+              "instanceUsable": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "browser": "webkit",
+      "version": "26.6",
+      "ok": true,
+      "isolated": true,
+      "timerMs": 1,
+      "results": {
+        "load": [
+          {
+            "variant": "quickjs-sync",
+            "compileMs": 9,
+            "instantiateMs": 12,
+            "firstRunMs": 3,
+            "secondRunMs": 1,
+            "totalMs": 24,
+            "memoryBytes": 16777216
+          },
+          {
+            "variant": "ng-sync",
+            "compileMs": 9,
+            "instantiateMs": 4,
+            "firstRunMs": 2,
+            "secondRunMs": 1,
+            "totalMs": 15,
+            "memoryBytes": 16777216
+          },
+          {
+            "variant": "quickjs-asyncify",
+            "compileMs": 19,
+            "instantiateMs": 4,
+            "firstRunMs": 3,
+            "secondRunMs": 1,
+            "totalMs": 26,
+            "memoryBytes": 16777216
+          },
+          {
+            "variant": "ng-asyncify",
+            "compileMs": 14,
+            "instantiateMs": 3,
+            "firstRunMs": 3,
+            "secondRunMs": 1,
+            "totalMs": 20,
+            "memoryBytes": 16777216
+          }
+        ],
+        "loadMs": 91,
+        "hostCalls": [
+          {
+            "variant": "quickjs-sync",
+            "calls": 100000,
+            "loopUs": 0.05,
+            "numberUs": 0.79,
+            "vec3Us": 3.63,
+            "jsonUs": 2.39
+          },
+          {
+            "variant": "ng-sync",
+            "calls": 100000,
+            "loopUs": 0.06,
+            "numberUs": 0.85,
+            "vec3Us": 4.3,
+            "jsonUs": 2.62
+          }
+        ],
+        "hostCallsMs": 2653,
+        "asyncCalls": [
+          {
+            "variant": "quickjs-asyncify",
+            "disposeError": "QuickJSRuntime(rt = 5333416) not found when trying to free HostRef(id = -2147483648)",
+            "loopUs": 0.07,
+            "syncNumberUs": 1.25,
+            "asyncResolvedUs": 3.83,
+            "asyncMacrotaskUs": 17.93
+          },
+          {
+            "variant": "ng-asyncify",
+            "disposeError": "QuickJSRuntime(rt = 5343160) not found when trying to free HostRef(id = -2147483648)",
+            "loopUs": 0.1,
+            "syncNumberUs": 1.41,
+            "asyncResolvedUs": 4.05,
+            "asyncMacrotaskUs": 15.9
+          }
+        ],
+        "asyncCallsMs": 2568,
+        "kernel": {
+          "kernelLoadMs": 977,
+          "sessions": [
+            {
+              "workload": "24 boolean cuts",
+              "hostCalls": 98,
+              "directSyncMs": 89,
+              "directServiceMs": 80,
+              "scriptSyncMs": 74,
+              "scriptAsyncMs": 80,
+              "results": [54772.566612]
+            },
+            {
+              "workload": "300 volume queries",
+              "hostCalls": 302,
+              "directSyncMs": 119,
+              "directServiceMs": 138,
+              "scriptSyncMs": 120,
+              "scriptAsyncMs": 146,
+              "results": [1800000]
+            }
+          ]
+        },
+        "kernelMs": 6216,
+        "interrupts": {
+          "quickjs-sync": [
+            {
+              "case": "empty for(;;)",
+              "overshootMs": 1,
+              "callsPerMs": 38.11,
+              "error": "InternalError: interrupted"
+            },
+            {
+              "case": "arithmetic loop",
+              "overshootMs": 1,
+              "callsPerMs": 3.6,
+              "error": "InternalError: interrupted"
+            },
+            {
+              "case": "recursion in a loop",
+              "overshootMs": 1,
+              "callsPerMs": 7.18,
+              "error": "InternalError: interrupted"
+            },
+            {
+              "case": "string building",
+              "overshootMs": 1,
+              "callsPerMs": 1.26,
+              "error": "InternalError: interrupted"
+            },
+            {
+              "case": "regex backtracking",
+              "overshootMs": 1,
+              "callsPerMs": 10.38,
+              "error": "InternalError: interrupted"
+            },
+            {
+              "case": "sort 1e5 numbers, comparator, in a loop",
+              "overshootMs": 2,
+              "callsPerMs": 3.91,
+              "error": "InternalError: interrupted"
+            },
+            {
+              "case": "sort 2e4 numbers, default order, in a loop",
+              "overshootMs": 8424,
+              "callsPerMs": 0,
+              "error": "InternalError: interrupted"
+            },
+            {
+              "case": "JSON round trip of 500 objects, in a loop",
+              "overshootMs": 1733,
+              "callsPerMs": 0,
+              "error": "InternalError: interrupted"
+            }
+          ],
+          "ng-sync": [
+            {
+              "case": "empty for(;;)",
+              "overshootMs": 1,
+              "callsPerMs": 34.48,
+              "error": "InternalError: interrupted"
+            },
+            {
+              "case": "arithmetic loop",
+              "overshootMs": 1,
+              "callsPerMs": 2.77,
+              "error": "InternalError: interrupted"
+            },
+            {
+              "case": "recursion in a loop",
+              "overshootMs": 1,
+              "callsPerMs": 5.88,
+              "error": "InternalError: interrupted"
+            },
+            {
+              "case": "string building",
+              "overshootMs": 1,
+              "callsPerMs": 0.89,
+              "error": "InternalError: interrupted"
+            },
+            {
+              "case": "regex backtracking",
+              "overshootMs": 1,
+              "callsPerMs": 16.26,
+              "error": "InternalError: interrupted"
+            },
+            {
+              "case": "sort 1e5 numbers, comparator, in a loop",
+              "overshootMs": 5,
+              "callsPerMs": 3.63,
+              "error": "InternalError: interrupted"
+            },
+            {
+              "case": "sort 2e4 numbers, default order, in a loop",
+              "overshootMs": 10208,
+              "callsPerMs": 0,
+              "error": "InternalError: interrupted"
+            },
+            {
+              "case": "JSON round trip of 500 objects, in a loop",
+              "overshootMs": 2653,
+              "callsPerMs": 0,
+              "error": "InternalError: interrupted"
+            }
+          ]
+        },
+        "interruptsMs": 24696,
+        "memory": {
+          "quickjs-sync": {
+            "report": "QuickJS memory usage -- 2025-09-13 version, 32-bit, malloc limit: 4294967295 / malloc_usable_size unavailable",
+            "memoryMaximum": [
+              {
+                "case": "arrays of doubles",
+                "mode": "memory-maximum",
+                "limitMiB": 64,
+                "error": "InternalError: out of memory",
+                "ms": 39,
+                "wasmMiB": 79.9,
+                "runtimeUsable": true,
+                "instanceUsable": true
+              },
+              {
+                "case": "one Float64Array of 1.6 GB",
+                "mode": "memory-maximum",
+                "limitMiB": 64,
+                "error": "InternalError: out of memory",
+                "ms": 0,
+                "wasmMiB": 16,
+                "runtimeUsable": true,
+                "instanceUsable": true
+              },
+              {
+                "case": "string doubling",
+                "mode": "memory-maximum",
+                "limitMiB": 64,
+                "error": "InternalError: string too long",
+                "ms": 0,
+                "wasmMiB": 16,
+                "runtimeUsable": true,
+                "instanceUsable": true
+              },
+              {
+                "case": "objects in a Map",
+                "mode": "memory-maximum",
+                "limitMiB": 64,
+                "error": "thrown: ",
+                "ms": 131,
+                "wasmMiB": 79.9,
+                "runtimeUsable": null,
+                "instanceUsable": false
+              }
+            ]
+          },
+          "ng-sync": {
+            "report": "QuickJS-ng memory usage -- 0.12.1 version, 32-bit, Little Endian, malloc limit: 0 / malloc_usable_size unavailable",
+            "memoryMaximum": [
+              {
+                "case": "arrays of doubles",
+                "mode": "memory-maximum",
+                "limitMiB": 64,
+                "error": "InternalError: out of memory",
+                "ms": 36,
+                "wasmMiB": 79.9,
+                "runtimeUsable": true,
+                "instanceUsable": true
+              },
+              {
+                "case": "one Float64Array of 1.6 GB",
+                "mode": "memory-maximum",
+                "limitMiB": 64,
+                "error": "InternalError: out of memory",
+                "ms": 0,
+                "wasmMiB": 16,
+                "runtimeUsable": true,
+                "instanceUsable": true
+              },
+              {
+                "case": "string doubling",
+                "mode": "memory-maximum",
+                "limitMiB": 64,
+                "error": "InternalError: string too long",
+                "ms": 0,
+                "wasmMiB": 16,
+                "runtimeUsable": true,
+                "instanceUsable": true
+              },
+              {
+                "case": "objects in a Map",
+                "mode": "memory-maximum",
+                "limitMiB": 64,
+                "error": "thrown: null",
+                "ms": 248,
+                "wasmMiB": 79.9,
+                "runtimeUsable": null,
+                "instanceUsable": false
+              }
+            ]
+          }
+        },
+        "memoryMs": 567,
+        "stack": {
+          "quickjs-sync": [
+            {
+              "maxStackKiB": 64,
+              "depth": 339,
+              "error": "InternalError: stack overflow",
+              "instanceUsable": true
+            },
+            {
+              "maxStackKiB": 128,
+              "depth": 680,
+              "error": "InternalError: stack overflow",
+              "instanceUsable": true
+            },
+            {
+              "maxStackKiB": 192,
+              "depth": 1022,
+              "error": "InternalError: stack overflow",
+              "instanceUsable": true
+            },
+            {
+              "maxStackKiB": 256,
+              "depth": 1363,
+              "error": "InternalError: stack overflow",
+              "instanceUsable": true
+            },
+            {
+              "maxStackKiB": 384,
+              "depth": 2046,
+              "error": "InternalError: stack overflow",
+              "instanceUsable": true
+            },
+            {
+              "maxStackKiB": 512,
+              "depth": 2728,
+              "error": "InternalError: stack overflow",
+              "instanceUsable": true
+            },
+            {
+              "maxStackKiB": 1024,
+              "depth": -1,
+              "error": "host exception: RangeError: Maximum call stack size exceeded.",
+              "instanceUsable": true
+            },
+            {
+              "maxStackKiB": 0,
+              "depth": -1,
+              "error": "host exception: RangeError: Maximum call stack size exceeded.",
+              "instanceUsable": true
+            }
+          ],
+          "ng-sync": [
+            {
+              "maxStackKiB": 64,
+              "depth": 369,
+              "error": "RangeError: Maximum call stack size exceeded",
+              "instanceUsable": true
+            },
+            {
+              "maxStackKiB": 128,
+              "depth": 742,
+              "error": "RangeError: Maximum call stack size exceeded",
+              "instanceUsable": true
+            },
+            {
+              "maxStackKiB": 192,
+              "depth": 1114,
+              "error": "RangeError: Maximum call stack size exceeded",
+              "instanceUsable": true
+            },
+            {
+              "maxStackKiB": 256,
+              "depth": 1486,
+              "error": "RangeError: Maximum call stack size exceeded",
+              "instanceUsable": true
+            },
+            {
+              "maxStackKiB": 384,
+              "depth": 2231,
+              "error": "RangeError: Maximum call stack size exceeded",
+              "instanceUsable": true
+            },
+            {
+              "maxStackKiB": 512,
+              "depth": 2976,
+              "error": "RangeError: Maximum call stack size exceeded",
+              "instanceUsable": true
+            },
+            {
+              "maxStackKiB": 1024,
+              "depth": -1,
+              "error": "host exception: RangeError: Maximum call stack size exceeded.",
+              "instanceUsable": true
+            },
+            {
+              "maxStackKiB": 0,
+              "depth": -1,
+              "error": "host exception: RangeError: Maximum call stack size exceeded.",
+              "instanceUsable": true
+            }
+          ]
+        },
+        "stackMs": 73,
+        "values": [
+          { "case": "string 1 MiB, script to host (getString)", "ms": 7 },
+          { "case": "string 1 MiB, host to script (newString)", "ms": 5 },
+          { "case": "string 16 MiB, script to host (getString)", "ms": 50 },
+          { "case": "string 16 MiB, host to script (newString)", "ms": 39 },
+          { "case": "array of 10000 numbers, script to host (dump)", "ms": 11 },
+          { "case": "array of 10000 numbers, host to script (newArray + setProp)", "ms": 4 },
+          {
+            "case": "array of 10000 numbers, host to script (JSON string, parsed in script)",
+            "ms": 3
+          },
+          { "case": "array of 100000 numbers, script to host (dump)", "ms": 42 },
+          { "case": "array of 100000 numbers, host to script (newArray + setProp)", "ms": 12 },
+          {
+            "case": "array of 100000 numbers, host to script (JSON string, parsed in script)",
+            "ms": 16
+          }
+        ],
+        "valuesMs": 202,
+        "instances": [
+          {
+            "variant": "quickjs-sync",
+            "instances": 10,
+            "perInstanceMs": 2,
+            "firstInstanceMs": 2,
+            "memoryMiBPerInstance": 16
+          },
+          {
+            "variant": "ng-sync",
+            "instances": 10,
+            "perInstanceMs": 2,
+            "firstInstanceMs": 3,
+            "memoryMiBPerInstance": 16
+          },
+          {
+            "variant": "quickjs-asyncify",
+            "instances": 10,
+            "perInstanceMs": 2,
+            "firstInstanceMs": 5,
+            "memoryMiBPerInstance": 16
+          },
+          {
+            "variant": "ng-asyncify",
+            "instances": 10,
+            "perInstanceMs": 3,
+            "firstInstanceMs": 5,
+            "memoryMiBPerInstance": 16
+          }
+        ],
+        "instancesMs": 166,
+        "asyncify": {
+          "quickjs-asyncify": {
+            "sharedModule": "host exception: QuickJSAsyncifyError: Already suspended at: @https://spike.test/assets/worker-nRbhsqRb.js:74:49",
+            "separateModules": "a = 20, b = 200 (expected 20 and 200)",
+            "nestedSuspend": "error QuickJSAsyncifyError: Already suspended at: @https://spike.test/assets/worker-nRbhsqRb.js:74:49"
+          },
+          "ng-asyncify": {
+            "sharedModule": "host exception: QuickJSAsyncifyError: Already suspended at: @https://spike.test/assets/worker-nRbhsqRb.js:74:49",
+            "separateModules": "a = 20, b = 200 (expected 20 and 200)",
+            "nestedSuspend": "error QuickJSAsyncifyError: Already suspended at: @https://spike.test/assets/worker-nRbhsqRb.js:74:49"
+          }
+        },
+        "asyncifyMs": 66,
+        "arithmetic": [
+          {
+            "variant": "quickjs-sync",
+            "iterations": 10000,
+            "quickjsMs": 0.8,
+            "hostMs": 0.1,
+            "ratio": 8,
+            "sameResult": true
+          },
+          {
+            "variant": "quickjs-sync",
+            "iterations": 1000000,
+            "quickjsMs": 89,
+            "hostMs": 3,
+            "ratio": 29.7,
+            "sameResult": true
+          },
+          {
+            "variant": "ng-sync",
+            "iterations": 10000,
+            "quickjsMs": 1.05,
+            "hostMs": 0.1,
+            "ratio": 10.5,
+            "sameResult": true
+          },
+          {
+            "variant": "ng-sync",
+            "iterations": 1000000,
+            "quickjsMs": 102,
+            "hostMs": 3,
+            "ratio": 34,
+            "sameResult": true
+          }
+        ],
+        "arithmeticMs": 2426,
+        "determinismMs": 129,
+        "globals": {
+          "globals": [
+            "AggregateError",
+            "Array",
+            "ArrayBuffer",
+            "BigInt",
+            "BigInt64Array",
+            "BigUint64Array",
+            "Boolean",
+            "DataView",
+            "Error",
+            "EvalError",
+            "Float16Array",
+            "Float32Array",
+            "Float64Array",
+            "Function",
+            "Infinity",
+            "Int16Array",
+            "Int32Array",
+            "Int8Array",
+            "InternalError",
+            "Iterator",
+            "JSON",
+            "Map",
+            "Math",
+            "NaN",
+            "Number",
+            "Object",
+            "Promise",
+            "Proxy",
+            "RangeError",
+            "ReferenceError",
+            "Reflect",
+            "RegExp",
+            "Set",
+            "SharedArrayBuffer",
+            "String",
+            "Symbol",
+            "SyntaxError",
+            "TypeError",
+            "URIError",
+            "Uint16Array",
+            "Uint32Array",
+            "Uint8Array",
+            "Uint8ClampedArray",
+            "WeakMap",
+            "WeakSet",
+            "decodeURI",
+            "decodeURIComponent",
+            "encodeURI",
+            "encodeURIComponent",
+            "escape",
+            "eval",
+            "globalThis",
+            "isFinite",
+            "isNaN",
+            "parseFloat",
+            "parseInt",
+            "undefined",
+            "unescape"
+          ],
+          "date": "undefined",
+          "random": [0.011704753153026104, 0.06195825757458806]
+        },
+        "globalsMs": 13,
+        "memoryUnbounded": {
+          "quickjs-sync": [
+            {
+              "case": "arrays of doubles",
+              "mode": "setMemoryLimit",
+              "limitMiB": 64,
+              "error": "InternalError: out of memory",
+              "ms": 902,
+              "wasmMiB": 2048,
+              "runtimeUsable": true,
+              "instanceUsable": true
+            },
+            {
+              "case": "one Float64Array of 1.6 GB",
+              "mode": "setMemoryLimit",
+              "limitMiB": 64,
+              "error": "InternalError: out of memory",
+              "ms": 0,
+              "wasmMiB": 16,
+              "runtimeUsable": true,
+              "instanceUsable": true
+            },
+            {
+              "case": "string doubling",
+              "mode": "setMemoryLimit",
+              "limitMiB": 64,
+              "error": "InternalError: string too long",
+              "ms": 0,
+              "wasmMiB": 16,
+              "runtimeUsable": true,
+              "instanceUsable": true
+            },
+            {
+              "case": "objects in a Map",
+              "mode": "setMemoryLimit",
+              "limitMiB": 64,
+              "error": "thrown: ",
+              "ms": 619,
+              "wasmMiB": 429,
+              "runtimeUsable": null,
+              "instanceUsable": true
+            }
+          ],
+          "ng-sync": [
+            {
+              "case": "arrays of doubles",
+              "mode": "setMemoryLimit",
+              "limitMiB": 64,
+              "error": "InternalError: out of memory",
+              "ms": 898,
+              "wasmMiB": 2048,
+              "runtimeUsable": true,
+              "instanceUsable": true
+            },
+            {
+              "case": "one Float64Array of 1.6 GB",
+              "mode": "setMemoryLimit",
+              "limitMiB": 64,
+              "error": "InternalError: out of memory",
+              "ms": 0,
+              "wasmMiB": 16,
+              "runtimeUsable": true,
+              "instanceUsable": true
+            },
+            {
+              "case": "string doubling",
+              "mode": "setMemoryLimit",
+              "limitMiB": 64,
+              "error": "InternalError: string too long",
+              "ms": 0,
+              "wasmMiB": 16,
+              "runtimeUsable": true,
+              "instanceUsable": true
+            },
+            {
+              "case": "objects in a Map",
+              "mode": "setMemoryLimit",
+              "limitMiB": 64,
+              "error": "thrown: ",
+              "ms": 905,
+              "wasmMiB": 429,
+              "runtimeUsable": null,
+              "instanceUsable": true
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
