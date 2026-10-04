@@ -58,6 +58,8 @@ expect_no_header() {
 }
 
 page_csp="script-src 'self' 'wasm-unsafe-eval';"
+# Pages reach the sync server and share hosts on other origins: https, and wss for the sync socket.
+page_connect="connect-src 'self' https: wss:;"
 
 # The pages: no long cache, the strict policy, the security headers, no cross-origin isolation.
 for path in / /index.html /viewer.html /viewer /source.html /some/app/route; do
@@ -67,6 +69,7 @@ for path in / /index.html /viewer.html /viewer /source.html /some/app/route; do
   expect_header cache-control no-cache "$path"
   expect_header_contains content-security-policy "$page_csp" "$path"
   expect_header_contains content-security-policy "frame-ancestors 'none'" "$path"
+  expect_header_contains content-security-policy "$page_connect" "$path"
   expect_header x-content-type-options nosniff "$path"
   expect_header referrer-policy no-referrer "$path"
   expect_header cross-origin-opener-policy same-origin "$path"

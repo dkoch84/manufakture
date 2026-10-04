@@ -105,7 +105,7 @@ Pages (and every other response but worker scripts):
 
 ```
 default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data: blob:;
-font-src 'self'; connect-src 'self' https:; worker-src 'self'; manifest-src 'self'; object-src 'none';
+font-src 'self'; connect-src 'self' https: wss:; worker-src 'self'; manifest-src 'self'; object-src 'none';
 base-uri 'self'; form-action 'self'; frame-ancestors 'none'
 ```
 
@@ -119,7 +119,7 @@ object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
 
 The workers fetch only the app's own `.wasm` and font files; sync and sharing talk to other origins from the page. User scripts run in QuickJS inside the regen worker and have no network API at all ([ADR 0010](adr/0010-scripting-sandbox.md)); `connect-src 'self'` is the layer behind that, so a script that escaped the interpreter still could not send anything to another origin (T7.2e). `deploy/check-headers.sh` asserts it on every worker script.
 
-A dedicated worker takes its policy from its own script's response, not from the page, and the kernel's Emscripten glue (libcascade's embind) builds its function invokers with `new Function`; without `'unsafe-eval'` the regen worker never starts (checked: the demo part never appears). The pages themselves allow no `eval` and no inline script or style. zod probes `Function('')` once and falls back when the policy refuses it; the browser reports that as a violation, which is harmless. The pages' `connect-src` allows any `https:` origin because the sync server and share hosts live elsewhere; the viewer refuses non-https bundle addresses anyway. `apps/web/e2e/csp.spec.ts` runs the app (kernel and regen), the viewer and the source page under the policy and fails on any other violation; the rest of the end-to-end suite bypasses the policy, because some specs inject inline styles to pin their layout.
+A dedicated worker takes its policy from its own script's response, not from the page, and the kernel's Emscripten glue (libcascade's embind) builds its function invokers with `new Function`; without `'unsafe-eval'` the regen worker never starts (checked: the demo part never appears). The pages themselves allow no `eval` and no inline script or style. zod probes `Function('')` once and falls back when the policy refuses it; the browser reports that as a violation, which is harmless. The pages' `connect-src` allows any `https:` and `wss:` origin because the sync server and share hosts live elsewhere: the sync socket is `wss://<server>/api/documents/:id/socket`, and an `https:` source does not match a `wss:` address, so both are needed. Plain `ws:` and `http:` stay out; the viewer refuses non-https bundle addresses anyway. `vite preview` adds `http:` and `ws:` for `localhost`, `127.0.0.1` and `[::1]` only, for local share hosts and a local sync server. `apps/web/e2e/csp.spec.ts` runs the app (kernel and regen), the viewer, the source page and a sync WebSocket to a real server under the policy and fails on any other violation; the rest of the end-to-end suite bypasses the policy, because some specs inject inline styles to pin their layout.
 
 ## Source offer
 

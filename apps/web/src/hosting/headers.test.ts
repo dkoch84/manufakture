@@ -61,18 +61,31 @@ describe('headersFor', () => {
     expect(
       WORKER_CSP.replace(" 'unsafe-eval'", '').replace(
         "connect-src 'self'",
-        "connect-src 'self' https:",
+        "connect-src 'self' https: wss:",
       ),
     ).toBe(DOCUMENT_CSP);
   });
 
+  it('lets pages reach other origins over https and wss only', () => {
+    // The sync socket is wss://<server>/api/documents/:id/socket; `https:` does not match `wss:`.
+    expect(DOCUMENT_CSP).toContain("connect-src 'self' https: wss:;");
+    expect(DOCUMENT_CSP).not.toContain('ws:');
+    expect(DOCUMENT_CSP).not.toContain('http:');
+  });
+
   it('widens connect-src for localhost only in the local variant', () => {
-    expect(DOCUMENT_CSP).toContain("connect-src 'self' https:;");
-    expect(localPolicy(DOCUMENT_CSP)).toContain('http://localhost:*');
-    expect(headersFor('/', { local: true })['Content-Security-Policy']).toContain(
-      'http://127.0.0.1:*',
+    const local = localPolicy(DOCUMENT_CSP);
+    for (const host of ['localhost', '127.0.0.1', '[::1]']) {
+      expect(local).toContain(`http://${host}:*`);
+      expect(local).toContain(`ws://${host}:*`);
+    }
+    expect(headersFor('/', { local: true })['Content-Security-Policy']).toBe(local);
+    // Only connect-src changes.
+    expect(local.split('; ').filter((d) => !d.startsWith('connect-src '))).toEqual(
+      DOCUMENT_CSP.split('; ').filter((d) => !d.startsWith('connect-src ')),
     );
     expect(headersFor('/')['Content-Security-Policy']).not.toContain('http:');
+    expect(headersFor('/')['Content-Security-Policy']).not.toContain('ws:');
   });
 
   it('sends no COEP: nothing needs cross-origin isolation', () => {

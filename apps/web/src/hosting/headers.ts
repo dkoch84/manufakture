@@ -1,6 +1,7 @@
 // The response headers a host sends with the build (T7.3c, docs/hosting.md). The production server
 // config, deploy/Caddyfile, writes them out for Caddy; `vite preview` (vite.config.ts) sends the
-// same ones, so every end-to-end test runs under the production Content-Security-Policy.
+// same ones (widened for localhost, localPolicy). Most end-to-end specs bypass the policy;
+// e2e/csp.spec.ts runs under it (playwright.config.ts).
 // headers.test.ts checks the Caddyfile still says what this module says.
 
 /**
@@ -13,8 +14,10 @@
  *   policy does not block.
  * - `img-src` adds `data:` and `blob:` for small inlined assets and object URLs of thumbnails and
  *   exports.
- * - `connect-src 'self' https:`: the sync server and share hosts are other origins, always https
- *   (the viewer refuses anything else, src/viewer/load.ts).
+ * - `connect-src 'self' https: wss:`: the sync server and share hosts are other origins, always
+ *   https (the viewer refuses anything else, src/viewer/load.ts). The sync socket is
+ *   `wss://<server>/api/documents/:id/socket`, and an `https:` source does not match `wss:`, so
+ *   both are listed. Never plain `ws:` or `http:` here.
  * - `frame-ancestors 'none'`: nobody frames the app (clickjacking); `object-src 'none'`,
  *   `base-uri 'self'` and `form-action 'self'` close the usual gaps.
  */
@@ -24,7 +27,7 @@ export const DOCUMENT_CSP = [
   "style-src 'self'",
   "img-src 'self' data: blob:",
   "font-src 'self'",
-  "connect-src 'self' https:",
+  "connect-src 'self' https: wss:",
   "worker-src 'self'",
   "manifest-src 'self'",
   "object-src 'none'",
@@ -46,16 +49,18 @@ export const DOCUMENT_CSP = [
 export const WORKER_CSP = DOCUMENT_CSP.replace(
   "script-src 'self' 'wasm-unsafe-eval'",
   "script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval'",
-).replace("connect-src 'self' https:", "connect-src 'self'");
+).replace("connect-src 'self' https: wss:", "connect-src 'self'");
 
 /**
  * The same policy for a page served from localhost (`vite preview`, the end-to-end tests): the
- * viewer opens bundles from local http servers there (src/viewer/load.ts, `allowLocalHttp`).
+ * viewer opens bundles from local http servers there (src/viewer/load.ts, `allowLocalHttp`), and
+ * a local sync server is reached over http and its socket over plain `ws:`.
  */
 export function localPolicy(policy: string): string {
   return policy.replace(
-    "connect-src 'self' https:",
-    "connect-src 'self' https: http://localhost:* http://127.0.0.1:* http://[::1]:*",
+    "connect-src 'self' https: wss:",
+    "connect-src 'self' https: wss: http://localhost:* http://127.0.0.1:* http://[::1]:* " +
+      'ws://localhost:* ws://127.0.0.1:* ws://[::1]:*',
   );
 }
 

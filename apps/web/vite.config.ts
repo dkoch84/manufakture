@@ -146,9 +146,10 @@ function sourceOffer(): Plugin {
 }
 
 // `vite preview` sends the production security headers (src/hosting/headers.ts: the
-// Content-Security-Policy and the rest of what deploy/Caddyfile sends), so the end-to-end tests run
-// under the real policy. Cache-Control is left to preview's own server. The policy is widened for
-// local http share hosts only, as the viewer itself allows them on localhost.
+// Content-Security-Policy and the rest of what deploy/Caddyfile sends). Most end-to-end specs bypass
+// the policy (playwright.config.ts sets bypassCSP); e2e/csp.spec.ts turns it back on and runs under
+// it. Cache-Control is left to preview's own server. The policy is widened for localhost only
+// (http and ws), for local share hosts and a local sync server.
 function previewSecurityHeaders(): Plugin {
   return {
     name: 'manufakture:preview-security-headers',
