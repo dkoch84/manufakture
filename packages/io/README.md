@@ -312,6 +312,8 @@ A published view (M7 plan, T7.3a; `mfkview.ts`) is a model to look at without th
 
 `writeMfkview(input)` (async) writes it from data the app already holds: each body's display mesh as the kernel tessellated it (`MfkviewMesh`: the kernel's `MeshData` layout, face and edge names as strings or null), plus names, colours, materials, volumes and masses, parts and instances. `readMfkview(bytes, limits?)` reads one back, synchronously and without three.js: the manifest, the meshes, and `readSource()`, which inflates `source.mfk` only when called (the viewer needs it for Open in manufakture only; `readMfkview` checks just that the entry is there). Both throw `MfkviewError` with a message for the person who opened the file.
 
+The format has its own entry point, `@manufakture/io/mfkview` (also re-exported from the package index): the read-only viewer imports only that, so it loads none of the other formats (the viewer's build check, `apps/web/src/viewer/bundleCheck.ts`). The viewer reads with `MFKVIEW_VIEWER_LIMITS`.
+
 **The zip** holds only these entries; a reader ignores (and never inflates) anything else:
 
 | Entry            | What                                                                                |

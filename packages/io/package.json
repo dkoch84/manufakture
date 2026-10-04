@@ -6,7 +6,8 @@
   "license": "GPL-3.0-or-later",
   "exports": {
     ".": "./src/index.ts",
-    "./ifc": "./src/ifc/index.ts"
+    "./ifc": "./src/ifc/index.ts",
+    "./mfkview": "./src/mfkview.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",

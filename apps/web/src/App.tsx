@@ -44,6 +44,7 @@ import { HomeScreen } from './home/HomeScreen';
 import { startAutosave, type Autosave, type SaveStatus } from './persistence/autosave';
 import { MAIN_BRANCH, type Branch, type DocumentLibrary } from './persistence/library';
 import { requestPersistence, storageInfo } from './persistence/storage';
+import { askPersistenceOnce, noteLibraryKind } from './pwa/persistence';
 import { registerAutosave } from './pwa/saveGate';
 import { markStartupDone } from './pwa/startup';
 import {
@@ -144,6 +145,8 @@ import type { GeometryRef, SelectableItem } from './state/selection';
 import { useSketchShortcuts } from './sketcher/shortcuts';
 import { useSketching } from './sketcher/useSketching';
 import { VariablesPanel } from './variables/VariablesPanel';
+import { acceptViewSource } from './viewer/handoff';
+import { MAX_MFK_FILE_BYTES } from './persistence/limits';
 import { testHooksEnabled } from './testHooks';
 import type { BodyInput } from './viewport/bodies';
 import { LoadingSplash } from './viewport/LoadingSplash';
@@ -843,12 +846,16 @@ export function App({
             setHomeOutcome({
               ok: false,
               message: `The document could not be opened. ${opened.message}`,
+              // Saved by a newer version: the home screen offers to update the app (src/pwa).
+              ...(opened.newer ? { newer: true } : {}),
             });
             setView('home');
           }
         }
       }
       setLibrary(lib);
+      // Persistent storage is never asked for documents kept in memory (src/pwa/persistence.ts).
+      noteLibraryKind(lib.kind);
       setDocReady(true);
     })();
   }, [libraryPromise, loader, initialDocumentId, show, documents, initialPartId]);
@@ -928,7 +935,8 @@ export function App({
         setHistoryRevision((n) => n + 1);
         if (!askedPersistence.current && library.kind !== 'memory') {
           askedPersistence.current = true;
-          void requestPersistence();
+          // Once ever, remembered (src/pwa/persistence.ts): never a prompt on every visit.
+          void askPersistenceOnce();
         }
       },
     });
@@ -988,6 +996,13 @@ export function App({
         : null,
     [library, documents, autosave, show, branchStore],
   );
+
+  // Open in manufakture from the read-only viewer (src/viewer/handoff.ts): this tab was opened
+  // with a one-time token in its fragment; fetch the source from the viewer and import it.
+  useEffect(() => {
+    if (!actions) return;
+    acceptViewSource(actions.importFile, setIoStatus, { maxBytes: MAX_MFK_FILE_BYTES });
+  }, [actions]);
 
   // Viewing a version or a revision: read it back, build it in the worker beside the open
   // document, and show it read-only until Back or Restore.

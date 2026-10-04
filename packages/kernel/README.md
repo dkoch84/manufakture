@@ -18,6 +18,8 @@ KernelClient  --- Comlink --->  createKernelWorkerApi   (loading, progress, tran
 | `@manufakture/kernel`               | worker, Node          | `Kernel`, `KernelService`, `createKernelWorkerApi`, `OcctLoader`, `applyFeature`, naming, hole and thread tables, types      |
 | `@manufakture/kernel/client`        | main thread           | `spawnKernelWorker()`, `KernelClient`                                                                                        |
 | `@manufakture/kernel/kernel-client` | main thread           | `KernelClient` alone, for the client of a worker that extends this one (the regen worker) without bundling this worker entry |
+| `@manufakture/kernel/names`         | anywhere              | `NameTable` alone (data only, no OCCT), for code that must not load the kernel (the viewport, the read-only viewer)          |
+| `@manufakture/kernel/types`         | anywhere              | the mesh and topology types and `UNNAMED` (data only, no OCCT), for the same code                                            |
 | `@manufakture/kernel/worker`        | worker entry          | `Comlink.expose` of the worker API, with the `.wasm` imported as a Vite `?url` asset                                         |
 | `@manufakture/kernel/node`          | Node (tests, goldens) | `createNodeKernel()`, `createNodeService()`, `nodeLoader()`, `wasmPath()`                                                    |
 | `@manufakture/kernel/testing`       | Node tests            | `track()`: records every embind object, to prove nothing is left undeleted; `heapInUse()`: the wasm heap probe (below)       |

@@ -1,7 +1,13 @@
+import { fileURLToPath } from 'node:url';
+import { gzipSync } from 'node:zlib';
 import react from '@vitejs/plugin-react';
+import type { Plugin } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 import { defineConfig } from 'vitest/config';
 import { choosePrecache, type ManifestEntry } from './src/pwa/precache.ts';
+import { checkViewerBundle, kib, type BuiltChunk } from './src/viewer/bundleCheck.ts';
+
+const appRoot = fileURLToPath(new URL('.', import.meta.url));
 
 // Cross-origin isolation is required for SharedArrayBuffer, which the
 // WASM geometry kernel running in Web Workers will depend on.
@@ -38,12 +44,58 @@ const pwa = VitePWA({
   },
 });
 
+// The read-only viewer (viewer.html, src/viewer/; T7.3b) is a second page of the same build. Its
+// chunks must hold no kernel, solver, regen or editor code and stay under a JavaScript budget:
+// checked here on every build, so a change that breaks either fails `vite build` and names the
+// module (src/viewer/bundleCheck.ts has the rules and the budget).
+//
+// The service worker precaches viewer.html and its chunks like the app's (the glob above takes
+// every .html and .js), so a viewer opened once works offline on a picked file; it adds
+// about 15 KB to what the app precaches anyway, since three.js and React are shared chunks.
+// viewer.html has a file extension, so the navigation rule (src/pwa/policy.ts) never answers
+// it with index.html; Workbox's precache route serves it, also as `/viewer`.
+function viewerBundleCheck(): Plugin {
+  return {
+    name: 'manufakture:viewer-bundle-check',
+    apply: 'build',
+    generateBundle(_options, bundle) {
+      const chunks: BuiltChunk[] = [];
+      for (const file of Object.values(bundle)) {
+        if (file.type !== 'chunk') continue;
+        chunks.push({
+          fileName: file.fileName,
+          facadeModuleId: file.facadeModuleId,
+          imports: file.imports,
+          dynamicImports: file.dynamicImports,
+          modules: Object.entries(file.modules)
+            .filter(([, m]) => m.renderedLength > 0)
+            .map(([id]) => id),
+          rawBytes: Buffer.byteLength(file.code),
+          gzipBytes: gzipSync(file.code, { level: 9 }).length,
+        });
+      }
+      const report = checkViewerBundle(chunks, appRoot);
+      if (!report) return;
+      if (report.problems.length > 0) this.error(report.problems.join('\n'));
+      this.info(
+        `viewer: ${report.files.length} JavaScript files, ${kib(report.rawBytes)} ` +
+          `(${kib(report.gzipBytes)} gzip)`,
+      );
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react(), pwa],
+  plugins: [react(), pwa, viewerBundleCheck()],
   server: { headers: crossOriginIsolationHeaders },
   preview: { headers: crossOriginIsolationHeaders },
   build: {
     rolldownOptions: {
+      // Two pages: the app and the read-only viewer (T7.3b).
+      input: {
+        main: fileURLToPath(new URL('index.html', import.meta.url)),
+        viewer: fileURLToPath(new URL('viewer.html', import.meta.url)),
+      },
       output: {
         // three.js is most of the app's JavaScript and changes far less often
         // than the app, so it gets chunks of its own that cache separately.

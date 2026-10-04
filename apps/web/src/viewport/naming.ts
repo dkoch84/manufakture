@@ -14,7 +14,10 @@
 // Vertices have no name slots in `MeshData` yet, so vertex names are always
 // placeholders; extending the mesh with vertex slots is #931's to decide.
 
-import { NameTable, UNNAMED, type MeshData } from '@manufakture/kernel';
+// Narrow imports, not the package index: the viewer (src/viewer/) draws with this module and must
+// not load the kernel (its bundle check, src/viewer/bundleCheck.ts).
+import { NameTable } from '@manufakture/kernel/names';
+import { UNNAMED, type MeshData } from '@manufakture/kernel/types';
 
 export const PLACEHOLDER_PREFIX = 'placeholder:';
 

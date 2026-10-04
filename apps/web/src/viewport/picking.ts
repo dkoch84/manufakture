@@ -14,7 +14,7 @@
 //
 // The result is always a name, never an index (ADR 0007, decision 8).
 
-import { UNNAMED } from '@manufakture/kernel';
+import { UNNAMED } from '@manufakture/kernel/types';
 import { geometryRef, type GeometryKind, type GeometryRef } from '../state/selection';
 import type { ViewBody } from './bodies';
 import { isPlaceholderName, placeholderName } from './naming';
