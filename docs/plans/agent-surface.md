@@ -19,7 +19,7 @@ M8 lets a person describe a change in conversation and have an agent (Claude Cod
 
 ## Decisions
 
-Daniel answered the four questions of task #1173 on 2026-10-04. They are instructions for every task here.
+The maintainer answered the four questions of task #1173 on 2026-10-04. They are instructions for every task here.
 
 1. **The session runs headless first.** A Node process holds core, regen, the kernel and the solver, with no browser: fastest to ship and to test. A session attached to a live browser tab, where the user watches the agent work, is a later phase (see "Later phases").
 2. **The interface is an MCP server.** Claude Code and Grok both speak MCP, so one server serves both. No separate command-line interface in this milestone.
@@ -279,7 +279,7 @@ Each scenario is run twice: as a scripted MCP client test (a fixed tool-call seq
 
 ## Open questions
 
-Three questions for Daniel. Until he answers, the plan assumes the default stated with each.
+Three questions for the maintainer that the decisions above do not settle. Until they are answered, the plan assumes the default stated with each.
 
 1. **Review needs a sync server.** The browser app cannot read a branch a Node process wrote to disk, so the reviewer sees agent branches only through the sync server (T8.4b); a self-hosted server on localhost is enough. Assumed: acceptable, and no serverless review path in M8 (a local library is for tests and CI only).
 2. **Spikes before M7 lands.** Assumed: T8.0a, T8.0b and T8.0c may run before T7.1e and T7.1f land, since they touch no shipped code; every other task waits (decision 4).

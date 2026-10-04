@@ -21,7 +21,7 @@ M7 adds the first server ([0000: Product decisions](0000-product-decisions.md), 
 
 6. **Share links: limits and retention.** For T7.3d:
    - a share expires after **30 days** by default; the user can pick another expiry, or **never**;
-   - per server token: at most **50 MB** per bundle and at most **100 active shares** (expired and revoked shares do not count).
+   - per server token: at most **50 MiB** per bundle and at most **100 active shares** (expired and revoked shares do not count).
 
 7. **Takedown and privacy: the self-hoster's responsibility.** Share links are served only by self-hosted instances, so whoever runs an instance is responsible for what it serves. M7 publishes no takedown contact and no privacy notice; the server and sharing docs say this plainly. A hosted service (decision 1) would need both before it opens.
 
