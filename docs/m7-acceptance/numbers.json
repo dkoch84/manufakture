@@ -1,0 +1,55 @@
+{
+  "note": "Wall-clock measurements of one e2e run in headless Chromium (SwiftShader), ms: estimates, not benchmarks.",
+  "budgets": {
+    "offlineStartMs": {
+      "what": "installed app, offline with the host down: navigation until the stored bracket is regenerated",
+      "total": 967
+    },
+    "scriptRunMs": {
+      "what": "the bolt-circle script (8, then 12 holes): regen time of the scripted feature, and wall clock from OK or Run scripts to the built body",
+      "regenFeatureMs": {
+        "browser1FirstRun": 130,
+        "browser2AfterRunScripts": 137,
+        "browser1TwelveHoles": 78,
+        "browser2TwelveHoles": 79
+      },
+      "wallClockMs": {
+        "insertToBuilt": 256,
+        "runScriptsToBuilt": 245,
+        "editToVolume": 218
+      }
+    },
+    "viewerLoadMs": {
+      "what": "a share link opened in a new browser context until the bracket is shown (page load, download from the server, unpack, first render)",
+      "wallClockMedian": 153,
+      "inPageMedian": 150,
+      "runs": [
+        159,
+        153,
+        152
+      ],
+      "publishMs": 63
+    },
+    "syncRoundTripMs": {
+      "what": "a rename in one browser until the other shows it (push, server, other browser)",
+      "median": 54,
+      "max": 82,
+      "runs": [
+        53,
+        57,
+        66,
+        55,
+        43,
+        82,
+        51,
+        54,
+        48,
+        50
+      ]
+    },
+    "rebase100PendingMs": {
+      "what": "back online with 100 queued commands until the server confirmed all of them (hello, rebase over 1 entry, push)",
+      "total": 76
+    }
+  }
+}
