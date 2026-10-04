@@ -75,6 +75,8 @@ import {
   MAX_DRAWING_ITEMS,
   MAX_FONT_TOTAL_BYTES,
   MAX_INSTANCE_NAME,
+  MAX_SCRIPT_TOTAL_BYTES,
+  MAX_SCRIPTS,
   MaterialIdSchema,
   NoteSchema,
   PaperPointSchema,
@@ -84,12 +86,17 @@ import {
   PrintSetupSchema,
   PrintThresholdsSchema,
   PrinterIdSchema,
+  SCRIPT_COUNTER,
+  SCRIPT_ID_PATTERN,
+  ScriptIdSchema,
+  ScriptSchema,
   SheetSchema,
   SheetSizeSchema,
   StoredExpressionSchema,
   TitleBlockSchema,
   ViewSchema,
   fontBytes,
+  scriptBytes,
   type Assembly,
   type BodyProps,
   type BodyPropsFields,
@@ -116,6 +123,7 @@ import {
   type PrintData,
   type PrintItem,
   type PrintSetup,
+  type Script,
   type Sheet,
   type Note,
 } from './schema';
@@ -445,6 +453,21 @@ export const SimpleCommandSchema = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('deleteFont'), fontId: FontIdSchema }),
   /** History only: put a deleted font back at `index` (its id was allocated before). */
   z.strictObject({ type: z.literal('restoreFont'), font: FontSchema, index }),
+  /**
+   * Create or replace a script of the library, by id (ADR 0010 decision 8). A new one needs a
+   * fresh `script#n` id from the document's `nextIds.script` and goes at `index` (default:
+   * last); `index` is ignored on replace. Replacing a script changes every scripted feature that
+   * runs it. Since version 16.
+   */
+  z.strictObject({
+    type: z.literal('setScript'),
+    script: ScriptSchema,
+    index: index.optional(),
+  }),
+  /** Remove a script. Refused while a scripted feature of any part runs it. Since version 16. */
+  z.strictObject({ type: z.literal('deleteScript'), scriptId: ScriptIdSchema }),
+  /** History only: put a deleted script back at `index` (its id was allocated before). */
+  z.strictObject({ type: z.literal('restoreScript'), script: ScriptSchema, index }),
   /**
    * Replace a domain's document-level data (ADR 0013 decision 3): `schemaVersion` and `data`
    * together set the namespace's entry; both absent remove it. Core never looks inside `data`;
@@ -904,6 +927,10 @@ function applyUnchecked(doc: ManufaktureDocument, command: Command): CoreResult<
     case 'deleteFont':
     case 'restoreFont':
       return applyToFonts(doc, command);
+    case 'setScript':
+    case 'deleteScript':
+    case 'restoreScript':
+      return applyToScripts(doc, command);
     case 'addCamTool':
     case 'editCamTool':
     case 'deleteCamTool':
@@ -2081,6 +2108,112 @@ function applyToFonts(doc: ManufaktureDocument, command: FontsCommand): CoreResu
       const fonts = insertAt(doc.fonts, font, command.index, 'fonts');
       if (!fonts.ok) return fonts;
       return done(fonts.value, { type: 'deleteFont', fontId: font.id });
+    }
+  }
+}
+
+/**
+ * The scripted features that run script `scriptId`, as `<part id>/<feature id>`, in document
+ * order: what blocks deleting the script.
+ */
+export function scriptUsers(doc: ManufaktureDocument, scriptId: string): string[] {
+  const out: string[] = [];
+  for (const part of doc.parts) {
+    for (const f of part.features) {
+      if (f.kind === 'scripted' && f.script === scriptId) out.push(`${part.id}/${f.id}`);
+    }
+  }
+  return out;
+}
+
+type ScriptsCommand = Extract<
+  SimpleCommand,
+  { type: 'setScript' | 'deleteScript' | 'restoreScript' }
+>;
+
+/** A failure when `scripts` would hold more source than `MAX_SCRIPT_TOTAL_BYTES`. */
+function scriptsTooBig(scripts: readonly Script[]): CoreResult<never> | null {
+  const total = scriptBytes(scripts);
+  if (total <= MAX_SCRIPT_TOTAL_BYTES) return null;
+  const kib = (n: number) => `${Math.ceil(n / 1024)} KiB`;
+  return fail(
+    'schema',
+    `The document's scripts would hold ${kib(total)} of source; at most ${kib(MAX_SCRIPT_TOTAL_BYTES)} are allowed`,
+    ['script', 'source'],
+  );
+}
+
+/**
+ * The script library commands. The library is absent when it is empty, so deleting the last
+ * script (or undoing the first) gives back a document with no `scripts` key at all.
+ */
+function applyToScripts(doc: ManufaktureDocument, command: ScriptsCommand): CoreResult<Applied> {
+  const scripts = doc.scripts ?? [];
+  const done = (next: Script[], inverse: Command, nextIds = doc.nextIds) => {
+    const { scripts: _old, ...rest } = doc;
+    void _old;
+    const document: ManufaktureDocument =
+      next.length === 0
+        ? { ...rest, nextIds }
+        : { ...rest, scripts: next as [Script, ...Script[]], nextIds };
+    return ok<Applied>({ document, inverse });
+  };
+  const add = (script: Script, at: number, mode: 'fresh' | 'restore'): CoreResult<Applied> => {
+    if (!SCRIPT_ID_PATTERN.test(script.id)) {
+      return fail('invalid-id', `"${script.id}" is not a script id (script#n)`, ['script', 'id'], {
+        blockers: [script.id],
+      });
+    }
+    if (scripts.length >= MAX_SCRIPTS) {
+      return fail('schema', `The document already holds ${MAX_SCRIPTS} scripts, the most allowed`, [
+        'script',
+      ]);
+    }
+    const ids = allocateDocumentId(doc, SCRIPT_COUNTER, script.id, mode);
+    if (!ids.ok) return ids;
+    const next = insertAt(scripts, script, at, 'scripts');
+    if (!next.ok) return next;
+    const tooBig = scriptsTooBig(next.value);
+    if (tooBig) return tooBig;
+    return done(next.value, { type: 'deleteScript', scriptId: script.id }, ids.value);
+  };
+
+  switch (command.type) {
+    case 'setScript': {
+      const { script } = command;
+      const i = scripts.findIndex((s) => s.id === script.id);
+      if (i < 0) return add(script, command.index ?? scripts.length, 'fresh');
+      const next = scripts.slice();
+      const old = next[i]!;
+      next[i] = script;
+      const tooBig = scriptsTooBig(next);
+      if (tooBig) return tooBig;
+      return done(next, { type: 'setScript', script: old });
+    }
+
+    case 'deleteScript': {
+      const i = scripts.findIndex((s) => s.id === command.scriptId);
+      if (i < 0) return fail('not-found', `No script "${command.scriptId}"`, ['scriptId']);
+      const users = scriptUsers(doc, command.scriptId);
+      if (users.length > 0) {
+        return fail(
+          'dependency',
+          `Script ${command.scriptId} is run by ${users.join(', ')}: change or delete those features first`,
+          ['scriptId'],
+          { blockers: users },
+        );
+      }
+      const next = scripts.slice();
+      const [old] = next.splice(i, 1);
+      return done(next, { type: 'restoreScript', script: old!, index: i });
+    }
+
+    case 'restoreScript': {
+      const { script } = command;
+      if (scripts.some((s) => s.id === script.id)) {
+        return fail('duplicate', `Script "${script.id}" already exists`, ['script', 'id']);
+      }
+      return add(script, command.index, 'restore');
     }
   }
 }

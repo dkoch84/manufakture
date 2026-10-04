@@ -111,6 +111,13 @@ const KIND_PATHS: Record<FeatureKind, ReactNode> = {
       <path d="M5 4l6-1.5M5 7l6-1.5M5 10l6-1.5M5 13l6-1.5" />
     </>
   ),
+  // Code brackets: a feature computed by a script of the document's library.
+  scripted: (
+    <>
+      <path d="M5.5 4L2 8l3.5 4M10.5 4L14 8l-3.5 4" />
+      <path d="M9 3l-2 10" />
+    </>
+  ),
 };
 
 export function KindIcon({ kind }: { kind: FeatureKind }) {

@@ -298,6 +298,22 @@ export const migrateV14ToV15: Migration = {
   },
 };
 
+/**
+ * Version 16 added the script library (`scripts`, absent when empty) and the `scripted` feature
+ * kind (ADR 0010 decision 8, M7 plan T7.2a), with the document counter `script`. Nothing in a
+ * version 15 file changes: it has no scripts, which is what an absent `scripts` means. A version
+ * 15 file that already has a `scripts` key is refused rather than read as a library.
+ */
+export const migrateV15ToV16: Migration = {
+  from: 15,
+  to: 16,
+  description: 'Add the script library and scripted features',
+  migrate(doc) {
+    if ('scripts' in doc) throw new Error('a version 15 document has no "scripts" library');
+    return { ...doc, version: 16 };
+  },
+};
+
 /** File format migrations, in order: `FORMAT_MIGRATIONS[i]` goes from version i to i + 1. */
 export const FORMAT_MIGRATIONS: readonly Migration[] = [
   migrateV0ToV1,
@@ -315,6 +331,7 @@ export const FORMAT_MIGRATIONS: readonly Migration[] = [
   migrateV12ToV13,
   migrateV13ToV14,
   migrateV14ToV15,
+  migrateV15ToV16,
 ];
 
 /**
@@ -424,6 +441,7 @@ export const COMMAND_MIGRATIONS: readonly CommandMigration[] = [
   commandStep(migrateV12ToV13),
   commandStep(migrateV13ToV14),
   commandStep(migrateV14ToV15),
+  commandStep(migrateV15ToV16),
 ];
 
 export interface CommandMigrationOptions {

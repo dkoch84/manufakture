@@ -67,6 +67,7 @@ export const KIND_LABELS: Record<FeatureKind, string> = {
   import: 'Import',
   derived: 'Derived',
   thread: 'Thread',
+  scripted: 'Scripted',
 };
 
 /** What a feature is, for its row's icon title: the domain's name for a known extension type. */

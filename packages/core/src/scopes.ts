@@ -8,16 +8,16 @@ import type { ManufaktureDocument } from './schema';
  *
  * A scope key is a string:
  *
- * | Key                      | `nextIds`       | Counters                                           |
- * | ------------------------ | --------------- | -------------------------------------------------- |
- * | `document`               | the document's  | `part`, `assembly`, `cp`, `cfg`, `font`, `drawing` |
- * | `part:<part id>`         | each part's     | one per feature kind, `e`, `k`, `r`                |
- * | `assembly:<assembly id>` | each assembly's | `inst`, `mate`, `mc`, `r`, `explode`, `step`       |
- * | `cam`                    | `cam.nextIds`   | `tool`, `setup`, one per operation kind, `r`       |
- * | `print`                  | `print.nextIds` | `print`, `item`, `r`                               |
- * | `drawing:<drawing id>`   | each drawing's  | `sheet`, `view`, `dim`, `note`                     |
+ * | Key                      | `nextIds`       | Counters                                                     |
+ * | ------------------------ | --------------- | ------------------------------------------------------------ |
+ * | `document`               | the document's  | `part`, `assembly`, `cp`, `cfg`, `font`, `drawing`, `script` |
+ * | `part:<part id>`         | each part's     | one per feature kind, `e`, `k`, `r`                          |
+ * | `assembly:<assembly id>` | each assembly's | `inst`, `mate`, `mc`, `r`, `explode`, `step`                 |
+ * | `cam`                    | `cam.nextIds`   | `tool`, `setup`, one per operation kind, `r`                 |
+ * | `print`                  | `print.nextIds` | `print`, `item`, `r`                                         |
+ * | `drawing:<drawing id>`   | each drawing's  | `sheet`, `view`, `dim`, `note`                               |
  *
- * A counter added to an existing `nextIds` (T7.2a's `script` in the document's) needs nothing
+ * A counter added to an existing `nextIds` (as `script` was to the document's) needs nothing
  * here. A new `nextIds` object is one entry in `COUNTER_SCOPES`.
  */
 export type ScopeKey = string;

@@ -297,6 +297,24 @@ const validFeatures: Feature[] = [
     clearance: mm('0.2'),
     representation: 'cosmetic',
   },
+  {
+    id: 'scripted#1',
+    kind: 'scripted',
+    ...common,
+    script: 'script#1',
+    params: {
+      width: { kind: 'expression', expression: mm('width / 2') },
+      rounded: { kind: 'boolean', value: false },
+      style: { kind: 'choice', value: 'hex' },
+      edges: {
+        kind: 'reference',
+        references: [{ id: 'r10', ref: { faces: ['extrude#1:cap:end', 'extrude#1:side:e2'] } }],
+      },
+      none: { kind: 'reference', references: [] },
+    },
+    seed: 0,
+    dependsOn: ['sketch#1'],
+  },
 ];
 
 describe('FeatureSchema', () => {

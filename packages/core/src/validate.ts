@@ -34,6 +34,7 @@ import {
   CONFIG_ROW_COUNTER,
   DRAWING_COUNTER,
   FONT_COUNTER,
+  SCRIPT_COUNTER,
   MAX_SKETCH_OUTLINE_TEXT,
   MAX_SKETCH_SVG_COMMANDS,
   svgCommandCount,
@@ -446,6 +447,7 @@ function checkPart(
   pi: number,
   variables: ReadonlySet<string>,
   fontIds: ReadonlySet<string>,
+  scriptIds: ReadonlySet<string>,
   out: CoreError[],
 ): void {
   const ppath = ['parts', pi];
@@ -543,6 +545,14 @@ function checkPart(
     checkDuplicates(scope, `the scope of ${f.id}`, [...fpath, 'scope'], out);
     scope.forEach((body, si) => checkBodyId(part, index, body, fi, [...fpath, 'scope', si], out));
     if (f.kind === 'sketch') checkSketch(f, fpath, fontIds, out);
+    if (f.kind === 'scripted' && !scriptIds.has(f.script)) {
+      out.push({
+        code: 'dependency',
+        message: `${f.id} runs script ${f.script}, which the document does not have`,
+        path: [...fpath, 'script'],
+        blockers: [f.script],
+      });
+    }
     // Source body ids name bodies of the source document: only duplicates are checked here.
     if (f.kind === 'derived' && f.bodies !== undefined) {
       checkDuplicates(f.bodies, `the bodies ${f.id} derives`, [...fpath, 'bodies'], out);
@@ -1311,6 +1321,18 @@ export function validateDocument(doc: ManufaktureDocument): CoreError[] {
     (i) => ['fonts', i, 'id'],
     out,
   );
+  const scripts = doc.scripts ?? [];
+  const scriptIds = new Set<string>();
+  scripts.forEach((script, i) => {
+    checkAllocated(script.id, SCRIPT_COUNTER, doc.nextIds, 'Script', ['scripts', i, 'id'], out);
+    scriptIds.add(script.id);
+  });
+  checkUnique(
+    scripts.map((s) => s.id),
+    'Script id',
+    (i) => ['scripts', i, 'id'],
+    out,
+  );
   const partIds = new Set<string>();
   doc.parts.forEach((part, pi) => {
     const parsed = parseFeatureId(part.id);
@@ -1329,7 +1351,7 @@ export function validateDocument(doc: ManufaktureDocument): CoreError[] {
       });
     }
     partIds.add(part.id);
-    checkPart(part, pi, variables, fontIds, out);
+    checkPart(part, pi, variables, fontIds, scriptIds, out);
   });
   checkConfigurations(doc, variables, out);
   checkUnique(

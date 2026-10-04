@@ -23,7 +23,7 @@ import {
 ```ts
 interface ManufaktureDocument {
   format: 'manufakture';
-  version: 14; // file format version, FORMAT_VERSION
+  version: 16; // file format version, FORMAT_VERSION
   namingScheme: 1; // topological naming scheme version (T0.5), NAMING_SCHEME
   id: string;
   name: string;
@@ -34,10 +34,11 @@ interface ManufaktureDocument {
   print: PrintData; // print setups: what to print, on which printer, oriented how (since version 8)
   fonts: DocumentFont[]; // the fonts texts use, bundled or added by the user (since version 9)
   cam: CamData; // CAM tools and setups with their operations (since version 14)
+  scripts?: Script[]; // the script library, in library order; absent: none (since version 16)
   drawings?: Drawing[]; // drawings of parts and assemblies, in tab order; absent: none (since version 12)
   configurations?: Configurations; // the configuration table; absent: none (since version 5)
   domains?: Record<string, DomainData>; // domain settings by namespace; absent: none (since version 11)
-  nextIds: Record<string, number>; // document-level counters: `part` (since version 4), `cp`, `cfg`, `assembly`, `font`, `drawing`
+  nextIds: Record<string, number>; // document-level counters: `part` (since version 4), `cp`, `cfg`, `assembly`, `font`, `drawing`, `script`
 }
 
 interface Part {
@@ -623,6 +624,41 @@ font an outline still uses (`fontUsers(doc, id)` lists them as `<part>/<sketch>/
 font never disappears from under a text. `findFont(doc, id)` finds one. Fonts change no geometry
 by themselves, so `diffDocuments` reports `fontsChanged` apart from the parts.
 
+### Scripts
+
+A document may carry a library of scripts that `scripted` features run (since version 16;
+[ADR 0010](../../docs/adr/0010-scripting-sandbox.md) decision 8). Scripts are data in the
+document; core never runs them (regen does, in QuickJS inside the regen worker).
+
+```ts
+interface Script {
+  id: 'script#1'; // from the document's nextIds.script; never reused
+  name: string; // display only, trimmed, 1 to 200 characters
+  language: 'js' | 'ts'; // TypeScript is erased before it runs (ADR 0010 decision 7)
+  apiVersion: number; // the script API version it was written against, from 1
+  source: string; // as the user typed it
+}
+```
+
+`apiVersion` is stored, never inferred: a script written against an API version runs unchanged,
+with the same results, forever (ADR 0010 amendment, item 12), so a newer API never changes an old
+script's geometry. Which versions exist is regen's to know; an unknown one is a feature error at
+regen, not a load error. Whether a document's scripts may run on this device (the opt-in until the
+security sign-off, T7.2d) is stored by the app per device, never in the document.
+
+Limits, checked by the schema and by `setScript`: a source of at most `MAX_SCRIPT_SOURCE_BYTES`
+(256 KiB) of UTF-8, at most `MAX_SCRIPTS` (256) scripts, and at most `MAX_SCRIPT_TOTAL_BYTES`
+(4 MiB) of source in all. The library is absent when empty, never an empty list.
+
+Validation checks that script ids are allocated and unique and that every scripted feature names a
+script of the library (`dependency`, the script id in `blockers`). `setScript` creates (a fresh
+`script#n`, at `index`, default last) or replaces by id; `deleteScript` refuses a script a
+scripted feature runs (`scriptUsers(doc, id)` lists them as `<part>/<feature>`), and deleting the
+last one drops `scripts`. `diffDocuments` reports `scriptsChanged` (ids added, removed or edited);
+a script whose source, language or API version changed also marks every scripted feature that
+runs it as changed in `parts`, with its `firstAffectedIndex`, so regen rebuilds it; a rename does
+not.
+
 ### Domain data
 
 A document may carry settings that belong to a domain but are not features (since version 11;
@@ -1034,6 +1070,7 @@ union is discriminated by `kind`.
 | `import`    | `source` (the imported file: `format` `step` or `stl`, `fileName`, `size`, `sha256`, base64 `data`), `operation` (`reference`, `new`, `add`, `cut`, `intersect`)                                                                                                       |
 | `derived`   | `source` (the pinned version: `documentId`, `documentName`, `versionId`, `versionName`, `partId`, optional `configuration`, `size`, `sha256`, text `data`), optional `bodies`, `placement` (`translation`, `rotation`), `operation` (`new`, `add`, `cut`, `intersect`) |
 | `thread`    | `face` (a cylinder), optional `start` (a circular edge of it), `length` (an expression or `'full'`), `standard` (`system` `iso-metric` or `unc`, `size`), `hand` (`right`, `left`), `clearance` (diametral), `representation` (`modelled`, `cosmetic`)                 |
+| `scripted`  | `script` (a `script#n` of the library), `params` (values by parameter name), `seed` (an unsigned 32-bit integer), `dependsOn` (since version 16)                                                                                                                       |
 
 A `profile` is `{ sketch, entities? }`: the sketch feature and the entities bounding the chosen
 regions (absent: every closed region). Extrude extents are `blind`, `symmetric` (total depth,
@@ -1064,6 +1101,20 @@ feature's, and leaves `params` to the domain package that owns the type. `operat
 extension's solid combines with the part, as for an extrude; with `new` or `add` the extension
 creates bodies (see Bodies). Without an `operation` it makes no solid of its own to combine, but
 it may still change the bodies in its `scope`.
+
+`scripted` runs a script of the document's library (see Scripts; ADR 0010 decisions 3, 6 and 8).
+`params` holds one value per parameter the script declares, keyed by its name (an identifier, at
+most 64 characters, at most `MAX_SCRIPT_PARAMS` (256) values): `{ kind: 'expression', expression }`
+for `length`, `angle` and `number` parameters (variables and units like any field; core checks
+them as untyped, `any`, since only the script knows the kind), `{ kind: 'boolean', value }`,
+`{ kind: 'choice', value }`, or `{ kind: 'reference', references }` with references whose `r<n>`
+ids come from the part's counter like any feature's. Whether the values fit the declarations is
+regen's to check by running the script. `seed` (0 to `MAX_SCRIPT_SEED`) seeds the script's
+`Math.random` together with the source hash, never with the feature id, so a remap or a merge never
+changes geometry. A scripted feature depends on `dependsOn`, on every feature its reference names
+mention, and needs its script to exist. Its faces are named `<id>:<operation id>/<name>`
+(decision 6); the name parser learns that form with regen in T7.2c. `serialize` writes `params`
+sorted by name.
 
 ### Threads
 
@@ -1389,6 +1440,9 @@ resulting document with `checkDocument`, and returns `{ document, inverse }` or 
 | `addFont`                | `font` (a fresh `font#n`; not the same bytes twice), `index?` | `deleteFont`                                                           |
 | `deleteFont`             | `fontId` (refused while an outline uses it)                   | `restoreFont`                                                          |
 | `restoreFont`            | `font`, `index` (history only)                                | `deleteFont`                                                           |
+| `setScript`              | `script` (by id: a fresh `script#n`, or replaced), `index?`   | `setScript` (the old script) or `deleteScript`                         |
+| `deleteScript`           | `scriptId` (refused while a scripted feature runs it)         | `restoreScript`                                                        |
+| `restoreScript`          | `script`, `index` (history only)                              | `deleteScript`                                                         |
 | `addExplodedView`        | `assemblyId`, `explodedView` (fresh ids), `index?`            | `deleteExplodedView`                                                   |
 | `editExplodedView`       | `assemblyId`, `explodedView` (by id; new ids fresh)           | `restoreExplodedView` (old state)                                      |
 | `deleteExplodedView`     | `assemblyId`, `explodedViewId` (not while a view shows it)    | `restoreExplodedView`                                                  |
@@ -1663,7 +1717,7 @@ A scope is a `nextIds` object, keyed as a string: `document`, `part:<id>`, `asse
 JSON (`CounterTable`); `maxCounters(a, b)` is a high-water mark that keeps deleted scopes;
 `counterRegressions(before, after)` lists every counter of `after` below `before` for scopes in
 both. A new `nextIds` object is one entry in `COUNTER_SCOPES`; a new counter in an existing one
-(`script` in the document's, T7.2a) needs nothing there.
+(`script` in the document's, since version 16) needs nothing there.
 
 ### Created ids
 
@@ -1822,7 +1876,12 @@ version 13 file that already has a `cam` key is refused (`migration`), never rep
 source (`{ domain, part, schemaVersion, params }`, M6 plan T6.4a: construction floor plans,
 framing elevations and roof framing plans); `migrateV14ToV15` only bumps the version, since a
 version 14 file's views all show a part or an assembly; `v14-bracket.json` migrates to exactly
-`v15-bracket.json`.
+`v15-bracket.json`. Version 16 added the script library (`scripts`, absent when empty) and the
+`scripted` feature kind, with the document counter `script` (ADR 0010 decision 8, M7 plan
+T7.2a); `migrateV15ToV16` only bumps the version, since a version 15 file has no scripts, and
+refuses one that already has a `scripts` key (`migration`); `v15-bracket.json` migrates to exactly
+`v16-bracket.json`. Its command step changes no command: the script commands are new, and a
+version 15 command carries no scripted feature.
 
 Commands carry parts of the document shape too (a feature, a whole part, a whole document), and
 log entries and sync queues store them as written, with the format they were written under.

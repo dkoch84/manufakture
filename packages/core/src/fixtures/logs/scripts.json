@@ -1,0 +1,775 @@
+{
+  "format": "manufakture-golden-log",
+  "version": 16,
+  "description": "Scripts and a scripted feature (format v16): scripts added (one at the front), a scripted feature with every kind of parameter, a script edit undone, a delete undone (restoreScript) and redone, a rename.",
+  "base": {
+    "format": "manufakture",
+    "version": 16,
+    "namingScheme": 1,
+    "id": "doc-1",
+    "name": "Bracket",
+    "units": {
+      "length": {
+        "unit": "ft-in",
+        "denominator": 32
+      },
+      "angle": {
+        "unit": "deg",
+        "decimals": 1
+      }
+    },
+    "variables": [
+      {
+        "name": "thickness",
+        "expression": {
+          "source": "6mm",
+          "lengthUnit": "mm",
+          "angleUnit": "deg"
+        }
+      },
+      {
+        "name": "width",
+        "expression": {
+          "source": "40",
+          "lengthUnit": "mm",
+          "angleUnit": "deg"
+        }
+      },
+      {
+        "name": "height",
+        "expression": {
+          "source": "width / 2",
+          "lengthUnit": "mm",
+          "angleUnit": "deg"
+        }
+      },
+      {
+        "name": "lip",
+        "expression": {
+          "source": "1/8\" + #thickness",
+          "lengthUnit": "in",
+          "angleUnit": "deg"
+        }
+      }
+    ],
+    "parts": [
+      {
+        "id": "part#1",
+        "name": "Part 1",
+        "features": [
+          {
+            "id": "sketch#1",
+            "kind": "sketch",
+            "name": "Sketch 1",
+            "suppressed": false,
+            "plane": {
+              "type": "plane",
+              "origin": [0, 0, 0],
+              "normal": [0, 0, 1],
+              "xDir": [1, 0, 0]
+            },
+            "entities": [
+              {
+                "id": "e1",
+                "kind": "line",
+                "construction": false,
+                "start": [0, 0],
+                "end": [40, 0]
+              },
+              {
+                "id": "e2",
+                "kind": "line",
+                "construction": false,
+                "start": [40, 0],
+                "end": [40, 20]
+              },
+              {
+                "id": "e3",
+                "kind": "line",
+                "construction": false,
+                "start": [40, 20],
+                "end": [0, 20]
+              },
+              {
+                "id": "e4",
+                "kind": "line",
+                "construction": false,
+                "start": [0, 20],
+                "end": [0, 0]
+              }
+            ],
+            "constraints": [
+              {
+                "id": "k1",
+                "kind": "coincident",
+                "a": {
+                  "entity": "e1",
+                  "at": "end"
+                },
+                "b": {
+                  "entity": "e2",
+                  "at": "start"
+                }
+              },
+              {
+                "id": "k2",
+                "kind": "horizontal",
+                "line": "e1"
+              },
+              {
+                "id": "k3",
+                "kind": "distance",
+                "value": {
+                  "source": "width",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                "a": {
+                  "entity": "e1",
+                  "at": "start"
+                },
+                "b": {
+                  "entity": "e1",
+                  "at": "end"
+                }
+              },
+              {
+                "id": "k4",
+                "kind": "distance",
+                "value": {
+                  "source": "height",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                "a": {
+                  "entity": "e2",
+                  "at": "start"
+                },
+                "b": {
+                  "entity": "e2",
+                  "at": "end"
+                }
+              },
+              {
+                "id": "k5",
+                "kind": "coincident",
+                "a": {
+                  "entity": "e1",
+                  "at": "start"
+                },
+                "b": {
+                  "entity": "@origin"
+                }
+              }
+            ]
+          },
+          {
+            "id": "extrude#1",
+            "kind": "extrude",
+            "name": "Extrude 1",
+            "suppressed": false,
+            "profile": {
+              "sketch": "sketch#1"
+            },
+            "operation": "new",
+            "extent": {
+              "type": "blind",
+              "distance": {
+                "source": "thickness",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            },
+            "reverse": false
+          },
+          {
+            "id": "sketch#2",
+            "kind": "sketch",
+            "name": "Sketch 2",
+            "suppressed": false,
+            "plane": {
+              "type": "face",
+              "face": {
+                "id": "r1",
+                "ref": {
+                  "face": "extrude#1:cap:end"
+                }
+              }
+            },
+            "entities": [
+              {
+                "id": "e5",
+                "kind": "circle",
+                "construction": false,
+                "center": [20, 10],
+                "radius": 3
+              }
+            ],
+            "constraints": [
+              {
+                "id": "k6",
+                "kind": "diameter",
+                "entity": "e5",
+                "value": {
+                  "source": "6mm",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                }
+              }
+            ]
+          },
+          {
+            "id": "extrude#2",
+            "kind": "extrude",
+            "name": "Extrude 2",
+            "suppressed": false,
+            "profile": {
+              "sketch": "sketch#2"
+            },
+            "operation": "cut",
+            "extent": {
+              "type": "throughAll"
+            },
+            "reverse": false
+          },
+          {
+            "id": "fillet#1",
+            "kind": "fillet",
+            "name": "Fillet 1",
+            "suppressed": false,
+            "edges": [
+              {
+                "id": "r2",
+                "ref": {
+                  "faces": ["extrude#1:side:e1", "extrude#1:side:e2"]
+                },
+                "lastResolved": {
+                  "point": [40, 0, 6],
+                  "direction": [0, 0, 1]
+                }
+              }
+            ],
+            "radius": {
+              "source": "2mm",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            }
+          }
+        ],
+        "rollbackIndex": null,
+        "nextIds": {
+          "e": 6,
+          "extrude": 3,
+          "fillet": 2,
+          "k": 7,
+          "r": 3,
+          "sketch": 3
+        },
+        "bodies": []
+      }
+    ],
+    "assemblies": [],
+    "print": {
+      "setups": [],
+      "nextIds": {}
+    },
+    "fonts": [],
+    "cam": {
+      "tools": [],
+      "setups": [],
+      "nextIds": {}
+    },
+    "nextIds": {
+      "part": 2
+    }
+  },
+  "entries": [
+    {
+      "cause": "execute",
+      "label": "Script",
+      "command": {
+        "type": "setScript",
+        "script": {
+          "id": "script#1",
+          "name": "Box",
+          "language": "ts",
+          "apiVersion": 1,
+          "source": "export const params = [{ name: \"size\", kind: \"length\", default: \"10mm\" }];\nexport function run(ctx: any, p: { size: number }) {\n  ctx.box(\"boss\", p.size);\n}\n"
+        }
+      },
+      "at": "2026-10-04T09:00:01.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Script",
+      "command": {
+        "type": "setScript",
+        "script": {
+          "id": "script#2",
+          "name": "Helper",
+          "language": "js",
+          "apiVersion": 1,
+          "source": "export function run() {}\n"
+        },
+        "index": 0
+      },
+      "at": "2026-10-04T09:00:02.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Scripted feature",
+      "command": {
+        "type": "addFeature",
+        "partId": "part#1",
+        "feature": {
+          "id": "scripted#1",
+          "kind": "scripted",
+          "name": "Box 1",
+          "suppressed": false,
+          "script": "script#1",
+          "params": {
+            "size": {
+              "kind": "expression",
+              "expression": {
+                "source": "width / 4",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            },
+            "rounded": {
+              "kind": "boolean",
+              "value": true
+            },
+            "style": {
+              "kind": "choice",
+              "value": "hex"
+            },
+            "on": {
+              "kind": "reference",
+              "references": [
+                {
+                  "id": "r3",
+                  "ref": {
+                    "face": "extrude#1:cap:end"
+                  }
+                }
+              ]
+            }
+          },
+          "seed": 3,
+          "dependsOn": ["extrude#1"]
+        }
+      },
+      "at": "2026-10-04T09:00:03.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Edit script",
+      "command": {
+        "type": "setScript",
+        "script": {
+          "id": "script#1",
+          "name": "Box",
+          "language": "ts",
+          "apiVersion": 1,
+          "source": "export const params = [{ name: \"size\", kind: \"length\", default: \"12mm\" }];\nexport function run(ctx: any, p: { size: number }) {\n  ctx.box(\"boss\", p.size);\n}\n"
+        }
+      },
+      "at": "2026-10-04T09:00:04.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Edit script",
+      "command": {
+        "type": "setScript",
+        "script": {
+          "id": "script#1",
+          "name": "Box",
+          "language": "ts",
+          "apiVersion": 1,
+          "source": "export const params = [{ name: \"size\", kind: \"length\", default: \"10mm\" }];\nexport function run(ctx: any, p: { size: number }) {\n  ctx.box(\"boss\", p.size);\n}\n"
+        }
+      },
+      "at": "2026-10-04T09:00:05.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Delete script",
+      "command": {
+        "type": "deleteScript",
+        "scriptId": "script#2"
+      },
+      "at": "2026-10-04T09:00:06.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Delete script",
+      "command": {
+        "type": "restoreScript",
+        "script": {
+          "id": "script#2",
+          "name": "Helper",
+          "language": "js",
+          "apiVersion": 1,
+          "source": "export function run() {}\n"
+        },
+        "index": 0
+      },
+      "at": "2026-10-04T09:00:07.000Z"
+    },
+    {
+      "cause": "redo",
+      "label": "Delete script",
+      "command": {
+        "type": "deleteScript",
+        "scriptId": "script#2"
+      },
+      "at": "2026-10-04T09:00:08.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Rename script",
+      "command": {
+        "type": "setScript",
+        "script": {
+          "id": "script#1",
+          "name": "Boss box",
+          "language": "ts",
+          "apiVersion": 1,
+          "source": "export const params = [{ name: \"size\", kind: \"length\", default: \"10mm\" }];\nexport function run(ctx: any, p: { size: number }) {\n  ctx.box(\"boss\", p.size);\n}\n"
+        }
+      },
+      "at": "2026-10-04T09:00:09.000Z"
+    }
+  ],
+  "expected": {
+    "format": "manufakture",
+    "version": 16,
+    "namingScheme": 1,
+    "id": "doc-1",
+    "name": "Bracket",
+    "units": {
+      "length": {
+        "unit": "ft-in",
+        "denominator": 32
+      },
+      "angle": {
+        "unit": "deg",
+        "decimals": 1
+      }
+    },
+    "variables": [
+      {
+        "name": "thickness",
+        "expression": {
+          "source": "6mm",
+          "lengthUnit": "mm",
+          "angleUnit": "deg"
+        }
+      },
+      {
+        "name": "width",
+        "expression": {
+          "source": "40",
+          "lengthUnit": "mm",
+          "angleUnit": "deg"
+        }
+      },
+      {
+        "name": "height",
+        "expression": {
+          "source": "width / 2",
+          "lengthUnit": "mm",
+          "angleUnit": "deg"
+        }
+      },
+      {
+        "name": "lip",
+        "expression": {
+          "source": "1/8\" + #thickness",
+          "lengthUnit": "in",
+          "angleUnit": "deg"
+        }
+      }
+    ],
+    "parts": [
+      {
+        "id": "part#1",
+        "name": "Part 1",
+        "features": [
+          {
+            "id": "sketch#1",
+            "kind": "sketch",
+            "name": "Sketch 1",
+            "suppressed": false,
+            "plane": {
+              "type": "plane",
+              "origin": [0, 0, 0],
+              "normal": [0, 0, 1],
+              "xDir": [1, 0, 0]
+            },
+            "entities": [
+              {
+                "id": "e1",
+                "kind": "line",
+                "construction": false,
+                "start": [0, 0],
+                "end": [40, 0]
+              },
+              {
+                "id": "e2",
+                "kind": "line",
+                "construction": false,
+                "start": [40, 0],
+                "end": [40, 20]
+              },
+              {
+                "id": "e3",
+                "kind": "line",
+                "construction": false,
+                "start": [40, 20],
+                "end": [0, 20]
+              },
+              {
+                "id": "e4",
+                "kind": "line",
+                "construction": false,
+                "start": [0, 20],
+                "end": [0, 0]
+              }
+            ],
+            "constraints": [
+              {
+                "id": "k1",
+                "kind": "coincident",
+                "a": {
+                  "entity": "e1",
+                  "at": "end"
+                },
+                "b": {
+                  "entity": "e2",
+                  "at": "start"
+                }
+              },
+              {
+                "id": "k2",
+                "kind": "horizontal",
+                "line": "e1"
+              },
+              {
+                "id": "k3",
+                "kind": "distance",
+                "value": {
+                  "source": "width",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                "a": {
+                  "entity": "e1",
+                  "at": "start"
+                },
+                "b": {
+                  "entity": "e1",
+                  "at": "end"
+                }
+              },
+              {
+                "id": "k4",
+                "kind": "distance",
+                "value": {
+                  "source": "height",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                "a": {
+                  "entity": "e2",
+                  "at": "start"
+                },
+                "b": {
+                  "entity": "e2",
+                  "at": "end"
+                }
+              },
+              {
+                "id": "k5",
+                "kind": "coincident",
+                "a": {
+                  "entity": "e1",
+                  "at": "start"
+                },
+                "b": {
+                  "entity": "@origin"
+                }
+              }
+            ]
+          },
+          {
+            "id": "extrude#1",
+            "kind": "extrude",
+            "name": "Extrude 1",
+            "suppressed": false,
+            "profile": {
+              "sketch": "sketch#1"
+            },
+            "operation": "new",
+            "extent": {
+              "type": "blind",
+              "distance": {
+                "source": "thickness",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            },
+            "reverse": false
+          },
+          {
+            "id": "sketch#2",
+            "kind": "sketch",
+            "name": "Sketch 2",
+            "suppressed": false,
+            "plane": {
+              "type": "face",
+              "face": {
+                "id": "r1",
+                "ref": {
+                  "face": "extrude#1:cap:end"
+                }
+              }
+            },
+            "entities": [
+              {
+                "id": "e5",
+                "kind": "circle",
+                "construction": false,
+                "center": [20, 10],
+                "radius": 3
+              }
+            ],
+            "constraints": [
+              {
+                "id": "k6",
+                "kind": "diameter",
+                "entity": "e5",
+                "value": {
+                  "source": "6mm",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                }
+              }
+            ]
+          },
+          {
+            "id": "extrude#2",
+            "kind": "extrude",
+            "name": "Extrude 2",
+            "suppressed": false,
+            "profile": {
+              "sketch": "sketch#2"
+            },
+            "operation": "cut",
+            "extent": {
+              "type": "throughAll"
+            },
+            "reverse": false
+          },
+          {
+            "id": "fillet#1",
+            "kind": "fillet",
+            "name": "Fillet 1",
+            "suppressed": false,
+            "edges": [
+              {
+                "id": "r2",
+                "ref": {
+                  "faces": ["extrude#1:side:e1", "extrude#1:side:e2"]
+                },
+                "lastResolved": {
+                  "point": [40, 0, 6],
+                  "direction": [0, 0, 1]
+                }
+              }
+            ],
+            "radius": {
+              "source": "2mm",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            }
+          },
+          {
+            "id": "scripted#1",
+            "kind": "scripted",
+            "name": "Box 1",
+            "suppressed": false,
+            "script": "script#1",
+            "params": {
+              "on": {
+                "kind": "reference",
+                "references": [
+                  {
+                    "id": "r3",
+                    "ref": {
+                      "face": "extrude#1:cap:end"
+                    }
+                  }
+                ]
+              },
+              "rounded": {
+                "kind": "boolean",
+                "value": true
+              },
+              "size": {
+                "kind": "expression",
+                "expression": {
+                  "source": "width / 4",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                }
+              },
+              "style": {
+                "kind": "choice",
+                "value": "hex"
+              }
+            },
+            "seed": 3,
+            "dependsOn": ["extrude#1"]
+          }
+        ],
+        "rollbackIndex": null,
+        "nextIds": {
+          "e": 6,
+          "extrude": 3,
+          "fillet": 2,
+          "k": 7,
+          "r": 4,
+          "scripted": 2,
+          "sketch": 3
+        },
+        "bodies": []
+      }
+    ],
+    "assemblies": [],
+    "print": {
+      "setups": [],
+      "nextIds": {}
+    },
+    "fonts": [],
+    "cam": {
+      "tools": [],
+      "setups": [],
+      "nextIds": {}
+    },
+    "scripts": [
+      {
+        "id": "script#1",
+        "name": "Boss box",
+        "language": "ts",
+        "apiVersion": 1,
+        "source": "export const params = [{ name: \"size\", kind: \"length\", default: \"10mm\" }];\nexport function run(ctx: any, p: { size: number }) {\n  ctx.box(\"boss\", p.size);\n}\n"
+      }
+    ],
+    "nextIds": {
+      "part": 2,
+      "script": 3
+    }
+  }
+}

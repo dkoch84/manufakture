@@ -44,6 +44,7 @@ export {
   partViews,
   restoredDocument,
   rowInstances,
+  scriptUsers,
   variableCamUsers,
   variableDrawings,
   variableExplodedViews,

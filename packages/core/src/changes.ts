@@ -16,6 +16,7 @@ import type {
   ManufaktureDocument,
   Part,
   PrintData,
+  Script,
   StoredExpression,
   Variable,
 } from './schema';
@@ -82,6 +83,13 @@ export interface DocumentChange {
    * reports that.
    */
   readonly fontsChanged: boolean;
+  /**
+   * The ids of library scripts added, removed or changed (source, language, API version or
+   * name), sorted; empty when none did (since version 16). A script whose source, language or API
+   * version changed also changes every scripted feature that runs it: `parts` lists those as
+   * `changed`, with `firstAffectedIndex` at or before them, as if they had been edited.
+   */
+  readonly scriptsChanged: readonly string[];
   /**
    * The namespaces whose `domains` entry was added, removed or changed (its `schemaVersion` or
    * its `data`), sorted; empty when none did (since version 11). Never a regen trigger by itself,
@@ -260,6 +268,7 @@ function diffPart(
   prev: Part | undefined,
   next: Part | undefined,
   vars: ReadonlySet<string>,
+  scripts: ReadonlySet<string> = new Set(),
 ): PartChange {
   const partId = (next ?? prev)!.id;
   const pf = prev?.features ?? [];
@@ -297,6 +306,11 @@ function diffPart(
         expressionVariableNames(s.expression).some((n) => vars.has(n)),
       )
     ) {
+      mark(i);
+    }
+    // A scripted feature whose script was edited regenerates like an edited feature.
+    if (f.kind === 'scripted' && scripts.has(f.script)) {
+      if (!changed.includes(f.id)) changed.push(f.id);
       mark(i);
     }
   });
@@ -555,12 +569,15 @@ function diffRaw(prev: ManufaktureDocument, next: ManufaktureDocument): Document
   ]);
   const pParts = new Map(prev.parts.map((p) => [p.id, p]));
   const nParts = new Map(next.parts.map((p) => [p.id, p]));
+  const scriptsChanged = diffScripts(prev.scripts, next.scripts, false);
+  // A script's name is for display: renaming it changes no geometry.
+  const scripts = new Set(diffScripts(prev.scripts, next.scripts, true));
   const parts: PartChange[] = [];
   for (const p of next.parts) {
     const old = pParts.get(p.id);
-    // An untouched part still changes when its features read a changed variable.
-    if (old === p && vars.size === 0) continue;
-    const c = diffPart(old, p, vars);
+    // An untouched part still changes when its features read a changed variable or script.
+    if (old === p && vars.size === 0 && scripts.size === 0) continue;
+    const c = diffPart(old, p, vars, scripts);
     const noop =
       c.status === 'changed' &&
       c.added.length + c.removed.length + c.changed.length === 0 &&
@@ -602,6 +619,7 @@ function diffRaw(prev: ManufaktureDocument, next: ManufaktureDocument): Document
       cam.reordered || touched(cam.tools) || touched(cam.setups) || !deepEqual(prev.cam, next.cam),
     cam,
     fontsChanged: !deepEqual(prev.fonts, next.fonts),
+    scriptsChanged,
     domainChanged: diffDomains(prev.domains, next.domains),
     drawingChanged:
       drawings.reordered ||
@@ -609,6 +627,23 @@ function diffRaw(prev: ManufaktureDocument, next: ManufaktureDocument): Document
       !deepEqual(prev.drawings, next.drawings),
     drawings,
   };
+}
+
+/**
+ * The ids of scripts added, removed or changed between two documents, sorted; with `ignoreName`,
+ * a script whose name alone changed does not count.
+ */
+function diffScripts(
+  prev: readonly Script[] | undefined,
+  next: readonly Script[] | undefined,
+  ignoreName: boolean,
+): string[] {
+  if (prev === next) return [];
+  const strip = (s: Script | undefined) => (s && ignoreName ? { ...s, name: '' } : s);
+  const p = new Map((prev ?? []).map((s) => [s.id, s]));
+  const n = new Map((next ?? []).map((s) => [s.id, s]));
+  const ids = new Set([...p.keys(), ...n.keys()]);
+  return [...ids].filter((id) => !deepEqual(strip(p.get(id)), strip(n.get(id)))).sort();
 }
 
 /** The namespaces whose domain data differs between two documents, sorted. */

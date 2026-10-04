@@ -84,6 +84,8 @@ const WEIGHTS = {
   camTool: 0.7,
   camSetup: 1,
   camOperation: 2,
+  script: 0.7,
+  scripted: 1.5,
 };
 export type Category = keyof typeof WEIGHTS;
 
@@ -825,6 +827,44 @@ export class Generator {
           };
         } else return undefined;
         return { type: 'addCamOperation', setupId: s.id, operation: op };
+      }
+      case 'script': {
+        const scripts = doc.scripts ?? [];
+        if (scripts.length > 0 && rng.chance(0.4)) {
+          const old = rng.pick(scripts);
+          return { type: 'setScript', script: { ...old, source: `${old.source}\n// edit` } };
+        }
+        return {
+          type: 'setScript',
+          script: {
+            id: new Alloc(doc.nextIds).take('script'),
+            name: 's',
+            language: rng.chance(0.5) ? 'ts' : 'js',
+            apiVersion: 1,
+            source: 'export function run() {}',
+          },
+        };
+      }
+      case 'scripted': {
+        const scripts = doc.scripts ?? [];
+        if (scripts.length === 0) return undefined;
+        const face = this.faceOf(part);
+        const extrudes = this.extrudes(part);
+        return add({
+          id: alloc.take('scripted'),
+          kind: 'scripted',
+          name: 'S',
+          suppressed: false,
+          script: rng.pick(scripts).id,
+          params: {
+            size: { kind: 'expression', expression: mm('5') },
+            ...(face !== undefined && {
+              at: { kind: 'reference', references: [{ id: alloc.take('r'), ref: { face } }] },
+            }),
+          },
+          seed: rng.int(4),
+          dependsOn: extrudes.length > 0 ? [rng.pick(extrudes).id] : [],
+        });
       }
     }
   }

@@ -499,6 +499,11 @@ function translateInput(f: Feature, ctx: TranslateContext): FeatureInput {
     }
     case 'thread':
       return threadInput(ctx, f);
+    case 'scripted':
+      // Stopgap until T7.2c runs scripts: a scripted feature is a feature error, never a crash.
+      throw new Failed([
+        { code: 'unsupported', message: 'Regen does not run scripted features yet' },
+      ]);
     case 'sketch':
     case 'extension':
       throw new Error(`${f.kind} features are not kernel features`);

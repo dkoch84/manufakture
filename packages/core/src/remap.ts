@@ -29,6 +29,7 @@ import type {
   PrintItem,
   PrintSetup,
   Reference,
+  Script,
   Sheet,
   SketchConstraint,
   SketchEntity,
@@ -433,6 +434,23 @@ export class IdWalker {
           face: ref(f.face),
           ...(f.start !== undefined && { start: ref(f.start) }),
         };
+      case 'scripted': {
+        // The script is the document's; parameter names, values and the seed are not ids.
+        const params: typeof f.params = {};
+        for (const [name, value] of Object.entries(f.params)) {
+          params[name] =
+            value.kind === 'reference'
+              ? { ...value, references: value.references.map(ref) }
+              : value;
+        }
+        return {
+          ...f,
+          id,
+          script: this.id(DOCUMENT_SCOPE, f.script),
+          params,
+          dependsOn: f.dependsOn.map(fid),
+        };
+      }
     }
   }
 
@@ -657,6 +675,10 @@ export class IdWalker {
     return { ...f, id: this.id(DOCUMENT_SCOPE, f.id) };
   }
 
+  script(s: Script): Script {
+    return { ...s, id: this.id(DOCUMENT_SCOPE, s.id) };
+  }
+
   // CAM --------------------------------------------------------------------------------------
 
   camWcs(part: string | undefined, w: CamWcs): CamWcs {
@@ -818,6 +840,9 @@ export class IdWalker {
     if (doc.configurations !== undefined) {
       out.configurations = inner.configurations(doc.configurations);
     }
+    if (doc.scripts !== undefined) {
+      out.scripts = doc.scripts.map((x) => inner.script(x)) as typeof doc.scripts;
+    }
     return out;
   }
 
@@ -951,6 +976,11 @@ export class IdWalker {
         return { ...c, font: this.font(c.font) };
       case 'deleteFont':
         return { ...c, fontId: doc(c.fontId) };
+      case 'setScript':
+      case 'restoreScript':
+        return { ...c, script: this.script(c.script) };
+      case 'deleteScript':
+        return { ...c, scriptId: doc(c.scriptId) };
       case 'addExplodedView':
       case 'editExplodedView':
       case 'restoreExplodedView':

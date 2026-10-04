@@ -64,9 +64,9 @@ function sortKeys(value: unknown, deep: boolean): unknown {
 /**
  * Schema-shaped objects already come out of zod in schema order. Records (`nextIds` of the
  * document, its parts, its assemblies, its print and CAM sections and its drawings, an extension's
- * `expressions` and its opaque `params`, a configuration row's `values`, the `domains` namespaces
- * and each one's opaque `data`) keep insertion order, so they are sorted here; otherwise two equal
- * documents could be saved as different text.
+ * `expressions` and its opaque `params`, a scripted feature's `params`, a configuration row's
+ * `values`, the `domains` namespaces and each one's opaque `data`) keep insertion order, so they
+ * are sorted here; otherwise two equal documents could be saved as different text.
  */
 function canonical(doc: ManufaktureDocument): ManufaktureDocument {
   const { configurations, domains, drawings } = doc;
@@ -120,7 +120,9 @@ function canonical(doc: ManufaktureDocument): ManufaktureDocument {
               expressions: sortKeys(f.expressions, false) as typeof f.expressions,
               params: sortKeys(f.params, true) as typeof f.params,
             }
-          : f,
+          : f.kind === 'scripted'
+            ? { ...f, params: sortKeys(f.params, false) as typeof f.params }
+            : f,
       ),
     })),
   };

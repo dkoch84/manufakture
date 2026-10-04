@@ -24,6 +24,7 @@ import type {
   PrintItem,
   PrintSetup,
   Reference,
+  ScriptedFeature,
   Sheet,
   SketchConstraint,
   SketchEntity,
@@ -66,7 +67,22 @@ export function featureReferences(feature: Feature): Reference[] {
       return [];
     case 'thread':
       return feature.start === undefined ? [feature.face] : [feature.face, feature.start];
+    case 'scripted':
+      return scriptedReferences(feature);
   }
+}
+
+/**
+ * The references of a scripted feature's `reference` parameters: by parameter name in code-unit
+ * order, then in each parameter's order, so the list does not depend on how `params` was built.
+ */
+export function scriptedReferences(feature: ScriptedFeature): Reference[] {
+  const out: Reference[] = [];
+  for (const name of Object.keys(feature.params).sort()) {
+    const value = feature.params[name]!;
+    if (value.kind === 'reference') out.push(...value.references);
+  }
+  return out;
 }
 
 /** Features named directly by id (profiles, hole sketches, patterned features). */
@@ -81,6 +97,7 @@ export function explicitDependencies(feature: Feature): string[] {
     case 'mirror':
       return [...feature.features];
     case 'extension':
+    case 'scripted':
       return [...feature.dependsOn];
     default:
       return [];
@@ -146,7 +163,10 @@ export function featureDependencies(feature: Feature): string[] {
   return [...out].sort();
 }
 
-/** What an expression must evaluate to. `any` is inferred (extension expressions). */
+/**
+ * What an expression must evaluate to. `any` is inferred (extension expressions, and scripted
+ * feature parameters, whose kind the script declares).
+ */
 export type ExpressionKind = 'length' | 'angle' | 'number' | 'any';
 
 export interface ExpressionSite {
@@ -248,6 +268,13 @@ export function featureExpressions(feature: Feature): ExpressionSite[] {
     case 'thread':
       if (feature.length !== 'full') add(['length'], feature.length, 'length');
       add(['clearance'], feature.clearance, 'length');
+      break;
+    case 'scripted':
+      for (const key of Object.keys(feature.params).sort()) {
+        const value = feature.params[key]!;
+        if (value.kind === 'expression')
+          add(['params', key, 'expression'], value.expression, 'any');
+      }
       break;
   }
   return out;

@@ -32,7 +32,7 @@ import { MATERIAL_IDS } from './materials';
  */
 
 /** The file format version this code reads and writes. Bump it only together with a migration. */
-export const FORMAT_VERSION = 15;
+export const FORMAT_VERSION = 16;
 /** The topological naming scheme version (T0.5) that stored references are written in. */
 export const NAMING_SCHEME = 1;
 export const FORMAT_TAG = 'manufakture';
@@ -77,6 +77,15 @@ export const FontIdSchema = z
   .string()
   .max(32, { abort: true })
   .regex(FONT_ID_PATTERN, 'Expected a font id like "font#1"');
+
+/** The document-level `nextIds` key for script ids (`script#n`). Since version 16. */
+export const SCRIPT_COUNTER = 'script';
+/** A script id: `script#n` with at most 15 digits, counted by the document's `nextIds.script`. */
+export const SCRIPT_ID_PATTERN = /^script#[1-9][0-9]{0,14}$/;
+export const ScriptIdSchema = z
+  .string()
+  .max(32, { abort: true })
+  .regex(SCRIPT_ID_PATTERN, 'Expected a script id like "script#1"');
 
 /** An extension feature's type: a namespace and one or more dotted names (`wood.board`). */
 export const EXTENSION_TYPE_PATTERN = /^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)+$/;
@@ -1174,6 +1183,124 @@ export const ThreadFeatureSchema = z
     }
   });
 
+// ---------------------------------------------------------------------------------------------
+// Scripts and scripted features (since version 16; ADR 0010 decisions 3, 6, 8 and 9)
+
+/** The languages a script may be written in: TypeScript is erased before it runs (decision 7). */
+export const SCRIPT_LANGUAGES = ['js', 'ts'] as const;
+export const ScriptLanguageSchema = z.enum(SCRIPT_LANGUAGES);
+/** The longest script name, in characters. */
+export const MAX_SCRIPT_NAME = 200;
+/**
+ * The largest script source, as UTF-8 bytes (256 KiB). A scripted feature's script is a page or
+ * two; the cap bounds what a crafted file costs to hash, erase and compile on every regen. The
+ * schema checks the text length first (a UTF-8 length is never less) before counting bytes.
+ */
+export const MAX_SCRIPT_SOURCE_BYTES = 256 * 1024;
+/** The most scripts a document may hold. */
+export const MAX_SCRIPTS = 256;
+/** The most source bytes the scripts of one document may hold in all (4 MiB). */
+export const MAX_SCRIPT_TOTAL_BYTES = 4 * 1024 * 1024;
+/**
+ * The largest script API version a script may name. API versions are small integers from 1; the
+ * cap only keeps the value a plain, safe number. Which versions exist is regen's to know: a
+ * version it does not have is a feature error there, never a load error, so a newer API never
+ * makes a file unreadable.
+ */
+export const MAX_SCRIPT_API_VERSION = 1_000_000;
+
+/** The UTF-8 bytes the sources of a script list hold in all. */
+export function scriptBytes(scripts: readonly { source: string }[]): number {
+  let total = 0;
+  for (const s of scripts) total += utf8Length(s.source);
+  return total;
+}
+
+/**
+ * A script of the document's library: a permanent id scripted features name it by (`script#n`,
+ * never reused), a display name, its language, the script API version it was written against
+ * and its source as the user typed it. A script runs unchanged, with the same results, under its
+ * `apiVersion` forever (ADR 0010 amendment, item 12), so the version is stored, never inferred.
+ */
+export const ScriptSchema = z
+  .strictObject({
+    id: ScriptIdSchema,
+    name: z.string().trim().min(1).max(MAX_SCRIPT_NAME),
+    language: ScriptLanguageSchema,
+    apiVersion: z.int().min(1).max(MAX_SCRIPT_API_VERSION),
+    source: z.string().max(MAX_SCRIPT_SOURCE_BYTES, { abort: true }),
+  })
+  .check((ctx) => {
+    const bytes = utf8Length(ctx.value.source);
+    if (bytes > MAX_SCRIPT_SOURCE_BYTES) {
+      ctx.issues.push({
+        code: 'custom',
+        message: `the source is ${bytes} bytes of UTF-8; at most ${MAX_SCRIPT_SOURCE_BYTES} are allowed`,
+        input: bytes,
+        path: ['source'],
+      });
+    }
+  });
+
+/** A script parameter's name: an identifier, as the script declares it. */
+export const SCRIPT_PARAM_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
+/** The most parameter values one scripted feature may hold. */
+export const MAX_SCRIPT_PARAMS = 256;
+/** The most references one reference parameter may hold. */
+export const MAX_SCRIPT_PARAM_REFERENCES = 1000;
+/** The longest `choice` value, in characters. */
+export const MAX_SCRIPT_CHOICE = 200;
+/** The largest `seed`: seeds are unsigned 32-bit integers. */
+export const MAX_SCRIPT_SEED = 0xffff_ffff;
+
+/**
+ * One parameter value of a scripted feature (ADR 0010 decision 6). The script declares its
+ * parameters (`length`, `angle`, `number`, `boolean`, `choice`, `reference`); the feature stores
+ * the values: an expression for the numeric kinds (variables and units like every other field),
+ * a boolean, a choice by its value, or geometry references (`r<n>` ids of the part, face or edge
+ * names). Whether a value fits the declaration is regen's to check, by running the script.
+ */
+export const ScriptParamValueSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('expression'), expression: StoredExpressionSchema }),
+  z.strictObject({ kind: z.literal('boolean'), value: z.boolean() }),
+  z.strictObject({ kind: z.literal('choice'), value: z.string().max(MAX_SCRIPT_CHOICE) }),
+  z.strictObject({
+    kind: z.literal('reference'),
+    references: z.array(ReferenceSchema).max(MAX_SCRIPT_PARAM_REFERENCES),
+  }),
+]);
+
+/**
+ * A feature whose geometry a script of the document's library computes (ADR 0010 decision 8).
+ * `script` names the script; `params` holds the parameter values by name; `seed` seeds the
+ * script's `Math.random` together with the source hash (decision 3), never the feature id, so a
+ * remap or a merge never changes geometry; `dependsOn` lists features the script reads by id,
+ * as an extension's does. Faces it makes are named `<id>:<operation id>/<name>` (decision 6).
+ * Since version 16.
+ */
+export const ScriptedFeatureSchema = z
+  .strictObject({
+    ...base('scripted'),
+    script: ScriptIdSchema,
+    params: z.record(
+      z.string().regex(SCRIPT_PARAM_NAME_PATTERN, 'Expected a parameter name like "width"'),
+      ScriptParamValueSchema,
+    ),
+    seed: z.int().min(0).max(MAX_SCRIPT_SEED),
+    dependsOn: z.array(featureId),
+  })
+  .check((ctx) => {
+    const count = Object.keys(ctx.value.params).length;
+    if (count > MAX_SCRIPT_PARAMS) {
+      ctx.issues.push({
+        code: 'custom',
+        message: `a scripted feature holds at most ${MAX_SCRIPT_PARAMS} parameter values, not ${count}`,
+        input: count,
+        path: ['params'],
+      });
+    }
+  });
+
 export const FeatureSchema = z.discriminatedUnion('kind', [
   SketchFeatureSchema,
   ExtrudeFeatureSchema,
@@ -1188,6 +1315,7 @@ export const FeatureSchema = z.discriminatedUnion('kind', [
   ImportFeatureSchema,
   DerivedFeatureSchema,
   ThreadFeatureSchema,
+  ScriptedFeatureSchema,
 ]);
 
 export const FEATURE_KINDS = [
@@ -1204,6 +1332,7 @@ export const FEATURE_KINDS = [
   'import',
   'derived',
   'thread',
+  'scripted',
 ] as const;
 
 // ---------------------------------------------------------------------------------------------
@@ -2661,6 +2790,26 @@ export const DocumentSchema = z.strictObject({
   /** CAM: tools, setups and their operations (ADR 0014). Since version 14. */
   cam: CamDataSchema,
   /**
+   * The script library (ADR 0010 decision 8): scripts scripted features name, in library order;
+   * absent when the document has none, never empty. Since version 16.
+   */
+  scripts: z
+    .array(ScriptSchema)
+    .min(1)
+    .max(MAX_SCRIPTS)
+    .check((ctx) => {
+      const total = scriptBytes(ctx.value);
+      if (total > MAX_SCRIPT_TOTAL_BYTES) {
+        ctx.issues.push({
+          code: 'custom',
+          message: `the document's scripts hold ${total} bytes; at most ${MAX_SCRIPT_TOTAL_BYTES} are allowed`,
+          input: total,
+        });
+      }
+    })
+    .exactOptional(),
+
+  /**
    * Drawings of the document's parts and assemblies, in tab order; absent when the document has
    * none, never empty. Since version 12.
    */
@@ -2675,8 +2824,8 @@ export const DocumentSchema = z.strictObject({
   /**
    * Next number per document-level id counter (`part`, giving `part#n`; `cp` and `cfg`, giving
    * configuration parameter and row ids; `assembly`, giving `assembly#n`; `font`, giving
-   * `font#n`; `drawing`, giving `drawing#n`). Only ever increases, so an id is never reused.
-   * Since version 4.
+   * `font#n`; `drawing`, giving `drawing#n`; `script`, giving `script#n`). Only ever increases,
+   * so an id is never reused. Since version 4.
    */
   nextIds: z.record(z.string(), z.int().min(1)),
 });
@@ -2743,6 +2892,10 @@ export type ThreadSystem = z.infer<typeof ThreadSystemSchema>;
 export type ThreadHand = z.infer<typeof ThreadHandSchema>;
 export type ThreadRepresentation = z.infer<typeof ThreadRepresentationSchema>;
 export type ThreadFeature = z.infer<typeof ThreadFeatureSchema>;
+export type ScriptLanguage = z.infer<typeof ScriptLanguageSchema>;
+export type Script = z.infer<typeof ScriptSchema>;
+export type ScriptParamValue = z.infer<typeof ScriptParamValueSchema>;
+export type ScriptedFeature = z.infer<typeof ScriptedFeatureSchema>;
 export type Feature = z.infer<typeof FeatureSchema>;
 export type FeatureKind = Feature['kind'];
 export type Variable = z.infer<typeof VariableSchema>;

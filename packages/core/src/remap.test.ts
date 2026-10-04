@@ -871,9 +871,11 @@ describe('remap property: remapped commands give the renamed document', () => {
   it(`holds for ${SEEDS} seeded streams of ${COMMANDS} commands, per-scope renames`, () => {
     const types = new Set<string>();
     let renamed = 0;
+    let scripted = 0;
     for (let seed = 1; seed <= SEEDS; seed++) {
       const { base, end, commands, high } = stream(seed, COMMANDS);
       typesOf(commands, types);
+      for (const p of end.parts) scripted += p.features.filter((f) => f.kind === 'scripted').length;
       const table = scopedTable(new Rng(seed * 31), high, duplicateRoots(commands));
       const report = emptyRemapReport();
       const remapped = remapIds(commands, table, { document: base, report });
@@ -898,10 +900,13 @@ describe('remap property: remapped commands give the renamed document', () => {
       'addPrintItem',
       'addDimension',
       'addCamOperation',
+      'setScript',
     ]) {
       expect(types, t).toContain(t);
     }
     expect(renamed).toBeGreaterThan(5000);
+    // Scripted features (with reference parameters) are in the streams too.
+    expect(scripted).toBeGreaterThan(0);
   });
 
   it(`agrees with an independent textual rename on ${SEEDS} streams`, () => {
@@ -953,7 +958,7 @@ const OPAQUE_KEYS = new Set([
  * The oracle: every id token in every string of a document, shifted by its counter's offset,
  * whatever the scope; counters raised by the same offsets. Feature-like tokens (`kind#n`, any
  * kind with an offset) and sub-id tokens (`e7`, `k2`, `r1` not inside a word) are rewritten in
- * plain fields and inside names alike. Free text is skipped by key. The generator makes no
+ * plain fields and inside names alike. Free text (a script's source among it) is skipped by key. The generator makes no
  * derived features, so no source name needs to be kept.
  */
 function textualRename(
@@ -1000,6 +1005,11 @@ function textualRename(
           counters[c] = n > 1 && offsets[c] !== undefined ? n + offsets[c] : n;
         }
         out[k] = counters;
+      } else if (k === 'params' && (v as { kind?: unknown }).kind === 'scripted') {
+        // A scripted feature's parameters are not opaque: reference values hold face names.
+        const rec: Record<string, unknown> = {};
+        for (const [rk, rv] of Object.entries(x as Record<string, unknown>)) rec[rk] = walk(rv);
+        out[k] = rec;
       } else if (k === 'values' || k === 'poses') {
         // Record keys that are ids: configuration row values, poses.
         const rec: Record<string, unknown> = {};

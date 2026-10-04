@@ -19,6 +19,7 @@ import {
   migrateV12ToV13,
   migrateV13ToV14,
   migrateV14ToV15,
+  migrateV15ToV16,
   type Migration,
 } from './migrations';
 import type { CoreErrorCode } from './result';
@@ -42,6 +43,7 @@ import v12Bracket from './fixtures/v12-bracket.json';
 import v13Bracket from './fixtures/v13-bracket.json';
 import v14Bracket from './fixtures/v14-bracket.json';
 import v15Bracket from './fixtures/v15-bracket.json';
+import v16Bracket from './fixtures/v16-bracket.json';
 
 /** One fixture per older file version; `migrates every older version` checks this is complete. */
 const FIXTURES: Record<number, unknown> = {
@@ -60,6 +62,7 @@ const FIXTURES: Record<number, unknown> = {
   12: v12Bracket,
   13: v13Bracket,
   14: v14Bracket,
+  15: v15Bracket,
 };
 
 function load(value: unknown): ManufaktureDocument {
@@ -70,7 +73,7 @@ describe('serialize and deserialize', () => {
   const documents: [string, () => ManufaktureDocument][] = [
     ['an empty document', () => createDocument({ id: 'd', name: 'Empty' })],
     ['the bracket', bracket],
-    ['the current fixture', () => load(v15Bracket)],
+    ['the current fixture', () => load(v16Bracket)],
     ['the two-body fixture', () => load(v4TwoBodies)],
     [
       'a document with body props and a scope',
@@ -203,20 +206,20 @@ describe('serialize and deserialize', () => {
     expect(serialize(unwrap(deserialize(serialize(shuffled))).document)).toBe(serialize(doc));
     expect(
       serialize(doc).startsWith(
-        '{\n  "format": "manufakture",\n  "version": 15,\n  "namingScheme": 1,',
+        '{\n  "format": "manufakture",\n  "version": 16,\n  "namingScheme": 1,',
       ),
     ).toBe(true);
   });
 
   it('refuses to serialize an invalid document', () => {
     const doc = clone(bracket()) as unknown as { version: number };
-    doc.version = 16;
+    doc.version = 17;
     expect(() => serialize(doc as unknown as ManufaktureDocument)).toThrow(/Cannot serialize/);
   });
 });
 
 describe('loading errors', () => {
-  const current = () => clone(v15Bracket) as Record<string, unknown>;
+  const current = () => clone(v16Bracket) as Record<string, unknown>;
   const cases: [string, string | (() => unknown), CoreErrorCode, RegExp?][] = [
     ['not JSON', '{ "format": ', 'json'],
     ['an array', '[]', 'format'],
@@ -272,7 +275,7 @@ describe('loading errors', () => {
   it('never modifies the value it is given, even a newer one', () => {
     for (const value of [
       clone(v0Bracket),
-      { ...clone(v15Bracket), version: 99 },
+      { ...clone(v16Bracket), version: 99 },
       clone(v1Bracket),
       clone(v3Bracket),
       clone(v4Bracket),
@@ -287,6 +290,7 @@ describe('loading errors', () => {
       clone(v13Bracket),
       clone(v14Bracket),
       clone(v15Bracket),
+      clone(v16Bracket),
     ]) {
       const frozen = deepFreeze(value);
       const snapshot = JSON.stringify(frozen);
@@ -296,7 +300,7 @@ describe('loading errors', () => {
   });
 
   it('reports schema problems with paths', () => {
-    const d = clone(v15Bracket) as { variables: { expression: unknown }[] };
+    const d = clone(v16Bracket) as { variables: { expression: unknown }[] };
     d.variables[0]!.expression = 6;
     const r = parseDocument(d);
     expect(r.ok).toBe(false);
@@ -334,11 +338,14 @@ describe('migrations', () => {
     expect(migrateV14ToV15.migrate(clone(v14Bracket) as Record<string, unknown>)).toEqual(
       v15Bracket,
     );
+    expect(migrateV15ToV16.migrate(clone(v15Bracket) as Record<string, unknown>)).toEqual(
+      v16Bracket,
+    );
     const loaded = unwrap(parseDocument(v0Bracket));
     expect(loaded.from).toEqual({ version: 0, namingScheme: 1 });
     expect(loaded.migrated).toBe(true);
-    expect(loaded.document).toEqual(load(v15Bracket));
-    expect(JSON.parse(serialize(loaded.document))).toEqual(v15Bracket);
+    expect(loaded.document).toEqual(load(v16Bracket));
+    expect(JSON.parse(serialize(loaded.document))).toEqual(v16Bracket);
   });
 
   it('v1 to v2 changes only the version: a version 1 part has no material', () => {
@@ -516,8 +523,8 @@ describe('migrations', () => {
     const loaded = unwrap(parseDocument(v9Bracket));
     expect(loaded.from.version).toBe(9);
     expect(loaded.migrated).toBe(true);
-    expect(loaded.document).toEqual(load(v15Bracket));
-    expect(serialize(loaded.document)).toBe(serialize(load(v15Bracket)));
+    expect(loaded.document).toEqual(load(v16Bracket));
+    expect(serialize(loaded.document)).toBe(serialize(load(v16Bracket)));
   });
 
   it('v10 to v11 changes only the version: a version 10 file has no domain data', () => {
@@ -528,10 +535,10 @@ describe('migrations', () => {
     const loaded = unwrap(parseDocument(v10Bracket));
     expect(loaded.from.version).toBe(10);
     expect(loaded.migrated).toBe(true);
-    expect(loaded.document).toEqual(load(v15Bracket));
+    expect(loaded.document).toEqual(load(v16Bracket));
     expect('domains' in loaded.document).toBe(false);
-    expect(serialize(loaded.document)).toBe(serialize(load(v15Bracket)));
-    expect(JSON.parse(serialize(loaded.document))).toEqual(v15Bracket);
+    expect(serialize(loaded.document)).toBe(serialize(load(v16Bracket)));
+    expect(JSON.parse(serialize(loaded.document))).toEqual(v16Bracket);
   });
 
   it('v11 to v12 changes only the version: a version 11 file has no drawings or exploded views', () => {
@@ -542,11 +549,11 @@ describe('migrations', () => {
     const loaded = unwrap(parseDocument(v11Bracket));
     expect(loaded.from.version).toBe(11);
     expect(loaded.migrated).toBe(true);
-    expect(loaded.document).toEqual(load(v15Bracket));
+    expect(loaded.document).toEqual(load(v16Bracket));
     expect('drawings' in loaded.document).toBe(false);
     expect(loaded.document.assemblies.every((a) => !('explodedViews' in a))).toBe(true);
-    expect(serialize(loaded.document)).toBe(serialize(load(v15Bracket)));
-    expect(JSON.parse(serialize(loaded.document))).toEqual(v15Bracket);
+    expect(serialize(loaded.document)).toBe(serialize(load(v16Bracket)));
+    expect(JSON.parse(serialize(loaded.document))).toEqual(v16Bracket);
   });
 
   it('v12 to v13 changes only the version: a version 12 file has no SVG outlines', () => {
@@ -557,9 +564,9 @@ describe('migrations', () => {
     const loaded = unwrap(parseDocument(v12Bracket));
     expect(loaded.from.version).toBe(12);
     expect(loaded.migrated).toBe(true);
-    expect(loaded.document).toEqual(load(v15Bracket));
-    expect(serialize(loaded.document)).toBe(serialize(load(v15Bracket)));
-    expect(JSON.parse(serialize(loaded.document))).toEqual(v15Bracket);
+    expect(loaded.document).toEqual(load(v16Bracket));
+    expect(serialize(loaded.document)).toBe(serialize(load(v16Bracket)));
+    expect(JSON.parse(serialize(loaded.document))).toEqual(v16Bracket);
   });
 
   it('v13 to v14 adds an empty CAM section after the fonts, and changes nothing else', () => {
@@ -577,9 +584,9 @@ describe('migrations', () => {
     expect(loaded.from.version).toBe(13);
     expect(loaded.migrated).toBe(true);
     expect(loaded.document.cam).toEqual({ tools: [], setups: [], nextIds: {} });
-    expect(loaded.document).toEqual(load(v15Bracket));
-    expect(serialize(loaded.document)).toBe(serialize(load(v15Bracket)));
-    expect(JSON.parse(serialize(loaded.document))).toEqual(v15Bracket);
+    expect(loaded.document).toEqual(load(v16Bracket));
+    expect(serialize(loaded.document)).toBe(serialize(load(v16Bracket)));
+    expect(JSON.parse(serialize(loaded.document))).toEqual(v16Bracket);
   });
 
   it('v13 to v14 refuses a version 13 file that already has a cam key', () => {
@@ -606,9 +613,70 @@ describe('migrations', () => {
     const loaded = unwrap(parseDocument(v14Bracket));
     expect(loaded.from.version).toBe(14);
     expect(loaded.migrated).toBe(true);
-    expect(loaded.document).toEqual(load(v15Bracket));
-    expect(serialize(loaded.document)).toBe(serialize(load(v15Bracket)));
-    expect(JSON.parse(serialize(loaded.document))).toEqual(v15Bracket);
+    expect(loaded.document).toEqual(load(v16Bracket));
+    expect(serialize(loaded.document)).toBe(serialize(load(v16Bracket)));
+    expect(JSON.parse(serialize(loaded.document))).toEqual(v16Bracket);
+  });
+
+  it('v15 to v16 changes only the version: a version 15 file has no scripts', () => {
+    expect(migrateV15ToV16.migrate(clone(v15Bracket) as Record<string, unknown>)).toEqual({
+      ...clone(v15Bracket),
+      version: 16,
+    });
+    const loaded = unwrap(parseDocument(v15Bracket));
+    expect(loaded.from.version).toBe(15);
+    expect(loaded.migrated).toBe(true);
+    expect('scripts' in loaded.document).toBe(false);
+    expect(loaded.document).toEqual(load(v16Bracket));
+    expect(serialize(loaded.document)).toBe(serialize(load(v16Bracket)));
+    expect(JSON.parse(serialize(loaded.document))).toEqual(v16Bracket);
+  });
+
+  it('v15 to v16 refuses a version 15 file that already has a scripts key', () => {
+    const v15 = { ...clone(v15Bracket), scripts: [] };
+    const r = parseDocument(v15);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.error.code).toBe('migration');
+      expect(r.error.message).toMatch(/scripts/);
+    }
+  });
+
+  it('v16 reads and writes a script library and a scripted feature', () => {
+    const doc = clone(v16Bracket) as {
+      scripts?: unknown;
+      nextIds: Record<string, number>;
+      parts: { features: unknown[]; nextIds: Record<string, number> }[];
+    };
+    doc.scripts = [
+      { id: 'script#1', name: 'Box', language: 'ts', apiVersion: 1, source: 'export {}' },
+    ];
+    doc.nextIds = { ...doc.nextIds, script: 2 };
+    const part = doc.parts[0]!;
+    part.features.push({
+      id: 'scripted#1',
+      kind: 'scripted',
+      name: 'Box 1',
+      suppressed: false,
+      script: 'script#1',
+      params: {
+        width: {
+          kind: 'expression',
+          expression: { source: 'width', lengthUnit: 'mm', angleUnit: 'deg' },
+        },
+        flip: { kind: 'boolean', value: true },
+      },
+      seed: 7,
+      dependsOn: [],
+    });
+    part.nextIds = { ...part.nextIds, scripted: 2 };
+    const loaded = unwrap(parseDocument(doc));
+    expect(loaded.migrated).toBe(false);
+    const text = serialize(loaded.document);
+    // Parameter names are a record: saved sorted, whatever order they were built in.
+    expect(text.indexOf('"flip"')).toBeLessThan(text.indexOf('"width": {'));
+    expect(serialize(unwrap(deserialize(text)).document)).toBe(text);
+    expect(text.indexOf('"cam"')).toBeLessThan(text.indexOf('"scripts"'));
   });
 
   it('v11 to v12 keeps a version 11 assembly as it was', () => {
@@ -690,8 +758,8 @@ describe('migrations', () => {
       expect(loaded.from.version).toBe(v);
       expect(loaded.document.version).toBe(FORMAT_VERSION);
       // Every fixture is the same bracket: each migrates to exactly the current one.
-      expect(loaded.document, `version ${v}`).toEqual(load(v15Bracket));
-      expect(serialize(loaded.document), `version ${v}`).toBe(serialize(load(v15Bracket)));
+      expect(loaded.document, `version ${v}`).toEqual(load(v16Bracket));
+      expect(serialize(loaded.document), `version ${v}`).toBe(serialize(load(v16Bracket)));
     }
   });
 
