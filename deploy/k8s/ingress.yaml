@@ -1,0 +1,26 @@
+# HTTPS ends here. The host name and the TLS secret are deploy-time settings (deploy/render.sh);
+# the secret holds a certificate for that host (cert-manager, or one you create; docs/hosting.md).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: manufakture-web
+  namespace: ${MANUFAKTURE_NAMESPACE}
+  labels:
+    app.kubernetes.io/name: manufakture-web
+spec:
+  ingressClassName: ${MANUFAKTURE_INGRESS_CLASS}
+  tls:
+    - hosts:
+        - ${MANUFAKTURE_HOST}
+      secretName: ${MANUFAKTURE_TLS_SECRET}
+  rules:
+    - host: ${MANUFAKTURE_HOST}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: manufakture-web
+                port:
+                  name: http

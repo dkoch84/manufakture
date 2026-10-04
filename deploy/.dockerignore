@@ -1,0 +1,3 @@
+# The main build context is deploy/ itself; only the Caddyfile is copied from it.
+*
+!Caddyfile

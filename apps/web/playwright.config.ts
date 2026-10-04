@@ -46,6 +46,11 @@ export default defineConfig({
     baseURL: `http://localhost:${port}`,
     viewport: { width: 1280, height: 800 },
     trace: 'retain-on-failure',
+    // `vite preview` sends the production Content-Security-Policy (src/hosting/headers.ts). Specs
+    // that pin layout inject inline styles, which that policy refuses, so the policy is bypassed
+    // by default; e2e/csp.spec.ts turns it back on and runs the app, the viewer and the source
+    // page under it.
+    bypassCSP: true,
     launchOptions: {
       // Software WebGL, so the viewport renders on machines without a GPU.
       args: ['--enable-unsafe-swiftshader', '--use-angle=swiftshader'],

@@ -48,12 +48,14 @@ export const isViewerEntry = (c: Pick<BuiltChunk, 'facadeModuleId'>): boolean =>
   /(^|[\\/])viewer\.html$/.test(c.facadeModuleId ?? '');
 
 // App modules the viewer may use: its own, the viewport (engine, materials, view cube, picking,
-// navigation and the toolbar), the two view stores the engine reads, and the length formatter.
+// navigation and the toolbar), the two view stores the engine reads, the length formatter, and
+// the "Source" link (T7.3c; the page's name only, the page itself is built in Node).
 const APP_ALLOWED = [
   /^src\/viewer\//,
   /^src\/viewport\//,
   /^src\/state\/(selection|viewSettings)\.ts$/,
   /^src\/measure\/format\.ts$/,
+  /^src\/source\/(SourceLink\.tsx|offer\.ts)$/,
 ];
 
 // Workspace packages: the `.mfkview` reader and its bounded zip reader, the units formatter, and

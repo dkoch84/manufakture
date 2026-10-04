@@ -56,6 +56,14 @@ describe('isAppNavigation', () => {
     expect(isAppNavigation(at('/api/shares/x'), SCOPE)).toBe(false);
     expect(isAppNavigation(at('/LICENSE.txt'), SCOPE)).toBe(false);
     expect(isAppNavigation(at('/other.html'), SCOPE)).toBe(false);
+    // The source offer (T7.3c), with or without its extension, under a sub-path too.
+    expect(isAppNavigation(at('/source.html'), SCOPE)).toBe(false);
+    expect(isAppNavigation(at('/source'), SCOPE)).toBe(false);
+    expect(isAppNavigation(at('/source/'), SCOPE)).toBe(false);
+    expect(
+      isAppNavigation(new URL('https://host.example/app/source'), 'https://host.example/app/'),
+    ).toBe(false);
+    expect(isAppNavigation(at('/sources/x'), SCOPE)).toBe(true);
     expect(isAppNavigation(new URL('https://elsewhere.example/'), SCOPE)).toBe(false);
     expect(isAppNavigation(new URL('https://host.example/'), 'https://host.example/app/')).toBe(
       false,

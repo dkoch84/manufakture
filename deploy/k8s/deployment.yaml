@@ -1,0 +1,62 @@
+# The static web app: Caddy serving the build (deploy/Dockerfile). Rendered by deploy/render.sh,
+# which substitutes the ${...} variables; see docs/hosting.md.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: manufakture-web
+  namespace: ${MANUFAKTURE_NAMESPACE}
+  labels:
+    app.kubernetes.io/name: manufakture-web
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: manufakture-web
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: manufakture-web
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: web
+          image: ${MANUFAKTURE_IMAGE}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            # Caddy's own small state (XDG_DATA_HOME and XDG_CONFIG_HOME in the image).
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 16Mi

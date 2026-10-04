@@ -1,6 +1,110 @@
 # Hosting manufakture
 
-manufakture is a static web app: `pnpm build` writes it to `apps/web/dist`, and any static host can serve that directory. This file says what a host needs to know. It covers the service worker for now; the headers file, the deploy workflow and the source offer come with T7.3c.
+manufakture is a static web app: `pnpm build` writes it to `apps/web/dist`, and any static host that can set response headers per path can serve that directory. This file says how to build it, how to run it with the container image and the Kubernetes manifests in `deploy/`, what any other host must send, and what serving it obliges you to do.
+
+**If you host an instance, you are responsible for it**: for keeping it updated, for who can reach it, for the data its users put in it, and for offering its source (below). The project ships the configuration; it does not run, monitor or support anybody's instance.
+
+## Build
+
+```sh
+pnpm install --frozen-lockfile
+pnpm --filter @manufakture/web build      # writes apps/web/dist
+```
+
+The build writes `source.html` (see [Source offer](#source-offer)), which names the commit it was built from. It reads it from git, or from the environment when there is no checkout:
+
+| Variable                                  | Default                                                                            |
+| ----------------------------------------- | ---------------------------------------------------------------------------------- |
+| `MANUFAKTURE_SOURCE_COMMIT`               | `GITHUB_SHA`, else `git rev-parse HEAD`                                            |
+| `MANUFAKTURE_SOURCE_DIRTY` (`1` or `0`)   | whether `git status --porcelain` lists anything                                    |
+| `MANUFAKTURE_SOURCE_URL` (the repository) | `GITHUB_SERVER_URL/GITHUB_REPOSITORY`, else the web address of the `origin` remote |
+
+A fork that serves its own changes must point the page at its own repository, which the `origin` default does. Build from a clean checkout of a commit you have pushed: a build from a tree with uncommitted changes says so on its source page, because then the commit is not its source.
+
+## Container image
+
+`deploy/Dockerfile` packs a build into a small image: [Caddy](https://caddyserver.com) 2.11 serving the files with `deploy/Caddyfile`, every compressible file precompressed with brotli (best quality; the 42.7 MB kernel `.wasm` goes to about 8.2 MB) and gzip. It does not build the app; pass the build as a named build context:
+
+```sh
+docker build -f deploy/Dockerfile --build-context site=apps/web/dist -t manufakture-web deploy
+docker run --rm -p 8080:8080 --read-only --tmpfs /tmp manufakture-web
+deploy/check-headers.sh http://localhost:8080 "$(git rev-parse HEAD)"
+```
+
+The image listens on plain HTTP, port 8080, as a non-root user (65532), and writes only Caddy's small state under `/tmp`; TLS ends at whatever sits in front of it. `GET /healthz` answers `ok` for probes. Caddy 2.10 answers every precompressed file with `206 Partial Content`, so keep 2.11 or later. `deploy/check-headers.sh` asserts every header in the next section against a running server; CI runs it against the image on every push (the `site` job in `.github/workflows/ci.yml`).
+
+## Kubernetes
+
+`deploy/k8s/` holds a Deployment, a Service and an Ingress, written for a small self-hosted cluster (k3s or k3d, whose built-in ingress controller is Traefik). Nothing about a real deployment is in the repository: `deploy/render.sh` fills in the host name, the TLS secret and the image from the environment and prints the manifests.
+
+```sh
+kubectl create namespace manufakture            # once
+MANUFAKTURE_HOST=manufakture.example.internal \
+MANUFAKTURE_TLS_SECRET=manufakture-tls \
+MANUFAKTURE_IMAGE=ghcr.io/OWNER/manufakture-web:1.2.3 \
+  deploy/render.sh | kubectl apply -f -
+kubectl -n manufakture rollout status deployment/manufakture-web
+```
+
+Optional: `MANUFAKTURE_NAMESPACE` (default `manufakture`) and `MANUFAKTURE_INGRESS_CLASS` (default `traefik`). The TLS secret must hold a certificate for the host: from cert-manager with your own issuer, or one you create with `kubectl -n manufakture create secret tls manufakture-tls --cert=... --key=...`. The service worker and installing the app need a secure context, so serve it over HTTPS (browsers count only `localhost` as secure without it). If the cluster is reachable only inside a private network, the certificate's issuer must be trusted by the devices that open the app.
+
+The pod runs with a read-only root file system, no capabilities, no service account token and the `RuntimeDefault` seccomp profile. One replica is enough: the app is static, and a restart costs users nothing, since the service worker serves the app from its cache meanwhile.
+
+### Publishing and rolling out
+
+`.github/workflows/deploy.yml` runs on a version tag (`v*`) or by hand. Its `image` job builds the site and the image once, checks that image's headers the way CI does, and hands it on as an artifact; it runs the repository's install scripts, so it holds no write token. The `publish` job then pushes that same image, unchanged, to the GitHub Container Registry as `ghcr.io/<owner>/manufakture-web` (tagged with the version and the commit; the job summary names the digest). It checks out nothing and installs nothing, and is the only job with `packages: write`. GitHub's runners cannot reach a cluster inside a private network, so the rollout is a separate step:
+
+- **By hand**: run the `render.sh | kubectl apply` above with `MANUFAKTURE_IMAGE` set to the published digest (`ghcr.io/<owner>/manufakture-web@sha256:...`). If the package is private, give the cluster a pull secret, or make the package public (the image holds only the public build).
+- **Optional, self-hosted runner**: register a runner inside the network with the labels `self-hosted` and `manufakture-deploy` and a `kubectl` configured for the cluster, then set the repository variables `MANUFAKTURE_ROLLOUT=self-hosted`, `MANUFAKTURE_HOST` and `MANUFAKTURE_TLS_SECRET` (and optionally `MANUFAKTURE_NAMESPACE`, `MANUFAKTURE_INGRESS_CLASS`). The workflow's `rollout` job then applies the manifests and waits for the rollout, in the `production` environment, for version tags only. Do not register the runner before the safeguards below are in place.
+
+#### Self-hosted rollout runner
+
+A self-hosted runner executes whatever a workflow tells it to, and the deploy workflow's own triggers do not decide which workflows reach it. A pull request from a fork runs the fork's copy of the workflows, which can name `runs-on: [self-hosted, manufakture-deploy]`; anyone with write access can dispatch a modified workflow from a branch, or push a `v*` tag pointing at any commit. The `if` on the `rollout` job only prevents mistakes. All of these are required:
+
+- **Deployment rule on `production`.** In the repository's settings, under Environments, give `production` a deployment tag rule that allows only `v*`, and required reviewers (with "Prevent self-review" where available). A job that names the environment then waits for a reviewer, whatever workflow it comes from; protect `v*` tags with a tag ruleset too, so only maintainers can create them.
+- **Fork pull requests need approval.** Under Actions settings, choose "Require approval for all outside collaborators" for workflows from fork pull requests, so no fork's workflow runs before a maintainer has read it. On a public repository GitHub recommends against self-hosted runners for this reason; the approval is the minimum.
+- **A runner group limited to this workflow**, where the plan offers runner groups (organizations): allow only this repository and only `.github/workflows/deploy.yml` at version tags, and leave public repositories off unless needed. A runner registered on the repository alone cannot be limited this way, which makes the two rules above the only gate.
+- **An ephemeral or dedicated runner.** Register it with `--ephemeral` (one job, then it deregisters; a fresh one per rollout) or on a machine or container that does nothing else, holds no other credentials and is not reachable from the rest of the network beyond the cluster's API.
+- **kubectl credentials limited to the app.** The runner's kubeconfig must not be an admin's. Use a service account bound by RBAC to the target namespace, able to change only the Deployment, Service and Ingress: `deploy/k8s/rollout-rbac.example.yaml` is such a Role and RoleBinding (not applied by `render.sh`; apply it once as a cluster admin and give the runner a token for `manufakture-rollout`). With it, even a hostile job can at worst replace the app in that namespace; it cannot read Secrets, exec into pods or touch the rest of the cluster.
+
+Rolling back is deploying the older image again (see [Updates and rollback](#updates-and-rollback)).
+
+## Headers
+
+What `deploy/Caddyfile` sends, and what any other host must send. `apps/web/src/hosting/headers.ts` holds the same rules, a unit test checks the Caddyfile against it, and `vite preview` sends its security headers, so the end-to-end tests run under the production policy.
+
+| Response                                                                                   | Header                                                                                                                                                                                                                                                                                            |
+| ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Content-hashed files under `assets/` (`name-XXXXXXXX.ext`)                                 | `Cache-Control: public, max-age=31536000, immutable`                                                                                                                                                                                                                                              |
+| Everything else (`index.html`, `viewer.html`, `source.html`, `sw.js`, the manifest, icons) | `Cache-Control: no-cache`                                                                                                                                                                                                                                                                         |
+| `.wasm`                                                                                    | `Content-Type: application/wasm`, brotli where the client takes it (`Content-Encoding: br`)                                                                                                                                                                                                       |
+| `manifest.webmanifest`                                                                     | `Content-Type: application/manifest+json`                                                                                                                                                                                                                                                         |
+| A missing file                                                                             | `404` with `Cache-Control: no-store`, never `index.html`                                                                                                                                                                                                                                          |
+| Anything under `api/`                                                                      | `404`: nothing of the app lives there                                                                                                                                                                                                                                                             |
+| Any other path without a file extension                                                    | `index.html` (a route of the app); `/viewer` and `/source` serve `viewer.html` and `source.html`                                                                                                                                                                                                  |
+| Every response                                                                             | `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Resource-Policy: same-origin`, a `Permissions-Policy` that turns off camera, microphone, location, payment and USB, and `Strict-Transport-Security: max-age=31536000` |
+
+No `Cross-Origin-Embedder-Policy`: nothing needs cross-origin isolation, since the kernel is single-threaded ([ADR 0002](adr/0002-kernel-build-and-loading.md) decision 2). The dev server and `vite preview` still send COOP and COEP, for parity with the spikes. Without COEP the app logs `crossOriginIsolated: false` at start-up; that is expected.
+
+### Content-Security-Policy
+
+Pages (and every other response but worker scripts):
+
+```
+default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data: blob:;
+font-src 'self'; connect-src 'self' https:; worker-src 'self'; manifest-src 'self'; object-src 'none';
+base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+```
+
+Worker scripts (`assets/*worker*.js`) get the same policy with `'unsafe-eval'` added to `script-src`. A dedicated worker takes its policy from its own script's response, not from the page, and the kernel's Emscripten glue (libcascade's embind) builds its function invokers with `new Function`; without `'unsafe-eval'` the regen worker never starts (checked: the demo part never appears). The pages themselves allow no `eval` and no inline script or style. zod probes `Function('')` once and falls back when the policy refuses it; the browser reports that as a violation, which is harmless. `connect-src` allows any `https:` origin because the sync server and share hosts live elsewhere; the viewer refuses non-https bundle addresses anyway. `apps/web/e2e/csp.spec.ts` runs the app (kernel and regen), the viewer and the source page under the policy and fails on any other violation; the rest of the end-to-end suite bypasses the policy, because some specs inject inline styles to pin their layout.
+
+## Source offer
+
+manufakture is GPL-3.0-or-later, and serving the app distributes it, so whoever serves a build must offer its corresponding source, including the build recipes of its `.wasm` modules ([ADR 0006](adr/0006-licensing.md)). Every build carries that offer: `source.html`, linked as **Source** from the header of the app and of the viewer. It names the commit the build was made from, links that commit in the repository, links ADR 0006 and the lockfile, and lists every `.wasm` the build ships with its package, version, license and upstream repository (where its build recipe lives). The list is made from the build's own output (`apps/web/src/source/`), and a build that emits a `.wasm` with no entry in `KNOWN_WASM` fails, so nothing ships without its recipe on the page.
+
+The page is static HTML with no script. Its name has a file extension, and `source` is excluded from the service worker's navigation rule (`apps/web/src/pwa/policy.ts`), so the worker never answers it with the app.
+
+A build from a checkout with uncommitted changes to tracked files says so on the page (untracked files, such as install and build leftovers, do not count), and `deploy/check-headers.sh`, given a commit, fails on that warning, so a release is always the exact commit it names. If you serve a modified build, publish your changes and build with `MANUFAKTURE_SOURCE_URL` (or the `origin` remote) pointing at the repository that holds them.
 
 ## Service worker
 

@@ -6,8 +6,19 @@ import { VitePWA } from 'vite-plugin-pwa';
 import { defineConfig } from 'vitest/config';
 import { choosePrecache, type ManifestEntry } from './src/pwa/precache.ts';
 import { checkViewerBundle, kib, type BuiltChunk } from './src/viewer/bundleCheck.ts';
+import { headersFor } from './src/hosting/headers.ts';
+import { readSourceInfo, wasmModule } from './src/source/build.ts';
+import {
+  KNOWN_WASM,
+  SOURCE_CSS,
+  SOURCE_PAGE,
+  knownWasmFor,
+  renderSourcePage,
+  type WasmModule,
+} from './src/source/offer.ts';
 
 const appRoot = fileURLToPath(new URL('.', import.meta.url));
+const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
 
 // Cross-origin isolation is required for SharedArrayBuffer, which the
 // WASM geometry kernel running in Web Workers will depend on.
@@ -85,8 +96,78 @@ function viewerBundleCheck(): Plugin {
   };
 }
 
+// The source offer (T7.3c, ADR 0006; src/source/offer.ts): every build writes source.html, naming
+// the commit it was built from and the package, version, license and upstream repository of every
+// .wasm it ships. A .wasm with no entry in KNOWN_WASM fails the build, so nothing ships without
+// its recipe on the page. The app and the viewer link to it ("Source"). It has a file extension,
+// so the service worker's navigation rule never answers it with index.html (src/pwa/policy.ts);
+// the dev server serves the same page, listing every known module.
+function sourceOffer(): Plugin {
+  const info = readSourceInfo(repoRoot);
+  const page = (modules: WasmModule[]) => renderSourcePage(info, modules);
+  return {
+    name: 'manufakture:source-offer',
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const path = req.url?.split('?')[0];
+        if (path !== `/${SOURCE_PAGE}` && path !== '/source.css') return next();
+        const css = path === '/source.css';
+        const modules = KNOWN_WASM.flatMap((k) => {
+          try {
+            return [wasmModule(repoRoot, `${k.base}.wasm`, k)];
+          } catch {
+            return [];
+          }
+        });
+        res.setHeader('Content-Type', css ? 'text/css' : 'text/html; charset=utf-8');
+        res.end(css ? SOURCE_CSS : page(modules));
+      });
+    },
+    generateBundle(_options, bundle) {
+      if (!info.commit) this.warn('source offer: no commit known; source.html names none');
+      if (!info.repository)
+        this.warn('source offer: no repository known (set MANUFAKTURE_SOURCE_URL)');
+      const modules: WasmModule[] = [];
+      for (const fileName of Object.keys(bundle).sort()) {
+        if (!fileName.endsWith('.wasm')) continue;
+        const known = knownWasmFor(fileName);
+        if (!known) {
+          this.error(
+            `${fileName} has no entry in KNOWN_WASM (src/source/offer.ts): every shipped .wasm ` +
+              'must name its package and upstream source on the source page (ADR 0006)',
+          );
+        }
+        modules.push(wasmModule(repoRoot, fileName, known));
+      }
+      this.emitFile({ type: 'asset', fileName: SOURCE_PAGE, source: page(modules) });
+      this.emitFile({ type: 'asset', fileName: 'source.css', source: SOURCE_CSS });
+    },
+  };
+}
+
+// `vite preview` sends the production security headers (src/hosting/headers.ts: the
+// Content-Security-Policy and the rest of what deploy/Caddyfile sends), so the end-to-end tests run
+// under the real policy. Cache-Control is left to preview's own server. The policy is widened for
+// local http share hosts only, as the viewer itself allows them on localhost.
+function previewSecurityHeaders(): Plugin {
+  return {
+    name: 'manufakture:preview-security-headers',
+    configurePreviewServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const path = req.url?.split('?')[0] ?? '/';
+        for (const [name, value] of Object.entries(headersFor(path, { local: true }))) {
+          if (name !== 'Cache-Control') res.setHeader(name, value);
+        }
+        next();
+      });
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react(), pwa, viewerBundleCheck()],
+  plugins: [react(), pwa, viewerBundleCheck(), sourceOffer(), previewSecurityHeaders()],
+  // COOP/COEP stay in dev and preview for parity with the spikes (ADR 0002); production sends COOP
+  // only (deploy/Caddyfile), since nothing needs cross-origin isolation.
   server: { headers: crossOriginIsolationHeaders },
   preview: { headers: crossOriginIsolationHeaders },
   build: {

@@ -49,7 +49,8 @@ export function isRuntimeCacheable(url: URL, request: RequestLike, scopeUrl: str
  * inside the scope, and a path without a file extension. Precached pages (`index.html`, and any
  * other HTML entry the build emits) are answered by the precache route before this one; any other
  * file goes to the network. Paths under `api/` are never the app, whatever server later lives
- * there.
+ * there. Nor is `source`, the source offer (T7.3c, `source.html`): it must reach the page that
+ * names the build's source even when the precache does not hold it, never the app.
  */
 export function isAppNavigation(url: URL, scopeUrl: string): boolean {
   const scope = new URL(scopeUrl);
@@ -57,6 +58,7 @@ export function isAppNavigation(url: URL, scopeUrl: string): boolean {
   if (!url.pathname.startsWith(scope.pathname)) return false;
   const rest = url.pathname.slice(scope.pathname.length);
   if (rest === 'api' || rest.startsWith('api/')) return false;
+  if (rest === 'source' || rest === 'source/') return false;
   const last = rest.split('/').pop() ?? '';
   return !last.includes('.');
 }

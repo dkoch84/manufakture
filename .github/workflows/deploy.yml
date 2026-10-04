@@ -1,0 +1,162 @@
+name: Deploy
+
+# Publishes the web app's container image (deploy/Dockerfile) to the GitHub Container Registry
+# when a version tag is pushed, or by hand. GitHub's runners cannot reach a cluster on a private
+# network, so the rollout is a separate step: by hand (docs/hosting.md, "Rolling out"), or by the
+# optional `rollout` job below on a self-hosted runner inside that network.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  image:
+    # Builds the site and the image once, checks that image's headers, and hands the very same
+    # image to `publish` as an artifact. This job installs and runs the repository's code
+    # (pnpm install runs package scripts), so it gets no write token at all.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build the site
+        # The source page names this commit and this repository (GITHUB_SHA, GITHUB_REPOSITORY).
+        run: pnpm --filter @manufakture/web build
+      - name: Build the image
+        run: docker build -f deploy/Dockerfile --build-context site=apps/web/dist -t manufakture-web:candidate deploy
+      - name: Check the headers before publishing
+        run: |
+          docker run -d --name site -p 8080:8080 --read-only --tmpfs /tmp manufakture-web:candidate
+          for _ in $(seq 1 30); do
+            curl -sf -o /dev/null http://localhost:8080/healthz && break
+            sleep 1
+          done
+          bash deploy/check-headers.sh http://localhost:8080 "$GITHUB_SHA"
+      - name: Server log
+        if: failure()
+        run: docker logs site || true
+      - name: Save the checked image
+        run: |
+          docker rm -f site
+          docker save manufakture-web:candidate -o "$RUNNER_TEMP/image.tar"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: image
+          path: ${{ runner.temp }}/image.tar
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    # Pushes the image `image` checked, unchanged: no checkout, no install, no build. The only job
+    # with packages:write, and it runs nothing from the repository.
+    needs: image
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      packages: write
+    outputs:
+      image: ${{ steps.push.outputs.image }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: image
+          path: ${{ runner.temp }}
+      - run: docker load -i "$RUNNER_TEMP/image.tar"
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/manufakture-web
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=long
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish the image
+        id: push
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          digest=""
+          while IFS= read -r tag; do
+            [ -n "$tag" ] || continue
+            docker tag manufakture-web:candidate "$tag"
+            out="$(docker push "$tag")"
+            echo "$out"
+            d="$(grep -oE 'sha256:[0-9a-f]{64}' <<< "$out" | tail -n 1)"
+            [ -n "$d" ] || { echo "no digest in the push output for $tag" >&2; exit 1; }
+            if [ -n "$digest" ] && [ "$d" != "$digest" ]; then
+              echo "$tag pushed as $d, earlier tags as $digest" >&2
+              exit 1
+            fi
+            digest="$d"
+          done <<< "$TAGS"
+          [ -n "$digest" ] || { echo "nothing was pushed" >&2; exit 1; }
+          image="ghcr.io/${OWNER,,}/manufakture-web@$digest"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "Published \`$image\`" >> "$GITHUB_STEP_SUMMARY"
+
+  rollout:
+    # Optional, off unless the repository variable MANUFAKTURE_ROLLOUT is `self-hosted`: applies
+    # the manifests on a self-hosted runner (labels `self-hosted` and `manufakture-deploy`) that
+    # can reach the cluster. The host name and TLS secret come from the repository variables
+    # MANUFAKTURE_HOST and MANUFAKTURE_TLS_SECRET, never from the repository.
+    #
+    # The triggers above do NOT protect that runner: a pull request from a fork runs its own copy
+    # of any workflow and can name these labels in `runs-on`, and anyone with write access can
+    # dispatch a modified workflow from a branch or push a `v*` tag. The `if` below only stops
+    # mistakes. Before registering the runner, set up what docs/hosting.md ("Self-hosted
+    # rollout runner") requires: a deployment rule on the `production` environment that allows
+    # only `v*` tags, plus required reviewers; approval for every outside collaborator's fork
+    # pull request; a runner group limited to this workflow where the plan offers one; an
+    # ephemeral or dedicated runner; and kubectl credentials limited by RBAC to the Deployment,
+    # Service and Ingress in the target namespace (deploy/k8s/rollout-rbac.example.yaml).
+    needs: publish
+    if: ${{ vars.MANUFAKTURE_ROLLOUT == 'self-hosted' && startsWith(github.ref, 'refs/tags/v') }}
+    runs-on: [self-hosted, manufakture-deploy]
+    timeout-minutes: 10
+    environment: production
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Apply the manifests
+        env:
+          MANUFAKTURE_HOST: ${{ vars.MANUFAKTURE_HOST }}
+          MANUFAKTURE_TLS_SECRET: ${{ vars.MANUFAKTURE_TLS_SECRET }}
+          MANUFAKTURE_NAMESPACE: ${{ vars.MANUFAKTURE_NAMESPACE || 'manufakture' }}
+          MANUFAKTURE_INGRESS_CLASS: ${{ vars.MANUFAKTURE_INGRESS_CLASS || 'traefik' }}
+          MANUFAKTURE_IMAGE: ${{ needs.publish.outputs.image }}
+        run: |
+          deploy/render.sh | kubectl apply -f -
+          kubectl -n "$MANUFAKTURE_NAMESPACE" rollout status deployment/manufakture-web --timeout=5m

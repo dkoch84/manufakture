@@ -159,6 +159,7 @@ import { GrainOverlay } from './wood/GrainOverlay';
 import { isBoard, isJoint } from './wood/kinds';
 import { StockPanel } from './wood/StockPanel';
 import { hasWoodwork } from './wood/stock';
+import { SourceLink } from './source/SourceLink';
 import './viewport/viewport.css';
 import './sketcher/sketcher.css';
 import './measure/measure.css';
@@ -1983,6 +1984,7 @@ export function App({
     <div className="app">
       <header className="app-header">
         <h1>manufakture</h1>
+        <SourceLink />
         {library && (
           <div className="toolbar-group document-title">
             <button

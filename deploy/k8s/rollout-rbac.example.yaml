@@ -1,0 +1,49 @@
+# An example, not applied by deploy/render.sh: the narrowest credentials for the optional
+# self-hosted `rollout` job in .github/workflows/deploy.yml (docs/hosting.md, "Publishing and
+# rolling out"). A service account that can change the app's Deployment, Service and Ingress in
+# one namespace and nothing else: no Secrets, no Pods/exec, no other namespace, nothing
+# cluster-wide. Replace `manufakture` if you deploy to another namespace, then, as a cluster
+# admin:
+#
+#   kubectl apply -f deploy/k8s/rollout-rbac.example.yaml
+#   kubectl -n manufakture create token manufakture-rollout --duration=24h
+#
+# and give the runner a kubeconfig with only that token, for that cluster and namespace. Prefer a
+# short-lived token renewed outside the runner over a long-lived Secret-bound one.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: manufakture-rollout
+  namespace: manufakture
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: manufakture-rollout
+  namespace: manufakture
+rules:
+  # `kubectl apply` reads, creates and patches; `kubectl rollout status` watches the Deployment.
+  - apiGroups: ['apps']
+    resources: ['deployments']
+    verbs: ['get', 'list', 'watch', 'create', 'patch', 'update']
+  - apiGroups: ['']
+    resources: ['services']
+    verbs: ['get', 'list', 'create', 'patch', 'update']
+  - apiGroups: ['networking.k8s.io']
+    resources: ['ingresses']
+    verbs: ['get', 'list', 'create', 'patch', 'update']
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: manufakture-rollout
+  namespace: manufakture
+subjects:
+  - kind: ServiceAccount
+    name: manufakture-rollout
+    namespace: manufakture
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: manufakture-rollout

@@ -34,6 +34,46 @@ jobs:
       - run: pnpm test --project packages --project cam-gcode --project web
       - run: pnpm build
 
+  site:
+    # The deployable site (T7.3c, docs/hosting.md): the production build in the production image
+    # (deploy/Dockerfile: Caddy with deploy/Caddyfile, files precompressed with brotli and gzip),
+    # run as the cluster runs it (read-only root, non-root user), with every header asserted by
+    # deploy/check-headers.sh: cache rules, types, compression, the Content-Security-Policy, the
+    # SPA fallback and its limits, and the source page naming this commit.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @manufakture/web build
+      - name: Build the image
+        run: docker build -f deploy/Dockerfile --build-context site=apps/web/dist -t manufakture-web:ci deploy
+      - name: Serve it and check the headers
+        run: |
+          docker run -d --name site -p 8080:8080 --read-only --tmpfs /tmp manufakture-web:ci
+          for _ in $(seq 1 30); do
+            curl -sf -o /dev/null http://localhost:8080/healthz && break
+            sleep 1
+          done
+          bash deploy/check-headers.sh http://localhost:8080 "$GITHUB_SHA"
+      - name: Server log
+        if: failure()
+        run: docker logs site || true
+      - name: Render the Kubernetes manifests
+        # Placeholders only: the real host, secret and image are given at deploy time.
+        run: |
+          MANUFAKTURE_HOST=manufakture.example.internal MANUFAKTURE_TLS_SECRET=manufakture-tls \
+            MANUFAKTURE_IMAGE=manufakture-web:ci deploy/render.sh > "$RUNNER_TEMP/manifests.yaml"
+          if grep -n '\${MANUFAKTURE_' "$RUNNER_TEMP/manifests.yaml"; then exit 1; fi
+
   kernel-goldens:
     # The kernel's golden tests in one job: volume, face count and bounding box per feature
     # (features), exact measures (measure), STEP round trips (exchange) and the M1 bracket

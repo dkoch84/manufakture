@@ -32,6 +32,7 @@ import {
 import { distanceOf, measureDelegate, nextMeasurement, type Measurement } from './measure';
 import { boundsOf, viewerBodies, type ViewerBody } from './scene';
 import { viewerUnits } from './units';
+import { SourceLink } from '../source/SourceLink';
 
 const createDefaultEngine: EngineFactory = (canvas, stores) => new ViewportEngine(canvas, stores);
 
@@ -240,6 +241,7 @@ export function ViewerApp({
     <div className="app viewer">
       <header className="app-header viewer-header">
         <h1>manufakture viewer</h1>
+        <SourceLink />
         {loaded && (
           <span className="viewer-name" data-testid="viewer-name" title={loaded.name}>
             {loaded.name}

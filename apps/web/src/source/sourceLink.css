@@ -1,0 +1,9 @@
+.source-link {
+  font-size: 0.75rem;
+  color: #5b6673;
+}
+
+.source-link:hover,
+.source-link:focus-visible {
+  color: #1a6fe0;
+}

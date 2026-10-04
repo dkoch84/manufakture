@@ -1,0 +1,88 @@
+# Caddy config that serves the manufakture build (apps/web/dist) as a static site.
+#
+# It listens on plain HTTP, port 8080: TLS ends at the ingress or reverse proxy in front of it
+# (deploy/k8s/, docs/hosting.md). The headers here are the ones apps/web/src/hosting/headers.ts
+# describes, and apps/web/src/hosting/headers.test.ts checks this file still says the same.
+# deploy/check-headers.sh asserts them against a running server (the `site` job in CI).
+
+{
+	admin off
+	auto_https off
+	persist_config off
+}
+
+# Sent with every response, errors included.
+(security_headers) {
+	header {
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		Cross-Origin-Opener-Policy "same-origin"
+		Cross-Origin-Resource-Policy "same-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+		# Browsers ignore it over plain HTTP; behind the HTTPS ingress it pins the host to HTTPS.
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+}
+
+:8080 {
+	root * /srv
+
+	# Content-hashed Vite assets (name-XXXXXXXX.ext directly under assets/) never change.
+	@hashed path_regexp ^/assets/[^/]+-[A-Za-z0-9_-]{8}\.[A-Za-z0-9]+$
+	@unhashed not path_regexp ^/assets/[^/]+-[A-Za-z0-9_-]{8}\.[A-Za-z0-9]+$
+	# Worker scripts get their own policy: a dedicated worker takes its CSP from its script's
+	# response, and the kernel's Emscripten glue needs 'unsafe-eval' (embind's invokers).
+	@worker path_regexp ^/assets/[^/]*worker[^/]*\.js$
+	@page not path_regexp ^/assets/[^/]*worker[^/]*\.js$
+	# Only for a file that exists: a missing .wasm is a plain 404, not one labelled WebAssembly.
+	@wasm {
+		path *.wasm
+		file
+	}
+	@manifest path *.webmanifest
+
+	import security_headers
+	header @page Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https:; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+	header @worker Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval'; style-src 'self'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https:; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+	# index.html, viewer.html, source.html, sw.js, the manifest and icons: revalidated on every use.
+	header @unhashed Cache-Control "no-cache"
+	header @hashed Cache-Control "public, max-age=31536000, immutable"
+	# WebAssembly.compileStreaming needs this exact type; set here rather than trusting a MIME table.
+	header @wasm Content-Type "application/wasm"
+	header @manifest Content-Type "application/manifest+json"
+
+	route {
+		respond /healthz 200 {
+			body "ok"
+		}
+		# Nothing of the app lives under api/; never answer it with the app.
+		respond /api 404
+		respond /api/* 404
+
+		# Files compressed at image build time (deploy/Dockerfile) are sent as they are; anything
+		# else is compressed on the fly.
+		encode zstd gzip
+
+		# /viewer and /source serve viewer.html and source.html, as the service worker does.
+		try_files {path} {path}.html
+		# Any other path without a file extension is a route of the app: index.html. A missing
+		# file (a path with an extension) is a 404, never the app.
+		@app {
+			not file
+			not path_regexp \.[^/]*$
+		}
+		rewrite @app /index.html
+
+		file_server {
+			precompressed br gzip
+		}
+	}
+
+	# A missing file: never cached (the immutable header above must not pin a 404 for a year).
+	handle_errors {
+		import security_headers
+		header Cache-Control "no-store"
+		respond "{err.status_code} {err.status_text}"
+	}
+}
