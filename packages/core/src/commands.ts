@@ -121,6 +121,15 @@ import {
 } from './schema';
 import { createAssembly, createPart } from './document';
 import { checkDocument, expressionVariableNames } from './validate';
+import {
+  CAM_SCOPE,
+  DOCUMENT_SCOPE,
+  PRINT_SCOPE,
+  assemblyScope,
+  drawingScope,
+  partScope,
+  type CounterTable,
+} from './scopes';
 
 /**
  * Commands: every change to a document is one of these plain, serializable objects. Applying a
@@ -975,35 +984,50 @@ function maxCounters(
  * (the document's, the print and CAM sections', and those of each part, assembly and drawing
  * both have) at the higher of the two values, so an id handed out after `past` is never handed
  * out again.
+ *
+ * A scope `current` no longer has (a part deleted since `past`) takes its counters from `past`,
+ * which may be below what it reached before it was deleted: the document does not remember a
+ * deleted scope's counters. `floor` fixes that: counters by scope (a sync server's or client's
+ * high-water mark, `maxCounters` over every head it saw), and every counter of the result is at
+ * least its `floor` value, so a restore never moves a counter back (ADR 0009 amendment, item 11).
  * The result is what `replaceDocument` takes.
  */
 export function restoredDocument(
   current: ManufaktureDocument,
   past: ManufaktureDocument,
+  floor: CounterTable = {},
 ): ManufaktureDocument {
   const parts = new Map(current.parts.map((p) => [p.id, p]));
   const assemblies = new Map(current.assemblies.map((a) => [a.id, a]));
   const drawings = new Map((current.drawings ?? []).map((d) => [d.id, d]));
+  const raised = (
+    scope: string,
+    a: Readonly<Record<string, number>>,
+    b: Readonly<Record<string, number>> | undefined,
+  ) => maxCounters(maxCounters(a, b), Object.hasOwn(floor, scope) ? floor[scope] : undefined);
   return {
     ...past,
     ...(past.drawings && {
       drawings: past.drawings.map((d) => ({
         ...d,
-        nextIds: maxCounters(d.nextIds, drawings.get(d.id)?.nextIds),
+        nextIds: raised(drawingScope(d.id), d.nextIds, drawings.get(d.id)?.nextIds),
       })),
     }),
     id: current.id,
     parts: past.parts.map((p) => ({
       ...p,
-      nextIds: maxCounters(p.nextIds, parts.get(p.id)?.nextIds),
+      nextIds: raised(partScope(p.id), p.nextIds, parts.get(p.id)?.nextIds),
     })),
     assemblies: past.assemblies.map((a) => ({
       ...a,
-      nextIds: maxCounters(a.nextIds, assemblies.get(a.id)?.nextIds),
+      nextIds: raised(assemblyScope(a.id), a.nextIds, assemblies.get(a.id)?.nextIds),
     })),
-    print: { ...past.print, nextIds: maxCounters(past.print.nextIds, current.print.nextIds) },
-    cam: { ...past.cam, nextIds: maxCounters(past.cam.nextIds, current.cam.nextIds) },
-    nextIds: maxCounters(past.nextIds, current.nextIds),
+    print: {
+      ...past.print,
+      nextIds: raised(PRINT_SCOPE, past.print.nextIds, current.print.nextIds),
+    },
+    cam: { ...past.cam, nextIds: raised(CAM_SCOPE, past.cam.nextIds, current.cam.nextIds) },
+    nextIds: raised(DOCUMENT_SCOPE, past.nextIds, current.nextIds),
   };
 }
 

@@ -1,0 +1,1495 @@
+{
+  "format": "manufakture-golden-log",
+  "version": 15,
+  "description": "Domain data set and removed, and a restore of an earlier state (replaceDocument built by restoredDocument), undone and redone.",
+  "base": {
+    "format": "manufakture",
+    "version": 15,
+    "namingScheme": 1,
+    "id": "doc-1",
+    "name": "Bracket",
+    "units": {
+      "length": {
+        "unit": "mm"
+      },
+      "angle": {
+        "unit": "deg"
+      }
+    },
+    "variables": [
+      {
+        "name": "thickness",
+        "expression": {
+          "source": "6mm",
+          "lengthUnit": "mm",
+          "angleUnit": "deg"
+        }
+      },
+      {
+        "name": "width",
+        "expression": {
+          "source": "40",
+          "lengthUnit": "mm",
+          "angleUnit": "deg"
+        }
+      },
+      {
+        "name": "height",
+        "expression": {
+          "source": "width / 2",
+          "lengthUnit": "mm",
+          "angleUnit": "deg"
+        }
+      }
+    ],
+    "parts": [
+      {
+        "id": "part#1",
+        "name": "Part 1",
+        "features": [
+          {
+            "id": "sketch#1",
+            "kind": "sketch",
+            "name": "Sketch 1",
+            "suppressed": false,
+            "plane": {
+              "type": "plane",
+              "origin": [0, 0, 0],
+              "normal": [0, 0, 1],
+              "xDir": [1, 0, 0]
+            },
+            "entities": [
+              {
+                "id": "e1",
+                "kind": "line",
+                "construction": false,
+                "start": [0, 0],
+                "end": [40, 0]
+              },
+              {
+                "id": "e2",
+                "kind": "line",
+                "construction": false,
+                "start": [40, 0],
+                "end": [40, 20]
+              },
+              {
+                "id": "e3",
+                "kind": "line",
+                "construction": false,
+                "start": [40, 20],
+                "end": [0, 20]
+              },
+              {
+                "id": "e4",
+                "kind": "line",
+                "construction": false,
+                "start": [0, 20],
+                "end": [0, 0]
+              }
+            ],
+            "constraints": [
+              {
+                "id": "k1",
+                "kind": "coincident",
+                "a": {
+                  "entity": "e1",
+                  "at": "end"
+                },
+                "b": {
+                  "entity": "e2",
+                  "at": "start"
+                }
+              },
+              {
+                "id": "k2",
+                "kind": "horizontal",
+                "line": "e1"
+              },
+              {
+                "id": "k3",
+                "kind": "distance",
+                "value": {
+                  "source": "width",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                "a": {
+                  "entity": "e1",
+                  "at": "start"
+                },
+                "b": {
+                  "entity": "e1",
+                  "at": "end"
+                }
+              },
+              {
+                "id": "k4",
+                "kind": "distance",
+                "value": {
+                  "source": "height",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                "a": {
+                  "entity": "e2",
+                  "at": "start"
+                },
+                "b": {
+                  "entity": "e2",
+                  "at": "end"
+                }
+              },
+              {
+                "id": "k5",
+                "kind": "coincident",
+                "a": {
+                  "entity": "e1",
+                  "at": "start"
+                },
+                "b": {
+                  "entity": "@origin"
+                }
+              }
+            ]
+          },
+          {
+            "id": "extrude#1",
+            "kind": "extrude",
+            "name": "Extrude 1",
+            "suppressed": false,
+            "profile": {
+              "sketch": "sketch#1"
+            },
+            "operation": "new",
+            "extent": {
+              "type": "blind",
+              "distance": {
+                "source": "thickness",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            },
+            "reverse": false
+          },
+          {
+            "id": "sketch#2",
+            "kind": "sketch",
+            "name": "Sketch 2",
+            "suppressed": false,
+            "plane": {
+              "type": "face",
+              "face": {
+                "id": "r1",
+                "ref": {
+                  "face": "extrude#1:cap:end"
+                }
+              }
+            },
+            "entities": [
+              {
+                "id": "e5",
+                "kind": "circle",
+                "construction": false,
+                "center": [20, 10],
+                "radius": 3
+              }
+            ],
+            "constraints": [
+              {
+                "id": "k6",
+                "kind": "diameter",
+                "entity": "e5",
+                "value": {
+                  "source": "6mm",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                }
+              }
+            ]
+          },
+          {
+            "id": "extrude#2",
+            "kind": "extrude",
+            "name": "Extrude 2",
+            "suppressed": false,
+            "profile": {
+              "sketch": "sketch#2"
+            },
+            "operation": "cut",
+            "extent": {
+              "type": "throughAll"
+            },
+            "reverse": false
+          },
+          {
+            "id": "fillet#1",
+            "kind": "fillet",
+            "name": "Fillet 1",
+            "suppressed": false,
+            "edges": [
+              {
+                "id": "r2",
+                "ref": {
+                  "faces": ["extrude#1:side:e1", "extrude#1:side:e2"]
+                }
+              }
+            ],
+            "radius": {
+              "source": "2mm",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            }
+          }
+        ],
+        "rollbackIndex": null,
+        "nextIds": {
+          "e": 6,
+          "extrude": 3,
+          "fillet": 2,
+          "k": 7,
+          "r": 3,
+          "sketch": 3
+        },
+        "bodies": []
+      }
+    ],
+    "assemblies": [],
+    "print": {
+      "setups": [],
+      "nextIds": {}
+    },
+    "fonts": [],
+    "cam": {
+      "tools": [],
+      "setups": [],
+      "nextIds": {}
+    },
+    "nextIds": {
+      "part": 2
+    }
+  },
+  "entries": [
+    {
+      "cause": "execute",
+      "label": "Domain data",
+      "command": {
+        "type": "setDomainData",
+        "namespace": "construction",
+        "schemaVersion": 1,
+        "data": {
+          "storeys": [
+            {
+              "name": "Ground",
+              "height": 2700
+            }
+          ]
+        }
+      },
+      "at": "2026-10-04T08:00:01.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Domain data",
+      "command": {
+        "type": "setDomainData",
+        "namespace": "construction"
+      },
+      "at": "2026-10-04T08:00:02.000Z"
+    },
+    {
+      "cause": "redo",
+      "label": "Domain data",
+      "command": {
+        "type": "setDomainData",
+        "namespace": "construction",
+        "schemaVersion": 1,
+        "data": {
+          "storeys": [
+            {
+              "name": "Ground",
+              "height": 2700
+            }
+          ]
+        }
+      },
+      "at": "2026-10-04T08:00:03.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Delete fillet",
+      "command": {
+        "type": "deleteFeature",
+        "partId": "part#1",
+        "featureId": "fillet#1"
+      },
+      "at": "2026-10-04T08:00:04.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Second part",
+      "command": {
+        "type": "addPart",
+        "partId": "part#2",
+        "name": "Lid"
+      },
+      "at": "2026-10-04T08:00:05.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Restore",
+      "command": {
+        "type": "replaceDocument",
+        "document": {
+          "format": "manufakture",
+          "version": 15,
+          "namingScheme": 1,
+          "id": "doc-1",
+          "name": "Bracket",
+          "units": {
+            "length": {
+              "unit": "mm"
+            },
+            "angle": {
+              "unit": "deg"
+            }
+          },
+          "variables": [
+            {
+              "name": "thickness",
+              "expression": {
+                "source": "6mm",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            },
+            {
+              "name": "width",
+              "expression": {
+                "source": "40",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            },
+            {
+              "name": "height",
+              "expression": {
+                "source": "width / 2",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            }
+          ],
+          "parts": [
+            {
+              "id": "part#1",
+              "name": "Part 1",
+              "features": [
+                {
+                  "id": "sketch#1",
+                  "kind": "sketch",
+                  "name": "Sketch 1",
+                  "suppressed": false,
+                  "plane": {
+                    "type": "plane",
+                    "origin": [0, 0, 0],
+                    "normal": [0, 0, 1],
+                    "xDir": [1, 0, 0]
+                  },
+                  "entities": [
+                    {
+                      "id": "e1",
+                      "kind": "line",
+                      "construction": false,
+                      "start": [0, 0],
+                      "end": [40, 0]
+                    },
+                    {
+                      "id": "e2",
+                      "kind": "line",
+                      "construction": false,
+                      "start": [40, 0],
+                      "end": [40, 20]
+                    },
+                    {
+                      "id": "e3",
+                      "kind": "line",
+                      "construction": false,
+                      "start": [40, 20],
+                      "end": [0, 20]
+                    },
+                    {
+                      "id": "e4",
+                      "kind": "line",
+                      "construction": false,
+                      "start": [0, 20],
+                      "end": [0, 0]
+                    }
+                  ],
+                  "constraints": [
+                    {
+                      "id": "k1",
+                      "kind": "coincident",
+                      "a": {
+                        "entity": "e1",
+                        "at": "end"
+                      },
+                      "b": {
+                        "entity": "e2",
+                        "at": "start"
+                      }
+                    },
+                    {
+                      "id": "k2",
+                      "kind": "horizontal",
+                      "line": "e1"
+                    },
+                    {
+                      "id": "k3",
+                      "kind": "distance",
+                      "value": {
+                        "source": "width",
+                        "lengthUnit": "mm",
+                        "angleUnit": "deg"
+                      },
+                      "a": {
+                        "entity": "e1",
+                        "at": "start"
+                      },
+                      "b": {
+                        "entity": "e1",
+                        "at": "end"
+                      }
+                    },
+                    {
+                      "id": "k4",
+                      "kind": "distance",
+                      "value": {
+                        "source": "height",
+                        "lengthUnit": "mm",
+                        "angleUnit": "deg"
+                      },
+                      "a": {
+                        "entity": "e2",
+                        "at": "start"
+                      },
+                      "b": {
+                        "entity": "e2",
+                        "at": "end"
+                      }
+                    },
+                    {
+                      "id": "k5",
+                      "kind": "coincident",
+                      "a": {
+                        "entity": "e1",
+                        "at": "start"
+                      },
+                      "b": {
+                        "entity": "@origin"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "id": "extrude#1",
+                  "kind": "extrude",
+                  "name": "Extrude 1",
+                  "suppressed": false,
+                  "profile": {
+                    "sketch": "sketch#1"
+                  },
+                  "operation": "new",
+                  "extent": {
+                    "type": "blind",
+                    "distance": {
+                      "source": "thickness",
+                      "lengthUnit": "mm",
+                      "angleUnit": "deg"
+                    }
+                  },
+                  "reverse": false
+                },
+                {
+                  "id": "sketch#2",
+                  "kind": "sketch",
+                  "name": "Sketch 2",
+                  "suppressed": false,
+                  "plane": {
+                    "type": "face",
+                    "face": {
+                      "id": "r1",
+                      "ref": {
+                        "face": "extrude#1:cap:end"
+                      }
+                    }
+                  },
+                  "entities": [
+                    {
+                      "id": "e5",
+                      "kind": "circle",
+                      "construction": false,
+                      "center": [20, 10],
+                      "radius": 3
+                    }
+                  ],
+                  "constraints": [
+                    {
+                      "id": "k6",
+                      "kind": "diameter",
+                      "entity": "e5",
+                      "value": {
+                        "source": "6mm",
+                        "lengthUnit": "mm",
+                        "angleUnit": "deg"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "id": "extrude#2",
+                  "kind": "extrude",
+                  "name": "Extrude 2",
+                  "suppressed": false,
+                  "profile": {
+                    "sketch": "sketch#2"
+                  },
+                  "operation": "cut",
+                  "extent": {
+                    "type": "throughAll"
+                  },
+                  "reverse": false
+                },
+                {
+                  "id": "fillet#1",
+                  "kind": "fillet",
+                  "name": "Fillet 1",
+                  "suppressed": false,
+                  "edges": [
+                    {
+                      "id": "r2",
+                      "ref": {
+                        "faces": ["extrude#1:side:e1", "extrude#1:side:e2"]
+                      }
+                    }
+                  ],
+                  "radius": {
+                    "source": "2mm",
+                    "lengthUnit": "mm",
+                    "angleUnit": "deg"
+                  }
+                }
+              ],
+              "rollbackIndex": null,
+              "nextIds": {
+                "sketch": 3,
+                "e": 6,
+                "k": 7,
+                "extrude": 3,
+                "r": 3,
+                "fillet": 2
+              },
+              "bodies": []
+            }
+          ],
+          "assemblies": [],
+          "print": {
+            "setups": [],
+            "nextIds": {}
+          },
+          "fonts": [],
+          "cam": {
+            "tools": [],
+            "setups": [],
+            "nextIds": {}
+          },
+          "nextIds": {
+            "part": 3
+          },
+          "domains": {
+            "construction": {
+              "schemaVersion": 1,
+              "data": {
+                "storeys": [
+                  {
+                    "name": "Ground",
+                    "height": 2700
+                  }
+                ]
+              }
+            }
+          }
+        }
+      },
+      "at": "2026-10-04T08:00:06.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Restore",
+      "command": {
+        "type": "replaceDocument",
+        "document": {
+          "format": "manufakture",
+          "version": 15,
+          "namingScheme": 1,
+          "id": "doc-1",
+          "name": "Bracket",
+          "units": {
+            "length": {
+              "unit": "mm"
+            },
+            "angle": {
+              "unit": "deg"
+            }
+          },
+          "variables": [
+            {
+              "name": "thickness",
+              "expression": {
+                "source": "6mm",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            },
+            {
+              "name": "width",
+              "expression": {
+                "source": "40",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            },
+            {
+              "name": "height",
+              "expression": {
+                "source": "width / 2",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            }
+          ],
+          "parts": [
+            {
+              "id": "part#1",
+              "name": "Part 1",
+              "features": [
+                {
+                  "id": "sketch#1",
+                  "kind": "sketch",
+                  "name": "Sketch 1",
+                  "suppressed": false,
+                  "plane": {
+                    "type": "plane",
+                    "origin": [0, 0, 0],
+                    "normal": [0, 0, 1],
+                    "xDir": [1, 0, 0]
+                  },
+                  "entities": [
+                    {
+                      "id": "e1",
+                      "kind": "line",
+                      "construction": false,
+                      "start": [0, 0],
+                      "end": [40, 0]
+                    },
+                    {
+                      "id": "e2",
+                      "kind": "line",
+                      "construction": false,
+                      "start": [40, 0],
+                      "end": [40, 20]
+                    },
+                    {
+                      "id": "e3",
+                      "kind": "line",
+                      "construction": false,
+                      "start": [40, 20],
+                      "end": [0, 20]
+                    },
+                    {
+                      "id": "e4",
+                      "kind": "line",
+                      "construction": false,
+                      "start": [0, 20],
+                      "end": [0, 0]
+                    }
+                  ],
+                  "constraints": [
+                    {
+                      "id": "k1",
+                      "kind": "coincident",
+                      "a": {
+                        "entity": "e1",
+                        "at": "end"
+                      },
+                      "b": {
+                        "entity": "e2",
+                        "at": "start"
+                      }
+                    },
+                    {
+                      "id": "k2",
+                      "kind": "horizontal",
+                      "line": "e1"
+                    },
+                    {
+                      "id": "k3",
+                      "kind": "distance",
+                      "value": {
+                        "source": "width",
+                        "lengthUnit": "mm",
+                        "angleUnit": "deg"
+                      },
+                      "a": {
+                        "entity": "e1",
+                        "at": "start"
+                      },
+                      "b": {
+                        "entity": "e1",
+                        "at": "end"
+                      }
+                    },
+                    {
+                      "id": "k4",
+                      "kind": "distance",
+                      "value": {
+                        "source": "height",
+                        "lengthUnit": "mm",
+                        "angleUnit": "deg"
+                      },
+                      "a": {
+                        "entity": "e2",
+                        "at": "start"
+                      },
+                      "b": {
+                        "entity": "e2",
+                        "at": "end"
+                      }
+                    },
+                    {
+                      "id": "k5",
+                      "kind": "coincident",
+                      "a": {
+                        "entity": "e1",
+                        "at": "start"
+                      },
+                      "b": {
+                        "entity": "@origin"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "id": "extrude#1",
+                  "kind": "extrude",
+                  "name": "Extrude 1",
+                  "suppressed": false,
+                  "profile": {
+                    "sketch": "sketch#1"
+                  },
+                  "operation": "new",
+                  "extent": {
+                    "type": "blind",
+                    "distance": {
+                      "source": "thickness",
+                      "lengthUnit": "mm",
+                      "angleUnit": "deg"
+                    }
+                  },
+                  "reverse": false
+                },
+                {
+                  "id": "sketch#2",
+                  "kind": "sketch",
+                  "name": "Sketch 2",
+                  "suppressed": false,
+                  "plane": {
+                    "type": "face",
+                    "face": {
+                      "id": "r1",
+                      "ref": {
+                        "face": "extrude#1:cap:end"
+                      }
+                    }
+                  },
+                  "entities": [
+                    {
+                      "id": "e5",
+                      "kind": "circle",
+                      "construction": false,
+                      "center": [20, 10],
+                      "radius": 3
+                    }
+                  ],
+                  "constraints": [
+                    {
+                      "id": "k6",
+                      "kind": "diameter",
+                      "entity": "e5",
+                      "value": {
+                        "source": "6mm",
+                        "lengthUnit": "mm",
+                        "angleUnit": "deg"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "id": "extrude#2",
+                  "kind": "extrude",
+                  "name": "Extrude 2",
+                  "suppressed": false,
+                  "profile": {
+                    "sketch": "sketch#2"
+                  },
+                  "operation": "cut",
+                  "extent": {
+                    "type": "throughAll"
+                  },
+                  "reverse": false
+                }
+              ],
+              "rollbackIndex": null,
+              "nextIds": {
+                "sketch": 3,
+                "e": 6,
+                "k": 7,
+                "extrude": 3,
+                "r": 3,
+                "fillet": 2
+              },
+              "bodies": []
+            },
+            {
+              "id": "part#2",
+              "name": "Lid",
+              "features": [],
+              "rollbackIndex": null,
+              "nextIds": {},
+              "bodies": []
+            }
+          ],
+          "assemblies": [],
+          "print": {
+            "setups": [],
+            "nextIds": {}
+          },
+          "fonts": [],
+          "cam": {
+            "tools": [],
+            "setups": [],
+            "nextIds": {}
+          },
+          "nextIds": {
+            "part": 3
+          },
+          "domains": {
+            "construction": {
+              "schemaVersion": 1,
+              "data": {
+                "storeys": [
+                  {
+                    "name": "Ground",
+                    "height": 2700
+                  }
+                ]
+              }
+            }
+          }
+        }
+      },
+      "at": "2026-10-04T08:00:07.000Z"
+    },
+    {
+      "cause": "redo",
+      "label": "Restore",
+      "command": {
+        "type": "replaceDocument",
+        "document": {
+          "format": "manufakture",
+          "version": 15,
+          "namingScheme": 1,
+          "id": "doc-1",
+          "name": "Bracket",
+          "units": {
+            "length": {
+              "unit": "mm"
+            },
+            "angle": {
+              "unit": "deg"
+            }
+          },
+          "variables": [
+            {
+              "name": "thickness",
+              "expression": {
+                "source": "6mm",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            },
+            {
+              "name": "width",
+              "expression": {
+                "source": "40",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            },
+            {
+              "name": "height",
+              "expression": {
+                "source": "width / 2",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            }
+          ],
+          "parts": [
+            {
+              "id": "part#1",
+              "name": "Part 1",
+              "features": [
+                {
+                  "id": "sketch#1",
+                  "kind": "sketch",
+                  "name": "Sketch 1",
+                  "suppressed": false,
+                  "plane": {
+                    "type": "plane",
+                    "origin": [0, 0, 0],
+                    "normal": [0, 0, 1],
+                    "xDir": [1, 0, 0]
+                  },
+                  "entities": [
+                    {
+                      "id": "e1",
+                      "kind": "line",
+                      "construction": false,
+                      "start": [0, 0],
+                      "end": [40, 0]
+                    },
+                    {
+                      "id": "e2",
+                      "kind": "line",
+                      "construction": false,
+                      "start": [40, 0],
+                      "end": [40, 20]
+                    },
+                    {
+                      "id": "e3",
+                      "kind": "line",
+                      "construction": false,
+                      "start": [40, 20],
+                      "end": [0, 20]
+                    },
+                    {
+                      "id": "e4",
+                      "kind": "line",
+                      "construction": false,
+                      "start": [0, 20],
+                      "end": [0, 0]
+                    }
+                  ],
+                  "constraints": [
+                    {
+                      "id": "k1",
+                      "kind": "coincident",
+                      "a": {
+                        "entity": "e1",
+                        "at": "end"
+                      },
+                      "b": {
+                        "entity": "e2",
+                        "at": "start"
+                      }
+                    },
+                    {
+                      "id": "k2",
+                      "kind": "horizontal",
+                      "line": "e1"
+                    },
+                    {
+                      "id": "k3",
+                      "kind": "distance",
+                      "value": {
+                        "source": "width",
+                        "lengthUnit": "mm",
+                        "angleUnit": "deg"
+                      },
+                      "a": {
+                        "entity": "e1",
+                        "at": "start"
+                      },
+                      "b": {
+                        "entity": "e1",
+                        "at": "end"
+                      }
+                    },
+                    {
+                      "id": "k4",
+                      "kind": "distance",
+                      "value": {
+                        "source": "height",
+                        "lengthUnit": "mm",
+                        "angleUnit": "deg"
+                      },
+                      "a": {
+                        "entity": "e2",
+                        "at": "start"
+                      },
+                      "b": {
+                        "entity": "e2",
+                        "at": "end"
+                      }
+                    },
+                    {
+                      "id": "k5",
+                      "kind": "coincident",
+                      "a": {
+                        "entity": "e1",
+                        "at": "start"
+                      },
+                      "b": {
+                        "entity": "@origin"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "id": "extrude#1",
+                  "kind": "extrude",
+                  "name": "Extrude 1",
+                  "suppressed": false,
+                  "profile": {
+                    "sketch": "sketch#1"
+                  },
+                  "operation": "new",
+                  "extent": {
+                    "type": "blind",
+                    "distance": {
+                      "source": "thickness",
+                      "lengthUnit": "mm",
+                      "angleUnit": "deg"
+                    }
+                  },
+                  "reverse": false
+                },
+                {
+                  "id": "sketch#2",
+                  "kind": "sketch",
+                  "name": "Sketch 2",
+                  "suppressed": false,
+                  "plane": {
+                    "type": "face",
+                    "face": {
+                      "id": "r1",
+                      "ref": {
+                        "face": "extrude#1:cap:end"
+                      }
+                    }
+                  },
+                  "entities": [
+                    {
+                      "id": "e5",
+                      "kind": "circle",
+                      "construction": false,
+                      "center": [20, 10],
+                      "radius": 3
+                    }
+                  ],
+                  "constraints": [
+                    {
+                      "id": "k6",
+                      "kind": "diameter",
+                      "entity": "e5",
+                      "value": {
+                        "source": "6mm",
+                        "lengthUnit": "mm",
+                        "angleUnit": "deg"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "id": "extrude#2",
+                  "kind": "extrude",
+                  "name": "Extrude 2",
+                  "suppressed": false,
+                  "profile": {
+                    "sketch": "sketch#2"
+                  },
+                  "operation": "cut",
+                  "extent": {
+                    "type": "throughAll"
+                  },
+                  "reverse": false
+                },
+                {
+                  "id": "fillet#1",
+                  "kind": "fillet",
+                  "name": "Fillet 1",
+                  "suppressed": false,
+                  "edges": [
+                    {
+                      "id": "r2",
+                      "ref": {
+                        "faces": ["extrude#1:side:e1", "extrude#1:side:e2"]
+                      }
+                    }
+                  ],
+                  "radius": {
+                    "source": "2mm",
+                    "lengthUnit": "mm",
+                    "angleUnit": "deg"
+                  }
+                }
+              ],
+              "rollbackIndex": null,
+              "nextIds": {
+                "sketch": 3,
+                "e": 6,
+                "k": 7,
+                "extrude": 3,
+                "r": 3,
+                "fillet": 2
+              },
+              "bodies": []
+            }
+          ],
+          "assemblies": [],
+          "print": {
+            "setups": [],
+            "nextIds": {}
+          },
+          "fonts": [],
+          "cam": {
+            "tools": [],
+            "setups": [],
+            "nextIds": {}
+          },
+          "domains": {
+            "construction": {
+              "schemaVersion": 1,
+              "data": {
+                "storeys": [
+                  {
+                    "name": "Ground",
+                    "height": 2700
+                  }
+                ]
+              }
+            }
+          },
+          "nextIds": {
+            "part": 3
+          }
+        }
+      },
+      "at": "2026-10-04T08:00:08.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Clear domain data",
+      "command": {
+        "type": "setDomainData",
+        "namespace": "construction"
+      },
+      "at": "2026-10-04T08:00:09.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Clear domain data",
+      "command": {
+        "type": "setDomainData",
+        "namespace": "construction",
+        "schemaVersion": 1,
+        "data": {
+          "storeys": [
+            {
+              "name": "Ground",
+              "height": 2700
+            }
+          ]
+        }
+      },
+      "at": "2026-10-04T08:00:10.000Z"
+    },
+    {
+      "cause": "redo",
+      "label": "Clear domain data",
+      "command": {
+        "type": "setDomainData",
+        "namespace": "construction"
+      },
+      "at": "2026-10-04T08:00:11.000Z"
+    }
+  ],
+  "expected": {
+    "format": "manufakture",
+    "version": 15,
+    "namingScheme": 1,
+    "id": "doc-1",
+    "name": "Bracket",
+    "units": {
+      "length": {
+        "unit": "mm"
+      },
+      "angle": {
+        "unit": "deg"
+      }
+    },
+    "variables": [
+      {
+        "name": "thickness",
+        "expression": {
+          "source": "6mm",
+          "lengthUnit": "mm",
+          "angleUnit": "deg"
+        }
+      },
+      {
+        "name": "width",
+        "expression": {
+          "source": "40",
+          "lengthUnit": "mm",
+          "angleUnit": "deg"
+        }
+      },
+      {
+        "name": "height",
+        "expression": {
+          "source": "width / 2",
+          "lengthUnit": "mm",
+          "angleUnit": "deg"
+        }
+      }
+    ],
+    "parts": [
+      {
+        "id": "part#1",
+        "name": "Part 1",
+        "features": [
+          {
+            "id": "sketch#1",
+            "kind": "sketch",
+            "name": "Sketch 1",
+            "suppressed": false,
+            "plane": {
+              "type": "plane",
+              "origin": [0, 0, 0],
+              "normal": [0, 0, 1],
+              "xDir": [1, 0, 0]
+            },
+            "entities": [
+              {
+                "id": "e1",
+                "kind": "line",
+                "construction": false,
+                "start": [0, 0],
+                "end": [40, 0]
+              },
+              {
+                "id": "e2",
+                "kind": "line",
+                "construction": false,
+                "start": [40, 0],
+                "end": [40, 20]
+              },
+              {
+                "id": "e3",
+                "kind": "line",
+                "construction": false,
+                "start": [40, 20],
+                "end": [0, 20]
+              },
+              {
+                "id": "e4",
+                "kind": "line",
+                "construction": false,
+                "start": [0, 20],
+                "end": [0, 0]
+              }
+            ],
+            "constraints": [
+              {
+                "id": "k1",
+                "kind": "coincident",
+                "a": {
+                  "entity": "e1",
+                  "at": "end"
+                },
+                "b": {
+                  "entity": "e2",
+                  "at": "start"
+                }
+              },
+              {
+                "id": "k2",
+                "kind": "horizontal",
+                "line": "e1"
+              },
+              {
+                "id": "k3",
+                "kind": "distance",
+                "value": {
+                  "source": "width",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                "a": {
+                  "entity": "e1",
+                  "at": "start"
+                },
+                "b": {
+                  "entity": "e1",
+                  "at": "end"
+                }
+              },
+              {
+                "id": "k4",
+                "kind": "distance",
+                "value": {
+                  "source": "height",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                "a": {
+                  "entity": "e2",
+                  "at": "start"
+                },
+                "b": {
+                  "entity": "e2",
+                  "at": "end"
+                }
+              },
+              {
+                "id": "k5",
+                "kind": "coincident",
+                "a": {
+                  "entity": "e1",
+                  "at": "start"
+                },
+                "b": {
+                  "entity": "@origin"
+                }
+              }
+            ]
+          },
+          {
+            "id": "extrude#1",
+            "kind": "extrude",
+            "name": "Extrude 1",
+            "suppressed": false,
+            "profile": {
+              "sketch": "sketch#1"
+            },
+            "operation": "new",
+            "extent": {
+              "type": "blind",
+              "distance": {
+                "source": "thickness",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            },
+            "reverse": false
+          },
+          {
+            "id": "sketch#2",
+            "kind": "sketch",
+            "name": "Sketch 2",
+            "suppressed": false,
+            "plane": {
+              "type": "face",
+              "face": {
+                "id": "r1",
+                "ref": {
+                  "face": "extrude#1:cap:end"
+                }
+              }
+            },
+            "entities": [
+              {
+                "id": "e5",
+                "kind": "circle",
+                "construction": false,
+                "center": [20, 10],
+                "radius": 3
+              }
+            ],
+            "constraints": [
+              {
+                "id": "k6",
+                "kind": "diameter",
+                "entity": "e5",
+                "value": {
+                  "source": "6mm",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                }
+              }
+            ]
+          },
+          {
+            "id": "extrude#2",
+            "kind": "extrude",
+            "name": "Extrude 2",
+            "suppressed": false,
+            "profile": {
+              "sketch": "sketch#2"
+            },
+            "operation": "cut",
+            "extent": {
+              "type": "throughAll"
+            },
+            "reverse": false
+          },
+          {
+            "id": "fillet#1",
+            "kind": "fillet",
+            "name": "Fillet 1",
+            "suppressed": false,
+            "edges": [
+              {
+                "id": "r2",
+                "ref": {
+                  "faces": ["extrude#1:side:e1", "extrude#1:side:e2"]
+                }
+              }
+            ],
+            "radius": {
+              "source": "2mm",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            }
+          }
+        ],
+        "rollbackIndex": null,
+        "nextIds": {
+          "e": 6,
+          "extrude": 3,
+          "fillet": 2,
+          "k": 7,
+          "r": 3,
+          "sketch": 3
+        },
+        "bodies": []
+      }
+    ],
+    "assemblies": [],
+    "print": {
+      "setups": [],
+      "nextIds": {}
+    },
+    "fonts": [],
+    "cam": {
+      "tools": [],
+      "setups": [],
+      "nextIds": {}
+    },
+    "nextIds": {
+      "part": 3
+    }
+  }
+}

@@ -1,6 +1,6 @@
 # 0009: Sync model: a server-ordered command log, validated by core, rebased on the client
 
-- Status: proposed
+- Status: accepted, amended 2026-10-04
 - Date: 2026-09-26
 
 ## Context
@@ -72,7 +72,11 @@ What it means for us:
 
    Imported files stay blobs by SHA-256, uploaded before the entry that names them, and the server refuses an entry that names a blob it does not have (persistence README, save step 2, carried over).
 
+   Amended 2026-10-04 after the T7.0b spike: the entry also carries `created`, the ids it allocates, and the server checks them before core ([amendment](#amendment-the-t70b-spike-and-the-maintainers-answers-t70d-1082), items 1 and 2).
+
 3. **The server validates with core.** On submit the server applies the entry's command to its head with `applyCommand`. If it applies, the entry gets the next revision and is broadcast; if not, the server refuses it with the `CoreError`. The server never regenerates geometry and never needs OCCT. The server runs a core whose `FORMAT_VERSION` and command schema are at least the client's; an older client is refused with an upgrade message (as a newer file is refused today, ADR 0004 decision 2), and a newer client is refused until the server is upgraded.
+
+   Amended 2026-10-04 after the T7.0b spike: the server also refuses any counter regression after `applyCommand` ([amendment](#amendment-the-t70b-spike-and-the-maintainers-answers-t70d-1082), item 3).
 
 4. **Clients rebase by replay.** A client keeps the last confirmed document (at server revision `c`) and a queue of its own entries the server has not confirmed, each either **in flight** (sent, so the server may already have ordered them) or **unsent**. The queue keeps its logical order, the order the user made the commands in; entries are sent in that order, so the in-flight entries come first, except that a remapped refused entry (A' in decision 2) takes its old place, ahead of in-flight entries that were sent after it. It shows confirmed plus pending, minus held entries and entries it knows were refused (a refused entry is shown again only once it returns remapped). Entries arrive in revision order, the client's own included. An arriving entry that carries the client's own `clientId` is first matched to the in-flight entry with the same `clientSeq`: that is its acknowledgement, and the entry becomes confirmed exactly as it was sent, with no remap. Every other arriving entry is applied to the confirmed document. Then the client replays its remaining entries on top, one by one, with `applyCommand`:
 
@@ -84,6 +88,8 @@ What it means for us:
    A dropped entry is removed from the queue, reported to the user by its label and error ("Fillet 2: the edge it names was deleted by another change"), and kept for decision 6. Rebasing never edits a confirmed entry.
 
    A client that persists its queue across a reload (T7.1d) saves the whole queue state, not only the entries: **the pending remap tables and entry states are part of the saved queue**, together with the entries it knows were refused and its latest accepted `clientSeq`, and they are saved in one step with the confirmed document they belong to. Without them, a reload after A's `id-reused` refusal and before B's verdict (decision 2) would lose A's table and the knowledge that A was refused, and B would be replayed as an edit of the other client's `extrude#3`.
+
+   Amended 2026-10-04 after the T7.0b spike: an in-flight entry whose created ids are below the confirmed counters is known refused at once, and verdicts belong to one `clientSeq` ([amendment](#amendment-the-t70b-spike-and-the-maintainers-answers-t70d-1082), items 4 and 5).
 
 5. **Ids are remapped on rebase.** An entry's ids may be renamed only while the server cannot have applied it under its `clientSeq`: when it is unsent, or after the server refused it (decision 4). When such an entry's fresh ids are no longer fresh (another client's entry took `extrude#3`), the client allocates the next free ids from the rebased counters and rewrites them through one table: in that entry, in every later unsent entry (a later in-flight or doomed entry keeps the table and gets the rewrite when it returns to unsent, decision 4), in the inverses and redo entries of the local undo stack that name them (decision 8), and in app state that points at them (selection, an open dialog). The table is keyed by counter scope, because the same id can exist in several scopes:
 
@@ -102,19 +108,29 @@ What it means for us:
 
    Edge references store face names, so they are covered by the same rules. Once an entry is accepted its ids are final: confirmed ids are never renamed, so ADR 0004 decision 4 holds on the server and an id is used once, for good. The server refuses `id-reused` as it does today, so a client bug cannot slip a duplicate in.
 
+   Amended 2026-10-04 after the T7.0b spike: one simultaneous rename table over the whole queue replaces per-entry tables, dropped entries' ids become tombstones, and renames can reverse the code-unit order of face names ([amendment](#amendment-the-t70b-spike-and-the-maintainers-answers-t70d-1082), items 6 to 9).
+
 6. **Nothing typed is lost.** When a rebase drops commands, the client first saves its pre-rebase state (confirmed plus every pending command, as it looked before the others' entries arrived) as a local branch (T2.5c, #989) named after the time it diverged, and says so. The user can compare it (T2.5b, #988) and copy work across. The same rule covers a device that was offline for a long time.
 
 7. **Concurrent edits of one feature: the later arrival wins, whole.** `editFeature` carries the whole feature, so if two clients edit the same fillet, the one the server orders second replaces the first. This is last-writer-wins at feature granularity, like Figma's per-property rule one level coarser. The earlier writer is told ("Fillet 2 was changed by another edit") through the same notice as decision 4. Field-level patches are a later refinement, not part of M7.
+
+   Amended 2026-10-04 after the T7.0b spike: a whole-feature edit that re-introduces a sub-id a concurrent edit removed cannot win; it is refused and dropped ([amendment](#amendment-the-t70b-spike-and-the-maintainers-answers-t70d-1082), item 10).
 
 8. **Undo stays local and selective.** Each client's undo stack holds its own commands' inverses. Undo applies an inverse only when the object it restores has not been changed by anyone else since the command being undone (compared by canonical JSON of the feature, variable or setting); otherwise it refuses with "changed by another edit" rather than overwrite someone's later work. Undo of a command that is still unsent just removes it from the queue; undo of an in-flight command is submitted as its inverse, like any other command, with the `prevSeq` of decision 2: the entry before it in the queue, which is the command it undoes or an entry after that command (if that command is doomed, the inverse is held behind it and not sent until it returns, so it never skips past it). So the inverse is refused as `predecessor-refused` whenever that command is refused, and is never applied on its own. If the command is then remapped, the inverse is remapped with it and resubmitted; if the command is dropped, the inverse is removed from the queue without a notice, since there is nothing left to undo. When a rebase remaps ids (decision 5), the undo and redo stacks are rewritten with the same table, so an undo acts on the renamed feature and not on another client's feature that took the old id. A held entry (held, doomed, or known refused and not yet remapped) is not on the visible undo stack: it is hidden like the entry itself and comes back, with its remapped inverse, when it returns to unsent or lands, or leaves the stack when it is dropped. Undo acts on the newest shown command; if a held entry comes after that command in the queue, undo waits (disabled, with a "waiting for the server" hint) until the held entries are resolved, rather than put an inverse after commands the user cannot see.
 
 9. **Versions and branches ride on the log.** A named version (T2.5a, #987) records a server revision and is an immutable, append-only record, so syncing it is a plain upload. A branch (T2.5c, #989) is a separate server log that starts from a version. Merging branch B into A is the rebase of decision 4 with B's commands since the fork as the pending queue, and the same notices; this is the M2 follow-up the M2 plan deferred.
 
+   Amended 2026-10-04 after the T7.0b spike: a restore (`replaceDocument`) is rebased as its intent, re-derived on the head at every replay ([amendment](#amendment-the-t70b-spike-and-the-maintainers-answers-t70d-1082), item 11).
+
 10. **The local library stays the first store.** Sync is optional per document. A synced document still lives in the browser (persistence README) and opens offline; the server is one more replica, not the source the app waits for. Snapshots on the server exist so a new device does not replay from revision 1 (every `CHECKPOINT_EVERY` revisions, the constant T2.5a introduces).
 
 11. **Transport and storage**, for T7.1c: HTTP for submit, pull (entries since a revision) and blobs; one WebSocket per open document for push, with pull as the fallback. The server is Node with Fastify (5.12.5, MIT) and a storage interface with a SQLite implementation first (`better-sqlite3` 13.0.3, MIT; SQLite is public domain) and Postgres (`pg` 8.23.0, MIT) as a second implementation if hosting calls for it. All are GPLv3-compatible; licenses to be re-read from the installed packages per ADR 0006.
 
+Amended 2026-10-04 after the T7.0b spike and the maintainer's answers: submits prefer an ordered channel, and M7 builds the SQLite store only ([amendment](#amendment-the-t70b-spike-and-the-maintainers-answers-t70d-1082), items 12 and 13).
+
 12. **What stays open for the maintainer.** This ADR stays **proposed** until these are decided: whether a hosted sync service is run at all or the server is self-host only; accounts and authentication (a single-user token for self-hosting is enough for the first tasks); and Postgres versus SQLite for a hosted service. The recommendation is self-hosted and single-user first, SQLite, then multi-user when the rebase notices have been used in practice.
+
+Answered 2026-10-04 by the maintainer, as recommended: self-host first, one user per instance with one bearer token, no accounts, SQLite; a hosted service is deferred, not ruled out, and Postgres (T7.1g) and several editors (T7.1h) are skipped in M7 ([product decision 0001](../decisions/0001-m7-hosting-accounts-and-sharing.md), decisions 1 to 3). The ADR is accepted.
 
 ## Alternatives considered
 
@@ -136,3 +152,45 @@ What it means for us:
 - The server is small: no geometry, no WebAssembly, core plus storage plus transport. It can run on modest hardware, and its tests run in Node like the packages.
 - The server is GPL-3.0-or-later like everything else. Under [ADR 0006](0006-licensing.md), GPL (not AGPL) does not oblige a host to publish server changes, but the app served to browsers is distributed, so a hosted instance must offer the app's source.
 - Threat model and security review are needed before anything is exposed beyond localhost: authentication, per-document authorisation, entry and blob size limits, rate limits, and validation cost (a large `batch` or `replaceDocument` is core work on the server's thread). The M7 plan flags each task that needs it.
+
+## Amendment: the T7.0b spike and the maintainer's answers (T7.0d, #1082)
+
+Amended 2026-10-04 after the T7.0b spike. The [T7.0b spike](../spikes/T7.0b-sync.md) ran this ADR on real core commands: 180 seeded runs of 9 scenarios with 2 to 5 clients, 48,800 random commands, random delivery orders, 15 % message loss, an offline stretch and restores. Every client converged to the server (180/180), every one of the 42,560 server heads passed `checkDocument`, no counter went below its high-water mark, and no command was dropped for an id collision (the remap renamed 973,098 ids in 25,462 entries). It found five protocol additions, each as a failure of an earlier version of its harness, and three limitations. Nothing it found pushes the model toward server-assigned ids or replica-unique ids, so decisions 1 and 5's choice of client-chosen ids with a client remap stands, and so does the rest of the text above, except where an item here says otherwise. The ADR is accepted with this amendment; the maintainer's answers to decision 12 are in [product decision 0001](../decisions/0001-m7-hosting-accounts-and-sharing.md).
+
+Decision 2, the sync entry:
+
+1. **The entry carries the ids it creates.** A sync entry gains `created`: the ids the command allocates, per scope and counter, computed by the client against the document it made the command on, and rewritten with the command when it is remapped. It is part of the entry's storage form and of the sync entry schema (T7.1a). The server cannot compute it: `editFeature` carries the whole feature, and core counts an id as new only if the head lacks it, so two concurrent edits that each add entity `e10` to one sketch are both accepted by core, the second taking over the first one's entity. The spike's guard caught 176 such takeovers; without it, one scenario had 17 misbound references in 20 runs and 29.3 % drops against 19.0 %.
+2. **The server checks `created` before core.** The order of decision 2 becomes: a recorded `(clientId, clientSeq)` gets its recorded outcome; an unknown `prevSeq` gets `predecessor-unknown`; a refused `prevSeq` gets `predecessor-refused`; a created id below the server's counter is refused as `id-reused`; then core (decision 3); then the counter guard (item 3).
+
+Decision 3, the server:
+
+3. **The server refuses counter regressions.** After `applyCommand` and before accepting, the server compares every counter of the new head with its high-water mark and refuses the entry if any is lower, a part scope that comes back included. Without this check (and item 11), restores moved counters back on the server: 11,966 heads below the high-water mark in 20 runs.
+
+Decision 4, the client:
+
+4. **An in-flight entry can be known refused before its verdict.** Counters only grow, so an in-flight entry whose created ids are below the confirmed counters can never be accepted. The client treats it as refused at once and renames it in its own naming immediately, keeping the copy it sent unchanged; on the wire it is still refused and resubmitted under a new `clientSeq` as decision 4 says. Waiting for the refusal, as decision 5 wrote it, let the user edit the remote feature that took the id in between, and the later rename then hit that edit too. The visible document's counters are kept past every held entry's ids, so a new command never takes an id a held entry holds.
+5. **A verdict belongs to one `clientSeq`.** Verdict state is kept per `clientSeq` and cleared when an entry leaves flight. A late answer to an old resubmission read as the new `clientSeq`'s verdict livelocked 2 of 20 lossy runs.
+
+Decision 5, the remap:
+
+6. **One simultaneous rename table over the whole queue.** Every queued entry is kept in the client's current naming, and each entry that may be renamed is rewritten once, through one table holding the renames of every earlier entry plus its own shift, keyed by scope and current id. Per-entry tables applied one after another collide (A's `{extrude#4 to #5}` applied to B, which already creates `extrude#5`, leaves B with two `extrude#5`s). This replaces the per-entry table of decision 5 and the pending tables of decision 4; the saved queue state of decision 4 holds the client's naming instead.
+7. **A dropped entry's ids become tombstones.** They are never handed out again in the client's naming: a plain id field gets an id the schema refuses (`kind#0`, `e0`), and an id inside a face name an unreachable number (`TOMBSTONE_NAME`) that core refuses: a feature id by its dependency check, a sub-id tail (`extrude#1:side:e999999999999999`, even on a live feature) by the face-name schema (T7.1a). A held entry naming a dropped command's ids then fails instead of binding to whatever later takes the number. Most of the spike's `schema` drops were these tombstones at work.
+8. **Two remap rules the command alone cannot carry.** A duplicated part's copied ids follow the source part's renames up to the duplicate (it inherits the source's table). Names that belong to another part (mate connectors name faces of the instance's part, CAM operations faces of the setup's part, an instance's `bodies` body ids of its source part) are resolved through the document and the queue, so the remap takes a resolver argument (T7.1a). Opaque data stays opaque and must stay id-free: derived and pinned sources, extension `params` (ADR 0013 decision 2), `domains` data, names and labels.
+9. **Known limitation: renames can reverse the order of face names.** An edge reference stores its faces sorted by code unit, and the kernel picks a chamfer's reference face and an edge's direction from that order. A rename that adds a digit (`e9` to `e10`, `extrude#9` to `extrude#10`) can swap two names: 81 reversals in 48,800 commands. Numeric-aware comparison of names would make every remap order-preserving, at the cost of a naming-scheme bump; T7.1a decides between that and reporting a reversal as a warning.
+
+Decision 7, concurrent edits:
+
+10. **Known limitation: stale whole-feature edits are refused.** Client A adds `e10` to a sketch and edits it again; B's edit of the old sketch lands between them and removes `e10`. A's second edit re-introduces an id below the counter that is not one of A's fresh ids, so no remap applies and "the later arrival wins, whole" cannot hold. Such edits (0.1 % to 0.9 % of commands by scenario) are dropped and reported like any conflict, until core lets an `editFeature` re-introduce sub-ids the same feature held before, or the remap treats them as fresh.
+
+Decision 9, versions and restores:
+
+11. **A restore is rebased as its intent.** The client records which version a `replaceDocument` entry restores in its queue state (T7.1b's `SyncQueueState`), not in the sync entry, so `SyncEntrySchema` carries the stored document only; at every replay the client re-derives `restoredDocument(head, past)` on the current head instead of replaying the stored document, and the server's counter guard (item 3) catches anything left. A branch merge follows the same rule. Known limitation: `restoredDocument` takes a deleted part's counters from the past version, below that part's high-water mark (12 `counter-regression` refusals in the restores scenario); T7.1a fixes it with a `floor` argument (the high-water counters), so the document need not remember deleted parts' counters.
+
+Decision 11, transport and storage:
+
+12. **Submits prefer an ordered channel.** With every request delayed independently, `predecessor-unknown` ran at 10 to 24 answers per accepted entry in the busy scenarios; with one ordered channel per client it was 0. Submits go over the document's WebSocket, or HTTP requests sent in order on one connection, and `predecessor-unknown` stays as the backstop.
+13. **SQLite only in M7.** Product decision 0001 picks self-hosted, single-user instances on SQLite. The Postgres implementation is not built in M7 (T7.1g skipped).
+
+Not changed, noted for T7.1a and T7.1b: the shared rollback bar and positional indexes (adds at the bar, `setRollback`, reorder, restore) cause most drops (five clients: 19.0 % with `setRollback`, 8.3 % without). Making the bar per-client view state, with adds naming an anchor, is the largest single lever on the drop rate; this amendment does not decide it.
+
+Decision 12 is answered: self-host first, one user per instance with one bearer token, no accounts, SQLite; a hosted service is deferred, and several editors (T7.1h) are skipped in M7.

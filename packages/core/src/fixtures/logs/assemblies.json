@@ -1,0 +1,1632 @@
+{
+  "format": "manufakture-golden-log",
+  "version": 15,
+  "description": "Assemblies: instances, poses, mates, exploded views and steps, with deletes undone (restoreInstance, restoreMate, restoreExplodedView, restoreExplodeStep, restoreAssembly) and redone.",
+  "base": {
+    "format": "manufakture",
+    "version": 15,
+    "namingScheme": 1,
+    "id": "doc-1",
+    "name": "Bracket",
+    "units": {
+      "length": {
+        "unit": "mm"
+      },
+      "angle": {
+        "unit": "deg"
+      }
+    },
+    "variables": [
+      {
+        "name": "thickness",
+        "expression": {
+          "source": "6mm",
+          "lengthUnit": "mm",
+          "angleUnit": "deg"
+        }
+      },
+      {
+        "name": "width",
+        "expression": {
+          "source": "40",
+          "lengthUnit": "mm",
+          "angleUnit": "deg"
+        }
+      },
+      {
+        "name": "height",
+        "expression": {
+          "source": "width / 2",
+          "lengthUnit": "mm",
+          "angleUnit": "deg"
+        }
+      }
+    ],
+    "parts": [
+      {
+        "id": "part#1",
+        "name": "Part 1",
+        "features": [
+          {
+            "id": "sketch#1",
+            "kind": "sketch",
+            "name": "Sketch 1",
+            "suppressed": false,
+            "plane": {
+              "type": "plane",
+              "origin": [0, 0, 0],
+              "normal": [0, 0, 1],
+              "xDir": [1, 0, 0]
+            },
+            "entities": [
+              {
+                "id": "e1",
+                "kind": "line",
+                "construction": false,
+                "start": [0, 0],
+                "end": [40, 0]
+              },
+              {
+                "id": "e2",
+                "kind": "line",
+                "construction": false,
+                "start": [40, 0],
+                "end": [40, 20]
+              },
+              {
+                "id": "e3",
+                "kind": "line",
+                "construction": false,
+                "start": [40, 20],
+                "end": [0, 20]
+              },
+              {
+                "id": "e4",
+                "kind": "line",
+                "construction": false,
+                "start": [0, 20],
+                "end": [0, 0]
+              }
+            ],
+            "constraints": [
+              {
+                "id": "k1",
+                "kind": "coincident",
+                "a": {
+                  "entity": "e1",
+                  "at": "end"
+                },
+                "b": {
+                  "entity": "e2",
+                  "at": "start"
+                }
+              },
+              {
+                "id": "k2",
+                "kind": "horizontal",
+                "line": "e1"
+              },
+              {
+                "id": "k3",
+                "kind": "distance",
+                "value": {
+                  "source": "width",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                "a": {
+                  "entity": "e1",
+                  "at": "start"
+                },
+                "b": {
+                  "entity": "e1",
+                  "at": "end"
+                }
+              },
+              {
+                "id": "k4",
+                "kind": "distance",
+                "value": {
+                  "source": "height",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                "a": {
+                  "entity": "e2",
+                  "at": "start"
+                },
+                "b": {
+                  "entity": "e2",
+                  "at": "end"
+                }
+              },
+              {
+                "id": "k5",
+                "kind": "coincident",
+                "a": {
+                  "entity": "e1",
+                  "at": "start"
+                },
+                "b": {
+                  "entity": "@origin"
+                }
+              }
+            ]
+          },
+          {
+            "id": "extrude#1",
+            "kind": "extrude",
+            "name": "Extrude 1",
+            "suppressed": false,
+            "profile": {
+              "sketch": "sketch#1"
+            },
+            "operation": "new",
+            "extent": {
+              "type": "blind",
+              "distance": {
+                "source": "thickness",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            },
+            "reverse": false
+          },
+          {
+            "id": "sketch#2",
+            "kind": "sketch",
+            "name": "Sketch 2",
+            "suppressed": false,
+            "plane": {
+              "type": "face",
+              "face": {
+                "id": "r1",
+                "ref": {
+                  "face": "extrude#1:cap:end"
+                }
+              }
+            },
+            "entities": [
+              {
+                "id": "e5",
+                "kind": "circle",
+                "construction": false,
+                "center": [20, 10],
+                "radius": 3
+              }
+            ],
+            "constraints": [
+              {
+                "id": "k6",
+                "kind": "diameter",
+                "entity": "e5",
+                "value": {
+                  "source": "6mm",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                }
+              }
+            ]
+          },
+          {
+            "id": "extrude#2",
+            "kind": "extrude",
+            "name": "Extrude 2",
+            "suppressed": false,
+            "profile": {
+              "sketch": "sketch#2"
+            },
+            "operation": "cut",
+            "extent": {
+              "type": "throughAll"
+            },
+            "reverse": false
+          },
+          {
+            "id": "fillet#1",
+            "kind": "fillet",
+            "name": "Fillet 1",
+            "suppressed": false,
+            "edges": [
+              {
+                "id": "r2",
+                "ref": {
+                  "faces": ["extrude#1:side:e1", "extrude#1:side:e2"]
+                }
+              }
+            ],
+            "radius": {
+              "source": "2mm",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            }
+          }
+        ],
+        "rollbackIndex": null,
+        "nextIds": {
+          "e": 6,
+          "extrude": 3,
+          "fillet": 2,
+          "k": 7,
+          "r": 3,
+          "sketch": 3
+        },
+        "bodies": []
+      }
+    ],
+    "assemblies": [],
+    "print": {
+      "setups": [],
+      "nextIds": {}
+    },
+    "fonts": [],
+    "cam": {
+      "tools": [],
+      "setups": [],
+      "nextIds": {}
+    },
+    "nextIds": {
+      "part": 2
+    }
+  },
+  "entries": [
+    {
+      "cause": "execute",
+      "label": "Assembly",
+      "command": {
+        "type": "addAssembly",
+        "assemblyId": "assembly#1",
+        "name": "Pair"
+      },
+      "at": "2026-10-04T08:00:01.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Rename assembly",
+      "command": {
+        "type": "renameAssembly",
+        "assemblyId": "assembly#1",
+        "name": "Two brackets"
+      },
+      "at": "2026-10-04T08:00:02.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Rename assembly",
+      "command": {
+        "type": "renameAssembly",
+        "assemblyId": "assembly#1",
+        "name": "Pair"
+      },
+      "at": "2026-10-04T08:00:03.000Z"
+    },
+    {
+      "cause": "redo",
+      "label": "Rename assembly",
+      "command": {
+        "type": "renameAssembly",
+        "assemblyId": "assembly#1",
+        "name": "Two brackets"
+      },
+      "at": "2026-10-04T08:00:04.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Instance 1",
+      "command": {
+        "type": "addInstance",
+        "assemblyId": "assembly#1",
+        "instance": {
+          "id": "inst#1",
+          "name": "inst#1",
+          "source": {
+            "part": "part#1"
+          },
+          "fixed": true,
+          "suppressed": false,
+          "pose": {
+            "translation": [0, 0, 0],
+            "rotation": [0, 0, 0, 1]
+          }
+        }
+      },
+      "at": "2026-10-04T08:00:05.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Instance 2",
+      "command": {
+        "type": "addInstance",
+        "assemblyId": "assembly#1",
+        "instance": {
+          "id": "inst#2",
+          "name": "inst#2",
+          "source": {
+            "part": "part#1"
+          },
+          "fixed": false,
+          "suppressed": false,
+          "pose": {
+            "translation": [0, 0, 0],
+            "rotation": [0, 0, 0, 1]
+          }
+        }
+      },
+      "at": "2026-10-04T08:00:06.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Instance 3",
+      "command": {
+        "type": "addInstance",
+        "assemblyId": "assembly#1",
+        "instance": {
+          "id": "inst#3",
+          "name": "inst#3",
+          "source": {
+            "part": "part#1"
+          },
+          "fixed": false,
+          "suppressed": false,
+          "pose": {
+            "translation": [0, 0, 0],
+            "rotation": [0, 0, 0, 1]
+          }
+        }
+      },
+      "at": "2026-10-04T08:00:07.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Edit instance",
+      "command": {
+        "type": "editInstance",
+        "assemblyId": "assembly#1",
+        "instanceId": "inst#2",
+        "name": "Upper",
+        "bodies": ["extrude#1"]
+      },
+      "at": "2026-10-04T08:00:08.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Edit instance",
+      "command": {
+        "type": "editInstance",
+        "assemblyId": "assembly#1",
+        "instanceId": "inst#2",
+        "name": "inst#2",
+        "bodies": null
+      },
+      "at": "2026-10-04T08:00:09.000Z"
+    },
+    {
+      "cause": "redo",
+      "label": "Edit instance",
+      "command": {
+        "type": "editInstance",
+        "assemblyId": "assembly#1",
+        "instanceId": "inst#2",
+        "name": "Upper",
+        "bodies": ["extrude#1"]
+      },
+      "at": "2026-10-04T08:00:10.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Poses",
+      "command": {
+        "type": "setPoses",
+        "assemblyId": "assembly#1",
+        "poses": {
+          "inst#2": {
+            "translation": [0, 0, 20],
+            "rotation": [0, 0, 0, 1]
+          }
+        }
+      },
+      "at": "2026-10-04T08:00:11.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Poses",
+      "command": {
+        "type": "setPoses",
+        "assemblyId": "assembly#1",
+        "poses": {
+          "inst#2": {
+            "translation": [0, 0, 0],
+            "rotation": [0, 0, 0, 1]
+          }
+        }
+      },
+      "at": "2026-10-04T08:00:12.000Z"
+    },
+    {
+      "cause": "redo",
+      "label": "Poses",
+      "command": {
+        "type": "setPoses",
+        "assemblyId": "assembly#1",
+        "poses": {
+          "inst#2": {
+            "translation": [0, 0, 20],
+            "rotation": [0, 0, 0, 1]
+          }
+        }
+      },
+      "at": "2026-10-04T08:00:13.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Mate",
+      "command": {
+        "type": "addMate",
+        "assemblyId": "assembly#1",
+        "mate": {
+          "id": "mate#1",
+          "name": "Stack",
+          "kind": "slider",
+          "a": {
+            "id": "mc#1",
+            "instance": "inst#1",
+            "inference": "centroid",
+            "origin": {
+              "id": "r1",
+              "ref": {
+                "face": "extrude#1:cap:end"
+              }
+            }
+          },
+          "b": {
+            "id": "mc#2",
+            "instance": "inst#2",
+            "inference": "vertex",
+            "origin": {
+              "id": "r2",
+              "ref": {
+                "faces": ["extrude#1:cap:start", "extrude#1:side:e1", "extrude#1:side:e2"]
+              }
+            },
+            "offset": {
+              "translation": [
+                {
+                  "source": "0",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                {
+                  "source": "0",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                {
+                  "source": "1",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                }
+              ],
+              "rotation": [
+                {
+                  "source": "0",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                {
+                  "source": "0",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                {
+                  "source": "0",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                }
+              ]
+            }
+          },
+          "suppressed": false
+        }
+      },
+      "at": "2026-10-04T08:00:14.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Edit mate",
+      "command": {
+        "type": "editMate",
+        "assemblyId": "assembly#1",
+        "mate": {
+          "id": "mate#1",
+          "name": "Stack",
+          "kind": "slider",
+          "a": {
+            "id": "mc#1",
+            "instance": "inst#1",
+            "inference": "centroid",
+            "origin": {
+              "id": "r1",
+              "ref": {
+                "face": "extrude#1:cap:end"
+              }
+            }
+          },
+          "b": {
+            "id": "mc#2",
+            "instance": "inst#2",
+            "inference": "vertex",
+            "origin": {
+              "id": "r2",
+              "ref": {
+                "faces": ["extrude#1:cap:start", "extrude#1:side:e1", "extrude#1:side:e2"]
+              }
+            },
+            "offset": {
+              "translation": [
+                {
+                  "source": "0",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                {
+                  "source": "0",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                {
+                  "source": "1",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                }
+              ],
+              "rotation": [
+                {
+                  "source": "0",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                {
+                  "source": "0",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                {
+                  "source": "0",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                }
+              ]
+            }
+          },
+          "suppressed": false,
+          "limits": {
+            "min": {
+              "source": "0",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "max": {
+              "source": "10",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            }
+          }
+        }
+      },
+      "at": "2026-10-04T08:00:15.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Edit mate",
+      "command": {
+        "type": "restoreMate",
+        "assemblyId": "assembly#1",
+        "mate": {
+          "id": "mate#1",
+          "name": "Stack",
+          "kind": "slider",
+          "a": {
+            "id": "mc#1",
+            "instance": "inst#1",
+            "inference": "centroid",
+            "origin": {
+              "id": "r1",
+              "ref": {
+                "face": "extrude#1:cap:end"
+              }
+            }
+          },
+          "b": {
+            "id": "mc#2",
+            "instance": "inst#2",
+            "offset": {
+              "translation": [
+                {
+                  "source": "0",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                {
+                  "source": "0",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                {
+                  "source": "1",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                }
+              ],
+              "rotation": [
+                {
+                  "source": "0",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                {
+                  "source": "0",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                {
+                  "source": "0",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                }
+              ]
+            },
+            "inference": "vertex",
+            "origin": {
+              "id": "r2",
+              "ref": {
+                "faces": ["extrude#1:cap:start", "extrude#1:side:e1", "extrude#1:side:e2"]
+              }
+            }
+          },
+          "suppressed": false
+        },
+        "index": 0
+      },
+      "at": "2026-10-04T08:00:16.000Z"
+    },
+    {
+      "cause": "redo",
+      "label": "Edit mate",
+      "command": {
+        "type": "restoreMate",
+        "assemblyId": "assembly#1",
+        "mate": {
+          "id": "mate#1",
+          "name": "Stack",
+          "kind": "slider",
+          "a": {
+            "id": "mc#1",
+            "instance": "inst#1",
+            "inference": "centroid",
+            "origin": {
+              "id": "r1",
+              "ref": {
+                "face": "extrude#1:cap:end"
+              }
+            }
+          },
+          "b": {
+            "id": "mc#2",
+            "instance": "inst#2",
+            "offset": {
+              "translation": [
+                {
+                  "source": "0",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                {
+                  "source": "0",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                {
+                  "source": "1",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                }
+              ],
+              "rotation": [
+                {
+                  "source": "0",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                {
+                  "source": "0",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                {
+                  "source": "0",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                }
+              ]
+            },
+            "inference": "vertex",
+            "origin": {
+              "id": "r2",
+              "ref": {
+                "faces": ["extrude#1:cap:start", "extrude#1:side:e1", "extrude#1:side:e2"]
+              }
+            }
+          },
+          "suppressed": false,
+          "limits": {
+            "min": {
+              "source": "0",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "max": {
+              "source": "10",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            }
+          }
+        },
+        "index": 0
+      },
+      "at": "2026-10-04T08:00:17.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Suppress mate",
+      "command": {
+        "type": "suppressMate",
+        "assemblyId": "assembly#1",
+        "mateId": "mate#1",
+        "suppressed": true
+      },
+      "at": "2026-10-04T08:00:18.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Suppress mate",
+      "command": {
+        "type": "suppressMate",
+        "assemblyId": "assembly#1",
+        "mateId": "mate#1",
+        "suppressed": false
+      },
+      "at": "2026-10-04T08:00:19.000Z"
+    },
+    {
+      "cause": "redo",
+      "label": "Suppress mate",
+      "command": {
+        "type": "suppressMate",
+        "assemblyId": "assembly#1",
+        "mateId": "mate#1",
+        "suppressed": true
+      },
+      "at": "2026-10-04T08:00:20.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Delete instance",
+      "command": {
+        "type": "deleteInstance",
+        "assemblyId": "assembly#1",
+        "instanceId": "inst#3"
+      },
+      "at": "2026-10-04T08:00:21.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Delete instance",
+      "command": {
+        "type": "restoreInstance",
+        "assemblyId": "assembly#1",
+        "instance": {
+          "id": "inst#3",
+          "name": "inst#3",
+          "source": {
+            "part": "part#1"
+          },
+          "fixed": false,
+          "suppressed": false,
+          "pose": {
+            "translation": [0, 0, 0],
+            "rotation": [0, 0, 0, 1]
+          }
+        },
+        "index": 2
+      },
+      "at": "2026-10-04T08:00:22.000Z"
+    },
+    {
+      "cause": "redo",
+      "label": "Delete instance",
+      "command": {
+        "type": "deleteInstance",
+        "assemblyId": "assembly#1",
+        "instanceId": "inst#3"
+      },
+      "at": "2026-10-04T08:00:23.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Exploded view",
+      "command": {
+        "type": "addExplodedView",
+        "assemblyId": "assembly#1",
+        "explodedView": {
+          "id": "explode#1",
+          "name": "Exploded",
+          "steps": [
+            {
+              "id": "step#1",
+              "instances": ["inst#2"],
+              "direction": {
+                "instance": "inst#1",
+                "face": {
+                  "face": "extrude#1:cap:end"
+                }
+              },
+              "distance": {
+                "source": "30",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            }
+          ]
+        }
+      },
+      "at": "2026-10-04T08:00:24.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Edit exploded view",
+      "command": {
+        "type": "editExplodedView",
+        "assemblyId": "assembly#1",
+        "explodedView": {
+          "id": "explode#1",
+          "name": "Apart",
+          "steps": [
+            {
+              "id": "step#1",
+              "instances": ["inst#2"],
+              "direction": {
+                "instance": "inst#1",
+                "face": {
+                  "face": "extrude#1:cap:end"
+                }
+              },
+              "distance": {
+                "source": "30",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            }
+          ]
+        }
+      },
+      "at": "2026-10-04T08:00:25.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Edit exploded view",
+      "command": {
+        "type": "restoreExplodedView",
+        "assemblyId": "assembly#1",
+        "explodedView": {
+          "id": "explode#1",
+          "name": "Exploded",
+          "steps": [
+            {
+              "id": "step#1",
+              "instances": ["inst#2"],
+              "direction": {
+                "instance": "inst#1",
+                "face": {
+                  "face": "extrude#1:cap:end"
+                }
+              },
+              "distance": {
+                "source": "30",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            }
+          ]
+        },
+        "index": 0
+      },
+      "at": "2026-10-04T08:00:26.000Z"
+    },
+    {
+      "cause": "redo",
+      "label": "Edit exploded view",
+      "command": {
+        "type": "restoreExplodedView",
+        "assemblyId": "assembly#1",
+        "explodedView": {
+          "id": "explode#1",
+          "name": "Apart",
+          "steps": [
+            {
+              "id": "step#1",
+              "instances": ["inst#2"],
+              "direction": {
+                "instance": "inst#1",
+                "face": {
+                  "face": "extrude#1:cap:end"
+                }
+              },
+              "distance": {
+                "source": "30",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            }
+          ]
+        },
+        "index": 0
+      },
+      "at": "2026-10-04T08:00:27.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Step",
+      "command": {
+        "type": "addExplodeStep",
+        "assemblyId": "assembly#1",
+        "explodedViewId": "explode#1",
+        "step": {
+          "id": "step#2",
+          "instances": ["inst#1"],
+          "direction": {
+            "instance": "inst#2",
+            "edge": {
+              "faces": ["extrude#1:cap:end", "extrude#1:side:e1"]
+            },
+            "flip": true
+          },
+          "distance": {
+            "source": "5",
+            "lengthUnit": "mm",
+            "angleUnit": "deg"
+          }
+        }
+      },
+      "at": "2026-10-04T08:00:28.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Edit step",
+      "command": {
+        "type": "editExplodeStep",
+        "assemblyId": "assembly#1",
+        "explodedViewId": "explode#1",
+        "step": {
+          "id": "step#2",
+          "instances": ["inst#1"],
+          "direction": {
+            "vector": [1, 0, 0]
+          },
+          "distance": {
+            "source": "8",
+            "lengthUnit": "mm",
+            "angleUnit": "deg"
+          }
+        }
+      },
+      "at": "2026-10-04T08:00:29.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Edit step",
+      "command": {
+        "type": "restoreExplodeStep",
+        "assemblyId": "assembly#1",
+        "explodedViewId": "explode#1",
+        "step": {
+          "id": "step#2",
+          "instances": ["inst#1"],
+          "direction": {
+            "instance": "inst#2",
+            "edge": {
+              "faces": ["extrude#1:cap:end", "extrude#1:side:e1"]
+            },
+            "flip": true
+          },
+          "distance": {
+            "source": "5",
+            "lengthUnit": "mm",
+            "angleUnit": "deg"
+          }
+        },
+        "index": 1
+      },
+      "at": "2026-10-04T08:00:30.000Z"
+    },
+    {
+      "cause": "redo",
+      "label": "Edit step",
+      "command": {
+        "type": "restoreExplodeStep",
+        "assemblyId": "assembly#1",
+        "explodedViewId": "explode#1",
+        "step": {
+          "id": "step#2",
+          "instances": ["inst#1"],
+          "direction": {
+            "vector": [1, 0, 0]
+          },
+          "distance": {
+            "source": "8",
+            "lengthUnit": "mm",
+            "angleUnit": "deg"
+          }
+        },
+        "index": 1
+      },
+      "at": "2026-10-04T08:00:31.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Delete step",
+      "command": {
+        "type": "deleteExplodeStep",
+        "assemblyId": "assembly#1",
+        "explodedViewId": "explode#1",
+        "stepId": "step#2"
+      },
+      "at": "2026-10-04T08:00:32.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Delete step",
+      "command": {
+        "type": "restoreExplodeStep",
+        "assemblyId": "assembly#1",
+        "explodedViewId": "explode#1",
+        "step": {
+          "id": "step#2",
+          "instances": ["inst#1"],
+          "direction": {
+            "vector": [1, 0, 0]
+          },
+          "distance": {
+            "source": "8",
+            "lengthUnit": "mm",
+            "angleUnit": "deg"
+          }
+        },
+        "index": 1
+      },
+      "at": "2026-10-04T08:00:33.000Z"
+    },
+    {
+      "cause": "redo",
+      "label": "Delete step",
+      "command": {
+        "type": "deleteExplodeStep",
+        "assemblyId": "assembly#1",
+        "explodedViewId": "explode#1",
+        "stepId": "step#2"
+      },
+      "at": "2026-10-04T08:00:34.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Delete exploded view",
+      "command": {
+        "type": "deleteExplodedView",
+        "assemblyId": "assembly#1",
+        "explodedViewId": "explode#1"
+      },
+      "at": "2026-10-04T08:00:35.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Delete exploded view",
+      "command": {
+        "type": "restoreExplodedView",
+        "assemblyId": "assembly#1",
+        "explodedView": {
+          "id": "explode#1",
+          "name": "Apart",
+          "steps": [
+            {
+              "id": "step#1",
+              "instances": ["inst#2"],
+              "direction": {
+                "instance": "inst#1",
+                "face": {
+                  "face": "extrude#1:cap:end"
+                }
+              },
+              "distance": {
+                "source": "30",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            }
+          ]
+        },
+        "index": 0
+      },
+      "at": "2026-10-04T08:00:36.000Z"
+    },
+    {
+      "cause": "redo",
+      "label": "Delete exploded view",
+      "command": {
+        "type": "deleteExplodedView",
+        "assemblyId": "assembly#1",
+        "explodedViewId": "explode#1"
+      },
+      "at": "2026-10-04T08:00:37.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Delete mate",
+      "command": {
+        "type": "deleteMate",
+        "assemblyId": "assembly#1",
+        "mateId": "mate#1"
+      },
+      "at": "2026-10-04T08:00:38.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Delete mate",
+      "command": {
+        "type": "restoreMate",
+        "assemblyId": "assembly#1",
+        "mate": {
+          "id": "mate#1",
+          "name": "Stack",
+          "kind": "slider",
+          "a": {
+            "id": "mc#1",
+            "instance": "inst#1",
+            "inference": "centroid",
+            "origin": {
+              "id": "r1",
+              "ref": {
+                "face": "extrude#1:cap:end"
+              }
+            }
+          },
+          "b": {
+            "id": "mc#2",
+            "instance": "inst#2",
+            "offset": {
+              "translation": [
+                {
+                  "source": "0",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                {
+                  "source": "0",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                {
+                  "source": "1",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                }
+              ],
+              "rotation": [
+                {
+                  "source": "0",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                {
+                  "source": "0",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                {
+                  "source": "0",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                }
+              ]
+            },
+            "inference": "vertex",
+            "origin": {
+              "id": "r2",
+              "ref": {
+                "faces": ["extrude#1:cap:start", "extrude#1:side:e1", "extrude#1:side:e2"]
+              }
+            }
+          },
+          "suppressed": true,
+          "limits": {
+            "min": {
+              "source": "0",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "max": {
+              "source": "10",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            }
+          }
+        },
+        "index": 0
+      },
+      "at": "2026-10-04T08:00:39.000Z"
+    },
+    {
+      "cause": "redo",
+      "label": "Delete mate",
+      "command": {
+        "type": "deleteMate",
+        "assemblyId": "assembly#1",
+        "mateId": "mate#1"
+      },
+      "at": "2026-10-04T08:00:40.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Assembly 2",
+      "command": {
+        "type": "addAssembly",
+        "assemblyId": "assembly#2",
+        "name": "Spare"
+      },
+      "at": "2026-10-04T08:00:41.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Delete assembly",
+      "command": {
+        "type": "deleteAssembly",
+        "assemblyId": "assembly#2"
+      },
+      "at": "2026-10-04T08:00:42.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Delete assembly",
+      "command": {
+        "type": "restoreAssembly",
+        "assembly": {
+          "id": "assembly#2",
+          "name": "Spare",
+          "instances": [],
+          "mates": [],
+          "nextIds": {}
+        },
+        "index": 1
+      },
+      "at": "2026-10-04T08:00:43.000Z"
+    },
+    {
+      "cause": "redo",
+      "label": "Delete assembly",
+      "command": {
+        "type": "deleteAssembly",
+        "assemblyId": "assembly#2"
+      },
+      "at": "2026-10-04T08:00:44.000Z"
+    }
+  ],
+  "expected": {
+    "format": "manufakture",
+    "version": 15,
+    "namingScheme": 1,
+    "id": "doc-1",
+    "name": "Bracket",
+    "units": {
+      "length": {
+        "unit": "mm"
+      },
+      "angle": {
+        "unit": "deg"
+      }
+    },
+    "variables": [
+      {
+        "name": "thickness",
+        "expression": {
+          "source": "6mm",
+          "lengthUnit": "mm",
+          "angleUnit": "deg"
+        }
+      },
+      {
+        "name": "width",
+        "expression": {
+          "source": "40",
+          "lengthUnit": "mm",
+          "angleUnit": "deg"
+        }
+      },
+      {
+        "name": "height",
+        "expression": {
+          "source": "width / 2",
+          "lengthUnit": "mm",
+          "angleUnit": "deg"
+        }
+      }
+    ],
+    "parts": [
+      {
+        "id": "part#1",
+        "name": "Part 1",
+        "features": [
+          {
+            "id": "sketch#1",
+            "kind": "sketch",
+            "name": "Sketch 1",
+            "suppressed": false,
+            "plane": {
+              "type": "plane",
+              "origin": [0, 0, 0],
+              "normal": [0, 0, 1],
+              "xDir": [1, 0, 0]
+            },
+            "entities": [
+              {
+                "id": "e1",
+                "kind": "line",
+                "construction": false,
+                "start": [0, 0],
+                "end": [40, 0]
+              },
+              {
+                "id": "e2",
+                "kind": "line",
+                "construction": false,
+                "start": [40, 0],
+                "end": [40, 20]
+              },
+              {
+                "id": "e3",
+                "kind": "line",
+                "construction": false,
+                "start": [40, 20],
+                "end": [0, 20]
+              },
+              {
+                "id": "e4",
+                "kind": "line",
+                "construction": false,
+                "start": [0, 20],
+                "end": [0, 0]
+              }
+            ],
+            "constraints": [
+              {
+                "id": "k1",
+                "kind": "coincident",
+                "a": {
+                  "entity": "e1",
+                  "at": "end"
+                },
+                "b": {
+                  "entity": "e2",
+                  "at": "start"
+                }
+              },
+              {
+                "id": "k2",
+                "kind": "horizontal",
+                "line": "e1"
+              },
+              {
+                "id": "k3",
+                "kind": "distance",
+                "value": {
+                  "source": "width",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                "a": {
+                  "entity": "e1",
+                  "at": "start"
+                },
+                "b": {
+                  "entity": "e1",
+                  "at": "end"
+                }
+              },
+              {
+                "id": "k4",
+                "kind": "distance",
+                "value": {
+                  "source": "height",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                "a": {
+                  "entity": "e2",
+                  "at": "start"
+                },
+                "b": {
+                  "entity": "e2",
+                  "at": "end"
+                }
+              },
+              {
+                "id": "k5",
+                "kind": "coincident",
+                "a": {
+                  "entity": "e1",
+                  "at": "start"
+                },
+                "b": {
+                  "entity": "@origin"
+                }
+              }
+            ]
+          },
+          {
+            "id": "extrude#1",
+            "kind": "extrude",
+            "name": "Extrude 1",
+            "suppressed": false,
+            "profile": {
+              "sketch": "sketch#1"
+            },
+            "operation": "new",
+            "extent": {
+              "type": "blind",
+              "distance": {
+                "source": "thickness",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            },
+            "reverse": false
+          },
+          {
+            "id": "sketch#2",
+            "kind": "sketch",
+            "name": "Sketch 2",
+            "suppressed": false,
+            "plane": {
+              "type": "face",
+              "face": {
+                "id": "r1",
+                "ref": {
+                  "face": "extrude#1:cap:end"
+                }
+              }
+            },
+            "entities": [
+              {
+                "id": "e5",
+                "kind": "circle",
+                "construction": false,
+                "center": [20, 10],
+                "radius": 3
+              }
+            ],
+            "constraints": [
+              {
+                "id": "k6",
+                "kind": "diameter",
+                "entity": "e5",
+                "value": {
+                  "source": "6mm",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                }
+              }
+            ]
+          },
+          {
+            "id": "extrude#2",
+            "kind": "extrude",
+            "name": "Extrude 2",
+            "suppressed": false,
+            "profile": {
+              "sketch": "sketch#2"
+            },
+            "operation": "cut",
+            "extent": {
+              "type": "throughAll"
+            },
+            "reverse": false
+          },
+          {
+            "id": "fillet#1",
+            "kind": "fillet",
+            "name": "Fillet 1",
+            "suppressed": false,
+            "edges": [
+              {
+                "id": "r2",
+                "ref": {
+                  "faces": ["extrude#1:side:e1", "extrude#1:side:e2"]
+                }
+              }
+            ],
+            "radius": {
+              "source": "2mm",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            }
+          }
+        ],
+        "rollbackIndex": null,
+        "nextIds": {
+          "e": 6,
+          "extrude": 3,
+          "fillet": 2,
+          "k": 7,
+          "r": 3,
+          "sketch": 3
+        },
+        "bodies": []
+      }
+    ],
+    "assemblies": [
+      {
+        "id": "assembly#1",
+        "name": "Two brackets",
+        "instances": [
+          {
+            "id": "inst#1",
+            "name": "inst#1",
+            "source": {
+              "part": "part#1"
+            },
+            "fixed": true,
+            "suppressed": false,
+            "pose": {
+              "translation": [0, 0, 0],
+              "rotation": [0, 0, 0, 1]
+            }
+          },
+          {
+            "id": "inst#2",
+            "name": "Upper",
+            "source": {
+              "part": "part#1"
+            },
+            "bodies": ["extrude#1"],
+            "fixed": false,
+            "suppressed": false,
+            "pose": {
+              "translation": [0, 0, 20],
+              "rotation": [0, 0, 0, 1]
+            }
+          }
+        ],
+        "mates": [],
+        "nextIds": {
+          "explode": 2,
+          "inst": 4,
+          "mate": 2,
+          "mc": 3,
+          "r": 3,
+          "step": 3
+        }
+      }
+    ],
+    "print": {
+      "setups": [],
+      "nextIds": {}
+    },
+    "fonts": [],
+    "cam": {
+      "tools": [],
+      "setups": [],
+      "nextIds": {}
+    },
+    "nextIds": {
+      "assembly": 3,
+      "part": 2
+    }
+  }
+}

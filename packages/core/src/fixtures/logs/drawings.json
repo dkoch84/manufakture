@@ -1,0 +1,1593 @@
+{
+  "format": "manufakture-golden-log",
+  "version": 15,
+  "description": "Drawings, sheets, part and assembly views, dimensions and notes, with deletes undone (restoreNote, restoreDimension, restoreView, restoreSheet, restoreDrawing) and redone.",
+  "base": {
+    "format": "manufakture",
+    "version": 15,
+    "namingScheme": 1,
+    "id": "doc-1",
+    "name": "Bracket",
+    "units": {
+      "length": {
+        "unit": "mm"
+      },
+      "angle": {
+        "unit": "deg"
+      }
+    },
+    "variables": [
+      {
+        "name": "thickness",
+        "expression": {
+          "source": "6mm",
+          "lengthUnit": "mm",
+          "angleUnit": "deg"
+        }
+      },
+      {
+        "name": "width",
+        "expression": {
+          "source": "40",
+          "lengthUnit": "mm",
+          "angleUnit": "deg"
+        }
+      },
+      {
+        "name": "height",
+        "expression": {
+          "source": "width / 2",
+          "lengthUnit": "mm",
+          "angleUnit": "deg"
+        }
+      }
+    ],
+    "parts": [
+      {
+        "id": "part#1",
+        "name": "Part 1",
+        "features": [
+          {
+            "id": "sketch#1",
+            "kind": "sketch",
+            "name": "Sketch 1",
+            "suppressed": false,
+            "plane": {
+              "type": "plane",
+              "origin": [0, 0, 0],
+              "normal": [0, 0, 1],
+              "xDir": [1, 0, 0]
+            },
+            "entities": [
+              {
+                "id": "e1",
+                "kind": "line",
+                "construction": false,
+                "start": [0, 0],
+                "end": [40, 0]
+              },
+              {
+                "id": "e2",
+                "kind": "line",
+                "construction": false,
+                "start": [40, 0],
+                "end": [40, 20]
+              },
+              {
+                "id": "e3",
+                "kind": "line",
+                "construction": false,
+                "start": [40, 20],
+                "end": [0, 20]
+              },
+              {
+                "id": "e4",
+                "kind": "line",
+                "construction": false,
+                "start": [0, 20],
+                "end": [0, 0]
+              }
+            ],
+            "constraints": [
+              {
+                "id": "k1",
+                "kind": "coincident",
+                "a": {
+                  "entity": "e1",
+                  "at": "end"
+                },
+                "b": {
+                  "entity": "e2",
+                  "at": "start"
+                }
+              },
+              {
+                "id": "k2",
+                "kind": "horizontal",
+                "line": "e1"
+              },
+              {
+                "id": "k3",
+                "kind": "distance",
+                "value": {
+                  "source": "width",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                "a": {
+                  "entity": "e1",
+                  "at": "start"
+                },
+                "b": {
+                  "entity": "e1",
+                  "at": "end"
+                }
+              },
+              {
+                "id": "k4",
+                "kind": "distance",
+                "value": {
+                  "source": "height",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                "a": {
+                  "entity": "e2",
+                  "at": "start"
+                },
+                "b": {
+                  "entity": "e2",
+                  "at": "end"
+                }
+              },
+              {
+                "id": "k5",
+                "kind": "coincident",
+                "a": {
+                  "entity": "e1",
+                  "at": "start"
+                },
+                "b": {
+                  "entity": "@origin"
+                }
+              }
+            ]
+          },
+          {
+            "id": "extrude#1",
+            "kind": "extrude",
+            "name": "Extrude 1",
+            "suppressed": false,
+            "profile": {
+              "sketch": "sketch#1"
+            },
+            "operation": "new",
+            "extent": {
+              "type": "blind",
+              "distance": {
+                "source": "thickness",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            },
+            "reverse": false
+          },
+          {
+            "id": "sketch#2",
+            "kind": "sketch",
+            "name": "Sketch 2",
+            "suppressed": false,
+            "plane": {
+              "type": "face",
+              "face": {
+                "id": "r1",
+                "ref": {
+                  "face": "extrude#1:cap:end"
+                }
+              }
+            },
+            "entities": [
+              {
+                "id": "e5",
+                "kind": "circle",
+                "construction": false,
+                "center": [20, 10],
+                "radius": 3
+              }
+            ],
+            "constraints": [
+              {
+                "id": "k6",
+                "kind": "diameter",
+                "entity": "e5",
+                "value": {
+                  "source": "6mm",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                }
+              }
+            ]
+          },
+          {
+            "id": "extrude#2",
+            "kind": "extrude",
+            "name": "Extrude 2",
+            "suppressed": false,
+            "profile": {
+              "sketch": "sketch#2"
+            },
+            "operation": "cut",
+            "extent": {
+              "type": "throughAll"
+            },
+            "reverse": false
+          },
+          {
+            "id": "fillet#1",
+            "kind": "fillet",
+            "name": "Fillet 1",
+            "suppressed": false,
+            "edges": [
+              {
+                "id": "r2",
+                "ref": {
+                  "faces": ["extrude#1:side:e1", "extrude#1:side:e2"]
+                }
+              }
+            ],
+            "radius": {
+              "source": "2mm",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            }
+          }
+        ],
+        "rollbackIndex": null,
+        "nextIds": {
+          "e": 6,
+          "extrude": 3,
+          "fillet": 2,
+          "k": 7,
+          "r": 3,
+          "sketch": 3
+        },
+        "bodies": []
+      }
+    ],
+    "assemblies": [
+      {
+        "id": "assembly#1",
+        "name": "Pair",
+        "instances": [
+          {
+            "id": "inst#1",
+            "name": "A",
+            "source": {
+              "part": "part#1"
+            },
+            "fixed": true,
+            "suppressed": false,
+            "pose": {
+              "translation": [0, 0, 0],
+              "rotation": [0, 0, 0, 1]
+            }
+          }
+        ],
+        "mates": [],
+        "nextIds": {
+          "inst": 2
+        }
+      }
+    ],
+    "print": {
+      "setups": [],
+      "nextIds": {}
+    },
+    "fonts": [],
+    "cam": {
+      "tools": [],
+      "setups": [],
+      "nextIds": {}
+    },
+    "nextIds": {
+      "assembly": 2,
+      "part": 2
+    }
+  },
+  "entries": [
+    {
+      "cause": "execute",
+      "label": "Drawing",
+      "command": {
+        "type": "addDrawing",
+        "drawing": {
+          "id": "drawing#1",
+          "name": "Bracket drawing",
+          "sheets": [
+            {
+              "id": "sheet#1",
+              "name": "Sheet 1",
+              "size": "A3",
+              "orientation": "landscape",
+              "titleBlock": {
+                "fields": [
+                  {
+                    "label": "Title",
+                    "value": "Bracket"
+                  }
+                ]
+              },
+              "views": [
+                {
+                  "id": "view#1",
+                  "source": {
+                    "part": "part#1",
+                    "bodies": ["extrude#1"]
+                  },
+                  "direction": "front",
+                  "scale": {
+                    "paper": {
+                      "source": "1",
+                      "lengthUnit": "mm",
+                      "angleUnit": "deg"
+                    },
+                    "model": {
+                      "source": "2",
+                      "lengthUnit": "mm",
+                      "angleUnit": "deg"
+                    }
+                  },
+                  "position": [100, 120],
+                  "options": {
+                    "hidden": true,
+                    "smooth": false
+                  }
+                }
+              ],
+              "dimensions": [
+                {
+                  "id": "dim#1",
+                  "view": "view#1",
+                  "kind": "vertical",
+                  "refs": [
+                    {
+                      "face": {
+                        "face": "extrude#1:cap:start"
+                      },
+                      "body": "extrude#1"
+                    },
+                    {
+                      "face": {
+                        "face": "extrude#1:cap:end"
+                      },
+                      "body": "extrude#1"
+                    }
+                  ],
+                  "offset": -12
+                }
+              ],
+              "notes": [
+                {
+                  "id": "note#1",
+                  "view": "view#1",
+                  "position": [0, -30],
+                  "text": "FRONT"
+                }
+              ]
+            }
+          ],
+          "nextIds": {
+            "sheet": 2,
+            "view": 2,
+            "dim": 2,
+            "note": 2
+          }
+        }
+      },
+      "at": "2026-10-04T08:00:01.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Drawing 2",
+      "command": {
+        "type": "addDrawing",
+        "drawing": {
+          "id": "drawing#2",
+          "name": "Spare",
+          "sheets": [],
+          "nextIds": {}
+        }
+      },
+      "at": "2026-10-04T08:00:02.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Rename drawing",
+      "command": {
+        "type": "renameDrawing",
+        "drawingId": "drawing#2",
+        "name": "Assembly drawing"
+      },
+      "at": "2026-10-04T08:00:03.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Rename drawing",
+      "command": {
+        "type": "renameDrawing",
+        "drawingId": "drawing#2",
+        "name": "Spare"
+      },
+      "at": "2026-10-04T08:00:04.000Z"
+    },
+    {
+      "cause": "redo",
+      "label": "Rename drawing",
+      "command": {
+        "type": "renameDrawing",
+        "drawingId": "drawing#2",
+        "name": "Assembly drawing"
+      },
+      "at": "2026-10-04T08:00:05.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Reorder drawings",
+      "command": {
+        "type": "reorderDrawings",
+        "drawingId": "drawing#2",
+        "index": 0
+      },
+      "at": "2026-10-04T08:00:06.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Reorder drawings",
+      "command": {
+        "type": "reorderDrawings",
+        "drawingId": "drawing#2",
+        "index": 1
+      },
+      "at": "2026-10-04T08:00:07.000Z"
+    },
+    {
+      "cause": "redo",
+      "label": "Reorder drawings",
+      "command": {
+        "type": "reorderDrawings",
+        "drawingId": "drawing#2",
+        "index": 0
+      },
+      "at": "2026-10-04T08:00:08.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Sheet",
+      "command": {
+        "type": "addSheet",
+        "drawingId": "drawing#1",
+        "sheet": {
+          "id": "sheet#2",
+          "name": "Sheet 2",
+          "size": "A4",
+          "orientation": "portrait",
+          "views": [],
+          "dimensions": [],
+          "notes": []
+        }
+      },
+      "at": "2026-10-04T08:00:09.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Edit sheet",
+      "command": {
+        "type": "editSheet",
+        "drawingId": "drawing#1",
+        "sheetId": "sheet#2",
+        "name": "Details",
+        "size": "A3",
+        "titleBlock": null
+      },
+      "at": "2026-10-04T08:00:10.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Edit sheet",
+      "command": {
+        "type": "editSheet",
+        "drawingId": "drawing#1",
+        "sheetId": "sheet#2",
+        "name": "Sheet 2",
+        "size": "A4",
+        "titleBlock": null
+      },
+      "at": "2026-10-04T08:00:11.000Z"
+    },
+    {
+      "cause": "redo",
+      "label": "Edit sheet",
+      "command": {
+        "type": "editSheet",
+        "drawingId": "drawing#1",
+        "sheetId": "sheet#2",
+        "name": "Details",
+        "size": "A3",
+        "titleBlock": null
+      },
+      "at": "2026-10-04T08:00:12.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Reorder sheets",
+      "command": {
+        "type": "reorderSheets",
+        "drawingId": "drawing#1",
+        "sheetId": "sheet#2",
+        "index": 0
+      },
+      "at": "2026-10-04T08:00:13.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Reorder sheets",
+      "command": {
+        "type": "reorderSheets",
+        "drawingId": "drawing#1",
+        "sheetId": "sheet#2",
+        "index": 1
+      },
+      "at": "2026-10-04T08:00:14.000Z"
+    },
+    {
+      "cause": "redo",
+      "label": "Reorder sheets",
+      "command": {
+        "type": "reorderSheets",
+        "drawingId": "drawing#1",
+        "sheetId": "sheet#2",
+        "index": 0
+      },
+      "at": "2026-10-04T08:00:15.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "View",
+      "command": {
+        "type": "addView",
+        "drawingId": "drawing#1",
+        "sheetId": "sheet#2",
+        "view": {
+          "id": "view#2",
+          "source": {
+            "part": "part#1",
+            "bodies": ["extrude#1"]
+          },
+          "direction": "front",
+          "scale": {
+            "paper": {
+              "source": "1",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "model": {
+              "source": "2",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            }
+          },
+          "position": [60, 120],
+          "options": {
+            "hidden": true,
+            "smooth": false
+          }
+        }
+      },
+      "at": "2026-10-04T08:00:16.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Assembly view",
+      "command": {
+        "type": "addView",
+        "drawingId": "drawing#1",
+        "sheetId": "sheet#2",
+        "view": {
+          "id": "view#3",
+          "source": {
+            "assembly": "assembly#1"
+          },
+          "direction": "isometric",
+          "scale": {
+            "paper": {
+              "source": "1",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "model": {
+              "source": "2",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            }
+          },
+          "position": [200, 120],
+          "options": {
+            "hidden": true,
+            "smooth": false
+          }
+        }
+      },
+      "at": "2026-10-04T08:00:17.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Edit view",
+      "command": {
+        "type": "editView",
+        "drawingId": "drawing#1",
+        "sheetId": "sheet#2",
+        "view": {
+          "id": "view#2",
+          "source": {
+            "part": "part#1",
+            "bodies": ["extrude#1"]
+          },
+          "direction": "top",
+          "scale": {
+            "paper": {
+              "source": "1",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "model": {
+              "source": "2",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            }
+          },
+          "position": [60, 120],
+          "options": {
+            "hidden": true,
+            "smooth": false
+          },
+          "label": "DETAIL A"
+        }
+      },
+      "at": "2026-10-04T08:00:18.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Edit view",
+      "command": {
+        "type": "restoreView",
+        "drawingId": "drawing#1",
+        "sheetId": "sheet#2",
+        "view": {
+          "id": "view#2",
+          "source": {
+            "part": "part#1",
+            "bodies": ["extrude#1"]
+          },
+          "direction": "front",
+          "scale": {
+            "paper": {
+              "source": "1",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "model": {
+              "source": "2",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            }
+          },
+          "position": [60, 120],
+          "options": {
+            "hidden": true,
+            "smooth": false
+          }
+        },
+        "index": 0
+      },
+      "at": "2026-10-04T08:00:19.000Z"
+    },
+    {
+      "cause": "redo",
+      "label": "Edit view",
+      "command": {
+        "type": "restoreView",
+        "drawingId": "drawing#1",
+        "sheetId": "sheet#2",
+        "view": {
+          "id": "view#2",
+          "label": "DETAIL A",
+          "source": {
+            "part": "part#1",
+            "bodies": ["extrude#1"]
+          },
+          "direction": "top",
+          "scale": {
+            "paper": {
+              "source": "1",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "model": {
+              "source": "2",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            }
+          },
+          "position": [60, 120],
+          "options": {
+            "hidden": true,
+            "smooth": false
+          }
+        },
+        "index": 0
+      },
+      "at": "2026-10-04T08:00:20.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Move view",
+      "command": {
+        "type": "moveView",
+        "drawingId": "drawing#1",
+        "sheetId": "sheet#2",
+        "viewId": "view#2",
+        "position": [80, 90]
+      },
+      "at": "2026-10-04T08:00:21.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Move view",
+      "command": {
+        "type": "moveView",
+        "drawingId": "drawing#1",
+        "sheetId": "sheet#2",
+        "viewId": "view#2",
+        "position": [60, 120]
+      },
+      "at": "2026-10-04T08:00:22.000Z"
+    },
+    {
+      "cause": "redo",
+      "label": "Move view",
+      "command": {
+        "type": "moveView",
+        "drawingId": "drawing#1",
+        "sheetId": "sheet#2",
+        "viewId": "view#2",
+        "position": [80, 90]
+      },
+      "at": "2026-10-04T08:00:23.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Dimension",
+      "command": {
+        "type": "addDimension",
+        "drawingId": "drawing#1",
+        "sheetId": "sheet#2",
+        "dimension": {
+          "id": "dim#2",
+          "view": "view#3",
+          "kind": "aligned",
+          "refs": [
+            {
+              "vertex": {
+                "faces": ["extrude#1:cap:end", "extrude#1:side:e1", "extrude#1:side:e2"]
+              },
+              "body": "extrude#1",
+              "instance": ["inst#1"]
+            },
+            {
+              "edge": {
+                "faces": ["extrude#1:cap:end", "extrude#1:side:e3"]
+              },
+              "body": "extrude#1",
+              "instance": ["inst#1"]
+            }
+          ],
+          "offset": 5
+        }
+      },
+      "at": "2026-10-04T08:00:24.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Edit dimension",
+      "command": {
+        "type": "editDimension",
+        "drawingId": "drawing#1",
+        "sheetId": "sheet#2",
+        "dimension": {
+          "id": "dim#2",
+          "view": "view#3",
+          "kind": "aligned",
+          "refs": [
+            {
+              "face": {
+                "face": "extrude#1:cap:start"
+              },
+              "body": "extrude#1",
+              "instance": ["inst#1"]
+            },
+            {
+              "edge": {
+                "faces": ["extrude#1:cap:end", "extrude#1:side:e3"]
+              },
+              "body": "extrude#1",
+              "instance": ["inst#1"]
+            }
+          ],
+          "offset": 7,
+          "decimals": 1
+        }
+      },
+      "at": "2026-10-04T08:00:25.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Edit dimension",
+      "command": {
+        "type": "restoreDimension",
+        "drawingId": "drawing#1",
+        "sheetId": "sheet#2",
+        "dimension": {
+          "id": "dim#2",
+          "view": "view#3",
+          "kind": "aligned",
+          "refs": [
+            {
+              "vertex": {
+                "faces": ["extrude#1:cap:end", "extrude#1:side:e1", "extrude#1:side:e2"]
+              },
+              "body": "extrude#1",
+              "instance": ["inst#1"]
+            },
+            {
+              "edge": {
+                "faces": ["extrude#1:cap:end", "extrude#1:side:e3"]
+              },
+              "body": "extrude#1",
+              "instance": ["inst#1"]
+            }
+          ],
+          "offset": 5
+        },
+        "index": 0
+      },
+      "at": "2026-10-04T08:00:26.000Z"
+    },
+    {
+      "cause": "redo",
+      "label": "Edit dimension",
+      "command": {
+        "type": "restoreDimension",
+        "drawingId": "drawing#1",
+        "sheetId": "sheet#2",
+        "dimension": {
+          "id": "dim#2",
+          "view": "view#3",
+          "decimals": 1,
+          "kind": "aligned",
+          "refs": [
+            {
+              "face": {
+                "face": "extrude#1:cap:start"
+              },
+              "body": "extrude#1",
+              "instance": ["inst#1"]
+            },
+            {
+              "edge": {
+                "faces": ["extrude#1:cap:end", "extrude#1:side:e3"]
+              },
+              "body": "extrude#1",
+              "instance": ["inst#1"]
+            }
+          ],
+          "offset": 7
+        },
+        "index": 0
+      },
+      "at": "2026-10-04T08:00:27.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Note",
+      "command": {
+        "type": "addNote",
+        "drawingId": "drawing#1",
+        "sheetId": "sheet#2",
+        "note": {
+          "id": "note#2",
+          "position": [10, 10],
+          "text": "ALL FILLETS R2"
+        }
+      },
+      "at": "2026-10-04T08:00:28.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Edit note",
+      "command": {
+        "type": "editNote",
+        "drawingId": "drawing#1",
+        "sheetId": "sheet#2",
+        "note": {
+          "id": "note#2",
+          "view": "view#2",
+          "position": [10, 12],
+          "text": "BREAK EDGES"
+        }
+      },
+      "at": "2026-10-04T08:00:29.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Edit note",
+      "command": {
+        "type": "restoreNote",
+        "drawingId": "drawing#1",
+        "sheetId": "sheet#2",
+        "note": {
+          "id": "note#2",
+          "position": [10, 10],
+          "text": "ALL FILLETS R2"
+        },
+        "index": 0
+      },
+      "at": "2026-10-04T08:00:30.000Z"
+    },
+    {
+      "cause": "redo",
+      "label": "Edit note",
+      "command": {
+        "type": "restoreNote",
+        "drawingId": "drawing#1",
+        "sheetId": "sheet#2",
+        "note": {
+          "id": "note#2",
+          "view": "view#2",
+          "position": [10, 12],
+          "text": "BREAK EDGES"
+        },
+        "index": 0
+      },
+      "at": "2026-10-04T08:00:31.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Delete note",
+      "command": {
+        "type": "deleteNote",
+        "drawingId": "drawing#1",
+        "sheetId": "sheet#2",
+        "noteId": "note#2"
+      },
+      "at": "2026-10-04T08:00:32.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Delete note",
+      "command": {
+        "type": "restoreNote",
+        "drawingId": "drawing#1",
+        "sheetId": "sheet#2",
+        "note": {
+          "id": "note#2",
+          "view": "view#2",
+          "position": [10, 12],
+          "text": "BREAK EDGES"
+        },
+        "index": 0
+      },
+      "at": "2026-10-04T08:00:33.000Z"
+    },
+    {
+      "cause": "redo",
+      "label": "Delete note",
+      "command": {
+        "type": "deleteNote",
+        "drawingId": "drawing#1",
+        "sheetId": "sheet#2",
+        "noteId": "note#2"
+      },
+      "at": "2026-10-04T08:00:34.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Delete dimension",
+      "command": {
+        "type": "deleteDimension",
+        "drawingId": "drawing#1",
+        "sheetId": "sheet#2",
+        "dimensionId": "dim#2"
+      },
+      "at": "2026-10-04T08:00:35.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Delete dimension",
+      "command": {
+        "type": "restoreDimension",
+        "drawingId": "drawing#1",
+        "sheetId": "sheet#2",
+        "dimension": {
+          "id": "dim#2",
+          "view": "view#3",
+          "decimals": 1,
+          "kind": "aligned",
+          "refs": [
+            {
+              "face": {
+                "face": "extrude#1:cap:start"
+              },
+              "body": "extrude#1",
+              "instance": ["inst#1"]
+            },
+            {
+              "edge": {
+                "faces": ["extrude#1:cap:end", "extrude#1:side:e3"]
+              },
+              "body": "extrude#1",
+              "instance": ["inst#1"]
+            }
+          ],
+          "offset": 7
+        },
+        "index": 0
+      },
+      "at": "2026-10-04T08:00:36.000Z"
+    },
+    {
+      "cause": "redo",
+      "label": "Delete dimension",
+      "command": {
+        "type": "deleteDimension",
+        "drawingId": "drawing#1",
+        "sheetId": "sheet#2",
+        "dimensionId": "dim#2"
+      },
+      "at": "2026-10-04T08:00:37.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Delete view",
+      "command": {
+        "type": "deleteView",
+        "drawingId": "drawing#1",
+        "sheetId": "sheet#2",
+        "viewId": "view#2"
+      },
+      "at": "2026-10-04T08:00:38.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Delete view",
+      "command": {
+        "type": "restoreView",
+        "drawingId": "drawing#1",
+        "sheetId": "sheet#2",
+        "view": {
+          "id": "view#2",
+          "label": "DETAIL A",
+          "source": {
+            "part": "part#1",
+            "bodies": ["extrude#1"]
+          },
+          "direction": "top",
+          "scale": {
+            "paper": {
+              "source": "1",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "model": {
+              "source": "2",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            }
+          },
+          "position": [80, 90],
+          "options": {
+            "hidden": true,
+            "smooth": false
+          }
+        },
+        "index": 0
+      },
+      "at": "2026-10-04T08:00:39.000Z"
+    },
+    {
+      "cause": "redo",
+      "label": "Delete view",
+      "command": {
+        "type": "deleteView",
+        "drawingId": "drawing#1",
+        "sheetId": "sheet#2",
+        "viewId": "view#2"
+      },
+      "at": "2026-10-04T08:00:40.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Delete sheet",
+      "command": {
+        "type": "deleteSheet",
+        "drawingId": "drawing#1",
+        "sheetId": "sheet#1"
+      },
+      "at": "2026-10-04T08:00:41.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Delete sheet",
+      "command": {
+        "type": "restoreSheet",
+        "drawingId": "drawing#1",
+        "sheet": {
+          "id": "sheet#1",
+          "name": "Sheet 1",
+          "size": "A3",
+          "orientation": "landscape",
+          "titleBlock": {
+            "fields": [
+              {
+                "label": "Title",
+                "value": "Bracket"
+              }
+            ]
+          },
+          "views": [
+            {
+              "id": "view#1",
+              "source": {
+                "part": "part#1",
+                "bodies": ["extrude#1"]
+              },
+              "direction": "front",
+              "scale": {
+                "paper": {
+                  "source": "1",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                "model": {
+                  "source": "2",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                }
+              },
+              "position": [100, 120],
+              "options": {
+                "hidden": true,
+                "smooth": false
+              }
+            }
+          ],
+          "dimensions": [
+            {
+              "id": "dim#1",
+              "view": "view#1",
+              "kind": "vertical",
+              "refs": [
+                {
+                  "face": {
+                    "face": "extrude#1:cap:start"
+                  },
+                  "body": "extrude#1"
+                },
+                {
+                  "face": {
+                    "face": "extrude#1:cap:end"
+                  },
+                  "body": "extrude#1"
+                }
+              ],
+              "offset": -12
+            }
+          ],
+          "notes": [
+            {
+              "id": "note#1",
+              "view": "view#1",
+              "position": [0, -30],
+              "text": "FRONT"
+            }
+          ]
+        },
+        "index": 1
+      },
+      "at": "2026-10-04T08:00:42.000Z"
+    },
+    {
+      "cause": "redo",
+      "label": "Delete sheet",
+      "command": {
+        "type": "deleteSheet",
+        "drawingId": "drawing#1",
+        "sheetId": "sheet#1"
+      },
+      "at": "2026-10-04T08:00:43.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Delete drawing",
+      "command": {
+        "type": "deleteDrawing",
+        "drawingId": "drawing#2"
+      },
+      "at": "2026-10-04T08:00:44.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Delete drawing",
+      "command": {
+        "type": "restoreDrawing",
+        "drawing": {
+          "id": "drawing#2",
+          "name": "Assembly drawing",
+          "sheets": [],
+          "nextIds": {}
+        },
+        "index": 0
+      },
+      "at": "2026-10-04T08:00:45.000Z"
+    },
+    {
+      "cause": "redo",
+      "label": "Delete drawing",
+      "command": {
+        "type": "deleteDrawing",
+        "drawingId": "drawing#2"
+      },
+      "at": "2026-10-04T08:00:46.000Z"
+    }
+  ],
+  "expected": {
+    "format": "manufakture",
+    "version": 15,
+    "namingScheme": 1,
+    "id": "doc-1",
+    "name": "Bracket",
+    "units": {
+      "length": {
+        "unit": "mm"
+      },
+      "angle": {
+        "unit": "deg"
+      }
+    },
+    "variables": [
+      {
+        "name": "thickness",
+        "expression": {
+          "source": "6mm",
+          "lengthUnit": "mm",
+          "angleUnit": "deg"
+        }
+      },
+      {
+        "name": "width",
+        "expression": {
+          "source": "40",
+          "lengthUnit": "mm",
+          "angleUnit": "deg"
+        }
+      },
+      {
+        "name": "height",
+        "expression": {
+          "source": "width / 2",
+          "lengthUnit": "mm",
+          "angleUnit": "deg"
+        }
+      }
+    ],
+    "parts": [
+      {
+        "id": "part#1",
+        "name": "Part 1",
+        "features": [
+          {
+            "id": "sketch#1",
+            "kind": "sketch",
+            "name": "Sketch 1",
+            "suppressed": false,
+            "plane": {
+              "type": "plane",
+              "origin": [0, 0, 0],
+              "normal": [0, 0, 1],
+              "xDir": [1, 0, 0]
+            },
+            "entities": [
+              {
+                "id": "e1",
+                "kind": "line",
+                "construction": false,
+                "start": [0, 0],
+                "end": [40, 0]
+              },
+              {
+                "id": "e2",
+                "kind": "line",
+                "construction": false,
+                "start": [40, 0],
+                "end": [40, 20]
+              },
+              {
+                "id": "e3",
+                "kind": "line",
+                "construction": false,
+                "start": [40, 20],
+                "end": [0, 20]
+              },
+              {
+                "id": "e4",
+                "kind": "line",
+                "construction": false,
+                "start": [0, 20],
+                "end": [0, 0]
+              }
+            ],
+            "constraints": [
+              {
+                "id": "k1",
+                "kind": "coincident",
+                "a": {
+                  "entity": "e1",
+                  "at": "end"
+                },
+                "b": {
+                  "entity": "e2",
+                  "at": "start"
+                }
+              },
+              {
+                "id": "k2",
+                "kind": "horizontal",
+                "line": "e1"
+              },
+              {
+                "id": "k3",
+                "kind": "distance",
+                "value": {
+                  "source": "width",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                "a": {
+                  "entity": "e1",
+                  "at": "start"
+                },
+                "b": {
+                  "entity": "e1",
+                  "at": "end"
+                }
+              },
+              {
+                "id": "k4",
+                "kind": "distance",
+                "value": {
+                  "source": "height",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                "a": {
+                  "entity": "e2",
+                  "at": "start"
+                },
+                "b": {
+                  "entity": "e2",
+                  "at": "end"
+                }
+              },
+              {
+                "id": "k5",
+                "kind": "coincident",
+                "a": {
+                  "entity": "e1",
+                  "at": "start"
+                },
+                "b": {
+                  "entity": "@origin"
+                }
+              }
+            ]
+          },
+          {
+            "id": "extrude#1",
+            "kind": "extrude",
+            "name": "Extrude 1",
+            "suppressed": false,
+            "profile": {
+              "sketch": "sketch#1"
+            },
+            "operation": "new",
+            "extent": {
+              "type": "blind",
+              "distance": {
+                "source": "thickness",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            },
+            "reverse": false
+          },
+          {
+            "id": "sketch#2",
+            "kind": "sketch",
+            "name": "Sketch 2",
+            "suppressed": false,
+            "plane": {
+              "type": "face",
+              "face": {
+                "id": "r1",
+                "ref": {
+                  "face": "extrude#1:cap:end"
+                }
+              }
+            },
+            "entities": [
+              {
+                "id": "e5",
+                "kind": "circle",
+                "construction": false,
+                "center": [20, 10],
+                "radius": 3
+              }
+            ],
+            "constraints": [
+              {
+                "id": "k6",
+                "kind": "diameter",
+                "entity": "e5",
+                "value": {
+                  "source": "6mm",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                }
+              }
+            ]
+          },
+          {
+            "id": "extrude#2",
+            "kind": "extrude",
+            "name": "Extrude 2",
+            "suppressed": false,
+            "profile": {
+              "sketch": "sketch#2"
+            },
+            "operation": "cut",
+            "extent": {
+              "type": "throughAll"
+            },
+            "reverse": false
+          },
+          {
+            "id": "fillet#1",
+            "kind": "fillet",
+            "name": "Fillet 1",
+            "suppressed": false,
+            "edges": [
+              {
+                "id": "r2",
+                "ref": {
+                  "faces": ["extrude#1:side:e1", "extrude#1:side:e2"]
+                }
+              }
+            ],
+            "radius": {
+              "source": "2mm",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            }
+          }
+        ],
+        "rollbackIndex": null,
+        "nextIds": {
+          "e": 6,
+          "extrude": 3,
+          "fillet": 2,
+          "k": 7,
+          "r": 3,
+          "sketch": 3
+        },
+        "bodies": []
+      }
+    ],
+    "assemblies": [
+      {
+        "id": "assembly#1",
+        "name": "Pair",
+        "instances": [
+          {
+            "id": "inst#1",
+            "name": "A",
+            "source": {
+              "part": "part#1"
+            },
+            "fixed": true,
+            "suppressed": false,
+            "pose": {
+              "translation": [0, 0, 0],
+              "rotation": [0, 0, 0, 1]
+            }
+          }
+        ],
+        "mates": [],
+        "nextIds": {
+          "inst": 2
+        }
+      }
+    ],
+    "print": {
+      "setups": [],
+      "nextIds": {}
+    },
+    "fonts": [],
+    "cam": {
+      "tools": [],
+      "setups": [],
+      "nextIds": {}
+    },
+    "drawings": [
+      {
+        "id": "drawing#1",
+        "name": "Bracket drawing",
+        "sheets": [
+          {
+            "id": "sheet#2",
+            "name": "Details",
+            "size": "A3",
+            "orientation": "portrait",
+            "views": [
+              {
+                "id": "view#3",
+                "source": {
+                  "assembly": "assembly#1"
+                },
+                "direction": "isometric",
+                "scale": {
+                  "paper": {
+                    "source": "1",
+                    "lengthUnit": "mm",
+                    "angleUnit": "deg"
+                  },
+                  "model": {
+                    "source": "2",
+                    "lengthUnit": "mm",
+                    "angleUnit": "deg"
+                  }
+                },
+                "position": [200, 120],
+                "options": {
+                  "hidden": true,
+                  "smooth": false
+                }
+              }
+            ],
+            "dimensions": [],
+            "notes": []
+          }
+        ],
+        "nextIds": {
+          "dim": 3,
+          "note": 3,
+          "sheet": 3,
+          "view": 4
+        }
+      }
+    ],
+    "nextIds": {
+      "assembly": 2,
+      "drawing": 3,
+      "part": 2
+    }
+  }
+}

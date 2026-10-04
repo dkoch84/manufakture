@@ -4,8 +4,14 @@
  * in order on load, and each migration is tested against a fixture of the older version.
  *
  * To change the file shape: bump `FORMAT_VERSION` in `schema.ts`, append a migration here, add a
- * fixture of the old version under `fixtures/`, and extend the migration test.
+ * fixture of the old version under `fixtures/`, and extend the migration test. Commands carry
+ * parts of the document shape too (a feature, a whole part, a whole document), so append the
+ * matching command migration to `COMMAND_MIGRATIONS` as well (see there).
  */
+
+import { CommandSchema, type Command } from './commands';
+import { fail, ok, schemaError, type CoreResult } from './result';
+import { FORMAT_VERSION } from './schema';
 
 export type JsonObject = { [key: string]: unknown };
 
@@ -317,3 +323,162 @@ export const FORMAT_MIGRATIONS: readonly Migration[] = [
  * `NAMING_MIGRATIONS[i]` goes from scheme i + 1 to i + 2.
  */
 export const NAMING_MIGRATIONS: readonly Migration[] = [];
+
+// Command migrations ---------------------------------------------------------------------------
+
+/**
+ * A command migration: from the JSON of a command written under document format `from` to the
+ * same command under `to`. Like document migrations it gets its own copy and may change it.
+ */
+export interface CommandMigration {
+  readonly from: number;
+  readonly to: number;
+  readonly description: string;
+  readonly migrate: (command: JsonObject) => JsonObject;
+}
+
+/**
+ * The command step beside document migration `document`: applies it to the document a
+ * `replaceDocument` carries, recurses into batches, and gives every other command to `entities`,
+ * which migrates the parts of the document shape that command carries (a feature, a part).
+ */
+function commandStep(
+  document: Migration,
+  entities: (command: JsonObject) => JsonObject = (c) => c,
+): CommandMigration {
+  const migrate = (command: JsonObject): JsonObject => {
+    if (command.type === 'batch' && Array.isArray(command.commands)) {
+      return {
+        ...command,
+        commands: command.commands.map((c) => (isObject(c) ? migrate(c) : c)),
+      };
+    }
+    if (command.type === 'replaceDocument' && isObject(command.document)) {
+      return { ...command, document: document.migrate(command.document) };
+    }
+    return entities(command);
+  };
+  return { from: document.from, to: document.to, description: document.description, migrate };
+}
+
+/** Version 0 to 1 for a feature: the `suppressed` flag (absent was not suppressed). */
+function suppressible(feature: unknown): unknown {
+  return isObject(feature) ? { suppressed: false, ...feature } : feature;
+}
+
+/** Version 0 to 1 for the commands that carry features or parts. */
+function commandV0ToV1(command: JsonObject): JsonObject {
+  if (
+    command.type === 'addFeature' ||
+    command.type === 'editFeature' ||
+    command.type === 'restoreFeature'
+  ) {
+    return { ...command, feature: suppressible(command.feature) };
+  }
+  if (command.type === 'restorePart' && isObject(command.part)) {
+    const part = command.part;
+    return {
+      ...command,
+      part: {
+        ...part,
+        features: Array.isArray(part.features) ? part.features.map(suppressible) : part.features,
+        rollbackIndex: part.rollbackIndex ?? null,
+      },
+    };
+  }
+  return command;
+}
+
+/** Version 3 to 4 for a restored part: body props (`bodies: []`, none set). */
+function commandV3ToV4(command: JsonObject): JsonObject {
+  if (command.type === 'restorePart' && isObject(command.part) && !('bodies' in command.part)) {
+    return { ...command, part: { ...command.part, bodies: [] } };
+  }
+  return command;
+}
+
+/**
+ * Command migrations, in order: `COMMAND_MIGRATIONS[i]` goes from format i to i + 1, beside
+ * `FORMAT_MIGRATIONS[i]` (a test keeps the two lists in step). Log entries and persisted sync
+ * queues store commands as written, with their format, and `migrateCommand` brings them up to
+ * date before they are applied (ADR 0009, consequences).
+ *
+ * A format task appends one entry here: `commandStep(itsMigration)` when no command carries the
+ * changed shape except inside a whole document, or with an `entities` function that migrates the
+ * feature, part, assembly or other item the affected commands carry. A command whose meaning
+ * changes is not migrated: it becomes a new command type (M7 plan, cross-cutting decision 3).
+ */
+export const COMMAND_MIGRATIONS: readonly CommandMigration[] = [
+  commandStep(migrateV0ToV1, commandV0ToV1),
+  commandStep(migrateV1ToV2),
+  commandStep(migrateV2ToV3),
+  commandStep(migrateV3ToV4, commandV3ToV4),
+  commandStep(migrateV4ToV5),
+  commandStep(migrateV5ToV6),
+  commandStep(migrateV6ToV7),
+  commandStep(migrateV7ToV8),
+  commandStep(migrateV8ToV9),
+  commandStep(migrateV9ToV10),
+  commandStep(migrateV10ToV11),
+  commandStep(migrateV11ToV12),
+  commandStep(migrateV12ToV13),
+  commandStep(migrateV13ToV14),
+  commandStep(migrateV14ToV15),
+];
+
+export interface CommandMigrationOptions {
+  /** Target format (default `FORMAT_VERSION`); for tests. */
+  readonly formatVersion?: number;
+  /** The chain (default `COMMAND_MIGRATIONS`); for tests. */
+  readonly commandMigrations?: readonly CommandMigration[];
+}
+
+/**
+ * Brings a command written under document format `fromFormat` up to the current format and
+ * validates it against `CommandSchema`. Refuses a format newer than this build reads, like a
+ * document. The input is not changed.
+ */
+export function migrateCommand(
+  command: unknown,
+  fromFormat: number,
+  options: CommandMigrationOptions = {},
+): CoreResult<Command> {
+  const target = options.formatVersion ?? FORMAT_VERSION;
+  const chain = options.commandMigrations ?? COMMAND_MIGRATIONS;
+  if (!Number.isInteger(fromFormat) || fromFormat < 0) {
+    return fail('version', "A command's format must be an integer of at least 0", ['format']);
+  }
+  if (fromFormat > target) {
+    return fail(
+      'version',
+      `This command was written by a newer version of manufakture (file format ${fromFormat}; this app reads up to ${target}). It was not applied.`,
+      ['format'],
+    );
+  }
+  if (!isObject(command) || typeof command.type !== 'string') {
+    return fail('schema', 'Invalid command: expected an object with a "type"', ['type']);
+  }
+  let current: JsonObject;
+  try {
+    current = JSON.parse(JSON.stringify(command)) as JsonObject;
+  } catch (e) {
+    return fail('schema', `Invalid command: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  for (let v = fromFormat; v < target; v++) {
+    const m = chain[v];
+    if (!m || m.from !== v || m.to !== v + 1) {
+      return fail('migration', `No command migration from format ${v} to ${v + 1}`, ['format']);
+    }
+    try {
+      current = m.migrate(current);
+    } catch (e) {
+      const why = e instanceof Error ? e.message : String(e);
+      return fail('migration', `Command migration from format ${v} to ${v + 1} failed: ${why}`, [
+        'format',
+      ]);
+    }
+  }
+  const parsed = CommandSchema.safeParse(current);
+  if (!parsed.success) return { ok: false, error: schemaError('Invalid command', parsed.error) };
+  return ok(parsed.data);
+}

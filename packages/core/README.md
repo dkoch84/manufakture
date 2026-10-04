@@ -1499,7 +1499,9 @@ assemblies and configurations included. It does not look at counters itself, so 
 can put back exactly what was there; a client builds the replacement with
 `restoredDocument(current, past)`, which keeps `past`'s content under `current`'s id and raises
 every counter (the document's, the print section's, and each part's, assembly's and drawing's
-that both have) to the higher of the two values, so no id handed out after `past` is handed out again. In the op log the command
+that both have) to the higher of the two values, so no id handed out after `past` is handed out again. A part deleted since
+`past` has no counters in `current`, so pass a high-water mark as the third argument,
+`restoredDocument(current, past, floor)` (see Sync), and no counter goes back. In the op log the command
 carries the whole document: imported files and pinned versions are stored by reference as for any
 command, so it is the feature JSON that repeats.
 
@@ -1606,6 +1608,144 @@ nothing to `parts` or `assemblies`, so it has no `firstAffectedIndex`; a model e
 per-domain hook: regen marks dirty every extension of a domain that may read the namespace, and the
 cache sorts out the rest (ADR 0013 decision 5).
 
+## Sync
+
+What sync needs from core ([ADR 0009](../../docs/adr/0009-sync-model.md) and its amendment), as
+pure functions and schemas. The client engine and the reference server (`packages/sync`, M7
+T7.1b) build on them.
+
+```ts
+import {
+  parseName,
+  printName,
+  remapIds,
+  remapDocument,
+  createdIds,
+  takenIds,
+  freshRenames,
+  tombstoneTable,
+  remapCreatedIds,
+  documentCounters,
+  maxCounters,
+  counterRegressions,
+  restoredDocument,
+  migrateCommand,
+  SyncEntrySchema,
+  PROTOCOL_VERSION,
+} from '@manufakture/core';
+```
+
+### Face names
+
+`parseName(name)` reads the naming grammar of `packages/kernel/src/naming.ts` and
+`printName(parseName(name)) === name` for every string. The parse is a flat list of parts, one
+left-to-right pass with no recursion (linear on hostile input, like the old scanner):
+
+| Part      | What it is                                                                            |
+| --------- | ------------------------------------------------------------------------------------- |
+| `feature` | a feature id starting a born name, an instance prefix or a derived prefix (`kind#n:`) |
+| `sub`     | a born name's tail when the whole tail is a sub-id: `e7` with suffix `#a#1`           |
+| `source`  | what follows `<id>:from/` to the end of its merge or corner member: never read        |
+| `text`    | roles, punctuation, other tails (`end`, `start#2`, `4`, `xmax`), placeholders         |
+
+So born names `extrude#1:side:e2#a`, region edges `e2#1`, nested names
+`shell#5:offset:extrude#1:cap:end`, pieces `X#2`, merges `(A+B)`, corners `A&B&C`, instance
+prefixes `pattern#7:i2/X` and `mirror#8:image/X`, `import#9:face:4`, `?face3` and derived
+prefixes all parse, and so do edge names (`A|B[C,D]#2`, display only). `mapName(name, maps)`
+rewrites the feature ids and sub-id tails (keeping suffixes) and of a derived prefix only its own
+id. `featureIdsInName` is the `feature` parts of the parse, so validation and the remap read names
+the same way.
+
+### Counter scopes
+
+A scope is a `nextIds` object, keyed as a string: `document`, `part:<id>`, `assembly:<id>`,
+`cam`, `print`, `drawing:<id>`. `documentCounters(doc)` snapshots every scope's counters as plain
+JSON (`CounterTable`); `maxCounters(a, b)` is a high-water mark that keeps deleted scopes;
+`counterRegressions(before, after)` lists every counter of `after` below `before` for scopes in
+both. A new `nextIds` object is one entry in `COUNTER_SCOPES`; a new counter in an existing one
+(`script` in the document's, T7.2a) needs nothing there.
+
+### Created ids
+
+`createdIds(doc, command)` gives the ids a command allocates, by scope
+(`{ "part:part#1": ["extrude#4", "e10"] }`): the ids in its fields that `applyCommand` takes fresh
+(at or above the scope's counter before, below it after), never split pieces, and never ids in a
+scope the command creates (a new part's or drawing's), whose own id is listed in the parent scope
+instead. The client computes it on the document it made the command on and sends it in the
+entry. The server cannot: two edits that each add `e10` to one sketch are both accepted by core,
+the second taking over the first one's entity. `takenIds(counters, created)` is the guard: the
+created ids below the head's counters, refused as `id-reused` before core runs.
+
+### Remap
+
+`remapIds(commands, table, { document, report })` rewrites every id in a list of commands through
+one table (`RenameTable`: scope to old id to new id), so a queue, an undo stack's inverses or a
+redo list is rewritten in one call with simultaneous renames. Fields are walked structurally by
+schema in `IdWalker`, each through its own scope, so a CAM `profile#1` and a feature id of the same
+shape never mix; names go through the parser. Names of another part (a mate connector's faces are
+its instance's part's, a CAM operation's its setup's part's, an instance's `bodies`, a drawing
+dimension's view part) are resolved through `document` and the commands before them; what cannot
+be resolved is left and counted in `report.unresolved`. Opaque data is never read: derived and
+pinned sources, extension `params`, domain data, view params, names, labels, expressions. Counters
+a command carries (a restored part's, a replaced document's) are raised to cover the renamed ids.
+`remapDocument(doc, table)` renames a whole document the same way; for any table that renames into
+fresh numbers, applying `remapIds(commands)` to `remapDocument(start)` gives
+`remapDocument(end)` (a seeded property test checks it, and a second one against an independent
+text rewrite).
+
+Building tables: `freshRenames(counters, ids, { reserved })` renames ids to the next free numbers
+of their counters (in order) and returns the counters after; `takenIds` plus `freshRenames` is how a
+client renames an in-flight entry whose ids were taken, in its own naming. A dropped command's ids
+become tombstones with `tombstoneTable(created)` (table value `null`): `kind#0` / `e0` in a plain
+field, which the schema refuses, and the number `TOMBSTONE_NAME` (999999999999999) inside a name:
+a feature id with it is refused by the dependency check, and a sub-id tail with it
+(`extrude#1:side:e999999999999999`, even on a live `extrude#1`) by the schema of every stored face
+name (`hasTombstoneSubId`, a `schema` error saying the name names a dropped command's sub-id). So a
+held entry that names them fails instead of binding to whatever takes the
+number later. `remapCreatedIds(created, table)` rewrites an entry's `created` with its command,
+scope keys included (`part:part#3` follows `part#3`).
+
+Left to the sync client (T7.1b): a duplicated part's copied ids follow its source part's renames
+up to the duplicate, so the client copies the source scope's entries into the new part's table;
+and a restore is kept as its intent and re-derived with `restoredDocument(head, past, floor)` at
+every replay (amendment, item 11), with the restored version tracked in the client's queue state,
+not in `SyncEntrySchema`. The spike's fixed concurrent sequences (two concurrent sketch edits adding
+one entity id, an in-flight collision followed by an edit of the remote feature, a dropped head
+with a held follower, a duplicate of a part that takes remote features, a stale restore) belong to
+T7.1b's fuzz suite: they exercise the client engine, not a single core command log.
+
+### Restores and counter regressions
+
+A server refuses an entry whose head has a counter below its high-water mark
+(`counterRegressions(high, documentCounters(head))`, with `high` the `maxCounters` of every
+accepted head). `restoredDocument(current, past, floor)` takes that mark as `floor`, so a part
+deleted since `past` comes back with the counters it reached, not `past`'s.
+
+### Sync entries
+
+`SyncEntrySchema` is an entry in storage form: `{ clientId, clientSeq, prevSeq?, baseRev, format,
+cause, label, command, created, at }`. `command` is stored as written under document format
+`format`; read it with `migrateCommand(entry.command, entry.format)`. `prevSeq` is the `clientSeq`
+of the entry the new one was built on, assigned with `clientSeq` when the entry is sent: the
+nearest entry before it in the queue that is neither refused nor doomed, else the latest accepted
+entry, else absent. `created` is `createdIds`' result (`CreatedIdsSchema`); `RenameTableSchema`
+validates a saved table. `PROTOCOL_VERSION` (1) versions the wire shapes, apart from
+`FORMAT_VERSION`.
+
+### Known limitations
+
+- **A rename can reverse the code-unit order of face names** (`e9` to `e10`, `extrude#9` to
+  `extrude#10`). An edge reference stores its faces sorted by code unit, and the kernel reads a
+  chamfer's reference face and an edge's direction from that order. The remap keeps positions, so
+  the stored list is no longer sorted; it counts each case in `report.orderFlips` (a test pins the
+  current behaviour). The kernel's naming is unchanged in M7: numeric-aware comparison would make
+  every remap order-preserving, at the cost of a naming-scheme bump, and is left to T7.1b and
+  T7.0d to decide.
+- **A stale whole-feature edit is refused**: an `editFeature` that re-introduces a sub-id a
+  concurrent edit removed is not a fresh id, so no remap applies (amendment, item 10).
+- **`RenameTable` keys are ids straight from counters.** A sub-id is renamed by its base, so `e7`
+  also renames `e7#a` and `e7#1`; split pieces are never keys.
+
 ## File format
 
 `serialize(doc)` writes canonical JSON: keys in schema order (records such as every `nextIds`,
@@ -1684,12 +1824,43 @@ framing elevations and roof framing plans); `migrateV14ToV15` only bumps the ver
 version 14 file's views all show a part or an assembly; `v14-bracket.json` migrates to exactly
 `v15-bracket.json`.
 
-To change the file shape:
+Commands carry parts of the document shape too (a feature, a whole part, a whole document), and
+log entries and sync queues store them as written, with the format they were written under.
+`migrateCommand(command, fromFormat)` brings one up to the current format and validates it:
+`COMMAND_MIGRATIONS[i]` goes from format i to i + 1 beside `FORMAT_MIGRATIONS[i]` (a test keeps the
+two lists in step). Each step runs its document migration on the document a `replaceDocument`
+carries, recurses into batches, and migrates the items other commands carry: version 0 to 1 gives
+a feature its `suppressed` flag (in `addFeature`, `editFeature`, `restoreFeature`, `restorePart`)
+and a restored part its rollback bar, version 3 to 4 gives a restored part `bodies: []`; the other
+steps change no command. A command written under a newer format is refused (`version`).
+
+### Golden command logs
+
+Core is a wire protocol (M7 plan, cross-cutting decision 3): command semantics must not change
+under old logs. `src/fixtures/logs/*.json` are command logs, each with the format version it was
+written under, a start document, entries in the persistence `LogEntry` shape
+(`{ cause, label, command, at }`) and the document they lead to. `golden-logs.test.ts` replays
+every entry through `migrateCommand` and `applyCommand` and compares `serialize` of the result with
+the expected document (itself loaded through the document migrations), and checks that the logs
+together use every command type, `batch` included. Undo entries are the inverses core returned, so
+every `restore*` command is covered.
+
+To change the file shape and commands:
 
 1. bump `FORMAT_VERSION` in `src/schema.ts` and change the schema;
 2. append a migration to `FORMAT_MIGRATIONS` in `src/migrations.ts`;
 3. add a fixture of the old version to `src/fixtures/` and register it in `FIXTURES` in
-   `src/format.test.ts` (a test fails until every older version has one).
+   `src/format.test.ts` (a test fails until every older version has one);
+4. append the matching step to `COMMAND_MIGRATIONS`: `commandStep(migration)` when no command
+   carries the changed shape except inside a whole document, or with an `entities` function that
+   migrates the item the affected commands carry;
+5. never edit or regenerate a golden log: the old ones must keep replaying, through step 4. A
+   command whose meaning changes is a new command type, not an edit of the old one; a new command
+   type gets a golden log of its own (the coverage test fails until it has one);
+6. a new id field, counter or naming form goes into the remap in the same task (see Sync): a
+   field in `IdWalker` (`src/remap.ts`), a `nextIds` object in `COUNTER_SCOPES`
+   (`src/scopes.ts`), a naming form in `parseName` (`src/names.ts`), each with its tests. A missed
+   one renames a local id and leaves a stale reference, which core then refuses.
 
 ## Where this deviates from ADR 0004's first cut
 

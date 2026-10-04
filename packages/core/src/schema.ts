@@ -12,7 +12,7 @@ import type {
   Vec3,
 } from '@manufakture/sketch/model';
 import { z } from 'zod';
-import { FEATURE_ID_PATTERN, isSubId } from './ids';
+import { FEATURE_ID_PATTERN, hasTombstoneSubId, isSubId } from './ids';
 import { MATERIAL_IDS } from './materials';
 
 /**
@@ -216,6 +216,10 @@ const topoName = z
   .refine(
     (name) => nameDepth(name) <= MAX_FACE_NAME_DEPTH,
     `A face name nests brackets at most ${MAX_FACE_NAME_DEPTH} deep`,
+  )
+  .refine(
+    (name) => !hasTombstoneSubId(name),
+    'A face name names a sub-id of a dropped command (a sync tombstone); the reference was lost',
   );
 export const FaceRefSchema = z.strictObject({ face: topoName });
 export const EdgeRefSchema = z.strictObject({

@@ -1,0 +1,1717 @@
+{
+  "format": "manufakture-golden-log",
+  "version": 15,
+  "description": "CAM tools, setups and operations of several kinds, with deletes undone (restoreCamOperation, restoreCamTool, restoreCamSetup) and redone.",
+  "base": {
+    "format": "manufakture",
+    "version": 15,
+    "namingScheme": 1,
+    "id": "doc-1",
+    "name": "Bracket",
+    "units": {
+      "length": {
+        "unit": "mm"
+      },
+      "angle": {
+        "unit": "deg"
+      }
+    },
+    "variables": [
+      {
+        "name": "thickness",
+        "expression": {
+          "source": "6mm",
+          "lengthUnit": "mm",
+          "angleUnit": "deg"
+        }
+      },
+      {
+        "name": "width",
+        "expression": {
+          "source": "40",
+          "lengthUnit": "mm",
+          "angleUnit": "deg"
+        }
+      },
+      {
+        "name": "height",
+        "expression": {
+          "source": "width / 2",
+          "lengthUnit": "mm",
+          "angleUnit": "deg"
+        }
+      }
+    ],
+    "parts": [
+      {
+        "id": "part#1",
+        "name": "Part 1",
+        "features": [
+          {
+            "id": "sketch#1",
+            "kind": "sketch",
+            "name": "Sketch 1",
+            "suppressed": false,
+            "plane": {
+              "type": "plane",
+              "origin": [0, 0, 0],
+              "normal": [0, 0, 1],
+              "xDir": [1, 0, 0]
+            },
+            "entities": [
+              {
+                "id": "e1",
+                "kind": "line",
+                "construction": false,
+                "start": [0, 0],
+                "end": [40, 0]
+              },
+              {
+                "id": "e2",
+                "kind": "line",
+                "construction": false,
+                "start": [40, 0],
+                "end": [40, 20]
+              },
+              {
+                "id": "e3",
+                "kind": "line",
+                "construction": false,
+                "start": [40, 20],
+                "end": [0, 20]
+              },
+              {
+                "id": "e4",
+                "kind": "line",
+                "construction": false,
+                "start": [0, 20],
+                "end": [0, 0]
+              }
+            ],
+            "constraints": [
+              {
+                "id": "k1",
+                "kind": "coincident",
+                "a": {
+                  "entity": "e1",
+                  "at": "end"
+                },
+                "b": {
+                  "entity": "e2",
+                  "at": "start"
+                }
+              },
+              {
+                "id": "k2",
+                "kind": "horizontal",
+                "line": "e1"
+              },
+              {
+                "id": "k3",
+                "kind": "distance",
+                "value": {
+                  "source": "width",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                "a": {
+                  "entity": "e1",
+                  "at": "start"
+                },
+                "b": {
+                  "entity": "e1",
+                  "at": "end"
+                }
+              },
+              {
+                "id": "k4",
+                "kind": "distance",
+                "value": {
+                  "source": "height",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                "a": {
+                  "entity": "e2",
+                  "at": "start"
+                },
+                "b": {
+                  "entity": "e2",
+                  "at": "end"
+                }
+              },
+              {
+                "id": "k5",
+                "kind": "coincident",
+                "a": {
+                  "entity": "e1",
+                  "at": "start"
+                },
+                "b": {
+                  "entity": "@origin"
+                }
+              }
+            ]
+          },
+          {
+            "id": "extrude#1",
+            "kind": "extrude",
+            "name": "Extrude 1",
+            "suppressed": false,
+            "profile": {
+              "sketch": "sketch#1"
+            },
+            "operation": "new",
+            "extent": {
+              "type": "blind",
+              "distance": {
+                "source": "thickness",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            },
+            "reverse": false
+          },
+          {
+            "id": "sketch#2",
+            "kind": "sketch",
+            "name": "Sketch 2",
+            "suppressed": false,
+            "plane": {
+              "type": "face",
+              "face": {
+                "id": "r1",
+                "ref": {
+                  "face": "extrude#1:cap:end"
+                }
+              }
+            },
+            "entities": [
+              {
+                "id": "e5",
+                "kind": "circle",
+                "construction": false,
+                "center": [20, 10],
+                "radius": 3
+              }
+            ],
+            "constraints": [
+              {
+                "id": "k6",
+                "kind": "diameter",
+                "entity": "e5",
+                "value": {
+                  "source": "6mm",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                }
+              }
+            ]
+          },
+          {
+            "id": "extrude#2",
+            "kind": "extrude",
+            "name": "Extrude 2",
+            "suppressed": false,
+            "profile": {
+              "sketch": "sketch#2"
+            },
+            "operation": "cut",
+            "extent": {
+              "type": "throughAll"
+            },
+            "reverse": false
+          },
+          {
+            "id": "fillet#1",
+            "kind": "fillet",
+            "name": "Fillet 1",
+            "suppressed": false,
+            "edges": [
+              {
+                "id": "r2",
+                "ref": {
+                  "faces": ["extrude#1:side:e1", "extrude#1:side:e2"]
+                }
+              }
+            ],
+            "radius": {
+              "source": "2mm",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            }
+          }
+        ],
+        "rollbackIndex": null,
+        "nextIds": {
+          "e": 6,
+          "extrude": 3,
+          "fillet": 2,
+          "k": 7,
+          "r": 3,
+          "sketch": 3
+        },
+        "bodies": []
+      }
+    ],
+    "assemblies": [],
+    "print": {
+      "setups": [],
+      "nextIds": {}
+    },
+    "fonts": [],
+    "cam": {
+      "tools": [],
+      "setups": [],
+      "nextIds": {}
+    },
+    "nextIds": {
+      "part": 2
+    }
+  },
+  "entries": [
+    {
+      "cause": "execute",
+      "label": "Tool",
+      "command": {
+        "type": "addCamTool",
+        "tool": {
+          "id": "tool#1",
+          "name": "Flat 6",
+          "kind": "flat",
+          "number": 1,
+          "diameter": {
+            "source": "6",
+            "lengthUnit": "mm",
+            "angleUnit": "deg"
+          },
+          "fluteLength": {
+            "source": "19",
+            "lengthUnit": "mm",
+            "angleUnit": "deg"
+          },
+          "flutes": 2,
+          "presets": []
+        }
+      },
+      "at": "2026-10-04T08:00:01.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "V-bit",
+      "command": {
+        "type": "addCamTool",
+        "tool": {
+          "id": "tool#2",
+          "name": "V 60",
+          "kind": "vbit",
+          "number": 1,
+          "diameter": {
+            "source": "6",
+            "lengthUnit": "mm",
+            "angleUnit": "deg"
+          },
+          "fluteLength": {
+            "source": "19",
+            "lengthUnit": "mm",
+            "angleUnit": "deg"
+          },
+          "flutes": 2,
+          "presets": [],
+          "angle": {
+            "source": "60deg",
+            "lengthUnit": "mm",
+            "angleUnit": "deg"
+          },
+          "tipDiameter": {
+            "source": "0.2",
+            "lengthUnit": "mm",
+            "angleUnit": "deg"
+          }
+        }
+      },
+      "at": "2026-10-04T08:00:02.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Edit tool",
+      "command": {
+        "type": "editCamTool",
+        "tool": {
+          "id": "tool#1",
+          "name": "Flat 6 mm",
+          "kind": "flat",
+          "number": 1,
+          "diameter": {
+            "source": "6",
+            "lengthUnit": "mm",
+            "angleUnit": "deg"
+          },
+          "fluteLength": {
+            "source": "19",
+            "lengthUnit": "mm",
+            "angleUnit": "deg"
+          },
+          "flutes": 3,
+          "presets": []
+        }
+      },
+      "at": "2026-10-04T08:00:03.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Edit tool",
+      "command": {
+        "type": "restoreCamTool",
+        "tool": {
+          "id": "tool#1",
+          "name": "Flat 6",
+          "kind": "flat",
+          "number": 1,
+          "diameter": {
+            "source": "6",
+            "lengthUnit": "mm",
+            "angleUnit": "deg"
+          },
+          "fluteLength": {
+            "source": "19",
+            "lengthUnit": "mm",
+            "angleUnit": "deg"
+          },
+          "flutes": 2,
+          "presets": []
+        },
+        "index": 0
+      },
+      "at": "2026-10-04T08:00:04.000Z"
+    },
+    {
+      "cause": "redo",
+      "label": "Edit tool",
+      "command": {
+        "type": "restoreCamTool",
+        "tool": {
+          "id": "tool#1",
+          "name": "Flat 6 mm",
+          "kind": "flat",
+          "number": 1,
+          "diameter": {
+            "source": "6",
+            "lengthUnit": "mm",
+            "angleUnit": "deg"
+          },
+          "fluteLength": {
+            "source": "19",
+            "lengthUnit": "mm",
+            "angleUnit": "deg"
+          },
+          "flutes": 3,
+          "presets": []
+        },
+        "index": 0
+      },
+      "at": "2026-10-04T08:00:05.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Setup",
+      "command": {
+        "type": "addCamSetup",
+        "setup": {
+          "id": "setup#1",
+          "name": "Top",
+          "part": "part#1",
+          "body": "extrude#1",
+          "machine": "shapeoko-5-pro-4x4",
+          "post": "grbl",
+          "stock": {
+            "kind": "fromBody",
+            "margins": {
+              "xMin": {
+                "source": "0",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "xMax": {
+                "source": "0",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "yMin": {
+                "source": "0",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "yMax": {
+                "source": "0",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "top": {
+                "source": "1",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "bottom": {
+                "source": "0",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            }
+          },
+          "wcs": {
+            "up": {
+              "kind": "face",
+              "face": {
+                "id": "r1",
+                "ref": {
+                  "face": "extrude#1:cap:end"
+                }
+              }
+            },
+            "origin": {
+              "xy": "front-left",
+              "z": "top"
+            }
+          },
+          "heights": {
+            "clearance": {
+              "source": "10",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "retract": {
+              "source": "5",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            }
+          },
+          "operations": [
+            {
+              "id": "profile#1",
+              "kind": "profile",
+              "name": "Outline",
+              "suppressed": false,
+              "tool": "tool#1",
+              "geometry": [
+                {
+                  "kind": "face",
+                  "face": {
+                    "id": "r2",
+                    "ref": {
+                      "face": "extrude#1:cap:start"
+                    }
+                  }
+                }
+              ],
+              "side": "outside",
+              "depth": {
+                "kind": "through"
+              },
+              "entry": {
+                "kind": "ramp",
+                "angle": {
+                  "source": "3deg",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                }
+              },
+              "leadIn": {
+                "kind": "arc",
+                "radius": {
+                  "source": "2",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                }
+              },
+              "leadOut": {
+                "kind": "none"
+              },
+              "climb": true
+            }
+          ]
+        }
+      },
+      "at": "2026-10-04T08:00:06.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Setup 2",
+      "command": {
+        "type": "addCamSetup",
+        "setup": {
+          "id": "setup#2",
+          "name": "Bottom",
+          "part": "part#1",
+          "body": "extrude#1",
+          "machine": "shapeoko-5-pro-4x4",
+          "post": "grbl",
+          "stock": {
+            "kind": "fromBody",
+            "margins": {
+              "xMin": {
+                "source": "0",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "xMax": {
+                "source": "0",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "yMin": {
+                "source": "0",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "yMax": {
+                "source": "0",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "top": {
+                "source": "1",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "bottom": {
+                "source": "0",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            }
+          },
+          "wcs": {
+            "up": {
+              "kind": "axis",
+              "axis": "-z"
+            },
+            "origin": {
+              "xy": "centre",
+              "z": "top"
+            }
+          },
+          "heights": {
+            "clearance": {
+              "source": "10",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "retract": {
+              "source": "5",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            }
+          },
+          "operations": []
+        }
+      },
+      "at": "2026-10-04T08:00:07.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Edit setup",
+      "command": {
+        "type": "editCamSetup",
+        "setupId": "setup#2",
+        "name": "Flip",
+        "body": null,
+        "wcs": {
+          "up": {
+            "kind": "face",
+            "face": {
+              "id": "r3",
+              "ref": {
+                "face": "extrude#1:cap:start"
+              }
+            }
+          },
+          "origin": {
+            "xy": "back-right",
+            "z": "bottom"
+          }
+        }
+      },
+      "at": "2026-10-04T08:00:08.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Edit setup",
+      "command": {
+        "type": "restoreCamSetup",
+        "setup": {
+          "id": "setup#2",
+          "name": "Bottom",
+          "part": "part#1",
+          "body": "extrude#1",
+          "machine": "shapeoko-5-pro-4x4",
+          "post": "grbl",
+          "stock": {
+            "kind": "fromBody",
+            "margins": {
+              "xMin": {
+                "source": "0",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "xMax": {
+                "source": "0",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "yMin": {
+                "source": "0",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "yMax": {
+                "source": "0",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "top": {
+                "source": "1",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "bottom": {
+                "source": "0",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            }
+          },
+          "wcs": {
+            "up": {
+              "kind": "axis",
+              "axis": "-z"
+            },
+            "origin": {
+              "xy": "centre",
+              "z": "top"
+            }
+          },
+          "heights": {
+            "clearance": {
+              "source": "10",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "retract": {
+              "source": "5",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            }
+          },
+          "operations": []
+        },
+        "index": 1
+      },
+      "at": "2026-10-04T08:00:09.000Z"
+    },
+    {
+      "cause": "redo",
+      "label": "Edit setup",
+      "command": {
+        "type": "restoreCamSetup",
+        "setup": {
+          "id": "setup#2",
+          "name": "Flip",
+          "part": "part#1",
+          "machine": "shapeoko-5-pro-4x4",
+          "post": "grbl",
+          "stock": {
+            "kind": "fromBody",
+            "margins": {
+              "xMin": {
+                "source": "0",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "xMax": {
+                "source": "0",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "yMin": {
+                "source": "0",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "yMax": {
+                "source": "0",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "top": {
+                "source": "1",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "bottom": {
+                "source": "0",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            }
+          },
+          "wcs": {
+            "up": {
+              "kind": "face",
+              "face": {
+                "id": "r3",
+                "ref": {
+                  "face": "extrude#1:cap:start"
+                }
+              }
+            },
+            "origin": {
+              "xy": "back-right",
+              "z": "bottom"
+            }
+          },
+          "heights": {
+            "clearance": {
+              "source": "10",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "retract": {
+              "source": "5",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            }
+          },
+          "operations": []
+        },
+        "index": 1
+      },
+      "at": "2026-10-04T08:00:10.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Reorder setups",
+      "command": {
+        "type": "reorderCamSetups",
+        "setupId": "setup#2",
+        "index": 0
+      },
+      "at": "2026-10-04T08:00:11.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Reorder setups",
+      "command": {
+        "type": "reorderCamSetups",
+        "setupId": "setup#2",
+        "index": 1
+      },
+      "at": "2026-10-04T08:00:12.000Z"
+    },
+    {
+      "cause": "redo",
+      "label": "Reorder setups",
+      "command": {
+        "type": "reorderCamSetups",
+        "setupId": "setup#2",
+        "index": 0
+      },
+      "at": "2026-10-04T08:00:13.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Pocket",
+      "command": {
+        "type": "addCamOperation",
+        "setupId": "setup#1",
+        "operation": {
+          "id": "pocket#1",
+          "kind": "pocket",
+          "name": "Pocket",
+          "suppressed": false,
+          "tool": "tool#1",
+          "geometry": [
+            {
+              "kind": "region",
+              "sketch": "sketch#2",
+              "entities": ["e5"]
+            }
+          ],
+          "depth": {
+            "kind": "blind",
+            "depth": {
+              "source": "2",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            }
+          },
+          "stepover": {
+            "source": "2.5",
+            "lengthUnit": "mm",
+            "angleUnit": "deg"
+          },
+          "entry": {
+            "kind": "helix",
+            "angle": {
+              "source": "2deg",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "radius": {
+              "source": "2",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            }
+          },
+          "climb": true
+        }
+      },
+      "at": "2026-10-04T08:00:14.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "V-carve",
+      "command": {
+        "type": "addCamOperation",
+        "setupId": "setup#1",
+        "operation": {
+          "id": "vcarve#1",
+          "kind": "vcarve",
+          "name": "Engrave",
+          "suppressed": false,
+          "tool": "tool#2",
+          "geometry": [
+            {
+              "kind": "region",
+              "sketch": "sketch#1"
+            }
+          ],
+          "clearing": {
+            "tool": "tool#1"
+          }
+        }
+      },
+      "at": "2026-10-04T08:00:15.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Edit operation",
+      "command": {
+        "type": "editCamOperation",
+        "setupId": "setup#1",
+        "operation": {
+          "id": "pocket#1",
+          "kind": "pocket",
+          "name": "Pocket deeper",
+          "suppressed": false,
+          "tool": "tool#1",
+          "geometry": [
+            {
+              "kind": "region",
+              "sketch": "sketch#2",
+              "entities": ["e5"]
+            }
+          ],
+          "depth": {
+            "kind": "blind",
+            "depth": {
+              "source": "3",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            }
+          },
+          "entry": {
+            "kind": "plunge"
+          },
+          "climb": false
+        }
+      },
+      "at": "2026-10-04T08:00:16.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Edit operation",
+      "command": {
+        "type": "restoreCamOperation",
+        "setupId": "setup#1",
+        "operation": {
+          "id": "pocket#1",
+          "kind": "pocket",
+          "name": "Pocket",
+          "suppressed": false,
+          "tool": "tool#1",
+          "geometry": [
+            {
+              "kind": "region",
+              "sketch": "sketch#2",
+              "entities": ["e5"]
+            }
+          ],
+          "depth": {
+            "kind": "blind",
+            "depth": {
+              "source": "2",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            }
+          },
+          "stepover": {
+            "source": "2.5",
+            "lengthUnit": "mm",
+            "angleUnit": "deg"
+          },
+          "entry": {
+            "kind": "helix",
+            "angle": {
+              "source": "2deg",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "radius": {
+              "source": "2",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            }
+          },
+          "climb": true
+        },
+        "index": 1
+      },
+      "at": "2026-10-04T08:00:17.000Z"
+    },
+    {
+      "cause": "redo",
+      "label": "Edit operation",
+      "command": {
+        "type": "restoreCamOperation",
+        "setupId": "setup#1",
+        "operation": {
+          "id": "pocket#1",
+          "kind": "pocket",
+          "name": "Pocket deeper",
+          "suppressed": false,
+          "tool": "tool#1",
+          "geometry": [
+            {
+              "kind": "region",
+              "sketch": "sketch#2",
+              "entities": ["e5"]
+            }
+          ],
+          "depth": {
+            "kind": "blind",
+            "depth": {
+              "source": "3",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            }
+          },
+          "entry": {
+            "kind": "plunge"
+          },
+          "climb": false
+        },
+        "index": 1
+      },
+      "at": "2026-10-04T08:00:18.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Reorder operation",
+      "command": {
+        "type": "reorderCamOperation",
+        "setupId": "setup#1",
+        "operationId": "pocket#1",
+        "index": 0
+      },
+      "at": "2026-10-04T08:00:19.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Reorder operation",
+      "command": {
+        "type": "reorderCamOperation",
+        "setupId": "setup#1",
+        "operationId": "pocket#1",
+        "index": 1
+      },
+      "at": "2026-10-04T08:00:20.000Z"
+    },
+    {
+      "cause": "redo",
+      "label": "Reorder operation",
+      "command": {
+        "type": "reorderCamOperation",
+        "setupId": "setup#1",
+        "operationId": "pocket#1",
+        "index": 0
+      },
+      "at": "2026-10-04T08:00:21.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Suppress operation",
+      "command": {
+        "type": "suppressCamOperation",
+        "setupId": "setup#1",
+        "operationId": "vcarve#1",
+        "suppressed": true
+      },
+      "at": "2026-10-04T08:00:22.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Suppress operation",
+      "command": {
+        "type": "suppressCamOperation",
+        "setupId": "setup#1",
+        "operationId": "vcarve#1",
+        "suppressed": false
+      },
+      "at": "2026-10-04T08:00:23.000Z"
+    },
+    {
+      "cause": "redo",
+      "label": "Suppress operation",
+      "command": {
+        "type": "suppressCamOperation",
+        "setupId": "setup#1",
+        "operationId": "vcarve#1",
+        "suppressed": true
+      },
+      "at": "2026-10-04T08:00:24.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Delete operation",
+      "command": {
+        "type": "deleteCamOperation",
+        "setupId": "setup#1",
+        "operationId": "vcarve#1"
+      },
+      "at": "2026-10-04T08:00:25.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Delete operation",
+      "command": {
+        "type": "restoreCamOperation",
+        "setupId": "setup#1",
+        "operation": {
+          "id": "vcarve#1",
+          "kind": "vcarve",
+          "name": "Engrave",
+          "suppressed": true,
+          "tool": "tool#2",
+          "geometry": [
+            {
+              "kind": "region",
+              "sketch": "sketch#1"
+            }
+          ],
+          "clearing": {
+            "tool": "tool#1"
+          }
+        },
+        "index": 2
+      },
+      "at": "2026-10-04T08:00:26.000Z"
+    },
+    {
+      "cause": "redo",
+      "label": "Delete operation",
+      "command": {
+        "type": "deleteCamOperation",
+        "setupId": "setup#1",
+        "operationId": "vcarve#1"
+      },
+      "at": "2026-10-04T08:00:27.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Delete tool",
+      "command": {
+        "type": "deleteCamTool",
+        "toolId": "tool#2"
+      },
+      "at": "2026-10-04T08:00:28.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Delete tool",
+      "command": {
+        "type": "restoreCamTool",
+        "tool": {
+          "id": "tool#2",
+          "name": "V 60",
+          "kind": "vbit",
+          "number": 1,
+          "diameter": {
+            "source": "6",
+            "lengthUnit": "mm",
+            "angleUnit": "deg"
+          },
+          "fluteLength": {
+            "source": "19",
+            "lengthUnit": "mm",
+            "angleUnit": "deg"
+          },
+          "flutes": 2,
+          "angle": {
+            "source": "60deg",
+            "lengthUnit": "mm",
+            "angleUnit": "deg"
+          },
+          "tipDiameter": {
+            "source": "0.2",
+            "lengthUnit": "mm",
+            "angleUnit": "deg"
+          },
+          "presets": []
+        },
+        "index": 1
+      },
+      "at": "2026-10-04T08:00:29.000Z"
+    },
+    {
+      "cause": "redo",
+      "label": "Delete tool",
+      "command": {
+        "type": "deleteCamTool",
+        "toolId": "tool#2"
+      },
+      "at": "2026-10-04T08:00:30.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Delete setup",
+      "command": {
+        "type": "deleteCamSetup",
+        "setupId": "setup#2"
+      },
+      "at": "2026-10-04T08:00:31.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Delete setup",
+      "command": {
+        "type": "restoreCamSetup",
+        "setup": {
+          "id": "setup#2",
+          "name": "Flip",
+          "part": "part#1",
+          "machine": "shapeoko-5-pro-4x4",
+          "post": "grbl",
+          "stock": {
+            "kind": "fromBody",
+            "margins": {
+              "xMin": {
+                "source": "0",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "xMax": {
+                "source": "0",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "yMin": {
+                "source": "0",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "yMax": {
+                "source": "0",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "top": {
+                "source": "1",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "bottom": {
+                "source": "0",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            }
+          },
+          "wcs": {
+            "up": {
+              "kind": "face",
+              "face": {
+                "id": "r3",
+                "ref": {
+                  "face": "extrude#1:cap:start"
+                }
+              }
+            },
+            "origin": {
+              "xy": "back-right",
+              "z": "bottom"
+            }
+          },
+          "heights": {
+            "clearance": {
+              "source": "10",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "retract": {
+              "source": "5",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            }
+          },
+          "operations": []
+        },
+        "index": 0
+      },
+      "at": "2026-10-04T08:00:32.000Z"
+    },
+    {
+      "cause": "redo",
+      "label": "Delete setup",
+      "command": {
+        "type": "deleteCamSetup",
+        "setupId": "setup#2"
+      },
+      "at": "2026-10-04T08:00:33.000Z"
+    }
+  ],
+  "expected": {
+    "format": "manufakture",
+    "version": 15,
+    "namingScheme": 1,
+    "id": "doc-1",
+    "name": "Bracket",
+    "units": {
+      "length": {
+        "unit": "mm"
+      },
+      "angle": {
+        "unit": "deg"
+      }
+    },
+    "variables": [
+      {
+        "name": "thickness",
+        "expression": {
+          "source": "6mm",
+          "lengthUnit": "mm",
+          "angleUnit": "deg"
+        }
+      },
+      {
+        "name": "width",
+        "expression": {
+          "source": "40",
+          "lengthUnit": "mm",
+          "angleUnit": "deg"
+        }
+      },
+      {
+        "name": "height",
+        "expression": {
+          "source": "width / 2",
+          "lengthUnit": "mm",
+          "angleUnit": "deg"
+        }
+      }
+    ],
+    "parts": [
+      {
+        "id": "part#1",
+        "name": "Part 1",
+        "features": [
+          {
+            "id": "sketch#1",
+            "kind": "sketch",
+            "name": "Sketch 1",
+            "suppressed": false,
+            "plane": {
+              "type": "plane",
+              "origin": [0, 0, 0],
+              "normal": [0, 0, 1],
+              "xDir": [1, 0, 0]
+            },
+            "entities": [
+              {
+                "id": "e1",
+                "kind": "line",
+                "construction": false,
+                "start": [0, 0],
+                "end": [40, 0]
+              },
+              {
+                "id": "e2",
+                "kind": "line",
+                "construction": false,
+                "start": [40, 0],
+                "end": [40, 20]
+              },
+              {
+                "id": "e3",
+                "kind": "line",
+                "construction": false,
+                "start": [40, 20],
+                "end": [0, 20]
+              },
+              {
+                "id": "e4",
+                "kind": "line",
+                "construction": false,
+                "start": [0, 20],
+                "end": [0, 0]
+              }
+            ],
+            "constraints": [
+              {
+                "id": "k1",
+                "kind": "coincident",
+                "a": {
+                  "entity": "e1",
+                  "at": "end"
+                },
+                "b": {
+                  "entity": "e2",
+                  "at": "start"
+                }
+              },
+              {
+                "id": "k2",
+                "kind": "horizontal",
+                "line": "e1"
+              },
+              {
+                "id": "k3",
+                "kind": "distance",
+                "value": {
+                  "source": "width",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                "a": {
+                  "entity": "e1",
+                  "at": "start"
+                },
+                "b": {
+                  "entity": "e1",
+                  "at": "end"
+                }
+              },
+              {
+                "id": "k4",
+                "kind": "distance",
+                "value": {
+                  "source": "height",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                "a": {
+                  "entity": "e2",
+                  "at": "start"
+                },
+                "b": {
+                  "entity": "e2",
+                  "at": "end"
+                }
+              },
+              {
+                "id": "k5",
+                "kind": "coincident",
+                "a": {
+                  "entity": "e1",
+                  "at": "start"
+                },
+                "b": {
+                  "entity": "@origin"
+                }
+              }
+            ]
+          },
+          {
+            "id": "extrude#1",
+            "kind": "extrude",
+            "name": "Extrude 1",
+            "suppressed": false,
+            "profile": {
+              "sketch": "sketch#1"
+            },
+            "operation": "new",
+            "extent": {
+              "type": "blind",
+              "distance": {
+                "source": "thickness",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            },
+            "reverse": false
+          },
+          {
+            "id": "sketch#2",
+            "kind": "sketch",
+            "name": "Sketch 2",
+            "suppressed": false,
+            "plane": {
+              "type": "face",
+              "face": {
+                "id": "r1",
+                "ref": {
+                  "face": "extrude#1:cap:end"
+                }
+              }
+            },
+            "entities": [
+              {
+                "id": "e5",
+                "kind": "circle",
+                "construction": false,
+                "center": [20, 10],
+                "radius": 3
+              }
+            ],
+            "constraints": [
+              {
+                "id": "k6",
+                "kind": "diameter",
+                "entity": "e5",
+                "value": {
+                  "source": "6mm",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                }
+              }
+            ]
+          },
+          {
+            "id": "extrude#2",
+            "kind": "extrude",
+            "name": "Extrude 2",
+            "suppressed": false,
+            "profile": {
+              "sketch": "sketch#2"
+            },
+            "operation": "cut",
+            "extent": {
+              "type": "throughAll"
+            },
+            "reverse": false
+          },
+          {
+            "id": "fillet#1",
+            "kind": "fillet",
+            "name": "Fillet 1",
+            "suppressed": false,
+            "edges": [
+              {
+                "id": "r2",
+                "ref": {
+                  "faces": ["extrude#1:side:e1", "extrude#1:side:e2"]
+                }
+              }
+            ],
+            "radius": {
+              "source": "2mm",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            }
+          }
+        ],
+        "rollbackIndex": null,
+        "nextIds": {
+          "e": 6,
+          "extrude": 3,
+          "fillet": 2,
+          "k": 7,
+          "r": 3,
+          "sketch": 3
+        },
+        "bodies": []
+      }
+    ],
+    "assemblies": [],
+    "print": {
+      "setups": [],
+      "nextIds": {}
+    },
+    "fonts": [],
+    "cam": {
+      "tools": [
+        {
+          "id": "tool#1",
+          "name": "Flat 6 mm",
+          "kind": "flat",
+          "number": 1,
+          "diameter": {
+            "source": "6",
+            "lengthUnit": "mm",
+            "angleUnit": "deg"
+          },
+          "fluteLength": {
+            "source": "19",
+            "lengthUnit": "mm",
+            "angleUnit": "deg"
+          },
+          "flutes": 3,
+          "presets": []
+        }
+      ],
+      "setups": [
+        {
+          "id": "setup#1",
+          "name": "Top",
+          "part": "part#1",
+          "body": "extrude#1",
+          "machine": "shapeoko-5-pro-4x4",
+          "post": "grbl",
+          "stock": {
+            "kind": "fromBody",
+            "margins": {
+              "xMin": {
+                "source": "0",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "xMax": {
+                "source": "0",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "yMin": {
+                "source": "0",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "yMax": {
+                "source": "0",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "top": {
+                "source": "1",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "bottom": {
+                "source": "0",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            }
+          },
+          "wcs": {
+            "up": {
+              "kind": "face",
+              "face": {
+                "id": "r1",
+                "ref": {
+                  "face": "extrude#1:cap:end"
+                }
+              }
+            },
+            "origin": {
+              "xy": "front-left",
+              "z": "top"
+            }
+          },
+          "heights": {
+            "clearance": {
+              "source": "10",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "retract": {
+              "source": "5",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            }
+          },
+          "operations": [
+            {
+              "id": "pocket#1",
+              "kind": "pocket",
+              "name": "Pocket deeper",
+              "suppressed": false,
+              "tool": "tool#1",
+              "geometry": [
+                {
+                  "kind": "region",
+                  "sketch": "sketch#2",
+                  "entities": ["e5"]
+                }
+              ],
+              "depth": {
+                "kind": "blind",
+                "depth": {
+                  "source": "3",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                }
+              },
+              "entry": {
+                "kind": "plunge"
+              },
+              "climb": false
+            },
+            {
+              "id": "profile#1",
+              "kind": "profile",
+              "name": "Outline",
+              "suppressed": false,
+              "tool": "tool#1",
+              "geometry": [
+                {
+                  "kind": "face",
+                  "face": {
+                    "id": "r2",
+                    "ref": {
+                      "face": "extrude#1:cap:start"
+                    }
+                  }
+                }
+              ],
+              "side": "outside",
+              "depth": {
+                "kind": "through"
+              },
+              "entry": {
+                "kind": "ramp",
+                "angle": {
+                  "source": "3deg",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                }
+              },
+              "leadIn": {
+                "kind": "arc",
+                "radius": {
+                  "source": "2",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                }
+              },
+              "leadOut": {
+                "kind": "none"
+              },
+              "climb": true
+            }
+          ]
+        }
+      ],
+      "nextIds": {
+        "pocket": 2,
+        "profile": 2,
+        "r": 4,
+        "setup": 3,
+        "tool": 3,
+        "vcarve": 2
+      }
+    },
+    "nextIds": {
+      "part": 2
+    }
+  }
+}

@@ -96,3 +96,18 @@ function letters(index: number): string {
   }
   return s;
 }
+
+/**
+ * The number a sync tombstone gets inside a face name (ADR 0009 amendment, item 7): the id of a
+ * dropped command, which must never bind. No counter reaches it. A feature id with it is refused
+ * by the dependency check (a missing feature), and a sub-id tail with it (`extrude#1:side:e999999999999999`)
+ * by the schema of every stored face name (`hasTombstoneSubId`).
+ */
+export const TOMBSTONE_NAME = 999_999_999_999_999;
+
+const TOMBSTONE_SUB = new RegExp(`:[ekr]${TOMBSTONE_NAME}(?![0-9])`);
+
+/** Whether a face name names a dropped command's sub-id (`e999999999999999` after a `:`). */
+export function hasTombstoneSubId(name: string): boolean {
+  return TOMBSTONE_SUB.test(name);
+}
