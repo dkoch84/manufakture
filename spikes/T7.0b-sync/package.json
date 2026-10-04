@@ -1,0 +1,15 @@
+{
+  "name": "@manufakture/spike-sync",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "GPL-3.0-or-later",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "sim": "node scripts/run.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@manufakture/core": "workspace:*"
+  }
+}
