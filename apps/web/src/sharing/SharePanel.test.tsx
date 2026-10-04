@@ -2,11 +2,12 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SERVER_SETTINGS_KEY, saveServerSettings, type ShareInfo } from './client';
 import { SharePanel } from './SharePanel';
+import { boxBundle } from '../viewer/bundles.test-fixture';
 
 const TOKEN = 'token-0123456789abcdefghijklmnopqrstuvwxyz';
 const SERVER = { url: 'https://cad.example.test', token: TOKEN };
 const VIEWER = 'https://app.example.test/viewer.html';
-const LIMITS = { maxBytes: 1000, maxShares: 2, defaultExpiryDays: 30, allowNever: true };
+const LIMITS = { maxBytes: 100_000, maxShares: 2, defaultExpiryDays: 30, allowNever: true };
 
 /** A fake server holding shares in memory. */
 function fakeServer() {
@@ -42,7 +43,7 @@ function fakeServer() {
 
 const bundle = vi.fn(async () => ({
   ok: true as const,
-  bytes: new Uint8Array(10),
+  bytes: await boxBundle(),
   name: 'Bracket',
 }));
 
@@ -100,7 +101,7 @@ describe('the Share panel', () => {
     const server = fakeServer();
     const big = vi.fn(async () => ({
       ok: true as const,
-      bytes: new Uint8Array(2000),
+      bytes: new Uint8Array(200_000),
       name: 'Big',
     }));
     const { unmount } = render(
@@ -111,10 +112,23 @@ describe('the Share panel', () => {
     await screen.findByText(/Active links \(0 of 2\)/);
     fireEvent.click(screen.getByTestId('share-create'));
     await waitFor(() =>
-      expect(screen.getByTestId('share-status').textContent).toMatch(/at most 1000 B/),
+      expect(screen.getByTestId('share-status').textContent).toMatch(/at most 97\.7 KB/),
     );
     expect(server.calls.some((c) => c.method === 'POST')).toBe(false);
     unmount();
+
+    // A bundle the viewer would refuse (here: not a view at all) is not uploaded either.
+    const bad = async () => ({ ok: true as const, bytes: new Uint8Array(10), name: 'Bad' });
+    const second = render(
+      <SharePanel makeBundle={bad} viewerUrl={VIEWER} fetch={server.fetch} appHostname="x" />,
+    );
+    fireEvent.click(screen.getByTestId('share-button'));
+    fireEvent.click(await screen.findByTestId('share-create'));
+    await waitFor(() =>
+      expect(screen.getByTestId('share-status').textContent).toMatch(/^The viewer cannot open/),
+    );
+    expect(server.calls.some((c) => c.method === 'POST')).toBe(false);
+    second.unmount();
 
     const none = async () => ({ ok: false as const, message: 'There is nothing to publish.' });
     render(

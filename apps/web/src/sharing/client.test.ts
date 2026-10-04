@@ -4,6 +4,7 @@ import {
   SHARE_MIME,
   ShareError,
   checkServerUrl,
+  checkShareable,
   checkToken,
   createShare,
   forgetServerSettings,
@@ -14,7 +15,11 @@ import {
   shareLink,
   viewerUrlFor,
 } from './client';
+import { IDENTITY_MATRIX } from '@manufakture/io';
+import { MFKVIEW_MIME, MFKVIEW_VIEWER_LIMITS, writeMfkview } from '@manufakture/io/mfkview';
 import { sourceFromHash } from '../viewer/load';
+import { boxBundle, meshOf } from '../viewer/bundles.test-fixture';
+import { boxBody } from '../viewport/testMeshes';
 
 const TOKEN = 'token-0123456789abcdefghijklmnopqrstuvwxyz';
 const SERVER = { url: 'https://cad.example.test', token: TOKEN };
@@ -134,5 +139,66 @@ describe('requests', () => {
     await expect(revokeShare(SERVER, ID, { fetch })).resolves.toBeUndefined();
     expect((fetch.mock.calls[0]! as unknown as [string, RequestInit])[1].method).toBe('DELETE');
     await expect(revokeShare(SERVER, ID, { fetch: async () => reply(500) })).rejects.toThrow(/500/);
+  });
+});
+
+describe('checkShareable', () => {
+  it("uses io's media type", () => {
+    expect(SHARE_MIME).toBe(MFKVIEW_MIME);
+  });
+
+  it('passes a bundle the viewer opens', async () => {
+    expect(() => checkShareable(new Uint8Array(0), null)).toThrow(ShareError);
+    const bytes = await boxBundle();
+    expect(() => checkShareable(bytes, null)).not.toThrow();
+    expect(() => checkShareable(bytes, bytes.length)).not.toThrow();
+  });
+
+  it("refuses by size: the smaller of the server's limit and the viewer's", async () => {
+    const bytes = await boxBundle();
+    const n = bytes.length;
+    const viewer = { ...MFKVIEW_VIEWER_LIMITS, maxFileBytes: n - 1 };
+    expect(() => checkShareable(bytes, n - 10)).toThrow(/this server takes at most/);
+    expect(() => checkShareable(bytes, n * 2, viewer)).toThrow(/the viewer opens at most/);
+    expect(() => checkShareable(bytes, null, viewer)).toThrow(/the viewer opens at most/);
+    expect(() => checkShareable(bytes, n - 10, viewer)).toThrow(/this server takes at most/);
+  });
+
+  it('refuses what the writer allows but the viewer does not, naming the limit', async () => {
+    const bytes = await boxBundle();
+    expect(() => checkShareable(bytes, null, { ...MFKVIEW_VIEWER_LIMITS, maxBodies: 1 })).toThrow(
+      /^The viewer cannot open this view \(the body list has more than 1 items\)/,
+    );
+    expect(() =>
+      checkShareable(bytes, null, { ...MFKVIEW_VIEWER_LIMITS, maxTotalTriangles: 10 }),
+    ).toThrow(/the view has more than 10 triangles/);
+  });
+
+  it('refuses more instances than the viewer reads, with its real limits', async () => {
+    const max = MFKVIEW_VIEWER_LIMITS.maxInstances;
+    const bytes = await writeMfkview({
+      name: 'Many',
+      kind: 'assembly',
+      bodies: [
+        {
+          name: 'Cube',
+          color: null,
+          material: null,
+          volume: null,
+          mass: null,
+          mesh: meshOf(boxBody({ id: 'c', size: [1, 1, 1] })),
+        },
+      ],
+      parts: [{ name: 'Cube', bodies: [0] }],
+      instances: Array.from({ length: max + 1 }, (_, i) => ({
+        name: `Cube ${i}`,
+        part: 0,
+        transform: [...IDENTITY_MATRIX],
+      })),
+      source: null,
+    });
+    expect(() => checkShareable(bytes, null)).toThrow(
+      new RegExp(`instance list has more than ${max} items`),
+    );
   });
 });

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ShareError,
   checkServerUrl,
+  checkShareable,
   checkToken,
   createShare,
   forgetServerSettings,
@@ -14,6 +15,7 @@ import {
   type ShareInfo,
   type ShareLimits,
 } from './client';
+import { formatBytes } from '../io/files';
 import './sharing.css';
 
 /** A bundle of what is shown, or why there is none. */
@@ -34,12 +36,6 @@ export interface SharePanelProps {
 
 /** The expiry choices, in days; the server's default is added when it is not one of them. */
 const EXPIRY_DAYS = [1, 7, 30, 90, 365];
-
-function sizeText(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
-}
 
 function dateText(iso: string | null): string {
   if (iso === null) return 'never';
@@ -152,13 +148,8 @@ export function SharePanel({
         setStatus({ error: true, text: bundle.message });
         return;
       }
-      if (limits && bundle.bytes.length > limits.maxBytes) {
-        setStatus({
-          error: true,
-          text: `The view is ${sizeText(bundle.bytes.length)}; this server takes at most ${sizeText(limits.maxBytes)}.`,
-        });
-        return;
-      }
+      // Refused here, before uploading, when the server or the viewer would refuse it.
+      checkShareable(bundle.bytes, limits?.maxBytes ?? null);
       setStatus({ error: false, text: 'Uploading...' });
       const chosen = expiry === '' ? undefined : expiry === 'never' ? 'never' : Number(expiry);
       const made = await createShare(
@@ -354,7 +345,7 @@ export function SharePanel({
                         {s.name}
                       </span>
                       <span className="share-meta">
-                        {sizeText(s.size)}, expires {dateText(s.expiresAt)}
+                        {formatBytes(s.size)}, expires {dateText(s.expiresAt)}
                       </span>
                       <button
                         type="button"

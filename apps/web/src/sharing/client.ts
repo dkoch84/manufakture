@@ -7,8 +7,17 @@
 // `.mfk`). Requests send the token as a bearer header and nothing else: no cookies, no referrer.
 // Kept free of React.
 
-/** The bundle's media type (`@manufakture/io`'s `MFKVIEW_MIME`). */
-export const SHARE_MIME = 'application/vnd.manufakture.view+zip';
+import {
+  MFKVIEW_MIME,
+  MFKVIEW_VIEWER_LIMITS,
+  MfkviewError,
+  readMfkview,
+  type MfkviewLimits,
+} from '@manufakture/io/mfkview';
+import { formatBytes } from '../io/files';
+
+/** The bundle's media type. */
+export const SHARE_MIME = MFKVIEW_MIME;
 
 /** Where the server and its token are kept in the origin's storage. */
 export const SERVER_SETTINGS_KEY = 'manufakture.server';
@@ -193,6 +202,43 @@ export async function listShares(
   );
   if (r === null || !Array.isArray(r.shares)) throw new ShareError('The server sent no list.');
   return { shares: r.shares.filter((s) => SHARE_ID.test(s.id)), limits: r.limits };
+}
+
+/**
+ * Throws a `ShareError` when the viewer would refuse `bytes`, so no link is made that never
+ * opens. The writer allows more (`MFKVIEW_LIMITS`) than the viewer reads (`limits`, by default
+ * `MFKVIEW_VIEWER_LIMITS`), so the bundle is read here as the viewer reads it. The size limit is
+ * the smaller of the server's `serverMaxBytes` (when known) and the viewer's.
+ */
+export function checkShareable(
+  bytes: Uint8Array,
+  serverMaxBytes: number | null,
+  limits: MfkviewLimits = MFKVIEW_VIEWER_LIMITS,
+): void {
+  const size = formatBytes(bytes.length);
+  if (
+    serverMaxBytes !== null &&
+    bytes.length > serverMaxBytes &&
+    serverMaxBytes <= limits.maxFileBytes
+  ) {
+    throw new ShareError(
+      `The view is ${size}; this server takes at most ${formatBytes(serverMaxBytes)}.`,
+    );
+  }
+  if (bytes.length > limits.maxFileBytes) {
+    throw new ShareError(
+      `The view is ${size}; the viewer opens at most ${formatBytes(limits.maxFileBytes)}.`,
+    );
+  }
+  try {
+    readMfkview(bytes, limits);
+  } catch (e) {
+    if (!(e instanceof MfkviewError)) throw e;
+    const why = e.message.replace(/^The view is damaged: /, '').replace(/\.$/, '');
+    throw new ShareError(
+      `The viewer cannot open this view (${why.charAt(0).toLowerCase()}${why.slice(1)}). Share fewer bodies or a simpler model.`,
+    );
+  }
 }
 
 /** Uploads a bundle. `expires`: days, or `never`; absent: the server's default. */
