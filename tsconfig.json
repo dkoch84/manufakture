@@ -1,7 +1,10 @@
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "types": ["node"]
+    "types": ["node"],
+    // vite.config.ts imports src/pwa/precache.ts with its extension, as Vite's native config
+    // loader wants.
+    "allowImportingTsExtensions": true
   },
   "include": ["vitest.config.ts", "apps/*/vite.config.ts"]
 }

@@ -3,6 +3,8 @@ import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import { logCrossOriginIsolation } from './isolation';
 import { openBrowserLibrary } from './persistence/storage';
+import { startPwa } from './pwa';
+import { PwaStatus } from './pwa/PwaStatus';
 import { testHooksEnabled } from './testHooks';
 import { sceneFromSearch } from './viewport/scenes';
 
@@ -18,8 +20,12 @@ if (!container) {
 const persisted = !testHooksEnabled || sceneFromSearch(window.location.search).scene === 'default';
 const library = persisted ? openBrowserLibrary() : null;
 
+// The service worker (production builds only; src/pwa/register.ts says when).
+const pwa = startPwa();
+
 createRoot(container).render(
   <StrictMode>
     <App library={library} />
+    {pwa && <PwaStatus flow={pwa.flow} status={pwa.status} />}
   </StrictMode>,
 );

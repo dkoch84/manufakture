@@ -67,6 +67,7 @@ The dev and preview servers send `Cross-Origin-Opener-Policy: same-origin` and `
 The user guide lives in `docs/user`:
 
 - [Documents and files](docs/user/files.md): local storage, the Documents screen, `.mfk` files
+- [Installing and working offline](docs/user/install.md): the installable app, offline use and updates
 - [Part studios](docs/user/part-studios.md): several parts in one document, as tabs
 - [Sketches](docs/user/sketcher.md): drawing, constraints and dimensions
 - [Features](docs/user/features.md): extrude, revolve, fillet, chamfer, shell, hole, pattern, mirror
