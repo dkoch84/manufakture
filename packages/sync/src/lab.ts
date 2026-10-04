@@ -9,7 +9,7 @@ import {
 } from '@manufakture/core';
 import { SyncClient, type SyncClientOptions } from './client';
 import type { ClientMessage, ServerMessage } from './protocol';
-import { ReferenceServer } from './server';
+import { ReferenceServer, type ReferenceServerOptions } from './server';
 
 /**
  * Test-only: a reference server and clients with hand-delivered messages, so a test decides
@@ -179,8 +179,8 @@ export class Lab {
   /** Every message each client sent, for assertions. */
   readonly sent = new Map<string, ClientMessage[]>();
 
-  constructor(doc: ManufaktureDocument = bracket()) {
-    this.server = new ReferenceServer(doc);
+  constructor(doc: ManufaktureDocument = bracket(), server: ReferenceServerOptions = {}) {
+    this.server = new ReferenceServer(doc, server);
   }
 
   add(id: string, options: Partial<SyncClientOptions> = {}): SyncClient {

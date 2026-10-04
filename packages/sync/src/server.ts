@@ -11,10 +11,12 @@ import {
 } from '@manufakture/core';
 import {
   CURRENT_VERSIONS,
+  ENTRY_TOO_LARGE,
   MAX_ENTRIES_PER_MESSAGE,
   ClientMessageSchema,
   checkVersions,
   describeIssues,
+  jsonBytes,
   type ClientMessage,
   type PushedEntry,
   type PushMessage,
@@ -51,6 +53,8 @@ export interface JudgeContext {
   readonly highWater: CounterTable;
   /** The recorded outcome of `(clientId, clientSeq)`, if any. */
   outcome(clientId: string, clientSeq: number): Outcome | undefined;
+  /** The largest entry taken, as JSON in UTF-8 bytes (`jsonBytes`); default: no limit. */
+  readonly maxEntryBytes?: number;
 }
 
 /**
@@ -61,6 +65,7 @@ export interface JudgeContext {
  * 1. a recorded `(clientId, clientSeq)` gets its recorded outcome, refusals included;
  * 2. a `prevSeq` with no outcome is `predecessor-unknown` (retryable, not recorded);
  * 3. a `prevSeq` that was refused makes this one `predecessor-refused`;
+ * 3a. an entry over `maxEntryBytes` is `ENTRY_TOO_LARGE`;
  * 4. the command is migrated from the entry's `format` (a newer format is refused);
  * 5. a created id below the head's counter is `id-reused` (the takeover guard);
  * 6. core's `applyCommand`, whose `CoreError` is the refusal;
@@ -78,6 +83,18 @@ export function judgeEntry(ctx: JudgeContext, entry: SyncEntry): Judgement {
         error: {
           code: 'predecessor-refused',
           message: `The change it was built on (${entry.prevSeq}) was refused`,
+        },
+      };
+    }
+  }
+  if (ctx.maxEntryBytes !== undefined) {
+    const bytes = jsonBytes(entry);
+    if (bytes > ctx.maxEntryBytes) {
+      return {
+        kind: 'refused',
+        error: {
+          code: ENTRY_TOO_LARGE,
+          message: `The change is ${bytes} bytes, more than the ${ctx.maxEntryBytes} the server takes`,
         },
       };
     }
@@ -124,6 +141,8 @@ function refusal(error: { code: string; message: string }): Judgement {
 export interface ReferenceServerOptions {
   /** The versions this server runs (default: this build's). For version-skew tests. */
   readonly versions?: Versions;
+  /** The largest entry taken (`JudgeContext.maxEntryBytes`); default: no limit. */
+  readonly maxEntryBytes?: number;
 }
 
 /** Replies to the sender, and accepted entries for every client. */
@@ -152,11 +171,13 @@ export class ReferenceServer {
   private readonly entries: PushedEntry[] = [];
   private readonly clients = new Map<string, ClientRows>();
   private readonly versions: Versions;
+  private readonly maxEntryBytes: number | undefined;
 
   constructor(doc: ManufaktureDocument, options: ReferenceServerOptions = {}) {
     this.doc = doc;
     this.high = documentCounters(doc);
     this.versions = options.versions ?? CURRENT_VERSIONS;
+    this.maxEntryBytes = options.maxEntryBytes;
   }
 
   /** The head document. */
@@ -239,7 +260,12 @@ export class ReferenceServer {
         continue;
       }
       const j = judgeEntry(
-        { head: this.doc, highWater: this.high, outcome: (c, s) => this.outcome(c, s) },
+        {
+          head: this.doc,
+          highWater: this.high,
+          outcome: (c, s) => this.outcome(c, s),
+          ...(this.maxEntryBytes !== undefined && { maxEntryBytes: this.maxEntryBytes }),
+        },
         entry,
       );
       switch (j.kind) {

@@ -324,7 +324,8 @@ export class SyncService {
     }
     const client = this.store.client(documentId, branch, clientId)!;
 
-    // Shape limits: format, entry size, created ids.
+    // Shape limits: format and created ids. An entry over the size limit is refused on its own
+    // (`judgeEntry`), so the entries after it are still judged.
     let created = 0;
     for (const e of entries) {
       if (e.format > this.versions.format) {
@@ -333,13 +334,6 @@ export class SyncService {
           this.versions,
         )!;
         return fail(400, skew.code, skew.message, { messages: [skew] });
-      }
-      if (Buffer.byteLength(JSON.stringify(e)) > this.limits.maxEntryBytes) {
-        return fail(
-          413,
-          'entry-too-large',
-          `Entry ${e.clientSeq} is larger than ${this.limits.maxEntryBytes} bytes`,
-        );
       }
       for (const ids of Object.values(e.created)) created += ids.length;
     }
@@ -454,6 +448,7 @@ export class SyncService {
             c === clientId && fresh.has(s)
               ? fresh.get(s)
               : this.store.outcome(documentId, branch, c, s),
+          maxEntryBytes: this.limits.maxEntryBytes,
         },
         entry,
       );

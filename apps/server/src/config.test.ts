@@ -38,6 +38,10 @@ describe('loadConfig', () => {
     expect(() =>
       loadConfig({ MANUFAKTURE_TOKEN: TOKEN, MANUFAKTURE_ENTRIES_PER_MINUTE: '10' }),
     ).toThrow(/at least 1000/);
+    // The app cuts its submits at the sync package's message limit: a lower one would cut them.
+    expect(() =>
+      loadConfig({ MANUFAKTURE_TOKEN: TOKEN, MANUFAKTURE_MAX_MESSAGE_BYTES: '1048576' }),
+    ).toThrow(/MANUFAKTURE_MAX_MESSAGE_BYTES/);
   });
 });
 

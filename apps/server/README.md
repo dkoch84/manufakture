@@ -76,7 +76,12 @@ The app refuses any message from the server over 16 MiB (`MAX_INBOUND_BYTES` in
 `apps/web/src/sync/transport.ts`). Every accepted entry is pushed to every client and may come
 back alone in a pull, so keep `MANUFAKTURE_MAX_ENTRY_BYTES` and `MANUFAKTURE_MAX_PULL_BYTES` well
 under that: an entry the app cannot receive closes its socket again on every reconnect. Raising
-them needs the app's limit raised too.
+them needs the app's limit raised too. The defaults of `MANUFAKTURE_MAX_ENTRY_BYTES` and
+`MANUFAKTURE_MAX_MESSAGE_BYTES` are the sync package's `MAX_ENTRY_BYTES` and `MAX_MESSAGE_BYTES`,
+which the app uses too: it refuses an entry over 12 MiB itself before sending it, and cuts its
+submits so none is over 40 MiB. `MANUFAKTURE_MAX_MESSAGE_BYTES` therefore may not be set lower than
+40 MiB (the server refuses to start); a lower `MANUFAKTURE_MAX_ENTRY_BYTES` is fine, since the server
+refuses each larger entry on its own (below).
 
 A document's head is cached in memory while it is in use and dropped after ten minutes unused; the
 next request loads it again from the database.
@@ -120,7 +125,7 @@ Caddy passes WebSocket upgrades through `reverse_proxy` as they are. With nginx,
 same; raise `client_max_body_size` to the body limit. On one origin, `MANUFAKTURE_ORIGINS` can stay
 empty (no CORS needed, and a same-origin WebSocket is allowed by the app's `connect-src 'self'`). A
 server on another origin needs that origin's scheme to be allowed by the app's
-Content-Security-Policy (`connect-src 'self' https:` covers `https:` and `wss:`) and the app's
+Content-Security-Policy (`connect-src 'self' https: wss:` allows both; `https:` alone does not cover `wss:`) and the app's
 origin in `MANUFAKTURE_ORIGINS`.
 
 ## The API
@@ -174,7 +179,7 @@ beside `clientId`. Over HTTP it goes in the `Manufakture-Client-Key` header; on 
 
 A submit is checked whole before anything is judged, and refused with no change when any check
 fails: the schema, the client key, an entry with a newer `format` than the server's (`400
-format-version`), an entry over `MANUFAKTURE_MAX_ENTRY_BYTES`, more created ids than the per-submit limit, a
+format-version`), more created ids than the per-submit limit, a
 floor above the submit's own lowest `clientSeq`, a `clientSeq` or `prevSeq` below the client's
 stored floor that the table no longer keeps (`400 below-floor`, one `error` message per entry; a
 correct client only ever sends one in a late copy of an entry it has already resolved), more rows
@@ -183,8 +188,10 @@ budget (`429 rate-limited` with `Retry-After`).
 
 Then the entries are judged in order, as ADR 0009 decision 2 and its amendment say: a recorded
 `(clientId, clientSeq)` gets its recorded outcome, refusals included; an unknown `prevSeq` gets
-`predecessor-unknown`, which is not recorded; a refused `prevSeq` gives `predecessor-refused`; a
-created id below the head's counter is `id-reused`; then core; then the counter guard. Everything
+`predecessor-unknown`, which is not recorded; a refused `prevSeq` gives `predecessor-refused`; an
+entry over `MANUFAKTURE_MAX_ENTRY_BYTES` (as JSON, in UTF-8 bytes) is refused as `entry-too-large`,
+recorded like any refusal, so the entries after it in the submit are still judged and the app drops
+it with a notice; a created id below the head's counter is `id-reused`; then core; then the counter guard. Everything
 the submit changes (entries, outcomes, the head and its high-water mark, a snapshot every
 `CHECKPOINT_EVERY` = 100 revisions, the client's floor, latest accepted entry and pruned rows) is
 written in one SQLite transaction, and the answers and pushes go out only after it commits. The
@@ -262,8 +269,13 @@ as a server fault (T7.1d), so restore the newest backup there is.
   memory while the document is in use, and dropped after ten minutes without a request, as are the
   per-client rate buckets; the next request loads it again from the database. What stays in memory
   is therefore bounded by the documents in use at once, each up to a full document.
-- Entries are capped at 12 MiB so that the app can always receive them, which refuses an import
-  over about 9 MiB (its bytes travel base64 inside the entry) until imports move out to blobs.
+- Entries are capped at 12 MiB so that the app can always receive them, so a change that carries
+  an import over about 9 MiB (its bytes travel base64 inside the entry) is not synced until imports
+  move out to blobs. That includes a merge or a version restore of a document holding such imports
+  or large fonts, since it carries the whole document. The app does not send such a change: it
+  drops it with the same notice as a refused one and keeps the work before it as a "Kept from sync"
+  branch, and the edits after it sync as usual. The server refuses one that arrives anyway
+  (`entry-too-large`, for that entry alone).
   A server that stored larger entries under an older default (32 MiB) serves them to no app client:
   their sockets close on that message and reconnect to it again.
 - Imports still carry their bytes inline in the document and its commands (core's schema), so

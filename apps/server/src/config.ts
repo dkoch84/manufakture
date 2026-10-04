@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { MAX_ENTRIES_PER_MESSAGE } from '@manufakture/sync';
+import { MAX_ENTRIES_PER_MESSAGE, MAX_MESSAGE_BYTES } from '@manufakture/sync';
 import { z } from 'zod';
 import { DEFAULT_LIMITS, type Limits } from './limits';
 import { DEFAULT_SHARE_CONFIG, MAX_EXPIRY_DAYS, type ShareConfig } from './shares';
@@ -135,6 +135,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   if (limits.entriesPerMinute! < MAX_ENTRIES_PER_MESSAGE) {
     throw new Error(
       `MANUFAKTURE_ENTRIES_PER_MINUTE must be at least ${MAX_ENTRIES_PER_MESSAGE} (one full submit)`,
+    );
+  }
+  if (limits.maxMessageBytes! < MAX_MESSAGE_BYTES) {
+    throw new Error(
+      `MANUFAKTURE_MAX_MESSAGE_BYTES must be at least ${MAX_MESSAGE_BYTES} (the app's largest submit)`,
     );
   }
   return {

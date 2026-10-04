@@ -588,7 +588,7 @@ describe('hostile inputs and limits', () => {
     expect(stateOf(dbPath)).toBe(before);
   });
 
-  it('refuses a body over the limit, an entry over its limit and too many created ids', async () => {
+  it('refuses a body over the limit and too many created ids', async () => {
     await server.close();
     server = await start(dbPath, {
       limits: { maxBodyBytes: 64 * 1024, maxEntryBytes: 8 * 1024, maxCreatedIdsPerSubmit: 5 },
@@ -600,8 +600,6 @@ describe('hostile inputs and limits', () => {
     const padded = (n: number) => ({ ...e, command: { ...e.command, pad: 'x'.repeat(n) } });
     const body = await submitHttp(server, DOC, key, submit([padded(70_000)], 1));
     expect(body).toMatchObject({ status: 413, body: { code: 'too-large' } });
-    const one = await submitHttp(server, DOC, key, submit([padded(10_000)], 1));
-    expect(one).toMatchObject({ status: 413, body: { code: 'entry-too-large' } });
     // A sketch creates seven ids: sketch#1, e1 to e4, k1 and k2.
     const ids = await submitHttp(
       server,
@@ -611,6 +609,77 @@ describe('hostile inputs and limits', () => {
     );
     expect(ids).toMatchObject({ status: 413, body: { code: 'too-many-ids' } });
     expect(stateOf(dbPath)).toBe(before);
+  });
+
+  it('refuses an entry over its limit on its own, typed, and judges the entries after it', async () => {
+    await server.close();
+    server = await start(dbPath, { limits: { maxEntryBytes: 8 * 1024 } });
+    const key = await ready('a');
+    const doc = baseDocument();
+    const small = entry(doc, setVariable('x', '1'), { clientId: 'a', clientSeq: 1 });
+    const big = entry(doc, setVariable('y', '1'), { clientId: 'a', clientSeq: 2 });
+    const padded = { ...big, label: 'big', command: { ...big.command, pad: 'x'.repeat(10_000) } };
+    // Built on the big one: refused as its successor, as for any refusal.
+    const after = entry(doc, setVariable('z', '1'), { clientId: 'a', clientSeq: 3, prevSeq: 2 });
+    const r = await submitHttp(server, DOC, key, submit([small, padded, after], 1));
+    expect(r).toMatchObject({
+      status: 200,
+      body: {
+        messages: [
+          { type: 'ack', clientSeq: 1, rev: 1 },
+          { type: 'refuse', clientSeq: 2, error: { code: 'entry-too-large' }, headRev: 1 },
+          { type: 'refuse', clientSeq: 3, error: { code: 'predecessor-refused' } },
+        ],
+      },
+    });
+    // Recorded: a resend gets the same answer, not a protocol error.
+    const again = await submitHttp(server, DOC, key, submit([padded], 1));
+    expect(again.body.messages).toEqual([
+      expect.objectContaining({
+        type: 'refuse',
+        error: expect.objectContaining({ code: 'entry-too-large' }),
+      }),
+    ]);
+  });
+
+  it('answers an oversized entry on a WebSocket with a refusal the client drops, then syncs on', async () => {
+    await server.close();
+    server = await start(dbPath, { limits: { maxEntryBytes: 8 * 1024 } });
+    await createDoc(server);
+    const snap = (
+      await call<{ rev: number; document: ManufaktureDocument }>(
+        server,
+        'GET',
+        `/documents/${DOC}/snapshot`,
+      )
+    ).body;
+    // The app's own limit is the default (12 MiB): the server's lower one refuses the entry.
+    const a = new Connected(
+      new SyncClient(snap.document, snap.rev, { clientId: 'a', now: () => AT }),
+      server,
+      DOC,
+    );
+    const dropped: string[] = [];
+    a.client.on('dropped', ({ drops }) => {
+      for (const d of drops) dropped.push(`${d.label}: ${d.error.code}`);
+    });
+    await a.open();
+    ok(a.client.submit({ command: setVariable('small', '1'), label: 'small' }));
+    const long = `1.${'0'.repeat(9000)}`;
+    ok(a.client.submit({ command: setVariable('big', long), label: 'big' }));
+    ok(a.client.submit({ command: setVariable('later', '2'), label: 'later' }));
+    const settled = () => a.client.pending.length === 0 && a.client.confirmedRevision === 2;
+    for (let i = 0; i < 500 && !settled(); i++) {
+      a.pump();
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    expect(a.errors).toEqual([]);
+    expect(settled()).toBe(true);
+    expect(dropped).toEqual(['big: entry-too-large']);
+    const names = a.client.document.variables.map((v) => v.name);
+    expect(names).toEqual(expect.arrayContaining(['small', 'later']));
+    expect(names).not.toContain('big');
+    a.socket.close();
   });
 
   it('limits the rows a client keeps and the entries it sends per minute', async () => {

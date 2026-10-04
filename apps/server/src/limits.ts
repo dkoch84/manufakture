@@ -1,4 +1,5 @@
 import { MAX_IMPORT_BYTES } from '@manufakture/core';
+import { MAX_ENTRY_BYTES, MAX_MESSAGE_BYTES } from '@manufakture/sync';
 
 /**
  * Every limit the server enforces, with its default. Each is configurable (see `config.ts` and the
@@ -9,14 +10,20 @@ import { MAX_IMPORT_BYTES } from '@manufakture/core';
 export interface Limits {
   /** The largest request body, in bytes (JSON requests; blobs have `maxBlobBytes`). */
   readonly maxBodyBytes: number;
-  /** The largest WebSocket message, in bytes. */
+  /**
+   * The largest WebSocket message, in bytes. The app cuts its submits at the sync package's
+   * `MAX_MESSAGE_BYTES` (the default), so this may not be lower: a larger message closes the socket.
+   */
   readonly maxMessageBytes: number;
   /**
    * The largest single entry, as JSON, in bytes. Every accepted entry is pushed to every client
    * and may come back alone in a pull, so it must fit the app's `MAX_INBOUND_BYTES`
    * (`apps/web/src/sync/transport.ts`, 16 MiB) with room for the push wrapper: an entry the app
-   * cannot receive would close its socket on every reconnect. 12 MiB leaves 4 MiB; it also means
-   * an import over about 9 MiB (base64 inside the entry) is refused rather than synced.
+   * cannot receive would close its socket on every reconnect. 12 MiB (the sync package's
+   * `MAX_ENTRY_BYTES`) leaves 4 MiB; it also means a command carrying an import over about 9 MiB
+   * (base64 inside the entry) is not synced. A larger entry gets a refusal of its own
+   * (`entry-too-large`); the app drops it with a notice and keeps the work as a branch, and it
+   * refuses such an entry itself before sending it.
    */
   readonly maxEntryBytes: number;
   /** How deeply a JSON body or message may nest. Real commands nest about 15 levels. */
@@ -85,8 +92,8 @@ export interface Limits {
 
 export const DEFAULT_LIMITS: Limits = {
   maxBodyBytes: 40 * 1024 * 1024,
-  maxMessageBytes: 40 * 1024 * 1024,
-  maxEntryBytes: 12 * 1024 * 1024,
+  maxMessageBytes: MAX_MESSAGE_BYTES,
+  maxEntryBytes: MAX_ENTRY_BYTES,
   maxJsonDepth: 64,
   maxJsonNodes: 1_000_000,
   maxCreatedIdsPerSubmit: 100_000,

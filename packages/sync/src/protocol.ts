@@ -17,6 +17,55 @@ import { z } from 'zod';
 export const MAX_ENTRIES_PER_MESSAGE = 1000;
 
 /**
+ * The largest entry a server takes by default, as JSON in UTF-8 bytes (`jsonBytes`). Every accepted
+ * entry is pushed to every client and may come back alone in a pull, so it must fit the app's
+ * inbound limit with room for the push wrapper. A server may be configured lower; it then refuses a
+ * larger entry with `ENTRY_TOO_LARGE`, as the client does locally for anything over this.
+ */
+export const MAX_ENTRY_BYTES = 12 * 1024 * 1024;
+
+/**
+ * The largest client message a server takes by default, as JSON in UTF-8 bytes. A client cuts its
+ * submits so none is larger (`SUBMIT_OVERHEAD`), so a server must take at least this much.
+ */
+export const MAX_MESSAGE_BYTES = 40 * 1024 * 1024;
+
+/**
+ * The refusal code for an entry over the entry limit: a `refuse` of that entry, recorded like any
+ * other refusal, so the client drops it with a notice and the entries after it are judged.
+ */
+export const ENTRY_TOO_LARGE = 'entry-too-large';
+
+/** The UTF-8 length of `value` as JSON. */
+export function jsonBytes(value: unknown): number {
+  const text = JSON.stringify(value);
+  let n = 0;
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    if (c < 0x80) n += 1;
+    else if (c < 0x800) n += 2;
+    else if (c >= 0xd800 && c <= 0xdbff && i + 1 < text.length) {
+      const d = text.charCodeAt(i + 1);
+      if (d >= 0xdc00 && d <= 0xdfff) {
+        n += 4;
+        i++;
+      } else n += 3;
+    } else n += 3;
+  }
+  return n;
+}
+
+/**
+ * Bytes a submit adds around its entries, at most: `{"type":"submit","entries":[],"floor":...}`
+ * with the largest floor. Each entry after the first adds one byte for its comma.
+ */
+export const SUBMIT_OVERHEAD = jsonBytes({
+  type: 'submit',
+  entries: [],
+  floor: Number.MAX_SAFE_INTEGER,
+});
+
+/**
  * How far past the revisions it has heard of a client trusts a revision from the server: pushed
  * entries beyond `confirmedRev + PUSH_WINDOW` are not buffered (a pull fetches them), and a
  * refusal's `headRev` or an ack's `rev` is clamped to the highest revision heard of plus this.
@@ -30,7 +79,8 @@ const version = z.int().min(0).max(Number.MAX_SAFE_INTEGER);
 /**
  * Why the server refused an entry: a `CoreError` code (`id-reused`, `dependency`, ...), or one of
  * the server's own: `predecessor-refused` (the entry's `prevSeq` names a refused entry) and
- * `counter-regression` (the head would have a counter below its high-water mark). Codes are open
+ * `counter-regression` (the head would have a counter below its high-water mark), and
+ * `ENTRY_TOO_LARGE` (the entry is over the server's entry limit). Codes are open
  * strings so a newer server's code still parses; the client drops on any code but `id-reused` and
  * `predecessor-refused`.
  */

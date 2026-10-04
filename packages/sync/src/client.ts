@@ -32,11 +32,16 @@ import {
 import { changedObjects, renameObjectKeys, type ObjectKey } from './objects';
 import {
   CURRENT_VERSIONS,
+  ENTRY_TOO_LARGE,
   MAX_ENTRIES_PER_MESSAGE,
+  MAX_ENTRY_BYTES,
+  MAX_MESSAGE_BYTES,
   PUSH_WINDOW,
+  SUBMIT_OVERHEAD,
   ServerMessageSchema,
   checkVersions,
   describeIssues,
+  jsonBytes,
   type ClientMessage,
   type HelloMessage,
   type ProtocolError,
@@ -122,6 +127,17 @@ export interface SyncClientOptions {
    * the same value.
    */
   readonly pushWindow?: number;
+  /**
+   * The largest entry sent, as JSON in UTF-8 bytes (default `MAX_ENTRY_BYTES`). A command whose
+   * entry would be larger is dropped before it is sent, like a refused one: the notice, and the
+   * work before it kept as a branch. Smaller only in tests.
+   */
+  readonly maxEntryBytes?: number;
+  /**
+   * The largest submit sent, in bytes (default `MAX_MESSAGE_BYTES`); at least `maxEntryBytes` plus
+   * `SUBMIT_OVERHEAD`, so one entry always fits. Smaller only in tests.
+   */
+  readonly maxMessageBytes?: number;
 }
 
 export type UndoStatus = 'empty' | 'waiting' | 'ready';
@@ -393,6 +409,24 @@ function sameCommand(pushed: unknown, format: number, sent: Command): boolean {
   return m.ok && sameJson(m.value, sent);
 }
 
+/** Each command's size as JSON: commands are not changed in place, so the size is kept. */
+const commandSizes = new WeakMap<object, number>();
+
+function commandBytes(c: object): number {
+  let n = commandSizes.get(c);
+  if (n === undefined) {
+    n = jsonBytes(c);
+    commandSizes.set(c, n);
+  }
+  return n;
+}
+
+/** An entry's size as JSON in UTF-8 bytes, measuring its command once. */
+function entryBytes(entry: Omit<SyncEntry, 'command'> & { readonly command: object }): number {
+  // `null` stands in for the command: four bytes, replaced by the command's own size.
+  return jsonBytes({ ...entry, command: null }) - 4 + commandBytes(entry.command);
+}
+
 type Listener<K extends keyof SyncClientEvents> = (event: SyncClientEvents[K]) => void;
 
 export class SyncClient {
@@ -433,6 +467,8 @@ export class SyncClient {
     landed: new Set(),
   };
   private readonly window: number;
+  private readonly maxEntryBytes: number;
+  private readonly maxMessageBytes: number;
 
   /** A client at `revision` of the server's log, whose confirmed document is `document`. */
   constructor(document: ManufaktureDocument, revision: number, options: SyncClientOptions) {
@@ -444,6 +480,11 @@ export class SyncClient {
     this.online = options.online ?? true;
     this.now = options.now ?? (() => new Date().toISOString());
     this.window = options.pushWindow ?? PUSH_WINDOW;
+    this.maxEntryBytes = options.maxEntryBytes ?? MAX_ENTRY_BYTES;
+    this.maxMessageBytes = options.maxMessageBytes ?? MAX_MESSAGE_BYTES;
+    if (this.maxMessageBytes < this.maxEntryBytes + SUBMIT_OVERHEAD) {
+      throw new RangeError('maxMessageBytes must leave room for one entry of maxEntryBytes');
+    }
     this.highWater = sortedCounters(
       maxCounters(options.highWater ?? {}, documentCounters(document)),
     );
@@ -771,8 +812,9 @@ export class SyncClient {
     }
     const anyHidden = this.queue.some((e) => HIDDEN_STATES.has(e.state));
     this.queue.push(entry);
-    if (anyHidden) {
-      // Behind a held entry: held too, until the held ones are resolved (decision 4).
+    if (anyHidden || this.oversized(entry) !== undefined) {
+      // Behind a held entry: held too, until the held ones are resolved (decision 4). Too large to
+      // send: the rebase drops it, with the notice and the branch fallback.
       this.rebase(this.snapshot());
     } else {
       this.visible = applied.value.document;
@@ -1163,16 +1205,29 @@ export class SyncClient {
       .filter((e) => this.retryable(e) && (!e.wire!.transmitted || e.wire!.resend))
       .sort((a, b) => a.wire!.clientSeq - b.wire!.clientSeq);
     if (send.length > 0) {
+      // Cut by count and by bytes: no submit is larger than the server's message limit, which
+      // would close the connection, and one entry (at most `maxEntryBytes`) always fits.
       const floor = this.floor();
-      for (let i = 0; i < send.length; i += MAX_ENTRIES_PER_MESSAGE) {
-        const chunk = send.slice(i, i + MAX_ENTRIES_PER_MESSAGE);
-        for (const e of chunk) {
-          if (e.wire!.transmitted) this.stats.resubmits++;
-          e.wire!.transmitted = true;
-          e.wire!.resend = false;
+      let entries: SyncEntry[] = [];
+      let bytes = SUBMIT_OVERHEAD;
+      for (const e of send) {
+        const entry = this.syncEntry(e);
+        const size = entryBytes(entry);
+        if (
+          entries.length > 0 &&
+          (entries.length >= MAX_ENTRIES_PER_MESSAGE || bytes + 1 + size > this.maxMessageBytes)
+        ) {
+          out.push({ type: 'submit', entries, floor });
+          entries = [];
+          bytes = SUBMIT_OVERHEAD;
         }
-        out.push({ type: 'submit', entries: chunk.map((e) => this.syncEntry(e)), floor });
+        bytes += size + (entries.length > 0 ? 1 : 0);
+        entries.push(entry);
+        if (e.wire!.transmitted) this.stats.resubmits++;
+        e.wire!.transmitted = true;
+        e.wire!.resend = false;
       }
+      if (entries.length > 0) out.push({ type: 'submit', entries, floor });
     }
     if (
       this.pullWanted !== undefined &&
@@ -1207,6 +1262,31 @@ export class SyncClient {
       floor = Math.min(floor, e.wire.clientSeq, e.wire.prevSeq ?? Infinity);
     }
     return floor;
+  }
+
+  /**
+   * The refusal for an unsent entry too large to send, or undefined. Measured as it would be sent,
+   * with every sequence and revision at its widest, so an entry that passes here fits once sent.
+   */
+  private oversized(e: QueueEntry): Refusal | undefined {
+    const widest = Number.MAX_SAFE_INTEGER;
+    const bytes = entryBytes({
+      clientId: this.clientId,
+      clientSeq: widest,
+      prevSeq: widest,
+      baseRev: widest,
+      format: FORMAT_VERSION,
+      cause: e.cause,
+      label: e.label,
+      command: e.command,
+      created: e.created as SyncEntry['created'],
+      at: e.at,
+    });
+    if (bytes <= this.maxEntryBytes) return undefined;
+    return {
+      code: ENTRY_TOO_LARGE,
+      message: `The change is ${bytes} bytes, more than the ${this.maxEntryBytes} sync takes`,
+    };
   }
 
   private syncEntry(e: QueueEntry): SyncEntry {
@@ -1440,6 +1520,12 @@ export class SyncClient {
           type: 'replaceDocument',
           document: restoredDocument(doc, e.restore.document, maxCounters(this.highWater, next)),
         };
+      }
+      // An unsent entry too large to send is dropped as the server would refuse it.
+      const tooLarge = e.wire === undefined ? this.oversized(e) : undefined;
+      if (tooLarge !== undefined) {
+        this.drop(e, tooLarge, table, oldCreated, drops);
+        continue;
       }
       const r = applyCommand(doc, e.command);
       if (!r.ok) {

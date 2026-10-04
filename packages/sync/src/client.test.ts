@@ -12,7 +12,14 @@ import {
   isPush,
   verdictOf,
 } from './lab';
-import { PUSH_WINDOW, type PushedEntry, type ServerMessage, type SubmitMessage } from './protocol';
+import {
+  PUSH_WINDOW,
+  SUBMIT_OVERHEAD,
+  jsonBytes,
+  type PushedEntry,
+  type ServerMessage,
+  type SubmitMessage,
+} from './protocol';
 
 function submitted(lab: Lab, id: string): { label: string; clientSeq: number; prevSeq?: number }[] {
   return lab.sent
@@ -855,5 +862,105 @@ describe('SyncClient: T7.1e additions', () => {
     const wide = structuredClone(a.save());
     wide.pullWanted = 8;
     expect(SyncClient.restore(wide, a.confirmedDocument, { pushWindow: 2 }).ok).toBe(false);
+  });
+});
+
+describe('SyncClient: entry and message size limits', () => {
+  /** A variable whose expression takes about `n` bytes. */
+  const sized = (name: string, n: number): Command => setVar(name, `1.${'0'.repeat(n)}`);
+  const names = (doc: ManufaktureDocument) => doc.variables.map((v) => v.name);
+
+  it('drops an entry over the limit before sending it, with the notice, and syncs the edits after it', () => {
+    const lab = new Lab();
+    const a = lab.add('a', { maxEntryBytes: 4000 });
+    const ev = events(a);
+    ok(a.submit({ command: setVar('before', '1'), label: 'before' }));
+    lab.settle();
+    ok(a.submit({ command: setVar('pending', '1'), label: 'pending' }));
+    ok(a.submit({ command: sized('big', 5000), label: 'big' }));
+    ok(a.submit({ command: setVar('after', '2'), label: 'after' }));
+    lab.settle();
+    // Never sent: no submit carried it, the server recorded nothing for it.
+    expect(submitted(lab, 'a').map((e) => e.label)).toEqual(['before', 'pending', 'after']);
+    expect(ev.dropped).toHaveLength(1);
+    const [drop] = ev.dropped;
+    expect(drop!.drops).toEqual([
+      expect.objectContaining({
+        label: 'big',
+        error: expect.objectContaining({ code: 'entry-too-large' }),
+      }),
+    ]);
+    // The state before the drop, for the app's "Kept from sync" branch: it holds the big command.
+    expect(drop!.before.revision).toBe(1);
+    expect(drop!.before.commands.map((c) => c.label)).toEqual(['pending', 'big']);
+    expect(a.pending).toEqual([]);
+    expect(names(a.document)).toEqual(expect.arrayContaining(['before', 'pending', 'after']));
+    expect(names(a.document)).not.toContain('big');
+    expect(a.document).toEqual(lab.server.head);
+    expect(a.stats).toMatchObject({ dropped: 1, landed: 3 });
+    expect(a.undoLabel).toBe('after');
+  });
+
+  it('drops an oversized entry made offline when it comes to be sent, as the queue rebases', () => {
+    const lab = new Lab();
+    const a = lab.add('a', { maxEntryBytes: 4000, online: false });
+    const ev = events(a);
+    ok(a.submit({ command: sized('big', 5000), label: 'big' }));
+    ok(a.submit({ command: setVar('after', '2'), label: 'after' }));
+    expect(ev.dropped.flatMap((d) => d.drops.map((x) => x.label))).toEqual(['big']);
+    a.setOnline(true);
+    lab.settle();
+    expect(names(lab.server.head)).toEqual(['thickness', 'width', 'after']);
+    expect(a.document).toEqual(lab.server.head);
+  });
+
+  it('drops an entry the server refuses as too large, and the entries chained to it land', () => {
+    const lab = new Lab(undefined, { maxEntryBytes: 4000 });
+    const a = lab.add('a');
+    const ev = events(a);
+    ok(a.submit({ command: setVar('before', '1'), label: 'before' }));
+    ok(a.submit({ command: sized('big', 5000), label: 'big' }));
+    ok(a.submit({ command: setVar('after', '2'), label: 'after' }));
+    lab.settle();
+    expect(lab.server.outcome('a', 2)).toMatchObject({ error: { code: 'entry-too-large' } });
+    expect(lab.server.outcome('a', 3)).toMatchObject({ error: { code: 'predecessor-refused' } });
+    expect(ev.dropped.flatMap((d) => d.drops.map((x) => `${x.label}: ${x.error.code}`))).toEqual([
+      'big: entry-too-large',
+    ]);
+    expect(a.pending).toEqual([]);
+    expect(names(lab.server.head)).toEqual(['thickness', 'width', 'before', 'after']);
+    expect(a.document).toEqual(lab.server.head);
+  });
+
+  it('cuts submits by bytes as well as by count, every entry once and in order', () => {
+    const lab = new Lab();
+    const maxMessageBytes = 4000 + SUBMIT_OVERHEAD;
+    const a = lab.add('a', { maxEntryBytes: 4000, maxMessageBytes, online: false });
+    for (let i = 0; i < 10; i++) ok(a.submit({ command: sized(`v${i}`, 1500), label: `v${i}` }));
+    a.setOnline(true);
+    const out = a.takeOutgoing();
+    const submits = out.filter((m): m is SubmitMessage => m.type === 'submit');
+    expect(submits.length).toBeGreaterThan(1);
+    for (const m of submits) expect(jsonBytes(m)).toBeLessThanOrEqual(maxMessageBytes);
+    expect(submits.flatMap((m) => m.entries.map((e) => e.clientSeq))).toEqual(
+      Array.from({ length: 10 }, (_, i) => i + 1),
+    );
+    lab.send('a', out);
+    lab.settle();
+    expect(a.pending).toEqual([]);
+    expect(lab.server.revision).toBe(10);
+    expect(a.document).toEqual(lab.server.head);
+    // An entry at the limit fits a submit on its own.
+    expect(() => lab.add('b', { maxEntryBytes: 4000, maxMessageBytes: 4000 })).toThrow(RangeError);
+  });
+
+  it('measures bytes as UTF-8, as the server does', () => {
+    expect(jsonBytes('a')).toBe(3);
+    expect(jsonBytes('\u00e9')).toBe(4);
+    expect(jsonBytes('\u20ac')).toBe(5);
+    expect(jsonBytes('\u{1f600}')).toBe(6);
+    expect(jsonBytes({ s: 'x\u00e9\u{1f600}' })).toBe(
+      Buffer.byteLength(JSON.stringify({ s: 'x\u00e9\u{1f600}' })),
+    );
   });
 });
