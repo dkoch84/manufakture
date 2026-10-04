@@ -76,6 +76,8 @@ describe('.mfk files', () => {
     expect(await importMessage(lib, packMfk(JSON.stringify(newer), new Map()))).toBe(
       `This document was saved by a newer version of manufakture (file format ${FORMAT_VERSION + 1}; this app reads up to ${FORMAT_VERSION}). It was not opened or changed.`,
     );
+    const refused = await lib.importMfk(packMfk(JSON.stringify(newer), new Map()));
+    expect(!refused.ok && refused.newer).toBe(true);
     expect(await lib.has('newer')).toBe(false);
   });
 

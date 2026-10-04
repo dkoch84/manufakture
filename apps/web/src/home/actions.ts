@@ -29,6 +29,11 @@ export interface ActionOutcome {
    * save again (`retrySave`) or to export the open document as it is (`exportCurrent`).
    */
   unsaved?: boolean;
+  /**
+   * The document was saved by a newer version of manufakture and refused (ADR 0004 decision 2):
+   * the home screen offers to update the app (src/pwa/UpdateNeeded.tsx).
+   */
+  newer?: boolean;
 }
 
 export interface HomeHost {
@@ -75,7 +80,8 @@ export interface HomeActions {
   keepAsCopy(): Promise<ActionOutcome>;
 }
 
-const failed = (message: string): ActionOutcome => ({ ok: false, message });
+const failed = (message: string, newer?: true): ActionOutcome =>
+  newer ? { ok: false, message, newer } : { ok: false, message };
 
 /**
  * What to say about a document just opened: "Opened <name>.", with a note when it was recovered
@@ -124,7 +130,7 @@ export function homeActions(host: HomeHost): HomeActions {
     const stop = await saveFirst();
     if (stop) return stop;
     const opened = await library.open(id);
-    if (!opened.ok) return failed(opened.message);
+    if (!opened.ok) return failed(opened.message, opened.newer);
     host.show(opened.value.document, { stored: true, migrated: opened.value.migrated });
     return { ok: true, message: openedMessage(opened.value) };
   };
@@ -133,7 +139,7 @@ export function homeActions(host: HomeHost): HomeActions {
     const stop = await saveFirst();
     if (stop) return stop;
     const r = await library.importMfk(file.bytes);
-    if (!r.ok) return failed(`${file.name}: ${r.message}`);
+    if (!r.ok) return failed(`${file.name}: ${r.message}`, r.newer);
     const opened = await open(r.value.summary.id);
     if (!opened.ok) return opened;
     const note = r.value.migrated ? ', updated from an older file format' : '';
@@ -244,7 +250,7 @@ export function homeActions(host: HomeHost): HomeActions {
         branch = MAIN_BRANCH;
         opened = await library.open(id, branch);
       }
-      if (!opened.ok) return failed(opened.message);
+      if (!opened.ok) return failed(opened.message, opened.newer);
       host.autosave?.forget(id);
       host.show(opened.value.document, {
         stored: true,

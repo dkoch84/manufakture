@@ -31,6 +31,8 @@ The worker answers only what it is told about: the precached files, navigations 
 
 A new build has a new `sw.js` (its file list changes). Browsers find it on the next navigation, or when an open tab comes back to the foreground, or hourly. The new worker installs in the background and waits; it never takes over on its own. The app first flushes autosave, and only once every change is saved shows "A new version of manufakture is ready" with **Reload** and **Later**. Reload saves once more, lets the new worker take over and reloads the page. **Later** leaves the old version running until every tab of the app is closed. The logic is `apps/web/src/pwa/updateFlow.ts`.
 
+When one tab chooses Reload, the new worker takes control of every other open tab of the app as well, but those keep running the old build, and the old build's precache is gone. Each such tab notices the change of controller and offers Reload ("manufakture was updated in another tab"), again only once its autosave has flushed; a lazily loaded chunk that fails to load in the meantime (a dynamic import Vite reports as `vite:preloadError`, or an unhandled rejection with a browser's "dynamically imported module" message) leads to the same offer. The logic is in `apps/web/src/pwa/register.ts` and `skew.ts`.
+
 Rolling back is deploying the older build again: its `sw.js` differs from the current one, so it arrives as an update like any other.
 
 ### Kill switch

@@ -4,6 +4,8 @@ import { MemoryBackend } from '../persistence/backend';
 import { DocumentLibrary } from '../persistence/library';
 import { MAX_MFK_FILE_BYTES } from '../persistence/limits';
 import { emptyDocument, partDocument } from '../persistence/test-fixtures';
+import type { AppUpdater } from '../pwa/appUpdate';
+import type { PersistenceAnswer } from '../pwa/persistence';
 import { createDocumentStore } from '../state/document';
 import { homeActions } from './actions';
 import { HomeScreen } from './HomeScreen';
@@ -11,7 +13,10 @@ import { HomeScreen } from './HomeScreen';
 let clock = 0;
 const now = () => new Date(Date.UTC(2026, 8, 26, 12, 0, clock++));
 
-async function setup(kind: 'stored' | 'empty' = 'stored') {
+async function setup(
+  kind: 'stored' | 'empty' = 'stored',
+  options: { persistGranted?: boolean; remembered?: PersistenceAnswer | null } = {},
+) {
   let n = 0;
   const library = new DocumentLibrary(new MemoryBackend(), { now, newId: () => `new-${++n}` });
   if (kind === 'stored') {
@@ -23,8 +28,13 @@ async function setup(kind: 'stored' | 'empty' = 'stored') {
   const download = vi.fn();
   const actions = homeActions({ library, documents, autosave: null, show, download });
   const onClose = vi.fn();
-  const onPersist = vi.fn(async () => true);
+  const onPersist = vi.fn(async () => options.persistGranted ?? true);
   const storage = vi.fn(async () => ({ usage: 2048, quota: 1024 * 1024, persisted: false }));
+  // The remembered answer, in memory (not this test runner's localStorage).
+  let remembered = options.remembered ?? null;
+  const rememberPersist = vi.fn((granted: boolean) => {
+    remembered = { granted, at: '2026-10-04T00:00:00.000Z', source: 'user' };
+  });
   render(
     <HomeScreen
       actions={actions}
@@ -33,9 +43,11 @@ async function setup(kind: 'stored' | 'empty' = 'stored') {
       onClose={onClose}
       storage={storage}
       onPersist={onPersist}
+      persistence={() => remembered}
+      rememberPersist={rememberPersist}
     />,
   );
-  return { library, documents, show, download, onClose, onPersist };
+  return { library, documents, show, download, onClose, onPersist, rememberPersist };
 }
 
 const rows = async () => {
@@ -58,9 +70,76 @@ describe('HomeScreen', () => {
   });
 
   it('asks the browser to keep the documents', async () => {
-    const { onPersist } = await setup();
+    const { onPersist, rememberPersist } = await setup();
     fireEvent.click(await screen.findByRole('button', { name: 'Keep my documents' }));
     expect(onPersist).toHaveBeenCalled();
+    await waitFor(() => expect(rememberPersist).toHaveBeenCalledWith(true));
+    expect(screen.queryByTestId('persist-denied')).toBeNull();
+  });
+
+  it('says what it means when the browser declined to keep the documents', async () => {
+    await setup('stored', {
+      remembered: { granted: false, at: '2026-10-01T00:00:00.000Z', source: 'install' },
+    });
+    const notice = await screen.findByTestId('persist-denied');
+    expect(notice.textContent).toContain('The browser declined to keep this site');
+    expect(notice.textContent).toContain('it may delete every document here without asking');
+    expect(notice.textContent).toContain('Export the documents you need as .mfk files');
+  });
+
+  it('says nothing about a denial before the browser was asked, and records a new denial', async () => {
+    const { rememberPersist } = await setup('stored', { persistGranted: false });
+    fireEvent.click(await screen.findByRole('button', { name: 'Keep my documents' }));
+    await waitFor(() => expect(rememberPersist).toHaveBeenCalledWith(false));
+    expect(await screen.findByTestId('persist-denied')).toBeTruthy();
+  });
+
+  it('offers to update the app when a document was saved by a newer version', async () => {
+    const reloadPage = vi.fn();
+    const updater: AppUpdater = {
+      check: vi.fn(async () => 'no-worker' as const),
+      flow: null,
+      reloadPage,
+    };
+    const library = new DocumentLibrary(new MemoryBackend());
+    const documents = createDocumentStore(emptyDocument('scratch'));
+    const actions = homeActions({
+      library,
+      documents,
+      autosave: null,
+      show: vi.fn(),
+      download: vi.fn(),
+    });
+    render(
+      <HomeScreen
+        actions={actions}
+        kind="opfs"
+        current={null}
+        onClose={vi.fn()}
+        updater={updater}
+        persistence={() => null}
+        outcome={{
+          ok: false,
+          newer: true,
+          message: 'This document was saved by a newer version of manufakture.',
+        }}
+      />,
+    );
+    const status = screen.getByTestId('home-status');
+    expect(status.getAttribute('role')).toBe('alert');
+    expect(within(status).getByTestId('update-needed').textContent).toContain(
+      'This document needs a newer version of manufakture',
+    );
+    fireEvent.click(within(status).getByRole('button', { name: 'Update the app' }));
+    fireEvent.click(await within(status).findByRole('button', { name: 'Reload' }));
+    expect(reloadPage).toHaveBeenCalledTimes(1);
+  });
+
+  it('any other outcome offers no update', async () => {
+    await setup();
+    fireEvent.click(await screen.findByRole('button', { name: 'Bravo' }));
+    await waitFor(() => expect(screen.getByTestId('home-status').textContent).toContain('Opened'));
+    expect(screen.queryByTestId('update-needed')).toBeNull();
   });
 
   it('opens a document, and goes back to the open one', async () => {

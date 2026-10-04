@@ -1,12 +1,21 @@
 // The home screen: the documents stored in this browser, most recent first, with new (an empty
 // document or the fit-test coupon template), open, rename, duplicate, export (.mfk), delete and
 // import (file picker, or a file dropped anywhere on the page), and how much storage they use.
+// A document saved by a newer version is refused with an offer to update the app (UpdateNeeded),
+// and when the browser declined to keep the site's storage, the footer says what that means.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { formatBytes } from '../io/files';
 import type { BackendKind } from '../persistence/backend';
 import type { DocumentSummary } from '../persistence/library';
 import type { StorageInfo } from '../persistence/storage';
+import type { AppUpdater } from '../pwa/appUpdate';
+import {
+  rememberedPersistence,
+  rememberPersistence,
+  type PersistenceAnswer,
+} from '../pwa/persistence';
+import { UpdateNeeded } from '../pwa/UpdateNeeded';
 import type { ActionOutcome, HomeActions } from './actions';
 import './home.css';
 
@@ -24,6 +33,12 @@ export interface HomeScreenProps {
   outcome?: ActionOutcome | null;
   /** Changes when the list must be read again (a file dropped and imported). */
   revision?: number;
+  /** "Update the app" for a document saved by a newer version (default: the running one). */
+  updater?: AppUpdater;
+  /** The browser's remembered answer to "keep this site's storage" (src/pwa/persistence.ts). */
+  persistence?: () => PersistenceAnswer | null;
+  /** Remember a new answer. */
+  rememberPersist?: (granted: boolean) => void;
 }
 
 const WHERE: Record<BackendKind, string> = {
@@ -46,6 +61,9 @@ export function HomeScreen({
   onPersist,
   outcome: given = null,
   revision = 0,
+  updater,
+  persistence = rememberedPersistence,
+  rememberPersist = rememberPersistence,
 }: HomeScreenProps) {
   const [docs, setDocs] = useState<DocumentSummary[] | null>(null);
   const [outcome, setOutcome] = useState<ActionOutcome | null>(given);
@@ -82,6 +100,9 @@ export function HomeScreen({
       setRefresh((n) => n + 1);
     }
   }, []);
+
+  // Read on every render: a cheap localStorage read, and it changes after asking.
+  const denied = persistence()?.granted === false;
 
   const submitRename = () => {
     if (!renaming) return;
@@ -140,6 +161,7 @@ export function HomeScreen({
             data-testid="home-status"
           >
             {outcome.message}
+            {outcome.newer && <UpdateNeeded reason="document" updater={updater} />}
             {outcome.unsaved && (
               <>
                 {' '}
@@ -287,11 +309,23 @@ export function HomeScreen({
               {!info.persisted && onPersist && (
                 <button
                   type="button"
-                  onClick={() => void onPersist().then(() => setRefresh((n) => n + 1))}
+                  onClick={() =>
+                    void onPersist().then((granted) => {
+                      rememberPersist(granted);
+                      setRefresh((n) => n + 1);
+                    })
+                  }
                 >
                   Keep my documents
                 </button>
               )}
+            </p>
+          )}
+          {kind !== 'memory' && info?.persisted === false && denied && (
+            <p className="home-warning" data-testid="persist-denied">
+              The browser declined to keep this site&apos;s storage for good. If your disk runs low
+              on space, it may delete every document here without asking. Export the documents you
+              need as .mfk files to keep a copy outside the browser.
             </p>
           )}
         </footer>

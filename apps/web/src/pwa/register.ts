@@ -66,32 +66,61 @@ export interface RegisterOptions {
   status: StoreApi<PwaStatus>;
   /** A new worker is installed and waits (the update flow's `updateFound`). */
   onUpdate: () => void;
+  /**
+   * A new worker took control of this page without this page asking: another tab chose Reload
+   * (the update flow's `tookOver`). Not called for the first install, which takes control of a
+   * page no worker controlled.
+   */
+  onTakeover?: () => void;
   /** The worker's URL and scope, from Vite's base. */
   base: string;
+  /** Reload the page (default: `location.reload`; tests pass their own). */
+  reloadPage?: () => void;
   /** How often an open tab asks for a new version, besides on every navigation. */
   checkEveryMs?: number;
 }
 
+/**
+ * What asking the host for a new version found (`Registered.checkForUpdate`): one is installed
+ * and waits (`ready`; the update flow then offers Reload), the host has none newer (`none`), the
+ * host could not be reached (`offline`), or no worker runs (`no-worker`: reloading the page loads
+ * the newest version from the host).
+ */
+export type UpdateCheck = 'ready' | 'none' | 'offline' | 'no-worker';
+
 export interface Registered {
   /** Make the waiting worker take over; the page reloads once it has. */
   activate(): void;
+  /** Ask the host for a new version now, and wait until it is installed (or there is none). */
+  checkForUpdate(): Promise<UpdateCheck>;
   /** The registration, or null when registering failed. */
   registration: Promise<ServiceWorkerRegistration | null>;
 }
 
 /** Register the worker and watch for updates. */
 export function registerServiceWorker(options: RegisterOptions): Registered {
-  const { status, onUpdate, base, checkEveryMs = 60 * 60 * 1000 } = options;
+  const { status, onUpdate, onTakeover, base, checkEveryMs = 60 * 60 * 1000 } = options;
+  const reloadPage = options.reloadPage ?? (() => window.location.reload());
   const container = navigator.serviceWorker;
   let waiting: ServiceWorker | null = null;
   let takingOver = false;
+  /** Whether a worker controlled this page before the latest controller change. */
+  let controlled = container.controller !== null;
 
   container.addEventListener('message', (e) => applyWorkerMessage(status, e.data));
   container.startMessages();
-  // The waiting worker took over because the user chose Reload: load the new version. (The first
-  // install also changes the controller, from none, and must not reload.)
   container.addEventListener('controllerchange', () => {
-    if (takingOver) window.location.reload();
+    const before = controlled;
+    controlled = container.controller !== null;
+    // The waiting worker took over because the user chose Reload here: load the new version.
+    if (takingOver) reloadPage();
+    // Another tab chose Reload, and the new worker claimed this tab too (sw.ts, clientsClaim).
+    // This tab still runs the old build, whose lazily loaded chunks the new worker does not have:
+    // offer Reload. (The first install also changes the controller, from none: nothing to do.)
+    else if (before) {
+      waiting = null;
+      onTakeover?.();
+    }
   });
 
   const found = (worker: ServiceWorker) => {
@@ -134,6 +163,45 @@ export function registerServiceWorker(options: RegisterOptions): Registered {
       takingOver = true;
       waiting.postMessage({ type: SW_MESSAGE.skipWaiting });
     },
+    async checkForUpdate() {
+      const reg = await registration;
+      if (!reg) return 'no-worker';
+      if (waiting) {
+        // Offered again, even after Later.
+        onUpdate();
+        return 'ready';
+      }
+      // A browser that knows it is offline: no need to try. (Not proof of being online either:
+      // the update itself fails then.)
+      if (!navigator.onLine) return 'offline';
+      try {
+        await reg.update();
+      } catch {
+        return 'offline';
+      }
+      const installing = reg.installing;
+      if (installing) await settled(installing);
+      if (reg.waiting && container.controller) {
+        // `watch` has seen it too; make sure the flow knows even if its event came first.
+        if (waiting !== reg.waiting) found(reg.waiting);
+        return 'ready';
+      }
+      return 'none';
+    },
     registration,
   };
+}
+
+/** Resolves once `worker` is past installing: installed, activated, or redundant (failed). */
+function settled(worker: ServiceWorker): Promise<void> {
+  return new Promise((resolve) => {
+    const check = () => {
+      if (worker.state !== 'installing' && worker.state !== 'parsed') {
+        worker.removeEventListener('statechange', check);
+        resolve();
+      }
+    };
+    worker.addEventListener('statechange', check);
+    check();
+  });
 }

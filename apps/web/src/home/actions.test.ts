@@ -1,4 +1,5 @@
-import type { ManufaktureDocument } from '@manufakture/core';
+import { FORMAT_VERSION, type ManufaktureDocument } from '@manufakture/core';
+import { strToU8, zipSync } from 'fflate';
 import { describe, expect, it, vi } from 'vitest';
 import { startAutosave } from '../persistence/autosave';
 import { MemoryBackend } from '../persistence/backend';
@@ -41,6 +42,24 @@ describe('home actions', () => {
       ok: false,
       message: 'There is no document "zzz".',
     });
+  });
+
+  it('flags a document saved by a newer app, opened or imported, so the app can offer an update', async () => {
+    const { actions, backend } = await setup();
+    const path = 'documents/a/snapshot-00000001.json';
+    const json = JSON.parse(new TextDecoder().decode(backend.files.get(path)));
+    json.version = FORMAT_VERSION + 1;
+    const newer = JSON.stringify(json);
+    backend.files.set(path, new TextEncoder().encode(newer));
+    backend.files.delete('documents/a/head.json');
+    const opened = await actions.open('a');
+    expect(opened).toMatchObject({ ok: false, newer: true });
+    expect(opened.message).toMatch(/saved by a newer version of manufakture/);
+    const bytes = zipSync({ 'document.json': strToU8(newer) });
+    const imported = await actions.importFile({ name: 'future.mfk', bytes });
+    expect(imported).toMatchObject({ ok: false, newer: true });
+    // Any other failure is not flagged.
+    expect(await actions.open('zzz')).not.toHaveProperty('newer');
   });
 
   it('creates a new document, saved at once so the list shows it', async () => {

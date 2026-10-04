@@ -167,6 +167,11 @@ export type LibraryResult<T> =
       message: string;
       /** Set when what failed is that the branch asked for does not exist (or was deleted). */
       noBranch?: true;
+      /**
+       * Set when the document was saved by a newer app (ADR 0004 decision 2): refused, and the
+       * home screen offers to update the app (src/pwa/UpdateNeeded.tsx).
+       */
+      newer?: true;
     };
 
 /** The failure for a branch that is not there; never echoes the id it was given. */
@@ -658,7 +663,7 @@ interface Found {
   damaged: { rev: number; bytes: Uint8Array; message: string }[];
 }
 
-type FindResult = { ok: true; found: Found } | { ok: false; message: string };
+type FindResult = { ok: true; found: Found } | { ok: false; message: string; newer?: true };
 
 export class DocumentLibrary {
   readonly #backend: StorageBackend;
@@ -845,7 +850,7 @@ export class DocumentLibrary {
       const mismatch = head?.revision === rev && (await sha256Hex(bytes)) !== head.snapshotSha256;
       const decoded = await decodeStored(decoder.decode(bytes), (sha) => blobs.read(sha));
       if (!decoded.ok) {
-        if (decoded.newer) return { ok: false, message: decoded.message };
+        if (decoded.newer) return { ok: false, message: decoded.message, newer: true };
         firstError ??= mismatch ? 'Its latest saved copy is damaged.' : decoded.message;
         if (decoded.complete) damaged.push({ rev, bytes, message: decoded.message });
         continue;
@@ -2181,7 +2186,11 @@ export class DocumentLibrary {
         contents.document,
         async (sha) => contents.blobs.get(sha) ?? null,
       );
-      if (!decoded.ok) return { ok: false, message: decoded.message };
+      if (!decoded.ok) {
+        return decoded.newer
+          ? { ok: false, message: decoded.message, newer: true }
+          : { ok: false, message: decoded.message };
+      }
       let versions: PackedVersion[] = [];
       if (contents.manifest !== null) {
         const read = await readManifest(contents, decoded.document.id);

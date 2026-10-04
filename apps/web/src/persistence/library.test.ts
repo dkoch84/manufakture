@@ -477,6 +477,8 @@ describe('DocumentLibrary', () => {
     const before = files(backend);
     const r = await library(backend).open('doc-1');
     expect(r.ok ? null : r.message).toMatch(/saved by a newer version of manufakture/);
+    // Flagged, so the home screen can offer to update the app (src/pwa/UpdateNeeded.tsx).
+    expect(!r.ok && r.newer).toBe(true);
     expect(files(backend)).toEqual(before);
   });
 

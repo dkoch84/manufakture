@@ -39,3 +39,32 @@
   height: 100%;
   background: #1a6fe0;
 }
+
+.pwa-offline {
+  position: fixed;
+  left: 0.75rem;
+  bottom: 0.75rem;
+  z-index: 1000;
+  padding: 0.15rem 0.6rem;
+  border: 1px solid #d6dce3;
+  border-radius: 999px;
+  background: #f4f6f8;
+  color: #4a5562;
+  font-family: system-ui, sans-serif;
+  font-size: 0.75rem;
+  pointer-events: auto;
+}
+
+.pwa-update-needed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+  color: #1f2a37;
+}
+
+.pwa-update-needed button {
+  font: inherit;
+  padding: 0.15rem 0.6rem;
+}

@@ -65,8 +65,10 @@ Opening takes the newest snapshot that reads completely: the JSON parses, the do
 validates, and every blob it needs matches its SHA-256 and size. The snapshot the head names is
 used when it reads, even if its SHA-256 differs from the head's (logged, and the head corrected):
 it is a whole document, and falling back could drop real work. A snapshot written by a newer app
-is refused at once, without trying older ones. If the chosen revision is not the head's (a crash
-between steps 4 and 5, or a torn head), the head is rewritten. Recovery deletes only logs and
+is refused at once, without trying older ones; the failure carries `newer: true` (as does
+`importMfk`'s for a newer `.mfk`), so the home screen offers to update the app. If the chosen
+revision is not the head's (a crash between steps 4 and 5, or a torn head), the head is
+rewritten. Recovery deletes only logs and
 snapshots above both the head and the chosen revision: never the snapshot the head names, nor
 anything below it. A snapshot passed over because it is complete (its JSON parses) but does not
 read as the document (a missing blob, a validation a later release adds, another document's id)

@@ -65,4 +65,52 @@ describe('PwaStatus', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Later' }));
     expect(screen.queryByRole('status')).toBeNull();
   });
+
+  it('another tab updated the app: Reload is offered here too, and reloads the page', async () => {
+    const reloadPage = vi.fn();
+    const flow = createUpdateFlow({
+      flush: () => Promise.resolve(true),
+      activate: vi.fn(),
+      reloadPage,
+    });
+    render(<PwaStatus flow={flow} status={createPwaStatus()} />);
+    await act(async () => flow.tookOver());
+    const offer = screen.getByTestId('pwa-update');
+    expect(offer.getAttribute('data-reason')).toBe('other-tab');
+    expect(offer.textContent).toContain('manufakture was updated in another tab.');
+    fireEvent.click(screen.getByRole('button', { name: 'Reload' }));
+    await act(async () => undefined);
+    expect(reloadPage).toHaveBeenCalledTimes(1);
+  });
+
+  it('a chunk that failed to load offers Reload', async () => {
+    const flow = createUpdateFlow({ flush: () => Promise.resolve(true), activate: vi.fn() });
+    render(<PwaStatus flow={flow} status={createPwaStatus()} />);
+    await act(async () => flow.chunkFailed());
+    expect(screen.getByTestId('pwa-update').textContent).toContain(
+      'Part of manufakture could not be loaded',
+    );
+  });
+
+  it('a chunk that failed to load while offline says so, not that the app was updated', async () => {
+    const onLine = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+    const flow = createUpdateFlow({ flush: () => Promise.resolve(true), activate: vi.fn() });
+    render(<PwaStatus flow={flow} status={createPwaStatus()} />);
+    await act(async () => flow.chunkFailed());
+    const text = screen.getByTestId('pwa-update').textContent;
+    expect(text).toContain('because you are offline');
+    expect(text).not.toContain('updated');
+    onLine.mockRestore();
+  });
+
+  it('shows the Offline note while the browser is offline', () => {
+    setup();
+    const onLine = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+    act(() => void window.dispatchEvent(new Event('offline')));
+    expect(screen.getByTestId('offline-indicator').textContent).toBe('Offline');
+    onLine.mockReturnValue(true);
+    act(() => void window.dispatchEvent(new Event('online')));
+    expect(screen.queryByTestId('offline-indicator')).toBeNull();
+    onLine.mockRestore();
+  });
 });
