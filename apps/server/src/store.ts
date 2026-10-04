@@ -1,5 +1,5 @@
 import type { CounterTable, ManufaktureDocument, SyncEntry } from '@manufakture/core';
-import type { Outcome, PushedEntry } from '@manufakture/sync';
+import type { Outcome, PushedEntry, ServerBranch, ServerVersion } from '@manufakture/sync';
 
 /**
  * The server's storage, behind an interface so the sync logic does not know SQL (ADR 0009
@@ -15,7 +15,10 @@ import type { Outcome, PushedEntry } from '@manufakture/sync';
  * all of it or none of it.
  */
 
-/** The only branch in M7; T7.1e adds the others. */
+/**
+ * The branch every document has. Other branches (T7.1e) are their own logs, each with a record
+ * (`ServerBranch`) naming the version it started from.
+ */
 export const MAIN_BRANCH = 'main';
 
 /** A snapshot of the head every this many revisions, so loading does not replay from 1. */
@@ -74,6 +77,13 @@ export interface SubmitWrite {
   }[];
 }
 
+/** A stored snapshot: a branch's document at `rev`. */
+export interface StoredSnapshot {
+  readonly rev: number;
+  readonly document: ManufaktureDocument;
+  readonly highWater: CounterTable;
+}
+
 export interface SyncStore {
   /** Creates a document with its main branch at revision 0; false if the id exists. */
   createDocument(
@@ -103,6 +113,37 @@ export interface SyncStore {
   rowCount(documentId: string, branch: string, clientId: string, fromSeq?: number): number;
   /** Writes a submit's changes and prunes the client's rows below its floor, in one transaction. */
   commitSubmit(write: SubmitWrite): void;
+
+  /** Whether the document has branch `branch` (`main` included). */
+  hasBranch(documentId: string, branch: string): boolean;
+  /** The newest snapshot of a branch at or below `rev`. */
+  snapshotAt(documentId: string, branch: string, rev: number): StoredSnapshot | undefined;
+
+  /** The document's versions (every branch's), in the order they were stored. */
+  listVersions(documentId: string): ServerVersion[];
+  version(documentId: string, versionId: string): ServerVersion | undefined;
+  versionCount(documentId: string): number;
+  /**
+   * Stores a version, and `snapshot` (its branch's document at its revision) unless that branch
+   * has a snapshot at that revision already, in one transaction. False if the id is taken.
+   */
+  insertVersion(documentId: string, version: ServerVersion, snapshot: StoredSnapshot): boolean;
+
+  /** The document's branch records (main has none), in the order they were made. */
+  listBranches(documentId: string): ServerBranch[];
+  branchRecord(documentId: string, branch: string): ServerBranch | undefined;
+  /** How many branches the document has besides main. */
+  branchCount(documentId: string): number;
+  /**
+   * Creates a branch with its record, at revision 0 holding `document`, in one transaction.
+   * False if the document has a branch with that id.
+   */
+  createBranch(
+    documentId: string,
+    record: ServerBranch,
+    document: ManufaktureDocument,
+    highWater: CounterTable,
+  ): boolean;
 
   /** Stores a blob; false if it was already there. */
   putBlob(sha256: string, bytes: Buffer): boolean;

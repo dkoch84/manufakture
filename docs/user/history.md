@@ -6,7 +6,7 @@ Every save keeps a record of what you did (each change, undo and redo, in order)
 
 **History** in the header, next to **Documents**, opens the panel at the top of the side panel; press it again (or **Close** in the panel) to put it away. It has two lists.
 
-**Versions** are the states you named, newest first, each with its name, when it was made, the saved revision it names and its description.
+**Versions** are the states you named, newest first, each with its name, when it was made, the saved revision it names and its description. A version made in another browser of a [synced](sync.md#versions-and-branches) document says **from the server** instead of a revision: this browser keeps its state, but not the history that led to it.
 
 The **Timeline** is every saved revision, newest first, grouped into sessions: saves that follow each other with less than half an hour between them belong to one session, headed by when it began and ended. Each revision shows when it was saved and what led to it ("Edit variable #thickness", "Undo Add Extrude 1"; after three, "and 2 more"). A revision that a version names carries that version's name.
 
@@ -51,6 +51,8 @@ A **branch** is a second line of work in the same document, started from a versi
 
 To bring a branch's work into another one, merge it (below). To take another branch's whole state instead, name it as a version on that branch, switch back, **View** the version and **Restore** it: the open branch then takes the other one's whole state, as one step that **Undo** takes back.
 
+When the document [syncs](sync.md#versions-and-branches), versions and branches made on Main go to your server and appear in your other browsers; the changes made on a branch stay in the browser they are made in.
+
 Branches are for trying alternatives inside one document. To make an independent copy, use **Duplicate** on the home screen: the copy has its own name and history, and lives on as a document of its own.
 
 On the home screen a document is its Main branch: the name shown is Main's, and **Rename** and **Export** act on Main, even for the document you have open on another branch (to export a branch, **Duplicate** the document while the branch is open and export the copy). **Duplicate** of the open document copies it as it is open, on its branch. An export with every version includes the versions of all branches (imported again, they all become versions of Main; branches themselves are not exported).
@@ -81,6 +83,8 @@ Merging needs no server and no connection: it works on the copy in your browser.
 Merging the same branch twice makes its changes again: anything it added is added a second time, under new ids. After a merge, carry on in one of the two branches, or make a new branch from a version of the merged result.
 
 Merging is offered for the open branch only, so to merge Main into a branch, open the branch and merge from Main.
+
+A branch made from a version that came from another browser (marked **from the server**) cannot be merged in this browser, because the history before that version is not here; the preview says so. Merge it in the browser where the version was made.
 
 ## Example
 

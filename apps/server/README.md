@@ -65,6 +65,8 @@ Limits (all positive integers; `src/limits.ts` documents each):
 | `MANUFAKTURE_MAX_CONNECTIONS`            | 256                                |
 | `MANUFAKTURE_MAX_SOCKET_BUFFER_BYTES`    | 64 MiB                             |
 | `MANUFAKTURE_HELLO_TIMEOUT_MS`           | 10,000                             |
+| `MANUFAKTURE_MAX_VERSIONS_PER_DOCUMENT`  | 2,000                              |
+| `MANUFAKTURE_MAX_BRANCHES_PER_DOCUMENT`  | 100                                |
 
 Share links (`src/shares.ts`; the user guide is `docs/user/sharing.md`):
 
@@ -125,10 +127,20 @@ status, plus `messages` when protocol messages explain it.
 | `PUT /api/blobs/:sha256`               | `application/octet-stream`, at most `MAX_IMPORT_BYTES`; refused unless the bytes hash to the name. `201` stored, `200` already there                             |
 | `GET /api/blobs/:sha256`               | The bytes, or 404                                                                                                                                                |
 | `GET /api/documents/:id/socket`        | The WebSocket (below)                                                                                                                                            |
+| `GET /api/documents/:id/versions`      | `{ versions }`: every branch's named versions, in the order they were stored                                                                                     |
+| `POST /api/documents/:id/versions`     | `{ version }` (`ServerVersionSchema`): `201`, or `200` when that record is stored already; `409 version-exists` for another record under its id                  |
+| `GET /api/documents/:id/versions/:vid` | `{ version, document }`: the version and its branch's document at its revision                                                                                   |
+| `GET /api/documents/:id/branches`      | `{ branches }`: the branch records (main has none)                                                                                                               |
+| `POST /api/documents/:id/branches`     | `{ branch }` (`ServerBranchSchema`): a new branch log from a stored version; `201`, `200` for a resend, `409 branch-exists`                                      |
 | `POST /api/shares?name=&expires=`      | A `.mfkview` as `application/vnd.manufakture.view+zip`; `expires` is days or `never`. `201 { id, name, size, createdAt, expiresAt }`; 409 at the count limit     |
 | `GET /api/shares`                      | `{ shares, limits }`: the active shares, newest first                                                                                                            |
 | `GET /api/shares/:id`                  | The bundle, **no token**, CORS for `MANUFAKTURE_VIEWER_ORIGINS` only; 404 for unknown, revoked and expired ids alike                                             |
 | `DELETE /api/shares/:id`               | Revokes: `204`, or 404                                                                                                                                           |
+
+The snapshot, hello, entries (both) and socket routes take `?branch=<id>` for a branch's own log;
+without it they mean `main`. Anything but a branch id is `400`, an unknown branch `404` (a
+WebSocket closes with 4404). A client's claim, rows and floor are per branch, and a push goes to the
+connections of its branch only.
 
 The messages are `@manufakture/sync`'s protocol (`ClientMessageSchema`, `ServerMessageSchema`), so
 a client feeds every message of `messages` to `SyncClient.handle` whatever the status was.
@@ -188,14 +200,32 @@ falls more than `MANUFAKTURE_MAX_SOCKET_BUFFER_BYTES` behind is disconnected and
 over one connection arrive in order, which keeps `predecessor-unknown` rare (ADR 0009 amendment,
 item 12).
 
+### Versions and branches
+
+T7.1e (ADR 0009 decision 9). A **version** names revision `rev` of one branch's log, for good:
+records are append-only and keyed by the app's version id, so a pin by document and version id
+means the same in every browser. Storing one also stores its branch's document at that revision as
+a snapshot, so reading it back replays nothing. A **branch** is a log of its own whose revision 0
+is the document of the version it names (`fromVersion`), with the high-water mark of that
+version's branch as of its revision; it is synced through the routes above with `?branch=`.
+
+Both routes are behind the token like the others, take bodies of at most 16 KiB
+(`RECORD_BODY_BYTES`), check them with the shared schemas, and answer every refusal with a fixed
+message: `invalid-version`/`invalid-branch` (schema), `no-branch` and `no-revision` (a version for
+a branch or revision the server does not have), `no-version` (a branch from a version it does not
+have), `version-exists`/`branch-exists` (409), and `too-many-versions`/`too-many-branches` (403) at
+the limits above. A resend of a stored record is answered `200` with it, so a client that lost
+the answer can send it again.
+
 ## Storage and backup
 
 One SQLite file (`MANUFAKTURE_DB`) with write-ahead logging and `synchronous = FULL`, so an
 answered submit survives a crash or a power cut, and a process killed mid-submit leaves the
 database as it was before the submit (the torn-write test kills one). Tables: `documents`,
-`branches` (head and high-water mark; only `main` in M7, T7.1e adds more), `entries`, `snapshots`,
-`clients` (key hash, floor, latest accepted), `outcomes` (the de-duplication table) and `blobs`.
-`meta.schema` versions the layout; a newer database is refused.
+`branches` (head and high-water mark of `main` and every other branch), `entries`, `snapshots`,
+`clients` (key hash, floor, latest accepted), `outcomes` (the de-duplication table), `versions`,
+`branch_records` and `blobs`. `meta.schema` versions the layout (2 since T7.1e; a version 1 database
+gets the two new tables when it is opened); a newer database is refused.
 
 Back up with SQLite's online backup, which is safe while the server runs:
 
@@ -219,6 +249,13 @@ as a server fault (T7.1d), so restore the newest backup there is.
 - Imports still carry their bytes inline in the document and its commands (core's schema), so
   entries do not name blobs yet and the server has no check that a named blob exists; the blob
   routes are ready for the format change that moves `data` out by hash.
+- Every version stores a full snapshot of its document (and every branch one more, its revision
+  0), unless a snapshot of that revision is there already, so storage grows by one document per
+  version beside the log and the checkpoints. Versions are never deleted; the per-document limits
+  (`MANUFAKTURE_MAX_VERSIONS_PER_DOCUMENT`, `MANUFAKTURE_MAX_BRANCHES_PER_DOCUMENT`) bound it.
+- Versions and branches are authorised by the token alone, like everything else: whoever holds it
+  can read every document's versions, which is what pin resolution across documents needs.
+  Per-document authorisation belongs with accounts (T7.1h, skipped in M7).
 - One token for everything. Accounts, per-document roles and a hosted service are deferred
   (product decision 0001); the store's tables are keyed by document and branch, and the client
   claim does not depend on the token, so accounts can be added in front of them.
@@ -228,7 +265,9 @@ as a server fault (T7.1d), so restore the newest backup there is.
 `test/server.test.ts` runs a real server on an ephemeral port over a temp SQLite file: auth and
 CORS, documents, client claims, two `SyncClient`s converging over WebSockets, pushes, the
 retryable answer, a restart with resubmissions, snapshots, the retention floor cases of the M7
-plan, hostile inputs and every limit. `test/torn-write.test.ts` bundles `test/crash-child.ts`,
+plan, hostile inputs and every limit. `test/records.test.ts` covers versions and branches: the
+token, storing, listing and reading back, resends and conflicts, the schemas' refusals with fixed
+messages, the body and count caps, a branch's own log and pushes, and the schema upgrade. `test/torn-write.test.ts` bundles `test/crash-child.ts`,
 kills it with SIGKILL inside the commit transaction, and checks the store is unchanged and the
 submit then lands.
 

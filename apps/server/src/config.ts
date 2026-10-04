@@ -45,6 +45,8 @@ const LIMIT_VARS: Record<keyof Limits, string> = {
   maxConnections: 'MANUFAKTURE_MAX_CONNECTIONS',
   maxSocketBufferBytes: 'MANUFAKTURE_MAX_SOCKET_BUFFER_BYTES',
   helloTimeoutMs: 'MANUFAKTURE_HELLO_TIMEOUT_MS',
+  maxVersionsPerDocument: 'MANUFAKTURE_MAX_VERSIONS_PER_DOCUMENT',
+  maxBranchesPerDocument: 'MANUFAKTURE_MAX_BRANCHES_PER_DOCUMENT',
 };
 
 const positive = z.coerce.number().int().min(1).max(Number.MAX_SAFE_INTEGER);

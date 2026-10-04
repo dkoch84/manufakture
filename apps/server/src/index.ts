@@ -1,7 +1,23 @@
-export { API_PREFIX, CLIENT_KEY_HEADER, SUBPROTOCOL, buildApp, type AppOptions } from './app';
+export {
+  API_PREFIX,
+  CLIENT_KEY_HEADER,
+  RECORD_BODY_BYTES,
+  SUBPROTOCOL,
+  buildApp,
+  type AppOptions,
+} from './app';
 export { TOKEN, loadConfig, type Config } from './config';
 export { DEFAULT_LIMITS, checkJsonShape, type Limits } from './limits';
-export { CLIENT_KEY, DOCUMENT_ID, SHA256, SyncService, type Reply, type Sender } from './service';
+export {
+  BRANCH_ID,
+  CLIENT_KEY,
+  DOCUMENT_ID,
+  SHA256,
+  SyncService,
+  type RecordReply,
+  type Reply,
+  type Sender,
+} from './service';
 export {
   DEFAULT_SHARE_CONFIG,
   SHARE_ID,
@@ -19,6 +35,7 @@ export {
   type ClientRecord,
   type DocumentInfo,
   type LoadedBranch,
+  type StoredSnapshot,
   type SubmitWrite,
   type SyncStore,
 } from './store';

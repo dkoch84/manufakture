@@ -1,11 +1,21 @@
 import Database from 'better-sqlite3';
 import type { CounterTable, ManufaktureDocument } from '@manufakture/core';
-import type { Outcome, PushedEntry } from '@manufakture/sync';
-import type { ClientRecord, DocumentInfo, LoadedBranch, SubmitWrite, SyncStore } from './store';
+import type { Outcome, PushedEntry, ServerBranch, ServerVersion } from '@manufakture/sync';
+import type {
+  ClientRecord,
+  DocumentInfo,
+  LoadedBranch,
+  StoredSnapshot,
+  SubmitWrite,
+  SyncStore,
+} from './store';
 import { MAIN_BRANCH } from './store';
 
-/** The schema version this code writes; `meta.schema`. A newer database is refused. */
-export const STORE_SCHEMA_VERSION = 1;
+/**
+ * The schema version this code writes; `meta.schema`. A newer database is refused. 2 (T7.1e)
+ * adds `versions` and `branch_records`; a version 1 database gets them on open.
+ */
+export const STORE_SCHEMA_VERSION = 2;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta (
@@ -62,6 +72,27 @@ CREATE TABLE IF NOT EXISTS outcomes (
   FOREIGN KEY (document_id, branch, client_id) REFERENCES clients(document_id, branch, client_id),
   CHECK ((rev IS NULL) <> (error IS NULL))
 ) STRICT, WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS versions (
+  document_id TEXT NOT NULL REFERENCES documents(id),
+  id TEXT NOT NULL,
+  branch TEXT NOT NULL,
+  rev INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (document_id, id),
+  FOREIGN KEY (document_id, branch) REFERENCES branches(document_id, branch)
+) STRICT;
+CREATE TABLE IF NOT EXISTS branch_records (
+  document_id TEXT NOT NULL,
+  branch TEXT NOT NULL,
+  name TEXT NOT NULL,
+  from_version TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (document_id, branch),
+  FOREIGN KEY (document_id, branch) REFERENCES branches(document_id, branch),
+  FOREIGN KEY (document_id, from_version) REFERENCES versions(document_id, id)
+) STRICT;
 CREATE TABLE IF NOT EXISTS blobs (
   sha256 TEXT PRIMARY KEY,
   size INTEGER NOT NULL,
@@ -182,6 +213,37 @@ export class SqliteStore implements SyncStore {
       getBlob: db.prepare('SELECT data FROM blobs WHERE sha256 = ?').pluck(),
       hasBlob: db.prepare('SELECT 1 FROM blobs WHERE sha256 = ?').pluck(),
       blobBytes: db.prepare('SELECT coalesce(sum(size), 0) FROM blobs').pluck(),
+      hasBranch: db.prepare('SELECT 1 FROM branches WHERE document_id = ? AND branch = ?').pluck(),
+      insertSnapshotIfAbsent: db.prepare(
+        `INSERT OR IGNORE INTO snapshots (document_id, branch, rev, document, high_water)
+         VALUES (?, ?, ?, ?, ?)`,
+      ),
+      versions: db.prepare(
+        `SELECT id, name, description, branch, rev, created_at AS createdAt FROM versions
+         WHERE document_id = ? ORDER BY rowid`,
+      ),
+      version: db.prepare(
+        `SELECT id, name, description, branch, rev, created_at AS createdAt FROM versions
+         WHERE document_id = ? AND id = ?`,
+      ),
+      versionCount: db.prepare('SELECT count(*) FROM versions WHERE document_id = ?').pluck(),
+      insertVersion: db.prepare(
+        `INSERT INTO versions (document_id, id, branch, rev, name, description, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      ),
+      branchRecords: db.prepare(
+        `SELECT branch AS id, name, from_version AS fromVersion, created_at AS createdAt
+         FROM branch_records WHERE document_id = ? ORDER BY rowid`,
+      ),
+      branchRecord: db.prepare(
+        `SELECT branch AS id, name, from_version AS fromVersion, created_at AS createdAt
+         FROM branch_records WHERE document_id = ? AND branch = ?`,
+      ),
+      branchCount: db.prepare('SELECT count(*) FROM branch_records WHERE document_id = ?').pluck(),
+      insertBranchRecord: db.prepare(
+        `INSERT INTO branch_records (document_id, branch, name, from_version, created_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      ),
     };
     this.commitTx = this.db.transaction((write: SubmitWrite) => this.writeSubmit(write));
   }
@@ -192,6 +254,13 @@ export class SqliteStore implements SyncStore {
     if (row === undefined) {
       this.db
         .prepare("INSERT INTO meta (key, value) VALUES ('schema', ?)")
+        .run(String(STORE_SCHEMA_VERSION));
+      return;
+    }
+    if (Number(row) < STORE_SCHEMA_VERSION) {
+      // The tables a newer schema adds were created above (`IF NOT EXISTS`); nothing else changed.
+      this.db
+        .prepare("UPDATE meta SET value = ? WHERE key = 'schema'")
         .run(String(STORE_SCHEMA_VERSION));
       return;
     }
@@ -347,6 +416,94 @@ export class SqliteStore implements SyncStore {
     }
     this.stmt.updateClient.run(w.floor, w.latestAccepted ?? null, d, b, c);
     this.stmt.prune.run(d, b, c, w.floor, w.latestAccepted ?? null);
+  }
+
+  hasBranch(documentId: string, branch: string): boolean {
+    return this.stmt.hasBranch.get(documentId, branch) !== undefined;
+  }
+
+  snapshotAt(documentId: string, branch: string, rev: number): StoredSnapshot | undefined {
+    const s = this.stmt.latestSnapshot.get(documentId, branch, rev) as
+      { rev: number; document: string; high_water: string } | undefined;
+    if (s === undefined) return undefined;
+    return {
+      rev: s.rev,
+      document: JSON.parse(s.document) as ManufaktureDocument,
+      highWater: JSON.parse(s.high_water) as CounterTable,
+    };
+  }
+
+  listVersions(documentId: string): ServerVersion[] {
+    return this.stmt.versions.all(documentId) as ServerVersion[];
+  }
+
+  version(documentId: string, versionId: string): ServerVersion | undefined {
+    return this.stmt.version.get(documentId, versionId) as ServerVersion | undefined;
+  }
+
+  versionCount(documentId: string): number {
+    return this.stmt.versionCount.get(documentId) as number;
+  }
+
+  insertVersion(documentId: string, v: ServerVersion, snapshot: StoredSnapshot): boolean {
+    return this.db
+      .transaction(() => {
+        if (this.stmt.version.get(documentId, v.id) !== undefined) return false;
+        this.stmt.insertVersion.run(
+          documentId,
+          v.id,
+          v.branch,
+          v.rev,
+          v.name,
+          v.description,
+          v.createdAt,
+        );
+        this.stmt.insertSnapshotIfAbsent.run(
+          documentId,
+          v.branch,
+          snapshot.rev,
+          JSON.stringify(snapshot.document),
+          JSON.stringify(snapshot.highWater),
+        );
+        return true;
+      })
+      .immediate();
+  }
+
+  listBranches(documentId: string): ServerBranch[] {
+    return this.stmt.branchRecords.all(documentId) as ServerBranch[];
+  }
+
+  branchRecord(documentId: string, branch: string): ServerBranch | undefined {
+    return this.stmt.branchRecord.get(documentId, branch) as ServerBranch | undefined;
+  }
+
+  branchCount(documentId: string): number {
+    return this.stmt.branchCount.get(documentId) as number;
+  }
+
+  createBranch(
+    documentId: string,
+    record: ServerBranch,
+    document: ManufaktureDocument,
+    highWater: CounterTable,
+  ): boolean {
+    return this.db
+      .transaction(() => {
+        if (this.stmt.hasBranch.get(documentId, record.id) !== undefined) return false;
+        const hw = JSON.stringify(highWater);
+        this.stmt.insertBranch.run(documentId, record.id, hw);
+        this.stmt.insertSnapshot.run(documentId, record.id, 0, JSON.stringify(document), hw);
+        this.stmt.insertBranchRecord.run(
+          documentId,
+          record.id,
+          record.name,
+          record.fromVersion,
+          record.createdAt,
+        );
+        return true;
+      })
+      .immediate();
   }
 
   putBlob(sha256: string, bytes: Buffer): boolean {

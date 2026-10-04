@@ -14,6 +14,8 @@
 //   did). It takes over when the lock is free.
 // - A rebase that drops commands shows a notice, and the work before it is kept as a branch
 //   (branch.ts).
+// - Named versions and branches go to the server and come from it (records.ts, T7.1e), and a
+//   pinned version this browser does not hold is looked up on the server (`setRemoteVersions`).
 //
 // Kept free of React: SyncPanel.tsx shows `state`.
 
@@ -29,7 +31,9 @@ import { flushForSync, registerSyncSource } from '../persistence/autosave';
 import {
   MAIN_BRANCH as LIBRARY_MAIN,
   type DocumentLibrary,
+  type RemoteVersionSource,
   type SyncRecord,
+  type SyncUploads,
 } from '../persistence/library';
 import { branchFromSearch } from '../persistence/url';
 import { loadServerSettings, type ServerSettings } from '../sharing/client';
@@ -37,6 +41,7 @@ import type { DocumentStoreApi } from '../state/document';
 import {
   SyncError,
   createServerDocument,
+  fetchServerVersion,
   fetchSnapshot,
   listServerDocuments,
   socketProtocols,
@@ -45,6 +50,7 @@ import {
 } from './api';
 import { droppedText, keepAsBranch } from './branch';
 import { SyncLoop, type LoopStatus } from './loop';
+import { RecordSync } from './records';
 import { webSocketConnect, type Connect } from './transport';
 
 /** What the status line says. */
@@ -136,6 +142,8 @@ export interface SyncControllerOptions {
   readonly now?: () => Date;
   /** How often another tab's lock is looked at again (default 5 s). */
   readonly lockPollMs?: number;
+  /** How often the server's versions and branches are looked at (default `RECORDS_POLL_MS`). */
+  readonly recordsPollMs?: number;
   /** Passed to each loop (tests). */
   readonly loop?: {
     retryMs?: number;
@@ -148,6 +156,7 @@ export interface SyncControllerOptions {
 interface Attached {
   readonly id: string;
   readonly loop: SyncLoop;
+  readonly records: RecordSync;
   readonly server: ServerSettings;
   readonly clientKey: string;
   readonly release: () => void;
@@ -169,12 +178,13 @@ export class SyncController {
   readonly #now: () => Date;
   readonly #lockPollMs: number;
   readonly #loopOptions: SyncControllerOptions['loop'];
+  readonly #recordsPollMs: number | undefined;
   #attached: Attached | null = null;
   /**
    * The state of the document that was syncing until another one opened: what autosave saves
    * with that document's last changes, which it saves after the switch.
    */
-  #retired: { id: string; record: SyncRecord } | null = null;
+  #retired: { id: string; record: () => SyncRecord } | null = null;
   /** Bumped by every (re)attach and by stop: an attach that is overtaken gives up. */
   #generation = 0;
   #pollTimer: ReturnType<typeof setTimeout> | null = null;
@@ -209,6 +219,7 @@ export class SyncController {
     this.#now = options.now ?? (() => new Date());
     this.#lockPollMs = options.lockPollMs ?? 5_000;
     this.#loopOptions = options.loop;
+    this.#recordsPollMs = options.recordsPollMs;
     this.state = createStore<SyncState>()(() => ({
       documentId: options.documents.core.document.id,
       enabled: false,
@@ -231,7 +242,9 @@ export class SyncController {
           // after this, with its state as it is now.
           const a = this.#attached;
           if (a !== null && !a.loop.stopped) {
-            this.#retired = { id: a.id, record: recordOf(a.loop.client, a.server, a.clientKey) };
+            // Read when autosave asks: the client no longer moves, but uploads made just before
+            // the switch (a branch made and opened) are still added.
+            this.#retired = { id: a.id, record: () => recordOf(a) };
           }
           this.#detach();
           this.#scheduleAttach();
@@ -249,6 +262,8 @@ export class SyncController {
       }),
       registerSyncSource((id, branch) => this.#recordFor(id, branch)),
     );
+    this.#library.setRemoteVersions(this.#remoteVersions);
+    this.#cleanup.push(() => this.#library.setRemoteVersions(null));
     if (typeof window !== 'undefined') {
       const online = () => this.#attached?.loop.setOnline(true);
       const offline = () => this.#attached?.loop.setOnline(false);
@@ -342,7 +357,7 @@ export class SyncController {
             throw new SyncError(`This browser's copy cannot be synced: ${r.error.message}`);
         }
       }
-      const record = recordOf(client, server, this.#newClientKey());
+      const record = recordOf({ client, server, clientKey: this.#newClientKey() });
       if (await this.#library.has(id)) {
         await this.#library.saveSync(id, record);
       } else {
@@ -389,7 +404,7 @@ export class SyncController {
         snapshot.document,
         [],
         undefined,
-        recordOf(client, server, this.#newClientKey()),
+        recordOf({ client, server, clientKey: this.#newClientKey() }),
       );
       opened = id;
     });
@@ -413,14 +428,29 @@ export class SyncController {
     return this.#fetch ? { fetch: this.#fetch } : {};
   }
 
+  /**
+   * A pinned version this browser does not hold, on the server set here: for a document that is
+   * not here, or one that syncs with that server (never another server's copy of it).
+   */
+  readonly #remoteVersions: RemoteVersionSource = async (documentId, versionId) => {
+    const server = this.#settings();
+    if (!server) return null;
+    if (await this.#library.has(documentId)) {
+      const stored = await this.#library.readSync(documentId);
+      if (!stored.ok || stored.value?.record.server !== server.url) return null;
+    }
+    const found = await fetchServerVersion(server, documentId, versionId, this.#fetchOptions());
+    if (found === null) return null;
+    const { rev, ...rest } = found.version;
+    return { version: { ...rest, serverRev: rev }, document: found.document };
+  };
+
   /** The record to save with document `id` now, while it syncs here. */
   #recordFor(id: string, branch: string): SyncRecord | null {
     if (branch !== LIBRARY_MAIN) return null;
     const a = this.#attached;
-    if (a !== null && a.id === id && !a.loop.stopped) {
-      return recordOf(a.loop.client, a.server, a.clientKey);
-    }
-    return this.#retired?.id === id ? this.#retired.record : null;
+    if (a !== null && a.id === id && !a.loop.stopped) return recordOf(a);
+    return this.#retired?.id === id ? this.#retired.record() : null;
   }
 
   #scheduleAttach(): void {
@@ -438,6 +468,7 @@ export class SyncController {
     const a = this.#attached;
     this.#attached = null;
     if (a) {
+      a.records.stop();
       a.loop.stop();
       a.release();
     }
@@ -560,15 +591,27 @@ export class SyncController {
       onStatus: (status) => {
         if (this.#attached === attached) this.state.setState({ status });
       },
-      onDropped: (drops, _before, kept) => this.#dropped(id, drops, kept),
+      onDropped: (drops, _before, kept) => this.#dropped(attached, id, drops, kept),
       onRemapped: (table) => {
         for (const l of this.#remapListeners) l(table);
       },
       onProblem: (message) => this.#notice(message),
     });
-    attached = { id, loop, server, clientKey, release };
+    const records = new RecordSync({
+      library: this.#library,
+      documentId: id,
+      server,
+      client,
+      uploads: stored.record.uploads,
+      save: () => void this.#persist(attached),
+      ...(this.#fetch && { fetch: this.#fetch }),
+      ...(this.#recordsPollMs !== undefined && { pollMs: this.#recordsPollMs }),
+    });
+    attached = { id, loop, records, server, clientKey, release };
     this.#attached = attached;
     this.state.setState({ enabled: true, status: loop.status });
+    // Listening before the loop starts, so no landing is missed.
+    void records.start();
     loop.start();
   }
 
@@ -589,7 +632,7 @@ export class SyncController {
     // Checked as the flush resolves: nothing of the document waits, so the head holds what the
     // store (and so the client) holds now.
     if (this.#attached !== attached || attached.loop.stopped) return false;
-    const record = recordOf(attached.loop.client, attached.server, attached.clientKey);
+    const record = recordOf(attached);
     try {
       await this.#library.saveSync(attached.id, record);
       return true;
@@ -604,13 +647,20 @@ export class SyncController {
     return id;
   }
 
-  #dropped(id: string, drops: readonly DroppedCommand[], kept: ManufaktureDocument): void {
+  #dropped(
+    attached: Attached | null,
+    id: string,
+    drops: readonly DroppedCommand[],
+    kept: ManufaktureDocument,
+  ): void {
     const noticeId = this.#notice(droppedText(drops));
     const update = (patch: Partial<SyncNotice>) =>
       this.state.setState((s) => ({
         notices: s.notices.map((n) => (n.id === noticeId ? { ...n, ...patch } : n)),
       }));
-    void keepAsBranch(this.#library, id, kept, this.#now()).then(
+    const keep = () => keepAsBranch(this.#library, id, kept, this.#now());
+    // The version and branch that keep the work are this browser's: not stored on the server.
+    void (attached ? attached.records.keep(keep) : keep()).then(
       (branch) => update({ branch: { id: branch.id, name: branch.name } }),
       (e: unknown) =>
         update({ branchError: e instanceof Error ? e.message : 'The branch could not be made.' }),
@@ -622,11 +672,20 @@ function sameDocument(a: ManufaktureDocument, b: ManufaktureDocument): boolean {
   return a === b || serialize(a) === serialize(b);
 }
 
-function recordOf(client: SyncClient, server: ServerSettings, clientKey: string): SyncRecord {
+function recordOf(from: {
+  readonly client?: SyncClient;
+  readonly loop?: SyncLoop;
+  readonly server: ServerSettings;
+  readonly clientKey: string;
+  readonly records?: RecordSync;
+}): SyncRecord {
+  const client = from.client ?? from.loop!.client;
+  const uploads: SyncUploads | undefined = from.records?.uploads();
   return {
-    server: server.url,
-    clientKey,
+    server: from.server.url,
+    clientKey: from.clientKey,
     confirmed: client.confirmedDocument,
     state: client.save(),
+    ...(uploads && { uploads }),
   };
 }

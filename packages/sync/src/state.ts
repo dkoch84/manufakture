@@ -162,9 +162,12 @@ export type SyncQueueState = z.infer<typeof SyncQueueStateSchema>;
  * An undo inverse's `undoOf` may name an entry no longer in the queue (it landed), but never
  * itself, a later entry or one not handed out yet.
  */
-export function checkQueueState(s: SyncQueueState): string | undefined {
+export function checkQueueState(
+  s: SyncQueueState,
+  window: number = PUSH_WINDOW,
+): string | undefined {
   // The client clamps every revision a server names to the window past its confirmed revision.
-  const bound = s.confirmedRev + PUSH_WINDOW;
+  const bound = s.confirmedRev + window;
   const locals = new Set<number>();
   const seqs = new Set<number>();
   for (const e of s.entries) {
@@ -214,7 +217,7 @@ export function checkQueueState(s: SyncQueueState): string | undefined {
   }
   const revs = new Set<number>();
   for (const p of s.buffered) {
-    if (p.rev <= s.confirmedRev || p.rev > s.confirmedRev + PUSH_WINDOW) {
+    if (p.rev <= s.confirmedRev || p.rev > bound) {
       return `buffered revision ${p.rev} is outside the window after ${s.confirmedRev}`;
     }
     if (revs.has(p.rev)) return `revision ${p.rev} is buffered twice`;

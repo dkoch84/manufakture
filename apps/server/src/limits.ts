@@ -50,6 +50,10 @@ export interface Limits {
   readonly maxSocketBufferBytes: number;
   /** Milliseconds a new WebSocket has to send its `hello`. */
   readonly helloTimeoutMs: number;
+  /** The most named versions one document may hold on the server (every branch's together). */
+  readonly maxVersionsPerDocument: number;
+  /** The most branches one document may have on the server besides main. */
+  readonly maxBranchesPerDocument: number;
 }
 
 export const DEFAULT_LIMITS: Limits = {
@@ -70,6 +74,8 @@ export const DEFAULT_LIMITS: Limits = {
   maxConnections: 256,
   maxSocketBufferBytes: 64 * 1024 * 1024,
   helloTimeoutMs: 10_000,
+  maxVersionsPerDocument: 2_000,
+  maxBranchesPerDocument: 100,
 };
 
 /**

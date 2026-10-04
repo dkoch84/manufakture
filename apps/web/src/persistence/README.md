@@ -29,6 +29,7 @@ documents/<id>/log-<rev>.json         the commands from the previous revision to
 documents/<id>/versions-<n>.json      the named versions, the n-th write of the list
 documents/<id>/branches-<n>.json      the branches besides main, the n-th write of the list
 documents/<id>/sync-<n>.json          the sync state (T7.1d), the n-th write, for the revision it names
+documents/<id>/remote-<v>.json        the document of version <v> kept from the sync server (T7.1e)
 documents/<id>/branches/<b>/head.json, snapshot-<rev>.json, log-<rev>.json, damaged-*
                                       branch <b>: its own head, snapshots and log
 documents/<id>/blobs/<sha256>         each imported file, user font and pinned version, once
@@ -359,7 +360,13 @@ queue would hold changes the server never gets. So both are committed by one hea
   a list. It is how the loop saves before it sends.
 - `readSync(id)` reads what the head names and says whether it was saved with the head's
   revision (`paired`). A save without the state (another tab, an older release) leaves an older
-  state; the loop then puts this browser's document on top as one change.
+  state; the loop then puts this browser's document on top as one change. When the file the head
+  names cannot be read, `readSync` fails (the sync status shows "Cannot sync"); it never falls back
+  to the spare: an older queue would hand out `clientSeq` values the server has already accepted
+  from the newer one. Switching sync off and on starts over from the server's copy.
+- The record may carry `uploads` (T7.1e): versions and branches made here that wait for the
+  server, each version with the server revision it names once known (`rev`) or the queue entry
+  whose landing tells it (`after`). Saved with the state, so a reload does not lose them.
 - `dropSync(id)` commits a head naming none, then deletes the files.
 
 Crash rules are those of the lists: a sync file above the head's is what a save that died left,
@@ -368,6 +375,29 @@ torn head takes the newest sync file whose `revision` is the revision recovered,
 between the snapshot and the head finds the new pair, and one before the snapshot is complete the
 old pair. `library-sync.test.ts` crashes a save with state and a `saveSync` at every step, clean
 and torn, and checks the reopened document and state are the old pair or the new pair.
+
+### Versions and branches from the server
+
+T7.1e (`src/sync/records.ts`). A version the server has and this browser does not is kept with
+`adoptVersion(id, remote, document)`: its document goes to `remote-<version id>.json` in the main
+directory (storage form, files as blobs), and its record to the version list with `revision: 0`
+and `serverRev` (the revision of its branch's server log), committed like any version. Revision 0
+names no revision here; `readVersion` reads the remote file instead and checks it against
+`snapshotSha256` as usual. Such a version can be viewed, restored, pinned and branched from;
+merging a branch made from one is refused with a message (the history before it is not here). An
+`.mfk` export carries it, and an import makes it a revision of main and drops `serverRev`.
+`adoptBranch(id, branch)` makes a branch the server has from its version, under the server's id
+and time (a taken name gets " (2)", " (3)", ...); a branch already here is returned as it is.
+
+`readVersion` asks `setRemoteVersions(source)` (the sync controller sets it) for a version that is
+not here, outside the queue and the lock; the answer must be of that document and version, and is
+kept with `adoptVersion` when the document is here.
+
+`subscribe(listener)` reports `{ id, kind: 'versions' | 'branches' }` after this library changed a
+document's versions (made, renamed, adopted) or branches (made, renamed, deleted, adopted); other
+tabs' changes are not reported. The sync controller uses it to find versions and branches to
+upload, and the History panel and the branch switcher to read their lists again.
+`library-remote.test.ts` covers all of it.
 
 A change from the server reaches the document store as a `remote` change (core `DocumentStore`
 `applyRemote`), which autosave logs as an `execute` of `replaceDocument` with the whole new

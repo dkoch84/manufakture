@@ -306,4 +306,34 @@ describe('the History panel on a branch', () => {
     expect(screen.getByTestId('revision-3').textContent).toContain('Base');
     expect(screen.getByTestId('revision-2').textContent).not.toContain('On the branch');
   });
+
+  it('lists a version kept from the sync server as it arrives, and views it', async () => {
+    const t = await setup();
+    expect(screen.getByTestId('versions-empty')).toBeDefined();
+    const doc = partDocument('doc-1', 'Elsewhere');
+    await act(async () => {
+      const r = await t.lib.adoptVersion(
+        'doc-1',
+        {
+          id: 'server-v',
+          name: 'From the laptop',
+          description: '',
+          createdAt: '2026-09-30T10:00:00.000Z',
+          branch: 'main',
+          serverRev: 7,
+        },
+        doc,
+      );
+      expect(r.ok).toBe(true);
+    });
+    const item = await screen.findByTestId('version-From the laptop');
+    expect(within(item).getByTestId('version-from-server-From the laptop').textContent).toBe(
+      'from the server',
+    );
+    fireEvent.click(within(item).getByRole('button', { name: 'View version From the laptop' }));
+    expect(t.onView).toHaveBeenCalledWith({
+      kind: 'version',
+      version: expect.objectContaining({ id: 'server-v', revision: 0, serverRev: 7 }),
+    });
+  });
 });

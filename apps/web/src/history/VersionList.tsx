@@ -1,6 +1,7 @@
 // A document's named versions, newest first, each with one action (View in the History panel).
 // Kept apart from the panel so that choosing a version elsewhere (the version a derived part
-// pins, T2.2c) shows versions the same way.
+// pins, T2.2c) shows versions the same way. A version kept from the sync server (T7.1e) names no
+// revision of this browser and says where it came from instead.
 
 import type { Version } from '../persistence/library';
 import { formatWhen } from './history';
@@ -61,7 +62,17 @@ export function VersionList({
               </button>
             </div>
             <div className="history-meta">
-              {formatWhen(v.createdAt)}, revision {v.revision}
+              {formatWhen(v.createdAt)},{' '}
+              {v.serverRev === undefined ? (
+                `revision ${v.revision}`
+              ) : (
+                <span
+                  data-testid={`version-from-server-${v.name}`}
+                  title="Made in another browser: kept from the sync server"
+                >
+                  from the server
+                </span>
+              )}
             </div>
             {v.description && <div className="history-description">{v.description}</div>}
           </li>

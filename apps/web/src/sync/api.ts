@@ -6,6 +6,13 @@
 // checked before use. Kept free of React.
 
 import { parseDocument, type CounterTable, type ManufaktureDocument } from '@manufakture/core';
+import {
+  RECORD_ID,
+  ServerBranchSchema,
+  ServerVersionSchema,
+  type ServerBranch,
+  type ServerVersion,
+} from '@manufakture/sync';
 import type { ServerSettings } from '../sharing/client';
 
 /** A failure, worded to be shown as it is. */
@@ -167,4 +174,108 @@ export function socketProtocols(
   clientKey: string,
 ): string[] {
   return ['manufakture-sync', `bearer.${server.token}`, `client.${clientKey}`];
+}
+
+// ---------------------------------------------------------------------------------------------
+// Versions and branches on the server (T7.1e). Every record read is checked with the schemas the
+// server checks with (`@manufakture/sync`); one that does not pass is left out.
+
+/** Document `id`'s versions on the server (every branch's), in the order they were stored. */
+export async function listServerVersions(
+  server: ServerSettings,
+  id: string,
+  options: ApiOptions = {},
+): Promise<ServerVersion[]> {
+  if (!SERVER_DOCUMENT_ID.test(id)) return [];
+  const r = await request(server, 'GET', `/documents/${encodeURIComponent(id)}/versions`, options);
+  if (r.status === 404) return [];
+  if (r.status !== 200) throw failure(r.status, r.body);
+  const list = (r.body as { versions?: unknown } | null)?.versions;
+  if (!Array.isArray(list)) throw new SyncError('The server sent no list of versions.');
+  return list.flatMap((v) => {
+    const parsed = ServerVersionSchema.safeParse(v);
+    return parsed.success ? [parsed.data] : [];
+  });
+}
+
+/** Document `id`'s branches on the server (main has no record). */
+export async function listServerBranches(
+  server: ServerSettings,
+  id: string,
+  options: ApiOptions = {},
+): Promise<ServerBranch[]> {
+  if (!SERVER_DOCUMENT_ID.test(id)) return [];
+  const r = await request(server, 'GET', `/documents/${encodeURIComponent(id)}/branches`, options);
+  if (r.status === 404) return [];
+  if (r.status !== 200) throw failure(r.status, r.body);
+  const list = (r.body as { branches?: unknown } | null)?.branches;
+  if (!Array.isArray(list)) throw new SyncError('The server sent no list of branches.');
+  return list.flatMap((b) => {
+    const parsed = ServerBranchSchema.safeParse(b);
+    return parsed.success ? [parsed.data] : [];
+  });
+}
+
+/**
+ * Version `versionId` of document `id` on the server with its document (validated by core), or
+ * null when the server has no such version.
+ */
+export async function fetchServerVersion(
+  server: ServerSettings,
+  id: string,
+  versionId: string,
+  options: ApiOptions = {},
+): Promise<{ version: ServerVersion; document: ManufaktureDocument } | null> {
+  if (!SERVER_DOCUMENT_ID.test(id) || !RECORD_ID.test(versionId)) return null;
+  const r = await request(
+    server,
+    'GET',
+    `/documents/${encodeURIComponent(id)}/versions/${encodeURIComponent(versionId)}`,
+    options,
+  );
+  if (r.status === 404) return null;
+  if (r.status !== 200) throw failure(r.status, r.body);
+  const b = r.body as { version?: unknown; document?: unknown } | null;
+  const version = ServerVersionSchema.safeParse(b?.version);
+  if (!version.success || version.data.id !== versionId) {
+    throw new SyncError('The server sent a damaged version.', r.status);
+  }
+  const parsed = parseDocument(b?.document);
+  if (!parsed.ok) {
+    throw new SyncError(`The server's version is invalid: ${parsed.error.message}`, r.status);
+  }
+  if (parsed.value.document.id !== id)
+    throw new SyncError("The server's version is of another document.", r.status);
+  return { version: version.data, document: parsed.value.document };
+}
+
+/**
+ * Stores a version on the server. Resolves when it is there (made now, or already); throws with
+ * the server's message otherwise (`status` 409: another version has its id).
+ */
+export async function uploadServerVersion(
+  server: ServerSettings,
+  id: string,
+  version: ServerVersion,
+  options: ApiOptions = {},
+): Promise<void> {
+  const r = await request(server, 'POST', `/documents/${encodeURIComponent(id)}/versions`, {
+    ...options,
+    body: { version },
+  });
+  if (r.status !== 200 && r.status !== 201) throw failure(r.status, r.body);
+}
+
+/** Stores a branch record on the server (its log starts from the version it names). */
+export async function uploadServerBranch(
+  server: ServerSettings,
+  id: string,
+  branch: ServerBranch,
+  options: ApiOptions = {},
+): Promise<void> {
+  const r = await request(server, 'POST', `/documents/${encodeURIComponent(id)}/branches`, {
+    ...options,
+    body: { branch },
+  });
+  if (r.status !== 200 && r.status !== 201) throw failure(r.status, r.body);
 }

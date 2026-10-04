@@ -4,7 +4,9 @@
 // app's (App.tsx, with the viewer banner). With a `branch`, the timeline is that branch's own;
 // the versions are every branch's, each tagged with its branch when it is not this one, so a
 // version of another branch can be viewed and restored here. With other branches, another one can
-// be merged into the open one (MergeBranch). The logic is in history.ts.
+// be merged into the open one (MergeBranch). Versions that came from the sync server (T7.1e) are
+// listed with the others; the panel reads the history again whenever the library says the
+// document's versions or branches changed. The logic is in history.ts.
 
 import { useEffect, useState, type FormEvent } from 'react';
 import {
@@ -12,6 +14,7 @@ import {
   MAIN_BRANCH_NAME,
   versionBranch,
   type Branch,
+  type LibraryChange,
   type Version,
 } from '../persistence/library';
 import {
@@ -31,7 +34,10 @@ import './history.css';
 
 export interface HistoryPanelProps {
   /** With `previewMerge` (the library has it), another branch can be merged into this one. */
-  source: HistorySource & { has(id: string): Promise<boolean> } & Partial<MergeSource>;
+  source: HistorySource & { has(id: string): Promise<boolean> } & Partial<MergeSource> & {
+      /** Changes to the document's versions and branches (made here, or kept from the server). */
+      subscribe?: (listener: (change: LibraryChange) => void) => () => void;
+    };
   documentId: string;
   /**
    * The branch whose history it shows, and its name (shown when it is not the main one). Absent:
@@ -91,6 +97,14 @@ export function HistoryPanel({
   const [form, setForm] = useState<{ name: string; description: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
+
+  // Versions can arrive without a save (sync keeps the server's, T7.1e): read again then.
+  useEffect(() => {
+    if (!source.subscribe) return undefined;
+    return source.subscribe((change) => {
+      if (change.id === documentId) setReload((n) => n + 1);
+    });
+  }, [source, documentId]);
 
   useEffect(() => {
     let cancelled = false;

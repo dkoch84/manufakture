@@ -1235,6 +1235,15 @@ export function App({
       cancelled = true;
     };
   }, [library, document.id, branch, branchesRevision, storedOnce]);
+  // A branch can arrive without a save or a switch (sync keeps the server's, T7.1e): read again.
+  useEffect(() => {
+    if (!library) return undefined;
+    return library.subscribe((change) => {
+      if (change.id === document.id && change.kind === 'branches') {
+        setBranchesRevision((n) => n + 1);
+      }
+    });
+  }, [library, document.id]);
 
   /**
    * Save what is pending on the open branch; null when that worked, else why not. Switching

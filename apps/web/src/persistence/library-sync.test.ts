@@ -193,4 +193,37 @@ describe('sync state in the library', () => {
       }
     });
   }
+
+  it('fails, never falls back to an older state, when the state the head names cannot be read', async () => {
+    const backend = new MemoryBackend();
+    const lib = library(backend);
+    const doc = partDocument();
+    await lib.save(doc, [], undefined, record(doc, 'one'));
+    await lib.saveSync('doc-1', record(doc, 'two'));
+    // The older state is still there as the spare; the named one is torn.
+    expect(backend.files.has('documents/doc-1/sync-00000001.json')).toBe(true);
+    backend.files.set('documents/doc-1/sync-00000002.json', new TextEncoder().encode('{"form'));
+    const r = await library(backend).readSync('doc-1');
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.message).toMatch(/^Its sync state cannot be read/);
+      expect(r.message).toContain('Switch sync off and on again');
+    }
+  });
+
+  it('keeps the uploads waiting for the server with the state', async () => {
+    const lib = library();
+    const doc = partDocument();
+    const uploads = {
+      versions: [
+        { id: 'v-1', after: 3 },
+        { id: 'v-2', rev: 7 },
+      ],
+      branches: ['b-1'],
+    };
+    await lib.save(doc, [], undefined, { ...record(doc, 'one'), uploads });
+    expect((await read(lib))!.record.uploads).toEqual(uploads);
+    await lib.saveSync('doc-1', record(doc, 'two'));
+    expect((await read(lib))!.record.uploads).toBeUndefined();
+  });
 });

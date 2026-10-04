@@ -10,7 +10,7 @@ import Fastify, {
 } from 'fastify';
 import type { WebSocket } from 'ws';
 import { TokenBucket, checkJsonShape, type Limits } from './limits';
-import { SyncService, type Reply, type ReplyError } from './service';
+import { BRANCH_ID, SyncService, type Reply, type ReplyError } from './service';
 import {
   isShareRead,
   registerShareRoutes,
@@ -18,7 +18,7 @@ import {
   type ShareConfig,
   type ShareStore,
 } from './shares';
-import type { SyncStore } from './store';
+import { MAIN_BRANCH, type SyncStore } from './store';
 
 /**
  * The HTTP and WebSocket transport (ADR 0009 decision 11), everything under `/api`:
@@ -29,6 +29,9 @@ import type { SyncStore } from './store';
  *   `GET /api/documents/:id/entries?since=` (pull): protocol messages in `{ messages }`.
  * - `PUT` and `GET /api/blobs/:sha256`.
  * - `GET /api/documents/:id/socket`: a WebSocket carrying the same protocol messages, and pushes.
+ * - Each of the sync routes above takes `?branch=<id>` for a branch's own log (default `main`).
+ * - `GET`/`POST /api/documents/:id/versions`, `GET /api/documents/:id/versions/:versionId`,
+ *   `GET`/`POST /api/documents/:id/branches`: named versions and branch records (T7.1e).
  * - `POST`/`GET /api/shares`, `GET`/`DELETE /api/shares/:id`: share links (shares.ts), when
  *   `shares` is given. `GET /api/shares/:id` is public, with CORS for the viewer's origins only.
  *
@@ -42,6 +45,17 @@ export const API_PREFIX = '/api';
 export const SUBPROTOCOL = 'manufakture-sync';
 /** The HTTP header that carries the client key on submits and hellos. */
 export const CLIENT_KEY_HEADER = 'manufakture-client-key';
+/** The largest body of a version or branch record (a record is well under 3 KiB). */
+export const RECORD_BODY_BYTES = 16 * 1024;
+
+/** `?branch=`: absent is main; anything but a branch id is refused (null). */
+function branchOf(query: unknown): string | null {
+  const raw = (query as { branch?: unknown } | undefined)?.branch;
+  if (raw === undefined) return MAIN_BRANCH;
+  return typeof raw === 'string' && BRANCH_ID.test(raw) ? raw : null;
+}
+
+const BAD_BRANCH = { code: 'invalid-request', message: 'branch must be a branch id' } as const;
 
 export interface AppOptions {
   /** The instance's bearer token. */
@@ -77,8 +91,12 @@ export interface AppOptions {
 interface Connection {
   readonly socket: WebSocket;
   readonly documentId: string;
+  readonly branch: string;
   clientId?: string;
 }
+
+/** Connections are grouped by document and branch: a push goes to that branch's only. */
+const groupOf = (documentId: string, branch: string) => `${documentId}\u0000${branch}`;
 
 function digest(s: string): Buffer {
   return createHash('sha256').update(s).digest();
@@ -125,21 +143,21 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     return timingSafeEqual(digest(token), tokenHash);
   };
 
-  const sendReply = (reply: FastifyReply, r: Reply, documentId?: string) => {
+  const sendReply = (reply: FastifyReply, r: Reply, group?: string) => {
     if (!r.ok) {
       if (r.retryAfterMs !== undefined) {
         void reply.header('retry-after', String(Math.max(1, Math.ceil(r.retryAfterMs / 1000))));
       }
       return reply.code(r.status).send(errorBody(r));
     }
-    if (r.push && documentId !== undefined) broadcast(documentId, r.push);
+    if (r.push && group !== undefined) broadcast(group, r.push);
     const body: { messages: ServerMessage[]; code?: string } = { messages: r.messages };
     if (r.status === 409) body.code = 'predecessor-unknown';
     return reply.code(r.status).send(body);
   };
 
-  const broadcast = (documentId: string, push: PushMessage) => {
-    const set = sockets.get(documentId);
+  const broadcast = (group: string, push: PushMessage) => {
+    const set = sockets.get(group);
     if (set === undefined) return;
     const text = JSON.stringify(push);
     for (const c of set) {
@@ -281,37 +299,99 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       api.get('/documents', async () => ({ documents: service.listDocuments() }));
 
       api.get<{ Params: { id: string } }>('/documents/:id/snapshot', async (req, reply) => {
-        const s = service.snapshot(req.params.id);
+        const branch = branchOf(req.query);
+        if (branch === null) return reply.code(400).send(BAD_BRANCH);
+        const s = service.snapshot(req.params.id, branch);
         if (s === undefined)
           return reply.code(404).send({ code: 'not-found', message: 'No such document' });
         return s;
       });
 
       api.post<{ Params: { id: string } }>('/documents/:id/hello', async (req, reply) => {
+        const branch = branchOf(req.query);
+        if (branch === null) return reply.code(400).send(BAD_BRANCH);
         const key = req.headers[CLIENT_KEY_HEADER];
-        const r = service.hello(req.params.id, req.body, typeof key === 'string' ? key : undefined);
+        const r = service.hello(
+          req.params.id,
+          req.body,
+          typeof key === 'string' ? key : undefined,
+          branch,
+        );
         return sendReply(reply, r);
       });
 
       api.post<{ Params: { id: string } }>('/documents/:id/entries', async (req, reply) => {
+        const branch = branchOf(req.query);
+        if (branch === null) return reply.code(400).send(BAD_BRANCH);
         const key = req.headers[CLIENT_KEY_HEADER];
-        const r = service.submit(req.params.id, req.body, {
-          key: typeof key === 'string' ? key : undefined,
-        });
-        return sendReply(reply, r, req.params.id);
+        const r = service.submit(
+          req.params.id,
+          req.body,
+          { key: typeof key === 'string' ? key : undefined },
+          branch,
+        );
+        return sendReply(reply, r, groupOf(req.params.id, branch));
       });
 
       api.get<{ Params: { id: string }; Querystring: { since?: string } }>(
         '/documents/:id/entries',
         async (req, reply) => {
+          const branch = branchOf(req.query);
+          if (branch === null) return reply.code(400).send(BAD_BRANCH);
           const since = Number(req.query.since ?? '0');
           if (!/^\d{1,16}$/.test(req.query.since ?? '0') || !Number.isSafeInteger(since)) {
             return reply
               .code(400)
               .send({ code: 'invalid-request', message: 'since must be a revision' });
           }
-          return sendReply(reply, service.pull(req.params.id, since));
+          return sendReply(reply, service.pull(req.params.id, since, branch));
         },
+      );
+
+      // Versions and branches (T7.1e). Records are small: their bodies are capped well below the
+      // general limit, checked by schema, and every refusal has a fixed message.
+      const recordReply = (
+        reply: FastifyReply,
+        r: Reply | { ok: true; status: 200 | 201; record: unknown },
+        field: 'version' | 'branch',
+      ) => {
+        if ('record' in r) return reply.code(r.status).send({ [field]: r.record });
+        return sendReply(reply, r);
+      };
+
+      api.get<{ Params: { id: string } }>('/documents/:id/versions', async (req, reply) => {
+        const r = service.listVersions(req.params.id);
+        if ('versions' in r) return { versions: r.versions };
+        return sendReply(reply, r);
+      });
+
+      api.post<{ Params: { id: string } }>(
+        '/documents/:id/versions',
+        { bodyLimit: RECORD_BODY_BYTES },
+        async (req, reply) =>
+          recordReply(reply, service.createVersion(req.params.id, req.body), 'version'),
+      );
+
+      api.get<{ Params: { id: string; versionId: string } }>(
+        '/documents/:id/versions/:versionId',
+        async (req, reply) => {
+          const r = service.readVersion(req.params.id, req.params.versionId);
+          if ('version' in r) return { version: r.version, document: r.document };
+          return sendReply(reply, r);
+        },
+      );
+
+      api.get<{ Params: { id: string } }>('/documents/:id/branches', async (req, reply) => {
+        const r = service.listBranches(req.params.id);
+        if ('branches' in r) return { branches: r.branches };
+        return sendReply(reply, r);
+      });
+
+      api.post<{ Params: { id: string } }>(
+        '/documents/:id/branches',
+        { bodyLimit: RECORD_BODY_BYTES },
+        async (req, reply) =>
+          recordReply(reply, service.createBranch(req.params.id, req.body), 'branch'),
       );
 
       api.put<{ Params: { sha256: string } }>('/blobs/:sha256', async (req, reply) => {
@@ -340,22 +420,24 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         { websocket: true },
         (socket, req) => {
           const documentId = req.params.id;
+          const branch = branchOf(req.query);
           if (connections >= limits.maxConnections) {
             socket.close(1013, 'too many connections');
             return;
           }
-          if (!service.hasDocument(documentId)) {
+          if (branch === null || !service.hasBranch(documentId, branch)) {
             socket.close(4404, 'no such document');
             return;
           }
+          const group = groupOf(documentId, branch);
           const key = protocolsOf(req)
             .find((p) => p.startsWith('client.'))
             ?.slice(7);
-          const c: Connection = { socket, documentId };
+          const c: Connection = { socket, documentId, branch };
           const rate = new TokenBucket(limits.messagesPerMinute);
           connections += 1;
-          let set = sockets.get(documentId);
-          if (set === undefined) sockets.set(documentId, (set = new Set()));
+          let set = sockets.get(group);
+          if (set === undefined) sockets.set(group, (set = new Set()));
           set.add(c);
           const helloTimer = setTimeout(() => {
             if (c.clientId === undefined) socket.close(4408, 'no hello');
@@ -364,7 +446,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
             clearTimeout(helloTimer);
             connections -= 1;
             set.delete(c);
-            if (set.size === 0) sockets.delete(documentId);
+            if (set.size === 0) sockets.delete(group);
           });
           const send = (m: ServerMessage) => deliver(c, m);
           const sendError = (e: ReplyError) => {
@@ -399,7 +481,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
                 send({ type: 'error', code: 'invalid-message', message: 'Send a hello first' });
                 return;
               }
-              const r = service.hello(documentId, message, key);
+              const r = service.hello(documentId, message, key, branch);
               if (!r.ok) {
                 sendError(r);
                 socket.close(r.status === 400 ? 1008 : 4403, r.code);
@@ -412,12 +494,12 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
             }
             let r: Reply;
             if (type === 'submit') {
-              r = service.submit(documentId, message, { boundClientId: c.clientId });
+              r = service.submit(documentId, message, { boundClientId: c.clientId }, branch);
             } else if (type === 'pull') {
               const since = (message as { since?: unknown }).since;
               r =
                 typeof since === 'number' && Number.isSafeInteger(since) && since >= 0
-                  ? service.pull(documentId, since)
+                  ? service.pull(documentId, since, branch)
                   : {
                       ok: false,
                       status: 400,
@@ -437,7 +519,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
               return;
             }
             for (const m of r.messages) send(m);
-            if (r.push) broadcast(documentId, r.push);
+            if (r.push) broadcast(group, r.push);
           });
         },
       );

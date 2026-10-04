@@ -47,6 +47,12 @@ setInterval(() => client.retry().forEach((m) => transport.send(m)), timeout);
   whose push is late).
   `retry()` marks every in-flight entry without a verdict for resending and asks for the pull
   again.
+- `on('landed', ({ local, clientSeq, rev }))` reports each of the client's own entries as the push
+  stream confirms it, with its revision: the server's document at `rev` holds it (T7.1e names a
+  version made after it by that revision).
+- `pushWindow` (option, default `PUSH_WINDOW`) is the window above; tests make it small, and
+  `restore` must be given the same value. A delivery that holds entries beyond the window applies
+  what fits and pulls the rest from where the client then is.
 - `setOnline(false)` keeps new entries unsent, so a long offline queue is renamed locally on
   reconnect instead of being refused entry by entry.
 - `undo()` and `redo()` (decision 8): undo acts on the newest shown command. An unsent one is
@@ -146,6 +152,16 @@ takeover guard); then core's `applyCommand`; then a counter below the high-water
 row from the highest floor a client sent plus its latest accepted entry, never lowers a floor,
 and answers a late copy of an entry below it with `below-floor` instead of judging it again.
 
+## Versions and branches
+
+`records.ts` (T7.1e, ADR 0009 decision 9) holds the zod schemas of the records the server keeps
+beside the logs, used by the server to validate what it is sent and by the app to validate what it
+reads: `ServerVersionSchema` (`{ id, name, description, branch, rev, createdAt }`: a named revision
+of one branch's log, append-only, keyed by the app's version id) and `ServerBranchSchema` (`{ id,
+name, fromVersion, createdAt }`: a branch log starting at revision 0 from a version's document; main
+has no record), the request bodies `CreateVersionSchema` and `CreateBranchSchema`, and `sameRecord`,
+which tells a resend from a conflicting record under the same id.
+
 ## Protocol
 
 `PROTOCOL_VERSION` (core) versions these shapes. Client to server: `hello { protocol, format,
@@ -162,10 +178,12 @@ older app is told to update, a newer one that the server must be upgraded first.
 messages through `lab.ts`. `fuzz.test.ts` runs the spike's scenarios, scaled down, on core's random
 command generator with lost submits and verdicts, duplicated deliveries, reordered submits, a push
 stream behind the head, an offline stretch, undo and redo, restores, and a save and restore at
-random steps; and the spike's fixed concurrent sequences (two sketch edits adding one entity id,
+random steps; a push window of 3 revisions (`small-window`: pushes running far behind overrun it, so revisions are
+clamped and the head is reached pull by pull; it found a client that stopped pulling when one
+delivery held more than a window), and the spike's fixed concurrent sequences (two sketch edits adding one entity id,
 an in-flight collision followed by an edit of the remote feature, a dropped head with held
 followers, a duplicated part taking remote features, a stale restore). `FUZZ_SEEDS=25` widens it
-(175 runs pass, about 80 s).
+(225 runs: nine scenarios, 25 seeds each).
 
 ```bash
 pnpm --filter @manufakture/sync test

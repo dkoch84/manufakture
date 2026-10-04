@@ -78,6 +78,12 @@ const logName = (rev: number) => `log-${pad(rev)}.json`;
 const versionsName = (n: number) => `versions-${pad(n)}.json`;
 const branchesName = (n: number) => `branches-${pad(n)}.json`;
 const syncName = (n: number) => `sync-${pad(n)}.json`;
+/**
+ * The document of a version that came from the sync server (T7.1e) and names no revision saved
+ * here: `remote-<version id>.json` in the main directory, in storage form.
+ */
+const remoteName = (versionId: string) => `remote-${versionId}.json`;
+const REMOTE = /^remote-[A-Za-z0-9][A-Za-z0-9_-]{0,127}\.json$/;
 
 /**
  * The main branch: the document's own directory. Every operation that takes a branch means this
@@ -265,6 +271,44 @@ export interface SyncRecord {
   confirmed: ManufaktureDocument;
   /** `SyncClient.save()`: plain JSON, validated by `SyncClient.restore`. */
   state: unknown;
+  /** Versions and branches made here while syncing that the server does not hold yet (T7.1e). */
+  uploads?: SyncUploads;
+}
+
+/** Versions and branches waiting to be stored on the sync server (T7.1e), by id. */
+export interface SyncUploads {
+  /**
+   * Each version with the server revision it names once that is known (`rev`), or the local id of
+   * the queue entry whose landing tells it (`after`, `SyncClient`'s `local`).
+   */
+  versions: { id: string; rev?: number; after?: number }[];
+  branches: string[];
+}
+
+/** The most uploads a sync record keeps of each kind. */
+export const MAX_UPLOADS = 500;
+
+/** `uploads` as read from a sync file, or null when it is not one. */
+export function parseUploads(v: unknown): SyncUploads | null {
+  if (!isRecord(v) || !Array.isArray(v.versions) || !Array.isArray(v.branches)) return null;
+  if (v.versions.length > MAX_UPLOADS || v.branches.length > MAX_UPLOADS) return null;
+  const count = (n: unknown) => n === undefined || (Number.isSafeInteger(n) && (n as number) >= 0);
+  const versions: SyncUploads['versions'] = [];
+  for (const u of v.versions) {
+    if (!isRecord(u) || typeof u.id !== 'string' || !VERSION_ID.test(u.id)) return null;
+    if (!count(u.rev) || !count(u.after)) return null;
+    versions.push({
+      id: u.id,
+      ...(u.rev === undefined ? {} : { rev: u.rev as number }),
+      ...(u.after === undefined ? {} : { after: u.after as number }),
+    });
+  }
+  const branches: string[] = [];
+  for (const b of v.branches) {
+    if (typeof b !== 'string' || !isBranchId(b) || b === MAIN_BRANCH) return null;
+    branches.push(b);
+  }
+  return { versions, branches };
 }
 
 /** A sync record as read back, and whether it belongs to the revision the head names. */
@@ -293,7 +337,40 @@ export interface Version {
   createdAt: string;
   /** The branch whose revision it names; absent: the main branch. */
   branch?: string;
+  /**
+   * Set on a version that came from the sync server (T7.1e) and names no revision saved in this
+   * browser: the revision of its branch's server log. Its `revision` is then 0 and its document is
+   * kept beside the revisions (`remote-<id>.json`), checked against `snapshotSha256` as usual.
+   */
+  serverRev?: number;
 }
+
+/** A version from the sync server, to keep here (`adoptVersion`). */
+export interface RemoteVersion {
+  id: string;
+  name: string;
+  description: string;
+  createdAt: string;
+  /** The branch it names a revision of. */
+  branch: string;
+  /** That revision of the branch's server log. */
+  serverRev: number;
+}
+
+/** What the library tells its subscribers: a document's versions or branches changed. */
+export interface LibraryChange {
+  id: string;
+  kind: 'versions' | 'branches';
+}
+
+/**
+ * A version that is not in this browser, looked up elsewhere (the sync server, T7.1e) by
+ * `documentId` plus `versionId`: its record and document, or null when it is not there either.
+ */
+export type RemoteVersionSource = (
+  documentId: string,
+  versionId: string,
+) => Promise<{ version: RemoteVersion; document: ManufaktureDocument } | null>;
 
 /** A branch of a document: its own head, history and versions, beside the main branch. */
 export interface Branch {
@@ -428,12 +505,17 @@ function versionMeta(meta: VersionMeta): { name: string; description: string } |
  */
 function parseVersion(v: unknown): Version | null {
   if (!isRecord(v)) return null;
-  const { id, name, description, revision, snapshotSha256, createdAt, branch } = v;
+  const { id, name, description, revision, snapshotSha256, createdAt, branch, serverRev } = v;
   if (typeof id !== 'string' || !VERSION_ID.test(id)) return null;
   if (typeof name !== 'string' || typeof description !== 'string') return null;
   const meta = versionMeta({ name, description });
   if (typeof meta === 'string' || meta.name !== name) return null;
-  if (!Number.isSafeInteger(revision) || (revision as number) < 1) return null;
+  if (serverRev !== undefined && (!Number.isSafeInteger(serverRev) || (serverRev as number) < 0)) {
+    return null;
+  }
+  // Revision 0 is a version from the server that names no revision saved here.
+  const least = serverRev === undefined ? 1 : 0;
+  if (!Number.isSafeInteger(revision) || (revision as number) < least) return null;
   if (typeof snapshotSha256 !== 'string' || !isSha256(snapshotSha256)) return null;
   if (typeof createdAt !== 'string' || createdAt.length > 64 || Number.isNaN(Date.parse(createdAt)))
     return null;
@@ -448,6 +530,7 @@ function parseVersion(v: unknown): Version | null {
     snapshotSha256,
     createdAt,
     ...(branch === undefined ? {} : { branch }),
+    ...(serverRev === undefined ? {} : { serverRev: serverRev as number }),
   };
 }
 
@@ -599,6 +682,7 @@ function parseSyncFile(
   clientKey: string;
   confirmed: unknown;
   state: unknown;
+  uploads?: SyncUploads;
 } | null {
   if (!bytes) return null;
   let v: unknown;
@@ -617,13 +701,15 @@ function parseSyncFile(
     typeof v.clientKey === 'string' &&
     isRecord(v.confirmed) &&
     isRecord(v.state);
-  return ok
+  const uploads = v.uploads === undefined ? undefined : parseUploads(v.uploads);
+  return ok && uploads !== null
     ? {
         revision: v.revision as number,
         server: v.server as string,
         clientKey: v.clientKey as string,
         confirmed: v.confirmed,
         state: v.state,
+        ...(uploads && { uploads }),
       }
     : null;
 }
@@ -756,6 +842,8 @@ export class DocumentLibrary {
   readonly #locks: DocumentLocks | null;
   readonly #warn: (message: string) => void;
   readonly #blobStores = new Map<string, BlobStore>();
+  readonly #listeners = new Set<(change: LibraryChange) => void>();
+  #remote: RemoteVersionSource | null = null;
   /** Operations run one at a time, so two saves never interleave their files. */
   #queue: Promise<unknown> = Promise.resolve();
   /**
@@ -783,6 +871,44 @@ export class DocumentLibrary {
   /** Where the documents are: OPFS, IndexedDB, or memory (nothing survives a reload). */
   get kind(): BackendKind {
     return this.#backend.kind;
+  }
+
+  /**
+   * Calls `listener` whenever this library changed a document's versions or branches (made,
+   * renamed, deleted, or kept from the sync server). Changes other tabs make are not reported.
+   * Returns the function that stops it.
+   */
+  subscribe(listener: (change: LibraryChange) => void): () => void {
+    this.#listeners.add(listener);
+    return () => this.#listeners.delete(listener);
+  }
+
+  /**
+   * Where `readVersion` looks for a version this browser does not hold (the sync server, T7.1e),
+   * or null for nowhere. A version found there is kept with its document when the document is
+   * here (`adoptVersion`), so a pin by `documentId` plus `versionId` resolves offline after that.
+   */
+  setRemoteVersions(source: RemoteVersionSource | null): void {
+    this.#remote = source;
+  }
+
+  /** `result`, after telling the subscribers when it succeeded. */
+  async #notify<T>(
+    id: string,
+    kind: LibraryChange['kind'],
+    result: Promise<LibraryResult<T>>,
+  ): Promise<LibraryResult<T>> {
+    const r = await result;
+    if (r.ok) {
+      for (const listener of [...this.#listeners]) {
+        try {
+          listener({ id, kind });
+        } catch (e) {
+          this.#warn(`manufakture: a library listener failed: ${String(e)}`);
+        }
+      }
+    }
+    return r;
   }
 
   #run<T>(op: () => Promise<T>): Promise<T> {
@@ -1344,6 +1470,7 @@ export class DocumentLibrary {
       clientKey: record.clientKey,
       confirmed: JSON.parse(confirmed.text) as unknown,
       state: state.value,
+      ...(record.uploads && { uploads: record.uploads }),
     };
     await this.#backend.write(
       `${this.#dir(id)}/${syncName(n)}`,
@@ -1403,7 +1530,10 @@ export class DocumentLibrary {
 
   /**
    * The sync state the main head names, with its files put back, or null when the document does
-   * not sync. Falls back to the newest older state that reads when the named one does not.
+   * not sync. When that state cannot be read, the result is a failure, never an older state: an
+   * older queue may hand out `clientSeq` values the server has already accepted from the newer
+   * one, and the server would answer them with other entries' outcomes. Switching sync off and on
+   * again starts over from the server's copy.
    */
   readSync(id: string): Promise<LibraryResult<StoredSync | null>> {
     return this.#run(async () => {
@@ -1411,47 +1541,43 @@ export class DocumentLibrary {
       return this.#locked(id, async () => {
         const head = await this.#head(id);
         if (!head || !head.sync) return { ok: true, value: null };
-        const dir = this.#dir(id);
-        const names = await this.#backend.list(dir);
-        const candidates = revisions(names, SYNC).filter((n) => n <= head.sync!);
+        const n = head.sync;
+        const fail = (why: string): LibraryResult<StoredSync | null> => ({
+          ok: false,
+          message:
+            `Its sync state cannot be read${why}. Switch sync off and on again to start over ` +
+            "from the server's copy (changes not yet on the server are kept in this browser).",
+        });
+        const file = parseSyncFile(
+          await this.#backend.read(`${this.#dir(id)}/${syncName(n)}`),
+          id,
+          n,
+        );
+        if (!file) return fail('');
         const blobs = this.#blobs(id);
-        let problem = 'Its sync state cannot be read.';
-        for (const n of candidates) {
-          const file = parseSyncFile(await this.#backend.read(`${dir}/${syncName(n)}`), id, n);
-          if (!file) continue;
-          const confirmed = await decodeStored(JSON.stringify(file.confirmed), (sha) =>
-            blobs.read(sha),
-          );
-          if (!confirmed.ok) {
-            problem = `Its sync state cannot be read: ${confirmed.message}`;
-            continue;
-          }
-          let state: unknown;
-          try {
-            state = await hydrateFrom(file.state, (sha) => blobs.read(sha));
-          } catch (e) {
-            problem = `Its sync state cannot be read: ${e instanceof Error ? e.message : String(e)}`;
-            continue;
-          }
-          if (n !== head.sync) {
-            this.#warn(
-              `manufakture: the sync state of document ${id} the head names cannot be read; an older one is used.`,
-            );
-          }
-          return {
-            ok: true,
-            value: {
-              record: {
-                server: file.server,
-                clientKey: file.clientKey,
-                confirmed: confirmed.document,
-                state,
-              },
-              paired: file.revision === head.revision,
-            },
-          };
+        const confirmed = await decodeStored(JSON.stringify(file.confirmed), (sha) =>
+          blobs.read(sha),
+        );
+        if (!confirmed.ok) return fail(`: ${confirmed.message}`);
+        let state: unknown;
+        try {
+          state = await hydrateFrom(file.state, (sha) => blobs.read(sha));
+        } catch (e) {
+          return fail(`: ${e instanceof Error ? e.message : String(e)}`);
         }
-        return { ok: false, message: problem };
+        return {
+          ok: true,
+          value: {
+            record: {
+              server: file.server,
+              clientKey: file.clientKey,
+              confirmed: confirmed.document,
+              state,
+              ...(file.uploads && { uploads: file.uploads }),
+            },
+            paired: file.revision === head.revision,
+          },
+        };
       });
     });
   }
@@ -1601,6 +1727,10 @@ export class DocumentLibrary {
    * another tab saved it meanwhile, since the version would name that tab's work.
    */
   createVersion(id: string, meta: VersionMeta, branch?: string): Promise<LibraryResult<Version>> {
+    return this.#notify(id, 'versions', this.#createVersion(id, meta, branch));
+  }
+
+  #createVersion(id: string, meta: VersionMeta, branch?: string): Promise<LibraryResult<Version>> {
     const on = branch ?? MAIN_BRANCH;
     return this.#run(async () => {
       if (!isStorableId(id)) return { ok: false, message: `There is no document "${id}".` };
@@ -1645,6 +1775,10 @@ export class DocumentLibrary {
 
   /** Rename a version (its id, revision and snapshot stay). Versions are never deleted. */
   renameVersion(id: string, versionId: string, name: string): Promise<LibraryResult<Version>> {
+    return this.#notify(id, 'versions', this.#renameVersion(id, versionId, name));
+  }
+
+  #renameVersion(id: string, versionId: string, name: string): Promise<LibraryResult<Version>> {
     return this.#run(async () => {
       if (!isStorableId(id)) return { ok: false, message: `There is no document "${id}".` };
       return this.#locked(id, () =>
@@ -1753,22 +1887,165 @@ export class DocumentLibrary {
     id: string,
     versionId: string,
   ): Promise<LibraryResult<{ version: Version; document: ManufaktureDocument }>> {
-    return this.#run(async () => {
+    type Read = LibraryResult<{ version: Version; document: ManufaktureDocument }>;
+    const local = this.#run(async (): Promise<Read & { missing?: 'document' | 'version' }> => {
       if (!isStorableId(id)) return { ok: false, message: `There is no document "${id}".` };
       return this.#locked(id, async () => {
-        const listed = await this.#readList(VERSION_LIST, id, await this.#head(id));
+        const names = await this.#backend.list(this.#dir(id));
+        if (names.length === 0) {
+          return { ok: false, message: `There is no document "${id}".`, missing: 'document' };
+        }
+        const listed = await this.#readList(VERSION_LIST, id, await this.#head(id), names);
         if (!listed.ok) return listed;
         const version = listed.items.find((v) => v.id === versionId);
-        if (!version) return { ok: false, message: `There is no version "${versionId}" of it.` };
+        if (!version) {
+          return {
+            ok: false,
+            message: `There is no version "${versionId}" of it.`,
+            missing: 'version',
+          };
+        }
         return this.#readVersion(id, version);
       });
     });
+    return local.then(async (r): Promise<Read> => {
+      if (r.ok) return r;
+      const { missing, ...failure } = r;
+      const remote = this.#remote;
+      if (missing === undefined || remote === null || !VERSION_ID.test(versionId)) return failure;
+      // Outside the queue and the lock: the lookup goes over the network.
+      const found = await remote(id, versionId).catch(() => null);
+      if (!found || found.document.id !== id || found.version.id !== versionId) return failure;
+      if (missing === 'version') {
+        const kept = await this.adoptVersion(id, found.version, found.document);
+        if (kept.ok) return { ok: true, value: { version: kept.value, document: found.document } };
+      }
+      // Not kept (the document is not here): the version as the server has it.
+      const text = encodeStored(found.document).text;
+      const version: Version = {
+        id: found.version.id,
+        name: found.version.name,
+        description: found.version.description,
+        revision: 0,
+        snapshotSha256: await sha256Hex(encoder.encode(text)),
+        createdAt: found.version.createdAt,
+        ...(found.version.branch === MAIN_BRANCH ? {} : { branch: found.version.branch }),
+        serverRev: found.version.serverRev,
+      };
+      return { ok: true, value: { version, document: found.document } };
+    });
+  }
+
+  /**
+   * Keep a version that came from the sync server (T7.1e): its document beside the revisions
+   * (`remote-<id>.json`, in storage form) and its record, with revision 0 and `serverRev`, in the
+   * version list, committed by the main head like any version. It must be of this document. A
+   * version already here is returned as it is.
+   */
+  adoptVersion(
+    id: string,
+    remote: RemoteVersion,
+    document: ManufaktureDocument,
+  ): Promise<LibraryResult<Version>> {
+    return this.#notify(
+      id,
+      'versions',
+      this.#run(async (): Promise<LibraryResult<Version>> => {
+        if (!isStorableId(id)) return { ok: false, message: `There is no document "${id}".` };
+        if (document.id !== id) {
+          return { ok: false, message: 'The version belongs to another document.' };
+        }
+        const checked = versionMeta(remote);
+        const branch = remote.branch;
+        if (
+          typeof checked === 'string' ||
+          checked.name !== remote.name ||
+          !VERSION_ID.test(remote.id) ||
+          !isBranchId(branch) ||
+          !Number.isSafeInteger(remote.serverRev) ||
+          remote.serverRev < 0 ||
+          remote.createdAt.length > 64 ||
+          Number.isNaN(Date.parse(remote.createdAt))
+        ) {
+          return { ok: false, message: 'The version record is invalid.' };
+        }
+        return this.#locked(id, async () => {
+          const opened = await this.#open(id);
+          if (!opened.ok) return opened;
+          const listed = await this.#readList(VERSION_LIST, id, await this.#head(id));
+          if (!listed.ok) return listed;
+          const here = listed.items.find((v) => v.id === remote.id);
+          if (here) return { ok: true, value: here };
+          const dir = this.#dir(id);
+          // What an adoption that died before its commit left (no list names it). Only under
+          // Web Locks: without them another tab may be between its write and its commit.
+          if (this.#locks && !listed.fallback) {
+            const named = new Set(listed.items.map((v) => remoteName(v.id)));
+            for (const name of await this.#backend.list(dir)) {
+              if (REMOTE.test(name) && !named.has(name)) {
+                await this.#backend.remove(`${dir}/${name}`).catch(() => undefined);
+              }
+            }
+          }
+          const stored = encodeStored(document);
+          const blobs = this.#blobs(id);
+          for (const [sha, data] of stored.blobs) await blobs.put(sha, data);
+          const bytes = encoder.encode(stored.text);
+          // Written before the list that names it, so a reader never finds a version without its
+          // document; taken away again when the list is not committed.
+          const file = `${dir}/${remoteName(remote.id)}`;
+          await this.#backend.write(file, bytes);
+          const version: Version = {
+            id: remote.id,
+            ...checked,
+            revision: 0,
+            snapshotSha256: await sha256Hex(bytes),
+            createdAt: remote.createdAt,
+            ...(branch === MAIN_BRANCH ? {} : { branch }),
+            serverRev: remote.serverRev,
+          };
+          let taken = false;
+          const undo = () =>
+            taken ? Promise.resolve() : this.#backend.remove(file).catch(() => undefined);
+          const changed = await this.#changeList(
+            VERSION_LIST,
+            id,
+            (versions) => {
+              if (versions.some((v) => v.id === version.id)) {
+                // Another tab kept it meanwhile, under the same file: that file stays.
+                taken = true;
+                return 'There is a version with its id already.';
+              }
+              if (versions.length >= MAX_VERSIONS) {
+                return `A document holds at most ${MAX_VERSIONS} versions.`;
+              }
+              return { items: [...versions, version], result: version };
+            },
+            false,
+          ).catch(async (e: unknown) => {
+            await undo();
+            throw e;
+          });
+          if (!changed.ok) await undo();
+          return changed;
+        });
+      }),
+    );
   }
 
   async #readVersion(
     id: string,
     version: Version,
   ): Promise<LibraryResult<{ version: Version; document: ManufaktureDocument }>> {
+    if (version.revision === 0) {
+      // A version from the sync server: its document is kept beside the revisions.
+      const kept = await this.#backend.read(`${this.#dir(id)}/${remoteName(version.id)}`);
+      if (kept && (await sha256Hex(kept)) === version.snapshotSha256) {
+        const stored = await this.#decodeSnapshot(id, kept);
+        if (stored) return { ok: true, value: { version, document: stored } };
+      }
+      return { ok: false, message: `The saved copy of the version "${version.name}" is damaged.` };
+    }
     const branch = versionBranch(version);
     const dir = this.#dir(id, branch);
     const bytes = await this.#backend.read(`${dir}/${snapshotName(version.revision)}`);
@@ -2115,6 +2392,8 @@ export class DocumentLibrary {
       // Branches are not exported: every imported version is a revision of the main branch.
       const record: Version = { ...version, revision: rev, snapshotSha256: last.sha256 };
       delete record.branch;
+      // A revision of this document now, not one of a server log.
+      delete record.serverRev;
       records.push(record);
     }
     const stored = encodeStored(doc);
@@ -2191,6 +2470,35 @@ export class DocumentLibrary {
    * list names, which the next branch change deletes. The new branch is not opened.
    */
   createBranch(id: string, fromVersion: string, name: string): Promise<LibraryResult<Branch>> {
+    return this.#notify(id, 'branches', this.#createBranch(id, fromVersion, name));
+  }
+
+  /**
+   * A branch that came from the sync server (T7.1e), kept here under its own id and time: made
+   * from its version as `createBranch` makes one (the version must be here, adopted first if it
+   * came from the server too). When its name is taken here, it gets " (2)", " (3)", ... A branch
+   * already here is returned as it is.
+   */
+  adoptBranch(id: string, record: Branch): Promise<LibraryResult<Branch>> {
+    if (record.fromVersion === null || !isBranchId(record.id) || record.id === MAIN_BRANCH) {
+      return Promise.resolve({ ok: false, message: 'The branch record is invalid.' });
+    }
+    return this.#notify(
+      id,
+      'branches',
+      this.#createBranch(id, record.fromVersion, record.name, {
+        id: record.id,
+        createdAt: record.createdAt,
+      }),
+    );
+  }
+
+  #createBranch(
+    id: string,
+    fromVersion: string,
+    name: string,
+    given?: { id: string; createdAt: string },
+  ): Promise<LibraryResult<Branch>> {
     return this.#run(async () => {
       if (!isStorableId(id)) return { ok: false, message: `There is no document "${id}".` };
       const checked = branchName(name);
@@ -2209,7 +2517,20 @@ export class DocumentLibrary {
         if (!version) return { ok: false, message: `There is no version "${fromVersion}" of it.` };
         const branches = await this.#readList(BRANCH_LIST, id, await this.#head(id));
         if (!branches.ok) return branches;
-        const problem = branchProblem(branches.items, checked);
+        if (given !== undefined) {
+          const here = branches.items.find((b) => b.id === given.id);
+          if (here) return { ok: true, value: here };
+          if (Number.isNaN(Date.parse(given.createdAt)) || given.createdAt.length > 64) {
+            return { ok: false, message: 'The branch record is invalid.' };
+          }
+        }
+        let named = checked;
+        for (let n = 2; given !== undefined && branchProblem(branches.items, named); n++) {
+          const suffix = ` (${n})`;
+          named = `${checked.slice(0, MAX_DOCUMENT_NAME - suffix.length)}${suffix}`;
+          if (n > MAX_BRANCHES + 1) break;
+        }
+        const problem = branchProblem(branches.items, named);
         if (problem) return { ok: false, message: problem };
         if (branches.items.length >= MAX_BRANCHES) {
           return { ok: false, message: `A document holds at most ${MAX_BRANCHES} branches.` };
@@ -2218,10 +2539,10 @@ export class DocumentLibrary {
         if (!read.ok) return read;
 
         const branch: Branch = {
-          id: this.#newId(),
-          name: checked,
+          id: given?.id ?? this.#newId(),
+          name: named,
           fromVersion: version.id,
-          createdAt: this.#now().toISOString(),
+          createdAt: given?.createdAt ?? this.#now().toISOString(),
         };
         if (!isBranchId(branch.id) || branch.id === MAIN_BRANCH) {
           return { ok: false, message: 'The new branch has no usable id.' };
@@ -2254,8 +2575,10 @@ export class DocumentLibrary {
           BRANCH_LIST,
           id,
           (items) => {
-            const again = branchProblem(items, checked);
+            const again = branchProblem(items, named);
             if (again) return again;
+            if (items.some((b) => b.id === branch.id))
+              return 'There is a branch with its id already.';
             return { items: [...items, branch], result: branch };
           },
           false,
@@ -2280,6 +2603,10 @@ export class DocumentLibrary {
 
   /** Rename branch `branch` (not main). */
   renameBranch(id: string, branch: string, name: string): Promise<LibraryResult<Branch>> {
+    return this.#notify(id, 'branches', this.#renameBranch(id, branch, name));
+  }
+
+  #renameBranch(id: string, branch: string, name: string): Promise<LibraryResult<Branch>> {
     return this.#run(async () => {
       if (!isStorableId(id)) return { ok: false, message: `There is no document "${id}".` };
       if (branch === MAIN_BRANCH) {
@@ -2320,6 +2647,10 @@ export class DocumentLibrary {
    * other documents may pin them.
    */
   deleteBranch(id: string, branch: string): Promise<LibraryResult<void>> {
+    return this.#notify(id, 'branches', this.#deleteBranch(id, branch));
+  }
+
+  #deleteBranch(id: string, branch: string): Promise<LibraryResult<void>> {
     return this.#run(async () => {
       if (!isStorableId(id)) return { ok: false, message: `There is no document "${id}".` };
       if (branch === MAIN_BRANCH) {
@@ -2533,6 +2864,12 @@ export class DocumentLibrary {
         return {
           ok: false,
           message: `The version the branch "${made.name}" was made from is gone.`,
+        };
+      }
+      if (version.revision === 0) {
+        return {
+          ok: false,
+          message: `The branch "${made.name}" was made from a version from the sync server, whose history this browser does not hold: merge it in the browser it was made in.`,
         };
       }
       on = versionBranch(version);

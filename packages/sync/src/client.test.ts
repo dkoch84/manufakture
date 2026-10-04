@@ -790,3 +790,70 @@ describe('SyncClient: restoring a saved state checks it', () => {
     expect(r.ok).toBe(true);
   });
 });
+
+describe('SyncClient: T7.1e additions', () => {
+  it('emits landed with the revision its own entry was confirmed at', () => {
+    const lab = new Lab();
+    const o = lab.add('o');
+    const a = lab.add('a');
+    const landed: SyncClientEvents['landed'][] = [];
+    a.on('landed', (e) => landed.push(e));
+    ok(o.submit({ command: setVar('p', '1'), label: 'p' }));
+    lab.send('o');
+    const { local } = ok(a.submit({ command: setVar('q', '2'), label: 'q' }));
+    lab.settle();
+    expect(landed).toEqual([{ local, clientSeq: 1, rev: 2 }]);
+    // The server's document at that revision holds it.
+    expect(lab.server.head.variables.map((v) => v.name)).toContain('q');
+  });
+
+  it('keeps a requested pull across a restore: no second pull, and retry asks again', () => {
+    const lab = new Lab();
+    const o = lab.add('o');
+    const a = lab.add('a');
+    ok(o.submit({ command: setVar('p', '1'), label: 'p' }));
+    lab.send('o');
+    const { protocol, format } = a.hello();
+    a.handle({ type: 'welcome', protocol, format, head: 1 });
+    expect(a.takeOutgoing()).toEqual([{ type: 'pull', since: 0 }]);
+    const saved = a.save();
+    expect(saved.pullRequested).toBe(1);
+    const back = reload(a);
+    expect(back.save()).toEqual(saved);
+    // The pull is in flight already: the restored client does not send it again on its own...
+    expect(back.takeOutgoing()).toEqual([]);
+    // ...and a retry (after a reconnect, the reply lost) asks for it again.
+    expect(back.retry()).toEqual([{ type: 'pull', since: 0 }]);
+  });
+
+  it('a push window of its own: pushes beyond it are pulled, and restore needs the same window', () => {
+    const lab = new Lab();
+    const o = lab.add('o');
+    const a = lab.add('a', { pushWindow: 2 });
+    for (const n of ['1', '2', '3', '4', '5']) {
+      ok(o.submit({ command: setVar(`v${n}`, n), label: n }));
+      lab.send('o');
+    }
+    lab.drop('a', isPush);
+    const all = lab.server.pull(0).entries;
+    ok(a.receive(all.slice(1)));
+    expect(a.save().buffered.map((p) => p.rev)).toEqual([2]);
+    expect(a.takeOutgoing()).toEqual([{ type: 'pull', since: 0 }]);
+    // Window by window: each delivery applies at most two revisions past the confirmed one.
+    ok(a.receive(all));
+    expect(a.confirmedRevision).toBe(2);
+    // The rest was beyond the window: it is pulled from where the client is now.
+    expect(a.takeOutgoing()).toEqual([{ type: 'pull', since: 2 }]);
+    ok(a.receive(all));
+    ok(a.receive(all));
+    expect(a.confirmedRevision).toBe(5);
+    const { protocol, format } = a.hello();
+    a.handle({ type: 'welcome', protocol, format, head: 50 });
+    const s = JSON.parse(JSON.stringify(a.save())) as unknown;
+    expect(a.save().pullWanted).toBe(7);
+    expect(SyncClient.restore(s, a.confirmedDocument, { pushWindow: 2 }).ok).toBe(true);
+    const wide = structuredClone(a.save());
+    wide.pullWanted = 8;
+    expect(SyncClient.restore(wide, a.confirmedDocument, { pushWindow: 2 }).ok).toBe(false);
+  });
+});

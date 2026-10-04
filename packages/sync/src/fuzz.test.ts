@@ -77,6 +77,18 @@ const SCENARIOS: Scenario[] = [
     generatorRestores: true,
     ...FAULTS,
   },
+  // A push window of 3 revisions: pushes running far behind overrun it, refusals' heads and acks'
+  // revisions are clamped, and the client reaches the head pull by pull.
+  {
+    name: 'small-window',
+    clients: 3,
+    commandsPerClient: 20,
+    think: 80,
+    latency: 100,
+    pushWindow: 3,
+    ...FAULTS,
+    pushDelay: 600,
+  },
 ];
 
 const seeds = Number(process.env.FUZZ_SEEDS ?? 3);

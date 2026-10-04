@@ -50,6 +50,8 @@ export interface Scenario {
   readonly saveRestore?: number;
   /** Keep the generator's own restores (`replaceDocument`, as restore intents). */
   readonly generatorRestores?: boolean;
+  /** Every client's `pushWindow` (default `PUSH_WINDOW`): small, so pushes and heads overrun it. */
+  readonly pushWindow?: number;
 }
 
 export interface RunResult {
@@ -187,6 +189,7 @@ export function runScenario(sc: Scenario, seed: number, start: ManufaktureDocume
       const restored = SyncClient.restore(state, roundTrip(s.twin.confirmedDocument), {
         online: s.online,
         now: () => AT,
+        ...(sc.pushWindow !== undefined && { pushWindow: sc.pushWindow }),
       });
       if (!restored.ok) violations.push(`client ${i}: restore failed: ${restored.error.message}`);
       else {
@@ -264,7 +267,12 @@ export function runScenario(sc: Scenario, seed: number, start: ManufaktureDocume
   };
 
   for (let i = 0; i < sc.clients; i++) {
-    const make = () => new SyncClient(start, 0, { clientId: `client-${i + 1}`, now: () => AT });
+    const make = () =>
+      new SyncClient(start, 0, {
+        clientId: `client-${i + 1}`,
+        now: () => AT,
+        ...(sc.pushWindow !== undefined && { pushWindow: sc.pushWindow }),
+      });
     slots.push({
       main: make(),
       twin: make(),

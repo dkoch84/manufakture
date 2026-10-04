@@ -6,6 +6,35 @@ import { partDocument } from '../persistence/test-fixtures';
 import { createDocumentStore, type DocumentStoreApi } from '../state/document';
 import { SyncController, newClientKey, type SyncLocks } from './controller';
 import { Hub } from './test-hub';
+import type { ServerVersion } from '@manufakture/sync';
+
+/** The server's version records over `base`, holding the hub's head as every version's document. */
+function withVersions(hub: Hub, versions: ServerVersion[]) {
+  return (base: typeof fetch): typeof fetch =>
+    (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const json = (status: number, body: unknown) =>
+        new Response(JSON.stringify(body), {
+          status,
+          headers: { 'content-type': 'application/json' },
+        });
+      if (url.endsWith('/versions') && init?.method === 'POST') {
+        const { version } = JSON.parse(String(init.body)) as { version: ServerVersion };
+        versions.push(version);
+        return json(201, { version });
+      }
+      if (url.endsWith('/versions')) return json(200, { versions });
+      if (url.endsWith('/branches')) return json(200, { branches: [] });
+      const one = /\/versions\/([^/]+)$/.exec(url);
+      if (one) {
+        const version = versions.find((v) => v.id === decodeURIComponent(one[1]!));
+        return version
+          ? json(200, { version, document: hub.server.head })
+          : json(404, { code: 'not-found', message: 'No such version' });
+      }
+      return base(input, init);
+    }) as typeof fetch;
+}
 
 const SERVER = { url: 'https://sync.example', token: 't'.repeat(40) };
 
@@ -67,6 +96,7 @@ function tab(
   locks: SyncLocks,
   created: { value: boolean },
   doc: ManufaktureDocument,
+  wrap: (f: typeof fetch) => typeof fetch = (f) => f,
 ): Tab {
   const documents = createDocumentStore(doc);
   const library = new DocumentLibrary(backend, { locks: null, warn: () => undefined });
@@ -77,7 +107,7 @@ function tab(
     branch: () => 'main',
     locks,
     connect: () => hub.connect,
-    fetch: serverFetch(hub, created),
+    fetch: wrap(serverFetch(hub, created)),
     flush: () => Promise.resolve(true),
     online: () => true,
     lockPollMs: 20,
@@ -252,5 +282,39 @@ describe('SyncController', () => {
       expect(other.state.getState().status).toMatchObject({ kind: 'no-server' }),
     );
     expect(other.loop).toBeNull();
+  });
+
+  it('stores a version made while syncing on the server, and resolves a pin from there', async () => {
+    const doc = partDocument();
+    const hub = new Hub(doc);
+    const created = { value: false };
+    const versions: ServerVersion[] = [];
+    const a = tab(
+      hub,
+      new MemoryBackend(),
+      sharedLocks(),
+      created,
+      doc,
+      withVersions(hub, versions),
+    );
+    await a.library.save(doc);
+    a.controller.start();
+    await a.controller.enable();
+    hub.open(hub.last);
+    await hub.settle();
+    a.documents.getState().execute({ type: 'renameDocument', name: 'Named' }, 'Rename');
+    await hub.settle();
+    await a.library.save(a.documents.getState().document);
+    const v = await a.library.createVersion('doc-1', { name: 'Release' });
+    expect(v.ok).toBe(true);
+    await vi.waitFor(() => expect(versions.map((x) => [x.name, x.rev])).toEqual([['Release', 1]]));
+
+    // A version only the server has: a pin to it resolves, and is kept here after.
+    versions.push({ ...versions[0]!, id: 'elsewhere', name: 'Made elsewhere' });
+    const read = await a.library.readVersion('doc-1', 'elsewhere');
+    expect(read.ok && read.value.document.name).toBe('Named');
+    expect(read.ok && read.value.version.serverRev).toBe(1);
+    const listed = await a.library.listVersions('doc-1');
+    expect(listed.ok && listed.value.map((x) => x.name)).toEqual(['Release', 'Made elsewhere']);
   });
 });

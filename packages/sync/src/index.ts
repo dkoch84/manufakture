@@ -68,3 +68,15 @@ export {
   type SyncQueueState,
 } from './state';
 export { changedObjects, documentObjects, renameObjectKeys, type ObjectKey } from './objects';
+export {
+  CreateBranchSchema,
+  CreateVersionSchema,
+  MAIN_BRANCH_ID,
+  MAX_RECORD_DESCRIPTION,
+  RECORD_ID,
+  ServerBranchSchema,
+  ServerVersionSchema,
+  sameRecord,
+  type ServerBranch,
+  type ServerVersion,
+} from './records';

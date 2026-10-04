@@ -17,7 +17,7 @@ import {
   restoredDocument,
   takenIds,
   TOMBSTONE_FIELD,
-  tombstoneId,
+  TOMBSTONE_NAME,
   type Command,
   type CoreError,
   type CoreResult,
@@ -101,6 +101,11 @@ export interface SyncClientEvents {
   dropped: { readonly drops: readonly DroppedCommand[]; readonly before: PreRebaseState };
   /** The server speaks another protocol or format version. */
   incompatible: ProtocolError;
+  /**
+   * One of this client's entries was confirmed by the push stream at revision `rev`: the server's
+   * document at `rev` holds it (T7.1e: a version made after it names that revision).
+   */
+  landed: { readonly local: number; readonly clientSeq: number; readonly rev: number };
 }
 
 export interface SyncClientOptions {
@@ -111,6 +116,12 @@ export interface SyncClientOptions {
   readonly now?: () => string;
   /** The server's high-water counters, when starting from a snapshot (default: the document's). */
   readonly highWater?: CounterTable;
+  /**
+   * How far past the revisions it has heard of the client trusts a revision from the server
+   * (default `PUSH_WINDOW`). Smaller only in tests, to exercise the window; `restore` must be given
+   * the same value.
+   */
+  readonly pushWindow?: number;
 }
 
 export type UndoStatus = 'empty' | 'waiting' | 'ready';
@@ -312,8 +323,8 @@ function asRefusal(error: { code: string; message: string }): Refusal {
  * A command with every sync tombstone (`kind#0`, `e0`, and the face-name number) replaced by an
  * ordinary id, so the schema can check the rest of it.
  */
-/** The number a tombstone gets inside a face name (core keeps the constant to itself). */
-const TOMBSTONE_NAME_NUMBER = String(idCounter(tombstoneId('e1', true))!.n);
+/** The number a tombstone gets inside a face name. */
+const TOMBSTONE_NAME_NUMBER = String(TOMBSTONE_NAME);
 
 function withoutTombstones(command: unknown): unknown {
   const text = JSON.stringify(command)
@@ -419,7 +430,9 @@ export class SyncClient {
     remapped: new Set(),
     dropped: new Set(),
     incompatible: new Set(),
+    landed: new Set(),
   };
+  private readonly window: number;
 
   /** A client at `revision` of the server's log, whose confirmed document is `document`. */
   constructor(document: ManufaktureDocument, revision: number, options: SyncClientOptions) {
@@ -430,6 +443,7 @@ export class SyncClient {
     this.heard = revision;
     this.online = options.online ?? true;
     this.now = options.now ?? (() => new Date().toISOString());
+    this.window = options.pushWindow ?? PUSH_WINDOW;
     this.highWater = sortedCounters(
       maxCounters(options.highWater ?? {}, documentCounters(document)),
     );
@@ -456,7 +470,7 @@ export class SyncClient {
       };
     }
     const s = parsed.data;
-    const inconsistent = checkQueueState(s);
+    const inconsistent = checkQueueState(s, options.pushWindow ?? PUSH_WINDOW);
     if (inconsistent !== undefined) {
       return {
         ok: false,
@@ -929,7 +943,7 @@ export class SyncClient {
    * `heard` keeps it, and the pull goes on once the client gets there.
    */
   private bounded(rev: number): number {
-    return Math.min(rev, this.confirmedRev + PUSH_WINDOW);
+    return Math.min(rev, this.confirmedRev + this.window);
   }
 
   /**
@@ -962,18 +976,20 @@ export class SyncClient {
     }
     const before = this.snapshot();
     // Entries beyond the window are not buffered (the buffer stays bounded); a pull fetches them.
-    const limit = this.confirmedRev + PUSH_WINDOW;
-    let beyond = false;
+    const limit = this.confirmedRev + this.window;
+    /** The highest revision pushed beyond the window (0: none). */
+    let beyond = 0;
     for (const p of entries) {
       if (p.rev <= this.confirmedRev) continue;
       if (p.rev > limit) {
-        beyond = true;
+        beyond = Math.max(beyond, p.rev);
         continue;
       }
       this.buffer.set(p.rev, p);
       this.heard = Math.max(this.heard, p.rev);
     }
     let moved = false;
+    const landed: SyncClientEvents['landed'][] = [];
     let failure: CoreError | undefined;
     let fault: string | undefined;
     for (
@@ -1020,6 +1036,8 @@ export class SyncClient {
         maxCounters(this.highWater, documentCounters(this.confirmed)),
       );
       moved = true;
+      if (own !== undefined)
+        landed.push({ local: own.local, clientSeq: own.wire!.clientSeq, rev: p.rev });
       if (mine) {
         this.latestAccepted = Math.max(this.latestAccepted ?? 0, p.entry.clientSeq);
       }
@@ -1059,7 +1077,9 @@ export class SyncClient {
     let lowest = Infinity;
     for (const rev of this.buffer.keys()) lowest = Math.min(lowest, rev);
     if (lowest !== Infinity) this.wantPull(lowest - 1);
-    else if (beyond) this.wantPull(limit);
+    // Pulled toward the furthest entry seen, from where the client is now: `limit` was the window
+    // before this delivery moved it, and pulling to it would stop where the client already is.
+    else if (beyond > 0) this.wantPull(beyond);
     // A head beyond the last window: the pull goes on from here.
     if (this.heard > this.confirmedRev) this.wantPull(this.heard);
     // The entry that could not be read was dropped from the buffer: fetch it again (after an app
@@ -1067,6 +1087,7 @@ export class SyncClient {
     if (failure !== undefined) this.wantPull(this.confirmedRev + 1);
     // What was applied is rebased before anything else, so the queue matches the confirmed document.
     if (moved) this.rebase(before);
+    for (const l of landed) this.emit('landed', l);
     if (fault !== undefined) return this.serverFault(fault);
     return failure === undefined ? { ok: true, value: undefined } : { ok: false, error: failure };
   }

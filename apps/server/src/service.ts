@@ -2,6 +2,7 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import {
   applyCommand,
   documentCounters,
+  maxCounters,
   migrateCommand,
   parseDocument,
   type CounterTable,
@@ -9,7 +10,10 @@ import {
 } from '@manufakture/core';
 import {
   CURRENT_VERSIONS,
+  CreateBranchSchema,
+  CreateVersionSchema,
   HelloSchema,
+  RECORD_ID,
   MAX_ENTRIES_PER_MESSAGE,
   SubmitSchema,
   checkVersions,
@@ -17,12 +21,21 @@ import {
   type Outcome,
   type PushMessage,
   type PushedEntry,
+  type ServerBranch,
   type ServerMessage,
+  type ServerVersion,
   type Versions,
+  sameRecord,
 } from '@manufakture/sync';
 import { z } from 'zod';
 import { TokenBucket, type Limits } from './limits';
-import { CHECKPOINT_EVERY, MAIN_BRANCH, type SubmitWrite, type SyncStore } from './store';
+import {
+  CHECKPOINT_EVERY,
+  MAIN_BRANCH,
+  type StoredSnapshot,
+  type SubmitWrite,
+  type SyncStore,
+} from './store';
 
 /**
  * The sync server's logic, between the transport (`app.ts`: HTTP and WebSocket) and the store:
@@ -53,6 +66,13 @@ export interface ReplyError {
   readonly retryAfterMs?: number;
 }
 
+/** A version or branch record stored (201) or already there (200). */
+export interface RecordReply<T> {
+  readonly ok: true;
+  readonly status: 200 | 201;
+  readonly record: T;
+}
+
 /** How a submit's sender is known: by its client key (HTTP), or bound by its hello (WebSocket). */
 export type Sender = { readonly key: string | undefined } | { readonly boundClientId: string };
 
@@ -62,6 +82,8 @@ export const DOCUMENT_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 export const CLIENT_KEY = /^[A-Za-z0-9_-]{32,128}$/;
 /** A blob id: lower-case hex SHA-256. */
 export const SHA256 = /^[0-9a-f]{64}$/;
+/** A branch id (`main`, or the app's id of a branch) and a version id. */
+export const BRANCH_ID = RECORD_ID;
 
 const CreateDocumentSchema = z.strictObject({ document: z.unknown() });
 
@@ -118,6 +140,11 @@ export class SyncService {
     this.now = options.now ?? Date.now;
   }
 
+  /** Whether the document has branch `branch` (main included), for the WebSocket route. */
+  hasBranch(documentId: string, branch: string): boolean {
+    return this.branch(documentId, branch) !== undefined;
+  }
+
   /** `POST /documents`: a new document, its main branch at revision 0 holding `document`. */
   createDocument(body: unknown): Reply | { ok: true; status: 201; id: string; head: 0 } {
     const parsed = CreateDocumentSchema.safeParse(body);
@@ -157,8 +184,9 @@ export class SyncService {
    */
   snapshot(
     documentId: string,
+    branch: string = MAIN_BRANCH,
   ): { rev: number; document: ManufaktureDocument; highWater: CounterTable } | undefined {
-    const b = this.branch(documentId);
+    const b = this.branch(documentId, branch);
     return b === undefined ? undefined : { rev: b.rev, document: b.head, highWater: b.highWater };
   }
 
@@ -167,14 +195,19 @@ export class SyncService {
    * for an id records the key's hash) or checks the key against the claim, so no other client can
    * submit as it, raise its floor or prune its rows.
    */
-  hello(documentId: string, raw: unknown, key: string | undefined): Reply {
+  hello(
+    documentId: string,
+    raw: unknown,
+    key: string | undefined,
+    branch: string = MAIN_BRANCH,
+  ): Reply {
     const parsed = HelloSchema.safeParse(raw);
     if (!parsed.success) return invalid(describe(parsed.error));
     const skew = checkVersions(parsed.data, this.versions);
     if (skew !== undefined) return fail(400, skew.code, skew.message, { messages: [skew] });
-    const b = this.branch(documentId);
+    const b = this.branch(documentId, branch);
     if (b === undefined) return fail(404, 'not-found', 'No such document');
-    const claim = this.claim(documentId, parsed.data.clientId, key);
+    const claim = this.claim(documentId, branch, parsed.data.clientId, key);
     if (claim !== undefined) return claim;
     return {
       ok: true,
@@ -185,6 +218,7 @@ export class SyncService {
 
   private claim(
     documentId: string,
+    branch: string,
     clientId: string,
     key: string | undefined,
   ): ReplyError | undefined {
@@ -192,16 +226,16 @@ export class SyncService {
       return fail(400, 'client-key', 'A client key (base64url, 32 to 128 characters) is required');
     }
     const hash = sha256(key);
-    const client = this.store.client(documentId, MAIN_BRANCH, clientId);
+    const client = this.store.client(documentId, branch, clientId);
     if (client === undefined) {
-      if (this.store.clientCount(documentId, MAIN_BRANCH) >= this.limits.maxClientsPerDocument) {
+      if (this.store.clientCount(documentId, branch) >= this.limits.maxClientsPerDocument) {
         return fail(
           403,
           'too-many-clients',
           `A document has at most ${this.limits.maxClientsPerDocument} clients`,
         );
       }
-      this.store.claimClient(documentId, MAIN_BRANCH, clientId, hash);
+      this.store.claimClient(documentId, branch, clientId, hash);
       return undefined;
     }
     if (!timingSafeEqual(hash, client.keyHash)) {
@@ -211,11 +245,11 @@ export class SyncService {
   }
 
   /** A submit (ADR 0009 decision 2): checked whole first, then judged entry by entry. */
-  submit(documentId: string, raw: unknown, sender: Sender): Reply {
+  submit(documentId: string, raw: unknown, sender: Sender, branch: string = MAIN_BRANCH): Reply {
     const parsed = SubmitSchema.safeParse(raw);
     if (!parsed.success) return invalid(describe(parsed.error));
     const { entries, floor } = parsed.data;
-    const b = this.branch(documentId);
+    const b = this.branch(documentId, branch);
     if (b === undefined) return fail(404, 'not-found', 'No such document');
     const clientId = entries[0]!.clientId;
 
@@ -229,7 +263,7 @@ export class SyncService {
         );
       }
     } else {
-      const client = this.store.client(documentId, MAIN_BRANCH, clientId);
+      const client = this.store.client(documentId, branch, clientId);
       if (client === undefined)
         return fail(403, 'hello-first', 'Send a hello for this client first');
       if (sender.key === undefined || !CLIENT_KEY.test(sender.key)) {
@@ -239,7 +273,7 @@ export class SyncService {
         return fail(403, 'client-key', 'This client id is claimed with another key');
       }
     }
-    const client = this.store.client(documentId, MAIN_BRANCH, clientId)!;
+    const client = this.store.client(documentId, branch, clientId)!;
 
     // Shape limits: format, entry size, created ids.
     let created = 0;
@@ -276,7 +310,7 @@ export class SyncService {
     // protocol error; nothing is judged.
     // An entry with a recorded outcome is answered with it whatever its prevSeq names.
     const recorded = (seq: number) =>
-      this.store.outcome(documentId, MAIN_BRANCH, clientId, seq) !== undefined;
+      this.store.outcome(documentId, branch, clientId, seq) !== undefined;
     const kept = (seq: number) => seq >= client.floor || recorded(seq);
     const below: ServerMessage[] = [];
     for (const e of entries) {
@@ -304,7 +338,7 @@ export class SyncService {
     // Row and rate limits.
     const newFloor = Math.max(client.floor, floor);
     const rows =
-      this.store.rowCount(documentId, MAIN_BRANCH, clientId, newFloor) +
+      this.store.rowCount(documentId, branch, clientId, newFloor) +
       (client.latestAccepted !== undefined && client.latestAccepted < newFloor ? 1 : 0) +
       entries.length;
     if (rows > this.limits.maxRowsPerClient) {
@@ -324,6 +358,7 @@ export class SyncService {
 
     return this.judge(
       documentId,
+      branch,
       b,
       clientId,
       client.latestAccepted,
@@ -335,6 +370,7 @@ export class SyncService {
 
   private judge(
     documentId: string,
+    branch: string,
     b: BranchState,
     clientId: string,
     latest: number | undefined,
@@ -368,7 +404,7 @@ export class SyncService {
           outcome: (c, s) =>
             c === clientId && fresh.has(s)
               ? fresh.get(s)
-              : this.store.outcome(documentId, MAIN_BRANCH, c, s),
+              : this.store.outcome(documentId, branch, c, s),
         },
         entry,
       );
@@ -409,7 +445,7 @@ export class SyncService {
     if (outcomes.length > 0 || floor !== previousFloor)
       this.store.commitSubmit({
         documentId,
-        branch: MAIN_BRANCH,
+        branch,
         clientId,
         accepted,
         outcomes,
@@ -430,13 +466,11 @@ export class SyncService {
   }
 
   /** A pull: accepted entries after `since`, at most `MAX_ENTRIES_PER_MESSAGE`. */
-  pull(documentId: string, since: number): Reply {
-    const b = this.branch(documentId);
+  pull(documentId: string, since: number, branch: string = MAIN_BRANCH): Reply {
+    const b = this.branch(documentId, branch);
     if (b === undefined) return fail(404, 'not-found', 'No such document');
     const entries =
-      since >= b.rev
-        ? []
-        : this.store.entries(documentId, MAIN_BRANCH, since, MAX_ENTRIES_PER_MESSAGE);
+      since >= b.rev ? [] : this.store.entries(documentId, branch, since, MAX_ENTRIES_PER_MESSAGE);
     return { ok: true, status: 200, messages: [{ type: 'push', entries }] };
   }
 
@@ -476,12 +510,13 @@ export class SyncService {
     return b;
   }
 
-  /** The cached head of a document's main branch, loaded (snapshot plus replay) on first use. */
-  private branch(documentId: string): BranchState | undefined {
-    if (!DOCUMENT_ID.test(documentId)) return undefined;
-    const cached = this.branches.get(documentId);
+  /** The cached head of a document's branch, loaded (snapshot plus replay) on first use. */
+  private branch(documentId: string, branch: string = MAIN_BRANCH): BranchState | undefined {
+    if (!DOCUMENT_ID.test(documentId) || !BRANCH_ID.test(branch)) return undefined;
+    const key = `${documentId}\u0000${branch}`;
+    const cached = this.branches.get(key);
     if (cached !== undefined) return cached;
-    const loaded = this.store.loadBranch(documentId, MAIN_BRANCH);
+    const loaded = this.store.loadBranch(documentId, branch);
     if (loaded === undefined) return undefined;
     let head = loaded.snapshot.document;
     let rev = loaded.snapshot.rev;
@@ -501,7 +536,151 @@ export class SyncService {
     if (rev !== loaded.head)
       throw new Error(`Document ${documentId}: the log ends at ${rev}, not ${loaded.head}`);
     const state: BranchState = { head, highWater: loaded.highWater, rev };
-    this.branches.set(documentId, state);
+    this.branches.set(key, state);
     return state;
+  }
+
+  // -----------------------------------------------------------------------------------------
+  // Versions and branches (T7.1e)
+
+  /** `GET /documents/:id/versions`: every branch's versions, in the order they were stored. */
+  listVersions(documentId: string): Reply | { ok: true; versions: ServerVersion[] } {
+    if (!this.hasDocument(documentId)) return fail(404, 'not-found', 'No such document');
+    return { ok: true, versions: this.store.listVersions(documentId) };
+  }
+
+  /**
+   * `POST /documents/:id/versions`: a version naming revision `rev` of branch `branch`. Its
+   * document is stored as a snapshot of that revision, so reading it back replays nothing. A
+   * resend of a stored version is answered as such (200); another record under its id is a
+   * conflict (409). Versions are never changed or deleted.
+   */
+  createVersion(documentId: string, body: unknown): Reply | RecordReply<ServerVersion> {
+    if (!this.hasDocument(documentId)) return fail(404, 'not-found', 'No such document');
+    const parsed = CreateVersionSchema.safeParse(body);
+    if (!parsed.success) return fail(400, 'invalid-version', 'The version record is invalid');
+    const v = parsed.data.version;
+    const stored = this.store.version(documentId, v.id);
+    if (stored !== undefined) {
+      return sameRecord(stored, v)
+        ? { ok: true, status: 200, record: stored }
+        : fail(409, 'version-exists', 'Another version has this id');
+    }
+    const b = this.branch(documentId, v.branch);
+    if (b === undefined)
+      return fail(400, 'no-branch', 'The version names a branch that is not here');
+    if (v.rev > b.rev) return fail(400, 'no-revision', 'The version names a revision not here yet');
+    if (this.store.versionCount(documentId) >= this.limits.maxVersionsPerDocument) {
+      return fail(
+        403,
+        'too-many-versions',
+        `A document holds at most ${this.limits.maxVersionsPerDocument} versions`,
+      );
+    }
+    const at = this.documentAt(documentId, v.branch, v.rev);
+    if (!this.store.insertVersion(documentId, v, at)) {
+      // Stored meanwhile: the same record (two identical uploads) is a resend, not a conflict.
+      const now = this.store.version(documentId, v.id);
+      return now !== undefined && sameRecord(now, v)
+        ? { ok: true, status: 200, record: now }
+        : fail(409, 'version-exists', 'Another version has this id');
+    }
+    return { ok: true, status: 201, record: v };
+  }
+
+  /** `GET /documents/:id/versions/:versionId`: the version and its document. */
+  readVersion(
+    documentId: string,
+    versionId: string,
+  ): Reply | { ok: true; version: ServerVersion; document: ManufaktureDocument } {
+    if (!this.hasDocument(documentId) || !RECORD_ID.test(versionId)) {
+      return fail(404, 'not-found', 'No such version');
+    }
+    const version = this.store.version(documentId, versionId);
+    if (version === undefined) return fail(404, 'not-found', 'No such version');
+    return {
+      ok: true,
+      version,
+      document: this.documentAt(documentId, version.branch, version.rev).document,
+    };
+  }
+
+  /** `GET /documents/:id/branches`: the branch records (main has none). */
+  listBranches(documentId: string): Reply | { ok: true; branches: ServerBranch[] } {
+    if (!this.hasDocument(documentId)) return fail(404, 'not-found', 'No such document');
+    return { ok: true, branches: this.store.listBranches(documentId) };
+  }
+
+  /**
+   * `POST /documents/:id/branches`: a new branch log, at revision 0 holding the document of the
+   * version it is made from, with its branch's high-water mark as of that revision. A resend is
+   * answered as such (200); another record under its id is a conflict (409).
+   */
+  createBranch(documentId: string, body: unknown): Reply | RecordReply<ServerBranch> {
+    if (!this.hasDocument(documentId)) return fail(404, 'not-found', 'No such document');
+    const parsed = CreateBranchSchema.safeParse(body);
+    if (!parsed.success) return fail(400, 'invalid-branch', 'The branch record is invalid');
+    const r = parsed.data.branch;
+    const stored = this.store.branchRecord(documentId, r.id);
+    if (stored !== undefined) {
+      return sameRecord(stored, r)
+        ? { ok: true, status: 200, record: stored }
+        : fail(409, 'branch-exists', 'Another branch has this id');
+    }
+    const from = this.store.version(documentId, r.fromVersion);
+    if (from === undefined) {
+      return fail(400, 'no-version', 'The branch names a version that is not here');
+    }
+    if (this.store.branchCount(documentId) >= this.limits.maxBranchesPerDocument) {
+      return fail(
+        403,
+        'too-many-branches',
+        `A document has at most ${this.limits.maxBranchesPerDocument} branches`,
+      );
+    }
+    // The version's document, with the high-water mark of its branch as of that revision (deleted
+    // parts' counters included), so the new log never hands out an id the old one had used.
+    const at = this.documentAt(documentId, from.branch, from.rev);
+    if (!this.store.createBranch(documentId, r, at.document, at.highWater)) {
+      const now = this.store.branchRecord(documentId, r.id);
+      return now !== undefined && sameRecord(now, r)
+        ? { ok: true, status: 200, record: now }
+        : fail(409, 'branch-exists', 'Another branch has this id');
+    }
+    return { ok: true, status: 201, record: r };
+  }
+
+  /**
+   * Branch `branch`'s document at revision `rev` (at most its head): the newest snapshot at or
+   * below it, then the logged entries after it, replayed.
+   */
+  private documentAt(documentId: string, branch: string, rev: number): StoredSnapshot {
+    const b = this.branch(documentId, branch);
+    if (b === undefined) throw new Error(`Document ${documentId} has no branch ${branch}`);
+    if (rev === b.rev) return { rev, document: b.head, highWater: b.highWater };
+    const snap = this.store.snapshotAt(documentId, branch, rev);
+    if (snap === undefined) throw new Error(`Branch ${documentId}/${branch} has no snapshot`);
+    let head = snap.document;
+    let at = snap.rev;
+    let highWater = snap.highWater;
+    while (at < rev) {
+      const batch = this.store.entries(documentId, branch, at, Math.min(rev - at, 10_000));
+      if (batch.length === 0) throw new Error(`Branch ${documentId}/${branch} ends before ${rev}`);
+      for (const p of batch) {
+        if (p.rev !== at + 1)
+          throw new Error(`Branch ${documentId}/${branch}: ${at + 1} is missing`);
+        const command = migrateCommand(p.entry.command, p.entry.format);
+        const applied = command.ok ? applyCommand(head, command.value) : command;
+        if (!applied.ok) {
+          throw new Error(
+            `Branch ${documentId}/${branch}: revision ${p.rev} does not apply: ${applied.error.message}`,
+          );
+        }
+        head = applied.value.document;
+        highWater = maxCounters(highWater, documentCounters(head));
+        at = p.rev;
+      }
+    }
+    return { rev, document: head, highWater };
   }
 }

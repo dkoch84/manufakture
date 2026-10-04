@@ -236,10 +236,15 @@ export class Socket {
   failed = false;
   private readonly ws: WebSocket;
 
-  constructor(server: Running, docId: string, options: { token?: string; key?: string } = {}) {
+  constructor(
+    server: Running,
+    docId: string,
+    options: { token?: string; key?: string; branch?: string } = {},
+  ) {
     const protocols = [SUBPROTOCOL, `bearer.${options.token ?? TOKEN}`];
     if (options.key !== undefined) protocols.push(`client.${options.key}`);
-    this.ws = new WebSocket(`${server.wsUrl}/documents/${docId}/socket`, protocols);
+    const query = options.branch === undefined ? '' : `?branch=${options.branch}`;
+    this.ws = new WebSocket(`${server.wsUrl}/documents/${docId}/socket${query}`, protocols);
     this.ws.addEventListener('open', () => (this.opened = true));
     this.ws.addEventListener('error', () => (this.failed = true));
     this.ws.addEventListener('close', (e) => (this.closed = { code: e.code, reason: e.reason }));

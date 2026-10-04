@@ -21,7 +21,17 @@ This is the same server setting as for [share links](sharing.md#share-links): se
 
 If the server already has the document when you tick the box (you synced it before, or opened it in another browser), the app starts from the server's copy, and when this browser's copy differs it is put on top as one change, labelled "This browser's copy".
 
-Only a document's main [branch](history.md) syncs. While another branch is open, the button says so; open the main branch to sync again.
+Only a document's main [branch](history.md) syncs its changes. While another branch is open, the button says so; open the main branch to sync again. Named versions and branches themselves do go to the server (below).
+
+## Versions and branches
+
+While a document syncs, the [versions](history.md#creating-a-version) and [branches](history.md#branches) you make on its main branch are stored on the server too, and every browser that syncs the document gets them:
+
+- **A version** made here is stored on the server as soon as the changes it holds are there, naming that point of the server's history. When you made it offline, it waits (saved with the document, across a reload) and goes up once your changes have arrived. In other browsers it appears in the **History** panel within a few seconds, marked **from the server**, and can be viewed, restored, branched from and pinned like any version of their own.
+- **A branch** made here from a version the server has is stored there too, and appears in the branch list of the other browsers within a few seconds, starting from that version. What you then do on the branch stays in the browser you do it in: only the main branch's changes sync. Syncing a branch's own changes is not part of this release.
+- **A derived part** that pins a version of another synced document finds it on the server when this browser does not have it, and keeps it from then on.
+
+Versions and branches made before the document started syncing in this browser stay in this browser, and so do the ones sync makes itself to keep work it could not apply (below). A branch made from a version that came from the server cannot be merged here, since this browser does not have the history before that version: merge it in the browser it was made in.
 
 ## The status
 
@@ -41,6 +51,7 @@ The **Sync** button shows how the open document stands:
 | Update the app to sync  | the server is newer than this app: **Update the app** fetches the new version               |
 | The server is too old   | the app is newer than the server: whoever runs it must upgrade it                           |
 | Sync stopped            | the server's copy disagrees with this browser's in a way the app cannot resolve (see below) |
+| Cannot sync             | the sync state saved with the document cannot be read (see below)                           |
 
 A red number on the button counts notices (below).
 
@@ -62,6 +73,8 @@ When the same document is open in two tabs of one browser, one of them syncs it 
 
 **Sync stopped** means the server sent something that contradicts what it sent before (a change that does not apply to the document as the server itself described it). The app keeps the document as it is in this browser and sends nothing more. This should not happen with an intact server; if it does, keep a copy (**Export** on the home screen), untick and tick **Sync this document** again to start over from the server's copy with yours on top.
 
+**Cannot sync** means the sync state saved in this browser with the document is damaged. The app does not fall back to an older copy of it: that copy could resend changes under numbers the server has already given to others. Your document is still there and saves as usual; untick and tick **Sync this document** to start over from the server's copy with this browser's on top.
+
 ## Privacy and safety
 
 - The server sees the documents you sync, as they are. It is your server: nobody else does.
@@ -73,4 +86,4 @@ When the same document is open in two tabs of one browser, one of them syncs it 
 
 - One server, one token, one person: there are no accounts and no sharing of editing with others yet.
 - When sync renames a feature (above) while its dialog is open, the dialog opens again on the new id, and what you had typed in it but not applied is lost; when the feature is gone, the dialog closes. Selected features follow the rename; selected faces, edges and vertices of that part studio are deselected.
-- The server's copy has no named versions or branches of its own; those stay in each browser.
+- Changes made on a branch stay in the browser they were made in; only the branch itself (where it starts) is on the server. A version made on a branch stays in that browser too.
