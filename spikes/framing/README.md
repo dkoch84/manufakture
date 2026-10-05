@@ -8,7 +8,8 @@ in [docs/spikes/T6.5a-framing.md](../../docs/spikes/T6.5a-framing.md).
 
 ## Running
 
-From the repository root, after `pnpm install`:
+From the repository root, after adding the spike to the workspace and running `pnpm install`
+(see [spikes/README.md](../README.md)):
 
 ```bash
 pnpm --filter @manufakture/spike-framing test        # checks, about 3 s
@@ -35,8 +36,8 @@ Every measurement that depends on process state runs in a fresh Node process
 Vite's resolver, so `measure` first bundles `scripts/kernel-child.ts` with Vite (SSR build, into
 `dist/`, which git ignores); everything else runs in plain Node.
 
-The package is private, in the workspace (root typecheck and lint include it) and not part of the
-root test run. `manifold-3d` 3.5.4 is a dependency of this spike only.
+The package is private and outside the workspace, so the root typecheck, lint and test do not
+cover it. `manifold-3d` 3.5.4 is a dependency of this spike only.
 
 ## Files
 

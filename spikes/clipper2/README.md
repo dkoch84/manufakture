@@ -8,7 +8,8 @@ output. Findings and the recommendation are in
 
 ## Running
 
-From the repository root, after `pnpm install`:
+From the repository root, after adding the spike to the workspace and running `pnpm install`
+(see [spikes/README.md](../README.md)):
 
 ```bash
 pnpm --filter @manufakture/spike-clipper2 test        # checks, about 1 s
@@ -26,8 +27,8 @@ Or with the repository's own Vitest, without pnpm:
 
 `measure` runs `scripts/measure.ts` under Vitest (the sketch package's extensionless imports need
 Vite's resolver), prints the tables as Markdown and writes them to `results/measure.json` with the
-machine they ran on. The package is private and not part of the root test run; root typecheck and
-lint include it.
+machine they ran on. The package is private and outside the workspace, so the root typecheck, lint and
+test do not cover it (see [spikes/README.md](../README.md)).
 
 ## Files
 

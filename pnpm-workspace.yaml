@@ -1,7 +1,9 @@
+# spikes/ is not in the workspace: the spike code and results stay in the repository as a
+# record, but installs (CI's included) skip their dependencies. To rerun a spike, add its folder
+# (e.g. `- spikes/clipper2`) to this list and run `pnpm install`; spikes/README.md has the details.
 packages:
   - apps/*
   - packages/*
-  - spikes/*
 
 # Packages whose install scripts may run: better-sqlite3 (apps/server) installs its native
 # module. pnpm 11 reads allowBuilds; pnpm 10 read onlyBuiltDependencies.

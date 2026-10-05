@@ -115,7 +115,7 @@ docs/user             User guide
 docs/plans            Plans for the milestones after M1
 docs/spikes           Write-ups of the early technical spikes
 docs/research         Background research (slicer hand-off, 3MF)
-spikes/               Spike code and raw results behind docs/spikes (not part of the app)
+spikes/               Spike code and raw results behind docs/spikes (outside the workspace; see spikes/README.md)
 ```
 
 Packages are consumed from source (`exports` points at `src/index.ts`), so there is no per-package build step.

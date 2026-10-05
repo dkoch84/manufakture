@@ -11,7 +11,8 @@ script compared bit for bit across Node, Chromium, Firefox and WebKit. Findings 
 
 ## Running
 
-From the repository root, after `pnpm install`:
+From the repository root, after adding the spike to the workspace and running `pnpm install`
+(see [spikes/README.md](../README.md)):
 
 ```bash
 pnpm --filter @manufakture/spike-t7-0c-quickjs test        # checks, a few seconds
@@ -59,5 +60,5 @@ the run at it:
 | `scripts/entries/*.ts` | Bundle-size entries for the erasure tools and the QuickJS host JavaScript                    |
 | `scripts/node-env.ts`  | The Node side of `BenchEnv`                                                                  |
 
-The package is private, in the workspace (root typecheck and lint include it) and not part of the
-root test run.
+The package is private and outside the workspace, so the root typecheck, lint and test do not
+cover it.

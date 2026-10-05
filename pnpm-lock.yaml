@@ -456,150 +456,6 @@ importers:
 
   packages/units: {}
 
-  spikes/T7.0b-sync:
-    dependencies:
-      '@manufakture/core':
-        specifier: workspace:*
-        version: link:../../packages/core
-
-  spikes/T7.0c-quickjs:
-    dependencies:
-      '@jitl/quickjs-ng-wasmfile-release-asyncify':
-        specifier: 0.32.0
-        version: 0.32.0
-      '@jitl/quickjs-ng-wasmfile-release-sync':
-        specifier: 0.32.0
-        version: 0.32.0
-      '@jitl/quickjs-wasmfile-release-asyncify':
-        specifier: 0.32.0
-        version: 0.32.0
-      '@jitl/quickjs-wasmfile-release-sync':
-        specifier: 0.32.0
-        version: 0.32.0
-      '@manufakture/kernel':
-        specifier: workspace:*
-        version: link:../../packages/kernel
-      libcascade:
-        specifier: 3.0.2
-        version: 3.0.2
-      quickjs-emscripten-core:
-        specifier: 0.32.0
-        version: 0.32.0
-      sucrase:
-        specifier: 3.35.1
-        version: 3.35.1
-      ts-blank-space:
-        specifier: 0.9.0
-        version: 0.9.0
-    devDependencies:
-      playwright:
-        specifier: ^1.63.0
-        version: 1.63.0
-
-  spikes/clipper2:
-    dependencies:
-      '@manufakture/sketch':
-        specifier: workspace:*
-        version: link:../../packages/sketch
-      clipper2-ts:
-        specifier: 2.0.1-18
-        version: 2.0.1-18
-      clipper2-wasm:
-        specifier: 0.4.0
-        version: 0.4.0
-
-  spikes/framing:
-    dependencies:
-      '@manufakture/kernel':
-        specifier: workspace:*
-        version: link:../../packages/kernel
-      libcascade:
-        specifier: 3.0.2
-        version: 3.0.2
-      manifold-3d:
-        specifier: 3.5.4
-        version: 3.5.4(@gltf-transform/core@4.5.1)(@gltf-transform/extensions@4.5.1)(@gltf-transform/functions@4.5.1(@types/node@22.20.4))(esbuild-wasm@0.27.7)
-      three:
-        specifier: ^0.186.1
-        version: 0.186.1
-    devDependencies:
-      '@types/three':
-        specifier: ^0.186.0
-        version: 0.186.0
-      playwright:
-        specifier: ^1.63.0
-        version: 1.63.0
-      prettier:
-        specifier: ^3.9.9
-        version: 3.9.9
-
-  spikes/kernel-wrapper:
-    dependencies:
-      brepjs:
-        specifier: 20.0.0
-        version: 20.0.0(occt-wasm@5.3.5)
-      libcascade:
-        specifier: 3.0.2
-        version: 3.0.2
-      occt-wasm:
-        specifier: 5.3.5
-        version: 5.3.5
-      replicad:
-        specifier: 1.1.0
-        version: 1.1.0
-      replicad-opencascadejs:
-        specifier: 1.1.0
-        version: 1.1.0
-    devDependencies:
-      prettier:
-        specifier: ^3.9.9
-        version: 3.9.9
-
-  spikes/occt-worker:
-    dependencies:
-      comlink:
-        specifier: ^4.4.2
-        version: 4.4.2
-      libcascade:
-        specifier: 3.0.2
-        version: 3.0.2
-      three:
-        specifier: ^0.186.1
-        version: 0.186.1
-    devDependencies:
-      '@types/three':
-        specifier: ^0.186.0
-        version: 0.186.0
-      playwright:
-        specifier: ^1.63.0
-        version: 1.63.0
-      prettier:
-        specifier: ^3.9.9
-        version: 3.9.9
-
-  spikes/planegcs:
-    dependencies:
-      '@salusoft89/planegcs':
-        specifier: 1.2.0
-        version: 1.2.0
-    devDependencies:
-      playwright:
-        specifier: ^1.63.0
-        version: 1.63.0
-      prettier:
-        specifier: ^3.9.9
-        version: 3.9.9
-
-  spikes/topo-naming:
-    dependencies:
-      libcascade:
-        specifier: 3.0.2
-        version: 3.0.2
-    devDependencies:
-      prettier:
-        specifier: ^3.9.9
-        version: 3.9.9
-
 packages:
 
   '@apideck/better-ajv-errors@0.3.7':
@@ -1460,15 +1316,6 @@ packages:
   '@jitl/quickjs-ffi-types@0.32.0':
     resolution: {integrity: sha512-v9T+GQpmk43VDJ7d72sf0Nexhk+ArvtUihW27dy7lqAl0zBObFKtSBBIm5RBjwIhE8VwsPPm9PNuvPvNqLWUEg==}
 
-  '@jitl/quickjs-ng-wasmfile-release-asyncify@0.32.0':
-    resolution: {integrity: sha512-N4GfnnxR0g4dEaymjclJkGjNaa1dpmPjp8fTu022WWFFyiQ2mOMi5b8V3CEWJOlW/4bflQGbSotuPI/I8/5PQg==}
-
-  '@jitl/quickjs-ng-wasmfile-release-sync@0.32.0':
-    resolution: {integrity: sha512-XAX2jjZWWh3M0YaRqi82xMKNW/gkF6mo3MpW3UY2cmVxnQai1JuboVsJQVoLU629iEL4XWvHtO4h5lo7NRnAcg==}
-
-  '@jitl/quickjs-wasmfile-release-asyncify@0.32.0':
-    resolution: {integrity: sha512-3oSwPfja12ICz4aIblB58cuY8JlEq5Txt8Cut4VLo+LH47QN+mzCnSgnbB03hWzg1LBcc+VyyI9UOag7a1NF+Q==}
-
   '@jitl/quickjs-wasmfile-release-sync@0.32.0':
     resolution: {integrity: sha512-BKNDI/TPBfGlLNGYpLrhcDGXmIk4xHm4MRAisOBnOzpXVn9HZWsfmMAc9WMBrAHjvvds6HOikKeaOBKdPdpVrg==}
 
@@ -1941,9 +1788,6 @@ packages:
   '@types/deep-eql@4.0.2':
     resolution: {integrity: sha512-c9h9dVVMigMPc4bwTvC5dxqtqJZwQPePsWjPlpSOnojbor6pGqdk541lfA7AqFQr5pB1BRdq0juY9db81BwyFw==}
 
-  '@types/emscripten@1.41.6':
-    resolution: {integrity: sha512-uN+9i8bFT5CUcZfyIEYDrSueACEyKGbUs5kC/72DGlZZoinh84sJfVV0i8UOJD1asdzkvLPBRrKs41kZ8MdEXg==}
-
   '@types/esrecurse@4.3.1':
     resolution: {integrity: sha512-xJBAbDifo5hpffDBuHl0Y8ywswbiAp/Wi7Y/GtAgSlZyIABppyurxVueOPE8LUQOxdlgi6Zqce7uoEpqNTeiUw==}
 
@@ -1958,9 +1802,6 @@ packages:
 
   '@types/node@22.20.4':
     resolution: {integrity: sha512-zJRE40jpHtKqE/C4fgHrAKQLJuSpzEnP9ff9Y7YtoR3Wd2pwqzlekDeEuUQXjRd+QCYnVnNwuJYmhdk9XV8gvA==}
-
-  '@types/opentype.js@1.3.10':
-    resolution: {integrity: sha512-F67EFyk6j02okHz5JCgata3ZRAcZi9GLnzmkHw/rzJq3OCc8/ZVdoKrxMTYjcQP6IYHGBz2cav1cpzkOkPiPCQ==}
 
   '@types/react-dom@19.3.0':
     resolution: {integrity: sha512-ZI7bU42mZXXKHn/qNLEw2IrbiINU7X5+vfgdixBHkCNpYWXjKgfQ/P+uyGb5CjOLB9UcnTeg3rylQtV2hym44Q==}
@@ -2196,25 +2037,6 @@ packages:
     resolution: {integrity: sha512-YovQ3rzhaLMIrDjNDMkNS01tea93qhEhG5xy8f6+R0l+dw3Ki+5sCoIoI942iuLZTHWogWktgwVDhU09iNEimQ==}
     engines: {node: 20 || >=22}
 
-  brepjs@20.0.0:
-    resolution: {integrity: sha512-1P7Uii+aEanQptqf0CBBPzg1an0pb9LUfIPAZkijbVI7F0TIiOQqrtQOJ0ZRGeBIMHAXXL+fXDq1mx31Eh1D6Q==}
-    engines: {node: '>=24'}
-    hasBin: true
-    peerDependencies:
-      brepjs-manifold: ^0.1.0
-      brepjs-opencascade: ^0.5.1 || ^0.6.0 || ^0.7.0 || ^0.8.0 || ^0.9.0 || ^0.10.0 || ^0.11.0 || ^0.12.0 || ^0.13.0 || ^0.14.0 || ^0.15.0 || ^0.16.0
-      brepkit-wasm: ^0.10.1 || ^1.0.0 || ^2.0.0 || ^3.0.0
-      occt-wasm: ^3.8.0 || ^4.0.0 || ^5.0.0
-    peerDependenciesMeta:
-      brepjs-manifold:
-        optional: true
-      brepjs-opencascade:
-        optional: true
-      brepkit-wasm:
-        optional: true
-      occt-wasm:
-        optional: true
-
   browserslist@4.29.1:
     resolution: {integrity: sha512-AUdjuRyCNGUYtqpqfTmWyM4fXay8yIQhmLnvYe/THMGfT9B/34X7xQd3ifKxwyNPPpowVBjLb+64BN9Rn1mizw==}
     engines: {node: ^6 || ^7 || ^8 || ^9 || ^10 || ^11 || ^12 || >=13.7}
@@ -2248,9 +2070,6 @@ packages:
   clipper2-ts@2.0.1-18:
     resolution: {integrity: sha512-WuRO1ZHzyYTVHY78r4wVWVydvQ+1lx9qZ+DeZa/8zhvrxIgCVzElJ6lwSMGtUUKFPefhvfJsHZ5C9RNkgisCOQ==}
     engines: {node: '>=14.0.0'}
-
-  clipper2-wasm@0.4.0:
-    resolution: {integrity: sha512-oYM/F8m7ogBmBXGxARJt9SEcjWPQg6+8zdfYw4Cmb5Ii5AOUjRgdQwQ9i5UW3BCJ4CFWG2CQWwm5HvekyvIdUA==}
 
   comlink@4.4.2:
     resolution: {integrity: sha512-OxGdvBmJuNKSCMO4NTl1L47VRp6xn2wG4F/2hYzB6tiCb709otOxtEYCSvK80PtjODfXXZu8ds+Nw5kVCjqd2g==}
@@ -2566,12 +2385,6 @@ packages:
 
   flat-cache@6.1.23:
     resolution: {integrity: sha512-f++BY9pTk+983xK1FLzlLpmM0i0z+jHmx3QESGkURMXujQZz1k5wzwX6hjnQ8goaD0B+sYnDK1yZ6MTyZfUaqA==}
-
-  flatbush@4.6.2:
-    resolution: {integrity: sha512-nNT7MFJ58Q4IAm3aYsEg+zgZGpdRcmR1i4U+aa8c+r91jmYZg7FTQwNnIMC0FyBqVZTbClKdAnrJkKkfp1BOvw==}
-
-  flatqueue@3.1.0:
-    resolution: {integrity: sha512-Ia4qIYrrsEqIRx3c3XhkT+QDLQuUV5ovsr6ah1rIgKT5wclhoGK3lAMS1bWRAWxlx7wtlTBpV7QXB5d9fOSRxA==}
 
   flatted@3.4.4:
     resolution: {integrity: sha512-5+ybhBZANEJxaH3X5evAFatUxLfEHSr7n6kYJ+1Qd0mUqr4eu9gIf6GDbWHf8RJijHrjjO8G+la14SlL2SeS1Q==}
@@ -3128,20 +2941,12 @@ packages:
     resolution: {integrity: sha512-XrsrhT5sybtKI6wakr2SPOlGZWWYbUXZ7a0jT8/QOeAPau+1X/bSegNe5YR75oJmEZQbKningirmGOEJCIk61Q==}
     engines: {node: '>=12.20.0'}
 
-  occt-wasm@5.3.5:
-    resolution: {integrity: sha512-P9OuWBo13BinouzKSaOXYoNnXbm9kR8+m7g5+DOeCrS945cQX8rROEVwL2SzStySJCQZajc57uE+BrEPXo+P+w==}
-
   on-exit-leak-free@2.1.2:
     resolution: {integrity: sha512-0eJJY6hXLGf1udHwfNftBqH+g73EU4B504nZeKpz1sYRKafAghwxEJunB2O7rDZkL4PGfsMVnTXZ2EjibbqcsA==}
     engines: {node: '>=14.0.0'}
 
   once@1.4.0:
     resolution: {integrity: sha512-lNaJgI+2Q5URQBkccEKHTQOPaXdUxnZZElQTZY0MFUAuaEqe1E+Nyvgdz/aIyNi6Z9MzO5dv1H8n58/GELp3+w==}
-
-  opentype.js@1.3.4:
-    resolution: {integrity: sha512-d2JE9RP/6uagpQAVtJoF0pJJA/fgai89Cc50Yp0EJHk+eLp6QQ7gBoblsnubRULNY132I0J1QKMJ+JTbMqz4sw==}
-    engines: {node: '>= 8.0.0'}
-    hasBin: true
 
   opentype.js@2.0.0:
     resolution: {integrity: sha512-kCyjv6xdDY1W/jLWZ/L3QhhTlKUqDZMQ5+Jdlw12b3dXkKNpYBqqlMMj0YDQPShWFTMwgZI1hG14kN3XUDSg/A==}
@@ -3320,12 +3125,6 @@ packages:
     resolution: {integrity: sha512-ycwFAS14Jw4mppvmK4GR/J6u3WpWpjkEApehuHtLc/8VpPNpDMbQ4WjqwplXifGeyKOzHSFLmSPqzksDQE2Sfg==}
     hasBin: true
 
-  replicad-opencascadejs@1.1.0:
-    resolution: {integrity: sha512-s0KHR5V+ivsOE4nZXfuoW70lW0/rldkb3ZDY34LpXOQRFLQN5qVydQm3BRo7boZPdFkkAZBERJ+NzB0DYxrivw==}
-
-  replicad@1.1.0:
-    resolution: {integrity: sha512-TJw32OTe6+HASPpfrLEjYUI66VvSmYC2F/za4iDFWIWo4RVYbiA62dmUbXUp8ZEqkIS//jK6TqrxnmFqX6cbkA==}
-
   require-from-string@2.0.2:
     resolution: {integrity: sha512-Xf0nWe6RseziFMu+Ap9biiUbmplq6S9/p+7w7YXP/JBHhrUDDUhwa+vANyubuqfZWTveU//DYVGsDG7RKL/vEw==}
     engines: {node: '>=0.10.0'}
@@ -3496,9 +3295,6 @@ packages:
   stream-shift@1.0.3:
     resolution: {integrity: sha512-76ORR0DO1o1hlKwTbi/DM3EXWGf3ZJYO8cXX5RJwnul2DEg2oyoZyjLNoQM8WsvZiFKCRfC1O0J7iCvie3RZmQ==}
 
-  string.prototype.codepointat@0.2.1:
-    resolution: {integrity: sha512-2cBVCj6I4IOvEnjgO/hWqXjqBGsY+zwPmHl12Srk9IXSZ56Jwwmy+66XO5Iut/oQVR7t5ihYdLB0GMa4alEUcg==}
-
   string.prototype.matchall@4.1.0:
     resolution: {integrity: sha512-tHNHTxInrYLCga9O9YGxWA3G9/nnzQw8UGAyqGx3Ar1pSTTzIuM4woFSq4SowkXCjJIwq5sIiQvEfRI9tCH1qQ==}
     engines: {node: '>= 0.4'}
@@ -3568,9 +3364,6 @@ packages:
   three@0.186.1:
     resolution: {integrity: sha512-blFeqb49wRCSGUGj7gtpfnSGHy2lwDk94RhUmS1c/hTby70kvChbWpkJ4Pm1390LqzzvTmzgXKHPEafJwCb8jA==}
 
-  tiny-inflate@1.0.3:
-    resolution: {integrity: sha512-pkY1fj1cKHb2seWDy0B16HeWyczlJA9/WW3u3c4z/NiWDsO3DOU5D7nhTLE9CF0yXv/QZFY7sEJmj24dK+Rrqw==}
-
   tinybench@6.1.4:
     resolution: {integrity: sha512-9APumHG7r4yOk4X4WlkmE71aZcv1gvin1czO3OQ1U9iJcFA5Ja/ygyb0vPOVHTthFozUYs8CLoLUlM8grb2lTQ==}
     engines: {node: '>=20.0.0'}
@@ -3607,10 +3400,6 @@ packages:
     engines: {node: '>=18.12'}
     peerDependencies:
       typescript: '>=4.8.4'
-
-  ts-blank-space@0.9.0:
-    resolution: {integrity: sha512-TU6coIZm6RxGgAjroRKmi6aCQ7Pq7cT+1I+bTKBepD6joOuWqUCOptVlz+eurqTnatnQOimlR8XB5sQZ6ULwbw==}
-    engines: {node: '>=18.0.0'}
 
   ts-interface-checker@0.1.13:
     resolution: {integrity: sha512-Y/arvbn+rrz3JCKl9C4kVNfTfSm2/mEp5FSz5EsZSANGPSlQrpRI5M4PKF+mJnE52jOO90PnPSc3Ur3bTQw0gA==}
@@ -4971,18 +4760,6 @@ snapshots:
 
   '@jitl/quickjs-ffi-types@0.32.0': {}
 
-  '@jitl/quickjs-ng-wasmfile-release-asyncify@0.32.0':
-    dependencies:
-      '@jitl/quickjs-ffi-types': 0.32.0
-
-  '@jitl/quickjs-ng-wasmfile-release-sync@0.32.0':
-    dependencies:
-      '@jitl/quickjs-ffi-types': 0.32.0
-
-  '@jitl/quickjs-wasmfile-release-asyncify@0.32.0':
-    dependencies:
-      '@jitl/quickjs-ffi-types': 0.32.0
-
   '@jitl/quickjs-wasmfile-release-sync@0.32.0':
     dependencies:
       '@jitl/quickjs-ffi-types': 0.32.0
@@ -5310,8 +5087,6 @@ snapshots:
 
   '@types/deep-eql@4.0.2': {}
 
-  '@types/emscripten@1.41.6': {}
-
   '@types/esrecurse@4.3.1': {}
 
   '@types/estree@1.0.9': {}
@@ -5323,8 +5098,6 @@ snapshots:
   '@types/node@22.20.4':
     dependencies:
       undici-types: 6.21.0
-
-  '@types/opentype.js@1.3.10': {}
 
   '@types/react-dom@19.3.0(@types/react@19.3.0)':
     dependencies:
@@ -5580,13 +5353,6 @@ snapshots:
     dependencies:
       balanced-match: 4.0.4
 
-  brepjs@20.0.0(occt-wasm@5.3.5):
-    dependencies:
-      flatbush: 4.6.2
-      opentype.js: 1.3.4
-    optionalDependencies:
-      occt-wasm: 5.3.5
-
   browserslist@4.29.1:
     dependencies:
       baseline-browser-mapping: 2.11.26
@@ -5627,10 +5393,6 @@ snapshots:
   chai@6.2.2: {}
 
   clipper2-ts@2.0.1-18: {}
-
-  clipper2-wasm@0.4.0:
-    dependencies:
-      '@types/emscripten': 1.41.6
 
   comlink@4.4.2: {}
 
@@ -6035,12 +5797,6 @@ snapshots:
       cacheable: 2.5.0
       flatted: 3.4.4
       hookified: 1.15.1
-
-  flatbush@4.6.2:
-    dependencies:
-      flatqueue: 3.1.0
-
-  flatqueue@3.1.0: {}
 
   flatted@3.4.4: {}
 
@@ -6579,20 +6335,11 @@ snapshots:
 
   obug@2.2.1: {}
 
-  occt-wasm@5.3.5:
-    dependencies:
-      comlink: 4.4.2
-
   on-exit-leak-free@2.1.2: {}
 
   once@1.4.0:
     dependencies:
       wrappy: 1.0.2
-
-  opentype.js@1.3.4:
-    dependencies:
-      string.prototype.codepointat: 0.2.1
-      tiny-inflate: 1.0.3
 
   opentype.js@2.0.0: {}
 
@@ -6772,14 +6519,6 @@ snapshots:
   regjsparser@0.13.3:
     dependencies:
       jsesc: 3.1.0
-
-  replicad-opencascadejs@1.1.0: {}
-
-  replicad@1.1.0:
-    dependencies:
-      '@types/opentype.js': 1.3.10
-      flatbush: 4.6.2
-      opentype.js: 1.3.4
 
   require-from-string@2.0.2: {}
 
@@ -7015,8 +6754,6 @@ snapshots:
 
   stream-shift@1.0.3: {}
 
-  string.prototype.codepointat@0.2.1: {}
-
   string.prototype.matchall@4.1.0:
     dependencies:
       call-bind: 1.0.9
@@ -7117,8 +6854,6 @@ snapshots:
 
   three@0.186.1: {}
 
-  tiny-inflate@1.0.3: {}
-
   tinybench@6.1.4: {}
 
   tinyexec@1.3.0: {}
@@ -7145,10 +6880,6 @@ snapshots:
       punycode: 2.3.1
 
   ts-api-utils@2.5.0(typescript@6.0.3):
-    dependencies:
-      typescript: 6.0.3
-
-  ts-blank-space@0.9.0:
     dependencies:
       typescript: 6.0.3
 

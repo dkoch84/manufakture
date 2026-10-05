@@ -6,3 +6,5 @@ LICENSE
 test-results
 playwright-report
 spikes/*/results
+# Written by the e2e acceptance runs (JSON.stringify output, not Prettier style).
+docs/m*-acceptance/numbers.json

@@ -7,7 +7,9 @@ import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
 export default defineConfig([
-  globalIgnores(['**/node_modules/', '**/dist/', '**/coverage/']),
+  // spikes/ is outside the pnpm workspace (pnpm-workspace.yaml), so its dependencies are not
+  // installed and its files are not linted.
+  globalIgnores(['**/node_modules/', '**/dist/', '**/coverage/', 'spikes/']),
   js.configs.recommended,
   tseslint.configs.recommended,
   {

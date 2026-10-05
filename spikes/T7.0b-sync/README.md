@@ -9,7 +9,8 @@ with random delivery orders. Findings are in
 
 ## Running
 
-From the repository root, after `pnpm install`:
+From the repository root, after adding the spike to the workspace and running `pnpm install`
+(see [spikes/README.md](../README.md)):
 
 ```bash
 pnpm --filter @manufakture/spike-sync sim         # every scenario x 20 seeds + the rebase bench, about 2.5 min
