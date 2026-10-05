@@ -1,6 +1,6 @@
 # 0002: Kernel binary, loading and memory lifecycle
 
-- Status: accepted
+- Status: accepted, amended 2026-10-04
 - Date: 2026-09-26
 
 ## Context
@@ -50,3 +50,12 @@ The forces, from T0.2:
 - The first regen after init or a recycle is slower while V8's lazy compilation catches up (bracket 197 ms against 74 ms steady state).
 - Hosting must set the caching and compression headers above, and keep serving the `.wasm` as a separate file.
 - T0.2's empty-destructor evidence should be added to upstream issue taucad/opencascade.js#40.
+
+## Amendment: the recycle threshold is 512 MiB
+
+Decision 5 started the recycle threshold at T0.2's 1 GiB, to be set from measurements on M1 models. They were taken on 2026-10-04 on the acceptance models of M1 to M7 ([research note](../research/end-of-m1-checkpoints.md)), and `DEFAULT_HEAP_THRESHOLD` (`packages/kernel/src/service.ts`) is now 512 MiB. The rest of decision 5 stands.
+
+- **What the models need.** Every model's cold regen fits in the initial 128 MiB of memory. They leak 0.12 MiB (M2 shelf) to about 5 MiB (M3 jig) per full regen; edits that rebuild little leak little (0.39 MiB for moving a window of the M6 house).
+- **What a recycle costs.** A new instance takes 352 to 381 ms in Node, and the replay is one cold regen: 0.04 s for the M1 bracket, 0.6 s for the house, 2.0 s for the jig.
+- **Why 512 MiB.** The heaviest models recycle after 83 (jig) and 101 (house) full regens, a recycle overhead of 1.5 to 1.8 % of regen time, against under 1 % at 1 GiB; in exchange the memory a session can hold stays near 550 MiB instead of passing 1 GiB, and the threshold stays four times above the largest model's needs, so a regen cannot thrash it. The memory's size runs ahead of what is in use by up to one growth step (about 20 %), so the threshold is crossed earlier than an in-use estimate suggests.
+- `make bench-memory` (`apps/web/bench`) measures the leak per regen of every acceptance model against the threshold. Revisit the value when a model's replay takes more than about 5 s, or its single regen needs more than about 128 MiB.

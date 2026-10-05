@@ -96,7 +96,7 @@ A **session** is one agent working on one branch of one document, in one Node pr
 - **Close.** Releases the kernel, the solver and the branch lock. A session idle past a timeout closes itself; its branch and bundle stay.
 - **One writer per branch.** A file lock in the Node backend, the server branch in sync mode. Two sessions on one document work on two branches.
 - **Determinism.** Node and the browser load the same libcascade single-threaded build and the same planegcs `.wasm`; regen is deterministic for the same inputs (ADR 0004 decision 8), scripts are deterministic by ADR 0010 decision 5. T8.0a measures it rather than assuming it: the same fixtures regenerated in Node and in Chromium must give identical mesh hashes, name tables and measurements. Anything that differs is listed in ADR 0016, and the app's check at review time (decision 4) catches the rest.
-- **Limits** (starting values, tuned by T8.0a): commands per batch (500), batches per session (2,000), regen time per batch (60 s, then the batch is refused and rolled back), kernel memory (the existing 1 GiB recycle), images per call (8) and size (2048 px on the long side), document size (the `.mfk` limits), one open session per branch, sessions per process (4).
+- **Limits** (starting values, tuned by T8.0a): commands per batch (500), batches per session (2,000), regen time per batch (60 s, then the batch is refused and rolled back), kernel memory (the existing recycle threshold, 512 MiB since the end-of-M1 checkpoint), images per call (8) and size (2048 px on the long side), document size (the `.mfk` limits), one open session per branch, sessions per process (4).
 
 ## The MCP tool list
 

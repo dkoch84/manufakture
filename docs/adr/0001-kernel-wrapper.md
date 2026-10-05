@@ -1,6 +1,6 @@
 # 0001: Kernel wrapper: a thin wrapper of our own over OCCT
 
-- Status: accepted
+- Status: accepted, amended 2026-10-04
 - Date: 2026-09-26
 
 ## Context
@@ -130,3 +130,12 @@ class KernelError extends Error {
 - The API is designed so that the C++ backend is an internal change. Tests written against `packages/kernel` stay valid across the swap, and they double as its acceptance tests.
 - The T0.3 spike adds about 82 MiB of dependencies to every CI install (replicad's and occt-wasm's builds among them). They can be dropped from `spikes/kernel-wrapper` now that the decision is made, keeping the results and the doc.
 - Later ADRs are numbered from 0002 in `docs/adr/`.
+
+## Amendment: the end-of-M1 checkpoint of decision 4
+
+Decision 4 set the end of M1 as the checkpoint for the custom libcascade build, with a switch to the occt-wasm fallback if the build missed its targets or the leak per regen on real M1 models exceeded 1 MiB. The checkpoint was taken on 2026-10-04, after M7, on the acceptance models of M1 to M7 ([research note](../research/end-of-m1-checkpoints.md)). The decision stands; this records the outcome and replaces the switch condition.
+
+- **The leak condition does not hold.** The M1 bracket leaks 0.19 to 0.21 MiB per regen, full or after an edit. Later models leak more, in proportion to their B-rep work: the M3 jig (modelled threads) about 4 to 5 MiB per full regen, the M6 house 3.7 to 4.2 MiB, the M4 bookshelf and the M5 sign about 2 MiB.
+- **The custom build was not attempted**, so its half of the condition holds only formally. It is not read as a reason to switch to occt-wasm: recycling copes with the measured leaks (at the new 512 MiB threshold, [ADR 0002](0002-kernel-build-and-loading.md), the heaviest model recycles after about 80 to 100 full regens, at under 2 % of regen time).
+- **Neither the custom build nor the fallback is started now.** The custom build is a follow-up task (the note's section 6 says what it must do and how it is accepted), still worth doing for download size, mesh copy speed and the worker CSP's `'unsafe-eval'`.
+- **The new switch condition**: start the custom build when any acceptance model leaks more than 8 MiB per full regen in `make bench-memory` (`apps/web/bench`, which fails at that point), or when the recycle overhead (recycle plus replay, over the regen time between recycles) of any acceptance model passes 5 %. If the custom build, once attempted, misses the targets of decision 4, fork occt-wasm's facade as decided there.

@@ -8,6 +8,7 @@ import { createNodeService, nodeLoader } from './node';
 import type { KernelOp, ShapeRef } from './ops';
 import {
   collectTransferables,
+  DEFAULT_HEAP_THRESHOLD,
   KernelService,
   yieldToEventLoop,
   type BatchReply,
@@ -39,7 +40,11 @@ afterEach(async () => {
   yieldHook = null;
   for (const off of unhook.splice(0)) off();
   await service.idle();
-  service.configure({ heapThresholdBytes: 1024 ** 3, autoRecycle: true, debug: false });
+  service.configure({
+    heapThresholdBytes: DEFAULT_HEAP_THRESHOLD,
+    autoRecycle: true,
+    debug: false,
+  });
   statuses.length = 0;
 });
 
@@ -399,7 +404,7 @@ describe('recycling', () => {
     expect(report.ms).toBeGreaterThan(0);
 
     // Old ids are unknown in the new instance; new ids never collide with them.
-    service.configure({ heapThresholdBytes: 1024 ** 3 });
+    service.configure({ heapThresholdBytes: DEFAULT_HEAP_THRESHOLD });
     const after = await run([
       { op: 'properties', shape: oldId },
       { op: 'box', size: [1, 1, 1] },
@@ -585,6 +590,8 @@ describe('leak detection', () => {
     const s = service.stats();
     expect(s).toMatchObject({ instance: service.instance, queued: 0, shapeCount: 0 });
     expect(s.heapBytes).toBeGreaterThanOrEqual(128 * 1024 * 1024);
-    expect(s.heapThresholdBytes).toBe(1024 ** 3);
+    // 512 MiB: the end-of-M1 checkpoint (docs/research/end-of-m1-checkpoints.md).
+    expect(s.heapThresholdBytes).toBe(DEFAULT_HEAP_THRESHOLD);
+    expect(DEFAULT_HEAP_THRESHOLD).toBe(512 * 1024 * 1024);
   });
 });

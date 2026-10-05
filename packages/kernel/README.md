@@ -420,7 +420,7 @@ Shapes live in an arena in the worker and cross the API as integer `ShapeId`s; n
 
 libcascade's empty destructors leak on every regen, and a `WebAssembly.Memory` never shrinks, so the instance is recycled (ADR 0002, decision 5):
 
-- after a batch, when the heap exceeds `heapThresholdBytes` (default 1 GiB) and no other batch is queued (an idle point);
+- after a batch, when the heap exceeds `heapThresholdBytes` (default `DEFAULT_HEAP_THRESHOLD`, 512 MiB, set from measurements in [the end-of-M1 checkpoints](../../docs/research/end-of-m1-checkpoints.md)) and no other batch is queued (an idle point);
 - after a wasm trap (`WebAssembly.RuntimeError`), always;
 - on request (`recycle()`).
 

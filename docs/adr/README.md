@@ -6,9 +6,9 @@ Product decisions (license, local-first storage, target machines, what comes fir
 
 ## Index
 
-- [0001: Kernel wrapper: a thin wrapper of our own over OCCT](0001-kernel-wrapper.md). Accepted.
-- [0002: Kernel binary, loading and memory lifecycle](0002-kernel-build-and-loading.md). Accepted.
-- [0003: Sketch solver: planegcs in a worker, behind our own wrapper](0003-sketch-solver.md). Accepted.
+- [0001: Kernel wrapper: a thin wrapper of our own over OCCT](0001-kernel-wrapper.md). Accepted, amended 2026-10-04 (the end-of-M1 checkpoint: recycling is enough for now, a new switch condition).
+- [0002: Kernel binary, loading and memory lifecycle](0002-kernel-build-and-loading.md). Accepted, amended 2026-10-04 (the recycle threshold is 512 MiB).
+- [0003: Sketch solver: planegcs in a worker, behind our own wrapper](0003-sketch-solver.md). Accepted, amended 2026-10-04 (the end-of-M1 checkpoint: our own build deferred).
 - [0004: Document format: a versioned JSON feature list, with names as references](0004-document-format.md). Accepted.
 - [0005: Units: millimetres and radians inside, per-document display units outside](0005-units.md). Accepted, amended 2026-10-03 (roof pitch notation and percent slopes).
 - [0006: Licensing: GPL-3.0-or-later, and what we may depend on](0006-licensing.md). Accepted, amended 2026-10-01 (fonts, by 0011).

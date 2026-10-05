@@ -1,6 +1,6 @@
 # 0003: Sketch solver: planegcs in a worker, behind our own wrapper
 
-- Status: accepted
+- Status: accepted, amended 2026-10-04
 - Date: 2026-09-26
 
 ## Context
@@ -46,3 +46,11 @@ The forces, from T0.4:
 - The sketch model owns stable constraint and entity ids (never reused, [ADR 0004](0004-document-format.md)), which the solver, the conflict UI and topological naming all rely on.
 - Until our own build exists, a sketch of about 130 entities or more can abort the solver (125 solved in T0.4, 130 did not); the worker must survive that by recycling, and the UI must say why the sketch did not solve.
 - We take on building planegcs ourselves before sketches grow. Upstream provides a Docker recipe and a 428-line binding template; its Emscripten 3.1.45 settings break on Emscripten 4 (upstream issue #8), so our build pins its toolchain too.
+
+## Amendment: the end-of-M1 checkpoint of decision 8
+
+Decision 8 called for our own planegcs build before sketches pass about 100 entities. The headroom of the published 1.2.0 binary and the size of real sketches were measured on 2026-10-04 ([research note](../research/end-of-m1-checkpoints.md), section 5). The decision stands; the build is deferred to a follow-up task.
+
+- **Headroom, through `packages/sketch`.** A coupled, fully constrained sketch (T0.4's chain) solves at 115 entities and aborts at 120; free, at 130 and 135; unconnected rectangles at 200 lines; loose lines without constraints at 2,000 and more. A thousand regen-style solves in one instance do not erode it.
+- **Real sketches are small.** The largest sketch of any acceptance model has 16 entities (the M5 sign's border); the most constrained has 6 lines and 17 constraints (the M1 bracket). M4 and M6 did not produce large sketches: the construction domain works from its own plan data, and text and SVG artwork enter a sketch as one outline entity.
+- **The build is not needed now.** It becomes necessary before any feature makes coupled sketches of about 100 entities, when the cap on SVG import as editable geometry (`MAX_SOLVER_LOAD` in `apps/web/src/sketcher/svg-import.ts`) should be lifted, when solver aborts show up in use, or when the published package stops working with our toolchain. The note's section 6 says what the build must do and how it is accepted.

@@ -1,4 +1,4 @@
-.PHONY: install dev test typecheck build lint bench-house
+.PHONY: install dev test typecheck build lint bench-house bench-memory
 
 install:
 	pnpm install
@@ -22,3 +22,8 @@ lint:
 # against the T6.5a budgets. Takes about a minute; not part of `test`.
 bench-house:
 	pnpm --filter @manufakture/domain-construction bench
+
+# The kernel memory bench (apps/web/bench): wasm heap left behind per regen of each acceptance
+# model, against the recycle threshold (docs/research/end-of-m1-checkpoints.md). A few minutes.
+bench-memory:
+	pnpm --filter @manufakture/web bench:memory

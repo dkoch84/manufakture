@@ -8,9 +8,10 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p src/pwa/sw/tsconfig.json && tsc --noEmit -p e2e/tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p src/pwa/sw/tsconfig.json && tsc --noEmit -p e2e/tsconfig.json && tsc --noEmit -p bench/tsconfig.json",
     "e2e": "playwright test",
-    "e2e:install": "playwright install --with-deps chromium"
+    "e2e:install": "playwright install --with-deps chromium",
+    "bench:memory": "vitest run --config bench/vitest.config.ts --silent=false --reporter=verbose"
   },
   "dependencies": {
     "@codemirror/commands": "6.11.1",

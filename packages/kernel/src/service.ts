@@ -154,7 +154,10 @@ export interface KernelStats {
 }
 
 export interface KernelServiceConfig {
-  /** Recycle at an idle point once the wasm heap is larger than this. Default 1 GiB (ADR 0002). */
+  /**
+   * Recycle at an idle point once the wasm heap is larger than this. Default
+   * `DEFAULT_HEAP_THRESHOLD`, 512 MiB (ADR 0002).
+   */
   heapThresholdBytes?: number;
   /** Recycle automatically at the threshold (default true). A trap always recycles. */
   autoRecycle?: boolean;
@@ -174,7 +177,14 @@ export interface KernelServiceOptions extends KernelServiceConfig {
 /** Called after a recycle with the new kernel, to replay the document into it. */
 export type ReplayHook = (kernel: Kernel, report: RecycleReport) => void | Promise<void>;
 
-export const DEFAULT_HEAP_THRESHOLD = 1024 * 1024 * 1024;
+/**
+ * 512 MiB, set at the end-of-M1 checkpoint from measurements on the M1 to M6 acceptance models
+ * (docs/research/end-of-m1-checkpoints.md): they leak 0.1 to 5 MiB per regen, a recycle plus a
+ * replay costs 0.4 to 2.4 s, so at this threshold the heaviest model recycles after about 80 full
+ * regens (under 2 % of regen time), while the memory a tab holds stays near 550 MiB instead of
+ * more than 1 GiB. Every model's single regen fits in the initial 128 MiB, far below it.
+ */
+export const DEFAULT_HEAP_THRESHOLD = 512 * 1024 * 1024;
 
 /** Let queued messages (a newer request, a cancel) run. */
 export function yieldToEventLoop(): Promise<void> {
