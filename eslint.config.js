@@ -13,7 +13,7 @@ export default defineConfig([
   js.configs.recommended,
   tseslint.configs.recommended,
   {
-    files: ['*.{js,ts}', 'apps/*/*.{js,ts}'],
+    files: ['*.{js,ts}', 'apps/*/*.{js,ts}', 'tools/**/*.ts'],
     languageOptions: { globals: globals.node },
   },
   {

@@ -1,7 +1,9 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "types": ["node"]
+    "types": ["node"],
+    // vite.config.ts imports tools/licenses (run by Node directly) with its extensions.
+    "allowImportingTsExtensions": true
   },
   "include": ["src", "test", "vite.config.ts"]
 }

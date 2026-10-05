@@ -6,5 +6,5 @@
     // loader wants.
     "allowImportingTsExtensions": true
   },
-  "include": ["vitest.config.ts", "apps/*/vite.config.ts"]
+  "include": ["vitest.config.ts", "apps/*/vite.config.ts", "tools/**/*.ts"]
 }

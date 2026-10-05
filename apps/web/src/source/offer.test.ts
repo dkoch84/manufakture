@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   KNOWN_WASM,
+  NOTICES_FILE,
   escapeHtml,
   knownWasmFor,
   renderSourcePage,
@@ -63,6 +64,11 @@ describe('renderSourcePage', () => {
     );
     expect(html).toContain('GNU General Public License, version 3');
     expect(html).not.toContain('source-dirty');
+  });
+
+  it('links the third-party notices the build writes next to it', () => {
+    const html = renderSourcePage(INFO, [KERNEL]);
+    expect(html).toContain(`<a href="${NOTICES_FILE}">${NOTICES_FILE}</a>`);
   });
 
   it('carries no script and no inline style, so the strict policy serves it', () => {

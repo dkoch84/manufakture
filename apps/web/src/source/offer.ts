@@ -7,6 +7,13 @@
 /** The page's file name, at the root of the build next to index.html. */
 export const SOURCE_PAGE = 'source.html';
 
+/**
+ * The third-party notices, next to the page: every bundled dependency's and .wasm module's
+ * license text with the version shipped (ADR 0006 decision 5), written by the build from
+ * tools/licenses (whose NOTICES_FILE is the same name).
+ */
+export const NOTICES_FILE = 'third-party-notices.txt';
+
 /** Where the build came from. */
 export interface SourceInfo {
   /** The full commit id, or null when the build was not made from a git checkout. */
@@ -154,6 +161,7 @@ export function renderSourcePage(info: SourceInfo, modules: readonly WasmModule[
       <p data-testid="source-commit"${info.commit ? ` data-commit="${escapeHtml(info.commit)}"` : ''}>${commitLine}</p>
       ${dirtyLine}
       <p>The licenses and the dependency rules are in ${docs('docs/adr/0006-licensing.md', 'ADR 0006')}; the exact version of every dependency is pinned in ${docs('pnpm-lock.yaml', 'pnpm-lock.yaml')}. How to build and host it yourself: ${docs('docs/hosting.md', 'docs/hosting.md')}.</p>
+      <p data-testid="source-notices">The third-party software in this build, with the versions shipped and the full text of every license, is listed in <a href="${NOTICES_FILE}">${NOTICES_FILE}</a>.</p>
       <h2>WebAssembly modules</h2>
       <p>Each module below is a separate file, loaded at run time and never bundled into the app's JavaScript, so it can be replaced by a build of your own. Its source and build recipe are in the upstream repository named, at the version shown.</p>
       <table data-testid="source-wasm">

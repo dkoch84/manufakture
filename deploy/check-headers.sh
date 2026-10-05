@@ -127,6 +127,14 @@ fetch /source.css
 expect_status 200 /source.css
 expect_header_contains content-type text/css /source.css
 
+# The third-party notices the source page links to (ADR 0006 decision 5), as plain text.
+grep -q 'href="third-party-notices.txt"' "$tmp/source.html" ||
+  fail "/source.html does not link the third-party notices"
+fetch /third-party-notices.txt
+expect_status 200 /third-party-notices.txt
+expect_header_contains content-type text/plain /third-party-notices.txt
+grep -q '^libcascade ' "$tmp/b" || fail "/third-party-notices.txt does not list libcascade"
+
 for file in $wasm_files; do
   path="/$file"
   fetch "$path" -H 'Accept-Encoding: br, gzip'

@@ -8,6 +8,7 @@ import { choosePrecache, type ManifestEntry } from './src/pwa/precache.ts';
 import { checkViewerBundle, kib, type BuiltChunk } from './src/viewer/bundleCheck.ts';
 import { headersFor } from './src/hosting/headers.ts';
 import { readSourceInfo, wasmModule } from './src/source/build.ts';
+import { NOTICES_FILE, notices } from '../../tools/licenses/index.ts';
 import {
   KNOWN_WASM,
   SOURCE_CSS,
@@ -39,7 +40,9 @@ const pwa = VitePWA({
   manifest: false,
   devOptions: { enabled: false },
   injectManifest: {
-    globPatterns: ['**/*.{html,js,css,wasm,ttf,woff2,svg,png,webmanifest}'],
+    // The third-party notices (thirdPartyNotices below) by name, so the source page's link works
+    // offline; no other text file is precached.
+    globPatterns: ['**/*.{html,js,css,wasm,ttf,woff2,svg,png,webmanifest}', NOTICES_FILE],
     // Hashed assets are fetched as they are (their name is their revision); everything else
     // (index.html, the manifest, icons) gets a revision from its content.
     dontCacheBustURLsMatching: /^assets\/.+-[A-Za-z0-9_-]{8}\.[A-Za-z0-9]+$/,
@@ -145,6 +148,50 @@ function sourceOffer(): Plugin {
   };
 }
 
+// The third-party notices (ADR 0006 decision 5; tools/licenses): every build writes
+// third-party-notices.txt, the name, version, license and full license texts of every package in
+// the app's production dependency closure, of the components compiled into its .wasm modules and
+// of its font. A dependency whose license is not on ADR 0006's allowlist, a shipped .wasm whose
+// package is not in the notices, or a font file they do not cover fails the build. source.html
+// links to it; the dev server serves the same file.
+function thirdPartyNotices(): Plugin {
+  return {
+    name: 'manufakture:third-party-notices',
+    configureServer(server) {
+      // Walked once per server start, on the first request; restart the server after an install.
+      let text: string | undefined;
+      server.middlewares.use((req, res, next) => {
+        if (req.url?.split('?')[0] !== `/${NOTICES_FILE}`) return next();
+        text ??= notices(repoRoot, 'web').text;
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        res.end(text);
+      });
+    },
+    generateBundle(_options, bundle) {
+      const result = notices(repoRoot, 'web');
+      const problems = [...result.problems];
+      for (const fileName of Object.keys(bundle).sort()) {
+        const base = fileName.split('/').pop()!;
+        if (fileName.endsWith('.wasm')) {
+          const known = knownWasmFor(fileName);
+          if (known && !result.packages.has(known.package)) {
+            problems.push(`${fileName}: its package ${known.package} is not in the notices`);
+          }
+        } else if (/\.(ttf|otf|woff2?)$/i.test(base)) {
+          const name = base.replace(/-[A-Za-z0-9_-]{8}(\.[^.]+)$/, '$1');
+          if (!result.fontFiles.has(name)) {
+            problems.push(`${fileName}: no font entry in tools/licenses/policy.ts covers it`);
+          }
+        }
+      }
+      if (problems.length > 0) {
+        this.error(`third-party notices (ADR 0006):\n${problems.join('\n')}`);
+      }
+      this.emitFile({ type: 'asset', fileName: NOTICES_FILE, source: result.text });
+    },
+  };
+}
+
 // `vite preview` sends the production security headers (src/hosting/headers.ts: the
 // Content-Security-Policy and the rest of what deploy/Caddyfile sends). Most end-to-end specs bypass
 // the policy (playwright.config.ts sets bypassCSP); e2e/csp.spec.ts turns it back on and runs under
@@ -166,7 +213,14 @@ function previewSecurityHeaders(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [react(), pwa, viewerBundleCheck(), sourceOffer(), previewSecurityHeaders()],
+  plugins: [
+    react(),
+    pwa,
+    viewerBundleCheck(),
+    sourceOffer(),
+    thirdPartyNotices(),
+    previewSecurityHeaders(),
+  ],
   // COOP/COEP stay in dev and preview for parity with the spikes (ADR 0002); production sends COOP
   // only (deploy/Caddyfile), since nothing needs cross-origin isolation.
   server: { headers: crossOriginIsolationHeaders },

@@ -14,7 +14,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json && pnpm -r run typecheck",
     "lint": "eslint . && prettier --check .",
     "format": "prettier --write .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "licenses:check": "node tools/licenses/cli.ts check"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

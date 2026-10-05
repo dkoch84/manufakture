@@ -56,6 +56,14 @@ export default defineConfig({
           include: ['apps/server/{src,test}/**/*.test.ts'],
         },
       },
+      {
+        // tools/licenses: the third-party notices generator and the license check (ADR 0006).
+        test: {
+          name: 'tools',
+          environment: 'node',
+          include: ['tools/**/*.test.ts'],
+        },
+      },
       'apps/web',
     ],
   },

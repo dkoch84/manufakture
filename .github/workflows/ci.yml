@@ -29,10 +29,15 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm lint
+      # Every production dependency of the web app and the sync server, the components compiled
+      # into the .wasm modules and the bundled font, against ADR 0006's license allowlist
+      # (tools/licenses; offline). The builds below write the same notices into dist/.
+      - run: pnpm licenses:check
       # Unit tests, the G-code verifier over every golden G-code file (the `cam-gcode`
       # project) and the sync server's integration tests over a real server and SQLite file (the
-      # `server` project); the kernel goldens run in their own job below.
-      - run: pnpm test --project packages --project cam-gcode --project server --project web
+      # `server` project), and the license tools' tests (the `tools` project); the kernel goldens
+      # run in their own job below.
+      - run: pnpm test --project packages --project cam-gcode --project server --project web --project tools
       - run: pnpm build
 
   site:

@@ -15,7 +15,7 @@ sync service, and nothing is sent anywhere but to the server you run.
 
 ```bash
 pnpm install
-pnpm --filter @manufakture/server build            # dist/main.js
+pnpm --filter @manufakture/server build            # dist/main.js, dist/third-party-notices.txt
 MANUFAKTURE_TOKEN="$(openssl rand -base64 48 | tr '+/' '-_' | tr -d '=')" \
 MANUFAKTURE_ORIGINS=https://cad.example.internal \
 MANUFAKTURE_DB=/var/lib/manufakture/sync.db \
@@ -28,6 +28,10 @@ proxy that ends TLS. Do not expose it to the internet: the token is the only pro
 The container recipe is [`Dockerfile`](Dockerfile) (build from the repository root:
 `docker build -f apps/server/Dockerfile -t manufakture-server .`); it keeps the database in the
 `/data` volume and runs as a non-root user.
+
+The build writes `dist/third-party-notices.txt`: the license texts of every npm package the
+deploy installs and of the SQLite inside better-sqlite3 (ADR 0006 decision 5). It ships with
+`dist/`, so the image has it at `/app/dist/third-party-notices.txt`; pass it on with the server.
 
 ## Configuration
 
