@@ -5,6 +5,7 @@ export * from './result';
 export * from './ids';
 export * from './features';
 export * from './document';
+export * from './display';
 export {
   MATERIALS,
   MATERIAL_IDS,

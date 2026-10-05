@@ -3,7 +3,9 @@
 // with `@manufakture/units`, and shown in the document's display units.
 
 import {
+  angleFormat,
   bareUnits,
+  lengthFormat,
   variableOrder,
   type DisplayUnits,
   type ManufaktureDocument,
@@ -17,10 +19,14 @@ import {
   formatLength,
   fromMillimetres,
   fromRadians,
-  type LengthFormat,
   type Quantity,
   type UnitsError,
 } from '@manufakture/units';
+
+// The display units to units-package format mapping lives in core, next to `DisplayUnits`;
+// re-exported here because the sketcher, construction and wood tools import it with the
+// rest of the value helpers.
+export { lengthFormat };
 
 export type Variables = Readonly<Record<string, Quantity>>;
 
@@ -108,28 +114,11 @@ export function evaluateStored(
   return r.ok ? r.value : null;
 }
 
-/** The format for lengths under the display units. */
-export function lengthFormat(units: DisplayUnits): LengthFormat {
-  const l = units.length;
-  if (l.unit === 'ft-in' || l.unit === 'in-fraction') {
-    return l.denominator === undefined
-      ? { unit: l.unit }
-      : { unit: l.unit, denominator: l.denominator };
-  }
-  const decimals = 'decimals' in l ? l.decimals : undefined;
-  return decimals === undefined ? { unit: l.unit } : { unit: l.unit, decimals };
-}
-
 /** A value for display, in the document's units. */
 export function formatValue(value: number, kind: ValueKind, units: DisplayUnits): string {
-  if (kind === 'angle') {
-    const a = units.angle;
-    return formatAngle(
-      value,
-      a.decimals === undefined ? { unit: a.unit } : { unit: a.unit, decimals: a.decimals },
-    );
-  }
-  return formatLength(value, lengthFormat(units));
+  return kind === 'angle'
+    ? formatAngle(value, angleFormat(units))
+    : formatLength(value, lengthFormat(units));
 }
 
 /**

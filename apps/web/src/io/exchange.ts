@@ -29,7 +29,7 @@ import type {
   Topology,
   VertexRef,
 } from '@manufakture/kernel';
-import type { KernelClient } from '@manufakture/kernel/client';
+import type { KernelClient } from '@manufakture/kernel/kernel-client';
 import type { RegenClient } from '@manufakture/regen/client';
 import type { Measurer } from '../measure/measurer';
 import type { BodyInput } from '../viewport/bodies';

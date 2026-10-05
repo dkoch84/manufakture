@@ -1,7 +1,7 @@
 import type { ManufaktureDocument } from '@manufakture/core';
 import { buildMeshes, meshProperties, parseStl, validate3mf, type TriMesh } from '@manufakture/io';
 import type { KernelOp } from '@manufakture/kernel';
-import type { KernelClient } from '@manufakture/kernel/client';
+import type { KernelClient } from '@manufakture/kernel/kernel-client';
 import { describe, expect, it, vi } from 'vitest';
 import { insertCommand } from '../assembly/assembly';
 import {

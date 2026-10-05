@@ -1,4 +1,4 @@
-import { FEATURE_KINDS } from './schema';
+import { FEATURE_KINDS } from './featureKinds';
 
 /**
  * A parser and printer for face names: the grammar of `packages/kernel/src/naming.ts`, read
@@ -228,6 +228,21 @@ export function mapName(name: string, maps: NameMaps): string {
     return p;
   });
   return changed ? printName(out) : name;
+}
+
+/**
+ * Feature ids that a face name mentions, in order of appearance, without duplicates: the
+ * `feature` parts of its parse (`parseName`). Names nest (merges `(A+B)`, corners
+ * `fillet#3:corner:A&B&C`, copies `pattern#2:i3/A`), so every feature id starting a name counts,
+ * not only the first; but in each merge or corner member, what follows `<id>:from/` is a name in
+ * a derived part's source document, so only `<id>` counts there:
+ * `derived#1:from/extrude#1:cap:end` gives `derived#1` alone. Linear in the name's length, with
+ * no recursion, so no input can exhaust the stack.
+ */
+export function featureIdsInName(name: string): string[] {
+  const out = new Set<string>();
+  for (const part of parseName(name)) if (part.kind === 'feature') out.add(part.id);
+  return [...out];
 }
 
 /** Every sub-id tail of a name, by base id (`e7` for `extrude#1:side:e7#a`), in order. */

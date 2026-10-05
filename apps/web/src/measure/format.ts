@@ -6,32 +6,20 @@
 // fractional formats), and grams or ounces and pounds.
 
 import type { DisplayUnits } from '@manufakture/core';
+import { angleFormat, lengthFormat } from '@manufakture/core/display';
 import {
   MM_PER_FOOT,
   MM_PER_INCH,
   formatAngle,
   formatLength,
   formatNumber,
-  type AngleFormat,
-  type LengthFormat,
 } from '@manufakture/units';
 
+// The display units to units-package format mapping lives in core, next to `DisplayUnits`;
+// re-exported here for the measure code that reads it alongside the formatters.
+export { angleFormat, lengthFormat };
+
 export type Vec3 = readonly [number, number, number];
-
-export function lengthFormat(units: DisplayUnits): LengthFormat {
-  const l = units.length;
-  if (l.unit === 'ft-in' || l.unit === 'in-fraction') {
-    const d = 'denominator' in l ? l.denominator : undefined;
-    return d === undefined ? { unit: l.unit } : { unit: l.unit, denominator: d };
-  }
-  const decimals = 'decimals' in l ? l.decimals : undefined;
-  return decimals === undefined ? { unit: l.unit } : { unit: l.unit, decimals };
-}
-
-export function angleFormat(units: DisplayUnits): AngleFormat {
-  const a = units.angle;
-  return a.decimals === undefined ? { unit: a.unit } : { unit: a.unit, decimals: a.decimals };
-}
 
 export function formatLengthIn(mm: number, units: DisplayUnits): string {
   return formatLength(mm, lengthFormat(units));

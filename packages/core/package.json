@@ -5,7 +5,9 @@
   "type": "module",
   "license": "GPL-3.0-or-later",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./display": "./src/display.ts",
+    "./names": "./src/names.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",

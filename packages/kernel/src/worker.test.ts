@@ -6,7 +6,7 @@
 import { readFile } from 'node:fs/promises';
 import * as Comlink from 'comlink';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { KernelClient, type KernelEndpoint } from './client';
+import { KernelClient, type KernelEndpoint } from './kernel-client';
 import { wasmPath } from './node';
 import type { KernelOp } from './ops';
 import type { BatchReply, KernelStatus } from './service';

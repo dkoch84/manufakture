@@ -4,7 +4,7 @@
 //
 // The viewer (viewer.html, src/viewer/) shows a published `.mfkview` with three.js and the
 // viewport's engine. It must never load the kernel (OCCT), the sketch solver (planegcs), regen,
-// core or any editor code: a link someone sends you should open fast and run nothing it does not
+// core's schema and commands or any editor code: a link someone sends you should open fast and run nothing it does not
 // need. The rule is an allowlist over the modules rendered into the chunks the viewer entry
 // reaches, statically or by `import()`: anything not on it fails the build and names the module.
 //
@@ -58,12 +58,16 @@ const APP_ALLOWED = [
   /^src\/source\/(SourceLink\.tsx|offer\.ts)$/,
 ];
 
-// Workspace packages: the `.mfkview` reader and its bounded zip reader, the units formatter, and
-// two data-only kernel files (the `UNNAMED` constant and the name table: no OCCT in either).
+// Workspace packages: the `.mfkview` reader and its bounded zip reader, the units formatter, two
+// data-only kernel files (the `UNNAMED` constant and the name table: no OCCT in either), and three
+// schema-free core files: the display units formats (`@manufakture/core/display`) and the face
+// name parser (`@manufakture/core/names`, with the feature kinds it reads), which the viewport
+// uses to find the faces a feature made. No zod, no commands.
 const PACKAGE_ALLOWED = [
   /^io\/src\/(mfkview|zip)\.ts$/,
   /^units\/src\//,
   /^kernel\/src\/(types|names)\.ts$/,
+  /^core\/src\/(display|names|featureKinds)\.ts$/,
 ];
 
 // npm packages: three.js, React, zustand (the view stores) and fflate (inflate).

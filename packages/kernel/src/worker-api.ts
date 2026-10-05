@@ -59,7 +59,7 @@ export interface WorkerApiOptions {
   service?: Omit<KernelServiceOptions, 'createInstance'>;
 }
 
-/** Build the API object; `worker.ts` passes it to `Comlink.expose`. */
+/** Build the API object, for a worker entry to pass to `Comlink.expose` (regen's `worker.ts`). */
 export function createKernelWorkerApi(options: WorkerApiOptions): KernelWorkerApi & {
   /** The service, once loaded; for code running in the same worker (the regen engine). */
   readonly service: KernelService | null;

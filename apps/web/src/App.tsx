@@ -465,19 +465,22 @@ export function App({
   useEffect(() => {
     // The loader outlives a remount (StrictMode): aborting only stops status updates.
     const controller = new AbortController();
-    loader.load(setStatus, controller.signal).then(
-      (b) => {
-        if (controller.signal.aborted) return;
-        if (loader.initialDocument && !openedInitial.current) {
-          openedInitial.current = true;
-          documents.getState().load(loader.initialDocument);
-        }
-        setBodies(b);
-      },
-      (e: unknown) => {
-        if (!controller.signal.aborted) setError(e instanceof Error ? e.message : String(e));
-      },
-    );
+    loader
+      .load(setStatus, controller.signal)
+      .then(async (b) => [b, await loader.initialDocument] as const)
+      .then(
+        ([b, initial]) => {
+          if (controller.signal.aborted) return;
+          if (initial && !openedInitial.current) {
+            openedInitial.current = true;
+            documents.getState().load(initial);
+          }
+          setBodies(b);
+        },
+        (e: unknown) => {
+          if (!controller.signal.aborted) setError(e instanceof Error ? e.message : String(e));
+        },
+      );
     return () => controller.abort();
   }, [loader, documents]);
 

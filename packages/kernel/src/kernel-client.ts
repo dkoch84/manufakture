@@ -1,8 +1,9 @@
-// Main-thread side of the kernel worker (ADR 0007): the client class, apart
-// from `spawnKernelWorker` (client.ts), so the client of a worker that extends
-// the kernel's (the regen worker) can use it without bundling the kernel's own
-// worker entry. The UI never touches the kernel directly: it submits batches
-// here and gets replies with transferred meshes. The client numbers requests by generation and drops replies that a
+// Main-thread side of the kernel worker API (ADR 0007): the client class. The package has no
+// worker entry of its own: a worker that hosts the API (the regen worker, which extends it)
+// starts its own `Worker` and subclasses this client, and tests connect it to a MessageChannel.
+// The module holds no `new Worker(new URL(...))`, so importing it bundles no worker. The UI
+// never touches the kernel directly: it submits batches here and gets replies with transferred
+// meshes. The client numbers requests by generation and drops replies that a
 // newer request has superseded (decision 4), so UI code sees `null` for a
 // stale reply and must not assume one reply per request.
 

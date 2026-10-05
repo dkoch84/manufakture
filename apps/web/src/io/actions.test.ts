@@ -8,7 +8,7 @@ import {
   type TriangleSoup,
 } from '@manufakture/io';
 import type { KernelOp, MeshData } from '@manufakture/kernel';
-import type { KernelClient } from '@manufakture/kernel/client';
+import type { KernelClient } from '@manufakture/kernel/kernel-client';
 import { describe, expect, it, vi } from 'vitest';
 import { createDocumentStore } from '../state/document';
 import type { BodyInput } from '../viewport/bodies';

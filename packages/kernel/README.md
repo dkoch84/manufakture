@@ -13,30 +13,44 @@ KernelClient  --- Comlink --->  createKernelWorkerApi   (loading, progress, tran
 
 ## Entry points
 
-| Import                              | Where                 | What                                                                                                                         |
-| ----------------------------------- | --------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `@manufakture/kernel`               | worker, Node          | `Kernel`, `KernelService`, `createKernelWorkerApi`, `OcctLoader`, `applyFeature`, naming, hole and thread tables, types      |
-| `@manufakture/kernel/client`        | main thread           | `spawnKernelWorker()`, `KernelClient`                                                                                        |
-| `@manufakture/kernel/kernel-client` | main thread           | `KernelClient` alone, for the client of a worker that extends this one (the regen worker) without bundling this worker entry |
-| `@manufakture/kernel/names`         | anywhere              | `NameTable` alone (data only, no OCCT), for code that must not load the kernel (the viewport, the read-only viewer)          |
-| `@manufakture/kernel/types`         | anywhere              | the mesh and topology types and `UNNAMED` (data only, no OCCT), for the same code                                            |
-| `@manufakture/kernel/worker`        | worker entry          | `Comlink.expose` of the worker API, with the `.wasm` imported as a Vite `?url` asset                                         |
-| `@manufakture/kernel/node`          | Node (tests, goldens) | `createNodeKernel()`, `createNodeService()`, `nodeLoader()`, `wasmPath()`                                                    |
-| `@manufakture/kernel/testing`       | Node tests            | `track()`: records every embind object, to prove nothing is left undeleted; `heapInUse()`: the wasm heap probe (below)       |
+| Import                              | Where                 | What                                                                                                                    |
+| ----------------------------------- | --------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `@manufakture/kernel`               | worker, Node          | `Kernel`, `KernelService`, `createKernelWorkerApi`, `OcctLoader`, `applyFeature`, naming, hole and thread tables, types |
+| `@manufakture/kernel/kernel-client` | main thread           | `KernelClient`, for the client of a worker that hosts this package's API (the regen worker); holds no `new Worker`      |
+| `@manufakture/kernel/names`         | anywhere              | `NameTable` alone (data only, no OCCT), for code that must not load the kernel (the viewport, the read-only viewer)     |
+| `@manufakture/kernel/types`         | anywhere              | the mesh and topology types and `UNNAMED` (data only, no OCCT), for the same code                                       |
+| `@manufakture/kernel/node`          | Node (tests, goldens) | `createNodeKernel()`, `createNodeService()`, `nodeLoader()`, `wasmPath()`                                               |
+| `@manufakture/kernel/testing`       | Node tests            | `track()`: records every embind object, to prove nothing is left undeleted; `heapInUse()`: the wasm heap probe (below)  |
 
 ## Using it from the app
 
-The app talks to the regen worker (`@manufakture/regen/worker`), which hosts this package's worker API and the regen engine in one worker; its `RegenClient` is a `KernelClient`. `KernelClient.worker()` (protected) gives such a subclass the worker proxy typed as its extended API. What follows is the kernel's own worker, used as is by tests and tools.
+The app talks to the regen worker (`@manufakture/regen/worker`), which hosts this package's worker API and the regen engine in one worker; its `RegenClient` is a `KernelClient`. `KernelClient.worker()` (protected) gives such a subclass the worker proxy typed as its extended API. The package has no worker entry of its own: a host builds its worker around `createKernelWorkerApi` and hands `KernelClient` a way to start it.
 
 ```ts
-import { spawnKernelWorker } from '@manufakture/kernel/client';
+// worker.ts: the worker entry.
+import * as Comlink from 'comlink';
+import wasmUrl from 'libcascade/single/wasm?url';
+import { createKernelWorkerApi } from '@manufakture/kernel';
 
-// At app start-up, so kernel loading overlaps UI start-up (ADR 0002).
-const kernel = spawnKernelWorker({
-  onStatus: (s) => {
-    if (s.type === 'loading') splash.update(s.progress); // download, compile, instantiate, init, ready
+Comlink.expose(createKernelWorkerApi({ source: { url: wasmUrl }, eager: true }));
+```
+
+```ts
+// spawn.ts, on the main thread: a module of its own (below). Call it at app start-up, so
+// kernel loading overlaps UI start-up (ADR 0002).
+import { KernelClient } from '@manufakture/kernel/kernel-client';
+
+const kernel = new KernelClient(
+  () => {
+    const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
+    return { endpoint: worker, terminate: () => worker.terminate() };
   },
-});
+  {
+    onStatus: (s) => {
+      if (s.type === 'loading') splash.update(s.progress); // download, compile, instantiate, init, ready
+    },
+  },
+);
 await kernel.ready;
 
 const reply = await kernel.submit([
@@ -50,7 +64,7 @@ if (reply !== null) {
 }
 ```
 
-`spawnKernelWorker` creates `new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' })`. Vite emits the `.wasm` as its own content-hashed asset and copies the Emscripten glue verbatim; the `.wasm` is never inlined (checked with a production build: `worker-*.js` 35 KB, `opencascade_single-*.js` 67 KB, `opencascade_single-*.wasm` 42.7 MB). Vite's default worker format builds; the T0.2 spike ran its module worker with `worker: { format: 'es' }`, which is the safer setting when the app wires this in. Hosting must serve the `.wasm` hashed, immutable and brotli-compressed (ADR 0002).
+Keep the `new Worker(new URL(...))` call in a module of its own, as regen's `spawn.ts` does: Vite bundles the worker of every module that holds one, used or not. With `?url` Vite emits the `.wasm` as its own content-hashed asset and copies the Emscripten glue verbatim; the `.wasm` is never inlined. Start the worker with `{ type: 'module' }`. Hosting must serve the `.wasm` hashed, immutable and brotli-compressed (ADR 0002).
 
 ## Operations
 
@@ -413,7 +427,7 @@ Terminating the worker is the last resort for a single op that never returns: `K
 Shapes live in an arena in the worker and cross the API as integer `ShapeId`s; no OCCT object leaves the package. Ids are never reused, not even across a recycle. Callers release explicitly (`release` op, `Kernel.release`, `checkpoint` / `releaseSince`).
 
 - Every live shape records the op, `featureId` and `generation` that made it; `leaks()` (client and service) lists them oldest first.
-- With `debug: true` (a `KernelServiceConfig` passed to `spawnKernelWorker({ config })` or `init`) shapes also record their creation stack, and a `leak-warning` status is emitted once when more than `maxLiveShapes` (default 10,000) are live.
+- With `debug: true` (a `KernelServiceConfig` passed to `new KernelClient(connect, { config })` or `init`) shapes also record their creation stack, and a `leak-warning` status is emitted once when more than `maxLiveShapes` (default 10,000) are live.
 - Every temporary OCCT object is owned by a scope and released before `delete()` (T0.2's rules: `Nullify`, `Clear`, `Reset`, empty argument lists, `BRepTools.Clean` after meshing, an empty compound for `BRepCheck_Analyzer`, `Clear` on `BRepTools_WireExplorer`), including on every error path. `leaks.test.ts` proves it with the embind tracker, and checks that 30 regens of a small part leave the heap at its initial size.
 
 ## Recycling

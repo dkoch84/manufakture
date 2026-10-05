@@ -5,10 +5,12 @@
 // an entry never needs invalidating by hand; a missing entry is always just a miss.
 //
 // Kernel results hold a shape id in the kernel arena, which is only valid in the kernel instance
-// that made it and only until it is released. This in-memory cache is therefore the live tier.
-// A persistent tier (OPFS, T1.12 #935) plugs in behind the same interface: its `get` may be
-// async, and it stores what can outlive the instance (statuses, sketch results, and later a
-// serialized B-rep to restore the body from). See the README.
+// that made it and only until it is released. `MemoryCache`, in memory, is the only cache there
+// is: nothing persists, and a reload regenerates from the document. `FeatureCache` leaves room
+// for a persistent tier (its methods may return promises, and the engine awaits them), but none
+// is built; one could keep only what outlives a kernel instance (statuses, solved sketches),
+// since the kernel has no B-rep format that keeps face names to restore a body from. See the
+// README, "Persistent tier: allowed, not built".
 
 import type { ShapeId, ThreadReport } from '@manufakture/kernel';
 import { hashValue } from './hash';
@@ -30,8 +32,8 @@ export const DEFAULT_KERNEL_BUILD = 'libcascade@3.0.2';
 /**
  * The sketch solver build that solved sketches come from, part of every sketch key. The sketch
  * package does not export a version either, so this names the pinned planegcs release
- * (packages/sketch/package.json). A persistent tier must never serve a sketch another solver
- * solved.
+ * (packages/sketch/package.json). With it in the key, no cache (nor a persistent tier, should
+ * one be built) serves a sketch another solver solved.
  */
 export const DEFAULT_SOLVER_BUILD = 'planegcs@1.2.0';
 

@@ -3,6 +3,7 @@
 // every document change without loading the import and export code, which is loaded on first use.
 
 import type { Command, ManufaktureDocument } from '@manufakture/core';
+import { visitJson } from '../persistence/walk';
 
 /**
  * The viewport and kernel id of the reference body of import feature `featureId` in part studio
@@ -17,33 +18,33 @@ export function importBodyId(partId: string, featureId: string): string {
  * list), qualified with the part it is in: the `partId` of the command that holds it, or the id
  * of the part (a `restorePart` carries a whole part).
  */
-function collectImportIds(
-  value: unknown,
-  partId: string | null,
-  out: Set<string>,
-  depth = 0,
-): void {
-  // Commands nest a few levels (batch, part, feature, sketch entities); strings are skipped,
-  // so a stored file is never scanned.
-  if (depth > 32 || value === null || typeof value !== 'object') return;
-  if (Array.isArray(value)) {
-    for (const v of value) collectImportIds(v, partId, out, depth + 1);
-    return;
-  }
-  const o = value as Record<string, unknown>;
-  // The qualifier follows the shape of the commands that carry features: `addFeature`,
-  // `editFeature` and `restoreFeature` name their part in `partId`, and `restorePart` holds a
-  // whole part (an object with `id`, `features` and `nextIds`). A new command that carries
-  // features some other way must be added here, or its imports are not kept.
-  let part = partId;
-  if (typeof o.partId === 'string') part = o.partId;
-  else if (typeof o.id === 'string' && Array.isArray(o.features) && typeof o.nextIds === 'object') {
-    part = o.id;
-  }
-  if (o.kind === 'import' && typeof o.id === 'string' && part !== null) {
-    out.add(importBodyId(part, o.id));
-  }
-  for (const v of Object.values(o)) collectImportIds(v, part, out, depth + 1);
+function collectImportIds(value: unknown, partId: string | null, out: Set<string>): void {
+  visitJson(
+    value,
+    partId,
+    (o, part) => {
+      // The qualifier follows the shape of the commands that carry features: `addFeature`,
+      // `editFeature` and `restoreFeature` name their part in `partId`, and `restorePart` holds
+      // a whole part (an object with `id`, `features` and `nextIds`). A new command that carries
+      // features some other way must be added here, or its imports are not kept.
+      let inner = part;
+      if (typeof o.partId === 'string') inner = o.partId;
+      else if (
+        typeof o.id === 'string' &&
+        Array.isArray(o.features) &&
+        typeof o.nextIds === 'object'
+      ) {
+        inner = o.id;
+      }
+      if (o.kind === 'import' && typeof o.id === 'string' && inner !== null) {
+        out.add(importBodyId(inner, o.id));
+      }
+      return inner;
+    },
+    // Commands nest a few levels (batch, part, feature, sketch entities); strings are leaves, so
+    // a stored file is never scanned. Anything deeper is not a command's feature and is skipped.
+    { maxDepth: 32 },
+  );
 }
 
 /**

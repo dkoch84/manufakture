@@ -1318,22 +1318,8 @@ export const FeatureSchema = z.discriminatedUnion('kind', [
   ScriptedFeatureSchema,
 ]);
 
-export const FEATURE_KINDS = [
-  'sketch',
-  'extrude',
-  'revolve',
-  'fillet',
-  'chamfer',
-  'shell',
-  'hole',
-  'pattern',
-  'mirror',
-  'extension',
-  'import',
-  'derived',
-  'thread',
-  'scripted',
-] as const;
+/** Every feature `kind`, in schema order (featureKinds.ts, kept apart for the name parser). */
+export { FEATURE_KINDS } from './featureKinds';
 
 // ---------------------------------------------------------------------------------------------
 // Document

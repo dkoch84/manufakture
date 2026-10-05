@@ -3,7 +3,7 @@
 // the real kernel in packages/kernel (exchange.test.ts) and in the e2e.
 
 import type { BatchReply, FeatureOutcome, Frame, KernelOp, OpResult } from '@manufakture/kernel';
-import type { KernelClient } from '@manufakture/kernel/client';
+import type { KernelClient } from '@manufakture/kernel/kernel-client';
 import { describe, expect, it, vi } from 'vitest';
 import { boxBody } from '../viewport/testMeshes';
 import { kernelExchange, type KernelBody } from './exchange';

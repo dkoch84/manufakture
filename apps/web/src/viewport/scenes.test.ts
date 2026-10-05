@@ -1,6 +1,6 @@
 import { createDocument } from '@manufakture/core';
 import { validateOp, type KernelStatus, type ShapeId } from '@manufakture/kernel';
-import type { KernelClientOptions } from '@manufakture/kernel/client';
+import type { KernelClientOptions } from '@manufakture/kernel/kernel-client';
 import type { RegenResult } from '@manufakture/regen';
 import type { RegenClient, RegenClientOptions } from '@manufakture/regen/client';
 import { describe, expect, it, vi } from 'vitest';
@@ -329,9 +329,10 @@ describe('the scene the page URL names', () => {
     expect(spawn).not.toHaveBeenCalled();
   });
 
-  it('opens the demo document in the demo scene', () => {
+  it('opens the demo document in the demo scene', async () => {
     const loader = loaderForLocation('?scene=demo', spawnFake(), true);
-    expect(loader.initialDocument!.parts[0]!.features.map((f) => f.id)).toEqual([
+    const demo = await loader.initialDocument!;
+    expect(demo.parts[0]!.features.map((f) => f.id)).toEqual([
       'sketch#1',
       'extrude#1',
       'fillet#1',

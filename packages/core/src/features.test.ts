@@ -63,6 +63,17 @@ describe('featureIdsInName', () => {
     // Only `<id>:from/` starts a source name: other text after an id is read as before.
     ['extrude#1:fromage/extrude#2:cap:end', ['extrude#1', 'extrude#2']],
     ['myderived#1:from/extrude#1:cap:end', ['extrude#1']],
+    // Edge names (display only): both faces count, after `|`, `[` and `,` too.
+    ['extrude#1:side:e1|extrude#2:cap:end', ['extrude#1', 'extrude#2']],
+    [
+      'extrude#1:side:e1|extrude#1:side:e2[hole#3:wall:e1,fillet#4:round:r1]#2',
+      ['extrude#1', 'hole#3', 'fillet#4'],
+    ],
+    // An id counts only at a token start, of a known kind, with its `:`.
+    ['9extrude#1:cap:end', []],
+    ['#extrude#1:cap:end', []],
+    ['widget#1:cap:end', []],
+    ['extrude#1x:cap:end', []],
     // Unbalanced brackets are scanned as far as they go.
     ['(extrude#1:cap:end+extrude#2:side:e5', ['extrude#1', 'extrude#2']],
     ['extrude#1:cap:end)+extrude#2:side:e5', ['extrude#1', 'extrude#2']],

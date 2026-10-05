@@ -20,11 +20,9 @@
 import { FONT_ID_PATTERN } from '@manufakture/core';
 import { fromBase64, sha256Hex, toBase64 } from '@manufakture/io';
 import type { StorageBackend } from './backend';
+import { isJsonObject, mapJson, type JsonObject } from './walk';
 
-type Json = Record<string, unknown>;
-
-const isObject = (v: unknown): v is Json =>
-  typeof v === 'object' && v !== null && !Array.isArray(v);
+type Json = JsonObject;
 
 const SHA256 = /^[0-9a-f]{64}$/;
 
@@ -65,7 +63,7 @@ function isPinnedSource(source: Json): boolean {
  * anything else.
  */
 function blobSource(o: Json): { kind: SourceKind; source: Json } | null {
-  if (!isObject(o.source)) return null;
+  if (!isJsonObject(o.source)) return null;
   if (o.kind === 'import' || o.kind === 'derived') {
     return typeof o.id === 'string' ? { kind: o.kind, source: o.source } : null;
   }
@@ -109,24 +107,17 @@ const decoder = new TextDecoder('utf-8', { fatal: true });
 /** Nested depth limit: documents and commands nest a few levels; this is far beyond. */
 const MAX_DEPTH = 64;
 
-function mapSources(
-  value: unknown,
-  f: (source: Json, kind: SourceKind) => Json,
-  depth = 0,
-): unknown {
-  if (depth > MAX_DEPTH) throw new Error('The document nests too deeply');
-  if (Array.isArray(value)) return value.map((v) => mapSources(v, f, depth + 1));
-  if (!isObject(value)) return value;
-  const out: Json = {};
-  for (const [k, v] of Object.entries(value)) {
-    // JSON.parse makes `__proto__` an own key; assigning it would set the copy's prototype.
-    // No document or command has one, so it is dropped.
-    if (k === '__proto__') continue;
-    out[k] = mapSources(v, f, depth + 1);
-  }
-  const found = blobSource(value);
-  if (found) out.source = f(found.source, found.kind);
-  return out;
+/** Every blob source in `value`, replaced by what `f` makes of it, in a copy (walk.ts). */
+function mapSources(value: unknown, f: (source: Json, kind: SourceKind) => Json): unknown {
+  return mapJson(
+    value,
+    (copy, original) => {
+      const found = blobSource(original);
+      if (found) copy.source = f(found.source, found.kind);
+      return copy;
+    },
+    { maxDepth: MAX_DEPTH, tooDeep: 'The document nests too deeply' },
+  );
 }
 
 /**

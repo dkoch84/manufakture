@@ -16,7 +16,6 @@ import type { Drawer } from '../drawing/drawer';
 import { kernelExchange, type Exchanger, type KernelBody, type Referencer } from '../io/exchange';
 import type { IfcExporter } from '../io/ifcExport';
 import type { Measurer } from '../measure/measurer';
-import { demoDocument } from '../model/demo';
 import { kernelRegenerator } from '../model/kernelModel';
 import { buildable, type Regenerator } from '../model/model';
 import { scriptGrantsStore, type ScriptGrantsStore } from '../scripts/policy';
@@ -67,8 +66,12 @@ export interface SceneLoader {
   ifcExporter?: IfcExporter;
   /** Scripts' declarations and run counts, in the regen worker; absent for kernel-free scenes. */
   scripter?: Scripter;
-  /** A document the scene opens with (the demo scene); the app loads it once the scene is loaded. */
-  initialDocument?: ManufaktureDocument;
+  /**
+   * A document the scene opens with (the demo scene); the app loads it once the scene is loaded.
+   * Its presence says at once that the scene brings a document (so the app opens none from the
+   * library); the document itself may come later, as the demo's module loads on demand.
+   */
+  initialDocument?: Promise<ManufaktureDocument>;
 }
 
 /** What the app asks of the regen worker's script host (T7.2d). */
@@ -154,7 +157,10 @@ export function kernelLoadStatus(p: LoadProgress): LoadStatus {
  */
 export function kernelLoader(
   spawn: (options: RegenClientOptions) => RegenClient,
-  options: { initialDocument?: ManufaktureDocument; scriptGrants?: ScriptGrantsStore } = {},
+  options: {
+    initialDocument?: Promise<ManufaktureDocument>;
+    scriptGrants?: ScriptGrantsStore;
+  } = {},
 ): SceneLoader {
   let client: RegenClient | null = null;
   // Which scripts may run (scripts/policy.ts): sent to the worker before its first regen and on
@@ -356,6 +362,11 @@ export function loaderForLocation(
   if (choice.scene === 'test') return testLoader();
   if (choice.scene === 'perf') return perfLoader(choice.triangles);
   if (choice.scene === 'framing') return framingLoader(choice.fixture ?? 'shed');
-  if (choice.scene === 'demo') return kernelLoader(spawn, { initialDocument: demoDocument() });
+  if (choice.scene === 'demo') {
+    // On demand, so the demo (test tooling) stays out of the production bundle's main chunk. It
+    // starts loading now, beside the kernel, and is long there when the kernel is ready.
+    const initialDocument = import('../model/demo').then((m) => m.demoDocument());
+    return kernelLoader(spawn, { initialDocument });
+  }
   return kernelLoader(spawn);
 }

@@ -31,8 +31,11 @@ import type {
   StoredExpression,
 } from './schema';
 import { DIMENSION_KINDS } from './schema';
-import { parseName } from './names';
+import { featureIdsInName } from './names';
 import { FEATURE_ID_PATTERN } from './ids';
+
+// The name parser owns it (names.ts, loadable without the schema); exported here as before.
+export { featureIdsInName };
 
 /**
  * Generic views of a feature: the geometry references it holds, the features it depends on and
@@ -102,21 +105,6 @@ export function explicitDependencies(feature: Feature): string[] {
     default:
       return [];
   }
-}
-
-/**
- * Feature ids that a face name mentions, in order of appearance, without duplicates: the
- * `feature` parts of its parse (`parseName`). Names nest (merges `(A+B)`, corners
- * `fillet#3:corner:A&B&C`, copies `pattern#2:i3/A`), so every feature id starting a name counts,
- * not only the first; but in each merge or corner member, what follows `<id>:from/` is a name in
- * a derived part's source document, so only `<id>` counts there:
- * `derived#1:from/extrude#1:cap:end` gives `derived#1` alone. Linear in the name's length, with
- * no recursion, so no input can exhaust the stack.
- */
-export function featureIdsInName(name: string): string[] {
-  const out = new Set<string>();
-  for (const part of parseName(name)) if (part.kind === 'feature') out.add(part.id);
-  return [...out];
 }
 
 /**

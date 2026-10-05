@@ -6,11 +6,9 @@
   "license": "GPL-3.0-or-later",
   "exports": {
     ".": "./src/index.ts",
-    "./client": "./src/client.ts",
     "./names": "./src/names.ts",
     "./types": "./src/types.ts",
     "./kernel-client": "./src/kernel-client.ts",
-    "./worker": "./src/worker.ts",
     "./node": "./src/node.ts",
     "./testing": "./src/track.ts"
   },

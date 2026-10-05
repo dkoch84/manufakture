@@ -4,7 +4,7 @@
 // - `KernelService` adds batching, generation cancellation, errors as data and
 //   instance recycling (ADR 0002, ADR 0007); `createKernelWorkerApi` exposes
 //   it through Comlink.
-// - The main thread uses `@manufakture/kernel/client`; Node tests use
+// - The main thread uses `@manufakture/kernel/kernel-client`; Node tests use
 //   `@manufakture/kernel/node`.
 
 export const packageName = '@manufakture/kernel';

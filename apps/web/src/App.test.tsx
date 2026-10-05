@@ -761,7 +761,7 @@ describe('App export and import', () => {
         load: async () => [],
         dispose: vi.fn(),
         regenerator,
-        initialDocument: demoDocument(),
+        initialDocument: Promise.resolve(demoDocument()),
       };
       const engine = fakeEngine();
       const selection = createSelectionStore();

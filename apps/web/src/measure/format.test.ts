@@ -1,4 +1,5 @@
 import type { DisplayUnits } from '@manufakture/core';
+import * as display from '@manufakture/core/display';
 import { describe, expect, it } from 'vitest';
 import {
   GRAMS_PER_OUNCE,
@@ -14,6 +15,7 @@ import {
   isImperial,
   lengthFormat,
 } from './format';
+import * as values from '../sketcher/values';
 
 const deg = { unit: 'deg' } as const;
 const MM: DisplayUnits = { length: { unit: 'mm' }, angle: deg };
@@ -28,6 +30,12 @@ const IN_FRACTION: DisplayUnits = {
 };
 
 describe('display formats from the document units', () => {
+  it('uses the one mapping core keeps next to DisplayUnits, as the dimension values do', () => {
+    expect(lengthFormat).toBe(display.lengthFormat);
+    expect(angleFormat).toBe(display.angleFormat);
+    expect(values.lengthFormat).toBe(display.lengthFormat);
+  });
+
   it('maps the stored display units onto the units package formats', () => {
     expect(lengthFormat(MM)).toEqual({ unit: 'mm' });
     expect(lengthFormat(IN)).toEqual({ unit: 'in', decimals: 2 });
