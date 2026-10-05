@@ -45,7 +45,7 @@ The forces, from T0.4:
 - Sketches up to about 50 entities in one coupled system drag and edit well inside a frame. Larger single systems are usable but slow (56 to 135 ms per move at 200), and the viewport stays responsive only because solving is off the main thread. Sketches made of unconnected profiles split into subsystems and cost less.
 - The sketch model owns stable constraint and entity ids (never reused, [ADR 0004](0004-document-format.md)), which the solver, the conflict UI and topological naming all rely on.
 - Until our own build exists, a sketch of about 130 entities or more can abort the solver (125 solved in T0.4, 130 did not); the worker must survive that by recycling, and the UI must say why the sketch did not solve.
-- We take on building planegcs ourselves before sketches grow. Upstream provides a Docker recipe and a 428-line binding template; its Emscripten 3.1.45 settings break on Emscripten 4 (upstream issue #8), so our build pins its toolchain too.
+- We take on building planegcs ourselves before sketches grow. Upstream provides a Docker recipe and a 428-line binding template; its Emscripten 3.1.45 settings break on Emscripten 4 (upstream [issue #8](https://github.com/Salusoft89/planegcs/issues/8)), so our build pins its toolchain too.
 
 ## Amendment: the end-of-M1 checkpoint of decision 8
 

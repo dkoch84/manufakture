@@ -2,7 +2,7 @@
 
 - Status: proposed
 - Date: 2026-10-04
-- Epic: "Can't CAD Can We?", milestone M8 (board task #1173, planned under epic #53)
+- Epic: "Can't CAD Can We?", milestone M8 (planned as T7.7)
 - Builds on: M1 to M6 as landed, the [M7 plan](m7.md) (T7.1e versions and branches on the server, T7.1f merge by replay, T7.2 scripted features, T7.3a publish bundles), ADRs [0004](../adr/0004-document-format.md) (document format), [0006](../adr/0006-licensing.md) (licensing), [0007](../adr/0007-worker-protocol.md) (worker protocol), [0009](../adr/0009-sync-model.md) (sync model) and [0010](../adr/0010-scripting-sandbox.md) (scripting sandbox), and one ADR written for this plan: 0016, agent sessions (T8.0c)
 
 M8 lets a person describe a change in conversation and have an agent (Claude Code, Grok, any MCP client) make it in manufakture, while nothing the agent does counts until a person has reviewed it. The agent works on a branch of its own; each submission comes with a review bundle (the commands, before and after renders, regen errors, measurements); approving it in History merges the branch into Main, and only then do fabrication exports (G-code, cut lists, construction drawings) accept the work.
@@ -19,7 +19,7 @@ M8 lets a person describe a change in conversation and have an agent (Claude Cod
 
 ## Decisions
 
-The maintainer answered the four questions of task #1173 on 2026-10-04. They are instructions for every task here.
+The maintainer answered the four questions of T7.7 on 2026-10-04. They are instructions for every task here.
 
 1. **The session runs headless first.** A Node process holds core, regen, the kernel and the solver, with no browser: fastest to ship and to test. A session attached to a live browser tab, where the user watches the agent work, is a later phase (see "Later phases").
 2. **The interface is an MCP server.** Claude Code and Grok both speak MCP, so one server serves both. No separate command-line interface in this milestone.

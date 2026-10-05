@@ -5,13 +5,13 @@
 
 ## Context
 
-The kernel and the solver run in Web Workers; the UI, the viewport and the document live on the main thread. This ADR fixes how they talk, so that `packages/kernel`, `packages/sketch`, `packages/regen` and the app can be built in parallel against one contract. It is the protocol task #926 builds.
+The kernel and the solver run in Web Workers; the UI, the viewport and the document live on the main thread. This ADR fixes how they talk, so that `packages/kernel`, `packages/sketch`, `packages/regen` and the app can be built in parallel against one contract. It is the protocol task T1.3 builds.
 
 The inputs:
 
 - [T0.2](../spikes/T0.2-occt.md): libcascade runs in a module worker behind Comlink 4.4.2 and hands meshes to three.js as transferred typed arrays (positions, normals, indices, per-face `[firstIndex, indexCount]` ranges). The Comlink round trip added little to a bracket regen (74.84 ms against 73.59 ms inside the worker). A regen can take hundreds of milliseconds (722.7 ms for the fine bracket), recycling the instance takes about 0.3 to 0.4 s, and OCCT exceptions arrive as `WebAssembly.Exception` to be decoded and released.
 - [T0.4](../spikes/T0.4-planegcs.md): the solver belongs in its own worker (a median of 0.02 to 0.12 ms round-trip overhead), pointer moves should be coalesced there, and a solver abort poisons its instance. Its spike used plain `postMessage` with a transferred `Float64Array` of parameters.
-- [T0.5](../spikes/T0.5-topo-naming.md), recommendations for #926: topology-changing operations return kinded history for every input face, edge and vertex; `extrude` returns the profile-to-face map and both caps; a `topology(shape)` query supplies what edge names and ambiguity checks need; the naming layer runs in the worker next to the regen engine; meshes carry names as a string table plus per-face and per-edge indices, with a `fragile` flag; picking returns a name, not an index; a feature with an unresolved reference is skipped with a `FeatureError` and later features still regenerate. T0.5 also found that `BRepFilletAPI_MakeFillet::IsDeleted` returns true for edges the fillet did not touch.
+- [T0.5](../spikes/T0.5-topo-naming.md), recommendations for T1.3: topology-changing operations return kinded history for every input face, edge and vertex; `extrude` returns the profile-to-face map and both caps; a `topology(shape)` query supplies what edge names and ambiguity checks need; the naming layer runs in the worker next to the regen engine; meshes carry names as a string table plus per-face and per-edge indices, with a `fragile` flag; picking returns a name, not an index; a feature with an unresolved reference is skipped with a `FeatureError` and later features still regenerate. T0.5 also found that `BRepFilletAPI_MakeFillet::IsDeleted` returns true for edges the fillet did not touch.
 - [ADR 0001](0001-kernel-wrapper.md): the synchronous kernel API, `HistoryEntry` (history to result faces only), `MeshData`, and `KernelError` with the operation and the decoded OCCT exception type. Its decision 2 leaves it to T0.5 to extend `HistoryEntry` to what naming needs.
 
 ## Decision
@@ -34,7 +34,7 @@ The inputs:
 6. **Meshes are transferred, not copied.** Per body, `MeshData` from ADR 0001: `Float32Array` positions and normals, a `Uint32Array` index buffer and `Uint32Array` face ranges, plus edge polylines (layout settled with the viewport). All buffers go through `Comlink.transfer`, and the worker keeps no copy. Sketch parameters come back as a transferred `Float64Array`.
 7. **Names travel with meshes.** Each regen reply has one string table. Each body adds a `Uint32Array` of name indices aligned with its face ranges, another aligned with its edge polylines, and a per-face and per-edge fragile flag, so the UI can warn at pick time.
 8. **Picking returns a name.** The main thread raycasts in three.js, maps the triangle to its face through the face ranges and the face to its name through the table, and sends the name with the generation it came from. For an edge, the kernel worker returns the minimal `EdgeRef` to store (with `ends` or `ordinal` only when needed). Indices are valid only within their generation and are never stored.
-9. **Kernel history and topology for naming**, adopted from T0.5's recommendations 1 to 3 for #926. This is the extension of `HistoryEntry` that ADR 0001's decision 2 anticipated, not a change of that decision; `packages/kernel` implements it.
+9. **Kernel history and topology for naming**, adopted from T0.5's recommendations 1 to 3 for T1.3. This is the extension of `HistoryEntry` that ADR 0001's decision 2 anticipated, not a change of that decision; `packages/kernel` implements it.
    - Every topology-changing operation returns a `HistoryEntry` for every face, edge and vertex of every operand, including inputs with no face output. `kept`, `modified` and `generated` refer to result sub-shapes of any kind, as `{ kind, index }`.
    - Naming uses `kept`, `modified` and `generated` only. `deleted` is informational: fillet's `IsDeleted` is wrong for untouched edges, so naming never relies on it.
    - `extrude` (and later revolve and sweep) also returns both caps and the result face each profile entity generated, in the order of the loop's entities, so the regen engine can name faces after sketch ids.
@@ -148,9 +148,9 @@ interface BodyMesh {
 - Every request and reply type is plain data plus transferable buffers, so the workers can be tested in Node without a browser.
 - The regen engine owns the document copy the kernel works on; the main thread owns the saved one. Deltas, if used, must be versioned by generation.
 - Stale replies are normal and are dropped silently; UI code must not assume one reply per request.
-- The exact edge polyline layout, and how `ReferenceResolution` is shaped, are settled by #926 and the viewport task within this contract.
+- The exact edge polyline layout, and how `ReferenceResolution` is shaped, are settled by T1.3 and the viewport task within this contract.
 
-## Amendment: the regen worker solves sketches in-process (T1.10, #933)
+## Amendment: the regen worker solves sketches in-process (T1.10)
 
 Decision 2 hands the kernel worker a `MessageChannel` port to the solver worker, so the regen engine can re-solve sketches there. When the engine was wired into the app, the solver went into the regen worker instead, as its own `SolverService` (planegcs loaded on the first sketch solve):
 
@@ -160,7 +160,7 @@ Decision 2 hands the kernel worker a `MessageChannel` port to the solver worker,
 
 The cost is planegcs's 0.5 MB `.wasm` instantiated in both workers. Decision 1 still holds for interactive sketching: drags and dimension edits run in the solver worker, never behind a regen. The engine takes any `solve` implementation (`createRegenWorkerApi({ solver })`), so a port can come back without changing it. Details are in `packages/regen/README.md`, "The worker".
 
-## Amendment: a fourth context, the print-analysis worker (T3.1c, #1042)
+## Amendment: a fourth context, the print-analysis worker (T3.1c)
 
 [ADR 0012](0012-3d-printing.md), decision 5, adds a **print-analysis worker** next to the three contexts of decision 1: wall thickness and gap ray casting for 3D printing, which needs nothing from OCCT and is too slow for the main thread (the plan's budget is under a second for a 200,000-triangle body). It is not the kernel worker, where it would queue behind regens and recycles, and not M5's CAM worker. This amendment records how it follows this ADR; the reasons for having it are ADR 0012's.
 
@@ -173,7 +173,7 @@ The cost is planegcs's 0.5 MB `.wasm` instantiated in both workers. Decision 1 s
 
 Details are in `packages/print/README.md`, "The print-analysis worker".
 
-## Amendment: a fifth context, the CAM worker, and a CAM geometry stage in the kernel worker (T5.0c, #1005)
+## Amendment: a fifth context, the CAM worker, and a CAM geometry stage in the kernel worker (T5.0c)
 
 [ADR 0014](0014-cam-architecture.md), decision 7, adds a **CAM worker** next to the four contexts above, and a **CAM geometry stage** as a new call on the kernel worker. Toolpath generation, linking, the material-removal simulation and the TypeScript drop-cutter for 3D surfacing (ADR 0014 decision 13, after the [T5.0b spike](../spikes/T5.0b-opencamlib.md)) run in the CAM worker, so a slow pocket or a 3D finish never delays a regen, a sketch drag or the printability overlay. Extracting the loops, points and meshes an operation machines needs OCCT and the final body, so it stays in the kernel worker. This amendment records how both follow this ADR; the reasons are ADR 0014's. It was recorded before the code: T5.1f builds the stage and T5.1g the worker, and either may refine the names below within these rules.
 

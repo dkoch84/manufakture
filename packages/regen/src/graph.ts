@@ -260,7 +260,7 @@ function actsOn(
     case 'extension':
       // Without an operation it changes what its scope lists, through inputs that name them.
       // A `new` one may change, through a `tools` input, the bodies made by the features in its
-      // dependsOn (as the engine routes them, #1172). Whether it has such an input is known only
+      // dependsOn (as the engine routes them, a T6.1b follow-up). Whether it has such an input is known only
       // after it translates, so this estimate counts them all: more edges, never fewer.
       if (f.operation === 'new') {
         return {

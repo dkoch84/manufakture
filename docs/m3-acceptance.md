@@ -110,7 +110,7 @@ Not on the list, and checked not to be: the entry chamfer (its steepest line is 
 
 ## Defects found
 
-- **The print workspace could check a body on its coarse viewport mesh for good** (fixed in task #1043).
+- **The print workspace could check a body on its coarse viewport mesh for good** (fixed in T3.1d).
   - _As found._ The workspace checked a body on its 0.1 mm viewport mesh, not the 0.02 mm export-tolerance one, while `meshesSettled()` reported the meshes as settled. Clicking **Lay flat on face** right after adding the thumbscrew's item did that in three runs out of four: the thumbscrew was checked on 3490 triangles instead of 6856, and its thread's downward flanks read 60.01 degrees, a false overhang of 6.8 mm².
   - _How the walkthrough exposed it._ Chapter 7 asserts that each body is checked on more than 1.5 times its viewport mesh's triangles, and that the thumbscrew has no overhang beyond facet noise on its thread. Both failed on the runs that fell back, although the workspace said the meshes had settled.
   - _Root cause._ Every document change started a regen, and each regen dropped the tessellation request in flight. The workspace retried a dropped request a fixed number of times (`MAX_TRIES`) and then stored the viewport mesh as the body's final mesh; a fine mesh that arrived after that was ignored, since nothing asked for a re-check. Items sharing a mesh also requested it once each, so one body's mesh was asked for twice per round.

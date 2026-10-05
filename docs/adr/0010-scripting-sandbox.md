@@ -105,7 +105,7 @@ A dedicated worker has no DOM, and `worker.terminate()` stops any loop. But a wo
 - The API is a compatibility promise. Every addition is additive under an API version; a breaking change is a new version with the old one kept.
 - If the spike T7.0c finds the synchronous kernel session impractical, the asyncified QuickJS build doubles the `.wasm` size and adds a cost per host call; the rest of this decision stands.
 
-## Amendment: the T7.0c spike and the maintainer's answers (T7.0d, #1082)
+## Amendment: the T7.0c spike and the maintainer's answers (T7.0d)
 
 Amended 2026-10-04 after the T7.0c spike. The [T7.0c spike](../spikes/T7.0c-quickjs.md) ran quickjs-emscripten 0.32.0 in a module worker next to the kernel in Node, Chromium, Firefox and WebKit. It confirmed the choice of QuickJS in WebAssembly, the per-document instance and the determinism rules, settled decision 2's open mechanism, and contradicted three assumptions of decision 4: that the interrupt handler bounds run time, that `setMemoryLimit` bounds the heap, and that a limit hit leaves the interpreter usable. The decisions are restated below where the evidence changes them; everything else stands as written. The ADR is accepted with this amendment; the maintainer's answers to decision 9 are in [product decision 0001](../decisions/0001-m7-hosting-accounts-and-sharing.md).
 

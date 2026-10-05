@@ -310,7 +310,7 @@ as no entity is reversed: `/L` and `/R` are relative to the entity's direction, 
 (swapping `start` and `end`) or an arc flips its side and changes the id of every region it bounds
 (`c1/L+l1/L` becomes `c1/L+l1/R`). The sketcher must therefore not reverse entities in place; an
 edit that needs the other direction must either keep the stored direction or be handled by the naming
-layer (#931) as a rename. When two faces still get the same id (a line cutting both horns of a
+layer (T1.8) as a rename. When two faces still get the same id (a line cutting both horns of a
 crescent), they are numbered by position, x then y (`...#1`, `...#2`), flagged `fragile`, and
 reported as `ambiguous-id`. Ids are unique across `regions` and `voids`.
 

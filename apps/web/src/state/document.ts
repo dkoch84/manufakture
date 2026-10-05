@@ -4,8 +4,8 @@
 // React components read the document and the history flags from here; tools
 // change the document only through `execute` (one command, one undo step).
 // The core store stays reachable as `core` for what needs every ChangeEvent
-// with its command and diff: regen scheduling, the feature tree (#933) and
-// persistence with its op log (#935) subscribe to `core.subscribe`.
+// with its command and diff: regen scheduling, the feature tree (T1.10) and
+// persistence with its op log (T1.12) subscribe to `core.subscribe`.
 //
 // It also holds which tab is active: a part studio (the tab the tree, the
 // dialogs, the sketcher and the viewport work on) or an assembly. A command

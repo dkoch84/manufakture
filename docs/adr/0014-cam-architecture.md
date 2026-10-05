@@ -207,6 +207,6 @@ The inputs:
 - The machine table must be revisited when Carbide 3D changes a machine's specifications; each row says where its numbers came from.
 - Polygon offsets are accurate to 0.0020 mm after refit (decision 12), a budget set by the tolerances of decision 12; changing any of them, or the scale, is a change of the CAM implementation version and so a cache miss for every toolpath.
 
-## Amendment: expressions and machine Z in the geometry stage, one stock box (#1020)
+## Amendment: expressions and machine Z in the geometry stage, one stock box (T5.3a)
 
 Dated 2026-10-02. Decisions 1 and 7 said the app evaluates the setup's expressions and that coordinate conversion is all `packages/cam`'s. As built, the regen geometry stage evaluates the expressions and computes machine Z, and `packages/cam` converts only loops, points and the mesh; decision 7 is corrected in place to say so. It also records the rule that the stock comes from the corner box of the model bounds on both sides, with `setupInput` refusing a mismatch. Before the fix, a tilted face-up WCS with a `surface3d` operation made the app size the stock from the mesh's tighter box while the stage used the corner box, so the app's stock and the stage's depths referred to different zeros and the cut was wrong by the difference.

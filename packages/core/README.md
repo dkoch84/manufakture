@@ -1160,7 +1160,7 @@ import is built (regen README, "Import integrity"). This was chosen over a separ
   imported file is input, not derived data: it cannot be rebuilt from anything else, so it cannot
   live in the cache, and a store beside the document would have to be saved, copied, exported
   and undone together with it. Inside the document, undo, redo, save and copy just work.
-- The hash makes storing the bytes apart mechanical, and the app's persistence (#935) does so
+- The hash makes storing the bytes apart mechanical, and the app's persistence (T1.12) does so
   without a format change: in storage and in `.mfk` files each `source` loses `data` and the
   bytes go to a content-addressed blob keyed by `sha256`, checked when they are put back on load
   (`apps/web/src/persistence/README.md`). In memory the document keeps `data` inline, so core,

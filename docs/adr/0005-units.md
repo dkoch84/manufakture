@@ -39,7 +39,7 @@ That place already exists: [`packages/units`](../../packages/units/README.md) (t
 - Anything the kernel or solver returns (measurements, dimensions) must be formatted with `formatLength` or `formatAngle` in the document's settings; no hand-written formatting.
 - New syntax (comparisons, locale decimal commas, pitch) goes into `packages/units` first, with its own README section, before any UI uses it.
 
-## Amendment: roof pitch notation and percent slopes (T6.0b, #1107)
+## Amendment: roof pitch notation and percent slopes (T6.0b)
 
 Decision 8 deferred pitch notation to M6 and said it would apply to angle fields only, so that `6/12` stays a division everywhere else. T6.0b added it on 2026-10-03, following the M6 plan ([`docs/plans/m6.md`](../plans/m6.md), "Pitch notation in `packages/units`"). The decision stands; this records how it is carried out, and one addition. The full rules are in the [`packages/units` README](../../packages/units/README.md#roof-pitch-and-slopes).
 

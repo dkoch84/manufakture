@@ -19,7 +19,7 @@
 //
 // Layer bodies are the wall translator's, which cannot see this graph: a translator reads only
 // the walls it names in `dependsOn`. `layerJoins` finds, by the same rules, where a wall joins its
-// layers with those walls (task #1172); walls that do not name each other keep square layer ends.
+// layers with those walls (a T6.1b follow-up); walls that do not name each other keep square layer ends.
 
 import type { WallJoin, WallSegment, WallTee } from '../framing/wall';
 import {

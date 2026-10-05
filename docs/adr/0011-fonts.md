@@ -88,7 +88,7 @@ What a font has to do for FDM printing:
 - Inter's `I` and `l` are both plain vertical bars, as in most sans-serifs, so they can be mistaken for each other on a label. Inter has a disambiguation stylistic set; using it depends on `opentype.js` applying that substitution, which a later task can check.
 - Inter has no RFN (confirmed from `LICENSE.txt` on 2026-10-01), so subsetting the bundled font to cut its size stays open as a later optimisation, provided the result keeps its OFL license and notice.
 
-## Amendment: the overlap check, and overlaps merged in outline.ts (T3.2b, #1045)
+## Amendment: the overlap check, and overlaps merged in outline.ts (T3.2b)
 
 Decision 3's checks were run on Inter Bold 4.1 by T3.2b on 2026-10-01 (`packages/text/src/bundled.test.ts`, results in `packages/text/README.md`). The license, static-file, `name` table and `fsType` checks pass as decision 2 recorded, and the SHA-256 is `288316099b1e0a47a4716d159098005eef7c0066921f34e3200393dbdb01947f`. Two findings change how the decision is carried out:
 
@@ -97,7 +97,7 @@ Decision 3's checks were run on Inter Bold 4.1 by T3.2b on 2026-10-01 (`packages
 
 The stroke measurements give a recommended minimum text size of 4.2 mm cap height (the 300-unit stem of `l` against a 0.84 mm wall at a 0.4 mm nozzle); horizontal strokes are thinner, the crossbar of `e` (188 units) clearing 0.84 mm only from 6.7 mm. T3.2d puts the number into `docs/user/text.md`.
 
-## Amendment: limits on untrusted fonts, and a watchdog (T3.2b security review, #1045)
+## Amendment: limits on untrusted fonts, and a watchdog (T3.2b security review)
 
 Decision 7 asks that a malformed user font "fails cleanly". A security review of T3.2b on 2026-10-01 found well-formed but hostile files that did not fail at all; they hung or crashed the parser: a 163 KB GPOS table whose features and lookups repeat (3.9 s to read; more with a bigger table), nested composite glyphs that opentype.js expands to K^depth points (300 references three levels deep ran V8 out of memory), and overlapping contours whose merging in `outline.ts` grows faster than quadratically (640 overlapping bars: 26 s). Each now has a limit, and every limit fails with a `FontError`, a warning or an issue rather than a hang: the GPOS reader reads each feature once, keeps a lookup's subtables once per offset and stops at 1,024 lookup indexes or 4,096 subtables (the font is used without kerning, with a warning); a TrueType glyph is checked from the raw bytes before opentype.js builds it and refused (`FontError` `malformed`) past 8 levels of nesting, 100,000 points or 10 million parse steps; `outlineRegions` refuses a path over 100,000 commands, 250 million work steps or a million flattened vertices with a `too-complex` error. The numbers and the reasons are in `packages/text/README.md` and `packages/sketch/README.md`.
 

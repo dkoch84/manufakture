@@ -1,4 +1,4 @@
-// Layer joins between separate walls (task #1172): the later wall, which names the earlier in
+// Layer joins between separate walls (a T6.1b follow-up): the later wall, which names the earlier in
 // its dependsOn, mitres their layers at an L and butts them at a tee. Detection without a kernel,
 // then volumes through regen with the real kernel: every layer body exact, no two overlapping
 // (their fuse is as big as their sum), and a shed of four walls identical to one closed wall.

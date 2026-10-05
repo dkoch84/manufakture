@@ -266,7 +266,7 @@ asks for the faces of the boards it joins this way.
 **Bodies.** An extension is placed in the graph like an extrude, by its `operation` and `scope`
 (`bodyUse`, `actsOn`): `new` reads only the bodies its references lie on and makes a body, and its
 `tools` inputs also read and may change the bodies it made and those made by the features in its
-`dependsOn` (a wall joining its layers with an earlier wall's, #1172; the graph counts every such
+`dependsOn` (a wall joining its layers with an earlier wall's, a T6.1b follow-up; the graph counts every such
 body as changed by it, since only the translator knows which it touches); `add`,
 `cut` and `intersect` read their scope, or every body; with no operation it reads its scope, or
 every body, since it may change bodies through inputs that name them (a joint's `tools` items).

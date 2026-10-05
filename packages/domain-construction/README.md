@@ -186,7 +186,7 @@ An opening is written with its host's layer bodies as its `scope` (`openingScope
 from `wallLayerBodies`: `<wall id>:layer/<layer id>` per sheet layer of a wall whose operation is
 `new`; none for a framing-only wall), so it reads only those. Without one it reads every body of
 the part, and moving one opening rebuilds every opening after it in the feature list. The scope
-names bodies, so it holds while layer joins (#1172) trim and notch them; it changes only when the
+names bodies, so it holds while layer joins (a T6.1b follow-up) trim and notch them; it changes only when the
 host's wall type gains or loses a sheet layer, and the app's wall type editor rewrites the scopes
 of the openings of that type's walls in the same step (`wallsFollowing`). A stale scope fails
 visibly: a missing body is regen's `reference-lost` on `scope`, an unlisted layer body a refusal.

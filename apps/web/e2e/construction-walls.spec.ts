@@ -203,7 +203,7 @@ async function expectCounts(want: typeof AT_16): Promise<void> {
 }
 
 test('a partition drawn from the outline names it in dependsOn and joins its layers', async () => {
-  // From 8' along the 16' wall, 6' in: its start lies on the outline, a tee (T6.1b, #1172).
+  // From 8' along the 16' wall, 6' in: its start lies on the outline, a tee (layer joins, a T6.1b follow-up).
   await page.getByTestId('construction-wall').click();
   await page.getByTestId('wall-start-x').fill(`8'`);
   await page.getByTestId('field-wall-direction').selectOption('90');

@@ -62,7 +62,7 @@ export const SIGN = {
 
 export const SVG_WORD = new URL('../../../packages/io/src/fixtures/svg/word.svg', import.meta.url);
 
-/** The M5 target machine (task #1009), in its default configuration. */
+/** The M5 target machine (T5.1d), in its default configuration. */
 export const MACHINE = findMachine('shapeoko-5-pro-4x4')!;
 export const TRAVEL: [number, number, number] = [
   MACHINE.travel.x.value,

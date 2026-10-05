@@ -94,7 +94,7 @@ Notes on the inventory:
 - Kernel and solver stay separate assets for good, including our own builds; ADR 0002 and ADR 0003 already require that.
 - The app is JavaScript delivered to the browser, so serving it to users distributes it: whoever hosts a build must also offer its corresponding source, including the build recipes of the `.wasm` modules.
 
-## Amendment: OFL 1.1 for bundled fonts, opentype.js and Inter Bold (T3.0c, #1038)
+## Amendment: OFL 1.1 for bundled fonts, opentype.js and Inter Bold (T3.0c)
 
 M3's text features need a bundled font, and decision 2 does not name the SIL Open Font License, under which nearly all good open fonts are released. [ADR 0011](0011-fonts.md) decides the fonts question and adds to decision 2:
 

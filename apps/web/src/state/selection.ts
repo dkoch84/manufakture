@@ -1,5 +1,5 @@
-// Selection state shared by the viewport and, later, the sketcher (#929), the
-// feature tree (#933) and the measure tool (#936).
+// Selection state shared by the viewport and, later, the sketcher (T1.6), the
+// feature tree (T1.10) and the measure tool (T1.13).
 //
 // Items are identified by stable ids, never by mesh or topology indices (ADR
 // 0007, decision 8): the viewport resolves a picked triangle or edge to its
@@ -35,7 +35,7 @@ export interface GeometryRef extends SelectableItem {
   /** The name is positional and may move to another sub-shape after an edit (T0.5). */
   fragile: boolean;
   /**
-   * The name is a viewport placeholder, not one from the naming layer (#931
+   * The name is a viewport placeholder, not one from the naming layer (T1.8
    * has not filled it yet). Such a name must not be stored in the document.
    */
   placeholder: boolean;

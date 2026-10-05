@@ -16,7 +16,7 @@
 //   corners (and around a closed path). Faces: `<id>:side:<layer>.ext<i>` and `.int<i>` (the
 //   exterior and interior faces along segment i), `.start` and `.end` (an open wall's ends),
 //   `<id>:cap.<layer>:start` (bottom) and `:end` (top).
-// - **Layer joins** (#1172): a wall joins its layers with the walls it names in `dependsOn` where
+// - **Layer joins** (a T6.1b follow-up): a wall joins its layers with the walls it names in `dependsOn` where
 //   the wall graph joins their framing (`layerJoins` in `graph.ts`). At an L both walls' layers
 //   end on the corner's bisector, as at a corner of one path; at a tee the branch's layers end on
 //   the host's layer face and the host's layers on that side are notched where the branch's

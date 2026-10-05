@@ -1,4 +1,4 @@
-// Exact measurements from the B-rep, never from the mesh (#936): per face,
+// Exact measurements from the B-rep, never from the mesh (T1.13): per face,
 // edge or vertex its size and analytic geometry, between two of them the
 // minimum distance (BRepExtrema_DistShapeShape) with its witness points and
 // the angle, and for the whole body its mass properties (BRepGProp) and a

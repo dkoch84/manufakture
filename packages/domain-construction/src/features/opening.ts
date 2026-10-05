@@ -19,7 +19,7 @@
 // - **Scope** (T6.5d): an opening is written with its host's layer bodies as its `scope`
 //   (`openingScope`), so regen's graph and cache see it read only those. Without one it reads every
 //   body in the part, and moving one opening rebuilds every opening after it. The scope names
-//   bodies, not layers' geometry, so it holds while joins (#1172) trim and notch them; it changes
+//   bodies, not layers' geometry, so it holds while joins (a T6.1b follow-up) trim and notch them; it changes
 //   only with the host's layers (a wall type gaining or losing a sheet layer), and the app rewrites
 //   it then.
 // - **Members** (decision 6): framed with the host wall by the member stage, owned by the
