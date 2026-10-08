@@ -34,6 +34,10 @@ import {
   ASSEMBLY_COUNTER,
   ASSEMBLY_ID_PATTERN,
   AssemblySchema,
+  BODY_GROUP_COUNTER,
+  BODY_GROUP_ID_PATTERN,
+  BodyGroupIdSchema,
+  BodyGroupSchema,
   BodyIdSchema,
   BodyPropsFieldsSchema,
   CamOperationSchema,
@@ -76,6 +80,7 @@ import {
   MAX_FONT_TOTAL_BYTES,
   MAX_INSTANCE_NAME,
   MAX_SCRIPT_TOTAL_BYTES,
+  MAX_BODY_GROUPS,
   MAX_SCRIPTS,
   MaterialIdSchema,
   NoteSchema,
@@ -98,6 +103,7 @@ import {
   fontBytes,
   scriptBytes,
   type Assembly,
+  type BodyGroup,
   type BodyProps,
   type BodyPropsFields,
   type CamData,
@@ -235,6 +241,27 @@ export const SimpleCommandSchema = z.discriminatedUnion('type', [
     bodyId: BodyIdSchema,
     props: BodyPropsFieldsSchema,
     index: index.optional(),
+  }),
+  /**
+   * Create or replace a body group of the part, by id: its name and its bodies. A new group
+   * needs a fresh `group#n` id from the part's `nextIds.group` and goes at `index` (default:
+   * last); `index` is ignored on replace. A body is in at most one group of its part, so moving a
+   * body between groups is a batch of two. Since version 17.
+   */
+  z.strictObject({
+    type: z.literal('setBodyGroup'),
+    partId,
+    group: BodyGroupSchema,
+    index: index.optional(),
+  }),
+  /** Remove a body group. Its bodies stay as they are. Since version 17. */
+  z.strictObject({ type: z.literal('deleteBodyGroup'), partId, groupId: BodyGroupIdSchema }),
+  /** History only: put a deleted body group back at `index` (its id was allocated before). */
+  z.strictObject({
+    type: z.literal('restoreBodyGroup'),
+    partId,
+    group: BodyGroupSchema,
+    index,
   }),
   /** Move the rollback bar; `null` puts it after the last feature. */
   z.strictObject({ type: z.literal('setRollback'), partId, index: index.nullable() }),
@@ -1219,6 +1246,79 @@ function propsFields(entry: BodyProps): BodyPropsFields {
   return fields;
 }
 
+type BodyGroupCommand = Extract<
+  PartCommand,
+  { type: 'setBodyGroup' | 'deleteBodyGroup' | 'restoreBodyGroup' }
+>;
+
+/**
+ * The body group commands. The list is absent when it is empty, so deleting the last group (or
+ * undoing the first) gives back a part with no `bodyGroups` key at all. Which bodies a group may
+ * list (each in one group only) is checked with the rest of the document (`checkDocument`).
+ */
+function applyBodyGroup(part: Part, command: BodyGroupCommand): CoreResult<PartApplied> {
+  const { partId } = command;
+  const groups = part.bodyGroups ?? [];
+  const done = (next: BodyGroup[], inverse: Command, nextIds = part.nextIds) => {
+    const { bodyGroups: _old, ...rest } = part;
+    void _old;
+    const out: Part =
+      next.length === 0
+        ? { ...rest, nextIds }
+        : { ...rest, bodyGroups: next as [BodyGroup, ...BodyGroup[]], nextIds };
+    return ok<PartApplied>({ part: out, inverse });
+  };
+  const add = (group: BodyGroup, at: number, mode: 'fresh' | 'restore') => {
+    if (!BODY_GROUP_ID_PATTERN.test(group.id)) {
+      return fail('invalid-id', `"${group.id}" is not a body group id (group#n)`, ['group', 'id'], {
+        blockers: [group.id],
+      });
+    }
+    if (groups.length >= MAX_BODY_GROUPS) {
+      return fail('schema', `Part ${part.id} already has ${MAX_BODY_GROUPS} body groups`, [
+        'group',
+      ]);
+    }
+    const ids = allocateCounted(part.nextIds, BODY_GROUP_COUNTER, group.id, mode);
+    if (!ids.ok) return ids;
+    const next = insertAt(groups, group, at, 'body groups');
+    if (!next.ok) return next;
+    return done(next.value, { type: 'deleteBodyGroup', partId, groupId: group.id }, ids.value);
+  };
+
+  switch (command.type) {
+    case 'setBodyGroup': {
+      const { group } = command;
+      const i = groups.findIndex((g) => g.id === group.id);
+      if (i < 0) return add(group, command.index ?? groups.length, 'fresh');
+      const next = groups.slice();
+      const old = next[i]!;
+      next[i] = group;
+      return done(next, { type: 'setBodyGroup', partId, group: old });
+    }
+
+    case 'deleteBodyGroup': {
+      const i = groups.findIndex((g) => g.id === command.groupId);
+      if (i < 0) {
+        return fail('not-found', `No body group "${command.groupId}" in part ${part.id}`, [
+          'groupId',
+        ]);
+      }
+      const next = groups.slice();
+      const [old] = next.splice(i, 1);
+      return done(next, { type: 'restoreBodyGroup', partId, group: old!, index: i });
+    }
+
+    case 'restoreBodyGroup': {
+      const { group } = command;
+      if (groups.some((g) => g.id === group.id)) {
+        return fail('duplicate', `Body group "${group.id}" already exists`, ['group', 'id']);
+      }
+      return add(group, command.index, 'restore');
+    }
+  }
+}
+
 function applyPartCommand(part: Part, command: PartCommand): CoreResult<PartApplied> {
   const { partId } = command;
   switch (command.type) {
@@ -1484,6 +1584,11 @@ function applyPartCommand(part: Part, command: PartCommand): CoreResult<PartAppl
       return ok({ part: old || !empty ? { ...part, bodies } : part, inverse });
     }
 
+    case 'setBodyGroup':
+    case 'deleteBodyGroup':
+    case 'restoreBodyGroup':
+      return applyBodyGroup(part, command);
+
     case 'setRollback': {
       if (command.index !== null && command.index > part.features.length) {
         return fail(
@@ -1567,11 +1672,21 @@ function allocateDocumentId(
   id: string,
   mode: 'fresh' | 'restore',
 ): CoreResult<Record<string, number>> {
+  return allocateCounted(doc.nextIds, counter, id, mode);
+}
+
+/** `allocateDocumentId` for any `nextIds`: a part's, for its body groups. */
+function allocateCounted(
+  nextIds: Record<string, number>,
+  counter: string,
+  id: string,
+  mode: 'fresh' | 'restore',
+): CoreResult<Record<string, number>> {
   const n = Number(id.slice(counter.length + 1));
-  const next = peekCounter(doc.nextIds, counter);
+  const next = peekCounter(nextIds, counter);
   if (mode === 'restore') {
     return n < next
-      ? ok(doc.nextIds)
+      ? ok(nextIds)
       : fail('invalid-id', `Id "${id}" was never allocated, so it cannot be restored`, [], {
           blockers: [id],
         });
@@ -1584,7 +1699,7 @@ function allocateDocumentId(
       { blockers: [id] },
     );
   }
-  return ok({ ...doc.nextIds, [counter]: n + 1 });
+  return ok({ ...nextIds, [counter]: n + 1 });
 }
 
 function insertAt<T>(list: readonly T[], item: T, at: number, what: string): CoreResult<T[]> {

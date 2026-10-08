@@ -181,7 +181,7 @@ describe('suppress, rename, delete, roll back', () => {
     expect(alone.command.type).toBe('deleteFeature');
   });
 
-  it('deleting a body takes its settings and its scope entries along, as one step', () => {
+  it('deleting a body takes its settings, group place and scope entries along, as one step', () => {
     const s = store(twoBodyDocument());
     const cut = (id: string, scope: string[]) => ({
       ...SECOND_BODY,
@@ -201,6 +201,11 @@ describe('suppress, rename, delete, roll back', () => {
     });
     run({ type: 'addFeature', partId: PART, feature: cut('extrude#5', ['extrude#3']) });
     run({ type: 'setBodyProps', partId: PART, bodyId: 'extrude#3', props: { name: 'Lid' } });
+    run({
+      type: 'setBodyGroup',
+      partId: PART,
+      group: { id: 'group#1', name: 'All', bodies: ['extrude#3', 'extrude#1'] },
+    });
     const before = s.document;
 
     const d = deleteFeature(s.document, PART, 'extrude#3')!;
@@ -212,6 +217,8 @@ describe('suppress, rename, delete, roll back', () => {
     expect(part.features.map((f) => f.id)).not.toContain('extrude#5');
     expect(part.features.find((f) => f.id === 'extrude#4')).toMatchObject({ scope: ['extrude#1'] });
     expect(part.bodies).toEqual([]);
+    // Its place in a group goes too; the group and its other bodies stay.
+    expect(part.bodyGroups).toEqual([{ id: 'group#1', name: 'All', bodies: ['extrude#1'] }]);
     s.undo();
     expect(s.document).toEqual(before);
   });

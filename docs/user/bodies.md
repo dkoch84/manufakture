@@ -25,7 +25,24 @@ The [feature tree](feature-tree.md) lists the part's bodies above its features:
 
 Name, colour and material are saved in the document, and each change is one step for **Undo**. Hiding is part of the view, like the camera: it is not an undo step, is not saved in the file, and is remembered for each document while the app is open.
 
-Deleting a feature that makes a body also removes that body's name, colour and material, and takes the body out of the **Bodies** fields of the features after it, all in one undo step. A feature whose **Bodies** field named only that body is deleted with it.
+## Groups
+
+A part with many bodies (a sim rig's frame, seat, wheel stand and pedal box, say) is easier to handle in **groups**: hide a whole subassembly at once instead of body by body.
+
+- **Making a group**: tick the bodies in the Bodies list, or select a face, edge or vertex of each in the view (Shift adds to the selection), then click **Group** at the top of the list. The new group's name is ready to type; press Enter to keep **Group 1**. A body is in one group at most: grouping a body that is already in a group moves it.
+- **The group row** shows the group's name and how many bodies it holds, with its bodies listed under it. The arrow in front collapses or expands the list.
+- **Rename** works as for a body (double-clicking the name also does).
+- **Hide** and **Show** hide or show every body of the group; **Isolate** hides everything else. A body's own **Hide**, **Show** and **Isolate** still work inside a group, and the group's name looks faded when all of its bodies are hidden, and in italics when only some are.
+- **Add** puts the ticked (or selected) bodies into the group, taking them out of any other. **Ungroup** on a body's row takes it out of its group.
+- **Delete** removes the group. Its bodies stay, back in the list on their own.
+
+Groups are saved in the document like body names: creating, renaming, changing and deleting a group are each one step for **Undo**. Hiding a group is part of the view, like hiding a body: it is not an undo step and is not saved in the file. Groups change nothing else: the cut list, exports, measuring and selection treat grouped bodies exactly like the rest.
+
+A body that is gone for now (merged into another by an **Add**, behind the rollback bar, or made by a suppressed feature) is not listed in its group, and is back in it when it returns.
+
+## Deleting a feature that makes a body
+
+Deleting a feature that makes a body also removes that body's name, colour and material, takes it out of its group, and takes the body out of the **Bodies** fields of the features after it, all in one undo step. A feature whose **Bodies** field named only that body is deleted with it.
 
 ## Measuring and exporting
 

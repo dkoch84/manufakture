@@ -32,7 +32,7 @@ import { MATERIAL_IDS } from './materials';
  */
 
 /** The file format version this code reads and writes. Bump it only together with a migration. */
-export const FORMAT_VERSION = 16;
+export const FORMAT_VERSION = 17;
 /** The topological naming scheme version (T0.5) that stored references are written in. */
 export const NAMING_SCHEME = 1;
 export const FORMAT_TAG = 'manufakture';
@@ -1363,6 +1363,36 @@ export const BodyPropsSchema = z
     }
   });
 
+/**
+ * The part `nextIds` counter for body group ids (`group#n`). Since version 17. It shares the part's
+ * counters with the feature kinds, so `group` is reserved: no feature kind may be named `group`.
+ */
+export const BODY_GROUP_COUNTER = 'group';
+export const BODY_GROUP_ID_PATTERN = /^group#[1-9][0-9]{0,14}$/;
+export const BodyGroupIdSchema = z
+  .string()
+  .max(32, { abort: true })
+  .regex(BODY_GROUP_ID_PATTERN, 'Expected a body group id like "group#1"');
+
+/** The most body groups one part may have. */
+export const MAX_BODY_GROUPS = 1000;
+
+/**
+ * A named group of a part's bodies, to show, hide and isolate them together (the seat, the pedal
+ * box of a rig). It describes the model like a body name, so it is document data; whether a group
+ * is hidden is view state, like a body's (M2 plan decision 5). `bodies` lists body ids in the
+ * user's order and may be empty. A body is in at most one group of its part. A member whose body
+ * no longer exists (its feature was deleted, or it merged into another body) stays listed and is
+ * simply not shown: body ids are never reused, so it can never pick up another body, and it is
+ * back in its group when the body comes back (an undo, the rollback bar, an unsuppress). Since
+ * version 17.
+ */
+export const BodyGroupSchema = z.strictObject({
+  id: BodyGroupIdSchema,
+  name: featureName,
+  bodies: z.array(BodyIdSchema).max(MAX_BODY_LIST),
+});
+
 export const PartSchema = z.strictObject({
   id: z.string().min(1),
   name: featureName,
@@ -1373,7 +1403,7 @@ export const PartSchema = z.strictObject({
    * them. New features are inserted at the bar.
    */
   rollbackIndex: z.int().min(0).nullable(),
-  /** Next number per id counter (feature kind, or `e`, `k`, `r`). Only ever increases. */
+  /** Next number per id counter (feature kind, `e`, `k`, `r`, or `group`). Only ever increases. */
   nextIds: z.record(z.string(), z.int().min(1)),
   /**
    * What the part's bodies are made of: a built-in material id (`MATERIALS`). Absent: not set.
@@ -1382,6 +1412,8 @@ export const PartSchema = z.strictObject({
   material: MaterialIdSchema.exactOptional(),
   /** Per-body names, colours and materials, for the bodies that have any. Since version 4. */
   bodies: z.array(BodyPropsSchema).max(MAX_BODY_LIST),
+  /** Body groups, in list order; absent when the part has none. Since version 17. */
+  bodyGroups: z.array(BodyGroupSchema).min(1).max(MAX_BODY_GROUPS).exactOptional(),
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -2887,6 +2919,7 @@ export type FeatureKind = Feature['kind'];
 export type Variable = z.infer<typeof VariableSchema>;
 export type BodyPropsFields = z.infer<typeof BodyPropsFieldsSchema>;
 export type BodyProps = z.infer<typeof BodyPropsSchema>;
+export type BodyGroup = z.infer<typeof BodyGroupSchema>;
 export type Part = z.infer<typeof PartSchema>;
 export type ConfigParameter = z.infer<typeof ConfigParameterSchema>;
 export type ConfigValue = z.infer<typeof ConfigValueSchema>;

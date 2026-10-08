@@ -965,6 +965,7 @@ describe('remap property: remapped commands give the renamed document', () => {
       'addDimension',
       'addCamOperation',
       'setScript',
+      'setBodyGroup',
     ]) {
       expect(types, t).toContain(t);
     }

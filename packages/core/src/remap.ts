@@ -3,6 +3,7 @@ import { TOMBSTONE_NAME, parseSubId } from './ids';
 import { compareNames, mapName } from './names';
 import type {
   Assembly,
+  BodyGroup,
   CamData,
   CamOperation,
   CamSetup,
@@ -504,7 +505,15 @@ export class IdWalker {
       features: p.features.map((f) => this.feature(p.id, f)),
       nextIds: this.nextIds(ps, p.nextIds),
       bodies: p.bodies.map((b) => ({ ...b, id: this.body(p.id, b.id) })),
+      ...(p.bodyGroups !== undefined && {
+        bodyGroups: p.bodyGroups.map((g) => this.bodyGroup(p.id, g)) as typeof p.bodyGroups,
+      }),
     };
+  }
+
+  /** A body group of part `part`: its id in the part's scope, its bodies as body ids. */
+  bodyGroup(part: string, g: BodyGroup): BodyGroup {
+    return { ...g, id: this.id(partScope(part), g.id), bodies: this.bodies(part, g.bodies) };
   }
 
   // Configurations ---------------------------------------------------------------------------
@@ -883,6 +892,11 @@ export class IdWalker {
         return { ...c, partId: doc(c.partId) };
       case 'setBodyProps':
         return { ...c, partId: doc(c.partId), bodyId: this.body(c.partId, c.bodyId) };
+      case 'setBodyGroup':
+      case 'restoreBodyGroup':
+        return { ...c, partId: doc(c.partId), group: this.bodyGroup(c.partId, c.group) };
+      case 'deleteBodyGroup':
+        return { ...c, partId: doc(c.partId), groupId: this.id(partScope(c.partId), c.groupId) };
       case 'setVariable':
       case 'deleteVariable':
       case 'setDisplayUnits':

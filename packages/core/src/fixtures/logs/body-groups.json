@@ -1,0 +1,508 @@
+{
+  "format": "manufakture-golden-log",
+  "version": 17,
+  "description": "Body groups (format v17): a group made from two bodies, an empty one at the front, a rename undone, a body moved between groups (a batch), a delete undone (restoreBodyGroup) and redone, a new group after it with a fresh id.",
+  "base": {
+    "format": "manufakture",
+    "version": 17,
+    "namingScheme": 1,
+    "id": "doc-two-bodies",
+    "name": "Two blocks",
+    "units": {
+      "length": {
+        "unit": "mm"
+      },
+      "angle": {
+        "unit": "deg"
+      }
+    },
+    "variables": [],
+    "parts": [
+      {
+        "id": "part#1",
+        "name": "Blocks",
+        "features": [
+          {
+            "id": "sketch#1",
+            "kind": "sketch",
+            "name": "Two blocks",
+            "suppressed": false,
+            "plane": {
+              "type": "plane",
+              "origin": [0, 0, 0],
+              "normal": [0, 0, 1],
+              "xDir": [1, 0, 0]
+            },
+            "entities": [
+              {
+                "id": "e1",
+                "kind": "line",
+                "construction": false,
+                "start": [0, 0],
+                "end": [20, 0]
+              },
+              {
+                "id": "e2",
+                "kind": "line",
+                "construction": false,
+                "start": [20, 0],
+                "end": [20, 20]
+              },
+              {
+                "id": "e3",
+                "kind": "line",
+                "construction": false,
+                "start": [20, 20],
+                "end": [0, 20]
+              },
+              {
+                "id": "e4",
+                "kind": "line",
+                "construction": false,
+                "start": [0, 20],
+                "end": [0, 0]
+              },
+              {
+                "id": "e5",
+                "kind": "line",
+                "construction": false,
+                "start": [40, 0],
+                "end": [60, 0]
+              },
+              {
+                "id": "e6",
+                "kind": "line",
+                "construction": false,
+                "start": [60, 0],
+                "end": [60, 20]
+              },
+              {
+                "id": "e7",
+                "kind": "line",
+                "construction": false,
+                "start": [60, 20],
+                "end": [40, 20]
+              },
+              {
+                "id": "e8",
+                "kind": "line",
+                "construction": false,
+                "start": [40, 20],
+                "end": [40, 0]
+              }
+            ],
+            "constraints": [
+              {
+                "id": "k1",
+                "kind": "horizontal",
+                "line": "e1"
+              },
+              {
+                "id": "k2",
+                "kind": "horizontal",
+                "line": "e5"
+              }
+            ]
+          },
+          {
+            "id": "extrude#1",
+            "kind": "extrude",
+            "name": "Left block",
+            "suppressed": false,
+            "profile": {
+              "sketch": "sketch#1",
+              "entities": ["e1", "e2", "e3", "e4"]
+            },
+            "operation": "new",
+            "extent": {
+              "type": "blind",
+              "distance": {
+                "source": "10",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            },
+            "reverse": false
+          },
+          {
+            "id": "extrude#2",
+            "kind": "extrude",
+            "name": "Right block",
+            "suppressed": false,
+            "profile": {
+              "sketch": "sketch#1",
+              "entities": ["e5", "e6", "e7", "e8"]
+            },
+            "operation": "new",
+            "extent": {
+              "type": "blind",
+              "distance": {
+                "source": "10",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            },
+            "reverse": false
+          }
+        ],
+        "rollbackIndex": null,
+        "nextIds": {
+          "e": 9,
+          "extrude": 3,
+          "k": 3,
+          "sketch": 2
+        },
+        "material": "pla",
+        "bodies": []
+      },
+      {
+        "id": "part#3",
+        "name": "Empty",
+        "features": [],
+        "rollbackIndex": null,
+        "nextIds": {},
+        "bodies": []
+      }
+    ],
+    "assemblies": [],
+    "print": {
+      "setups": [],
+      "nextIds": {}
+    },
+    "fonts": [],
+    "cam": {
+      "tools": [],
+      "setups": [],
+      "nextIds": {}
+    },
+    "nextIds": {
+      "part": 4
+    }
+  },
+  "entries": [
+    {
+      "cause": "execute",
+      "label": "Group Frame",
+      "command": {
+        "type": "setBodyGroup",
+        "partId": "part#1",
+        "group": {
+          "id": "group#1",
+          "name": "Frame",
+          "bodies": ["extrude#1", "extrude#2"]
+        }
+      },
+      "at": "2026-10-08T09:00:00.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Group Spare",
+      "command": {
+        "type": "setBodyGroup",
+        "partId": "part#1",
+        "group": {
+          "id": "group#2",
+          "name": "Spare",
+          "bodies": []
+        },
+        "index": 0
+      },
+      "at": "2026-10-08T09:00:01.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Rename Frame",
+      "command": {
+        "type": "setBodyGroup",
+        "partId": "part#1",
+        "group": {
+          "id": "group#1",
+          "name": "Base frame",
+          "bodies": ["extrude#1", "extrude#2"]
+        }
+      },
+      "at": "2026-10-08T09:00:02.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Rename Frame",
+      "command": {
+        "type": "setBodyGroup",
+        "partId": "part#1",
+        "group": {
+          "id": "group#1",
+          "name": "Frame",
+          "bodies": ["extrude#1", "extrude#2"]
+        }
+      },
+      "at": "2026-10-08T09:00:03.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Move Body 2 to Spare",
+      "command": {
+        "type": "batch",
+        "commands": [
+          {
+            "type": "setBodyGroup",
+            "partId": "part#1",
+            "group": {
+              "id": "group#1",
+              "name": "Frame",
+              "bodies": ["extrude#1"]
+            }
+          },
+          {
+            "type": "setBodyGroup",
+            "partId": "part#1",
+            "group": {
+              "id": "group#2",
+              "name": "Spare",
+              "bodies": ["extrude#2"]
+            }
+          }
+        ]
+      },
+      "at": "2026-10-08T09:00:04.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Delete group Frame",
+      "command": {
+        "type": "deleteBodyGroup",
+        "partId": "part#1",
+        "groupId": "group#1"
+      },
+      "at": "2026-10-08T09:00:05.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Delete group Frame",
+      "command": {
+        "type": "restoreBodyGroup",
+        "partId": "part#1",
+        "group": {
+          "id": "group#1",
+          "name": "Frame",
+          "bodies": ["extrude#1"]
+        },
+        "index": 1
+      },
+      "at": "2026-10-08T09:00:06.000Z"
+    },
+    {
+      "cause": "redo",
+      "label": "Delete group Frame",
+      "command": {
+        "type": "deleteBodyGroup",
+        "partId": "part#1",
+        "groupId": "group#1"
+      },
+      "at": "2026-10-08T09:00:07.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Group Frame",
+      "command": {
+        "type": "setBodyGroup",
+        "partId": "part#1",
+        "group": {
+          "id": "group#3",
+          "name": "Frame",
+          "bodies": ["extrude#1"]
+        }
+      },
+      "at": "2026-10-08T09:00:08.000Z"
+    }
+  ],
+  "expected": {
+    "format": "manufakture",
+    "version": 17,
+    "namingScheme": 1,
+    "id": "doc-two-bodies",
+    "name": "Two blocks",
+    "units": {
+      "length": {
+        "unit": "mm"
+      },
+      "angle": {
+        "unit": "deg"
+      }
+    },
+    "variables": [],
+    "parts": [
+      {
+        "id": "part#1",
+        "name": "Blocks",
+        "features": [
+          {
+            "id": "sketch#1",
+            "kind": "sketch",
+            "name": "Two blocks",
+            "suppressed": false,
+            "plane": {
+              "type": "plane",
+              "origin": [0, 0, 0],
+              "normal": [0, 0, 1],
+              "xDir": [1, 0, 0]
+            },
+            "entities": [
+              {
+                "id": "e1",
+                "kind": "line",
+                "construction": false,
+                "start": [0, 0],
+                "end": [20, 0]
+              },
+              {
+                "id": "e2",
+                "kind": "line",
+                "construction": false,
+                "start": [20, 0],
+                "end": [20, 20]
+              },
+              {
+                "id": "e3",
+                "kind": "line",
+                "construction": false,
+                "start": [20, 20],
+                "end": [0, 20]
+              },
+              {
+                "id": "e4",
+                "kind": "line",
+                "construction": false,
+                "start": [0, 20],
+                "end": [0, 0]
+              },
+              {
+                "id": "e5",
+                "kind": "line",
+                "construction": false,
+                "start": [40, 0],
+                "end": [60, 0]
+              },
+              {
+                "id": "e6",
+                "kind": "line",
+                "construction": false,
+                "start": [60, 0],
+                "end": [60, 20]
+              },
+              {
+                "id": "e7",
+                "kind": "line",
+                "construction": false,
+                "start": [60, 20],
+                "end": [40, 20]
+              },
+              {
+                "id": "e8",
+                "kind": "line",
+                "construction": false,
+                "start": [40, 20],
+                "end": [40, 0]
+              }
+            ],
+            "constraints": [
+              {
+                "id": "k1",
+                "kind": "horizontal",
+                "line": "e1"
+              },
+              {
+                "id": "k2",
+                "kind": "horizontal",
+                "line": "e5"
+              }
+            ]
+          },
+          {
+            "id": "extrude#1",
+            "kind": "extrude",
+            "name": "Left block",
+            "suppressed": false,
+            "profile": {
+              "sketch": "sketch#1",
+              "entities": ["e1", "e2", "e3", "e4"]
+            },
+            "operation": "new",
+            "extent": {
+              "type": "blind",
+              "distance": {
+                "source": "10",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            },
+            "reverse": false
+          },
+          {
+            "id": "extrude#2",
+            "kind": "extrude",
+            "name": "Right block",
+            "suppressed": false,
+            "profile": {
+              "sketch": "sketch#1",
+              "entities": ["e5", "e6", "e7", "e8"]
+            },
+            "operation": "new",
+            "extent": {
+              "type": "blind",
+              "distance": {
+                "source": "10",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            },
+            "reverse": false
+          }
+        ],
+        "rollbackIndex": null,
+        "nextIds": {
+          "e": 9,
+          "extrude": 3,
+          "group": 4,
+          "k": 3,
+          "sketch": 2
+        },
+        "material": "pla",
+        "bodies": [],
+        "bodyGroups": [
+          {
+            "id": "group#2",
+            "name": "Spare",
+            "bodies": ["extrude#2"]
+          },
+          {
+            "id": "group#3",
+            "name": "Frame",
+            "bodies": ["extrude#1"]
+          }
+        ]
+      },
+      {
+        "id": "part#3",
+        "name": "Empty",
+        "features": [],
+        "rollbackIndex": null,
+        "nextIds": {},
+        "bodies": []
+      }
+    ],
+    "assemblies": [],
+    "print": {
+      "setups": [],
+      "nextIds": {}
+    },
+    "fonts": [],
+    "cam": {
+      "tools": [],
+      "setups": [],
+      "nextIds": {}
+    },
+    "nextIds": {
+      "part": 4
+    }
+  }
+}

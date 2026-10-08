@@ -1,9 +1,14 @@
 // The bodies of a part as the app shows them: regen says which bodies exist (and their solids),
-// the document holds what the user set on them (`Part.bodies`: name, colour, material), and the
-// view settings say which are hidden. Everything here is derived, so nothing is stored twice.
+// the document holds what the user set on them (`Part.bodies`: name, colour, material) and how
+// they are grouped (`Part.bodyGroups`), and the view settings say which are hidden. Everything
+// here is derived, so nothing is stored twice.
 
 import {
+  BODY_GROUP_COUNTER,
+  bodyCreator,
   findMaterial,
+  previewIds,
+  type BodyGroup,
   type BodyProps,
   type BodyPropsFields,
   type Command,
@@ -171,4 +176,177 @@ export function bodyPropsCommand(
 
 function sorted(o: Record<string, unknown>): [string, unknown][] {
   return Object.entries(o).sort(([a], [b]) => a.localeCompare(b));
+}
+
+// Body groups -----------------------------------------------------------------------------------
+// A group (`Part.bodyGroups`) is document data: creating, renaming, changing members and deleting
+// are undoable commands. Whether a group is hidden is not stored anywhere: a group is hidden when
+// its bodies are, so hiding, showing and isolating a group write the per-body hidden state in the
+// view settings (M2 plan, decision 5). A member whose body regen did not make (deleted, merged
+// away, past the rollback bar) is not shown; it comes back with its body.
+
+/** A group of the active part as the Bodies list shows it. */
+export interface PartBodyGroup {
+  group: BodyGroup;
+  /** Its members that exist in the regen result, in the group's order. */
+  members: PartBody[];
+  /** Every member shown is hidden (false for a group with none shown). */
+  hidden: boolean;
+  /** Some members shown are hidden, some not. */
+  partlyHidden: boolean;
+}
+
+/** The part's groups with their bodies, and the bodies in no group (in body order). */
+export function groupBodies(
+  part: Pick<Part, 'bodyGroups'> | undefined,
+  bodies: readonly PartBody[],
+): { groups: PartBodyGroup[]; ungrouped: PartBody[] } {
+  const byId = new Map(bodies.map((b) => [b.bodyId, b]));
+  const grouped = new Set<string>();
+  const groups = (part?.bodyGroups ?? []).map((group): PartBodyGroup => {
+    const members: PartBody[] = [];
+    for (const id of group.bodies) {
+      const b = byId.get(id);
+      if (b && !grouped.has(id)) {
+        members.push(b);
+        grouped.add(id);
+      }
+    }
+    const hiddenCount = members.filter((b) => b.hidden).length;
+    return {
+      group,
+      members,
+      hidden: members.length > 0 && hiddenCount === members.length,
+      partlyHidden: hiddenCount > 0 && hiddenCount < members.length,
+    };
+  });
+  return { groups, ungrouped: bodies.filter((b) => !grouped.has(b.bodyId)) };
+}
+
+/** The group a body is in, if any. */
+export function groupOf(part: Pick<Part, 'bodyGroups'>, bodyId: string): BodyGroup | undefined {
+  return part.bodyGroups?.find((g) => g.bodies.includes(bodyId));
+}
+
+/** `Group <n>`, the first such name no group of the part has. */
+export function defaultGroupName(part: Pick<Part, 'bodyGroups'>): string {
+  const names = new Set((part.bodyGroups ?? []).map((g) => g.name));
+  let n = (part.bodyGroups?.length ?? 0) + 1;
+  while (names.has(`Group ${n}`)) n++;
+  return `Group ${n}`;
+}
+
+function batchOf(commands: Command[]): Command | null {
+  if (commands.length === 0) return null;
+  return commands.length === 1 ? commands[0]! : { type: 'batch', commands };
+}
+
+/**
+ * Takes `bodyIds` out of every group of the part except `except`: the commands that do it. A body
+ * is in one group at most, so joining a group leaves the old one in the same undo step.
+ */
+function leaveOtherGroups(part: Part, bodyIds: readonly string[], except?: string): Command[] {
+  const moving = new Set(bodyIds);
+  const out: Command[] = [];
+  for (const g of part.bodyGroups ?? []) {
+    if (g.id === except || !g.bodies.some((b) => moving.has(b))) continue;
+    out.push({
+      type: 'setBodyGroup',
+      partId: part.id,
+      group: { ...g, bodies: g.bodies.filter((b) => !moving.has(b)) },
+    });
+  }
+  return out;
+}
+
+/**
+ * A new group of `bodyIds` (from other groups too), named `name`, last in the list: one undo
+ * step. Its id is the part's next `group#n`.
+ */
+export function newGroupCommand(
+  part: Part,
+  bodyIds: readonly string[],
+  name: string = defaultGroupName(part),
+): { command: Command; groupId: string; name: string } {
+  const [groupId] = previewIds(part.nextIds, BODY_GROUP_COUNTER);
+  const bodies = [...new Set(bodyIds)];
+  const command = batchOf([
+    ...leaveOtherGroups(part, bodies),
+    { type: 'setBodyGroup', partId: part.id, group: { id: groupId!, name, bodies } },
+  ])!;
+  return { command, groupId: groupId!, name };
+}
+
+/** Renames a group; null when the name does not change. Names are trimmed. */
+export function renameGroupCommand(part: Part, groupId: string, name: string): Command | null {
+  const g = part.bodyGroups?.find((x) => x.id === groupId);
+  const text = name.trim();
+  if (!g || text === g.name) return null;
+  return { type: 'setBodyGroup', partId: part.id, group: { ...g, name: text } };
+}
+
+/** Adds bodies to a group (moving them out of any other); null when none is new to it. */
+export function addToGroupCommand(
+  part: Part,
+  groupId: string,
+  bodyIds: readonly string[],
+): Command | null {
+  const g = part.bodyGroups?.find((x) => x.id === groupId);
+  if (!g) return null;
+  const have = new Set(g.bodies);
+  const added = [...new Set(bodyIds)].filter((b) => !have.has(b));
+  if (added.length === 0) return null;
+  return batchOf([
+    ...leaveOtherGroups(part, added, groupId),
+    { type: 'setBodyGroup', partId: part.id, group: { ...g, bodies: [...g.bodies, ...added] } },
+  ]);
+}
+
+/** Removes bodies from a group (they stay in the part); null when none is in it. */
+export function removeFromGroupCommand(
+  part: Part,
+  groupId: string,
+  bodyIds: readonly string[],
+): Command | null {
+  const g = part.bodyGroups?.find((x) => x.id === groupId);
+  const removing = new Set(bodyIds);
+  if (!g || !g.bodies.some((b) => removing.has(b))) return null;
+  return {
+    type: 'setBodyGroup',
+    partId: part.id,
+    group: { ...g, bodies: g.bodies.filter((b) => !removing.has(b)) },
+  };
+}
+
+/** Deletes a group; its bodies stay. */
+export function deleteGroupCommand(partId: string, groupId: string): Command {
+  return { type: 'deleteBodyGroup', partId, groupId };
+}
+
+/**
+ * The commands that drop, from every group, the bodies the features `gone` make: for a feature
+ * delete, in its batch, so the file keeps no member that can never come back and undo restores
+ * both. (Members of bodies that only merged or rolled back stay: they return.)
+ */
+export function pruneGroupsCommands(part: Part, gone: ReadonlySet<string>): Command[] {
+  const out: Command[] = [];
+  for (const g of part.bodyGroups ?? []) {
+    const bodies = g.bodies.filter((b) => {
+      const creator = bodyCreator(b);
+      return creator === undefined || !gone.has(creator);
+    });
+    if (bodies.length !== g.bodies.length) {
+      out.push({ type: 'setBodyGroup', partId: part.id, group: { ...g, bodies } });
+    }
+  }
+  return out;
+}
+
+/**
+ * The view ids to hide among `all` so only `keep` are shown: isolating a group, or a body.
+ * `setHiddenBodies(documentId, all, isolateHidden(all, keep))`.
+ */
+export function isolateHidden(all: readonly string[], keep: readonly string[]): string[] {
+  const kept = new Set(keep);
+  return all.filter((id) => !kept.has(id));
 }

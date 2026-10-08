@@ -11,7 +11,7 @@ import type { ManufaktureDocument } from './schema';
  * | Key                      | `nextIds`       | Counters                                                     |
  * | ------------------------ | --------------- | ------------------------------------------------------------ |
  * | `document`               | the document's  | `part`, `assembly`, `cp`, `cfg`, `font`, `drawing`, `script` |
- * | `part:<part id>`         | each part's     | one per feature kind, `e`, `k`, `r`                          |
+ * | `part:<part id>`         | each part's     | one per feature kind, `e`, `k`, `r`, `group`                 |
  * | `assembly:<assembly id>` | each assembly's | `inst`, `mate`, `mc`, `r`, `explode`, `step`                 |
  * | `cam`                    | `cam.nextIds`   | `tool`, `setup`, one per operation kind, `r`                 |
  * | `print`                  | `print.nextIds` | `print`, `item`, `r`                                         |

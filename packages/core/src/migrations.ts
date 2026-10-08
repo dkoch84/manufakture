@@ -314,6 +314,25 @@ export const migrateV15ToV16: Migration = {
   },
 };
 
+/**
+ * Version 17 added body groups (the optional `bodyGroups` of a part, with the part counter
+ * `group`). Nothing in a version 16 file changes: its parts have no groups, which is what an
+ * absent `bodyGroups` means. A version 16 part that already has a `bodyGroups` key is refused
+ * rather than read as groups.
+ */
+export const migrateV16ToV17: Migration = {
+  from: 16,
+  to: 17,
+  description: 'Add body groups',
+  migrate(doc) {
+    const parts = Array.isArray(doc.parts) ? doc.parts : [];
+    if (parts.some((p) => isObject(p) && 'bodyGroups' in p)) {
+      throw new Error('a version 16 part has no "bodyGroups"');
+    }
+    return { ...doc, version: 17 };
+  },
+};
+
 /** File format migrations, in order: `FORMAT_MIGRATIONS[i]` goes from version i to i + 1. */
 export const FORMAT_MIGRATIONS: readonly Migration[] = [
   migrateV0ToV1,
@@ -332,6 +351,7 @@ export const FORMAT_MIGRATIONS: readonly Migration[] = [
   migrateV13ToV14,
   migrateV14ToV15,
   migrateV15ToV16,
+  migrateV16ToV17,
 ];
 
 /**
@@ -442,6 +462,7 @@ export const COMMAND_MIGRATIONS: readonly CommandMigration[] = [
   commandStep(migrateV13ToV14),
   commandStep(migrateV14ToV15),
   commandStep(migrateV15ToV16),
+  commandStep(migrateV16ToV17),
 ];
 
 export interface CommandMigrationOptions {

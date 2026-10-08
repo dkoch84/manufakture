@@ -65,6 +65,7 @@ const WEIGHTS = {
   undo: 4,
   replaceDocument: 1,
   bodyProps: 1,
+  bodyGroup: 1,
   addPart: 1,
   duplicatePart: 1,
   deletePart: 0.5,
@@ -479,6 +480,31 @@ export class Generator {
           partId,
           bodyId: rng.pick(ext).id,
           props: { color: rng.pick(['#ff0000', '#00ff00']) },
+        };
+      }
+      case 'bodyGroup': {
+        const groups = part.bodyGroups ?? [];
+        if (groups.length > 0 && rng.chance(0.3)) {
+          return { type: 'deleteBodyGroup', partId, groupId: rng.pick(groups).id };
+        }
+        // A body is in one group at most: only ungrouped bodies join one.
+        const grouped = new Set(groups.flatMap((g) => g.bodies));
+        const free = this.extrudes(part)
+          .map((e) => e.id)
+          .filter((id) => !grouped.has(id));
+        const members = free.filter(() => rng.chance(0.5));
+        if (groups.length > 0 && rng.chance(0.5)) {
+          const old = rng.pick(groups);
+          return {
+            type: 'setBodyGroup',
+            partId,
+            group: { ...old, name: `${old.name}+`, bodies: [...old.bodies, ...members] },
+          };
+        }
+        return {
+          type: 'setBodyGroup',
+          partId,
+          group: { id: alloc.take('group'), name: 'g', bodies: members },
         };
       }
       case 'addPart':

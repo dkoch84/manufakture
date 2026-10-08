@@ -30,6 +30,7 @@ import { PART_COUNTER, parseAnyId, parseFeatureId, parseSubId, peekCounter } fro
 import { fail, ok, type CoreError, type CoreResult } from './result';
 import {
   ASSEMBLY_COUNTER,
+  BODY_GROUP_COUNTER,
   CONFIG_PARAMETER_COUNTER,
   CONFIG_ROW_COUNTER,
   DRAWING_COUNTER,
@@ -566,6 +567,44 @@ function checkPart(
   bodies.forEach((body, bi) =>
     checkBodyId(part, index, body, undefined, [...ppath, 'bodies', bi, 'id'], out),
   );
+  checkBodyGroups(part, ppath, out);
+}
+
+/**
+ * A part's body groups: ids allocated by the part's `nextIds.group` and used once, and each body
+ * in at most one group. Members are not checked against the features: a group keeps a body whose
+ * feature is gone (BodyGroupSchema), so deleting a feature, or another client's delete arriving
+ * first, never fails on a group.
+ */
+function checkBodyGroups(part: Part, ppath: readonly (string | number)[], out: CoreError[]): void {
+  const groups = part.bodyGroups ?? [];
+  const gpath = (i: number) => [...ppath, 'bodyGroups', i];
+  groups.forEach((g, gi) =>
+    checkAllocated(g.id, BODY_GROUP_COUNTER, part.nextIds, 'Body group', [...gpath(gi), 'id'], out),
+  );
+  checkUnique(
+    groups.map((g) => g.id),
+    'Body group id',
+    (i) => [...gpath(i), 'id'],
+    out,
+  );
+  const owner = new Map<string, string>();
+  groups.forEach((g, gi) => {
+    g.bodies.forEach((body, bi) => {
+      const other = owner.get(body);
+      if (other !== undefined) {
+        out.push({
+          code: 'duplicate',
+          message:
+            other === g.id
+              ? `Body "${body}" is listed twice in body group ${g.id}`
+              : `Body "${body}" is in body groups ${other} and ${g.id}; a body is in one group at most`,
+          path: [...gpath(gi), 'bodies', bi],
+          blockers: [body],
+        });
+      } else owner.set(body, g.id);
+    });
+  });
 }
 
 /**

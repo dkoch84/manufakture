@@ -4,7 +4,10 @@ import { describe, expect, it, vi } from 'vitest';
 import { demoDocument } from '../model/demo';
 import { createModelStore } from '../model/model';
 import { createDocumentStore } from '../state/document';
+import { applyCommand, findPart } from '@manufakture/core';
 import { createSelectionStore, featureItem } from '../state/selection';
+import { createViewSettingsStore } from '../state/viewSettings';
+import { modelBody, twoBodyDocument } from '../model/twoBodies.test-fixture';
 import { FeatureTree } from './FeatureTree';
 
 function result(featureId: string, patch: Partial<FeatureResult> = {}): FeatureResult {
@@ -288,5 +291,58 @@ describe('FeatureTree: scripted features', () => {
     expect(row.getAttribute('data-status')).toBe('error');
     fireEvent.doubleClick(row);
     expect(onEdit).toHaveBeenCalledWith('scripted#1');
+  });
+});
+
+describe('the Bodies section across parts', () => {
+  it('starts afresh on another part: no open rename, ticks or collapsed groups carry over', () => {
+    let doc = twoBodyDocument();
+    for (const command of [
+      {
+        type: 'setBodyGroup' as const,
+        partId: 'part#1',
+        group: { id: 'group#1', name: 'Frame', bodies: ['extrude#1', 'extrude#3'] },
+      },
+      { type: 'duplicatePart' as const, sourcePartId: 'part#1', partId: 'part#2', name: 'Copy' },
+    ]) {
+      const r = applyCommand(doc, command);
+      if (!r.ok) throw new Error(r.error.message);
+      doc = r.value.document;
+    }
+    const documents = createDocumentStore(doc);
+    const model = createModelStore();
+    const bodies = [modelBody('extrude#1'), modelBody('extrude#3', 1, [20, 0, 0])];
+    model.setState({
+      available: true,
+      generation: 1,
+      document: doc,
+      parts: [
+        { partId: 'part#1', features: [], bodies },
+        { partId: 'part#2', features: [], bodies },
+      ],
+    });
+    const props = {
+      documents,
+      model,
+      selection: createSelectionStore(),
+      settings: createViewSettingsStore(() => sessionStorage),
+      onEdit: () => undefined,
+    };
+    const view = render(<FeatureTree {...props} partId="part#1" />);
+    fireEvent.click(screen.getByTestId('body-pick-extrude#1'));
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse Frame' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Rename group Frame' }));
+    fireEvent.change(screen.getByLabelText('New name for group Frame'), {
+      target: { value: 'Seat' },
+    });
+
+    view.rerender(<FeatureTree {...props} partId="part#2" />);
+    expect(screen.queryByLabelText('New name for group Frame')).toBeNull();
+    expect(screen.getByTestId('body-group-toggle-group#1').getAttribute('aria-expanded')).toBe(
+      'true',
+    );
+    expect(screen.getByTestId<HTMLInputElement>('body-pick-extrude#1').checked).toBe(false);
+    // The rename typed on part 1 never reaches part 2's group of the same id.
+    expect(findPart(documents.getState().document, 'part#2')!.bodyGroups![0]!.name).toBe('Frame');
   });
 });

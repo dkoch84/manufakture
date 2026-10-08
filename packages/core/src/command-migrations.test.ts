@@ -13,6 +13,7 @@ import { PART, bracket, clone, deepFreeze, mm, unwrap } from './test-helpers';
 import v0Bracket from './fixtures/v0-bracket.json';
 import v3Bracket from './fixtures/v3-bracket.json';
 import v13Bracket from './fixtures/v13-bracket.json';
+import v16Bracket from './fixtures/v16-bracket.json';
 
 describe('command migrations', () => {
   it('has one command step per document format step, in step', () => {
@@ -77,6 +78,26 @@ describe('command migrations', () => {
     expect(migrated.type === 'replaceDocument' && migrated.document.version).toBe(FORMAT_VERSION);
     const replaced = unwrap(applyCommand(current, migrated)).document;
     expect(serialize(replaced)).toBe(serialize(current));
+  });
+
+  it('brings version 16 commands to version 17 unchanged', () => {
+    // Version 17 added body groups and nothing a version 16 command carries changes.
+    const v16 = clone(v16Bracket) as { parts: Record<string, unknown>[] };
+    const restore = { type: 'restorePart', part: { ...v16.parts[0]!, id: 'part#2' }, index: 1 };
+    expect(unwrap(migrateCommand(restore, 16))).toEqual(restore);
+    const replaced = unwrap(migrateCommand({ type: 'replaceDocument', document: v16 }, 16));
+    expect(replaced.type === 'replaceDocument' && replaced.document.version).toBe(17);
+    // A version 16 restored part cannot have groups: the document step refuses the key.
+    const document = { ...v16, parts: [{ ...v16.parts[0]!, bodyGroups: [] }] };
+    const refused = migrateCommand({ type: 'replaceDocument', document }, 16);
+    expect(!refused.ok && refused.error.code).toBe('migration');
+    // A group command, new in 17, passes through as it is.
+    const group = {
+      type: 'setBodyGroup',
+      partId: PART,
+      group: { id: 'group#1', name: 'Frame', bodies: ['extrude#1'] },
+    };
+    expect(unwrap(migrateCommand(group, 17))).toEqual(group);
   });
 
   it('refuses a newer format, a bad format and a command that is not one', () => {

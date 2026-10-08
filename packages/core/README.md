@@ -23,7 +23,7 @@ import {
 ```ts
 interface ManufaktureDocument {
   format: 'manufakture';
-  version: 16; // file format version, FORMAT_VERSION
+  version: 17; // file format version, FORMAT_VERSION
   namingScheme: 1; // topological naming scheme version (T0.5), NAMING_SCHEME
   id: string;
   name: string;
@@ -49,6 +49,7 @@ interface Part {
   nextIds: Record<string, number>; // next number per id counter; only ever increases
   material?: MaterialId; // default material of the part's bodies; absent: not set (since version 2)
   bodies: BodyProps[]; // per-body name, colour, material, for bodies that have any (since version 4)
+  bodyGroups?: BodyGroup[]; // named groups of bodies, in list order; absent: none (since version 17)
 }
 
 interface BodyProps {
@@ -56,6 +57,12 @@ interface BodyProps {
   name?: string;
   color?: string; // '#rrggbb', lower-case
   material?: MaterialId; // overrides Part.material for this body
+}
+
+interface BodyGroup {
+  id: string; // 'group#1', from the part's nextIds.group; never reused
+  name: string; // trimmed, 1 to 200 characters
+  bodies: string[]; // body ids, in the user's order; may be empty
 }
 ```
 
@@ -120,6 +127,16 @@ of `featureDependencies`, so reorder and delete respect it. Duplicate ids in `bo
 scope are refused. The rest is regen's: whether an `add` really made a body (it may have merged),
 whether an instance suffix exists (`:i3` of a three-copy pattern) and whether a source body
 exists in the pinned version, are reported by regen as `reference-lost`.
+
+**Body groups** (since version 17) name a set of a part's bodies so the app can show, hide and
+isolate them together (the seat or the pedal box of a rig). A group describes the model, like a
+body name, so it is document data and undoable; whether a group is hidden is view state, like a
+body's. A body is in at most one group of its part (validation refuses a body in two groups, or
+twice in one). Members are not checked against the features: a member whose body is gone (its
+feature deleted, or merged into another body by an `add`) stays listed and the app does not show
+it. Body ids are never reused, so such a member can never pick up another body, and it is back in
+its group when the body comes back (undo, the rollback bar, an unsuppress); a feature delete is
+therefore never blocked by a group. Grouping changes no geometry, no export and no cut list.
 
 Part ids are `part#n`, allocated from the document's `nextIds.part` like feature ids: a
 `part#n` at or past the counter is refused, and the counter only increases. A part id of another
@@ -1389,6 +1406,9 @@ resulting document with `checkDocument`, and returns `{ document, inverse }` or 
 | `setDisplayUnits`        | `units`                                                       | `setDisplayUnits`                                                      |
 | `setMaterial`            | `partId`, `material` (a material id, `null` clears)           | `setMaterial` (the old one or null)                                    |
 | `setBodyProps`           | `partId`, `bodyId`, `props`, `index?` (for a new one)         | `setBodyProps` (the old props)                                         |
+| `setBodyGroup`           | `partId`, `group` (a fresh `group#n`, or by id), `index?`     | `setBodyGroup` (the old group) or `deleteBodyGroup`                    |
+| `deleteBodyGroup`        | `partId`, `groupId` (the bodies stay)                         | `restoreBodyGroup` at the old index                                    |
+| `restoreBodyGroup`       | `partId`, `group`, `index` (history only)                     | `deleteBodyGroup`                                                      |
 | `renameDocument`         | `name` (trimmed, 1 to 200 characters)                         | `renameDocument` (the old name)                                        |
 | `setDomainData`          | `namespace`, `schemaVersion` and `data` (both absent: remove) | `setDomainData` (the old entry, or a removal)                          |
 | `setConfigParameter`     | `parameter` (by id: new or replaced), `index?`                | `setConfigParameter` or `deleteConfigParameter`                        |
@@ -1566,6 +1586,11 @@ command, so it is the feature JSON that repeats.
 `setBodyProps` replaces the body's whole entry with `props` (`{ name?, color?, material? }`);
 empty `props` removes the entry. Its inverse sets the old props back at the old index, or removes
 the entry when there was none.
+
+`setBodyGroup` creates a group (a fresh `group#n` from the part's `nextIds.group`, at `index` or
+last) or replaces one by id: its name and its whole member list. Moving a body from one group to
+another is a `batch` of two `setBodyGroup`s, since a body is in one group at most. The list is
+absent when empty, so deleting the last group gives back a part with no `bodyGroups` key.
 
 A `batch` is checked once, at the end, so its steps may pass through invalid states (add a
 feature, then the sketch it uses, in one step).

@@ -354,6 +354,82 @@
   font-size: 0.72rem;
 }
 
+.bodies-section .bodies-actions {
+  display: inline-flex;
+  gap: 0.25rem;
+}
+
+.bodies-section .new-group {
+  font-size: 0.75rem;
+}
+
+.body-row .pick {
+  margin: 0;
+}
+
+/* A body group: a collapsible row with its members indented under it. */
+.body-group {
+  padding: 0.1rem 0;
+}
+
+.body-group-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.35rem;
+  padding: 0.2rem 0.3rem;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.body-group-row:hover {
+  background: #eef3fb;
+}
+
+.body-group-row .group-toggle {
+  width: 1.1rem;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+
+.body-group-row .name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.body-group-row .rename {
+  flex: 1;
+  min-width: 0;
+}
+
+.body-group-row .group-count {
+  font-size: 0.75rem;
+  font-weight: normal;
+  color: #5b6673;
+}
+
+.body-group-row .body-actions {
+  font-weight: normal;
+}
+
+.body-group.hidden > .body-group-row .name {
+  opacity: 0.45;
+}
+
+.body-group.partly-hidden > .body-group-row .name {
+  font-style: italic;
+}
+
+.group-members {
+  margin-left: 1.1rem;
+  border-left: 1px solid #e1e6ec;
+}
+
 /* A derived part: its source and version on a line of its own under the row. */
 .feature-row.derived {
   flex-wrap: wrap;

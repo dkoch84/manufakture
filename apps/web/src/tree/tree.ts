@@ -15,6 +15,7 @@ import {
 } from '@manufakture/core';
 import type { FeatureResult, RegenError } from '@manufakture/regen';
 import { constructionLabel } from '../construction/kinds';
+import { pruneGroupsCommands } from '../model/bodies';
 import { boardStockName, extensionLabel, jointDetail } from '../wood/kinds';
 
 /**
@@ -269,9 +270,9 @@ export function dropIndex(from: number, slot: number): number {
 
 /**
  * Deleting a feature: every feature built from it goes too (core refuses to leave a dependent
- * behind), and so do the names, colours and materials of the bodies they made and the `scope`
- * entries naming those bodies, as one undoable step. `dependents` lists what else is deleted,
- * for the warning.
+ * behind), and so do the names, colours and materials of the bodies they made, their places in
+ * body groups and the `scope` entries naming those bodies, as one undoable step. `dependents`
+ * lists what else is deleted, for the warning.
  */
 export function deleteFeature(
   doc: ManufaktureDocument,
@@ -296,6 +297,7 @@ export function deleteFeature(
       commands.push({ type: 'setBodyProps', partId, bodyId: b.id, props: {} });
     }
   }
+  commands.push(...pruneGroupsCommands(part, gone));
   // The last first, so no deletion leaves a dependent without its dependency.
   const ids = [featureId, ...dependents].reverse();
   commands.push(...ids.map((id): Command => ({ type: 'deleteFeature', partId, featureId: id })));

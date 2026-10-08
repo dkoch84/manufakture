@@ -608,9 +608,12 @@ export function FeatureTree({
         )}
       </h2>
       <BodiesSection
+        // Its ticks, collapsed groups and open rename are for this part of this document only.
+        key={`${document.id}/${partId}`}
         documents={documents}
         model={model}
         settings={settings}
+        selection={selection}
         partId={partId}
         disabled={disabled}
         onMessage={setMessage}

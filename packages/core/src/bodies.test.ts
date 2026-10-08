@@ -559,3 +559,147 @@ describe('the document part counter', () => {
     ]);
   });
 });
+
+describe('body groups (format v17)', () => {
+  const group = (id: string, name: string, bodies: string[], index?: number): Command => ({
+    type: 'setBodyGroup',
+    partId: PART,
+    group: { id, name, bodies },
+    ...(index !== undefined && { index }),
+  });
+  const del = (groupId: string): Command => ({ type: 'deleteBodyGroup', partId: PART, groupId });
+
+  it('creates, renames, edits members and deletes a group, and undo restores each state', () => {
+    const d0 = deepFreeze(twoBodies());
+    expect('bodyGroups' in d0.parts[0]!).toBe(false);
+    const a = unwrap(apply(d0, group('group#1', 'Frame', ['extrude#1', 'extrude#2'])));
+    expect(a.document.parts[0]!.bodyGroups).toEqual([
+      { id: 'group#1', name: 'Frame', bodies: ['extrude#1', 'extrude#2'] },
+    ]);
+    expect(a.document.parts[0]!.nextIds.group).toBe(2);
+    expect(a.inverse).toEqual(del('group#1'));
+    // Undo of the first group gives back a part with no key at all (counters stay).
+    const undone = applied(a.document, a.inverse);
+    expect('bodyGroups' in undone.parts[0]!).toBe(false);
+    expect(undone.parts[0]!.nextIds.group).toBe(2);
+
+    const renamed = unwrap(apply(a.document, group('group#1', 'Base frame', ['extrude#1'])));
+    expect(renamed.document.parts[0]!.bodyGroups).toEqual([
+      { id: 'group#1', name: 'Base frame', bodies: ['extrude#1'] },
+    ]);
+    expect(applied(renamed.document, renamed.inverse)).toEqual(a.document);
+
+    const removed = unwrap(apply(renamed.document, del('group#1')));
+    expect('bodyGroups' in removed.document.parts[0]!).toBe(false);
+    expect(removed.inverse).toMatchObject({ type: 'restoreBodyGroup', index: 0 });
+    expect(applied(removed.document, removed.inverse)).toEqual(renamed.document);
+    // Deleting a group leaves the bodies and their props alone.
+    expect(removed.document.parts[0]!.features).toEqual(d0.parts[0]!.features);
+    expect(removed.document.parts[0]!.bodies).toEqual(d0.parts[0]!.bodies);
+  });
+
+  it('places a new group at index, and an undone delete back where it was', () => {
+    const doc = applied(twoBodies(), {
+      type: 'batch',
+      commands: [
+        group('group#1', 'B', []),
+        group('group#2', 'A', [], 0),
+        group('group#3', 'C', []),
+      ],
+    });
+    expect(doc.parts[0]!.bodyGroups!.map((g) => g.id)).toEqual(['group#2', 'group#1', 'group#3']);
+    const r = unwrap(apply(doc, del('group#1')));
+    expect(applied(r.document, r.inverse)).toEqual(doc);
+    const bad = apply(twoBodies(), group('group#1', 'A', [], 1));
+    expect(!bad.ok && bad.error.code).toBe('invalid-index');
+  });
+
+  it('never reuses a group id, and restores only ids that were allocated', () => {
+    const doc = applied(twoBodies(), group('group#1', 'A', []));
+    const gone = applied(doc, del('group#1'));
+    const reused = apply(gone, group('group#1', 'Again', []));
+    expect(!reused.ok && reused.error.code).toBe('id-reused');
+    expect(apply(gone, group('group#2', 'Again', [])).ok).toBe(true);
+    const never = apply(gone, {
+      type: 'restoreBodyGroup',
+      partId: PART,
+      group: { id: 'group#5', name: 'X', bodies: [] },
+      index: 0,
+    });
+    expect(!never.ok && never.error.code).toBe('invalid-id');
+    const twice = apply(doc, {
+      type: 'restoreBodyGroup',
+      partId: PART,
+      group: { id: 'group#1', name: 'X', bodies: [] },
+      index: 0,
+    });
+    expect(!twice.ok && twice.error.code).toBe('duplicate');
+  });
+
+  it('keeps a body in one group: a move between groups is a batch of two', () => {
+    const doc = applied(twoBodies(), {
+      type: 'batch',
+      commands: [group('group#1', 'A', ['extrude#1', 'extrude#2']), group('group#2', 'B', [])],
+    });
+    const twice = apply(doc, group('group#2', 'B', ['extrude#2']));
+    expect(twice.ok).toBe(false);
+    if (!twice.ok) {
+      expect(twice.error.code).toBe('duplicate');
+      expect(twice.error.blockers).toEqual(['extrude#2']);
+    }
+    const moved = unwrap(
+      apply(doc, {
+        type: 'batch',
+        commands: [group('group#1', 'A', ['extrude#1']), group('group#2', 'B', ['extrude#2'])],
+      }),
+    );
+    expect(moved.document.parts[0]!.bodyGroups!.map((g) => g.bodies)).toEqual([
+      ['extrude#1'],
+      ['extrude#2'],
+    ]);
+    expect(applied(moved.document, moved.inverse)).toEqual(doc);
+  });
+
+  it('does not block deleting a feature whose body is grouped; the member stays listed', () => {
+    const doc = applied(twoBodies(), group('group#1', 'A', ['extrude#1', 'extrude#2']));
+    const r = unwrap(apply(doc, { type: 'deleteFeature', partId: PART, featureId: 'extrude#2' }));
+    expect(r.document.parts[0]!.bodyGroups![0]!.bodies).toEqual(['extrude#1', 'extrude#2']);
+    // Undo brings the body back into its group.
+    expect(applied(r.document, r.inverse)).toEqual(doc);
+  });
+
+  it.each<[string, Command, CoreErrorCode]>([
+    ['a bad id', group('grp#1', 'A', []), 'schema'],
+    ['an empty name', group('group#1', '  ', []), 'schema'],
+    ['a bad body id', group('group#1', 'A', ['not a body']), 'schema'],
+    ['a body listed twice', group('group#1', 'A', ['extrude#1', 'extrude#1']), 'duplicate'],
+    ['a missing group', del('group#1'), 'not-found'],
+    ['a missing part', { ...group('group#1', 'A', []), partId: 'part#9' } as Command, 'not-found'],
+  ])('refuses %s', (_label, command, code) => {
+    const r = apply(twoBodies(), command);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error.code).toBe(code);
+  });
+
+  it('changes no feature result', () => {
+    const doc = twoBodies();
+    const next = applied(doc, group('group#1', 'A', ['extrude#1']));
+    const change = diffDocuments(doc, next);
+    expect(change.empty).toBe(false);
+    expect(change.parts).toEqual([
+      expect.objectContaining({ partId: PART, changed: [], firstAffectedIndex: null }),
+    ]);
+  });
+
+  it('is copied with a duplicated part, ids and all', () => {
+    const doc = applied(twoBodies(), group('group#1', 'A', ['extrude#1']));
+    const copy = applied(doc, {
+      type: 'duplicatePart',
+      sourcePartId: PART,
+      partId: `part#${doc.nextIds.part}`,
+      name: 'Copy',
+    });
+    expect(copy.parts[1]!.bodyGroups).toEqual(doc.parts[0]!.bodyGroups);
+    expect(copy.parts[1]!.nextIds.group).toBe(2);
+  });
+});
