@@ -1,0 +1,487 @@
+{
+  "format": "manufakture-review",
+  "version": 1,
+  "key": {
+    "documentId": "doc-cabinet",
+    "branch": "<branch>",
+    "baseVersion": "<base-version>",
+    "headRevision": 4
+  },
+  "documentName": "Cabinet",
+  "commands": {
+    "batches": {
+      "items": [
+        {
+          "revision": 2,
+          "cause": "execute",
+          "label": "Raise the shelf",
+          "commands": [
+            {
+              "type": "editFeature",
+              "summary": "Edited sketch Shelf: plane.origin[2] 355.6 to 406.4",
+              "json": "{\"type\":\"editFeature\",\"partId\":\"part#1\",\"feature\":{\"id\":\"sketch#5\",\"kind\":\"sketch\",\"name\":\"Shelf\",\"suppressed\":false,\"plane\":{\"type\":\"plane\",\"origin\":[0,0,406.4],\"normal\":[0,0,1],\"xDir\":[1,0,0]},\"entities\":[{\"id\":\"e17\",\"kind\":\"line\",\"construction\":false,\"start\":[11.90625,0],\"end\":[597.69375,0]},{\"id\":\"e18\",\"kind\":\"line\",\"construction\":false,\"start\":[597.69375,0],\"end\":[597.69375,280.19374999999997]},{\"id\":\"e19\",\"kind\":\"line\",\"construction\":false,\"start\":[597.69375,280.19374999999997],\"end\":[11.90625,280.19374999999997]},{\"id\":\"e20\",\"kind\":\"line\",\"construction\":false,\"start\":[11.90625,280.19374999999997],\"end\":[11.90625,0]}],\"constraints\":[]}}",
+              "truncated": false
+            }
+          ]
+        },
+        {
+          "revision": 3,
+          "cause": "execute",
+          "label": "Thicker back",
+          "commands": [
+            {
+              "type": "editFeature",
+              "summary": "Edited board Back: params.stock \"us-ply-7-32\" to \"us-ply-23-32\"",
+              "json": "{\"type\":\"editFeature\",\"partId\":\"part#1\",\"feature\":{\"id\":\"extension#6\",\"kind\":\"extension\",\"name\":\"Back\",\"suppressed\":false,\"extension\":\"wood.board\",\"schemaVersion\":1,\"dependsOn\":[\"sketch#6\"],\"references\":[],\"expressions\":{},\"params\":{\"form\":\"panel\",\"sketch\":\"sketch#6\",\"stock\":\"us-ply-23-32\"},\"operation\":\"new\"}}",
+              "truncated": false
+            }
+          ]
+        },
+        {
+          "revision": 4,
+          "cause": "execute",
+          "label": "Settings",
+          "commands": [
+            {
+              "type": "setDomainData",
+              "summary": "Set the wood data: Saw kerf: not set to 3 mm",
+              "json": "{\"type\":\"setDomainData\",\"namespace\":\"wood\",\"schemaVersion\":1,\"data\":{\"kerf\":{\"source\":\"3 mm\",\"lengthUnit\":\"mm\",\"angleUnit\":\"deg\"}}}",
+              "truncated": false
+            },
+            {
+              "type": "setDomainData",
+              "summary": "Set the stock data: Stock override added for 3/4\" plywood (us-ply-23-32): price 52 USD per sheet",
+              "json": "{\"type\":\"setDomainData\",\"namespace\":\"stock\",\"schemaVersion\":1,\"data\":{\"overrides\":{\"us-ply-23-32\":{\"price\":{\"amount\":52,\"per\":\"sheet\",\"currency\":\"USD\"}}}}}",
+              "truncated": false
+            },
+            {
+              "type": "renameFeature",
+              "summary": "Renamed Back to Back panel",
+              "json": "{\"type\":\"renameFeature\",\"partId\":\"part#1\",\"featureId\":\"extension#6\",\"name\":\"Back panel\"}",
+              "truncated": false
+            }
+          ]
+        }
+      ],
+      "omitted": 0
+    },
+    "omittedCommands": 0
+  },
+  "features": {
+    "parts": [
+      {
+        "id": "part#1",
+        "name": "Part 1",
+        "change": "changed",
+        "fields": [],
+        "items": {
+          "items": [
+            {
+              "id": "sketch#5",
+              "kind": "sketch",
+              "name": "Shelf",
+              "changes": ["edited"],
+              "summary": "Edited sketch Shelf: plane.origin[2] 355.6 to 406.4",
+              "fields": [
+                {
+                  "path": "plane.origin[2]",
+                  "before": "355.6",
+                  "after": "406.4"
+                }
+              ]
+            },
+            {
+              "id": "extension#6",
+              "kind": "extension:wood.board",
+              "name": "Back panel",
+              "changes": ["renamed", "edited"],
+              "summary": "Renamed Back to Back panel; Edited board Back panel: params.stock \"us-ply-7-32\" to \"us-ply-23-32\"",
+              "fields": [
+                {
+                  "path": "params.stock",
+                  "before": "\"us-ply-7-32\"",
+                  "after": "\"us-ply-23-32\""
+                }
+              ]
+            }
+          ],
+          "omitted": 0
+        }
+      }
+    ],
+    "assemblies": []
+  },
+  "document": [],
+  "domains": [
+    {
+      "namespace": "stock",
+      "change": "added",
+      "lines": ["Stock override added for 3/4\" plywood (us-ply-23-32): price 52 USD per sheet"],
+      "omitted": 0
+    },
+    {
+      "namespace": "wood",
+      "change": "added",
+      "lines": ["Saw kerf: not set to 3 mm"],
+      "omitted": 0
+    }
+  ],
+  "scripts": [],
+  "renders": [
+    {
+      "name": "isometric",
+      "camera": {
+        "position": [305.377338062, 142.297649731, 381.577350269],
+        "target": [304.799987793, 142.875, 381],
+        "up": [-0.408248290464, 0.408248290464, 0.816496580928],
+        "extent": 1234.61936446
+      },
+      "base": {
+        "sha256": "e73895434b3e6930c57dc80c3638891b55ad04a97a174dd965a7d08e85bc0ed2",
+        "bytes": 4706,
+        "width": 320,
+        "height": 240
+      },
+      "head": {
+        "sha256": "44303bc7df491cb9c51cf9eb352a8b258a5ae693bd63d90e065b6c1acd1b6d98",
+        "bytes": 4739,
+        "width": 320,
+        "height": 240
+      }
+    },
+    {
+      "name": "front",
+      "camera": {
+        "position": [304.799987793, 141.875, 381],
+        "target": [304.799987793, 142.875, 381],
+        "up": [0, 0, 1],
+        "extent": 952.5
+      },
+      "base": {
+        "sha256": "e27f9d7a7f95a3830da365cff68c53d149c050307b8df2713c8dcb6e1d2b6a93",
+        "bytes": 1163,
+        "width": 320,
+        "height": 240
+      },
+      "head": {
+        "sha256": "729d118d0aa6e29d383256eb81d38a854252e9796aa25006c999b0a342657e08",
+        "bytes": 1190,
+        "width": 320,
+        "height": 240
+      }
+    },
+    {
+      "name": "top",
+      "camera": {
+        "position": [304.799987793, 142.875, 382],
+        "target": [304.799987793, 142.875, 381],
+        "up": [0, 1, 0],
+        "extent": 537.882331399
+      },
+      "base": {
+        "sha256": "f9ad359e2dd7019020f37098229e78ad35ffb3c10939054f50eae510e10cba24",
+        "bytes": 957,
+        "width": 320,
+        "height": 240
+      },
+      "head": {
+        "sha256": "d207df85fe75869493d3a28f90907a2761030aa6fd72cbba505a5ebcaf6534d2",
+        "bytes": 976,
+        "width": 320,
+        "height": 240
+      }
+    },
+    {
+      "name": "right",
+      "camera": {
+        "position": [305.799987793, 142.875, 381],
+        "target": [304.799987793, 142.875, 381],
+        "up": [0, 0, 1],
+        "extent": 952.5
+      },
+      "base": {
+        "sha256": "6acde85b2c5da19329c7ec3eb97338c7656531b44338d2d842af0ae7f3833ba6",
+        "bytes": 1006,
+        "width": 320,
+        "height": 240
+      },
+      "head": {
+        "sha256": "dafad80b468601f311be15265940208eb619d9e5a71762389ce3be52b79db7d6",
+        "bytes": 1013,
+        "width": 320,
+        "height": 240
+      }
+    }
+  ],
+  "regen": {
+    "new": {
+      "items": [],
+      "omitted": 0
+    },
+    "remaining": {
+      "items": [],
+      "omitted": 0
+    },
+    "resolved": {
+      "items": [],
+      "omitted": 0
+    },
+    "counts": {
+      "base": {
+        "errors": 0,
+        "warnings": 0
+      },
+      "head": {
+        "errors": 0,
+        "warnings": 0
+      }
+    }
+  },
+  "measurements": {
+    "bodies": {
+      "items": [
+        {
+          "partId": "part#1",
+          "bodyId": "extension#1",
+          "name": "Left side",
+          "change": "changed",
+          "base": {
+            "volume": 3850812.01232,
+            "area": 476531.305,
+            "mass": null,
+            "material": null,
+            "boundingBox": {
+              "min": [0, 0, 0],
+              "max": [18.25625, 285.75, 762]
+            }
+          },
+          "head": {
+            "volume": 3793777.34817,
+            "area": 476208.725,
+            "mass": null,
+            "material": null,
+            "boundingBox": {
+              "min": [0, 0, 0],
+              "max": [18.25625, 285.75, 762]
+            }
+          },
+          "delta": {
+            "volume": -57034.66415,
+            "area": -322.58,
+            "mass": null
+          }
+        },
+        {
+          "partId": "part#1",
+          "bodyId": "extension#2",
+          "name": "Right side",
+          "change": "changed",
+          "base": {
+            "volume": 3850812.01232,
+            "area": 476531.305,
+            "mass": null,
+            "material": null,
+            "boundingBox": {
+              "min": [591.34375, 0, 0],
+              "max": [609.6, 285.75, 762]
+            }
+          },
+          "head": {
+            "volume": 3793777.34817,
+            "area": 476208.725,
+            "mass": null,
+            "material": null,
+            "boundingBox": {
+              "min": [591.34375, 0, 0],
+              "max": [609.6, 285.75, 762]
+            }
+          },
+          "delta": {
+            "volume": -57034.66415,
+            "area": -322.58,
+            "mass": null
+          }
+        },
+        {
+          "partId": "part#1",
+          "bodyId": "extension#5",
+          "name": "Shelf",
+          "change": "changed",
+          "base": {
+            "volume": 2996471.27047,
+            "area": 359887.133047,
+            "mass": null,
+            "material": null,
+            "boundingBox": {
+              "min": [11.90625, 0, 355.6],
+              "max": [597.69375, 280.19375, 373.85625]
+            }
+          },
+          "head": {
+            "volume": 2996471.27047,
+            "area": 359887.133047,
+            "mass": null,
+            "material": null,
+            "boundingBox": {
+              "min": [11.90625, 0, 406.4],
+              "max": [597.69375, 280.19375, 424.65625]
+            }
+          },
+          "delta": {
+            "volume": 0,
+            "area": 0,
+            "mass": null
+          }
+        },
+        {
+          "partId": "part#1",
+          "bodyId": "extension#6",
+          "name": "Back panel",
+          "change": "changed",
+          "base": {
+            "volume": 2480143.72922,
+            "area": 907717.438594,
+            "mass": null,
+            "material": null,
+            "boundingBox": {
+              "min": [11.90625, 280.19375, 0],
+              "max": [597.69375, 285.75, 762]
+            }
+          },
+          "head": {
+            "volume": 8149043.68172,
+            "area": 941951.241094,
+            "mass": null,
+            "material": null,
+            "boundingBox": {
+              "min": [11.90625, 267.49375, 0],
+              "max": [597.69375, 285.75, 762]
+            }
+          },
+          "delta": {
+            "volume": 5668899.9525,
+            "area": 34233.8025,
+            "mass": null
+          }
+        },
+        {
+          "partId": "part#1",
+          "bodyId": "extension#3",
+          "name": "Bottom",
+          "change": "unchanged",
+          "base": {
+            "volume": 2996471.27047,
+            "area": 359887.133047,
+            "mass": null,
+            "material": null,
+            "boundingBox": {
+              "min": [11.90625, 0, 0],
+              "max": [597.69375, 280.19375, 18.25625]
+            }
+          },
+          "head": {
+            "volume": 2996471.27047,
+            "area": 359887.133047,
+            "mass": null,
+            "material": null,
+            "boundingBox": {
+              "min": [11.90625, 0, 0],
+              "max": [597.69375, 280.19375, 18.25625]
+            }
+          },
+          "delta": {
+            "volume": 0,
+            "area": 0,
+            "mass": null
+          }
+        },
+        {
+          "partId": "part#1",
+          "bodyId": "extension#4",
+          "name": "Top",
+          "change": "unchanged",
+          "base": {
+            "volume": 2996471.27047,
+            "area": 359887.133047,
+            "mass": null,
+            "material": null,
+            "boundingBox": {
+              "min": [11.90625, 0, 743.74375],
+              "max": [597.69375, 280.19375, 762]
+            }
+          },
+          "head": {
+            "volume": 2996471.27047,
+            "area": 359887.133047,
+            "mass": null,
+            "material": null,
+            "boundingBox": {
+              "min": [11.90625, 0, 743.74375],
+              "max": [597.69375, 280.19375, 762]
+            }
+          },
+          "delta": {
+            "volume": 0,
+            "area": 0,
+            "mass": null
+          }
+        }
+      ],
+      "omitted": 0
+    },
+    "interference": []
+  },
+  "quantities": {
+    "rows": {
+      "items": [
+        {
+          "list": "cut list",
+          "key": "board|us-ply-23-32|plywood|762000000x585787500x18256250x-",
+          "item": "Back panel",
+          "category": "sheet",
+          "unit": "area",
+          "base": null,
+          "head": {
+            "quantity": 1,
+            "extended": 446370.075
+          }
+        },
+        {
+          "list": "cut list",
+          "key": "board|us-ply-7-32|plywood|762000000x585787500x5556250x-",
+          "item": "Back",
+          "category": "sheet",
+          "unit": "area",
+          "base": {
+            "quantity": 1,
+            "extended": 446370.075
+          },
+          "head": null
+        }
+      ],
+      "omitted": 0
+    },
+    "totals": [],
+    "notes": []
+  },
+  "merge": {
+    "ok": true,
+    "applied": {
+      "items": ["Raise the shelf", "Thicker back", "Settings"],
+      "omitted": 0
+    },
+    "dropped": {
+      "items": [],
+      "omitted": 0
+    },
+    "renamed": {
+      "items": [],
+      "omitted": 0
+    },
+    "replaced": {
+      "items": [],
+      "omitted": 0
+    },
+    "changed": true
+  }
+}

@@ -4,11 +4,13 @@
 
 export {
   BackendBundleStore,
+  MAX_BUNDLE_BLOB_BYTES,
   MAX_BUNDLE_BYTES,
   MAX_NOTE,
   MemoryBundleStore,
   type BundleBase,
   type BundleBuilder,
+  type BundleContext,
   type BundleHead,
   type BundleStore,
   type StoredBundle,
@@ -46,6 +48,9 @@ export { nodeExtensions, readBundledFont, sessionEngineApi } from './node-host';
 export {
   MAX_GEOMETRY_RESULTS,
   MAX_MEASURE_ITEMS,
+  errorsOf,
+  measure,
+  quantities,
   type BodyRef,
   type ErrorLine,
   type GeometryHit,
@@ -53,6 +58,7 @@ export {
   type MeasureQuery,
   type ObjectQuery,
   type Quantities,
+  type QueryContext,
 } from './queries';
 export { schemaIndex, schemaOf } from './schema';
 export {

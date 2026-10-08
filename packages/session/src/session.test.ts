@@ -11,6 +11,7 @@ import {
 import { MAIN_BRANCH } from '@manufakture/library';
 import { NodeBranchLocks } from '@manufakture/library/node';
 import { afterEach, describe, expect, it } from 'vitest';
+import { BackendBundleStore } from './bundles';
 import type { Session } from './session';
 import { PART, bracketDocument } from './test/fixtures';
 import { ok, seeded, type Seeded } from './test/setup';
@@ -373,6 +374,33 @@ describe('submit', () => {
     const info = await s.info();
     expect(info.review).toBe('open');
     expect(info.bundle).toEqual({ revision: 2, stale: true });
+  });
+
+  it("gives the builder reads, an engine and the document's blob store", async () => {
+    const s = await start();
+    ok(await s.apply({ label: 'Add a boss', commands: BOSS }));
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+    let sha = '';
+    ok(
+      await s.submit(async (_base, head, context) => {
+        expect(context.documentId).toBe(seed.documentId);
+        expect(ok(await context.library.readLog(context.documentId, head.branch))).toHaveLength(1);
+        const engine = await context.engine();
+        await engine.close();
+        sha = await context.putBlob(png);
+        return { image: sha };
+      }),
+    );
+    expect(sha).toMatch(/^[0-9a-f]{64}$/);
+    const store = new BackendBundleStore(seed.backend);
+    expect(await store.readBlob(seed.documentId, sha)).toEqual(png);
+    // Stored where the library keeps imported files, and checked against its name on read.
+    const path = `documents/${seed.documentId}/blobs/${sha}`;
+    expect(await seed.backend.read(path)).toEqual(png);
+    await seed.backend.write(path, new Uint8Array([1]));
+    expect(await store.readBlob(seed.documentId, sha)).toBeNull();
+    expect(await store.readBlob(seed.documentId, '../head.json')).toBeNull();
+    await expect(store.putBlob(seed.documentId, new Uint8Array())).rejects.toThrow();
   });
 });
 

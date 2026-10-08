@@ -460,6 +460,30 @@ importers:
         specifier: workspace:*
         version: link:../sketch
 
+  packages/review:
+    dependencies:
+      '@manufakture/core':
+        specifier: workspace:*
+        version: link:../core
+      '@manufakture/domain-construction':
+        specifier: workspace:*
+        version: link:../domain-construction
+      '@manufakture/domain-wood':
+        specifier: workspace:*
+        version: link:../domain-wood
+      '@manufakture/library':
+        specifier: workspace:*
+        version: link:../library
+      '@manufakture/regen':
+        specifier: workspace:*
+        version: link:../regen
+      '@manufakture/render':
+        specifier: workspace:*
+        version: link:../render
+      '@manufakture/session':
+        specifier: workspace:*
+        version: link:../session
+
   packages/script:
     dependencies:
       '@jitl/quickjs-wasmfile-release-sync':

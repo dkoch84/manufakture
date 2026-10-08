@@ -1,0 +1,367 @@
+{
+  "format": "manufakture-review",
+  "version": 1,
+  "key": {
+    "documentId": "doc-bracket",
+    "branch": "<branch>",
+    "baseVersion": "<base-version>",
+    "headRevision": 5
+  },
+  "documentName": "Bracket",
+  "commands": {
+    "batches": {
+      "items": [
+        {
+          "revision": 2,
+          "cause": "execute",
+          "label": "Add a boss",
+          "commands": [
+            {
+              "type": "addFeature",
+              "summary": "Added sketch Boss sketch (1 entity, 0 constraints)",
+              "json": "{\"type\":\"addFeature\",\"partId\":\"part#1\",\"feature\":{\"id\":\"sketch#3\",\"kind\":\"sketch\",\"name\":\"Boss sketch\",\"suppressed\":false,\"plane\":{\"type\":\"plane\",\"origin\":[0,0,40],\"normal\":[0,0,1],\"xDir\":[1,0,0]},\"entities\":[{\"id\":\"e9\",\"kind\":\"circle\",\"construction\":false,\"center\":[3,0],\"radius\":2}],\"constraints\":[]}}",
+              "truncated": false
+            },
+            {
+              "type": "addFeature",
+              "summary": "Added extrude Boss (add, blind 5 mm) from Boss sketch",
+              "json": "{\"type\":\"addFeature\",\"partId\":\"part#1\",\"feature\":{\"id\":\"extrude#2\",\"kind\":\"extrude\",\"name\":\"Boss\",\"suppressed\":false,\"profile\":{\"sketch\":\"sketch#3\"},\"operation\":\"add\",\"extent\":{\"type\":\"blind\",\"distance\":{\"source\":\"5 mm\",\"lengthUnit\":\"mm\",\"angleUnit\":\"deg\"}},\"reverse\":false}}",
+              "truncated": false
+            }
+          ]
+        },
+        {
+          "revision": 3,
+          "cause": "execute",
+          "label": "Smaller fillet",
+          "commands": [
+            {
+              "type": "editFeature",
+              "summary": "Edited Fillet 1: radius 4 mm to 2 mm",
+              "json": "{\"type\":\"editFeature\",\"partId\":\"part#1\",\"feature\":{\"id\":\"fillet#1\",\"kind\":\"fillet\",\"name\":\"Fillet 1\",\"suppressed\":false,\"edges\":[{\"id\":\"r1\",\"ref\":{\"faces\":[\"extrude#1:side:e3\",\"extrude#1:side:e4\"]}}],\"radius\":{\"source\":\"2 mm\",\"lengthUnit\":\"mm\",\"angleUnit\":\"deg\"}}}",
+              "truncated": false
+            }
+          ]
+        },
+        {
+          "revision": 4,
+          "cause": "execute",
+          "label": "Aluminium",
+          "commands": [
+            {
+              "type": "setMaterial",
+              "summary": "Set the material of Part 1 to Aluminium 6061",
+              "json": "{\"type\":\"setMaterial\",\"partId\":\"part#1\",\"material\":\"aluminium-6061\"}",
+              "truncated": false
+            }
+          ]
+        },
+        {
+          "revision": 5,
+          "cause": "execute",
+          "label": "Two brackets",
+          "commands": [
+            {
+              "type": "addAssembly",
+              "summary": "Added assembly Pair",
+              "json": "{\"type\":\"addAssembly\",\"assemblyId\":\"assembly#1\",\"name\":\"Pair\"}",
+              "truncated": false
+            },
+            {
+              "type": "addInstance",
+              "summary": "Added instance Left of Part 1 to Pair at (0, 0, 0), fixed",
+              "json": "{\"type\":\"addInstance\",\"assemblyId\":\"assembly#1\",\"instance\":{\"id\":\"inst#1\",\"name\":\"Left\",\"source\":{\"part\":\"part#1\"},\"fixed\":true,\"suppressed\":false,\"pose\":{\"translation\":[0,0,0],\"rotation\":[0,0,0,1]}}}",
+              "truncated": false
+            },
+            {
+              "type": "addInstance",
+              "summary": "Added instance Right of Part 1 to Pair at (10, 0, 0), fixed",
+              "json": "{\"type\":\"addInstance\",\"assemblyId\":\"assembly#1\",\"instance\":{\"id\":\"inst#2\",\"name\":\"Right\",\"source\":{\"part\":\"part#1\"},\"fixed\":true,\"suppressed\":false,\"pose\":{\"translation\":[10,0,0],\"rotation\":[0,0,0,1]}}}",
+              "truncated": false
+            }
+          ]
+        }
+      ],
+      "omitted": 0
+    },
+    "omittedCommands": 0
+  },
+  "features": {
+    "parts": [
+      {
+        "id": "part#1",
+        "name": "Part 1",
+        "change": "changed",
+        "fields": [
+          {
+            "path": "material",
+            "before": "none",
+            "after": "\"aluminium-6061\""
+          }
+        ],
+        "items": {
+          "items": [
+            {
+              "id": "fillet#1",
+              "kind": "fillet",
+              "name": "Fillet 1",
+              "changes": ["edited"],
+              "summary": "Edited Fillet 1: radius 4 mm to 2 mm",
+              "fields": [
+                {
+                  "path": "radius",
+                  "before": "4 mm",
+                  "after": "2 mm"
+                }
+              ]
+            },
+            {
+              "id": "sketch#3",
+              "kind": "sketch",
+              "name": "Boss sketch",
+              "changes": ["added"],
+              "summary": "Added sketch Boss sketch (1 entity, 0 constraints)",
+              "fields": []
+            },
+            {
+              "id": "extrude#2",
+              "kind": "extrude",
+              "name": "Boss",
+              "changes": ["added"],
+              "summary": "Added extrude Boss (add, blind 5 mm) from Boss sketch",
+              "fields": []
+            }
+          ],
+          "omitted": 0
+        }
+      }
+    ],
+    "assemblies": [
+      {
+        "id": "assembly#1",
+        "name": "Pair",
+        "change": "added",
+        "fields": [],
+        "items": {
+          "items": [
+            {
+              "id": "inst#1",
+              "kind": "instance",
+              "name": "Left",
+              "changes": ["added"],
+              "summary": "Added instance Left of Part 1",
+              "fields": []
+            },
+            {
+              "id": "inst#2",
+              "kind": "instance",
+              "name": "Right",
+              "changes": ["added"],
+              "summary": "Added instance Right of Part 1",
+              "fields": []
+            }
+          ],
+          "omitted": 0
+        }
+      }
+    ]
+  },
+  "document": [],
+  "domains": [],
+  "scripts": [],
+  "renders": [
+    {
+      "name": "isometric",
+      "camera": {
+        "position": [25.5773502692, -0.57735026919, 23.0773502692],
+        "target": [25, 0, 22.5],
+        "up": [-0.408248290464, 0.408248290464, 0.816496580928],
+        "extent": 86.7527617236
+      },
+      "base": {
+        "sha256": "b6b30ee0856e1d1a42ef1831eaec478e437fce9bbeff987cf0a90cd26a5b2cef",
+        "bytes": 4590,
+        "width": 320,
+        "height": 240
+      },
+      "head": {
+        "sha256": "2b976d0504e06c736067a13e464311ecc12b0bc2945666f8d69276b7a6bcad43",
+        "bytes": 4700,
+        "width": 320,
+        "height": 240
+      }
+    },
+    {
+      "name": "front",
+      "camera": {
+        "position": [25, -1, 22.5],
+        "target": [25, 0, 22.5],
+        "up": [0, 0, 1],
+        "extent": 56.25
+      },
+      "base": {
+        "sha256": "7f52bc0fe8f633844a2db6317e45cb539cf179ee484d0971879fd032a2878ee9",
+        "bytes": 1215,
+        "width": 320,
+        "height": 240
+      },
+      "head": {
+        "sha256": "bbb3701c12ab484d14ff650afd61f2f03122de11b4773e681bab0b8a01c407c3",
+        "bytes": 1218,
+        "width": 320,
+        "height": 240
+      }
+    },
+    {
+      "name": "top",
+      "camera": {
+        "position": [25, 0, 23.5],
+        "target": [25, 0, 22.5],
+        "up": [0, 1, 0],
+        "extent": 44.1176470588
+      },
+      "base": {
+        "sha256": "b5e2162948a4722a041d5cc4f5540915867d8187019a167de3849f2bc8474995",
+        "bytes": 2697,
+        "width": 320,
+        "height": 240
+      },
+      "head": {
+        "sha256": "e42952f5d1f4924584d467c1dac3f03753c1e5c31287ecc9618744b285f56bb9",
+        "bytes": 2887,
+        "width": 320,
+        "height": 240
+      }
+    },
+    {
+      "name": "right",
+      "camera": {
+        "position": [26, 0, 22.5],
+        "target": [25, 0, 22.5],
+        "up": [0, 0, 1],
+        "extent": 56.25
+      },
+      "base": {
+        "sha256": "6cc7a825f3de2be137f003267448095890118b57e6f30ecab9475ba7072ba4a4",
+        "bytes": 1133,
+        "width": 320,
+        "height": 240
+      },
+      "head": {
+        "sha256": "85f5dc5f133079f054e3f3192402f485c4e00089abe8644831b46b1cab341bf0",
+        "bytes": 1274,
+        "width": 320,
+        "height": 240
+      }
+    }
+  ],
+  "regen": {
+    "new": {
+      "items": [],
+      "omitted": 0
+    },
+    "remaining": {
+      "items": [],
+      "omitted": 0
+    },
+    "resolved": {
+      "items": [],
+      "omitted": 0
+    },
+    "counts": {
+      "base": {
+        "errors": 0,
+        "warnings": 0
+      },
+      "head": {
+        "errors": 0,
+        "warnings": 0
+      }
+    }
+  },
+  "measurements": {
+    "bodies": {
+      "items": [
+        {
+          "partId": "part#1",
+          "bodyId": "extrude#1",
+          "name": "Extrude 1",
+          "change": "changed",
+          "base": {
+            "volume": 14729.778835,
+            "area": 6566.15262378,
+            "mass": null,
+            "material": null,
+            "boundingBox": {
+              "min": [0, -15, 0],
+              "max": [50, 15, 40]
+            }
+          },
+          "head": {
+            "volume": 14715.3540269,
+            "area": 6649.58625316,
+            "mass": 39.7314558725,
+            "material": "aluminium-6061",
+            "boundingBox": {
+              "min": [0, -15, 0],
+              "max": [50, 15, 45]
+            }
+          },
+          "delta": {
+            "volume": -14.4248081,
+            "area": 83.43362938,
+            "mass": null
+          }
+        }
+      ],
+      "omitted": 0
+    },
+    "interference": [
+      {
+        "assemblyId": "assembly#1",
+        "name": "Pair",
+        "base": null,
+        "head": [
+          {
+            "a": "inst#1",
+            "b": "inst#2",
+            "volume": 6394.26204342
+          }
+        ]
+      }
+    ]
+  },
+  "quantities": {
+    "rows": {
+      "items": [],
+      "omitted": 0
+    },
+    "totals": [],
+    "notes": []
+  },
+  "merge": {
+    "ok": true,
+    "applied": {
+      "items": ["Add a boss", "Aluminium", "Two brackets"],
+      "omitted": 0
+    },
+    "dropped": {
+      "items": [
+        {
+          "label": "Smaller fillet",
+          "message": "No feature \"fillet#1\" in part part#1"
+        }
+      ],
+      "omitted": 0
+    },
+    "renamed": {
+      "items": [],
+      "omitted": 0
+    },
+    "replaced": {
+      "items": [],
+      "omitted": 0
+    },
+    "changed": true
+  }
+}

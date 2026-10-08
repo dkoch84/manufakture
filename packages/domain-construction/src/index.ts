@@ -150,6 +150,7 @@ export {
   type WallLayer,
   type WallType,
 } from './data';
+export { constructionDataSummariser } from './review';
 export {
   DATA_ID_PATTERN,
   MAX_LEVEL_LENGTH,

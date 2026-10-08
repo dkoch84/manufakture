@@ -76,6 +76,12 @@ export {
   type WoodSettings,
 } from './wood-data';
 export {
+  expressionText,
+  stockDataSummariser,
+  woodDataSummariser,
+  type DomainDataSummariser,
+} from './review';
+export {
   DADO_STOPS,
   DEFAULT_DOWEL,
   JOINT_EXPRESSIONS,

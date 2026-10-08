@@ -1,30 +1,24 @@
 {
-  "name": "@manufakture/session",
+  "name": "@manufakture/review",
   "version": "0.0.0",
   "private": true,
   "type": "module",
   "license": "GPL-3.0-or-later",
   "exports": {
     ".": "./src/index.ts",
-    "./worker": "./src/worker/entry.ts",
-    "./test-fixtures": "./src/test/fixtures.ts",
-    "./test-setup": "./src/test/setup.ts"
+    "./data": "./src/data-entry.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run --root ../.. --project packages packages/session"
+    "test": "vitest run --root ../.. --project packages packages/review"
   },
   "dependencies": {
     "@manufakture/core": "workspace:*",
     "@manufakture/domain-construction": "workspace:*",
     "@manufakture/domain-wood": "workspace:*",
-    "@manufakture/io": "workspace:*",
-    "@manufakture/kernel": "workspace:*",
     "@manufakture/library": "workspace:*",
     "@manufakture/regen": "workspace:*",
-    "@manufakture/stock": "workspace:*",
-    "@manufakture/sync": "workspace:*",
-    "comlink": "^4.4.2",
-    "zod": "^4.6.5"
+    "@manufakture/render": "workspace:*",
+    "@manufakture/session": "workspace:*"
   }
 }

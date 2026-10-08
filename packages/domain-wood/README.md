@@ -60,6 +60,12 @@ here.
 1/8" kerf (a common full-kerf blade, a typical value), no trims, no stage limit, grain respected.
 No board reads them, so changing them rebuilds no body.
 
+**For a reviewer** (`src/review.ts`, M8 plan T8.3a): `woodDataSummariser` and
+`stockDataSummariser` are the review bundle's summarisers of the two namespaces
+(`@manufakture/review`): given a namespace's entry in two documents, the lines a person reads
+("Saw kerf: 1/8" to 3 mm", "Stock override added for 3/4" plywood (us-ply-23-32): price 52 USD
+per sheet"), values as typed; data that does not read is said to. They never throw.
+
 ## The board feature
 
 A board is an extension feature with `operation: 'new'` (anything else is refused on `operation`)

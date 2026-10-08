@@ -1209,6 +1209,13 @@ export class Session {
             document: this.#document,
             regen: this.#model.last,
           },
+          {
+            documentId: this.documentId,
+            library: this.#host.library,
+            engine: this.#host.engine,
+            limits: this.#host.limits,
+            putBlob: (bytes) => store.putBlob(this.documentId, bytes),
+          },
         );
       } catch (e) {
         return sessionError(

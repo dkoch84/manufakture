@@ -103,6 +103,12 @@ optional; absent lists are empty.
   (`spacing`, `ladderSpacing`) at least 50 mm (`MIN_SPACING`) and plate stock lengths at least
   300 mm (`MIN_PLATE_STOCK`). These are far outside framing practice, not sizings.
 
+**For a reviewer** (`src/review.ts`, M8 plan T8.3a): `constructionDataSummariser` is the review
+bundle's summariser of `domains.construction` (`@manufakture/review`): levels, wall, floor and roof
+types matched by id ("Added wall type "Exterior 2x6""), header rules by position, framing and
+takeoff field by field ("Framing spacing: not set to 24 in"), values as typed. Data that does not
+read is said to; it never throws.
+
 **Registration.** `constructionDomain`: namespace `construction`, `reads: ['stock']`, the reader
 of `domains.construction`, the `construction.wall` and `construction.opening` types and the
 member stage (see [Walls and openings](#walls-and-openings-constructionwall-constructionopening)). The

@@ -55,7 +55,7 @@ await session.close(); // the branch stays
 | `doc-comments.ts`        | Reads core's doc comments from its sources; `doc-comments.test.ts` keeps `doc-comments.json` equal to them.              |
 | `imports.ts`             | Reference import bodies (STEP through the kernel, STL as a mesh), read again on the session's kernel.                    |
 | `rebase.ts`              | Replaying the branch's commands onto Main's head, one command at a time (T7.1f's merge).                                 |
-| `bundles.ts`             | `BundleBuilder`, `BundleStore`, `BackendBundleStore` (the branch directory) and `MemoryBundleStore`.                     |
+| `bundles.ts`             | `BundleBuilder` and its context, `BundleStore`, `BackendBundleStore` (branch directory, blobs) and `MemoryBundleStore`.  |
 | `limits.ts`, `errors.ts` | The limits, and the typed errors every refusal is.                                                                       |
 
 ## Sessions
@@ -93,10 +93,15 @@ review: 'open' }` (the library checks `clientName`). The session takes the branc
   restore of the whole document and undo whatever Main did after the update. The branch id
   changes; nothing else that names it exists before a submit. When Main has not moved, nothing
   happens (`changed: false`).
-- **Submit** (`submit(builder, note)`): `builder(base, head)` (T8.3a's; a stub in the tests) gets
-  the base version's document and the head's document, revision and last regen, and returns the
-  bundle as JSON data. It is stored with the branch (`BundleStore`, keyed by the head revision;
-  at most `MAX_BUNDLE_BYTES`) and the branch's review state set to `submitted`, the only state an
+- **Submit** (`submit(builder, note)`): `builder(base, head, context)` (`@manufakture/review`'s
+  `bundleBuilder`; a stub in the tests) gets the base version's document, the head's document,
+  revision and last regen, and a `BundleContext`: the document id, the library (for the branch's
+  log and the merge preview), `engine()` to start an engine of the host's kind for the builder
+  alone (it closes it), the session's limits, and `putBlob(bytes)`, which stores an image as a
+  blob of the document (`documents/<id>/blobs/<sha256>`, at most `MAX_BUNDLE_BLOB_BYTES`) and
+  returns its SHA-256. It returns the bundle as JSON data. It is stored with the branch
+  (`BundleStore`, keyed by the head revision; at most `MAX_BUNDLE_BYTES`) and the branch's review
+  state set to `submitted`, the only state an
   agent may set (ADR 0016 decision 9), and only from `open`. A later write returns the branch to
   `open`, and `info().bundle.stale` turns true. A write to a branch the reviewer has `approved`
   or `rejected` is refused; one with `changes-requested` returns it to `open`.
@@ -197,7 +202,9 @@ from Main"), which name a revision and change no document.
 **No path from input to storage paths.** Document ids must be `isStorableId`, branch and session
 ids `isBranchId`/`isStorableId`, before any library or lock call; the library and `NodeBackend`
 confine every path again. `BackendBundleStore` writes
-`documents/<id>/branches/<branch>/review-<rev>.json` from those ids and a revision number only.
+`documents/<id>/branches/<branch>/review-<rev>.json` from those ids and a revision number only,
+and blobs as `documents/<id>/blobs/<sha256>` from the document id and the hash it computes;
+`readBlob` refuses a name that is not a SHA-256 and bytes that do not match it.
 The worker's script and Node options come from the host's configuration, never from a call.
 
 ## Engines and memory
@@ -311,9 +318,12 @@ them by the import feature's id as `bodyId`; a file that does not read is listed
   by the lock file); Main and a person's branch refused on resume, writes to an approved branch
   refused; update from Main after a person deleted the fillet on Main: the fillet edit dropped by
   label, the boss replayed on a new branch, the old branch gone, undo still reaching the
-  replayed batch; submit with a stub builder, stored, then stale after a write; and each limit's
+  replayed batch; submit with a stub builder, stored, then stale after a write; the builder's
+  context (log reads, an engine, blobs stored and checked on read); and each limit's
   typed error (commands per batch, nested too; batches per session; document size; sessions per
   process; idle close; labels).
+- The fixtures and the seeded library are exported for other packages' tests
+  (`@manufakture/session/test-fixtures`, `@manufakture/session/test-setup`).
 - `queries.test.ts`: the cabinet (tree, objects, faces by plane and position, distance and angle
   between them, cut list as data, clearance and overlap between two boards); an assembly of two
   brackets made with symbolic ids (interference at the solved and at given poses); the shed
@@ -349,8 +359,5 @@ them by the import feature's id as `bodyId`; a file that does not read is listed
 - **Exact clearance between bodies.** The kernel has no minimum-distance operation between two
   shapes; `clearance` reports overlap volumes exactly and, for bodies apart, a bounding-box gap,
   which is a lower bound. Distances between faces of one body are exact (`targets`).
-- **Bundle storage format.** `BackendBundleStore` writes the bundle as one JSON file per head
-  revision in the branch directory; T8.3a decides the final layout (PNGs as blobs) and may give
-  the library an API for it.
 - **Sessions over sync** (T8.4b): opening from a sync server, batches as sync entries, and
   carrying provenance with `adoptBranch`.

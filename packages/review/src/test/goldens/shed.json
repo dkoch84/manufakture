@@ -1,0 +1,715 @@
+{
+  "format": "manufakture-review",
+  "version": 1,
+  "key": {
+    "documentId": "doc-shed",
+    "branch": "<branch>",
+    "baseVersion": "<base-version>",
+    "headRevision": 3
+  },
+  "documentName": "Shed",
+  "commands": {
+    "batches": {
+      "items": [
+        {
+          "revision": 2,
+          "cause": "execute",
+          "label": "Move window 1",
+          "commands": [
+            {
+              "type": "editFeature",
+              "summary": "Edited opening Window 1: expressions.position 48 in to 60 in",
+              "json": "{\"type\":\"editFeature\",\"partId\":\"part#1\",\"feature\":{\"id\":\"extension#5\",\"kind\":\"extension\",\"name\":\"Window 1\",\"suppressed\":false,\"extension\":\"construction.opening\",\"schemaVersion\":1,\"dependsOn\":[\"extension#1\"],\"references\":[],\"expressions\":{\"height\":{\"source\":\"36\",\"lengthUnit\":\"in\",\"angleUnit\":\"deg\"},\"position\":{\"source\":\"60\",\"lengthUnit\":\"in\",\"angleUnit\":\"deg\"},\"sill\":{\"source\":\"44\",\"lengthUnit\":\"in\",\"angleUnit\":\"deg\"},\"width\":{\"source\":\"24\",\"lengthUnit\":\"in\",\"angleUnit\":\"deg\"}},\"params\":{\"from\":\"start\",\"header\":{\"kind\":\"auto\"},\"kind\":\"window\",\"segment\":1}}}",
+              "truncated": false
+            }
+          ]
+        },
+        {
+          "revision": 3,
+          "cause": "execute",
+          "label": "Studs at 24 inches",
+          "commands": [
+            {
+              "type": "setDomainData",
+              "summary": "Set the construction data: Framing spacing: not set to 24 in",
+              "json": "{\"type\":\"setDomainData\",\"namespace\":\"construction\",\"schemaVersion\":1,\"data\":{\"floorTypes\":[{\"id\":\"shed-floor\",\"joistStock\":\"us-2x6\",\"name\":\"Shed floor\",\"subfloor\":\"us-osb-23-32\"}],\"levels\":[{\"elevation\":{\"angleUnit\":\"deg\",\"lengthUnit\":\"in\",\"source\":\"0\"},\"height\":{\"angleUnit\":\"deg\",\"lengthUnit\":\"in\",\"source\":\"97.125\"},\"id\":\"level-1\",\"name\":\"Level 1\"}],\"roofTypes\":[{\"id\":\"shed-roof\",\"name\":\"Shed roof\",\"overhang\":{\"angleUnit\":\"deg\",\"lengthUnit\":\"in\",\"source\":\"12\"},\"rafterStock\":\"us-2x6\",\"rakeOverhang\":{\"angleUnit\":\"deg\",\"lengthUnit\":\"in\",\"source\":\"12\"},\"ridgeStock\":\"us-2x8\",\"sheathing\":\"us-osb-7-16\"}],\"wallTypes\":[{\"id\":\"ext-2x4\",\"layers\":[{\"id\":\"sheathing\",\"kind\":\"sheathing\",\"stock\":\"us-osb-7-16\"},{\"header\":{\"jacks\":1,\"plies\":2,\"stock\":\"us-2x6\"},\"id\":\"framing\",\"kind\":\"framing\",\"stock\":\"us-2x4\"}],\"name\":\"Exterior 2x4\"}],\"framing\":{\"spacing\":{\"source\":\"24\",\"lengthUnit\":\"in\",\"angleUnit\":\"deg\"}}}}",
+              "truncated": false
+            }
+          ]
+        }
+      ],
+      "omitted": 0
+    },
+    "omittedCommands": 0
+  },
+  "features": {
+    "parts": [
+      {
+        "id": "part#1",
+        "name": "Part 1",
+        "change": "changed",
+        "fields": [],
+        "items": {
+          "items": [
+            {
+              "id": "extension#5",
+              "kind": "extension:construction.opening",
+              "name": "Window 1",
+              "changes": ["edited"],
+              "summary": "Edited opening Window 1: expressions.position 48 in to 60 in",
+              "fields": [
+                {
+                  "path": "expressions.position",
+                  "before": "48 in",
+                  "after": "60 in"
+                }
+              ]
+            }
+          ],
+          "omitted": 0
+        }
+      }
+    ],
+    "assemblies": []
+  },
+  "document": [],
+  "domains": [
+    {
+      "namespace": "construction",
+      "change": "changed",
+      "lines": ["Framing spacing: not set to 24 in"],
+      "omitted": 0
+    }
+  ],
+  "scripts": [],
+  "renders": [
+    {
+      "name": "isometric",
+      "camera": {
+        "position": [2438.97739376, 1828.22260701, 1603.27608074],
+        "target": [2438.40004349, 1828.79995728, 1602.69873047],
+        "up": [-0.408248290464, 0.408248290464, 0.816496580928],
+        "extent": 8920.21054906
+      },
+      "base": {
+        "sha256": "057986f45ee160d14652ce6e4468f61cfbcc2fe36c9fe0bb3e97b60cc91dedca",
+        "bytes": 5649,
+        "width": 320,
+        "height": 240
+      },
+      "head": {
+        "sha256": "704d5a9afe58adf1873fdbb1abb580f75c085449bbe75357f8af69d155ff3cf2",
+        "bytes": 5664,
+        "width": 320,
+        "height": 240
+      }
+    },
+    {
+      "name": "front",
+      "camera": {
+        "position": [2438.40004349, 1827.79995728, 1602.69873047],
+        "target": [2438.40004349, 1828.79995728, 1602.69873047],
+        "up": [0, 0, 1],
+        "extent": 4840.94127206
+      },
+      "base": {
+        "sha256": "420511a94c666b4717c470ad6e64d87747238713c9defdd0c405c6e3d90d6956",
+        "bytes": 1476,
+        "width": 320,
+        "height": 240
+      },
+      "head": {
+        "sha256": "0c570951af88158c009f753b38f49ea78df17bd4e8e00280f0e890b7828cbd3c",
+        "bytes": 1491,
+        "width": 320,
+        "height": 240
+      }
+    },
+    {
+      "name": "top",
+      "camera": {
+        "position": [2438.40004349, 1828.79995728, 1603.69873047],
+        "target": [2438.40004349, 1828.79995728, 1602.69873047],
+        "up": [0, 1, 0],
+        "extent": 5490.18920562
+      },
+      "base": {
+        "sha256": "9e33cf47686c4e3942e5231ca289ea4b8beee1791b3801b70e04a5c180f985d0",
+        "bytes": 944,
+        "width": 320,
+        "height": 240
+      },
+      "head": {
+        "sha256": "9e33cf47686c4e3942e5231ca289ea4b8beee1791b3801b70e04a5c180f985d0",
+        "bytes": 944,
+        "width": 320,
+        "height": 240
+      }
+    },
+    {
+      "name": "right",
+      "camera": {
+        "position": [2439.40004349, 1828.79995728, 1602.69873047],
+        "target": [2438.40004349, 1828.79995728, 1602.69873047],
+        "up": [0, 0, 1],
+        "extent": 4750.88745117
+      },
+      "base": {
+        "sha256": "ab017e03e1f04727d008c71bcf68a4d2942a8405c4c5693ea593bd7ccaa9753e",
+        "bytes": 2174,
+        "width": 320,
+        "height": 240
+      },
+      "head": {
+        "sha256": "37e1f7c6c91896a519b6950af2c9c2839ba66d7caefd793e0c0701afe9a4cdb5",
+        "bytes": 2142,
+        "width": 320,
+        "height": 240
+      }
+    }
+  ],
+  "regen": {
+    "new": {
+      "items": [],
+      "omitted": 0
+    },
+    "remaining": {
+      "items": [],
+      "omitted": 0
+    },
+    "resolved": {
+      "items": [],
+      "omitted": 0
+    },
+    "counts": {
+      "base": {
+        "errors": 0,
+        "warnings": 0
+      },
+      "head": {
+        "errors": 0,
+        "warnings": 0
+      }
+    }
+  },
+  "measurements": {
+    "bodies": {
+      "items": [
+        {
+          "partId": "part#1",
+          "bodyId": "extension#1:layer/sheathing",
+          "name": "extension#1:layer/sheathing",
+          "change": "unchanged",
+          "base": {
+            "volume": 121305241.26,
+            "area": 22063171.5994,
+            "mass": null,
+            "material": null,
+            "boundingBox": {
+              "min": [0, -11.1125, 0],
+              "max": [4876.8, 0, 2466.975]
+            }
+          },
+          "head": {
+            "volume": 121305241.26,
+            "area": 22063171.5994,
+            "mass": null,
+            "material": null,
+            "boundingBox": {
+              "min": [0, -11.1125, 0],
+              "max": [4876.8, 0, 2466.975]
+            }
+          },
+          "delta": {
+            "volume": 0,
+            "area": 0,
+            "mass": null
+          }
+        },
+        {
+          "partId": "part#1",
+          "bodyId": "extension#2:layer/sheathing",
+          "name": "extension#2:layer/sheathing",
+          "change": "unchanged",
+          "base": {
+            "volume": 133693861.644,
+            "area": 24225102.7594,
+            "mass": null,
+            "material": null,
+            "boundingBox": {
+              "min": [0, 3657.6, 0],
+              "max": [4876.8, 3668.7125, 2466.975]
+            }
+          },
+          "head": {
+            "volume": 133693861.644,
+            "area": 24225102.7594,
+            "mass": null,
+            "material": null,
+            "boundingBox": {
+              "min": [0, 3657.6, 0],
+              "max": [4876.8, 3668.7125, 2466.975]
+            }
+          },
+          "delta": {
+            "volume": 0,
+            "area": 0,
+            "mass": null
+          }
+        },
+        {
+          "partId": "part#1",
+          "bodyId": "extension#3:layer/sheathing",
+          "name": "extension#3:layer/sheathing",
+          "change": "unchanged",
+          "base": {
+            "volume": 79622695.593,
+            "area": 14511573.7994,
+            "mass": null,
+            "material": null,
+            "boundingBox": {
+              "min": [4876.8, 0, 0],
+              "max": [4887.9125, 3657.6, 2466.975]
+            }
+          },
+          "head": {
+            "volume": 79622695.593,
+            "area": 14511573.7994,
+            "mass": null,
+            "material": null,
+            "boundingBox": {
+              "min": [4876.8, 0, 0],
+              "max": [4887.9125, 3657.6, 2466.975]
+            }
+          },
+          "delta": {
+            "volume": 0,
+            "area": 0,
+            "mass": null
+          }
+        },
+        {
+          "partId": "part#1",
+          "bodyId": "extension#4:layer/sheathing",
+          "name": "extension#4:layer/sheathing",
+          "change": "unchanged",
+          "base": {
+            "volume": 100270396.233,
+            "area": 18182534.1994,
+            "mass": null,
+            "material": null,
+            "boundingBox": {
+              "min": [-11.1125, 0, 0],
+              "max": [0, 3657.6, 2466.975]
+            }
+          },
+          "head": {
+            "volume": 100270396.233,
+            "area": 18182534.1994,
+            "mass": null,
+            "material": null,
+            "boundingBox": {
+              "min": [-11.1125, 0, 0],
+              "max": [0, 3657.6, 2466.975]
+            }
+          },
+          "delta": {
+            "volume": 0,
+            "area": 0,
+            "mass": null
+          }
+        },
+        {
+          "partId": "part#1",
+          "bodyId": "extension#8:layer/subfloor",
+          "name": "extension#8:layer/subfloor",
+          "change": "unchanged",
+          "base": {
+            "volume": 325643735.808,
+            "area": 35986379.64,
+            "mass": null,
+            "material": null,
+            "boundingBox": {
+              "min": [0, 0, -18.25625],
+              "max": [4876.8, 3657.6, 0]
+            }
+          },
+          "head": {
+            "volume": 325643735.808,
+            "area": 35986379.64,
+            "mass": null,
+            "material": null,
+            "boundingBox": {
+              "min": [0, 0, -18.25625],
+              "max": [4876.8, 3657.6, 0]
+            }
+          },
+          "delta": {
+            "volume": 0,
+            "area": 0,
+            "mass": null
+          }
+        },
+        {
+          "partId": "part#1",
+          "bodyId": "extension#9:layer/sheathing-e1",
+          "name": "extension#9:layer/sheathing-e1",
+          "change": "unchanged",
+          "base": {
+            "volume": 145434435.962,
+            "area": 26349878.1917,
+            "mass": null,
+            "material": null,
+            "boundingBox": {
+              "min": [-304.8, -309.76966108, 2426.31434823],
+              "max": [5181.6, 1828.8, 3503.05367039]
+            }
+          },
+          "head": {
+            "volume": 145434435.962,
+            "area": 26349878.1917,
+            "mass": null,
+            "material": null,
+            "boundingBox": {
+              "min": [-304.8, -309.76966108, 2426.31434823],
+              "max": [5181.6, 1828.8, 3503.05367039]
+            }
+          },
+          "delta": {
+            "volume": 0,
+            "area": 0,
+            "mass": null
+          }
+        },
+        {
+          "partId": "part#1",
+          "bodyId": "extension#9:layer/sheathing-e3",
+          "name": "extension#9:layer/sheathing-e3",
+          "change": "unchanged",
+          "base": {
+            "volume": 145434435.962,
+            "area": 26349878.1917,
+            "mass": null,
+            "material": null,
+            "boundingBox": {
+              "min": [-304.8, 1828.8, 2426.31434823],
+              "max": [5181.6, 3967.36966108, 3503.05367039]
+            }
+          },
+          "head": {
+            "volume": 145434435.962,
+            "area": 26349878.1917,
+            "mass": null,
+            "material": null,
+            "boundingBox": {
+              "min": [-304.8, 1828.8, 2426.31434823],
+              "max": [5181.6, 3967.36966108, 3503.05367039]
+            }
+          },
+          "delta": {
+            "volume": 0,
+            "area": 0,
+            "mass": null
+          }
+        },
+        {
+          "partId": "part#1",
+          "bodyId": "extension#9:layer/gable-e2-sheathing",
+          "name": "extension#9:layer/gable-e2-sheathing",
+          "change": "unchanged",
+          "base": {
+            "volume": 18582930.576,
+            "area": 3430597.10092,
+            "mass": null,
+            "material": null,
+            "boundingBox": {
+              "min": [4876.8, 0, 2466.975],
+              "max": [4887.9125, 3657.6, 3381.375]
+            }
+          },
+          "head": {
+            "volume": 18582930.576,
+            "area": 3430597.10092,
+            "mass": null,
+            "material": null,
+            "boundingBox": {
+              "min": [4876.8, 0, 2466.975],
+              "max": [4887.9125, 3657.6, 3381.375]
+            }
+          },
+          "delta": {
+            "volume": 0,
+            "area": 0,
+            "mass": null
+          }
+        },
+        {
+          "partId": "part#1",
+          "bodyId": "extension#9:layer/gable-e4-sheathing",
+          "name": "extension#9:layer/gable-e4-sheathing",
+          "change": "unchanged",
+          "base": {
+            "volume": 18582930.576,
+            "area": 3430597.10092,
+            "mass": null,
+            "material": null,
+            "boundingBox": {
+              "min": [-11.1125, 0, 2466.975],
+              "max": [0, 3657.6, 3381.375]
+            }
+          },
+          "head": {
+            "volume": 18582930.576,
+            "area": 3430597.10092,
+            "mass": null,
+            "material": null,
+            "boundingBox": {
+              "min": [-11.1125, 0, 2466.975],
+              "max": [0, 3657.6, 3381.375]
+            }
+          },
+          "delta": {
+            "volume": 0,
+            "area": 0,
+            "mass": null
+          }
+        }
+      ],
+      "omitted": 0
+    },
+    "interference": []
+  },
+  "quantities": {
+    "rows": {
+      "items": [
+        {
+          "list": "takeoff Part 1",
+          "key": "framing|us-2x4|2352675000",
+          "item": "Stud, Corner stud, King stud",
+          "category": "framing",
+          "unit": "each",
+          "base": {
+            "quantity": 51,
+            "extended": 51
+          },
+          "head": {
+            "quantity": 37,
+            "extended": 37
+          }
+        },
+        {
+          "list": "takeoff Part 1",
+          "key": "framing|us-2x4|1041400000",
+          "item": "Cripple",
+          "category": "framing",
+          "unit": "each",
+          "base": {
+            "quantity": 2,
+            "extended": 2
+          },
+          "head": {
+            "quantity": 1,
+            "extended": 1
+          }
+        },
+        {
+          "list": "takeoff Part 1",
+          "key": "framing|us-2x4|835025000",
+          "item": "Gable stud",
+          "category": "framing",
+          "unit": "each",
+          "base": null,
+          "head": {
+            "quantity": 2,
+            "extended": 2
+          }
+        },
+        {
+          "list": "takeoff Part 1",
+          "key": "framing|us-2x4|314325000",
+          "item": "Gable stud",
+          "category": "framing",
+          "unit": "each",
+          "base": null,
+          "head": {
+            "quantity": 2,
+            "extended": 2
+          }
+        },
+        {
+          "list": "takeoff Part 1",
+          "key": "framing|us-2x4|225425000",
+          "item": "Gable stud",
+          "category": "framing",
+          "unit": "each",
+          "base": null,
+          "head": {
+            "quantity": 2,
+            "extended": 2
+          }
+        },
+        {
+          "list": "takeoff Part 1",
+          "key": "lumber|us-2x4|3657600000",
+          "item": "2x4",
+          "category": "lumber",
+          "unit": "each",
+          "base": {
+            "quantity": 2,
+            "extended": 2
+          },
+          "head": {
+            "quantity": 1,
+            "extended": 1
+          }
+        },
+        {
+          "list": "takeoff Part 1",
+          "key": "lumber|us-2x4-precut-92-5-8",
+          "item": "2x4 precut stud 92-5/8\"",
+          "category": "lumber",
+          "unit": "each",
+          "base": {
+            "quantity": 51,
+            "extended": 51
+          },
+          "head": {
+            "quantity": 37,
+            "extended": 37
+          }
+        },
+        {
+          "list": "takeoff Part 1",
+          "key": "framing|us-2x4|822325000",
+          "item": "Gable stud",
+          "category": "framing",
+          "unit": "each",
+          "base": {
+            "quantity": 2,
+            "extended": 2
+          },
+          "head": null
+        },
+        {
+          "list": "takeoff Part 1",
+          "key": "framing|us-2x4|733425000",
+          "item": "Gable stud",
+          "category": "framing",
+          "unit": "each",
+          "base": {
+            "quantity": 2,
+            "extended": 2
+          },
+          "head": null
+        },
+        {
+          "list": "takeoff Part 1",
+          "key": "framing|us-2x4|415925000",
+          "item": "Gable stud",
+          "category": "framing",
+          "unit": "each",
+          "base": {
+            "quantity": 2,
+            "extended": 2
+          },
+          "head": null
+        },
+        {
+          "list": "takeoff Part 1",
+          "key": "framing|us-2x4|327025000",
+          "item": "Gable stud",
+          "category": "framing",
+          "unit": "each",
+          "base": {
+            "quantity": 2,
+            "extended": 2
+          },
+          "head": null
+        },
+        {
+          "list": "takeoff Part 1",
+          "key": "framing|us-2x4|212725000",
+          "item": "Gable stud",
+          "category": "framing",
+          "unit": "each",
+          "base": {
+            "quantity": 2,
+            "extended": 2
+          },
+          "head": null
+        },
+        {
+          "list": "takeoff Part 1",
+          "key": "framing|us-2x4|123825000",
+          "item": "Gable stud",
+          "category": "framing",
+          "unit": "each",
+          "base": {
+            "quantity": 2,
+            "extended": 2
+          },
+          "head": null
+        }
+      ],
+      "omitted": 0
+    },
+    "totals": [
+      {
+        "list": "takeoff Part 1",
+        "group": "framing",
+        "unit": "length",
+        "base": 357092.132485,
+        "head": 320592.332485
+      },
+      {
+        "list": "takeoff Part 1",
+        "group": "framing",
+        "unit": "each",
+        "base": 156,
+        "head": 135
+      },
+      {
+        "list": "takeoff Part 1",
+        "group": "lumber",
+        "unit": "board-foot",
+        "base": 1019.77083333,
+        "head": 939.729166667
+      },
+      {
+        "list": "takeoff Part 1",
+        "group": "lumber",
+        "unit": "length",
+        "base": 361997.625,
+        "head": 325402.575
+      },
+      {
+        "list": "takeoff Part 1",
+        "group": "lumber",
+        "unit": "each",
+        "base": 105,
+        "head": 90
+      }
+    ],
+    "notes": []
+  },
+  "merge": {
+    "ok": true,
+    "applied": {
+      "items": ["Move window 1", "Studs at 24 inches"],
+      "omitted": 0
+    },
+    "dropped": {
+      "items": [],
+      "omitted": 0
+    },
+    "renamed": {
+      "items": [],
+      "omitted": 0
+    },
+    "replaced": {
+      "items": [],
+      "omitted": 0
+    },
+    "changed": true
+  }
+}
