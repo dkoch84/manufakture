@@ -1,0 +1,89 @@
+{
+  "machine": {
+    "node": "v26.10.0",
+    "cpu": "AMD Ryzen 5 7600X 6-Core Processor",
+    "cores": 12,
+    "memoryGiB": 62,
+    "date": "2026-10-08"
+  },
+  "memory": {
+    "base": {
+      "rss": 201.6,
+      "heapUsed": 78.4,
+      "external": 11.1,
+      "arrayBuffers": 0.7
+    },
+    "steps": [
+      {
+        "sessions": 1,
+        "rss": 602.1,
+        "heapUsed": 204.6,
+        "external": 53.5,
+        "arrayBuffers": 42.6,
+        "wasmMiB": 128
+      },
+      {
+        "sessions": 2,
+        "rss": 782.9,
+        "heapUsed": 318,
+        "external": 54,
+        "arrayBuffers": 42.3,
+        "wasmMiB": 256
+      },
+      {
+        "sessions": 3,
+        "rss": 944,
+        "heapUsed": 433.8,
+        "external": 55,
+        "arrayBuffers": 43.2,
+        "wasmMiB": 384
+      },
+      {
+        "sessions": 4,
+        "rss": 1183.8,
+        "heapUsed": 550.3,
+        "external": 54.4,
+        "arrayBuffers": 43.3,
+        "wasmMiB": 512
+      },
+      {
+        "sessions": 5,
+        "rss": 1322.9,
+        "heapUsed": 667,
+        "external": 55.3,
+        "arrayBuffers": 43.6,
+        "wasmMiB": 640
+      },
+      {
+        "sessions": 6,
+        "rss": 1499,
+        "heapUsed": 783.6,
+        "external": 55.7,
+        "arrayBuffers": 44.1,
+        "wasmMiB": 768
+      }
+    ],
+    "closedButReferenced": {
+      "rss": 1498.8,
+      "heapUsed": 763.7,
+      "external": 54.5,
+      "arrayBuffers": 44.1
+    },
+    "dropped": {
+      "rss": 1217.7,
+      "heapUsed": 197,
+      "external": 52.3,
+      "arrayBuffers": 41.8
+    }
+  },
+  "turns": {
+    "fixture": "shed",
+    "aloneMedianMs": 38,
+    "togetherMedianMs": 151,
+    "togetherMaxMs": 261.1,
+    "fortyBatchesWallMs": 1521.2
+  },
+  "sharedService": {
+    "ok": 20
+  }
+}

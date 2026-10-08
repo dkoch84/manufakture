@@ -1,0 +1,78 @@
+{
+  "machine": {
+    "node": "v26.10.0",
+    "cpu": "AMD Ryzen 5 7600X 6-Core Processor",
+    "cores": 12,
+    "memoryGiB": 62,
+    "date": "2026-10-08"
+  },
+  "note": "ms; memory in MiB (rss, V8 heap used, external, array buffers) after a full GC",
+  "sinceProcessStartMs": 69,
+  "importMs": 391.4,
+  "kernelServiceMs": 464.7,
+  "open": {
+    "totalMs": 167.2,
+    "steps": {
+      "readMain": 1.7,
+      "version": 1.7,
+      "branch": 4.3,
+      "lock": 0.3,
+      "readBranch": 1,
+      "store": 0.1,
+      "firstRegen": 138.5
+    }
+  },
+  "firstBatch": {
+    "execute": 3.5,
+    "regen": 195.3,
+    "measure": 8.7,
+    "save": 2.1,
+    "total": 209.8
+  },
+  "nextTenBatchesMs": [
+    168,
+    164.8,
+    159.6,
+    156.8,
+    156.3,
+    153.4,
+    153.6,
+    151.6,
+    150.4,
+    152
+  ],
+  "coldToFirstRegenMs": 1023.3,
+  "kernelHeapMiB": 128,
+  "memory": {
+    "base": {
+      "rss": 68.2,
+      "heapUsed": 8.8,
+      "external": 2.4,
+      "arrayBuffers": 0.2
+    },
+    "afterImport": {
+      "rss": 212.9,
+      "heapUsed": 78.4,
+      "external": 11.3,
+      "arrayBuffers": 0.7
+    },
+    "afterKernel": {
+      "rss": 495.3,
+      "heapUsed": 192,
+      "external": 51.8,
+      "arrayBuffers": 41.4
+    },
+    "afterOpen": {
+      "rss": 532.3,
+      "heapUsed": 196.7,
+      "external": 51.9,
+      "arrayBuffers": 41.4
+    },
+    "afterBatches": {
+      "rss": 568.6,
+      "heapUsed": 204.1,
+      "external": 52.9,
+      "arrayBuffers": 41.8
+    }
+  }
+}

@@ -1,0 +1,153 @@
+{
+  "machine": {
+    "node": "v26.10.0",
+    "cpu": "AMD Ryzen 5 7600X 6-Core Processor",
+    "cores": 12,
+    "memoryGiB": 62,
+    "date": "2026-10-08"
+  },
+  "batches": 1000,
+  "fixture": "bracket (engraved)",
+  "rows": [
+    {
+      "batch": 100,
+      "wasmHeapMiB": 128,
+      "beforeGc": {
+        "rss": 812.2,
+        "heapUsed": 246.6
+      },
+      "afterGc": {
+        "rss": 812.1,
+        "heapUsed": 206.1
+      },
+      "recycles": 0,
+      "instancesAlive": "1"
+    },
+    {
+      "batch": 200,
+      "wasmHeapMiB": 265.5,
+      "beforeGc": {
+        "rss": 775.9,
+        "heapUsed": 218.2
+      },
+      "afterGc": {
+        "rss": 775.9,
+        "heapUsed": 201
+      },
+      "recycles": 0,
+      "instancesAlive": "1"
+    },
+    {
+      "batch": 300,
+      "wasmHeapMiB": 318.6,
+      "beforeGc": {
+        "rss": 856.1,
+        "heapUsed": 232.8
+      },
+      "afterGc": {
+        "rss": 856.1,
+        "heapUsed": 201.3
+      },
+      "recycles": 0,
+      "instancesAlive": "1"
+    },
+    {
+      "batch": 400,
+      "wasmHeapMiB": 458.9,
+      "beforeGc": {
+        "rss": 956.7,
+        "heapUsed": 221
+      },
+      "afterGc": {
+        "rss": 956.7,
+        "heapUsed": 201.5
+      },
+      "recycles": 0,
+      "instancesAlive": "1"
+    },
+    {
+      "batch": 500,
+      "wasmHeapMiB": 128,
+      "beforeGc": {
+        "rss": 1295.5,
+        "heapUsed": 474.5
+      },
+      "afterGc": {
+        "rss": 1295.8,
+        "heapUsed": 313.9
+      },
+      "recycles": 1,
+      "instancesAlive": "01"
+    },
+    {
+      "batch": 600,
+      "wasmHeapMiB": 221.3,
+      "beforeGc": {
+        "rss": 762.3,
+        "heapUsed": 227.1
+      },
+      "afterGc": {
+        "rss": 762.3,
+        "heapUsed": 201.6
+      },
+      "recycles": 1,
+      "instancesAlive": "01"
+    },
+    {
+      "batch": 700,
+      "wasmHeapMiB": 318.6,
+      "beforeGc": {
+        "rss": 849.9,
+        "heapUsed": 247.4
+      },
+      "afterGc": {
+        "rss": 849.9,
+        "heapUsed": 201.6
+      },
+      "recycles": 1,
+      "instancesAlive": "01"
+    },
+    {
+      "batch": 800,
+      "wasmHeapMiB": 458.9,
+      "beforeGc": {
+        "rss": 966,
+        "heapUsed": 223.7
+      },
+      "afterGc": {
+        "rss": 966,
+        "heapUsed": 201.7
+      },
+      "recycles": 1,
+      "instancesAlive": "01"
+    },
+    {
+      "batch": 900,
+      "wasmHeapMiB": 128,
+      "beforeGc": {
+        "rss": 1267.7,
+        "heapUsed": 457
+      },
+      "afterGc": {
+        "rss": 1267.3,
+        "heapUsed": 313.8
+      },
+      "recycles": 2,
+      "instancesAlive": "001"
+    },
+    {
+      "batch": 1000,
+      "wasmHeapMiB": 221.3,
+      "beforeGc": {
+        "rss": 784.8,
+        "heapUsed": 212.7
+      },
+      "afterGc": {
+        "rss": 784.8,
+        "heapUsed": 201.7
+      },
+      "recycles": 2,
+      "instancesAlive": "001"
+    }
+  ]
+}

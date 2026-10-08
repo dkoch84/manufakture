@@ -1,0 +1,40 @@
+{
+  "machine": {
+    "node": "v26.10.0",
+    "cpu": "AMD Ryzen 5 7600X 6-Core Processor",
+    "cores": 12,
+    "memoryGiB": 62,
+    "date": "2026-10-08"
+  },
+  "textWithoutFetchImpl": {
+    "status": "error",
+    "errors": [
+      {
+        "code": "font",
+        "fontId": "font#1",
+        "field": [
+          "entities",
+          0,
+          "source",
+          "font"
+        ],
+        "message": "This font could not be read (inter-bold): fetch failed"
+      }
+    ]
+  },
+  "domainsWithoutRegistration": {
+    "failed": 29,
+    "first": {
+      "id": "extension#1",
+      "errors": [
+        {
+          "code": "unsupported",
+          "field": [
+            "extension"
+          ],
+          "message": "This build has no domain for \"wood.board\" features (version 1): it makes no geometry here; open the document in a build that ships the \"wood\" domain"
+        }
+      ]
+    }
+  }
+}

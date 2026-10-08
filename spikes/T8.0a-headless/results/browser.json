@@ -1,0 +1,954 @@
+{
+  "machine": {
+    "node": "v26.10.0",
+    "cpu": "AMD Ryzen 5 7600X 6-Core Processor",
+    "cores": 12,
+    "memoryGiB": 62,
+    "date": "2026-10-08"
+  },
+  "chromium": "153.0.8010.12",
+  "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+  "secureContext": true,
+  "crossOriginIsolated": true,
+  "pageBuildMs": 630.2,
+  "requests": [
+    "/",
+    "/assets/index-BVx2BJrj.js",
+    "/inputs.json",
+    "/assets/regen-worker-Ch8toBEz.js",
+    "/assets/rolldown-runtime-CbXtAM7H.js",
+    "/assets/opencascade_single-B9DBEong.wasm",
+    "/assets/opencascade_single-C7RNL4M3.js",
+    "/assets/planegcs-r8EUavAY.wasm",
+    "/assets/text-worker-BhLioI2Z.js",
+    "/assets/Inter-Bold-SlGuY_v7.ttf",
+    "/assets/manifold-fWy0kqeB.js",
+    "/assets/manifold-BE4c7gO-.wasm"
+  ],
+  "rows": [
+    {
+      "key": "bracket/opened",
+      "identical": true,
+      "differences": [],
+      "memberMeshes": [],
+      "bodies": 1,
+      "triangles": 472,
+      "members": 0,
+      "names": 48,
+      "nodeRegenMs": 137.9,
+      "chromiumRegenMs": 146,
+      "chromiumWorkerReadyMs": 420.9
+    },
+    {
+      "key": "bracket/engraved",
+      "identical": true,
+      "differences": [],
+      "memberMeshes": [],
+      "bodies": 1,
+      "triangles": 784,
+      "members": 0,
+      "names": 325,
+      "nodeRegenMs": 223.4,
+      "chromiumRegenMs": 374.5,
+      "chromiumWorkerReadyMs": 396.4
+    },
+    {
+      "key": "bracket/story",
+      "identical": true,
+      "differences": [],
+      "memberMeshes": [],
+      "bodies": 1,
+      "triangles": 784,
+      "members": 0,
+      "names": 325,
+      "nodeRegenMs": 149.5,
+      "chromiumRegenMs": 357.2,
+      "chromiumWorkerReadyMs": 383
+    },
+    {
+      "key": "bracket/long-7",
+      "identical": true,
+      "differences": [],
+      "memberMeshes": [],
+      "bodies": 1,
+      "triangles": 784,
+      "members": 0,
+      "names": 325,
+      "nodeRegenMs": 146.9,
+      "chromiumRegenMs": 368.7,
+      "chromiumWorkerReadyMs": 397.4
+    },
+    {
+      "key": "bracket/long-500",
+      "identical": true,
+      "differences": [],
+      "memberMeshes": [],
+      "bodies": 1,
+      "triangles": 784,
+      "members": 0,
+      "names": 325,
+      "nodeRegenMs": 141.8,
+      "chromiumRegenMs": 367.9,
+      "chromiumWorkerReadyMs": 395.6
+    },
+    {
+      "key": "bookshelf/opened",
+      "identical": true,
+      "differences": [],
+      "memberMeshes": [],
+      "bodies": 12,
+      "triangles": 1312,
+      "members": 0,
+      "names": 452,
+      "nodeRegenMs": 315.4,
+      "chromiumRegenMs": 470.2,
+      "chromiumWorkerReadyMs": 394.4
+    },
+    {
+      "key": "bookshelf/story",
+      "identical": true,
+      "differences": [],
+      "memberMeshes": [],
+      "bodies": 12,
+      "triangles": 1312,
+      "members": 0,
+      "names": 452,
+      "nodeRegenMs": 295,
+      "chromiumRegenMs": 477,
+      "chromiumWorkerReadyMs": 390.4
+    },
+    {
+      "key": "bookshelf/long-7",
+      "identical": true,
+      "differences": [],
+      "memberMeshes": [],
+      "bodies": 12,
+      "triangles": 1312,
+      "members": 0,
+      "names": 452,
+      "nodeRegenMs": 290.1,
+      "chromiumRegenMs": 469.5,
+      "chromiumWorkerReadyMs": 401.1
+    },
+    {
+      "key": "bookshelf/long-500",
+      "identical": true,
+      "differences": [],
+      "memberMeshes": [],
+      "bodies": 12,
+      "triangles": 1312,
+      "members": 0,
+      "names": 452,
+      "nodeRegenMs": 284.5,
+      "chromiumRegenMs": 491.7,
+      "chromiumWorkerReadyMs": 408
+    },
+    {
+      "key": "shed/opened",
+      "identical": false,
+      "differences": [
+        "bodies[part#1/extension#9:layer/gable-e2-sheathing].bodyKey: \"7bf1705bccf0c607b9771cec185f021c/extension#9:layer/gable-e2-sheathing\" != \"92eeb9b26e55ecd4e01470fd120563dd/extension#9:layer/gable-e2-sheathing\"",
+        "bodies[part#1/extension#9:layer/gable-e4-sheathing].bodyKey: \"88530ef5e659d99f07434514d580a50a/extension#9:layer/gable-e4-sheathing\" != \"1d80a039c4d79259223320656d95a4ed/extension#9:layer/gable-e4-sheathing\"",
+        "memberMeshes: {\"us-2x4:38.100x88.900:4876.800:\":\"fbec649b3f8ace0cfd7556fb7c7971a46739fc22238524c0befb5ed2930f04de\",\"us-2x4:38.100x88.900:4699.000:\":\"a4606dc36b949ba92723bdaa091c07603e26f775fa14f5ce33a556a86baaf2be\",\"us-2x4:38.100x88.900:2352.675:\":\"c163a347a21a4f2baab17411e34ba039856f79d3bc4544f2badc717ea01ef751\" != {\"us-2x4:38.100x88.900:4876.800:\":\"fbec649b3f8ace0cfd7556fb7c7971a46739fc22238524c0befb5ed2930f04de\",\"us-2x4:38.100x88.900:4699.000:\":\"a4606dc36b949ba92723bdaa091c07603e26f775fa14f5ce33a556a86baaf2be\",\"us-2x4:38.100x88.900:2352.675:\":\"c163a347a21a4f2baab17411e34ba039856f79d3bc4544f2badc717ea01ef751\""
+      ],
+      "memberMeshes": [
+        {
+          "key": "us-2x4:38.100x88.900:1666.157:p-0.44721,0.00000,0.89443,0.000|p0.44721,0.00000,0.89443,745.128",
+          "vertices": [
+            36,
+            36
+          ],
+          "maxAbsMm": 7.63607601629579e-13,
+          "vertexSetDistanceMm": 8.67060101227865e-13,
+          "volumes": [
+            5041200.295481838,
+            5041200.2954818215
+          ]
+        },
+        {
+          "key": "us-2x4:38.100x88.900:123.825:p0.89443,-0.44721,0.00000,93.714",
+          "vertices": [
+            36,
+            36
+          ],
+          "maxAbsMm": 88.9000015258789,
+          "vertexSetDistanceMm": 2.2382096176443156e-12,
+          "volumes": [
+            387144.3755559291,
+            387144.3755559309
+          ]
+        },
+        {
+          "key": "us-2x4:38.100x88.900:530.225:p0.89443,-0.44721,0.00000,457.209",
+          "vertices": [
+            36,
+            36
+          ],
+          "maxAbsMm": 6.631731974552149e-14,
+          "vertexSetDistanceMm": 6.631731974552149e-14,
+          "volumes": [
+            1763657.6606186524,
+            1763657.6606186526
+          ]
+        },
+        {
+          "key": "us-2x4:38.100x88.900:822.325:p0.89443,0.44721,0.00000,735.510",
+          "vertices": [
+            36,
+            36
+          ],
+          "maxAbsMm": 6.1452325026594215e-15,
+          "vertexSetDistanceMm": 6.1452325026594215e-15,
+          "volumes": [
+            2753026.7510155602,
+            2753026.7510155602
+          ]
+        },
+        {
+          "key": "us-2x4:38.100x88.900:619.125:p0.89443,0.44721,0.00000,553.762",
+          "vertices": [
+            36,
+            36
+          ],
+          "maxAbsMm": 1.7053025658242404e-13,
+          "vertexSetDistanceMm": 1.798470691641264e-13,
+          "volumes": [
+            2064770.0374202244,
+            2064770.0374202223
+          ]
+        },
+        {
+          "key": "us-2x4:38.100x88.900:415.925:p0.89443,0.44721,0.00000,372.015",
+          "vertices": [
+            36,
+            36
+          ],
+          "maxAbsMm": 1.0327277769929533e-13,
+          "vertexSetDistanceMm": 1.0327277769929533e-13,
+          "volumes": [
+            1376513.3238248888,
+            1376513.3238248895
+          ]
+        },
+        {
+          "key": "us-2x4:38.100x88.900:415.925:p0.89443,-0.44721,0.00000,354.976",
+          "vertices": [
+            36,
+            36
+          ],
+          "maxAbsMm": 1.1937117960769683e-12,
+          "vertexSetDistanceMm": 1.1937117960769683e-12,
+          "volumes": [
+            1376513.3238248858,
+            1376513.3238248893
+          ]
+        },
+        {
+          "key": "us-2x4:38.100x88.900:619.125:p0.89443,-0.44721,0.00000,536.723",
+          "vertices": [
+            36,
+            36
+          ],
+          "maxAbsMm": 2.0558370544127014e-12,
+          "vertexSetDistanceMm": 2.0558370544127014e-12,
+          "volumes": [
+            2064770.037420225,
+            2064770.037420217
+          ]
+        },
+        {
+          "key": "us-2x4:38.100x88.900:822.325:p0.89443,-0.44721,0.00000,718.471",
+          "vertices": [
+            36,
+            36
+          ],
+          "maxAbsMm": 2.652693060871403e-13,
+          "vertexSetDistanceMm": 2.652693060871403e-13,
+          "volumes": [
+            2753026.7510155584,
+            2753026.7510155593
+          ]
+        },
+        {
+          "key": "us-2x4:38.100x88.900:733.425:p0.89443,0.44721,0.00000,655.995",
+          "vertices": [
+            36,
+            36
+          ],
+          "maxAbsMm": 1.1368683772161603e-13,
+          "vertexSetDistanceMm": 1.2788536660692104e-13,
+          "volumes": [
+            2451914.3742139875,
+            2451914.374213986
+          ]
+        },
+        {
+          "key": "us-2x4:38.100x88.900:530.225:p0.89443,0.44721,0.00000,474.248",
+          "vertices": [
+            36,
+            36
+          ],
+          "maxAbsMm": 5.684341886080802e-14,
+          "vertexSetDistanceMm": 5.684341886080802e-14,
+          "volumes": [
+            1763657.660618643,
+            1763657.660618642
+          ]
+        },
+        {
+          "key": "us-2x4:38.100x88.900:123.825:p0.89443,0.44721,0.00000,110.752",
+          "vertices": [
+            36,
+            36
+          ],
+          "maxAbsMm": 88.9000015258789,
+          "vertexSetDistanceMm": 4.1333193668613766e-13,
+          "volumes": [
+            387144.37555593037,
+            387144.3755559299
+          ]
+        }
+      ],
+      "bodies": 9,
+      "triangles": 156,
+      "members": 156,
+      "names": 202,
+      "nodeRegenMs": 84.5,
+      "chromiumRegenMs": 179.8,
+      "chromiumWorkerReadyMs": 389.6
+    },
+    {
+      "key": "shed/story",
+      "identical": false,
+      "differences": [
+        "bodies[part#1/extension#9:layer/gable-e2-sheathing].bodyKey: \"7bf1705bccf0c607b9771cec185f021c/extension#9:layer/gable-e2-sheathing\" != \"92eeb9b26e55ecd4e01470fd120563dd/extension#9:layer/gable-e2-sheathing\"",
+        "bodies[part#1/extension#9:layer/gable-e4-sheathing].bodyKey: \"88530ef5e659d99f07434514d580a50a/extension#9:layer/gable-e4-sheathing\" != \"1d80a039c4d79259223320656d95a4ed/extension#9:layer/gable-e4-sheathing\"",
+        "memberMeshes: {\"us-2x4:38.100x88.900:4876.800:\":\"fbec649b3f8ace0cfd7556fb7c7971a46739fc22238524c0befb5ed2930f04de\",\"us-2x4:38.100x88.900:4699.000:\":\"a4606dc36b949ba92723bdaa091c07603e26f775fa14f5ce33a556a86baaf2be\",\"us-2x4:38.100x88.900:2352.675:\":\"c163a347a21a4f2baab17411e34ba039856f79d3bc4544f2badc717ea01ef751\" != {\"us-2x4:38.100x88.900:4876.800:\":\"fbec649b3f8ace0cfd7556fb7c7971a46739fc22238524c0befb5ed2930f04de\",\"us-2x4:38.100x88.900:4699.000:\":\"a4606dc36b949ba92723bdaa091c07603e26f775fa14f5ce33a556a86baaf2be\",\"us-2x4:38.100x88.900:2352.675:\":\"c163a347a21a4f2baab17411e34ba039856f79d3bc4544f2badc717ea01ef751\""
+      ],
+      "memberMeshes": [
+        {
+          "key": "us-2x4:38.100x88.900:1666.157:p-0.44721,0.00000,0.89443,0.000|p0.44721,0.00000,0.89443,745.128",
+          "vertices": [
+            36,
+            36
+          ],
+          "maxAbsMm": 7.63607601629579e-13,
+          "vertexSetDistanceMm": 8.67060101227865e-13,
+          "volumes": [
+            5041200.295481838,
+            5041200.2954818215
+          ]
+        },
+        {
+          "key": "us-2x4:38.100x88.900:123.825:p0.89443,-0.44721,0.00000,93.714",
+          "vertices": [
+            36,
+            36
+          ],
+          "maxAbsMm": 88.9000015258789,
+          "vertexSetDistanceMm": 2.2382096176443156e-12,
+          "volumes": [
+            387144.3755559291,
+            387144.3755559309
+          ]
+        },
+        {
+          "key": "us-2x4:38.100x88.900:530.225:p0.89443,-0.44721,0.00000,457.209",
+          "vertices": [
+            36,
+            36
+          ],
+          "maxAbsMm": 6.631731974552149e-14,
+          "vertexSetDistanceMm": 6.631731974552149e-14,
+          "volumes": [
+            1763657.6606186524,
+            1763657.6606186526
+          ]
+        },
+        {
+          "key": "us-2x4:38.100x88.900:822.325:p0.89443,0.44721,0.00000,735.510",
+          "vertices": [
+            36,
+            36
+          ],
+          "maxAbsMm": 6.1452325026594215e-15,
+          "vertexSetDistanceMm": 6.1452325026594215e-15,
+          "volumes": [
+            2753026.7510155602,
+            2753026.7510155602
+          ]
+        },
+        {
+          "key": "us-2x4:38.100x88.900:619.125:p0.89443,0.44721,0.00000,553.762",
+          "vertices": [
+            36,
+            36
+          ],
+          "maxAbsMm": 1.7053025658242404e-13,
+          "vertexSetDistanceMm": 1.798470691641264e-13,
+          "volumes": [
+            2064770.0374202244,
+            2064770.0374202223
+          ]
+        },
+        {
+          "key": "us-2x4:38.100x88.900:415.925:p0.89443,0.44721,0.00000,372.015",
+          "vertices": [
+            36,
+            36
+          ],
+          "maxAbsMm": 1.0327277769929533e-13,
+          "vertexSetDistanceMm": 1.0327277769929533e-13,
+          "volumes": [
+            1376513.3238248888,
+            1376513.3238248895
+          ]
+        },
+        {
+          "key": "us-2x4:38.100x88.900:415.925:p0.89443,-0.44721,0.00000,354.976",
+          "vertices": [
+            36,
+            36
+          ],
+          "maxAbsMm": 1.1937117960769683e-12,
+          "vertexSetDistanceMm": 1.1937117960769683e-12,
+          "volumes": [
+            1376513.3238248858,
+            1376513.3238248893
+          ]
+        },
+        {
+          "key": "us-2x4:38.100x88.900:619.125:p0.89443,-0.44721,0.00000,536.723",
+          "vertices": [
+            36,
+            36
+          ],
+          "maxAbsMm": 2.0558370544127014e-12,
+          "vertexSetDistanceMm": 2.0558370544127014e-12,
+          "volumes": [
+            2064770.037420225,
+            2064770.037420217
+          ]
+        },
+        {
+          "key": "us-2x4:38.100x88.900:822.325:p0.89443,-0.44721,0.00000,718.471",
+          "vertices": [
+            36,
+            36
+          ],
+          "maxAbsMm": 2.652693060871403e-13,
+          "vertexSetDistanceMm": 2.652693060871403e-13,
+          "volumes": [
+            2753026.7510155584,
+            2753026.7510155593
+          ]
+        },
+        {
+          "key": "us-2x4:38.100x88.900:733.425:p0.89443,0.44721,0.00000,655.995",
+          "vertices": [
+            36,
+            36
+          ],
+          "maxAbsMm": 1.1368683772161603e-13,
+          "vertexSetDistanceMm": 1.2788536660692104e-13,
+          "volumes": [
+            2451914.3742139875,
+            2451914.374213986
+          ]
+        },
+        {
+          "key": "us-2x4:38.100x88.900:530.225:p0.89443,0.44721,0.00000,474.248",
+          "vertices": [
+            36,
+            36
+          ],
+          "maxAbsMm": 5.684341886080802e-14,
+          "vertexSetDistanceMm": 5.684341886080802e-14,
+          "volumes": [
+            1763657.660618643,
+            1763657.660618642
+          ]
+        },
+        {
+          "key": "us-2x4:38.100x88.900:123.825:p0.89443,0.44721,0.00000,110.752",
+          "vertices": [
+            36,
+            36
+          ],
+          "maxAbsMm": 88.9000015258789,
+          "vertexSetDistanceMm": 4.1333193668613766e-13,
+          "volumes": [
+            387144.37555593037,
+            387144.3755559299
+          ]
+        }
+      ],
+      "bodies": 9,
+      "triangles": 156,
+      "members": 156,
+      "names": 202,
+      "nodeRegenMs": 58.9,
+      "chromiumRegenMs": 177.3,
+      "chromiumWorkerReadyMs": 407
+    },
+    {
+      "key": "shed/long-7",
+      "identical": false,
+      "differences": [
+        "bodies[part#1/extension#9:layer/gable-e2-sheathing].bodyKey: \"7bf1705bccf0c607b9771cec185f021c/extension#9:layer/gable-e2-sheathing\" != \"92eeb9b26e55ecd4e01470fd120563dd/extension#9:layer/gable-e2-sheathing\"",
+        "bodies[part#1/extension#9:layer/gable-e4-sheathing].bodyKey: \"88530ef5e659d99f07434514d580a50a/extension#9:layer/gable-e4-sheathing\" != \"1d80a039c4d79259223320656d95a4ed/extension#9:layer/gable-e4-sheathing\"",
+        "memberMeshes: {\"us-2x4:38.100x88.900:4876.800:\":\"fbec649b3f8ace0cfd7556fb7c7971a46739fc22238524c0befb5ed2930f04de\",\"us-2x4:38.100x88.900:4699.000:\":\"a4606dc36b949ba92723bdaa091c07603e26f775fa14f5ce33a556a86baaf2be\",\"us-2x4:38.100x88.900:2352.675:\":\"c163a347a21a4f2baab17411e34ba039856f79d3bc4544f2badc717ea01ef751\" != {\"us-2x4:38.100x88.900:4876.800:\":\"fbec649b3f8ace0cfd7556fb7c7971a46739fc22238524c0befb5ed2930f04de\",\"us-2x4:38.100x88.900:4699.000:\":\"a4606dc36b949ba92723bdaa091c07603e26f775fa14f5ce33a556a86baaf2be\",\"us-2x4:38.100x88.900:2352.675:\":\"c163a347a21a4f2baab17411e34ba039856f79d3bc4544f2badc717ea01ef751\""
+      ],
+      "memberMeshes": [
+        {
+          "key": "us-2x4:38.100x88.900:1666.157:p-0.44721,0.00000,0.89443,0.000|p0.44721,0.00000,0.89443,745.128",
+          "vertices": [
+            36,
+            36
+          ],
+          "maxAbsMm": 7.63607601629579e-13,
+          "vertexSetDistanceMm": 8.67060101227865e-13,
+          "volumes": [
+            5041200.295481838,
+            5041200.2954818215
+          ]
+        },
+        {
+          "key": "us-2x4:38.100x88.900:123.825:p0.89443,-0.44721,0.00000,93.714",
+          "vertices": [
+            36,
+            36
+          ],
+          "maxAbsMm": 88.9000015258789,
+          "vertexSetDistanceMm": 2.2382096176443156e-12,
+          "volumes": [
+            387144.3755559291,
+            387144.3755559309
+          ]
+        },
+        {
+          "key": "us-2x4:38.100x88.900:530.225:p0.89443,-0.44721,0.00000,457.209",
+          "vertices": [
+            36,
+            36
+          ],
+          "maxAbsMm": 6.631731974552149e-14,
+          "vertexSetDistanceMm": 6.631731974552149e-14,
+          "volumes": [
+            1763657.6606186524,
+            1763657.6606186526
+          ]
+        },
+        {
+          "key": "us-2x4:38.100x88.900:822.325:p0.89443,0.44721,0.00000,735.510",
+          "vertices": [
+            36,
+            36
+          ],
+          "maxAbsMm": 6.1452325026594215e-15,
+          "vertexSetDistanceMm": 6.1452325026594215e-15,
+          "volumes": [
+            2753026.7510155602,
+            2753026.7510155602
+          ]
+        },
+        {
+          "key": "us-2x4:38.100x88.900:619.125:p0.89443,0.44721,0.00000,553.762",
+          "vertices": [
+            36,
+            36
+          ],
+          "maxAbsMm": 1.7053025658242404e-13,
+          "vertexSetDistanceMm": 1.798470691641264e-13,
+          "volumes": [
+            2064770.0374202244,
+            2064770.0374202223
+          ]
+        },
+        {
+          "key": "us-2x4:38.100x88.900:415.925:p0.89443,0.44721,0.00000,372.015",
+          "vertices": [
+            36,
+            36
+          ],
+          "maxAbsMm": 1.0327277769929533e-13,
+          "vertexSetDistanceMm": 1.0327277769929533e-13,
+          "volumes": [
+            1376513.3238248888,
+            1376513.3238248895
+          ]
+        },
+        {
+          "key": "us-2x4:38.100x88.900:415.925:p0.89443,-0.44721,0.00000,354.976",
+          "vertices": [
+            36,
+            36
+          ],
+          "maxAbsMm": 1.1937117960769683e-12,
+          "vertexSetDistanceMm": 1.1937117960769683e-12,
+          "volumes": [
+            1376513.3238248858,
+            1376513.3238248893
+          ]
+        },
+        {
+          "key": "us-2x4:38.100x88.900:619.125:p0.89443,-0.44721,0.00000,536.723",
+          "vertices": [
+            36,
+            36
+          ],
+          "maxAbsMm": 2.0558370544127014e-12,
+          "vertexSetDistanceMm": 2.0558370544127014e-12,
+          "volumes": [
+            2064770.037420225,
+            2064770.037420217
+          ]
+        },
+        {
+          "key": "us-2x4:38.100x88.900:822.325:p0.89443,-0.44721,0.00000,718.471",
+          "vertices": [
+            36,
+            36
+          ],
+          "maxAbsMm": 2.652693060871403e-13,
+          "vertexSetDistanceMm": 2.652693060871403e-13,
+          "volumes": [
+            2753026.7510155584,
+            2753026.7510155593
+          ]
+        },
+        {
+          "key": "us-2x4:38.100x88.900:733.425:p0.89443,0.44721,0.00000,655.995",
+          "vertices": [
+            36,
+            36
+          ],
+          "maxAbsMm": 1.1368683772161603e-13,
+          "vertexSetDistanceMm": 1.2788536660692104e-13,
+          "volumes": [
+            2451914.3742139875,
+            2451914.374213986
+          ]
+        },
+        {
+          "key": "us-2x4:38.100x88.900:530.225:p0.89443,0.44721,0.00000,474.248",
+          "vertices": [
+            36,
+            36
+          ],
+          "maxAbsMm": 5.684341886080802e-14,
+          "vertexSetDistanceMm": 5.684341886080802e-14,
+          "volumes": [
+            1763657.660618643,
+            1763657.660618642
+          ]
+        },
+        {
+          "key": "us-2x4:38.100x88.900:123.825:p0.89443,0.44721,0.00000,110.752",
+          "vertices": [
+            36,
+            36
+          ],
+          "maxAbsMm": 88.9000015258789,
+          "vertexSetDistanceMm": 4.1333193668613766e-13,
+          "volumes": [
+            387144.37555593037,
+            387144.3755559299
+          ]
+        }
+      ],
+      "bodies": 9,
+      "triangles": 156,
+      "members": 155,
+      "names": 202,
+      "nodeRegenMs": 58.6,
+      "chromiumRegenMs": 194.3,
+      "chromiumWorkerReadyMs": 393
+    },
+    {
+      "key": "shed/long-500",
+      "identical": false,
+      "differences": [
+        "bodies[part#1/extension#9:layer/gable-e2-sheathing].bodyKey: \"7bf1705bccf0c607b9771cec185f021c/extension#9:layer/gable-e2-sheathing\" != \"92eeb9b26e55ecd4e01470fd120563dd/extension#9:layer/gable-e2-sheathing\"",
+        "bodies[part#1/extension#9:layer/gable-e4-sheathing].bodyKey: \"88530ef5e659d99f07434514d580a50a/extension#9:layer/gable-e4-sheathing\" != \"1d80a039c4d79259223320656d95a4ed/extension#9:layer/gable-e4-sheathing\"",
+        "memberMeshes: {\"us-2x4:38.100x88.900:4876.800:\":\"fbec649b3f8ace0cfd7556fb7c7971a46739fc22238524c0befb5ed2930f04de\",\"us-2x4:38.100x88.900:4699.000:\":\"a4606dc36b949ba92723bdaa091c07603e26f775fa14f5ce33a556a86baaf2be\",\"us-2x4:38.100x88.900:2352.675:\":\"c163a347a21a4f2baab17411e34ba039856f79d3bc4544f2badc717ea01ef751\" != {\"us-2x4:38.100x88.900:4876.800:\":\"fbec649b3f8ace0cfd7556fb7c7971a46739fc22238524c0befb5ed2930f04de\",\"us-2x4:38.100x88.900:4699.000:\":\"a4606dc36b949ba92723bdaa091c07603e26f775fa14f5ce33a556a86baaf2be\",\"us-2x4:38.100x88.900:2352.675:\":\"c163a347a21a4f2baab17411e34ba039856f79d3bc4544f2badc717ea01ef751\""
+      ],
+      "memberMeshes": [
+        {
+          "key": "us-2x4:38.100x88.900:1666.157:p-0.44721,0.00000,0.89443,0.000|p0.44721,0.00000,0.89443,745.128",
+          "vertices": [
+            36,
+            36
+          ],
+          "maxAbsMm": 7.63607601629579e-13,
+          "vertexSetDistanceMm": 8.67060101227865e-13,
+          "volumes": [
+            5041200.295481838,
+            5041200.2954818215
+          ]
+        },
+        {
+          "key": "us-2x4:38.100x88.900:123.825:p0.89443,-0.44721,0.00000,93.714",
+          "vertices": [
+            36,
+            36
+          ],
+          "maxAbsMm": 88.9000015258789,
+          "vertexSetDistanceMm": 2.2382096176443156e-12,
+          "volumes": [
+            387144.3755559291,
+            387144.3755559309
+          ]
+        },
+        {
+          "key": "us-2x4:38.100x88.900:530.225:p0.89443,-0.44721,0.00000,457.209",
+          "vertices": [
+            36,
+            36
+          ],
+          "maxAbsMm": 6.631731974552149e-14,
+          "vertexSetDistanceMm": 6.631731974552149e-14,
+          "volumes": [
+            1763657.6606186524,
+            1763657.6606186526
+          ]
+        },
+        {
+          "key": "us-2x4:38.100x88.900:822.325:p0.89443,0.44721,0.00000,735.510",
+          "vertices": [
+            36,
+            36
+          ],
+          "maxAbsMm": 6.1452325026594215e-15,
+          "vertexSetDistanceMm": 6.1452325026594215e-15,
+          "volumes": [
+            2753026.7510155602,
+            2753026.7510155602
+          ]
+        },
+        {
+          "key": "us-2x4:38.100x88.900:619.125:p0.89443,0.44721,0.00000,553.762",
+          "vertices": [
+            36,
+            36
+          ],
+          "maxAbsMm": 1.7053025658242404e-13,
+          "vertexSetDistanceMm": 1.798470691641264e-13,
+          "volumes": [
+            2064770.0374202244,
+            2064770.0374202223
+          ]
+        },
+        {
+          "key": "us-2x4:38.100x88.900:415.925:p0.89443,0.44721,0.00000,372.015",
+          "vertices": [
+            36,
+            36
+          ],
+          "maxAbsMm": 1.0327277769929533e-13,
+          "vertexSetDistanceMm": 1.0327277769929533e-13,
+          "volumes": [
+            1376513.3238248888,
+            1376513.3238248895
+          ]
+        },
+        {
+          "key": "us-2x4:38.100x88.900:415.925:p0.89443,-0.44721,0.00000,354.976",
+          "vertices": [
+            36,
+            36
+          ],
+          "maxAbsMm": 1.1937117960769683e-12,
+          "vertexSetDistanceMm": 1.1937117960769683e-12,
+          "volumes": [
+            1376513.3238248858,
+            1376513.3238248893
+          ]
+        },
+        {
+          "key": "us-2x4:38.100x88.900:619.125:p0.89443,-0.44721,0.00000,536.723",
+          "vertices": [
+            36,
+            36
+          ],
+          "maxAbsMm": 2.0558370544127014e-12,
+          "vertexSetDistanceMm": 2.0558370544127014e-12,
+          "volumes": [
+            2064770.037420225,
+            2064770.037420217
+          ]
+        },
+        {
+          "key": "us-2x4:38.100x88.900:822.325:p0.89443,-0.44721,0.00000,718.471",
+          "vertices": [
+            36,
+            36
+          ],
+          "maxAbsMm": 2.652693060871403e-13,
+          "vertexSetDistanceMm": 2.652693060871403e-13,
+          "volumes": [
+            2753026.7510155584,
+            2753026.7510155593
+          ]
+        },
+        {
+          "key": "us-2x4:38.100x88.900:733.425:p0.89443,0.44721,0.00000,655.995",
+          "vertices": [
+            36,
+            36
+          ],
+          "maxAbsMm": 1.1368683772161603e-13,
+          "vertexSetDistanceMm": 1.2788536660692104e-13,
+          "volumes": [
+            2451914.3742139875,
+            2451914.374213986
+          ]
+        },
+        {
+          "key": "us-2x4:38.100x88.900:530.225:p0.89443,0.44721,0.00000,474.248",
+          "vertices": [
+            36,
+            36
+          ],
+          "maxAbsMm": 5.684341886080802e-14,
+          "vertexSetDistanceMm": 5.684341886080802e-14,
+          "volumes": [
+            1763657.660618643,
+            1763657.660618642
+          ]
+        },
+        {
+          "key": "us-2x4:38.100x88.900:123.825:p0.89443,0.44721,0.00000,110.752",
+          "vertices": [
+            36,
+            36
+          ],
+          "maxAbsMm": 88.9000015258789,
+          "vertexSetDistanceMm": 4.1333193668613766e-13,
+          "volumes": [
+            387144.37555593037,
+            387144.3755559299
+          ]
+        }
+      ],
+      "bodies": 9,
+      "triangles": 156,
+      "members": 157,
+      "names": 202,
+      "nodeRegenMs": 57,
+      "chromiumRegenMs": 176.9,
+      "chromiumWorkerReadyMs": 390.4
+    }
+  ],
+  "math": {
+    "sin": {
+      "inputs": 856,
+      "differ": 43,
+      "maxUlp": 1
+    },
+    "cos": {
+      "inputs": 856,
+      "differ": 34,
+      "maxUlp": 1
+    },
+    "tan": {
+      "inputs": 856,
+      "differ": 48,
+      "maxUlp": 2
+    },
+    "atan": {
+      "inputs": 856,
+      "differ": 71,
+      "maxUlp": 1
+    },
+    "asin": {
+      "inputs": 856,
+      "differ": 63,
+      "maxUlp": 1
+    },
+    "acos": {
+      "inputs": 856,
+      "differ": 76,
+      "maxUlp": 1
+    },
+    "atan2": {
+      "inputs": 856,
+      "differ": 158,
+      "maxUlp": 1
+    },
+    "hypot2": {
+      "inputs": 856,
+      "differ": 0,
+      "maxUlp": 0
+    },
+    "hypot3": {
+      "inputs": 856,
+      "differ": 0,
+      "maxUlp": 0
+    },
+    "sqrt": {
+      "inputs": 856,
+      "differ": 0,
+      "maxUlp": 0
+    },
+    "exp": {
+      "inputs": 856,
+      "differ": 87,
+      "maxUlp": 1
+    },
+    "log": {
+      "inputs": 856,
+      "differ": 62,
+      "maxUlp": 2
+    },
+    "pow": {
+      "inputs": 856,
+      "differ": 0,
+      "maxUlp": 0
+    },
+    "cbrt": {
+      "inputs": 856,
+      "differ": 61,
+      "maxUlp": 1
+    }
+  },
+  "routeHarness": {
+    "requests": [
+      "/",
+      "/assets/index-BVx2BJrj.js",
+      "/inputs.json",
+      "/assets/regen-worker-Ch8toBEz.js",
+      "/assets/rolldown-runtime-CbXtAM7H.js",
+      "/assets/opencascade_single-B9DBEong.wasm",
+      "/assets/opencascade_single-C7RNL4M3.js",
+      "/assets/planegcs-r8EUavAY.wasm"
+    ],
+    "textSketch": {
+      "id": "sketch#3",
+      "status": "error",
+      "key": "72e317159b98649dbc1e472f5bef14f4",
+      "errors": [
+        "font: This font could not be read (inter-bold): the text worker could not be started (The worker did not start: The worker stopped (out of memory, or a crash).)"
+      ],
+      "warnings": [],
+      "references": [
+        "r3=extrude#1:side:e6/exact"
+      ]
+    }
+  },
+  "log": [
+    "regenerating bracket/opened",
+    "regenerating bracket/engraved",
+    "regenerating bracket/story",
+    "regenerating bracket/long-7",
+    "regenerating bracket/long-500",
+    "regenerating bookshelf/opened",
+    "regenerating bookshelf/story",
+    "regenerating bookshelf/long-7",
+    "regenerating bookshelf/long-500",
+    "regenerating shed/opened",
+    "regenerating shed/story",
+    "regenerating shed/long-7",
+    "regenerating shed/long-500"
+  ]
+}

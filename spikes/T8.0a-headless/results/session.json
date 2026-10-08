@@ -1,0 +1,351 @@
+{
+  "machine": {
+    "node": "v26.10.0",
+    "cpu": "AMD Ryzen 5 7600X 6-Core Processor",
+    "cores": 12,
+    "memoryGiB": 62,
+    "date": "2026-10-08"
+  },
+  "bracket": {
+    "open": {
+      "readMain": 2.6,
+      "version": 2.4,
+      "branch": 9.9,
+      "lock": 0.4,
+      "readBranch": 1.4,
+      "store": 0.1,
+      "firstRegen": 142.4
+    },
+    "features": 7,
+    "bodies": 1,
+    "members": 0,
+    "triangles": 784,
+    "story": [
+      {
+        "ok": true,
+        "revision": 2,
+        "ms": {
+          "execute": 3.1,
+          "regen": 200,
+          "measure": 8.5,
+          "save": 2.6,
+          "total": 214.3
+        },
+        "counters": {
+          "featureOps": 1,
+          "otherOps": 3,
+          "batches": 3,
+          "solves": 1,
+          "cacheHits": 5,
+          "cacheMisses": 2
+        },
+        "statusChanges": [
+          "part#1/sketch#3: new -> ok",
+          "part#1/extrude#2: new -> ok"
+        ],
+        "errors": [],
+        "measured": 1
+      },
+      {
+        "ok": true,
+        "revision": 3,
+        "ms": {
+          "execute": 0.3,
+          "regen": 168.8,
+          "measure": 7.1,
+          "save": 2.4,
+          "total": 178.6
+        },
+        "counters": {
+          "featureOps": 4,
+          "otherOps": 4,
+          "batches": 7,
+          "solves": 3,
+          "cacheHits": 0,
+          "cacheMisses": 7
+        },
+        "statusChanges": [],
+        "errors": [],
+        "measured": 1
+      },
+      {
+        "ok": true,
+        "revision": 4,
+        "ms": {
+          "execute": 0.6,
+          "regen": 145,
+          "measure": 7,
+          "save": 2.9,
+          "total": 155.6
+        },
+        "counters": {
+          "featureOps": 2,
+          "otherOps": 3,
+          "batches": 4,
+          "solves": 1,
+          "cacheHits": 4,
+          "cacheMisses": 3
+        },
+        "statusChanges": [],
+        "errors": [],
+        "measured": 1
+      }
+    ],
+    "incrementalRegenMs": {
+      "median": 152.1,
+      "min": 149.8,
+      "max": 156.7
+    },
+    "fullRegenOfHeadMs": 150,
+    "reopen": {
+      "totalMs": 151.5,
+      "steps": {
+        "lock": 0.1,
+        "readBranch": 1.3,
+        "store": 0.1,
+        "firstRegen": 150
+      }
+    },
+    "revisions": 16,
+    "disk": {
+      "reads": 182,
+      "writes": 53,
+      "bytesWritten": 216276,
+      "removes": 14,
+      "lists": 58
+    },
+    "memory": {
+      "rss": 624.4,
+      "heapUsed": 202,
+      "external": 53.4,
+      "arrayBuffers": 41.9
+    },
+    "kernelHeapMiB": 128
+  },
+  "bookshelf": {
+    "open": {
+      "readMain": 4.5,
+      "version": 4.7,
+      "branch": 18.3,
+      "lock": 0.1,
+      "readBranch": 4.1,
+      "store": 0.1,
+      "firstRegen": 331.6
+    },
+    "features": 37,
+    "bodies": 12,
+    "members": 0,
+    "triangles": 1312,
+    "story": [
+      {
+        "ok": true,
+        "revision": 2,
+        "ms": {
+          "execute": 0.6,
+          "regen": 306.5,
+          "measure": 6.2,
+          "save": 5.2,
+          "total": 318.4
+        },
+        "counters": {
+          "featureOps": 26,
+          "otherOps": 23,
+          "batches": 28,
+          "solves": 8,
+          "cacheHits": 3,
+          "cacheMisses": 34
+        },
+        "statusChanges": [],
+        "errors": [],
+        "measured": 11
+      },
+      {
+        "ok": true,
+        "revision": 3,
+        "ms": {
+          "execute": 0.3,
+          "regen": 3.9,
+          "measure": 0,
+          "save": 5,
+          "total": 9.2
+        },
+        "counters": {
+          "featureOps": 0,
+          "otherOps": 0,
+          "batches": 0,
+          "solves": 0,
+          "cacheHits": 37,
+          "cacheMisses": 0
+        },
+        "statusChanges": [],
+        "errors": [],
+        "measured": 0
+      }
+    ],
+    "incrementalRegenMs": {
+      "median": 298.2,
+      "min": 293.7,
+      "max": 319.8
+    },
+    "fullRegenOfHeadMs": 308.8,
+    "reopen": {
+      "totalMs": 308.6,
+      "steps": {
+        "lock": 0.1,
+        "readBranch": 3.7,
+        "store": 0.1,
+        "firstRegen": 304.5
+      }
+    },
+    "revisions": 15,
+    "disk": {
+      "reads": 172,
+      "writes": 50,
+      "bytesWritten": 1081709,
+      "removes": 13,
+      "lists": 55
+    },
+    "memory": {
+      "rss": 679.1,
+      "heapUsed": 205.3,
+      "external": 52.6,
+      "arrayBuffers": 41.9
+    },
+    "kernelHeapMiB": 128
+  },
+  "shed": {
+    "open": {
+      "readMain": 0.9,
+      "version": 1,
+      "branch": 2.8,
+      "lock": 0.1,
+      "readBranch": 0.5,
+      "store": 0,
+      "firstRegen": 87.9
+    },
+    "features": 9,
+    "bodies": 9,
+    "members": 155,
+    "triangles": 156,
+    "story": [
+      {
+        "ok": true,
+        "revision": 2,
+        "ms": {
+          "execute": 0.2,
+          "regen": 38.1,
+          "measure": 0.8,
+          "save": 1.4,
+          "total": 40.6
+        },
+        "counters": {
+          "featureOps": 3,
+          "otherOps": 4,
+          "batches": 4,
+          "solves": 0,
+          "cacheHits": 9,
+          "cacheMisses": 3
+        },
+        "statusChanges": [],
+        "errors": [],
+        "measured": 2
+      },
+      {
+        "ok": true,
+        "revision": 3,
+        "ms": {
+          "execute": 0.1,
+          "regen": 36.3,
+          "measure": 0.8,
+          "save": 1.3,
+          "total": 38.5
+        },
+        "counters": {
+          "featureOps": 3,
+          "otherOps": 4,
+          "batches": 4,
+          "solves": 0,
+          "cacheHits": 9,
+          "cacheMisses": 3
+        },
+        "statusChanges": [],
+        "errors": [],
+        "measured": 2
+      }
+    ],
+    "incrementalRegenMs": {
+      "median": 36.2,
+      "min": 35.5,
+      "max": 47.4
+    },
+    "fullRegenOfHeadMs": 65.6,
+    "reopen": {
+      "totalMs": 65.1,
+      "steps": {
+        "lock": 0.1,
+        "readBranch": 0.6,
+        "store": 0,
+        "firstRegen": 64.3
+      }
+    },
+    "revisions": 15,
+    "disk": {
+      "reads": 172,
+      "writes": 50,
+      "bytesWritten": 215912,
+      "removes": 13,
+      "lists": 55
+    },
+    "memory": {
+      "rss": 687.6,
+      "heapUsed": 203,
+      "external": 52.5,
+      "arrayBuffers": 42
+    },
+    "kernelHeapMiB": 128
+  },
+  "limits": {
+    "overLimit": {
+      "ok": false,
+      "code": "batch-limit",
+      "message": "a batch holds at most 500 commands; this one has 501",
+      "ms": 0
+    },
+    "overLimitRefuseMs": 0.04,
+    "fiveHundredCommands": {
+      "ok": true,
+      "revision": 2,
+      "ms": {
+        "execute": 3,
+        "regen": 1.5,
+        "measure": 0,
+        "save": 3.3,
+        "total": 7.9
+      },
+      "counters": {
+        "featureOps": 0,
+        "otherOps": 0,
+        "batches": 0,
+        "solves": 0,
+        "cacheHits": 5,
+        "cacheMisses": 0
+      },
+      "statusChanges": [],
+      "errors": [],
+      "measured": 0
+    },
+    "coreError": {
+      "ok": false,
+      "code": "not-found",
+      "message": "No feature \"extrude#99\" in part part#1",
+      "ms": 0.3
+    },
+    "regenTimeout": {
+      "ok": false,
+      "code": "regen-timeout",
+      "message": "the regen took longer than 50 ms; the batch was rolled back",
+      "ms": 61.3
+    },
+    "regenTimeoutWallMs": 61.3
+  }
+}

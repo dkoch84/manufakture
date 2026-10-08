@@ -1,0 +1,343 @@
+{
+  "machine": {
+    "node": "v26.10.0",
+    "cpu": "AMD Ryzen 5 7600X 6-Core Processor",
+    "cores": 12,
+    "memoryGiB": 62,
+    "date": "2026-10-08"
+  },
+  "batches": 1000,
+  "wallMs": 381249.8,
+  "perBatchMs": {
+    "total": {
+      "p50": 322.3,
+      "p90": 611.9,
+      "p99": 960.5,
+      "max": 2554.4
+    },
+    "regen": {
+      "p50": 309.7,
+      "p90": 588.4,
+      "p99": 897.8,
+      "max": 1944.5
+    },
+    "save": {
+      "p50": 6,
+      "p90": 10.2,
+      "p99": 25.5,
+      "max": 46.2
+    }
+  },
+  "recycles": [
+    {
+      "batch": 187,
+      "heapBefore": 550.7,
+      "heapAfter": 128,
+      "ms": 354
+    },
+    {
+      "batch": 374,
+      "heapBefore": 550.7,
+      "heapAfter": 128,
+      "ms": 382.2
+    },
+    {
+      "batch": 561,
+      "heapBefore": 550.7,
+      "heapAfter": 128,
+      "ms": 378.4
+    },
+    {
+      "batch": 748,
+      "heapBefore": 550.7,
+      "heapAfter": 128,
+      "ms": 486.3
+    },
+    {
+      "batch": 935,
+      "heapBefore": 550.7,
+      "heapAfter": 128,
+      "ms": 1321.7
+    }
+  ],
+  "engine": {
+    "featureOps": 26168,
+    "otherOps": 23025,
+    "batches": 28170,
+    "solves": 8009,
+    "cacheHits": 3045,
+    "cacheMisses": 34177,
+    "regens": 1006,
+    "superseded": 0,
+    "retries": 0
+  },
+  "trace": [
+    {
+      "batch": 1,
+      "heapMiB": 128,
+      "rssMiB": 586.7,
+      "liveShapes": 54
+    },
+    {
+      "batch": 25,
+      "heapMiB": 128,
+      "rssMiB": 759.6,
+      "liveShapes": 77
+    },
+    {
+      "batch": 50,
+      "heapMiB": 128,
+      "rssMiB": 796.4,
+      "liveShapes": 77
+    },
+    {
+      "batch": 75,
+      "heapMiB": 221.3,
+      "rssMiB": 849.3,
+      "liveShapes": 77
+    },
+    {
+      "batch": 100,
+      "heapMiB": 265.5,
+      "rssMiB": 912.5,
+      "liveShapes": 77
+    },
+    {
+      "batch": 125,
+      "heapMiB": 318.6,
+      "rssMiB": 869.7,
+      "liveShapes": 77
+    },
+    {
+      "batch": 150,
+      "heapMiB": 382.4,
+      "rssMiB": 914.5,
+      "liveShapes": 77
+    },
+    {
+      "batch": 175,
+      "heapMiB": 458.9,
+      "rssMiB": 970.2,
+      "liveShapes": 77
+    },
+    {
+      "batch": 200,
+      "heapMiB": 128,
+      "rssMiB": 1162.1,
+      "liveShapes": 77
+    },
+    {
+      "batch": 225,
+      "heapMiB": 128,
+      "rssMiB": 1266.3,
+      "liveShapes": 77
+    },
+    {
+      "batch": 250,
+      "heapMiB": 184.4,
+      "rssMiB": 1374.4,
+      "liveShapes": 77
+    },
+    {
+      "batch": 275,
+      "heapMiB": 221.3,
+      "rssMiB": 1486.9,
+      "liveShapes": 77
+    },
+    {
+      "batch": 300,
+      "heapMiB": 318.6,
+      "rssMiB": 1599.2,
+      "liveShapes": 77
+    },
+    {
+      "batch": 325,
+      "heapMiB": 382.4,
+      "rssMiB": 1711.5,
+      "liveShapes": 77
+    },
+    {
+      "batch": 350,
+      "heapMiB": 382.4,
+      "rssMiB": 1817.8,
+      "liveShapes": 77
+    },
+    {
+      "batch": 375,
+      "heapMiB": 128,
+      "rssMiB": 1991,
+      "liveShapes": 54
+    },
+    {
+      "batch": 400,
+      "heapMiB": 128,
+      "rssMiB": 2045.5,
+      "liveShapes": 77
+    },
+    {
+      "batch": 425,
+      "heapMiB": 153.6,
+      "rssMiB": 1937.9,
+      "liveShapes": 77
+    },
+    {
+      "batch": 450,
+      "heapMiB": 221.3,
+      "rssMiB": 2027.8,
+      "liveShapes": 77
+    },
+    {
+      "batch": 475,
+      "heapMiB": 265.5,
+      "rssMiB": 2166.3,
+      "liveShapes": 77
+    },
+    {
+      "batch": 500,
+      "heapMiB": 318.6,
+      "rssMiB": 2292.9,
+      "liveShapes": 77
+    },
+    {
+      "batch": 525,
+      "heapMiB": 382.4,
+      "rssMiB": 2415.9,
+      "liveShapes": 77
+    },
+    {
+      "batch": 550,
+      "heapMiB": 458.9,
+      "rssMiB": 2544.6,
+      "liveShapes": 77
+    },
+    {
+      "batch": 575,
+      "heapMiB": 128,
+      "rssMiB": 2723,
+      "liveShapes": 77
+    },
+    {
+      "batch": 600,
+      "heapMiB": 128,
+      "rssMiB": 2583.4,
+      "liveShapes": 77
+    },
+    {
+      "batch": 625,
+      "heapMiB": 184.4,
+      "rssMiB": 2635.5,
+      "liveShapes": 77
+    },
+    {
+      "batch": 650,
+      "heapMiB": 221.3,
+      "rssMiB": 2685.5,
+      "liveShapes": 77
+    },
+    {
+      "batch": 675,
+      "heapMiB": 318.6,
+      "rssMiB": 2748.7,
+      "liveShapes": 77
+    },
+    {
+      "batch": 700,
+      "heapMiB": 382.4,
+      "rssMiB": 2872.8,
+      "liveShapes": 77
+    },
+    {
+      "batch": 725,
+      "heapMiB": 382.4,
+      "rssMiB": 2997.1,
+      "liveShapes": 77
+    },
+    {
+      "batch": 750,
+      "heapMiB": 128,
+      "rssMiB": 3197.8,
+      "liveShapes": 77
+    },
+    {
+      "batch": 775,
+      "heapMiB": 128,
+      "rssMiB": 3119.9,
+      "liveShapes": 77
+    },
+    {
+      "batch": 800,
+      "heapMiB": 153.6,
+      "rssMiB": 3170.1,
+      "liveShapes": 77
+    },
+    {
+      "batch": 825,
+      "heapMiB": 221.3,
+      "rssMiB": 3220.1,
+      "liveShapes": 77
+    },
+    {
+      "batch": 850,
+      "heapMiB": 265.5,
+      "rssMiB": 3272.3,
+      "liveShapes": 77
+    },
+    {
+      "batch": 875,
+      "heapMiB": 318.6,
+      "rssMiB": 3321.4,
+      "liveShapes": 77
+    },
+    {
+      "batch": 900,
+      "heapMiB": 382.4,
+      "rssMiB": 3448,
+      "liveShapes": 77
+    },
+    {
+      "batch": 925,
+      "heapMiB": 458.9,
+      "rssMiB": 3572.5,
+      "liveShapes": 77
+    },
+    {
+      "batch": 950,
+      "heapMiB": 128,
+      "rssMiB": 3597.2,
+      "liveShapes": 77
+    },
+    {
+      "batch": 975,
+      "heapMiB": 128,
+      "rssMiB": 3645.1,
+      "liveShapes": 77
+    },
+    {
+      "batch": 1000,
+      "heapMiB": 184.4,
+      "rssMiB": 3696.3,
+      "liveShapes": 77
+    }
+  ],
+  "memoryAtEnd": {
+    "rss": 2894.8,
+    "heapUsed": 534.4,
+    "external": 61.2,
+    "arrayBuffers": 41.5
+  },
+  "disk": {
+    "files": 1023,
+    "bytes": 1538615,
+    "MiB": 1.5,
+    "operations": {
+      "reads": 9010,
+      "writes": 3008,
+      "bytesWritten": 67692365,
+      "removes": 984,
+      "lists": 3010
+    }
+  },
+  "reopenMs": 318.9,
+  "reopenDifferences": [],
+  "failures": []
+}
