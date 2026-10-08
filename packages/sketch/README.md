@@ -193,8 +193,9 @@ order (point 2, line 4, circle 3, arc 6 numbers; see `packCoordinates`), ready t
 
 ### Out of memory
 
-The published planegcs binary has a fixed 16 MiB heap and aborts with `Aborted(OOM)` from about
-130 connected entities (T0.4). An abort poisons the instance. The system then answers
+The published planegcs binary has a fixed 16 MiB heap and aborts with `Aborted(OOM)` past about
+115 coupled, fully constrained entities (130 free ones; measured in
+`docs/research/end-of-m1-checkpoints.md`). An abort poisons the instance. The system then answers
 `aborted` with a message saying the solver ran out of memory, and keeps answering `aborted`; the
 service discards the instance, loads a new one, and reloads its sessions. Building planegcs with
 memory growth is ADR 0003's follow-up (decision 8).

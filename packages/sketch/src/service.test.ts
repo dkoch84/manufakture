@@ -1,6 +1,6 @@
 // The solver service (the worker's API): sessions, drag coalescing, regen
 // solves, and surviving a planegcs abort (the stock 16 MiB heap runs out of
-// memory from about 130 connected entities, T0.4).
+// memory past about 115 coupled, fully constrained entities; 130 free ones).
 
 import { lengthQuantity } from '@manufakture/units';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -14,7 +14,7 @@ import { chain, end, mm, pointAt, rectangle, start } from './test-helpers';
 
 const underRect = (): SketchInput =>
   rectangle({ stages: ['geometry', 'coincident', 'hv', 'anchor'] });
-/** Far past what the stock heap holds (125 entities solved in T0.4, 130 did not). */
+/** Far past what the stock heap holds (130 free entities, 115 coupled fully constrained ones). */
 const TOO_BIG = () => chain({ entities: 200, mode: 'free' });
 
 /** A real planegcs backend that counts drag solves. */

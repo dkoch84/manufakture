@@ -27,7 +27,7 @@ export class SolverAbortedError extends Error {
     super(
       oom
         ? 'The sketch solver ran out of memory (planegcs Aborted(OOM)). The published solver ' +
-            'holds about 125 connected entities; split the sketch or simplify it.'
+            'holds about 115 coupled, fully constrained entities; split the sketch or simplify it.'
         : `The sketch solver stopped (planegcs aborted: ${reason}).`,
     );
     this.name = 'SolverAbortedError';
