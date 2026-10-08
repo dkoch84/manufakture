@@ -22,6 +22,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { cpus } from 'node:os';
+import { DEFAULT_HEAP_THRESHOLD } from '@manufakture/kernel';
 import { describe, expect, it } from 'vitest';
 import {
   HOUSE_BUDGETS,
@@ -93,6 +94,9 @@ if (TASK !== undefined) {
       for (const n of leakN) leaks.push(await child<LeakSample>(`leak:${n}`));
 
       const first = colds[0]!;
+      const [l0, l1] = [leaks[0], leaks.at(-1)];
+      const perRegenBytes =
+        leaks.length >= 2 ? (l1!.heapInUse - l0!.heapInUse) / (l1!.n - l0!.n) : null;
       const m = (f: (c: ColdSample) => number) => r2(median(colds.map(f)));
       const report = {
         cpu: cpus()[0]?.model ?? 'unknown',
@@ -131,19 +135,16 @@ if (TASK !== undefined) {
           instance: l.instance,
           msPerRegen: r2(l.msPerRegen),
         })),
-        perRegenMiB:
-          leaks.length >= 2
-            ? r2(
-                (leaks.at(-1)!.heapInUse - leaks[0]!.heapInUse) /
-                  (leaks.at(-1)!.n - leaks[0]!.n) /
-                  MiB,
-              )
-            : null,
+        perRegenMiB: perRegenBytes === null ? null : r2(perRegenBytes / MiB),
         budgets: HOUSE_BUDGETS,
       };
       const perRegen = report.perRegenMiB;
+      // Regens from the first probe's heap to the kernel's recycle threshold, as
+      // apps/web/bench/memory.bench.ts counts them.
       const regensToRecycle =
-        perRegen !== null && perRegen > 0 ? Math.floor(1024 / perRegen) : null;
+        perRegenBytes !== null && perRegenBytes > 0
+          ? Math.floor((DEFAULT_HEAP_THRESHOLD - l0!.heapInUse) / perRegenBytes)
+          : null;
 
       console.log(`BENCH house ${JSON.stringify({ ...report, regensToRecycle })}`);
       console.log(
@@ -157,7 +158,7 @@ if (TASK !== undefined) {
           `| Whole regen, cold              | ${report.cold.regenMs} ms | ${HOUSE_BUDGETS.regenCold} ms |`,
           `| Whole regen, warm              | ${report.warm.regenMs} ms | ${HOUSE_BUDGETS.regenWarm} ms |`,
           `| Kernel instance start          | ${report.cold.instanceStartMs} ms | excluded |`,
-          `| Kernel heap per full regen     | ${perRegen ?? '-'} MiB | ${regensToRecycle ?? '-'} regens to 1 GiB |`,
+          `| Kernel heap per full regen     | ${perRegen ?? '-'} MiB | ${regensToRecycle ?? '-'} regens to ${DEFAULT_HEAP_THRESHOLD / MiB} MiB |`,
         ].join('\n'),
       );
       const out = process.env.HOUSE_BENCH_RESULTS;

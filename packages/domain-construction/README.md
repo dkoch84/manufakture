@@ -947,22 +947,24 @@ T6.5a budget, so only an order-of-magnitude regression fails a noisy runner.
 sample and heap probe in a fresh Node process. `apps/web/e2e/perf-house.spec.ts` measures the same
 house in headless Chromium. Measured 2026-10-03 on a 6-core desktop CPU (AMD Ryzen 5 7600X, Node 26):
 
-| Measure                                        | Measured                      | Budget (T6.5a) |
-| ---------------------------------------------- | ----------------------------- | -------------- |
-| Framing, cold (members, meshes, Manifold load) | 48.5 ms                       | 150 ms         |
-| Framing, warm (move a window)                  | 2.1 ms                        | 10 ms          |
-| Whole regen, cold (kernel start excluded)      | 740 ms                        | 3 s            |
-| Whole regen, warm (move a window)              | 67 ms                         | 150 ms         |
-| Kernel instance start                          | 482 ms                        | excluded       |
-| Kernel heap per full regen (`heapInUse`)       | 3.9 MiB (262 regens to 1 GiB) | none           |
-| Browser: first render (regen to viewport)      | 860 to 960 ms                 | none           |
-| Browser: draw calls per frame                  | 207 (88 of them members)      | 250            |
-| Browser: frame time, SwiftShader, mean         | 26.5 to 28.7 ms               | 30 ms          |
-| Browser: pick, SwiftShader, median             | 3.7 ms                        | none           |
+| Measure                                        | Measured                                | Budget (T6.5a) |
+| ---------------------------------------------- | --------------------------------------- | -------------- |
+| Framing, cold (members, meshes, Manifold load) | 48.5 ms                                 | 150 ms         |
+| Framing, warm (move a window)                  | 2.1 ms                                  | 10 ms          |
+| Whole regen, cold (kernel start excluded)      | 740 ms                                  | 3 s            |
+| Whole regen, warm (move a window)              | 67 ms                                   | 150 ms         |
+| Kernel instance start                          | 482 ms                                  | excluded       |
+| Kernel heap per full regen (`heapInUse`)       | 3.9 MiB (at most 131 regens to 512 MiB) | none           |
+| Browser: first render (regen to viewport)      | 860 to 960 ms                           | none           |
+| Browser: draw calls per frame                  | 207 (88 of them members)                | 250            |
+| Browser: frame time, SwiftShader, mean         | 26.5 to 28.7 ms                         | 30 ms          |
+| Browser: pick, SwiftShader, median             | 3.7 ms                                  | none           |
 
 SwiftShader is software GL on the CPU: its frame times are a regression check, not GPU numbers,
 and the 60 fps target on a laptop GPU is not measured headless. The heap figure compares N = 10
 and N = 60 full regens; the probe reads low by up to 30 % (T6.5a), so take it as a lower bound.
+The regen count is to the kernel's recycle threshold, `DEFAULT_HEAP_THRESHOLD` (512 MiB, ADR 0002),
+counted from the heap of the first probe, so it is at most 512 / 3.9.
 
 **The warm regen.** Moving a window rebuilds that opening and the one after it in the same wall
 (each opening is scoped to its host's two layer bodies, as the app writes it), re-frames one group

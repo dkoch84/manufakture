@@ -10,7 +10,8 @@ export const SOURCE_PAGE = 'source.html';
 /**
  * The third-party notices, next to the page: every bundled dependency's and .wasm module's
  * license text with the version shipped (ADR 0006 decision 5), written by the build from
- * tools/licenses (whose NOTICES_FILE is the same name).
+ * tools/licenses. That module has its own NOTICES_FILE so the app bundle never reaches into
+ * tools/; tools/licenses/check.test.ts holds the two equal.
  */
 export const NOTICES_FILE = 'third-party-notices.txt';
 

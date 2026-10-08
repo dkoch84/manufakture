@@ -4,7 +4,10 @@
 
 import type { Collected, TextFile } from './collect.ts';
 
-/** The file's name, at the root of each build. */
+/**
+ * The file's name, at the root of each build. The web app's source page links to it by its own
+ * copy (apps/web/src/source/offer.ts); check.test.ts holds the two equal.
+ */
 export const NOTICES_FILE = 'third-party-notices.txt';
 
 const RULE = '='.repeat(78);
