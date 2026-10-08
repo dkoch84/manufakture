@@ -1,0 +1,25 @@
+{
+  "name": "@manufakture/render",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "GPL-3.0-or-later",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --root ../.. --project packages packages/render"
+  },
+  "dependencies": {
+    "@manufakture/core": "workspace:*",
+    "@manufakture/kernel": "workspace:*",
+    "@manufakture/regen": "workspace:*",
+    "fflate": "^0.8.3"
+  },
+  "devDependencies": {
+    "@manufakture/domain-construction": "workspace:*",
+    "@manufakture/domain-wood": "workspace:*",
+    "@manufakture/sketch": "workspace:*"
+  }
+}
