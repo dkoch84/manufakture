@@ -4,7 +4,7 @@
 
 import { useEffect, useState } from 'react';
 import type { PinLibrary } from '../features/derived';
-import type { Version } from '../persistence/library';
+import type { Version } from '@manufakture/library';
 
 const NONE: ReadonlyMap<string, Version[] | null> = new Map();
 

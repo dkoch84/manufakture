@@ -14,8 +14,8 @@ import {
   type DocumentLibrary,
   type DocumentSummary,
   type Opened,
-} from '../persistence/library';
-import { MAX_MFK_FILE_BYTES } from '../persistence/limits';
+  MAX_MFK_FILE_BYTES,
+} from '@manufakture/library';
 import { newDocument, type DocumentStoreApi } from '../state/document';
 import { couponDocument } from './coupon';
 

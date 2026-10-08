@@ -1,10 +1,11 @@
 // Where documents are stored: a tiny file system of paths ('documents/<id>/head.json') to bytes.
 // The library (library.ts) builds its crash-safe scheme on these few operations, and never
 // relies on a write being atomic or on a rename existing, since OPFS offers neither in every
-// browser. Three implementations: OPFS (opfs.ts), IndexedDB when OPFS is missing (idb.ts), and
-// memory here, for tests and for a browser with no storage at all.
+// browser. In the app: OPFS and IndexedDB when OPFS is missing (apps/web/src/persistence); here,
+// memory, for tests and for a browser with no storage at all; and a directory on disk in Node
+// (node.ts, `@manufakture/library/node`).
 
-export type BackendKind = 'opfs' | 'indexeddb' | 'memory';
+export type BackendKind = 'opfs' | 'indexeddb' | 'memory' | 'node';
 
 export interface StorageBackend {
   readonly kind: BackendKind;

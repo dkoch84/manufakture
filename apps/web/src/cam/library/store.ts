@@ -26,8 +26,7 @@ import {
   validateLibraryTool,
   type LibraryTool,
 } from '@manufakture/cam/library';
-import { browserLocks, type DocumentLocks } from '../../persistence/library';
-import type { StorageBackend } from '../../persistence/backend';
+import { browserLocks, type DocumentLocks, type StorageBackend } from '@manufakture/library';
 
 export const TOOL_LIBRARY_DIR = 'cam-library';
 /** The library id a copied user tool's `source.library` names. */

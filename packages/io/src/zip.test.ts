@@ -1,5 +1,5 @@
 // `readZip` against hand-built and hand-patched zips: one case per defensive check (ported in
-// part from apps/web/src/persistence/mfk.test.ts, whose reader makes the same checks).
+// part from packages/library/src/mfk.test.ts, whose reader makes the same checks).
 
 import { zipSync, type Zippable } from 'fflate';
 import { describe, expect, it } from 'vitest';

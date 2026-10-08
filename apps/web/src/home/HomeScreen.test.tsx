@@ -1,9 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { MemoryBackend } from '../persistence/backend';
-import { DocumentLibrary } from '../persistence/library';
-import { MAX_MFK_FILE_BYTES } from '../persistence/limits';
-import { emptyDocument, partDocument } from '../persistence/test-fixtures';
+import { MemoryBackend, DocumentLibrary, MAX_MFK_FILE_BYTES } from '@manufakture/library';
+import { emptyDocument, partDocument } from '@manufakture/library/test-fixtures';
 import type { AppUpdater } from '../pwa/appUpdate';
 import type { PersistenceAnswer } from '../pwa/persistence';
 import { createDocumentStore } from '../state/document';

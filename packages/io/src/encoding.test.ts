@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fromBase64, importSource, sha256Hex, toBase64 } from './encoding';
+import { formatBytes, fromBase64, importSource, sha256Hex, toBase64 } from './encoding';
 
 describe('encoding', () => {
   it('round trips base64 of large binary data', () => {
@@ -25,5 +25,12 @@ describe('encoding', () => {
       sha256: await sha256Hex(bytes),
       data: toBase64(bytes),
     });
+  });
+
+  it('formats byte counts for messages', () => {
+    expect(formatBytes(512)).toBe('512 B');
+    expect(formatBytes(1023)).toBe('1023 B');
+    expect(formatBytes(12.3 * 1024)).toBe('12.3 KB');
+    expect(formatBytes(4.5 * 1024 * 1024)).toBe('4.5 MB');
   });
 });

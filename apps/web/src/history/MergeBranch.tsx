@@ -15,7 +15,7 @@ import {
   type Branch,
   type LibraryResult,
   type MergePlan,
-} from '../persistence/library';
+} from '@manufakture/library';
 import { documentStore, type DocumentStoreApi } from '../state/document';
 import './history.css';
 

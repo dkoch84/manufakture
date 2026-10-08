@@ -1,9 +1,14 @@
 import { applyCommand, type Command, type ManufaktureDocument } from '@manufakture/core';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import { MemoryBackend } from '../persistence/backend';
-import { DocumentLibrary, MAIN_BRANCH, type Branch, type LogEntry } from '../persistence/library';
-import { partDocument } from '../persistence/test-fixtures';
+import {
+  MemoryBackend,
+  DocumentLibrary,
+  MAIN_BRANCH,
+  type Branch,
+  type LogEntry,
+} from '@manufakture/library';
+import { partDocument } from '@manufakture/library/test-fixtures';
 import { createDocumentStore } from '../state/document';
 import { MergeBranch } from './MergeBranch';
 

@@ -6,8 +6,7 @@
 import { BUILTIN_POST_IDS, DEFAULT_MACHINE_ID, defaultPost, findMachine } from '@manufakture/cam';
 import { deserialize, serialize, type Command } from '@manufakture/core';
 import { describe, expect, it } from 'vitest';
-import { MemoryBackend } from '../persistence/backend';
-import { DocumentLibrary } from '../persistence/library';
+import { MemoryBackend, DocumentLibrary } from '@manufakture/library';
 import { createDocumentStore } from '../state/document';
 import { apply, mm, plywoodDocument, setupDocument, withTool } from './cam.test-fixture';
 import {

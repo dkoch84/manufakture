@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { MAIN_BRANCH, type Branch } from '../persistence/library';
+import { MAIN_BRANCH, type Branch } from '@manufakture/library';
 import { BranchSwitcher } from './BranchSwitcher';
 
 const branches: Branch[] = [

@@ -6,8 +6,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { formatBytes } from '../io/files';
-import type { BackendKind } from '../persistence/backend';
-import type { DocumentSummary } from '../persistence/library';
+import type { BackendKind, DocumentSummary } from '@manufakture/library';
 import type { StorageInfo } from '../persistence/storage';
 import type { AppUpdater } from '../pwa/appUpdate';
 import {
@@ -45,6 +44,8 @@ const WHERE: Record<BackendKind, string> = {
   opfs: 'Documents are stored in this browser (Origin Private File System).',
   indexeddb: 'Documents are stored in this browser (IndexedDB).',
   memory: 'This browser offers no storage: documents are lost when the page is closed or reloaded.',
+  // Not the app's: the library on a directory in Node (headless sessions).
+  node: 'Documents are stored in a directory on disk.',
 };
 
 function formatDate(iso: string): string {

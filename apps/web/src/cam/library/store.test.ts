@@ -5,8 +5,12 @@ import {
   type LibraryTool,
 } from '@manufakture/cam/library';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { MemoryBackend } from '../../persistence/backend';
-import { CrashingBackend, cloneBackend } from '../../persistence/test-fixtures';
+import { MemoryBackend } from '@manufakture/library';
+import {
+  CrashingBackend,
+  cloneBackend,
+  type TestBackend,
+} from '@manufakture/library/test-fixtures';
 import {
   MAX_LIBRARY_JSON,
   TOOL_LIBRARY_DIR,
@@ -31,7 +35,7 @@ function store(backend = new MemoryBackend()) {
   return { backend, lib: new ToolLibraryStore(backend, { locks: null }) };
 }
 
-function files(backend: MemoryBackend): string[] {
+function files(backend: TestBackend): string[] {
   return [...backend.files.keys()].sort();
 }
 
@@ -297,8 +301,8 @@ describe('user tool library store', () => {
     const start = new MemoryBackend();
     await writeFile(start, 1, libraryOf([mine('a')]));
     await writeFile(start, 2, bad);
-    const kept = (backend: MemoryBackend) =>
-      [...backend.files.entries()].some(
+    const kept = (backend: TestBackend) =>
+      [...backend.files].some(
         ([name, bytes]) =>
           /(tools-00000002|rejected-tools-00000002)/.test(name) && decoder.decode(bytes) === bad,
       );

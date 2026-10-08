@@ -2,7 +2,7 @@
 // `createWritable`, which some browsers apply atomically on close and others do not; the
 // library's scheme does not depend on it either way.
 
-import { segments, type StorageBackend } from './backend';
+import { segments, type StorageBackend } from '@manufakture/library';
 
 /** The directory iteration OPFS has, which the DOM typings in use do not all declare. */
 interface IterableDirectory extends FileSystemDirectoryHandle {

@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Exchanger } from '../io/exchange';
 import { boxBody } from '../viewport/testMeshes';
 import { referenceImports, restoreImports } from './imports';
-import { partWithImport, unwrapDoc } from './test-fixtures';
+import { partWithImport, unwrapDoc } from '@manufakture/library/test-fixtures';
 
 function exchanger(ok = true): Exchanger {
   return {

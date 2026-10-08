@@ -15,7 +15,7 @@
 // Nothing is asked while documents live in memory (no browser storage at all: nothing to keep);
 // App reports the library's kind with `noteLibraryKind` once it has opened the library.
 
-import type { BackendKind } from '../persistence/backend';
+import type { BackendKind } from '@manufakture/library';
 import { requestPersistence } from '../persistence/storage';
 
 export const PERSISTENCE_KEY = 'manufakture.persistence';

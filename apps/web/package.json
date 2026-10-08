@@ -27,6 +27,7 @@
     "@manufakture/drawing": "workspace:*",
     "@manufakture/io": "workspace:*",
     "@manufakture/kernel": "workspace:*",
+    "@manufakture/library": "workspace:*",
     "@manufakture/nesting": "workspace:*",
     "@manufakture/print": "workspace:*",
     "@manufakture/regen": "workspace:*",

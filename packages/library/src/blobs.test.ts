@@ -1,6 +1,5 @@
 import { fromBase64, sha256Hex, toBase64 } from '@manufakture/io';
 import { describe, expect, it } from 'vitest';
-import { MemoryBackend } from './backend';
 import { BlobStore, blobRefs, externalize, hydrate, hydrateFrom, isSha256 } from './blobs';
 import {
   applyCommand,
@@ -22,6 +21,7 @@ import {
   stlImport,
   unwrapDoc,
   userFont,
+  newBackend,
 } from './test-fixtures';
 
 describe('externalize and hydrate', () => {
@@ -161,7 +161,7 @@ describe('derived sources', () => {
     expect(blobs.size).toBe(1);
     expect(JSON.stringify(value)).not.toContain('"format": "manufakture"');
     expect(hydrate(value, blobs)).toEqual(command);
-    const store = new BlobStore(new MemoryBackend(), 'blobs');
+    const store = new BlobStore(newBackend(), 'blobs');
     const [[sha, base64]] = [...blobs] as [[string, string]];
     expect(await store.put(sha, base64)).toBe(a.source.size);
     expect(await store.put(sha, base64)).toBe(0);
@@ -341,7 +341,7 @@ describe('user fonts', () => {
 
 describe('BlobStore', () => {
   it('writes a blob once, rewrites one that a crash cut short, and refuses a wrong hash', async () => {
-    const backend = new MemoryBackend();
+    const backend = newBackend();
     const bytes = cubeStl();
     const sha = await sha256Hex(bytes);
     const path = `docs/blobs/${sha}`;

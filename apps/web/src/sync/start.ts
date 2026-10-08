@@ -2,7 +2,7 @@
 // library, and (only where the test hooks are on) the hook the end-to-end test reads:
 // `window.__manufakture.sync`.
 
-import type { DocumentLibrary } from '../persistence/library';
+import type { DocumentLibrary } from '@manufakture/library';
 import type { DocumentStoreApi } from '../state/document';
 import { testHooksEnabled } from '../testHooks';
 import { SyncController } from './controller';

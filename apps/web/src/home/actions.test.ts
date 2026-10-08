@@ -2,11 +2,9 @@ import { FORMAT_VERSION, type ManufaktureDocument } from '@manufakture/core';
 import { strToU8, zipSync } from 'fflate';
 import { describe, expect, it, vi } from 'vitest';
 import { startAutosave } from '../persistence/autosave';
-import { MemoryBackend } from '../persistence/backend';
-import { DocumentLibrary } from '../persistence/library';
-import { MAX_MFK_FILE_BYTES } from '../persistence/limits';
-import { unpackMfk } from '../persistence/mfk';
-import { emptyDocument, partDocument, partWithImport } from '../persistence/test-fixtures';
+import { MemoryBackend, DocumentLibrary, MAX_MFK_FILE_BYTES } from '@manufakture/library';
+import { unpackMfk } from '@manufakture/library/mfk';
+import { emptyDocument, partDocument, partWithImport } from '@manufakture/library/test-fixtures';
 import { createDocumentStore } from '../state/document';
 import { MFK_MIME, homeActions } from './actions';
 

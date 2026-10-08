@@ -29,9 +29,5 @@ export async function readFileBytes(file: Blob): Promise<Uint8Array> {
   return new Uint8Array(await file.arrayBuffer());
 }
 
-/** A byte count for messages: `512 B`, `12.3 KB`, `4.5 MB`. */
-export function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
-}
+/** A byte count for messages (`512 B`, `12.3 KB`, `4.5 MB`); it lives in @manufakture/io. */
+export { formatBytes } from '@manufakture/io';

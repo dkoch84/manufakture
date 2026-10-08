@@ -3,7 +3,7 @@
 // every document change without loading the import and export code, which is loaded on first use.
 
 import type { Command, ManufaktureDocument } from '@manufakture/core';
-import { visitJson } from '../persistence/walk';
+import { visitJson } from '@manufakture/library';
 
 /**
  * The viewport and kernel id of the reference body of import feature `featureId` in part studio

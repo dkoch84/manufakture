@@ -1,5 +1,5 @@
-// Reading a zip from elsewhere, within limits. The same checks as the app's `.mfk` reader
-// (apps/web/src/persistence/mfk.ts), as a package function so that readers of other zip formats
+// Reading a zip from elsewhere, within limits. The same checks as the library's `.mfk` reader
+// (packages/library/src/mfk.ts), as a package function so that readers of other zip formats
 // (`.mfkview`) share them:
 //
 // Nothing is inflated before the zip's directory is read and checked as a whole: the file's own

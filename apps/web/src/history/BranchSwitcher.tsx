@@ -4,7 +4,7 @@
 // to the library and the editor is the app's (App.tsx).
 
 import { useState, type FormEvent } from 'react';
-import { MAIN_BRANCH, type Branch } from '../persistence/library';
+import { MAIN_BRANCH, type Branch } from '@manufakture/library';
 import './history.css';
 
 export interface BranchSwitcherProps {

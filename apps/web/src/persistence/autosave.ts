@@ -17,7 +17,7 @@
 // `replaceDocument` (so replay reproduces it). While a document syncs, `src/sync` registers a
 // source of its sync state (`registerSyncSource`), and every save of the document's main branch
 // carries the state as it is at that moment, with every change made up to then: the snapshot and
-// the queue are one commit (persistence README, "Sync"). `flushForSync` is how the sync loop
+// the queue are one commit (library README, "Sync"). `flushForSync` is how the sync loop
 // saves before it sends.
 
 import type { ChangeEvent, ManufaktureDocument } from '@manufakture/core';
@@ -33,7 +33,7 @@ import {
   type SyncRecord,
   type Version,
   type VersionMeta,
-} from './library';
+} from '@manufakture/library';
 
 export interface SaveStatus {
   /**

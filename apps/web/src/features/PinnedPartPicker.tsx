@@ -10,7 +10,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { DerivedSource, ManufaktureDocument } from '@manufakture/core';
-import type { DocumentSummary, LibraryResult, Version } from '../persistence/library';
+import type { DocumentSummary, LibraryResult, Version } from '@manufakture/library';
 import type { CreateVersion } from '../history/history';
 import { VersionList } from '../history/VersionList';
 import '../history/history.css';

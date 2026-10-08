@@ -9,7 +9,7 @@ import {
   type DerivedFeature,
   type ManufaktureDocument,
 } from '@manufakture/core';
-import type { DocumentSummary, LibraryResult, Version } from '../persistence/library';
+import type { DocumentSummary, LibraryResult, Version } from '@manufakture/library';
 import { pinOf, type PinLibrary } from './derived';
 
 export interface FakeDocument {

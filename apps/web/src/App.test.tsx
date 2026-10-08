@@ -11,9 +11,8 @@ import {
 import type { FeatureResult, InstanceInterference } from '@manufakture/regen';
 import { importSource, writeBinaryStl } from '@manufakture/io';
 import { App } from './App';
-import { MemoryBackend } from './persistence/backend';
-import { DocumentLibrary } from './persistence/library';
-import { partDocument, partWithImport } from './persistence/test-fixtures';
+import { MemoryBackend, DocumentLibrary } from '@manufakture/library';
+import { partDocument, partWithImport } from '@manufakture/library/test-fixtures';
 import type { Exchanger } from './io/exchange';
 import { createSketchSession } from './sketcher/session';
 import { immediateSolver } from './sketcher/testSolver';

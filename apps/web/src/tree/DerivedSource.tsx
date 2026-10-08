@@ -8,7 +8,7 @@
 
 import type { Command, DerivedFeature, DerivedSource } from '@manufakture/core';
 import { useMemo, useState } from 'react';
-import type { Version } from '../persistence/library';
+import type { Version } from '@manufakture/library';
 import { VersionList } from '../history/VersionList';
 import '../history/history.css';
 import { newerVersions, pinLabel, readUpdate, type PinLibrary } from '../features/derived';

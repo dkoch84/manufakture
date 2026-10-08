@@ -25,7 +25,7 @@ import {
   type DocumentLibrary,
   type LibraryChange,
   type SyncUploads,
-} from '../persistence/library';
+} from '@manufakture/library';
 import type { ServerSettings } from '../sharing/client';
 import {
   SyncError,

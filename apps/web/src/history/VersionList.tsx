@@ -3,7 +3,7 @@
 // pins, T2.2c) shows versions the same way. A version kept from the sync server (T7.1e) names no
 // revision of this browser and says where it came from instead.
 
-import type { Version } from '../persistence/library';
+import type { Version } from '@manufakture/library';
 import { formatWhen } from './history';
 
 export interface VersionListProps {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { DocumentLibrary } from '../persistence/library';
+import type { DocumentLibrary } from '@manufakture/library';
 import { forgettingScriptGrants } from './libraryGuard';
 import { createScriptGrantsStore } from './policy';
 import { memoryStorage } from './scripts.test-fixture';

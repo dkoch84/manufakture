@@ -12,7 +12,7 @@ import {
   type Command,
   type ManufaktureDocument,
 } from '@manufakture/core';
-import type { LibraryResult, LoggedRevision, Version, VersionMeta } from '../persistence/library';
+import type { LibraryResult, LoggedRevision, Version, VersionMeta } from '@manufakture/library';
 import { importBodyId } from '../io/restorable';
 import { createDocumentStore, type DocumentStoreApi } from '../state/document';
 import {

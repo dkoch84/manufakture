@@ -1,9 +1,8 @@
 import { applyCommand, type ManufaktureDocument } from '@manufakture/core';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { MemoryBackend } from '../persistence/backend';
-import { DocumentLibrary, type LogEntry } from '../persistence/library';
-import { partDocument, unwrapDoc } from '../persistence/test-fixtures';
+import { MemoryBackend, DocumentLibrary, type LogEntry } from '@manufakture/library';
+import { partDocument, unwrapDoc } from '@manufakture/library/test-fixtures';
 import { HistoryPanel } from './HistoryPanel';
 import { ViewerBanner } from './ViewerBanner';
 import type { HistoryTarget } from './history';

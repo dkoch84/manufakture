@@ -2,9 +2,8 @@ import type { Command } from '@manufakture/core';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDocumentStore } from '../state/document';
 import { flushForSync, registerSyncSource, startAutosave } from './autosave';
-import { MemoryBackend } from './backend';
-import { DocumentLibrary, type SyncRecord } from './library';
-import { emptyDocument } from './test-fixtures';
+import { MemoryBackend, DocumentLibrary, type SyncRecord } from '@manufakture/library';
+import { emptyDocument } from '@manufakture/library/test-fixtures';
 
 // Autosave and sync (T7.1d): a syncing document is saved with its sync state as it is at the
 // moment of the save, and with every change made up to then, so the snapshot and the queue state

@@ -64,7 +64,14 @@ export {
   type Placement,
 } from './placement';
 export { decodeStepString, isStep, sniffFormat, stepProductNames, type FileFormat } from './step';
-export { fromBase64, importSource, sha256Hex, toBase64, type ImportSourceData } from './encoding';
+export {
+  formatBytes,
+  fromBase64,
+  importSource,
+  sha256Hex,
+  toBase64,
+  type ImportSourceData,
+} from './encoding';
 export {
   DEFAULT_EXPORT_TOLERANCE,
   EXPORT_TOLERANCES,
@@ -138,6 +145,25 @@ export {
   type DxfWriteOptions,
 } from './dxf';
 export { POINTS_PER_MM, contentStream, pdfTextString, writePdf, type PdfWriteOptions } from './pdf';
+export { FABRICATION_MIME, documentFileName, type FabricationFile } from './fabrication';
+export {
+  exportBodyFiles,
+  kernelExchanger,
+  type BodyExchanger,
+  type BodyFileFormat,
+  type BodyFileOptions,
+  type BodyFiles,
+  type ExchangeOutcome,
+  type KernelExchangeBody,
+  type MemberBodiesLike,
+} from './body-files';
+export {
+  matrix3x4,
+  memberExportBodies,
+  type MemberExportSource,
+  type MemberInstancesLike,
+} from './member-export';
+export { stepStrings, withStepDescription } from './step-header';
 export {
   HELVETICA_CAP_HEIGHT,
   helveticaTextWidth,
@@ -152,6 +178,14 @@ export {
   drawingToSvg,
   type DrawingSheetOptions,
 } from './drawing-export';
+export {
+  DRAWING_MIME,
+  drawingFile,
+  drawingFileName,
+  screenSvg,
+  type DrawingFile,
+  type DrawingFormat,
+} from './drawing-files';
 export {
   DEFAULT_SVG_OUTLINE_TOLERANCE,
   DEFAULT_SVG_TOLERANCE,

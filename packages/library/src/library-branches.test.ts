@@ -11,8 +11,6 @@ import {
   type ManufaktureDocument,
 } from '@manufakture/core';
 import { describe, expect, it } from 'vitest';
-import { createDocumentStore } from '../state/document';
-import { MemoryBackend } from './backend';
 import {
   BranchDeleted,
   DocumentLibrary,
@@ -24,12 +22,20 @@ import {
   type LogEntry,
 } from './library';
 import { unpackMfk } from './mfk';
-import { CrashingBackend, cloneBackend, partDocument, partWithImport } from './test-fixtures';
+import {
+  CrashingBackend,
+  cloneBackend,
+  partDocument,
+  partWithImport,
+  newBackend,
+  type TestBackend,
+  editorStore,
+} from './test-fixtures';
 
 let clock = 0;
 const now = () => new Date(Date.UTC(2026, 8, 30, 12, 0, clock++));
 
-function library(backend: MemoryBackend | CrashingBackend, ids = 'id') {
+function library(backend: TestBackend | CrashingBackend, ids = 'id') {
   let n = 0;
   return new DocumentLibrary(backend, { now, locks: null, newId: () => `${ids}-${++n}` });
 }
@@ -49,7 +55,7 @@ const renameEntry = (name: string): LogEntry => ({
 const named = (name: string) => partDocument('doc-1', name);
 
 /** The files under `prefix`, with their bytes as text: to check nothing there changed. */
-function tree(backend: MemoryBackend, prefix: string, except?: string): Map<string, string> {
+function tree(backend: TestBackend, prefix: string, except?: string): Map<string, string> {
   const out = new Map<string, string>();
   const decoder = new TextDecoder();
   for (const [path, bytes] of backend.files) {
@@ -60,7 +66,7 @@ function tree(backend: MemoryBackend, prefix: string, except?: string): Map<stri
   return out;
 }
 
-const MAIN_FILES = (backend: MemoryBackend) =>
+const MAIN_FILES = (backend: TestBackend) =>
   tree(backend, 'documents/doc-1/', 'documents/doc-1/branches/');
 
 /**
@@ -68,7 +74,7 @@ const MAIN_FILES = (backend: MemoryBackend) =>
  * `b-1`) from it, saved once ("Branch two") so it is at revision 2 with a log.
  */
 async function branched() {
-  const backend = new MemoryBackend();
+  const backend = newBackend();
   const lib = library(backend, 'v');
   await lib.save(named('One'));
   const a = value(await lib.createVersion('doc-1', { name: 'A' }));
@@ -705,7 +711,7 @@ describe('documents stored before branches', () => {
    * `versions` nor `branches`, two revisions, a log, and no list files.
    */
   async function oldStore() {
-    const backend = new MemoryBackend();
+    const backend = newBackend();
     const lib = library(backend);
     await lib.save(named('One'));
     await lib.save(named('Two'), [renameEntry('Two')]);
@@ -796,7 +802,7 @@ describe('merging branches', () => {
 
   /** Main and the branch "Thick" (`b-1`), both from version "Base" of the demo part. */
   async function forked() {
-    const backend = new MemoryBackend();
+    const backend = newBackend();
     const lib = new DocumentLibrary(backend, { now, locks: null, newId: () => 'b-1' });
     const base = partDocument('doc-1', 'Doc');
     await lib.save(base);
@@ -1012,7 +1018,7 @@ describe('merging branches', () => {
       ['Set #w', { type: 'setVariable', name: 'w', expression: mm('5') }],
     );
     // Main open in the editor, with an unsaved change.
-    const store = createDocumentStore(value(await lib.open('doc-1')).document);
+    const store = editorStore(value(await lib.open('doc-1')).document);
     expect(store.getState().execute({ type: 'renameDocument', name: 'Unsaved' }).ok).toBe(true);
     const before = store.getState().document;
     const plan = value(await lib.previewMerge('doc-1', branch, MAIN_BRANCH, { document: before }));

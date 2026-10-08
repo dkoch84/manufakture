@@ -26,7 +26,7 @@ import {
   type StoredExpression,
 } from '@manufakture/core';
 import { sha256Hex } from '@manufakture/io';
-import type { DocumentSummary, LibraryResult, Version, VersionMeta } from '../persistence/library';
+import type { DocumentSummary, LibraryResult, Version, VersionMeta } from '@manufakture/library';
 import { evaluateVariables } from '../sketcher/values';
 import { checkExpression, type Operation, type ScopeBody } from './forms';
 

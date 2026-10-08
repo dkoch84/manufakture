@@ -1,27 +1,56 @@
-// Documents and backends for the persistence tests.
+// Documents and backends for the library's tests, and the app's tests of what uses the library
+// (`@manufakture/library/test-fixtures`).
 
 import {
+  DocumentStore,
   applyCommand,
   createDocument,
   serialize,
+  type Command,
   type DerivedFeature,
+  type EdgeReference,
+  type Feature,
   type DocumentFont,
   type ImportFeature,
   type Instance,
   type ManufaktureDocument,
   type OutlineEntity,
+  type SketchFeature,
 } from '@manufakture/core';
 import { importSource, sha256Hex, toBase64, writeBinaryStl } from '@manufakture/io';
-import { demoDocument } from '../model/demo';
-import { boxBody } from '../viewport/testMeshes';
-import { MemoryBackend, type StorageBackend } from './backend';
+import { MemoryBackend, type BackendKind, type StorageBackend } from './backend';
 
-/** A binary STL of a 10 mm cube. */
+/**
+ * A binary STL of a cube of `size` mm from the origin: two triangles per face, faces in the
+ * order -X, +X, -Y, +Y, -Z, +Z, wound outward (the app's test box mesh, written out).
+ */
 export function cubeStl(size = 10): Uint8Array {
-  const mesh = boxBody({ size: [size, size, size] }).mesh;
+  const positions: number[] = [];
+  const indices: number[] = [];
+  for (let a = 0; a < 3; a++) {
+    for (const s of [-1, 1]) {
+      let u = (a + 1) % 3;
+      let v = (a + 2) % 3;
+      if (s < 0) [u, v] = [v, u]; // keep u x v = outward normal
+      const base = positions.length / 3;
+      for (const [du, dv] of [
+        [0, 0],
+        [1, 0],
+        [1, 1],
+        [0, 1],
+      ] as const) {
+        const p = [0, 0, 0];
+        p[a] = s > 0 ? size : 0;
+        p[u] = du ? size : 0;
+        p[v] = dv ? size : 0;
+        positions.push(...p);
+      }
+      indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
+    }
+  }
   return writeBinaryStl({
-    positions: new Float32Array(mesh.positions),
-    indices: new Uint32Array(mesh.indices),
+    positions: new Float32Array(positions),
+    indices: new Uint32Array(indices),
   });
 }
 
@@ -46,9 +75,107 @@ export function unwrapDoc(r: ReturnType<typeof applyCommand>): ManufaktureDocume
   return r.value.document;
 }
 
-/** The demo part (sketches, an extrude, fillets, a cut) under `id`. */
+/**
+ * The demo part (sketches, an extrude, fillets, a cut) under `id`: the app's `?scene=demo`
+ * document (apps/web/src/model/demo.ts), built the same way, so the app's tests and these agree.
+ */
 export function partDocument(id = 'doc-1', name = 'Bracket'): ManufaktureDocument {
-  return { ...demoDocument(id), name };
+  const base = createDocument({ id, name: 'Demo' });
+  let doc: ManufaktureDocument = {
+    ...base,
+    parts: base.parts.map((p) => ({ ...p, name: 'Demo part' })),
+  };
+  for (const feature of demoFeatures()) {
+    const command: Command = { type: 'addFeature', partId: 'part#1', feature };
+    doc = unwrapDoc(applyCommand(doc, command));
+  }
+  return { ...doc, name };
+}
+
+/** A 60 x 40 x 20 mm block, every edge filleted at 3 mm, with a through hole of radius 8. */
+function demoFeatures(): Feature[] {
+  const corners: [number, number][] = [
+    [-30, -20],
+    [30, -20],
+    [30, 20],
+    [-30, 20],
+  ];
+  const outline: SketchFeature = {
+    id: 'sketch#1',
+    kind: 'sketch',
+    name: 'Sketch 1',
+    suppressed: false,
+    plane: { type: 'plane', origin: [0, 0, 0], normal: [0, 0, 1], xDir: [1, 0, 0] },
+    entities: corners.map((start, i) => ({
+      id: `e${i + 1}`,
+      kind: 'line' as const,
+      construction: false,
+      start,
+      end: corners[(i + 1) % 4]!,
+    })),
+    constraints: [
+      ...[1, 2, 3, 4].map((i) => ({
+        id: `k${i}`,
+        kind: 'coincident' as const,
+        a: { entity: `e${i}`, at: 'end' as const },
+        b: { entity: `e${(i % 4) + 1}`, at: 'start' as const },
+      })),
+      { id: 'k5', kind: 'horizontal', line: 'e1' },
+      { id: 'k6', kind: 'horizontal', line: 'e3' },
+      { id: 'k7', kind: 'vertical', line: 'e2' },
+      { id: 'k8', kind: 'vertical', line: 'e4' },
+    ],
+  };
+  const side = (i: number) => `extrude#1:side:e${i}`;
+  const pairs: [string, string][] = [];
+  for (let i = 1; i <= 4; i++) {
+    pairs.push(['extrude#1:cap:end', side(i)], ['extrude#1:cap:start', side(i)]);
+    pairs.push([side(i), side((i % 4) + 1)]);
+  }
+  const edges: EdgeReference[] = pairs.map((faces, i) => ({
+    id: `r${i + 1}`,
+    ref: { faces: [...faces].sort() },
+  }));
+  return [
+    outline,
+    {
+      id: 'extrude#1',
+      kind: 'extrude',
+      name: 'Extrude 1',
+      suppressed: false,
+      profile: { sketch: 'sketch#1' },
+      operation: 'new',
+      extent: { type: 'blind', distance: mm('20') },
+      reverse: false,
+    },
+    {
+      id: 'fillet#1',
+      kind: 'fillet',
+      name: 'Fillet 1',
+      suppressed: false,
+      edges,
+      radius: mm('3'),
+    },
+    {
+      id: 'sketch#2',
+      kind: 'sketch',
+      name: 'Sketch 2',
+      suppressed: false,
+      plane: { type: 'plane', origin: [0, 0, -5], normal: [0, 0, 1], xDir: [1, 0, 0] },
+      entities: [{ id: 'e5', kind: 'circle', construction: false, center: [0, 0], radius: 8 }],
+      constraints: [],
+    },
+    {
+      id: 'extrude#2',
+      kind: 'extrude',
+      name: 'Hole',
+      suppressed: false,
+      profile: { sketch: 'sketch#2' },
+      operation: 'cut',
+      extent: { type: 'blind', distance: mm('30') },
+      reverse: false,
+    },
+  ];
 }
 
 /** The demo part plus an imported STL reference body. */
@@ -203,15 +330,80 @@ export async function assemblyWithPinnedInstance(id = 'doc-1'): Promise<Manufakt
   );
 }
 
+/**
+ * A core `DocumentStore` with the app editor store's shape (`getState()` with the document, the
+ * undo label and `execute`, `undo`, `redo`; `core` for its change events), for tests that edit a
+ * document the way the app does and save what it logs.
+ */
+export function editorStore(doc: ManufaktureDocument) {
+  const created = DocumentStore.create(doc);
+  if (!created.ok) throw new Error(`Invalid document: ${created.error.message}`);
+  const core = created.value;
+  return {
+    core,
+    getState: () => ({
+      document: core.document,
+      undoLabel: core.undoStack.at(-1)?.label ?? null,
+      execute: (command: Command, label?: string) => core.execute(command, label),
+      undo: () => core.undo(),
+      redo: () => core.redo(),
+    }),
+  };
+}
+
 export function emptyDocument(id = 'doc-1', name = 'Untitled'): ManufaktureDocument {
   return createDocument({ id, name });
 }
 
-/** A copy of a memory backend's files, to replay a crash from the same starting point. */
-export function cloneBackend(from: MemoryBackend): MemoryBackend {
-  const to = new MemoryBackend();
-  for (const [k, v] of from.files) to.files.set(k, v.slice());
-  return to;
+/**
+ * A backend's files as a map from path to bytes, read and changed directly (not through the
+ * backend), as the tests damage files to see what the library makes of it.
+ */
+export interface FileMap extends Iterable<[string, Uint8Array]> {
+  get(path: string): Uint8Array | undefined;
+  set(path: string, bytes: Uint8Array): unknown;
+  has(path: string): boolean;
+  delete(path: string): unknown;
+  keys(): Iterable<string>;
+}
+
+/** A backend the tests can look into: `MemoryBackend`, or a directory on disk in Node. */
+export type TestBackend = StorageBackend & { readonly files: FileMap };
+
+/** How the tests make backends. */
+export interface TestBackends {
+  make(): TestBackend;
+  /** A copy of `from`'s files in a new backend of the same kind. */
+  clone(from: TestBackend): TestBackend;
+}
+
+const memoryBackends: TestBackends = {
+  make: () => new MemoryBackend(),
+  clone: (from) => {
+    const to = new MemoryBackend();
+    for (const [k, v] of from.files) to.files.set(k, v.slice());
+    return to;
+  },
+};
+
+let backends: TestBackends = memoryBackends;
+
+/**
+ * Make the library's suites run on other backends (a setup file does this for Node: the
+ * `library-node` test project). Memory by default.
+ */
+export function useTestBackends(next: TestBackends | null): void {
+  backends = next ?? memoryBackends;
+}
+
+/** A new, empty backend of the kind the suite runs on. */
+export function newBackend(): TestBackend {
+  return backends.make();
+}
+
+/** A copy of a backend's files, to replay a crash from the same starting point. */
+export function cloneBackend(from: TestBackend): TestBackend {
+  return backends.clone(from);
 }
 
 /**
@@ -221,16 +413,19 @@ export function cloneBackend(from: MemoryBackend): MemoryBackend {
  * reload.
  */
 export class CrashingBackend implements StorageBackend {
-  readonly kind = 'memory';
-  readonly inner: MemoryBackend;
+  readonly inner: TestBackend;
   readonly ops: string[] = [];
   crashAt: number | null;
   torn: boolean;
 
-  constructor(inner: MemoryBackend, crashAt: number | null = null, torn = false) {
+  constructor(inner: TestBackend, crashAt: number | null = null, torn = false) {
     this.inner = inner;
     this.crashAt = crashAt;
     this.torn = torn;
+  }
+
+  get kind(): BackendKind {
+    return this.inner.kind;
   }
 
   #step(op: string): boolean {

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { BackendKind } from '../persistence/backend';
+import type { BackendKind } from '@manufakture/library';
 import {
   askPersistenceAtInstall,
   askPersistenceOnce,

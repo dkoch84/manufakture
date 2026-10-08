@@ -32,6 +32,22 @@ export default defineConfig({
         },
       },
       {
+        // The library's suites again, with every storage backend a directory on disk
+        // (packages/library/src/test-node-setup.ts) instead of memory.
+        test: {
+          name: 'library-node',
+          environment: 'node',
+          include: ['packages/library/src/**/*.test.ts'],
+          exclude: [
+            ...configDefaults.exclude,
+            'packages/library/src/backend.test.ts',
+            'packages/library/src/node.test.ts',
+            'packages/library/src/walk.test.ts',
+          ],
+          setupFiles: ['packages/library/src/test-node-setup.ts'],
+        },
+      },
+      {
         test: {
           name: 'kernel-goldens',
           environment: 'node',

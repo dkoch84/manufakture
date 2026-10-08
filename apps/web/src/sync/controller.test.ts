@@ -1,8 +1,7 @@
 import { serialize, type Command, type ManufaktureDocument } from '@manufakture/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { MemoryBackend } from '../persistence/backend';
-import { DocumentLibrary } from '../persistence/library';
-import { partDocument } from '../persistence/test-fixtures';
+import { MemoryBackend, DocumentLibrary } from '@manufakture/library';
+import { partDocument } from '@manufakture/library/test-fixtures';
 import { createDocumentStore, type DocumentStoreApi } from '../state/document';
 import { SyncController, newClientKey, type SyncLocks } from './controller';
 import { Hub } from './test-hub';

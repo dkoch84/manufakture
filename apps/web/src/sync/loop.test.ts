@@ -8,7 +8,7 @@ import {
 } from '@manufakture/core';
 import { SyncClient, type ClientMessage, type SyncQueueState } from '@manufakture/sync';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { partDocument } from '../persistence/test-fixtures';
+import { partDocument } from '@manufakture/library/test-fixtures';
 import { PERSIST_RETRY_MS, RECONNECT_MS, RETRY_MS, SyncLoop, type LoopStatus } from './loop';
 import { Hub, flushPromises, type FakeConnection } from './test-hub';
 

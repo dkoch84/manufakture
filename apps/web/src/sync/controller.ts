@@ -34,7 +34,7 @@ import {
   type RemoteVersionSource,
   type SyncRecord,
   type SyncUploads,
-} from '../persistence/library';
+} from '@manufakture/library';
 import { branchFromSearch } from '../persistence/url';
 import { loadServerSettings, type ServerSettings } from '../sharing/client';
 import type { DocumentStoreApi } from '../state/document';

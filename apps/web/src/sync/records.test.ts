@@ -6,9 +6,8 @@ import {
   type ServerVersion,
 } from '@manufakture/sync';
 import { afterEach, describe, expect, it } from 'vitest';
-import { MemoryBackend } from '../persistence/backend';
-import { DocumentLibrary, type SyncUploads } from '../persistence/library';
-import { partDocument } from '../persistence/test-fixtures';
+import { MemoryBackend, DocumentLibrary, type SyncUploads } from '@manufakture/library';
+import { partDocument } from '@manufakture/library/test-fixtures';
 import { RecordSync } from './records';
 import { flushPromises } from './test-hub';
 

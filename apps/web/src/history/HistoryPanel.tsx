@@ -16,7 +16,7 @@ import {
   type Branch,
   type LibraryChange,
   type Version,
-} from '../persistence/library';
+} from '@manufakture/library';
 import {
   formatWhen,
   sameTarget,

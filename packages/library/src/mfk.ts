@@ -19,7 +19,7 @@
 // read; every other entry, including names like `../x` or `/etc/x`, is ignored and never inflated.
 
 import { Inflate, zipSync, type Zippable } from 'fflate';
-import { formatBytes } from '../io/files';
+import { formatBytes } from '@manufakture/io';
 import { isSha256 } from './blobs';
 import { MAX_MFK_FILE_BYTES } from './limits';
 

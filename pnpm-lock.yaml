@@ -120,6 +120,9 @@ importers:
       '@manufakture/kernel':
         specifier: workspace:*
         version: link:../../packages/kernel
+      '@manufakture/library':
+        specifier: workspace:*
+        version: link:../../packages/library
       '@manufakture/nesting':
         specifier: workspace:*
         version: link:../../packages/nesting
@@ -213,6 +216,12 @@ importers:
 
   packages/cam:
     dependencies:
+      '@manufakture/core':
+        specifier: workspace:*
+        version: link:../core
+      '@manufakture/io':
+        specifier: workspace:*
+        version: link:../io
       '@manufakture/units':
         specifier: workspace:*
         version: link:../units
@@ -222,7 +231,16 @@ importers:
       comlink:
         specifier: ^4.4.2
         version: 4.4.2
+      fflate:
+        specifier: ^0.8.3
+        version: 0.8.3
     devDependencies:
+      '@manufakture/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      '@manufakture/regen':
+        specifier: workspace:*
+        version: link:../regen
       gcode-toolpath:
         specifier: 3.0.0
         version: 3.0.0
@@ -272,6 +290,12 @@ importers:
       '@manufakture/core':
         specifier: workspace:*
         version: link:../core
+      '@manufakture/io':
+        specifier: workspace:*
+        version: link:../io
+      '@manufakture/nesting':
+        specifier: workspace:*
+        version: link:../nesting
       '@manufakture/stock':
         specifier: workspace:*
         version: link:../stock
@@ -335,6 +359,21 @@ importers:
         specifier: 3.0.2
         version: 3.0.2
 
+  packages/library:
+    dependencies:
+      '@manufakture/core':
+        specifier: workspace:*
+        version: link:../core
+      '@manufakture/io':
+        specifier: workspace:*
+        version: link:../io
+      '@manufakture/sync':
+        specifier: workspace:*
+        version: link:../sync
+      fflate:
+        specifier: ^0.8.3
+        version: 0.8.3
+
   packages/nesting:
     devDependencies:
       guillotine-packer:
@@ -395,6 +434,31 @@ importers:
       web-ifc:
         specifier: 0.0.78
         version: 0.0.78
+
+  packages/render:
+    dependencies:
+      '@manufakture/core':
+        specifier: workspace:*
+        version: link:../core
+      '@manufakture/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      '@manufakture/regen':
+        specifier: workspace:*
+        version: link:../regen
+      fflate:
+        specifier: ^0.8.3
+        version: 0.8.3
+    devDependencies:
+      '@manufakture/domain-construction':
+        specifier: workspace:*
+        version: link:../domain-construction
+      '@manufakture/domain-wood':
+        specifier: workspace:*
+        version: link:../domain-wood
+      '@manufakture/sketch':
+        specifier: workspace:*
+        version: link:../sketch
 
   packages/script:
     dependencies:

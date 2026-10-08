@@ -7,9 +7,13 @@ import {
   type Command,
 } from '@manufakture/core';
 import { describe, expect, it } from 'vitest';
-import { MemoryBackend } from '../persistence/backend';
-import { DocumentLibrary, type LoggedRevision, type Version } from '../persistence/library';
-import { partDocument, partWithImport, unwrapDoc } from '../persistence/test-fixtures';
+import {
+  MemoryBackend,
+  DocumentLibrary,
+  type LoggedRevision,
+  type Version,
+} from '@manufakture/library';
+import { partDocument, partWithImport, unwrapDoc } from '@manufakture/library/test-fixtures';
 import { createViewSettingsStore, hiddenBodiesOf } from '../state/viewSettings';
 import {
   compareDocuments,

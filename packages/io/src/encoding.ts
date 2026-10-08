@@ -49,3 +49,10 @@ export async function importSource(
     data: toBase64(bytes),
   };
 }
+
+/** A byte count for messages: `512 B`, `12.3 KB`, `4.5 MB`. */
+export function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}

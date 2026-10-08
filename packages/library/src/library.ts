@@ -381,7 +381,36 @@ export interface Branch {
   fromVersion: string | null;
   /** ISO 8601. */
   createdAt: string;
+  /** Set on a branch an agent session made; absent on a person's (and on main). */
+  provenance?: BranchProvenance;
 }
+
+/** Where an agent branch stands in review. */
+export type ReviewState = 'open' | 'submitted' | 'changes-requested' | 'approved' | 'rejected';
+export const REVIEW_STATES: readonly ReviewState[] = [
+  'open',
+  'submitted',
+  'changes-requested',
+  'approved',
+  'rejected',
+];
+
+/**
+ * Who made a branch when it was not a person in the app (docs/plans/agent-surface.md, decision
+ * 3). Library data kept in the branch list, not document format: a release that does not know it
+ * reads the list as before.
+ */
+export interface BranchProvenance {
+  origin: 'agent';
+  /** The session that made it: an id as documents have (`isStorableId`). */
+  sessionId: string;
+  /** The name the agent's client gave for itself: self-reported, so shown, never trusted. */
+  clientName: string;
+  review: ReviewState;
+}
+
+/** A client's self-reported name, at most this many characters. */
+export const MAX_CLIENT_NAME = 200;
 
 export interface VersionMeta {
   name: string;
@@ -543,16 +572,58 @@ function branchName(name: unknown): string | null {
   return trimmed.length > 0 && trimmed.length <= MAX_DOCUMENT_NAME ? trimmed : null;
 }
 
-/** One branch record, checked field by field. Null when anything is off. */
+/**
+ * A branch's provenance, checked field by field (other fields are left out). Null when anything
+ * is off: a session id that is not a storable id, a client name that is empty, longer than
+ * MAX_CLIENT_NAME, padded, holding control or format characters (Unicode Cc and Cf: bidi
+ * overrides, zero-width marks) or a lone surrogate, or an unknown review state. Lenient about
+ * the review state, which any of `REVIEW_STATES` may be: this reads stored branches. A new
+ * branch takes `newProvenance`.
+ */
+export function parseProvenance(v: unknown): BranchProvenance | null {
+  if (!isRecord(v)) return null;
+  const { origin, sessionId, clientName, review } = v;
+  if (origin !== 'agent') return null;
+  if (typeof sessionId !== 'string' || !isStorableId(sessionId)) return null;
+  if (
+    typeof clientName !== 'string' ||
+    clientName.length === 0 ||
+    clientName.length > MAX_CLIENT_NAME ||
+    clientName.trim() !== clientName ||
+    /[\p{Cc}\p{Cf}\p{Cs}]/u.test(clientName)
+  ) {
+    return null;
+  }
+  if (typeof review !== 'string' || !REVIEW_STATES.includes(review as ReviewState)) return null;
+  return { origin, sessionId, clientName, review: review as ReviewState };
+}
+
+/**
+ * The provenance of a branch about to be made: as `parseProvenance` checks it, and only in
+ * review state `open`, since a new branch has not been reviewed. A string saying what is wrong.
+ */
+function newProvenance(v: unknown): BranchProvenance | string {
+  const parsed = parseProvenance(v);
+  if (!parsed) return 'The branch provenance is invalid.';
+  if (parsed.review !== 'open') return 'A new agent branch starts in review state "open".';
+  return parsed;
+}
+
+/**
+ * One branch record, checked field by field. Null when anything is off, provenance included: a
+ * damaged provenance never reads as a person's branch.
+ */
 function parseBranch(v: unknown): Branch | null {
   if (!isRecord(v)) return null;
-  const { id, name, fromVersion, createdAt } = v;
+  const { id, name, fromVersion, createdAt, provenance } = v;
   if (typeof id !== 'string' || !isBranchId(id) || id === MAIN_BRANCH) return null;
   if (typeof name !== 'string' || branchName(name) !== name) return null;
   if (typeof fromVersion !== 'string' || !VERSION_ID.test(fromVersion)) return null;
   if (typeof createdAt !== 'string' || createdAt.length > 64 || Number.isNaN(Date.parse(createdAt)))
     return null;
-  return { id, name, fromVersion, createdAt };
+  if (provenance === undefined) return { id, name, fromVersion, createdAt };
+  const parsed = parseProvenance(provenance);
+  return parsed ? { id, name, fromVersion, createdAt, provenance: parsed } : null;
 }
 
 /**
@@ -1730,7 +1801,18 @@ export class DocumentLibrary {
     return this.#notify(id, 'versions', this.#createVersion(id, meta, branch));
   }
 
-  #createVersion(id: string, meta: VersionMeta, branch?: string): Promise<LibraryResult<Version>> {
+  /**
+   * With `revision`: name that stored revision of branch `branch` instead of the current one
+   * (`branchFromRevision`). Its retained snapshot's SHA-256; a revision no longer kept is
+   * rebuilt and its snapshot written again first (`#revisionStamp`).
+   * No `RevisionConflict`: the revision is named, not the head.
+   */
+  #createVersion(
+    id: string,
+    meta: VersionMeta,
+    branch?: string,
+    revision?: number,
+  ): Promise<LibraryResult<Version>> {
     const on = branch ?? MAIN_BRANCH;
     return this.#run(async () => {
       if (!isStorableId(id)) return { ok: false, message: `There is no document "${id}".` };
@@ -1738,16 +1820,27 @@ export class DocumentLibrary {
       const checked = versionMeta(meta);
       if (typeof checked === 'string') return { ok: false, message: checked };
       return this.#locked(id, async () => {
-        let named: Head | null = null;
-        if (on !== MAIN_BRANCH) {
-          const listed = await this.#branch(id, on);
-          if (!listed.ok) return listed;
+        let named: Pick<Head, 'revision' | 'snapshotSha256'> | null = null;
+        if (on !== MAIN_BRANCH || revision !== undefined) {
+          if (on !== MAIN_BRANCH) {
+            const listed = await this.#branch(id, on);
+            if (!listed.ok) return listed;
+          }
           // Open first: it repairs the branch's head and deletes what a failed save left.
           const opened = await this.#open(id, on);
           if (!opened.ok) return opened;
-          named = await this.#head(id, on);
-          if (!named) return { ok: false, message: 'Its head cannot be read.' };
-          this.#checkRevision(id, on, named);
+          const head = await this.#head(id, on);
+          if (!head) return { ok: false, message: 'Its head cannot be read.' };
+          if (revision === undefined) {
+            this.#checkRevision(id, on, head);
+            named = head;
+          } else if (revision === head.revision) {
+            named = head;
+          } else {
+            const stamp = await this.#revisionStamp(id, on, revision);
+            if (!stamp.ok) return stamp;
+            named = stamp.value;
+          }
         }
         return this.#changeList(
           VERSION_LIST,
@@ -1771,6 +1864,43 @@ export class DocumentLibrary {
         );
       });
     });
+  }
+
+  /**
+   * What a version of revision `rev` (not the head) of a branch records about it: the SHA-256 of
+   * its snapshot. A revision whose snapshot is no longer kept (or does not read) is rebuilt by
+   * replay and written as `snapshot-<rev>.json` in storage form, its blobs stored first as a save
+   * stores them, so the version names a file that pruning keeps and `readVersion` reads directly.
+   * Recording only the hash of a replay would break once a format bump changes the storage form.
+   * A snapshot there that does not read is copied aside first, as loading does with one above
+   * the head.
+   */
+  async #revisionStamp(
+    id: string,
+    branch: string,
+    rev: number,
+  ): Promise<LibraryResult<Pick<Head, 'revision' | 'snapshotSha256'>>> {
+    const dir = this.#dir(id, branch);
+    const bytes = await this.#backend.read(`${dir}/${snapshotName(rev)}`);
+    if (bytes && (await this.#decodeSnapshot(id, bytes))) {
+      return { ok: true, value: { revision: rev, snapshotSha256: await sha256Hex(bytes) } };
+    }
+    const rebuilt = await this.#readRevision(id, branch, rev);
+    if (!rebuilt.ok) return rebuilt;
+    const stored = encodeStored(rebuilt.value.document);
+    const blobs = this.#blobs(id);
+    for (const [sha, data] of stored.blobs) await blobs.put(sha, data);
+    if (bytes) {
+      const copy = damagedName('snapshot', rev, await sha256Hex(bytes));
+      await this.#backend.write(`${dir}/${copy}`, bytes);
+      this.#warn(
+        `manufakture: revision ${rev} of document ${id}${onBranch(branch)} cannot be read from ` +
+          `its snapshot; it is kept as ${copy} and the snapshot rebuilt from the log.`,
+      );
+    }
+    const snapshot = encoder.encode(stored.text);
+    await this.#backend.write(`${dir}/${snapshotName(rev)}`, snapshot);
+    return { ok: true, value: { revision: rev, snapshotSha256: await sha256Hex(snapshot) } };
   }
 
   /** Rename a version (its id, revision and snapshot stay). Versions are never deleted. */
@@ -2469,8 +2599,104 @@ export class DocumentLibrary {
    * naming it is committed by the main head. A crash before that commit leaves a directory no
    * list names, which the next branch change deletes. The new branch is not opened.
    */
-  createBranch(id: string, fromVersion: string, name: string): Promise<LibraryResult<Branch>> {
-    return this.#notify(id, 'branches', this.#createBranch(id, fromVersion, name));
+  createBranch(
+    id: string,
+    fromVersion: string,
+    name: string,
+    options: { provenance?: BranchProvenance } = {},
+  ): Promise<LibraryResult<Branch>> {
+    return this.#notify(
+      id,
+      'branches',
+      this.#createBranch(id, fromVersion, name, undefined, options.provenance),
+    );
+  }
+
+  /**
+   * A new branch of document `id` from revision `options.revision` (default: the head) of
+   * branch `options.from` (default: main), through a version of that revision named
+   * `options.version`, since branches start from versions: `createVersion`, then
+   * `createBranch` with `options.provenance`. The name and provenance are checked before the
+   * version is made; a branch that still cannot be made (its name taken meanwhile, the branch
+   * limit) leaves the version, as versions are kept for good, and the failure says so.
+   */
+  async branchFromRevision(
+    id: string,
+    options: {
+      from?: string;
+      revision?: number;
+      version: VersionMeta;
+      name: string;
+      provenance?: BranchProvenance;
+    },
+  ): Promise<LibraryResult<{ version: Version; branch: Branch }>> {
+    if (branchName(options.name) === null) {
+      return { ok: false, message: `A branch name must be 1 to ${MAX_DOCUMENT_NAME} characters.` };
+    }
+    if (options.provenance !== undefined) {
+      const origin = newProvenance(options.provenance);
+      if (typeof origin === 'string') return { ok: false, message: origin };
+    }
+    const listed = await this.listBranches(id);
+    if (!listed.ok) return listed;
+    const problem = branchProblem(listed.value.slice(1), branchName(options.name)!);
+    if (problem) return { ok: false, message: problem };
+    if (listed.value.length - 1 >= MAX_BRANCHES) {
+      return { ok: false, message: `A document holds at most ${MAX_BRANCHES} branches.` };
+    }
+    const version = await this.#notify(
+      id,
+      'versions',
+      this.#createVersion(id, options.version, options.from, options.revision),
+    );
+    if (!version.ok) return version;
+    const branch = await this.createBranch(id, version.value.id, options.name, {
+      ...(options.provenance ? { provenance: options.provenance } : {}),
+    });
+    if (!branch.ok) {
+      return {
+        ok: false,
+        message: `${branch.message} The version "${version.value.name}" was made and is kept.`,
+      };
+    }
+    return { ok: true, value: { version: version.value, branch: branch.value } };
+  }
+
+  /**
+   * Set the review state of agent branch `branch` (one with provenance), committed by the main
+   * head like any branch change. A person's branch, and main, have none to set. The library does
+   * not check who asks: its callers (the review UI, T8.3b, and the session server, T8.4b) decide
+   * who may call it, and an agent session must never reach it for its own branch. Note that
+   * `adoptBranch` does not carry provenance yet (T8.4b), so a branch synced to another browser
+   * arrives there as a person's.
+   */
+  setBranchReview(id: string, branch: string, review: ReviewState): Promise<LibraryResult<Branch>> {
+    return this.#notify(
+      id,
+      'branches',
+      this.#run(async () => {
+        if (!isStorableId(id)) return { ok: false, message: `There is no document "${id}".` };
+        if (branch === MAIN_BRANCH || !isBranchId(branch)) return NO_BRANCH;
+        if (!REVIEW_STATES.includes(review)) {
+          return { ok: false, message: `There is no review state "${String(review)}".` };
+        }
+        return this.#locked(id, () =>
+          this.#changeList(
+            BRANCH_LIST,
+            id,
+            (items) => {
+              const at = items.findIndex((b) => b.id === branch);
+              if (at < 0) return 'There is no such branch.';
+              const provenance = items[at]!.provenance;
+              if (!provenance) return 'It is not an agent branch, so it has no review state.';
+              const changed = { ...items[at]!, provenance: { ...provenance, review } };
+              return { items: items.map((b, i) => (i === at ? changed : b)), result: changed };
+            },
+            false,
+          ),
+        );
+      }),
+    );
   }
 
   /**
@@ -2498,9 +2724,12 @@ export class DocumentLibrary {
     fromVersion: string,
     name: string,
     given?: { id: string; createdAt: string },
+    provenance?: BranchProvenance,
   ): Promise<LibraryResult<Branch>> {
     return this.#run(async () => {
       if (!isStorableId(id)) return { ok: false, message: `There is no document "${id}".` };
+      const origin = provenance === undefined ? null : newProvenance(provenance);
+      if (typeof origin === 'string') return { ok: false, message: origin };
       const checked = branchName(name);
       if (checked === null) {
         return {
@@ -2543,6 +2772,7 @@ export class DocumentLibrary {
           name: named,
           fromVersion: version.id,
           createdAt: given?.createdAt ?? this.#now().toISOString(),
+          ...(origin ? { provenance: origin } : {}),
         };
         if (!isBranchId(branch.id) || branch.id === MAIN_BRANCH) {
           return { ok: false, message: 'The new branch has no usable id.' };

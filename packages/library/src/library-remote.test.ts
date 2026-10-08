@@ -1,6 +1,5 @@
 import { serialize, type ManufaktureDocument } from '@manufakture/core';
 import { describe, expect, it } from 'vitest';
-import { MemoryBackend } from './backend';
 import {
   DocumentLibrary,
   MAIN_BRANCH,
@@ -8,7 +7,7 @@ import {
   type RemoteVersion,
   type Version,
 } from './library';
-import { partDocument } from './test-fixtures';
+import { partDocument, newBackend } from './test-fixtures';
 
 // Versions and branches that came from the sync server (T7.1e): kept here with their documents
 // although they name no revision saved in this browser, listed and read like any version, a
@@ -18,7 +17,7 @@ import { partDocument } from './test-fixtures';
 let clock = 0;
 const now = () => new Date(Date.UTC(2026, 9, 4, 12, 0, clock++));
 
-function library(backend = new MemoryBackend()) {
+function library(backend = newBackend()) {
   let n = 0;
   return new DocumentLibrary(backend, {
     now,
@@ -49,7 +48,7 @@ function remote(fields: Partial<RemoteVersion> = {}): RemoteVersion {
 
 describe('versions from the sync server', () => {
   it('are kept with their document, listed after the local ones, and read back', async () => {
-    const backend = new MemoryBackend();
+    const backend = newBackend();
     const lib = library(backend);
     const doc = partDocument();
     await lib.save(doc, []);
@@ -68,7 +67,7 @@ describe('versions from the sync server', () => {
   });
 
   it('refuse another document, an invalid record, and a damaged copy', async () => {
-    const backend = new MemoryBackend();
+    const backend = newBackend();
     const lib = library(backend);
     const doc = partDocument();
     await lib.save(doc, []);
@@ -121,7 +120,7 @@ describe('versions from the sync server', () => {
 
 describe('a kept version that is not committed', () => {
   it('leaves no file behind, and a leftover one is swept under locks', async () => {
-    const backend = new MemoryBackend();
+    const backend = newBackend();
     const lib = library(backend);
     const doc = partDocument();
     await lib.save(doc, []);
@@ -131,7 +130,7 @@ describe('a kept version that is not committed', () => {
     expect([...backend.files.keys()].some((k) => k.includes('remote-'))).toBe(false);
 
     // A crash between the write and the commit leaves a file no list names.
-    const other = new MemoryBackend();
+    const other = newBackend();
     const locked = new DocumentLibrary(other, {
       now,
       newId: () => crypto.randomUUID(),

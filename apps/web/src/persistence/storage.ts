@@ -1,9 +1,8 @@
 // Picking the browser's storage, and what the home screen says about it: how much is used, and
 // whether the browser has agreed to keep it (persistent storage is not evicted under pressure).
 
-import { memoryBackend, type StorageBackend } from './backend';
+import { memoryBackend, type StorageBackend, DocumentLibrary } from '@manufakture/library';
 import { openIdb } from './idb';
-import { DocumentLibrary } from './library';
 import { openOpfs } from './opfs';
 
 /** OPFS when it works, else IndexedDB, else memory (nothing survives a reload). */

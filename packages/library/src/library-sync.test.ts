@@ -1,17 +1,23 @@
 import { serialize, type ManufaktureDocument } from '@manufakture/core';
 import { describe, expect, it } from 'vitest';
-import { MemoryBackend } from './backend';
 import { DocumentLibrary, RevisionConflict, type LogEntry, type SyncRecord } from './library';
-import { CrashingBackend, cloneBackend, partDocument, partWithImport } from './test-fixtures';
+import {
+  CrashingBackend,
+  cloneBackend,
+  partDocument,
+  partWithImport,
+  newBackend,
+  type TestBackend,
+} from './test-fixtures';
 
-// The sync state beside the snapshot (T7.1d; persistence README, "Sync"): saved with the revision
+// The sync state beside the snapshot (T7.1d; README, "Sync"): saved with the revision
 // it belongs to and committed by the same head, so a crash at any step leaves the old pair or the
 // new pair, never a queue with another revision's document.
 
 let clock = 0;
 const now = () => new Date(Date.UTC(2026, 9, 4, 12, 0, clock++));
 
-function library(backend: MemoryBackend | CrashingBackend = new MemoryBackend()) {
+function library(backend: TestBackend | CrashingBackend = newBackend()) {
   return new DocumentLibrary(backend, { now, locks: null, warn: () => undefined });
 }
 
@@ -44,7 +50,7 @@ async function read(lib: DocumentLibrary, id = 'doc-1') {
 
 describe('sync state in the library', () => {
   it('saves the state with a revision and reads it back, files and all', async () => {
-    const backend = new MemoryBackend();
+    const backend = newBackend();
     const lib = library(backend);
     const doc = await partWithImport();
     await lib.save(doc, [], undefined, record(doc, 'one'));
@@ -70,7 +76,7 @@ describe('sync state in the library', () => {
   });
 
   it('saves the state alone for the revision the head names, keeping one spare', async () => {
-    const backend = new MemoryBackend();
+    const backend = newBackend();
     const lib = library(backend);
     const doc = partDocument();
     await lib.save(doc, [], undefined, record(doc, 'one'));
@@ -100,7 +106,7 @@ describe('sync state in the library', () => {
   });
 
   it('refuses to save the state when another tab saved the document', async () => {
-    const backend = new MemoryBackend();
+    const backend = newBackend();
     const a = library(backend);
     const b = library(backend);
     const doc = partDocument();
@@ -112,7 +118,7 @@ describe('sync state in the library', () => {
   });
 
   it('stops syncing: the head names no state and the files go', async () => {
-    const backend = new MemoryBackend();
+    const backend = newBackend();
     const lib = library(backend);
     const doc = partDocument();
     await lib.save(doc, [], undefined, record(doc, 'one'));
@@ -128,7 +134,7 @@ describe('sync state in the library', () => {
   // and the state are the old pair or the new pair, and the next save works.
   for (const torn of [false, true]) {
     it(`a save crashed at any step leaves a matching pair (${torn ? 'torn' : 'clean'})`, async () => {
-      const base = new MemoryBackend();
+      const base = newBackend();
       const doc = await partWithImport();
       await library(base).save(doc, [], undefined, record(doc, 'old'));
       const next = renamed(doc, 'New');
@@ -164,7 +170,7 @@ describe('sync state in the library', () => {
     });
 
     it(`saving the state alone crashed at any step leaves old or new (${torn ? 'torn' : 'clean'})`, async () => {
-      const base = new MemoryBackend();
+      const base = newBackend();
       const doc = partDocument();
       const seed = library(base);
       await seed.save(doc, [], undefined, record(doc, 'old'));
@@ -195,7 +201,7 @@ describe('sync state in the library', () => {
   }
 
   it('fails, never falls back to an older state, when the state the head names cannot be read', async () => {
-    const backend = new MemoryBackend();
+    const backend = newBackend();
     const lib = library(backend);
     const doc = partDocument();
     await lib.save(doc, [], undefined, record(doc, 'one'));

@@ -2,7 +2,7 @@
 // bytes. Each write is its own transaction, so it is atomic here; the library does not rely
 // on that.
 
-import { segments, type StorageBackend } from './backend';
+import { segments, type StorageBackend } from '@manufakture/library';
 
 const DB_NAME = 'manufakture';
 const STORE = 'files';

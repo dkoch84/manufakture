@@ -1,7 +1,6 @@
 import { applyCommand, FORMAT_VERSION, serialize, type Command } from '@manufakture/core';
 import { describe, expect, it } from 'vitest';
-import { createDocumentStore } from '../state/document';
-import { MemoryBackend, type StorageBackend } from './backend';
+import type { StorageBackend } from './backend';
 import {
   CHECKPOINT_EVERY,
   DocumentLibrary,
@@ -25,19 +24,19 @@ import {
   pinnedInstance,
   stlImport,
   unwrapDoc,
+  newBackend,
+  type TestBackend,
+  editorStore,
 } from './test-fixtures';
 
 const decoder = new TextDecoder();
-const text = (backend: MemoryBackend, path: string) => decoder.decode(backend.files.get(path)!);
-const files = (backend: MemoryBackend) => [...backend.files.keys()].sort();
+const text = (backend: TestBackend, path: string) => decoder.decode(backend.files.get(path)!);
+const files = (backend: TestBackend) => [...backend.files.keys()].sort();
 
 let clock = 0;
 const now = () => new Date(Date.UTC(2026, 8, 26, 12, 0, clock++));
 
-function library(
-  backend: MemoryBackend | CrashingBackend = new MemoryBackend(),
-  locks?: DocumentLocks,
-) {
+function library(backend: TestBackend | CrashingBackend = newBackend(), locks?: DocumentLocks) {
   let n = 0;
   return new DocumentLibrary(backend, { now, newId: () => `copy-${++n}`, locks: locks ?? null });
 }
@@ -75,7 +74,7 @@ async function opened(lib: DocumentLibrary, id: string) {
 
 describe('DocumentLibrary', () => {
   it('saves and opens a document unchanged, as numbered snapshots behind a head', async () => {
-    const backend = new MemoryBackend();
+    const backend = newBackend();
     const lib = library(backend);
     const doc = partDocument();
     const s1 = await lib.save(doc);
@@ -106,7 +105,7 @@ describe('DocumentLibrary', () => {
   });
 
   it('stores an imported file once, as a blob keyed by its SHA-256, outside the snapshot', async () => {
-    const backend = new MemoryBackend();
+    const backend = newBackend();
     const lib = library(backend);
     const doc = await partWithImport();
     const source = (doc.parts[0]!.features.at(-1) as Awaited<ReturnType<typeof stlImport>>).source;
@@ -131,7 +130,7 @@ describe('DocumentLibrary', () => {
   });
 
   it('stores a pinned version once, as a blob of its UTF-8 text, and opens it again', async () => {
-    const backend = new MemoryBackend();
+    const backend = newBackend();
     const lib = library(backend);
     const doc = await partWithDerived();
     const feature = doc.parts[0]!.features.at(-1)!;
@@ -147,7 +146,7 @@ describe('DocumentLibrary', () => {
   });
 
   it("stores an instance's pinned version once, for snapshots and logged commands", async () => {
-    const backend = new MemoryBackend();
+    const backend = newBackend();
     const lib = library(backend);
     const doc = await assemblyWithPinnedInstance();
     const before = unwrapDoc(
@@ -180,7 +179,7 @@ describe('DocumentLibrary', () => {
   });
 
   it('refuses a blob that does not match its SHA-256 or is missing', async () => {
-    const backend = new MemoryBackend();
+    const backend = newBackend();
     const doc = await partWithImport();
     const { sha256 } = (doc.parts[0]!.features.at(-1) as Awaited<ReturnType<typeof stlImport>>)
       .source;
@@ -188,6 +187,7 @@ describe('DocumentLibrary', () => {
     const path = `documents/doc-1/blobs/${sha256}`;
     const bytes = backend.files.get(path)!;
     bytes[100] = bytes[100]! ^ 0xff;
+    backend.files.set(path, bytes);
     let r = await library(backend).open('doc-1');
     expect(r.ok ? null : r.message).toBe(
       'The imported file cube.stl is damaged: its SHA-256 does not match.',
@@ -200,7 +200,7 @@ describe('DocumentLibrary', () => {
   });
 
   it('logs commands beside the snapshots, imported files by reference, and reads them back', async () => {
-    const backend = new MemoryBackend();
+    const backend = newBackend();
     const lib = library(backend);
     const doc = partDocument();
     await lib.save(doc);
@@ -239,7 +239,7 @@ describe('DocumentLibrary', () => {
   });
 
   it('saves the print section and logged print commands unchanged (ADR 0012, format v8)', async () => {
-    const backend = new MemoryBackend();
+    const backend = newBackend();
     const lib = library(backend);
     const doc = partDocument();
     await lib.save(doc);
@@ -282,7 +282,7 @@ describe('DocumentLibrary', () => {
   });
 
   it('saves the CAM section and logged CAM commands unchanged (ADR 0014, format v14)', async () => {
-    const backend = new MemoryBackend();
+    const backend = newBackend();
     const lib = library(backend);
     const doc = partDocument();
     await lib.save(doc);
@@ -371,7 +371,7 @@ describe('DocumentLibrary', () => {
   });
 
   it('opens a snapshot saved before CAM existed with an empty CAM section (format v13)', async () => {
-    const backend = new MemoryBackend();
+    const backend = newBackend();
     const lib = library(backend);
     const doc = partDocument();
     await lib.save(doc);
@@ -385,7 +385,7 @@ describe('DocumentLibrary', () => {
   });
 
   it('saves a user font as a blob and opens the document with it (format v9)', async () => {
-    const backend = new MemoryBackend();
+    const backend = newBackend();
     const lib = library(backend);
     const doc = await partWithFonts();
     const font = doc.fonts[1]!;
@@ -410,7 +410,7 @@ describe('DocumentLibrary', () => {
   });
 
   it('saves domain data and logged setDomainData commands unchanged (ADR 0013, format v12)', async () => {
-    const backend = new MemoryBackend();
+    const backend = newBackend();
     const lib = library(backend);
     const doc = partDocument();
     await lib.save(doc);
@@ -451,7 +451,7 @@ describe('DocumentLibrary', () => {
   });
 
   it('keeps a logged import even once the document no longer holds it', async () => {
-    const backend = new MemoryBackend();
+    const backend = newBackend();
     const lib = library(backend);
     const doc = partDocument();
     const feature = await stlImport();
@@ -465,7 +465,7 @@ describe('DocumentLibrary', () => {
   });
 
   it('refuses a document saved by a newer app, without falling back or changing anything', async () => {
-    const backend = new MemoryBackend();
+    const backend = newBackend();
     const lib = library(backend);
     await lib.save(partDocument());
     await lib.save(partDocument());
@@ -483,7 +483,7 @@ describe('DocumentLibrary', () => {
   });
 
   it('lists documents most recent first, and renames, duplicates and deletes them', async () => {
-    const backend = new MemoryBackend();
+    const backend = newBackend();
     const lib = library(backend);
     await lib.save(emptyDocument('a', 'Alpha'));
     await lib.save(await partWithImport('b'));
@@ -528,7 +528,7 @@ describe('DocumentLibrary', () => {
 
   it('refuses to delete an unsafe id before taking any lock', async () => {
     const locks = sharedLocks();
-    const lib = library(new MemoryBackend(), locks);
+    const lib = library(newBackend(), locks);
     await expect(lib.remove('../evil')).rejects.toThrow('Cannot delete a document "../evil"');
     expect(locks.names).toEqual([]);
   });
@@ -537,7 +537,7 @@ describe('DocumentLibrary', () => {
 describe('crash safety', () => {
   /** Revision 1 of the part, and the change saved as revision 2 (which adds an import). */
   async function start() {
-    const backend = new MemoryBackend();
+    const backend = newBackend();
     const before = partDocument();
     await library(backend).save(before);
     const after = await partWithImport();
@@ -655,7 +655,7 @@ describe('crash safety', () => {
 
 describe('a complete snapshot that cannot be read', () => {
   it('is kept aside, with its log, before the head moves off it: later opens and saves never delete it', async () => {
-    const backend = new MemoryBackend();
+    const backend = newBackend();
     const lib = library(backend);
     await lib.save(partDocument());
     await lib.save(partDocument('doc-1', 'Two'), [renameEntry('Two')]);
@@ -702,7 +702,7 @@ describe('a complete snapshot that cannot be read', () => {
   });
 
   it('is not kept when it is cut short (a torn write), nor when it is missing', async () => {
-    const backend = new MemoryBackend();
+    const backend = newBackend();
     const lib = library(backend);
     await lib.save(partDocument());
     await lib.save(partDocument('doc-1', 'Two'));
@@ -716,7 +716,7 @@ describe('a complete snapshot that cannot be read', () => {
 
 describe('a failed save, retried in the same session', () => {
   it('logs each command once and keeps the last committed snapshot as the spare', async () => {
-    const backend = new MemoryBackend();
+    const backend = newBackend();
     await library(backend).save(partDocument());
     await library(backend).save(partDocument('doc-1', 'Two'));
     // The next save writes its log segment, then fails on the snapshot (a full disk, say).
@@ -740,11 +740,11 @@ describe('a failed save, retried in the same session', () => {
   });
 
   it('logs its commands once when the head was written but the write then failed', async () => {
-    const backend = new MemoryBackend();
+    const backend = newBackend();
     await library(backend).save(partDocument(), [renameEntry('One')]);
     // The head's bytes land, then the write reports a failure (a quota error on close, say).
     let failHead = true;
-    const flaky: StorageBackend = Object.assign(Object.create(backend) as MemoryBackend, {
+    const flaky: StorageBackend = Object.assign(Object.create(backend) as TestBackend, {
       async write(path: string, bytes: Uint8Array) {
         await backend.write(path, bytes);
         if (failHead && path.endsWith('/head.json')) {
@@ -753,7 +753,7 @@ describe('a failed save, retried in the same session', () => {
         }
       },
     });
-    const lib = library(flaky as MemoryBackend);
+    const lib = library(flaky as TestBackend);
     await opened(lib, 'doc-1');
     const two = [renameEntry('Two')];
     await expect(lib.save(partDocument('doc-1', 'Two'), two)).rejects.toThrow(/after all/);
@@ -765,7 +765,7 @@ describe('a failed save, retried in the same session', () => {
   });
 
   it('builds on its own recovered snapshot when the failure tore the head', async () => {
-    const backend = new MemoryBackend();
+    const backend = newBackend();
     await library(backend).save(partDocument());
     // Blob-free save: log, snapshot, then a torn head.
     const failing = new CrashingBackend(backend, 2, true);
@@ -781,7 +781,7 @@ describe('a failed save, retried in the same session', () => {
 
 describe('the command log', () => {
   it('follows the chain back from the head, and refuses a segment of the wrong shape', async () => {
-    const backend = new MemoryBackend();
+    const backend = newBackend();
     const lib = library(backend);
     await lib.save(partDocument(), [renameEntry('One')]);
     await lib.save(partDocument());
@@ -810,7 +810,7 @@ describe('the command log', () => {
   });
 
   it('lists the log per revision for the history, without the commands', async () => {
-    const backend = new MemoryBackend();
+    const backend = newBackend();
     const lib = library(backend);
     await lib.save(partDocument(), [renameEntry('One')]);
     await lib.save(partDocument());
@@ -842,7 +842,7 @@ describe('the command log', () => {
 
 describe('listing', () => {
   it('describes a document without a head from its snapshots, without writing anything', async () => {
-    const backend = new MemoryBackend();
+    const backend = newBackend();
     await library(backend).save(partDocument());
     await library(backend).save(partDocument('doc-1', 'Two'));
     backend.files.delete('documents/doc-1/head.json');
@@ -860,7 +860,7 @@ describe('listing', () => {
 describe('several tabs on one document', () => {
   it('takes the document lock for open, save, rename, duplicate, export and delete', async () => {
     const locks = sharedLocks();
-    const lib = library(new MemoryBackend(), locks);
+    const lib = library(newBackend(), locks);
     await lib.save(partDocument('d'));
     await lib.open('d');
     await lib.rename('d', 'New');
@@ -879,7 +879,7 @@ describe('several tabs on one document', () => {
   });
 
   it('two tabs saving at once: one commits, the other is refused, and nothing interleaves', async () => {
-    const backend = new MemoryBackend();
+    const backend = newBackend();
     await library(backend).save(partDocument());
     const locks = sharedLocks();
     const tabA = library(backend, locks);
@@ -903,13 +903,13 @@ describe('several tabs on one document', () => {
   it('without Web Locks: a save that finds the head moved just before its commit is refused, and overwrites nothing', async () => {
     // IndexedDB on an insecure origin: no locks. Tab B has written its snapshot when tab A's
     // whole save runs; only B's last look at the head stands between B and dropping A's work.
-    const backend = new MemoryBackend();
+    const backend = newBackend();
     await library(backend).save(partDocument(), [renameEntry('One')]);
     let release!: () => void;
     const gate = new Promise<void>((resolve) => (release = resolve));
     let paused!: () => void;
     const reached = new Promise<void>((resolve) => (paused = resolve));
-    const gated: StorageBackend = Object.assign(Object.create(backend) as MemoryBackend, {
+    const gated: StorageBackend = Object.assign(Object.create(backend) as TestBackend, {
       async write(path: string, bytes: Uint8Array) {
         await backend.write(path, bytes);
         if (path.endsWith('/snapshot-00000002.json')) {
@@ -939,7 +939,7 @@ describe('several tabs on one document', () => {
   });
 
   it('refuses to save over a newer revision from another tab; the tab can keep its version as a copy', async () => {
-    const backend = new MemoryBackend();
+    const backend = newBackend();
     await library(backend).save(partDocument());
     const tabA = library(backend);
     const tabB = library(backend);
@@ -962,7 +962,7 @@ describe('several tabs on one document', () => {
 });
 
 /** A library that records what it warns about. */
-function watched(backend: MemoryBackend | CrashingBackend = new MemoryBackend()) {
+function watched(backend: TestBackend | CrashingBackend = newBackend()) {
   const warnings: string[] = [];
   let n = 0;
   const lib = new DocumentLibrary(backend, {
@@ -985,9 +985,7 @@ function value<T>(r: { ok: true; value: T } | { ok: false; message: string }): T
  * without commands. Returns each revision's canonical text.
  */
 async function edit(lib: DocumentLibrary, saves: number, from = 1): Promise<Map<number, string>> {
-  const store = createDocumentStore(
-    from === 1 ? partDocument() : (await opened(lib, 'doc-1')).document,
-  );
+  const store = editorStore(from === 1 ? partDocument() : (await opened(lib, 'doc-1')).document);
   const entries: LogEntry[] = [];
   store.core.subscribe((e) => {
     if (e.command && e.cause !== 'load' && e.cause !== 'remote') {
@@ -1038,7 +1036,7 @@ async function edit(lib: DocumentLibrary, saves: number, from = 1): Promise<Map<
   return texts;
 }
 
-const snapshotRevisions = (backend: MemoryBackend) =>
+const snapshotRevisions = (backend: TestBackend) =>
   files(backend)
     .map((f) => /snapshot-(\d+)\.json$/.exec(f)?.[1])
     .filter((r): r is string => r !== undefined)
@@ -1046,7 +1044,7 @@ const snapshotRevisions = (backend: MemoryBackend) =>
 
 describe('named versions', () => {
   it('names the current revision, lists, renames and reads versions back', async () => {
-    const backend = new MemoryBackend();
+    const backend = newBackend();
     const { lib } = watched(backend);
     await lib.save(partDocument());
     await lib.save(partDocument('doc-1', 'Two'), [renameEntry('Two')]);
@@ -1106,7 +1104,7 @@ describe('named versions', () => {
   });
 
   it('refuses to name a revision another tab saved over this one', async () => {
-    const backend = new MemoryBackend();
+    const backend = newBackend();
     await library(backend).save(partDocument());
     const tabA = library(backend);
     await opened(tabA, 'doc-1');
@@ -1116,7 +1114,7 @@ describe('named versions', () => {
   });
 
   it('keeps the snapshot a version names through 200 later saves', async () => {
-    const backend = new MemoryBackend();
+    const backend = newBackend();
     const { lib } = watched(backend);
     await lib.save(partDocument());
     await lib.save(partDocument('doc-1', 'Named'), [renameEntry('Named')]);
@@ -1134,7 +1132,7 @@ describe('named versions', () => {
   });
 
   it('refuses a version whose snapshot and log no longer give its SHA-256', async () => {
-    const backend = new MemoryBackend();
+    const backend = newBackend();
     const { lib } = watched(backend);
     await lib.save(partDocument());
     await lib.save(partDocument('doc-1', 'Named'));
@@ -1157,7 +1155,7 @@ describe('crash safety of a version', () => {
    * rename), so the next change deletes the list before the spare.
    */
   async function start() {
-    const backend = new MemoryBackend();
+    const backend = newBackend();
     let n = 0;
     const lib = new DocumentLibrary(backend, { now, locks: null, newId: () => `a-${++n}` });
     await lib.save(partDocument());
@@ -1249,7 +1247,7 @@ describe('crash safety of a version', () => {
     const gate = new Promise<void>((resolve) => (release = resolve));
     let paused!: () => void;
     const reached = new Promise<void>((resolve) => (paused = resolve));
-    const gated: StorageBackend = Object.assign(Object.create(backend) as MemoryBackend, {
+    const gated: StorageBackend = Object.assign(Object.create(backend) as TestBackend, {
       async write(path: string, bytes: Uint8Array) {
         await backend.write(path, bytes);
         if (path.endsWith('/snapshot-00000004.json')) {
@@ -1259,7 +1257,7 @@ describe('crash safety of a version', () => {
       },
     });
     // Tab A does not see B's new files yet (they are above the head, and not committed).
-    const hiding: StorageBackend = Object.assign(Object.create(backend) as MemoryBackend, {
+    const hiding: StorageBackend = Object.assign(Object.create(backend) as TestBackend, {
       async list(dir: string) {
         return (await backend.list(dir)).filter((n) => !n.endsWith('00000004.json'));
       },
@@ -1289,7 +1287,7 @@ describe('crash safety of a version', () => {
     const gate = new Promise<void>((resolve) => (release = resolve));
     let paused!: () => void;
     const reached = new Promise<void>((resolve) => (paused = resolve));
-    const gated: StorageBackend = Object.assign(Object.create(backend) as MemoryBackend, {
+    const gated: StorageBackend = Object.assign(Object.create(backend) as TestBackend, {
       async write(path: string, bytes: Uint8Array) {
         await backend.write(path, bytes);
         if (path.endsWith('/versions-00000003.json')) {
@@ -1353,7 +1351,7 @@ describe('crash safety of a version', () => {
 
 describe('replaying the log', () => {
   it(`keeps a checkpoint every ${CHECKPOINT_EVERY} revisions and rebuilds every revision exactly`, async () => {
-    const backend = new MemoryBackend();
+    const backend = newBackend();
     const { lib, warnings } = watched(backend);
     const texts = await edit(lib, 140);
     const v = value(await lib.createVersion('doc-1', { name: 'At 140' }));
@@ -1391,7 +1389,7 @@ describe('replaying the log', () => {
   });
 
   it('logs a replay that does not reproduce a retained snapshot, and goes on from it', async () => {
-    const backend = new MemoryBackend();
+    const backend = newBackend();
     const { lib, warnings } = watched(backend);
     const texts = await edit(lib, 70);
     // A command whose meaning changed: revision 64's rename now says something else.
@@ -1408,7 +1406,7 @@ describe('replaying the log', () => {
   });
 
   it('goes on from a later snapshot past a command that no longer applies, or says why it cannot', async () => {
-    const backend = new MemoryBackend();
+    const backend = newBackend();
     const { lib, warnings } = watched(backend);
     const texts = await edit(lib, 70);
     const path = 'documents/doc-1/log-00000006.json';
@@ -1436,7 +1434,7 @@ describe('replaying the log', () => {
   });
 
   it('a document saved before checkpoints has history from its oldest remaining snapshot', async () => {
-    const backend = new MemoryBackend();
+    const backend = newBackend();
     const { lib } = watched(backend);
     const texts = await edit(lib, 10);
     // What the old pruning left: the last two snapshots only.
@@ -1465,7 +1463,7 @@ describe('.mfk files with versions', () => {
   });
 
   async function versioned() {
-    const backend = new MemoryBackend();
+    const backend = newBackend();
     const { lib } = watched(backend);
     await lib.save(partDocument());
     await lib.save(await partWithImport(), [renameEntry('Imported')]);

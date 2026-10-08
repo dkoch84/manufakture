@@ -4,7 +4,7 @@
 
 import type { Command, ManufaktureDocument } from '@manufakture/core';
 import type { DroppedCommand } from '@manufakture/sync';
-import type { Branch, DocumentLibrary, LogEntry } from '../persistence/library';
+import type { Branch, DocumentLibrary, LogEntry } from '@manufakture/library';
 
 /** The notice's text for dropped commands. */
 export function droppedText(drops: readonly DroppedCommand[]): string {

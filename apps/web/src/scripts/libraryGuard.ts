@@ -4,7 +4,7 @@
 // therefore forgets a document's grants when the document is deleted and when a file is imported
 // under its id, before the imported document opens.
 
-import type { DocumentLibrary } from '../persistence/library';
+import type { DocumentLibrary } from '@manufakture/library';
 import type { ScriptGrantsStore } from './policy';
 
 /** `library`, forgetting a document's script grants on `remove` and on `importMfk`. */

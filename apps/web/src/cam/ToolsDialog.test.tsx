@@ -11,7 +11,7 @@ import {
   unverifiedToolFields,
 } from '@manufakture/cam/library';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { MemoryBackend } from '../persistence/backend';
+import { MemoryBackend } from '@manufakture/library';
 import { createDocumentStore } from '../state/document';
 import { apply, plywoodDocument, setupDocument } from './cam.test-fixture';
 import { TOOL_LIBRARY_DIR, ToolLibraryStore } from './library/store';

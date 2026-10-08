@@ -1,15 +1,14 @@
 import { createDocument, FORMAT_VERSION, serialize } from '@manufakture/core';
 import { zipSync, type Zippable } from 'fflate';
 import { describe, expect, it } from 'vitest';
-import { MemoryBackend } from './backend';
 import { DocumentLibrary } from './library';
 import { MFK_LIMITS, packMfk, unpackMfk, type MfkLimits } from './mfk';
-import { cubeStl, partDocument, partWithImport } from './test-fixtures';
+import { cubeStl, partDocument, partWithImport, newBackend } from './test-fixtures';
 
 const encode = (s: string) => new TextEncoder().encode(s);
 const zip = (files: Zippable) => zipSync(files, { level: 6 });
 
-function library(backend = new MemoryBackend()) {
+function library(backend = newBackend()) {
   let n = 0;
   return new DocumentLibrary(backend, { newId: () => `new-${++n}` });
 }
@@ -98,7 +97,7 @@ describe('.mfk files', () => {
     );
 
     // A blob that is missing, or whose bytes do not match the SHA-256 the import stores.
-    const source = new DocumentLibrary(new MemoryBackend());
+    const source = new DocumentLibrary(newBackend());
     await source.save(await partWithImport('b'));
     const good = await source.exportMfk('b');
     if (!good.ok) throw new Error(good.message);

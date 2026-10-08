@@ -42,7 +42,12 @@ import { createAssemblyUiStore, type AssemblyUiStore } from './assembly/state';
 import { homeActions, openedMessage, type ActionOutcome } from './home/actions';
 import { HomeScreen } from './home/HomeScreen';
 import { startAutosave, type Autosave, type SaveStatus } from './persistence/autosave';
-import { MAIN_BRANCH, type Branch, type DocumentLibrary } from './persistence/library';
+import {
+  MAIN_BRANCH,
+  type Branch,
+  type DocumentLibrary,
+  MAX_MFK_FILE_BYTES,
+} from '@manufakture/library';
 import { requestPersistence, storageInfo } from './persistence/storage';
 import { askPersistenceOnce, noteLibraryKind } from './pwa/persistence';
 import { registerAutosave } from './pwa/saveGate';
@@ -156,7 +161,6 @@ import { ScriptsBanner } from './scripts/ScriptsBanner';
 import { ScriptsPanel } from './scripts/ScriptsPanel';
 import type { ScriptedServices } from './features/ScriptedDialog';
 import { acceptViewSource } from './viewer/handoff';
-import { MAX_MFK_FILE_BYTES } from './persistence/limits';
 import { testHooksEnabled } from './testHooks';
 import type { BodyInput } from './viewport/bodies';
 import { LoadingSplash } from './viewport/LoadingSplash';
@@ -1599,7 +1603,7 @@ export function App({
   const buildView = useCallback(
     async (includeSource: boolean) => {
       const [{ assemblyPublishPlan, partPublishPlan, publishView }, { packDocument }] =
-        await Promise.all([import('./io/publishView'), import('./persistence/library')]);
+        await Promise.all([import('./io/publishView'), import('@manufakture/library')]);
       const plan =
         assemblyId !== null
           ? assemblyPublishPlan(shownDocument, assemblyId, {

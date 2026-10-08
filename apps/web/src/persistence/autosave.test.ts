@@ -2,9 +2,8 @@ import type { Command } from '@manufakture/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDocumentStore } from '../state/document';
 import { startAutosave } from './autosave';
-import { MemoryBackend } from './backend';
-import { DocumentLibrary, type DocumentSummary } from './library';
-import { emptyDocument, partDocument } from './test-fixtures';
+import { MemoryBackend, DocumentLibrary, type DocumentSummary } from '@manufakture/library';
+import { emptyDocument, partDocument } from '@manufakture/library/test-fixtures';
 
 const rename = (name: string): Command => ({ type: 'renameDocument', name });
 
