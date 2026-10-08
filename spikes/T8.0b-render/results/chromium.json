@@ -1,0 +1,339 @@
+{
+  "host": {
+    "cpu": "AMD Ryzen 5 7600X 6-Core Processor",
+    "logicalCpus": 12,
+    "memoryGiB": 62,
+    "node": "v26.10.0",
+    "platform": "linux x64",
+    "measuredAt": "2026-10-08T19:57:01.882Z"
+  },
+  "browser": "Chrome Headless Shell 153.0.8010.12 (Playwright 1.63.0), SwiftShader WebGL",
+  "bundles": {
+    "bracket": {
+      "bytes": 5805,
+      "bodies": 1,
+      "writeMs": 25.3
+    },
+    "bookshelf": {
+      "bytes": 32023,
+      "bodies": 12,
+      "writeMs": 8
+    },
+    "shed": {
+      "bytes": 92250,
+      "bodies": 54,
+      "writeMs": 22.6
+    },
+    "house": {
+      "bytes": 374626,
+      "bodies": 165,
+      "writeMs": 91.5
+    }
+  },
+  "launches": [
+    {
+      "launchMs": 36.5,
+      "shots": [
+        {
+          "fixture": "bracket",
+          "view": "iso",
+          "loadMs": 191.1,
+          "viewMs": 46.5,
+          "screenshotMs": 172.1,
+          "pngBytes": 321149,
+          "secondRoundIdentical": true
+        },
+        {
+          "fixture": "bracket",
+          "view": "front",
+          "loadMs": 191.1,
+          "viewMs": 44.5,
+          "screenshotMs": 85.7,
+          "pngBytes": 59507,
+          "secondRoundIdentical": true
+        },
+        {
+          "fixture": "bracket",
+          "view": "top",
+          "loadMs": 191.1,
+          "viewMs": 47.6,
+          "screenshotMs": 81.8,
+          "pngBytes": 28263,
+          "secondRoundIdentical": true
+        },
+        {
+          "fixture": "bracket",
+          "view": "right",
+          "loadMs": 191.1,
+          "viewMs": 34.9,
+          "screenshotMs": 84.4,
+          "pngBytes": 53978,
+          "secondRoundIdentical": true
+        },
+        {
+          "fixture": "bookshelf",
+          "view": "iso",
+          "loadMs": 130.7,
+          "viewMs": 42.6,
+          "screenshotMs": 149.9,
+          "pngBytes": 425763,
+          "secondRoundIdentical": true
+        },
+        {
+          "fixture": "bookshelf",
+          "view": "front",
+          "loadMs": 130.7,
+          "viewMs": 50.2,
+          "screenshotMs": 87.5,
+          "pngBytes": 128365,
+          "secondRoundIdentical": true
+        },
+        {
+          "fixture": "bookshelf",
+          "view": "top",
+          "loadMs": 130.7,
+          "viewMs": 45.7,
+          "screenshotMs": 81,
+          "pngBytes": 17785,
+          "secondRoundIdentical": true
+        },
+        {
+          "fixture": "bookshelf",
+          "view": "right",
+          "loadMs": 130.7,
+          "viewMs": 35.6,
+          "screenshotMs": 88.3,
+          "pngBytes": 125113,
+          "secondRoundIdentical": true
+        },
+        {
+          "fixture": "shed",
+          "view": "iso",
+          "loadMs": 150.1,
+          "viewMs": 36.9,
+          "screenshotMs": 116.3,
+          "pngBytes": 226582,
+          "secondRoundIdentical": true
+        },
+        {
+          "fixture": "shed",
+          "view": "front",
+          "loadMs": 150.1,
+          "viewMs": 41.8,
+          "screenshotMs": 82.6,
+          "pngBytes": 49027,
+          "secondRoundIdentical": true
+        },
+        {
+          "fixture": "shed",
+          "view": "top",
+          "loadMs": 150.1,
+          "viewMs": 43.3,
+          "screenshotMs": 80,
+          "pngBytes": 17714,
+          "secondRoundIdentical": true
+        },
+        {
+          "fixture": "shed",
+          "view": "right",
+          "loadMs": 150.1,
+          "viewMs": 44.2,
+          "screenshotMs": 82,
+          "pngBytes": 47437,
+          "secondRoundIdentical": true
+        },
+        {
+          "fixture": "house",
+          "view": "iso",
+          "loadMs": 189.3,
+          "viewMs": 47.3,
+          "screenshotMs": 168.2,
+          "pngBytes": 387018,
+          "secondRoundIdentical": true
+        },
+        {
+          "fixture": "house",
+          "view": "front",
+          "loadMs": 189.3,
+          "viewMs": 59.5,
+          "screenshotMs": 78.4,
+          "pngBytes": 52859,
+          "secondRoundIdentical": true
+        },
+        {
+          "fixture": "house",
+          "view": "top",
+          "loadMs": 189.3,
+          "viewMs": 36.2,
+          "screenshotMs": 81.9,
+          "pngBytes": 43484,
+          "secondRoundIdentical": true
+        },
+        {
+          "fixture": "house",
+          "view": "right",
+          "loadMs": 189.3,
+          "viewMs": 44,
+          "screenshotMs": 81.5,
+          "pngBytes": 49607,
+          "secondRoundIdentical": true
+        }
+      ]
+    },
+    {
+      "launchMs": 27.6,
+      "shots": [
+        {
+          "fixture": "bracket",
+          "view": "iso",
+          "loadMs": 191.8,
+          "viewMs": 41.7,
+          "screenshotMs": 177.2,
+          "pngBytes": 321149,
+          "secondRoundIdentical": true
+        },
+        {
+          "fixture": "bracket",
+          "view": "front",
+          "loadMs": 191.8,
+          "viewMs": 47.8,
+          "screenshotMs": 86.4,
+          "pngBytes": 59507,
+          "secondRoundIdentical": true
+        },
+        {
+          "fixture": "bracket",
+          "view": "top",
+          "loadMs": 191.8,
+          "viewMs": 46.9,
+          "screenshotMs": 81.5,
+          "pngBytes": 28263,
+          "secondRoundIdentical": true
+        },
+        {
+          "fixture": "bracket",
+          "view": "right",
+          "loadMs": 191.8,
+          "viewMs": 35.2,
+          "screenshotMs": 85,
+          "pngBytes": 53978,
+          "secondRoundIdentical": true
+        },
+        {
+          "fixture": "bookshelf",
+          "view": "iso",
+          "loadMs": 132.6,
+          "viewMs": 43.3,
+          "screenshotMs": 144.6,
+          "pngBytes": 425763,
+          "secondRoundIdentical": true
+        },
+        {
+          "fixture": "bookshelf",
+          "view": "front",
+          "loadMs": 132.6,
+          "viewMs": 46.9,
+          "screenshotMs": 88.5,
+          "pngBytes": 128365,
+          "secondRoundIdentical": true
+        },
+        {
+          "fixture": "bookshelf",
+          "view": "top",
+          "loadMs": 132.6,
+          "viewMs": 44.8,
+          "screenshotMs": 80.6,
+          "pngBytes": 17785,
+          "secondRoundIdentical": true
+        },
+        {
+          "fixture": "bookshelf",
+          "view": "right",
+          "loadMs": 132.6,
+          "viewMs": 36,
+          "screenshotMs": 89.2,
+          "pngBytes": 125113,
+          "secondRoundIdentical": true
+        },
+        {
+          "fixture": "shed",
+          "view": "iso",
+          "loadMs": 144.4,
+          "viewMs": 40.4,
+          "screenshotMs": 117.6,
+          "pngBytes": 226582,
+          "secondRoundIdentical": true
+        },
+        {
+          "fixture": "shed",
+          "view": "front",
+          "loadMs": 144.4,
+          "viewMs": 40.7,
+          "screenshotMs": 84.3,
+          "pngBytes": 49027,
+          "secondRoundIdentical": true
+        },
+        {
+          "fixture": "shed",
+          "view": "top",
+          "loadMs": 144.4,
+          "viewMs": 40.7,
+          "screenshotMs": 79.5,
+          "pngBytes": 17714,
+          "secondRoundIdentical": true
+        },
+        {
+          "fixture": "shed",
+          "view": "right",
+          "loadMs": 144.4,
+          "viewMs": 37.1,
+          "screenshotMs": 82.3,
+          "pngBytes": 47437,
+          "secondRoundIdentical": true
+        },
+        {
+          "fixture": "house",
+          "view": "iso",
+          "loadMs": 205.7,
+          "viewMs": 44.3,
+          "screenshotMs": 171.2,
+          "pngBytes": 387018,
+          "secondRoundIdentical": true
+        },
+        {
+          "fixture": "house",
+          "view": "front",
+          "loadMs": 205.7,
+          "viewMs": 37.1,
+          "screenshotMs": 83.4,
+          "pngBytes": 52859,
+          "secondRoundIdentical": true
+        },
+        {
+          "fixture": "house",
+          "view": "top",
+          "loadMs": 205.7,
+          "viewMs": 49.7,
+          "screenshotMs": 82.1,
+          "pngBytes": 43484,
+          "secondRoundIdentical": true
+        },
+        {
+          "fixture": "house",
+          "view": "right",
+          "loadMs": 205.7,
+          "viewMs": 34.4,
+          "screenshotMs": 83.1,
+          "pngBytes": 49607,
+          "secondRoundIdentical": true
+        }
+      ]
+    }
+  ],
+  "determinism": {
+    "withinLaunchIdentical": true,
+    "acrossLaunchesDiffering": [],
+    "previousRunCompared": 16,
+    "previousRunDiffering": []
+  }
+}

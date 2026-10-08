@@ -27,3 +27,7 @@ Several spikes depend on workspace packages (`workspace:*`), so installing one o
 
 The spikes without a `package.json` (`hlr`, `opencamlib`) need nothing extra: they run with the
 repository's own Vitest, as their READMEs describe.
+
+`T8.0b-render` (rendering views without a browser) has no `package.json` either; its README also covers the Chromium reference's setup.
+
+`T8.0a-headless` (a headless session in Node) has no `package.json` either; its README also covers the Chromium comparison's setup.

@@ -1,0 +1,1202 @@
+{
+  "host": {
+    "cpu": "AMD Ryzen 5 7600X 6-Core Processor",
+    "logicalCpus": 12,
+    "memoryGiB": 62,
+    "node": "v26.10.0",
+    "platform": "linux x64",
+    "measuredAt": "2026-10-08T20:01:50.521Z"
+  },
+  "runs": 7,
+  "regens": {
+    "bracket": {
+      "regenMs": 145.7,
+      "sceneMs": 0.2,
+      "bodies": 1,
+      "members": 0,
+      "memberShapes": 0,
+      "triangles": 472,
+      "drawCalls": 1,
+      "instances": 1
+    },
+    "bookshelf": {
+      "regenMs": 380.2,
+      "sceneMs": 0.1,
+      "bodies": 12,
+      "members": 0,
+      "memberShapes": 0,
+      "triangles": 1312,
+      "drawCalls": 12,
+      "instances": 12
+    },
+    "shed": {
+      "regenMs": 102.7,
+      "sceneMs": 3.4,
+      "bodies": 9,
+      "members": 156,
+      "memberShapes": 36,
+      "triangles": 2340,
+      "drawCalls": 54,
+      "instances": 165
+    },
+    "house": {
+      "regenMs": 599.4,
+      "sceneMs": 5.3,
+      "bodies": 28,
+      "members": 794,
+      "memberShapes": 84,
+      "triangles": 12160,
+      "drawCalls": 165,
+      "instances": 822
+    }
+  },
+  "rows": [
+    {
+      "fixture": "bracket",
+      "view": "iso",
+      "variant": "default",
+      "triangles": 472,
+      "segments": 245,
+      "mmPerPixel": 0.0907,
+      "renderMs": {
+        "median": 37.3,
+        "min": 31.8,
+        "max": 66.6
+      },
+      "phasesMs": {
+        "transform": 0.2,
+        "triangles": 13.9,
+        "edges": 0.7,
+        "outline": 10.6,
+        "resolve": 8.7
+      },
+      "encodeMs": 69.2,
+      "pngBytes": 18981,
+      "level6": {
+        "encodeMs": 39.8,
+        "pngBytes": 20668
+      },
+      "sha256": "7e5b22757b9d0d93b8d7e9c23cd17ddd8c3fa33c7bb11576fec5fac49f0e9e95",
+      "identicalRuns": true
+    },
+    {
+      "fixture": "bracket",
+      "view": "front",
+      "variant": "default",
+      "triangles": 230,
+      "segments": 245,
+      "mmPerPixel": 0.0556,
+      "renderMs": {
+        "median": 31.1,
+        "min": 28.2,
+        "max": 45
+      },
+      "phasesMs": {
+        "transform": 0.1,
+        "triangles": 10.3,
+        "edges": 0.5,
+        "outline": 9.7,
+        "resolve": 8.8
+      },
+      "encodeMs": 35.7,
+      "pngBytes": 4801,
+      "level6": {
+        "encodeMs": 27.4,
+        "pngBytes": 5594
+      },
+      "sha256": "a5fc184d97c9542e18d261fb989e8816309c6bdb10376dbc98260108831c2df3",
+      "identicalRuns": true
+    },
+    {
+      "fixture": "bracket",
+      "view": "top",
+      "variant": "default",
+      "triangles": 236,
+      "segments": 245,
+      "mmPerPixel": 0.0512,
+      "renderMs": {
+        "median": 41.5,
+        "min": 36.8,
+        "max": 42.2
+      },
+      "phasesMs": {
+        "transform": 0.1,
+        "triangles": 19.7,
+        "edges": 0.8,
+        "outline": 9.9,
+        "resolve": 9.2
+      },
+      "encodeMs": 41.2,
+      "pngBytes": 8452,
+      "level6": {
+        "encodeMs": 29.5,
+        "pngBytes": 9582
+      },
+      "sha256": "29ac62fbd6c00174c0f5c2c70d63c8f19edc644b848dac047e4806ec7772cf93",
+      "identicalRuns": true
+    },
+    {
+      "fixture": "bracket",
+      "view": "right",
+      "variant": "default",
+      "triangles": 212,
+      "segments": 245,
+      "mmPerPixel": 0.0556,
+      "renderMs": {
+        "median": 35.1,
+        "min": 31.8,
+        "max": 36.8
+      },
+      "phasesMs": {
+        "transform": 0.1,
+        "triangles": 13.7,
+        "edges": 0.6,
+        "outline": 9.7,
+        "resolve": 9.1
+      },
+      "encodeMs": 33.6,
+      "pngBytes": 3776,
+      "level6": {
+        "encodeMs": 27,
+        "pngBytes": 4434
+      },
+      "sha256": "c7d4afc06767faf52d80556ea052d98e7a2b222968a17abae92a6224078e012e",
+      "identicalRuns": true
+    },
+    {
+      "fixture": "bookshelf",
+      "view": "iso",
+      "variant": "default",
+      "triangles": 1312,
+      "segments": 786,
+      "mmPerPixel": 2.6788,
+      "renderMs": {
+        "median": 36.2,
+        "min": 32.5,
+        "max": 55.1
+      },
+      "phasesMs": {
+        "transform": 0.2,
+        "triangles": 14.3,
+        "edges": 2.1,
+        "outline": 9.9,
+        "resolve": 9
+      },
+      "encodeMs": 61.2,
+      "pngBytes": 20525,
+      "level6": {
+        "encodeMs": 37.5,
+        "pngBytes": 21837
+      },
+      "sha256": "8b186432f3ae57bf0504a51e7b13aeae20061e03a2c526fd8c044e49ee9beb45",
+      "identicalRuns": true
+    },
+    {
+      "fixture": "bookshelf",
+      "view": "front",
+      "variant": "default",
+      "triangles": 984,
+      "segments": 786,
+      "mmPerPixel": 2.54,
+      "renderMs": {
+        "median": 34.7,
+        "min": 31.2,
+        "max": 38.3
+      },
+      "phasesMs": {
+        "transform": 0.3,
+        "triangles": 11.6,
+        "edges": 1.9,
+        "outline": 9.6,
+        "resolve": 8.8
+      },
+      "encodeMs": 34.3,
+      "pngBytes": 3898,
+      "level6": {
+        "encodeMs": 26.9,
+        "pngBytes": 4529
+      },
+      "sha256": "050f533e448468e08eed3ec861507d4604181bd1127f86222324d8f69ccd9a09",
+      "identicalRuns": true
+    },
+    {
+      "fixture": "bookshelf",
+      "view": "top",
+      "variant": "default",
+      "triangles": 784,
+      "segments": 786,
+      "mmPerPixel": 0.7807,
+      "renderMs": {
+        "median": 59.5,
+        "min": 59,
+        "max": 63.8
+      },
+      "phasesMs": {
+        "transform": 0.3,
+        "triangles": 37.6,
+        "edges": 3.6,
+        "outline": 9.4,
+        "resolve": 8.7
+      },
+      "encodeMs": 31.3,
+      "pngBytes": 3693,
+      "level6": {
+        "encodeMs": 27.1,
+        "pngBytes": 4319
+      },
+      "sha256": "765e59ed5e9c838c2adb4728fadbd40c1e075f90de3721da76dfb7bf648b9b2e",
+      "identicalRuns": true
+    },
+    {
+      "fixture": "bookshelf",
+      "view": "right",
+      "variant": "default",
+      "triangles": 944,
+      "segments": 786,
+      "mmPerPixel": 2.54,
+      "renderMs": {
+        "median": 31.7,
+        "min": 28.9,
+        "max": 33.4
+      },
+      "phasesMs": {
+        "transform": 0.3,
+        "triangles": 9.2,
+        "edges": 1.6,
+        "outline": 9.6,
+        "resolve": 8.9
+      },
+      "encodeMs": 32.8,
+      "pngBytes": 3697,
+      "level6": {
+        "encodeMs": 26.7,
+        "pngBytes": 4335
+      },
+      "sha256": "7334a587a4fce58d3b6318069148153331f2aa2a701d2854dc707f0f00735ef1",
+      "identicalRuns": true
+    },
+    {
+      "fixture": "shed",
+      "view": "iso",
+      "variant": "default",
+      "triangles": 2340,
+      "segments": 2244,
+      "mmPerPixel": 8.2879,
+      "renderMs": {
+        "median": 66.9,
+        "min": 65.9,
+        "max": 96
+      },
+      "phasesMs": {
+        "transform": 1.1,
+        "triangles": 33.9,
+        "edges": 14.4,
+        "outline": 9.3,
+        "resolve": 8.8
+      },
+      "encodeMs": 74.9,
+      "pngBytes": 29741,
+      "level6": {
+        "encodeMs": 38.4,
+        "pngBytes": 31720
+      },
+      "sha256": "cee91ee1cc2bc796a9090d6e3a8b10ec93fe0d839d2dfe3fdc77650bde3cf138",
+      "identicalRuns": true
+    },
+    {
+      "fixture": "shed",
+      "view": "front",
+      "variant": "default",
+      "triangles": 1015,
+      "segments": 2244,
+      "mmPerPixel": 5.6213,
+      "renderMs": {
+        "median": 75.3,
+        "min": 70.8,
+        "max": 77.6
+      },
+      "phasesMs": {
+        "transform": 1.2,
+        "triangles": 36.8,
+        "edges": 17.1,
+        "outline": 9,
+        "resolve": 8.7
+      },
+      "encodeMs": 37.4,
+      "pngBytes": 4455,
+      "level6": {
+        "encodeMs": 27.3,
+        "pngBytes": 5183
+      },
+      "sha256": "2552758bd394fc6abb659aeeaf8426ba8bfe9873584181806aeeca573526e506",
+      "identicalRuns": true
+    },
+    {
+      "fixture": "shed",
+      "view": "top",
+      "variant": "default",
+      "triangles": 935,
+      "segments": 2244,
+      "mmPerPixel": 5.9405,
+      "renderMs": {
+        "median": 79.6,
+        "min": 73.6,
+        "max": 80.6
+      },
+      "phasesMs": {
+        "transform": 1.2,
+        "triangles": 42.4,
+        "edges": 17.1,
+        "outline": 8.9,
+        "resolve": 8.7
+      },
+      "encodeMs": 31.5,
+      "pngBytes": 3586,
+      "level6": {
+        "encodeMs": 26.7,
+        "pngBytes": 4198
+      },
+      "sha256": "9c4c0ae55b6de95bebac8e17b34205e4eef17601d91d40b97c43019c250c8dc2",
+      "identicalRuns": true
+    },
+    {
+      "fixture": "shed",
+      "view": "right",
+      "variant": "default",
+      "triangles": 830,
+      "segments": 2244,
+      "mmPerPixel": 5.2788,
+      "renderMs": {
+        "median": 80.6,
+        "min": 76.4,
+        "max": 82
+      },
+      "phasesMs": {
+        "transform": 1.9,
+        "triangles": 39.6,
+        "edges": 19.8,
+        "outline": 9.2,
+        "resolve": 8.7
+      },
+      "encodeMs": 40.2,
+      "pngBytes": 5818,
+      "level6": {
+        "encodeMs": 29.5,
+        "pngBytes": 6854
+      },
+      "sha256": "557c169bc63e717d4c5ccdafdd8c2f842b65302f8559d16a1e5c5d906ae90f25",
+      "identicalRuns": true
+    },
+    {
+      "fixture": "house",
+      "view": "iso",
+      "variant": "default",
+      "triangles": 12140,
+      "segments": 11584,
+      "mmPerPixel": 20.7648,
+      "renderMs": {
+        "median": 107.1,
+        "min": 99,
+        "max": 112.7
+      },
+      "phasesMs": {
+        "transform": 2.9,
+        "triangles": 52.2,
+        "edges": 33.4,
+        "outline": 9.2,
+        "resolve": 8.8
+      },
+      "encodeMs": 72.4,
+      "pngBytes": 29470,
+      "level6": {
+        "encodeMs": 38.6,
+        "pngBytes": 31202
+      },
+      "sha256": "5f739c3464756d77fd8ca0ef15cfd54ba27598f14191615261415331c303906f",
+      "identicalRuns": true
+    },
+    {
+      "fixture": "house",
+      "view": "front",
+      "variant": "default",
+      "triangles": 5054,
+      "segments": 11584,
+      "mmPerPixel": 16.2495,
+      "renderMs": {
+        "median": 91.2,
+        "min": 87.1,
+        "max": 109.8
+      },
+      "phasesMs": {
+        "transform": 2.9,
+        "triangles": 37.8,
+        "edges": 33.2,
+        "outline": 9,
+        "resolve": 8.7
+      },
+      "encodeMs": 38.1,
+      "pngBytes": 5080,
+      "level6": {
+        "encodeMs": 29.5,
+        "pngBytes": 6286
+      },
+      "sha256": "c6163275332a9d460d434501402f7195f60ef458dcca30624cf108f4e8eb3b28",
+      "identicalRuns": true
+    },
+    {
+      "fixture": "house",
+      "view": "top",
+      "variant": "default",
+      "triangles": 4781,
+      "segments": 11584,
+      "mmPerPixel": 17.7938,
+      "renderMs": {
+        "median": 106.6,
+        "min": 102.4,
+        "max": 110.9
+      },
+      "phasesMs": {
+        "transform": 2.5,
+        "triangles": 46.6,
+        "edges": 38.2,
+        "outline": 9,
+        "resolve": 8.8
+      },
+      "encodeMs": 47.1,
+      "pngBytes": 6126,
+      "level6": {
+        "encodeMs": 34.9,
+        "pngBytes": 8582
+      },
+      "sha256": "0e200db08306bfd35eb7612b0646ea2c05d2a14459a3b2bd82fd130950423b80",
+      "identicalRuns": true
+    },
+    {
+      "fixture": "house",
+      "view": "right",
+      "variant": "default",
+      "triangles": 4899,
+      "segments": 11584,
+      "mmPerPixel": 13.1266,
+      "renderMs": {
+        "median": 136.9,
+        "min": 132.4,
+        "max": 147
+      },
+      "phasesMs": {
+        "transform": 3.6,
+        "triangles": 64.9,
+        "edges": 49,
+        "outline": 9,
+        "resolve": 8.8
+      },
+      "encodeMs": 40.8,
+      "pngBytes": 5557,
+      "level6": {
+        "encodeMs": 29.9,
+        "pngBytes": 6876
+      },
+      "sha256": "f90e748ffaba61eee597d5d2f5af8c6bf01d22fab191af36d2e0cb6f8042492a",
+      "identicalRuns": true
+    },
+    {
+      "fixture": "bracket",
+      "view": "iso",
+      "variant": "ss1",
+      "triangles": 472,
+      "segments": 245,
+      "mmPerPixel": 0.0907,
+      "renderMs": {
+        "median": 11.6,
+        "min": 9.8,
+        "max": 14.7
+      },
+      "phasesMs": {
+        "transform": 0.1,
+        "triangles": 2.8,
+        "edges": 1,
+        "outline": 2.4,
+        "resolve": 4.4
+      },
+      "encodeMs": 48.6,
+      "pngBytes": 8915,
+      "level6": {
+        "encodeMs": 32.5,
+        "pngBytes": 11287
+      },
+      "sha256": "fe2d6f1c8bb9624a6b101549a79596f9aaae37b4ea277a2ed90dcc5cc0271ce8",
+      "identicalRuns": true
+    },
+    {
+      "fixture": "bracket",
+      "view": "iso",
+      "variant": "ss3",
+      "triangles": 472,
+      "segments": 245,
+      "mmPerPixel": 0.0907,
+      "renderMs": {
+        "median": 63.9,
+        "min": 62.1,
+        "max": 75.2
+      },
+      "phasesMs": {
+        "transform": 0.1,
+        "triangles": 26,
+        "edges": 1.3,
+        "outline": 20.4,
+        "resolve": 15
+      },
+      "encodeMs": 67.4,
+      "pngBytes": 28421,
+      "level6": {
+        "encodeMs": 35.8,
+        "pngBytes": 29979
+      },
+      "sha256": "b2bc22c9f615941808d645adff8cfae5dfc4b75b9fd7a9fac2feba93c167ac52",
+      "identicalRuns": true
+    },
+    {
+      "fixture": "bracket",
+      "view": "iso",
+      "variant": "no-outline",
+      "triangles": 472,
+      "segments": 245,
+      "mmPerPixel": 0.0907,
+      "renderMs": {
+        "median": 22.8,
+        "min": 19.6,
+        "max": 32.8
+      },
+      "phasesMs": {
+        "transform": 0.1,
+        "triangles": 13.2,
+        "edges": 0.6,
+        "outline": 0,
+        "resolve": 8.8
+      },
+      "encodeMs": 62.1,
+      "pngBytes": 19043,
+      "level6": {
+        "encodeMs": 35.5,
+        "pngBytes": 20732
+      },
+      "sha256": "900799c18d4b3a4aa5240c24013f8070bb5957481c52f1539abcdfedf5d04fbd",
+      "identicalRuns": true
+    },
+    {
+      "fixture": "bracket",
+      "view": "iso",
+      "variant": "no-edges-no-outline",
+      "triangles": 472,
+      "segments": 0,
+      "mmPerPixel": 0.0907,
+      "renderMs": {
+        "median": 21.5,
+        "min": 19.4,
+        "max": 30.9
+      },
+      "phasesMs": {
+        "transform": 0.1,
+        "triangles": 12.2,
+        "edges": 0,
+        "outline": 0,
+        "resolve": 9.2
+      },
+      "encodeMs": 58.6,
+      "pngBytes": 13186,
+      "level6": {
+        "encodeMs": 34.6,
+        "pngBytes": 14826
+      },
+      "sha256": "485e5dedd623fb343d4dc8bcdd910eba784cc5b2ed3882701bb974a116bf43f9",
+      "identicalRuns": true
+    },
+    {
+      "fixture": "bookshelf",
+      "view": "iso",
+      "variant": "ss1",
+      "triangles": 1312,
+      "segments": 786,
+      "mmPerPixel": 2.6788,
+      "renderMs": {
+        "median": 11.7,
+        "min": 11,
+        "max": 16.1
+      },
+      "phasesMs": {
+        "transform": 0.2,
+        "triangles": 3.4,
+        "edges": 0.8,
+        "outline": 2.3,
+        "resolve": 4.3
+      },
+      "encodeMs": 48.6,
+      "pngBytes": 9072,
+      "level6": {
+        "encodeMs": 34.8,
+        "pngBytes": 10586
+      },
+      "sha256": "f1476772ac15326b7afc64d5c05ac554cf68a21f3f4d4d80a0343f0a304c17e7",
+      "identicalRuns": true
+    },
+    {
+      "fixture": "bookshelf",
+      "view": "iso",
+      "variant": "ss3",
+      "triangles": 1312,
+      "segments": 786,
+      "mmPerPixel": 2.6788,
+      "renderMs": {
+        "median": 73.9,
+        "min": 70.6,
+        "max": 85.7
+      },
+      "phasesMs": {
+        "transform": 0.2,
+        "triangles": 29.9,
+        "edges": 4.4,
+        "outline": 21,
+        "resolve": 15.2
+      },
+      "encodeMs": 69.7,
+      "pngBytes": 30817,
+      "level6": {
+        "encodeMs": 38,
+        "pngBytes": 31969
+      },
+      "sha256": "b699e94cdba997e4c99f4a7552221e1153fd3a2482b015dce9baa0e6823e1d2d",
+      "identicalRuns": true
+    },
+    {
+      "fixture": "bookshelf",
+      "view": "iso",
+      "variant": "no-outline",
+      "triangles": 1312,
+      "segments": 786,
+      "mmPerPixel": 2.6788,
+      "renderMs": {
+        "median": 25.9,
+        "min": 22.9,
+        "max": 26.5
+      },
+      "phasesMs": {
+        "transform": 0.2,
+        "triangles": 13.2,
+        "edges": 2.4,
+        "outline": 0,
+        "resolve": 8.7
+      },
+      "encodeMs": 61.2,
+      "pngBytes": 20525,
+      "level6": {
+        "encodeMs": 37.1,
+        "pngBytes": 21837
+      },
+      "sha256": "8b186432f3ae57bf0504a51e7b13aeae20061e03a2c526fd8c044e49ee9beb45",
+      "identicalRuns": true
+    },
+    {
+      "fixture": "bookshelf",
+      "view": "iso",
+      "variant": "no-edges-no-outline",
+      "triangles": 1312,
+      "segments": 0,
+      "mmPerPixel": 2.6788,
+      "renderMs": {
+        "median": 22.7,
+        "min": 21.3,
+        "max": 22.8
+      },
+      "phasesMs": {
+        "transform": 0.2,
+        "triangles": 13.7,
+        "edges": 0,
+        "outline": 0,
+        "resolve": 8.7
+      },
+      "encodeMs": 53.6,
+      "pngBytes": 10661,
+      "level6": {
+        "encodeMs": 34.5,
+        "pngBytes": 11985
+      },
+      "sha256": "5fe92986ec6b6e95f0bd662c662b4bc6e9f4cce5ce9dfd50f503b476bf8a130d",
+      "identicalRuns": true
+    },
+    {
+      "fixture": "shed",
+      "view": "iso",
+      "variant": "ss1",
+      "triangles": 2340,
+      "segments": 2244,
+      "mmPerPixel": 8.2879,
+      "renderMs": {
+        "median": 22.9,
+        "min": 22.2,
+        "max": 28.1
+      },
+      "phasesMs": {
+        "transform": 1.1,
+        "triangles": 9.3,
+        "edges": 5.5,
+        "outline": 2.3,
+        "resolve": 4.3
+      },
+      "encodeMs": 55.1,
+      "pngBytes": 13080,
+      "level6": {
+        "encodeMs": 34.7,
+        "pngBytes": 15313
+      },
+      "sha256": "eafa6c7dfdba687bdd9a5614eddc59f8f3ead96e50cffb76fefae536d0941881",
+      "identicalRuns": true
+    },
+    {
+      "fixture": "shed",
+      "view": "iso",
+      "variant": "ss3",
+      "triangles": 2340,
+      "segments": 2244,
+      "mmPerPixel": 8.2879,
+      "renderMs": {
+        "median": 143.7,
+        "min": 136.1,
+        "max": 153.2
+      },
+      "phasesMs": {
+        "transform": 1.1,
+        "triangles": 79.1,
+        "edges": 26.7,
+        "outline": 21.1,
+        "resolve": 15.2
+      },
+      "encodeMs": 89.2,
+      "pngBytes": 43869,
+      "level6": {
+        "encodeMs": 40.5,
+        "pngBytes": 45749
+      },
+      "sha256": "8163244cbba477b4437af8e80257bd1272100151aae96dd29db874e404884f4a",
+      "identicalRuns": true
+    },
+    {
+      "fixture": "shed",
+      "view": "iso",
+      "variant": "no-outline",
+      "triangles": 2340,
+      "segments": 2244,
+      "mmPerPixel": 8.2879,
+      "renderMs": {
+        "median": 64.6,
+        "min": 58.2,
+        "max": 87.6
+      },
+      "phasesMs": {
+        "transform": 1.1,
+        "triangles": 36.4,
+        "edges": 17.6,
+        "outline": 0,
+        "resolve": 8.9
+      },
+      "encodeMs": 77.1,
+      "pngBytes": 29741,
+      "level6": {
+        "encodeMs": 38.9,
+        "pngBytes": 31720
+      },
+      "sha256": "cee91ee1cc2bc796a9090d6e3a8b10ec93fe0d839d2dfe3fdc77650bde3cf138",
+      "identicalRuns": true
+    },
+    {
+      "fixture": "shed",
+      "view": "iso",
+      "variant": "no-edges-no-outline",
+      "triangles": 2340,
+      "segments": 0,
+      "mmPerPixel": 8.2879,
+      "renderMs": {
+        "median": 48.4,
+        "min": 45,
+        "max": 52.2
+      },
+      "phasesMs": {
+        "transform": 1.1,
+        "triangles": 38.1,
+        "edges": 0,
+        "outline": 0,
+        "resolve": 9.1
+      },
+      "encodeMs": 70.5,
+      "pngBytes": 19216,
+      "level6": {
+        "encodeMs": 38.1,
+        "pngBytes": 21286
+      },
+      "sha256": "ff3fe1483e138ba92740377090c5a33ff198ce7df7d4a01138e4fc1ebe53f971",
+      "identicalRuns": true
+    },
+    {
+      "fixture": "house",
+      "view": "iso",
+      "variant": "ss1",
+      "triangles": 12140,
+      "segments": 11584,
+      "mmPerPixel": 20.7648,
+      "renderMs": {
+        "median": 38.4,
+        "min": 37.5,
+        "max": 47.8
+      },
+      "phasesMs": {
+        "transform": 0.4,
+        "triangles": 16.5,
+        "edges": 14.7,
+        "outline": 2.4,
+        "resolve": 4.4
+      },
+      "encodeMs": 55.4,
+      "pngBytes": 14445,
+      "level6": {
+        "encodeMs": 35.6,
+        "pngBytes": 16710
+      },
+      "sha256": "c3284782583ef7be176bc2f98507266403d21b98e836f185bc84305f8a737572",
+      "identicalRuns": true
+    },
+    {
+      "fixture": "house",
+      "view": "iso",
+      "variant": "ss3",
+      "triangles": 12140,
+      "segments": 11584,
+      "mmPerPixel": 20.7648,
+      "renderMs": {
+        "median": 228.2,
+        "min": 218.1,
+        "max": 234.2
+      },
+      "phasesMs": {
+        "transform": 5.6,
+        "triangles": 126.2,
+        "edges": 60.5,
+        "outline": 20.9,
+        "resolve": 15.2
+      },
+      "encodeMs": 87.7,
+      "pngBytes": 47922,
+      "level6": {
+        "encodeMs": 40.6,
+        "pngBytes": 49500
+      },
+      "sha256": "d888359af140e97804361e3ce456fd1dcf934654c64a06366b1ce7161e097052",
+      "identicalRuns": true
+    },
+    {
+      "fixture": "house",
+      "view": "iso",
+      "variant": "no-outline",
+      "triangles": 12140,
+      "segments": 11584,
+      "mmPerPixel": 20.7648,
+      "renderMs": {
+        "median": 106.6,
+        "min": 103,
+        "max": 113.3
+      },
+      "phasesMs": {
+        "transform": 4.1,
+        "triangles": 56.9,
+        "edges": 36.8,
+        "outline": 0,
+        "resolve": 8.8
+      },
+      "encodeMs": 72.9,
+      "pngBytes": 29470,
+      "level6": {
+        "encodeMs": 39.2,
+        "pngBytes": 31202
+      },
+      "sha256": "5f739c3464756d77fd8ca0ef15cfd54ba27598f14191615261415331c303906f",
+      "identicalRuns": true
+    },
+    {
+      "fixture": "house",
+      "view": "iso",
+      "variant": "no-edges-no-outline",
+      "triangles": 12140,
+      "segments": 0,
+      "mmPerPixel": 20.7648,
+      "renderMs": {
+        "median": 67.1,
+        "min": 62,
+        "max": 78.4
+      },
+      "phasesMs": {
+        "transform": 2.5,
+        "triangles": 54,
+        "edges": 0,
+        "outline": 0,
+        "resolve": 8.8
+      },
+      "encodeMs": 69,
+      "pngBytes": 23738,
+      "level6": {
+        "encodeMs": 37.4,
+        "pngBytes": 25595
+      },
+      "sha256": "fb9dcef37d5dcfc4d49810efe5ce879e1e9aa6e0726ff6f8e90c07f49aa09112",
+      "identicalRuns": true
+    },
+    {
+      "fixture": "shed",
+      "view": "iso",
+      "variant": "framing-only",
+      "triangles": 2184,
+      "segments": 2106,
+      "mmPerPixel": 8.2738,
+      "renderMs": {
+        "median": 68.7,
+        "min": 56.5,
+        "max": 77.7
+      },
+      "phasesMs": {
+        "transform": 1.2,
+        "triangles": 29.2,
+        "edges": 14.4,
+        "outline": 10.6,
+        "resolve": 9.4
+      },
+      "encodeMs": 96.2,
+      "pngBytes": 89951,
+      "level6": {
+        "encodeMs": 46.1,
+        "pngBytes": 93415
+      },
+      "sha256": "f8ce05754afbfde5a3268805fa38aad06e3ffd3bfacf5e7b37e14273a03d0a1b",
+      "identicalRuns": true
+    },
+    {
+      "fixture": "shed",
+      "view": "iso",
+      "variant": "framing-highlight-door",
+      "triangles": 2184,
+      "segments": 2106,
+      "mmPerPixel": 8.2738,
+      "renderMs": {
+        "median": 60.7,
+        "min": 54.3,
+        "max": 85
+      },
+      "phasesMs": {
+        "transform": 1.1,
+        "triangles": 26.9,
+        "edges": 14.7,
+        "outline": 11.1,
+        "resolve": 9.2
+      },
+      "encodeMs": 105,
+      "pngBytes": 90865,
+      "level6": {
+        "encodeMs": 47.2,
+        "pngBytes": 94295
+      },
+      "sha256": "ab6cb74009040b42451c045e09579f56be8865ba44565cc3c204b13a1e79a456",
+      "identicalRuns": true
+    },
+    {
+      "fixture": "house x1",
+      "view": "iso",
+      "variant": "tiled",
+      "triangles": 12140,
+      "segments": 11584,
+      "mmPerPixel": 20.7648,
+      "renderMs": {
+        "median": 137.4,
+        "min": 115.1,
+        "max": 165.3
+      },
+      "phasesMs": {
+        "transform": 5.4,
+        "triangles": 63.4,
+        "edges": 37.9,
+        "outline": 11.4,
+        "resolve": 9
+      },
+      "encodeMs": 75.2,
+      "pngBytes": 29470,
+      "level6": {
+        "encodeMs": 38.7,
+        "pngBytes": 31202
+      },
+      "sha256": "5f739c3464756d77fd8ca0ef15cfd54ba27598f14191615261415331c303906f",
+      "identicalRuns": true
+    },
+    {
+      "fixture": "house x4",
+      "view": "iso",
+      "variant": "tiled",
+      "triangles": 48560,
+      "segments": 46336,
+      "mmPerPixel": 44.4349,
+      "renderMs": {
+        "median": 160.8,
+        "min": 142.8,
+        "max": 182.8
+      },
+      "phasesMs": {
+        "transform": 2.1,
+        "triangles": 66,
+        "edges": 65.3,
+        "outline": 9.5,
+        "resolve": 9
+      },
+      "encodeMs": 87.1,
+      "pngBytes": 44406,
+      "level6": {
+        "encodeMs": 46.8,
+        "pngBytes": 46153
+      },
+      "sha256": "370cee6de9ba10a36cbd5ecb8557db28191d11266844465bd24ac294a7a9a2c4",
+      "identicalRuns": true
+    },
+    {
+      "fixture": "house x9",
+      "view": "iso",
+      "variant": "tiled",
+      "triangles": 109260,
+      "segments": 104256,
+      "mmPerPixel": 68.1049,
+      "renderMs": {
+        "median": 213.8,
+        "min": 203.6,
+        "max": 229.9
+      },
+      "phasesMs": {
+        "transform": 16,
+        "triangles": 82.3,
+        "edges": 95.8,
+        "outline": 9.6,
+        "resolve": 9.1
+      },
+      "encodeMs": 88.3,
+      "pngBytes": 54114,
+      "level6": {
+        "encodeMs": 46.1,
+        "pngBytes": 56293
+      },
+      "sha256": "26f5bece972d4189decb68dd2c65853cbee71ea96d17e0be178883b670b40118",
+      "identicalRuns": true
+    },
+    {
+      "fixture": "house x16",
+      "view": "iso",
+      "variant": "tiled",
+      "triangles": 194240,
+      "segments": 185344,
+      "mmPerPixel": 91.7749,
+      "renderMs": {
+        "median": 243.7,
+        "min": 233.8,
+        "max": 269.8
+      },
+      "phasesMs": {
+        "transform": 18.3,
+        "triangles": 93.4,
+        "edges": 121.5,
+        "outline": 9.7,
+        "resolve": 8.7
+      },
+      "encodeMs": 84.5,
+      "pngBytes": 60190,
+      "level6": {
+        "encodeMs": 39.7,
+        "pngBytes": 62527
+      },
+      "sha256": "88196e1e4436e7dae33fb042d957c36a704f8628a3bb3880b7c70bd1379916af",
+      "identicalRuns": true
+    }
+  ],
+  "stress": [
+    {
+      "copies": 1,
+      "instances": 822,
+      "triangles": 12160,
+      "renderMs": {
+        "median": 137.4,
+        "min": 115.1,
+        "max": 165.3
+      },
+      "phasesMs": {
+        "transform": 5.4,
+        "triangles": 63.4,
+        "edges": 37.9,
+        "outline": 11.4,
+        "resolve": 9
+      },
+      "encodeMs": 75.2,
+      "pngBytes": 29470
+    },
+    {
+      "copies": 4,
+      "instances": 3288,
+      "triangles": 48640,
+      "renderMs": {
+        "median": 160.8,
+        "min": 142.8,
+        "max": 182.8
+      },
+      "phasesMs": {
+        "transform": 2.1,
+        "triangles": 66,
+        "edges": 65.3,
+        "outline": 9.5,
+        "resolve": 9
+      },
+      "encodeMs": 87.1,
+      "pngBytes": 44406
+    },
+    {
+      "copies": 9,
+      "instances": 7398,
+      "triangles": 109440,
+      "renderMs": {
+        "median": 213.8,
+        "min": 203.6,
+        "max": 229.9
+      },
+      "phasesMs": {
+        "transform": 16,
+        "triangles": 82.3,
+        "edges": 95.8,
+        "outline": 9.6,
+        "resolve": 9.1
+      },
+      "encodeMs": 88.3,
+      "pngBytes": 54114
+    },
+    {
+      "copies": 16,
+      "instances": 13152,
+      "triangles": 194560,
+      "renderMs": {
+        "median": 243.7,
+        "min": 233.8,
+        "max": 269.8
+      },
+      "phasesMs": {
+        "transform": 18.3,
+        "triangles": 93.4,
+        "edges": 121.5,
+        "outline": 9.7,
+        "resolve": 8.7
+      },
+      "encodeMs": 84.5,
+      "pngBytes": 60190
+    }
+  ],
+  "determinism": {
+    "allRunsIdentical": true,
+    "previousRunCompared": 38,
+    "previousRunDiffering": []
+  }
+}

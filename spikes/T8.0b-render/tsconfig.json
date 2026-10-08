@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "ESNext.Disposable", "DOM"],
+    "types": ["node"],
+    "allowImportingTsExtensions": true,
+    // Types of the transitive packages the spike loads by path (see README.md).
+    "paths": {
+      "sharp": ["../../node_modules/.pnpm/node_modules/sharp"],
+      "playwright-core": ["../../node_modules/.pnpm/node_modules/playwright-core"]
+    }
+  },
+  "include": ["src", "vitest.config.ts", "../../apps/web/e2e/global.d.ts"]
+}
