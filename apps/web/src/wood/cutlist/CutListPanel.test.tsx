@@ -3,7 +3,7 @@ import type { OrientedSizesResult } from '@manufakture/regen';
 import { describe, expect, it, vi } from 'vitest';
 import { createDocumentStore } from '../../state/document';
 import { createSelectionStore } from '../../state/selection';
-import { cutListCsv, documentCutList } from './cutlist';
+import { cutListCsv, documentCutList } from '@manufakture/domain-wood';
 import { CutListPanel } from './CutListPanel';
 import { localNester } from './nester';
 import type { Sizer } from './sizer';

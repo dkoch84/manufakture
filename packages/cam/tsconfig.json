@@ -3,5 +3,8 @@
   "compilerOptions": {
     "types": ["node"]
   },
-  "include": ["src", "test"]
+  "include": ["src", "test"],
+  // The document side of the exports names regen's types, which need the DOM's; it is checked by
+  // tsconfig.export.json, so the rest of the package is checked without the DOM (ADR 0014).
+  "exclude": ["src/export"]
 }

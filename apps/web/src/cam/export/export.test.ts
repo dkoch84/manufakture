@@ -27,7 +27,6 @@ import {
   buildExport,
   defaultExportSettings,
   exportFiles,
-  exportReadiness,
   formatFeed,
   formatLength,
   formatSize,
@@ -35,10 +34,13 @@ import {
   localDate,
   multiToolModes,
   originText,
+  POST_IDS as EXPORT_POST_IDS,
+  postName as exportPostName,
+  setupSheetHtml,
   withPost,
   type ExportPlan,
   type ExportSettings,
-} from './export';
+} from '@manufakture/cam/export';
 import {
   DOC_OPERATIONS,
   STOCK_WCS,
@@ -47,7 +49,8 @@ import {
   flat,
   vbit,
 } from './export.test-fixture';
-import { setupSheetHtml } from './sheet';
+import { POST_IDS, postName } from '../commands';
+import { exportReadiness } from './readiness';
 
 const machine = findMachine('shapeoko-5-pro-4x4')!;
 const settings = (over: Partial<ExportSettings> = {}): ExportSettings => ({
@@ -105,6 +108,11 @@ describe('export settings', () => {
     expect(withPost(withPost(grbl, 'linuxcnc'), 'grbl').multiTool).toBe('files');
     expect(multiToolModes('grbl')).toEqual(['files', 'pause']);
     expect(multiToolModes('constructor')).toEqual([]);
+  });
+
+  it('offer the posts the workspace lists, in its order and under its names', () => {
+    expect(EXPORT_POST_IDS).toEqual(POST_IDS);
+    for (const id of [...POST_IDS, 'my-post']) expect(exportPostName(id)).toBe(postName(id));
   });
 });
 

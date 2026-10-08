@@ -1,10 +1,12 @@
-// A drawing's files (M4 plan T4.4g, written by T4.4f's writers): the sheet shown as SVG or DXF, or
-// every sheet as one PDF; and printing the sheet shown. The writers throw on input they cannot
-// write (a non-finite coordinate, a sheet of no size); that is caught and reported, never thrown
-// at the user.
+// A drawing's files (M4 plan T4.4g, written by T4.4f's writers; moved here from the app's drawing
+// workspace in M8 plan T8.1b): one sheet as SVG or DXF, or every sheet as one PDF, from the
+// display lists regen lays out (`RegenEngine.drawingSheet`'s `display`). A construction set is a
+// drawing like any other, so its sheets go through here too. The writers throw on input they
+// cannot write (a non-finite coordinate, a sheet of no size); that is caught and reported, never
+// thrown at the user.
 
 import type { DisplayList } from '@manufakture/drawing';
-import { drawingToDxf, drawingToPdf, drawingToSvg } from '@manufakture/io';
+import { drawingToDxf, drawingToPdf, drawingToSvg } from './drawing-export';
 
 export type DrawingFormat = 'svg' | 'dxf' | 'pdf';
 
@@ -84,39 +86,4 @@ export function screenSvg(
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : String(e) };
   }
-}
-
-/**
- * Print one sheet through the browser: its SVG at paper size in a hidden frame, so the printout is
- * to scale when the printer's page matches the sheet.
- */
-export function printSheet(list: DisplayList, title: string): { ok: boolean; message?: string } {
-  let svg: string;
-  try {
-    svg = drawingToSvg(list, { title });
-  } catch (e) {
-    return { ok: false, message: e instanceof Error ? e.message : String(e) };
-  }
-  const frame = document.createElement('iframe');
-  frame.style.position = 'fixed';
-  frame.style.width = '0';
-  frame.style.height = '0';
-  frame.style.border = '0';
-  frame.setAttribute('aria-hidden', 'true');
-  document.body.appendChild(frame);
-  const win = frame.contentWindow;
-  const doc = frame.contentDocument;
-  if (!win || !doc) {
-    frame.remove();
-    return { ok: false, message: 'The browser cannot print from here.' };
-  }
-  doc.open();
-  doc.write(
-    `<!doctype html><html><head><title></title><style>@page { size: ${list.width}mm ${list.height}mm; margin: 0 } html, body { margin: 0 } svg { display: block }</style></head><body>${svg.replace(/^<\?xml[^>]*>\s*/, '')}</body></html>`,
-  );
-  doc.close();
-  win.focus();
-  win.print();
-  setTimeout(() => frame.remove(), 60_000);
-  return { ok: true };
 }

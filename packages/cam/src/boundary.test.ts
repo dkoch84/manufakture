@@ -9,13 +9,23 @@ import { describe, expect, it } from 'vitest';
 // offset adapter, T5.2a). Type-only imports may also name `@manufakture/core` (the `cam` section's
 // types) and `@manufakture/kernel` (`MeshData`); they are erased. Tests may also load `vitest`,
 // `gcode-toolpath` (the post's round trip, T5.4a; a development dependency, MIT) and Node
-// built-ins. This is an allowlist, so a new dependency fails here until it is added on purpose.
+// built-ins. One directory more: `export/` (the `./export` subpath, M8 plan T8.1b) is the
+// document side of CAM's exports, which the app's export dialogs used to hold. It may load
+// `@manufakture/core` (the document's types and `bareUnits`), `@manufakture/io` (file names and
+// the 2D writers) and `fflate` (the zip of files per tool) at run time, and name
+// `@manufakture/regen` (the CAM stage's replies) as types; nothing outside it may, and the package
+// root never imports it. This is an allowlist, so a new dependency fails here until it is added
+// on purpose.
 
 const RUNTIME = ['@manufakture/units', 'comlink', 'clipper2-ts'];
 const TYPE_ONLY = [...RUNTIME, '@manufakture/core', '@manufakture/kernel'];
 const TEST_ONLY = ['vitest', 'gcode-toolpath'];
 
 const SRC = fileURLToPath(new URL('.', import.meta.url));
+/** `export/` may load and name these besides. */
+const EXPORT = join(SRC, 'export') + sep;
+const EXPORT_RUNTIME = [...RUNTIME, '@manufakture/core', '@manufakture/io', 'fflate'];
+const EXPORT_TYPE_ONLY = [...TYPE_ONLY, ...EXPORT_RUNTIME, '@manufakture/regen'];
 
 describe('package boundary', () => {
   it('every module imports only what ADR 0014 allows', () => {
@@ -94,6 +104,17 @@ describe('package boundary', () => {
     expect(allowed('../arc', false, false, join(SRC, 'offset', 'x.ts'))).toBe(true);
     expect(allowed('@manufakture/units', false, false, file)).toBe(true);
     expect(allowed('node:fs', false, true, file)).toBe(true);
+    // `export/` loads the document side's packages; the rest of the package never loads it.
+    const exporter = join(SRC, 'export', 'x.ts');
+    for (const spec of ['@manufakture/core', '@manufakture/io', 'fflate', '../index']) {
+      expect(allowed(spec, false, false, exporter), spec).toBe(true);
+    }
+    expect(allowed('@manufakture/regen', true, false, exporter)).toBe(true);
+    expect(allowed('@manufakture/regen', false, false, exporter)).toBe(false);
+    expect(allowed('@manufakture/domain-wood', false, false, exporter)).toBe(false);
+    expect(allowed('@manufakture/io', false, false, file)).toBe(false);
+    expect(allowed('./export', false, false, file)).toBe(false);
+    expect(allowed('./export/gcode', false, false, file)).toBe(false);
   });
 });
 
@@ -133,12 +154,15 @@ function importsOf(text: string): Found[] {
 function allowed(spec: string, typeOnly: boolean, isTest: boolean, file: string): boolean {
   if (spec.startsWith('.')) {
     const target = resolve(file, '..', spec);
+    // The package root never loads the document side of the exports.
+    if ((target + sep).startsWith(EXPORT) && !file.startsWith(EXPORT)) return false;
     return (
       target === SRC.replace(/[\\/]$/, '') || target.startsWith(SRC.endsWith(sep) ? SRC : SRC + sep)
     );
   }
   const pkg = packageOf(spec);
   if (isTest && (TEST_ONLY.includes(pkg) || spec.startsWith('node:'))) return true;
+  if (file.startsWith(EXPORT)) return (typeOnly ? EXPORT_TYPE_ONLY : EXPORT_RUNTIME).includes(pkg);
   return (typeOnly ? TYPE_ONLY : RUNTIME).includes(pkg);
 }
 

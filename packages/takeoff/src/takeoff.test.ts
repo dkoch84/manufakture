@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { formatMeasure, formatRow, formatSize, isImperial } from './format';
+import { csvField, csvTextField } from './csv';
+import { exactLengthFormat, formatMeasure, formatRow, formatSize, isImperial } from './format';
 import {
   MM3_PER_BOARD_FOOT,
   boardFeet,
@@ -205,5 +206,32 @@ describe('formatting', () => {
       measures: ['138"'],
     });
     expect(formatRow(row({ key: 'b' }), frac).stock).toBe('');
+  });
+});
+
+describe('takeoff files', () => {
+  it('show fractional sizes to 1/64" and other formats as they are', () => {
+    expect(exactLengthFormat({ unit: 'in-fraction', denominator: 16 })).toEqual({
+      unit: 'in-fraction',
+      denominator: 64,
+    });
+    expect(exactLengthFormat({ unit: 'ft-in', denominator: 8 })).toEqual({
+      unit: 'ft-in',
+      denominator: 64,
+    });
+    expect(exactLengthFormat({ unit: 'mm', decimals: 1 })).toEqual({ unit: 'mm', decimals: 1 });
+  });
+
+  it('quote CSV fields that need it, and keep text a spreadsheet would run as text', () => {
+    expect(csvField('a "b", c')).toBe('"a ""b"", c"');
+    expect(csvField(-1.5)).toBe('-1.5');
+    expect(['=1+1', '+1', '-1', '@SUM(A1)', '\tx', 'Side 1'].map(csvTextField)).toEqual([
+      "'=1+1",
+      "'+1",
+      "'-1",
+      "'@SUM(A1)",
+      "'\tx",
+      'Side 1',
+    ]);
   });
 });

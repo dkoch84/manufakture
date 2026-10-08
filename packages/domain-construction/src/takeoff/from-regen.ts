@@ -1,6 +1,7 @@
-// What the construction takeoff counts, from the shown model (M6 plan T6.3b): the framing members
-// regen sent for the part studio, and the sheet faces of its walls, floors and roofs, rebuilt from
-// the metadata their translators returned (ADR 0013 decision 7: derived, never stored).
+// What the construction takeoff counts, from the regenerated model (M6 plan T6.3b; moved from the
+// app's Takeoff panel in M8 plan T8.1b): the framing members regen sent for the part studio, and
+// the sheet faces of its walls, floors and roofs, rebuilt from the metadata their translators
+// returned (ADR 0013 decision 7: derived, never stored).
 //
 // Faces, as T6.3a's fixtures measure them:
 // - **Walls**: one face per path segment and sheet layer with a body (siding, sheathing,
@@ -18,29 +19,25 @@
 // sheets, and `notes` says so.
 
 import type { ExtensionFeature, ManufaktureDocument } from '@manufakture/core';
-import {
-  readFloorMetadata,
-  readOpeningMetadata,
-  readRoofMetadata,
-  readWallMetadata,
-  roofSheathingFaces,
-  subfloorFace,
-  wallFace,
-  type ConstructionSettings,
-  type ConstructionTakeoffInput,
-  type ConstructionTakeoffSettings,
-  type FaceOpening,
-  type OpeningMetadata,
-  type RoofMetadata,
-  type SheetFace,
-  type SheetLayerKind,
-  type TakeoffMember,
-  type WallMetadata,
-} from '@manufakture/domain-construction';
-import type { FeatureResult } from '@manufakture/regen';
+import type { FeatureResult, MemberData } from '@manufakture/regen';
 import type { StockData } from '@manufakture/stock';
-import type { MemberSetView } from '../../viewport/members';
-import { CONSTRUCTION_DOMAIN } from '../kinds';
+import { CONSTRUCTION_NAMESPACE, type ConstructionSettings } from '../data';
+import {
+  readOpeningMetadata,
+  readWallMetadata,
+  type OpeningMetadata,
+  type WallMetadata,
+} from '../features/common';
+import { readFloorMetadata } from '../features/floor';
+import { readRoofMetadata, type RoofMetadata } from '../features/roof';
+import { roofSheathingFaces, subfloorFace, wallFace, type FaceOpening } from './faces';
+import type {
+  ConstructionTakeoffInput,
+  ConstructionTakeoffSettings,
+  SheetFace,
+  SheetLayerKind,
+  TakeoffMember,
+} from './types';
 
 type P2 = readonly [number, number];
 
@@ -217,13 +214,24 @@ function roofFaces(
 const isConstruction = (f: FeatureResult, doc: ExtensionFeature | undefined) =>
   f.kind === 'extension' && f.status === 'ok' && doc !== undefined;
 
+/**
+ * A framing group's members as the takeoff reads them: the app's view of a set fits, and so does
+ * regen's `MemberSetResult` once its `members` are known (a regen leaves them null for a set that
+ * did not change since the last one; a first regen on a fresh engine sends every set).
+ */
+export interface TakeoffMemberSet {
+  /** The domain that framed it. */
+  namespace: string;
+  members: readonly MemberData[];
+}
+
 export interface TakeoffSources {
   document: ManufaktureDocument;
   partId: string;
   /** The part studio's feature results (with their metadata). */
   features: readonly FeatureResult[];
   /** The part studio's member sets. */
-  sets: readonly MemberSetView[];
+  sets: readonly TakeoffMemberSet[];
   settings: ConstructionSettings | undefined;
   stock: StockData | undefined;
 }
@@ -332,7 +340,7 @@ export function takeoffModel(src: TakeoffSources): TakeoffModel {
   const members: TakeoffMember[] = [];
   const ids = new Set<string>();
   for (const set of src.sets) {
-    if (set.namespace !== CONSTRUCTION_DOMAIN) continue;
+    if (set.namespace !== CONSTRUCTION_NAMESPACE) continue;
     for (const m of set.members) {
       members.push(m as TakeoffMember);
       ids.add(`${m.owner}:${m.id}`);

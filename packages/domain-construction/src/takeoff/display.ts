@@ -1,27 +1,37 @@
-// The construction takeoff as the panel and its files show it (M6 plan T6.3b): rows numbered and
-// grouped by section in T6.3a's order (as framed, linear length, sheet layers as laid, lumber to
-// buy, sheets to buy), sizes and totals in the document's display units, cost per row and in all,
-// subtotals per level and feature, and the CSV. Every export carries the short "not an
-// engineering tool" text (ADR 0015 decision 8).
+// The construction takeoff as the panel and its files show it (M6 plan T6.3b; moved from the app in
+// M8 plan T8.1b): rows numbered and grouped by section in T6.3a's order (as framed, linear length,
+// sheet layers as laid, lumber to buy, sheets to buy), sizes and totals in the document's display
+// units, cost per row and in all, subtotals per level and feature, and the CSV. Every export
+// carries the short "not an engineering tool" text (ADR 0015 decision 8).
 //
 // As framed only (ADR 0015 decision 10): every count is what the generators framed and the faces
 // laid, then what to buy for exactly that; there is no estimating row. A row to buy counts what
 // is bought (sticks, precut studs, sheets) while its sources are the members or faces cut from it,
 // so the panel and the files say both: "13 sticks, cut into 38 members".
 
-import type { DisplayUnits, ManufaktureDocument } from '@manufakture/core';
+import { lengthFormat, type DisplayUnits, type ManufaktureDocument } from '@manufakture/core';
+import { findStock } from '@manufakture/stock';
+import {
+  csvField,
+  csvTextField,
+  exactLengthFormat,
+  formatMeasure,
+  type TakeoffTotal,
+} from '@manufakture/takeoff';
+import { formatLength, type LengthFormat } from '@manufakture/units';
+import type { ConstructionSettings } from '../data';
+import { DISCLAIMER_SHORT } from '../disclaimer';
 import {
   CONSTRUCTION_CATEGORIES,
-  DISCLAIMER_SHORT,
   type ConstructionCategory,
   type ConstructionRow,
-  type ConstructionSettings,
   type ConstructionTakeoff,
-} from '@manufakture/domain-construction';
-import { findStock } from '@manufakture/stock';
-import { formatMeasure, type TakeoffTotal } from '@manufakture/takeoff';
-import { formatLength, type LengthFormat } from '@manufakture/units';
-import { csvField, csvTextField, exactFormat } from '../../wood/cutlist/cutlist';
+} from './types';
+
+/** A fractional display shows sizes to 1/64", as the cut list does. */
+export function exactFormat(units: DisplayUnits): LengthFormat {
+  return exactLengthFormat(lengthFormat(units));
+}
 
 /** Section titles and what each counts, in T6.3a's order. */
 export const SECTIONS: Readonly<Record<ConstructionCategory, { title: string; note: string }>> = {

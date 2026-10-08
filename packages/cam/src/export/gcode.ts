@@ -1,10 +1,11 @@
-// G-code export (M5 plan, T5.4e), kept free of React: what a setup needs before it can be
-// exported (every operation generated from its current inputs, none with an error), the export
-// settings (post, units, multi-tool mode, grouping by tool), and the export itself: the
-// generation linked into one job (`assembleJob`), written by the chosen post, named through
-// `@manufakture/io`'s `fileName`, with the summary and setup sheet data the operator reads before
-// saving. An operation with an error, or a post that refuses the job, refuses the export with
-// the reason; nothing is ever dropped silently.
+// G-code export (M5 plan, T5.4e; moved from the app in M8 plan T8.1b): the export settings (post,
+// units, multi-tool mode, grouping by tool) and the export itself: a generation linked into one job
+// (`assembleJob`), written by the chosen post, named through `@manufakture/io`'s `fileName`, with
+// the summary and setup sheet data the operator reads before saving. An operation with an error, or
+// a post that refuses the job, refuses the export with the reason; nothing is ever dropped
+// silently. What a setup needs before it can be exported (every operation generated from its
+// current inputs) is the app's to judge, from its workspace state; `exportGcode` (`index.ts`)
+// generates everything first.
 
 import {
   GCODE_FILE_EXTENSION,
@@ -35,18 +36,27 @@ import {
   type ToolpathStats,
   type Vec3,
   type WcsCorner,
-} from '@manufakture/cam';
-import { machineDial, type MachineProfile } from '@manufakture/cam/library';
+} from '../index';
 import type { CamOperation, CamSetup } from '@manufakture/core';
-import type { CamGeometryResult } from '@manufakture/regen';
-import { fileName } from '@manufakture/io';
+import { fileName, type FabricationFile } from '@manufakture/io';
 import { MM_PER_INCH } from '@manufakture/units';
 import { zipSync, strToU8, type Zippable } from 'fflate';
-import type { ExportedFile } from '../../io/actions';
-import { POST_IDS, postName } from '../commands';
-import { documentOperation } from '../generate';
-import type { GeneratedToolpaths } from '../preview/job';
-import { operationStatus, type GeneratedOutcome } from '../status';
+import { machineDial, type MachineProfile } from '../library/index';
+import type { CamOperationResult } from '../worker/api';
+import { POST_IDS, postName } from './posts';
+import { documentOperation } from './setup';
+
+/** One generation of a setup: what the preview plays and what the export writes. */
+export interface GeneratedToolpaths {
+  /** The setup id. */
+  readonly setupId: string;
+  /** The evaluated setup the toolpaths were generated for (stock, WCS frame, operations). */
+  readonly setup: Setup;
+  /** The machine's rapid rate, mm/min, for the time estimates. */
+  readonly rapidRate: number;
+  /** The CAM worker's results, in the setup's order; toolpaths packed. */
+  readonly operations: readonly CamOperationResult[];
+}
 
 /**
  * How a job with several tools is written: one file per tool, one file with an `M0` pause at each
@@ -111,101 +121,6 @@ export function withPost(settings: ExportSettings, post: string): ExportSettings
     post,
     multiTool: modes.includes(settings.multiTool) ? settings.multiTool : (modes[0] ?? 'files'),
   };
-}
-
-// ---------------------------------------------------------------------------------------------
-// Readiness: what has to happen before the setup can be exported.
-
-/** An operation that stops the export, and why. */
-export interface ExportBlocker {
-  readonly id: string;
-  readonly name: string;
-  readonly message: string;
-}
-
-export interface ExportReadiness {
-  /** Operations with an error: the export refuses until they are fixed or suppressed. */
-  readonly blocked: readonly ExportBlocker[];
-  /** Operations to generate first: never generated, or generated from inputs that changed. */
-  readonly stale: readonly string[];
-  /** Why the export cannot run at all (no operation to cut, say); null when it can. */
-  readonly message: string | null;
-  /**
-   * The geometry is not known to be the current document's (an edit since, or no reply yet):
-   * every operation counts as stale until a reply for the document as it is now arrives.
-   */
-  readonly pending: boolean;
-}
-
-/**
- * What the setup needs before it can be exported, from the workspace's state: the last geometry
- * reply, the last generation's outcomes and toolpaths, and whether there is a geometry stage at
- * all (`available`). Suppressed operations are left out. `current` says whether `geometry` was
- * resolved for the document as it is now; when it was not (the document changed since, and the
- * reply for the edit has not come), every operation is pending: an edit to the stock, heights,
- * feeds or model may change any of them, and their keys cannot tell until the new reply.
- */
-export function exportReadiness(
-  setup: Pick<CamSetup, 'id' | 'operations'>,
-  geometry: CamGeometryResult | null,
-  generated: ReadonlyMap<string, GeneratedOutcome>,
-  toolpaths: GeneratedToolpaths | null,
-  available: boolean,
-  current = true,
-): ExportReadiness {
-  const active = setup.operations.filter((op) => !op.suppressed);
-  if (active.length === 0) {
-    return {
-      blocked: [],
-      stale: [],
-      pending: false,
-      message:
-        setup.operations.length === 0
-          ? 'This setup has no operations to export.'
-          : 'Every operation of this setup is suppressed: nothing to export.',
-    };
-  }
-  const unavailable =
-    'Toolpaths need the geometry kernel and the CAM worker, which are not running here.';
-  if (!current) {
-    return {
-      blocked: [],
-      stale: active.map((op) => op.id),
-      message: available ? null : unavailable,
-      pending: true,
-    };
-  }
-  const shownGeometry = geometry?.setupId === setup.id ? geometry : null;
-  const results = toolpaths?.setupId === setup.id ? toolpaths.operations : [];
-  const blocked: ExportBlocker[] = [];
-  const stale: string[] = [];
-  for (const op of active) {
-    const status = operationStatus(op, shownGeometry, generated, available);
-    if (status.state === 'error') {
-      blocked.push(blocker(op, status.errors.join(' ') || 'Its geometry has an error.'));
-      continue;
-    }
-    const result = results.find((r) => r.id === op.id);
-    if (status.toolpath === 'failed' && !status.stale) {
-      const outcome = generated.get(op.id);
-      blocked.push(blocker(op, outcome?.message ?? 'Its toolpath could not be generated.'));
-    } else if (
-      status.state === 'pending' ||
-      status.toolpath === 'none' ||
-      status.stale ||
-      result === undefined
-    ) {
-      stale.push(op.id);
-    } else if (!result.ok) {
-      blocked.push(blocker(op, result.error.message));
-    }
-  }
-  const message = stale.length > 0 && !available ? unavailable : null;
-  return { blocked, stale, message, pending: false };
-}
-
-function blocker(op: CamOperation, message: string): ExportBlocker {
-  return { id: op.id, name: op.name, message };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -657,7 +572,7 @@ export const HTML_MIME = 'text/html';
  * What Save writes: the one G-code file, or for a job written as several files a zip of them
  * with the setup sheet, so they arrive together and in order.
  */
-export function exportFiles(plan: ExportPlan, sheetHtml: string): ExportedFile[] {
+export function exportFiles(plan: ExportPlan, sheetHtml: string): FabricationFile[] {
   if (plan.files.length === 1) {
     const f = plan.files[0]!;
     return [{ name: f.name, bytes: strToU8(f.text), type: GCODE_MIME }];

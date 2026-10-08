@@ -7,7 +7,7 @@
 import type { CamSetup, ManufaktureDocument } from '@manufakture/core';
 import type { CamClient } from '@manufakture/cam/client';
 import { machineById } from './commands';
-import { documentOperation, setupInput } from './generate';
+import { documentOperation, setupInput } from '@manufakture/cam/export';
 import type { CamGeometer } from './geometer';
 import { activeCamSetup, type CamUiStore } from './state';
 import type { GeneratedOutcome } from './status';

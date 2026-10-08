@@ -7,7 +7,12 @@ import { createSelectionStore } from '../../state/selection';
 import { createMemberStore } from '../../viewport/memberStore';
 import { documentConstruction } from '../settings';
 import { TakeoffPanel } from './TakeoffPanel';
-import { PART, shedDocument, shedFeatures, shedSets } from './takeoff.test-fixture';
+import {
+  PART,
+  shedDocument,
+  shedFeatures,
+  shedSets,
+} from '@manufakture/domain-construction/fixtures/shed-model';
 
 function setup() {
   const documents = createDocumentStore(shedDocument({ prices: true }));

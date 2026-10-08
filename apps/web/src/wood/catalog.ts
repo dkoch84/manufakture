@@ -3,33 +3,23 @@
 // units suggest, and the document's stock overrides read. Apart from the board tool's logic
 // (boards.ts), so the Stock panel and the picker load without the feature forms.
 
-import type { DisplayUnits, ManufaktureDocument } from '@manufakture/core';
+import type { DisplayUnits } from '@manufakture/core';
 import {
   defaultRegion,
-  readStockData,
-  STOCK_NAMESPACE,
   stockByRegion,
   type BoardParams,
-  type Json,
-  type StockData,
   type StockEntry,
   type StockRegion,
 } from '@manufakture/domain-wood';
-import { formatLength, type LengthFormat } from '@manufakture/units';
+import { exactLengthFormat } from '@manufakture/takeoff';
+import { formatLength } from '@manufakture/units';
 import { lengthFormat } from '../sketcher/values';
 
 // Stock labels ---------------------------------------------------------------------------------
 
-/** A fractional display shows actual sizes to 1/64", so `23/32"` never rounds to `3/4"`. */
-function exactFormat(format: LengthFormat): LengthFormat {
-  return format.unit === 'in-fraction' || format.unit === 'ft-in'
-    ? { unit: format.unit, denominator: 64 }
-    : format;
-}
-
-/** A length in the document's display units, exact enough for a stock size. */
+/** A length in the document's display units, exact enough for a stock size (to 1/64"). */
 export function sizeText(mm: number, units: DisplayUnits): string {
-  return formatLength(mm, exactFormat(lengthFormat(units)));
+  return formatLength(mm, exactLengthFormat(lengthFormat(units)));
 }
 
 /** The actual size of a stock (thickness, or thickness by width) in the document's units. */
@@ -85,14 +75,7 @@ export function defaultStock(region: StockRegion, form: BoardParams['form']): st
 // The document's stock data -----------------------------------------------------------------------
 
 /** The document's `domains.stock`, read; an unreadable entry gives its message instead. */
-export function documentStock(
-  doc: ManufaktureDocument,
-): { ok: true; data: StockData | undefined } | { ok: false; message: string } {
-  const entry = doc.domains?.[STOCK_NAMESPACE];
-  if (entry === undefined) return { ok: true, data: undefined };
-  const r = readStockData(entry.data as Json, entry.schemaVersion);
-  return r.ok ? { ok: true, data: r.value } : { ok: false, message: r.message };
-}
+export { documentStock } from '@manufakture/domain-wood';
 
 /** The stock region a document's display units suggest (the picker opens on it). */
 export function documentRegion(units: DisplayUnits): StockRegion {

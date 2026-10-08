@@ -21,6 +21,7 @@ import type {
   DrawingView,
   ManufaktureDocument,
 } from '@manufakture/core';
+import { drawingFile, screenSvg, type DrawingFormat } from '@manufakture/io';
 import { pickInView, type DrawingSheetResult } from '@manufakture/regen';
 import { useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
 import { useStore } from 'zustand';
@@ -45,7 +46,7 @@ import {
   type NewDrawingSettings,
 } from './DrawingPanels';
 import type { Drawer } from './drawer';
-import { drawingFile, printSheet, screenSvg, type DrawingFormat } from './exports';
+import { printSheet } from './print';
 import {
   DIMENSION_KIND_LABELS,
   addDimensionCommand,

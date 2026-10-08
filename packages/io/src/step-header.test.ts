@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { stepStrings, withStepDescription } from './stepHeader';
+import { stepStrings, withStepDescription } from './step-header';
 
 const encode = (s: string) => new TextEncoder().encode(s);
 const decode = (b: Uint8Array) => new TextDecoder().decode(b);

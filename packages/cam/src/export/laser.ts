@@ -1,5 +1,7 @@
-// Laser and plasma export (M5 plan, T5.6b): a part's outlines as DXF or SVG for cutting software,
-// optionally compensated for the kerf. Kept free of React so it can be tested with a fake geometer.
+// Laser and plasma export (M5 plan, T5.6b; moved from the app in M8 plan T8.1b): a part's
+// outlines as DXF or SVG for cutting software, optionally compensated for the kerf. Its services
+// (the geometry stage and the kernel's section) are passed in, so the app's dialog, a headless
+// session and the tests (with a fake geometer) run the same code.
 //
 // Where the loops come from:
 // - planar faces and sketch regions through the CAM geometry stage (T5.1f; ADR 0014 decisions 5
@@ -26,7 +28,7 @@ import {
   type Vec2,
   type Vec3,
   type WcsFrame,
-} from '@manufakture/cam';
+} from '../index';
 import {
   bareUnits,
   type CamGeometrySource,
@@ -38,6 +40,7 @@ import {
   type StoredExpression,
 } from '@manufakture/core';
 import {
+  FABRICATION_MIME,
   dxfName,
   fileName,
   layerId,
@@ -45,13 +48,12 @@ import {
   loopsToSheet,
   loopsToSvg,
   sheetBounds,
+  type ExchangeOutcome,
+  type FabricationFile,
 } from '@manufakture/io';
 import type { Frame, Loop as KernelLoop, SectionLoops } from '@manufakture/kernel';
 import type { CamGeometryResult, CamStageError } from '@manufakture/regen';
-import type { ExportedFile } from '../../io/actions';
-import type { ExchangeResult } from '../../io/exchange';
-import { MIME } from '../../io/files';
-import type { CamGeometer } from '../geometer';
+import type { CamGeometer } from './geometer';
 
 export type LaserFormat = 'dxf' | 'svg';
 export type SectionAxis = 'x' | 'y' | 'z';
@@ -96,7 +98,7 @@ export interface LaserServices {
         frame: Frame,
         height: number,
         deflection?: number,
-      ) => Promise<ExchangeResult<SectionLoops>>)
+      ) => Promise<ExchangeOutcome<SectionLoops>>)
     | undefined;
 }
 
@@ -572,7 +574,7 @@ export function layerNameClashes(names: readonly string[], format: LaserFormat):
 }
 
 export type LaserFileResult =
-  | { ok: true; file: ExportedFile; warnings: string[]; size: OutlineSize }
+  | { ok: true; file: FabricationFile; warnings: string[]; size: OutlineSize }
   | { ok: false; message: string };
 
 /**
@@ -614,7 +616,7 @@ export function laserFile(
       file: {
         name: fileName(options.baseName, options.format),
         bytes: new TextEncoder().encode(text),
-        type: MIME[options.format],
+        type: FABRICATION_MIME[options.format],
       },
       warnings,
       size: { min: [0, 0], width: size.width, height: size.height },

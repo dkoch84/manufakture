@@ -5,7 +5,10 @@
   "type": "module",
   "license": "GPL-3.0-or-later",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./files": "./src/files/index.ts",
+    "./fixtures": "./src/fixtures.ts",
+    "./nesting": "./src/cutlist/nesting.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
@@ -13,6 +16,8 @@
   },
   "dependencies": {
     "@manufakture/core": "workspace:*",
+    "@manufakture/io": "workspace:*",
+    "@manufakture/nesting": "workspace:*",
     "@manufakture/stock": "workspace:*",
     "@manufakture/takeoff": "workspace:*",
     "@manufakture/units": "workspace:*"

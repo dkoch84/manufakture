@@ -20,7 +20,7 @@
 // Lengths are constants (`constantLength`): settings, not model, so no variables. An override for
 // an id this build's catalog does not have is kept and ignored (it may come from a newer build).
 
-import type { StoredExpression } from '@manufakture/core';
+import type { ManufaktureDocument, StoredExpression } from '@manufakture/core';
 import { findStock, type StockEntry } from './catalog';
 import { currentVersion, migrate, type Json, type Versioned } from './migrations';
 import {
@@ -172,6 +172,16 @@ export function readStockData(data: Json, schemaVersion: number): Read<StockData
   const migrated = migrate(STOCK_DATA, data, schemaVersion);
   if (!migrated.ok) return migrated;
   return readCurrent(migrated.value);
+}
+
+/** A document's stock overrides, read: undefined when it stores none, or why they cannot be read. */
+export function documentStock(
+  doc: Pick<ManufaktureDocument, 'domains'>,
+): { ok: true; data: StockData | undefined } | { ok: false; message: string } {
+  const entry = doc.domains?.[STOCK_NAMESPACE];
+  if (entry === undefined) return { ok: true, data: undefined };
+  const r = readStockData(entry.data as Json, entry.schemaVersion);
+  return r.ok ? { ok: true, data: r.value } : { ok: false, message: r.message };
 }
 
 /**

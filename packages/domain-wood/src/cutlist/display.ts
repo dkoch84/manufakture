@@ -1,36 +1,32 @@
-// The Cut list panel's logic, free of React (M4 plan T4.3d): the cut list input from the document
-// and the regenerated model (`@manufakture/domain-wood`'s `cutList`, T4.3a), which bodies need an
-// oriented box from the regen worker, the rows as the panel and the files show them (numbered,
-// with short item names and flags in words), sorting, and the CSV files.
+// The cut list as people read it (M4 plan T4.3d; moved from the app's Cut list panel in M8 plan
+// T8.1b so a headless session can write the files): the cut list input from the document and its
+// regenerated model (`cutList`, T4.3a), which bodies need an oriented box from regen, the rows as
+// the panel and the files show them (numbered, with short item names and flags in words),
+// sorting, and the CSV files.
 
 import {
   findMaterial,
+  lengthFormat,
   type DisplayUnits,
   type ManufaktureDocument,
   type Part,
 } from '@manufakture/core';
-import {
-  BOARD_TYPE,
-  WOOD_NAMESPACE,
-  cutList,
-  cutListPart,
-  stockName,
-  woodSettings,
-  type CutList,
-  type CutListFlag,
-  type CutListInput,
-  type CutListInstance,
-  type CutListRow,
-  type Json,
-  type OrientedSize,
-  type WoodSettings,
-} from '@manufakture/domain-wood';
 import type { AssemblyResult } from '@manufakture/regen';
-import { formatMeasure, formatSize } from '@manufakture/takeoff';
+import { documentStock } from '@manufakture/stock';
+import {
+  csvField,
+  csvTextField,
+  exactLengthFormat,
+  formatMeasure,
+  formatSize,
+} from '@manufakture/takeoff';
 import { formatLength, type LengthFormat } from '@manufakture/units';
-import type { PartModel } from '../../model/model';
-import { lengthFormat } from '../../sketcher/values';
-import { documentStock } from '../catalog';
+import { BOARD_TYPE } from '../board';
+import type { Json } from '../migrations';
+import { WOOD_NAMESPACE, woodSettings, type WoodSettings } from '../wood-data';
+import { cutList, stockName, type CutList, type CutListFlag, type CutListRow } from './cutlist';
+import { cutListPart, type PartResultLike } from './from-regen';
+import type { CutListInput, CutListInstance, OrientedSize } from './input';
 import type { Purchase } from './layout';
 
 // The input --------------------------------------------------------------------------------------
@@ -71,7 +67,7 @@ function isBoardCreator(part: Pick<Part, 'features'>, creator: string): boolean 
  * The bodies of a part that need an oriented box for the cut list: not made by a board, and of a
  * wood material (their own, else the part's). Boards are sized by their blank, never by a box.
  */
-export function bodiesToSize(part: Part, model: PartModel): string[] {
+export function bodiesToSize(part: Part, model: CutListPartModel): string[] {
   return model.bodies
     .filter((b) => {
       if (isBoardCreator(part, b.creator)) return false;
@@ -81,11 +77,21 @@ export function bodiesToSize(part: Part, model: PartModel): string[] {
     .map((b) => b.bodyId);
 }
 
+/**
+ * A part of the regenerated model, as the cut list reads it: regen's `PartResult` fits, and so
+ * does the app's model of a part.
+ */
+export interface CutListPartModel {
+  partId: string;
+  features: PartResultLike['features'];
+  bodies: readonly { bodyId: string; creator: string }[];
+}
+
 export interface CutListSources {
   /** The document as stored. */
   document: ManufaktureDocument;
   /** The model's parts (built in the active configuration row). */
-  parts: readonly PartModel[];
+  parts: readonly CutListPartModel[];
   /** The model's assemblies; with `assemblyId`, the list counts through that one. */
   assemblies?: readonly AssemblyResult[];
   assemblyId?: string | null;
@@ -103,7 +109,12 @@ export function cutListInput(src: CutListSources): CutListInput {
     return [
       cutListPart(
         part,
-        { features: model.features, bodies: model.bodies },
+        // Bodies by id and creator only, as the app's model holds them: names and materials come
+        // from the document part, so a regen result's `inherited` fields are not read here.
+        {
+          features: model.features,
+          bodies: model.bodies.map((b) => ({ bodyId: b.bodyId, creator: b.creator })),
+        },
         sizes === undefined ? {} : { orientedSizes: sizes },
       ),
     ];
@@ -144,10 +155,7 @@ export function documentCutList(src: CutListSources): CutList {
 
 /** A fractional display shows sizes to 1/64", so `23/32"` never rounds to `3/4"`. */
 export function exactFormat(units: DisplayUnits): LengthFormat {
-  const format = lengthFormat(units);
-  return format.unit === 'in-fraction' || format.unit === 'ft-in'
-    ? { unit: format.unit, denominator: 64 }
-    : format;
+  return exactLengthFormat(lengthFormat(units));
 }
 
 const NUMBERED = /^(.*?)\s*(\d+)$/;
@@ -362,22 +370,6 @@ type Cell = string | number | TextCell;
 /** Marks `value` as user-supplied text, so `csvField` guards it against formula injection. */
 function text(value: string): TextCell {
   return { text: value };
-}
-
-/** One CSV field, quoted when it needs to be (RFC 4180). */
-export function csvField(value: string | number): string {
-  const s = String(value);
-  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-}
-
-/**
- * A CSV field of user-supplied text: one that a spreadsheet would read as a formula (it starts
- * with `=`, `+`, `-`, `@`, a tab or a carriage return) gets a leading `'`, so a part named
- * `=HYPERLINK(...)` stays text. Numbers and formatted measures do not pass through here, so a
- * negative number stays a number.
- */
-export function csvTextField(value: string): string {
-  return csvField(/^[=+\-@\t\r]/.test(value) ? `'${value}` : value);
 }
 
 function csv(lines: readonly (readonly Cell[])[]): string {

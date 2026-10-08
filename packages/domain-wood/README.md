@@ -9,8 +9,11 @@ between two boards), and the **cut list** (T4.3a: the woodworking producer of
 `@manufakture/takeoff`). Plain TypeScript under GPL-3.0-or-later.
 
 **Dependencies.** At run time only `@manufakture/core`, `@manufakture/units` and the shared
-`@manufakture/takeoff` (ADR 0013 decision 8) and `@manufakture/stock` (ADR 0015 decision 1), so
-everything here runs in Node with no `.wasm`. `@manufakture/regen` (the translator contract) and
+`@manufakture/takeoff` (ADR 0013 decision 8), `@manufakture/stock` (ADR 0015 decision 1) and
+`@manufakture/nesting` (the sheet layouts and lumber plans of the cut list, as
+`domain-construction` uses it), so everything here runs in Node with no `.wasm`. The `./files`
+subpath alone also loads `@manufakture/io`'s writers (the cut list PDF); the package root never
+does. `@manufakture/regen` (the translator contract) and
 `@manufakture/kernel` (the `FeatureInput` types) are type-only imports, and devDependencies, as
 `packages/print` does with kernel types; `@manufakture/sketch` is a devDependency for the solver of
 the real-kernel tests. Regen imports no domain package.
@@ -275,6 +278,49 @@ input lacks are reported in `missing`.
 then material, then thickest, longest, widest. `totals` are per category and unit, `stockTotals`
 per stock. `configuration` echoes the row given.
 
+### As people read it (`cutlist/display.ts`)
+
+Moved from the app's Cut list panel in M8 plan T8.1b, so a headless session builds the same list
+and files. `documentCutList({ document, parts, assemblies?, assemblyId?, sizes? })` is the list of a
+regenerated model: `parts` are regen's `PartResult`s (or the app's model of them; only `partId`,
+`features` and the bodies' `bodyId` and `creator` are read, so names and materials come from the
+document), `assemblyId` counts through that assembly, `sizes` are the oriented sizes of bodies that
+are not boards (`bodiesToSize` says which), and the settings and stock overrides are the document's
+(`documentSettings`, `documentStock`). `displayRows` numbers the rows and writes them in the
+document's units (`exactFormat`: fractions to 1/64"), with short item names (`shortItem`: `Shelf
+1-3`) and flags in words (`flagText`); `groupRows` sorts them by stock; `totalLines`,
+`excludedLines` and `missingLines` are the lines under the list; `cutListCsv` and `bomCsv` the CSV
+files, user text guarded against spreadsheet formulas.
+
+`nestingJob(list, settings, stock)` turns the list into `@manufakture/nesting` inputs with the
+document's kerf, trims and stage limit (a stock with no sheet size, or lumber sold in random
+lengths, has a note instead; a blank wider than its lumber is left out with one), `runNesting(job)`
+lays every sheet and stick out (cancellable, with progress; the app's nesting worker loads it from
+the `./nesting` subpath, which imports nothing else), and `purchase(result)` counts the sheets and
+sticks to buy.
+
+## Files (`@manufakture/domain-wood/files`)
+
+The cut list's files, one entry point for every caller (M8 plan T8.1b; the list of every
+fabrication format is in the io README, "Fabrication exports"):
+
+```ts
+import { exportCutList } from '@manufakture/domain-wood/files';
+
+const file = await exportCutList('pdf', {
+  document,
+  parts: result.parts,
+  assemblies: result.assemblies,
+});
+// { name: 'Bookshelf cut list.pdf', bytes, type: 'application/pdf' }; 'list' and 'bom' are CSV
+```
+
+`exportCutList(kind, sources, { sizingErrors?, signal? })` builds the list, lays it out in-process
+and writes the file; `cutListFile(kind, list, options)` writes one from a list and layouts already
+known (the app's panel, whose layouts come from its nesting worker). `cutListPdf` is the shop PDF:
+the list, hardware and totals, a page per sheet drawn to scale with its cut order, and the lumber
+plans, Letter for inch and foot documents, A4 otherwise.
+
 ## Tests
 
 `catalog.test.ts` (every Table 3 size against an independently typed copy, exact millimetres,
@@ -295,6 +341,10 @@ pocket screws; grouping; a part inserted twice; per-board instances equal to the
 configurations; shapes that are not boards; board feet by basis; layout inputs) and
 `cutlist/regen.test.ts` (with the real kernel: blanks and dowels of a shelf on a side, a
 configuration row deepening the shelf and nothing else, a tenon's length kept in its blank).
+`cutlist/display.test.ts` checks the rows, CSV files and layout job of the bookshelf in
+`src/fixtures.ts` (exported as `@manufakture/domain-wood/fixtures`, which the app's Cut list panel
+tests use too); the app parses the PDF back with pdfjs-dist (`apps/web/src/wood/cutlist/pdf.test.ts`)
+and exports every format from the e2e fixtures in Node (`apps/web/src/fabrication.test.ts`).
 
 ```sh
 ./node_modules/.bin/vitest run --project packages packages/domain-wood

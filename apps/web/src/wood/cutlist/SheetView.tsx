@@ -5,7 +5,7 @@
 
 import { cutSequence, type SheetLayout, type StickLayout } from '@manufakture/nesting';
 import { formatLength, type LengthFormat } from '@manufakture/units';
-import type { DisplayRow } from './cutlist';
+import type { DisplayRow } from '@manufakture/domain-wood';
 
 export interface SheetViewProps {
   sheet: SheetLayout;

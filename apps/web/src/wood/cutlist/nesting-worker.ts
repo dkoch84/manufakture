@@ -1,7 +1,7 @@
 // The nesting worker (M4 plan T4.3d): sheet layouts and lumber plans off the main thread. One job
 // at a time per message id; a `cancel` stops it between attempts. The protocol is in nester.ts.
 
-import { runNesting } from './nesting';
+import { runNesting } from '@manufakture/domain-wood/nesting';
 import type { NesterReply, NesterRequest } from './nester';
 
 const running = new Map<number, AbortController>();

@@ -95,6 +95,8 @@ up with `Object.hasOwn`, so stored keys like `__proto__` are only ever data.
 amount `per` `piece`, `sheet`, `board-foot`, `metre` or `foot`. `resolveStock(id, data)` gives the
 catalog entry with the override applied (`thickness`, `width`, `sheet`, `price`, and which of them
 were `overridden`). An override for an id this build does not know is kept and ignored.
+`documentStock(doc)` reads a document's `domains.stock` (undefined when it stores none), for the
+takeoff and cut list files and the app's panels.
 
 ## Readers and migrations
 

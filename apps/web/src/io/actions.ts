@@ -9,31 +9,25 @@ import {
   type ManufaktureDocument,
 } from '@manufakture/core';
 import {
-  EXPORT_TOLERANCES,
-  NotWatertightError,
-  deflectionOf,
-  export3mf,
-  exportStl,
-  fileName,
+  exportBodyFiles,
   fromBase64,
   importSource,
   parseStl,
   sniffFormat,
   stepProductNames,
-  type ExportBody,
-  type ExportTolerancePreset,
+  type BodyFileFormat,
+  type BodyFileOptions,
   type TriMesh,
 } from '@manufakture/io';
 import type { DocumentStoreApi } from '../state/document';
 import type { BodyInput } from '../viewport/bodies';
 import type { Exchanger } from './exchange';
-import { MIME, formatBytes } from './files';
+import { formatBytes } from './files';
 import { shownMemberExports } from './memberExport';
 import { meshBody } from './meshBody';
-import { withStepDescription } from './stepHeader';
 import { importBodyId } from './restorable';
 
-export type ExportFormat = 'stl' | 'stl-each' | '3mf' | 'step';
+export type ExportFormat = BodyFileFormat;
 
 export interface ExportedFile {
   name: string;
@@ -51,119 +45,23 @@ export interface ExportChoice {
 }
 
 /**
- * Export B-rep bodies: `options.bodies` (the ones the user chose, under the names given), or
- * every part body the kernel holds. The files are named after the one body, or the document
- * when there are several (`options.fileBase` overrides both). Binary STL (all bodies in one file, or one file per body),
- * 3MF (one named object per body) or STEP (one named product per body). Mesh exports are
- * tessellated at `tolerance` and must be watertight.
- *
- * Framing members (`options.members`, by default the ones the viewport shows) go into mesh
- * exports after the bodies (ADR 0015 decision 4): one 3MF object per member named by its full id,
- * appended to a merged STL, or one more STL of them all when each body gets a file. STEP writes
- * them as B-reps in the same file as the bodies, each a product named by its full id, built on
- * demand in the regen worker (`Exchanger.exportStepWithMembers`) when `options.partId` names the
- * part they belong to; an exchanger that builds no members leaves them out and says so. With
- * `options.stepDescription`, a STEP file's header description is that text (the construction
- * disclaimer).
+ * Export B-rep bodies (`@manufakture/io`'s `exportBodyFiles`): `options.bodies` (the ones the user
+ * chose, under the names given), or every part body the kernel holds, as binary STL, 3MF or STEP.
+ * Framing members default to the ones the viewport shows. The message names every file and its
+ * size.
  */
 export async function exportBodies(
   exchanger: Exchanger,
   format: ExportFormat,
-  options: {
-    tolerance?: ExportTolerancePreset;
-    documentName?: string;
-    bodies?: readonly ExportChoice[];
-    /** The file name, without extension, whatever the bodies are (default: see below). */
-    fileBase?: string;
-    /** Framing members, placed and named (default: the members the viewport shows). */
-    members?: readonly ExportBody[];
-    /** The part studio the members belong to: STEP builds their B-reps there. */
-    partId?: string;
-    /** The STEP header's description (FILE_DESCRIPTION), in place of the kernel's. */
-    stepDescription?: string;
-  } = {},
+  options: BodyFileOptions = {},
 ): Promise<ActionResult<ExportedFile[]>> {
-  const bodies = options.bodies ?? exchanger.bodies();
-  const members = options.members ?? shownMemberExports();
-  const stepMembers =
-    format === 'step' &&
-    members.length > 0 &&
-    options.partId !== undefined &&
-    exchanger.exportStepWithMembers !== undefined;
-  if (bodies.length === 0 && (members.length === 0 || (format === 'step' && !stepMembers))) {
-    return { ok: false, message: 'There is nothing to export.' };
-  }
-  const ids = bodies.map((b) => b.id);
-  const names = options.bodies ? new Map(bodies.map((b) => [b.id, b.name])) : undefined;
-  const base =
-    options.fileBase ??
-    (bodies.length === 1 ? bodies[0]!.name : (options.documentName ?? 'bodies'));
-  let files: ExportedFile[];
-  let note = '';
-  if (format === 'step') {
-    let bytes: Uint8Array;
-    if (stepMembers) {
-      const step = await exchanger.exportStepWithMembers!(
-        ids,
-        names,
-        options.partId!,
-        members.map((m) => m.name),
-      );
-      if (!step.ok) return step;
-      bytes = step.value.data;
-      note = ` ${step.value.members} framing ${step.value.members === 1 ? 'member' : 'members'} as B-reps.`;
-      if (step.value.failed.length > 0)
-        note += ` Left out, not built: ${step.value.failed.join(', ')}.`;
-    } else {
-      const step = names ? await exchanger.exportStep(ids, names) : await exchanger.exportStep(ids);
-      if (!step.ok) return step;
-      bytes = step.value;
-      if (members.length > 0) note = ' Framing members are not exported to STEP here.';
-    }
-    if (options.stepDescription !== undefined)
-      bytes = withStepDescription(bytes, options.stepDescription);
-    files = [{ name: fileName(base, 'step'), bytes, type: MIME.step }];
-  } else {
-    const tolerance = EXPORT_TOLERANCES[options.tolerance ?? 'normal'];
-    const deflection = deflectionOf(tolerance);
-    const meshes =
-      ids.length === 0
-        ? { ok: true as const, value: [] }
-        : names
-          ? await exchanger.tessellate(ids, deflection, names)
-          : await exchanger.tessellate(ids, deflection);
-    if (!meshes.ok) return meshes;
-    const all = [...meshes.value, ...members];
-    try {
-      if (format === '3mf') {
-        files = [
-          {
-            name: fileName(base, '3mf'),
-            bytes: export3mf(all, { title: base }),
-            type: MIME['3mf'],
-          },
-        ];
-      } else if (format === 'stl') {
-        files = exportStl(all, { merge: true, fileName: base }).map((f) => ({
-          ...f,
-          type: MIME.stl,
-        }));
-      } else {
-        // One file per body; the members, often hundreds, together in one more.
-        files = [
-          ...exportStl(meshes.value, { merge: false }),
-          ...(members.length > 0
-            ? exportStl(members, { merge: true, fileName: `${base} members` })
-            : []),
-        ].map((f) => ({ ...f, type: MIME.stl }));
-      }
-    } catch (e) {
-      if (e instanceof NotWatertightError) return { ok: false, message: e.message };
-      throw e;
-    }
-  }
-  const summary = files.map((f) => `${f.name} (${formatBytes(f.bytes.length)})`).join(', ');
-  return { ok: true, value: files, message: `Exported ${summary}.${note}` };
+  const r = await exportBodyFiles(exchanger, format, {
+    ...options,
+    members: options.members ?? shownMemberExports(),
+  });
+  if (!r.ok) return r;
+  const summary = r.files.map((f) => `${f.name} (${formatBytes(f.bytes.length)})`).join(', ');
+  return { ok: true, value: r.files, message: `Exported ${summary}.${r.note}` };
 }
 
 /** Largest file an import accepts (core's limit): it is kept inside the document, as base64. */

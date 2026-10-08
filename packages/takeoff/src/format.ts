@@ -15,6 +15,16 @@ export function isImperial(format: LengthFormat): boolean {
   );
 }
 
+/**
+ * The format takeoff files show sizes in: a fractional display goes to 1/64", so a `23/32"` sheet
+ * never rounds to `3/4"`; any other format as it is.
+ */
+export function exactLengthFormat(format: LengthFormat): LengthFormat {
+  return format.unit === 'in-fraction' || format.unit === 'ft-in'
+    ? { unit: format.unit, denominator: 64 }
+    : format;
+}
+
 const MM2_PER_SQ_FT = (12 * MM_PER_INCH) ** 2;
 const MM3_PER_CU_IN = MM_PER_INCH ** 3;
 

@@ -15,7 +15,7 @@ import {
   type Toolpath,
   type Wcs,
 } from '@manufakture/cam';
-import type { GeneratedToolpaths } from '../preview/job';
+import type { GeneratedToolpaths } from '@manufakture/cam/export';
 
 export const flat: Tool = {
   id: 'tool#1',

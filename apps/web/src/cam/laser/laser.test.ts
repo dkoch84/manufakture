@@ -27,7 +27,7 @@ import {
   sectionFrame,
   type LaserLayer,
   type LaserSource,
-} from './laser';
+} from '@manufakture/cam/export';
 import { dxfLoops, svgLoops } from './readBack.test-fixture';
 
 /**

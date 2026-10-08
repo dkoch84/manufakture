@@ -1,10 +1,11 @@
-// Generate on demand (M5 plan, T5.3a; ADR 0014 decisions 7 and 8): the geometry stage's reply for
-// one setup (regen worker: sources resolved on the final body, expressions evaluated, depths in
-// machine Z) turned into `packages/cam`'s evaluated `Setup` (stock box, WCS frame, loops and drill
-// points in machine coordinates, the body's mesh for a 3D surfacing), which the CAM worker
-// generates. Only operations whose geometry resolved go to the worker; the others keep the stage's
-// errors. A V-carve with a clearing tool goes as two operations, its clearing first. Nothing here
-// evaluates an expression or resolves a name: the stage did both.
+// Generate on demand (M5 plan, T5.3a; ADR 0014 decisions 7 and 8; moved from the app in M8 plan
+// T8.1b): the geometry stage's reply for one setup (regen: sources resolved on the final body,
+// expressions evaluated, depths in machine Z) turned into `packages/cam`'s evaluated `Setup` (stock
+// box, WCS frame, loops and drill points in machine coordinates, the body's mesh for a 3D
+// surfacing), which the CAM worker generates. Only operations whose geometry resolved go to the
+// worker; the others keep the stage's errors. A V-carve with a clearing tool goes as two
+// operations, its clearing first. Nothing here evaluates an expression or resolves a name: the
+// stage did both.
 
 import {
   boundsInSetup,
@@ -26,7 +27,7 @@ import {
   type Setup,
   type Stock,
   type WcsFrame,
-} from '@manufakture/cam';
+} from '../index';
 import type { CamGeometryResult, CamOperationResult, CamSourceResult } from '@manufakture/regen';
 
 /**

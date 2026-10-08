@@ -6,7 +6,9 @@
   "license": "GPL-3.0-or-later",
   "exports": {
     ".": "./src/index.ts",
-    "./fixtures/house": "./src/fixtures/house.ts"
+    "./files": "./src/files/index.ts",
+    "./fixtures/house": "./src/fixtures/house.ts",
+    "./fixtures/shed-model": "./src/fixtures/shed-model.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p bench/tsconfig.json",

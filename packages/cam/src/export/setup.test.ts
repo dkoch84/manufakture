@@ -4,7 +4,7 @@
 
 import type { CamGeometryResult, CamOperationResult } from '@manufakture/regen';
 import { describe, expect, it } from 'vitest';
-import { CLEARING_SUFFIX, documentOperation, setupInput, stockOutline } from './generate';
+import { CLEARING_SUFFIX, documentOperation, setupInput, stockOutline } from './setup';
 
 const tool = {
   id: 'tool#1',

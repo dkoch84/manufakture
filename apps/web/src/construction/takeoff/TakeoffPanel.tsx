@@ -18,9 +18,21 @@ import type { ManufaktureDocument } from '@manufakture/core';
 import {
   DISCLAIMER_SHORT,
   LAYER_LABELS,
+  SECTIONS,
   constructionTakeoff,
+  costLines,
+  displayRows,
+  flagText,
+  sections,
+  subtotalLines,
+  takeoffModel,
+  totalsText,
   type ConstructionTakeoff,
+  type TakeoffDisplayRow,
+  type TakeoffModel,
 } from '@manufakture/domain-construction';
+import { takeoffFile } from '@manufakture/domain-construction/files';
+import { exactFormat, type DisplayRow } from '@manufakture/domain-wood';
 import { UNNAMED } from '@manufakture/kernel';
 import { findStock } from '@manufakture/stock';
 import { formatLength } from '@manufakture/units';
@@ -33,23 +45,9 @@ import { geometryRef, type SelectableItem, type SelectionStore } from '../../sta
 import { memberRef, type MemberSetView } from '../../viewport/members';
 import type { MemberStore } from '../../viewport/memberStore';
 import { documentStock } from '../../wood/catalog';
-import { exactFormat, type DisplayRow } from '../../wood/cutlist/cutlist';
 import { SheetView, StickView } from '../../wood/cutlist/SheetView';
 import { documentConstruction } from '../settings';
-import {
-  SECTIONS,
-  costLines,
-  displayRows,
-  flagText,
-  sections,
-  subtotalLines,
-  takeoffCsv,
-  totalsText,
-  type TakeoffDisplayRow,
-} from './display';
 import { FaceView } from './FaceView';
-import { takeoffModel, type TakeoffModel } from './input';
-import { takeoffPdf } from './pdf';
 import {
   AS_CUT,
   takeoffForm,
@@ -74,11 +72,6 @@ export interface TakeoffPanelProps {
 
 const EMPTY_FEATURES: readonly never[] = [];
 const EMPTY_SETS: readonly MemberSetView[] = [];
-
-function fileName(doc: ManufaktureDocument, ext: string): string {
-  const base = doc.name.replace(/[\\/:*?"<>|]+/g, ' ').trim() || 'manufakture';
-  return `${base} takeoff.${ext}`;
-}
 
 /** The faces of a body of the part, for the selection. */
 function bodyFaces(parts: readonly PartModel[], partId: string, bodyId: string): SelectableItem[] {
@@ -204,20 +197,13 @@ export function TakeoffPanel({
   const save = (what: 'csv' | 'pdf') => {
     if (!computed.ok) return;
     try {
-      const options = { title: doc.name, units, subtotals };
-      if (what === 'pdf') {
-        download(
-          takeoffPdf(computed.takeoff, rows, { ...options, notes: computed.model.notes }),
-          fileName(doc, 'pdf'),
-          'application/pdf',
-        );
-      } else {
-        download(
-          new TextEncoder().encode(takeoffCsv(computed.takeoff, rows, options)),
-          fileName(doc, 'csv'),
-          'text/csv',
-        );
-      }
+      const file = takeoffFile(what, computed.takeoff, rows, {
+        documentName: doc.name,
+        units,
+        subtotals,
+        notes: computed.model.notes,
+      });
+      download(file.bytes, file.name, file.type);
       setMessage(null);
     } catch (error) {
       setMessage({

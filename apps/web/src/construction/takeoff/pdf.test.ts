@@ -1,16 +1,27 @@
 // @vitest-environment node
-// The takeoff PDF parsed back with pdfjs-dist (M6 plan T6.3b): the shed's rows to buy and its
-// cost are there as text, and the short disclaimer opens the first page and closes every page.
+// The takeoff PDF (`@manufakture/domain-construction/files`, M6 plan T6.3b) parsed back with
+// pdfjs-dist, a development dependency of the app: the shed's rows to buy and its cost are there
+// as text, and the short disclaimer opens the first page and closes every page.
 
-import { DISCLAIMER_SHORT, constructionTakeoff } from '@manufakture/domain-construction';
+import {
+  DISCLAIMER_SHORT,
+  constructionTakeoff,
+  displayRows,
+  documentConstruction,
+  subtotalLines,
+  takeoffModel,
+} from '@manufakture/domain-construction';
+import { takeoffPdf, wrap } from '@manufakture/domain-construction/files';
+import {
+  PART,
+  PRICES,
+  shedDocument,
+  shedFeatures,
+  shedSets,
+} from '@manufakture/domain-construction/fixtures/shed-model';
 import { readStockData, type Json } from '@manufakture/stock';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { describe, expect, it } from 'vitest';
-import { documentConstruction } from '../settings';
-import { displayRows, subtotalLines } from './display';
-import { takeoffModel } from './input';
-import { takeoffPdf, wrap } from './pdf';
-import { PART, PRICES, shedDocument, shedFeatures, shedSets } from './takeoff.test-fixture';
 
 async function pagesText(bytes: Uint8Array): Promise<string[]> {
   const pdf = await getDocument({ data: bytes.slice(), verbosity: 0 }).promise;

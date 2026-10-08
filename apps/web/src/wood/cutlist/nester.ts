@@ -3,7 +3,12 @@
 // laid out never starts it); `localNester` runs it in-process (tests, and hosts with no workers).
 // A new job cancels the one before it: only the latest layout is wanted.
 
-import { runNesting, type JobProgress, type NestingJob, type NestingResult } from './nesting';
+import {
+  runNesting,
+  type JobProgress,
+  type NestingJob,
+  type NestingResult,
+} from '@manufakture/domain-wood/nesting';
 
 export type NesterRequest =
   { type: 'run'; id: number; job: NestingJob } | { type: 'cancel'; id: number };

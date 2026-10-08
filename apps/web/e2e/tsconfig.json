@@ -4,5 +4,7 @@
     "lib": ["ES2023", "DOM"],
     "types": ["node"]
   },
-  "include": [".", "../playwright.config.ts"]
+  // The fabrication test (src/fabrication.test.ts) runs in vitest but builds its documents from
+  // these fixtures, so it is checked here, with their types.
+  "include": [".", "../playwright.config.ts", "../src/fabrication.test.ts"]
 }

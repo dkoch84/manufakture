@@ -25,7 +25,7 @@ import { createNodeService } from '@manufakture/kernel/node';
 import { RegenEngine, type CamGeometryResult } from '@manufakture/regen';
 import { createSolverService } from '@manufakture/sketch';
 import { describe, expect, it } from 'vitest';
-import { STOCK_Z_TOLERANCE, setupInput } from './generate';
+import { STOCK_Z_TOLERANCE, setupInput } from '@manufakture/cam/export';
 
 const PART = 'part#1';
 const S = 'setup#1';

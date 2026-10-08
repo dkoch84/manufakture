@@ -1,11 +1,11 @@
-// The cut list as a PDF for the shop (M4 plan T4.3d): the cut list, hardware and totals on the
-// first pages, then one page per sheet (drawn to scale with part numbers, offcuts and the cut
-// order) and the lumber plans, through `@manufakture/io`'s PDF writer on its shared 2D sheets
-// (`Sheet2`, T4.4f). Letter landscape for inch and foot documents, A4 landscape otherwise. The
-// writer throws a RangeError on input it cannot write; the panel catches and reports it.
+// The cut list as a PDF for the shop (M4 plan T4.3d; moved from the app in M8 plan T8.1b): the
+// cut list, hardware and totals on the first pages, then one page per sheet (drawn to scale with
+// part numbers, offcuts and the cut order) and the lumber plans, through `@manufakture/io`'s PDF
+// writer on its shared 2D sheets (`Sheet2`, T4.4f). Letter landscape for inch and foot
+// documents, A4 landscape otherwise. The writer throws a RangeError on input it cannot write; the
+// caller catches and reports it.
 
 import type { DisplayUnits } from '@manufakture/core';
-import type { CutList } from '@manufakture/domain-wood';
 import {
   HELVETICA_CAP_HEIGHT,
   helveticaTextWidth,
@@ -18,8 +18,15 @@ import {
 import { cutSequence, type SheetLayout, type StickLayout } from '@manufakture/nesting';
 import { isImperial } from '@manufakture/takeoff';
 import { formatLength, type LengthFormat } from '@manufakture/units';
-import { displayRows, exactFormat, flagText, totalLines, type DisplayRow } from './cutlist';
-import type { NestingResult } from './nesting';
+import type { CutList } from '../cutlist/cutlist';
+import {
+  displayRows,
+  exactFormat,
+  flagText,
+  totalLines,
+  type DisplayRow,
+} from '../cutlist/display';
+import type { NestingResult } from '../cutlist/nesting';
 
 const LETTER = { width: 279.4, height: 215.9 };
 const A4 = { width: 297, height: 210 };

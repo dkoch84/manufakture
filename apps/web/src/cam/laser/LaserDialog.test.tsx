@@ -12,7 +12,7 @@ import { createSelectionStore, geometryRef, type GeometryRef } from '../../state
 import { setupDocument } from '../cam.test-fixture';
 import type { CamGeometer } from '../geometer';
 import type { FacePick } from '../picking';
-import { middleAlong, type LaserBody } from './laser';
+import { middleAlong, type LaserBody } from '@manufakture/cam/export';
 import { LaserDialog } from './LaserDialog';
 import { svgLoops } from './readBack.test-fixture';
 

@@ -4,9 +4,15 @@
 
 import { findMachine } from '@manufakture/cam/library';
 import { describe, expect, it } from 'vitest';
-import { buildExport, type ExportPlan, type ExportSettings } from './export';
+import {
+  buildExport,
+  escapeHtml,
+  setupSheetHtml,
+  zeroingSteps,
+  type ExportPlan,
+  type ExportSettings,
+} from '@manufakture/cam/export';
 import { DOC_OPERATIONS, exportGeneration } from './export.test-fixture';
-import { escapeHtml, setupSheetHtml, zeroingSteps } from './sheet';
 
 const machine = findMachine('shapeoko-5-pro-4x4')!;
 

@@ -27,7 +27,7 @@ import {
   type PreviewPath,
 } from './geometry';
 import { PLAYBACK_SPEEDS, formatLength, formatMinutes } from './format';
-import { CLEARING_SUFFIX } from '../generate';
+import { CLEARING_SUFFIX } from '@manufakture/cam/export';
 import { previewJob } from './job';
 import { previewPlacement } from './placement';
 import { MOVE_COLORS, PreviewOverlay, operationColor } from './scene';

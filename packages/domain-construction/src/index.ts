@@ -126,6 +126,7 @@ export {
   MIN_PLATE_STOCK,
   MIN_SPACING,
   defaultConstructionSettings,
+  documentConstruction,
   layerThickness,
   mapLengths,
   newWallType,
@@ -323,3 +324,25 @@ export {
   type WallFaceInput,
 } from './takeoff';
 export * from './ifc/adapter';
+export {
+  SECTIONS,
+  costLines,
+  displayRows,
+  flagText,
+  money,
+  sections,
+  stockName,
+  subtotalLines,
+  takeoffCsv,
+  totalsText,
+  type TakeoffCsvOptions,
+  type TakeoffDisplayRow,
+} from './takeoff/display';
+export {
+  faceSpans,
+  takeoffModel,
+  takeoffSettings,
+  type TakeoffMemberSet,
+  type TakeoffModel,
+  type TakeoffSources,
+} from './takeoff/from-regen';

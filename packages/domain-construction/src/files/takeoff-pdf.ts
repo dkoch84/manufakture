@@ -1,12 +1,11 @@
-// The construction takeoff as a PDF for the lumber yard (M6 plan T6.3b), through
-// `@manufakture/io`'s PDF writer (T4.4f): the rows by section with their totals, cost and notes,
-// the subtotals per level and feature, and the cost in all. The short "not an engineering tool"
-// text opens the first page and closes every page (ADR 0015 decision 8). Letter landscape for inch
-// and foot documents, A4 landscape otherwise. The writer throws a RangeError on input it cannot
-// write; the panel catches and reports it.
+// The construction takeoff as a PDF for the lumber yard (M6 plan T6.3b; moved from the app in M8
+// plan T8.1b), through `@manufakture/io`'s PDF writer (T4.4f): the rows by section with their
+// totals, cost and notes, the subtotals per level and feature, and the cost in all. The short
+// "not an engineering tool" text opens the first page and closes every page (ADR 0015 decision 8).
+// Letter landscape for inch and foot documents, A4 landscape otherwise. The writer throws a
+// RangeError on input it cannot write; the caller catches and reports it.
 
 import type { DisplayUnits } from '@manufakture/core';
-import { DISCLAIMER_SHORT, type ConstructionTakeoff } from '@manufakture/domain-construction';
 import {
   HELVETICA_CAP_HEIGHT,
   helveticaTextWidth,
@@ -17,15 +16,17 @@ import {
   type Sheet2,
 } from '@manufakture/io';
 import { isImperial } from '@manufakture/takeoff';
-import { exactFormat } from '../../wood/cutlist/cutlist';
+import { DISCLAIMER_SHORT } from '../disclaimer';
 import {
   SECTIONS,
   costLines,
+  exactFormat,
   flagText,
   sections,
   totalsText,
   type TakeoffDisplayRow,
-} from './display';
+} from '../takeoff/display';
+import type { ConstructionTakeoff } from '../takeoff/types';
 
 const LETTER = { width: 279.4, height: 215.9 };
 const A4 = { width: 297, height: 210 };

@@ -11,7 +11,7 @@ import {
   type WcsFrame,
 } from '@manufakture/cam';
 import type { CamGeometryResult } from '@manufakture/regen';
-import { stockOf } from '../generate';
+import { stockOf } from '@manufakture/cam/export';
 import type { GeneratedToolpaths } from './job';
 
 /** A stock box (setup frame) in machine coordinates: less the WCS origin. */

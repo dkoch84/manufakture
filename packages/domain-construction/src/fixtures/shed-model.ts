@@ -1,9 +1,9 @@
-// The 12' x 16' shed of T6.3a's fixture (packages/domain-construction/src/takeoff/shed.test.ts) as
-// the app sees it after a regen: a document with its walls, openings, floor and roof features,
-// the feature results with the metadata their translators return (paths on the framing's outside
-// face, sheathing outside it, the roof's gable fills), and the member sets framed by the same
-// generators with the same inputs. So the takeoff panel's rows can be checked against T6.3a's
-// hand counts without a kernel.
+// @manufakture/domain-construction/fixtures/shed-model: the 12' x 16' shed of T6.3a's fixture
+// (`src/takeoff/shed.test.ts`) as a regen reports it: a document with its walls, openings, floor
+// and roof features, the feature results with the metadata their translators return (paths on the
+// framing's outside face, sheathing outside it, the roof's gable fills), and the member sets
+// framed by the same generators with the same inputs. So the takeoff's rows can be checked against
+// T6.3a's hand counts without a kernel, here and in the app's Takeoff panel tests.
 
 import {
   applyCommand,
@@ -12,22 +12,23 @@ import {
   type ExtensionFeature,
   type ManufaktureDocument,
 } from '@manufakture/core';
-import {
-  frameFloor,
-  frameRoof,
-  frameWall,
-  type FloorMetadata,
-  type FrameFloorInput,
-  type FrameRoofInput,
-  type HeaderSpec,
-  type OpeningMetadata,
-  type RoofMetadata,
-  type StockRef,
-  type WallMetadata,
-  type WallOpening,
-} from '@manufakture/domain-construction';
-import type { FeatureResult, MemberData } from '@manufakture/regen';
-import type { MemberSetView } from '../../viewport/members';
+import type { FeatureResult, MemberData, MemberInstances } from '@manufakture/regen';
+import type { OpeningMetadata, WallMetadata } from '../features/common';
+import type { FloorMetadata } from '../features/floor';
+import type { RoofMetadata } from '../features/roof';
+import { frameFloor, type FrameFloorInput } from '../framing/floor';
+import { frameRoof, type FrameRoofInput } from '../framing/roof';
+import { frameWall, type HeaderSpec, type WallOpening } from '../framing/wall';
+import type { StockRef } from '../members';
+
+/** A framing group's members as regen sends them for a part, and as the app's viewport keeps them. */
+export interface ShedMemberSet {
+  group: string;
+  namespace: string;
+  features: string[];
+  members: MemberData[];
+  instances: MemberInstances[];
+}
 
 export const IN = 25.4;
 const inch = (v: number) => v * IN;
@@ -141,7 +142,7 @@ export function shedMembers(): Map<string, MemberData[]> {
   return groups;
 }
 
-export function shedSets(): MemberSetView[] {
+export function shedSets(): ShedMemberSet[] {
   return [...shedMembers()].map(([group, members]) => ({
     group,
     namespace: 'construction',

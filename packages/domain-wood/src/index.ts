@@ -49,6 +49,7 @@ export {
   STOCK_DATA,
   STOCK_DATA_VERSION,
   STOCK_NAMESPACE,
+  documentStock,
   readStockData,
   resolveStock,
   writeStockData,
@@ -128,6 +129,39 @@ export {
   type SheetLayoutInput,
   type SheetLayoutPart,
 } from './cutlist';
+export {
+  FLAG_TEXT,
+  activeRow,
+  bodiesToSize,
+  bomCsv,
+  cutListCsv,
+  cutListInput,
+  displayRows,
+  documentCutList,
+  documentSettings,
+  exactFormat,
+  excludedLines,
+  flagText,
+  groupRows,
+  missingLines,
+  shortItem,
+  totalBoardFeet,
+  totalLines,
+  type CutListPartModel,
+  type CutListSources,
+  type DisplayRow,
+  type SortKey,
+} from './cutlist/display';
+export { nestingJob, purchase, type Purchase } from './cutlist/layout';
+export {
+  runNesting,
+  type JobProgress,
+  type LayoutNote,
+  type NestingJob,
+  type NestingResult,
+  type SheetJob,
+  type StickJob,
+} from './cutlist/nesting';
 export { WOOD_IMPLEMENTATION, registerWood, woodDomain } from './domain';
 export { currentVersion, migrate, type Json, type Migration, type Versioned } from './migrations';
 export { constantLength, type Path, type Read } from './read';

@@ -9,6 +9,7 @@ export {
   STOCK_DATA,
   STOCK_DATA_VERSION,
   STOCK_NAMESPACE,
+  documentStock,
   readStockData,
   resolveStock,
   writeStockData,

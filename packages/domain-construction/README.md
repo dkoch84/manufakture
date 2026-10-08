@@ -16,9 +16,10 @@ shared `@manufakture/stock` (the catalog, the `stock` namespace and the JSON rea
 `@manufakture/core` for types, so everything runs in Node with no `.wasm`. ADR 0015 decision 1
 also allows `takeoff` and `nesting` at run time, and `regen` and `kernel` as types only (both are
 devDependencies, for the registration's and the translators' types); never the kernel, regen,
-Manifold, the app or another domain. Tests may also load regen and the kernel, as `domain-wood`'s
-do, to run the features through regen with the real kernel. `src/boundary.test.ts` enforces that
-allowlist. The generators' input is this
+Manifold, the app or another domain. The `./files` subpath (the takeoff's CSV and PDF, M8 plan
+T8.1b) also loads `@manufakture/io` at run time; the package root does not. Tests may also load
+regen and the kernel, as `domain-wood`'s do, to run the features through regen with the real
+kernel. `src/boundary.test.ts` enforces that allowlist. The generators' input is this
 package's own type: the feature layer (T6.1b) evaluates the wall feature's expressions, resolves
 the wall graph and the construction domain data (below), and passes plain numbers in. Stock is
 passed to the generators as a `StockRef` (catalog id, nominal name, dressed sizes); `stockRef(id,
@@ -905,6 +906,39 @@ floor and gable and hip roofs) and `src/takeoff/shed.test.ts`, the 12' x 16' she
 real generators, every count derived by hand in its comments: 51 precut studs; 2x4 13 x 16', 4 x
 14', 1 x 12'; 2x6 18 x 16', 13 x 12'; 2x8 1 x 16', 1 x 8'; 4x6 3 x 16'; 25 sheets of 7/16" OSB
 (18 whole, 7 new for the partial pieces) and 6 of 23/32" OSB; $1,708.90 at the test's prices.
+
+### From a regenerated model, as people read it
+
+Moved from the app's Takeoff panel in M8 plan T8.1b, so a headless session counts and writes the
+same. `takeoffModel({ document, partId, features, sets, settings, stock })`
+(`src/takeoff/from-regen.ts`) builds the takeoff's input from a regenerated part studio: the
+members of its construction member sets (regen's `MemberSetResult`s of a completed regen, whose
+`members` are known), and the sheet faces of its walls, floors and roofs rebuilt from the metadata
+their translators returned (wall faces on the framing's face, mitred at path corners, openings cut
+at their rough size, gable fills on top; the subfloor; one face per plane of roof sheathing), with
+the layer bodies each face covers and notes for layers that have no sheet stock.
+`documentConstruction(doc)` reads `domains.construction`. `src/takeoff/display.ts` writes the
+rows as text in the document's units (`displayRows`: numbered, cost per row, what a bought row is
+cut into), groups them by section (`sections`, `SECTIONS`), and gives `costLines`,
+`subtotalLines` and the CSV (`takeoffCsv`), which opens with the title and the short disclaimer.
+
+`src/fixtures/shed-model.ts` (exported as `@manufakture/domain-construction/fixtures/shed-model`)
+is T6.3a's shed as a regen reports it: the document, the feature results with their metadata and
+the member sets, so the takeoff and the app's Takeoff panel are checked against the hand counts
+without a kernel (`src/takeoff/display.test.ts`).
+
+### Takeoff files (`@manufakture/domain-construction/files`)
+
+One entry point for every caller (the list of every fabrication format is in the io README,
+"Fabrication exports"): `exportTakeoff(kind, { document, partId, features, sets })` writes the
+CSV or the PDF of a regenerated part studio, with the document's construction settings and stock
+prices, as the app's panel does; `takeoffFile(kind, takeoff, rows, options)` writes one from a
+takeoff already counted (the panel). `takeoffPdf` is the PDF for the lumber yard: the rows by
+section with totals, cost and notes, the subtotals and the cost in all, Letter for inch and foot
+documents and A4 otherwise, the short disclaimer opening the first page and closing every page.
+This subpath alone loads `@manufakture/io`'s writers at run time; `src/boundary.test.ts` allows
+it there and nowhere else. The app parses the PDF back with pdfjs-dist
+(`apps/web/src/construction/takeoff/pdf.test.ts`).
 
 ## Tests
 

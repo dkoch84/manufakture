@@ -12,8 +12,10 @@ import { describe, expect, it } from 'vitest';
 // IFC writer's input types, which `ifc/adapter.ts` fills); they are erased. Tests, and their
 // helpers (`test-helpers.ts`, `test-*.ts`), may also load `vitest` and Node built-ins, and, as
 // `domain-wood`'s do, regen and the kernel, to run the features through regen with the real
-// kernel, and `@manufakture/io`, to write the IFC and read it back. This is an allowlist, so a new dependency fails
-// here until it is added on purpose.
+// kernel, and `@manufakture/io`, to write the IFC and read it back. One directory more: `files/`
+// (the `./files` subpath, M8 plan T8.1b) writes the takeoff's CSV and PDF and may load
+// `@manufakture/io` at run time; nothing outside it may, and the package root never imports it.
+// This is an allowlist, so a new dependency fails here until it is added on purpose.
 
 const RUNTIME = [
   '@manufakture/core',
@@ -26,6 +28,9 @@ const TYPE_ONLY = [...RUNTIME, '@manufakture/regen', '@manufakture/kernel', '@ma
 const TEST_ONLY = ['vitest', '@manufakture/regen', '@manufakture/kernel', '@manufakture/io'];
 
 const SRC = fileURLToPath(new URL('.', import.meta.url));
+/** `files/` may load these at run time. */
+const FILES_RUNTIME = [...RUNTIME, '@manufakture/io'];
+const FILES = join(SRC, 'files') + sep;
 
 describe('package boundary', () => {
   it('every module imports only what ADR 0015 allows', () => {
@@ -85,6 +90,7 @@ describe('package boundary', () => {
       `// import ${q}${kernel}${q};`,
       `/* import ${q}${kernel}${q}; */`,
       `const keys = [${q}${F}${q}, ${q}sizing${q}];`,
+      `const header = [${q}Counted ${F}${q},\n  ${q}Notes${q}];`,
     ]) {
       expect(importsOf(text), text).toEqual([]);
     }
@@ -118,6 +124,15 @@ describe('package boundary', () => {
     expect(allowed('node:fs', false, true, file)).toBe(true);
     expect(allowed('@manufakture/kernel/node', false, true, file)).toBe(true);
     expect(allowed('@manufakture/regen', false, true, file)).toBe(true);
+    // `@manufakture/io` at run time in `files/` only.
+    expect(allowed('@manufakture/io', false, false, file)).toBe(false);
+    expect(allowed('@manufakture/io', false, false, join(SRC, 'files', 'x.ts'))).toBe(true);
+    expect(allowed('@manufakture/regen', false, false, join(SRC, 'files', 'x.ts'))).toBe(false);
+    // The rest of the package never loads `files/`, by package name or by relative path.
+    expect(allowed('../takeoff/display', false, false, join(SRC, 'files', 'x.ts'))).toBe(true);
+    expect(allowed('./files', false, false, file)).toBe(false);
+    expect(allowed('./files/takeoff', false, false, file)).toBe(false);
+    expect(allowed('../files/takeoff-pdf', false, false, join(SRC, 'takeoff', 'x.ts'))).toBe(false);
   });
 });
 
@@ -145,9 +160,10 @@ function importsOf(text: string): Found[] {
     found.push({ spec, typeOnly: true });
     return '';
   });
-  // `from` as a word, not inside a string (`'from'` is a params key).
+  // `from` as a word, not inside a string (`'from'` is a params key), and a specifier with no
+  // white space (so the end of a string such as `'Counted from',` is not one).
   const runtime =
-    /(?<!['"`])\bfrom\s*(['"`])([^'"`]+)\1|\bimport\s*\(\s*(['"`])([^'"`]+)\3|\brequire\s*\(\s*(['"`])([^'"`]+)\5|^\s*import\s*(['"`])([^'"`]+)\7/gm;
+    /(?<!['"`])\bfrom\s*(['"`])([^'"`\s]+)\1|\bimport\s*\(\s*(['"`])([^'"`]+)\3|\brequire\s*\(\s*(['"`])([^'"`]+)\5|^\s*import\s*(['"`])([^'"`]+)\7/gm;
   for (const m of code.matchAll(runtime)) {
     const spec = m[2] ?? m[4] ?? m[6] ?? m[8];
     if (spec !== undefined) found.push({ spec, typeOnly: false });
@@ -158,13 +174,16 @@ function importsOf(text: string): Found[] {
 function allowed(spec: string, typeOnly: boolean, isTest: boolean, file: string): boolean {
   if (spec.startsWith('.')) {
     const target = resolve(file, '..', spec);
+    // The package root never loads the fabrication files.
+    if ((target + sep).startsWith(FILES) && !file.startsWith(FILES)) return false;
     return (
       target === SRC.replace(/[\\/]$/, '') || target.startsWith(SRC.endsWith(sep) ? SRC : SRC + sep)
     );
   }
   const pkg = packageOf(spec);
   if (isTest && (TEST_ONLY.includes(pkg) || spec.startsWith('node:'))) return true;
-  return (typeOnly ? TYPE_ONLY : RUNTIME).includes(pkg);
+  if (typeOnly) return TYPE_ONLY.includes(pkg);
+  return (file.startsWith(FILES) ? FILES_RUNTIME : RUNTIME).includes(pkg);
 }
 
 /** `@scope/name/sub` -> `@scope/name`, `name/sub` -> `name`. */

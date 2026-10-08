@@ -1,8 +1,8 @@
-// The description in a STEP file's header (ISO 10303-21 `FILE_DESCRIPTION`): the app writes the
-// construction domain's short disclaimer there when it exports a document with construction
-// features (ADR 0015 decision 8), as the IFC export does. The kernel writes OCCT's own
-// description; this splices the new one into the header's bytes, leaving every other byte of the
-// file as it was.
+// The description in a STEP file's header (ISO 10303-21 `FILE_DESCRIPTION`; moved here from the
+// app in M8 plan T8.1b): the STEP export writes the construction domain's short disclaimer there
+// for a document with construction features (ADR 0015 decision 8), as the IFC export does. The
+// kernel writes OCCT's own description; this splices the new one into the header's bytes, leaving
+// every other byte of the file as it was.
 
 /** Longest string written per description entry, so no header line runs very long. */
 const MAX_ENTRY = 200;

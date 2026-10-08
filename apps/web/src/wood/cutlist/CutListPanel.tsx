@@ -15,19 +15,9 @@
 // The model is built in the active configuration row, so the list is that row's.
 
 import type { DisplayUnits, ManufaktureDocument } from '@manufakture/core';
-import { BOARD_TYPE, type CutList, type OrientedSize } from '@manufakture/domain-wood';
-import { UNNAMED } from '@manufakture/kernel';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { useStore } from 'zustand';
-import { ExpressionField } from '../../components/ExpressionField';
-import { downloadBytes } from '../../io/files';
-import { useModel, type ModelStore, type PartModel } from '../../model/model';
-import type { DocumentStoreApi } from '../../state/document';
-import { geometryRef, type GeometryRef, type SelectionStore } from '../../state/selection';
 import {
+  BOARD_TYPE,
   bodiesToSize,
-  bomCsv,
-  cutListCsv,
   displayRows,
   documentCutList,
   documentSettings,
@@ -36,15 +26,26 @@ import {
   flagText,
   groupRows,
   missingLines,
+  nestingJob,
   totalBoardFeet,
   totalLines,
+  type CutList,
   type DisplayRow,
+  type JobProgress,
+  type NestingResult,
+  type OrientedSize,
   type SortKey,
-} from './cutlist';
-import { nestingJob, purchase } from './layout';
-import type { JobProgress, NestingResult } from './nesting';
+} from '@manufakture/domain-wood';
+import { cutListFile } from '@manufakture/domain-wood/files';
+import { UNNAMED } from '@manufakture/kernel';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useStore } from 'zustand';
+import { ExpressionField } from '../../components/ExpressionField';
+import { downloadBytes } from '../../io/files';
+import { useModel, type ModelStore, type PartModel } from '../../model/model';
+import type { DocumentStoreApi } from '../../state/document';
+import { geometryRef, type GeometryRef, type SelectionStore } from '../../state/selection';
 import type { Nester } from './nester';
-import { cutListPdf } from './pdf';
 import { settingsCommand, settingsForm, trimNotes, type SettingsForm } from './settings';
 import { SheetView, StickView } from './SheetView';
 import type { Sizer } from './sizer';
@@ -72,8 +73,6 @@ export interface CutListPanelProps {
 }
 
 const NO_VARIABLES = {};
-const CSV = 'text/csv';
-const PDF = 'application/pdf';
 
 async function defaultNester(): Promise<Nester> {
   const { spawnNester } = await import('./nesting-spawn');
@@ -105,11 +104,6 @@ function withSettings(source: ManufaktureDocument, doc: ManufaktureDocument): Ma
   if (doc.domains === undefined) delete out.domains;
   else out.domains = doc.domains;
   return out;
-}
-
-function fileName(doc: ManufaktureDocument, what: string, ext: string): string {
-  const base = doc.name.replace(/[\\/:*?"<>|]+/g, ' ').trim() || 'manufakture';
-  return `${base} ${what}.${ext}`;
 }
 
 /** The oriented sizes of the shown model's bodies that are not boards, by part. */
@@ -299,25 +293,14 @@ export function CutListPanel({
 
   const save = (what: 'list' | 'bom' | 'pdf') => {
     try {
-      if (what === 'pdf') {
-        const bytes = cutListPdf(list, current, {
-          title: doc.name,
-          units,
-          ...(list.configuration ? { configuration: list.configuration.name } : {}),
-          warnings: [...warnings, ...(current?.notes ?? job.notes).map((n) => n.message)],
-        });
-        download(bytes, fileName(doc, 'cut list', 'pdf'), PDF);
-      } else {
-        const text =
-          what === 'list'
-            ? cutListCsv(list, units)
-            : bomCsv(list, units, current ? purchase(current) : undefined);
-        download(
-          new TextEncoder().encode(text),
-          fileName(doc, what === 'list' ? 'cut list' : 'bill of materials', 'csv'),
-          CSV,
-        );
-      }
+      const file = cutListFile(what, list, {
+        documentName: doc.name,
+        units,
+        layouts: current,
+        notes: job.notes,
+        warnings,
+      });
+      download(file.bytes, file.name, file.type);
       setMessage(null);
     } catch (error) {
       // The PDF writer refuses input it cannot write with a RangeError: report it, never crash.

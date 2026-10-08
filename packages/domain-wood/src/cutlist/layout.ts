@@ -1,10 +1,12 @@
-// Sheet layouts and lumber plans from a cut list (M4 plan T4.3d): the cut list's nesting-ready
-// parts (`CutList.sheets`, `CutList.lumber`) with the document's settings (`domains.wood`: kerf,
-// trims, stages) as `@manufakture/nesting` inputs (run by `nesting.ts`), and what to buy.
+// Sheet layouts and lumber plans from a cut list (M4 plan T4.3d; moved from the app in M8 plan
+// T8.1b): the cut list's nesting-ready parts (`CutList.sheets`, `CutList.lumber`) with the
+// document's settings (`domains.wood`: kerf, trims, stages) as `@manufakture/nesting` inputs (run
+// by `nesting.ts`), and what to buy.
 
-import type { CutList, WoodSettings } from '@manufakture/domain-wood';
-import { resolveStock, stockName, type StockData } from '@manufakture/domain-wood';
 import type { SheetInput, StickInput } from '@manufakture/nesting';
+import { resolveStock, type StockData } from '../stock-data';
+import type { WoodSettings } from '../wood-data';
+import { stockName, type CutList } from './cutlist';
 import type { LayoutNote, NestingJob, NestingResult, SheetJob, StickJob } from './nesting';
 
 /** Lengths closer than this (mm) are equal when checking a blank against its stock's width. */

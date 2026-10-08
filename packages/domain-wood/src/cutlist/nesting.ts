@@ -1,7 +1,8 @@
-// Running a nesting job (M4 plan T4.3d): every sheet layout and lumber plan of a cut list, one
-// attempt per step, cancellable, with progress over the whole job. The nesting worker runs it
-// (`nesting-worker.ts`), and so do the tests, in-process. Imports only `@manufakture/nesting`, so
-// the worker's bundle stays small.
+// Running a nesting job (M4 plan T4.3d; moved from the app in M8 plan T8.1b): every sheet layout
+// and lumber plan of a cut list, one attempt per step, cancellable, with progress over the whole
+// job. The app's nesting worker runs it, and so do Node callers and the tests, in-process. Imports
+// only `@manufakture/nesting`, so the worker's bundle stays small: the worker loads it through the
+// `@manufakture/domain-wood/nesting` subpath, not the package root.
 
 import {
   layoutSheetsSteps,

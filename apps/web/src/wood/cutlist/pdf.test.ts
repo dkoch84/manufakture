@@ -1,14 +1,18 @@
 // @vitest-environment node
-// The cut list PDF parsed back with pdfjs-dist: the list page, one page per sheet with its parts
-// numbered as in the list, and the lumber plan; a sheet that does not fit a page's text is cut,
-// never overflowing; the writer's RangeError on bad input reaches the caller.
+// The cut list PDF (`@manufakture/domain-wood/files`) parsed back with pdfjs-dist, a development
+// dependency of the app: the list page, one page per sheet with its parts numbered as in the
+// list, and the lumber plan; a sheet that does not fit a page's text is cut, never overflowing;
+// the writer's RangeError on bad input reaches the caller.
 
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { describe, expect, it } from 'vitest';
-import { documentCutList, documentSettings } from './cutlist';
-import { nestingJob } from './layout';
-import { runNesting } from './nesting';
-import { cutListPdf } from './pdf';
+import {
+  documentCutList,
+  documentSettings,
+  nestingJob,
+  runNesting,
+} from '@manufakture/domain-wood';
+import { cutListPdf } from '@manufakture/domain-wood/files';
 import { bookshelfDocument, bookshelfModel } from './cutlist.test-fixture';
 
 async function pagesText(bytes: Uint8Array): Promise<string[]> {

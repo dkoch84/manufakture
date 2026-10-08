@@ -1,16 +1,15 @@
-// The setup sheet (M5 plan, T5.4e): a printable HTML page with what the operator needs at the
-// machine: the files and their order, the stock and where to zero X, Y and Z, the heights, the
-// tools with their numbers, every tool change in order, and per operation its depths and feeds.
-// Built as one self-contained document (inline styles, no scripts, no outside resources), shown
-// in the export dialog, printed from there and saved with the G-code.
+// The setup sheet (M5 plan, T5.4e; moved from the app in M8 plan T8.1b): a printable HTML page
+// with what the operator needs at the machine: the files and their order, the stock and where to
+// zero X, Y and Z, the heights, the tools with their numbers, every tool change in order, and per
+// operation its depths and feeds. Built as one self-contained document (inline styles, no
+// scripts, no outside resources), shown in the app's export dialog, printed from there and saved
+// with the G-code.
 //
 // What it says about zeroing on a Shapeoko stays with what the machine profile and the cam
 // README cite: the BitSetter is standard on the profiles that say so, Carbide Motion stops for
 // the tool at each `M6`, and Grbl does not jog while held by an `M0`. Anything a probe's routine
 // does is left to its own instructions.
 
-import { postName } from '../commands';
-import { formatMinutes } from '../preview/format';
 import {
   MULTI_TOOL_LABELS,
   formatFeed,
@@ -18,7 +17,19 @@ import {
   formatSize,
   toolLabel,
   type ExportPlan,
-} from './export';
+} from './gcode';
+import { postName } from './posts';
+
+/** Minutes as `m:ss`, or `h:mm:ss` from an hour. */
+export function formatMinutes(minutes: number): string {
+  if (!Number.isFinite(minutes)) return '-';
+  const total = Math.round(minutes * 60);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  const ss = String(s).padStart(2, '0');
+  return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`;
+}
 
 /** Escape text for HTML content and attribute values. */
 export function escapeHtml(text: string): string {

@@ -6,6 +6,7 @@
     "types": ["vite/client"]
   },
   "include": ["src"],
-  // The service worker has its own lib (WebWorker): src/pwa/sw/tsconfig.json.
-  "exclude": ["src/pwa/sw"]
+  // The service worker has its own lib (WebWorker): src/pwa/sw/tsconfig.json. The fabrication
+  // test builds its documents from the e2e fixtures, so e2e/tsconfig.json checks it.
+  "exclude": ["src/pwa/sw", "src/fabrication.test.ts"]
 }

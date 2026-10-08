@@ -64,11 +64,15 @@ formatRow(merged[0], { unit: 'in-fraction', denominator: 32 });
 | `formatSize(size, format)`     | `72" x 11-1/4" x 23/32"`, `Ø8 mm x 32 mm`, in the document's length format.                 |
 | `formatMeasure(m, format)`     | `5.33 bd ft`; areas in sq ft or m², volumes in in³ or cm³ (by the format being imperial).   |
 | `formatRow(row, format, name)` | A row's cells as text, for a table or CSV.                                                  |
+| `exactLengthFormat(format)`    | The format takeoff files show sizes in: fractions to 1/64", so `23/32"` never reads `3/4"`. |
+| `csvField(value)`              | One CSV field, quoted when it needs to be (RFC 4180).                                       |
+| `csvTextField(text)`           | A field of user text: a leading `'` on one a spreadsheet would read as a formula.           |
 
 ## Tests
 
 `src/takeoff.test.ts`: board feet (a 2x4x8 is 5.33), keys, merging and its refusal of mixed
-units, totals, and formatting in fractions and millimetres.
+units, totals, and formatting in fractions and millimetres. The CSV helpers are tested with the
+files that use them (`domain-wood`'s cut list, `domain-construction`'s takeoff).
 
 ```sh
 ./node_modules/.bin/vitest run --project packages packages/takeoff

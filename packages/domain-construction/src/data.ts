@@ -39,7 +39,7 @@
 // where it is resolved; a known one must be of the right kind (studs from lumber, layers from
 // sheets).
 
-import type { StoredExpression } from '@manufakture/core';
+import type { ManufaktureDocument, StoredExpression } from '@manufakture/core';
 import {
   EMPTY_STOCK_DATA,
   constantLength,
@@ -807,6 +807,16 @@ export function readConstructionData(data: Json, schemaVersion: number): Read<Co
   const stored = readCurrent(migrated.value);
   if (!stored.ok) return stored;
   return ok({ stored: stored.value, settings: mapLengths(stored.value, evaluateLength) });
+}
+
+/** A document's construction data, read; undefined when it has none. */
+export function documentConstruction(
+  doc: Pick<ManufaktureDocument, 'domains'>,
+): { ok: true; data: ConstructionData | undefined } | { ok: false; message: string } {
+  const entry = doc.domains?.[CONSTRUCTION_NAMESPACE];
+  if (entry === undefined) return { ok: true, data: undefined };
+  const r = readConstructionData(entry.data as Json, entry.schemaVersion);
+  return r.ok ? { ok: true, data: r.value } : { ok: false, message: r.message };
 }
 
 // Writing -------------------------------------------------------------------------------------

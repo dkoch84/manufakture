@@ -23,10 +23,9 @@ import {
   MAX_LEVELS,
   MAX_TYPES,
   defaultConstructionSettings,
+  documentConstruction,
   openingScope,
-  readConstructionData,
   writeConstructionData,
-  type ConstructionData,
   type HeaderData,
   type LayerKind,
   type StoredConstructionSettings,
@@ -44,15 +43,8 @@ export type Outcome<T = Command | null> =
 
 export type StoredWallType = WallType<StoredExpression>;
 
-/** The document's construction data, read; undefined when it has none. */
-export function documentConstruction(
-  doc: ManufaktureDocument,
-): { ok: true; data: ConstructionData | undefined } | { ok: false; message: string } {
-  const entry = doc.domains?.[CONSTRUCTION_NAMESPACE];
-  if (entry === undefined) return { ok: true, data: undefined };
-  const r = readConstructionData(entry.data as never, entry.schemaVersion);
-  return r.ok ? { ok: true, data: r.value } : { ok: false, message: r.message };
-}
+// The document's construction data, read (undefined when it has none): the domain's reader.
+export { documentConstruction };
 
 export { hasConstruction, isOpening, isWall } from './kinds';
 

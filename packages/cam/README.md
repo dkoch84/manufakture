@@ -8,7 +8,9 @@ far it has the foundation every later task builds on (T5.1c): evaluated input ty
 transforms, stock boxes, IR statistics and bounds, and the IR validator.
 
 Pure TypeScript; its runtime dependencies are `clipper2-ts` (the offset engine, T5.2a) and
-`comlink` (the CAM worker, T5.1g). Everything runs in Node tests with no kernel `.wasm` loaded.
+`comlink` (the CAM worker, T5.1g), and for the `./export` subpath alone `@manufakture/core`,
+`@manufakture/io` and `fflate` (M8 plan T8.1b). Everything runs in Node tests with no kernel `.wasm`
+loaded.
 
 ## Units and inputs
 
@@ -27,9 +29,37 @@ ADR 0014 decision 5) and `stock-too-small`. They never throw on bad input.
 ADR 0014 decision 1: at run time the package may load only its own modules, `@manufakture/units`,
 `comlink` (the worker, T5.1g) and `clipper2-ts` (the offsets, T5.2a). Type-only imports may also
 name `@manufakture/core` and `@manufakture/kernel`. It never loads the kernel, regen, the sketch
-package, a domain package, the app or the DOM. `src/boundary.test.ts` enforces this as an
-allowlist over every file in `src/`, including subdirectories and relative paths that would leave
-the package, so a new dependency fails there until it is added on purpose.
+package, a domain package, the app or the DOM. The one exception is `export/` (below), which only
+the `./export` subpath loads. `src/boundary.test.ts` enforces this as an allowlist over every file
+in `src/`, including subdirectories and relative paths that would leave the package, so a new
+dependency fails there until it is added on purpose.
+
+## Exports (`export/`, `@manufakture/cam/export`)
+
+The document side of CAM's files (M8 plan T8.1b), which the app's export dialogs used to hold, so a
+headless session writes what the app writes. It is apart from the package root because it reads
+the document's setups and operations and regen's CAM stage, which the rest of the package never
+sees (decision 1 above); `src/boundary.test.ts` lets `export/` alone load `@manufakture/core`,
+`@manufakture/io` and `fflate` and name `@manufakture/regen` as types, and keeps the root from
+importing it. `tsconfig.export.json` type-checks it with the DOM's types, which regen's need; the
+rest of the package is checked without them.
+
+- `setup.ts`: `setupInput(geometry, setup)`, the CAM stage's reply for a setup as an evaluated
+  `Setup` (stock, WCS frame, loops and drill points in machine coordinates), the operations whose
+  geometry did not resolve in `failed`; a V-carve with a clearing tool as two operations
+  (`CLEARING_SUFFIX`, `documentOperation`).
+- `gcode.ts`: the export settings (`defaultExportSettings`, `withPost`, `multiToolModes`), and
+  `buildExport`, a generation (`GeneratedToolpaths`) linked into one job, posted, with the plan the
+  operator reads; `exportFiles`, the one file or a zip of the files per tool and the setup sheet.
+- `sheet.ts`: `setupSheetHtml(plan)`, the printable setup sheet.
+- `laser.ts`: the laser and plasma export: `extractLoops` (faces and sketch regions through the
+  CAM stage, sections through the kernel), `laserFile` (kerf compensation, DXF or SVG).
+- `posts.ts`: `POST_IDS` in the order the export offers them, `postName`.
+- `index.ts`: the entry points. `exportGcode(document, setupId, geometer, { date, settings? })`
+  resolves the setup through the CAM stage, generates every operation in-process (a fresh
+  `createCamWorkerApi`, or `options.api`) and writes the files, refusing with every reason;
+  `exportLaser(document, scope, sources, services, options)` writes one laser file. The list of
+  every fabrication format's entry point is in the io README, "Fabrication exports".
 
 ## Evaluated types (`types.ts`)
 

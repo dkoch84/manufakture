@@ -12,26 +12,15 @@ import {
   assembleJob,
   jobOperations,
   toolpathStats,
-  type CamOperationResult,
   type IrEntry,
-  type Setup,
   type Tool,
   type Toolpath,
   type ToolpathStats,
 } from '@manufakture/cam';
-import { documentOperation } from '../generate';
+import { documentOperation, type GeneratedToolpaths } from '@manufakture/cam/export';
 
-/** One generation of a setup, kept for the preview. */
-export interface GeneratedToolpaths {
-  /** The setup id. */
-  readonly setupId: string;
-  /** The evaluated setup the toolpaths were generated for (stock, WCS frame, operations). */
-  readonly setup: Setup;
-  /** The machine's rapid rate, mm/min, for the time estimates. */
-  readonly rapidRate: number;
-  /** The CAM worker's results, in the setup's order; toolpaths packed. */
-  readonly operations: readonly CamOperationResult[];
-}
+/** One generation of a setup, kept for the preview (and written by the export). */
+export type { GeneratedToolpaths };
 
 /** One operation's line in the statistics. */
 export interface PreviewOperation {

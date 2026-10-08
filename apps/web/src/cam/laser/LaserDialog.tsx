@@ -38,7 +38,7 @@ import {
   type LaserSource,
   type OutlineSize,
   type SectionAxis,
-} from './laser';
+} from '@manufakture/cam/export';
 import './laser.css';
 
 export interface LaserDialogProps {
