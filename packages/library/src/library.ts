@@ -185,6 +185,11 @@ export type LibraryResult<T> =
        * home screen offers to update the app (src/pwa/UpdateNeeded.tsx).
        */
       newer?: true;
+      /**
+       * Set by `setBranchReview` with `expected` when the branch's review state was not the one
+       * expected (someone changed it meanwhile): nothing was written.
+       */
+      reviewChanged?: true;
     };
 
 /** The failure for a branch that is not there; never echoes the id it was given. */
@@ -2780,8 +2785,24 @@ export class DocumentLibrary {
    * who may call it, and an agent session must never reach it for its own branch. Note that
    * `adoptBranch` does not carry provenance yet (T8.4b), so a branch synced to another browser
    * arrives there as a person's.
+   *
+   * `expected` makes it a compare-and-set: the change is made only when the branch's review state
+   * is one of `expected` at the moment of the change (under the library's lock); otherwise nothing
+   * is written and the failure has `reviewChanged`. A session uses it so that a reviewer's decision
+   * made while it worked is never overwritten.
    */
-  setBranchReview(id: string, branch: string, review: ReviewState): Promise<LibraryResult<Branch>> {
+  setBranchReview(
+    id: string,
+    branch: string,
+    review: ReviewState,
+    options: { expected?: ReviewState | readonly ReviewState[] } = {},
+  ): Promise<LibraryResult<Branch>> {
+    const expected =
+      options.expected === undefined
+        ? undefined
+        : typeof options.expected === 'string'
+          ? [options.expected]
+          : options.expected;
     return this.#notify(
       id,
       'branches',
@@ -2791,7 +2812,11 @@ export class DocumentLibrary {
         if (!REVIEW_STATES.includes(review)) {
           return { ok: false, message: `There is no review state "${String(review)}".` };
         }
-        return this.#locked(id, () =>
+        if (expected !== undefined && !expected.every((e) => REVIEW_STATES.includes(e))) {
+          return { ok: false, message: 'There is no such expected review state.' };
+        }
+        let changedMeanwhile = false;
+        const result = await this.#locked(id, () =>
           this.#changeList(
             BRANCH_LIST,
             id,
@@ -2800,12 +2825,19 @@ export class DocumentLibrary {
               if (at < 0) return 'There is no such branch.';
               const provenance = items[at]!.provenance;
               if (!provenance) return 'It is not an agent branch, so it has no review state.';
+              if (expected !== undefined && !expected.includes(provenance.review)) {
+                changedMeanwhile = true;
+                return `The branch is ${provenance.review}, not ${expected.join(' or ')}.`;
+              }
               const changed = { ...items[at]!, provenance: { ...provenance, review } };
               return { items: items.map((b, i) => (i === at ? changed : b)), result: changed };
             },
             false,
           ),
         );
+        return !result.ok && changedMeanwhile
+          ? { ...result, reviewChanged: true as const }
+          : result;
       }),
     );
   }

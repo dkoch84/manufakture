@@ -387,6 +387,8 @@ needs every release that may open the library to know it first, or a format chan
   like a rename. Main and a person's branch have none. The library does not check who asks: its
   callers (the review UI, T8.3b; the session server, T8.4b) decide who may, and an agent must
   never reach it for its own branch. `adoptBranch` does not carry provenance yet (T8.4b).
+  With `{ expected }` (a state or a list) it is a compare-and-set: refused, with
+  `reviewChanged`, when the state at the moment of the change is not one of them.
 - `branchFromRevision(id, { from, revision, version, name, provenance })` makes a branch from any
   stored revision of a branch (default: main's head), through a version of that revision named
   `version` (branches start from versions): that is how a session starts ("Agent session `<id>`

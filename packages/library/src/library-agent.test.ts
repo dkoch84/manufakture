@@ -135,6 +135,37 @@ describe('branch provenance', () => {
     ).toMatch(/no review state "merged"/);
   });
 
+  it('sets the review state only from an expected one, when asked to compare', async () => {
+    const { backend, lib } = await saved(1);
+    const v = value(await lib.createVersion('doc-1', { name: 'Start' }));
+    const b = value(await lib.createBranch('doc-1', v.id, 'Agent', { provenance: agent }));
+    const set = value(await lib.setBranchReview('doc-1', b.id, 'submitted', { expected: 'open' }));
+    expect(set.provenance?.review).toBe('submitted');
+    // A reviewer rejects it meanwhile: a write expecting submitted is refused, nothing written.
+    value(await lib.setBranchReview('doc-1', b.id, 'rejected'));
+    const refused = await lib.setBranchReview('doc-1', b.id, 'open', {
+      expected: ['submitted', 'changes-requested'],
+    });
+    expect(refused).toEqual({
+      ok: false,
+      message: 'The branch is rejected, not submitted or changes-requested.',
+      reviewChanged: true,
+    });
+    const read = value(await library(backend).listBranches('doc-1')).find((x) => x.id === b.id);
+    expect(read?.provenance?.review).toBe('rejected');
+    // Other refusals do not claim a change.
+    const person = value(await lib.createBranch('doc-1', v.id, 'Mine'));
+    const r = await lib.setBranchReview('doc-1', person.id, 'open', { expected: 'open' });
+    expect(r.ok ? null : r.reviewChanged).toBeUndefined();
+    expect(
+      failure(
+        await lib.setBranchReview('doc-1', b.id, 'open', {
+          expected: 'merged' as unknown as 'open',
+        }),
+      ),
+    ).toMatch(/no such expected review state/);
+  });
+
   it('refuses provenance that does not check, before anything is written', async () => {
     const { backend, lib } = await saved(1);
     const v = value(await lib.createVersion('doc-1', { name: 'Start' }));

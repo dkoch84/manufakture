@@ -472,6 +472,42 @@ importers:
         specifier: 3.35.1
         version: 3.35.1
 
+  packages/session:
+    dependencies:
+      '@manufakture/core':
+        specifier: workspace:*
+        version: link:../core
+      '@manufakture/domain-construction':
+        specifier: workspace:*
+        version: link:../domain-construction
+      '@manufakture/domain-wood':
+        specifier: workspace:*
+        version: link:../domain-wood
+      '@manufakture/io':
+        specifier: workspace:*
+        version: link:../io
+      '@manufakture/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      '@manufakture/library':
+        specifier: workspace:*
+        version: link:../library
+      '@manufakture/regen':
+        specifier: workspace:*
+        version: link:../regen
+      '@manufakture/stock':
+        specifier: workspace:*
+        version: link:../stock
+      '@manufakture/sync':
+        specifier: workspace:*
+        version: link:../sync
+      comlink:
+        specifier: ^4.4.2
+        version: 4.4.2
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
+
   packages/sketch:
     dependencies:
       '@manufakture/units':

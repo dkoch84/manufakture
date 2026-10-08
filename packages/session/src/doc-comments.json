@@ -1,0 +1,510 @@
+{
+  "commands": {
+    "addFeature": {
+      "doc": "Insert a new feature. Its ids must be fresh and cannot be split pieces; `index` defaults to the rollback bar.",
+      "fields": {}
+    },
+    "editFeature": {
+      "doc": "Replace a feature's inputs. Same id and kind; ids it introduces must be fresh, and a split piece must split an id this feature had before and no longer has.",
+      "fields": {}
+    },
+    "deleteFeature": {
+      "doc": "Remove a feature. Refused while another feature depends on it.",
+      "fields": {}
+    },
+    "restoreFeature": {
+      "doc": "Put an earlier state of a feature back (undo of a delete or an edit, and redo of an add). Replaces the feature with the same id, or inserts it at `index`, and sets the rollback bar. Unlike `addFeature` and `editFeature`, its ids must have been allocated before. History only: it is the inverse that undo and redo apply, and it checks only that each id was allocated at some point, not that a split piece is fresh. Clients editing a feature use `editFeature`, which enforces the full id rules.",
+      "fields": {}
+    },
+    "reorderFeature": {
+      "doc": "Move a feature so it ends up at `index`. Refused if it would pass a dependency.",
+      "fields": {}
+    },
+    "suppressFeature": {
+      "fields": {}
+    },
+    "renameFeature": {
+      "fields": {}
+    },
+    "setMaterial": {
+      "doc": "Set what the part's body is made of (a built-in material id), or clear it with `null`.",
+      "fields": {}
+    },
+    "setBodyProps": {
+      "doc": "Set a body's name, colour and material, all at once: `props` replaces the body's entry, and empty `props` removes it. `index` places a new entry (default: last); ignored on update.",
+      "fields": {}
+    },
+    "setBodyGroup": {
+      "doc": "Create or replace a body group of the part, by id: its name and its bodies. A new group needs a fresh `group#n` id from the part's `nextIds.group` and goes at `index` (default: last); `index` is ignored on replace. A body is in at most one group of its part, so moving a body between groups is a batch of two. Since version 17.",
+      "fields": {}
+    },
+    "deleteBodyGroup": {
+      "doc": "Remove a body group. Its bodies stay as they are. Since version 17.",
+      "fields": {}
+    },
+    "restoreBodyGroup": {
+      "doc": "History only: put a deleted body group back at `index` (its id was allocated before).",
+      "fields": {}
+    },
+    "setRollback": {
+      "doc": "Move the rollback bar; `null` puts it after the last feature.",
+      "fields": {}
+    },
+    "setVariable": {
+      "doc": "Create or update a variable. `index` places a new one (default: last); ignored on update.",
+      "fields": {}
+    },
+    "deleteVariable": {
+      "doc": "Remove a variable. Refused while a variable or feature references it.",
+      "fields": {}
+    },
+    "setDisplayUnits": {
+      "doc": "Change display units. Stored expressions keep their own units, so no geometry changes.",
+      "fields": {}
+    },
+    "renameDocument": {
+      "doc": "Rename the document (trimmed, 1 to 200 characters).",
+      "fields": {}
+    },
+    "setConfigParameter": {
+      "doc": "Create or replace a configuration parameter, by id. A new one needs a fresh `cp#n` id and goes at `index` (default: last); `index` is ignored on replace.",
+      "fields": {}
+    },
+    "deleteConfigParameter": {
+      "doc": "Remove a configuration parameter and every row's value for it.",
+      "fields": {}
+    },
+    "restoreConfigParameter": {
+      "doc": "History only: put a deleted parameter back at `index` (its id was allocated before).",
+      "fields": {}
+    },
+    "setConfigRow": {
+      "doc": "Create or replace a configuration row, by id. A new one needs a fresh `cfg#n` id and goes at `index` (default: last); `index` is ignored on replace.",
+      "fields": {}
+    },
+    "deleteConfigRow": {
+      "doc": "Remove a configuration row. Deleting the active row leaves no row active.",
+      "fields": {}
+    },
+    "restoreConfigRow": {
+      "doc": "History only: put a deleted row back at `index` (its id was allocated before).",
+      "fields": {}
+    },
+    "setActiveConfiguration": {
+      "doc": "Choose the row the document is shown and built in; `null`: none.",
+      "fields": {}
+    },
+    "addPart": {
+      "doc": "Add an empty part studio. `partId` must be a fresh `part#n` from the document's `nextIds.part`; it goes at `index` (default: last).",
+      "fields": {}
+    },
+    "renamePart": {
+      "doc": "Rename a part studio (trimmed, 1 to 200 characters).",
+      "fields": {}
+    },
+    "deletePart": {
+      "doc": "Remove a part studio. Refused for the last one, while a configuration parameter suppresses one of its features, while an assembly instance shows it, and while a print item prints it.",
+      "fields": {}
+    },
+    "restorePart": {
+      "doc": "History only: put a deleted part studio back at `index` (undo of a delete, redo of an add or a duplicate). Its id must have been allocated before; the counter does not move.",
+      "fields": {}
+    },
+    "reorderParts": {
+      "doc": "Move a part studio so it ends up at `index`.",
+      "fields": {}
+    },
+    "duplicatePart": {
+      "doc": "Copy part studio `sourcePartId` to a new one, `partId` (a fresh `part#n`), at `index` (default: just after the source). Features keep their ids, since ids are per part; body names, colours and materials, the rollback bar and the counters are copied too.",
+      "fields": {}
+    },
+    "addAssembly": {
+      "doc": "Add an empty assembly. `assemblyId` must be a fresh `assembly#n` from the document's `nextIds.assembly`; it goes at `index` (default: last).",
+      "fields": {}
+    },
+    "renameAssembly": {
+      "doc": "Rename an assembly (trimmed, 1 to 200 characters).",
+      "fields": {}
+    },
+    "deleteAssembly": {
+      "doc": "Remove an assembly with its instances and mates. Nothing else refers to an assembly.",
+      "fields": {}
+    },
+    "restoreAssembly": {
+      "doc": "History only: put a deleted assembly back at `index` (its id was allocated before).",
+      "fields": {}
+    },
+    "addInstance": {
+      "doc": "Add an instance, last. Its id must be a fresh `inst#n` from the assembly's `nextIds.inst`; a part of this document must exist.",
+      "fields": {}
+    },
+    "editInstance": {
+      "doc": "Change an instance's name, `fixed`, `suppressed`, shown `bodies` (`null`: every body) or `source` (another part or pin, or another configuration row). Absent fields stay.",
+      "fields": {}
+    },
+    "setPoses": {
+      "doc": "Set the poses of several instances at once, by instance id: one undo step for a solve or a drag. Commit on drag end and after mate edits, never per frame.",
+      "fields": {}
+    },
+    "deleteInstance": {
+      "doc": "Remove an instance. Refused while a mate connects it.",
+      "fields": {}
+    },
+    "restoreInstance": {
+      "doc": "History only: put a deleted instance back at `index` (its id was allocated before).",
+      "fields": {}
+    },
+    "addMate": {
+      "doc": "Add a mate, last (the newest). Its id, its connectors' ids and their references' ids must be fresh (`mate#n`, `mc#n`, `r<n>` from the assembly's `nextIds`).",
+      "fields": {}
+    },
+    "editMate": {
+      "doc": "Replace a mate's inputs, by id. Ids it introduces must be fresh.",
+      "fields": {}
+    },
+    "deleteMate": {
+      "doc": "Remove a mate with its connectors.",
+      "fields": {}
+    },
+    "restoreMate": {
+      "doc": "History only: put a mate state back, replacing the mate with the same id (at `index`) or inserting it at `index`. Its ids must have been allocated before.",
+      "fields": {}
+    },
+    "suppressMate": {
+      "fields": {}
+    },
+    "addPrintSetup": {
+      "doc": "Add a print setup at `index` (default: last). Its id, its items' ids and their references' ids must be fresh (`print#n`, `item#n`, `r<n>` from `print.nextIds`). Since version 8.",
+      "fields": {}
+    },
+    "editPrintSetup": {
+      "doc": "Change a setup's name, printer, nozzle or thresholds (`null`: the defaults). Absent fields stay. Items are edited with the item commands.",
+      "fields": {}
+    },
+    "deletePrintSetup": {
+      "doc": "Remove a print setup with its items. Nothing refers to a setup.",
+      "fields": {}
+    },
+    "restorePrintSetup": {
+      "doc": "History only: put a deleted setup back at `index` (its ids were allocated before).",
+      "fields": {}
+    },
+    "addPrintItem": {
+      "doc": "Add an item to a setup at `index` (default: last). Its id and its face reference's id must be fresh (`item#n`, `r<n>` from `print.nextIds`); the part must exist. The body and face are not checked against the part: what they name may change or go, and the print workspace reports it.",
+      "fields": {}
+    },
+    "editPrintItem": {
+      "doc": "Replace an item's inputs, by id. Ids it introduces must be fresh.",
+      "fields": {}
+    },
+    "deletePrintItem": {
+      "doc": "Remove an item from a setup.",
+      "fields": {}
+    },
+    "restorePrintItem": {
+      "doc": "History only: put an item state back, replacing the item with the same id (at `index`) or inserting it at `index`. Its ids must have been allocated before.",
+      "fields": {}
+    },
+    "addFont": {
+      "doc": "Add a font at `index` (default: last). Its id must be a fresh `font#n` from the document's `nextIds.font`; a font with the same bytes (SHA-256) may not be added twice. Since version 9.",
+      "fields": {}
+    },
+    "deleteFont": {
+      "doc": "Remove a font. Refused while an outline of any sketch uses it.",
+      "fields": {}
+    },
+    "restoreFont": {
+      "doc": "History only: put a deleted font back at `index` (its id was allocated before).",
+      "fields": {}
+    },
+    "setScript": {
+      "doc": "Create or replace a script of the library, by id (ADR 0010 decision 8). A new one needs a fresh `script#n` id from the document's `nextIds.script` and goes at `index` (default: last); `index` is ignored on replace. Replacing a script changes every scripted feature that runs it. Since version 16.",
+      "fields": {}
+    },
+    "deleteScript": {
+      "doc": "Remove a script. Refused while a scripted feature of any part runs it. Since version 16.",
+      "fields": {}
+    },
+    "restoreScript": {
+      "doc": "History only: put a deleted script back at `index` (its id was allocated before).",
+      "fields": {}
+    },
+    "setDomainData": {
+      "doc": "Replace a domain's document-level data (ADR 0013 decision 3): `schemaVersion` and `data` together set the namespace's entry; both absent remove it. Core never looks inside `data`; the domain package validates it before issuing the command. The inverse sets the old entry back, or removes the namespace when it had none. Since version 11.",
+      "fields": {}
+    },
+    "addExplodedView": {
+      "doc": "Add an exploded view to an assembly at `index` (default: last). Its id and its steps' ids must be fresh (`explode#n`, `step#n` from the assembly's `nextIds`). Since version 12.",
+      "fields": {}
+    },
+    "editExplodedView": {
+      "doc": "Replace an exploded view's name and steps, by id: renaming it, and adding, editing, removing or reordering steps in one go. Ids it introduces must be fresh.",
+      "fields": {}
+    },
+    "deleteExplodedView": {
+      "doc": "Remove an exploded view with its steps. Refused while a drawing view shows it.",
+      "fields": {}
+    },
+    "restoreExplodedView": {
+      "doc": "History only: put an exploded view state back, replacing the one with the same id (at `index`) or inserting it at `index`. Its ids must have been allocated before.",
+      "fields": {}
+    },
+    "addExplodeStep": {
+      "doc": "Add a step to an exploded view at `index` (default: last). Its id must be a fresh `step#n`.",
+      "fields": {}
+    },
+    "editExplodeStep": {
+      "doc": "Replace a step's instances, direction and distance, by id.",
+      "fields": {}
+    },
+    "deleteExplodeStep": {
+      "doc": "Remove a step. Nothing refers to a step.",
+      "fields": {}
+    },
+    "restoreExplodeStep": {
+      "doc": "History only: put a step state back (replace by id at `index`, or insert at `index`).",
+      "fields": {}
+    },
+    "addDrawing": {
+      "doc": "Add a drawing at `index` (default: last). Its id must be a fresh `drawing#n` from the document's `nextIds.drawing`; the ids inside it must be allocated by its own `nextIds`. Since version 12.",
+      "fields": {}
+    },
+    "renameDrawing": {
+      "doc": "Rename a drawing (trimmed, 1 to 200 characters).",
+      "fields": {}
+    },
+    "deleteDrawing": {
+      "doc": "Remove a drawing with its sheets. Nothing refers to a drawing.",
+      "fields": {}
+    },
+    "restoreDrawing": {
+      "doc": "History only: put a deleted drawing back at `index` (its id was allocated before).",
+      "fields": {}
+    },
+    "reorderDrawings": {
+      "doc": "Move a drawing so it ends up at `index`.",
+      "fields": {}
+    },
+    "addSheet": {
+      "doc": "Add a sheet to a drawing at `index` (default: last). Its id and the ids of its views, dimensions and notes must be fresh (`sheet#n`, `view#n`, `dim#n`, `note#n` from the drawing's `nextIds`).",
+      "fields": {}
+    },
+    "editSheet": {
+      "doc": "Change a sheet's name, size, orientation or title block (`null`: none). Absent fields stay. Views, dimensions and notes are edited with their own commands.",
+      "fields": {}
+    },
+    "deleteSheet": {
+      "doc": "Remove a sheet with its views, dimensions and notes. Nothing outside the sheet refers to it.",
+      "fields": {}
+    },
+    "restoreSheet": {
+      "doc": "History only: put a deleted sheet back at `index` (its ids were allocated before).",
+      "fields": {}
+    },
+    "reorderSheets": {
+      "doc": "Move a sheet so it ends up at `index`.",
+      "fields": {}
+    },
+    "addView": {
+      "doc": "Add a view to a sheet at `index` (default: last). Its id must be a fresh `view#n` from the drawing's `nextIds`; the part, assembly or exploded view it shows must exist.",
+      "fields": {}
+    },
+    "editView": {
+      "doc": "Replace a view's inputs, by id (source, direction, scale, position, options, label).",
+      "fields": {}
+    },
+    "moveView": {
+      "doc": "Move a view on its sheet (a drag): set its `position` only.",
+      "fields": {}
+    },
+    "deleteView": {
+      "doc": "Remove a view. Refused while a dimension or note on the sheet is in it.",
+      "fields": {}
+    },
+    "restoreView": {
+      "doc": "History only: put a view state back (replace by id at `index`, or insert at `index`).",
+      "fields": {}
+    },
+    "addDimension": {
+      "doc": "Add a dimension to a sheet at `index` (default: last). Its id must be a fresh `dim#n` from the drawing's `nextIds`; its view must be on the sheet. Its model references are not checked against the model: what they name may change or go, and regen reports it.",
+      "fields": {}
+    },
+    "editDimension": {
+      "doc": "Replace a dimension's inputs, by id (a re-pick, a drag of its placement, a text override).",
+      "fields": {}
+    },
+    "deleteDimension": {
+      "fields": {}
+    },
+    "restoreDimension": {
+      "doc": "History only: put a dimension state back (replace by id at `index`, or insert at `index`).",
+      "fields": {}
+    },
+    "addNote": {
+      "doc": "Add a note to a sheet at `index` (default: last). Its id must be a fresh `note#n`.",
+      "fields": {}
+    },
+    "editNote": {
+      "doc": "Replace a note's text, position or view, by id.",
+      "fields": {}
+    },
+    "deleteNote": {
+      "fields": {}
+    },
+    "restoreNote": {
+      "doc": "History only: put a note state back (replace by id at `index`, or insert at `index`).",
+      "fields": {}
+    },
+    "addCamTool": {
+      "doc": "Add a CAM tool at `index` (default: last). Its id must be a fresh `tool#n` from `cam.nextIds`. Since version 14.",
+      "fields": {}
+    },
+    "editCamTool": {
+      "doc": "Replace a tool's inputs, by id.",
+      "fields": {}
+    },
+    "deleteCamTool": {
+      "doc": "Remove a tool. Refused while an operation of any setup cuts with it.",
+      "fields": {}
+    },
+    "restoreCamTool": {
+      "doc": "History only: put a tool state back (replace by id at `index`, or insert at `index`).",
+      "fields": {}
+    },
+    "addCamSetup": {
+      "doc": "Add a CAM setup at `index` (default: last). Its id, its WCS face reference's and those of its operations must be fresh (`setup#n`, `<kind>#n`, `r<n>` from `cam.nextIds`); its part must exist and its operations' tools be in `cam.tools`. The body, faces, sketches and holes it names are not checked against the part (ADR 0014 decision 6).",
+      "fields": {}
+    },
+    "editCamSetup": {
+      "doc": "Change a setup's name, part, body (`null`: the part's only body), machine, post, stock, WCS or heights. Absent fields stay; operations are edited with their own commands. A new WCS face reference id must be fresh.",
+      "fields": {}
+    },
+    "deleteCamSetup": {
+      "doc": "Remove a setup with its operations. Nothing refers to a setup.",
+      "fields": {}
+    },
+    "restoreCamSetup": {
+      "doc": "History only: put a setup state back, replacing the setup with the same id (at `index`) or inserting it at `index`. Its ids must have been allocated before.",
+      "fields": {}
+    },
+    "reorderCamSetups": {
+      "doc": "Move a setup so it ends up at `index`.",
+      "fields": {}
+    },
+    "addCamOperation": {
+      "doc": "Add an operation to a setup at `index` (default: last, the end of the cut order). Its id and its face references' ids must be fresh (`<kind>#n`, `r<n>` from `cam.nextIds`); its tool must be in `cam.tools`.",
+      "fields": {}
+    },
+    "editCamOperation": {
+      "doc": "Replace an operation's inputs, by id (so of the same kind). Ids it introduces must be fresh.",
+      "fields": {}
+    },
+    "deleteCamOperation": {
+      "doc": "Remove an operation from a setup. Nothing refers to an operation.",
+      "fields": {}
+    },
+    "restoreCamOperation": {
+      "doc": "History only: put an operation state back, replacing the one with the same id (at `index`) or inserting it at `index`. Its ids must have been allocated before. With `deleteCamOperation` in one batch, it moves an operation to another setup under its id.",
+      "fields": {}
+    },
+    "reorderCamOperation": {
+      "doc": "Move an operation so it ends up at `index` in its setup's cut order.",
+      "fields": {}
+    },
+    "suppressCamOperation": {
+      "fields": {}
+    },
+    "replaceDocument": {
+      "doc": "History only: put a whole document in place of this one (restore a version or revision; the undo of a restore). The replacement must be this document (same `id`) and valid as a whole, assemblies and configurations included. Its inverse is `replaceDocument` of the document it replaced. Clients restoring an older state build the replacement with `restoredDocument`, which keeps the id counters from going back.",
+      "fields": {}
+    }
+  },
+  "features": {
+    "sketch": {
+      "fields": {}
+    },
+    "extrude": {
+      "fields": {
+        "reverse": "Extrude against the sketch normal.",
+        "draft": "Draft angle: positive tapers the sides inward along the extrusion, negative outward. The neutral plane is the sketch plane. Absent means no draft.",
+        "scope": "The bodies the operation combines with; absent: every body. Not for a `new` extrude."
+      }
+    },
+    "revolve": {
+      "fields": {
+        "symmetric": "Split the angle evenly to both sides of the sketch plane.",
+        "scope": "The bodies the operation combines with; absent: every body. Not for a `new` revolve."
+      }
+    },
+    "fillet": {
+      "fields": {}
+    },
+    "chamfer": {
+      "fields": {
+        "distance": "Along the reference face of each edge: the adjacent face whose name sorts first (T1.8). Equal chamfers measure it on both faces.",
+        "secondDistance": "Unequal chamfer: the distance along the other face. Absent means equal distances.",
+        "angle": "Distance-angle chamfer: the angle from the reference face. Excludes `secondDistance`."
+      }
+    },
+    "shell": {
+      "fields": {
+        "faces": "Faces to remove (open the shell); may be empty for a closed hollow.",
+        "outward": "Grow the wall outward instead of inward."
+      }
+    },
+    "hole": {
+      "fields": {
+        "sketch": "The sketch whose points place the holes, drilled along its normal.",
+        "standard": "The screw size and fit the hole was sized for (`M6`, `#10`, `1/4`), from the kernel's `HOLE_SIZES`. Informational: `diameter` and the head sizes are what regen uses, so a standard hole can still be edited by hand.",
+        "scope": "The bodies the holes are drilled into; absent: every body."
+      }
+    },
+    "pattern": {
+      "fields": {
+        "body": "Repeat the bodies instead of features.",
+        "scope": "With `body: true`, the bodies to copy; absent: every body.",
+        "mode": "With `body: true`, how the copies join the part; absent: `add`. Since version 6."
+      }
+    },
+    "mirror": {
+      "fields": {
+        "body": "Mirror the bodies instead of features.",
+        "scope": "With `body: true`, the bodies to mirror; absent: every body.",
+        "mode": "With `body: true`, how the copies join the part; absent: `add`. Since version 6."
+      }
+    },
+    "extension": {
+      "doc": "The extension point for domain features (woodworking, construction; ADR 0013). `extension` is a dotted, namespaced type (`wood.board`) with its own `schemaVersion`, owned by the domain package. Core understands only the generic parts: feature dependencies, geometry references, expressions, and since version 11 `operation` and `scope`, which it validates like any other feature's. `params` is opaque JSON.",
+      "fields": {
+        "operation": "How the extension's solid combines with the part, as for an extrude: with `new` or `add` the extension creates bodies (`extension#n`, or `extension#n:<key>` for several). Absent: it makes no solid of its own to combine. Since version 11.",
+        "scope": "Every body the extension combines with or changes; absent: every body. Allowed without an `operation`, refused with `new`. Since version 11."
+      }
+    },
+    "import": {
+      "doc": "Geometry read from a file. A STEP file gives a B-rep whose faces are named `import#k:face:<n>` in the file's face order (fragile: imported topology has no history); an STL file gives a mesh, which can only be a reference (display and measure, no B-rep features). Since version 3.",
+      "fields": {
+        "scope": "The bodies the operation combines with; absent: every body. Not for `new` or `reference`."
+      }
+    },
+    "derived": {
+      "doc": "Bodies of a part of another document (or of another version of this one), pinned to a version and carried inside the document. Its bodies are `<id>:from/<source body id>`, and its faces are named `<id>:from/<source face name>`: everything after `:from/` is a name in the source document, never read for this part's feature ids. Since version 6.",
+      "fields": {
+        "bodies": "The source part's bodies to derive, by their ids in the source; absent: every body.",
+        "scope": "The bodies the operation combines with; absent: every body. Not for a `new` feature."
+      }
+    },
+    "thread": {
+      "doc": "A thread on a cylindrical face: a shaft (external) or a hole (internal), told apart by which side of the face the material is on. It acts on the body that owns the face, like a fillet, so it has no scope. The size is a name of the kernel's thread table; regen refuses one it does not know, so adding sizes never changes the format. Since version 10.",
+      "fields": {
+        "face": "The cylinder to thread.",
+        "start": "A circular edge of the face: the end the thread starts from. Absent: the end nearer the face's first neighbour by name (`cap:end` before `cap:start`: a lone extruded cylinder starts at its top).",
+        "length": "How far along the face the thread runs from its start; `full`: the whole face.",
+        "clearance": "Diametral printing clearance, like the fit variables (`#fit_slip`): the thread is this much smaller across (external) or larger (internal) than the basic profile."
+      }
+    },
+    "scripted": {
+      "doc": "A feature whose geometry a script of the document's library computes (ADR 0010 decision 8). `script` names the script; `params` holds the parameter values by name; `seed` seeds the script's `Math.random` together with the source hash (decision 3), never the feature id, so a remap or a merge never changes geometry; `dependsOn` lists features the script reads by id, as an extension's does. Faces it makes are named `<id>:<operation id>/<name>` (decision 6). Since version 16.",
+      "fields": {}
+    }
+  }
+}
