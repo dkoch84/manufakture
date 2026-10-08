@@ -19,6 +19,11 @@ import type { ModelState } from '../model/model';
 import { boxBody } from '../viewport/testMeshes';
 import { assemblyExportPlan, exportAssembly, type AssemblyExportPlan } from './assemblyExport';
 import { kernelExchange, type Exchanger, type KernelBody } from './exchange';
+import { REFUSED_REVIEWS, agentSource } from './exportGate.test-fixture';
+import { UNREVIEWED_EXPORT } from '@manufakture/io';
+
+/** Main: the export gate (T8.3c) lets every export here through. */
+const MAIN = { id: 'main' };
 
 /** The fixture's box and lid, and a second box turned a quarter about z and moved along x. */
 const TURNED = {
@@ -206,7 +211,7 @@ describe('exportAssembly', () => {
   it('3MF: meshed once, an object per body per instance, each placed by its build item', async () => {
     const { doc, model: m } = threeInstances();
     const ex = fakeExchanger();
-    const r = await exportAssembly(ex, '3mf', plan(doc, m), { tolerance: 'fine' });
+    const r = await exportAssembly(ex, '3mf', plan(doc, m), { source: MAIN, tolerance: 'fine' });
     if (!r.ok) throw new Error(r.message);
     expect(ex.tessellate).toHaveBeenCalledWith(
       ['assembly#1/inst#1/extrude#1', 'assembly#1/inst#2/extrude#1'],
@@ -229,7 +234,7 @@ describe('exportAssembly', () => {
 
   it('STL: every instance placed, in one file', async () => {
     const { doc, model: m } = threeInstances();
-    const r = await exportAssembly(fakeExchanger(), 'stl', plan(doc, m));
+    const r = await exportAssembly(fakeExchanger(), 'stl', plan(doc, m), { source: MAIN });
     if (!r.ok) throw new Error(r.message);
     expect(r.value.map((f) => [f.name, f.type])).toEqual([['Assembly 1.stl', 'model/stl']]);
     const mesh = parseStl(r.value[0]!.bytes).mesh;
@@ -240,7 +245,7 @@ describe('exportAssembly', () => {
     const { doc, model: m } = threeInstances();
     const ex = fakeExchanger();
     const p = plan(doc, m);
-    const r = await exportAssembly(ex, 'step', p);
+    const r = await exportAssembly(ex, 'step', p, { source: MAIN });
     if (!r.ok) throw new Error(r.message);
     expect(r.value[0]).toMatchObject({ name: 'Assembly 1.step', type: 'model/step' });
     expect(ex.exportStep).toHaveBeenCalledWith(
@@ -256,11 +261,11 @@ describe('exportAssembly', () => {
   it('refuses one file per body, and passes on a kernel failure', async () => {
     const { doc, model: m } = threeInstances();
     const ex = fakeExchanger();
-    expect((await exportAssembly(ex, 'stl-each', plan(doc, m))).message).toMatch(
+    expect((await exportAssembly(ex, 'stl-each', plan(doc, m), { source: MAIN })).message).toMatch(
       /exported as one file/,
     );
     ex.exportStep.mockResolvedValueOnce({ ok: false, message: 'STEP export failed: boom' });
-    expect(await exportAssembly(ex, 'step', plan(doc, m))).toEqual({
+    expect(await exportAssembly(ex, 'step', plan(doc, m), { source: MAIN })).toEqual({
       ok: false,
       message: 'STEP export failed: boom',
     });
@@ -289,7 +294,7 @@ describe('exportAssembly', () => {
     const { exchanger } = kernelExchange(() => client, registry);
     const { doc, model: m } = threeInstances();
     const p = plan(doc, m);
-    const r = await exportAssembly(exchanger, 'step', p);
+    const r = await exportAssembly(exchanger, 'step', p, { source: MAIN });
     if (!r.ok) throw new Error(r.message);
     expect(sent).toEqual([
       [
@@ -306,5 +311,25 @@ describe('exportAssembly', () => {
     // A plain export sends no assembly.
     await exchanger.exportStep(['assembly#1/inst#1/extrude#1']);
     expect(sent[1]![0]).not.toHaveProperty('assembly');
+  });
+});
+
+describe('exportAssembly behind the export gate', () => {
+  it('writes no STL, 3MF or STEP of an assembly from an agent’s unreviewed branch', async () => {
+    const { doc, model: m } = threeInstances();
+    for (const format of ['stl', '3mf', 'step'] as const) {
+      for (const review of REFUSED_REVIEWS) {
+        const ex = fakeExchanger();
+        expect(
+          await exportAssembly(ex, format, plan(doc, m), { source: agentSource(review) }),
+        ).toEqual({ ok: false, message: UNREVIEWED_EXPORT });
+        expect(ex.tessellate).not.toHaveBeenCalled();
+        expect(ex.exportStep).not.toHaveBeenCalled();
+      }
+      const ok = await exportAssembly(fakeExchanger(), format, plan(doc, m), {
+        source: agentSource('approved'),
+      });
+      expect(ok.ok).toBe(true);
+    }
   });
 });

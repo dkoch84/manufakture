@@ -3,7 +3,7 @@
 // in slicer shows the help once per slicer, and the slicer chosen is kept with the view settings.
 
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { validate3mf } from '@manufakture/io';
+import { UNREVIEWED_EXPORT, validate3mf } from '@manufakture/io';
 import type { MeshData } from '@manufakture/kernel';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ManufaktureDocument } from '@manufakture/core';
@@ -15,6 +15,11 @@ import { PrintExport, type PrintExportProps, type PrintExporter } from './PrintE
 import { SlicerHandoff } from './SlicerHandoff';
 import { apply, boxPart, partsDocument, setupOf, withSetup } from './print.test-fixture';
 import { resolveSetup } from './resolve';
+import { exportSourceStore } from '../io/exportSource';
+import { REFUSED_REVIEWS, agentSource } from '../io/exportGate.test-fixture';
+
+// Main is open: the export gate (T8.3c) lets these exports through unless a test says otherwise.
+beforeEach(() => exportSourceStore.setState({ source: { id: 'main' } }));
 
 afterEach(cleanup);
 beforeEach(() => localStorage.clear());
@@ -101,6 +106,29 @@ describe('PrintExport', () => {
     );
     // A plain export does not show the slicer help.
     expect(screen.queryByTestId('slicer-handoff')).toBeNull();
+  });
+
+  it('writes no plate from an agent’s unreviewed branch, and says why', () => {
+    for (const review of REFUSED_REVIEWS) {
+      exportSourceStore.setState({ source: agentSource(review) });
+      const c = configured();
+      const exclusive = vi.fn() as unknown as NonNullable<PrintExporter['exclusive']>;
+      const ex = exporter(box(), exclusive);
+      const { download } = mount(c.doc, c.setupId, box(), ex);
+      expect(screen.getByTestId('export-gate-refusal').textContent).toBe(UNREVIEWED_EXPORT);
+      for (const id of [
+        'print-export-button',
+        'print-open-slicer',
+        'print-export-configurations',
+      ]) {
+        expect(screen.getByTestId(id)).toHaveProperty('disabled', true);
+        fireEvent.click(screen.getByTestId(id));
+      }
+      expect(ex.exchanger.tessellate).not.toHaveBeenCalled();
+      expect(exclusive).not.toHaveBeenCalled();
+      expect(download).not.toHaveBeenCalled();
+      cleanup();
+    }
   });
 
   it('exports one STL per body when asked', async () => {

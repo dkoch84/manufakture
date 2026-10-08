@@ -48,12 +48,13 @@ export interface ExportChoice {
  * Export B-rep bodies (`@manufakture/io`'s `exportBodyFiles`): `options.bodies` (the ones the user
  * chose, under the names given), or every part body the kernel holds, as binary STL, 3MF or STEP.
  * Framing members default to the ones the viewport shows. The message names every file and its
- * size.
+ * size. Refused when `options.source` is an agent's unreviewed branch or is not known (the export
+ * gate, T8.3c).
  */
 export async function exportBodies(
   exchanger: Exchanger,
   format: ExportFormat,
-  options: BodyFileOptions = {},
+  options: BodyFileOptions,
 ): Promise<ActionResult<ExportedFile[]>> {
   const r = await exportBodyFiles(exchanger, format, {
     ...options,

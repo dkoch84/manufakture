@@ -42,6 +42,7 @@ import {
 import {
   FABRICATION_MIME,
   dxfName,
+  exportAllowed,
   fileName,
   layerId,
   loopsToDxf,
@@ -49,6 +50,7 @@ import {
   loopsToSvg,
   sheetBounds,
   type ExchangeOutcome,
+  type ExportSource,
   type FabricationFile,
 } from '@manufakture/io';
 import type { Frame, Loop as KernelLoop, SectionLoops } from '@manufakture/kernel';
@@ -579,12 +581,22 @@ export type LaserFileResult =
 
 /**
  * The file of `layers` in `format`, each layer compensated for `kerf` (mm; zero for none), the
- * drawing moved so its lower left corner is at (0, 0). Named `<baseName>.<format>`.
+ * drawing moved so its lower left corner is at (0, 0). Named `<baseName>.<format>`. Laser and
+ * plasma files are fabrication files: refused when `options.source`, the branch the document
+ * comes from, is an agent's unreviewed branch or is not known (`exportAllowed`).
  */
 export function laserFile(
   layers: readonly LaserLayer[],
-  options: { format: LaserFormat; kerf: number; baseName: string; title?: string },
+  options: {
+    format: LaserFormat;
+    kerf: number;
+    baseName: string;
+    title?: string;
+    source: ExportSource | null;
+  },
 ): LaserFileResult {
+  const gate = exportAllowed(options?.source);
+  if (!gate.ok) return gate;
   const problem = kerfProblem(options.kerf, outlineSize(layers));
   if (problem !== null) return { ok: false, message: problem };
   const warnings = layerNameClashes(

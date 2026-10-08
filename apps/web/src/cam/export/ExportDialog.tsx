@@ -5,7 +5,8 @@
 // tools in order, estimated time, extents, warnings) and the setup sheet, which can be printed
 // and saved. Save hands the G-code (or a zip of the files, for one file per tool) to the app's
 // download. An operation with an error, or a post that refuses the job, refuses the export with
-// the reason, and Save stays disabled.
+// the reason, and Save stays disabled. So does the export gate (T8.3c): on an agent's branch that
+// is not approved, the dialog says so first and nothing is written.
 //
 // The workspace's geometry may be of an older document (it is asked for asynchronously after each
 // edit), so the dialog asks for the current document's geometry itself and treats every operation
@@ -18,6 +19,8 @@ import type { ManufaktureDocument } from '@manufakture/core';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from 'zustand';
 import type { ExportedFile } from '../../io/actions';
+import { ExportGateNotice } from '../../io/ExportGateNotice';
+import { currentExportSource, exportRefusal, exportSourceStore } from '../../io/exportSource';
 import { formatBytes } from '../../io/files';
 import type { DocumentStoreApi } from '../../state/document';
 import { POST_IDS, machineById, postName } from '../commands';
@@ -77,6 +80,8 @@ export function ExportDialog({
   const toolpaths = useStore(camUi, (s) => s.toolpaths);
   const generating = useStore(camUi, (s) => s.generating);
   const generateMessage = useStore(camUi, (s) => s.generateMessage);
+  const source = useStore(exportSourceStore, (s) => s.source);
+  const gated = exportRefusal(source);
   const setup = doc.cam.setups.find((s) => s.id === setupId);
   const machine = setup ? machineById(setup.machine) : undefined;
   const [settings, setSettings] = useState<ExportSettings>(() =>
@@ -195,9 +200,10 @@ export function ExportDialog({
             setupName: setup.name,
             machine,
             date: stamp,
+            source,
           })
         : null,
-    [ready, setup, machine, toolpaths, settings, doc.name, stamp],
+    [ready, setup, machine, toolpaths, settings, doc.name, stamp, source],
   );
   const plan = build?.ok ? build.plan : null;
   const sheet = useMemo(() => (plan ? setupSheetHtml(plan) : null), [plan]);
@@ -207,16 +213,18 @@ export function ExportDialog({
   else if (!machine) reasons.push(`This version does not know the machine ${setup.machine}.`);
   if (readiness?.message) reasons.push(readiness.message);
   for (const b of readiness?.blocked ?? []) reasons.push(`${b.name}: ${b.message}`);
-  if (build && !build.ok) reasons.push(...build.reasons);
+  // The gate's own refusal is shown above the settings, once.
+  if (build && !build.ok) reasons.push(...build.reasons.filter((r) => r !== gated));
 
   const save = () => {
-    if (!plan || !sheet || !upToDate()) return;
-    const files = exportFiles(plan, sheet);
+    // The source as it is now: the gate is asked again at the moment of writing.
+    if (!plan || !sheet || !upToDate() || exportRefusal() !== null) return;
+    const files = exportFiles(plan, sheet, currentExportSource());
     for (const f of files) onSave(f);
     setSaved(`Saved ${files.map((f) => `${f.name} (${formatBytes(f.bytes.length)})`).join(', ')}.`);
   };
   const saveSheet = () => {
-    if (!plan || !sheet || !upToDate()) return;
+    if (!plan || !sheet || !upToDate() || exportRefusal() !== null) return;
     onSave({ name: sheetFileName(plan), bytes: new TextEncoder().encode(sheet), type: HTML_MIME });
   };
 
@@ -246,6 +254,8 @@ export function ExportDialog({
             Close
           </button>
         </header>
+
+        <ExportGateNotice refusal={gated} />
 
         <div className="cam-export-settings">
           <label>

@@ -32,12 +32,14 @@ import {
   NotWatertightError,
   deflectionOf,
   export3mfAssembly,
+  exportAllowed,
   exportStl,
   fileName,
   placementMatrix,
   transformMesh,
   type ExportAssembly,
   type ExportBody,
+  type ExportSource,
   type ExportTolerancePreset,
 } from '@manufakture/io';
 import type { BoundingBox, MeshData } from '@manufakture/kernel';
@@ -64,6 +66,11 @@ export const MAX_PLATE_COPIES = 5000;
 export type PrintExportFormat = '3mf' | 'stl';
 
 export interface PrintExportOptions {
+  /**
+   * The branch the document comes from: a plate's 3MF and STL are fabrication files, refused from
+   * an agent's unreviewed branch (the export gate, T8.3c).
+   */
+  source: ExportSource | null;
   /** The document's name: the 3MF title and the start of the file name. */
   documentName: string;
   /** For the sizes in messages. */
@@ -210,13 +217,16 @@ function tooManyCopies(total: number, printer: { name: string }): string {
 /**
  * Export a resolved setup for printing: one 3MF of the whole plate, or one STL per body. The
  * bodies are tessellated through `exchanger` at `tolerance` (default `normal`) under their view
- * ids, which the kernel holds for the regen `resolved` was made from.
+ * ids, which the kernel holds for the regen `resolved` was made from. Refused first, before
+ * anything is tessellated, when `options.source` is an agent's unreviewed branch or is not known.
  */
 export async function exportPrintSetup(
   exchanger: Pick<Exchanger, 'tessellate'>,
   resolved: ResolvedSetup,
   options: PrintExportOptions,
 ): Promise<ActionResult<ExportedFile[]>> {
+  const gate = exportAllowed(options?.source);
+  if (!gate.ok) return gate;
   const refusal = exportRefusal(resolved, options.units);
   if (refusal !== null) return { ok: false, message: refusal };
   const printer = resolved.printer!;
@@ -363,6 +373,8 @@ export async function exportPrintSetup(
 export interface PrintConfigurationsRequest {
   /** The document as stored; each row is applied to it with `configured`. */
   document: ManufaktureDocument;
+  /** The branch it comes from: refused from an agent's unreviewed branch (T8.3c). */
+  source: ExportSource | null;
   setupId: string;
   /** The rows to export, in order (default: every row). */
   rowIds?: readonly string[];
@@ -391,13 +403,18 @@ export interface PrintConfigurationsResult {
  * `<document>-<setup>-<row>.<ext>`: the row is applied, regenerated with `regen` (which must build
  * documents that are not the open one, see `shareRegenerator`), the setup resolved against that
  * model and exported as `exportPrintSetup` does. A row where a feature of a part the setup prints
- * fails, or whose setup is refused, is reported and the others still export.
+ * fails, or whose setup is refused, is reported and the others still export. Refused before any
+ * regen when `request.source` is an agent's unreviewed branch or is not known.
  */
 export async function exportPrintConfigurations(
   exchanger: Pick<Exchanger, 'tessellate'>,
   regen: (document: ManufaktureDocument, stored?: ManufaktureDocument) => Promise<RegenView | null>,
   request: PrintConfigurationsRequest,
 ): Promise<PrintConfigurationsResult> {
+  const gate = exportAllowed(request.source);
+  if (!gate.ok) {
+    return { files: [], failures: [], cancelled: false, ok: false, message: gate.message };
+  }
   const { document, setupId, signal } = request;
   const table = document.configurations?.rows ?? [];
   const rows = request.rowIds
@@ -446,6 +463,7 @@ export async function exportPrintConfigurations(
     }
     const resolved = resolveSetup(variant.value, setup, view.parts);
     const r = await exportPrintSetup(exchanger, resolved, {
+      source: request.source,
       documentName: document.name,
       units: document.units,
       fileBase: printFileBase(document.name, setup.name, row.name),

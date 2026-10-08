@@ -402,6 +402,35 @@ needs every release that may open the library to know it first, or a format chan
   made; a branch that still cannot be made leaves the version (versions are kept for good), and
   the message says so.
 
+A revision named this way must be one of the branch's, an integer from 1 to its head: it is
+checked before any file name is made of it.
+
+### The export gate
+
+`exportAllowed(branch)` (M8 plan T8.3c, ADR 0016 decision 12) says whether a fabrication file may
+be made from a branch, given its record as `listBranches` lists it: yes for main and a person's
+branch, and for an agent's branch in review state `approved`; no for an agent's branch in any other
+state, with `UNREVIEWED_EXPORT` ("This is an agent's unreviewed branch. Review it in History
+first."), and no (`UNKNOWN_EXPORT_SOURCE`) for a missing or malformed record. The rule itself is
+`@manufakture/io`'s `exportAllowed`, since every package with a fabrication entry point depends on
+`@manufakture/io` and this one does too; the library exports the same function typed for `Branch`.
+Every entry point takes the branch as a required `source` and refuses before it does any work (io
+README, "Fabrication exports").
+
+A version of main can record the review its work came from: `createVersion(id, { name, review })`
+with a `ReviewReference` (`branch`, the agent branch's id; `sessionId`; `clientName`;
+`bundleRevision`, the head revision the approved bundle was built at, so the bundle is
+`review-<bundleRevision>.json` in that branch's directory; `label`, the merge's label). Approving
+in History (T8.3b) writes it after the merge. Only main's versions take one; it is checked as
+provenance is (ids, a client name and a label of at most `MAX_REVIEW_LABEL` characters with no
+control or format characters), a damaged one makes the version list read as damaged, and an
+imported `.mfk` keeps none (a review recorded in another library is not this one's). An older
+release reading the list drops the field, as it drops any field it does not know.
+`reviewOf(id, revision?)` reads it back: the latest version of main at or before `revision`
+(default: main's head) that records a review, with its reference, or null when main's work there
+is a person's. `library-export-gate.test.ts` covers the gate over every review state and a merge,
+the reference round trip and its checks, and the revision check.
+
 `library-agent.test.ts` covers provenance round trips, old lists, damaged provenance, review
 states (and that a new branch starts `open`), client names with format characters or lone
 surrogates, branching from kept and rebuilt revisions of main and of a branch, reading those
@@ -436,8 +465,9 @@ merging such a branch into main.
     holder recorded, within 2 s. While the process runs, the lock is never broken by age: a hung
     holder keeps it until it is killed. Where the start time cannot be read (no /proc), a live
     pid is taken for the holder.
-  - a record of another machine (a shared directory), or a file that does not read as a record:
-    nobody refreshed it for `staleAfterMs` (2 minutes). This compares the file's time, set by the
+  - a record of another machine (a shared directory), or a file that does not read as a record
+    (a pid that is not a positive safe integer included, so no pid of 0 or below is ever
+    signalled): nobody refreshed it for `staleAfterMs` (2 minutes). This compares the file's time, set by the
     other machine or its file server, with this machine's clock, so clocks more than
     `staleAfterMs` apart break a live lock (or keep a dead one longer); keep the machines' clocks
     in sync.

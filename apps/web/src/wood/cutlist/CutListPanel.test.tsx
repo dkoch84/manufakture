@@ -1,6 +1,6 @@
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { OrientedSizesResult } from '@manufakture/regen';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDocumentStore } from '../../state/document';
 import { createSelectionStore } from '../../state/selection';
 import { cutListCsv, documentCutList } from '@manufakture/domain-wood';
@@ -8,6 +8,12 @@ import { CutListPanel } from './CutListPanel';
 import { localNester } from './nester';
 import type { Sizer } from './sizer';
 import { bookshelfDocument, bookshelfModel, IN, withOakPanel } from './cutlist.test-fixture';
+import { exportSourceStore } from '../../io/exportSource';
+import { REFUSED_REVIEWS, agentSource } from '../../io/exportGate.test-fixture';
+import { UNREVIEWED_EXPORT } from '@manufakture/io';
+
+// Main is open: the export gate (T8.3c) lets these exports through unless a test says otherwise.
+beforeEach(() => exportSourceStore.setState({ source: { id: 'main' } }));
 
 function setup(options: { extras?: boolean; sizer?: Sizer } = {}) {
   const doc = options.extras ? withOakPanel(bookshelfDocument()) : bookshelfDocument();
@@ -118,6 +124,24 @@ describe('the cut list panel', () => {
     );
     act(() => t.documents.getState().undo());
     expect(t.documents.getState().document.domains?.wood).toBeUndefined();
+  });
+
+  it('writes no file from an agent’s unreviewed branch, and says why', () => {
+    for (const review of REFUSED_REVIEWS) {
+      exportSourceStore.setState({ source: agentSource(review) });
+      const t = setup();
+      expect(screen.getByTestId('export-gate-refusal').textContent).toBe(UNREVIEWED_EXPORT);
+      for (const id of ['cutlist-csv', 'cutlist-bom-csv', 'cutlist-pdf']) {
+        expect(screen.getByTestId(id)).toHaveProperty('disabled', true);
+        fireEvent.click(screen.getByTestId(id));
+      }
+      expect(t.download).not.toHaveBeenCalled();
+      cleanup();
+    }
+    exportSourceStore.setState({ source: agentSource('approved') });
+    setup();
+    expect(screen.queryByTestId('export-gate-refusal')).toBeNull();
+    expect(screen.getByTestId('cutlist-csv')).toHaveProperty('disabled', false);
   });
 
   it('saves the cut list CSV and the PDF', async () => {

@@ -930,10 +930,12 @@ without a kernel (`src/takeoff/display.test.ts`).
 ### Takeoff files (`@manufakture/domain-construction/files`)
 
 One entry point for every caller (the list of every fabrication format is in the io README,
-"Fabrication exports"): `exportTakeoff(kind, { document, partId, features, sets })` writes the
+"Fabrication exports"): `exportTakeoff(kind, { document, partId, features, sets }, source)` writes the
 CSV or the PDF of a regenerated part studio, with the document's construction settings and stock
 prices, as the app's panel does; `takeoffFile(kind, takeoff, rows, options)` writes one from a
-takeoff already counted (the panel). `takeoffPdf` is the PDF for the lumber yard: the rows by
+takeoff already counted (the panel). Both throw an `ExportRefusedError` when the source
+(`options.source` for `takeoffFile`) is an agent's unreviewed branch or is not known (the export
+gate, io README "Fabrication exports"). `takeoffPdf` is the PDF for the lumber yard: the rows by
 section with totals, cost and notes, the subtotals and the cost in all, Letter for inch and foot
 documents and A4 otherwise, the short disclaimer opening the first page and closing every page.
 This subpath alone loads `@manufakture/io`'s writers at run time; `src/boundary.test.ts` allows

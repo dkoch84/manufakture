@@ -7,6 +7,11 @@ import { boxDocument, mm } from '../variables/box.test-fixture';
 import { boxBody } from '../viewport/testMeshes';
 import { configurationFileBase, exportConfigurations } from './configExport';
 import type { Exchanger } from './exchange';
+import { REFUSED_REVIEWS, agentSource } from './exportGate.test-fixture';
+import { UNREVIEWED_EXPORT } from '@manufakture/io';
+
+/** Main: the export gate (T8.3c) lets every export here through. */
+const MAIN = { id: 'main' };
 
 /** The box, with #w configured in rows 600, 800 and 1000 (in mm). */
 function shelf(): ManufaktureDocument {
@@ -105,6 +110,7 @@ describe('exporting every configuration', () => {
     const onFile = vi.fn();
     const document = shelf();
     const r = await exportConfigurations(k.exchanger, k.regen, {
+      source: MAIN,
       document,
       partId: 'part#1',
       format: '3mf',
@@ -144,6 +150,7 @@ describe('exporting every configuration', () => {
   it('writes STL and STEP too, and only the rows asked for', async () => {
     const k = fakeKernel();
     const stl = await exportConfigurations(k.exchanger, k.regen, {
+      source: MAIN,
       document: shelf(),
       rowIds: ['cfg#3', 'cfg#1'],
       partId: 'part#1',
@@ -151,6 +158,7 @@ describe('exporting every configuration', () => {
     });
     expect(stl.files.map((f) => f.name)).toEqual(['Shelf-1000.stl', 'Shelf-600.stl']);
     const step = await exportConfigurations(k.exchanger, k.regen, {
+      source: MAIN,
       document: shelf(),
       rowIds: ['cfg#2'],
       partId: 'part#1',
@@ -162,6 +170,7 @@ describe('exporting every configuration', () => {
   it('skips the bodies asked, and says so when nothing is left', async () => {
     const k = fakeKernel({ two: true });
     const r = await exportConfigurations(k.exchanger, k.regen, {
+      source: MAIN,
       document: shelf(),
       rowIds: ['cfg#1'],
       partId: 'part#1',
@@ -175,6 +184,7 @@ describe('exporting every configuration', () => {
     );
     expect(r.ok).toBe(true);
     const none = await exportConfigurations(k.exchanger, k.regen, {
+      source: MAIN,
       document: shelf(),
       rowIds: ['cfg#1'],
       partId: 'part#1',
@@ -191,6 +201,7 @@ describe('exporting every configuration', () => {
   it('reports a row whose features fail, and exports the others', async () => {
     const k = fakeKernel({ failOn: '800 mm' });
     const r = await exportConfigurations(k.exchanger, k.regen, {
+      source: MAIN,
       document: shelf(),
       partId: 'part#1',
       format: '3mf',
@@ -205,6 +216,7 @@ describe('exporting every configuration', () => {
   it('asks again once when the kernel drops a regen', async () => {
     const k = fakeKernel({ drop: 1 });
     const r = await exportConfigurations(k.exchanger, k.regen, {
+      source: MAIN,
       document: shelf(),
       rowIds: ['cfg#1'],
       partId: 'part#1',
@@ -214,6 +226,7 @@ describe('exporting every configuration', () => {
     expect(k.regen).toHaveBeenCalledTimes(2);
     const dropped = fakeKernel({ drop: 2 });
     const r2 = await exportConfigurations(dropped.exchanger, dropped.regen, {
+      source: MAIN,
       document: shelf(),
       rowIds: ['cfg#1'],
       partId: 'part#1',
@@ -226,6 +239,7 @@ describe('exporting every configuration', () => {
     const k = fakeKernel();
     const controller = new AbortController();
     const r = await exportConfigurations(k.exchanger, k.regen, {
+      source: MAIN,
       document: shelf(),
       partId: 'part#1',
       format: '3mf',
@@ -242,11 +256,31 @@ describe('exporting every configuration', () => {
   it('has nothing to do without rows', async () => {
     const k = fakeKernel();
     const r = await exportConfigurations(k.exchanger, k.regen, {
+      source: MAIN,
       document: boxDocument(),
       partId: 'part#1',
       format: '3mf',
     });
     expect(r).toMatchObject({ ok: false, message: 'There are no configurations to export.' });
     expect(configurationFileBase('Shelf', '600 mm')).toBe('Shelf-600 mm');
+  });
+});
+
+describe('exporting every configuration behind the export gate', () => {
+  it('regenerates and writes nothing from an agent’s unreviewed branch', async () => {
+    for (const review of REFUSED_REVIEWS) {
+      const k = fakeKernel();
+      const onFile = vi.fn();
+      const r = await exportConfigurations(k.exchanger, k.regen, {
+        source: agentSource(review),
+        document: shelf(),
+        partId: 'part#1',
+        format: 'step',
+        onFile,
+      });
+      expect(r).toMatchObject({ ok: false, files: [], message: UNREVIEWED_EXPORT });
+      expect(k.regen).not.toHaveBeenCalled();
+      expect(onFile).not.toHaveBeenCalled();
+    }
   });
 });

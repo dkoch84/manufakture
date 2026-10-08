@@ -29,6 +29,7 @@ import {
   kernelExchanger,
   memberExportBodies,
   parseStl,
+  UNREVIEWED_EXPORT,
   stepProductNames,
   validate3mf,
 } from '@manufakture/io';
@@ -65,6 +66,8 @@ import { constructionSetCommand } from './construction/drawings/set';
 import { insertViewCommand, newDrawingCommand } from './drawing/model';
 
 const PART = 'part#1';
+/** The branch every file here is exported from: main (the export gate, T8.3c). */
+const MAIN = { id: 'main' };
 const mm = (source: string): StoredExpression => ({ source, lengthUnit: 'mm', angleUnit: 'deg' });
 const inch = (source: string): StoredExpression => ({
   source,
@@ -229,7 +232,7 @@ describe('fabrication exports in Node: the cabinet', () => {
     const doc = cabinet();
     const { result } = await regen(doc);
     const sources = { document: doc, parts: result.parts, assemblies: result.assemblies };
-    const list = await exportCutList('list', sources);
+    const list = await exportCutList('list', sources, { source: MAIN });
     expect([list.name, list.type]).toEqual([`${SHELF.name} cut list.csv`, 'text/csv']);
     const lines = text(list.bytes).split('\r\n');
     expect(lines[0]).toBe(
@@ -238,9 +241,13 @@ describe('fabrication exports in Node: the cabinet', () => {
     // Every board of the cabinet is counted once, in some row.
     const bodies = lines.slice(1, -1).flatMap((l) => l.slice(l.lastIndexOf(',') + 1).split(' '));
     expect(bodies.sort()).toEqual(BOARDS.map((_, i) => `extension#${i + 1}`).sort());
-    const bom = await exportCutList('bom', sources);
+    const bom = await exportCutList('bom', sources, { source: MAIN });
     expect(text(bom.bytes)).toContain('"3/4"" plywood (sheets to buy)",,1,');
-    const pdf = await exportCutList('pdf', { ...sources, assemblyId: 'assembly#1' });
+    const pdf = await exportCutList(
+      'pdf',
+      { ...sources, assemblyId: 'assembly#1' },
+      { source: MAIN },
+    );
     expect([pdf.name, pdf.type, isPdf(pdf.bytes)]).toEqual([
       `${SHELF.name} cut list.pdf`,
       'application/pdf',
@@ -256,18 +263,24 @@ describe('fabrication exports in Node: the cabinet', () => {
       generation: () => engine.generation,
       bodies: bodiesOf(result, doc),
     });
-    const stl = await exportBodyFiles(exchanger, 'stl', { documentName: doc.name });
+    const stl = await exportBodyFiles(exchanger, 'stl', { documentName: doc.name, source: MAIN });
     if (!stl.ok) throw new Error(stl.message);
     expect(stl.files.map((f) => f.name)).toEqual([`${SHELF.name}.stl`]);
     expect(parseStl(stl.files[0]!.bytes).mesh.indices.length).toBeGreaterThan(0);
-    const each = await exportBodyFiles(exchanger, 'stl-each', { documentName: doc.name });
+    const each = await exportBodyFiles(exchanger, 'stl-each', {
+      documentName: doc.name,
+      source: MAIN,
+    });
     expect(each.ok && each.files.length).toBe(BOARDS.length);
-    const threemf = await exportBodyFiles(exchanger, '3mf', { documentName: doc.name });
+    const threemf = await exportBodyFiles(exchanger, '3mf', {
+      documentName: doc.name,
+      source: MAIN,
+    });
     if (!threemf.ok) throw new Error(threemf.message);
     const report = validate3mf(threemf.files[0]!.bytes);
     expect(report.problems).toEqual([]);
     expect(report.objects.map((o) => o.name).sort()).toEqual(BOARDS.map((b) => b.name).sort());
-    const step = await exportBodyFiles(exchanger, 'step', { documentName: doc.name });
+    const step = await exportBodyFiles(exchanger, 'step', { documentName: doc.name, source: MAIN });
     if (!step.ok) throw new Error(step.message);
     expect([step.files[0]!.name, step.files[0]!.type]).toEqual([
       `${SHELF.name}.step`,
@@ -299,9 +312,9 @@ describe('fabrication exports in Node: the cabinet', () => {
     const drawing = doc.drawings!.find((x) => x.id === d.drawingId)!;
     const sheet = await engine.drawingSheet(doc, drawing.id, drawing.sheets[0]!.id);
     const names = { drawing: drawing.name, sheets: drawing.sheets.map((s) => s.name) };
-    const pdf = drawingFile('pdf', [sheet?.display ?? null], names);
-    const dxf = drawingFile('dxf', [sheet?.display ?? null], names);
-    const svg = drawingFile('svg', [sheet?.display ?? null], names);
+    const pdf = drawingFile('pdf', [sheet?.display ?? null], names, MAIN);
+    const dxf = drawingFile('dxf', [sheet?.display ?? null], names, MAIN);
+    const svg = drawingFile('svg', [sheet?.display ?? null], names, MAIN);
     if (!pdf.ok || !dxf.ok || !svg.ok) throw new Error('a drawing file was refused');
     expect([pdf.fileName, isPdf(pdf.bytes)]).toEqual(['Carcass.pdf', true]);
     expect(dxf.fileName).toBe('Carcass - Sheet 1.dxf');
@@ -320,6 +333,7 @@ describe('fabrication exports in Node: the cabinet', () => {
     const geometer = { geometry: engine.camGeometry.bind(engine) };
     const gcode = await exportGcode(doc, setupId, geometer, {
       date: '2026-10-08',
+      source: MAIN,
       settings: (defaults) => ({ ...withPost(defaults, 'grbl'), multiTool: 'pause' }),
     });
     if (!gcode.ok) throw new Error(gcode.reasons.join('; '));
@@ -332,6 +346,7 @@ describe('fabrication exports in Node: the cabinet', () => {
     expect(gcode.sheet).toContain('Rough outline');
     const perTool = await exportGcode(doc, setupId, geometer, {
       date: '2026-10-08',
+      source: MAIN,
       settings: (defaults) => withPost(defaults, 'grbl'),
     });
     expect(perTool.ok && perTool.files.map((f) => f.type)).toEqual(['application/zip']);
@@ -341,7 +356,7 @@ describe('fabrication exports in Node: the cabinet', () => {
       { partId: PART, body: 'extension#9', viewId: `${PART}/extension#9` },
       [{ kind: 'face', ref: { face }, label: 'Shelf top', layer: 'outline' }],
       { geometer },
-      { format: 'dxf', kerf: 0.2, baseName: 'Shelf 1' },
+      { format: 'dxf', kerf: 0.2, baseName: 'Shelf 1', source: MAIN },
     );
     if (!laser.ok) throw new Error(laser.messages.join('; '));
     expect([laser.file.name, laser.file.type]).toEqual(['Shelf 1.dxf', 'application/dxf']);
@@ -359,12 +374,12 @@ describe('fabrication exports in Node: the shed', () => {
     const part = result.parts[0]!;
     const sets = (part.members ?? []).map((s) => ({ namespace: s.namespace, members: s.members! }));
     const sources = { document: doc, partId: PART, features: part.features, sets };
-    const csv = exportTakeoff('csv', sources);
+    const csv = exportTakeoff('csv', sources, MAIN);
     expect([csv.name, csv.type]).toEqual(['Shed takeoff.csv', 'text/csv']);
     const lines = text(csv.bytes).split('\r\n');
     expect(lines.slice(0, 2)).toEqual(['Takeoff: Shed', csvTextField(DISCLAIMER_SHORT)]);
     expect(lines.some((l) => l.startsWith('Lumber to buy,'))).toBe(true);
-    const pdf = exportTakeoff('pdf', sources);
+    const pdf = exportTakeoff('pdf', sources, MAIN);
     expect([pdf.name, isPdf(pdf.bytes)]).toEqual(['Shed takeoff.pdf', true]);
   });
 
@@ -384,7 +399,7 @@ describe('fabrication exports in Node: the shed', () => {
       bodies: bodiesOf(result, doc),
       memberBodies: (partId, ids, options) => engine.memberBodies(partId, ids, options),
     });
-    const options = { documentName: doc.name, members, partId: PART };
+    const options = { documentName: doc.name, members, partId: PART, source: MAIN };
     const threemf = await exportBodyFiles(exchanger, '3mf', options);
     if (!threemf.ok) throw new Error(threemf.message);
     const report = validate3mf(threemf.files[0]!.bytes);
@@ -428,12 +443,79 @@ describe('fabrication exports in Node: the shed', () => {
     const lists = [];
     for (const s of sheets)
       lists.push((await engine.drawingSheet(doc, d.drawingId, s.id))?.display ?? null);
-    const pdf = drawingFile('pdf', lists, {
-      drawing: 'Shed set',
-      sheets: sheets.map((s) => s.name),
-    });
+    const pdf = drawingFile(
+      'pdf',
+      lists,
+      { drawing: 'Shed set', sheets: sheets.map((s) => s.name) },
+      MAIN,
+    );
     if (!pdf.ok) throw new Error(pdf.message);
     expect([pdf.fileName, isPdf(pdf.bytes)]).toEqual(['Shed set.pdf', true]);
     expect(text(pdf.bytes)).toContain(`/Count ${sheets.length}`);
+  });
+});
+
+describe('fabrication exports in Node: the export gate', () => {
+  const agent = (review: string) => ({
+    id: 'branch-1',
+    provenance: { origin: 'agent' as const, review },
+  });
+  const REFUSED = ['open', 'submitted', 'changes-requested', 'rejected'];
+  const refusing = {
+    bodies: () => {
+      throw new Error('the kernel was asked');
+    },
+    tessellate: () => Promise.reject(new Error('the kernel was asked')),
+    exportStep: () => Promise.reject(new Error('the kernel was asked')),
+  };
+  const asked = {
+    geometry: () => Promise.reject(new Error('the geometry stage was asked')),
+  };
+
+  it('refuses every format from an agent’s unreviewed branch, before any work', async () => {
+    const doc = cabinet();
+    for (const review of REFUSED) {
+      const source = agent(review);
+      await expect(exportCutList('list', { document: doc, parts: [] }, { source })).rejects.toThrow(
+        UNREVIEWED_EXPORT,
+      );
+      expect(() =>
+        exportTakeoff('csv', { document: doc, partId: PART, features: [], sets: [] }, source),
+      ).toThrow(UNREVIEWED_EXPORT);
+      expect(await exportGcode(doc, 'setup#1', asked, { date: 'x', source })).toEqual({
+        ok: false,
+        reasons: [UNREVIEWED_EXPORT],
+      });
+      expect(
+        await exportLaser(
+          doc,
+          { partId: PART, body: 'extension#9', viewId: 'v' },
+          [],
+          { geometer: asked },
+          { format: 'svg', kerf: 0, baseName: 'x', source },
+        ),
+      ).toEqual({ ok: false, messages: [UNREVIEWED_EXPORT] });
+      for (const format of ['pdf', 'dxf', 'svg'] as const) {
+        expect(drawingFile(format, [], { drawing: 'D', sheets: [] }, source)).toEqual({
+          ok: false,
+          message: UNREVIEWED_EXPORT,
+        });
+      }
+      for (const format of ['stl', 'stl-each', '3mf', 'step'] as const) {
+        expect(await exportBodyFiles(refusing, format, { source })).toEqual({
+          ok: false,
+          message: UNREVIEWED_EXPORT,
+        });
+      }
+    }
+  });
+
+  it('writes from an approved agent branch as from main', async () => {
+    const doc = cabinet();
+    const { result } = await regen(doc);
+    const sources = { document: doc, parts: result.parts, assemblies: result.assemblies };
+    const approved = await exportCutList('list', sources, { source: agent('approved') });
+    const main = await exportCutList('list', sources, { source: MAIN });
+    expect(text(approved.bytes)).toBe(text(main.bytes));
   });
 });

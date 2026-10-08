@@ -21,6 +21,11 @@ import {
   restorableImportIds,
 } from './actions';
 import { kernelExchange, type Exchanger, type KernelBody } from './exchange';
+import { REFUSED_REVIEWS, agentSource } from './exportGate.test-fixture';
+import { UNKNOWN_EXPORT_SOURCE, UNREVIEWED_EXPORT } from '@manufakture/io';
+
+/** Main: the export gate (T8.3c) lets every export here through. */
+const MAIN = { id: 'main' };
 
 /** A fake kernel exchange over box meshes (in the kernel's layout: vertices per face). */
 function fakeExchanger(names: string[] = ['Demo part']): Exchanger & {
@@ -54,7 +59,7 @@ const documents = () => createDocumentStore(createDocument({ id: 'doc', name: 'B
 describe('exportBodies', () => {
   it('STL: one watertight binary file, named after the body, at the chosen tolerance', async () => {
     const ex = fakeExchanger();
-    const r = await exportBodies(ex, 'stl', { tolerance: 'fine' });
+    const r = await exportBodies(ex, 'stl', { source: MAIN, tolerance: 'fine' });
     if (!r.ok) throw new Error(r.message);
     expect(ex.tessellate).toHaveBeenCalledWith(['body1'], { linear: 0.005, angular: 0.1 });
     expect(r.value.map((f) => [f.name, f.type])).toEqual([['Demo part.stl', 'model/stl']]);
@@ -64,10 +69,10 @@ describe('exportBodies', () => {
 
   it('STL per body, and 3MF with one object per body, named after the document when several', async () => {
     const ex = fakeExchanger(['Bracket', 'Pin']);
-    const each = await exportBodies(ex, 'stl-each');
+    const each = await exportBodies(ex, 'stl-each', { source: MAIN });
     if (!each.ok) throw new Error(each.message);
     expect(each.value.map((f) => f.name)).toEqual(['Bracket.stl', 'Pin.stl']);
-    const threemf = await exportBodies(ex, '3mf', { documentName: 'Assembly' });
+    const threemf = await exportBodies(ex, '3mf', { source: MAIN, documentName: 'Assembly' });
     if (!threemf.ok) throw new Error(threemf.message);
     expect(threemf.value[0]!.name).toBe('Assembly.3mf');
     const report = validate3mf(threemf.value[0]!.bytes);
@@ -81,7 +86,11 @@ describe('exportBodies', () => {
       { id: 'body1', name: 'Base' },
       { id: 'body3', name: 'Lid' },
     ];
-    const threemf = await exportBodies(ex, '3mf', { documentName: 'Box', bodies: chosen });
+    const threemf = await exportBodies(ex, '3mf', {
+      source: MAIN,
+      documentName: 'Box',
+      bodies: chosen,
+    });
     if (!threemf.ok) throw new Error(threemf.message);
     expect(ex.tessellate).toHaveBeenCalledWith(
       ['body1', 'body3'],
@@ -92,18 +101,18 @@ describe('exportBodies', () => {
       ]),
     );
     expect(threemf.value[0]!.name).toBe('Box.3mf');
-    const one = await exportBodies(ex, 'step', { bodies: [chosen[1]!] });
+    const one = await exportBodies(ex, 'step', { source: MAIN, bodies: [chosen[1]!] });
     if (!one.ok) throw new Error(one.message);
     expect(one.value[0]!.name).toBe('Lid.step');
     expect(ex.exportStep).toHaveBeenLastCalledWith(['body3'], new Map([['body3', 'Lid']]));
-    expect((await exportBodies(ex, 'stl', { bodies: [] })).message).toBe(
+    expect((await exportBodies(ex, 'stl', { source: MAIN, bodies: [] })).message).toBe(
       'There is nothing to export.',
     );
   });
 
   it('STEP comes from the kernel', async () => {
     const ex = fakeExchanger();
-    const r = await exportBodies(ex, 'step');
+    const r = await exportBodies(ex, 'step', { source: MAIN });
     if (!r.ok) throw new Error(r.message);
     expect(r.value[0]).toMatchObject({ name: 'Demo part.step', type: 'model/step' });
     expect(ex.exportStep).toHaveBeenCalledWith(['body1']);
@@ -120,10 +129,10 @@ describe('exportBodies', () => {
         },
       ],
     });
-    const r = await exportBodies(ex, '3mf');
+    const r = await exportBodies(ex, '3mf', { source: MAIN });
     expect(r.ok).toBe(false);
     expect(r.message).toMatch(/Open is not watertight/);
-    expect((await exportBodies(fakeExchanger([]), 'stl')).message).toBe(
+    expect((await exportBodies(fakeExchanger([]), 'stl', { source: MAIN })).message).toBe(
       'There is nothing to export.',
     );
   });
@@ -298,16 +307,22 @@ describe('reference bodies and export', () => {
     expect(k.exchanger.bodies()).toEqual([{ id: 'demo-part', name: 'Demo part' }]);
 
     k.sent.length = 0;
-    const stl = await exportBodies(k.exchanger, 'stl', { documentName: 'Bracket' });
+    const stl = await exportBodies(k.exchanger, 'stl', { source: MAIN, documentName: 'Bracket' });
     if (!stl.ok) throw new Error(stl.message);
     // Named after the part, not the document: one body.
     expect(stl.value.map((f) => f.name)).toEqual(['Demo part.stl']);
-    const threemf = await exportBodies(k.exchanger, '3mf', { documentName: 'Bracket' });
+    const threemf = await exportBodies(k.exchanger, '3mf', {
+      source: MAIN,
+      documentName: 'Bracket',
+    });
     if (!threemf.ok) throw new Error(threemf.message);
     expect(validate3mf(threemf.value[0]!.bytes).parsed!.objects.map((o) => o.name)).toEqual([
       'Demo part',
     ]);
-    const stepOut = await exportBodies(k.exchanger, 'step', { documentName: 'Bracket' });
+    const stepOut = await exportBodies(k.exchanger, 'step', {
+      source: MAIN,
+      documentName: 'Bracket',
+    });
     if (!stepOut.ok) throw new Error(stepOut.message);
     expect(stepOut.value[0]!.name).toBe('Demo part.step');
     expect(shapesSent(k.sent, 'tessellate')).toEqual([3, 3]);
@@ -334,7 +349,7 @@ describe('reference bodies and export', () => {
     expect([...keep()]).toEqual(['part#1/import#1']);
     expect(k.exchanger.retain(keep())).toEqual([]);
     k.sent.length = 0;
-    const stl = await exportBodies(k.exchanger, 'stl');
+    const stl = await exportBodies(k.exchanger, 'stl', { source: MAIN });
     if (!stl.ok) throw new Error(stl.message);
     expect(shapesSent(k.sent, 'tessellate')).toEqual([3]);
 
@@ -435,5 +450,29 @@ describe('reference bodies and export', () => {
       { command: { type: 'deleteFeature', partId: 'part#1', featureId: 'import#9' } },
     ] as never;
     expect([...restorableImportIds(doc, history)]).toEqual(['part#1/import#4']);
+  });
+});
+
+describe('exportBodies behind the export gate', () => {
+  it('writes no STL, 3MF or STEP from an agent’s unreviewed branch, nor from an unknown one', async () => {
+    for (const format of ['stl', 'stl-each', '3mf', 'step'] as const) {
+      for (const review of REFUSED_REVIEWS) {
+        const ex = fakeExchanger();
+        expect(await exportBodies(ex, format, { source: agentSource(review) })).toEqual({
+          ok: false,
+          message: UNREVIEWED_EXPORT,
+        });
+        expect(ex.tessellate).not.toHaveBeenCalled();
+        expect(ex.exportStep).not.toHaveBeenCalled();
+      }
+      expect(await exportBodies(fakeExchanger(), format, { source: null })).toEqual({
+        ok: false,
+        message: UNKNOWN_EXPORT_SOURCE,
+      });
+      const approved = await exportBodies(fakeExchanger(), format, {
+        source: agentSource('approved'),
+      });
+      expect(approved.ok).toBe(true);
+    }
   });
 });

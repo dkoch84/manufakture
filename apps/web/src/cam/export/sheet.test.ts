@@ -25,6 +25,7 @@ function plan(over: Partial<ExportSettings> = {}, jobName = 'Sign'): ExportPlan 
     setupName: 'Top',
     machine,
     date: '2026-10-02',
+    source: { id: 'main' },
   });
   if (!r.ok) throw new Error(r.reasons.join('\n'));
   return r.plan;

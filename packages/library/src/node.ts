@@ -272,7 +272,9 @@ function parseLock(bytes: Uint8Array): LockRecord | null {
       v?.format === 'manufakture-lock' &&
       typeof v.token === 'string' &&
       typeof v.host === 'string' &&
-      typeof v.pid === 'number' &&
+      // A real process id: a non-positive one would signal a process group in `processAlive`.
+      Number.isSafeInteger(v.pid) &&
+      (v.pid as number) > 0 &&
       typeof v.processStart === 'number'
     ) {
       return v as LockRecord;

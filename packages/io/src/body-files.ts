@@ -16,6 +16,7 @@ import {
   type ExportBody,
   type ExportTolerancePreset,
 } from './export';
+import { exportAllowed, type ExportSource } from './export-gate';
 import { FABRICATION_MIME, type FabricationFile } from './fabrication';
 import { withStepDescription } from './step-header';
 
@@ -53,6 +54,11 @@ export interface BodyExchanger {
 }
 
 export interface BodyFileOptions {
+  /**
+   * The branch the bodies' document comes from: STL, 3MF and STEP are fabrication files, so an
+   * agent's branch that is not approved is refused (`exportAllowed`, ADR 0016 decision 12).
+   */
+  source: ExportSource | null;
   /** Mesh exports' tolerance (default `normal`). */
   tolerance?: ExportTolerancePreset;
   /** Names the file when there are several bodies. */
@@ -84,13 +90,16 @@ export type BodyFiles =
  * each a product named by its full id, built on demand (`exportStepWithMembers`) when
  * `options.partId` names the part they belong to; an exchanger that builds no members leaves them
  * out and says so. With `options.stepDescription`, a STEP file's header description is that text
- * (the construction disclaimer).
+ * (the construction disclaimer). Refused, before the exchanger is asked for anything, when
+ * `options.source` is an agent's unreviewed branch or is not known (`exportAllowed`).
  */
 export async function exportBodyFiles(
   exchanger: BodyExchanger,
   format: BodyFileFormat,
-  options: BodyFileOptions = {},
+  options: BodyFileOptions,
 ): Promise<BodyFiles> {
+  const gate = exportAllowed(options?.source);
+  if (!gate.ok) return gate;
   const bodies = options.bodies ?? exchanger.bodies();
   const members = options.members ?? [];
   const stepMembers =

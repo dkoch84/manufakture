@@ -3,7 +3,14 @@
 
 import { describe, expect, it } from 'vitest';
 import { DRAWING_MIME, drawingFile, drawingFileName, screenSvg } from './drawing-files';
+import { UNKNOWN_EXPORT_SOURCE, UNREVIEWED_EXPORT, type ExportSource } from './export-gate';
 import { bracketSheet } from './sheet-test-helpers';
+
+const main: ExportSource = { id: 'main' };
+const agent = (review: string): ExportSource => ({
+  id: 'b-1',
+  provenance: { origin: 'agent', review },
+});
 
 const text = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
 
@@ -18,9 +25,9 @@ describe('drawing files', () => {
   it('writes one sheet as SVG or DXF, and every sheet as one PDF', () => {
     const list = bracketSheet();
     const names = { drawing: 'Bracket', sheets: ['Sheet 1', 'Sheet 2'] };
-    const svg = drawingFile('svg', [list], names);
-    const dxf = drawingFile('dxf', [list], names);
-    const pdf = drawingFile('pdf', [list, list], names);
+    const svg = drawingFile('svg', [list], names, main);
+    const dxf = drawingFile('dxf', [list], names, main);
+    const pdf = drawingFile('pdf', [list, list], names, main);
     if (!svg.ok || !dxf.ok || !pdf.ok) throw new Error('refused');
     expect([svg.fileName, svg.type]).toEqual(['Bracket - Sheet 1.svg', DRAWING_MIME.svg]);
     expect(text(svg.bytes)).toContain('<title>Bracket - Sheet 1</title>');
@@ -31,15 +38,34 @@ describe('drawing files', () => {
 
   it('refuses a sheet that could not be laid out, and a sheet the writer cannot write', () => {
     const names = { drawing: 'Bracket', sheets: ['Front', 'Plan'] };
-    expect(drawingFile('pdf', [bracketSheet(), null], names)).toEqual({
+    expect(drawingFile('pdf', [bracketSheet(), null], names, main)).toEqual({
       ok: false,
       message: 'Plan cannot be laid out: check its size and views.',
     });
-    expect(drawingFile('svg', [], names)).toMatchObject({ ok: false });
+    expect(drawingFile('svg', [], names, main)).toMatchObject({ ok: false });
     const bad = { ...bracketSheet(), width: Number.NaN };
-    const r = drawingFile('dxf', [bad], names);
+    const r = drawingFile('dxf', [bad], names, main);
     expect(r.ok).toBe(false);
     expect(!r.ok && r.message).toMatch(/^The DXF could not be written: /);
+  });
+
+  it('refuses every format from an agent’s unreviewed branch, and allows main, a person’s and an approved one', () => {
+    const names = { drawing: 'Bracket', sheets: ['Sheet 1'] };
+    for (const format of ['svg', 'dxf', 'pdf'] as const) {
+      for (const review of ['open', 'submitted', 'changes-requested', 'rejected']) {
+        expect(drawingFile(format, [bracketSheet()], names, agent(review))).toEqual({
+          ok: false,
+          message: UNREVIEWED_EXPORT,
+        });
+      }
+      expect(drawingFile(format, [bracketSheet()], names, undefined as never)).toEqual({
+        ok: false,
+        message: UNKNOWN_EXPORT_SOURCE,
+      });
+      for (const source of [main, { id: 'b-2' }, agent('approved')]) {
+        expect(drawingFile(format, [bracketSheet()], names, source).ok).toBe(true);
+      }
+    }
   });
 
   it('scales the screen SVG to its box', () => {

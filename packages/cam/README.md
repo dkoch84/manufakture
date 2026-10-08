@@ -51,14 +51,18 @@ rest of the package is checked without them.
 - `gcode.ts`: the export settings (`defaultExportSettings`, `withPost`, `multiToolModes`), and
   `buildExport`, a generation (`GeneratedToolpaths`) linked into one job, posted, with the plan the
   operator reads; `exportFiles`, the one file or a zip of the files per tool and the setup sheet.
+  Both take the export gate's `source` (io README, "Fabrication exports") and refuse an agent's
+  unreviewed branch: `buildExport` with the reason, `exportFiles` by throwing.
 - `sheet.ts`: `setupSheetHtml(plan)`, the printable setup sheet.
 - `laser.ts`: the laser and plasma export: `extractLoops` (faces and sketch regions through the
-  CAM stage, sections through the kernel), `laserFile` (kerf compensation, DXF or SVG).
+  CAM stage, sections through the kernel), `laserFile` (kerf compensation, DXF or SVG; gated by
+  `options.source`).
 - `posts.ts`: `POST_IDS` in the order the export offers them, `postName`.
-- `index.ts`: the entry points. `exportGcode(document, setupId, geometer, { date, settings? })`
+- `index.ts`: the entry points. `exportGcode(document, setupId, geometer, { date, source, settings? })`
   resolves the setup through the CAM stage, generates every operation in-process (a fresh
   `createCamWorkerApi`, or `options.api`) and writes the files, refusing with every reason;
-  `exportLaser(document, scope, sources, services, options)` writes one laser file. The list of
+  `exportLaser(document, scope, sources, services, options)` writes one laser file. Both refuse,
+  before asking the CAM stage for anything, when `source` is an agent's unreviewed branch. The list of
   every fabrication format's entry point is in the io README, "Fabrication exports".
 
 ## Evaluated types (`types.ts`)

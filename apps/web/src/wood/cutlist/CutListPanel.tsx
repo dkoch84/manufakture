@@ -41,6 +41,8 @@ import { UNNAMED } from '@manufakture/kernel';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from 'zustand';
 import { ExpressionField } from '../../components/ExpressionField';
+import { ExportGateNotice } from '../../io/ExportGateNotice';
+import { currentExportSource, useExportRefusal } from '../../io/exportSource';
 import { downloadBytes } from '../../io/files';
 import { useModel, type ModelStore, type PartModel } from '../../model/model';
 import type { DocumentStoreApi } from '../../state/document';
@@ -291,6 +293,10 @@ export function CutListPanel({
     ...(oriented.error ? [oriented.error] : []),
   ];
 
+  // The export gate (T8.3c): the cut list shows on any branch, but its files are not written
+  // from an agent's unreviewed branch.
+  const gated = useExportRefusal();
+
   const save = (what: 'list' | 'bom' | 'pdf') => {
     try {
       const file = cutListFile(what, list, {
@@ -299,6 +305,7 @@ export function CutListPanel({
         layouts: current,
         notes: job.notes,
         warnings,
+        source: currentExportSource(),
       });
       download(file.bytes, file.name, file.type);
       setMessage(null);
@@ -463,17 +470,30 @@ export function CutListPanel({
           )}
         </div>
       )}
+      <ExportGateNotice refusal={gated} />
       <div className="cutlist-files">
-        <button type="button" data-testid="cutlist-csv" onClick={() => save('list')}>
+        <button
+          type="button"
+          data-testid="cutlist-csv"
+          disabled={gated !== null}
+          onClick={() => save('list')}
+        >
           Cut list CSV
         </button>
-        <button type="button" data-testid="cutlist-bom-csv" onClick={() => save('bom')}>
+        <button
+          type="button"
+          data-testid="cutlist-bom-csv"
+          disabled={gated !== null}
+          onClick={() => save('bom')}
+        >
           BOM CSV
         </button>
         <button
           type="button"
           data-testid="cutlist-pdf"
-          disabled={current === null && (job.sheets.length > 0 || job.sticks.length > 0)}
+          disabled={
+            gated !== null || (current === null && (job.sheets.length > 0 || job.sticks.length > 0))
+          }
           title={current === null ? 'Waiting for the layouts' : undefined}
           onClick={() => save('pdf')}
         >

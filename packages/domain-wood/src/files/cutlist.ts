@@ -5,7 +5,13 @@
 // same way and write the same bytes for the same input.
 
 import type { DisplayUnits } from '@manufakture/core';
-import { FABRICATION_MIME, documentFileName, type FabricationFile } from '@manufakture/io';
+import {
+  FABRICATION_MIME,
+  assertExportAllowed,
+  documentFileName,
+  type ExportSource,
+  type FabricationFile,
+} from '@manufakture/io';
 import { documentStock } from '@manufakture/stock';
 import type { CutList } from '../cutlist/cutlist';
 import {
@@ -34,17 +40,24 @@ export interface CutListFileOptions {
   notes: readonly LayoutNote[];
   /** Lines the PDF prints under the totals: bodies left out, instances not counted. */
   warnings: readonly string[];
+  /**
+   * The branch the document comes from. Cut lists are fabrication files: an agent's branch that
+   * is not approved is refused (`exportAllowed`, ADR 0016 decision 12).
+   */
+  source: ExportSource | null;
 }
 
 /**
  * One file of a cut list. Throws a RangeError for input the PDF writer cannot write (the app's
- * panel catches it and reports it).
+ * panel catches it and reports it), and an `ExportRefusedError` when `options.source` is an
+ * agent's unreviewed branch or is not known.
  */
 export function cutListFile(
   kind: CutListFileKind,
   list: CutList,
   options: CutListFileOptions,
 ): FabricationFile {
+  assertExportAllowed(options?.source);
   const { documentName, units, layouts } = options;
   if (kind === 'pdf') {
     const bytes = cutListPdf(list, layouts, {
@@ -75,12 +88,15 @@ export function cutListFile(
  * the list of `sources` (regen's `PartResult`s and `AssemblyResult`s fit `parts` and
  * `assemblies`), its sheets and sticks laid out in-process, and the file written as the panel
  * writes it. `sizingErrors` are lines about bodies whose oriented size could not be measured.
+ * Throws an `ExportRefusedError`, before laying anything out, when `options.source` (the branch
+ * the document comes from) is an agent's unreviewed branch or is not known.
  */
 export async function exportCutList(
   kind: CutListFileKind,
   sources: CutListSources,
-  options: { sizingErrors?: readonly string[]; signal?: AbortSignal } = {},
+  options: { source: ExportSource | null; sizingErrors?: readonly string[]; signal?: AbortSignal },
 ): Promise<FabricationFile> {
+  assertExportAllowed(options?.source);
   const doc = sources.document;
   const list = documentCutList(sources);
   const stock = documentStock(doc);
@@ -95,5 +111,6 @@ export async function exportCutList(
     layouts,
     notes: job.notes,
     warnings: [...excludedLines(list, doc), ...missingLines(list), ...(options.sizingErrors ?? [])],
+    source: options.source,
   });
 }

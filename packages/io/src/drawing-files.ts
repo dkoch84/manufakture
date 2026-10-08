@@ -7,6 +7,7 @@
 
 import type { DisplayList } from '@manufakture/drawing';
 import { drawingToDxf, drawingToPdf, drawingToSvg } from './drawing-export';
+import { exportAllowed, type ExportSource } from './export-gate';
 
 export type DrawingFormat = 'svg' | 'dxf' | 'pdf';
 
@@ -31,13 +32,18 @@ export function drawingFileName(parts: readonly string[], format: DrawingFormat)
 
 /**
  * The file for `format`: SVG and DXF of one sheet (`lists[0]`), PDF of every sheet in `lists`,
- * a page each. A sheet that could not be laid out (`null`) is reported by `names[i]`.
+ * a page each. A sheet that could not be laid out (`null`) is reported by `names[i]`. Drawings
+ * are fabrication files: refused when `source`, the branch the drawing's document comes from, is
+ * an agent's unreviewed branch or is not known (`exportAllowed`).
  */
 export function drawingFile(
   format: DrawingFormat,
   lists: readonly (DisplayList | null)[],
   names: { drawing: string; sheets: readonly string[] },
+  source: ExportSource | null,
 ): DrawingFile {
+  const gate = exportAllowed(source);
+  if (!gate.ok) return gate;
   const missing = lists.findIndex((l) => l === null);
   if (missing >= 0 || lists.length === 0) {
     const sheet = names.sheets[missing] ?? 'The sheet';

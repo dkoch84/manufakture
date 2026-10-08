@@ -26,6 +26,11 @@ import {
 import type { PrintIssue } from './issues';
 import { apply, boxPart, partsDocument, setupOf, withSetup } from './print.test-fixture';
 import { resolveSetup } from './resolve';
+import { REFUSED_REVIEWS, agentSource } from '../io/exportGate.test-fixture';
+import { UNREVIEWED_EXPORT } from '@manufakture/io';
+
+/** Main: the export gate (T8.3c) lets every export here through. */
+const MAIN = { id: 'main' };
 
 const UNITS = partsDocument().units;
 const x1c = findPrinter('bambu-x1c')!;
@@ -92,7 +97,11 @@ describe('exportPrintSetup', () => {
     const { doc, setupId, parts } = twoColour(2);
     const resolved = resolveSetup(doc, setupOf(doc, setupId), parts);
     const ex = fakeExchanger(() => parts);
-    const r = await exportPrintSetup(ex, resolved, { documentName: doc.name, units: UNITS });
+    const r = await exportPrintSetup(ex, resolved, {
+      source: MAIN,
+      documentName: doc.name,
+      units: UNITS,
+    });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.value.map((f) => [f.name, f.type])).toEqual([['Jig-Plate 1.3mf', 'model/3mf']]);
@@ -152,10 +161,7 @@ describe('exportPrintSetup', () => {
     const r = await exportPrintSetup(
       fakeExchanger(() => parts),
       resolved,
-      {
-        documentName: laid.name,
-        units: UNITS,
-      },
+      { source: MAIN, documentName: laid.name, units: UNITS },
     );
     expect(r.ok).toBe(true);
     if (!r.ok) return;
@@ -181,7 +187,11 @@ describe('exportPrintSetup', () => {
       "Not exported. Part 1 does not fit the Bambu Lab X1 Carbon's bed: too big by x 44.00 mm.",
     );
     const ex = fakeExchanger(() => parts);
-    const r = await exportPrintSetup(ex, resolved, { documentName: doc.name, units: UNITS });
+    const r = await exportPrintSetup(ex, resolved, {
+      source: MAIN,
+      documentName: doc.name,
+      units: UNITS,
+    });
     expect(r).toEqual({ ok: false, message: refusal });
     expect(ex.tessellate).not.toHaveBeenCalled();
   });
@@ -212,10 +222,7 @@ describe('exportPrintSetup', () => {
     const r = await exportPrintSetup(
       fakeExchanger(() => parts),
       resolved,
-      {
-        documentName: doc.name,
-        units: UNITS,
-      },
+      { source: MAIN, documentName: doc.name, units: UNITS },
     );
     expect(r).toEqual({
       ok: false,
@@ -234,7 +241,7 @@ describe('exportPrintSetup', () => {
     const r = await exportPrintSetup(
       fakeExchanger(() => parts),
       resolved,
-      { documentName: doc.name, units: UNITS },
+      { source: MAIN, documentName: doc.name, units: UNITS },
     );
     expect(r.ok).toBe(true);
     if (!r.ok) return;
@@ -253,7 +260,7 @@ describe('exportPrintSetup', () => {
     const r = await exportPrintSetup(
       fakeExchanger(() => parts),
       resolved,
-      { documentName: doc.name, units: UNITS },
+      { source: MAIN, documentName: doc.name, units: UNITS },
     );
     expect(r.ok).toBe(true);
     if (!r.ok) return;
@@ -294,7 +301,7 @@ describe('exportPrintSetup', () => {
     const r = await exportPrintSetup(
       fakeExchanger(() => parts),
       resolved,
-      { documentName: doc.name, units: UNITS },
+      { source: MAIN, documentName: doc.name, units: UNITS },
     );
     expect(r).toEqual({
       ok: false,
@@ -317,7 +324,7 @@ describe('exportPrintSetup', () => {
       await exportPrintSetup(
         fakeExchanger(() => parts),
         resolved,
-        { documentName: doc.name, units: UNITS },
+        { source: MAIN, documentName: doc.name, units: UNITS },
       ),
     ).toEqual({ ok: false, message });
 
@@ -333,7 +340,7 @@ describe('exportPrintSetup', () => {
     const r = await exportPrintSetup(
       ex,
       resolveSetup(many.doc, setupOf(many.doc, many.setupId), parts),
-      { documentName: doc.name, units: UNITS },
+      { source: MAIN, documentName: doc.name, units: UNITS },
     );
     expect(r.ok).toBe(false);
     expect(r.message).toMatch(/^Not exported\. The \d+ copies need more than one plate/);
@@ -356,6 +363,7 @@ describe('exportPrintSetup', () => {
       fakeExchanger(() => parts),
       resolved,
       {
+        source: MAIN,
         documentName: doc.name,
         units: UNITS,
         issues: [issue('overhang'), issue('thinWall'), issue('thinWall')],
@@ -370,11 +378,7 @@ describe('exportPrintSetup', () => {
     const r = await exportPrintSetup(
       fakeExchanger(() => parts),
       resolved,
-      {
-        documentName: doc.name,
-        units: UNITS,
-        format: 'stl',
-      },
+      { source: MAIN, documentName: doc.name, units: UNITS, format: 'stl' },
     );
     expect(r.ok).toBe(true);
     if (!r.ok) return;
@@ -409,7 +413,7 @@ describe('exportPrintSetup', () => {
     const r = await exportPrintSetup(
       fakeExchanger(() => parts),
       resolved,
-      { documentName: named.name, units: UNITS, format: 'stl' },
+      { source: MAIN, documentName: named.name, units: UNITS, format: 'stl' },
     );
     expect(r.ok).toBe(true);
     if (!r.ok) return;
@@ -434,10 +438,7 @@ describe('exportPrintSetup', () => {
     const r = await exportPrintSetup(
       fakeExchanger(() => parts),
       resolved,
-      {
-        documentName: named.name,
-        units: UNITS,
-      },
+      { source: MAIN, documentName: named.name, units: UNITS },
     );
     expect(r.ok).toBe(true);
     if (!r.ok) return;
@@ -482,6 +483,7 @@ describe('exportPrintConfigurations', () => {
       fakeExchanger(() => parts),
       regen,
       {
+        source: MAIN,
         document: doc,
         setupId,
         onFile: (f) => files.push(f.name),
@@ -520,7 +522,7 @@ describe('exportPrintConfigurations', () => {
     const r = await exportPrintConfigurations(
       fakeExchanger(() => parts),
       regen,
-      { document: doc, setupId, onFile: (f) => files.push(f.name) },
+      { source: MAIN, document: doc, setupId, onFile: (f) => files.push(f.name) },
     );
     expect(files).toEqual(['Shelf-Plate 1-20 wide.3mf', 'Shelf-Plate 1-40 wide.3mf']);
     expect(r.files).toEqual(files);
@@ -538,6 +540,7 @@ describe('exportPrintConfigurations', () => {
       fakeExchanger(() => parts),
       async () => ({ generation: 1, ms: 1, parts }),
       {
+        source: MAIN,
         document: doc,
         setupId,
         signal: controller.signal,
@@ -549,5 +552,46 @@ describe('exportPrintConfigurations', () => {
     expect(r.message).toBe(
       'Export cancelled after 1 of 3 configurations (Shelf-Plate 1-20 wide.3mf).',
     );
+  });
+});
+
+describe('print exports behind the export gate', () => {
+  it('writes no plate, as 3MF or STL, from an agent’s unreviewed branch', async () => {
+    const { doc, setupId, parts } = twoColour(2);
+    const resolved = resolveSetup(doc, setupOf(doc, setupId), parts);
+    for (const format of ['3mf', 'stl'] as const) {
+      for (const review of REFUSED_REVIEWS) {
+        const ex = fakeExchanger(() => parts);
+        expect(
+          await exportPrintSetup(ex, resolved, {
+            source: agentSource(review),
+            documentName: doc.name,
+            units: UNITS,
+            format,
+          }),
+        ).toEqual({ ok: false, message: UNREVIEWED_EXPORT });
+        expect(ex.tessellate).not.toHaveBeenCalled();
+        const regen = vi.fn();
+        const all = await exportPrintConfigurations(ex, regen, {
+          source: agentSource(review),
+          document: doc,
+          setupId,
+          format,
+        });
+        expect(all).toMatchObject({ ok: false, files: [], message: UNREVIEWED_EXPORT });
+        expect(regen).not.toHaveBeenCalled();
+      }
+      const ok = await exportPrintSetup(
+        fakeExchanger(() => parts),
+        resolved,
+        {
+          source: agentSource('approved'),
+          documentName: doc.name,
+          units: UNITS,
+          format,
+        },
+      );
+      expect(ok.ok).toBe(true);
+    }
   });
 });

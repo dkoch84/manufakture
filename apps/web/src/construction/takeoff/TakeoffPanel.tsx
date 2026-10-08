@@ -38,6 +38,8 @@ import { findStock } from '@manufakture/stock';
 import { formatLength } from '@manufakture/units';
 import { useMemo, useState } from 'react';
 import { useStore } from 'zustand';
+import { ExportGateNotice } from '../../io/ExportGateNotice';
+import { currentExportSource, useExportRefusal } from '../../io/exportSource';
 import { downloadBytes } from '../../io/files';
 import { useModel, type ModelStore, type PartModel } from '../../model/model';
 import type { DocumentStoreApi } from '../../state/document';
@@ -194,6 +196,10 @@ export function TakeoffPanel({
     [rows, picked],
   );
 
+  // The export gate (T8.3c): the takeoff shows on any branch, but its files are not written
+  // from an agent's unreviewed branch.
+  const gated = useExportRefusal();
+
   const save = (what: 'csv' | 'pdf') => {
     if (!computed.ok) return;
     try {
@@ -202,6 +208,7 @@ export function TakeoffPanel({
         units,
         subtotals,
         notes: computed.model.notes,
+        source: currentExportSource(),
       });
       download(file.bytes, file.name, file.type);
       setMessage(null);
@@ -394,11 +401,12 @@ export function TakeoffPanel({
           })}
         </div>
       )}
+      <ExportGateNotice refusal={gated} />
       <div className="cutlist-files">
         <button
           type="button"
           data-testid="takeoff-csv"
-          disabled={!computed.ok}
+          disabled={!computed.ok || gated !== null}
           onClick={() => save('csv')}
         >
           Takeoff CSV
@@ -406,7 +414,7 @@ export function TakeoffPanel({
         <button
           type="button"
           data-testid="takeoff-pdf"
-          disabled={!computed.ok}
+          disabled={!computed.ok || gated !== null}
           onClick={() => save('pdf')}
         >
           PDF

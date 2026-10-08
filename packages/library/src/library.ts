@@ -343,7 +343,33 @@ export interface Version {
    * kept beside the revisions (`remote-<id>.json`), checked against `snapshotSha256` as usual.
    */
   serverRev?: number;
+  /**
+   * Set on a version of main that records an approved review (T8.3b writes it when it merges an
+   * agent's branch): which review the work came from, so a later export can say so. Only main's
+   * versions carry one; an imported `.mfk` keeps none.
+   */
+  review?: ReviewReference;
 }
+
+/**
+ * The review a merge into main came from (ADR 0016 decisions 11 and 12): the agent branch, its
+ * session and client as its provenance names them, the bundle the reviewer approved (stored in
+ * that branch's directory as `review-<bundleRevision>.json`) and the merge's label.
+ */
+export interface ReviewReference {
+  /** The agent branch's id. */
+  branch: string;
+  sessionId: string;
+  /** Self-reported by the agent's client, as its provenance had it: shown, never trusted. */
+  clientName: string;
+  /** The head revision of the branch the approved bundle was built at. */
+  bundleRevision: number;
+  /** The merge's label in main's history, naming the session. */
+  label: string;
+}
+
+/** A review reference's label, at most this many characters. */
+export const MAX_REVIEW_LABEL = 200;
 
 /** A version from the sync server, to keep here (`adoptVersion`). */
 export interface RemoteVersion {
@@ -415,6 +441,8 @@ export const MAX_CLIENT_NAME = 200;
 export interface VersionMeta {
   name: string;
   description?: string;
+  /** The review the version's work came from; main's versions only (`Version.review`). */
+  review?: ReviewReference;
 }
 
 /** A revision read back, possibly rebuilt by replaying the log. */
@@ -528,13 +556,40 @@ function versionMeta(meta: VersionMeta): { name: string; description: string } |
   return { name, description };
 }
 
+/** Text a person reads that came from elsewhere: 1 to `max` characters, unpadded, no Cc/Cf/Cs. */
+const shownText = (v: unknown, max: number): v is string =>
+  typeof v === 'string' &&
+  v.length > 0 &&
+  v.length <= max &&
+  v.trim() === v &&
+  !/[\p{Cc}\p{Cf}\p{Cs}]/u.test(v);
+
+/**
+ * A review reference, checked field by field (other fields are left out): the branch an agent
+ * branch id (never main), the session a storable id, the client name as provenance checks it, the
+ * bundle's revision a positive safe integer and the label shown text of at most
+ * MAX_REVIEW_LABEL characters. Null when anything is off.
+ */
+export function parseReviewReference(v: unknown): ReviewReference | null {
+  if (!isRecord(v)) return null;
+  const { branch, sessionId, clientName, bundleRevision, label } = v;
+  if (typeof branch !== 'string' || !isBranchId(branch) || branch === MAIN_BRANCH) return null;
+  if (typeof sessionId !== 'string' || !isStorableId(sessionId)) return null;
+  if (!shownText(clientName, MAX_CLIENT_NAME)) return null;
+  if (!Number.isSafeInteger(bundleRevision) || (bundleRevision as number) < 1) return null;
+  if (!shownText(label, MAX_REVIEW_LABEL)) return null;
+  return { branch, sessionId, clientName, bundleRevision: bundleRevision as number, label };
+}
+
 /**
  * One version record, checked field by field (it may come from an imported file): exactly the
- * known fields are kept. Null when anything is off.
+ * known fields are kept. Null when anything is off, a review reference included (and one on a
+ * version that is not of main).
  */
 function parseVersion(v: unknown): Version | null {
   if (!isRecord(v)) return null;
-  const { id, name, description, revision, snapshotSha256, createdAt, branch, serverRev } = v;
+  const { id, name, description, revision, snapshotSha256, createdAt, branch, serverRev, review } =
+    v;
   if (typeof id !== 'string' || !VERSION_ID.test(id)) return null;
   if (typeof name !== 'string' || typeof description !== 'string') return null;
   const meta = versionMeta({ name, description });
@@ -551,6 +606,11 @@ function parseVersion(v: unknown): Version | null {
   // Main is recorded by leaving the field out, as versions made before branches are.
   if (branch !== undefined && (typeof branch !== 'string' || !isBranchId(branch))) return null;
   if (branch === MAIN_BRANCH) return null;
+  let reviewed: ReviewReference | null = null;
+  if (review !== undefined) {
+    reviewed = parseReviewReference(review);
+    if (!reviewed || branch !== undefined) return null;
+  }
   return {
     id,
     name,
@@ -560,6 +620,7 @@ function parseVersion(v: unknown): Version | null {
     createdAt,
     ...(branch === undefined ? {} : { branch }),
     ...(serverRev === undefined ? {} : { serverRev: serverRev as number }),
+    ...(reviewed ? { review: reviewed } : {}),
   };
 }
 
@@ -1819,6 +1880,14 @@ export class DocumentLibrary {
       if (!isBranchId(on)) return NO_BRANCH;
       const checked = versionMeta(meta);
       if (typeof checked === 'string') return { ok: false, message: checked };
+      let review: ReviewReference | null = null;
+      if (meta.review !== undefined) {
+        if (on !== MAIN_BRANCH) {
+          return { ok: false, message: 'Only a version of the main branch records a review.' };
+        }
+        review = parseReviewReference(meta.review);
+        if (!review) return { ok: false, message: 'The review reference is invalid.' };
+      }
       return this.#locked(id, async () => {
         let named: Pick<Head, 'revision' | 'snapshotSha256'> | null = null;
         if (on !== MAIN_BRANCH || revision !== undefined) {
@@ -1837,7 +1906,7 @@ export class DocumentLibrary {
           } else if (revision === head.revision) {
             named = head;
           } else {
-            const stamp = await this.#revisionStamp(id, on, revision);
+            const stamp = await this.#revisionStamp(id, on, revision, head.revision);
             if (!stamp.ok) return stamp;
             named = stamp.value;
           }
@@ -1857,6 +1926,7 @@ export class DocumentLibrary {
               snapshotSha256: at.snapshotSha256,
               createdAt: this.#now().toISOString(),
               ...(on === MAIN_BRANCH ? {} : { branch: on }),
+              ...(review ? { review } : {}),
             };
             return { items: [...versions, version], result: version };
           },
@@ -1873,13 +1943,18 @@ export class DocumentLibrary {
    * stores them, so the version names a file that pruning keeps and `readVersion` reads directly.
    * Recording only the hash of a replay would break once a format bump changes the storage form.
    * A snapshot there that does not read is copied aside first, as loading does with one above
-   * the head.
+   * the head. `rev` must be a revision of the branch, an integer from 1 to `headRevision`: it is
+   * checked before any file name is made of it.
    */
   async #revisionStamp(
     id: string,
     branch: string,
     rev: number,
+    headRevision: number,
   ): Promise<LibraryResult<Pick<Head, 'revision' | 'snapshotSha256'>>> {
+    if (!Number.isSafeInteger(rev) || rev < 1 || rev > headRevision) {
+      return { ok: false, message: 'There is no revision of it with that number.' };
+    }
     const dir = this.#dir(id, branch);
     const bytes = await this.#backend.read(`${dir}/${snapshotName(rev)}`);
     if (bytes && (await this.#decodeSnapshot(id, bytes))) {
@@ -2004,6 +2079,40 @@ export class DocumentLibrary {
             ? listed.items
             : listed.items.filter((v) => versionBranch(v) === branch);
         return { ok: true, value: items };
+      });
+    });
+  }
+
+  /**
+   * The review main's work at `revision` (default: main's head) last came from: the latest
+   * version of main at or before that revision that records one (`Version.review`, written when
+   * an agent's branch is approved and merged), with that record. Null when none does: the work is
+   * a person's. What an export from main says about where its work came from.
+   */
+  reviewOf(
+    id: string,
+    revision?: number,
+  ): Promise<LibraryResult<{ version: Version; review: ReviewReference } | null>> {
+    return this.#run(async () => {
+      if (!isStorableId(id)) return { ok: false, message: `There is no document "${id}".` };
+      if (revision !== undefined && (!Number.isSafeInteger(revision) || revision < 1)) {
+        return { ok: false, message: 'There is no revision of it with that number.' };
+      }
+      return this.#locked(id, async () => {
+        const names = await this.#backend.list(this.#dir(id));
+        if (names.length === 0) return { ok: false, message: `There is no document "${id}".` };
+        const head = await this.#head(id);
+        const listed = await this.#readList(VERSION_LIST, id, head, names);
+        if (!listed.ok) return listed;
+        const at = revision ?? head?.revision ?? 0;
+        let found: (Version & { review: ReviewReference }) | null = null;
+        for (const v of listed.items) {
+          if (v.review === undefined || v.branch !== undefined || v.serverRev !== undefined)
+            continue;
+          if (v.revision > at || (found && v.revision < found.revision)) continue;
+          found = v as Version & { review: ReviewReference };
+        }
+        return { ok: true, value: found ? { version: found, review: found.review } : null };
       });
     });
   }
@@ -2524,6 +2633,8 @@ export class DocumentLibrary {
       delete record.branch;
       // A revision of this document now, not one of a server log.
       delete record.serverRev;
+      // A review recorded in another library is not one of this one's.
+      delete record.review;
       records.push(record);
     }
     const stored = encodeStored(doc);

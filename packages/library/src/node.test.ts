@@ -308,6 +308,28 @@ describe('NodeBranchLocks: lock files', () => {
     expect(await locks.acquire('doc-1', 'b-1')).not.toBeNull();
   });
 
+  it('reads a lock whose pid is not a positive safe integer as one that does not read', async () => {
+    for (const pid of [0, -1, -4242, 1.5, 2 ** 53, Number.NaN, '4242']) {
+      const asked: unknown[] = [];
+      const { locks, file } = await planted(
+        { pid: pid as number },
+        {
+          staleAfterMs: 60_000,
+          isAlive: (p) => {
+            asked.push(p);
+            return false;
+          },
+        },
+      );
+      expect(await locks.holder('doc-1', 'b-1')).toBeNull();
+      // Judged by its age alone: never by signalling that pid (0 or -1 would reach a group).
+      expect(await locks.acquire('doc-1', 'b-1')).toBeNull();
+      await age(file, 61_000);
+      expect(await locks.acquire('doc-1', 'b-1')).not.toBeNull();
+      expect(asked).toEqual([]);
+    }
+  });
+
   it('keeps a lock file that does not read until it is stale', async () => {
     const { locks, file } = await planted('', { staleAfterMs: 60_000 });
     expect(await locks.acquire('doc-1', 'b-1')).toBeNull();

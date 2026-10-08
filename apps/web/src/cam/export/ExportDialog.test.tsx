@@ -8,7 +8,7 @@ import type { CamClient } from '@manufakture/cam/client';
 import type { CamOperation, ManufaktureDocument } from '@manufakture/core';
 import type { CamGeometryResult } from '@manufakture/regen';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ExportedFile } from '../../io/actions';
 import { createModelStore } from '../../model/model';
 import { createDocumentStore } from '../../state/document';
@@ -17,6 +17,12 @@ import { CamTree } from '../CamWorkspace';
 import type { CamGeometer } from '../geometer';
 import { createCamUiStore } from '../state';
 import { square } from './export.test-fixture';
+import { exportSourceStore } from '../../io/exportSource';
+import { REFUSED_REVIEWS, agentSource } from '../../io/exportGate.test-fixture';
+import { UNREVIEWED_EXPORT } from '@manufakture/io';
+
+// Main is open: the export gate (T8.3c) lets these exports through unless a test says otherwise.
+beforeEach(() => exportSourceStore.setState({ source: { id: 'main' } }));
 
 afterEach(cleanup);
 
@@ -257,6 +263,31 @@ describe('ExportDialog', () => {
 
     fireEvent.click(screen.getByTestId('cam-export-close'));
     expect(screen.queryByTestId('cam-export-dialog')).toBeNull();
+  });
+
+  it('refuses on an agent’s unreviewed branch: says why, shows no job and saves nothing', async () => {
+    for (const review of REFUSED_REVIEWS) {
+      exportSourceStore.setState({ source: agentSource(review) });
+      const { saved } = mount(withOps(facing('facing#1', 'Face')));
+      fireEvent.click(screen.getByTestId('cam-export'));
+      expect(screen.getByTestId('export-gate-refusal').textContent).toBe(UNREVIEWED_EXPORT);
+      // Generated or not, no job is assembled and Save stays off.
+      await waitFor(() => expect(screen.queryByTestId('cam-export-progress')).toBeNull());
+      expect(screen.queryByTestId('cam-export-summary')).toBeNull();
+      expect(screen.queryByTestId('cam-export-refused')).toBeNull();
+      for (const id of ['cam-export-save', 'cam-export-save-sheet', 'cam-export-print']) {
+        expect(button(id).disabled).toBe(true);
+        fireEvent.click(button(id));
+      }
+      expect(saved).toEqual([]);
+      cleanup();
+    }
+    // Approved, it exports as from main.
+    exportSourceStore.setState({ source: agentSource('approved') });
+    mount(withOps(facing('facing#1', 'Face')));
+    fireEvent.click(screen.getByTestId('cam-export'));
+    await waitFor(() => expect(screen.getByTestId('cam-export-summary')).toBeTruthy());
+    expect(screen.queryByTestId('export-gate-refusal')).toBeNull();
   });
 
   it('refuses with the reason when an operation has an error', async () => {

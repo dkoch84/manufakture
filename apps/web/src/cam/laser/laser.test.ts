@@ -28,7 +28,10 @@ import {
   type LaserLayer,
   type LaserSource,
 } from '@manufakture/cam/export';
+import { UNKNOWN_EXPORT_SOURCE, UNREVIEWED_EXPORT } from '@manufakture/io';
 import { dxfLoops, svgLoops } from './readBack.test-fixture';
+
+const main = { id: 'main' };
 
 /**
  * The M1 bracket's side profile, counter-clockwise: a 50 mm foot and a 40 mm upright, 6 mm thick,
@@ -432,7 +435,7 @@ describe('laserFile', () => {
 
   for (const format of ['dxf', 'svg'] as const) {
     it(`writes ${format.toUpperCase()} that reads back with the exact areas, at the origin`, () => {
-      const r = laserFile(layers, { format, kerf: 0, baseName: 'Bracket' });
+      const r = laserFile(layers, { format, kerf: 0, baseName: 'Bracket', source: main });
       expect(r.ok).toBe(true);
       if (!r.ok) return;
       expect(r.file.name).toBe(`Bracket.${format}`);
@@ -460,7 +463,7 @@ describe('laserFile', () => {
   it('compensates the kerf: the outline grows and the hole shrinks by about P k / 2', () => {
     const kerf = 0.2;
     const d = kerf / 2;
-    const r = laserFile(layers, { format: 'dxf', kerf, baseName: 'Bracket' });
+    const r = laserFile(layers, { format: 'dxf', kerf, baseName: 'Bracket', source: main });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     const [outline, h] = dxfLoops(new TextDecoder().decode(r.file.bytes)) as [
@@ -498,20 +501,40 @@ describe('laserFile', () => {
         { name: 'outer cut', loops: [shifted(0, 0)] },
         { name: 'Outer Cut', loops: [hole(25, 3, 1)] },
       ],
-      { format: 'dxf', kerf: 0, baseName: 'x' },
+      { format: 'dxf', kerf: 0, baseName: 'x', source: main },
     );
     expect(r.ok && r.warnings).toEqual([
       'Layers "outer cut", "Outer Cut" have the same name in DXF; all but the first are numbered (_2, _3...): rename them to tell them apart.',
     ]);
   });
 
+  it('refuses both formats from an agent’s unreviewed branch, and writes them from an approved one', () => {
+    const agent = (review: string) => ({
+      id: 'b-1',
+      provenance: { origin: 'agent' as const, review },
+    });
+    for (const format of ['dxf', 'svg'] as const) {
+      for (const review of ['open', 'submitted', 'changes-requested', 'rejected']) {
+        expect(
+          laserFile(layers, { format, kerf: 0, baseName: 'x', source: agent(review) }),
+        ).toEqual({ ok: false, message: UNREVIEWED_EXPORT });
+      }
+      expect(
+        laserFile(layers, { format, kerf: 0, baseName: 'x', source: undefined as never }),
+      ).toEqual({ ok: false, message: UNKNOWN_EXPORT_SOURCE });
+      for (const source of [main, { id: 'b-2' }, agent('approved')]) {
+        expect(laserFile(layers, { format, kerf: 0, baseName: 'x', source }).ok).toBe(true);
+      }
+    }
+  });
+
   it('refuses a bad kerf and warns about a hole that closes up', () => {
-    expect(laserFile(layers, { format: 'svg', kerf: -1, baseName: 'x' })).toEqual({
+    expect(laserFile(layers, { format: 'svg', kerf: -1, baseName: 'x', source: main })).toEqual({
       ok: false,
       message: 'The kerf must be zero or more.',
     });
     const pin: LaserLayer[] = [{ name: 'cut', loops: [shifted(0, 0), hole(25, 3, 0.1)] }];
-    const r = laserFile(pin, { format: 'svg', kerf: 0.4, baseName: 'x' });
+    const r = laserFile(pin, { format: 'svg', kerf: 0.4, baseName: 'x', source: main });
     expect(r.ok && r.warnings).toEqual([
       'Layer cut: 1 hole(s) narrower than the kerf closed up and are left out.',
     ]);
