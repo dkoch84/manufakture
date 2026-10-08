@@ -11,7 +11,7 @@ The **Scripts** panel is in the side panel, under Variables. It lists the docume
 - **New script** opens the script editor on a new script. It starts as the box below, so it builds something at once.
 - **Edit** opens a script in the editor. **Delete** removes a script that no feature runs (change or delete those features first).
 
-The editor floats over the viewport. At the top are the script's **Name** and **Language** (JavaScript or TypeScript); below is the code, with line numbers, highlighting and undo of its own. **Save** writes the script to the document as one step (the document's **Undo** takes it back), and every feature that runs it is rebuilt. **Close** (or Escape) closes the editor; with changes not saved, it asks first.
+The editor floats over the viewport. At the top are the script's **Name** and **Language** (JavaScript or TypeScript); below is the code, with line numbers, highlighting and undo of its own: click in it and type, as in any code editor. A line under the code names the language and says where errors appear; an empty code area says what to write. **Save** writes the script to the document as one step (the document's **Undo** takes it back), and every feature that runs it is rebuilt. **Close** (or Escape) closes the editor; with changes not saved, it asks first.
 
 When a feature that runs the script fails because of it, the editor marks the place: a red dot in the margin and an underline at the line and column the error points to, with the message on hover, and a list of the problems under the code, such as `Scripted 1 (line 10, column 18): Error: no box today`. The marks belong to the saved script: edit the code and they go until you save again.
 

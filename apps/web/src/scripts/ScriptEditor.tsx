@@ -180,6 +180,11 @@ export function ScriptEditor({
           />
         </Suspense>
       </div>
+      <p className="field-note script-editor-hint" data-testid="script-hint">
+        {draft.language === 'ts' ? 'TypeScript' : 'JavaScript'}: click in the code and type. Save
+        rebuilds every feature that runs the script; the errors it reports are marked in the code
+        (hover a mark for the message) and listed below.
+      </p>
       {problems.length > 0 && (
         <ul className="script-problems" data-testid="script-problems" aria-label="Problems">
           {problems.map((p, i) => (

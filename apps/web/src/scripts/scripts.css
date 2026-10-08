@@ -109,6 +109,10 @@
   height: 100%;
 }
 
+.script-editor-hint {
+  margin: 0;
+}
+
 .script-problems {
   max-height: 8rem;
   overflow: auto;
