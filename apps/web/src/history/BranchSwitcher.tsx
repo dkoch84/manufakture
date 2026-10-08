@@ -1,11 +1,21 @@
 // The branch switcher next to the document name: which branch of the document is open, the
 // others to switch to, and renaming or deleting the open one (never the main branch). A branch
 // is made from a version, in the history viewer (ViewerBanner's Branch). What each action does
-// to the library and the editor is the app's (App.tsx).
+// to the library and the editor is the app's (App.tsx). Agent branches (M8 plan T8.3b) are listed
+// in a group of their own, each titled with its client, session and review state, and the open
+// one is marked beside the list.
 
 import { useState, type FormEvent } from 'react';
 import { MAIN_BRANCH, type Branch } from '@manufakture/library';
+import { clip, isAgentBranch, reviewStateText } from '../review/review';
 import './history.css';
+import '../review/review.css';
+
+/** What an agent branch's title and mark say: who made it, its session, its review state. */
+const agentText = (b: Branch): string =>
+  b.provenance
+    ? `Agent: ${clip(b.provenance.clientName, 80)}, session ${b.provenance.sessionId}, ${reviewStateText(b.provenance.review)}`
+    : '';
 
 export interface BranchSwitcherProps {
   /** Main first, as the library lists them. */
@@ -34,6 +44,8 @@ export function BranchSwitcher({
   const [failure, setFailure] = useState<string | null>(null);
   const open = branches.find((b) => b.id === current);
   const main = current === MAIN_BRANCH;
+  const agents = branches.filter(isAgentBranch);
+  const people = branches.filter((b) => !isAgentBranch(b));
 
   const run = (action: () => Promise<string | null>) => {
     setBusy(true);
@@ -69,12 +81,31 @@ export function BranchSwitcher({
         title="The branch open: each has its own history and versions"
         onChange={(e) => onSwitch(e.target.value)}
       >
-        {branches.map((b) => (
+        {people.map((b) => (
           <option key={b.id} value={b.id}>
             {b.name}
           </option>
         ))}
+        {agents.length > 0 && (
+          <optgroup label="Agent branches">
+            {agents.map((b) => (
+              <option
+                key={b.id}
+                value={b.id}
+                title={agentText(b)}
+                data-review={b.provenance?.review}
+              >
+                {b.name}
+              </option>
+            ))}
+          </optgroup>
+        )}
       </select>
+      {open && isAgentBranch(open) && (
+        <span className="branch-agent" data-testid="branch-agent" title={agentText(open)}>
+          {agentText(open)}
+        </span>
+      )}
       {!main && mode.kind === 'idle' && (
         <>
           <button

@@ -63,4 +63,35 @@ describe('the branch switcher', () => {
     fireEvent.click(screen.getByTestId('branch-delete-confirm'));
     await waitFor(() => expect(props.onDelete).toHaveBeenCalledWith('b-1'));
   });
+
+  it('groups agent branches and marks the open one with its client, session and state', () => {
+    const agent: Branch = {
+      id: 'b-2',
+      name: 'Agent session s-1',
+      fromVersion: 'v-2',
+      createdAt: '2026-10-08T12:00:00.000Z',
+      provenance: {
+        origin: 'agent',
+        sessionId: 's-1',
+        clientName: '<b>Some agent</b>',
+        review: 'submitted',
+      },
+    };
+    setup('b-2', { branches: [...branches, agent] });
+    const select = screen.getByTestId('branch-select') as HTMLSelectElement;
+    expect([...select.options].map((o) => o.textContent)).toEqual([
+      'Main',
+      'Wide',
+      'Agent session s-1',
+    ]);
+    const group = select.querySelector('optgroup')!;
+    expect(group.label).toBe('Agent branches');
+    expect(group.querySelector('option')!.title).toBe(
+      'Agent: <b>Some agent</b>, session s-1, Submitted for review',
+    );
+    expect(screen.getByTestId('branch-agent').textContent).toBe(
+      'Agent: <b>Some agent</b>, session s-1, Submitted for review',
+    );
+    expect(document.querySelector('b')).toBeNull();
+  });
 });

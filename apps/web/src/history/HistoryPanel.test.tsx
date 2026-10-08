@@ -335,4 +335,30 @@ describe('the History panel on a branch', () => {
       version: expect.objectContaining({ id: 'server-v', revision: 0, serverRev: 7 }),
     });
   });
+
+  it('lists agent branches with their client, session and state, and opens their review', async () => {
+    const { seeded } = await import('../review/review.test-fixture');
+    const s = await seeded();
+    const branches = await s.branches();
+    const onReview = vi.fn();
+    render(
+      <HistoryPanel
+        source={s.lib}
+        documentId={s.id}
+        branch={s.branch.id}
+        branchName={s.branch.name}
+        branches={branches}
+        onView={vi.fn()}
+        onReview={onReview}
+      />,
+    );
+    const item = await screen.findByTestId(`agent-branch-${s.branch.id}`);
+    expect(item.dataset.state).toBe('submitted');
+    expect(within(item).getByTestId('agent-branch-client').textContent).toBe('Test agent');
+    expect(within(item).getByTestId('agent-branch-state').textContent).toBe('Submitted for review');
+    expect(item.textContent).toContain('session session-1');
+    expect(screen.getByTestId('history-branch-review').textContent).toBe('Submitted for review');
+    fireEvent.click(within(item).getByTestId('agent-branch-review'));
+    expect(onReview).toHaveBeenCalledWith(s.branch.id);
+  });
 });

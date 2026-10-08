@@ -86,6 +86,66 @@ Merging is offered for the open branch only, so to merge Main into a branch, ope
 
 A branch made from a version that came from another browser (marked **from the server**) cannot be merged in this browser, because the history before that version is not here; the preview says so. Merge it in the browser where the version was made.
 
+## Reviewing an agent's work
+
+An AI agent connected to manufakture never changes Main. It works on a branch of its own, an **agent branch**, and when it is done it submits the branch for review with a **review bundle**: what it changed, pictures of the part before and after, measurements and quantities. You decide in History whether its work goes into Main.
+
+Agent branches are marked wherever branches show:
+
+- In the branch list next to the document name they are grouped under **Agent branches**. Hovering one shows which agent made it, its session and its review state; while one is open, the same line shows next to the list.
+- In **History**, under **Agent branches**, each is listed with the agent's name, its session and its review state, and a **Review** button. The agent's name is what its program calls itself: it is shown, never checked.
+
+A review state is one of **Open** (the agent is working), **Submitted for review**, **Changes requested**, **Approved** and **Rejected**.
+
+### The Review view
+
+**Review** opens the agent branch's bundle beside the side panel. At the top: who made the branch, its state, the agent's note to you and your last comment. Then the checks, the buttons, and the bundle itself, geometry first:
+
+- **Renders**: the same views of the part before (Base) and after (Head) the agent's work, side by side. Each picture is checked against the fingerprint (SHA-256) and size the bundle gives before it is shown; one that does not match says so instead.
+- **Measurements**: each body's volume, area and mass before and after, and overlaps in assemblies.
+- **Regen errors**: new errors first, then those already there, then those the agent fixed.
+- **Quantities**: what changed in the cut list, the hardware and the takeoffs.
+- **Features**: per part studio and assembly, what was added, deleted, edited (with the fields before and after), renamed, reordered or suppressed; other document changes; domain data.
+- **Scripts**: every script on the branch, in full, read from the branch itself rather than from the bundle, since that is what **Run scripts** would run. Those the bundle lists as added or changed come first. A script holding hidden characters (that can make it look different from what runs) is flagged, and the characters show as escapes such as `\u{202e}`.
+- **Commands**: every batch the agent made, with a readable line per command; **JSON** shows the command itself.
+
+Everything in a bundle was written by the agent or by whoever wrote the document, so it is shown as plain text, never as a web page, with invisible characters (direction overrides, zero-width marks) shown as escapes so they cannot change what you read. Long text is cut, with **Show all** to read the rest, and long lists show 50 at a time, with **Show more**.
+
+### The checks, and Approve
+
+manufakture does not take the bundle's word for anything. **Approve** is offered only when all of these hold, and the view says which one does not:
+
+1. **The bundle describes the branch as it is.** A change saved on the branch after the bundle was made (by the agent, or by you) makes it **stale**: the agent has to submit again.
+2. **The bundle's scripts are the branch's.** A bundle that shows a script otherwise than the branch has it blocks Approve, and the difference is listed.
+3. **Your own regen matches the bundle.** With the branch open, manufakture rebuilds it itself and compares every body (which bodies there are, their names, volume, area, bounding box and mass) and every feature's errors with the bundle, to a billionth of each value (a millionth of a millimetre near zero). Any difference is listed, never hidden. **Open the branch** opens it when another branch is open. Errors of scripted features are not compared, since they depend on which scripts may run. A very large bundle may leave some bodies or errors out; what your regen has beyond its lists is then shown, and Approve waits until you tick **I have checked these myself** (more than the bundle left out is a difference).
+4. **Everything applies on Main.** The merge into Main as it would be made now is previewed: nothing may be left out.
+5. The branch is **Submitted for review**.
+
+**Approve** checks all of that again at the moment it acts, and then, in this order:
+
+1. opens Main (what is pending on the branch is saved first);
+2. previews the merge onto Main as it is open: nothing may be left out;
+3. reads the branch again: it must still be what the bundle describes;
+4. marks the branch **Approved** (from then on the agent cannot write to it);
+5. merges the agent's work into Main (as **Merge** does, above) as one step labelled with the session ("Approve agent session ..."); when that fails, the branch goes back to **Submitted for review**;
+6. saves Main;
+7. records a version of Main named "Approved: ..." that remembers which branch, session, agent and bundle it came from.
+
+**Undo** takes the whole merge back in one step and **Redo** brings it again; the branch stays **Approved** either way. The branch and its bundle are kept. If anything changed in the meantime (the agent wrote to the branch, say), nothing is merged and the reason is shown.
+
+If the tab closes (or Main cannot be saved, or the version cannot be recorded) after the branch was marked approved, the branch is **Approved** but no version of Main records it. Its Review view says so and offers **Finish approval**: the same checks, then the merge if Main does not have it yet (one already saved is not merged twice) and the version.
+
+Only an approved agent branch can be exported for fabrication (G-code, cut lists, and the other fabrication files): the export dialogs refuse the others with "This is an agent's unreviewed branch. Review it in History first."
+
+### Request changes and Reject
+
+- **Request changes** asks what the agent should change. Your comment is stored with the branch (up to 4,000 characters), the state becomes **Changes requested**, and the agent reads the comment when it asks for its review. When it carries on, the branch is **Open** again, and it can submit again.
+- **Reject** closes the branch: the agent cannot write to it again. Main is not changed.
+
+### Scripts in an agent branch
+
+An agent can add or change scripts, so on an agent branch the scripts do not run just because you allowed this document's scripts before (on Main, say). The banner over the document lists every one of them, and **Run scripts** there allows exactly those, each as the branch has it now, on this device: a script the agent changes afterwards is asked about again. Read the scripts in the review first. The scripts of derived parts' source documents do not run on an agent branch, even when you allowed those documents.
+
 ## Example
 
 1. Build a bracket whose walls are the variable `#thickness`, at 6 mm.

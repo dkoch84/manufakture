@@ -132,6 +132,9 @@ importers:
       '@manufakture/regen':
         specifier: workspace:*
         version: link:../../packages/regen
+      '@manufakture/review':
+        specifier: workspace:*
+        version: link:../../packages/review
       '@manufakture/sketch':
         specifier: workspace:*
         version: link:../../packages/sketch
@@ -175,6 +178,9 @@ importers:
         specifier: ^5.0.15
         version: 5.0.15(@types/react@19.3.0)(react@19.3.0)
     devDependencies:
+      '@manufakture/session':
+        specifier: workspace:*
+        version: link:../../packages/session
       '@playwright/test':
         specifier: ~1.63.0
         version: 1.63.0

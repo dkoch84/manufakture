@@ -1,0 +1,169 @@
+/* The Review view (ReviewPanel): wider than the other side panels, since base and head renders
+   sit side by side. Bundle text is untrusted: long words wrap, code keeps its lines. */
+.review-panel {
+  width: min(46rem, 60vw);
+  max-width: none;
+  overflow-y: auto;
+}
+
+.review-panel h3 {
+  margin: 0.6rem 0 0.2rem;
+  font-size: 0.85rem;
+}
+
+.review-panel h4 {
+  margin: 0.8rem 0 0.3rem;
+  font-size: 0.82rem;
+  border-bottom: 1px solid #e3e7ec;
+}
+
+.review-panel h5 {
+  margin: 0.4rem 0 0.2rem;
+  font-size: 0.76rem;
+  color: #5b6673;
+}
+
+.review-panel p,
+.review-panel li {
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
+.review-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.review-fields {
+  margin-left: 0.8rem;
+}
+
+.review-row,
+.review-batch,
+.review-container {
+  padding: 0.2rem 0.3rem;
+  border: 1px solid #eef1f4;
+  border-radius: 4px;
+}
+
+/* Untrusted text never sets the direction of what is around it. */
+.review-clipped,
+.review-clipped > bdi,
+.review-clipped > .review-pre {
+  unicode-bidi: isolate;
+}
+
+.review-unverified label {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 0.78rem;
+}
+
+.review-pre {
+  margin: 0.2rem 0;
+  max-height: 24rem;
+  overflow: auto;
+  padding: 0.3rem;
+  background: #f6f8fa;
+  font-size: 0.72rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.review-link {
+  border: none;
+  background: none;
+  padding: 0;
+  color: #2b43a8;
+  text-decoration: underline;
+  cursor: pointer;
+  font-size: 0.74rem;
+}
+
+.review-state {
+  font-weight: 600;
+}
+
+.review-comment,
+.review-note {
+  margin: 0.3rem 0;
+  padding: 0.3rem;
+  border-left: 3px solid #4b6cf9;
+  background: #f1f4ff;
+  font-size: 0.78rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.review-checks li {
+  padding: 0.2rem 0;
+}
+
+.review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.4rem 0;
+}
+
+.review-blockers li::before {
+  content: '- ';
+}
+
+.review-renders {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.review-render {
+  margin: 0;
+}
+
+.review-render figcaption {
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+.review-render-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem;
+}
+
+.review-side {
+  display: block;
+  font-size: 0.7rem;
+  color: #5b6673;
+}
+
+.review-image {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid #e3e7ec;
+  background: #fff;
+}
+
+.review-image-missing {
+  min-height: 4rem;
+  padding: 0.4rem;
+  font-size: 0.74rem;
+  color: #5b6673;
+}
+
+.branch-agent {
+  font-size: 0.74rem;
+  padding: 0 0.3rem;
+  border-radius: 3px;
+  background: #fff4dc;
+  color: #6a4a00;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 22rem;
+}

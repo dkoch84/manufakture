@@ -87,6 +87,39 @@ describe('the script opt-in', () => {
     expect(mine.at(-1)!.sha256).toBe(await sourceSha256(`source ${MAX_SOURCES_PER_SCRIPT + 4}`));
   });
 
+  it('on an agent’s branch asks again: no whole-document choice or setting, only exact sources', async () => {
+    const doc = scriptedDocument();
+    const grants = createScriptGrantsStore(() => memoryStorage(), { signedOff: true });
+    grants.getState().allowDocument(doc.id);
+    grants.getState().allowDocument('doc-other');
+    const shas = await shasOf(BOX_SOURCE, OTHER_SOURCE);
+    expect(blockedUses(doc, grants.getState(), shas)).toEqual([]);
+    const revision = grants.getState().revision;
+    grants.getState().setAgentDocument(doc.id);
+    expect(grants.getState().revision).toBe(revision + 1);
+    // Unchanged scope: no new revision (no regen).
+    grants.getState().setAgentDocument(doc.id);
+    expect(grants.getState().revision).toBe(revision + 1);
+    // No document is allowed whole, not even another one a derived part takes from.
+    expect(grants.getState().policy()).toEqual({ auto: false, documents: [], scripts: [] });
+    expect(blockedUses(doc, grants.getState(), shas)).toHaveLength(2);
+    expect(
+      await mayRunScript(grants.getState(), doc.id, { id: 'script#1', source: BOX_SOURCE }),
+    ).toBe(false);
+    // Allowed exactly as it is: that source runs, a changed one does not.
+    await grants.getState().allowSource(doc.id, 'script#1', BOX_SOURCE);
+    expect(blockedUses(doc, grants.getState(), shas)!.map((u) => u.feature.id)).toEqual([
+      'scripted#2',
+    ]);
+    expect(
+      await mayRunScript(grants.getState(), doc.id, { id: 'script#1', source: `${BOX_SOURCE} ` }),
+    ).toBe(false);
+    // Back on a person's branch the earlier choices hold again, and the scope is never stored.
+    grants.getState().setAgentDocument(null);
+    expect(blockedUses(doc, grants.getState(), shas)).toEqual([]);
+    expect(grants.getState().policy().auto).toBe(true);
+  });
+
   it('the automatic setting is locked off until the sign-off, even if storage says on', () => {
     const storage = memoryStorage({ [SCRIPT_GRANTS_KEY]: JSON.stringify({ auto: true }) });
     const grants = createScriptGrantsStore(() => storage);

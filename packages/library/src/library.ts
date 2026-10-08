@@ -57,7 +57,7 @@ import {
   type ManufaktureDocument,
   type SyncEntry,
 } from '@manufakture/core';
-import { fileName, fromBase64, sha256Hex } from '@manufakture/io';
+import { fileName, fromBase64, sha256Hex, toBase64 } from '@manufakture/io';
 import { SyncClient, changedObjects, documentObjects } from '@manufakture/sync';
 import type { BackendKind, StorageBackend } from './backend';
 import { BlobStore, blobRefs, externalize, hydrateFrom, isSha256 } from './blobs';
@@ -376,6 +376,17 @@ export interface ReviewReference {
 /** A review reference's label, at most this many characters. */
 export const MAX_REVIEW_LABEL = 200;
 
+/** The envelope a stored review bundle has (`packages/session`'s `StoredBundle`). */
+export const REVIEW_BUNDLE_FORMAT = 'manufakture-review-bundle';
+/** The largest stored review bundle, as JSON in UTF-8 bytes (the session's `MAX_BUNDLE_BYTES`). */
+export const MAX_REVIEW_BUNDLE_BYTES = 64 * 1024 * 1024;
+/** The largest review image stored or read (the session's `MAX_BUNDLE_BLOB_BYTES`). */
+export const MAX_REVIEW_IMAGE_BYTES = 16 * 1024 * 1024;
+// Eight digits, more without leading zeros once a revision needs them (as `reviewName` writes
+// them): up to the largest safe integer, 16 digits.
+const REVIEW_FILE = /^review-(\d{8}|[1-9]\d{8,15})\.json$/;
+const reviewName = (revision: number): string => `review-${String(revision).padStart(8, '0')}.json`;
+
 /** A version from the sync server, to keep here (`adoptVersion`). */
 export interface RemoteVersion {
   id: string;
@@ -438,10 +449,27 @@ export interface BranchProvenance {
   /** The name the agent's client gave for itself: self-reported, so shown, never trusted. */
   clientName: string;
   review: ReviewState;
+  /**
+   * The reviewer's comment, set with **Request changes** in History (T8.3b), for the agent to
+   * read with `get_review`. Written by a person, read by an agent: 1 to `MAX_REVIEW_COMMENT`
+   * characters, line breaks and tabs allowed, no other control or format characters and no lone
+   * surrogates. Kept through later state changes until a new one replaces it.
+   */
+  comment?: string;
 }
 
 /** A client's self-reported name, at most this many characters. */
 export const MAX_CLIENT_NAME = 200;
+/** A reviewer's comment on an agent branch, at most this many characters. */
+export const MAX_REVIEW_COMMENT = 4000;
+
+/** Whether `v` is a reviewer's comment as provenance keeps one. */
+export const isReviewComment = (v: unknown): v is string =>
+  typeof v === 'string' &&
+  v.length > 0 &&
+  v.length <= MAX_REVIEW_COMMENT &&
+  v.trim().length > 0 &&
+  !/[\p{Cs}]|(?![\n\t])[\p{Cc}\p{Cf}]/u.test(v);
 
 export interface VersionMeta {
   name: string;
@@ -648,7 +676,7 @@ function branchName(name: unknown): string | null {
  */
 export function parseProvenance(v: unknown): BranchProvenance | null {
   if (!isRecord(v)) return null;
-  const { origin, sessionId, clientName, review } = v;
+  const { origin, sessionId, clientName, review, comment } = v;
   if (origin !== 'agent') return null;
   if (typeof sessionId !== 'string' || !isStorableId(sessionId)) return null;
   if (
@@ -661,7 +689,14 @@ export function parseProvenance(v: unknown): BranchProvenance | null {
     return null;
   }
   if (typeof review !== 'string' || !REVIEW_STATES.includes(review as ReviewState)) return null;
-  return { origin, sessionId, clientName, review: review as ReviewState };
+  if (comment !== undefined && !isReviewComment(comment)) return null;
+  return {
+    origin,
+    sessionId,
+    clientName,
+    review: review as ReviewState,
+    ...(comment === undefined ? {} : { comment }),
+  };
 }
 
 /**
@@ -672,6 +707,7 @@ function newProvenance(v: unknown): BranchProvenance | string {
   const parsed = parseProvenance(v);
   if (!parsed) return 'The branch provenance is invalid.';
   if (parsed.review !== 'open') return 'A new agent branch starts in review state "open".';
+  if (parsed.comment !== undefined) return 'A new agent branch has no review comment.';
   return parsed;
 }
 
@@ -2790,13 +2826,18 @@ export class DocumentLibrary {
    * is one of `expected` at the moment of the change (under the library's lock); otherwise nothing
    * is written and the failure has `reviewChanged`. A session uses it so that a reviewer's decision
    * made while it worked is never overwritten.
+   *
+   * `comment` (T8.3b's **Request changes**) replaces the reviewer's comment the agent reads with
+   * `get_review`; null removes it; absent keeps it. One that `isReviewComment` refuses is refused
+   * before anything is written.
    */
   setBranchReview(
     id: string,
     branch: string,
     review: ReviewState,
-    options: { expected?: ReviewState | readonly ReviewState[] } = {},
+    options: { expected?: ReviewState | readonly ReviewState[]; comment?: string | null } = {},
   ): Promise<LibraryResult<Branch>> {
+    const comment = options.comment;
     const expected =
       options.expected === undefined
         ? undefined
@@ -2815,6 +2856,12 @@ export class DocumentLibrary {
         if (expected !== undefined && !expected.every((e) => REVIEW_STATES.includes(e))) {
           return { ok: false, message: 'There is no such expected review state.' };
         }
+        if (comment !== undefined && comment !== null && !isReviewComment(comment)) {
+          return {
+            ok: false,
+            message: `A review comment is 1 to ${MAX_REVIEW_COMMENT} characters of text.`,
+          };
+        }
         let changedMeanwhile = false;
         const result = await this.#locked(id, () =>
           this.#changeList(
@@ -2829,7 +2876,12 @@ export class DocumentLibrary {
                 changedMeanwhile = true;
                 return `The branch is ${provenance.review}, not ${expected.join(' or ')}.`;
               }
-              const changed = { ...items[at]!, provenance: { ...provenance, review } };
+              const { comment: kept, ...rest } = provenance;
+              const next = comment === undefined ? kept : (comment ?? undefined);
+              const changed = {
+                ...items[at]!,
+                provenance: { ...rest, review, ...(next === undefined ? {} : { comment: next }) },
+              };
               return { items: items.map((b, i) => (i === at ? changed : b)), result: changed };
             },
             false,
@@ -2840,6 +2892,111 @@ export class DocumentLibrary {
           : result;
       }),
     );
+  }
+
+  /**
+   * Store a review bundle (`@manufakture/review`'s data, in the session's `StoredBundle` envelope)
+   * with agent branch `branch`, as `review-<revision>.json` in the branch's directory, beside its
+   * own files (which never match that name), where `packages/session`'s `BackendBundleStore`
+   * writes it in Node. `revision` is the branch head revision it was built for. The library does
+   * not read the bundle: it checks the size, the envelope's format and that the branch is an
+   * agent's. For a bundle that arrives other than through a session (sync, T8.4b; tests).
+   */
+  storeReviewBundle(
+    id: string,
+    branch: string,
+    revision: number,
+    record: unknown,
+  ): Promise<LibraryResult<void>> {
+    return this.#run(async () => {
+      if (!isStorableId(id)) return { ok: false, message: `There is no document "${id}".` };
+      if (branch === MAIN_BRANCH || !isBranchId(branch)) return NO_BRANCH;
+      if (!Number.isSafeInteger(revision) || revision < 1) {
+        return { ok: false, message: 'A review bundle names a revision from 1.' };
+      }
+      if (!isRecord(record) || record.format !== REVIEW_BUNDLE_FORMAT) {
+        return { ok: false, message: 'This is not a stored review bundle.' };
+      }
+      const bytes = new TextEncoder().encode(JSON.stringify(record));
+      if (bytes.length > MAX_REVIEW_BUNDLE_BYTES) {
+        return { ok: false, message: 'The review bundle is too large.' };
+      }
+      return this.#locked(id, async () => {
+        const listed = await this.#branch(id, branch);
+        if (!listed.ok) return listed;
+        if (!listed.value.provenance) return { ok: false, message: 'It is not an agent branch.' };
+        await this.#backend.write(`${this.#dir(id, branch)}/${reviewName(revision)}`, bytes);
+        return { ok: true, value: undefined };
+      });
+    });
+  }
+
+  /**
+   * The newest review bundle stored with agent branch `branch` (`storeReviewBundle`, or a
+   * session's `BackendBundleStore`): the head revision it names and the stored record, parsed
+   * as JSON and otherwise unchecked (untrusted: read it with `@manufakture/review/data`'s
+   * `readBundle`). Null when there is none. A file over `MAX_REVIEW_BUNDLE_BYTES`, or one that
+   * does not parse, is passed over for the one before.
+   */
+  reviewBundle(
+    id: string,
+    branch: string,
+  ): Promise<LibraryResult<{ revision: number; record: unknown } | null>> {
+    return this.#run(async () => {
+      if (!isStorableId(id)) return { ok: false, message: `There is no document "${id}".` };
+      if (branch === MAIN_BRANCH || !isBranchId(branch)) return NO_BRANCH;
+      const listed = await this.#branch(id, branch);
+      if (!listed.ok) return listed;
+      if (!listed.value.provenance) return { ok: true, value: null };
+      const dir = this.#dir(id, branch);
+      const found = revisions(await this.#backend.list(dir), REVIEW_FILE);
+      for (const revision of found) {
+        const bytes = await this.#backend.read(`${dir}/${reviewName(revision)}`);
+        if (bytes === null || bytes.length > MAX_REVIEW_BUNDLE_BYTES) continue;
+        try {
+          const record: unknown = JSON.parse(new TextDecoder().decode(bytes));
+          if (isRecord(record) && record.format === REVIEW_BUNDLE_FORMAT) {
+            return { ok: true, value: { revision, record } };
+          }
+        } catch {
+          // A torn file: the one before.
+        }
+      }
+      return { ok: true, value: null };
+    });
+  }
+
+  /**
+   * Store an image of a review bundle (a PNG) as a blob of document `id`, where imported files
+   * are kept (never pruned, so a bundle kept with a merge still finds its images); returns its
+   * SHA-256, which the bundle names it by. 1 to `MAX_REVIEW_IMAGE_BYTES` bytes.
+   */
+  storeReviewImage(id: string, bytes: Uint8Array): Promise<LibraryResult<string>> {
+    return this.#run(async () => {
+      if (!isStorableId(id)) return { ok: false, message: `There is no document "${id}".` };
+      if (!(bytes instanceof Uint8Array) || bytes.length === 0) {
+        return { ok: false, message: 'An image has bytes.' };
+      }
+      if (bytes.length > MAX_REVIEW_IMAGE_BYTES) {
+        return { ok: false, message: 'The image is too large.' };
+      }
+      const sha256 = await sha256Hex(bytes);
+      await this.#locked(id, () => this.#blobs(id).put(sha256, toBase64(bytes)));
+      return { ok: true, value: sha256 };
+    });
+  }
+
+  /**
+   * An image a review bundle names, by SHA-256: its bytes, checked against the name; null when
+   * the name is not a SHA-256, or the blob is missing, too large or does not match.
+   */
+  reviewImage(id: string, sha256: string): Promise<Uint8Array | null> {
+    return this.#run(async () => {
+      if (!isStorableId(id) || typeof sha256 !== 'string' || !isSha256(sha256)) return null;
+      const bytes = await this.#blobs(id).read(sha256);
+      if (bytes === null || bytes.length > MAX_REVIEW_IMAGE_BYTES) return null;
+      return (await sha256Hex(bytes)) === sha256 ? bytes : null;
+    });
   }
 
   /**

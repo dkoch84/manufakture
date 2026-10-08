@@ -10,6 +10,13 @@
 //   sign-off it is locked off, whatever storage holds: `SCRIPTS_SECURITY_SIGNED_OFF` is the one
 //   switch that makes it available (and on by default).
 //
+// On an agent's branch (M8 plan T8.3b) the document is not allowed as a whole, whatever was chosen
+// for it: an agent may add or change scripts, so the reviewer is asked again, and **Run scripts**
+// allows each script exactly as the branch has it (by SHA-256), as a script saved in the editor is.
+// No other document is allowed whole there either, so the scripts of derived parts' sources do
+// not run on an agent's branch. The app says which document is on an agent branch
+// (`setAgentDocument`); that is not stored.
+//
 // The choices are stored on this device (localStorage), never in the document, so they never
 // travel with a file, a link or sync. The regen worker enforces them (`ScriptPolicy` of
 // `@manufakture/regen`): a document not allowed regenerates without running any script, and each
@@ -59,6 +66,13 @@ export interface ScriptGrantsState {
   revision: number;
   /** Whether the automatic setting may be changed (after the security sign-off only). */
   autoAvailable: boolean;
+  /**
+   * The document open on an agent's branch, if any: neither the automatic setting nor a choice
+   * for the whole document applies to it, only exact sources. Not stored.
+   */
+  agentDocument: string | null;
+  /** Say which document is open on an agent's branch (null: none). */
+  setAgentDocument(documentId: string | null): void;
   /** **Run scripts in documents automatically**, as it is now: always off while not available. */
   auto(): boolean;
   /** Ignored while the setting is not available. */
@@ -169,6 +183,11 @@ export function createScriptGrantsStore(
       ...initial,
       revision: 0,
       autoAvailable: signedOff,
+      agentDocument: null,
+      setAgentDocument(documentId) {
+        if (get().agentDocument === documentId) return;
+        set((s) => ({ agentDocument: documentId, revision: s.revision + 1 }));
+      },
       // Before the sign-off a stored `true` (an older build, a hand edit) counts for nothing.
       auto: () => signedOff && (get().autoChoice ?? true),
       setAuto(on) {
@@ -216,7 +235,13 @@ export function createScriptGrantsStore(
       },
       policy() {
         const s = get();
-        return { auto: s.auto(), documents: [...s.documents], scripts: [...s.sources] };
+        // On an agent's branch nothing runs on a whole-document choice: not the branch's own
+        // document, and not a derived part's source document either (the regen runs a source's
+        // scripts only when that document is allowed whole), so the banner can say they do not
+        // run. The setting is off too. Only exact sources of the open document run.
+        return s.agentDocument === null
+          ? { auto: s.auto(), documents: [...s.documents], scripts: [...s.sources] }
+          : { auto: false, documents: [], scripts: [...s.sources] };
       },
     };
   });
@@ -252,17 +277,33 @@ export function scriptedUses(doc: ManufaktureDocument): ScriptedUse[] {
   return out;
 }
 
+/** The parts of the store's state that decide what may run. */
+type GrantsView = Pick<ScriptGrantsState, 'auto' | 'documents' | 'sources'> &
+  Partial<Pick<ScriptGrantsState, 'agentDocument'>>;
+
+/**
+ * Whether every script of `documentId` may run: the automatic setting or the choice for the whole
+ * document, neither of which counts for a document open on an agent's branch.
+ */
+export function wholeDocumentAllowed(
+  state: Omit<GrantsView, 'sources'>,
+  documentId: string,
+): boolean {
+  if (state.agentDocument === documentId) return false;
+  return state.auto() || state.documents.includes(documentId);
+}
+
 /**
  * Whether a script of `documentId` may run under the store's state, given the SHA-256 of its
  * source (`sha`; undefined while it is being computed, which counts as not allowed).
  */
 export function mayRun(
-  state: Pick<ScriptGrantsState, 'auto' | 'documents' | 'sources'>,
+  state: GrantsView,
   documentId: string,
   scriptId: string,
   sha: string | undefined,
 ): boolean {
-  if (state.auto() || state.documents.includes(documentId)) return true;
+  if (wholeDocumentAllowed(state, documentId)) return true;
   if (sha === undefined) return false;
   return state.sources.some(
     (g) => g.document === documentId && g.script === scriptId && g.sha256 === sha,
@@ -271,11 +312,11 @@ export function mayRun(
 
 /** As `mayRun`, hashing the source itself. */
 export async function mayRunScript(
-  state: Pick<ScriptGrantsState, 'auto' | 'documents' | 'sources'>,
+  state: GrantsView,
   documentId: string,
   script: Pick<Script, 'id' | 'source'>,
 ): Promise<boolean> {
-  if (state.auto() || state.documents.includes(documentId)) return true;
+  if (wholeDocumentAllowed(state, documentId)) return true;
   return mayRun(state, documentId, script.id, await sourceSha256(script.source));
 }
 
@@ -286,10 +327,10 @@ export async function mayRunScript(
  */
 export function blockedUses(
   doc: ManufaktureDocument,
-  state: Pick<ScriptGrantsState, 'auto' | 'documents' | 'sources'>,
+  state: GrantsView,
   shas: ReadonlyMap<string, string>,
 ): ScriptedUse[] | null {
-  if (state.auto() || state.documents.includes(doc.id)) return [];
+  if (wholeDocumentAllowed(state, doc.id)) return [];
   const out: ScriptedUse[] = [];
   for (const use of scriptedUses(doc)) {
     if (use.script === undefined) continue;
@@ -318,11 +359,11 @@ export interface BlockedSource {
  */
 export function blockedSources(
   doc: ManufaktureDocument,
-  state: Pick<ScriptGrantsState, 'auto' | 'documents'>,
+  state: Omit<GrantsView, 'sources'>,
   built: ManufaktureDocument | null,
   parts: readonly { partId: string; features: readonly FeatureResult[] }[],
 ): BlockedSource[] {
-  if (state.auto() || state.documents.includes(doc.id)) return [];
+  if (wholeDocumentAllowed(state, doc.id)) return [];
   if (built === null || built.id !== doc.id) return [];
   const out: BlockedSource[] = [];
   for (const part of doc.parts) {

@@ -9,6 +9,8 @@ import {
   MAIN_BRANCH,
   encodeStored,
   MAX_CLIENT_NAME,
+  MAX_REVIEW_COMMENT,
+  MAX_REVIEW_IMAGE_BYTES,
   parseProvenance,
   type BranchProvenance,
   type LogEntry,
@@ -255,6 +257,130 @@ describe('branch provenance', () => {
       // The list does not read (and has no spare to fall back to), or reads without the branch.
       if (listed.ok) expect(listed.value.some((x) => x.id === b.id && !x.provenance)).toBe(false);
     }
+  });
+});
+
+describe('review comments', () => {
+  it('stores a reviewer’s comment with the state, keeps it, replaces it and removes it', async () => {
+    const { backend, lib } = await saved(1);
+    const v = value(await lib.createVersion('doc-1', { name: 'Start' }));
+    const b = value(await lib.createBranch('doc-1', v.id, 'Agent', { provenance: agent }));
+    value(await lib.setBranchReview('doc-1', b.id, 'submitted'));
+    const comment = 'Make the boss 6 mm.\nKeep the fillet.';
+    const asked = value(
+      await lib.setBranchReview('doc-1', b.id, 'changes-requested', {
+        expected: 'submitted',
+        comment,
+      }),
+    );
+    expect(asked.provenance).toEqual({ ...agent, review: 'changes-requested', comment });
+    // Another library reads it; a later state change without a comment keeps it.
+    const read = value(await library(backend).listBranches('doc-1')).find((x) => x.id === b.id);
+    expect(read?.provenance?.comment).toBe(comment);
+    const reopened = value(await lib.setBranchReview('doc-1', b.id, 'open'));
+    expect(reopened.provenance?.comment).toBe(comment);
+    const replaced = value(
+      await lib.setBranchReview('doc-1', b.id, 'changes-requested', { comment: 'Shorter.' }),
+    );
+    expect(replaced.provenance?.comment).toBe('Shorter.');
+    const cleared = value(await lib.setBranchReview('doc-1', b.id, 'open', { comment: null }));
+    expect(cleared.provenance).toEqual(agent);
+  });
+
+  it('refuses a comment that is empty, too long or holds hidden characters', async () => {
+    const { lib } = await saved(1);
+    const v = value(await lib.createVersion('doc-1', { name: 'Start' }));
+    const b = value(await lib.createBranch('doc-1', v.id, 'Agent', { provenance: agent }));
+    for (const bad of [
+      '',
+      '   ',
+      'x'.repeat(MAX_REVIEW_COMMENT + 1),
+      'a\u202eb',
+      'a\u0000b',
+      '\ud800',
+    ]) {
+      expect(
+        failure(await lib.setBranchReview('doc-1', b.id, 'changes-requested', { comment: bad })),
+      ).toMatch(/review comment/);
+    }
+    const listed = value(await lib.listBranches('doc-1')).find((x) => x.id === b.id);
+    expect(listed?.provenance).toEqual(agent);
+    expect(parseProvenance({ ...agent, comment: 'a\u200bb' })).toBeNull();
+    expect(parseProvenance({ ...agent, comment: 'Fine.\tTabbed.' })?.comment).toBe(
+      'Fine.\tTabbed.',
+    );
+    // A new branch has none.
+    expect(
+      failure(
+        await lib.createBranch('doc-1', v.id, 'Other', { provenance: { ...agent, comment: 'x' } }),
+      ),
+    ).toMatch(/no review comment/);
+  });
+});
+
+describe('review bundles', () => {
+  const stored = (revision: number, extra: Record<string, unknown> = {}) => ({
+    format: 'manufakture-review-bundle',
+    revision,
+    bundle: { n: revision },
+    ...extra,
+  });
+
+  it('stores bundles with an agent branch and reads the newest back', async () => {
+    const { backend, lib } = await saved(1);
+    const v = value(await lib.createVersion('doc-1', { name: 'Start' }));
+    const b = value(await lib.createBranch('doc-1', v.id, 'Agent', { provenance: agent }));
+    expect(value(await lib.reviewBundle('doc-1', b.id))).toBeNull();
+    value(await lib.storeReviewBundle('doc-1', b.id, 2, stored(2)));
+    value(await lib.storeReviewBundle('doc-1', b.id, 3, stored(3)));
+    expect(backend.files.has(`documents/doc-1/branches/${b.id}/review-00000003.json`)).toBe(true);
+    expect(value(await library(backend).reviewBundle('doc-1', b.id))).toEqual({
+      revision: 3,
+      record: stored(3),
+    });
+    // A torn newest file: the one before.
+    backend.files.set(
+      `documents/doc-1/branches/${b.id}/review-00000004.json`,
+      new TextEncoder().encode('{"format":'),
+    );
+    expect(value(await lib.reviewBundle('doc-1', b.id))?.revision).toBe(3);
+  });
+
+  it('refuses a person’s branch, main, another envelope and a bad revision', async () => {
+    const { lib } = await saved(1);
+    const v = value(await lib.createVersion('doc-1', { name: 'Start' }));
+    const mine = value(await lib.createBranch('doc-1', v.id, 'Mine'));
+    const b = value(await lib.createBranch('doc-1', v.id, 'Agent', { provenance: agent }));
+    expect(failure(await lib.storeReviewBundle('doc-1', mine.id, 2, stored(2)))).toMatch(
+      /not an agent branch/,
+    );
+    expect(value(await lib.reviewBundle('doc-1', mine.id))).toBeNull();
+    expect(failure(await lib.storeReviewBundle('doc-1', MAIN_BRANCH, 2, stored(2)))).toMatch(
+      /no such branch/,
+    );
+    expect(failure(await lib.storeReviewBundle('doc-1', b.id, 2, { format: 'x' }))).toMatch(
+      /not a stored review bundle/,
+    );
+    expect(failure(await lib.storeReviewBundle('doc-1', b.id, 0, stored(0)))).toMatch(/revision/);
+    expect(failure(await lib.storeReviewBundle('doc-1', '../x', 2, stored(2)))).toMatch(
+      /no such branch/,
+    );
+  });
+
+  it('stores images as blobs and reads them back only when they match their name', async () => {
+    const { backend, lib } = await saved(1);
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+    const sha = value(await lib.storeReviewImage('doc-1', png));
+    expect(sha).toBe(await sha256Hex(png));
+    expect(await library(backend).reviewImage('doc-1', sha)).toEqual(png);
+    expect(await lib.reviewImage('doc-1', '../../x')).toBeNull();
+    expect(await lib.reviewImage('doc-1', 'a'.repeat(64))).toBeNull();
+    backend.files.set(`documents/doc-1/blobs/${sha}`, new Uint8Array([1, 2, 3]));
+    expect(await library(backend).reviewImage('doc-1', sha)).toBeNull();
+    expect(failure(await lib.storeReviewImage('doc-1', new Uint8Array()))).toMatch(/bytes/);
+    expect(
+      failure(await lib.storeReviewImage('doc-1', new Uint8Array(MAX_REVIEW_IMAGE_BYTES + 1))),
+    ).toMatch(/too large/);
   });
 });
 

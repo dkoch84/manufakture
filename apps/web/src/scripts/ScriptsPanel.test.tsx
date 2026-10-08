@@ -1,5 +1,10 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { createDocument, type Feature, type ManufaktureDocument } from '@manufakture/core';
+import {
+  createDocument,
+  type Command,
+  type Feature,
+  type ManufaktureDocument,
+} from '@manufakture/core';
 import type { FeatureResult } from '@manufakture/regen';
 import { createModelStore } from '../model/model';
 import { describe, expect, it, vi } from 'vitest';
@@ -7,7 +12,15 @@ import { createDocumentStore } from '../state/document';
 import { createScriptGrantsStore } from './policy';
 import { ScriptsBanner } from './ScriptsBanner';
 import { ScriptsPanel } from './ScriptsPanel';
-import { BOX_SOURCE, memoryStorage, scriptedDocument } from './scripts.test-fixture';
+import {
+  BOX_SOURCE,
+  PART,
+  applyAll,
+  memoryStorage,
+  script,
+  scriptedDocument,
+  scriptedFeature,
+} from './scripts.test-fixture';
 
 describe('ScriptsPanel', () => {
   it('lists the scripts with their language and users, and opens the editor', () => {
@@ -85,6 +98,58 @@ describe('ScriptsBanner', () => {
     fireEvent.click(screen.getByTestId('run-scripts'));
     expect(grants.getState().documents).toEqual(['doc-s']);
     await waitFor(() => expect(screen.queryByTestId('scripts-banner')).toBeNull());
+  });
+
+  it('on an agent’s branch asks again, and Run scripts allows each script exactly as it is', async () => {
+    const doc = scriptedDocument();
+    const grants = createScriptGrantsStore(() => memoryStorage());
+    grants.getState().allowDocument(doc.id);
+    grants.getState().setAgentDocument(doc.id);
+    render(<ScriptsBanner document={doc} grants={grants} model={createModelStore()} />);
+    const banner = await screen.findByTestId('scripts-banner');
+    expect(within(banner).getByTestId('scripts-banner-agent').textContent).toContain('agent');
+    fireEvent.click(screen.getByTestId('run-scripts'));
+    await waitFor(() => expect(screen.queryByTestId('scripts-banner')).toBeNull());
+    expect(
+      grants
+        .getState()
+        .sources.map((g) => g.script)
+        .sort(),
+    ).toEqual(['script#1', 'script#2']);
+    expect(grants.getState().policy().documents).toEqual([]);
+  });
+
+  it('on an agent’s branch lists every script Run scripts allows, never "and N more"', async () => {
+    const commands: Command[] = [];
+    for (let i = 1; i <= 12; i++) {
+      commands.push({
+        type: 'setScript',
+        script: script(`script#${i}`, `S${i}`, `export function run(ctx) {} // ${i}\n`),
+      });
+      commands.push({
+        type: 'addFeature',
+        partId: PART,
+        feature: scriptedFeature(`scripted#${i}`, `script#${i}`),
+      });
+    }
+    const doc = applyAll(createDocument({ id: 'doc-many', name: 'Many' }), commands);
+    const grants = createScriptGrantsStore(() => memoryStorage());
+    grants.getState().setAgentDocument(doc.id);
+    const { unmount } = render(
+      <ScriptsBanner document={doc} grants={grants} model={createModelStore()} />,
+    );
+    const list = await screen.findByTestId('scripts-banner-features');
+    await waitFor(() => expect(list.querySelectorAll('li')).toHaveLength(12));
+    expect(list.textContent).not.toContain('more');
+    fireEvent.click(screen.getByTestId('run-scripts'));
+    await waitFor(() => expect(grants.getState().sources).toHaveLength(12));
+    unmount();
+
+    // On a person's branch the list is cut, and Run scripts allows the whole document.
+    const person = createScriptGrantsStore(() => memoryStorage());
+    render(<ScriptsBanner document={doc} grants={person} model={createModelStore()} />);
+    const cut = await screen.findByTestId('scripts-banner-features');
+    await waitFor(() => expect(cut.textContent).toContain('and 4 more'));
   });
 
   it('lists only scripts not allowed; none when the user wrote them all here', async () => {

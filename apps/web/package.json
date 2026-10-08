@@ -31,6 +31,7 @@
     "@manufakture/nesting": "workspace:*",
     "@manufakture/print": "workspace:*",
     "@manufakture/regen": "workspace:*",
+    "@manufakture/review": "workspace:*",
     "@manufakture/sketch": "workspace:*",
     "@manufakture/stock": "workspace:*",
     "@manufakture/sync": "workspace:*",
@@ -47,6 +48,7 @@
     "zustand": "^5.0.15"
   },
   "devDependencies": {
+    "@manufakture/session": "workspace:*",
     "@playwright/test": "~1.63.0",
     "@testing-library/dom": "^10.4.2",
     "@testing-library/react": "^16.3.3",

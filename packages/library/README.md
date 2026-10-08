@@ -389,6 +389,13 @@ needs every release that may open the library to know it first, or a format chan
   never reach it for its own branch. `adoptBranch` does not carry provenance yet (T8.4b).
   With `{ expected }` (a state or a list) it is a compare-and-set: refused, with
   `reviewChanged`, when the state at the moment of the change is not one of them.
+  With `{ comment }` it also stores the reviewer's comment in the provenance (T8.3b's **Request
+  changes**), which the agent reads with `get_review`; `comment: null` removes it, and without
+  the option it is kept. A comment is 1 to `MAX_REVIEW_COMMENT` (4,000) characters, not all
+  blank, with line breaks and tabs but no other control or format characters and no lone
+  surrogates (`isReviewComment`); `parseProvenance` checks it as it checks the client name, so a
+  damaged one makes the list read as damaged. A new branch has none. A release that does not know
+  the field reads the list as before (and drops it if it writes the list again).
 - `branchFromRevision(id, { from, revision, version, name, provenance })` makes a branch from any
   stored revision of a branch (default: main's head), through a version of that revision named
   `version` (branches start from versions): that is how a session starts ("Agent session `<id>`
@@ -406,6 +413,30 @@ needs every release that may open the library to know it first, or a format chan
 
 A revision named this way must be one of the branch's, an integer from 1 to its head: it is
 checked before any file name is made of it.
+
+### Review bundles
+
+A session's review bundle (`packages/review`, ADR 0016 decision 11) is stored with its agent
+branch as `review-<rev>.json` in the branch's directory, `<rev>` the head revision it was built
+for (padded to eight digits; a larger one has more, without leading zeros, and both sides read
+those), and its images as blobs of the document (`documents/<id>/blobs/<sha256>`, never pruned, so
+the bundle of an approved branch still finds them). In Node the session writes them itself
+(`BackendBundleStore`); the library reads and writes the same files for the app (T8.3b) and for
+bundles that arrive another way (sync, T8.4b):
+
+- `storeReviewBundle(id, branch, revision, record)` writes a stored bundle (the session's
+  `StoredBundle` envelope, `format: 'manufakture-review-bundle'`, at most
+  `MAX_REVIEW_BUNDLE_BYTES`, 64 MiB) with an agent branch; a person's branch and main are refused.
+- `reviewBundle(id, branch)` reads the newest one back: the revision and the record, parsed as JSON
+  but otherwise unchecked (untrusted: read it with `@manufakture/review/data`'s `readBundle`).
+  A file too large or torn is passed over for the one before; a person's branch has none.
+- `storeReviewImage(id, bytes)` stores an image (1 byte to `MAX_REVIEW_IMAGE_BYTES`, 16 MiB) and
+  returns its SHA-256; `reviewImage(id, sha256)` reads it back, null unless the name is a SHA-256
+  and the bytes match it.
+
+The library never reads a bundle's content: the review view checks it (apps/web `src/review/`).
+`library-agent.test.ts` covers comments and bundle storage; `packages/session`'s
+`bundles.test.ts` checks that what `BackendBundleStore` writes the library reads, and back.
 
 ### The export gate
 

@@ -133,7 +133,10 @@ export class MemoryBundleStore implements BundleStore {
   }
 }
 
-const REVIEW = /^review-(\d{8})\.json$/;
+// `review-<revision>.json`, the revision padded to eight digits; a larger one has more (no
+// leading zeros), up to the largest safe integer (16 digits). The library reads the same names.
+const REVIEW = /^review-(\d{8}|[1-9]\d{8,15})\.json$/;
+const reviewRevision = (name: string): number => Number(REVIEW.exec(name)?.[1] ?? -1);
 
 /**
  * Bundles in the library's branch directory: `documents/<id>/branches/<branch>/review-<rev>.json`,
@@ -166,8 +169,11 @@ export class BackendBundleStore implements BundleStore {
 
   async latest(documentId: string, branch: string): Promise<StoredBundle | null> {
     const dir = this.#dir(documentId, branch);
-    const names = (await this.#backend.list(dir)).filter((n) => REVIEW.test(n)).sort();
-    for (const name of names.reverse()) {
+    // Newest first, by number: a ninth digit sorts after `99999999` only as a number.
+    const names = (await this.#backend.list(dir))
+      .filter((n) => REVIEW.test(n))
+      .sort((a, b) => reviewRevision(b) - reviewRevision(a));
+    for (const name of names) {
       const bytes = await this.#backend.read(`${dir}/${name}`);
       if (bytes === null || bytes.length > MAX_BUNDLE_BYTES) continue;
       try {

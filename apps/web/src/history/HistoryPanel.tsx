@@ -6,7 +6,8 @@
 // version of another branch can be viewed and restored here. With other branches, another one can
 // be merged into the open one (MergeBranch). Versions that came from the sync server (T7.1e) are
 // listed with the others; the panel reads the history again whenever the library says the
-// document's versions or branches changed. The logic is in history.ts.
+// document's versions or branches changed. The logic is in history.ts. Agent branches (M8 plan
+// T8.3b) are listed with their client, session and review state, each with **Review**.
 
 import { useEffect, useState, type FormEvent } from 'react';
 import {
@@ -28,6 +29,8 @@ import {
   type Session,
 } from './history';
 import { MergeBranch, type MergeSource } from './MergeBranch';
+import { AgentBranches } from '../review/AgentBranches';
+import { agentBranches, reviewStateText } from '../review/review';
 import { VersionList } from './VersionList';
 import type { DocumentStoreApi } from '../state/document';
 import './history.css';
@@ -61,6 +64,8 @@ export interface HistoryPanelProps {
   onClose?: () => void;
   /** The editor's store, which a merge runs on (default: the app's). */
   documents?: DocumentStoreApi;
+  /** Open the Review view of an agent branch; absent: agent branches are not listed. */
+  onReview?: (branch: string) => void;
 }
 
 type Loaded =
@@ -91,6 +96,7 @@ export function HistoryPanel({
   createDisabled = false,
   onClose,
   documents,
+  onReview,
 }: HistoryPanelProps) {
   const [loaded, setLoaded] = useState<Loaded>({ state: 'loading' });
   const [reload, setReload] = useState(0);
@@ -180,6 +186,8 @@ export function HistoryPanel({
   };
 
   const viewingVersion = viewing?.kind === 'version' ? viewing.version.id : null;
+  const agents = agentBranches(branches);
+  const openAgent = agents.find((b) => b.id === (branch ?? MAIN_BRANCH));
 
   return (
     <aside
@@ -192,6 +200,11 @@ export function HistoryPanel({
         {branchName && (
           <span className="history-branch" data-testid="history-branch-name">
             {branchName}
+          </span>
+        )}
+        {openAgent && (
+          <span className="history-tag" data-testid="history-branch-review">
+            {reviewStateText(openAgent.provenance.review)}
           </span>
         )}
         {createVersion && !form && (
@@ -263,6 +276,14 @@ export function HistoryPanel({
       )}
       {loaded.state === 'ready' && (
         <>
+          {onReview && (
+            <AgentBranches
+              branches={agents}
+              current={branch ?? MAIN_BRANCH}
+              onReview={onReview}
+              disabled={disabled}
+            />
+          )}
           <h3>Versions</h3>
           <VersionList
             versions={loaded.versions}

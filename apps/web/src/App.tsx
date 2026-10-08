@@ -101,6 +101,9 @@ import {
 } from './model/model';
 import { BranchSwitcher } from './history/BranchSwitcher';
 import { HistoryPanel } from './history/HistoryPanel';
+import { approveBranch } from './review/approve';
+import { isAgentBranch, type MeasuredHere } from './review/review';
+import { ReviewPanel } from './review/ReviewPanel';
 import { ViewerBanner } from './history/ViewerBanner';
 import {
   compareDocuments,
@@ -440,6 +443,9 @@ export function App({
   const branch = useStore(branchStore, (s) => s.id);
   const [branches, setBranches] = useState<readonly Branch[] | null>(null);
   const [branchesRevision, setBranchesRevision] = useState(0);
+  // The agent branch whose review bundle the Review view shows (T8.3b), if any, with its document:
+  // a review is of the open document's branch, so another document closes it.
+  const [reviewingIn, setReviewing] = useState<{ document: string; branch: string } | null>(null);
   const [autosave, setAutosave] = useState<Autosave | null>(null);
   const [docReady, setDocReady] = useState(libraryPromise === null);
   const [view, setView] = useState<'editor' | 'home'>('editor');
@@ -1265,6 +1271,21 @@ export function App({
     exportSourceStore.setState({ source: branchExportSource(shownBranch, branches) });
   }, [shownBranch, branches]);
   useLayoutEffect(() => () => exportSourceStore.setState({ source: null }), []);
+  // Scripts on an agent's branch (T8.3b): the reviewer is asked again, whatever was allowed for
+  // the document (scripts/policy.ts). The open branch and the shown one count; a branch other than
+  // main whose record is not read yet counts as an agent's until it is (fail closed).
+  const agentScoped = [branch, shownBranch].some(
+    (b) =>
+      b !== MAIN_BRANCH &&
+      (branches === null ||
+        !branches.some((x) => x.id === b) ||
+        isAgentBranch(branches.find((x) => x.id === b))),
+  );
+  useLayoutEffect(() => {
+    scriptGrants.getState().setAgentDocument(agentScoped ? document.id : null);
+  }, [scriptGrants, agentScoped, document.id]);
+  useLayoutEffect(() => () => scriptGrants.getState().setAgentDocument(null), [scriptGrants]);
+  const reviewing = reviewingIn?.document === document.id ? reviewingIn.branch : null;
   // A branch can arrive without a save or a switch (sync keeps the server's, T7.1e): read again.
   useEffect(() => {
     if (!library) return undefined;
@@ -1530,6 +1551,49 @@ export function App({
       ? withMeshBodies(loader.measurer ?? null, () => meshes)
       : (loader.measurer ?? null);
   }, [loader, shownImports]);
+  // The Review view's measurement of a body of the open branch's regen (T8.3b). A request a newer
+  // regen superseded is asked again, a few times.
+  const measureForReview = useCallback(
+    async (viewId: string): Promise<MeasuredHere> => {
+      if (!measurer) return { ok: false, message: 'There is no geometry kernel here.' };
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const r = await measurer.measure(viewId, [], true);
+        if (r === null) continue;
+        if (!r.ok) return { ok: false, message: r.message };
+        const body = r.result.body;
+        if (!body || body.volume === null) return { ok: false, message: 'It has no volume.' };
+        return { ok: true, volume: body.volume, area: body.area, boundingBox: body.boundingBox };
+      }
+      return { ok: false, message: 'The kernel was busy; open the review again.' };
+    },
+    [measurer],
+  );
+  const reviewed = reviewing === null ? undefined : branches?.find((b) => b.id === reviewing);
+  const onApproveReview = useCallback(
+    async (bundleRevision: number, finishing: boolean) => {
+      if (!library || !autosave || !isAgentBranch(reviewed)) {
+        return { ok: false as const, message: 'Nothing is saved here.' };
+      }
+      const r = await approveBranch({
+        source: library,
+        documentId: documents.getState().document.id,
+        branch: reviewed,
+        bundleRevision,
+        openMain: () => openBranch(MAIN_BRANCH),
+        documents,
+        flush: () => autosave.flush(),
+        finishing,
+      });
+      setBranchesRevision((n) => n + 1);
+      setIoStatus(
+        r.ok
+          ? { error: false, text: `Approved ${reviewed.name}: merged into Main as one step.` }
+          : { error: true, text: r.message },
+      );
+      return r;
+    },
+    [library, autosave, reviewed, documents, openBranch],
+  );
 
   const exportable = useMemo(
     () => activeBodies.map((b) => ({ id: b.viewId, name: b.name, hidden: b.hidden })),
@@ -2750,6 +2814,7 @@ export function App({
                     disabled={exportAll !== null}
                     createDisabled={locked}
                     onClose={() => setHistoryOpen(false)}
+                    onReview={(id) => setReviewing({ document: document.id, branch: id })}
                   />
                 )}
                 {!locked && cutListOpen && hasWoodwork(document) && (
@@ -2813,6 +2878,22 @@ export function App({
             )}
           </div>
         </div>
+        {library && isAgentBranch(reviewed) && (
+          <ReviewPanel
+            key={reviewed.id}
+            source={library}
+            documentId={document.id}
+            branch={reviewed}
+            openBranch={branch}
+            model={model}
+            measure={measureForReview}
+            refresh={historyRevision + branchesRevision}
+            onOpenBranch={() => onSwitchBranch(reviewed.id)}
+            onApprove={onApproveReview}
+            onClose={() => setReviewing(null)}
+            disabled={sketching.active || dialog !== null || locked || exportAll !== null}
+          />
+        )}
         {scriptEditor !== null && !locked && (
           <Suspense
             fallback={
