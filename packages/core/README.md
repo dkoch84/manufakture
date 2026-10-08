@@ -1872,7 +1872,8 @@ to exactly `v4-bracket.json` and that to exactly `v5-bracket.json` and that to e
 `v6-bracket.json` and that to exactly `v7-bracket.json` and that to exactly `v8-bracket.json`
 and that to exactly `v9-bracket.json` and that to exactly `v10-bracket.json` and that to exactly
 `v11-bracket.json` and that to exactly `v12-bracket.json` and that to exactly `v13-bracket.json`
-and that to exactly `v14-bracket.json` and that to exactly `v15-bracket.json` (and every older
+and that to exactly `v14-bracket.json` and that to exactly `v15-bracket.json` and that to exactly
+`v16-bracket.json` and that to exactly `v17-bracket.json` (and every older
 fixture loads as exactly the current one),
 and
 `v3-two-bodies.json` to
@@ -1916,7 +1917,11 @@ version 14 file's views all show a part or an assembly; `v14-bracket.json` migra
 T7.2a); `migrateV15ToV16` only bumps the version, since a version 15 file has no scripts, and
 refuses one that already has a `scripts` key (`migration`); `v15-bracket.json` migrates to exactly
 `v16-bracket.json`. Its command step changes no command: the script commands are new, and a
-version 15 command carries no scripted feature.
+version 15 command carries no scripted feature. Version 17 added body groups (the optional
+`bodyGroups` of a part, absent when empty, with the part counter `group`); `migrateV16ToV17` only
+bumps the version, since a version 16 part has no groups, and refuses one that already has a
+`bodyGroups` key (`migration`); `v16-bracket.json` migrates to exactly `v17-bracket.json`. Its
+command step changes no command: the body group commands are new.
 
 Commands carry parts of the document shape too (a feature, a whole part, a whole document), and
 log entries and sync queues store them as written, with the format they were written under.
@@ -1959,7 +1964,8 @@ To change the file shape and commands:
 ## Where this deviates from ADR 0004's first cut
 
 - **Added fields.** The document has `id`, `name`, `nextIds`, `assemblies`, `print`, `cam` and optional `configurations` and `drawings`; a part has `name`,
-  `rollbackIndex`, an optional `material` (the default for its bodies) and `bodies`;
+  `rollbackIndex`, an optional `material` (the default for its bodies), `bodies` and optional
+  `bodyGroups` (`{ id: 'group#n', name, bodies }`, absent when the part has none);
   every feature has `name` and `suppressed`. The ADR's shape was a first cut that expected feature kinds
   to add their own fields.
 - **Cuts are extrudes.** The ADR's comment lists `'cut'` as a kind and T0.5 names faces

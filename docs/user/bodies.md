@@ -33,7 +33,7 @@ A part with many bodies (a sim rig's frame, seat, wheel stand and pedal box, say
 - **The group row** shows the group's name and how many bodies it holds, with its bodies listed under it. The arrow in front collapses or expands the list.
 - **Rename** works as for a body (double-clicking the name also does).
 - **Hide** and **Show** hide or show every body of the group; **Isolate** hides everything else. A body's own **Hide**, **Show** and **Isolate** still work inside a group, and the group's name looks faded when all of its bodies are hidden, and in italics when only some are.
-- **Add** puts the ticked (or selected) bodies into the group, taking them out of any other. **Ungroup** on a body's row takes it out of its group.
+- **Add** puts the ticked (or selected) bodies into the group, taking them out of any other. **Remove** on a body's row takes it out of its group.
 - **Delete** removes the group. Its bodies stay, back in the list on their own.
 
 Groups are saved in the document like body names: creating, renaming, changing and deleting a group are each one step for **Undo**. Hiding a group is part of the view, like hiding a body: it is not an undo step and is not saved in the file. Groups change nothing else: the cut list, exports, measuring and selection treat grouped bodies exactly like the rest.
