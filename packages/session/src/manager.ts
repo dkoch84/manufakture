@@ -5,6 +5,7 @@
 import type { BranchLocks, DocumentLibrary } from '@manufakture/library';
 import type { BundleStore } from './bundles';
 import { startEngine, type Engine, type EngineKind } from './engine';
+import type { TextWorkerOptions } from './node-host';
 import { sessionError, type SessionResult } from './errors';
 import {
   IN_PROCESS_SESSIONS_PER_PROCESS,
@@ -30,6 +31,8 @@ export interface SessionManagerOptions {
   /** The worker's script, for a bundled host (see `WorkerEngineOptions.url`). */
   workerUrl?: URL;
   workerExecArgv?: string[];
+  /** The text worker for user fonts, for a bundled host (see `TextWorkerOptions`). */
+  textWorker?: TextWorkerOptions;
   /** Overrides of `DEFAULT_LIMITS`; `sessionsPerProcess` defaults by engine kind. */
   limits?: Partial<SessionLimits>;
   now?: () => Date;
@@ -85,6 +88,7 @@ export class SessionManager {
           heapThresholdBytes: this.#limits.kernelHeapBytes,
           ...(o.workerUrl ? { url: o.workerUrl } : {}),
           ...(o.workerExecArgv ? { execArgv: o.workerExecArgv } : {}),
+          ...(o.textWorker ? { textWorker: o.textWorker } : {}),
         }),
       onClose: (session) => {
         if (this.#sessions.get(session.id) === session) this.#sessions.delete(session.id);

@@ -23,6 +23,7 @@
     "@manufakture/kernel": "workspace:*",
     "@manufakture/library": "workspace:*",
     "@manufakture/regen": "workspace:*",
+    "@manufakture/script": "workspace:*",
     "@manufakture/stock": "workspace:*",
     "@manufakture/sync": "workspace:*",
     "comlink": "^4.4.2",

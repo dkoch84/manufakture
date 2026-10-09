@@ -160,7 +160,25 @@ export function ReviewPanel({
     if (checkKey === null || checkKey.ready === null || checkKey.built === null) return undefined;
     let cancelled = false;
     const { ready: r, built: document, parts: regenerated } = checkKey;
-    void compareRegen({ bundle: r.bundle, document, parts: regenerated, measure }).then(
+    // The branch's base version says which scripted features the session did not run; when it
+    // cannot be read nothing is left out, and those bodies show as mismatches.
+    const readBase = async () => {
+      if (branch.fromVersion === null) return null;
+      try {
+        const read = await source.readVersion(documentId, branch.fromVersion);
+        return read.ok ? read.value.document : null;
+      } catch {
+        return null;
+      }
+    };
+    void (async () =>
+      compareRegen({
+        bundle: r.bundle,
+        document,
+        parts: regenerated,
+        measure,
+        base: await readBase(),
+      }))().then(
       (check) => {
         if (!cancelled) setChecked({ for: checkKey, check });
       },
@@ -183,7 +201,7 @@ export function ReviewPanel({
     return () => {
       cancelled = true;
     };
-  }, [checkKey, measure]);
+  }, [checkKey, measure, source, documentId, branch.fromVersion]);
   const regen: RegenStatus =
     openBranch !== branch.id
       ? { kind: 'not-open' }

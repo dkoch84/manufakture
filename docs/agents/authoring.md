@@ -1100,15 +1100,21 @@ pattern, a variable and an expression cover most requests and are far easier to 
 a script only when the person asks for one, or when the geometry follows a rule no feature can
 express (holes on a spiral, a count that follows a length), and say why.
 
-Scripted features do not run in an agent's session yet: they regenerate there with an error,
-though they build in the app. So if you add one, the session cannot check it; tell the person to
-check it in the app. A dry run shows that:
+Your session runs your branch's own scripts: those you added or changed on the branch, under the
+same limits as in the app (a run stops after 2 s, and one still going after 10 s ends your
+session's geometry worker; that feature then fails with a `script` error until you change the
+script or its parameters). So check a scripted feature's result in the apply report and with
+`measure`; `render` and `export` do not run scripts yet, so their images and files leave its
+bodies out. Scripts that were already in the document before your branch, written by someone
+else, do not run in your session: their features regenerate with a `script` error
+(`not-allowed`). Do not edit someone else's script just to make it run; it would then count as
+yours and the person reviews it as your change. A dry run of a scripted pin:
 
 ```json mcp:open_session
 { "documentId": "doc-bracket" }
 ```
 
-```json mcp:apply regen-errors
+```json mcp:apply
 {
   "sessionId": "<session>",
   "label": "Try a scripted pin",

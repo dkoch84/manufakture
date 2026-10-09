@@ -324,11 +324,40 @@ export interface RegenCheck {
 export const MAX_MISMATCHES = 200;
 
 /**
+ * The scripted features of `head` that a session does not run (ADR 0016 decision 2, which runs only
+ * the branch's own scripts): those whose script `base` has with the same id and source, by
+ * `<part id>/<feature id>`. Worked out from the branch's base version and its head, never from the
+ * bundle. Empty without a base, so nothing is left out of the comparison then.
+ */
+export function scriptedNotRunBySession(
+  head: ManufaktureDocument,
+  base: ManufaktureDocument | null,
+): Set<string> {
+  const out = new Set<string>();
+  if (base === null) return out;
+  const before = new Map((base.scripts ?? []).map((x) => [x.id, x.source]));
+  for (const part of head.parts) {
+    for (const f of part.features) {
+      if (f.kind !== 'scripted') continue;
+      const script = head.scripts?.find((x) => x.id === f.script);
+      if (script !== undefined && before.get(script.id) === script.source) {
+        out.add(`${part.id}/${f.id}`);
+      }
+    }
+  }
+  return out;
+}
+
+/**
  * Compare the bundle's head with this app's regen of the same head (ADR 0016 decision 4): the
  * bodies (by part and body id), their names where this app can tell them, their volume, area,
  * bounding box and mass within `TOLERANCE`, and the error codes of features. Never mesh hashes or
- * cache keys. Scripted features are left out of the error comparison: a session's engine runs no
- * script, and here they run only when the reviewer allows them.
+ * cache keys. Scripted features are left out of the error comparison: a session's engine runs
+ * only the branch's own scripts, and here they run only when the reviewer allows them. The bodies
+ * made by a scripted feature whose script is the base version's, unchanged (`base`;
+ * `scriptedNotRunBySession`), are left out of this regen's side too, with a note: the session never
+ * runs such a script, so with **Run scripts** this regen has bodies the bundle cannot. Anything
+ * such a body changes in another body or feature is still compared, and fails as a mismatch.
  *
  * It fails closed. A body the bundle lists without a measurement at head, a body this app cannot
  * measure, and a body or error on one side only are mismatches. Where the bundle cut a list at its
@@ -342,6 +371,8 @@ export async function compareRegen(input: {
   document: ManufaktureDocument;
   parts: readonly PartModel[];
   measure: (viewId: string) => Promise<MeasuredHere>;
+  /** The branch's base version: which scripted features the session did not run. */
+  base?: ManufaktureDocument | null;
 }): Promise<RegenCheck> {
   const { bundle, document, parts } = input;
   const mismatches: string[] = [];
@@ -377,8 +408,9 @@ export async function compareRegen(input: {
     theirs.set(`${b.partId}/${b.bodyId}`, b);
   }
 
-  // The bodies this regen made.
-  const ours = parts.flatMap((p) =>
+  // The bodies this regen made, but those of scripted features the session did not run.
+  const notRun = scriptedNotRunBySession(document, input.base ?? null);
+  const made = parts.flatMap((p) =>
     p.bodies.map((b) => ({
       partId: p.partId,
       bodyId: b.bodyId,
@@ -386,6 +418,16 @@ export async function compareRegen(input: {
       viewId: b.view.id,
     })),
   );
+  const ours = made.filter((b) => !notRun.has(`${b.partId}/${b.creator}`));
+  const leftOutHere = made.filter((b) => notRun.has(`${b.partId}/${b.creator}`));
+  if (leftOutHere.length > 0) {
+    notes.push(
+      `Not compared: ${leftOutHere.length === 1 ? 'a body' : `${leftOutHere.length} bodies`} of scripted features whose scripts are Main's, which an agent's session does not run (${leftOutHere
+        .slice(0, 20)
+        .map((b) => `${partName(b.partId)} / ${b.bodyId}`)
+        .join(', ')}${leftOutHere.length > 20 ? ', ...' : ''}).`,
+    );
+  }
   const ourKeys = new Set(ours.map((b) => `${b.partId}/${b.bodyId}`));
   for (const [key, b] of theirs) {
     if (!ourKeys.has(key)) {

@@ -71,6 +71,9 @@ importers:
       '@manufakture/library':
         specifier: workspace:*
         version: link:../../packages/library
+      '@manufakture/print':
+        specifier: workspace:*
+        version: link:../../packages/print
       '@manufakture/regen':
         specifier: workspace:*
         version: link:../../packages/regen
@@ -570,6 +573,9 @@ importers:
       '@manufakture/regen':
         specifier: workspace:*
         version: link:../regen
+      '@manufakture/script':
+        specifier: workspace:*
+        version: link:../script
       '@manufakture/stock':
         specifier: workspace:*
         version: link:../stock

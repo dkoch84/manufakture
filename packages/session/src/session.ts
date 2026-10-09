@@ -39,7 +39,7 @@ import {
   type BundleStore,
   type StoredBundle,
 } from './bundles';
-import { EngineLost, KernelTimeout, type Engine, type EngineApi } from './engine';
+import { EngineLost, KernelTimeout, ScriptStopped, type Engine, type EngineApi } from './engine';
 import { coreRefusal, done, sessionError, type Refusal, type SessionResult } from './errors';
 import { References } from './imports';
 import type { SessionLimits } from './limits';
@@ -196,6 +196,12 @@ export const MAX_REPORTED = 100;
 export function commandCount(command: Command): number {
   return command.type === 'batch' ? command.commands.reduce((n, c) => n + commandCount(c), 0) : 1;
 }
+
+/**
+ * How many times one regen goes on after the script hard limit ended its worker. Each stop costs
+ * that limit (10 s) of the regen's own time limit, which bounds it anyway.
+ */
+const MAX_SCRIPT_STOPS = 3;
 
 const CONTROL = /[\p{Cc}\p{Cf}]/u;
 /** A note may break lines. */
@@ -450,6 +456,15 @@ export class Session {
       await fail();
       return sessionError('kernel', 'The geometry kernel did not start.');
     }
+    // The branch's own scripts are those not in its base version as they are there (ADR 0016
+    // decision 2): only they run.
+    const base = await host.library.readVersion(fields.documentId, fields.base.id);
+    if (!base.ok) {
+      await engine.close().catch(() => undefined);
+      await fail();
+      return sessionError('storage', base.message);
+    }
+    engine.scriptBase = base.value.document;
     const session = new Session({
       ...rest,
       host,
@@ -561,13 +576,41 @@ export class Session {
     return r.value;
   }
 
-  /** Regen `document` under the time limit. A regen that does not stop is ended (worker). */
+  /**
+   * Regen `document` under the time limit. A regen that does not stop is ended (worker). A script
+   * run that passed its hard limit ended the worker (`ScriptStopped`): on a new one, which fails
+   * that run with a timeout, the regen is tried again within what is left of the time limit.
+   */
   async #regen(document: ManufaktureDocument): Promise<RegenOutcome> {
+    const t0 = performance.now();
+    const limit = this.#host.limits.regenMsPerBatch;
+    for (let stops = 0; ; stops++) {
+      const outcome = await this.#regenOnce(
+        document,
+        Math.max(1, limit - (performance.now() - t0)),
+      );
+      if (outcome !== 'script-stopped') {
+        return outcome.ok ? { ...outcome, ms: performance.now() - t0 } : outcome;
+      }
+      if (stops >= MAX_SCRIPT_STOPS || performance.now() - t0 >= limit) {
+        return {
+          ok: false,
+          reason: 'timeout',
+          message: `the regen took longer than ${limit} ms (scripts ran past their time limit)`,
+        };
+      }
+    }
+  }
+
+  async #regenOnce(
+    document: ManufaktureDocument,
+    ms: number,
+  ): Promise<RegenOutcome | 'script-stopped'> {
     const generation = ++this.#generation;
     const engine = this.#engine;
     const t0 = performance.now();
     const call = engine.api.regen(document, { generation });
-    const first = await within(call, this.#host.limits.regenMsPerBatch);
+    const first = await within(call, ms);
     if (first === 'timeout') {
       // Not awaited: a worker stuck in one operation never reads the cancel.
       engine.api.cancel(generation).catch(() => undefined);
@@ -581,7 +624,11 @@ export class Session {
       };
     }
     if ('error' in first) {
-      await this.#replaceEngine('restart').catch(() => undefined);
+      const restarted = await this.#replaceEngine('restart').then(
+        () => true,
+        () => false,
+      );
+      if (first.error instanceof ScriptStopped && restarted) return 'script-stopped';
       return { ok: false, reason: 'kernel', message: this.#public(first.error, 'regen') };
     }
     if (first.value === null) {
@@ -1120,8 +1167,12 @@ export class Session {
           `The branch was not updated: ${this.#public(e, 'updating from Main')}`,
         );
       }
+      // Main's head is the new base: scripts Main has are no longer the branch's own.
+      const priorBase = this.#engine.scriptBase ?? null;
+      this.#engine.scriptBase = main.value.document;
       const regen = await this.#settle(doc);
       if (!regen.ok) {
+        this.#engine.scriptBase = priorBase;
         await undoNew(lock);
         await this.#restore(this.#document);
         return sessionError(
@@ -1134,6 +1185,7 @@ export class Session {
       const listed = await lib.listBranches(id);
       const now = listed.ok ? listed.value.find((b) => b.id === old.id) : undefined;
       const refuse = async (r: { ok: false; error: Refusal }) => {
+        this.#engine.scriptBase = priorBase;
         await undoNew(lock);
         await this.#restore(this.#document);
         return r;
@@ -1233,7 +1285,19 @@ export class Session {
           {
             documentId: this.documentId,
             library: this.#host.library,
-            engine: this.#host.engine,
+            // The builder's engine runs the same scripts as the session's, and fails the runs
+            // the hard limit stopped there without running them again.
+            engine: async () => {
+              const engine = await this.#host.engine();
+              try {
+                engine.scriptBase = base.value.document;
+                await engine.addRunawayScripts?.(this.#engine.runawayScripts ?? []);
+              } catch (e) {
+                await engine.close().catch(() => undefined);
+                throw e;
+              }
+              return engine;
+            },
             limits: this.#host.limits,
             putBlob: (bytes) => store.putBlob(this.documentId, bytes),
           },

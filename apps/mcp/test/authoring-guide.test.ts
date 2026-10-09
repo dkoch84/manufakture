@@ -19,6 +19,9 @@
 //
 // The documents are packages/session's three fixtures (the M1 bracket, the cabinet, the shed) in
 // one library, so ids in the guide's examples are real ids of those documents.
+//
+// Sessions run on the worker engine, as the server does by default: only a worker engine runs
+// scripted features (it can end a run past the hard limit), and the guide's scripted pin builds.
 
 import { readFileSync } from 'node:fs';
 import { DocumentLibrary, type ReviewState } from '@manufakture/library';
@@ -265,7 +268,7 @@ describe('every example of the authoring guide, through the MCP server', () => {
   let documentId: string | null = null;
 
   beforeAll(async () => {
-    h = await harness();
+    h = await harness({ server: { engine: 'worker' } });
     const library = new DocumentLibrary(new NodeBackend(h.libraryRoot));
     await library.create(cabinetDocument());
     await library.create(shedDocument());

@@ -1,6 +1,6 @@
 # 0016: Agent sessions: headless sessions on agent branches, an MCP surface, review in History before Main
 
-- Status: accepted, amended 2026-10-08 (at acceptance: no export gate, see "Acceptance"; then how `apply` checks commands, see the amendment); amended 2026-10-09 (decision 2: scripts and user fonts not yet wired in sessions)
+- Status: accepted, amended 2026-10-08 (at acceptance: no export gate, see "Acceptance"; then how `apply` checks commands, see the amendment)
 - Date: 2026-10-08
 
 ## Context
@@ -37,8 +37,6 @@ The inputs:
    - **scripts** through `nodeScriptEngine` and `setScriptPolicy`, in a worker thread the host can terminate, with ADR 0010's limits and the browser's 10 s backstop. A session must run the agent's own scripted features to show their result; whether it runs scripts already in a document from someone else follows the same rule as the app (ADR 0010 amendment item 11), set in the session's configuration (T8.1c).
 
    Nothing else on the session path needs a browser API: Manifold, `crypto.subtle` and `navigator.locks` exist in Node 26, and no package reaches `OffscreenCanvas`.
-
-   Amended 2026-10-09: the last two items are not yet wired. A session runs no scripts (no `nodeScriptEngine`, no `setScriptPolicy`) and outlines no user fonts (no watchdog outliner); follow-up task #1224 wires them ([packages/session README](../../packages/session/README.md), "Not done"). Until then a scripted feature fails in the session, the agent's own included, so the bundle shows it failing; a reviewer who allows scripts gets that feature's bodies from the app's regen and none in the bundle, so the regen check reports a mismatch and **Approve** stays off (decision 11; [History, "Scripts in an agent branch"](../user/history.md#scripts-in-an-agent-branch)).
 
 3. **Limits.** Each ends with a typed error, as data (T8.1c). Values from T8.0a's recommendations:
 
@@ -151,7 +149,7 @@ The inputs:
 - **Limits**: decision 3; the idle timeout and the regen overrun margin are T8.1c's.
 - **Releasing a recycled kernel** (terminating the worker, or `gc()` after each recycle): T8.1c verifies; 2 sessions per process until then.
 - **Node against browser determinism**: decision 4; the measurement tolerance is T8.3b's.
-- **Injections for Node** (text `fetchImpl`, domain registry, user fonts and scripts in a worker with a watchdog): decision 2. The text `fetchImpl` and the domain registry are wired (T8.1c); user fonts, scripts and the script policy in sessions are not yet, and are follow-up task #1224's (decision 2's amendment of 2026-10-09).
+- **Injections for Node** (text `fetchImpl`, domain registry, user fonts and scripts in a worker with a watchdog): decision 2. Wired in T8.1c and #1224 ([packages/session README](../../packages/session/README.md), "Scripts and user fonts").
 - **Rendering**: decision 5, landed in T8.2a.
 - **Tool list and versioning**: decisions 6 and 7; CI keeps a golden of the tool list and schemas, T8.4a's. Which export formats the `export` tool offers beyond T8.1b's entry points is T8.4a's.
 - **Symbolic ids**: decision 8, counter-prefixed; built in T8.1c.

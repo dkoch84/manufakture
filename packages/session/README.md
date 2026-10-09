@@ -44,10 +44,11 @@ await session.close(); // the branch stays
 | ------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
 | `session.ts`             | `Session`: open, resume, apply, undo, updateFromMain, submit, close, and the reads.                                      |
 | `manager.ts`             | `SessionManager`: the sessions of one process under the per-process limit; the host each session gets.                   |
-| `engine.ts`              | `WorkerEngine` (default) and `InProcessEngine`: where a session's regen engine and kernel run.                           |
+| `engine.ts`              | `WorkerEngine` (default) and `InProcessEngine`: where a session's regen engine and kernel run; which scripts run.        |
 | `worker/entry.ts`        | The worker thread's script (`./worker`): the regen worker API on the main thread's compiled kernel module, over Comlink. |
+| `worker/text.ts`         | The text worker's script: user fonts read and texts in them laid out, under the watchdog.                                |
 | `worker/ts-hooks.ts`     | Development and tests only: lets the worker load the workspace's TypeScript sources.                                     |
-| `node-host.ts`           | What a Node host injects into regen: the bundled font read from `file:` URLs, the stock, wood and construction domains.  |
+| `node-host.ts`           | What a Node host injects into regen: bundled fonts from `file:` URLs, the text worker, QuickJS, the domains.             |
 | `symbols.ts`             | Symbolic ids: `extrude#$boss` to `extrude#2`, through core's `commandIds` and `remapIds`.                                |
 | `queries.ts`             | `tree`, `object`, `findGeometry`, `measure`, `quantities`, `errors`.                                                     |
 | `model.ts`               | `ModelState`: what the session keeps between regens (face and edge names with geometry, member sets).                    |
@@ -333,6 +334,44 @@ development dependency) and load `opentype.js` from its ES module build. A bundl
 (`apps/mcp`, T8.4a) builds `@manufakture/session/worker` as an entry of its own and passes its
 URL (`SessionManagerOptions.workerUrl`); the hooks are never loaded then.
 
+## Scripts and user fonts
+
+ADR 0016 decision 2. This runs untrusted code and parses untrusted files headlessly, so each runs
+where the host can end it, with the limits the app has, and nothing is widened.
+
+**Which scripts run: the branch's own.** Before every regen the engine sends the regen worker a
+`ScriptPolicy` (`sessionScriptPolicy`): the scripts of the regenerated document that the session's
+base document (its branch's base version, read when the session starts) does not have with the
+same id and source, each granted by its id and the SHA-256 of its source, as the app grants a
+script the user wrote on this device. Never `auto` and never a whole document, so scripts already
+in the document from someone else, and the scripts of a derived part's source document, do not run;
+their features fail with `not-allowed` (`scriptsNotRunError`), as in the app before the user
+allows them. A script the agent edits becomes its own, and the review shows it in full. An update
+from Main makes Main's head the base (restored when the update fails). The bundle builder's
+engine (`BundleContext.engine`) gets the same base, so the bundle has the bodies the session has,
+and those the reviewer's regen has with **Run scripts**, which grants exactly the head's scripts.
+Without a base (an engine started elsewhere) no script runs.
+
+**Where they run: only in a worker engine.** The session's worker gets the QuickJS module the
+main thread compiled (`nodeScriptModule`) and runs scripts with `@manufakture/script`'s default
+limits (2 s per run, 64 MiB heap, the host call, kernel operation and payload limits), as the
+app's regen worker does. The hard limit is the main thread's, as `RegenClient`'s is in the app:
+the worker reports every run's start and end on a channel of its own, set before its API is
+exposed, so no script runs unwatched; a run still going after `SCRIPT_HARD_TIMEOUT_MS` (10 s, the
+app's) terminates the worker. The call in flight rejects with `ScriptStopped`, the session starts a
+new worker, which is given the stopped runs' cache keys (at most 1,000) and fails those features
+with a `timeout` error instead of running them again, and regenerates within what is left of the
+batch's regen time (at most 3 stops a regen). An `InProcessEngine` cannot end a run, so it is given
+no script engine: scripted features fail there as `unsupported`.
+
+**User fonts.** Texts in a bundled font are laid out in the engine's thread as before (the font's
+bytes are pinned by SHA-256). A user font is read, and texts in it laid out, in a text worker
+(`worker/text.ts`, started on the first user font, ended with the engine) under
+`createWatchdogOutliner`: 10 s a request, the regen's text budgets, a font that timed out or
+crashed not tried again. The text worker has a 1 GiB V8 heap (`TEXT_WORKER_HEAP_MB`), so a font
+that exhausts memory ends that worker, never the process. Both engines use it; in a worker engine
+it is a worker of the session's worker.
+
 ## Reads
 
 All plain JSON; text from the document (names, labels, notes) travels only in data fields
@@ -405,7 +444,15 @@ them by the import feature's id as `bodyId`; a file that does not read is listed
   a schema for every command type and feature kind, with doc comments.
 - `worker.test.ts`: the shed on the worker engine; a regen that does not stop ends its worker
   and the batch is rolled back, the next one served by a new worker; a heap past the threshold
-  replaces the worker.
+  replaces the worker. Scripts: the agent's scripted pin builds its body, and the bundle
+  builder's engine gives the same bodies and volumes as a reviewer's regen with **Run scripts**;
+  a script already on Main does not run until the branch changes it; a run past the hard limit
+  ends the worker once and then fails as `timeout`; an update from Main takes Main's head as the
+  base (a script Main absorbed stops running), and one that fails keeps the old base. User fonts:
+  a text in a user font builds on both engines; a file that is not a font, and a text worker that
+  runs out of memory or exits, fail the text as data and the session goes on.
+- `engine.test.ts`: the worker engine's lifecycle; the script policy (own scripts by source, none
+  without a base); the in-process engine runs no script.
 - `hardening.test.ts` (the security review): kernel calls that hang (a measurement, a batch
   report's measurements, a STEP read) end in `kernel-timeout` on a new kernel; close and idle
   close end a session whose queue is stuck; a reviewer approving or rejecting while a batch
@@ -425,11 +472,14 @@ them by the import feature's id as `bodyId`; a file that does not read is listed
 
 ## Not done
 
-- **Scripts and user fonts.** Scripted features are not run (the session's engine has no script
-  engine), so they regenerate as `unsupported` errors, as data.
-  User fonts are refused by the in-thread outliner. In a worker engine both could run under the
-  regen limit's hard bound (the worker is terminated), but ADR 0010's own limits and the policy
-  for scripts already in a document are not wired yet.
+- **Scripts from someone else.** Scripts already in the document when the branch was made never
+  run in a session: there is no session setting to run them (ADR 0016 decision 2 leaves it to
+  the session's configuration). A reviewer who allows such a script gets its bodies in the app's
+  regen and not in the bundle; the regen check leaves those bodies out, with a note, by the same
+  rule worked out from the branch's base version (apps/web `scriptedNotRunBySession`).
+- **Scripts in process, renders and exports.** An `InProcessEngine` runs no script (above), and
+  apps/mcp's `render` and `export` regenerate on an engine of their own with no script engine,
+  so their images and files leave scripted bodies out.
 - **Exact clearance between bodies.** The kernel has no minimum-distance operation between two
   shapes; `clearance` reports overlap volumes exactly and, for bodies apart, a bounding-box gap,
   which is a lower bound. Distances between faces of one body are exact (`targets`).
