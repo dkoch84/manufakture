@@ -1405,6 +1405,7 @@ export class Session {
       api: this.#kernel,
       generation: this.#generation,
       references: this.#references,
+      kernelMsPerCall: this.#host.limits.kernelMsPerCall,
     };
   }
 

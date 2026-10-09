@@ -169,7 +169,28 @@ export const MeasureQuery = z.discriminatedUnion('kind', [
   z.strictObject({
     kind: z.literal('interference'),
     assemblyId: ModelId,
-    poses: z.record(ModelId, Placement).optional(),
+    poses: z
+      .record(ModelId, Placement)
+      .optional()
+      .describe(
+        'Instances placed by hand (the rest at their solved poses), each checked against the mates: warnings for a pose past a limit or off a mate.',
+      ),
+    travel: z
+      .strictObject({
+        mateId: ModelId.describe('A slider or revolute mate.'),
+        from: z.number().min(-1e9).max(1e9).optional().describe("Default the mate's minimum."),
+        to: z.number().min(-1e9).max(1e9).optional().describe("Default the mate's maximum."),
+        step: z
+          .number()
+          .positive()
+          .max(1e9)
+          .optional()
+          .describe('Default a twentieth of the range.'),
+      })
+      .optional()
+      .describe(
+        "Sweep a slider's distance (mm) or a revolute's angle (degrees) from `from` to `to`, the other mates kept, checking each step for pairs with an instance that moves: the first colliding value and its pairs, every colliding value, the values checked (at most 101, within one kernel call's time budget), pairs of instances that never move checked once as staticPairs, and warnings for values past the limits. Not with poses; refused while the assembly's solve conflicts or is invalid.",
+      ),
   }),
 ]);
 

@@ -230,11 +230,18 @@ export {
   framePose,
   instanceSourceKey,
   limitWarning,
+  MAX_SWEEP_VALUES,
   namedCoordinates,
+  posedMates,
   posesDiffer,
+  resultSolverInput,
   solvedPoses,
+  sweepPoses,
+  sweepValues,
   type ConnectorFrame,
   type NamedCoordinate,
+  type PosedMateCheck,
+  type SweepStep,
 } from './assembly';
 export {
   DRAWING_STAGE_VERSION,

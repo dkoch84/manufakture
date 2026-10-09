@@ -13,8 +13,11 @@ import { ok, seeded, type Seeded } from './test/setup';
 const open: Session[] = [];
 let seed: Seeded;
 
-async function start(doc: ManufaktureDocument): Promise<Session> {
-  seed = await seeded(doc);
+async function start(
+  doc: ManufaktureDocument,
+  options: Parameters<typeof seeded>[1] = {},
+): Promise<Session> {
+  seed = await seeded(doc, options);
   const s = ok(await seed.manager.open({ documentId: seed.documentId, clientName: 'Test' }));
   open.push(s);
   return s;
@@ -177,6 +180,277 @@ describe('assemblies', () => {
     expect(apart.pairs).toEqual([]);
     const tree = ok(await s.tree());
     expect(tree.assemblies[0]!.instances.map((i) => i.id)).toEqual(['inst#1', 'inst#2']);
+  });
+});
+
+describe('interference over a travel', () => {
+  const pose = (x: number) => ({ translation: [x, 0, 0], rotation: [0, 0, 0, 1] });
+  const mm = (source: string) => ({ source, lengthUnit: 'mm', angleUnit: 'deg' });
+  // Two brackets on a slider along -X (the normal of the bracket's back face, x = 0), both at the
+  // origin: the second slides out of the first. They overlap until 50 mm, the bracket's length.
+  interface PairOptions {
+    limits?: Record<string, unknown>;
+    kind?: 'slider' | 'revolute';
+    face?: string;
+    /** The connectors' offset translation (mm, along each connector frame's axes). */
+    offset?: [number, number, number];
+    /** More commands after the mate (a third instance, another mate). */
+    more?: Record<string, unknown>[];
+    session?: Parameters<typeof seeded>[1];
+  }
+  const instance = (id: string, fixed: boolean, x = 0) => ({
+    type: 'addInstance',
+    assemblyId: 'assembly#$a',
+    instance: { id, name: id, source: { part: PART }, fixed, suppressed: false, pose: pose(x) },
+  });
+  async function pair(limits?: Record<string, unknown>, options: PairOptions = {}) {
+    const s = await start(bracketDocument(), options.session);
+    const offset = options.offset
+      ? {
+          offset: {
+            translation: options.offset.map((v) => mm(`${v}`)),
+            rotation: [mm('0'), mm('0'), mm('0')],
+          },
+        }
+      : {};
+    const connector = (id: string, instance: string) => ({
+      id,
+      instance,
+      inference: 'centroid',
+      origin: { id: `r$ref_${id.slice(4)}`, ref: { face: options.face ?? 'extrude#1:side:e6' } },
+      ...offset,
+    });
+    ok(
+      await s.apply({
+        label: 'Two brackets on a mate',
+        commands: [
+          { type: 'addAssembly', assemblyId: 'assembly#$a', name: 'Pair' },
+          instance('inst#$one', true),
+          instance('inst#$two', false),
+          {
+            type: 'addMate',
+            assemblyId: 'assembly#$a',
+            mate: {
+              id: 'mate#$slide',
+              name: 'Slide',
+              kind: options.kind ?? 'slider',
+              suppressed: false,
+              a: connector('mc#$ca', 'inst#$one'),
+              b: connector('mc#$cb', 'inst#$two'),
+              ...(limits ? { limits } : {}),
+            },
+          },
+          ...(options.more ?? []),
+        ],
+      }),
+    );
+    return s;
+  }
+  type Sweep = {
+    travel: { from: number; to: number; step: number; unit: string };
+    values: number[];
+    checked: number;
+    first: { value: number; pairs: { a: string; b: string; volume: number }[] } | null;
+    pairs: unknown[];
+    moving: string[];
+    staticPairs: { a: string; b: string; volume: number }[];
+    colliding: number[];
+    warnings: { code: string; bound?: string; values?: number[] }[];
+  };
+  const sweep = async (s: Session, travel: Record<string, unknown>) =>
+    ok(
+      await s.measure({ kind: 'interference', assemblyId: 'assembly#1', travel }),
+    ) as unknown as Sweep;
+
+  it('sweeps a slider over its limits by default, and from a given end with a given step', async () => {
+    const s = await pair({ min: mm('20'), max: mm('100') });
+    const all = await sweep(s, { mateId: 'mate#1' });
+    expect(all.travel).toMatchObject({ from: 20, to: 100, step: 4, unit: 'mm' });
+    expect(all.checked).toBe(21);
+    expect(all.first).toEqual({
+      value: 20,
+      pairs: [{ a: 'inst#1', b: 'inst#2', volume: expect.any(Number) }],
+    });
+    expect(all.pairs).toEqual(all.first!.pairs);
+    // 50 mm is touching, not overlapping.
+    expect(all.colliding).toEqual([20, 24, 28, 32, 36, 40, 44, 48]);
+    expect(all.warnings).toEqual([]);
+    // Closing from the far end: the first value that collides on the way in.
+    const closing = await sweep(s, { mateId: 'mate#1', from: 100, to: 20, step: 10 });
+    expect(closing.values).toEqual([100, 90, 80, 70, 60, 50, 40, 30, 20]);
+    expect(closing.first!.value).toBe(40);
+    // A range past the limits is checked, with a warning naming the values.
+    const past = await sweep(s, { mateId: 'mate#1', from: 0, to: 20, step: 10 });
+    expect(past.checked).toBe(3);
+    expect(past.first!.value).toBe(0);
+    expect(past.warnings).toEqual([
+      expect.objectContaining({ code: 'outside-limits', bound: 'min', limit: 20, values: [0, 10] }),
+    ]);
+    // A pose by hand past the limit is a warning as well.
+    const posed = ok(
+      await s.measure({
+        kind: 'interference',
+        assemblyId: 'assembly#1',
+        poses: { 'inst#2': pose(-150) },
+      }),
+    ) as unknown as Sweep;
+    expect(posed.pairs).toEqual([]);
+    expect(posed.warnings).toEqual([
+      expect.objectContaining({ code: 'outside-limits', bound: 'max', limit: 100, value: 150 }),
+    ]);
+  });
+
+  it('checks only pairs with a moving instance; the rest once, as staticPairs', async () => {
+    // A third bracket, fixed where the first is: the two overlap whatever the slider does.
+    const s = await pair(
+      { min: mm('60'), max: mm('100') },
+      { more: [instance('inst#$three', true)] },
+    );
+    const r = await sweep(s, { mateId: 'mate#1', step: 20 });
+    expect(r.moving).toEqual(['inst#2']);
+    expect(r.staticPairs).toEqual([{ a: 'inst#1', b: 'inst#3', volume: expect.any(Number) }]);
+    // Past 50 mm the moving bracket is clear of both: the fixed overlap does not count as one.
+    expect(r.checked).toBe(3);
+    expect(r.first).toBeNull();
+    expect(r.pairs).toEqual([]);
+  });
+
+  it('stops a sweep that runs past the kernel budget and answers what it checked', async () => {
+    const s = await pair(
+      { min: mm('0'), max: mm('100') },
+      { session: { limits: { kernelMsPerCall: 500 } } },
+    );
+    const r = await sweep(s, { mateId: 'mate#1', step: 1 });
+    expect(r.values).toHaveLength(101);
+    expect(r.checked).toBeGreaterThan(0);
+    expect(r.checked).toBeLessThan(101);
+    expect(r.first!.value).toBe(0);
+    expect(r.warnings).toEqual([
+      expect.objectContaining({ code: 'truncated', checked: r.checked, values: 101, ms: 500 }),
+    ]);
+  });
+
+  it('refuses to sweep an assembly whose solve conflicts', async () => {
+    // The two brackets also fastened to each other 10 mm apart, both fixed: no solve closes that.
+    const s = await pair(
+      { min: mm('0'), max: mm('100') },
+      {
+        more: [
+          instance('inst#$three', true, 10),
+          {
+            type: 'addMate',
+            assemblyId: 'assembly#$a',
+            mate: {
+              id: 'mate#$fix',
+              name: 'Fix',
+              kind: 'fastened',
+              suppressed: false,
+              a: {
+                id: 'mc#$fa',
+                instance: 'inst#$one',
+                inference: 'centroid',
+                origin: { id: 'r$ref_fa', ref: { face: 'extrude#1:side:e6' } },
+              },
+              b: {
+                id: 'mc#$fb',
+                instance: 'inst#$three',
+                inference: 'centroid',
+                origin: { id: 'r$ref_fb', ref: { face: 'extrude#1:side:e6' } },
+              },
+            },
+          },
+        ],
+      },
+    );
+    const r = await s.measure({
+      kind: 'interference',
+      assemblyId: 'assembly#1',
+      travel: { mateId: 'mate#1' },
+    });
+    expect(r.ok).toBe(false);
+    expect(JSON.stringify(r)).toMatch(/last solve is conflicting/);
+  });
+
+  it('sweeps a revolute in degrees, with warnings in degrees', async () => {
+    // Both connectors on the bracket's foot (normal -Z), moved 100 mm along their frame's x: the
+    // second bracket swings about a vertical axis 100 mm off, clear of the first past some angle.
+    const s = await pair(
+      { min: mm('0 deg'), max: mm('90 deg') },
+      { kind: 'revolute', face: 'extrude#1:side:e1', offset: [100, 0, 0] },
+    );
+    const all = await sweep(s, { mateId: 'mate#1' });
+    expect(all.travel).toMatchObject({ from: 0, to: 90, step: 4.5, unit: 'deg' });
+    expect(all.checked).toBe(21);
+    expect(all.first!.value).toBe(0);
+    expect(all.colliding).not.toContain(90);
+    const past = await sweep(s, { mateId: 'mate#1', from: 0, to: 180, step: 30 });
+    expect(past.values).toEqual([0, 30, 60, 90, 120, 150, 180]);
+    expect(past.colliding).not.toContain(180);
+    expect(past.warnings).toEqual([
+      expect.objectContaining({
+        code: 'outside-limits',
+        bound: 'max',
+        limit: 90,
+        unit: 'deg',
+        values: [120, 150, 180],
+      }),
+    ]);
+    // A pose by hand, turned 120 degrees about the axis: a warning in degrees too.
+    const frames = ok(
+      await s.mateFrames({ kind: 'mate', assemblyId: 'assembly#1', mateId: 'mate#1' }),
+    ) as {
+      a: { origin: readonly number[]; z: readonly number[] };
+    };
+    const axis = frames.a.z;
+    const angle = (120 * Math.PI) / 180;
+    const q = [...axis.map((c) => c * Math.sin(angle / 2)), Math.cos(angle / 2)];
+    // Turn about the axis through a's origin: p' = R (p - o) + o, so t = o - R o.
+    const o = frames.a.origin;
+    const rot = (v: readonly number[]) => {
+      const [x, y, z, w] = q as [number, number, number, number];
+      const c = [y * v[2]! - z * v[1]!, z * v[0]! - x * v[2]!, x * v[1]! - y * v[0]!];
+      return [
+        v[0]! + 2 * (w * c[0]! + y * c[2]! - z * c[1]!),
+        v[1]! + 2 * (w * c[1]! + z * c[0]! - x * c[2]!),
+        v[2]! + 2 * (w * c[2]! + x * c[1]! - y * c[0]!),
+      ];
+    };
+    const ro = rot(o);
+    const posed = ok(
+      await s.measure({
+        kind: 'interference',
+        assemblyId: 'assembly#1',
+        poses: { 'inst#2': { translation: o.map((c, i) => c - ro[i]!), rotation: q } },
+      }),
+    ) as unknown as { warnings: Record<string, unknown>[] };
+    expect(posed.warnings).toEqual([
+      expect.objectContaining({
+        code: 'outside-limits',
+        bound: 'max',
+        limit: expect.closeTo(90, 9) as number,
+        value: expect.closeTo(120, 6) as number,
+        unit: 'deg',
+      }),
+    ]);
+  });
+
+  it('refuses a sweep it cannot make', async () => {
+    const s = await pair({ min: mm('0') });
+    const refused = async (query: Record<string, unknown>, message: RegExp) => {
+      const r = await s.measure({ kind: 'interference', assemblyId: 'assembly#1', ...query });
+      expect(r.ok).toBe(false);
+      expect(JSON.stringify(r)).toMatch(message);
+    };
+    await refused({ travel: { mateId: 'mate#1' } }, /no maximum: give travel to/);
+    await refused({ travel: { mateId: 'mate#1', to: 1000, step: 1 } }, /at most 101 values/);
+    await refused({ travel: { mateId: 'mate#9' } }, /no mate mate#9/);
+    await refused(
+      { travel: { mateId: 'mate#1', to: 10 }, poses: { 'inst#2': pose(5) } },
+      /poses or a travel, not both/,
+    );
+    const r = await sweep(s, { mateId: 'mate#1', to: 60, step: 30 });
+    expect(r.values).toEqual([0, 30, 60]);
+    expect(r.colliding).toEqual([0, 30]);
   });
 });
 

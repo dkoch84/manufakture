@@ -4,15 +4,20 @@
 import { solve, type Pose } from '@manufakture/assembly';
 import type { ConnectorReport } from '@manufakture/kernel';
 import { describe, expect, it } from 'vitest';
+import type { Assembly, Mate } from '@manufakture/core';
 import {
   applyReport,
   connectorFrames,
   emptyAssemblyResult,
   namedCoordinates,
   pickReport,
+  posedMates,
+  resultSolverInput,
   solvedPoses,
+  sweepPoses,
 } from './assembly';
 import type { AssemblyResult, InstanceResult, MateResult } from './types';
+import { evaluateVariables } from './values';
 
 const found = (via: 'exact' | 'descendant' | 'ordinal', index = 1): ConnectorReport => ({
   ok: true,
@@ -231,5 +236,152 @@ describe('connectorFrames', () => {
     near(a.y, [0, 0, 1]);
     near(a.z, [0, -1, 0]);
     expect(connectorFrames(result, 'mate#9', 'slider')).toBeUndefined();
+  });
+});
+
+describe('sweeps over a mate from a regen result', () => {
+  const I: Pose = { translation: [0, 0, 0], rotation: [0, 0, 0, 1] };
+  const mm = (source: string) => ({ source, lengthUnit: 'mm' as const, angleUnit: 'deg' as const });
+  const connector = (id: string, instance: string) => ({
+    id,
+    instance,
+    inference: 'centroid' as const,
+    origin: { id: `r${id}`, ref: { face: 'f' } },
+  });
+  const mateOf = (id: string, kind: Mate['kind'], a: string, b: string, extra = {}): Mate =>
+    ({
+      id,
+      name: id,
+      kind,
+      suppressed: false,
+      a: connector(`${id}a`, a),
+      b: connector(`${id}b`, b),
+      ...extra,
+    }) as Mate;
+  const assembly = {
+    id: 'assembly#1',
+    name: 'Drawer',
+    instances: [
+      {
+        id: 'cab',
+        name: 'Cabinet',
+        source: { part: 'p' },
+        fixed: true,
+        suppressed: false,
+        pose: I,
+      },
+      {
+        id: 'drawer',
+        name: 'Drawer',
+        source: { part: 'p' },
+        fixed: false,
+        suppressed: false,
+        pose: I,
+      },
+      { id: 'knob', name: 'Knob', source: { part: 'p' }, fixed: false, suppressed: false, pose: I },
+      { id: 'off', name: 'Off', source: { part: 'p' }, fixed: false, suppressed: true, pose: I },
+    ],
+    mates: [
+      mateOf('mate#1', 'slider', 'cab', 'drawer', { limits: { min: mm('0'), max: mm('#travel') } }),
+      mateOf('mate#2', 'fastened', 'drawer', 'knob'),
+      mateOf('mate#3', 'fastened', 'drawer', 'off'),
+    ],
+    nextIds: {},
+  } as unknown as Assembly;
+  const variables = evaluateVariables([
+    { name: 'travel', expression: mm('400') } as unknown as Parameters<
+      typeof evaluateVariables
+    >[0][number],
+  ]);
+
+  function result(): AssemblyResult {
+    const r = emptyAssemblyResult('assembly#1');
+    const inst = (
+      id: string,
+      z: number,
+      status: InstanceResult['status'] = 'ok',
+    ): InstanceResult => ({
+      instanceId: id,
+      status,
+      source: { part: 'p' },
+      bodies: [],
+      transform: { translation: [0, 0, z], rotation: [0, 0, 0, 1] },
+      moved: false,
+      errors: [],
+      warnings: [],
+    });
+    r.instances.push(
+      inst('cab', 0),
+      inst('drawer', 100),
+      inst('knob', 105),
+      inst('off', 0, 'suppressed'),
+    );
+    const m = (
+      id: string,
+      a: string,
+      b: string,
+      bFrame: Pose,
+      status: MateResult['status'] = 'ok',
+    ): MateResult => ({
+      mateId: id,
+      status,
+      coordinates: [],
+      residual: null,
+      connectors: [
+        { connectorId: `${id}a`, instanceId: a, frame: I, reference: null },
+        { connectorId: `${id}b`, instanceId: b, frame: bFrame, reference: null },
+      ],
+      errors: [],
+      warnings: [],
+    });
+    // The knob's connector is 5 below its origin, so the fastened mate holds it 5 above the drawer.
+    r.mates.push(
+      m('mate#1', 'cab', 'drawer', I),
+      m('mate#2', 'drawer', 'knob', { translation: [0, 0, -5], rotation: [0, 0, 0, 1] }),
+      m('mate#3', 'drawer', 'off', I, 'suppressed'),
+    );
+    return r;
+  }
+
+  it('rebuilds the solver input at the solved poses, limits evaluated', () => {
+    const input = resultSolverInput(assembly, result(), variables);
+    expect(input.instances.map((i) => [i.id, i.fixed, i.pose.translation[2]])).toEqual([
+      ['cab', true, 0],
+      ['drawer', false, 100],
+      ['knob', false, 105],
+    ]);
+    expect(input.mates.map((m) => m.id)).toEqual(['mate#1', 'mate#2']);
+    expect(input.mates[0]!.limits).toEqual({ min: 0, max: 400 });
+  });
+
+  it('poses the instances at each value of the travel, the fastened knob following', () => {
+    const input = resultSolverInput(assembly, result(), variables);
+    const steps = sweepPoses(input, 'mate#1', [0, 200, 450]);
+    expect(steps.map((s) => s.value)).toEqual([0, 200, 450]);
+    expect(steps.map((s) => s.poses!.drawer!.translation[2])).toEqual([
+      expect.closeTo(0, 9),
+      expect.closeTo(200, 9),
+      expect.closeTo(450, 9),
+    ]);
+    expect(steps[1]!.poses!.knob!.translation[2]).toBeCloseTo(205, 9);
+    expect(steps[1]!.poses!.cab).toEqual(I);
+  });
+
+  it('reads the mates at hand-made poses: past a limit, off a mate', () => {
+    const input = resultSolverInput(assembly, result(), variables);
+    const checks = posedMates(input, {
+      drawer: { translation: [0, 0, 500], rotation: [0, 0, 0, 1] },
+    });
+    expect(checks).toHaveLength(2);
+    expect(checks[0]).toMatchObject({
+      mateId: 'mate#1',
+      kind: 'slider',
+      coordinates: [{ name: 'distance', value: expect.closeTo(500, 9), angular: false }],
+      outsideLimits: { bound: 'max', limit: 400, value: expect.closeTo(500, 9) },
+    });
+    // The knob stayed at 105 while the drawer went to 500: 400 mm off its fastened mate.
+    expect(checks[1]!.mateId).toBe('mate#2');
+    expect(checks[1]!.residual.position).toBeCloseTo(400, 9);
+    expect(checks[1]!.outsideLimits).toBeNull();
   });
 });

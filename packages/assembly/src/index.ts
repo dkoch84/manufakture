@@ -34,6 +34,14 @@ export {
 } from './mates';
 export { drag, solve } from './solver';
 export {
+  MAX_SWEEP_VALUES,
+  posedMate,
+  solveAtCoordinate,
+  sweepValues,
+  type CoordinateSolve,
+  type PosedMate,
+} from './sweep';
+export {
   IDENTITY,
   compose,
   exp,

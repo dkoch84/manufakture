@@ -13,6 +13,8 @@
 import {
   compose,
   coordinateAxes,
+  posedMate,
+  solveAtCoordinate,
   coordinateNames,
   frameAxes,
   isAngular,
@@ -21,12 +23,14 @@ import {
   type AssemblyWarning,
   type DragReport,
   type FrameAxes,
+  type LimitViolation,
   type MateInput,
   type MateKind,
   type SolveReport,
 } from '@manufakture/assembly';
 import {
   isPinnedSource,
+  type Assembly,
   mateExpressions,
   type InstanceSource,
   type Mate,
@@ -52,6 +56,8 @@ import type {
   RegenWarning,
 } from './types';
 import { evaluateField, pathKey, type VariableValues } from './values';
+
+export { MAX_SWEEP_VALUES, sweepValues } from '@manufakture/assembly';
 
 /**
  * The key an instance's source is built under: `part:<part id>` for a part of this document,
@@ -425,6 +431,116 @@ export function solvedPoses(result: AssemblyResult): Record<string, Pose> {
   const out: Record<string, Pose> = {};
   for (const i of result.instances) {
     if (i.status !== 'suppressed') out[i.instanceId] = plain(i.transform);
+  }
+  return out;
+}
+
+/**
+ * The solver input an assembly's last regen solved, seeded at the solved poses: its unsuppressed
+ * instances (fixed as the document says) and the mates that reached the solver, with the
+ * connector frames regen resolved and the limits evaluated (revolute radians, slider mm). What a
+ * sweep over a mate's travel, or a check of poses against the mates, starts from.
+ */
+export function resultSolverInput(
+  assembly: Assembly,
+  result: AssemblyResult,
+  variables: VariableValues,
+): AssemblyInput {
+  const fixed = new Map(assembly.instances.map((i) => [i.id, i.fixed]));
+  const instances = result.instances
+    .filter((i) => i.status !== 'suppressed')
+    .map((i) => ({
+      id: i.instanceId,
+      pose: plain(i.transform),
+      fixed: fixed.get(i.instanceId) ?? false,
+    }));
+  const mates: MateInput[] = [];
+  for (const mate of assembly.mates) {
+    if (mate.suppressed) continue;
+    const m = result.mates.find((x) => x.mateId === mate.id);
+    if (m === undefined || m.status === 'error' || m.status === 'suppressed') continue;
+    const [a, b] = m.connectors;
+    if (a.frame === null || b.frame === null) continue;
+    const values = mateValues(mate, variables);
+    if (values.errors.length > 0) continue;
+    mates.push(mateInput(mate, a.frame, b.frame, values));
+  }
+  return solverInput(instances, mates);
+}
+
+/** The instances' poses with one mate's coordinate at a value, or why not. */
+export interface SweepStep {
+  /** The coordinate asked for (revolute radians, slider mm). */
+  value: number;
+  /** The solved pose per instance id; null when the solver could not hold the mate there. */
+  poses: Record<string, Pose> | null;
+}
+
+/**
+ * The instances' poses at each of `values` of revolute or slider `mateId` (radians or mm), every
+ * other mate kept: each step solves from the one before, so a loop of mates follows the motion.
+ * A value the solver cannot hold the mate at (a mate inside a loop, where limits do not hold)
+ * gets null poses.
+ */
+export function sweepPoses(
+  input: AssemblyInput,
+  mateId: string,
+  values: readonly number[],
+): SweepStep[] {
+  const steps: SweepStep[] = [];
+  let seed = input;
+  for (const value of values) {
+    const r = solveAtCoordinate(seed, mateId, value);
+    if (!r.reached || r.report.outcome !== 'solved') {
+      steps.push({ value, poses: null });
+      continue;
+    }
+    const poses: Record<string, Pose> = {};
+    for (const [id, pose] of Object.entries(r.report.poses)) poses[id] = plain(pose);
+    steps.push({ value, poses });
+    seed = {
+      instances: seed.instances.map((i) => ({ ...i, pose: poses[i.id] ?? i.pose })),
+      mates: seed.mates,
+    };
+  }
+  return steps;
+}
+
+/** A mate checked at poses a caller gave: its coordinates there, and what it does not keep. */
+export interface PosedMateCheck {
+  mateId: string;
+  kind: MateKind;
+  /** The coordinates nearest the poses, named (radians and mm). */
+  coordinates: NamedCoordinate[];
+  /** How far the poses are from keeping the mate (mm, radians). */
+  residual: { position: number; angle: number };
+  /** A revolute's or slider's coordinate past one of its limits, else null. */
+  outsideLimits: LimitViolation | null;
+}
+
+/**
+ * Every mate of `input` read at `poses` (by instance id; an instance not given stays at its
+ * seed pose): where a hand-made placement puts each mate, whether it keeps the mate and its
+ * limits.
+ */
+export function posedMates(
+  input: AssemblyInput,
+  poses: Readonly<Record<string, Pose>>,
+): PosedMateCheck[] {
+  const at = new Map(input.instances.map((i) => [i.id, poses[i.id] ?? i.pose]));
+  const out: PosedMateCheck[] = [];
+  for (const mate of input.mates) {
+    const a = at.get(mate.a.instance);
+    const b = at.get(mate.b.instance);
+    if (a === undefined || b === undefined) continue;
+    const p = posedMate(mate, a, b);
+    out.push({
+      mateId: mate.id,
+      kind: mate.kind,
+      coordinates: namedCoordinates(mate.kind, p.coordinates),
+      residual: p.residual,
+      outsideLimits: p.outsideLimits,
+    });
   }
   return out;
 }

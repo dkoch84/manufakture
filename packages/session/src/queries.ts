@@ -28,9 +28,15 @@ import type {
   Vec3,
 } from '@manufakture/kernel';
 import {
+  MAX_SWEEP_VALUES,
   connectorFrames,
   evaluateVariables,
   namedCoordinates,
+  posedMates,
+  posesDiffer,
+  resultSolverInput,
+  sweepPoses,
+  sweepValues,
   type InstanceResult,
   type RegenResult,
 } from '@manufakture/regen';
@@ -47,6 +53,11 @@ export interface QueryContext {
   /** The generation of the last regen: kernel batches at it are never stale. */
   generation: number;
   references: References;
+  /**
+   * The time budget of one kernel call, ms (`SessionLimits.kernelMsPerCall`): a read made of many
+   * calls (a sweep over a mate's travel) stops past it and answers what it checked.
+   */
+  kernelMsPerCall?: number;
 }
 
 const DEG = 180 / Math.PI;
@@ -643,8 +654,31 @@ export type MeasureQuery =
    * overlapping volume per pair, and the gap between their bounding boxes when apart.
    */
   | { kind: 'clearance'; bodies: (BodyRef & { placement?: Placement })[] }
-  /** Interference of an assembly's instances: at their solved poses, or at `poses` by instance. */
-  | { kind: 'interference'; assemblyId: string; poses?: Record<string, Placement> };
+  /**
+   * Interference of an assembly's instances: at their solved poses, at `poses` by instance (each
+   * checked against the mates: a warning for a pose past a limit or off a mate), or over `travel`,
+   * a slider's or revolute's coordinate swept from `from` to `to` by `step` (mm or degrees; the
+   * mate's limits and 20 steps by default), the other mates kept.
+   */
+  | {
+      kind: 'interference';
+      assemblyId: string;
+      poses?: Record<string, Placement>;
+      travel?: InterferenceTravel;
+    };
+
+/** A sweep over one mate's coordinate: mm for a slider, degrees for a revolute. */
+export interface InterferenceTravel {
+  mateId: string;
+  from?: number;
+  to?: number;
+  step?: number;
+}
+
+/** Steps of a sweep over a mate's travel when no step is given. */
+export const DEFAULT_SWEEP_STEPS = 20;
+/** A sweep's time budget, ms, when the context gives none (`SessionLimits.kernelMsPerCall`'s default). */
+const DEFAULT_SWEEP_MS = 30_000;
 
 interface LiveBody {
   shape: ShapeId;
@@ -784,51 +818,321 @@ export async function measure(ctx: QueryContext, query: unknown): Promise<Sessio
       }
       return interference(ctx, items);
     }
-    case 'interference': {
-      if (!isString(q.assemblyId)) return sessionError('invalid-input', 'assemblyId is a string.');
-      const poses = (q.poses ?? {}) as Record<string, unknown>;
-      if (typeof poses !== 'object' || poses === null) {
-        return sessionError('invalid-input', 'poses maps instance ids to placements.');
-      }
-      const solved = ctx.model.last?.assemblies.find((a) => a.assemblyId === q.assemblyId);
-      if (solved === undefined) return sessionError('not-found', 'There is no such assembly.');
-      const items: { shapes: ShapeId[]; transform?: Placement; instance: string }[] = [];
-      for (const inst of solved.instances) {
-        if (inst.status !== 'ok' || !('part' in inst.source)) continue;
-        const partId = inst.source.part;
-        const built = ctx.model.last!.parts.find((p) => p.partId === partId);
-        const shapes = inst.bodies
-          .map((b) => built?.bodies.find((x) => x.bodyId === b)?.shape)
-          .filter((s): s is ShapeId => s !== undefined);
-        if (shapes.length === 0) continue;
-        const given = Object.hasOwn(poses, inst.instanceId) ? poses[inst.instanceId] : undefined;
-        if (given !== undefined && !checkPlacement(given)) {
-          return sessionError(
-            'invalid-input',
-            'A pose is { translation: [x, y, z], rotation: [x, y, z, w] }.',
-          );
-        }
-        items.push({ shapes, transform: given ?? inst.transform, instance: inst.instanceId });
-      }
-      const r = await interference(
-        ctx,
-        items.map(({ shapes, transform }) => ({ shapes, ...(transform ? { transform } : {}) })),
-      );
-      if (!r.ok) return r;
-      const v = r.value;
-      return done({
-        instances: items.map((i) => i.instance),
-        pairs: v.pairs.map((p) => ({ ...p, a: items[p.a]!.instance, b: items[p.b]!.instance })),
-        failures: v.failures.map((f) => ({
-          ...f,
-          a: items[f.a]!.instance,
-          b: items[f.b]!.instance,
-        })),
-      });
-    }
+    case 'interference':
+      return assemblyInterference(ctx, q);
     default:
       return sessionError('invalid-input', 'kind is body, targets, clearance or interference.');
   }
+}
+
+/** An instance an interference check places: its bodies' shapes and its solved pose. */
+interface PlacedInstance {
+  instance: string;
+  shapes: ShapeId[];
+  transform: Placement;
+}
+
+/** A mate warning of an interference check, in mm and degrees. */
+interface InterferenceWarning {
+  code: 'outside-limits' | 'off-mate' | 'not-reached' | 'truncated';
+  mateId: string;
+  message: string;
+  [key: string]: unknown;
+}
+
+async function assemblyInterference(
+  ctx: QueryContext,
+  q: Record<string, unknown>,
+): Promise<SessionResult<unknown>> {
+  if (!isString(q.assemblyId)) return sessionError('invalid-input', 'assemblyId is a string.');
+  const poses = (q.poses ?? {}) as Record<string, unknown>;
+  if (typeof poses !== 'object' || poses === null) {
+    return sessionError('invalid-input', 'poses maps instance ids to placements.');
+  }
+  const solved = ctx.model.last?.assemblies.find((a) => a.assemblyId === q.assemblyId);
+  const assembly = ctx.document.assemblies.find((a) => a.id === q.assemblyId);
+  if (solved === undefined || assembly === undefined) {
+    return sessionError('not-found', 'There is no such assembly.');
+  }
+  const placed: PlacedInstance[] = [];
+  for (const inst of solved.instances) {
+    if (inst.status !== 'ok' || !('part' in inst.source)) continue;
+    const partId = inst.source.part;
+    const built = ctx.model.last!.parts.find((p) => p.partId === partId);
+    const shapes = inst.bodies
+      .map((b) => built?.bodies.find((x) => x.bodyId === b)?.shape)
+      .filter((s): s is ShapeId => s !== undefined);
+    if (shapes.length === 0) continue;
+    placed.push({ instance: inst.instanceId, shapes, transform: inst.transform });
+  }
+  const instances = placed.map((i) => i.instance);
+  const input = resultSolverInput(assembly, solved, evaluateVariables(ctx.document.variables));
+  if (q.travel !== undefined) {
+    if (Object.keys(poses).length > 0) {
+      return sessionError('invalid-input', 'Give poses or a travel, not both.');
+    }
+    if (solved.outcome !== 'solved') {
+      return sessionError(
+        'invalid-input',
+        `The assembly's last solve is ${solved.outcome}${solved.message ? `: ${solved.message}` : ''}. Fix its mates (get_errors) before sweeping one.`,
+      );
+    }
+    return travelInterference(ctx, q.travel, input, placed);
+  }
+  const given: Record<string, Placement> = {};
+  for (const [id, pose] of Object.entries(poses)) {
+    if (!checkPlacement(pose)) {
+      return sessionError(
+        'invalid-input',
+        'A pose is { translation: [x, y, z], rotation: [x, y, z, w] }.',
+      );
+    }
+    given[id] = pose;
+  }
+  const items = placed.map((i) => ({
+    shapes: i.shapes,
+    transform: Object.hasOwn(given, i.instance) ? given[i.instance]! : i.transform,
+  }));
+  const r = await interference(ctx, items);
+  if (!r.ok) return r;
+  const v = r.value;
+  return done({
+    instances,
+    pairs: v.pairs.map((p) => ({ ...p, a: instances[p.a]!, b: instances[p.b]! })),
+    failures: v.failures.map((f) => ({ ...f, a: instances[f.a]!, b: instances[f.b]! })),
+    warnings: Object.keys(given).length === 0 ? [] : poseWarnings(input, given),
+  });
+}
+
+/** Past this a pose is off its mate: mm, and degrees. */
+const OFF_MATE_MM = 0.01;
+const OFF_MATE_DEG = 0.01;
+
+/** What the given poses do to the mates: a coordinate past a limit, a mate not kept. */
+function poseWarnings(
+  input: ReturnType<typeof resultSolverInput>,
+  poses: Record<string, Placement>,
+): InterferenceWarning[] {
+  const moved = new Set(Object.keys(poses));
+  const warnings: InterferenceWarning[] = [];
+  for (const m of posedMates(input, poses)) {
+    const mate = input.mates.find((x) => x.id === m.mateId)!;
+    if (!moved.has(mate.a.instance) && !moved.has(mate.b.instance)) continue;
+    const past = m.outsideLimits;
+    if (past !== null) {
+      const unit = m.kind === 'revolute' ? 'deg' : 'mm';
+      const k = m.kind === 'revolute' ? DEG : 1;
+      warnings.push({
+        code: 'outside-limits',
+        mateId: m.mateId,
+        bound: past.bound,
+        limit: past.limit * k,
+        value: past.value * k,
+        unit,
+        message: `The poses put ${m.mateId} at ${fmt(past.value * k, unit)}, past its ${past.bound === 'max' ? 'maximum' : 'minimum'} of ${fmt(past.limit * k, unit)}: the mate cannot get there.`,
+      });
+    }
+    const angle = m.residual.angle * DEG;
+    if (m.residual.position > OFF_MATE_MM || angle > OFF_MATE_DEG) {
+      warnings.push({
+        code: 'off-mate',
+        mateId: m.mateId,
+        position: m.residual.position,
+        angle,
+        message: `The poses do not keep ${m.mateId} (a ${m.kind}): its connectors are ${fmt(m.residual.position, 'mm')} and ${fmt(angle, 'deg')} from where it holds them.`,
+      });
+    }
+  }
+  return warnings;
+}
+
+function fmt(v: number, unit: 'mm' | 'deg'): string {
+  return unit === 'deg' ? `${v.toFixed(2)} deg` : `${v.toFixed(2)} mm`;
+}
+
+/** The interference check over a slider's or revolute's travel. */
+async function travelInterference(
+  ctx: QueryContext,
+  travel: unknown,
+  input: ReturnType<typeof resultSolverInput>,
+  placed: PlacedInstance[],
+): Promise<SessionResult<unknown>> {
+  const t = (travel ?? {}) as Record<string, unknown>;
+  const number = (v: unknown) => v === undefined || (typeof v === 'number' && Number.isFinite(v));
+  if (typeof travel !== 'object' || travel === null || !isString(t.mateId)) {
+    return sessionError('invalid-input', 'travel is { mateId, from?, to?, step? }.');
+  }
+  if (!number(t.from) || !number(t.to) || !number(t.step)) {
+    return sessionError('invalid-input', 'travel from, to and step are numbers.');
+  }
+  const mate = input.mates.find((m) => m.id === t.mateId);
+  if (mate === undefined) {
+    return sessionError(
+      'not-found',
+      `There is no mate ${t.mateId} that solved in the last regen: see get_errors.`,
+    );
+  }
+  if (mate.kind !== 'slider' && mate.kind !== 'revolute') {
+    return sessionError(
+      'invalid-input',
+      `${mate.id} is a ${mate.kind} mate: only a slider's or a revolute's travel is swept.`,
+    );
+  }
+  const unit = mate.kind === 'revolute' ? 'deg' : 'mm';
+  const k = mate.kind === 'revolute' ? DEG : 1;
+  const min = mate.limits?.min === undefined ? undefined : mate.limits.min * k;
+  const max = mate.limits?.max === undefined ? undefined : mate.limits.max * k;
+  const from = (t.from as number | undefined) ?? min;
+  const to = (t.to as number | undefined) ?? max;
+  if (from === undefined || to === undefined) {
+    return sessionError(
+      'invalid-input',
+      `${mate.id} has no ${from === undefined ? 'minimum' : 'maximum'}: give travel ${from === undefined ? 'from' : 'to'} (${unit}).`,
+    );
+  }
+  const span = Math.abs(to - from);
+  const step = (t.step as number | undefined) ?? (span > 0 ? span / DEFAULT_SWEEP_STEPS : 1);
+  const values = sweepValues(from, to, step);
+  if (values === null) {
+    return sessionError(
+      'invalid-input',
+      `A sweep checks at most ${MAX_SWEEP_VALUES} values: for ${fmt(span, unit)} the step is at least ${fmt(span / (MAX_SWEEP_VALUES - 1), unit)}, and positive.`,
+    );
+  }
+  const warnings: InterferenceWarning[] = [];
+  for (const bound of ['min', 'max'] as const) {
+    const limit = bound === 'min' ? min : max;
+    if (limit === undefined) continue;
+    const past = values.filter((v) => (bound === 'min' ? v < limit - 1e-9 : v > limit + 1e-9));
+    if (past.length === 0) continue;
+    warnings.push({
+      code: 'outside-limits',
+      mateId: mate.id,
+      bound,
+      limit,
+      values: past,
+      unit,
+      message: `${past.length === 1 ? 'A value' : `${past.length} values`} of the sweep (${fmt(past[0]!, unit)}${past.length > 1 ? ` to ${fmt(past.at(-1)!, unit)}` : ''}) ${past.length === 1 ? 'is' : 'are'} past ${mate.id}'s ${bound === 'max' ? 'maximum' : 'minimum'} of ${fmt(limit, unit)}: checked, though the mate cannot get there.`,
+    });
+  }
+  const steps = sweepPoses(
+    input,
+    mate.id,
+    values.map((v) => v / k),
+  );
+  const instances = placed.map((i) => i.instance);
+  // Only pairs with an instance the sweep moves change from step to step; the pairs of instances
+  // that stay put are checked once, at their solved poses, and answered apart (`staticPairs`).
+  const moving = new Set<number>();
+  placed.forEach((p, i) => {
+    if (
+      steps.some(
+        (s) => s.poses !== null && posesDiffer(s.poses[p.instance] ?? p.transform, p.transform),
+      )
+    ) {
+      moving.add(i);
+    }
+  });
+  const sweptPairs: [number, number][] = [];
+  const fixedPairs: [number, number][] = [];
+  for (let a = 0; a < placed.length; a++) {
+    for (let b = a + 1; b < placed.length; b++) {
+      (moving.has(a) || moving.has(b) ? sweptPairs : fixedPairs).push([a, b]);
+    }
+  }
+  type Kernel = {
+    pairs: { a: number; b: number; volume: number }[];
+    failures: { a: number; b: number; message: string }[];
+  };
+  const named = (p: { a: number; b: number; volume: number }) => ({
+    ...p,
+    a: instances[p.a]!,
+    b: instances[p.b]!,
+  });
+  const colliding: number[] = [];
+  const failures: { value: number | null; a: string; b: string; message: string }[] = [];
+  const notReached: number[] = [];
+  let staticPairs: { a: string; b: string; volume: number }[] = [];
+  let first: { value: number; pairs: { a: string; b: string; volume: number }[] } | null = null;
+  let checked = 0;
+  // The whole sweep stays within one kernel call's budget: past it, what was checked is answered.
+  const budget = ctx.kernelMsPerCall ?? DEFAULT_SWEEP_MS;
+  const started = performance.now();
+  const overBudget = () => performance.now() - started >= budget;
+  let truncated = false;
+  if (fixedPairs.length > 0) {
+    const r = await runOne<Kernel>(ctx, {
+      op: 'interference',
+      items: placed.map((p) => ({ shapes: p.shapes, transform: p.transform })),
+      pairs: fixedPairs,
+    });
+    if (!r.ok) return r;
+    staticPairs = r.value.pairs.map(named);
+    for (const f of r.value.failures) {
+      failures.push({ value: null, a: instances[f.a]!, b: instances[f.b]!, message: f.message });
+    }
+  }
+  for (let i = 0; i < steps.length; i++) {
+    const value = values[i]!;
+    const at = steps[i]!.poses;
+    if (at === null) {
+      notReached.push(value);
+      continue;
+    }
+    if (sweptPairs.length === 0) {
+      checked++;
+      continue;
+    }
+    if (overBudget()) {
+      truncated = true;
+      break;
+    }
+    const r = await runOne<Kernel>(ctx, {
+      op: 'interference',
+      items: placed.map((p) => ({ shapes: p.shapes, transform: at[p.instance] ?? p.transform })),
+      pairs: sweptPairs,
+    });
+    if (!r.ok) return r;
+    checked++;
+    for (const f of r.value.failures) {
+      failures.push({ value, a: instances[f.a]!, b: instances[f.b]!, message: f.message });
+    }
+    if (r.value.pairs.length === 0) continue;
+    colliding.push(value);
+    first ??= { value, pairs: r.value.pairs.map(named) };
+  }
+  if (notReached.length > 0) {
+    warnings.push({
+      code: 'not-reached',
+      mateId: mate.id,
+      values: notReached,
+      unit,
+      message: `The solver could not hold ${mate.id} at ${notReached.length === 1 ? 'one value' : `${notReached.length} values`} (${fmt(notReached[0]!, unit)} first), as inside a loop of mates: not checked there.`,
+    });
+  }
+  if (truncated) {
+    warnings.push({
+      code: 'truncated',
+      mateId: mate.id,
+      checked,
+      values: values.length,
+      ms: budget,
+      message: `The sweep stopped after ${checked} of ${values.length} values: it ran past ${budget} ms. Sweep the rest (from the next value) or use a larger step.`,
+    });
+  }
+  return done({
+    instances,
+    moving: [...moving].map((i) => instances[i]!),
+    travel: { mateId: mate.id, kind: mate.kind, unit, from, to, step },
+    values,
+    checked,
+    first,
+    pairs: first?.pairs ?? [],
+    colliding,
+    staticPairs,
+    failures,
+    warnings,
+  });
 }
 
 function isTarget(t: unknown): t is MeasureTarget {

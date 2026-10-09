@@ -1236,7 +1236,48 @@ asked for and the limit: "Mate mate#1 was at 600.00 mm, past its maximum of 457.
 at the limit, so the instances on it are not where their stored poses put them." It means the
 pose is wrong: pick one inside the travel, or change the limits if the travel really is longer.
 Inside a loop of mates limits are not enforced; the same code then flags a mate the loop leaves
-past a limit. Poses given to `measure` `interference` are not checked against limits.
+past a limit. Poses given to `measure` `interference` are checked against the mates: see the
+next paragraphs.
+
+To check that something moves freely, sweep the mate instead of placing instances by hand.
+`measure` `interference` with `travel: { mateId }` moves a slider's distance (mm) or a revolute's
+angle (degrees) over its limits in 20 steps, the other mates kept (a part fastened to the drawer
+goes with it), and checks the assembly at each step. `from`, `to` and `step` change the range:
+`from` may be above `to` (closing a drawer from fully open finds where it first hits), and a mate
+with a bound left out needs the missing end given. A sweep checks at most 101 values; a finer
+step is refused, so narrow the range instead. It is refused too while the assembly's solve is
+`conflicting` or `invalid`: fix the mates first (`get_errors`).
+
+```text not-run
+"query": { "kind": "interference", "assemblyId": "assembly#1",
+           "travel": { "mateId": "mate#1", "from": 457.2, "to": 0, "step": 25.4 } }
+```
+
+Each step checks only the pairs with an instance that moves during the sweep (`moving` lists
+them). Pairs of instances that never move are checked once, at their solved poses, and answered
+apart as `staticPairs`: an overlap there is real, but it is not the motion's. The answer has
+`values` (every value asked for), `checked` (how many were checked), `first` (the first value
+that collides, in sweep order, with its `pairs`, or null when nothing collides), `pairs` (the
+same pairs, empty when nothing collides), `colliding` (every value that collides) and `failures`
+(pairs the kernel could not check, each with its `value`, null for a static pair). `travel`
+echoes the mate, its kind, the unit and the range and step used.
+
+```text not-run
+"measurement": { "instances": ["inst#1", "inst#2"], "moving": ["inst#2"], "staticPairs": [],
+  "checked": 19, "colliding": [25.4, 0],
+  "first": { "value": 25.4, "pairs": [{ "a": "inst#1", "b": "inst#2", "volume": 1826.4 }] }, ... }
+```
+
+Both kinds of interference check carry `warnings`. A sweep warns `outside-limits` with the values
+past the mate's minimum or maximum (they are still checked, but the mate cannot get there),
+`not-reached` with the values the solver could not hold the mate at (a mate inside a loop of
+mates, where limits do not hold): those are not checked, and `truncated` when the whole sweep ran
+past one kernel call's time budget (`ms`): it stopped after `checked` of the `values`, so sweep
+the rest from the next value or with a larger step. Poses given by hand are read against every
+mate on a moved instance: `outside-limits` names the mate, the `value` the poses put it at and
+the `limit` passed; `off-mate` means the poses do not keep the mate at all (`position` mm and
+`angle` degrees between where its connectors are and where it holds them), so a pose worked out
+by hand that slid the drawer sideways shows up here.
 
 ### Mate connector frames: work out an offset instead of trying
 

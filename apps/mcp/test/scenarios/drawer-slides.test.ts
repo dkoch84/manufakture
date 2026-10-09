@@ -7,9 +7,9 @@
 // A fixed tool-call sequence through the real MCP server (in process), doing the scenario as far
 // as the product allows: measure the opening, a drawer box of boards with dowel joints, the slides
 // as plain steel bodies, an assembly with a slider mate limited to the slide's travel, and
-// interference checks at poses along that travel. The plan's gap hypotheses, and the gaps found
-// on the way, are asserted as they are today in tests named "gap probe": when a fix changes one,
-// its test fails, and the write-up's gap table needs the same change.
+// interference checks at poses along that travel and swept over it. The plan's gap hypotheses,
+// and the gaps found on the way, are asserted as they are today in tests named "gap probe": when
+// a fix changes one, its test fails, and the write-up's gap table needs the same change.
 //
 // The guide's cabinet (packages/session's fixture) is a bookshelf 11-1/4" deep, too shallow for
 // an 18" slide; the first test shows that. The rest runs on the same cabinet made 22" deep by
@@ -223,10 +223,12 @@ describe('scenario T8.6a: drawer slides', () => {
     });
     return r.measurement as Data;
   };
-  const interference = async (poses?: Record<string, unknown>) => {
+  const interference = async (
+    options: { poses?: Record<string, unknown>; travel?: Record<string, unknown> } = {},
+  ) => {
     const r = await call('measure', {
       sessionId,
-      query: { kind: 'interference', assemblyId: ids.assembly, ...(poses ? { poses } : {}) },
+      query: { kind: 'interference', assemblyId: ids.assembly, ...options },
     });
     return r.measurement as Data;
   };
@@ -593,7 +595,7 @@ describe('scenario T8.6a: drawer slides', () => {
   it('checks the drawer opens fully: no interference closed, half open or at 18"', async () => {
     expect((await interference()).pairs).toEqual([]);
     for (const d of [0, 9 * IN, LENGTH]) {
-      const m = await interference({ [ids.drawer!]: pulled(d) });
+      const m = await interference({ poses: { [ids.drawer!]: pulled(d) } });
       expect(m.instances).toEqual([ids.cabinet, ids.drawer]);
       expect(m.pairs).toEqual([]);
       expect(m.failures).toEqual([]);
@@ -604,20 +606,130 @@ describe('scenario T8.6a: drawer slides', () => {
     close(back.centroid[1] - LENGTH, 0);
   });
 
-  it('gap probe: interference is checked one pose at a time, blind to the mate', async () => {
-    // No sweep over a slider's travel: the query takes poses, and a travel is refused.
-    const travel = await h.call('measure', {
-      sessionId,
-      query: { kind: 'interference', assemblyId: ids.assembly, travel: { mate: ids.mate } },
+  it('sweeps the slider\'s travel: no interference over 18", and a pose past it is a warning', async () => {
+    // Over the slider's limits by default, 20 steps: nothing collides anywhere on the travel.
+    const sweep = await interference({ travel: { mateId: ids.mate } });
+    expect(sweep).toMatchObject({
+      instances: [ids.cabinet, ids.drawer],
+      moving: [ids.drawer],
+      staticPairs: [],
+      travel: { mateId: ids.mate, kind: 'slider', unit: 'mm', from: 0, to: LENGTH },
+      checked: 21,
+      first: null,
+      pairs: [],
+      colliding: [],
+      failures: [],
+      warnings: [],
     });
-    expect(travel.ok).toBe(false);
-    expect(travel.error).toMatchObject({ kind: 'input' });
-    expect(travel.error!.message).toMatch(/Unrecognized key: "travel"/);
-    // A pose is a placement the agent works out by hand, and nothing checks it against the
-    // slider: pushed 4" into the cabinet (below the travel's 0), the drawer hits the back.
-    const pushed = await interference({ [ids.drawer!]: pulled(-4 * IN) });
-    expect(pushed.pairs).toEqual([{ a: ids.cabinet, b: ids.drawer, volume: expect.any(Number) }]);
-    expect(pushed.pairs[0].volume).toBeGreaterThan(0);
+    close(sweep.travel.step, LENGTH / 20, 9);
+    expect(sweep.values).toHaveLength(21);
+    close(sweep.values[10], 9 * IN, 9);
+    // A range past the travel is checked and warned about: pushed in (below the travel's 0) the
+    // drawer hits the cabinet's back, so the first colliding value is the first step.
+    const pushed = await interference({
+      travel: { mateId: ids.mate, from: -4 * IN, to: 0, step: IN },
+    });
+    expect(pushed.checked).toBe(5);
+    expect(pushed.first.value).toBeCloseTo(-4 * IN, 9);
+    expect(pushed.first.pairs).toEqual([
+      { a: ids.cabinet, b: ids.drawer, volume: expect.any(Number) },
+    ]);
+    expect(pushed.colliding.length).toBeGreaterThan(0);
+    expect(pushed.colliding).not.toContain(0);
+    expect(pushed.warnings).toEqual([
+      expect.objectContaining({
+        code: 'outside-limits',
+        mateId: ids.mate,
+        bound: 'min',
+        limit: 0,
+        values: [-4, -3, -2, -1].map((x) => expect.closeTo(x * IN, 9) as number),
+      }),
+    ]);
+    // A pose placed by hand is checked against the slider too: 4" in is past its minimum.
+    const posed = await interference({ poses: { [ids.drawer!]: pulled(-4 * IN) } });
+    expect(posed.pairs).toEqual([{ a: ids.cabinet, b: ids.drawer, volume: expect.any(Number) }]);
+    expect(posed.warnings).toEqual([
+      expect.objectContaining({
+        code: 'outside-limits',
+        mateId: ids.mate,
+        bound: 'min',
+        limit: 0,
+        value: expect.closeTo(-4 * IN, 6) as number,
+        unit: 'mm',
+      }),
+    ]);
+    // And a pose off the slider's line (an inch sideways) does not keep the mate.
+    const sideways = await interference({
+      poses: { [ids.drawer!]: { translation: [IN, -IN, 0], rotation: [0, 0, 0, 1] } },
+    });
+    expect(sideways.warnings).toEqual([
+      expect.objectContaining({
+        code: 'off-mate',
+        mateId: ids.mate,
+        position: expect.closeTo(IN, 6) as number,
+      }),
+    ]);
+    // A sweep is bounded: at most 101 values.
+    const huge = await h.call('measure', {
+      sessionId,
+      query: {
+        kind: 'interference',
+        assemblyId: ids.assembly,
+        travel: { mateId: ids.mate, step: 1 },
+      },
+    });
+    expect(huge.ok).toBe(false);
+    expect(huge.error!.message).toMatch(/at most 101 values/);
+  });
+
+  it('sweeps a shortened cabinet: the first colliding value and the pair', async () => {
+    // The cabinet made 17" deep (the slides and the 18" drawer as they were): the back now stands
+    // inside the drawer's travel.
+    const depth = 17 * IN;
+    const back = (7 / 32) * IN;
+    const commands: unknown[] = [];
+    for (const id of ['sketch#1', 'sketch#2', 'sketch#3', 'sketch#4', 'sketch#5', 'sketch#6']) {
+      const read = await call('get_object', {
+        sessionId,
+        query: { kind: 'feature', partId: P, featureId: id },
+      });
+      const f = structuredClone(read.object) as Data;
+      if (id === 'sketch#6') {
+        f.plane.origin[1] = depth;
+      } else {
+        const axis = id === 'sketch#1' || id === 'sketch#2' ? 0 : 1;
+        const from = axis === 0 ? 22 * IN : 22 * IN - back;
+        const to = axis === 0 ? depth : depth - back;
+        for (const e of f.entities as Data[]) {
+          for (const p of [e.start, e.end]) if (p && Math.abs(p[axis] - from) < 1e-6) p[axis] = to;
+        }
+      }
+      commands.push({ type: 'editFeature', partId: P, feature: f });
+    }
+    const r = await call('apply', { sessionId, label: 'Make the cabinet 17" deep', commands });
+    expect(r.errors).toEqual([]);
+    // Closed, the drawer runs through the back: the sweep's first value collides.
+    const closed = await interference({ travel: { mateId: ids.mate } });
+    expect(closed.checked).toBe(21);
+    expect(closed.first).toEqual({
+      value: 0,
+      pairs: [{ a: ids.cabinet, b: ids.drawer, volume: expect.any(Number) }],
+    });
+    expect(closed.pairs).toEqual(closed.first.pairs);
+    // Clear from 1-7/32" out: of the 0.9" steps, 0 and 0.9" collide.
+    expect(closed.colliding).toEqual([0, expect.closeTo(0.9 * IN, 9) as number]);
+    expect(closed.warnings).toEqual([]);
+    // Closing it from fully open, an inch at a time, it first hits the back at 1".
+    const closing = await interference({
+      travel: { mateId: ids.mate, from: LENGTH, to: 0, step: IN },
+    });
+    expect(closing.checked).toBe(19);
+    expect(closing.first.value).toBeCloseTo(IN, 9);
+    expect(closing.first.pairs).toEqual([
+      { a: ids.cabinet, b: ids.drawer, volume: expect.any(Number) },
+    ]);
+    await call('undo', { sessionId });
+    expect((await interference({ travel: { mateId: ids.mate } })).first).toBeNull();
   });
 
   it("reads the solved pose and the slider's value, and a pose past the limit is a warning", async () => {

@@ -1,5 +1,5 @@
 {
-  "surfaceVersion": "1.4.0",
+  "surfaceVersion": "1.5.0",
   "tools": [
     {
       "name": "apply",
@@ -2473,6 +2473,34 @@
                       "pattern": "^[\\x21-\\x7e]+$",
                       "type": "string"
                     },
+                    "type": "object"
+                  },
+                  "travel": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "from": {
+                        "maximum": 1000000000,
+                        "minimum": -1000000000,
+                        "type": "number"
+                      },
+                      "mateId": {
+                        "maxLength": 512,
+                        "minLength": 1,
+                        "pattern": "^[\\x21-\\x7e]+$",
+                        "type": "string"
+                      },
+                      "step": {
+                        "exclusiveMinimum": 0,
+                        "maximum": 1000000000,
+                        "type": "number"
+                      },
+                      "to": {
+                        "maximum": 1000000000,
+                        "minimum": -1000000000,
+                        "type": "number"
+                      }
+                    },
+                    "required": ["mateId"],
                     "type": "object"
                   }
                 },
