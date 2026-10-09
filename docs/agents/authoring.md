@@ -1093,6 +1093,32 @@ The takeoff (lumber and sheet goods) is in the quantities:
 { "sessionId": "<session>" }
 ```
 
+### Assemblies: where the instances really are
+
+An instance's `pose` in the document (what `get_object` and `setPoses` carry) is only where it
+was left: the mate solver starts from it and moves the instance to where its mates put it. To know
+where an instance is, read `get_tree`, not `get_object`. Each assembly's instances there carry
+`transform` (the solved pose: translation in mm and a unit quaternion `[x, y, z, w]`) and `moved`
+(true when the solved pose differs from the stored one). Each mate carries `coordinates`, its
+solved value by name: a slider's `distance` in mm, a revolute's `angle` in degrees (planar `x`,
+`y`, `angle`; cylindrical `distance`, `angle`; a ball's rotation vector `x`, `y`, `z` in degrees),
+and `warnings`, how many regen warnings it has.
+
+```text not-run
+"instances": [{ "id": "inst#2", "transform": { "translation": [0, -457.2, 0], ... }, "moved": true }]
+"mates": [{ "id": "mate#1", "kind": "slider", "status": "ok",
+            "coordinates": [{ "name": "distance", "value": 457.2, "unit": "mm" }], "warnings": 1 }]
+```
+
+A revolute or slider with `limits` stays within them. When the stored poses ask for a value past
+a limit (a drawer set 600 mm out on a 457.2 mm slide), the solver holds the mate at the limit, and
+the apply report and `get_errors` carry a warning on the mate, code `limit`, naming the value
+asked for and the limit: "Mate mate#1 was at 600.00 mm, past its maximum of 457.20 mm: it is held
+at the limit, so the instances on it are not where their stored poses put them." It means the
+pose is wrong: pick one inside the travel, or change the limits if the travel really is longer.
+Inside a loop of mates limits are not enforced; the same code then flags a mate the loop leaves
+past a limit. Poses given to `measure` `interference` are not checked against limits.
+
 ## Scripted features, and when not to use them
 
 A `scripted` feature runs a script of the document's library (`setScript`) in a sandbox to make

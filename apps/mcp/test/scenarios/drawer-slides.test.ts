@@ -532,9 +532,17 @@ describe('scenario T8.6a: drawer slides', () => {
     expect(pushed.pairs[0].volume).toBeGreaterThan(0);
   });
 
-  it("gap probe: the solved pose and the slider's value cannot be read", async () => {
+  it("reads the solved pose and the slider's value, and a pose past the limit is a warning", async () => {
+    // At rest the tree gives the solved pose and the slide's distance, with no warning.
+    const before = ((await tree()).assemblies as Data[])[0]!;
+    expect(before.instances[1]).toMatchObject({ id: ids.drawer, moved: false });
+    expect(before.instances[1].transform.translation[1]).toBeCloseTo(0, 6);
+    expect(before.mates[0]).toMatchObject({ id: ids.mate, warnings: 0 });
+    expect(before.mates[0].coordinates).toEqual([
+      { name: 'distance', value: expect.closeTo(0, 6) as number, unit: 'mm' },
+    ]);
     // Opening the drawer 600 mm (past the slide's 457.2) as a pose of the instance: the solver
-    // clamps it to the limit, but no tool says so.
+    // holds it at the limit, and the apply report says so.
     const r = await call('apply', {
       sessionId,
       label: 'Pull the drawer out past its travel',
@@ -542,21 +550,32 @@ describe('scenario T8.6a: drawer slides', () => {
         { type: 'setPoses', assemblyId: ids.assembly, poses: { [ids.drawer!]: pulled(600) } },
       ],
     });
-    expect(r.errors).toEqual([]);
+    const warning = {
+      where: 'mate',
+      assemblyId: ids.assembly,
+      id: ids.mate,
+      severity: 'warning',
+      code: 'limit',
+      message: expect.stringMatching(/600\.00 mm, past its maximum of 457\.20 mm/) as string,
+    };
+    expect(r.errors).toEqual([warning]);
     expect(r.measured).toEqual([]);
-    expect((await call('get_errors', { sessionId })).errors).toEqual([]);
+    expect((await call('get_errors', { sessionId })).errors).toEqual([warning]);
+    // get_object is the document: the stored 600 mm. get_tree is the solve: 457.2 mm.
     const instance = await call('get_object', {
       sessionId,
       query: { kind: 'instance', assemblyId: ids.assembly, instanceId: ids.drawer },
     });
     expect(instance.object.pose.translation).toEqual([0, -600, 0]);
-    const mate = (await tree()).assemblies[0].mates[0] as Data;
-    expect(Object.keys(mate).sort()).toEqual(['id', 'kind', 'name', 'status', 'suppressed']);
-    // The session's own regen (not reachable through any tool) holds the clamped answer.
-    const solved = h.app.manager.get(sessionId)!.regen!.assemblies[0]!;
-    expect(solved.mates[0]!.coordinates[0]).toBeCloseTo(LENGTH, 6);
-    expect(solved.instances[1]!.transform!.translation[1]).toBeCloseTo(-LENGTH, 6);
+    const asm = ((await tree()).assemblies as Data[])[0]!;
+    expect(asm.instances[1]).toMatchObject({ id: ids.drawer, moved: true });
+    expect(asm.instances[1].transform.translation[1]).toBeCloseTo(-LENGTH, 6);
+    expect(asm.mates[0]).toMatchObject({ id: ids.mate, status: 'ok', warnings: 1 });
+    expect(asm.mates[0].coordinates).toEqual([
+      { name: 'distance', value: expect.closeTo(LENGTH, 6) as number, unit: 'mm' },
+    ]);
     await call('undo', { sessionId });
+    expect((await call('get_errors', { sessionId })).errors).toEqual([]);
   });
 
   it('gap probe: render draws the part, not the assembly at a pose', async () => {

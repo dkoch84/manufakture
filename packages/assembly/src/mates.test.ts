@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   MATE_KINDS,
+  clampToLimits,
   coordinateCount,
+  coordinateNames,
   coordinateTwist,
   extractCoordinates,
   jointTransform,
+  limitViolation,
   retract,
   wrapAngle,
 } from './mates';
@@ -85,4 +88,26 @@ describe('mate kinds', () => {
       }
     });
   }
+});
+
+describe('coordinate names and limits', () => {
+  it('names as many coordinates as each kind has', () => {
+    for (const kind of MATE_KINDS)
+      expect(coordinateNames(kind)).toHaveLength(coordinateCount(kind));
+    expect(coordinateNames('slider')).toEqual(['distance']);
+    expect(coordinateNames('cylindrical')).toEqual(['distance', 'angle']);
+  });
+
+  it('finds the limit a value passes, within a tolerance, and clamps to it', () => {
+    const limits = { min: 0, max: 457.2 };
+    expect(limitViolation(600, limits)).toEqual({ bound: 'max', limit: 457.2, value: 600 });
+    expect(limitViolation(-1, limits)).toEqual({ bound: 'min', limit: 0, value: -1 });
+    expect(limitViolation(457.2, limits)).toBeNull();
+    expect(limitViolation(457.2 + 1e-7, limits, 1e-6)).toBeNull();
+    expect(limitViolation(1e9, { min: 0 })).toBeNull();
+    expect(limitViolation(5, undefined)).toBeNull();
+    expect(clampToLimits(600, limits)).toBe(457.2);
+    expect(clampToLimits(-3, { min: 0 })).toBe(0);
+    expect(clampToLimits(-3, undefined)).toBe(-3);
+  });
 });

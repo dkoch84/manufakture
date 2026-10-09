@@ -18,8 +18,10 @@ import {
   extractCoordinates,
   isAngular,
   jointTransform,
+  limitViolation,
   MATE_KINDS,
   retract,
+  type LimitViolation,
 } from './mates';
 import type {
   AssemblyInput,
@@ -121,6 +123,8 @@ class Assembly {
   /** Per coordinate: L for angles, 1 for lengths. */
   weight!: Float64Array;
   L = 1;
+  /** Per mate index: the seed coordinate a tree mate's limits clamped, past which limit. */
+  readonly clamped = new Map<number, LimitViolation>();
 
   // Graph.
   parent: Int32Array;
@@ -520,9 +524,18 @@ class Assembly {
       if (!Number.isNaN(mt.min)) {
         const c = mt.c0;
         if (mt.kind === 'revolute') this.coords[c] = nearestTurn(this.coords[c]!, mt.min, mt.max);
-        if (this.sysOfMate[j]! < 0) this.coords[c] = clamp(this.coords[c]!, mt.min, mt.max);
+        if (this.sysOfMate[j]! < 0) {
+          const past = limitViolation(this.coords[c]!, mt, this.limitTolerance(mt.kind));
+          if (past !== null) this.clamped.set(j, past);
+          this.coords[c] = clamp(this.coords[c]!, mt.min, mt.max);
+        }
       }
     }
+  }
+
+  /** How far past a limit a coordinate may be before it counts: rounding, not a real excess. */
+  limitTolerance(kind: MateKind): number {
+    return kind === 'revolute' ? 1e-9 : 1e-9 * this.L;
   }
 
   /** Forward kinematics: every pose from the roots and the coordinates, then loop errors. */
@@ -1118,7 +1131,6 @@ class Assembly {
 
   report(input: AssemblyInput, warnings: AssemblyWarning[]): SolveReport {
     const { redundant, conflicting, redundantMates } = this.analyze();
-    const L = this.L;
     const poses: Record<string, Pose> = {};
     for (let i = 0; i < this.n; i++) {
       poses[this.ids[i]!] = this.outputPose(i);
@@ -1163,15 +1175,26 @@ class Assembly {
         entry.message = redundant.find((g) => g.blame === mt.id)!.message;
       }
       mates[mate.id] = entry;
+      // The stored poses put a tree mate past a limit: it was clamped there, say so.
+      const clamped = this.clamped.get(j);
+      if (clamped !== undefined) {
+        const side = clamped.bound === 'max' ? 'maximum' : 'minimum';
+        warnings.push({
+          code: 'clamped',
+          mateId: mt.id,
+          ...clamped,
+          message: `Mate ${mt.id} was at ${formatCoordinate(mt.kind, clamped.value)}, past its ${side} of ${formatCoordinate(mt.kind, clamped.limit)}: it is held at the limit, so the instances on it are not where their stored poses put them.`,
+        });
+      }
       // Limits are not enforced inside loops: say so when a loop leaves one.
       if (!Number.isNaN(mt.min) && this.sysOfMate[j]! >= 0) {
-        const v = this.coords[mt.c0]!;
-        const tol = mt.kind === 'revolute' ? 1e-9 : 1e-9 * L;
-        if (v < mt.min - tol || v > mt.max + tol) {
+        const past = limitViolation(this.coords[mt.c0]!, mt, this.limitTolerance(mt.kind));
+        if (past !== null) {
           warnings.push({
             code: 'outside-limits',
             mateId: mt.id,
-            message: `Mate ${mt.id} is outside its limits (${formatCoordinate(mt.kind, v)}); limits are not enforced inside loops of mates.`,
+            ...past,
+            message: `Mate ${mt.id} is outside its limits (${formatCoordinate(mt.kind, past.value)}); limits are not enforced inside loops of mates.`,
           });
         }
       }

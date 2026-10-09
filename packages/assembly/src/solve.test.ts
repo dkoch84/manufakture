@@ -118,6 +118,60 @@ describe('hand-computed poses per mate kind', () => {
       ),
     );
     expectPoseClose(r.poses.B, at([0, 0, 20]));
+    expect(r.mates.m1!.coordinates[0]).toBeCloseTo(20, 12);
+  });
+
+  it('a seed past a limit is clamped with a warning naming the mate, the bound and the value', () => {
+    const r = solve(
+      input(
+        [inst('A', I, true), inst('B', at([0, 0, 50]))],
+        [mate('m1', 'slider', ['A', I], ['B', I], { limits: { min: 0, max: 20 } })],
+      ),
+    );
+    expect(r.outcome).toBe('solved');
+    expect(r.warnings).toEqual([
+      {
+        code: 'clamped',
+        mateId: 'm1',
+        bound: 'max',
+        limit: 20,
+        value: expect.closeTo(50, 9) as number,
+        message: expect.stringMatching(/50\.00 mm, past its maximum of 20\.00 mm/) as string,
+      },
+    ]);
+    const below = solve(
+      input(
+        [inst('A', I, true), inst('B', at([0, 0, -5]))],
+        [mate('m1', 'slider', ['A', I], ['B', I], { limits: { min: 0 } })],
+      ),
+    );
+    expect(below.warnings).toMatchObject([{ code: 'clamped', bound: 'min', limit: 0 }]);
+    expect(below.poses.B!.translation[2]).toBeCloseTo(0, 12);
+  });
+
+  it('a seed at or within a limit (up to rounding) gives no warning', () => {
+    for (const z of [0, 20, 20 + 1e-12, 7]) {
+      const r = solve(
+        input(
+          [inst('A', I, true), inst('B', at([0, 0, z]))],
+          [mate('m1', 'slider', ['A', I], ['B', I], { limits: { min: 0, max: 20 } })],
+        ),
+      );
+      expect(r.warnings).toEqual([]);
+    }
+  });
+
+  it('a revolute seed past its limit is clamped in angle', () => {
+    const r = solve(
+      input(
+        [inst('A', I, true), inst('B', at([0, 0, 0], rz(deg(100))))],
+        [mate('m1', 'revolute', ['A', I], ['B', I], { limits: { min: 0, max: deg(90) } })],
+      ),
+    );
+    expect(r.mates.m1!.coordinates[0]).toBeCloseTo(deg(90), 12);
+    expect(r.warnings).toMatchObject([{ code: 'clamped', bound: 'max', limit: deg(90) }]);
+    expect(r.warnings[0]!.value).toBeCloseTo(deg(100), 9);
+    expect(r.warnings[0]!.message).toMatch(/100\.00 degrees/);
   });
 
   it('a revolute limit picks the turn inside the range', () => {
@@ -299,6 +353,8 @@ describe('diagnostics', () => {
     const r = solve(input(fb.instances, mates));
     expect(r.outcome).toBe('solved');
     expect(r.warnings.map((w) => w.code)).toEqual(['outside-limits']);
+    expect(r.warnings[0]).toMatchObject({ mateId: 'm4', bound: 'min', limit: 0 });
+    expect(r.warnings[0]!.value).toBeLessThan(0);
   });
 });
 

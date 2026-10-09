@@ -210,7 +210,21 @@ export type RegenWarning =
    * A layout warning a domain's member stage reported on this feature while framing `group`
    * (ADR 0015 decision 7): `domainCode` is the domain's own code, `member` a full member id.
    */
-  | { code: 'members'; message: string; group: string; domainCode?: string; member?: string };
+  | { code: 'members'; message: string; group: string; domainCode?: string; member?: string }
+  /**
+   * On a mate: the stored poses put its coordinate past one of its limits. `clamped`: the solver
+   * held it at the limit (a mate on no loop), so its instances are not at their stored poses;
+   * otherwise it is inside a loop of mates, where limits are not enforced, and stays past it.
+   * `value` and `limit` are radians for a revolute, millimetres for a slider.
+   */
+  | {
+      code: 'limit';
+      message: string;
+      clamped: boolean;
+      bound: 'min' | 'max';
+      limit: number;
+      value: number;
+    };
 
 /** How one reference of a feature resolved (ADR 0004 decision 6: recomputed, never stored). */
 export interface ReferenceResolution {

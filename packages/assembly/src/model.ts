@@ -102,11 +102,24 @@ export interface AssemblyIssue {
   mateId?: string;
 }
 
+/**
+ * `clamped`: a mate's coordinate in the seed poses (the stored poses) was past one of its limits,
+ * so the solver held it at the limit and moved the instances on it there; `value` is the
+ * coordinate the poses asked for. `outside-limits`: a mate inside a loop of mates ended past a
+ * limit (limits are not enforced in loops); `value` is where it ended. Both carry `bound` and
+ * `limit`. Revolute values are radians, slider values millimetres.
+ */
 export interface AssemblyWarning {
-  code: 'outside-limits' | 'fixed-instance' | 'not-reached';
+  code: 'clamped' | 'outside-limits' | 'fixed-instance' | 'not-reached';
   message: string;
   instanceId?: string;
   mateId?: string;
+  /** Which limit was passed (`clamped` and `outside-limits`). */
+  bound?: 'min' | 'max';
+  /** That limit's value. */
+  limit?: number;
+  /** The coordinate past it. */
+  value?: number;
 }
 
 export interface SolveReport {

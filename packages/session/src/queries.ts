@@ -25,7 +25,12 @@ import type {
   ShapeId,
   Vec3,
 } from '@manufakture/kernel';
-import { evaluateVariables, type RegenResult } from '@manufakture/regen';
+import {
+  evaluateVariables,
+  namedCoordinates,
+  type InstanceResult,
+  type RegenResult,
+} from '@manufakture/regen';
 import { documentStock } from '@manufakture/stock';
 import type { EngineApi } from './engine';
 import { done, sessionError, type SessionResult } from './errors';
@@ -136,15 +141,25 @@ export function tree(document: ManufaktureDocument, result: RegenResult | null) 
           source: 'part' in i.source ? { part: i.source.part } : { pinned: true },
           fixed: i.fixed,
           suppressed: i.suppressed,
-          status: solved?.instances.find((x) => x.instanceId === i.id)?.status ?? null,
+          ...solvedInstance(solved?.instances.find((x) => x.instanceId === i.id)),
         })),
-        mates: a.mates.map((m) => ({
-          id: m.id,
-          name: m.name,
-          kind: m.kind,
-          suppressed: m.suppressed,
-          status: solved?.mates.find((x) => x.mateId === m.id)?.status ?? null,
-        })),
+        mates: a.mates.map((m) => {
+          const r = solved?.mates.find((x) => x.mateId === m.id);
+          return {
+            id: m.id,
+            name: m.name,
+            kind: m.kind,
+            suppressed: m.suppressed,
+            status: r?.status ?? null,
+            // The solved coordinates (a slider's distance, a revolute's angle): after any clamp.
+            coordinates: namedCoordinates(m.kind, r?.coordinates ?? []).map((c) => ({
+              name: c.name,
+              value: c.angular ? c.value * DEG : c.value,
+              unit: c.angular ? 'deg' : 'mm',
+            })),
+            warnings: r?.warnings.length ?? 0,
+          };
+        }),
       };
     }),
     configurations:
@@ -174,6 +189,19 @@ export function tree(document: ManufaktureDocument, result: RegenResult | null) 
       namespace,
       bytes: JSON.stringify(entry).length,
     })),
+  };
+}
+
+/**
+ * An instance's solved state: its status, the solved pose (instance coordinates to world, mm and
+ * a unit quaternion [x, y, z, w]) and whether that differs from the stored pose (a mate moved it,
+ * or a limit clamped it). Nulls before a regen.
+ */
+function solvedInstance(r: InstanceResult | undefined) {
+  return {
+    status: r?.status ?? null,
+    transform: r === undefined ? null : r.transform,
+    moved: r?.moved ?? null,
   };
 }
 

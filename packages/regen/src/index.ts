@@ -228,7 +228,11 @@ export {
   connectorPose,
   framePose,
   instanceSourceKey,
+  limitWarning,
+  namedCoordinates,
   posesDiffer,
+  solvedPoses,
+  type NamedCoordinate,
 } from './assembly';
 export {
   DRAWING_STAGE_VERSION,

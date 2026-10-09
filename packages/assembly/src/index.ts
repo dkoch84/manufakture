@@ -19,7 +19,16 @@ export type {
   Residual,
   SolveReport,
 } from './model';
-export { MATE_KINDS, coordinateCount } from './mates';
+export {
+  MATE_KINDS,
+  clampToLimits,
+  coordinateCount,
+  coordinateNames,
+  hasLimits,
+  isAngular,
+  limitViolation,
+  type LimitViolation,
+} from './mates';
 export { drag, solve } from './solver';
 export {
   IDENTITY,

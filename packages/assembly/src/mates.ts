@@ -15,7 +15,7 @@
 // Every coordinate but a ball's is additive. A ball's is a rotation vector updated by a
 // left increment in G's frame, which keeps its tangent directions G's axes everywhere.
 
-import type { MateKind } from './model';
+import type { MateKind, MateLimits } from './model';
 import { POSE, rotationExp, rotationLog, rotateVec } from './transform';
 
 export const MATE_KINDS: readonly MateKind[] = [
@@ -40,6 +40,71 @@ export function coordinateCount(kind: MateKind): number {
     case 'ball':
       return 3;
   }
+}
+
+/**
+ * The names of a kind's free coordinates, in the order `MateReport.coordinates` holds them: a
+ * revolute's angle, a slider's distance, a planar's x, y and angle, a cylindrical's distance and
+ * angle, a ball's rotation vector x, y and z.
+ */
+export function coordinateNames(kind: MateKind): readonly string[] {
+  switch (kind) {
+    case 'fastened':
+      return [];
+    case 'revolute':
+      return ['angle'];
+    case 'slider':
+      return ['distance'];
+    case 'planar':
+      return ['x', 'y', 'angle'];
+    case 'cylindrical':
+      return ['distance', 'angle'];
+    case 'ball':
+      return ['x', 'y', 'z'];
+  }
+}
+
+/** Whether a kind takes limits on its coordinate: revolute (radians) and slider (mm). */
+export function hasLimits(kind: MateKind): boolean {
+  return kind === 'revolute' || kind === 'slider';
+}
+
+/** A coordinate past one of its mate's limits. */
+export interface LimitViolation {
+  bound: 'min' | 'max';
+  /** The limit passed. */
+  limit: number;
+  /** The coordinate. */
+  value: number;
+}
+
+/**
+ * Where a revolute's or slider's coordinate lies against its limits: null within them (or
+ * within `tolerance` of them, in the coordinate's unit), else the limit it passes. A bound left
+ * out does not limit. The same test the solver clamps and warns by, for callers that check a
+ * value of their own (a pose they are about to try, a sweep over a mate's travel).
+ */
+export function limitViolation(
+  value: number,
+  limits: MateLimits | undefined,
+  tolerance = 0,
+): LimitViolation | null {
+  if (limits === undefined) return null;
+  if (limits.min !== undefined && value < limits.min - tolerance) {
+    return { bound: 'min', limit: limits.min, value };
+  }
+  if (limits.max !== undefined && value > limits.max + tolerance) {
+    return { bound: 'max', limit: limits.max, value };
+  }
+  return null;
+}
+
+/** The value held within the limits (a bound left out does not limit). */
+export function clampToLimits(value: number, limits: MateLimits | undefined): number {
+  if (limits === undefined) return value;
+  if (limits.min !== undefined && value < limits.min) return limits.min;
+  if (limits.max !== undefined && value > limits.max) return limits.max;
+  return value;
 }
 
 /** Whether coordinate `k` of the kind is an angle (radians) rather than a length (mm). */

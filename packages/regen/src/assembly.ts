@@ -12,10 +12,14 @@
 
 import {
   compose,
+  coordinateNames,
+  isAngular,
   quatFromAxisAngle,
   type AssemblyInput,
+  type AssemblyWarning,
   type DragReport,
   type MateInput,
+  type MateKind,
   type SolveReport,
 } from '@manufakture/assembly';
 import {
@@ -317,6 +321,62 @@ export function applyReport(
     m.residual = { ...r.residual };
     if (r.message !== undefined) m.message = r.message;
   }
+  // A limit the stored poses passed is a warning on its mate, where errors lists read it.
+  for (const w of report.warnings) {
+    const limit = limitWarning(w);
+    if (limit === undefined) continue;
+    result.mates.find((m) => m.mateId === w.mateId)?.warnings.push(limit);
+  }
+}
+
+/** A solver warning about a mate's limit as the mate's regen warning; undefined for others. */
+export function limitWarning(w: AssemblyWarning): RegenWarning | undefined {
+  if (w.code !== 'clamped' && w.code !== 'outside-limits') return undefined;
+  if (w.bound === undefined || w.limit === undefined || w.value === undefined) return undefined;
+  return {
+    code: 'limit',
+    message: w.message,
+    clamped: w.code === 'clamped',
+    bound: w.bound,
+    limit: w.limit,
+    value: w.value,
+  };
+}
+
+/** One solved coordinate of a mate, named: a slider's `distance` (mm), a revolute's `angle`. */
+export interface NamedCoordinate {
+  name: string;
+  /** Millimetres, or radians when `angular`. */
+  value: number;
+  angular: boolean;
+}
+
+/**
+ * A mate's solved coordinates (`MateResult.coordinates`) with their names: revolute angle,
+ * slider distance, planar x, y and angle, cylindrical distance and angle, ball rotation vector
+ * x, y and z. Empty when the mate was not solved.
+ */
+export function namedCoordinates(
+  kind: MateKind,
+  coordinates: readonly number[],
+): NamedCoordinate[] {
+  const names = coordinateNames(kind);
+  if (coordinates.length !== names.length) return [];
+  return names.map((name, k) => ({ name, value: coordinates[k]!, angular: isAngular(kind, k) }));
+}
+
+/**
+ * The solved pose (instance coordinates to world) of every instance of an assembly's result that
+ * is not suppressed, by instance id: where the solver put them, which may differ from the stored
+ * poses (`moved`), for instance when a mate limit clamped them. What to draw or check the
+ * assembly at.
+ */
+export function solvedPoses(result: AssemblyResult): Record<string, Pose> {
+  const out: Record<string, Pose> = {};
+  for (const i of result.instances) {
+    if (i.status !== 'suppressed') out[i.instanceId] = plain(i.transform);
+  }
+  return out;
 }
 
 /** A drag step's result from the solver's report. */
