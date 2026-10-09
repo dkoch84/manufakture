@@ -7,7 +7,9 @@ TypeScript MCP SDK. Setup for users, Claude Code and other clients:
 [docs/user/agents.md](../../docs/user/agents.md).
 
 ```sh
-MANUFAKTURE_LIBRARY=/abs/library MANUFAKTURE_OUTPUT=/abs/exports make mcp
+MANUFAKTURE_SYNC_URL=http://127.0.0.1:8787 MANUFAKTURE_SYNC_TOKEN=agent.... \
+  MANUFAKTURE_OUTPUT=/abs/exports make mcp
+# a library directory instead (tests, CI): MANUFAKTURE_LIBRARY=/abs/library
 # or: pnpm --silent --filter @manufakture/mcp start
 ```
 
@@ -43,17 +45,31 @@ written to `process.stdout`, and `console.log`, `info` and `debug`, to stderr.
 ## Configuration
 
 From the environment (`src/config.ts`); a problem ends the process with exit code 2 and the
-reasons on stderr.
+reasons on stderr (never quoting the token). A warning (a sync URL over plain `http` to a host
+that is not this machine) goes to stderr, and the server starts.
 
-| Variable                 | Required | Value                                                                                        |
-| ------------------------ | -------- | -------------------------------------------------------------------------------------------- |
-| `MANUFAKTURE_LIBRARY`    | yes      | Absolute path of an existing directory: a `NodeBackend` root (`documents/...` under it)      |
-| `MANUFAKTURE_OUTPUT`     | no       | Absolute path of an existing directory for exports; without it `export` answers `no-output`  |
-| `MANUFAKTURE_ENGINE`     | no       | `worker` (default) or `in-process`, where each session's kernel runs                         |
-| `MANUFAKTURE_SYNC_URL`   | no       | http(s) URL of the sync server, no credentials in it (T8.4b; read and checked, not used)     |
-| `MANUFAKTURE_SYNC_TOKEN` | no       | The agent token (T8.4b; never logged or returned, and removed from the environment on start) |
+| Variable                 | Required        | Value                                                                                                                               |
+| ------------------------ | --------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `MANUFAKTURE_SYNC_URL`   | no              | http(s) URL of the sync server, no credentials in it: sessions work over sync (T8.4b)                                               |
+| `MANUFAKTURE_SYNC_TOKEN` | with the URL    | An agent token, `agent.<id>.<secret>` (the instance's own token is refused); never logged or returned, removed from the environment |
+| `MANUFAKTURE_LIBRARY`    | without the URL | Absolute path of an existing directory: a `NodeBackend` root (`documents/...` under it); unused over sync                           |
+| `MANUFAKTURE_OUTPUT`     | no              | Absolute path of an existing directory for exports; without it `export` answers `no-output`                                         |
+| `MANUFAKTURE_ENGINE`     | no              | `worker` (default) or `in-process`, where each session's kernel runs                                                                |
 
 Both directories are resolved with `realpath` at start, and must not contain each other.
+
+**Over sync** (ADR 0016 decision 10, T8.4b), the library is a `SyncedLibrary` from
+`packages/session`: a working copy in memory of what the server holds, with every change going
+to the server first (batches as entries of the branch's server log, bundles and images with the
+branch, review states as compare-and-sets there), and branch locks that also let go of the
+server's one-writer lease. `list_documents` lists the server's documents the token reaches
+(`savedAt` is when the document was made there: the server keeps no save time), with each
+document's branch records; `open_session` with a branch first builds it here from the server's
+log (`SyncedLibrary.materialize`), refusing as `locked` a branch another process writes (told by
+the failure's `busy`, not by its text);
+`get_review` by document and branch reads the server's record. A refusal from the server reaches
+the agent as the session's typed error, with the server's code and no address or token
+(`RemoteRefusal`). A library directory stays for tests and CI.
 
 **Running TypeScript in Node.** Like `packages/session`'s worker threads (ADR 0016 decision 2), the
 server runs the workspace's sources through `packages/session/src/worker/ts-hooks.ts`
@@ -109,7 +125,8 @@ The security review's points (M8 plan T8.4a), and where each is held:
 - **Review states.** No tool approves, rejects, merges or requests changes;
   `submit_for_review` only submits.
 - **Paths.** Documents come only from the library root (ids are `isStorableId`, and
-  `NodeBackend` confines every path). Exports go only into the output directory
+  `NodeBackend` confines every path), or over sync only from the sync server, where the agent
+  token is checked on every request (apps/server README, "Agent tokens"). Exports go only into the output directory
   (`src/files.ts`): every name, the agent's or the document's, is reduced to one plain file name
   (no separators, no leading dot, no trailing dot or space, no control characters, Windows'
   reserved names prefixed), and no two files of one export share a name (without case); the
@@ -179,15 +196,22 @@ follows core's add-only rule for commands, not this golden.
   stdout line JSON-RPC (and OCCT's statistics on stderr); a bad configuration ends with its
   reason.
 - `test/workshop.test.ts`: a call over its work limit answered at once while the next waits for
-  its work to settle; work that never settles has its kernel dropped.
+  its work to settle; work that never settles has its kernel dropped, disposed once it settles,
+  and beyond `MAX_STUCK` (2) such kernels a call is answered `busy`; a kernel that fails to load
+  is not kept.
+- `test/sync.test.ts`: the server over sync against a real sync server (in this process) with an
+  agent token and no library directory: the server's documents, a session through submit with
+  the bundle on the server, the reviewer's comment read back, exports, an update from Main after
+  the owner edited Main, a resume in a second server process (refused while the first holds the
+  branch), a revoked token, and the configuration's sync rules.
 - `test/units.test.ts`: `boundJson` (strings cut in one pass), file names (unique after cutting,
   trailing dots), the hard link that never replaces, and an export that fails partway leaving
   nothing behind.
 
 ## Not done
 
-- **Sessions over sync** (T8.4b): `MANUFAKTURE_SYNC_URL` and `MANUFAKTURE_SYNC_TOKEN` are read
-  and checked only; sessions open documents from the library directory.
+- **`find_geometry` finds faces and edges, not vertices.** The ADR's tool list names vertices too;
+  they are not found yet.
 - **The authoring guide** (T8.5a): `docs/agents/authoring.md` is served when it exists; until
   then the resource is a short stub (`GUIDE_STUB`).
 - **Export formats**: a print setup's packed plate (still the app's), IFC and `.mfkview`. Laser
@@ -199,7 +223,9 @@ follows core's add-only rule for commands, not this golden.
   and the kernel generation is cancelled, which stops it between kernel operations. The engine is
   disposed and the kernel recycled only once that work has settled, and the next render or
   export waits for it. Work that has not stopped `regenStopMs` after its deadline keeps its
-  kernel, which the workshop drops and never uses again: the next call starts a new one. A single
+  kernel, which the workshop drops and never uses again: the next call starts a new one. When that
+  work settles, its engine is disposed and the kernel let go for collection. At most two dropped
+  kernels may still be running; beyond that a render or export is answered `busy` at once. A single
   kernel operation that never returns cannot be stopped here, as it can in a session's worker.
 - **No license notices for this app.** It is not one of `tools/licenses`' targets (the web app and
   the sync server are); it runs from sources, and its dependencies are listed in ADR 0006.

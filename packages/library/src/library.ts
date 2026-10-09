@@ -288,6 +288,19 @@ export interface SyncUploads {
    */
   versions: { id: string; rev?: number; after?: number }[];
   branches: string[];
+  /**
+   * Each agent branch's review state and comment on the server, as this browser last took it in
+   * or sent it (T8.4b). Where the branch here differs from it, the difference is a reviewer's
+   * decision made here and not sent yet; kept so that a reload tells the two apart.
+   */
+  reviews?: AgentReviewState[];
+}
+
+/** An agent branch's review state on the sync server, as last known here. */
+export interface AgentReviewState {
+  branch: string;
+  review: ReviewState;
+  comment?: string;
 }
 
 /** The most uploads a sync record keeps of each kind. */
@@ -313,7 +326,23 @@ export function parseUploads(v: unknown): SyncUploads | null {
     if (typeof b !== 'string' || !isBranchId(b) || b === MAIN_BRANCH) return null;
     branches.push(b);
   }
-  return { versions, branches };
+  if (v.reviews === undefined) return { versions, branches };
+  if (!Array.isArray(v.reviews) || v.reviews.length > MAX_UPLOADS) return null;
+  const reviews: AgentReviewState[] = [];
+  for (const r of v.reviews) {
+    if (!isRecord(r) || typeof r.branch !== 'string' || !isBranchId(r.branch)) return null;
+    if (r.branch === MAIN_BRANCH) return null;
+    if (typeof r.review !== 'string' || !REVIEW_STATES.includes(r.review as ReviewState)) {
+      return null;
+    }
+    if (r.comment !== undefined && !isReviewComment(r.comment)) return null;
+    reviews.push({
+      branch: r.branch,
+      review: r.review as ReviewState,
+      ...(r.comment === undefined ? {} : { comment: r.comment }),
+    });
+  }
+  return { versions, branches, reviews };
 }
 
 /** A sync record as read back, and whether it belongs to the revision the head names. */
@@ -348,6 +377,11 @@ export interface Version {
    * kept beside the revisions (`remote-<id>.json`), checked against `snapshotSha256` as usual.
    */
   serverRev?: number;
+  /**
+   * Set on a version from the sync server that an agent token made there (T8.4b: the version of
+   * Main an agent's session started from), so History says so. Only with `serverRev`.
+   */
+  madeByAgent?: true;
   /**
    * Set on a version of main that records an approved review (T8.3b writes it when it merges an
    * agent's branch): which review the work came from. Only main's versions carry one; an imported
@@ -397,6 +431,8 @@ export interface RemoteVersion {
   branch: string;
   /** That revision of the branch's server log. */
   serverRev: number;
+  /** An agent token made it on the server (its record names one). */
+  madeByAgent?: boolean;
 }
 
 /** What the library tells its subscribers: a document's versions or branches changed. */
@@ -621,8 +657,18 @@ export function parseReviewReference(v: unknown): ReviewReference | null {
  */
 function parseVersion(v: unknown): Version | null {
   if (!isRecord(v)) return null;
-  const { id, name, description, revision, snapshotSha256, createdAt, branch, serverRev, review } =
-    v;
+  const {
+    id,
+    name,
+    description,
+    revision,
+    snapshotSha256,
+    createdAt,
+    branch,
+    serverRev,
+    review,
+    madeByAgent,
+  } = v;
   if (typeof id !== 'string' || !VERSION_ID.test(id)) return null;
   if (typeof name !== 'string' || typeof description !== 'string') return null;
   const meta = versionMeta({ name, description });
@@ -630,6 +676,7 @@ function parseVersion(v: unknown): Version | null {
   if (serverRev !== undefined && (!Number.isSafeInteger(serverRev) || (serverRev as number) < 0)) {
     return null;
   }
+  if (madeByAgent !== undefined && (madeByAgent !== true || serverRev === undefined)) return null;
   // Revision 0 is a version from the server that names no revision saved here.
   const least = serverRev === undefined ? 1 : 0;
   if (!Number.isSafeInteger(revision) || (revision as number) < least) return null;
@@ -653,6 +700,7 @@ function parseVersion(v: unknown): Version | null {
     createdAt,
     ...(branch === undefined ? {} : { branch }),
     ...(serverRev === undefined ? {} : { serverRev: serverRev as number }),
+    ...(madeByAgent === true ? { madeByAgent: true as const } : {}),
     ...(reviewed ? { review: reviewed } : {}),
   };
 }
@@ -2308,6 +2356,7 @@ export class DocumentLibrary {
             createdAt: remote.createdAt,
             ...(branch === MAIN_BRANCH ? {} : { branch }),
             serverRev: remote.serverRev,
+            ...(remote.madeByAgent === true ? { madeByAgent: true as const } : {}),
           };
           let taken = false;
           const undo = () =>
@@ -2865,9 +2914,9 @@ export class DocumentLibrary {
    * Set the review state of agent branch `branch` (one with provenance), committed by the main
    * head like any branch change. A person's branch, and main, have none to set. The library does
    * not check who asks: its callers (the review UI, T8.3b, and the session server, T8.4b) decide
-   * who may call it, and an agent session must never reach it for its own branch. Note that
-   * `adoptBranch` does not carry provenance yet (T8.4b), so a branch synced to another browser
-   * arrives there as a person's.
+   * who may call it, and an agent session must never reach it for its own branch. A branch synced
+   * from the server keeps its provenance (`adoptBranch`), and its review state follows the
+   * server's through this call (apps/web `src/sync/agents.ts`).
    *
    * `expected` makes it a compare-and-set: the change is made only when the branch's review state
    * is one of `expected` at the moment of the change (under the library's lock); otherwise nothing
@@ -3050,11 +3099,24 @@ export class DocumentLibrary {
    * A branch that came from the sync server (T7.1e), kept here under its own id and time: made
    * from its version as `createBranch` makes one (the version must be here, adopted first if it
    * came from the server too). When its name is taken here, it gets " (2)", " (3)", ... A branch
-   * already here is returned as it is.
+   * already here is returned as it is: adopting never turns a person's branch into an agent's or
+   * the reverse, nor changes a review state (`setBranchReview` does that).
+   *
+   * An agent branch keeps its provenance (T8.4b), in whatever review state the server has it and
+   * with the reviewer's comment, parsed as strictly as a stored one (`parseProvenance`): a record
+   * whose provenance does not check is refused, never kept as a person's branch.
    */
   adoptBranch(id: string, record: Branch): Promise<LibraryResult<Branch>> {
     if (record.fromVersion === null || !isBranchId(record.id) || record.id === MAIN_BRANCH) {
       return Promise.resolve({ ok: false, message: 'The branch record is invalid.' });
+    }
+    let provenance: BranchProvenance | undefined;
+    if (record.provenance !== undefined) {
+      const parsed = parseProvenance(record.provenance);
+      if (parsed === null) {
+        return Promise.resolve({ ok: false, message: 'The branch provenance is invalid.' });
+      }
+      provenance = parsed;
     }
     return this.#notify(
       id,
@@ -3062,6 +3124,7 @@ export class DocumentLibrary {
       this.#createBranch(id, record.fromVersion, record.name, {
         id: record.id,
         createdAt: record.createdAt,
+        ...(provenance === undefined ? {} : { provenance }),
       }),
     );
   }
@@ -3070,7 +3133,7 @@ export class DocumentLibrary {
     id: string,
     fromVersion: string,
     name: string,
-    given?: { id: string; createdAt: string },
+    given?: { id: string; createdAt: string; provenance?: BranchProvenance },
     provenance?: BranchProvenance,
     reviewCommentFrom?: string,
   ): Promise<LibraryResult<Branch>> {
@@ -3128,7 +3191,9 @@ export class DocumentLibrary {
           createdAt: given?.createdAt ?? this.#now().toISOString(),
           ...(origin
             ? { provenance: { ...origin, ...(comment === undefined ? {} : { comment }) } }
-            : {}),
+            : given?.provenance
+              ? { provenance: given.provenance }
+              : {}),
         };
         if (!isBranchId(branch.id) || branch.id === MAIN_BRANCH) {
           return { ok: false, message: 'The new branch has no usable id.' };
@@ -3370,6 +3435,9 @@ export class DocumentLibrary {
     if (!versions.ok) return versions;
     const a = await this.#lineage(id, from, branches.items, versions.items);
     if (!a.ok) return a;
+    if (a.remote !== undefined) {
+      return this.#planRemoteMerge(id, from, into, a.value, a.remote, branches.items, current);
+    }
     const b = await this.#lineage(id, into, branches.items, versions.items);
     if (!b.ok) return b;
     const fork = forkOf(a.value, b.value);
@@ -3415,17 +3483,75 @@ export class DocumentLibrary {
   }
 
   /**
+   * The merge of a branch whose lineage starts at a version from the sync server (an agent's
+   * branch reviewed in this browser, T8.4b): the history before that version is not here, but the
+   * version's document is, and the branch's commands since are its own log. They are rebased
+   * from that document onto `into`'s head, as an update from Main does in a session. Only into
+   * main, and only from a version of main: anything else is refused as before.
+   */
+  async #planRemoteMerge(
+    id: string,
+    from: string,
+    into: string,
+    stretches: readonly Stretch[],
+    remote: Version,
+    branches: readonly Branch[],
+    current?: ManufaktureDocument,
+  ): Promise<LibraryResult<MergePlan>> {
+    const made = branches.find((x) => x.id === stretches[0]?.branch);
+    if (into !== MAIN_BRANCH || versionBranch(remote) !== MAIN_BRANCH) {
+      return {
+        ok: false,
+        message: `The branch "${made?.name ?? from}" was made from a version from the sync server, whose history this browser does not hold: merge it in the browser it was made in.`,
+      };
+    }
+    const entries: LogEntry[] = [];
+    for (const s of stretches) {
+      const read = await this.#logEntries(id, s.branch, s.from, s.to);
+      if (!read.ok) return read;
+      entries.push(...read.value);
+    }
+    const base = await this.#readVersion(id, remote);
+    if (!base.ok) {
+      return { ok: false, message: `The state the branches share cannot be read: ${base.message}` };
+    }
+    let target = current;
+    if (target === undefined) {
+      const opened = await this.#open(id, into);
+      if (!opened.ok) return opened;
+      target = opened.value.document;
+    }
+    const rebased = rebaseOnto(base.value.document, target, entries);
+    if (!rebased.ok) return rebased;
+    return {
+      ok: true,
+      value: {
+        ...rebased.value,
+        from,
+        into,
+        fromName: branches.find((x) => x.id === from)?.name ?? from,
+        intoName: MAIN_BRANCH_NAME,
+        // Revision 0 of main: the server's, before this browser's history of it.
+        fork: { branch: MAIN_BRANCH, revision: 0 },
+      },
+    };
+  }
+
+  /**
    * Where branch `branch`'s states come from, oldest first: main's revisions up to the version
    * the first branch was made from, that branch's up to the version the next one was made from,
    * and so on down to `branch`'s own, up to its head. A branch's revision 1 is the version it was
-   * made from, so its own commands start at revision 2.
+   * made from, so its own commands start at revision 2. A lineage that starts at a version from
+   * the sync server ends there: `remote` is that version, and the stretches are those after it.
    */
   async #lineage(
     id: string,
     branch: string,
     branches: readonly Branch[],
     versions: readonly Version[],
-  ): Promise<LibraryResult<Stretch[]>> {
+  ): Promise<
+    { ok: true; value: Stretch[]; remote?: Version } | Extract<LibraryResult<never>, { ok: false }>
+  > {
     const out: Stretch[] = [];
     let on = branch;
     let to: number | null = null;
@@ -3452,12 +3578,7 @@ export class DocumentLibrary {
           message: `The version the branch "${made.name}" was made from is gone.`,
         };
       }
-      if (version.revision === 0) {
-        return {
-          ok: false,
-          message: `The branch "${made.name}" was made from a version from the sync server, whose history this browser does not hold: merge it in the browser it was made in.`,
-        };
-      }
+      if (version.revision === 0) return { ok: true, value: out, remote: version };
       on = versionBranch(version);
       to = version.revision;
     }

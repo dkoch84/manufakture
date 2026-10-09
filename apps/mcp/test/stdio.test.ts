@@ -177,4 +177,23 @@ describe('over stdio', () => {
     expect(r.stdout).toBe('');
     expect(r.stderr).toContain('MANUFAKTURE_LIBRARY is not set');
   }, 60_000);
+
+  it('refuses the instance’s own token for a sync server, without quoting it', () => {
+    const owner = 'owner-token-0123456789abcdefghijklmnopqrstuvwxyz';
+    const r = spawnSync(process.execPath, ARGS, {
+      cwd: APP,
+      env: {
+        PATH: env.PATH!,
+        MANUFAKTURE_SYNC_URL: 'https://sync.example.com/',
+        MANUFAKTURE_SYNC_TOKEN: owner,
+      },
+      input: '',
+      encoding: 'utf8',
+      timeout: 60_000,
+    });
+    expect(r.status).toBe(2);
+    expect(r.stdout).toBe('');
+    expect(r.stderr).toContain('MANUFAKTURE_SYNC_TOKEN is not an agent token');
+    expect(r.stderr).not.toContain(owner);
+  }, 60_000);
 });

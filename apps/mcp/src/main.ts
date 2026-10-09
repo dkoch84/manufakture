@@ -15,6 +15,7 @@ if (!loaded.ok) {
   for (const p of loaded.problems) log(p);
   process.exit(2);
 }
+for (const w of loaded.warnings) log(`warning: ${w}`);
 
 const app = createMcpServer({ config: loaded.config, log });
 const transport = new StdioServerTransport(process.stdin, protocolOut);
@@ -29,11 +30,16 @@ async function end(code: number): Promise<void> {
 }
 
 transport.onclose = () => void end(0);
+// The client went away under a write (EPIPE): nothing more can be said to it, so end cleanly.
+protocolOut.on('error', () => void end(0));
 process.stdin.on('end', () => void end(0));
 process.on('SIGINT', () => void end(130));
 process.on('SIGTERM', () => void end(143));
 
 await app.server.connect(transport);
+const { sync, libraryRoot, outputDir, engine } = loaded.config;
+// The token is never logged; the server's address is (it is not secret).
+const source = sync === null ? `library ${libraryRoot}` : `sync server ${new URL(sync.url).origin}`;
 log(
-  `ready: library ${loaded.config.libraryRoot}, ${loaded.config.outputDir === null ? 'no output directory' : `output ${loaded.config.outputDir}`}, ${loaded.config.engine} engines${loaded.config.sync === null ? '' : ', sync configured (not used yet)'}`,
+  `ready: ${source}, ${outputDir === null ? 'no output directory' : `output ${outputDir}`}, ${engine} engines`,
 );

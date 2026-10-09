@@ -13,22 +13,28 @@ import {
   CreateBranchSchema,
   CreateVersionSchema,
   HelloSchema,
+  PutBundleSchema,
   RECORD_ID,
   MAX_ENTRIES_PER_MESSAGE,
+  ReviewChangeSchema,
   SubmitSchema,
   checkVersions,
   judgeEntry,
   type Outcome,
+  type Provenance,
   type PushMessage,
   type PushedEntry,
+  type ReviewState,
   type ServerBranch,
   type ServerMessage,
   type ServerVersion,
   type Versions,
+  sameBranch,
   sameRecord,
 } from '@manufakture/sync';
 import { z } from 'zod';
 import { TokenBucket, type Limits } from './limits';
+import { OWNER, type Principal } from './tokens';
 import {
   CHECKPOINT_EVERY,
   MAIN_BRANCH,
@@ -65,6 +71,9 @@ export interface ReplyError {
   readonly messages?: ServerMessage[];
   readonly retryAfterMs?: number;
 }
+
+/** How many review bundles the server keeps per branch (the newest). */
+export const BUNDLES_KEPT = 8;
 
 /** A version or branch record stored (201) or already there (200). */
 export interface RecordReply<T> {
@@ -155,7 +164,21 @@ export class SyncService {
   private readonly idleEvictMs: number;
   private readonly branches = new Map<string, BranchState>();
   private readonly buckets = new Map<string, { bucket: TokenBucket; used: number }>();
+  /**
+   * The client holding each agent branch's log, when it was last heard, and the agent token it
+   * speaks for (null: the owner's) (T8.4b).
+   */
+  private readonly writers = new Map<
+    string,
+    { clientId: string; at: number; tokenId: string | null }
+  >();
   private lastSweep: number;
+  /**
+   * Agent tokens revoked while this process runs. The transport checks the token once, when a
+   * request arrives; a request already past that check when its token is revoked (its body still
+   * arriving, say) is refused here instead.
+   */
+  private readonly revokedTokens = new Set<string>();
 
   constructor(store: SyncStore, options: SyncServiceOptions) {
     this.store = store;
@@ -185,6 +208,130 @@ export class SyncService {
     for (const [key, b] of this.buckets) {
       if (t - b.used >= this.idleEvictMs) this.buckets.delete(key);
     }
+    for (const [key, w] of this.writers) {
+      if (t - w.at >= this.limits.writerLeaseMs) this.writers.delete(key);
+    }
+  }
+
+  // -----------------------------------------------------------------------------------------
+  // Authorization (ADR 0016 decision 12, T8.4b). The owner's token may do everything; an agent
+  // token reads the documents it is scoped to, makes agent branches of them, and writes only the
+  // agent branches it made, never one approved or rejected and never main. Every check reads the
+  // branch's stored record (its provenance and the token that made it), never what the request
+  // says about it.
+
+  /** Whether `p` may read document `documentId` (anything in it). */
+  readCheck(p: Principal, documentId: string): ReplyError | undefined {
+    const revoked = this.revokedCheck(p);
+    if (revoked !== undefined) return revoked;
+    if (p.kind === 'owner' || p.documents.has(documentId)) return undefined;
+    return fail(403, 'out-of-scope', 'This token is not scoped to that document');
+  }
+
+  /** A 401 for an agent token revoked since its request was let in (`revoked`). */
+  revokedCheck(p: Principal): ReplyError | undefined {
+    if (p.kind === 'agent' && this.revokedTokens.has(p.tokenId)) {
+      return fail(401, 'unauthorized', 'The token was revoked');
+    }
+    return undefined;
+  }
+
+  /**
+   * An agent token adds a review bundle or a version to its branch only while the branch is
+   * open, so the evidence a reviewer is looking at never changes under them. The session stores
+   * its bundle before it submits.
+   */
+  private openCheck(p: Principal, documentId: string, branch: string): ReplyError | undefined {
+    if (p.kind !== 'agent') return undefined;
+    const review = this.store.branchMeta(documentId, branch)?.record.provenance?.review;
+    if (review === 'open') return undefined;
+    return fail(
+      409,
+      'branch-not-open',
+      `The branch is ${review ?? 'gone'}: move it back to open before writing`,
+    );
+  }
+
+  /**
+   * Whether `p` may write branch `branch` of `documentId`: its log (hello, submits), its bundle,
+   * its deletion. For an agent token: an agent branch (by its stored provenance) that this token
+   * made, not approved or rejected; never main.
+   */
+  writeCheck(p: Principal, documentId: string, branch: string): ReplyError | undefined {
+    if (p.kind === 'owner') return undefined;
+    // readCheck refuses a revoked token first.
+    const read = this.readCheck(p, documentId);
+    if (read !== undefined) return read;
+    if (branch === MAIN_BRANCH) {
+      return fail(403, 'main-refused', 'An agent token never writes the main branch');
+    }
+    const meta = this.store.branchMeta(documentId, branch);
+    if (meta === undefined) return fail(404, 'not-found', 'No such branch');
+    const review = meta.record.provenance?.review;
+    if (review === undefined) {
+      return fail(403, 'not-agent-branch', 'An agent token writes only agent branches');
+    }
+    if (meta.createdBy !== p.tokenId) {
+      return fail(403, 'not-own-branch', 'An agent token writes only the agent branches it made');
+    }
+    if (review === 'approved' || review === 'rejected') {
+      return fail(403, 'branch-closed', `The branch was ${review}: it takes no more work`);
+    }
+    return undefined;
+  }
+
+  /**
+   * One writer per agent branch: `clientId` takes (or keeps) the branch's log unless another
+   * client was heard on it within `writerLeaseMs`. Person's branches and main are not leased.
+   */
+  private lease(
+    documentId: string,
+    branch: string,
+    clientId: string,
+    principal: Principal,
+    take = true,
+  ): ReplyError | undefined {
+    if (branch === MAIN_BRANCH) return undefined;
+    if (this.store.branchMeta(documentId, branch)?.record.provenance === undefined)
+      return undefined;
+    const key = `${documentId}\u0000${branch}`;
+    const t = this.now();
+    const held = this.writers.get(key);
+    if (
+      held !== undefined &&
+      held.clientId !== clientId &&
+      t - held.at < this.limits.writerLeaseMs
+    ) {
+      return fail(409, 'branch-busy', 'Another client is writing this agent branch');
+    }
+    if (take) {
+      this.writers.set(key, {
+        clientId,
+        at: t,
+        tokenId: principal.kind === 'agent' ? principal.tokenId : null,
+      });
+    }
+    return undefined;
+  }
+
+  /**
+   * Ends every lease agent token `tokenId` holds (it was revoked), so the owner, or a new token,
+   * can take its branches at once.
+   */
+  dropLeases(tokenId: string): void {
+    for (const [key, w] of this.writers) if (w.tokenId === tokenId) this.writers.delete(key);
+  }
+
+  /**
+   * Agent token `tokenId` was revoked: its requests still in flight are refused from now on
+   * (`revokedCheck`), its leases end (`dropLeases`), and the start versions it made that no branch
+   * starts from any more go, so nothing it made outlives it without a branch. How many versions
+   * went.
+   */
+  revoked(tokenId: string): number {
+    this.revokedTokens.add(tokenId);
+    this.dropLeases(tokenId);
+    return this.store.sweepStartVersions(tokenId);
   }
 
   /** Whether the document has branch `branch` (main included), for the WebSocket route. */
@@ -223,8 +370,10 @@ export class SyncService {
     return { ok: true, status: 201, id: doc.id, head: 0 };
   }
 
-  listDocuments() {
-    return this.store.listDocuments();
+  /** The documents `p` may read. */
+  listDocuments(p: Principal = OWNER) {
+    const all = this.store.listDocuments();
+    return p.kind === 'owner' ? all : all.filter((d) => p.documents.has(d.id));
   }
 
   /**
@@ -249,6 +398,7 @@ export class SyncService {
     raw: unknown,
     key: string | undefined,
     branch: string = MAIN_BRANCH,
+    principal: Principal = OWNER,
   ): Reply {
     const parsed = HelloSchema.safeParse(raw);
     if (!parsed.success) return invalid(describe(parsed.error));
@@ -256,8 +406,16 @@ export class SyncService {
     if (skew !== undefined) return fail(400, skew.code, skew.message, { messages: [skew] });
     const b = this.branch(documentId, branch);
     if (b === undefined) return fail(404, 'not-found', 'No such document');
+    // A hello is how a client starts writing: an agent token's only on a branch it may write.
+    const denied = this.writeCheck(principal, documentId, branch);
+    if (denied !== undefined) return denied;
+    // A busy branch is refused before the client is claimed; the lease is taken only once the
+    // client has proven its key.
+    const busy = this.lease(documentId, branch, parsed.data.clientId, principal, false);
+    if (busy !== undefined) return busy;
     const claim = this.claim(documentId, branch, parsed.data.clientId, key);
     if (claim !== undefined) return claim;
+    this.lease(documentId, branch, parsed.data.clientId, principal);
     return {
       ok: true,
       status: 200,
@@ -293,13 +451,68 @@ export class SyncService {
     return undefined;
   }
 
+  /**
+   * `POST /documents/:id/release?branch=`: a client lets go of an agent branch's log (its session
+   * closed), so another may take it before the lease runs out. Only the client holding it, proven
+   * by its key, can let it go.
+   */
+  release(
+    documentId: string,
+    raw: unknown,
+    key: string | undefined,
+    branch: string,
+    principal: Principal = OWNER,
+  ): ReplyError | { ok: true; status: 204 } {
+    const clientId = (raw as { clientId?: unknown } | null)?.clientId;
+    if (typeof clientId !== 'string' || clientId.length === 0 || clientId.length > 128) {
+      return fail(400, 'invalid-request', 'A release names its client');
+    }
+    if (this.branch(documentId, branch) === undefined) {
+      return fail(404, 'not-found', 'No such document');
+    }
+    const denied = this.writeCheck(principal, documentId, branch);
+    if (denied !== undefined) return denied;
+    const client = this.store.client(documentId, branch, clientId);
+    if (client === undefined || key === undefined || !CLIENT_KEY.test(key)) {
+      return fail(403, 'client-key', 'This client id is claimed with another key');
+    }
+    if (!timingSafeEqual(sha256(key), client.keyHash)) {
+      return fail(403, 'client-key', 'This client id is claimed with another key');
+    }
+    const lease = `${documentId}\u0000${branch}`;
+    if (this.writers.get(lease)?.clientId === clientId) this.writers.delete(lease);
+    return { ok: true, status: 204 };
+  }
+
   /** A submit (ADR 0009 decision 2): checked whole first, then judged entry by entry. */
-  submit(documentId: string, raw: unknown, sender: Sender, branch: string = MAIN_BRANCH): Reply {
+  submit(
+    documentId: string,
+    raw: unknown,
+    sender: Sender,
+    branch: string = MAIN_BRANCH,
+    principal: Principal = OWNER,
+  ): Reply {
     const parsed = SubmitSchema.safeParse(raw);
     if (!parsed.success) return invalid(describe(parsed.error));
     const { entries, floor } = parsed.data;
     const b = this.branch(documentId, branch);
     if (b === undefined) return fail(404, 'not-found', 'No such document');
+    // Checked on every submit, not only at the hello: a reviewer may have closed the branch since.
+    const denied = this.writeCheck(principal, documentId, branch);
+    if (denied !== undefined) return denied;
+    // An agent token writes only an open branch: the session moves a submitted branch, or one
+    // with changes requested, back to open (`setReview`) before it writes, so the review state on
+    // the server always says whether work landed after a submit.
+    if (principal.kind === 'agent') {
+      const review = this.store.branchMeta(documentId, branch)?.record.provenance?.review;
+      if (review !== 'open') {
+        return fail(
+          409,
+          'branch-not-open',
+          `The branch is ${review ?? 'gone'}: move it back to open before writing`,
+        );
+      }
+    }
     const clientId = entries[0]!.clientId;
 
     // The sender: a submit only ever speaks for the client its hello claimed.
@@ -323,6 +536,8 @@ export class SyncService {
       }
     }
     const client = this.store.client(documentId, branch, clientId)!;
+    const busy = this.lease(documentId, branch, clientId, principal);
+    if (busy !== undefined) return busy;
 
     // Shape limits: format and created ids. An entry over the size limit is refused on its own
     // (`judgeEntry`), so the entries after it are still judged.
@@ -526,8 +741,17 @@ export class SyncService {
     return { ok: true, status: 200, messages: [{ type: 'push', entries }] };
   }
 
-  /** `PUT /blobs/:sha256`: the bytes must hash to the name. */
-  putBlob(name: string, bytes: Buffer): ReplyError | { ok: true; status: 200 | 201 } {
+  /**
+   * `PUT /blobs/:sha256`: the bytes must hash to the name. An agent token stores at most
+   * `maxAgentBlobBytes` of blobs (those it was the first to store).
+   */
+  putBlob(
+    name: string,
+    bytes: Buffer,
+    principal: Principal = OWNER,
+  ): ReplyError | { ok: true; status: 200 | 201 } {
+    const revoked = this.revokedCheck(principal);
+    if (revoked !== undefined) return revoked;
     if (!SHA256.test(name))
       return fail(400, 'invalid-hash', 'A blob is named by its lower-case hex SHA-256');
     if (bytes.length === 0) return fail(400, 'empty-blob', 'A blob has at least one byte');
@@ -538,10 +762,21 @@ export class SyncService {
       return fail(400, 'hash-mismatch', 'The bytes do not hash to the blob name');
     }
     if (this.store.hasBlob(name)) return { ok: true, status: 200 };
+    const tokenId = principal.kind === 'agent' ? principal.tokenId : null;
+    if (
+      tokenId !== null &&
+      this.store.agentBlobBytes(tokenId) + bytes.length > this.limits.maxAgentBlobBytes
+    ) {
+      return fail(
+        403,
+        'blob-quota',
+        `An agent token stores at most ${this.limits.maxAgentBlobBytes} bytes of blobs`,
+      );
+    }
     if (this.store.blobBytes() + bytes.length > this.limits.maxBlobTotalBytes) {
       return fail(507, 'storage-full', 'The blob store is full');
     }
-    return { ok: true, status: this.store.putBlob(name, bytes) ? 201 : 200 };
+    return { ok: true, status: this.store.putBlob(name, bytes, tokenId) ? 201 : 200 };
   }
 
   getBlob(name: string): Buffer | undefined {
@@ -614,14 +849,44 @@ export class SyncService {
    * `POST /documents/:id/versions`: a version naming revision `rev` of branch `branch`. Its
    * document is stored as a snapshot of that revision, so reading it back replays nothing. A
    * resend of a stored version is answered as such (200); another record under its id is a
-   * conflict (409). Versions are never changed or deleted.
+   * conflict (409). A stored version is never changed; it is deleted only as `deleteBranch` and
+   * `deleteVersion` say. An agent token adds one only to an open branch it made (`openCheck`).
    */
-  createVersion(documentId: string, body: unknown): Reply | RecordReply<ServerVersion> {
+  createVersion(
+    documentId: string,
+    body: unknown,
+    principal: Principal = OWNER,
+  ): Reply | RecordReply<ServerVersion> {
     if (!this.hasDocument(documentId)) return fail(404, 'not-found', 'No such document');
     const parsed = CreateVersionSchema.safeParse(body);
     if (!parsed.success) return fail(400, 'invalid-version', 'The version record is invalid');
     const v = parsed.data.version;
+    const revoked = this.revokedCheck(principal);
+    if (revoked !== undefined) return revoked;
+    if (v.createdBy !== undefined) {
+      return fail(
+        400,
+        'invalid-version',
+        'The server records who made a version; a client never says',
+      );
+    }
+    // A version only names a revision. An agent token names only its own branches' revisions:
+    // never main's (a session's start version is stored with its branch, `createBranch`).
+    if (principal.kind === 'agent' && v.branch === MAIN_BRANCH) {
+      const denied = this.readCheck(principal, documentId);
+      return (
+        denied ?? fail(403, 'main-refused', 'An agent token adds no version to the main branch')
+      );
+    }
+    if (v.branch !== MAIN_BRANCH) {
+      const denied = this.writeCheck(principal, documentId, v.branch);
+      if (denied !== undefined) return denied;
+    }
     const stored = this.store.version(documentId, v.id);
+    if (stored === undefined && v.branch !== MAIN_BRANCH) {
+      const closed = this.openCheck(principal, documentId, v.branch);
+      if (closed !== undefined) return closed;
+    }
     if (stored !== undefined) {
       return sameRecord(stored, v)
         ? { ok: true, status: 200, record: stored }
@@ -631,6 +896,26 @@ export class SyncService {
     if (b === undefined)
       return fail(400, 'no-branch', 'The version names a branch that is not here');
     if (v.rev > b.rev) return fail(400, 'no-revision', 'The version names a revision not here yet');
+    const quota = this.versionQuota(documentId, principal);
+    if (quota !== undefined) return quota;
+    const at = this.documentAt(documentId, v.branch, v.rev);
+    const createdBy = principal.kind === 'agent' ? principal.tokenId : null;
+    if (!this.store.insertVersion(documentId, v, at, createdBy)) {
+      // Stored meanwhile: the same record (two identical uploads) is a resend, not a conflict.
+      const now = this.store.version(documentId, v.id);
+      return now !== undefined && sameRecord(now, v)
+        ? { ok: true, status: 200, record: now }
+        : fail(409, 'version-exists', 'Another version has this id');
+    }
+    return {
+      ok: true,
+      status: 201,
+      record: createdBy === null ? v : { ...v, createdBy },
+    };
+  }
+
+  /** Whether one more version fits: the document's limit, and an agent token's own. */
+  private versionQuota(documentId: string, principal: Principal): ReplyError | undefined {
     if (this.store.versionCount(documentId) >= this.limits.maxVersionsPerDocument) {
       return fail(
         403,
@@ -638,15 +923,47 @@ export class SyncService {
         `A document holds at most ${this.limits.maxVersionsPerDocument} versions`,
       );
     }
-    const at = this.documentAt(documentId, v.branch, v.rev);
-    if (!this.store.insertVersion(documentId, v, at)) {
-      // Stored meanwhile: the same record (two identical uploads) is a resend, not a conflict.
-      const now = this.store.version(documentId, v.id);
-      return now !== undefined && sameRecord(now, v)
-        ? { ok: true, status: 200, record: now }
-        : fail(409, 'version-exists', 'Another version has this id');
+    if (
+      principal.kind === 'agent' &&
+      this.store.agentVersionCount(documentId, principal.tokenId) >=
+        this.limits.maxAgentVersionsPerToken
+    ) {
+      return fail(
+        403,
+        'version-quota',
+        `An agent token makes at most ${this.limits.maxAgentVersionsPerToken} versions of a document`,
+      );
     }
-    return { ok: true, status: 201, record: v };
+    return undefined;
+  }
+
+  /**
+   * `DELETE /documents/:id/versions/:versionId`, the owner's alone: a version an agent token made,
+   * or a start version (the owner's one an agent's branch delete left behind included), that no
+   * branch starts from, so the owner can always make room under `maxVersionsPerDocument`. The
+   * owner's other versions are kept for good (409), as is any version a branch starts from (409).
+   */
+  deleteVersion(
+    documentId: string,
+    versionId: string,
+    principal: Principal = OWNER,
+  ): ReplyError | { ok: true; status: 204 } {
+    if (principal.kind === 'agent') {
+      return fail(403, 'owner-only', 'An agent token may not do this');
+    }
+    if (!this.hasDocument(documentId) || !RECORD_ID.test(versionId)) {
+      return fail(404, 'not-found', 'No such version');
+    }
+    switch (this.store.deleteAgentVersion(documentId, versionId)) {
+      case 'deleted':
+        return { ok: true, status: 204 };
+      case 'gone':
+        return fail(404, 'not-found', 'No such version');
+      case 'owner-made':
+        return fail(409, 'version-kept', "The owner's versions are kept for good");
+      case 'referenced':
+        return fail(409, 'version-referenced', 'A branch starts from this version');
+    }
   }
 
   /** `GET /documents/:id/versions/:versionId`: the version and its document. */
@@ -677,20 +994,69 @@ export class SyncService {
    * version it is made from, with its branch's high-water mark as of that revision. A resend is
    * answered as such (200); another record under its id is a conflict (409).
    */
-  createBranch(documentId: string, body: unknown): Reply | RecordReply<ServerBranch> {
+  createBranch(
+    documentId: string,
+    body: unknown,
+    principal: Principal = OWNER,
+  ): Reply | RecordReply<ServerBranch> {
     if (!this.hasDocument(documentId)) return fail(404, 'not-found', 'No such document');
     const parsed = CreateBranchSchema.safeParse(body);
     if (!parsed.success) return fail(400, 'invalid-branch', 'The branch record is invalid');
-    const r = parsed.data.branch;
-    const stored = this.store.branchRecord(documentId, r.id);
+    let r: ServerBranch = parsed.data.branch;
+    const { commentFrom, startVersion } = parsed.data;
+    // readCheck refuses a revoked token too.
+    const denied = this.readCheck(principal, documentId);
+    if (denied !== undefined) return denied;
+    if (principal.kind === 'agent' && r.provenance === undefined) {
+      return fail(403, 'agent-provenance', 'An agent token makes only agent branches');
+    }
+    if (
+      startVersion !== undefined &&
+      (r.provenance === undefined ||
+        startVersion.id !== r.fromVersion ||
+        startVersion.branch !== MAIN_BRANCH ||
+        startVersion.createdBy !== undefined)
+    ) {
+      return fail(
+        400,
+        'invalid-branch',
+        'A start version is a version of the main branch, made with an agent branch from it',
+      );
+    }
+    if (r.provenance !== undefined) {
+      if (r.provenance.review !== 'open' || r.provenance.comment !== undefined) {
+        return fail(400, 'invalid-branch', 'A new agent branch is open, with no comment');
+      }
+    } else if (commentFrom !== undefined) {
+      return fail(400, 'invalid-branch', 'Only an agent branch carries a comment over');
+    }
+    const createdBy = principal.kind === 'agent' ? principal.tokenId : null;
+    const stored = this.store.branchMeta(documentId, r.id);
     if (stored !== undefined) {
-      return sameRecord(stored, r)
-        ? { ok: true, status: 200, record: stored }
+      return sameBranch(stored.record, r) && stored.createdBy === createdBy
+        ? { ok: true, status: 200, record: stored.record }
         : fail(409, 'branch-exists', 'Another branch has this id');
     }
-    const from = this.store.version(documentId, r.fromVersion);
-    if (from === undefined) {
-      return fail(400, 'no-version', 'The branch names a version that is not here');
+    if (commentFrom !== undefined) {
+      // The reviewer's comment of the branch an update from Main replaces, copied here: never
+      // taken from the request (ADR 0016 decision 9).
+      const source = this.store.branchMeta(documentId, commentFrom);
+      const sp = source?.record.provenance;
+      if (
+        source === undefined ||
+        sp === undefined ||
+        sp.sessionId !== r.provenance!.sessionId ||
+        sp.clientName !== r.provenance!.clientName ||
+        (principal.kind === 'agent' && source.createdBy !== principal.tokenId)
+      ) {
+        return fail(
+          400,
+          'invalid-branch',
+          "The comment carries over only from the same session's branch",
+        );
+      }
+      if (sp.comment !== undefined)
+        r = { ...r, provenance: { ...r.provenance!, comment: sp.comment } };
     }
     if (this.store.branchCount(documentId) >= this.limits.maxBranchesPerDocument) {
       return fail(
@@ -699,16 +1065,317 @@ export class SyncService {
         `A document has at most ${this.limits.maxBranchesPerDocument} branches`,
       );
     }
+    if (
+      principal.kind === 'agent' &&
+      this.store.openAgentBranchCount(documentId, principal.tokenId) >=
+        this.limits.maxAgentBranchesPerToken
+    ) {
+      return fail(
+        403,
+        'branch-quota',
+        `An agent token has at most ${this.limits.maxAgentBranchesPerToken} agent branches of a document under way`,
+      );
+    }
+    let from = this.store.version(documentId, r.fromVersion);
+    let start: { version: ServerVersion; snapshot: StoredSnapshot } | undefined;
+    if (startVersion !== undefined) {
+      if (from !== undefined) {
+        if (!sameRecord(from, startVersion)) {
+          return fail(409, 'version-exists', 'Another version has the id of the start version');
+        }
+      } else {
+        const main = this.branch(documentId, MAIN_BRANCH)!;
+        if (startVersion.rev > main.rev) {
+          return fail(400, 'no-revision', 'The start version names a revision not here yet');
+        }
+        const quota = this.versionQuota(documentId, principal);
+        if (quota !== undefined) return quota;
+        start = {
+          version: startVersion,
+          snapshot: this.documentAt(documentId, MAIN_BRANCH, startVersion.rev),
+        };
+        from = startVersion;
+      }
+    }
+    if (from === undefined) {
+      return fail(400, 'no-version', 'The branch names a version that is not here');
+    }
+    // An agent token starts only from the owner's versions and its own: never from another
+    // token's (its start version), which would keep that version alive past its own branch and
+    // past that token's revocation.
+    if (
+      principal.kind === 'agent' &&
+      start === undefined &&
+      from.createdBy !== undefined &&
+      from.createdBy !== principal.tokenId
+    ) {
+      return fail(
+        403,
+        'not-own-version',
+        "An agent token does not start a branch from another token's version",
+      );
+    }
     // The version's document, with the high-water mark of its branch as of that revision (deleted
     // parts' counters included), so the new log never hands out an id the old one had used.
-    const at = this.documentAt(documentId, from.branch, from.rev);
-    if (!this.store.createBranch(documentId, r, at.document, at.highWater)) {
-      const now = this.store.branchRecord(documentId, r.id);
-      return now !== undefined && sameRecord(now, r)
-        ? { ok: true, status: 200, record: now }
+    const at = start?.snapshot ?? this.documentAt(documentId, from.branch, from.rev);
+    if (!this.store.createBranch(documentId, r, at.document, at.highWater, createdBy, start)) {
+      const now = this.store.branchMeta(documentId, r.id);
+      return now !== undefined && sameBranch(now.record, r) && now.createdBy === createdBy
+        ? { ok: true, status: 200, record: now.record }
         : fail(409, 'branch-exists', 'Another branch has this id');
     }
     return { ok: true, status: 201, record: r };
+  }
+
+  /**
+   * `POST /documents/:id/branches/:branch/review`: a new review state for an agent branch,
+   * compare-and-set with `expected`. The owner may make any change and set or remove the
+   * reviewer's comment. An agent token, on a branch it made, may only (ADR 0016 decisions 9 and
+   * 12): submit an open branch; reopen a submitted one or one with changes requested (as a write
+   * does); and, while nothing was written since it reopened one, put back the state it reopened
+   * it from (a failed write). Never approve, reject, or touch the comment.
+   */
+  setReview(
+    documentId: string,
+    branch: string,
+    body: unknown,
+    principal: Principal = OWNER,
+  ): Reply | RecordReply<ServerBranch> {
+    if (!this.hasDocument(documentId)) return fail(404, 'not-found', 'No such document');
+    const parsed = ReviewChangeSchema.safeParse(body);
+    if (!parsed.success) return fail(400, 'invalid-review', 'The review change is invalid');
+    // readCheck refuses a revoked token too.
+    const denied = this.readCheck(principal, documentId);
+    if (denied !== undefined) return denied;
+    if (branch === MAIN_BRANCH) {
+      return principal.kind === 'agent'
+        ? fail(403, 'main-refused', 'An agent token never writes the main branch')
+        : fail(400, 'not-agent-branch', 'The main branch has no review state');
+    }
+    const meta = this.store.branchMeta(documentId, branch);
+    if (meta === undefined) return fail(404, 'not-found', 'No such branch');
+    const prov = meta.record.provenance;
+    if (prov === undefined) {
+      return principal.kind === 'agent'
+        ? fail(403, 'not-agent-branch', 'An agent token writes only agent branches')
+        : fail(400, 'not-agent-branch', "A person's branch has no review state");
+    }
+    const { review, expected, comment } = parsed.data;
+    const current = prov.review;
+    if (principal.kind === 'agent' && meta.createdBy !== principal.tokenId) {
+      return fail(403, 'not-own-branch', 'An agent token writes only the agent branches it made');
+    }
+    if (expected !== undefined) {
+      const allowed: readonly ReviewState[] = typeof expected === 'string' ? [expected] : expected;
+      if (!allowed.includes(current)) {
+        return fail(409, 'review-changed', `The branch is ${current}`);
+      }
+    }
+    let reopened: { from: string; head: number } | null = null;
+    if (principal.kind === 'agent') {
+      if (comment !== undefined) {
+        return fail(403, 'comment-refused', 'Only the reviewer sets a review comment');
+      }
+      const head = this.branch(documentId, branch)?.rev ?? -1;
+      const reopen =
+        (current === 'submitted' || current === 'changes-requested') && review === 'open';
+      const submit = current === 'open' && review === 'submitted';
+      const restore =
+        current === 'open' &&
+        review === meta.reopenedFrom &&
+        meta.reopenedHead === head &&
+        (review === 'submitted' || review === 'changes-requested');
+      if (!reopen && !submit && !restore) {
+        return fail(
+          403,
+          'review-refused',
+          `An agent token may not move a branch from ${current} to ${review}`,
+        );
+      }
+      if (reopen) reopened = { from: current, head };
+    }
+    const { comment: kept, ...rest } = prov;
+    const nextComment = comment === undefined ? kept : (comment ?? undefined);
+    const next: Provenance = {
+      ...rest,
+      review,
+      ...(nextComment === undefined ? {} : { comment: nextComment }),
+    };
+    if (!this.store.updateReview(documentId, branch, current, next, reopened)) {
+      return fail(409, 'review-changed', 'The review state changed meanwhile');
+    }
+    // A closed branch takes no more writes: whoever held its log lets go of it now.
+    if (review === 'approved' || review === 'rejected') {
+      this.writers.delete(`${documentId}\u0000${branch}`);
+    }
+    return { ok: true, status: 200, record: { ...meta.record, provenance: next } };
+  }
+
+  /**
+   * `DELETE /documents/:id/branches/:branch`: a branch and its log go (an update from Main
+   * replacing an agent branch, ADR 0016 decision 1), with the start version stored with it when
+   * no other branch starts from that. With `expected`, only while its review state is that. A
+   * branch that versions name stays (409), since versions are kept for good; except that the
+   * owner may delete an agent branch with `withVersions`, taking the versions agent tokens made on
+   * it along (never one the owner made), so an agent can never leave the owner unable to tidy up.
+   */
+  deleteBranch(
+    documentId: string,
+    branch: string,
+    expected: string | undefined,
+    principal: Principal = OWNER,
+    withVersions = false,
+  ): Reply | { ok: true; status: 204 } {
+    if (!this.hasDocument(documentId)) return fail(404, 'not-found', 'No such document');
+    if (branch === MAIN_BRANCH) {
+      return principal.kind === 'agent'
+        ? fail(403, 'main-refused', 'An agent token never writes the main branch')
+        : fail(400, 'main', 'The main branch cannot be deleted');
+    }
+    if (!BRANCH_ID.test(branch)) return fail(404, 'not-found', 'No such branch');
+    if (
+      expected !== undefined &&
+      !(['open', 'submitted', 'changes-requested', 'approved', 'rejected'] as string[]).includes(
+        expected,
+      )
+    ) {
+      return fail(400, 'invalid-request', 'expected must be a review state');
+    }
+    if (withVersions && principal.kind === 'agent') {
+      return fail(403, 'owner-only', 'Only the owner deletes versions with a branch');
+    }
+    const denied = this.writeCheck(principal, documentId, branch);
+    if (denied !== undefined) return denied;
+    const meta = this.store.branchMeta(documentId, branch);
+    if (meta === undefined) return fail(404, 'not-found', 'No such branch');
+    const current = meta.record.provenance?.review;
+    if (expected !== undefined && current !== expected) {
+      return fail(409, 'review-changed', `The branch is ${current ?? "a person's"}`);
+    }
+    if (withVersions && current === undefined) {
+      return fail(400, 'not-agent-branch', 'Versions go with an agent branch only');
+    }
+    const deleted = this.store.deleteBranch(documentId, branch, current, {
+      withAgentVersions: withVersions,
+    });
+    if (deleted === 'has-versions') {
+      return fail(
+        409,
+        'branch-has-versions',
+        withVersions
+          ? 'Versions the owner made name this branch, or other branches start from its versions, so it stays'
+          : 'Versions name this branch, so it stays',
+      );
+    }
+    if (deleted !== 'deleted') {
+      return fail(409, 'review-changed', 'The branch changed meanwhile');
+    }
+    const key = `${documentId}\u0000${branch}`;
+    this.branches.delete(key);
+    this.writers.delete(key);
+    return { ok: true, status: 204 };
+  }
+
+  /**
+   * `PUT /documents/:id/branches/:branch/bundle`: a review bundle for head `revision` (the
+   * library's count, one above the server log's), stored with an agent branch. Its content is not
+   * read here: the app checks it as untrusted (T8.3b). Bundles count against the document's
+   * cap, the instance's, and, for an agent token, its own (every document's bundles it stored).
+   */
+  putBundle(
+    documentId: string,
+    branch: string,
+    body: unknown,
+    principal: Principal = OWNER,
+  ): Reply | { ok: true; status: 201 } {
+    if (!this.hasDocument(documentId)) return fail(404, 'not-found', 'No such document');
+    const denied = this.writeCheck(principal, documentId, branch);
+    if (denied !== undefined) return denied;
+    const meta = branch === MAIN_BRANCH ? undefined : this.store.branchMeta(documentId, branch);
+    if (meta === undefined) return fail(404, 'not-found', 'No such branch');
+    if (meta.record.provenance === undefined) {
+      return fail(400, 'not-agent-branch', 'Only an agent branch has review bundles');
+    }
+    const closed = this.openCheck(principal, documentId, branch);
+    if (closed !== undefined) return closed;
+    const parsed = PutBundleSchema.safeParse(body);
+    if (!parsed.success) return fail(400, 'invalid-bundle', 'The review bundle is invalid');
+    const { revision, record } = parsed.data;
+    const head = this.branch(documentId, branch)!.rev;
+    if (
+      record.documentId !== documentId ||
+      record.branch !== branch ||
+      record.revision !== revision ||
+      revision > head + 1
+    ) {
+      return fail(400, 'invalid-bundle', 'The review bundle is not of this branch head');
+    }
+    const text = JSON.stringify(record);
+    const bytes = Buffer.byteLength(text);
+    if (bytes > this.limits.maxBundleBytes) {
+      return fail(
+        413,
+        'too-large',
+        `A review bundle is at most ${this.limits.maxBundleBytes} bytes`,
+      );
+    }
+    if (
+      this.store.bundleBytes(documentId, { branch, revision }) + bytes >
+      this.limits.maxBundleBytesPerDocument
+    ) {
+      return fail(
+        507,
+        'bundle-storage-full',
+        `A document's review bundles hold at most ${this.limits.maxBundleBytesPerDocument} bytes`,
+      );
+    }
+    const replaced = { documentId, branch, revision };
+    const tokenId = principal.kind === 'agent' ? principal.tokenId : null;
+    if (
+      tokenId !== null &&
+      this.store.agentBundleBytes(tokenId, replaced) + bytes > this.limits.maxAgentBundleBytes
+    ) {
+      return fail(
+        403,
+        'bundle-quota',
+        `An agent token stores at most ${this.limits.maxAgentBundleBytes} bytes of review bundles`,
+      );
+    }
+    if (this.store.totalBundleBytes(replaced) + bytes > this.limits.maxBundleTotalBytes) {
+      return fail(
+        507,
+        'bundle-storage-full',
+        `The server's review bundles hold at most ${this.limits.maxBundleTotalBytes} bytes`,
+      );
+    }
+    this.store.putBundle(documentId, branch, revision, text, BUNDLES_KEPT, tokenId);
+    return { ok: true, status: 201 };
+  }
+
+  /** `GET /documents/:id/branches/:branch/bundle/meta`: the newest bundle's revision and size. */
+  bundleMeta(
+    documentId: string,
+    branch: string,
+  ): ReplyError | { ok: true; revision: number; bytes: number } {
+    if (!this.hasDocument(documentId) || !BRANCH_ID.test(branch) || branch === MAIN_BRANCH) {
+      return fail(404, 'not-found', 'No such branch');
+    }
+    const m = this.store.bundleMeta(documentId, branch);
+    if (m === undefined) return fail(404, 'not-found', 'No review bundle');
+    return { ok: true, ...m };
+  }
+
+  /** `GET /documents/:id/branches/:branch/bundle`: the newest review bundle, or 404. */
+  getBundle(
+    documentId: string,
+    branch: string,
+  ): ReplyError | { ok: true; revision: number; record: unknown } {
+    if (!this.hasDocument(documentId) || !BRANCH_ID.test(branch) || branch === MAIN_BRANCH) {
+      return fail(404, 'not-found', 'No such branch');
+    }
+    const b = this.store.latestBundle(documentId, branch);
+    if (b === undefined) return fail(404, 'not-found', 'No review bundle');
+    return { ok: true, revision: b.revision, record: JSON.parse(b.record) as unknown };
   }
 
   /**

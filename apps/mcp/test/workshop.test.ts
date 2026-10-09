@@ -5,7 +5,8 @@
 import { RegenEngine } from '@manufakture/regen';
 import { bracketDocument } from '@manufakture/session/test-fixtures';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { Workshop, WorkshopTimeout } from '../src/workshop';
+import { createNodeService, STDERR_OUTPUT } from '@manufakture/kernel/node';
+import { MAX_STUCK, Workshop, WorkshopBusy, WorkshopTimeout } from '../src/workshop';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -76,6 +77,55 @@ describe('the workshop', () => {
     expect(kernels).toHaveLength(2);
     expect(kernels[1]).not.toBe(kernels[0]);
     expect(workshop.stats().dropped).toBe(1);
+  }, 120_000);
+
+  it('caps dropped kernels still running, answering busy, and lets each go once it settles', async () => {
+    const workshop = new Workshop({ stopMs: 50 });
+    open.push(workshop);
+    const doc = bracketDocument();
+    const disposed = vi.spyOn(RegenEngine.prototype, 'dispose');
+    const releases: (() => void)[] = [];
+    for (let i = 0; i < MAX_STUCK; i++) {
+      const stuck = workshop.run(
+        doc,
+        60_000,
+        () => new Promise<void>((resolve) => releases.push(resolve)),
+        { workMs: 20 },
+      );
+      await expect(stuck).rejects.toBeInstanceOf(WorkshopTimeout);
+    }
+    // Each is dropped `stopMs` after its answer.
+    await vi.waitFor(() =>
+      expect(workshop.stats()).toEqual({ dropped: MAX_STUCK, stuck: MAX_STUCK }),
+    );
+    const calls = disposed.mock.calls.length;
+    // Beyond the cap a call is not started at all.
+    await expect(workshop.run(doc, 60_000, async () => 'no')).rejects.toBeInstanceOf(WorkshopBusy);
+    // One settles: its engine is disposed and it no longer counts.
+    releases[0]!();
+    await vi.waitFor(() => expect(workshop.stats().stuck).toBe(MAX_STUCK - 1));
+    expect(disposed.mock.calls.length).toBe(calls + 1);
+    expect(await workshop.run(doc, 60_000, async () => 'served')).toBe('served');
+    releases[1]!();
+    await vi.waitFor(() => expect(workshop.stats().stuck).toBe(0));
+  }, 120_000);
+
+  it('does not keep a kernel that failed to load: the next call loads it again', async () => {
+    let attempts = 0;
+    const workshop = new Workshop({
+      createKernel: () => {
+        attempts++;
+        return attempts === 1
+          ? Promise.reject(new Error('no wasm'))
+          : createNodeService({ autoRecycle: false, output: STDERR_OUTPUT });
+      },
+    });
+    open.push(workshop);
+    await expect(workshop.run(bracketDocument(), 60_000, async () => 'x')).rejects.toThrow(
+      'no wasm',
+    );
+    expect(await workshop.run(bracketDocument(), 60_000, async () => 'loaded')).toBe('loaded');
+    expect(attempts).toBe(2);
   }, 120_000);
 
   it('answers a regen over its limit with the regen timeout', async () => {

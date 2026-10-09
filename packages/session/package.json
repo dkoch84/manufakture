@@ -8,7 +8,8 @@
     ".": "./src/index.ts",
     "./worker": "./src/worker/entry.ts",
     "./test-fixtures": "./src/test/fixtures.ts",
-    "./test-setup": "./src/test/setup.ts"
+    "./test-setup": "./src/test/setup.ts",
+    "./test-sync-server": "./src/test/sync-server.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",

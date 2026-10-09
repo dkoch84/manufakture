@@ -4,6 +4,9 @@ import {
   CreateVersionSchema,
   ServerBranchSchema,
   ServerVersionSchema,
+  ProvenanceSchema,
+  ReviewChangeSchema,
+  sameBranch,
   sameRecord,
 } from './records';
 
@@ -52,6 +55,70 @@ describe('server version and branch records', () => {
   it('tell a resend from a conflict', () => {
     expect(sameRecord(version, { ...version })).toBe(true);
     expect(sameRecord(version, { ...version, rev: 5 })).toBe(false);
-    expect(sameRecord(branch, { ...branch, name: 'Other' })).toBe(false);
+    expect(sameBranch(branch, { ...branch, name: 'Other' })).toBe(false);
+    expect(sameBranch(branch, { ...branch })).toBe(true);
+  });
+});
+
+describe('agent branch provenance (T8.4b)', () => {
+  const provenance = {
+    origin: 'agent',
+    sessionId: 'c0ffee00-1111-4222-8333-444455556666',
+    clientName: 'Claude Code',
+    review: 'open',
+  };
+
+  it('rides on a branch record, comment included', () => {
+    const agent = { ...branch, provenance: { ...provenance, comment: 'Wider.\nThanks' } };
+    expect(ServerBranchSchema.parse(agent)).toEqual(agent);
+    expect(CreateBranchSchema.safeParse({ branch: agent, commentFrom: branch.id }).success).toBe(
+      true,
+    );
+  });
+
+  it.each([
+    ['another origin', { ...provenance, origin: 'person' }],
+    ['an unknown review state', { ...provenance, review: 'merged' }],
+    ['a session id that is a path', { ...provenance, sessionId: '../x' }],
+    ['an empty client name', { ...provenance, clientName: '' }],
+    ['a padded client name', { ...provenance, clientName: ' x' }],
+    ['a bidi override in the client name', { ...provenance, clientName: 'Claude\u202e' }],
+    ['a lone surrogate in the client name', { ...provenance, clientName: 'C\ud800' }],
+    ['a long client name', { ...provenance, clientName: 'x'.repeat(201) }],
+    ['a comment with a control character', { ...provenance, comment: 'a\u0007' }],
+    ['a blank comment', { ...provenance, comment: '  ' }],
+    ['a long comment', { ...provenance, comment: 'x'.repeat(4001) }],
+    ['an extra field', { ...provenance, extra: 1 }],
+  ])('refuses %s', (_what, p) => {
+    expect(ProvenanceSchema.safeParse(p).success).toBe(false);
+    expect(ServerBranchSchema.safeParse({ ...branch, provenance: p }).success).toBe(false);
+  });
+
+  it('a resend keeps its origin: a person cannot become an agent, nor the reverse', () => {
+    const agent = { ...branch, provenance: provenance as never };
+    expect(sameBranch(agent, { ...agent })).toBe(true);
+    // The review state may have moved since: still a resend.
+    expect(
+      sameBranch(agent, { ...agent, provenance: { ...provenance, review: 'submitted' } as never }),
+    ).toBe(true);
+    expect(sameBranch(agent, branch)).toBe(false);
+    expect(sameBranch(branch, agent)).toBe(false);
+    expect(
+      sameBranch(agent, { ...agent, provenance: { ...provenance, sessionId: 'other' } as never }),
+    ).toBe(false);
+  });
+
+  it('checks review changes', () => {
+    expect(ReviewChangeSchema.safeParse({ review: 'submitted', expected: 'open' }).success).toBe(
+      true,
+    );
+    expect(
+      ReviewChangeSchema.safeParse({ review: 'open', expected: ['submitted', 'changes-requested'] })
+        .success,
+    ).toBe(true);
+    expect(ReviewChangeSchema.safeParse({ review: 'approved', comment: null }).success).toBe(true);
+    expect(ReviewChangeSchema.safeParse({ review: 'merged' }).success).toBe(false);
+    expect(ReviewChangeSchema.safeParse({ review: 'open', comment: '\u202e' }).success).toBe(false);
+    expect(ReviewChangeSchema.safeParse({ review: 'open', by: 'agent' }).success).toBe(false);
   });
 });

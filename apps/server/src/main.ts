@@ -2,6 +2,7 @@ import { buildApp } from './app';
 import { loadConfig } from './config';
 import { SqliteShareStore } from './shares';
 import { SqliteStore } from './sqlite';
+import { AgentTokenStore } from './tokens';
 
 /** `pnpm --filter @manufakture/server start`: reads the environment, opens the database, listens. */
 async function main(): Promise<void> {
@@ -15,6 +16,7 @@ async function main(): Promise<void> {
   const store = new SqliteStore(config.databasePath);
   const app = await buildApp({
     token: config.token,
+    agentTokens: new AgentTokenStore(store.database),
     store,
     limits: config.limits,
     origins: config.origins,

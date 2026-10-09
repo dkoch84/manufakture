@@ -38,7 +38,13 @@ export type ServerErrorCode =
   /** The geometry kernel failed outside any feature. */
   | 'kernel'
   /** Writing the file failed (the system error code only). */
-  | 'storage';
+  | 'storage'
+  /** The sync server refused or failed (T8.4b): `details` says how. */
+  | 'sync'
+  /** Another session is writing the branch (one writer per branch over sync). */
+  | 'locked'
+  /** Too many renders or exports are still stopping: try again shortly. */
+  | 'busy';
 
 export interface ServerError {
   kind: 'server';

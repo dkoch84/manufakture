@@ -15,9 +15,12 @@
 // answered with the timeout at once, but the call keeps the workshop until what it started has
 // settled: the engine is disposed, and the kernel recycled, only then, and the next call waits.
 // What has not settled `stopMs` after the deadline is left to finish on its own: its kernel is
-// dropped (never disposed or recycled under it) and the next call starts a new one. A single
-// kernel operation that never returns cannot be stopped here (the session's worker engines can
-// be; README, "Not done").
+// dropped (never disposed or recycled under it) and the next call starts a new one. Once that
+// work settles, its engine is disposed and the dropped kernel let go, and a collection asked for.
+// At most `MAX_STUCK` dropped kernels may still be running at once (each holds a whole kernel
+// instance); beyond that a call is answered at once with `WorkshopBusy`. A single kernel
+// operation that never returns cannot be stopped here (the session's worker engines can be;
+// README, "Not done").
 
 import { DEFAULT_HEAP_THRESHOLD, type KernelService } from '@manufakture/kernel';
 import { STDERR_OUTPUT, createNodeService } from '@manufakture/kernel/node';
@@ -47,6 +50,17 @@ export class WorkshopTimeout extends Error {
   }
 }
 
+/** Dropped kernels whose work is still running, at most (each is a whole kernel instance). */
+export const MAX_STUCK = 2;
+
+/** Too many dropped kernels are still running their work: the call was not started. */
+export class WorkshopBusy extends Error {
+  constructor(readonly stuck: number) {
+    super('Earlier renders or exports are still stopping: try again shortly.');
+    this.name = 'WorkshopBusy';
+  }
+}
+
 export interface WorkshopOptions {
   /** Kernel heap past which the kernel is recycled after a call. */
   heapThresholdBytes?: number;
@@ -55,6 +69,8 @@ export interface WorkshopOptions {
    * (default 5000, the session's `regenStopMs`).
    */
   stopMs?: number;
+  /** Makes the kernel (default: `createNodeService` on stderr); tests replace it. */
+  createKernel?: () => Promise<KernelService>;
 }
 
 export interface RunOptions {
@@ -66,6 +82,8 @@ export interface RunOptions {
 export interface WorkshopStats {
   /** Kernels dropped because a call did not stop in time. */
   dropped: number;
+  /** Of those, the ones whose work is still running. */
+  stuck: number;
 }
 
 function collect(): void {
@@ -104,23 +122,36 @@ export class Workshop {
   #queue: Promise<unknown> = Promise.resolve();
   #closed = false;
   #dropped = 0;
+  #stuck = 0;
+  readonly #createKernel: () => Promise<KernelService>;
 
   constructor(options: WorkshopOptions = {}) {
     this.#heapThreshold = options.heapThresholdBytes ?? DEFAULT_HEAP_THRESHOLD;
     this.#stopMs = options.stopMs ?? 5_000;
+    this.#createKernel =
+      options.createKernel ??
+      (() =>
+        createNodeService({
+          heapThresholdBytes: this.#heapThreshold,
+          autoRecycle: false,
+          // stdout carries the MCP protocol: OCCT's chatter (the STEP writer's) goes to stderr.
+          output: STDERR_OUTPUT,
+        }));
   }
 
   stats(): WorkshopStats {
-    return { dropped: this.#dropped };
+    return { dropped: this.#dropped, stuck: this.#stuck };
   }
 
   #services(): Promise<{ kernel: KernelService; solver: SolverService }> {
-    this.#kernel ??= createNodeService({
-      heapThresholdBytes: this.#heapThreshold,
-      autoRecycle: false,
-      // stdout carries the MCP protocol: OCCT's chatter (the STEP writer's) goes to stderr.
-      output: STDERR_OUTPUT,
-    });
+    if (this.#kernel === null) {
+      const made = this.#createKernel();
+      this.#kernel = made;
+      // A kernel that does not load is not kept: the next call tries again.
+      made.catch(() => {
+        if (this.#kernel === made) this.#kernel = null;
+      });
+    }
     this.#solver ??= createSolverService();
     const solver = this.#solver;
     return this.#kernel.then((kernel) => ({ kernel, solver }));
@@ -138,6 +169,7 @@ export class Workshop {
     use: (bench: Bench) => Promise<T>,
     options: RunOptions = {},
   ): Promise<T> {
+    if (this.#stuck >= MAX_STUCK) return Promise.reject(new WorkshopBusy(this.#stuck));
     let reply!: Reply<T>;
     let answered = false;
     const answer = new Promise<T>((resolve, reject) => {
@@ -208,10 +240,16 @@ export class Workshop {
     } finally {
       if (running !== null) {
         // It did not stop: leave it its kernel, and never use that kernel again (calls run one
-        // at a time, so the kernel held now is this call's).
+        // at a time, so the kernel held now is this call's). Once it settles, the engine is
+        // disposed and nothing here holds the kernel any more: it is collected with its instance.
         this.#kernel = null;
         this.#dropped++;
-        void running.finally(() => engine.dispose().catch(() => undefined));
+        this.#stuck++;
+        void running.finally(async () => {
+          await engine.dispose().catch(() => undefined);
+          this.#stuck--;
+          setTimeout(collect, 0).unref();
+        });
       } else {
         await engine.dispose().catch(() => undefined);
         if (kernel.stats().heapBytes > this.#heapThreshold) {

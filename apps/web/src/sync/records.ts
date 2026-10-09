@@ -12,13 +12,18 @@
 //   restored, branched from and pinned like any other.
 // - What sync makes itself (the version and branch that keep work a rebase dropped) stays here:
 //   the work on that branch is this browser's.
+// - Agent branches (T8.4b) keep their provenance, and are followed (`AgentBranchSync`,
+//   agents.ts): their log, their review bundle and their review state, which also goes back to
+//   the server. The review states last known on the server are saved with the sync state
+//   (`uploads().reviews`). A version an agent token made on the server is kept as one
+//   (`madeByAgent`), and History says so.
 //
 // Versions and branches that were here before the document started syncing in this tab stay
 // here. Edits on a branch are not synced: only the main branch's log is.
 // Kept free of React.
 
 import { serialize } from '@manufakture/core';
-import { ServerVersionSchema, type SyncClient } from '@manufakture/sync';
+import { ServerApi, ServerVersionSchema, type SyncClient } from '@manufakture/sync';
 import {
   MAIN_BRANCH,
   versionBranch,
@@ -27,6 +32,7 @@ import {
   type SyncUploads,
 } from '@manufakture/library';
 import type { ServerSettings } from '../sharing/client';
+import { AgentBranchSync } from './agents';
 import {
   SyncError,
   fetchServerVersion,
@@ -91,6 +97,7 @@ export class RecordSync {
   /** Versions and branches from the server that could not be kept: when to try again. */
   readonly #failures = new Map<string, { count: number; next: number }>();
   readonly #now: () => number;
+  readonly #agents: AgentBranchSync | null;
 
   constructor(options: RecordSyncOptions) {
     this.#library = options.library;
@@ -104,12 +111,43 @@ export class RecordSync {
     this.#now = options.now ?? Date.now;
     this.#versions = (options.uploads?.versions ?? []).map((u) => ({ ...u }));
     this.#branches = [...(options.uploads?.branches ?? [])];
+    let api: ServerApi | null = null;
+    try {
+      api = new ServerApi({
+        url: options.server.url,
+        token: options.server.token,
+        ...(options.fetch ? { fetch: options.fetch } : {}),
+      });
+    } catch {
+      // An address the client does not take: agent branches are not followed (records still are).
+    }
+    this.#agents =
+      api === null
+        ? null
+        : new AgentBranchSync({
+            library: options.library,
+            documentId: options.documentId,
+            api,
+            warn: this.#warn,
+            known: options.uploads?.reviews,
+            save: this.#save,
+          });
   }
 
-  /** What waits for the server, to save with the sync state (undefined: nothing). */
+  /**
+   * What waits for the server, and the agent branches' review states last known there, to save
+   * with the sync state (undefined: nothing).
+   */
   uploads(): SyncUploads | undefined {
-    if (this.#versions.length === 0 && this.#branches.length === 0) return undefined;
-    return { versions: this.#versions.map((u) => ({ ...u })), branches: [...this.#branches] };
+    const reviews = this.#agents?.known() ?? [];
+    if (this.#versions.length === 0 && this.#branches.length === 0 && reviews.length === 0) {
+      return undefined;
+    }
+    return {
+      versions: this.#versions.map((u) => ({ ...u })),
+      branches: [...this.#branches],
+      ...(reviews.length > 0 ? { reviews } : {}),
+    };
   }
 
   /**
@@ -348,6 +386,7 @@ export class RecordSync {
             createdAt: sv.createdAt,
             branch: sv.branch,
             serverRev: sv.rev,
+            ...(sv.createdBy === undefined ? {} : { madeByAgent: true }),
           },
           found.document,
         );
@@ -373,6 +412,10 @@ export class RecordSync {
           }
         }
       }
+      // Agent branches: their logs, bundles and review states (T8.4b).
+      await this.#agents?.reconcile(serverBranches).catch((e: unknown) => {
+        this.#warn(`manufakture: agent branches: ${String(e)}`);
+      });
     } catch (e) {
       // Offline or the server is away: everything waits for the next run.
       if (!(e instanceof SyncError)) throw e;

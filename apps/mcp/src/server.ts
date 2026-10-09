@@ -12,17 +12,28 @@
 // - review states move only through `submit_for_review` (to submitted) and the session's own
 //   writes; no tool approves, rejects or requests changes;
 // - files are written only into the output directory (files.ts), documents read only from the
-//   library root (the library's `NodeBackend` confines every path to it);
+//   library root (the library's `NodeBackend` confines every path to it), or, over sync (T8.4b),
+//   only from the sync server, with an agent token the server checks on every request;
 // - every result is bounded (bounds.ts, render.ts), and expected failures are data (results.ts).
 
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { DocumentLibrary, MAIN_BRANCH, type Branch } from '@manufakture/library';
+import {
+  DocumentLibrary,
+  MAIN_BRANCH,
+  MemoryBackend,
+  type Branch,
+  type BranchLocks,
+} from '@manufakture/library';
 import { NodeBackend, NodeBranchLocks } from '@manufakture/library/node';
 import { bundleBuilder, type ReviewView } from '@manufakture/review';
 import {
   BackendBundleStore,
+  ServerApi,
   SessionManager,
+  SyncBundleStore,
+  SyncedLibrary,
+  type BundleStore,
   schemaIndex,
   schemaOf,
   type EngineKind,
@@ -46,7 +57,7 @@ import {
 } from './results';
 import { Inputs, Outputs, type ToolName } from './schemas';
 import { SERVER_NAME, SURFACE_VERSION } from './version';
-import { Workshop, WorkshopTimeout } from './workshop';
+import { MAX_STUCK, Workshop, WorkshopBusy, WorkshopTimeout } from './workshop';
 
 export interface ServerOptions {
   config: McpConfig;
@@ -163,12 +174,30 @@ export function createMcpServer(options: ServerOptions): ManufaktureServer {
   const now = options.now ?? (() => new Date());
   const log = options.log ?? (() => undefined);
 
-  const backend = new NodeBackend(config.libraryRoot);
-  const library = new DocumentLibrary(backend);
-  const bundles = new BackendBundleStore(backend);
+  // Over sync (T8.4b), documents are the server's: the library is a working copy in memory, every
+  // change goes to the server first, and the server checks the agent token on every request. A
+  // library directory is for tests and CI.
+  let library: DocumentLibrary;
+  let synced: SyncedLibrary | null = null;
+  let locks: BranchLocks;
+  let bundles: BundleStore;
+  if (config.sync !== null) {
+    const api = new ServerApi({ url: config.sync.url, token: config.sync.token });
+    const backend = new MemoryBackend();
+    synced = new SyncedLibrary(api, { backend });
+    library = synced;
+    locks = synced.locks;
+    bundles = new SyncBundleStore(new BackendBundleStore(backend), api);
+  } else {
+    const root = config.libraryRoot!;
+    const backend = new NodeBackend(root);
+    library = new DocumentLibrary(backend);
+    locks = new NodeBranchLocks(root);
+    bundles = new BackendBundleStore(backend);
+  }
   const manager = new SessionManager({
     library,
-    locks: new NodeBranchLocks(config.libraryRoot),
+    locks,
     bundles,
     engine: options.engine ?? config.engine,
     ...(options.limits ? { limits: options.limits } : {}),
@@ -229,6 +258,9 @@ export function createMcpServer(options: ServerOptions): ManufaktureServer {
         } catch (e) {
           // Not an expected failure: the agent gets a general message, the log the error.
           log(`${name}: ${e instanceof Error ? (e.stack ?? e.message) : String(e)}`);
+          if (e instanceof WorkshopBusy) {
+            return fail(serverError('busy', e.message, { limit: MAX_STUCK }));
+          }
           if (e instanceof WorkshopTimeout) {
             return fail(serverError('regen-timeout', e.message, { limit: e.ms }));
           }
@@ -252,7 +284,49 @@ export function createMcpServer(options: ServerOptions): ManufaktureServer {
   // ---------------------------------------------------------------------------------------------
   // Documents and sessions
 
+  const agentOf = (b: Pick<Branch, 'provenance'>) =>
+    b.provenance
+      ? {
+          sessionId: b.provenance.sessionId,
+          clientName: b.provenance.clientName,
+          review: b.provenance.review,
+          comment: b.provenance.comment !== undefined,
+        }
+      : null;
+
   tool('list_documents', async () => {
+    if (synced !== null) {
+      const listed = await synced.remoteDocuments();
+      if (!listed.ok) {
+        return fail(
+          serverError('sync', 'The sync server did not list the documents.', {
+            details: [listed.message],
+          }),
+        );
+      }
+      const documents = [];
+      for (const d of listed.value.slice(0, MAX_DOCUMENTS)) {
+        const branches = await synced.remoteBranches(d.id);
+        documents.push({
+          id: d.id,
+          name: d.name,
+          revision: d.head,
+          // The server keeps no save time: when the document was made there.
+          savedAt: d.createdAt,
+          damaged: false,
+          branches: !branches.ok
+            ? []
+            : branches.value.map((b) => ({
+                id: b.id,
+                name: b.name,
+                fromVersion: b.fromVersion,
+                createdAt: b.createdAt,
+                agent: agentOf(b),
+              })),
+        });
+      }
+      return ok({ documents, omitted: Math.max(0, listed.value.length - MAX_DOCUMENTS) });
+    }
     const all = await library.list();
     const documents = [];
     for (const d of all.slice(0, MAX_DOCUMENTS)) {
@@ -271,14 +345,7 @@ export function createMcpServer(options: ServerOptions): ManufaktureServer {
                 name: b.name,
                 fromVersion: b.fromVersion,
                 createdAt: b.createdAt,
-                agent: b.provenance
-                  ? {
-                      sessionId: b.provenance.sessionId,
-                      clientName: b.provenance.clientName,
-                      review: b.provenance.review,
-                      comment: b.provenance.comment !== undefined,
-                    }
-                  : null,
+                agent: agentOf(b),
               })),
       });
     }
@@ -292,6 +359,25 @@ export function createMcpServer(options: ServerOptions): ManufaktureServer {
       );
     }
     const clientName = args.clientName ?? server.server.getClientVersion()?.name ?? 'MCP client';
+    if (
+      synced !== null &&
+      args.branch !== undefined &&
+      !manager.list().some((x) => x.documentId === args.documentId && x.branch === args.branch)
+    ) {
+      // A branch from the server: built here from its log, and taken for this process.
+      const made = await synced.materialize(args.documentId, args.branch);
+      if (!made.ok) {
+        return fail(
+          made.noBranch
+            ? serverError('not-found', 'There is no such branch.')
+            : 'busy' in made && made.busy
+              ? serverError('locked', 'Another session is writing this branch.')
+              : serverError('sync', 'The branch could not be read from the sync server.', {
+                  details: [made.message],
+                }),
+        );
+      }
+    }
     // The session id is always the session's own (a new UUID, or the resumed branch's).
     const opened =
       args.branch !== undefined
@@ -451,9 +537,14 @@ export function createMcpServer(options: ServerOptions): ManufaktureServer {
     } else {
       return fail(serverError('invalid-input', 'Give a sessionId, or a documentId and a branch.'));
     }
-    const listed = await library.listBranches(documentId);
+    const listed =
+      synced !== null && session === undefined
+        ? await synced.remoteBranches(documentId)
+        : await library.listBranches(documentId);
     if (!listed.ok) return fail(serverError('not-found', 'There is no such document.'));
-    const record: Branch | undefined = listed.value.find((b) => b.id === branchId);
+    const record: Pick<Branch, 'id' | 'name' | 'provenance'> | undefined = listed.value.find(
+      (b) => b.id === branchId,
+    );
     const p = record?.provenance;
     if (record === undefined || p?.origin !== 'agent') {
       return fail(serverError('not-found', 'There is no such agent branch.'));

@@ -1,5 +1,11 @@
 import type { CounterTable, ManufaktureDocument, SyncEntry } from '@manufakture/core';
-import type { Outcome, PushedEntry, ServerBranch, ServerVersion } from '@manufakture/sync';
+import type {
+  Outcome,
+  Provenance,
+  PushedEntry,
+  ServerBranch,
+  ServerVersion,
+} from '@manufakture/sync';
 
 /**
  * The server's storage, behind an interface so the sync logic does not know SQL (ADR 0009
@@ -84,6 +90,26 @@ export interface StoredSnapshot {
   readonly highWater: CounterTable;
 }
 
+/**
+ * A branch record with what only the server knows of it (T8.4b): which agent token made it (null:
+ * the owner, or a person's branch), and, after an agent moved it back to `open` from
+ * `reopenedFrom`, the head revision it was at then, so that restoring that state is allowed only
+ * while no write has landed since.
+ */
+export interface BranchMeta {
+  readonly record: ServerBranch;
+  readonly createdBy: string | null;
+  readonly reopenedFrom: string | null;
+  readonly reopenedHead: number | null;
+}
+
+/** A review bundle stored with a branch (T8.4b). */
+export interface StoredBundle {
+  readonly revision: number;
+  /** The bundle record as JSON. */
+  readonly record: string;
+}
+
 export interface SyncStore {
   /** Creates a document with its main branch at revision 0; false if the id exists. */
   createDocument(
@@ -135,8 +161,16 @@ export interface SyncStore {
   /**
    * Stores a version, and `snapshot` (its branch's document at its revision) unless that branch
    * has a snapshot at that revision already, in one transaction. False if the id is taken.
+   * `createdBy` is the agent token that made it (null: the owner).
    */
-  insertVersion(documentId: string, version: ServerVersion, snapshot: StoredSnapshot): boolean;
+  insertVersion(
+    documentId: string,
+    version: ServerVersion,
+    snapshot: StoredSnapshot,
+    createdBy?: string | null,
+  ): boolean;
+  /** How many versions of the document agent token `tokenId` made. */
+  agentVersionCount(documentId: string, tokenId: string): number;
 
   /** The document's branch records (main has none), in the order they were made. */
   listBranches(documentId: string): ServerBranch[];
@@ -152,10 +186,90 @@ export interface SyncStore {
     record: ServerBranch,
     document: ManufaktureDocument,
     highWater: CounterTable,
+    createdBy?: string | null,
+    startVersion?: { version: ServerVersion; snapshot: StoredSnapshot },
   ): boolean;
+  /**
+   * How many agent branches of the document agent token `tokenId` made that are not closed
+   * (approved or rejected).
+   */
+  openAgentBranchCount(documentId: string, tokenId: string): number;
+  /** A branch record with the server's own fields; undefined when there is none (or it is damaged). */
+  branchMeta(documentId: string, branch: string): BranchMeta | undefined;
+  /**
+   * Changes an agent branch's provenance (its review state and comment) and the reopen marker, if
+   * the stored review state is still `from`. False otherwise (nothing written).
+   */
+  updateReview(
+    documentId: string,
+    branch: string,
+    from: string,
+    provenance: Provenance,
+    reopened: { from: string; head: number } | null,
+  ): boolean;
+  /** How many versions name a revision of `branch`. */
+  branchVersionCount(documentId: string, branch: string): number;
+  /**
+   * Deletes a branch (never main) with its record, log, snapshots, clients, outcomes and bundles,
+   * in one transaction; with `review`, only while its stored review state is that. The version it
+   * started from goes too when it is a start version (stored with some branch by `createBranch`'s
+   * `startVersion`) that no other branch starts from now, and either an agent token made it or
+   * the owner made both it and this branch: a delete of an agent's branch never takes a version
+   * the owner made. A start version stored with this branch that stays is marked as having
+   * outlived it, so a branch made later under the same id never inherits it. Versions that name
+   * the branch keep it (`has-versions`), unless `withAgentVersions` and every one of them was
+   * made by an agent token and starts no other branch: those go with it.
+   */
+  deleteBranch(
+    documentId: string,
+    branch: string,
+    review?: string,
+    options?: { withAgentVersions?: boolean },
+  ): 'deleted' | 'gone' | 'changed' | 'has-versions';
+  /**
+   * Stores a review bundle for `revision` (replacing one there), keeping the newest `keep`.
+   * `createdBy` is the agent token that stored it (null: the owner).
+   */
+  putBundle(
+    documentId: string,
+    branch: string,
+    revision: number,
+    record: string,
+    keep: number,
+    createdBy?: string | null,
+  ): void;
+  /** The newest review bundle of a branch. */
+  latestBundle(documentId: string, branch: string): StoredBundle | undefined;
+  /** The newest review bundle's revision and size in bytes. */
+  bundleMeta(documentId: string, branch: string): { revision: number; bytes: number } | undefined;
+  /** The bytes of every review bundle of the document, but `except` (one branch's revision). */
+  bundleBytes(documentId: string, except?: { branch: string; revision: number }): number;
+  /** The bytes of every review bundle agent token `tokenId` stored, but `except`. */
+  agentBundleBytes(
+    tokenId: string,
+    except?: { documentId: string; branch: string; revision: number },
+  ): number;
+  /** The bytes of every review bundle of the instance, but `except`. */
+  totalBundleBytes(except?: { documentId: string; branch: string; revision: number }): number;
+  /**
+   * Deletes a version no branch starts from, made by an agent token or stored as a start version
+   * (the owner tidying up, a start version an agent's branch delete left behind included). Any
+   * other version of the owner's is `owner-made`; it and a `referenced` one stay.
+   */
+  deleteAgentVersion(
+    documentId: string,
+    versionId: string,
+  ): 'deleted' | 'gone' | 'owner-made' | 'referenced';
+  /**
+   * Deletes the start versions agent token `tokenId` made that no branch starts from (it was
+   * revoked), in every document: how many went.
+   */
+  sweepStartVersions(tokenId: string): number;
 
-  /** Stores a blob; false if it was already there. */
-  putBlob(sha256: string, bytes: Buffer): boolean;
+  /** Stores a blob, recording the agent token that stored it (null: the owner); false if it was already there. */
+  putBlob(sha256: string, bytes: Buffer, createdBy?: string | null): boolean;
+  /** The size of the blobs agent token `tokenId` stored. */
+  agentBlobBytes(tokenId: string): number;
   getBlob(sha256: string): Buffer | undefined;
   hasBlob(sha256: string): boolean;
   /** The size of every blob together. */

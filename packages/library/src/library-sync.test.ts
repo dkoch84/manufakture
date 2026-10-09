@@ -1,6 +1,12 @@
 import { serialize, type ManufaktureDocument } from '@manufakture/core';
 import { describe, expect, it } from 'vitest';
-import { DocumentLibrary, RevisionConflict, type LogEntry, type SyncRecord } from './library';
+import {
+  DocumentLibrary,
+  RevisionConflict,
+  parseUploads,
+  type LogEntry,
+  type SyncRecord,
+} from './library';
 import {
   CrashingBackend,
   cloneBackend,
@@ -231,5 +237,31 @@ describe('sync state in the library', () => {
     expect((await read(lib))!.record.uploads).toEqual(uploads);
     await lib.saveSync('doc-1', record(doc, 'two'));
     expect((await read(lib))!.record.uploads).toBeUndefined();
+  });
+
+  it('keeps the agent branches’ review states last known on the server (T8.4b)', async () => {
+    const lib = library();
+    const doc = partDocument();
+    const uploads = {
+      versions: [],
+      branches: [],
+      reviews: [
+        { branch: 'b-1', review: 'changes-requested' as const, comment: 'Taller.' },
+        { branch: 'b-2', review: 'submitted' as const },
+      ],
+    };
+    await lib.save(doc, [], undefined, { ...record(doc, 'one'), uploads });
+    expect((await read(lib))!.record.uploads).toEqual(uploads);
+    for (const reviews of [
+      [{ branch: 'main', review: 'open' }],
+      [{ branch: 'b-1', review: 'merged' }],
+      [{ branch: 'b-1', review: 'open', comment: '' }],
+      [{ branch: '../x', review: 'open' }],
+      'b-1',
+    ]) {
+      expect(parseUploads({ versions: [], branches: [], reviews }), JSON.stringify(reviews)).toBe(
+        null,
+      );
+    }
   });
 });

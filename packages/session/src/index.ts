@@ -78,6 +78,15 @@ export {
   type StatusChange,
   type UpdateReport,
 } from './session';
+export { AGENT_TOKEN, ServerApi, ServerApiError, type ServerApiOptions } from '@manufakture/sync';
+export {
+  DEFAULT_KEEP_ALIVE_MS,
+  RemoteRefusal,
+  SyncBundleStore,
+  SyncedLibrary,
+  type SyncFailure,
+  type SyncedLibraryOptions,
+} from './sync';
 export {
   MAX_BATCH_DEPTH,
   MAX_JSON_DEPTH,

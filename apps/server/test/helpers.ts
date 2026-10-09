@@ -18,6 +18,7 @@ import { CLIENT_KEY_HEADER, SUBPROTOCOL, buildApp } from '../src/app';
 import { DEFAULT_LIMITS, type Limits } from '../src/limits';
 import { SyncService } from '../src/service';
 import { SqliteStore } from '../src/sqlite';
+import { AgentTokenStore } from '../src/tokens';
 
 /** Test-only helpers: a real server on an ephemeral port over a temp SQLite file. */
 
@@ -38,6 +39,8 @@ export function clientKey(): string {
 export interface Running {
   readonly app: FastifyInstance;
   readonly store: SqliteStore;
+  /** The service `start` made (absent when a test builds its own app). */
+  readonly service?: SyncService;
   readonly url: string;
   readonly wsUrl: string;
   close(): Promise<void>;
@@ -52,7 +55,14 @@ export async function start(dbPath: string, options: StartOptions = {}): Promise
   const store = new SqliteStore(dbPath);
   const limits = { ...DEFAULT_LIMITS, ...options.limits };
   const service = new SyncService(store, { limits, ...(options.now && { now: options.now }) });
-  const app = await buildApp({ token: TOKEN, store, limits, origins: [ORIGIN], service });
+  const app = await buildApp({
+    token: TOKEN,
+    agentTokens: new AgentTokenStore(store.database),
+    store,
+    limits,
+    origins: [ORIGIN],
+    service,
+  });
   await app.listen({ host: '127.0.0.1', port: 0 });
   const address = app.server.address();
   if (address === null || typeof address === 'string') throw new Error('no address');
@@ -60,6 +70,7 @@ export async function start(dbPath: string, options: StartOptions = {}): Promise
   return {
     app,
     store,
+    service,
     url,
     wsUrl: url.replace(/^http/, 'ws'),
     async close() {

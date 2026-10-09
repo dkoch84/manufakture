@@ -73,6 +73,18 @@ export function VersionList({
                   from the server
                 </span>
               )}
+              {v.madeByAgent && (
+                <>
+                  ,{' '}
+                  <span
+                    className="history-agent-made"
+                    data-testid={`version-agent-made-${v.name}`}
+                    title="Made on the sync server by an agent's token: the version of Main an agent session started from"
+                  >
+                    made by an agent
+                  </span>
+                </>
+              )}
             </div>
             {v.description && <div className="history-description">{v.description}</div>}
           </li>

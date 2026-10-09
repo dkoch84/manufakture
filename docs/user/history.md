@@ -51,7 +51,7 @@ A **branch** is a second line of work in the same document, started from a versi
 
 To bring a branch's work into another one, merge it (below). To take another branch's whole state instead, name it as a version on that branch, switch back, **View** the version and **Restore** it: the open branch then takes the other one's whole state, as one step that **Undo** takes back.
 
-When the document [syncs](sync.md#versions-and-branches), versions and branches made on Main go to your server and appear in your other browsers; the changes made on a branch stay in the browser they are made in.
+When the document [syncs](sync.md#versions-and-branches), versions and branches made on Main go to your server and appear in your other browsers; the changes made on a branch stay in the browser they are made in. An AI agent's branch is the exception: the agent writes it on the server, and it arrives here with its changes, its review bundle and its review state (below, and [Working with an AI agent](agents.md)).
 
 Branches are for trying alternatives inside one document. To make an independent copy, use **Duplicate** on the home screen: the copy has its own name and history, and lives on as a document of its own.
 
@@ -89,6 +89,8 @@ A branch made from a version that came from another browser (marked **from the s
 ## Reviewing an agent's work
 
 An AI agent connected to manufakture never changes Main. It works on a branch of its own, an **agent branch**, and when it is done it submits the branch for review with a **review bundle**: what it changed, pictures of the part before and after, measurements and quantities. You decide in History whether its work goes into Main.
+
+The agent works through your sync server, so open the document here with sync on: its branch shows within a few seconds of each change the agent makes, and your decisions go back to the server, where the agent reads them ([Sync](sync.md#versions-and-branches)). The version of Main an agent's branch starts from is one you made when Main's head has one; otherwise the agent made it on the server, and the version list marks it **made by an agent**.
 
 Agent branches are marked wherever branches show:
 

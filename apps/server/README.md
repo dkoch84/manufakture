@@ -23,7 +23,9 @@ MANUFAKTURE_DB=/var/lib/manufakture/sync.db \
 ```
 
 It listens on `127.0.0.1:8787` by default: on localhost or a private network, behind a reverse
-proxy that ends TLS. Do not expose it to the internet: the token is the only protection.
+proxy that ends TLS. Do not expose it to the internet: the token is the only protection. Agent
+tokens (below) are for a server on localhost only, until the M8 security review signs them off
+for anything wider.
 
 The container recipe is [`Dockerfile`](Dockerfile) (build from the repository root:
 `docker build -f apps/server/Dockerfile -t manufakture-server .`); it keeps the database in the
@@ -50,31 +52,39 @@ Everything comes from environment variables.
 
 Limits (all positive integers; `src/limits.ts` documents each):
 
-| Variable                                 | Default                            |
-| ---------------------------------------- | ---------------------------------- |
-| `MANUFAKTURE_MAX_BODY_BYTES`             | 40 MiB                             |
-| `MANUFAKTURE_MAX_MESSAGE_BYTES`          | 40 MiB                             |
-| `MANUFAKTURE_MAX_ENTRY_BYTES`            | 12 MiB (under the app's 16 MiB)    |
-| `MANUFAKTURE_MAX_JSON_DEPTH`             | 64                                 |
-| `MANUFAKTURE_MAX_JSON_NODES`             | 1,000,000                          |
-| `MANUFAKTURE_MAX_CREATED_IDS_PER_SUBMIT` | 100,000                            |
-| `MANUFAKTURE_MAX_BLOB_BYTES`             | 20 MiB (core's `MAX_IMPORT_BYTES`) |
-| `MANUFAKTURE_MAX_BLOB_TOTAL_BYTES`       | 10 GiB                             |
-| `MANUFAKTURE_MAX_DOCUMENTS`              | 10,000                             |
-| `MANUFAKTURE_MAX_CLIENTS_PER_DOCUMENT`   | 256                                |
-| `MANUFAKTURE_MAX_ROWS_PER_CLIENT`        | 20,000                             |
-| `MANUFAKTURE_ENTRIES_PER_MINUTE`         | 20,000 (at least 1,000)            |
-| `MANUFAKTURE_MESSAGES_PER_MINUTE`        | 1,200                              |
-| `MANUFAKTURE_VALIDATION_BUDGET_MS`       | 2,000                              |
-| `MANUFAKTURE_MAX_CONNECTIONS`            | 256                                |
-| `MANUFAKTURE_MAX_SOCKET_BUFFER_BYTES`    | 64 MiB                             |
-| `MANUFAKTURE_HELLO_TIMEOUT_MS`           | 10,000                             |
-| `MANUFAKTURE_MAX_VERSIONS_PER_DOCUMENT`  | 2,000                              |
-| `MANUFAKTURE_MAX_BRANCHES_PER_DOCUMENT`  | 100                                |
-| `MANUFAKTURE_MAX_PULL_BYTES`             | 8 MiB (at least one entry a pull)  |
-| `MANUFAKTURE_REQUEST_TIMEOUT_MS`         | 120,000 (a whole HTTP request)     |
-| `MANUFAKTURE_CONNECTION_TIMEOUT_MS`      | 300,000 (an idle connection)       |
-| `MANUFAKTURE_KEEP_ALIVE_TIMEOUT_MS`      | 72,000 (above the proxy's own)     |
+| Variable                                    | Default                                     |
+| ------------------------------------------- | ------------------------------------------- |
+| `MANUFAKTURE_MAX_BODY_BYTES`                | 40 MiB                                      |
+| `MANUFAKTURE_MAX_MESSAGE_BYTES`             | 40 MiB                                      |
+| `MANUFAKTURE_MAX_ENTRY_BYTES`               | 12 MiB (under the app's 16 MiB)             |
+| `MANUFAKTURE_MAX_JSON_DEPTH`                | 64                                          |
+| `MANUFAKTURE_MAX_JSON_NODES`                | 1,000,000                                   |
+| `MANUFAKTURE_MAX_CREATED_IDS_PER_SUBMIT`    | 100,000                                     |
+| `MANUFAKTURE_MAX_BLOB_BYTES`                | 20 MiB (core's `MAX_IMPORT_BYTES`)          |
+| `MANUFAKTURE_MAX_BLOB_TOTAL_BYTES`          | 10 GiB                                      |
+| `MANUFAKTURE_MAX_DOCUMENTS`                 | 10,000                                      |
+| `MANUFAKTURE_MAX_CLIENTS_PER_DOCUMENT`      | 256                                         |
+| `MANUFAKTURE_MAX_ROWS_PER_CLIENT`           | 20,000                                      |
+| `MANUFAKTURE_ENTRIES_PER_MINUTE`            | 20,000 (at least 1,000)                     |
+| `MANUFAKTURE_MESSAGES_PER_MINUTE`           | 1,200                                       |
+| `MANUFAKTURE_VALIDATION_BUDGET_MS`          | 2,000                                       |
+| `MANUFAKTURE_MAX_CONNECTIONS`               | 256                                         |
+| `MANUFAKTURE_MAX_SOCKET_BUFFER_BYTES`       | 64 MiB                                      |
+| `MANUFAKTURE_HELLO_TIMEOUT_MS`              | 10,000                                      |
+| `MANUFAKTURE_MAX_VERSIONS_PER_DOCUMENT`     | 2,000                                       |
+| `MANUFAKTURE_MAX_BRANCHES_PER_DOCUMENT`     | 100                                         |
+| `MANUFAKTURE_MAX_PULL_BYTES`                | 8 MiB (at least one entry a pull)           |
+| `MANUFAKTURE_REQUEST_TIMEOUT_MS`            | 120,000 (a whole HTTP request)              |
+| `MANUFAKTURE_CONNECTION_TIMEOUT_MS`         | 300,000 (an idle connection)                |
+| `MANUFAKTURE_KEEP_ALIVE_TIMEOUT_MS`         | 72,000 (above the proxy's own)              |
+| `MANUFAKTURE_WRITER_LEASE_MS`               | 120,000 (one writer per agent branch)       |
+| `MANUFAKTURE_MAX_BUNDLE_BYTES`              | 64 MiB + 64 KiB (one review bundle request) |
+| `MANUFAKTURE_MAX_BUNDLE_BYTES_PER_DOCUMENT` | 512 MiB (a document's review bundles)       |
+| `MANUFAKTURE_MAX_BUNDLE_TOTAL_BYTES`        | 4 GiB (every review bundle together)        |
+| `MANUFAKTURE_MAX_AGENT_BRANCHES_PER_TOKEN`  | 20 (under way, per document)                |
+| `MANUFAKTURE_MAX_AGENT_VERSIONS_PER_TOKEN`  | 200 (per document)                          |
+| `MANUFAKTURE_MAX_AGENT_BLOB_BYTES`          | 1 GiB (blobs one agent token stored)        |
+| `MANUFAKTURE_MAX_AGENT_BUNDLE_BYTES`        | 256 MiB (bundles one agent token stored)    |
 
 The app refuses any message from the server over 16 MiB (`MAX_INBOUND_BYTES` in
 `apps/web/src/sync/transport.ts`). Every accepted entry is pushed to every client and may come
@@ -134,31 +144,42 @@ origin in `MANUFAKTURE_ORIGINS`.
 
 ## The API
 
-Every route but `GET /api/health` and `GET /api/shares/:id` needs `Authorization: Bearer <token>`. No cookies are read or
+Every route but `GET /api/health` and `GET /api/shares/:id` needs `Authorization: Bearer <token>`: the
+instance's token, or an agent token where the route allows one (below, "Agent tokens"). No cookies are read or
 set. JSON responses carry `Cache-Control: no-store`; an error is `{ code, message }` with a 4xx
 status, plus `messages` when protocol messages explain it.
 
-| Route                                  | What it does                                                                                                                                                     |
-| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /api/health`                      | `{ ok: true }`, no token                                                                                                                                         |
-| `POST /api/documents`                  | `{ document }`: a new document at revision 0, under the document's own `id` (URL-safe, at most 128 characters). Migrated and checked by core. `201 { id, head }` |
-| `GET /api/documents`                   | `{ documents: [{ id, name, createdAt, head }] }`                                                                                                                 |
-| `GET /api/documents/:id/snapshot`      | `{ rev, document, highWater }`: the head, for a new device: `new SyncClient(document, rev, { clientId, highWater })`                                             |
-| `POST /api/documents/:id/hello`        | A `hello` message, with the client key header: `{ messages: [welcome] }`                                                                                         |
-| `POST /api/documents/:id/entries`      | A `submit` message, with the client key header: `{ messages }`, the acks, refusals and retryable answers in entry order                                          |
-| `GET /api/documents/:id/entries?since` | A pull: `{ messages: [push] }` with up to 1,000 entries after `since`                                                                                            |
-| `PUT /api/blobs/:sha256`               | `application/octet-stream`, at most `MAX_IMPORT_BYTES`; refused unless the bytes hash to the name. `201` stored, `200` already there                             |
-| `GET /api/blobs/:sha256`               | The bytes, or 404                                                                                                                                                |
-| `GET /api/documents/:id/socket`        | The WebSocket (below)                                                                                                                                            |
-| `GET /api/documents/:id/versions`      | `{ versions }`: every branch's named versions, in the order they were stored                                                                                     |
-| `POST /api/documents/:id/versions`     | `{ version }` (`ServerVersionSchema`): `201`, or `200` when that record is stored already; `409 version-exists` for another record under its id                  |
-| `GET /api/documents/:id/versions/:vid` | `{ version, document }`: the version and its branch's document at its revision                                                                                   |
-| `GET /api/documents/:id/branches`      | `{ branches }`: the branch records (main has none)                                                                                                               |
-| `POST /api/documents/:id/branches`     | `{ branch }` (`ServerBranchSchema`): a new branch log from a stored version; `201`, `200` for a resend, `409 branch-exists`                                      |
-| `POST /api/shares?name=&expires=`      | A `.mfkview` as `application/vnd.manufakture.view+zip`; `expires` is days or `never`. `201 { id, name, size, createdAt, expiresAt }`; 409 at the count limit     |
-| `GET /api/shares`                      | `{ shares, limits }`: the active shares, newest first                                                                                                            |
-| `GET /api/shares/:id`                  | The bundle, **no token**, CORS for `MANUFAKTURE_VIEWER_ORIGINS` only; 404 for unknown, revoked and expired ids alike                                             |
-| `DELETE /api/shares/:id`               | Revokes: `204`, or 404                                                                                                                                           |
+| Route                                            | What it does                                                                                                                                                                                                                                                                            |
+| ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/health`                                | `{ ok: true }`, no token                                                                                                                                                                                                                                                                |
+| `POST /api/documents`                            | `{ document }`: a new document at revision 0, under the document's own `id` (URL-safe, at most 128 characters). Migrated and checked by core. `201 { id, head }`                                                                                                                        |
+| `GET /api/documents`                             | `{ documents: [{ id, name, createdAt, head }] }`                                                                                                                                                                                                                                        |
+| `GET /api/documents/:id/snapshot`                | `{ rev, document, highWater }`: the head, for a new device: `new SyncClient(document, rev, { clientId, highWater })`                                                                                                                                                                    |
+| `POST /api/documents/:id/hello`                  | A `hello` message, with the client key header: `{ messages: [welcome] }`                                                                                                                                                                                                                |
+| `POST /api/documents/:id/entries`                | A `submit` message, with the client key header: `{ messages }`, the acks, refusals and retryable answers in entry order. `409 branch-not-open` for an agent token on an agent branch that is not `open`                                                                                 |
+| `GET /api/documents/:id/entries?since`           | A pull: `{ messages: [push] }` with up to 1,000 entries after `since`                                                                                                                                                                                                                   |
+| `PUT /api/blobs/:sha256`                         | `application/octet-stream`, at most `MAX_IMPORT_BYTES`; refused unless the bytes hash to the name. `201` stored, `200` already there. `403 blob-quota` past an agent token's quota                                                                                                      |
+| `GET /api/blobs/:sha256`                         | The bytes, or 404                                                                                                                                                                                                                                                                       |
+| `GET /api/documents/:id/socket`                  | The WebSocket (below)                                                                                                                                                                                                                                                                   |
+| `GET /api/documents/:id/versions`                | `{ versions }`: every branch's named versions, in the order they were stored                                                                                                                                                                                                            |
+| `POST /api/documents/:id/versions`               | `{ version }` (`ServerVersionSchema`, without `createdBy`): `201`, or `200` when that record is stored already; `409 version-exists` for another record under its id. A version an agent token made is listed with `createdBy`, the token's id                                          |
+| `GET /api/documents/:id/versions/:vid`           | `{ version, document }`: the version and its branch's document at its revision                                                                                                                                                                                                          |
+| `DELETE /api/documents/:id/versions/:vid`        | The owner's alone: deletes a version an agent token made, or a start version, that no branch starts from; `204`, 404, `409 version-kept` for the owner's other versions, `409 version-referenced` while a branch starts from it, `403 owner-only` for an agent token                    |
+| `GET /api/documents/:id/branches`                | `{ branches }`: the branch records (main has none)                                                                                                                                                                                                                                      |
+| `POST /api/documents/:id/branches`               | `{ branch, commentFrom?, startVersion? }` (`CreateBranchSchema`): a new branch log from a stored version, or from `startVersion`, stored with it; `201`, `200` for a resend, `409 branch-exists`                                                                                        |
+| `POST /api/documents/:id/branches/:b/review`     | `{ review, expected?, comment? }` (`ReviewChangeSchema`): an agent branch's review state, compare-and-set; `200 { branch }`, `409 review-changed`                                                                                                                                       |
+| `DELETE /api/documents/:id/branches/:b`          | `?expected=<state>&withVersions=true`: deletes a branch, its log and its start version (an update from Main); `204`, `409` while versions name it or the state moved. `withVersions` (the owner's, an agent branch) takes the versions agents made on it along                          |
+| `PUT /api/documents/:id/branches/:b/bundle`      | `{ revision, record }` (`PutBundleSchema`): a review bundle with an agent branch; `201`. The newest 8 are kept. A body limit of its own (`MANUFAKTURE_MAX_BUNDLE_BYTES`); `507 bundle-storage-full` past the document's or the instance's cap, `403 bundle-quota` past an agent token's |
+| `GET /api/documents/:id/branches/:b/bundle`      | `{ revision, record }`: the newest review bundle, or 404                                                                                                                                                                                                                                |
+| `GET /api/documents/:id/branches/:b/bundle/meta` | `{ revision, bytes }`: the newest review bundle's revision and size, or 404, so a client looks before it downloads one                                                                                                                                                                  |
+| `POST /api/documents/:id/release`                | `{ clientId }`, with the client key header and `?branch=`: the client lets go of an agent branch's log (its session closed); `204`                                                                                                                                                      |
+| `POST /api/agent-tokens`                         | `{ name, documents }`: a new agent token, `201 { token, id, name, documents, createdAt, revokedAt }`; the token is shown only here                                                                                                                                                      |
+| `GET /api/agent-tokens`                          | `{ tokens }`: every agent token's record, revoked ones included, never a token                                                                                                                                                                                                          |
+| `DELETE /api/agent-tokens/:tokenId`              | Revokes it: `204`, or 404. Its open WebSockets are terminated, its writer leases end, and the start versions it made that no branch starts from are deleted                                                                                                                             |
+| `POST /api/shares?name=&expires=`                | A `.mfkview` as `application/vnd.manufakture.view+zip`; `expires` is days or `never`. `201 { id, name, size, createdAt, expiresAt }`; 409 at the count limit                                                                                                                            |
+| `GET /api/shares`                                | `{ shares, limits }`: the active shares, newest first                                                                                                                                                                                                                                   |
+| `GET /api/shares/:id`                            | The bundle, **no token**, CORS for `MANUFAKTURE_VIEWER_ORIGINS` only; 404 for unknown, revoked and expired ids alike                                                                                                                                                                    |
+| `DELETE /api/shares/:id`                         | Revokes: `204`, or 404                                                                                                                                                                                                                                                                  |
 
 The snapshot, hello, entries (both) and socket routes take `?branch=<id>` for a branch's own log;
 without it they mean `main`. Anything but a branch id is `400`, an unknown branch `404` (a
@@ -242,6 +263,111 @@ have), `version-exists`/`branch-exists` (409), and `too-many-versions`/`too-many
 the limits above. A resend of a stored record is answered `200` with it, so a client that lost
 the answer can send it again.
 
+### Agent tokens
+
+T8.4b, ADR 0016 decision 12 (`src/tokens.ts`). Product decision 0001 gives an instance one bearer
+token; an AI agent's MCP server gets a second kind instead, issued and revoked by the owner with
+the instance's token, scoped to documents.
+
+- **Form and storage.** `agent.<id>.<secret>`: the id is 128 random bits, the secret 256, both
+  base64url, so the token fits a WebSocket subprotocol. The `agent_tokens` table keeps the id, the
+  SHA-256 of the secret (a secret this long needs no slow hash), the name, the documents (1 to
+  100 ids of documents the server has), the creation time and the revocation time. The secret is
+  compared in constant time, with a hash compared for an unknown id too. At most 100 tokens are
+  active.
+- **Revoking** sets the revocation time: the token is refused (401) from then on, its open
+  WebSockets are terminated at once (no close handshake, so the peer sees 1006, and a message
+  already received is dropped), and a request it made that was let in before the revocation
+  (its body still arriving, say) is refused 401 by the service when it is handled. The record
+  stays, since branches name the token that made them.
+- **What it reaches.** Routes are the owner's unless marked for agents (`config.agent` in
+  `app.ts`, checked in `onRequest`, before any handler): an agent token gets 403 `owner-only` on
+  every other route (creating documents, reading blobs, tokens, share links). The marked routes
+  under `/documents/:id` answer 403 `out-of-scope` for a document the token does not name;
+  `GET /documents` lists only those; `PUT /blobs` stores a bundle's images. Every handler reads
+  the principal `onRequest` recorded, and fails closed (500) when there is none.
+- **What it may write** (`SyncService.writeCheck`, from the stored branch record, never from what
+  the request says): an agent branch, by its stored provenance, that this token made (the
+  `created_by` column), not `approved` or `rejected`. Never `main`: a hello, a submit, a merge
+  (any write of main is one) or a review change on main is 403 `main-refused`. A hello is checked
+  when it claims the client, and every submit again, over HTTP and over the WebSocket, so a branch
+  the reviewer closes while the agent is connected refuses its next submit. An agent token's
+  submit lands only on an `open` branch (409 `branch-not-open` on one `submitted` or with
+  `changes-requested`): the session moves it back to `open` first (below, "Review states"), so
+  the state on the server always shows that work landed after a submit. So with a review bundle
+  and a new version on its branch (the same 409), so the evidence a reviewer is looking at never
+  changes under them; the session stores its bundle before it submits. A hello is still fine
+  there (the session's keep-alive).
+- **Versions.** An agent token never adds a version to `main` (403 `main-refused`): the version
+  of main an agent branch starts from is either one the server has (the session uses a version of
+  main's head when there is one) or the branch's `startVersion`, stored with the branch in one
+  transaction and recorded as the start of that branch (`versions.start_of`; `''` once it
+  outlives that branch, so a branch made later under the same id never inherits it). Deleting a
+  branch deletes the version it started from when that is a start version no other branch starts
+  from now, and either an agent token made it (whichever branch it was stored with) or the owner
+  made both it and the deleted branch, so an agent's start version goes with the last branch that
+  uses it. Deleting an agent's branch never deletes a version the owner made: an owner's start
+  version that outlives its branch stays until the owner deletes the last branch of the owner's
+  that starts from it, or deletes it on its own once nothing starts from it. An agent token never starts a branch from a version
+  another token made (403 `not-own-version`), so it cannot keep that token's start version alive.
+  Revoking a token deletes the start versions it made that no branch starts from, and the owner
+  can delete any agent-made version or start version no branch starts from
+  (`DELETE /documents/:id/versions/:vid`), so nothing an agent made can fill
+  `MANUFAKTURE_MAX_VERSIONS_PER_DOCUMENT` for good. Every version records the agent token that made it
+  (`versions.created_by`, listed as `createdBy`; null and left out for the owner's); no client may
+  send `createdBy` (400). Versions on an agent branch the token made are allowed.
+- **Making branches.** An agent token makes only agent branches (403 `agent-provenance`
+  otherwise), in state `open` with no comment (400 for anything else). `commentFrom` names the
+  agent branch an update from Main replaces: the server copies that branch's comment, only from
+  the same session and client and only from a branch this token made, so the comment never comes
+  from the agent. A resend must say the same, origin included: the same id as a person's branch,
+  or another token's, is a conflict, so no request turns an agent branch into a person's or the
+  reverse.
+- **Review states.** On a branch it made, an agent token may only submit (`open` to `submitted`),
+  reopen (`submitted` or `changes-requested` to `open`, as a write does), and put back the state
+  it reopened from while no entry has landed since (a write that failed: the `reopened_from` and
+  `reopened_head` columns). Never `approved` or `rejected`, never `changes-requested` otherwise,
+  and never a comment: 403 `review-refused` or `comment-refused`. `expected` makes any change a
+  compare-and-set (409 `review-changed`). The owner may make any change and set or remove the
+  comment.
+- **One writer per agent branch.** A client that says hello on an agent branch holds its log for
+  `MANUFAKTURE_WRITER_LEASE_MS` after its last hello or submit; another client's hello or submit
+  gets 409 `branch-busy` (the owner's too: there is no way around a live lease). A session renews
+  it with a hello every 30 seconds while it is open (`packages/session`, `keepAliveMs`), so keep
+  the lease well above that. `POST /documents/:id/release` lets it go at once (a session closed),
+  only for the client holding it, proven by its key; approving or rejecting the branch, and
+  revoking the token, end it too. Leases are kept in memory: a restart frees them.
+- **Quotas per token** (`MANUFAKTURE_MAX_AGENT_*`), so that an agent cannot fill a document or
+  the server: agent branches under way per document (open, submitted or with changes requested;
+  403 `branch-quota`), versions it made per document, start versions included (403
+  `version-quota`), bytes of blobs it was the first to store (403 `blob-quota`), and bytes of
+  review bundles it stored, every document's together (403 `bundle-quota`). They come on
+  top of the document's own limits, which the owner shares. The owner can always make room:
+  `DELETE /documents/:id/branches/:b?withVersions=true` deletes an agent branch with the versions
+  agent tokens made on it, as long as none of them is the owner's or starts another branch (409
+  `branch-has-versions` otherwise; 403 for an agent token).
+- **Review bundles** are bounded three times: the bundle route's own body limit
+  (`MANUFAKTURE_MAX_BUNDLE_BYTES`, the session's largest bundle plus its envelope), the stored
+  record's size against it again (413), and every bundle of the document together
+  (`MANUFAKTURE_MAX_BUNDLE_BYTES_PER_DOCUMENT`, 507 `bundle-storage-full`; a bundle replacing one
+  of the same revision does not count twice), and every bundle of the instance together
+  (`MANUFAKTURE_MAX_BUNDLE_TOTAL_BYTES`, 507 `bundle-storage-full`), besides an agent token's own
+  quota (above). `GET .../bundle/meta` answers the newest bundle's
+  revision and size, so the app downloads a bundle only when it is newer than the one it has.
+
+`test/agents.test.ts` covers all of it: issuing, listing and revoking (only the owner; the hash
+stored, never the secret), reads in and out of scope, the owner-only routes, every write of main
+(hello, submit, a merge, review, delete) over HTTP and the WebSocket, branch creation and
+provenance (strict, never forged, never switched), writes to a person's branch, another token's
+branch and other documents, every review move allowed and refused, approved and rejected
+branches, a branch closed while connected, the writer lease and its release, the comment carried
+over, deletion, bundles, and the schema upgrade with a damaged stored provenance. Its last block
+covers the start version and `createdBy`, the quotas per token, the owner's deletion with
+versions, the bundle caps and `meta`, and the leases ended by a review decision or a revoke. The
+block after it covers a start version going with the last branch that uses it, the refusal of
+another token's version, the sweep on revoke, the owner's deletion of a version and its refusals,
+the bundle quotas per token and per instance, and writes refused on a branch that is not open.
+
 ## Storage and backup
 
 One SQLite file (`MANUFAKTURE_DB`) with write-ahead logging and `synchronous = FULL`, so an
@@ -249,8 +375,12 @@ answered submit survives a crash or a power cut, and a process killed mid-submit
 database as it was before the submit (the torn-write test kills one). Tables: `documents`,
 `branches` (head and high-water mark of `main` and every other branch), `entries`, `snapshots`,
 `clients` (key hash, floor, latest accepted), `outcomes` (the de-duplication table), `versions`,
-`branch_records` and `blobs`. `meta.schema` versions the layout (2 since T7.1e; a version 1 database
-gets the two new tables when it is opened); a newer database is refused.
+`branch_records` (with an agent branch's provenance, the token that made it and the reopen marker),
+`review_bundles`, `agent_tokens` and `blobs` (`versions` and `blobs` record the agent token that
+made a row, `created_by`, and a start version the branch it starts, `start_of`). `meta.schema` versions the layout (3 since T8.4b; an
+older database gets the new tables and columns when it is opened, its branches reading as a
+person's); a newer database is refused. A stored provenance that does not check makes its branch
+unreadable (left out of the list, 404), never a person's branch.
 
 Back up with SQLite's online backup, which is safe while the server runs:
 
@@ -287,14 +417,24 @@ as a server fault (T7.1d), so restore the newest backup there is.
   routes are ready for the format change that moves `data` out by hash.
 - Every version stores a full snapshot of its document (and every branch one more, its revision
   0), unless a snapshot of that revision is there already, so storage grows by one document per
-  version beside the log and the checkpoints. Versions are never deleted; the per-document limits
+  version beside the log and the checkpoints. Versions are never deleted, except a start
+  version with the last branch that starts from it (above) or when its agent token is revoked,
+  the versions agents made on an agent branch the owner deletes with `withVersions`, and an
+  agent-made version or start version the owner deletes on its own; the per-document limits
   (`MANUFAKTURE_MAX_VERSIONS_PER_DOCUMENT`, `MANUFAKTURE_MAX_BRANCHES_PER_DOCUMENT`) bound it.
-- Versions and branches are authorised by the token alone, like everything else: whoever holds it
-  can read every document's versions, which is what pin resolution across documents needs.
-  Per-document authorisation belongs with accounts (T7.1h, skipped in M7).
-- One token for everything. Accounts, per-document roles and a hosted service are deferred
+- Versions and branches are authorised by the instance's token alone, like everything else: whoever
+  holds it can read every document's versions, which is what pin resolution across documents needs.
+  Per-document authorisation belongs with accounts (T7.1h, skipped in M7); agent tokens (above)
+  are the one exception, scoped to documents.
+- One token for the owner. Accounts, per-document roles and a hosted service are deferred
   (product decision 0001); the store's tables are keyed by document and branch, and the client
   claim does not depend on the token, so accounts can be added in front of them.
+- An agent token has quotas of its own (above), and shares the document's limits with its owner
+  besides: the versions and branches it makes count against `MANUFAKTURE_MAX_VERSIONS_PER_DOCUMENT`
+  and `MANUFAKTURE_MAX_BRANCHES_PER_DOCUMENT`, and the images it stores against
+  `MANUFAKTURE_MAX_BLOB_TOTAL_BYTES`. Several tokens together can still reach a document's limits;
+  the owner deletes agent branches (with their versions) to make room, and revokes a token to stop
+  it.
 
 ## Tests
 

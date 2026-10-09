@@ -59,6 +59,7 @@ import {
 import { replayOnto } from './rebase';
 import { schemaIndex, schemaOf } from './schema';
 import { batchProblem, resolveSymbols } from './symbols';
+import { RemoteRefusal } from './sync';
 
 /** What a session needs from its host (`SessionManager` provides it). */
 export interface SessionHost {
@@ -665,7 +666,13 @@ export class Session {
 
   /** Tell the host's log about `error`; return what the agent may read of it. */
   #public(error: unknown, context: string): string {
-    if (error instanceof Refused || error instanceof KernelTimeout) return error.message;
+    // A sync server's refusal is fixed text with its code (sync.ts): the agent reads it as is.
+    if (
+      error instanceof Refused ||
+      error instanceof KernelTimeout ||
+      error instanceof RemoteRefusal
+    )
+      return error.message;
     if (error instanceof BranchDeleted) return 'The branch is gone.';
     if (error instanceof RevisionConflict) return 'The branch was saved elsewhere meanwhile.';
     this.#logError(context, error);
@@ -1039,6 +1046,11 @@ export class Session {
       }
       const base = await lib.readVersion(id, this.#base.id);
       if (!base.ok) return sessionError('storage', base.message);
+      // Main's revisions are counted where it is kept (a sync server's working copy counts its
+      // own), so a base whose document is Main's head is unchanged too.
+      if (serialize(base.value.document) === serialize(main.value.document)) {
+        return done(unchanged());
+      }
       const log = await lib.readLog(id, old.id);
       if (!log.ok) return sessionError('storage', log.message);
       const replayed = replayOnto(base.value.document, main.value.document, log.value);

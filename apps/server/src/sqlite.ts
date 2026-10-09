@@ -1,10 +1,19 @@
 import Database from 'better-sqlite3';
 import type { CounterTable, ManufaktureDocument } from '@manufakture/core';
-import type { Outcome, PushedEntry, ServerBranch, ServerVersion } from '@manufakture/sync';
+import {
+  ProvenanceSchema,
+  type Outcome,
+  type Provenance,
+  type PushedEntry,
+  type ServerBranch,
+  type ServerVersion,
+} from '@manufakture/sync';
 import type {
+  BranchMeta,
   ClientRecord,
   DocumentInfo,
   LoadedBranch,
+  StoredBundle,
   StoredSnapshot,
   SubmitWrite,
   SyncStore,
@@ -13,9 +22,20 @@ import { MAIN_BRANCH } from './store';
 
 /**
  * The schema version this code writes; `meta.schema`. A newer database is refused. 2 (T7.1e)
- * adds `versions` and `branch_records`; a version 1 database gets them on open.
+ * adds `versions` and `branch_records`; a version 1 database gets them on open. 3 (T8.4b) adds
+ * agent branches (`provenance`, `created_by` and the reopen marker on `branch_records`), review
+ * bundles (`review_bundles`, with their size and the agent token that stored one), agent tokens
+ * (`agent_tokens`, tokens.ts), and who made a version or stored a blob (`created_by` on
+ * `versions` and `blobs`, and `start_of` on a start version); an older database gets them on open.
+ *
+ * `start_of` marks a start version (one stored with a branch by `createBranch`): it names that
+ * branch while the branch is there, and is `''` once the version outlives it (`GONE_BRANCH`), so a
+ * branch made later under a reused id never inherits it. Who may delete one is `deleteBranch`'s.
  */
-export const STORE_SCHEMA_VERSION = 2;
+export const STORE_SCHEMA_VERSION = 3;
+
+/** `start_of` of a start version whose branch is gone: no branch id (`RECORD_ID`) is empty. */
+const GONE_BRANCH = '';
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta (
@@ -80,6 +100,8 @@ CREATE TABLE IF NOT EXISTS versions (
   name TEXT NOT NULL,
   description TEXT NOT NULL,
   created_at TEXT NOT NULL,
+  created_by TEXT,
+  start_of TEXT,
   PRIMARY KEY (document_id, id),
   FOREIGN KEY (document_id, branch) REFERENCES branches(document_id, branch)
 ) STRICT;
@@ -89,15 +111,30 @@ CREATE TABLE IF NOT EXISTS branch_records (
   name TEXT NOT NULL,
   from_version TEXT NOT NULL,
   created_at TEXT NOT NULL,
+  provenance TEXT,
+  created_by TEXT,
+  reopened_from TEXT,
+  reopened_head INTEGER,
   PRIMARY KEY (document_id, branch),
   FOREIGN KEY (document_id, branch) REFERENCES branches(document_id, branch),
   FOREIGN KEY (document_id, from_version) REFERENCES versions(document_id, id)
+) STRICT;
+CREATE TABLE IF NOT EXISTS review_bundles (
+  document_id TEXT NOT NULL,
+  branch TEXT NOT NULL,
+  revision INTEGER NOT NULL,
+  record TEXT NOT NULL,
+  bytes INTEGER NOT NULL,
+  created_by TEXT,
+  PRIMARY KEY (document_id, branch, revision),
+  FOREIGN KEY (document_id, branch) REFERENCES branches(document_id, branch)
 ) STRICT;
 CREATE TABLE IF NOT EXISTS blobs (
   sha256 TEXT PRIMARY KEY,
   size INTEGER NOT NULL,
   data BLOB NOT NULL,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  created_by TEXT
 ) STRICT;
 `;
 
@@ -113,6 +150,81 @@ interface OutcomeRow {
   rev: number | null;
   error: string | null;
 }
+
+interface BranchRow {
+  id: string;
+  name: string;
+  fromVersion: string;
+  createdAt: string;
+  provenance: string | null;
+  createdBy: string | null;
+  reopenedFrom: string | null;
+  reopenedHead: number | null;
+}
+
+/** Columns T8.4b adds to existing tables, for a database made before it. */
+const ADDED_COLUMNS: readonly [table: string, column: string, type: string][] = [
+  ['branch_records', 'provenance', 'TEXT'],
+  ['branch_records', 'created_by', 'TEXT'],
+  ['branch_records', 'reopened_from', 'TEXT'],
+  ['branch_records', 'reopened_head', 'INTEGER'],
+  ['versions', 'created_by', 'TEXT'],
+  ['versions', 'start_of', 'TEXT'],
+  ['blobs', 'created_by', 'TEXT'],
+];
+
+interface VersionRow {
+  id: string;
+  name: string;
+  description: string;
+  branch: string;
+  rev: number;
+  createdAt: string;
+  createdBy: string | null;
+}
+
+/** A stored version row as a record: `createdBy` only when an agent token made it. */
+function versionOf(r: VersionRow): ServerVersion {
+  const { createdBy, ...rest } = r;
+  return createdBy === null ? rest : { ...rest, createdBy };
+}
+
+const VERSION_SELECT = `SELECT id, name, description, branch, rev, created_at AS createdAt,
+  created_by AS createdBy FROM versions`;
+
+/**
+ * A stored branch row as a record. A provenance that does not check makes the row unreadable
+ * (undefined), never a person's branch.
+ */
+function branchOf(r: BranchRow): BranchMeta | undefined {
+  const record: ServerBranch = {
+    id: r.id,
+    name: r.name,
+    fromVersion: r.fromVersion,
+    createdAt: r.createdAt,
+  };
+  if (r.provenance !== null) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(r.provenance);
+    } catch {
+      return undefined;
+    }
+    const p = ProvenanceSchema.safeParse(parsed);
+    if (!p.success) return undefined;
+    record.provenance = p.data;
+  }
+  return {
+    record,
+    createdBy: r.createdBy,
+    reopenedFrom: r.reopenedFrom,
+    reopenedHead: r.reopenedHead,
+  };
+}
+
+const BRANCH_SELECT = `SELECT branch AS id, name, from_version AS fromVersion, created_at AS createdAt,
+  provenance, created_by AS createdBy, reopened_from AS reopenedFrom,
+  reopened_head AS reopenedHead FROM branch_records`;
 
 interface ClientRow {
   client_id: string;
@@ -208,8 +320,12 @@ export class SqliteStore implements SyncStore {
         'UPDATE branches SET head = ?, high_water = ? WHERE document_id = ? AND branch = ? AND head = ?',
       ),
       putBlob: db.prepare(
-        'INSERT OR IGNORE INTO blobs (sha256, size, data, created_at) VALUES (?, ?, ?, ?)',
+        `INSERT OR IGNORE INTO blobs (sha256, size, data, created_at, created_by)
+         VALUES (?, ?, ?, ?, ?)`,
       ),
+      agentBlobBytes: db
+        .prepare('SELECT coalesce(sum(size), 0) FROM blobs WHERE created_by = ?')
+        .pluck(),
       getBlob: db.prepare('SELECT data FROM blobs WHERE sha256 = ?').pluck(),
       hasBlob: db.prepare('SELECT 1 FROM blobs WHERE sha256 = ?').pluck(),
       blobBytes: db.prepare('SELECT coalesce(sum(size), 0) FROM blobs').pluck(),
@@ -218,31 +334,106 @@ export class SqliteStore implements SyncStore {
         `INSERT OR IGNORE INTO snapshots (document_id, branch, rev, document, high_water)
          VALUES (?, ?, ?, ?, ?)`,
       ),
-      versions: db.prepare(
-        `SELECT id, name, description, branch, rev, created_at AS createdAt FROM versions
-         WHERE document_id = ? ORDER BY rowid`,
-      ),
-      version: db.prepare(
-        `SELECT id, name, description, branch, rev, created_at AS createdAt FROM versions
-         WHERE document_id = ? AND id = ?`,
-      ),
+      versions: db.prepare(`${VERSION_SELECT} WHERE document_id = ? ORDER BY rowid`),
+      version: db.prepare(`${VERSION_SELECT} WHERE document_id = ? AND id = ?`),
       versionCount: db.prepare('SELECT count(*) FROM versions WHERE document_id = ?').pluck(),
+      agentVersionCount: db
+        .prepare('SELECT count(*) FROM versions WHERE document_id = ? AND created_by = ?')
+        .pluck(),
       insertVersion: db.prepare(
-        `INSERT INTO versions (document_id, id, branch, rev, name, description, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO versions
+           (document_id, id, branch, rev, name, description, created_at, created_by, start_of)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ),
-      branchRecords: db.prepare(
-        `SELECT branch AS id, name, from_version AS fromVersion, created_at AS createdAt
-         FROM branch_records WHERE document_id = ? ORDER BY rowid`,
-      ),
-      branchRecord: db.prepare(
-        `SELECT branch AS id, name, from_version AS fromVersion, created_at AS createdAt
-         FROM branch_records WHERE document_id = ? AND branch = ?`,
-      ),
+      openAgentBranchCount: db
+        .prepare(
+          `SELECT count(*) FROM branch_records WHERE document_id = ? AND created_by = ?
+           AND json_extract(provenance, '$.review') NOT IN ('approved', 'rejected')`,
+        )
+        .pluck(),
+      branchRecords: db.prepare(`${BRANCH_SELECT} WHERE document_id = ? ORDER BY rowid`),
+      branchRecord: db.prepare(`${BRANCH_SELECT} WHERE document_id = ? AND branch = ?`),
       branchCount: db.prepare('SELECT count(*) FROM branch_records WHERE document_id = ?').pluck(),
       insertBranchRecord: db.prepare(
-        `INSERT INTO branch_records (document_id, branch, name, from_version, created_at)
-         VALUES (?, ?, ?, ?, ?)`,
+        `INSERT INTO branch_records
+           (document_id, branch, name, from_version, created_at, provenance, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      ),
+      updateReview: db.prepare(
+        `UPDATE branch_records SET provenance = ?, reopened_from = ?, reopened_head = ?
+         WHERE document_id = ? AND branch = ? AND json_extract(provenance, '$.review') = ?`,
+      ),
+      branchVersionCount: db
+        .prepare('SELECT count(*) FROM versions WHERE document_id = ? AND branch = ?')
+        .pluck(),
+      putBundle: db.prepare(
+        `INSERT OR REPLACE INTO review_bundles
+           (document_id, branch, revision, record, bytes, created_by)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      ),
+      pruneBundles: db.prepare(
+        `DELETE FROM review_bundles WHERE document_id = ? AND branch = ? AND revision NOT IN (
+           SELECT revision FROM review_bundles WHERE document_id = ? AND branch = ?
+           ORDER BY revision DESC LIMIT ?)`,
+      ),
+      latestBundle: db.prepare(
+        `SELECT revision, record FROM review_bundles WHERE document_id = ? AND branch = ?
+         ORDER BY revision DESC LIMIT 1`,
+      ),
+      bundleMeta: db.prepare(
+        `SELECT revision, bytes FROM review_bundles
+         WHERE document_id = ? AND branch = ? ORDER BY revision DESC LIMIT 1`,
+      ),
+      bundleBytes: db
+        .prepare(
+          `SELECT coalesce(sum(bytes), 0) FROM review_bundles
+           WHERE document_id = ? AND NOT (branch IS ? AND revision IS ?)`,
+        )
+        .pluck(),
+      agentBundleBytes: db
+        .prepare(
+          `SELECT coalesce(sum(bytes), 0) FROM review_bundles WHERE created_by = ?
+           AND NOT (document_id IS ? AND branch IS ? AND revision IS ?)`,
+        )
+        .pluck(),
+      totalBundleBytes: db
+        .prepare(
+          `SELECT coalesce(sum(bytes), 0) FROM review_bundles
+           WHERE NOT (document_id IS ? AND branch IS ? AND revision IS ?)`,
+        )
+        .pluck(),
+      // An agent-made version, or a start version of the owner's, that no branch starts from
+      // (versions name a revision; only a branch record refers to a version).
+      deleteUnreferencedVersion: db.prepare(
+        `DELETE FROM versions WHERE document_id = ? AND id = ?
+         AND (created_by IS NOT NULL OR start_of IS NOT NULL)
+         AND NOT EXISTS (SELECT 1 FROM branch_records r
+           WHERE r.document_id = versions.document_id AND r.from_version = versions.id)`,
+      ),
+      versionReferenced: db
+        .prepare('SELECT count(*) FROM branch_records WHERE document_id = ? AND from_version = ?')
+        .pluck(),
+      versionOrigin: db.prepare(
+        `SELECT created_by AS createdBy, start_of AS startOf FROM versions
+         WHERE document_id = ? AND id = ?`,
+      ),
+      // The start version a deleted branch started from, when nothing starts from it now and the
+      // delete may take it: an agent token made it, or the owner did and the branch was the
+      // owner's (only the owner deletes the owner's branches). Never the owner's through an
+      // agent's branch.
+      deleteStartVersion: db.prepare(
+        `DELETE FROM versions WHERE document_id = ? AND id = ? AND start_of IS NOT NULL
+         AND (created_by IS NOT NULL OR ? IS NULL)
+         AND NOT EXISTS (SELECT 1 FROM branch_records r
+           WHERE r.document_id = versions.document_id AND r.from_version = versions.id)`,
+      ),
+      strandStartVersions: db.prepare(
+        `UPDATE versions SET start_of = '${GONE_BRANCH}' WHERE document_id = ? AND start_of = ?`,
+      ),
+      sweepStartVersions: db.prepare(
+        `DELETE FROM versions WHERE created_by = ? AND start_of IS NOT NULL
+         AND NOT EXISTS (SELECT 1 FROM branch_records r
+           WHERE r.document_id = versions.document_id AND r.from_version = versions.id)`,
       ),
     };
     this.commitTx = this.db.transaction((write: SubmitWrite) => this.writeSubmit(write));
@@ -258,7 +449,15 @@ export class SqliteStore implements SyncStore {
       return;
     }
     if (Number(row) < STORE_SCHEMA_VERSION) {
-      // The tables a newer schema adds were created above (`IF NOT EXISTS`); nothing else changed.
+      // The tables a newer schema adds were created above (`IF NOT EXISTS`); the columns T8.4b
+      // adds to older tables are added here (absent: a person's branch, a version or blob of the
+      // owner's).
+      for (const [table, name, type] of ADDED_COLUMNS) {
+        const have = (
+          this.db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]
+        ).some((c) => c.name === name);
+        if (!have) this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`);
+      }
       this.db
         .prepare("UPDATE meta SET value = ? WHERE key = 'schema'")
         .run(String(STORE_SCHEMA_VERSION));
@@ -461,48 +660,247 @@ export class SqliteStore implements SyncStore {
   }
 
   listVersions(documentId: string): ServerVersion[] {
-    return this.stmt.versions.all(documentId) as ServerVersion[];
+    return (this.stmt.versions.all(documentId) as VersionRow[]).map(versionOf);
   }
 
   version(documentId: string, versionId: string): ServerVersion | undefined {
-    return this.stmt.version.get(documentId, versionId) as ServerVersion | undefined;
+    const r = this.stmt.version.get(documentId, versionId) as VersionRow | undefined;
+    return r === undefined ? undefined : versionOf(r);
+  }
+
+  agentVersionCount(documentId: string, tokenId: string): number {
+    return this.stmt.agentVersionCount.get(documentId, tokenId) as number;
+  }
+
+  openAgentBranchCount(documentId: string, tokenId: string): number {
+    return this.stmt.openAgentBranchCount.get(documentId, tokenId) as number;
   }
 
   versionCount(documentId: string): number {
     return this.stmt.versionCount.get(documentId) as number;
   }
 
-  insertVersion(documentId: string, v: ServerVersion, snapshot: StoredSnapshot): boolean {
+  insertVersion(
+    documentId: string,
+    v: ServerVersion,
+    snapshot: StoredSnapshot,
+    createdBy: string | null = null,
+  ): boolean {
+    return this.db
+      .transaction(() => this.#insertVersion(documentId, v, snapshot, createdBy, null))
+      .immediate();
+  }
+
+  #insertVersion(
+    documentId: string,
+    v: ServerVersion,
+    snapshot: StoredSnapshot,
+    createdBy: string | null,
+    startOf: string | null,
+  ): boolean {
+    if (this.stmt.version.get(documentId, v.id) !== undefined) return false;
+    this.stmt.insertVersion.run(
+      documentId,
+      v.id,
+      v.branch,
+      v.rev,
+      v.name,
+      v.description,
+      v.createdAt,
+      createdBy,
+      startOf,
+    );
+    this.stmt.insertSnapshotIfAbsent.run(
+      documentId,
+      v.branch,
+      snapshot.rev,
+      JSON.stringify(snapshot.document),
+      JSON.stringify(snapshot.highWater),
+    );
+    return true;
+  }
+
+  listBranches(documentId: string): ServerBranch[] {
+    return (this.stmt.branchRecords.all(documentId) as BranchRow[]).flatMap((r) => {
+      const b = branchOf(r);
+      return b === undefined ? [] : [b.record];
+    });
+  }
+
+  branchRecord(documentId: string, branch: string): ServerBranch | undefined {
+    return this.branchMeta(documentId, branch)?.record;
+  }
+
+  branchMeta(documentId: string, branch: string): BranchMeta | undefined {
+    const r = this.stmt.branchRecord.get(documentId, branch) as BranchRow | undefined;
+    return r === undefined ? undefined : branchOf(r);
+  }
+
+  updateReview(
+    documentId: string,
+    branch: string,
+    from: string,
+    provenance: Provenance,
+    reopened: { from: string; head: number } | null,
+  ): boolean {
+    return (
+      this.stmt.updateReview.run(
+        JSON.stringify(provenance),
+        reopened?.from ?? null,
+        reopened?.head ?? null,
+        documentId,
+        branch,
+        from,
+      ).changes === 1
+    );
+  }
+
+  branchVersionCount(documentId: string, branch: string): number {
+    return this.stmt.branchVersionCount.get(documentId, branch) as number;
+  }
+
+  deleteBranch(
+    documentId: string,
+    branch: string,
+    review?: string,
+    options: { withAgentVersions?: boolean } = {},
+  ): 'deleted' | 'gone' | 'changed' | 'has-versions' {
+    if (branch === MAIN_BRANCH) return 'gone';
     return this.db
       .transaction(() => {
-        if (this.stmt.version.get(documentId, v.id) !== undefined) return false;
-        this.stmt.insertVersion.run(
+        const d = this.db;
+        const meta = this.branchMeta(documentId, branch);
+        if (meta === undefined) return 'gone' as const;
+        if (review !== undefined && meta.record.provenance?.review !== review) {
+          return 'changed' as const;
+        }
+        const named = d
+          .prepare(
+            `SELECT v.id, v.created_by AS createdBy,
+               (SELECT count(*) FROM branch_records r
+                 WHERE r.document_id = v.document_id AND r.from_version = v.id) AS starts
+             FROM versions v WHERE v.document_id = ? AND v.branch = ?`,
+          )
+          .all(documentId, branch) as { id: string; createdBy: string | null; starts: number }[];
+        if (named.length > 0) {
+          const removable =
+            options.withAgentVersions === true &&
+            named.every((v) => v.createdBy !== null && v.starts === 0);
+          if (!removable) return 'has-versions' as const;
+          d.prepare('DELETE FROM versions WHERE document_id = ? AND branch = ?').run(
+            documentId,
+            branch,
+          );
+        }
+        for (const table of ['outcomes', 'clients', 'entries', 'snapshots', 'review_bundles']) {
+          d.prepare(`DELETE FROM ${table} WHERE document_id = ? AND branch = ?`).run(
+            documentId,
+            branch,
+          );
+        }
+        d.prepare('DELETE FROM branch_records WHERE document_id = ? AND branch = ?').run(
           documentId,
-          v.id,
-          v.branch,
-          v.rev,
-          v.name,
-          v.description,
-          v.createdAt,
+          branch,
         );
-        this.stmt.insertSnapshotIfAbsent.run(
+        d.prepare('DELETE FROM branches WHERE document_id = ? AND branch = ?').run(
           documentId,
-          v.branch,
-          snapshot.rev,
-          JSON.stringify(snapshot.document),
-          JSON.stringify(snapshot.highWater),
+          branch,
         );
-        return true;
+        // The version it started from goes with it when it is a start version that no other
+        // branch starts from now, and this delete may take it: an agent token's (whichever branch
+        // it was stored with), or the owner's when this branch was the owner's too. An agent's
+        // delete never takes a version the owner made. Otherwise an agent-made version of main
+        // could outlive every branch and every token.
+        this.stmt.deleteStartVersion.run(documentId, meta.record.fromVersion, meta.createdBy);
+        // A start version stored with this branch that outlives it no longer names it, so a
+        // branch made later under this id inherits nothing.
+        this.stmt.strandStartVersions.run(documentId, branch);
+        return 'deleted' as const;
       })
       .immediate();
   }
 
-  listBranches(documentId: string): ServerBranch[] {
-    return this.stmt.branchRecords.all(documentId) as ServerBranch[];
+  putBundle(
+    documentId: string,
+    branch: string,
+    revision: number,
+    record: string,
+    keep: number,
+    createdBy: string | null = null,
+  ): void {
+    this.db
+      .transaction(() => {
+        this.stmt.putBundle.run(
+          documentId,
+          branch,
+          revision,
+          record,
+          Buffer.byteLength(record),
+          createdBy,
+        );
+        this.stmt.pruneBundles.run(documentId, branch, documentId, branch, keep);
+      })
+      .immediate();
   }
 
-  branchRecord(documentId: string, branch: string): ServerBranch | undefined {
-    return this.stmt.branchRecord.get(documentId, branch) as ServerBranch | undefined;
+  latestBundle(documentId: string, branch: string): StoredBundle | undefined {
+    return this.stmt.latestBundle.get(documentId, branch) as StoredBundle | undefined;
+  }
+
+  bundleMeta(documentId: string, branch: string): { revision: number; bytes: number } | undefined {
+    return this.stmt.bundleMeta.get(documentId, branch) as
+      { revision: number; bytes: number } | undefined;
+  }
+
+  bundleBytes(documentId: string, except?: { branch: string; revision: number }): number {
+    return this.stmt.bundleBytes.get(
+      documentId,
+      except?.branch ?? null,
+      except?.revision ?? null,
+    ) as number;
+  }
+
+  agentBundleBytes(
+    tokenId: string,
+    except?: { documentId: string; branch: string; revision: number },
+  ): number {
+    return this.stmt.agentBundleBytes.get(
+      tokenId,
+      except?.documentId ?? null,
+      except?.branch ?? null,
+      except?.revision ?? null,
+    ) as number;
+  }
+
+  totalBundleBytes(except?: { documentId: string; branch: string; revision: number }): number {
+    return this.stmt.totalBundleBytes.get(
+      except?.documentId ?? null,
+      except?.branch ?? null,
+      except?.revision ?? null,
+    ) as number;
+  }
+
+  deleteAgentVersion(
+    documentId: string,
+    versionId: string,
+  ): 'deleted' | 'gone' | 'owner-made' | 'referenced' {
+    return this.db
+      .transaction(() => {
+        const v = this.stmt.versionOrigin.get(documentId, versionId) as
+          { createdBy: string | null; startOf: string | null } | undefined;
+        if (v === undefined) return 'gone' as const;
+        if (v.createdBy === null && v.startOf === null) return 'owner-made' as const;
+        if ((this.stmt.versionReferenced.get(documentId, versionId) as number) > 0) {
+          return 'referenced' as const;
+        }
+        this.stmt.deleteUnreferencedVersion.run(documentId, versionId);
+        return 'deleted' as const;
+      })
+      .immediate();
+  }
+
+  sweepStartVersions(tokenId: string): number {
+    return this.stmt.sweepStartVersions.run(tokenId).changes;
   }
 
   branchCount(documentId: string): number {
@@ -514,10 +912,20 @@ export class SqliteStore implements SyncStore {
     record: ServerBranch,
     document: ManufaktureDocument,
     highWater: CounterTable,
+    createdBy: string | null = null,
+    startVersion?: { version: ServerVersion; snapshot: StoredSnapshot },
   ): boolean {
     return this.db
       .transaction(() => {
         if (this.stmt.hasBranch.get(documentId, record.id) !== undefined) return false;
+        if (startVersion !== undefined) {
+          const v = startVersion.version;
+          const stored = this.stmt.version.get(documentId, v.id);
+          // Stored already (a resend) or not, it is the version the branch starts from.
+          if (stored === undefined) {
+            this.#insertVersion(documentId, v, startVersion.snapshot, createdBy, record.id);
+          }
+        }
         const hw = JSON.stringify(highWater);
         this.stmt.insertBranch.run(documentId, record.id, hw);
         this.stmt.insertSnapshot.run(documentId, record.id, 0, JSON.stringify(document), hw);
@@ -527,15 +935,27 @@ export class SqliteStore implements SyncStore {
           record.name,
           record.fromVersion,
           record.createdAt,
+          record.provenance === undefined ? null : JSON.stringify(record.provenance),
+          createdBy,
         );
         return true;
       })
       .immediate();
   }
 
-  putBlob(sha256: string, bytes: Buffer): boolean {
-    const r = this.stmt.putBlob.run(sha256, bytes.length, bytes, new Date().toISOString());
+  putBlob(sha256: string, bytes: Buffer, createdBy: string | null = null): boolean {
+    const r = this.stmt.putBlob.run(
+      sha256,
+      bytes.length,
+      bytes,
+      new Date().toISOString(),
+      createdBy,
+    );
     return r.changes === 1;
+  }
+
+  agentBlobBytes(tokenId: string): number {
+    return this.stmt.agentBlobBytes.get(tokenId) as number;
   }
 
   getBlob(sha256: string): Buffer | undefined {

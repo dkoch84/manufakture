@@ -162,6 +162,31 @@ name, fromVersion, createdAt }`: a branch log starting at revision 0 from a vers
 has no record), the request bodies `CreateVersionSchema` and `CreateBranchSchema`, and `sameRecord`,
 which tells a resend from a conflicting record under the same id.
 
+Agent branches (T8.4b, ADR 0016 decisions 9 and 12): a branch record may carry `provenance`
+(`ProvenanceSchema`: `{ origin: 'agent', sessionId, clientName, review, comment? }`), checked as
+strictly as the library's `parseProvenance` (a storable session id; a client name of 1 to 200
+characters, not padded, with no control or format characters or lone surrogates; one of
+`REVIEW_STATES`; a comment that is `isReviewComment`). `CreateBranchSchema` takes `commentFrom`,
+the branch whose comment the server copies (an update from Main), and `startVersion`, the version
+of main an agent branch starts from when the server has none of main's head, stored with the
+branch; `ReviewChangeSchema` is a review change (`review`, `expected`, `comment`);
+`PutBundleSchema` a review bundle in its envelope, at most `MAX_REVIEW_BUNDLE_BYTES`.
+`sameBranch` tells a resend of a branch from a conflict: the review state may have moved, the
+origin (agent or person, session and client) may not. A version the server lists may carry
+`createdBy`, the id of the agent token that made it (`AGENT_TOKEN_ID`); only the server sets it,
+and `sameRecord` leaves it out.
+
+## The server's HTTP routes
+
+`remote.ts`: `ServerApi`, a client of the sync server's routes for Node and the browser
+(`fetch`, the bearer token and nothing else; no cookies, no referrer). It checks every answer with
+the schemas here and core's `parseDocument`, and turns a refusal into `ServerApiError` with the
+status and the server's code. The headless session over sync (`packages/session`'s
+`SyncedLibrary`) and the app's reviewer side of agent branches (`apps/web/src/sync/agents.ts`) use
+it. `AGENT_TOKEN` is the form of an agent token (`agent.<id>.<secret>`). `bundleMeta` reads a
+review bundle's revision and size before `getBundle` downloads it; `deleteBranch` takes
+`withVersions` (the owner's, for an agent branch).
+
 ## Protocol
 
 `PROTOCOL_VERSION` (core) versions these shapes. Client to server: `hello { protocol, format,

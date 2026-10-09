@@ -1,5 +1,5 @@
 import { MAX_IMPORT_BYTES } from '@manufakture/core';
-import { MAX_ENTRY_BYTES, MAX_MESSAGE_BYTES } from '@manufakture/sync';
+import { MAX_ENTRY_BYTES, MAX_MESSAGE_BYTES, MAX_REVIEW_BUNDLE_BYTES } from '@manufakture/sync';
 
 /**
  * Every limit the server enforces, with its default. Each is configurable (see `config.ts` and the
@@ -88,6 +88,32 @@ export interface Limits {
    * reverse proxy's own idle timeout, so the server never closes a connection the proxy reuses.
    */
   readonly keepAliveTimeoutMs: number;
+  /**
+   * One writer per agent branch (T8.4b): milliseconds after its last hello or submit for which a
+   * client holds an agent branch's log, refusing every other client's hello and submit
+   * (`branch-busy`). A session that ended without a word frees its branch after this long.
+   */
+  readonly writerLeaseMs: number;
+  /**
+   * The largest review bundle request, in bytes (T8.4b): the session's largest bundle
+   * (`MAX_REVIEW_BUNDLE_BYTES`) plus its envelope. The bundle route's own body limit.
+   */
+  readonly maxBundleBytes: number;
+  /** All review bundles of one document together, in bytes (every branch's kept bundles). */
+  readonly maxBundleBytesPerDocument: number;
+  /** All review bundles of the instance together, in bytes (every document's). */
+  readonly maxBundleTotalBytes: number;
+  /**
+   * The most agent branches one agent token may have in one document that are not closed (not
+   * approved or rejected). The owner deletes closed ones, or any agent branch, to make room.
+   */
+  readonly maxAgentBranchesPerToken: number;
+  /** The most versions one agent token may have made in one document (start versions included). */
+  readonly maxAgentVersionsPerToken: number;
+  /** The most blob bytes one agent token may have stored (blobs it was the first to store). */
+  readonly maxAgentBlobBytes: number;
+  /** The most review bundle bytes one agent token may have stored, every document's together. */
+  readonly maxAgentBundleBytes: number;
 }
 
 export const DEFAULT_LIMITS: Limits = {
@@ -114,6 +140,14 @@ export const DEFAULT_LIMITS: Limits = {
   requestTimeoutMs: 120_000,
   connectionTimeoutMs: 300_000,
   keepAliveTimeoutMs: 72_000,
+  writerLeaseMs: 120_000,
+  maxBundleBytes: MAX_REVIEW_BUNDLE_BYTES + 64 * 1024,
+  maxBundleBytesPerDocument: 512 * 1024 * 1024,
+  maxBundleTotalBytes: 4 * 1024 * 1024 * 1024,
+  maxAgentBranchesPerToken: 20,
+  maxAgentVersionsPerToken: 200,
+  maxAgentBlobBytes: 1024 * 1024 * 1024,
+  maxAgentBundleBytes: 256 * 1024 * 1024,
 };
 
 /**

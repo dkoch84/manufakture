@@ -382,11 +382,13 @@ falls back to the spare list (an older branch list) or to none. A new review sta
 needs every release that may open the library to know it first, or a format change.
 
 - `createBranch(id, fromVersion, name, { provenance })` makes an agent branch; provenance that
-  does not check is refused before anything is written. `adoptBranch` (sync) keeps none yet.
+  does not check is refused before anything is written. `adoptBranch` (sync) keeps the
+  server's (T8.4b), parsed the same way.
 - `setBranchReview(id, branch, review)` changes the review state, as a new branch list committed
   like a rename. Main and a person's branch have none. The library does not check who asks: its
   callers (the review UI, T8.3b; the session server, T8.4b) decide who may, and an agent must
-  never reach it for its own branch. `adoptBranch` does not carry provenance yet (T8.4b).
+  never reach it for its own branch. Over sync the server decides who may (apps/server README,
+  "Agent tokens"), and the app follows the server's state with it.
   With `{ expected }` (a state or a list) it is a compare-and-set: refused, with
   `reviewChanged`, when the state at the moment of the change is not one of them.
   With `{ comment }` it also stores the reviewer's comment in the provenance (T8.3b's **Request
@@ -574,7 +576,10 @@ queue would hold changes the server never gets. So both are committed by one hea
   from the newer one. Switching sync off and on starts over from the server's copy.
 - The record may carry `uploads` (T7.1e): versions and branches made here that wait for the
   server, each version with the server revision it names once known (`rev`) or the queue entry
-  whose landing tells it (`after`). Saved with the state, so a reload does not lose them.
+  whose landing tells it (`after`). Saved with the state, so a reload does not lose them. Its
+  `reviews` (T8.4b) are the agent branches' review states and comments as the server last had
+  them (`AgentReviewState`), so that after a reload a reviewer's decision not sent yet is still
+  told from a change made on the server.
 - `dropSync(id)` commits a head naming none, then deletes the files.
 
 Crash rules are those of the lists: a sync file above the head's is what a save that died left,
@@ -589,13 +594,20 @@ and torn, and checks the reopened document and state are the old pair or the new
 T7.1e (`apps/web/src/sync/records.ts`). A version the server has and this browser does not is kept with
 `adoptVersion(id, remote, document)`: its document goes to `remote-<version id>.json` in the main
 directory (storage form, files as blobs), and its record to the version list with `revision: 0`
-and `serverRev` (the revision of its branch's server log), committed like any version. Revision 0
+and `serverRev` (the revision of its branch's server log), committed like any version, and
+`madeByAgent` when an agent token made it on the server (T8.4b; History marks it). Revision 0
 names no revision here; `readVersion` reads the remote file instead and checks it against
 `snapshotSha256` as usual. Such a version can be viewed, restored, pinned and branched from;
-merging a branch made from one is refused with a message (the history before it is not here). An
+a branch made from one of main merges into main (T8.4b: an agent's branch reviewed in another
+browser): the history before the version is not here, so its document is the base and the
+branch's own log is replayed onto main's head (`fork` is main at revision 0); into any other
+branch, or for a version of another branch, the merge is refused with a message. An
 `.mfk` export carries it, and an import makes it a revision of main and drops `serverRev`.
 `adoptBranch(id, branch)` makes a branch the server has from its version, under the server's id
-and time (a taken name gets " (2)", " (3)", ...); a branch already here is returned as it is.
+and time (a taken name gets " (2)", " (3)", ...); a branch already here is returned as it is, so
+adopting never turns a person's branch into an agent's or the reverse. An agent branch keeps its
+provenance (T8.4b): review state and comment as the server has them, checked by `parseProvenance`
+(a record that does not check is refused, never kept as a person's branch).
 
 `readVersion` asks `setRemoteVersions(source)` (the sync controller sets it) for a version that is
 not here, outside the queue and the lock; the answer must be of that document and version, and is

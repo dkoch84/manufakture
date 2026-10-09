@@ -4,7 +4,7 @@ Sync keeps one document the same in several browsers: your laptop and your works
 
 Documents still live in your browser first. Sync adds to that; it replaces nothing. You keep working offline, and what you did is sent when the connection is back.
 
-There is no hosted manufakture service: sync needs a server you run (the `apps/server` program; its README says how to run it). One server has one token and one user.
+There is no hosted manufakture service: sync needs a server you run (the `apps/server` program; its README says how to run it). One server has one user, and one token of its own; it can also issue agent tokens for AI agents (below, "Tokens").
 
 ## Setting it up
 
@@ -31,7 +31,9 @@ While a document syncs, the [versions](history.md#creating-a-version) and [branc
 - **A branch** made here from a version the server has is stored there too, and appears in the branch list of the other browsers within a few seconds, starting from that version. What you then do on the branch stays in the browser you do it in: only the main branch's changes sync. Syncing a branch's own changes is not part of this release.
 - **A derived part** that pins a version of another synced document finds it on the server when this browser does not have it, and keeps it from then on.
 
-Versions and branches made before the document started syncing in this browser stay in this browser, and so do the ones sync makes itself to keep work it could not apply (below). A branch made from a version that came from the server cannot be merged here, since this browser does not have the history before that version: merge it in the browser it was made in.
+Versions and branches made before the document started syncing in this browser stay in this browser, and so do the ones sync makes itself to keep work it could not apply (below). A branch made from a version of Main that came from the server can be merged into Main here: its own changes are replayed onto Main as it is now, as for any merge. A branch made from a version of another branch that came from the server cannot be merged here, since this browser does not have that branch's history: merge it in the browser it was made in.
+
+**Agent branches** are the exception to "only the main branch's changes sync": an AI agent working through the [MCP server](agents.md) writes its branch on the server, and while the document syncs here, that branch appears in History with each of the agent's batches, its review bundle and its review state, within a few seconds. Your **Approve**, **Request changes** (with its comment) and **Reject** go back to the server, where the agent reads them; what the server said last about each agent branch is saved with the document's sync state, so a reload neither loses a decision not sent yet nor undoes a change the agent made since. When the agent brings its branch up to date with Main, the new branch replaces the old one here too, also when that happened while this browser was closed; an agent branch you approved or rejected here stays. A version of Main the agent made on the server to start its branch from shows in History marked **made by an agent**.
 
 ## The status
 
@@ -75,6 +77,15 @@ When the same document is open in two tabs of one browser, one of them syncs it 
 
 **Cannot sync** means the sync state saved in this browser with the document is damaged. The app does not fall back to an older copy of it: that copy could resend changes under numbers the server has already given to others. Your document is still there and saves as usual; untick and tick **Sync this document** to start over from the server's copy with this browser's on top.
 
+## Tokens
+
+A server knows two kinds of token:
+
+- **Its own token** (`MANUFAKTURE_TOKEN`), the one you enter in the app: it may do everything, on every document. Keep it to yourself and your browsers.
+- **Agent tokens**, for an AI agent's MCP server ([Working with an AI agent](agents.md)). You issue one with the server's token, for the documents it may work on, and revoke it the same way; the server keeps only a hash of it. An agent token reads those documents, all of them, other agent tokens' branches, logs and review bundles included, makes agent branches of them and writes only the branches it made, and only while they are open. It never writes Main or adds a version to it, never approves, rejects, requests changes, comments or merges, never writes a branch you approved or rejected, and reaches no other document and none of the server's other routes (documents, tokens, share links): the server answers all of that with a refusal. A revoked token is refused at once, its open connections end, and the start versions it made that no branch starts from are deleted. Each agent token has limits of its own (branches under way, versions, image bytes, review bundle bytes), and so does the server as a whole (all review bundles together). You can always delete an agent branch together with the versions agents made on it, and any version an agent made that no branch starts from (`DELETE /api/documents/<id>/versions/<version id>`, with the server's own token; [What one token may use](agents.md#what-one-token-may-use)).
+
+For now, use agent tokens only with a server on the same machine as the agent, listening on localhost (the server's default); their use across a network waits for a security review.
+
 ## Privacy and safety
 
 - The server sees the documents you sync, as they are. It is your server: nobody else does.
@@ -84,6 +95,6 @@ When the same document is open in two tabs of one browser, one of them syncs it 
 
 ## Known limitations
 
-- One server, one token, one person: there are no accounts and no sharing of editing with others yet.
+- One server, one person: there are no accounts and no sharing of editing with others yet. Agent tokens are for your own agents, on localhost for now.
 - When sync renames a feature (above) while its dialog is open, the dialog opens again on the new id, and what you had typed in it but not applied is lost; when the feature is gone, the dialog closes. Selected features follow the rename; selected faces, edges and vertices of that part studio are deselected.
-- Changes made on a branch stay in the browser they were made in; only the branch itself (where it starts) is on the server. A version made on a branch stays in that browser too.
+- Changes made on a branch stay in the browser they were made in; only the branch itself (where it starts) is on the server. A version made on a branch stays in that browser too. Agent branches are the exception (above).

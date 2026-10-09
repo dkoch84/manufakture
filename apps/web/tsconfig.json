@@ -7,6 +7,7 @@
   },
   "include": ["src"],
   // The service worker has its own lib (WebWorker): src/pwa/sw/tsconfig.json. The fabrication
-  // test builds its documents from the e2e fixtures, so e2e/tsconfig.json checks it.
-  "exclude": ["src/pwa/sw", "src/fabrication.test.ts"]
+  // test builds its documents from the e2e fixtures, and the agents integration test starts the
+  // sync server from its sources (Node), so e2e/tsconfig.json checks both.
+  "exclude": ["src/pwa/sw", "src/fabrication.test.ts", "src/sync/agents.integration.test.ts"]
 }

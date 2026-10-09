@@ -12,6 +12,13 @@ import type { WebSocket } from 'ws';
 import { TokenBucket, checkJsonShape, type Limits } from './limits';
 import { BRANCH_ID, SyncService, type Reply, type ReplyError } from './service';
 import {
+  IssueTokenSchema,
+  MAX_AGENT_TOKENS,
+  OWNER,
+  type AgentTokenStore,
+  type Principal,
+} from './tokens';
+import {
   isShareRead,
   registerShareRoutes,
   type PublicRouteConfig,
@@ -35,9 +42,21 @@ import { MAIN_BRANCH, type SyncStore } from './store';
  * - `POST`/`GET /api/shares`, `GET`/`DELETE /api/shares/:id`: share links (shares.ts), when
  *   `shares` is given. `GET /api/shares/:id` is public, with CORS for the viewer's origins only.
  *
- * Every route but `health` and the public share download needs the instance's bearer token: `Authorization: Bearer <token>`,
+ * - `POST /api/documents/:id/release`: a client lets go of an agent branch's log (T8.4b).
+ * - `POST /api/documents/:id/branches/:branch/review`, `DELETE /api/documents/:id/branches/:branch`,
+ *   `PUT`/`GET /api/documents/:id/branches/:branch/bundle`, `GET .../bundle/meta`: agent branches'
+ *   review states, their deletion and their review bundles (T8.4b).
+ * - `POST`/`GET /api/agent-tokens`, `DELETE /api/agent-tokens/:tokenId`: agent tokens (T8.4b).
+ *
+ * Every route but `health` and the public share download needs a bearer token: `Authorization: Bearer <token>`,
  * or for a WebSocket (browsers cannot set its headers) the subprotocol `bearer.<token>` next to
  * `manufakture-sync`. No cookies; CORS only for the configured origins.
+ *
+ * Two kinds of token (ADR 0016 decision 12): the instance's own, which may do everything, and
+ * agent tokens (tokens.ts), which reach only the routes marked `agent` in their config, and on
+ * those only the documents they are scoped to; every other route answers an agent token 403.
+ * What an agent token may do on a marked route is checked again in the service, from the stored
+ * branch records.
  */
 
 export const API_PREFIX = '/api';
@@ -57,9 +76,25 @@ function branchOf(query: unknown): string | null {
 
 const BAD_BRANCH = { code: 'invalid-request', message: 'branch must be a branch id' } as const;
 
+/**
+ * Which routes an agent token reaches (`config.agent`): `scoped` ones under
+ * `/documents/:id`, for the documents the token is scoped to, and `listed` and `blob-put`. A
+ * route without it is the owner's alone.
+ */
+export interface RouteAccess {
+  readonly agent?: 'scoped' | 'listed' | 'blob-put';
+}
+
+const SCOPED = { config: { agent: 'scoped' } satisfies RouteAccess };
+
+/** The largest body of an agent token request (its name and up to 100 document ids). */
+export const TOKEN_BODY_BYTES = 64 * 1024;
+
 export interface AppOptions {
   /** The instance's bearer token. */
   readonly token: string;
+  /** Agent tokens (T8.4b); without it only the instance's token is known and there are no token routes. */
+  readonly agentTokens?: AgentTokenStore;
   readonly store: SyncStore;
   readonly limits: Limits;
   /** Origins allowed by CORS and on WebSocket upgrades (exact `scheme://host[:port]`). */
@@ -92,6 +127,7 @@ interface Connection {
   readonly socket: WebSocket;
   readonly documentId: string;
   readonly branch: string;
+  readonly principal: Principal;
   clientId?: string;
 }
 
@@ -160,7 +196,9 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     keepAliveTimeout: limits.keepAliveTimeoutMs,
   });
 
-  const authorized = (req: FastifyRequest): boolean => {
+  const principals = new WeakMap<FastifyRequest, Principal>();
+  /** Who the request's token speaks for: the owner, an agent token, or nobody (null). */
+  const principalOf = (req: FastifyRequest): Principal | null => {
     let token: string | undefined;
     const h = req.headers.authorization;
     if (typeof h === 'string' && h.startsWith('Bearer ')) token = h.slice(7).trim();
@@ -169,8 +207,18 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         .find((p) => p.startsWith('bearer.'))
         ?.slice(7);
     }
-    if (token === undefined || token.length === 0 || token.length > 1024) return false;
-    return timingSafeEqual(digest(token), tokenHash);
+    if (token === undefined || token.length === 0 || token.length > 1024) return null;
+    if (timingSafeEqual(digest(token), tokenHash)) return OWNER;
+    return options.agentTokens?.verify(token) ?? null;
+  };
+  /**
+   * The principal `onRequest` found (routes behind the token only). Fails closed: a route that
+   * asks without one having been recorded is a bug, answered 500, never taken for the owner.
+   */
+  const principal = (req: FastifyRequest): Principal => {
+    const p = principals.get(req);
+    if (p === undefined) throw new Error('No principal was recorded for this request');
+    return p;
   };
 
   const sendReply = (reply: FastifyReply, r: Reply, group?: string) => {
@@ -204,6 +252,11 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     const delay = options.testReplyDelay?.({ documentId: c.documentId, clientId: c.clientId }, m);
     if (delay === undefined || delay <= 0) sendText(c, JSON.stringify(m));
     else setTimeout(() => sendText(c, JSON.stringify(m)), delay);
+  };
+
+  /** Closes every connection of a document's branch (it was deleted). */
+  const closeGroup = (group: string, code: number, reason: string) => {
+    for (const c of sockets.get(group) ?? []) c.socket.close(code, reason);
   };
 
   const sendText = (c: Connection, text: string) => {
@@ -290,11 +343,29 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         if (req.method === 'OPTIONS') return;
         if (req.routeOptions.url === `${API_PREFIX}/health`) return;
         if ((req.routeOptions.config as PublicRouteConfig | undefined)?.public === true) return;
-        if (!authorized(req)) {
+        const who = principalOf(req);
+        if (who === null) {
           return reply.code(401).header('www-authenticate', 'Bearer').send({
             code: 'unauthorized',
             message: 'A valid bearer token is required',
           });
+        }
+        principals.set(req, who);
+        if (who.kind === 'agent') {
+          // Deny by default: an agent token reaches only the routes marked for it.
+          const access = (req.routeOptions.config as RouteAccess | undefined)?.agent;
+          if (access === undefined) {
+            return reply
+              .code(403)
+              .send({ code: 'owner-only', message: 'An agent token may not do this' });
+          }
+          const id = (req.params as { id?: unknown } | undefined)?.id;
+          if (access === 'scoped' && (typeof id !== 'string' || !who.documents.has(id))) {
+            return reply.code(403).send({
+              code: 'out-of-scope',
+              message: 'This token is not scoped to that document',
+            });
+          }
         }
         const origin = req.headers.origin;
         if (req.headers.upgrade !== undefined && origin !== undefined && !origins.has(origin)) {
@@ -336,9 +407,11 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         return sendReply(reply, r as Reply);
       });
 
-      api.get('/documents', async () => ({ documents: service.listDocuments() }));
+      api.get('/documents', { config: { agent: 'listed' } satisfies RouteAccess }, async (req) => ({
+        documents: service.listDocuments(principal(req)),
+      }));
 
-      api.get<{ Params: { id: string } }>('/documents/:id/snapshot', async (req, reply) => {
+      api.get<{ Params: { id: string } }>('/documents/:id/snapshot', SCOPED, async (req, reply) => {
         const branch = branchOf(req.query);
         if (branch === null) return reply.code(400).send(BAD_BRANCH);
         const s = service.snapshot(req.params.id, branch);
@@ -347,7 +420,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         return s;
       });
 
-      api.post<{ Params: { id: string } }>('/documents/:id/hello', async (req, reply) => {
+      api.post<{ Params: { id: string } }>('/documents/:id/hello', SCOPED, async (req, reply) => {
         const branch = branchOf(req.query);
         if (branch === null) return reply.code(400).send(BAD_BRANCH);
         const key = req.headers[CLIENT_KEY_HEADER];
@@ -356,11 +429,12 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
           req.body,
           typeof key === 'string' ? key : undefined,
           branch,
+          principal(req),
         );
         return sendReply(reply, r);
       });
 
-      api.post<{ Params: { id: string } }>('/documents/:id/entries', async (req, reply) => {
+      api.post<{ Params: { id: string } }>('/documents/:id/entries', SCOPED, async (req, reply) => {
         const branch = branchOf(req.query);
         if (branch === null) return reply.code(400).send(BAD_BRANCH);
         const key = req.headers[CLIENT_KEY_HEADER];
@@ -369,12 +443,33 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
           req.body,
           { key: typeof key === 'string' ? key : undefined },
           branch,
+          principal(req),
         );
         return sendReply(reply, r, groupOf(req.params.id, branch));
       });
 
+      api.post<{ Params: { id: string } }>(
+        '/documents/:id/release',
+        { ...SCOPED, bodyLimit: RECORD_BODY_BYTES },
+        async (req, reply) => {
+          const branch = branchOf(req.query);
+          if (branch === null) return reply.code(400).send(BAD_BRANCH);
+          const key = req.headers[CLIENT_KEY_HEADER];
+          const r = service.release(
+            req.params.id,
+            req.body,
+            typeof key === 'string' ? key : undefined,
+            branch,
+            principal(req),
+          );
+          if (!r.ok) return sendReply(reply, r);
+          return reply.code(204).send();
+        },
+      );
+
       api.get<{ Params: { id: string }; Querystring: { since?: string } }>(
         '/documents/:id/entries',
+        SCOPED,
         async (req, reply) => {
           const branch = branchOf(req.query);
           if (branch === null) return reply.code(400).send(BAD_BRANCH);
@@ -399,7 +494,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         return sendReply(reply, r);
       };
 
-      api.get<{ Params: { id: string } }>('/documents/:id/versions', async (req, reply) => {
+      api.get<{ Params: { id: string } }>('/documents/:id/versions', SCOPED, async (req, reply) => {
         const r = service.listVersions(req.params.id);
         if ('versions' in r) return { versions: r.versions };
         return sendReply(reply, r);
@@ -407,13 +502,18 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
       api.post<{ Params: { id: string } }>(
         '/documents/:id/versions',
-        { bodyLimit: RECORD_BODY_BYTES },
+        { ...SCOPED, bodyLimit: RECORD_BODY_BYTES },
         async (req, reply) =>
-          recordReply(reply, service.createVersion(req.params.id, req.body), 'version'),
+          recordReply(
+            reply,
+            service.createVersion(req.params.id, req.body, principal(req)),
+            'version',
+          ),
       );
 
       api.get<{ Params: { id: string; versionId: string } }>(
         '/documents/:id/versions/:versionId',
+        SCOPED,
         async (req, reply) => {
           const r = service.readVersion(req.params.id, req.params.versionId);
           if ('version' in r) return { version: r.version, document: r.document };
@@ -421,7 +521,17 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         },
       );
 
-      api.get<{ Params: { id: string } }>('/documents/:id/branches', async (req, reply) => {
+      // The owner's alone (no `agent` access): an agent-made version no branch starts from.
+      api.delete<{ Params: { id: string; versionId: string } }>(
+        '/documents/:id/versions/:versionId',
+        async (req, reply) => {
+          const r = service.deleteVersion(req.params.id, req.params.versionId, principal(req));
+          if (!r.ok) return sendReply(reply, r);
+          return reply.code(204).send();
+        },
+      );
+
+      api.get<{ Params: { id: string } }>('/documents/:id/branches', SCOPED, async (req, reply) => {
         const r = service.listBranches(req.params.id);
         if ('branches' in r) return { branches: r.branches };
         return sendReply(reply, r);
@@ -429,21 +539,151 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
       api.post<{ Params: { id: string } }>(
         '/documents/:id/branches',
-        { bodyLimit: RECORD_BODY_BYTES },
+        { ...SCOPED, bodyLimit: RECORD_BODY_BYTES },
         async (req, reply) =>
-          recordReply(reply, service.createBranch(req.params.id, req.body), 'branch'),
+          recordReply(
+            reply,
+            service.createBranch(req.params.id, req.body, principal(req)),
+            'branch',
+          ),
       );
 
-      api.put<{ Params: { sha256: string } }>('/blobs/:sha256', async (req, reply) => {
-        if (!Buffer.isBuffer(req.body)) {
+      // Agent branches (T8.4b): review states, deletion (an update from Main), review bundles.
+      api.post<{ Params: { id: string; branch: string } }>(
+        '/documents/:id/branches/:branch/review',
+        { ...SCOPED, bodyLimit: RECORD_BODY_BYTES },
+        async (req, reply) =>
+          recordReply(
+            reply,
+            service.setReview(req.params.id, req.params.branch, req.body, principal(req)),
+            'branch',
+          ),
+      );
+
+      api.delete<{
+        Params: { id: string; branch: string };
+        Querystring: { expected?: string; withVersions?: string };
+      }>('/documents/:id/branches/:branch', SCOPED, async (req, reply) => {
+        const withVersions = req.query.withVersions;
+        if (withVersions !== undefined && withVersions !== 'true' && withVersions !== 'false') {
           return reply
-            .code(415)
-            .send({ code: 'unsupported-media-type', message: 'Send application/octet-stream' });
+            .code(400)
+            .send({ code: 'invalid-request', message: 'withVersions is true or false' });
         }
-        const r = service.putBlob(req.params.sha256, req.body);
+        const r = service.deleteBranch(
+          req.params.id,
+          req.params.branch,
+          req.query.expected,
+          principal(req),
+          withVersions === 'true',
+        );
         if (!r.ok) return sendReply(reply, r);
-        return reply.code(r.status).send({ sha256: req.params.sha256, size: req.body.length });
+        closeGroup(groupOf(req.params.id, req.params.branch), 4404, 'branch deleted');
+        return reply.code(204).send();
       });
+
+      // Its own body limit: a review bundle may be larger than other requests, and no larger than
+      // the session's largest (`maxBundleBytes`).
+      api.put<{ Params: { id: string; branch: string } }>(
+        '/documents/:id/branches/:branch/bundle',
+        { ...SCOPED, bodyLimit: limits.maxBundleBytes },
+        async (req, reply) => {
+          const r = service.putBundle(req.params.id, req.params.branch, req.body, principal(req));
+          if (!r.ok) return sendReply(reply, r);
+          return reply.code(201).send({ stored: true });
+        },
+      );
+
+      // The newest bundle's revision and size, so a client looks before it downloads one.
+      api.get<{ Params: { id: string; branch: string } }>(
+        '/documents/:id/branches/:branch/bundle/meta',
+        SCOPED,
+        async (req, reply) => {
+          const r = service.bundleMeta(req.params.id, req.params.branch);
+          if (!r.ok) return sendReply(reply, r);
+          return { revision: r.revision, bytes: r.bytes };
+        },
+      );
+
+      api.get<{ Params: { id: string; branch: string } }>(
+        '/documents/:id/branches/:branch/bundle',
+        SCOPED,
+        async (req, reply) => {
+          const r = service.getBundle(req.params.id, req.params.branch);
+          if (!r.ok) return sendReply(reply, r);
+          return { revision: r.revision, record: r.record };
+        },
+      );
+
+      // Agent tokens (T8.4b): the owner's alone (no `agent` access).
+      const agentTokens = options.agentTokens;
+      if (agentTokens !== undefined) {
+        api.post('/agent-tokens', { bodyLimit: TOKEN_BODY_BYTES }, async (req, reply) => {
+          const parsed = IssueTokenSchema.safeParse(req.body);
+          if (!parsed.success) {
+            return reply.code(400).send({
+              code: 'invalid-token',
+              message: 'A token has a name and 1 to 100 documents',
+            });
+          }
+          if (parsed.data.documents.some((d) => !service.hasDocument(d))) {
+            return reply.code(400).send({
+              code: 'no-document',
+              message: 'A token is scoped to documents the server has',
+            });
+          }
+          if (agentTokens.activeCount() >= MAX_AGENT_TOKENS) {
+            return reply.code(403).send({
+              code: 'too-many-tokens',
+              message: `An instance has at most ${MAX_AGENT_TOKENS} active agent tokens`,
+            });
+          }
+          const issued = agentTokens.issue(
+            parsed.data.name,
+            parsed.data.documents,
+            new Date().toISOString(),
+          );
+          return reply.code(201).send({ token: issued.token, ...issued.info });
+        });
+        api.get('/agent-tokens', async () => ({ tokens: agentTokens.list() }));
+        api.delete<{ Params: { tokenId: string } }>(
+          '/agent-tokens/:tokenId',
+          async (req, reply) => {
+            if (!agentTokens.revoke(req.params.tokenId, new Date().toISOString())) {
+              return reply.code(404).send({ code: 'not-found', message: 'No such active token' });
+            }
+            // Its open connections end now, its leases are let go of (the owner, or a new token,
+            // takes its branches at once), the start versions it made that no branch starts from
+            // go, and its next request, or one already let in, is refused (401). A socket is
+            // terminated, not closed: a close handshake would leave it reading until the peer
+            // answers, and a message already received is dropped once it is no longer open.
+            service.revoked(req.params.tokenId);
+            for (const set of sockets.values()) {
+              for (const c of set) {
+                if (c.principal.kind === 'agent' && c.principal.tokenId === req.params.tokenId) {
+                  c.socket.terminate();
+                }
+              }
+            }
+            return reply.code(204).send();
+          },
+        );
+      }
+
+      api.put<{ Params: { sha256: string } }>(
+        '/blobs/:sha256',
+        { config: { agent: 'blob-put' } satisfies RouteAccess },
+        async (req, reply) => {
+          if (!Buffer.isBuffer(req.body)) {
+            return reply
+              .code(415)
+              .send({ code: 'unsupported-media-type', message: 'Send application/octet-stream' });
+          }
+          const r = service.putBlob(req.params.sha256, req.body, principal(req));
+          if (!r.ok) return sendReply(reply, r);
+          return reply.code(r.status).send({ sha256: req.params.sha256, size: req.body.length });
+        },
+      );
 
       api.get<{ Params: { sha256: string } }>('/blobs/:sha256', async (req, reply) => {
         const bytes = service.getBlob(req.params.sha256);
@@ -457,7 +697,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
       api.get<{ Params: { id: string } }>(
         '/documents/:id/socket',
-        { websocket: true },
+        { websocket: true, ...SCOPED },
         (socket, req) => {
           const documentId = req.params.id;
           const branch = branchOf(req.query);
@@ -473,7 +713,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
           const key = protocolsOf(req)
             .find((p) => p.startsWith('client.'))
             ?.slice(7);
-          const c: Connection = { socket, documentId, branch };
+          const c: Connection = { socket, documentId, branch, principal: principal(req) };
           const rate = new TokenBucket(limits.messagesPerMinute);
           connections += 1;
           let set = sockets.get(group);
@@ -495,6 +735,12 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
               send({ type: 'error', code: 'invalid-message', message: `${e.code}: ${e.message}` });
           };
           socket.on('message', (data, isBinary) => {
+            // Nothing is read from a socket that is closing or gone (a revoked token's, say).
+            if (socket.readyState !== socket.OPEN) return;
+            if (service.revokedCheck(c.principal) !== undefined) {
+              socket.terminate();
+              return;
+            }
             if (isBinary || !rate.take(1).ok) {
               socket.close(1008, isBinary ? 'text messages only' : 'too many messages');
               return;
@@ -523,7 +769,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
                 send({ type: 'error', code: 'invalid-message', message: 'Send a hello first' });
                 return;
               }
-              const r = service.hello(documentId, message, key, branch);
+              const r = service.hello(documentId, message, key, branch, c.principal);
               if (!r.ok) {
                 sendError(r);
                 socket.close(r.status === 400 ? 1008 : 4403, r.code);
@@ -536,7 +782,13 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
             }
             let r: Reply;
             if (type === 'submit') {
-              r = service.submit(documentId, message, { boundClientId: c.clientId }, branch);
+              r = service.submit(
+                documentId,
+                message,
+                { boundClientId: c.clientId },
+                branch,
+                c.principal,
+              );
             } else if (type === 'pull') {
               const since = (message as { since?: unknown }).since;
               r =

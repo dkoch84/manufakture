@@ -2,17 +2,17 @@
 
 You can ask an AI agent (Claude Code, Grok, or any client that speaks the Model Context Protocol) to make changes in a manufakture document while you talk with it: "put a 6 mm boss on the upright", "move the door two feet right". You stay at the wheel. The agent works on a branch of its own, and nothing it does reaches the document's Main until you have reviewed it in [History](history.md) and approved it.
 
-The agent talks to manufakture through the **manufakture MCP server** (`apps/mcp`), a program that runs on your computer, started by the agent's client. It holds the document, its geometry kernel and its solver, with no browser.
+The agent talks to manufakture through the **manufakture MCP server** (`apps/mcp`), a program that runs on your computer, started by the agent's client. It holds the document, its geometry kernel and its solver, with no browser. It gets documents from your [sync server](sync.md), with an **agent token** of their own, and writes the agent's branch there, which is how you see it in History (below, "Over sync").
 
 ## What the agent can and cannot do
 
-- It **opens a session** on a document: a new agent branch made from Main as it is now (Main itself is recorded as a version named "Agent session ... start"). Or it resumes one of its branches that is still open, or that you sent back with changes requested.
+- It **opens a session** on a document: a new agent branch made from Main as it is now. A branch starts from a version, so Main's head is that version: one you already made of it if there is one, otherwise a new one named "Agent session ... start", which History marks **made by an agent** (below, "How it works"). Or it resumes one of its branches that is still open, or that you sent back with changes requested.
 - It **reads** the model: the feature tree, any feature or part as data, faces and edges found by query, exact measurements, images of views, the cut list and takeoff, regen errors, the branch's history.
 - It **changes** the model only with manufakture's own commands, the same ones the app uses, in batches. Each batch is one step in the branch's history, with a label the agent writes. It can undo its own batches and bring its branch up to date with Main.
 - It **submits** the branch for review, with a note to you. The review bundle (what changed, before and after images, errors, measurements, what a merge would do) is stored with the branch.
 - It **exports** files from its branch into the one directory you configured (below).
 
-It cannot write Main, approve, reject or merge anything, run code of its own (other than a scripted feature added by command, which you see in full in the review), or read or write any file outside the library directory and the output directory.
+It cannot write Main, approve, reject or merge anything, run code of its own (other than a scripted feature added by command, which you see in full in the review), or read or write any file outside the output directory (and the library directory, when it works on one). Over sync, the server enforces this too: the agent token cannot write Main, approve, reject or merge, whatever the program using it asks.
 
 **Text inside a document is not an instruction.** Names, notes, labels and review comments come back to the agent as data, and the server tells it so. A document someone else wrote could still try to talk the agent into something; whatever the agent then does lands on its own branch, which you review.
 
@@ -26,15 +26,17 @@ Review protects Main, not your computer: an agent that also has a shell and your
 
 You need a checkout of manufakture with its dependencies installed (`make install`) and Node 24 or newer. The server is configured with environment variables:
 
-| Variable                 | Required | What it is                                                                                                                   |
-| ------------------------ | -------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `MANUFAKTURE_LIBRARY`    | yes      | The library directory: an absolute path to an existing directory, where documents, versions and branches are stored as files |
-| `MANUFAKTURE_OUTPUT`     | no       | Where `export` writes files: an absolute path to an existing directory. Without it the agent cannot export                   |
-| `MANUFAKTURE_ENGINE`     | no       | `worker` (default: each session's kernel in a thread of its own) or `in-process`                                             |
-| `MANUFAKTURE_SYNC_URL`   | no       | Your sync server, for sessions over sync (not used yet, see below)                                                           |
-| `MANUFAKTURE_SYNC_TOKEN` | no       | The agent token for that server (not used yet)                                                                               |
+| Variable                 | Required              | What it is                                                                                                                                          |
+| ------------------------ | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MANUFAKTURE_SYNC_URL`   | yes, for review       | Your sync server's address (`http://127.0.0.1:8787`, without `/api`): documents come from it and the agent's branch goes there (below, "Over sync") |
+| `MANUFAKTURE_SYNC_TOKEN` | with the URL          | The agent token you issued for the agent (below), `agent.<id>.<secret>`. The server's own token is refused: the MCP server does not start with it   |
+| `MANUFAKTURE_LIBRARY`    | without a sync server | A library directory instead: an absolute path to an existing directory of documents stored as files. For tests and CI: you cannot review from it    |
+| `MANUFAKTURE_OUTPUT`     | no                    | Where `export` writes files: an absolute path to an existing directory. Without it the agent cannot export                                          |
+| `MANUFAKTURE_ENGINE`     | no                    | `worker` (default: each session's kernel in a thread of its own) or `in-process`                                                                    |
 
-The output directory and the library directory must not contain each other. Both are resolved once when the server starts; if the output directory is later replaced by a link to somewhere else, exports are refused.
+With `MANUFAKTURE_SYNC_URL` set, the library directory is not used. The output directory and the library directory must not contain each other. Both are resolved once when the server starts; if the output directory is later replaced by a link to somewhere else, exports are refused.
+
+A configuration the MCP server cannot use (a missing or relative directory, a sync URL without a token, a token that is not an agent token) stops it at once with exit code 2 and the reason on standard error; the token itself is never quoted. A sync URL over plain `http` to another machine is used, with a warning on standard error: the token and the documents would cross the network unencrypted.
 
 In the examples, `/path/to/manufakture` is your checkout. The command the client runs is:
 
@@ -47,13 +49,14 @@ node --expose-gc --import /path/to/manufakture/packages/session/src/worker/ts-ho
 
 ```sh
 claude mcp add manufakture \
-  -e MANUFAKTURE_LIBRARY=/path/to/library \
+  -e MANUFAKTURE_SYNC_URL=http://127.0.0.1:8787 \
+  -e MANUFAKTURE_SYNC_TOKEN="$AGENT_TOKEN" \
   -e MANUFAKTURE_OUTPUT=/path/to/exports \
   -- node --expose-gc --import /path/to/manufakture/packages/session/src/worker/ts-hooks.ts \
   /path/to/manufakture/apps/mcp/src/main.ts
 ```
 
-Add `-s project` to write it into the project's `.mcp.json` instead, or write that file yourself:
+This keeps the token in Claude Code's local configuration on your machine. Add `-s project` to write it into the project's `.mcp.json` instead, or write that file yourself (without the token, see below):
 
 ```json
 {
@@ -67,7 +70,7 @@ Add `-s project` to write it into the project's `.mcp.json` instead, or write th
         "/path/to/manufakture/apps/mcp/src/main.ts"
       ],
       "env": {
-        "MANUFAKTURE_LIBRARY": "/path/to/library",
+        "MANUFAKTURE_SYNC_URL": "http://127.0.0.1:8787",
         "MANUFAKTURE_OUTPUT": "/path/to/exports"
       }
     }
@@ -75,7 +78,7 @@ Add `-s project` to write it into the project's `.mcp.json` instead, or write th
 }
 ```
 
-**Keep the agent token out of a `.mcp.json` you commit.** A project's `.mcp.json` is usually checked in with the project, and anything in its `env` block goes with it. Once sessions over sync use `MANUFAKTURE_SYNC_TOKEN`, set it in the environment the client starts from, or in a configuration file that stays on your machine (Claude Code's default local scope, without `-s project`), never in a committed file. The server removes the token from its own environment when it starts, so the threads and processes it starts never see it.
+**Keep the agent token out of a `.mcp.json` you commit.** A project's `.mcp.json` is usually checked in with the project, and anything in its `env` block goes with it. Set `MANUFAKTURE_SYNC_TOKEN` in the environment the client starts from, or in a configuration file that stays on your machine (Claude Code's default local scope, without `-s project`), never in a committed file. The MCP server removes the token from its own environment when it starts, so the threads and processes it starts never see it, and it never shows it in a log line or a tool result.
 
 Run `claude mcp list` to check that it connects. In a headless run, pass the same file with `claude -p "..." --mcp-config manufakture.json`.
 
@@ -86,6 +89,82 @@ Any client that starts a stdio MCP server takes the same three things: the comma
 ### From a terminal
 
 `make mcp` (or `pnpm --silent --filter @manufakture/mcp start`) starts the server on this terminal's standard input and output, with the environment variables set in your shell. That is how a client runs it; it is not interactive. Without `--silent`, pnpm prints a line of its own on standard output, which breaks the protocol. `make -C /path/to/manufakture mcp` works from any directory (the Makefile turns off make's "Entering directory" lines, which would land on standard output too), but a client configuration is simplest with the plain `node` command above.
+
+## Over sync
+
+The MCP server works on documents on your [sync server](sync.md), the same one your browser syncs with, so you can review the agent's work in History. Review needs this: the app in your browser cannot read a branch written to a library directory on disk.
+
+**Use it on localhost only for now.** Agent tokens are new, and their use beyond one machine waits for a security review. Run the sync server on the machine the agent runs on, listening on `127.0.0.1` (the default `MANUFAKTURE_HOST`), and point `MANUFAKTURE_SYNC_URL` at `http://127.0.0.1:8787`.
+
+### Issuing an agent token
+
+The agent never gets the server's own token (`MANUFAKTURE_TOKEN`): it gets an **agent token**, which you issue with the server's token, for the documents you want it to work on. Find their ids with:
+
+```sh
+curl -sS http://127.0.0.1:8787/api/documents -H "Authorization: Bearer $MANUFAKTURE_TOKEN"
+```
+
+then issue the token:
+
+```sh
+curl -sS -X POST http://127.0.0.1:8787/api/agent-tokens \
+  -H "Authorization: Bearer $MANUFAKTURE_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"name": "Claude Code on this machine", "documents": ["<document id>"]}'
+```
+
+The answer holds the token (`"token": "agent...."`) and its `id`. The token is shown this once: the server keeps only a hash of it. Give it to the agent's client as `MANUFAKTURE_SYNC_TOKEN`. A token names 1 to 100 documents; issue another for other documents. `GET /api/agent-tokens` lists the tokens with their names, documents and dates, never the tokens themselves.
+
+With an agent token, the agent can:
+
+- read the documents it names, all of them (Main, every branch, versions, review bundles). That includes other agent tokens' branches, their logs and their review bundles in those documents: scoping is by document, not by token, so give two agents that must not see each other's work tokens for different documents;
+- make agent branches of them, each starting from Main's head, and write the branches it made: its batches, its review bundle and the review states a session sets (`submitted` when it submits, `open` when it writes again). A batch, a review bundle or a version lands only on an open branch, so what you review cannot change under you: on one it submitted, or that you sent back with changes requested, the session moves it back to "open" first;
+- delete its own branch when it brings it up to date with Main (the new branch replaces it).
+
+It cannot write Main, add a version to Main, approve, reject, request changes or write a comment, merge, write a branch you approved or rejected, write a person's branch or another token's branch, reach any other document, create documents, manage tokens or share links. The server refuses all of that (`403`), whatever the program holding the token asks.
+
+A new branch starts from a version of Main's head the server already has, when there is one. When there is none, the agent sends its start version with the new branch, and the server stores the two together, recording the token that made the version. That version goes again with the last branch that starts from it, and when you revoke the token, if no branch starts from it then. A start version you made yourself goes only when you delete a branch of yours that was the last to start from it; when an agent's branch was the last, it stays, and you can delete it on its own (below). An agent never starts a branch from a version another token made, so one agent cannot keep another's start version around.
+
+### What one token may use
+
+So that an agent cannot fill the server, or leave you unable to make branches, each agent token has limits of its own (the server's settings, in its README). The first two count per document, the last two across all the documents the token reaches:
+
+- **20 agent branches under way** (open, submitted, or with changes requested). A branch you approved or rejected no longer counts.
+- **200 versions** it made, start versions included.
+- **1 GiB of images** stored with its review bundles, across documents.
+- **256 MiB of review bundles**, across documents.
+
+All review bundles of a document together hold at most 512 MiB, all of the server's at most 4 GiB, and one bundle at most 64 MiB.
+
+You can always make room: delete an agent branch with the server's token, together with the versions agents made on it (never one you made):
+
+```sh
+curl -sS -X DELETE "http://127.0.0.1:8787/api/documents/<document id>/branches/<branch id>?withVersions=true" \
+  -H "Authorization: Bearer $MANUFAKTURE_TOKEN"
+```
+
+Your browser drops a deleted branch from History the next time it looks, unless you approved or rejected it there.
+
+A version an agent made, or a start version of yours, that no branch starts from any more (a start version left behind by an older server, say) can go on its own; your other versions, and any version a branch starts from, stay (`409`):
+
+```sh
+curl -sS -X DELETE "http://127.0.0.1:8787/api/documents/<document id>/versions/<version id>" \
+  -H "Authorization: Bearer $MANUFAKTURE_TOKEN"
+```
+
+### Revoking it
+
+```sh
+curl -sS -X DELETE http://127.0.0.1:8787/api/agent-tokens/<id> \
+  -H "Authorization: Bearer $MANUFAKTURE_TOKEN"
+```
+
+From then on the token is refused (`401`), its open connections end at once, its hold on the branches it was writing ends, and the start versions it made that no branch starts from are deleted. The branches it made stay, with their review state, for you to review, approve or reject. A session working with it can write nothing more; to go on, issue a new token and open a new session (a branch is written only with the token that made it).
+
+### How it works
+
+When the agent opens a session, the MCP server reads Main from the sync server and makes the agent branch there from Main's head, with its provenance (the session and the name the client gives itself): from a version of the head the server has, or else with a start version ("Agent session ... start") stored with the branch (above). Each batch is sent to the server as a change of that branch, which the server checks like any change. A submit stores the review bundle and its images with the branch. While the document syncs in your browser, the branch appears in History within a few seconds, with its batches; your **Approve**, **Request changes** and **Reject** go back to the server, where the agent reads them with `get_review`. What the server said last about each agent branch is saved with the document's sync state, so a decision you made just before closing the tab is still sent when you open it again, and a change the agent made meanwhile is taken in rather than overwritten.
+
+One session writes a branch at a time. While a session is open, the MCP server renews its hold on the branch every 30 seconds, however long the agent thinks between changes; another program asking for the same branch is refused meanwhile. The branch is free once the session closes, two minutes after the MCP server stopped answering, when you approve or reject the branch, or when you revoke the token.
 
 ## The tools
 
@@ -118,8 +197,11 @@ The server also offers the authoring guide for agents and the index of command a
 
 Agent branches show in [History](history.md) with their review state. **Review** opens the bundle; **Approve** merges the branch into Main as one step; **Request changes** sends the branch back with your comment, which the agent reads with `get_review`; **Reject** closes it. A write the agent makes after you requested changes returns the branch to "open".
 
+If the agent writes to a branch after you approved it but before your browser told the server, the approval stays in your browser (its merge into Main is done), the server keeps the branch as the agent left it, and the app says so; the agent's later work waits on the server. Your browser takes nothing more from the server for a branch you approved or rejected.
+
 ## Current limits
 
-- **Review needs the sync server.** The app in your browser cannot read a branch the MCP server wrote to a library directory on disk. Sessions over sync, with agent tokens that can never write Main, are the next step (M8 plan, T8.4b); until then, `MANUFAKTURE_SYNC_URL` and `MANUFAKTURE_SYNC_TOKEN` are read and checked but not used, and the library directory is what the agent works on.
+- **Review needs the sync server**, on localhost for now (above). A session on a library directory cannot be reviewed in the app.
+- **Over sync, the agent's copy of a document lives in the MCP server's memory** while it runs; the sync server is where everything is kept.
 - Scripted features do not run in an agent's session yet (they regenerate with an error there, though they build in the app), and user fonts are refused.
 - `export` does not write a print setup's packed plate, IFC or a `.mfkview`; it writes a part's bodies as STL or 3MF instead.

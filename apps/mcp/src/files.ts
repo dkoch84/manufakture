@@ -225,5 +225,6 @@ export async function place(temp: string, target: string): Promise<void> {
     if (!NO_LINKS.has(code(e) ?? '')) throw e;
     await copyFile(temp, target, constants.COPYFILE_EXCL);
   }
-  await rm(temp, { force: true });
+  // The file has its name: a temp that cannot be removed now is only a leftover, not a failure.
+  await rm(temp, { force: true }).catch(() => undefined);
 }

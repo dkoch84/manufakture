@@ -3,8 +3,10 @@ export {
   CLIENT_KEY_HEADER,
   RECORD_BODY_BYTES,
   SUBPROTOCOL,
+  TOKEN_BODY_BYTES,
   buildApp,
   type AppOptions,
+  type RouteAccess,
 } from './app';
 export { TOKEN, loadConfig, type Config } from './config';
 export { DEFAULT_LIMITS, checkJsonShape, type Limits } from './limits';
@@ -13,6 +15,7 @@ export {
   CLIENT_KEY,
   DOCUMENT_ID,
   SHA256,
+  BUNDLES_KEPT,
   SyncService,
   type RecordReply,
   type Reply,
@@ -30,8 +33,18 @@ export {
 } from './shares';
 export { STORE_SCHEMA_VERSION, SqliteStore, type SqliteStoreOptions } from './sqlite';
 export {
+  AgentTokenStore,
+  IssueTokenSchema,
+  MAX_AGENT_TOKENS,
+  MAX_TOKEN_DOCUMENTS,
+  OWNER,
+  type AgentTokenInfo,
+  type Principal,
+} from './tokens';
+export {
   CHECKPOINT_EVERY,
   MAIN_BRANCH,
+  type BranchMeta,
   type ClientRecord,
   type DocumentInfo,
   type LoadedBranch,

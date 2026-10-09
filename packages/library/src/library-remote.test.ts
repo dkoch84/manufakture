@@ -1,4 +1,4 @@
-import { serialize, type ManufaktureDocument } from '@manufakture/core';
+import { applyCommand, serialize, type Command, type ManufaktureDocument } from '@manufakture/core';
 import { describe, expect, it } from 'vitest';
 import {
   DocumentLibrary,
@@ -66,6 +66,21 @@ describe('versions from the sync server', () => {
     expect(value(await lib.adoptVersion('doc-1', remote({ name: 'Other' }), doc))).toEqual(kept);
   });
 
+  it('keep the mark of a version an agent made on the server, and read it back (T8.4b)', async () => {
+    const backend = newBackend();
+    const lib = library(backend);
+    const doc = partDocument();
+    await lib.save(doc, []);
+    const kept = value(await lib.adoptVersion('doc-1', remote({ madeByAgent: true }), doc));
+    expect(kept.madeByAgent).toBe(true);
+    value(await lib.adoptVersion('doc-1', remote({ id: 'server-v2', madeByAgent: false }), doc));
+    const listed = value(await library(backend).listVersions('doc-1'));
+    expect(listed.map((v) => [v.id, v.madeByAgent])).toEqual([
+      ['server-v1', true],
+      ['server-v2', undefined],
+    ]);
+  });
+
   it('refuse another document, an invalid record, and a damaged copy', async () => {
     const backend = newBackend();
     const lib = library(backend);
@@ -88,7 +103,7 @@ describe('versions from the sync server', () => {
     expect(r.ok).toBe(false);
   });
 
-  it('can be branched from; merging such a branch says where to merge it', async () => {
+  it('can be branched from; such a branch merges into main from that version (T8.4b)', async () => {
     const lib = library();
     const doc = partDocument();
     await lib.save(doc, []);
@@ -96,6 +111,47 @@ describe('versions from the sync server', () => {
     const branch = value(await lib.createBranch('doc-1', 'server-v1', 'Try'));
     const opened = value(await lib.open('doc-1', branch.id));
     expect(opened.document.name).toBe('Theirs');
+    // A command on the branch, as an agent's synced batch arrives in the reviewer's browser.
+    const command = {
+      type: 'setVariable',
+      name: 'depth',
+      expression: { source: '12', lengthUnit: 'mm', angleUnit: 'deg' },
+    } as Command;
+    const applied = applyCommand(opened.document, command);
+    if (!applied.ok) throw new Error(applied.error.message);
+    await lib.save(
+      applied.value.document,
+      [{ cause: 'execute', label: 'Depth', command, at: '2026-10-04T12:00:00.000Z' }],
+      branch.id,
+    );
+    // Main moved meanwhile (a person's edit): the branch's command is rebased onto it.
+    const mainEdit = { ...command, name: 'width' } as Command;
+    const mainNow = applyCommand(doc, mainEdit);
+    if (!mainNow.ok) throw new Error(mainNow.error.message);
+    await lib.save(mainNow.value.document, [
+      { cause: 'execute', label: 'Width', command: mainEdit, at: '2026-10-04T12:00:00.000Z' },
+    ]);
+    const plan = value(await lib.previewMerge('doc-1', branch.id, MAIN_BRANCH));
+    expect(plan.dropped).toEqual([]);
+    expect(plan.fork).toEqual({ branch: MAIN_BRANCH, revision: 0 });
+    const merged = value(await lib.mergeBranch('doc-1', branch.id, MAIN_BRANCH));
+    expect(merged.saved).not.toBeNull();
+    const main = value(await lib.open('doc-1'));
+    expect(main.document.variables.map((v) => v.name).sort()).toEqual(['depth', 'width']);
+    // Into another branch it is still refused: that history is not here.
+    const other = value(await lib.createVersion('doc-1', { name: 'Here' }));
+    const second = value(await lib.createBranch('doc-1', other.id, 'Second'));
+    const into = await lib.previewMerge('doc-1', branch.id, second.id);
+    expect(into.ok).toBe(false);
+    if (!into.ok) expect(into.message).toContain('sync server');
+  });
+
+  it('a branch made from a server version of another branch still says where to merge it', async () => {
+    const lib = library();
+    const doc = partDocument();
+    await lib.save(doc, []);
+    value(await lib.adoptVersion('doc-1', remote({ branch: 'server-b9' }), named(doc, 'Theirs')));
+    const branch = value(await lib.createBranch('doc-1', 'server-v1', 'Try'));
     const merge = await lib.previewMerge('doc-1', branch.id, MAIN_BRANCH);
     expect(merge.ok).toBe(false);
     if (!merge.ok) expect(merge.message).toContain('sync server');
@@ -167,6 +223,79 @@ describe('branches from the sync server', () => {
       (await lib.adoptBranch('doc-1', { ...record, id: 'server-b2', fromVersion: 'missing' })).ok,
     ).toBe(false);
     expect((await lib.adoptBranch('doc-1', { ...record, id: 'main' })).ok).toBe(false);
+  });
+
+  it("keep an agent branch's provenance, review state and comment (T8.4b)", async () => {
+    const lib = library();
+    const doc = partDocument();
+    await lib.save(doc, []);
+    value(await lib.adoptVersion('doc-1', remote(), named(doc, 'Theirs')));
+    const provenance = {
+      origin: 'agent' as const,
+      sessionId: 'session-1',
+      clientName: 'Claude Code',
+      review: 'changes-requested' as const,
+      comment: 'Wider, please.\nThanks',
+    };
+    const record = {
+      id: 'server-agent',
+      name: 'Agent session',
+      fromVersion: 'server-v1',
+      createdAt: '2026-10-04T11:30:00.000Z',
+      provenance,
+    };
+    expect(value(await lib.adoptBranch('doc-1', record))).toEqual(record);
+    const listed = value(await lib.listBranches('doc-1')).find((b) => b.id === 'server-agent');
+    expect(listed?.provenance).toEqual(provenance);
+    // Its review state then moves as the server's does.
+    value(await lib.setBranchReview('doc-1', 'server-agent', 'open', { comment: null }));
+    expect(
+      value(await lib.listBranches('doc-1')).find((b) => b.id === 'server-agent')?.provenance,
+    ).toEqual({ ...provenance, review: 'open', comment: undefined });
+  });
+
+  it('refuse a forged or damaged provenance, and never turn one kind of branch into the other', async () => {
+    const lib = library();
+    const doc = partDocument();
+    await lib.save(doc, []);
+    value(await lib.adoptVersion('doc-1', remote(), named(doc, 'Theirs')));
+    const base = {
+      name: 'B',
+      fromVersion: 'server-v1',
+      createdAt: '2026-10-04T11:30:00.000Z',
+    };
+    const good = { origin: 'agent', sessionId: 's1', clientName: 'Claude Code', review: 'open' };
+    for (const provenance of [
+      { ...good, origin: 'person' },
+      { ...good, review: 'merged' },
+      { ...good, clientName: 'Claude\u202e' },
+      { ...good, clientName: '' },
+      { ...good, sessionId: '../x' },
+      { ...good, comment: 'bell\u0007' },
+      { ...good, comment: '' },
+    ]) {
+      const r = await lib.adoptBranch('doc-1', {
+        ...base,
+        id: 'forged',
+        provenance: provenance as never,
+      });
+      expect(r.ok).toBe(false);
+    }
+    expect(value(await lib.listBranches('doc-1')).map((b) => b.id)).toEqual(['main']);
+    // A person's branch here stays a person's when the server's record says agent, and the
+    // reverse.
+    const person = value(await lib.adoptBranch('doc-1', { ...base, id: 'p1' }));
+    expect(person.provenance).toBeUndefined();
+    const again = value(
+      await lib.adoptBranch('doc-1', { ...base, id: 'p1', provenance: good as never }),
+    );
+    expect(again.provenance).toBeUndefined();
+    const agent = value(
+      await lib.adoptBranch('doc-1', { ...base, name: 'A', id: 'a1', provenance: good as never }),
+    );
+    expect(agent.provenance?.origin).toBe('agent');
+    const back = value(await lib.adoptBranch('doc-1', { ...base, name: 'A', id: 'a1' }));
+    expect(back.provenance).toEqual(good);
   });
 });
 

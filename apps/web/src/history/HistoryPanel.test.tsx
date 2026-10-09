@@ -336,6 +336,34 @@ describe('the History panel on a branch', () => {
     });
   });
 
+  it('says so of a version an agent made on the sync server', async () => {
+    const t = await setup();
+    const doc = partDocument('doc-1', 'Elsewhere');
+    await act(async () => {
+      const r = await t.lib.adoptVersion(
+        'doc-1',
+        {
+          id: 'agent-v',
+          name: 'Agent session start',
+          description: '',
+          createdAt: '2026-09-30T10:00:00.000Z',
+          branch: 'main',
+          serverRev: 2,
+          madeByAgent: true,
+        },
+        doc,
+      );
+      expect(r.ok).toBe(true);
+    });
+    const item = await screen.findByTestId('version-Agent session start');
+    expect(within(item).getByTestId('version-agent-made-Agent session start').textContent).toBe(
+      'made by an agent',
+    );
+    // A version a person made carries no such mark.
+    expect(screen.queryByTestId('version-agent-made-From the laptop')).toBeNull();
+    expect(screen.queryAllByTestId(/^version-agent-made-/)).toHaveLength(1);
+  });
+
   it('lists agent branches with their client, session and state, and opens their review', async () => {
     const { seeded } = await import('../review/review.test-fixture');
     const s = await seeded();

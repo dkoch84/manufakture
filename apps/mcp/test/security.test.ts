@@ -241,21 +241,72 @@ describe('roots', () => {
     await rm(nested, { recursive: true });
   });
 
+  const SECRET = 'agent.AAAAAAAAAAAAAAAAAAAAAA.BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB';
+
+  it('refuses a sync URL without a token, or with one that is not a token', async () => {
+    for (const env of [
+      { MANUFAKTURE_SYNC_URL: 'https://sync.example.com/' },
+      { MANUFAKTURE_SYNC_URL: 'https://sync.example.com/', MANUFAKTURE_SYNC_TOKEN: 'short' },
+      { MANUFAKTURE_SYNC_URL: 'ftp://sync.example.com/', MANUFAKTURE_SYNC_TOKEN: SECRET },
+    ]) {
+      expect((await loadConfig(env)).ok).toBe(false);
+    }
+    // With a sync server, no library directory is needed.
+    const r = await loadConfig({
+      MANUFAKTURE_SYNC_URL: 'https://sync.example.com/',
+      MANUFAKTURE_SYNC_TOKEN: SECRET,
+    });
+    expect(r.ok && r.config.libraryRoot).toBeNull();
+    expect(r.ok && r.warnings).toEqual([]);
+  });
+
+  it('takes only an agent token for a sync server, never the instance’s own', async () => {
+    const owner = 'owner-token-0123456789abcdefghijklmnopqrstuvwxyz';
+    for (const token of [owner, `${SECRET}x`, 'agent.short.secret']) {
+      const r = await loadConfig({
+        MANUFAKTURE_SYNC_URL: 'https://sync.example.com/',
+        MANUFAKTURE_SYNC_TOKEN: token,
+      });
+      expect(r.ok).toBe(false);
+      if (!r.ok) {
+        expect(r.problems.join(' ')).toMatch(/not an agent token/);
+        expect(r.problems.join(' ')).not.toContain(token);
+      }
+    }
+  });
+
+  it('warns about plain http to another machine, not to this one', async () => {
+    const warned = async (url: string) => {
+      const r = await loadConfig({ MANUFAKTURE_SYNC_URL: url, MANUFAKTURE_SYNC_TOKEN: SECRET });
+      if (!r.ok) throw new Error(r.problems.join('; '));
+      return r.warnings;
+    };
+    expect(await warned('http://sync.example.com:8787/')).toEqual([
+      expect.stringMatching(/plain http to another machine/),
+    ]);
+    expect(await warned('http://192.168.1.20:8787/')).toHaveLength(1);
+    for (const url of [
+      'http://127.0.0.1:8787/',
+      'http://localhost:8787/',
+      'http://[::1]:8787/',
+      'https://sync.example.com/',
+    ]) {
+      expect(await warned(url)).toEqual([]);
+    }
+  });
+
   it('takes the sync token out of the environment once it is read', async () => {
     const h = await start();
     const env: NodeJS.ProcessEnv = {
       MANUFAKTURE_LIBRARY: h.libraryRoot,
       MANUFAKTURE_SYNC_URL: 'https://sync.example.com/',
-      MANUFAKTURE_SYNC_TOKEN: 'secret-token',
+      MANUFAKTURE_SYNC_TOKEN: SECRET,
     };
     const r = await loadConfig(env);
-    expect(r.ok && r.config.sync).toEqual({
-      url: 'https://sync.example.com/',
-      token: 'secret-token',
-    });
+    expect(r.ok && r.config.sync).toEqual({ url: 'https://sync.example.com/', token: SECRET });
     expect('MANUFAKTURE_SYNC_TOKEN' in env).toBe(false);
     // Also when the configuration is refused.
-    const refused: NodeJS.ProcessEnv = { MANUFAKTURE_SYNC_TOKEN: 'secret-token' };
+    const refused: NodeJS.ProcessEnv = { MANUFAKTURE_SYNC_TOKEN: SECRET };
     expect((await loadConfig(refused)).ok).toBe(false);
     expect('MANUFAKTURE_SYNC_TOKEN' in refused).toBe(false);
   });

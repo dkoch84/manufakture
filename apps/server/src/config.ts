@@ -51,6 +51,14 @@ const LIMIT_VARS: Record<keyof Limits, string> = {
   requestTimeoutMs: 'MANUFAKTURE_REQUEST_TIMEOUT_MS',
   connectionTimeoutMs: 'MANUFAKTURE_CONNECTION_TIMEOUT_MS',
   keepAliveTimeoutMs: 'MANUFAKTURE_KEEP_ALIVE_TIMEOUT_MS',
+  writerLeaseMs: 'MANUFAKTURE_WRITER_LEASE_MS',
+  maxBundleBytes: 'MANUFAKTURE_MAX_BUNDLE_BYTES',
+  maxBundleBytesPerDocument: 'MANUFAKTURE_MAX_BUNDLE_BYTES_PER_DOCUMENT',
+  maxBundleTotalBytes: 'MANUFAKTURE_MAX_BUNDLE_TOTAL_BYTES',
+  maxAgentBranchesPerToken: 'MANUFAKTURE_MAX_AGENT_BRANCHES_PER_TOKEN',
+  maxAgentVersionsPerToken: 'MANUFAKTURE_MAX_AGENT_VERSIONS_PER_TOKEN',
+  maxAgentBlobBytes: 'MANUFAKTURE_MAX_AGENT_BLOB_BYTES',
+  maxAgentBundleBytes: 'MANUFAKTURE_MAX_AGENT_BUNDLE_BYTES',
 };
 
 const positive = z.coerce.number().int().min(1).max(Number.MAX_SAFE_INTEGER);

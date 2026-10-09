@@ -62,7 +62,7 @@ export async function harness(
     (await client.callTool({ name, arguments: args })) as CallToolResult;
   return {
     dir,
-    libraryRoot: loaded.config.libraryRoot,
+    libraryRoot: loaded.config.libraryRoot ?? libraryRoot,
     outputDir: loaded.config.outputDir ?? outputDir,
     documentId: doc.id,
     app,

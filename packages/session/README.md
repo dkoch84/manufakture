@@ -56,6 +56,7 @@ await session.close(); // the branch stays
 | `imports.ts`             | Reference import bodies (STEP through the kernel, STL as a mesh), read again on the session's kernel.                    |
 | `rebase.ts`              | Replaying the branch's commands onto Main's head, one command at a time (T7.1f's merge).                                 |
 | `bundles.ts`             | `BundleBuilder` and its context, `BundleStore`, `BackendBundleStore` (branch directory, blobs) and `MemoryBundleStore`.  |
+| `sync.ts`                | `SyncedLibrary`, `SyncBundleStore`, `RemoteRefusal`: sessions over a sync server (T8.4b).                                |
 | `limits.ts`, `errors.ts` | The limits, and the typed errors every refusal is.                                                                       |
 
 ## Sessions
@@ -192,6 +193,76 @@ its kernel.
 never reach the agent: it reads a general message with the system error code (`storage failed
 (ENOSPC).`), and the full error goes to the host's log hook (`SessionManagerOptions.log`).
 
+## Sessions over sync
+
+ADR 0016 decisions 10 and 12, M8 plan T8.4b. The reviewer sees an agent branch through the sync
+server, so a session normally works there, with an agent token (apps/server README, "Agent
+tokens"). Nothing in `Session` changes: its library is a `SyncedLibrary` (`sync.ts`), a
+`DocumentLibrary` whose files are a working copy (in memory by default) of what the server holds,
+and whose changes that matter go to the server first:
+
+```ts
+import {
+  MemoryBundleStore,
+  ServerApi,
+  SessionManager,
+  SyncBundleStore,
+  SyncedLibrary,
+} from '@manufakture/session';
+
+const api = new ServerApi({ url: 'http://127.0.0.1:8787', token: agentToken });
+const library = new SyncedLibrary(api);
+const sessions = new SessionManager({
+  library,
+  locks: library.locks,
+  bundles: new SyncBundleStore(new MemoryBundleStore(), api),
+});
+```
+
+- **Main** is the server's: `open(id, 'main')` (and `previewMerge` into main) read it from there
+  into the working copy (`pullMain`), whose main is a cache that is never sent anywhere.
+- **Open** (`branchFromRevision`, from Main's head only): when the server has a version of Main's
+  head, the branch starts from it (kept in the working copy as a version from the server) and no
+  version is added; otherwise the start version is made here and sent with the branch
+  (`startVersion`), which the server stores in one transaction with it, recording the token, and
+  deletes with it. An agent token never adds a version to Main on its own. Then this process
+  claims the branch's log (`hello`, the server's one-writer lease). An update from Main asks the
+  server to copy the reviewer's comment (`commentFrom`): it never comes from the session.
+- **Every batch** (`save` on a branch) is one sync entry of the branch's server log, with its
+  created ids, submitted before the working copy saves it. A refusal (core's, a closed branch, a
+  revoked token, another writer) throws a `RemoteRefusal`, whose fixed text with the server's code
+  the session passes to the agent; the branch and the working copy stay as they were. The working
+  copy's revision `n` is the server log's revision `n - 1`.
+- **Review states** go to the server first, as compare-and-sets (`review-changed` is the session's
+  `reviewChanged`), and the server decides what an agent token may set. `listBranches` takes the
+  server's states and comments into the working copy, so the session's check before every write
+  sees a reviewer's decision.
+- **Bundles** and their images go to the server with the branch (`SyncBundleStore`); a branch
+  resumed in another process reads its newest bundle from there.
+- **Deleting** a branch (the old one, after an update from Main) deletes it on the server, as a
+  compare-and-set on its review state there.
+- **Resume** in another process: `materialize(documentId, branch)` builds the branch in the working
+  copy from the server (its version, its record with provenance, one revision per log entry) and
+  claims it; then `SessionManager.resume` as usual. A branch another client writes is refused,
+  with `busy` set on the failure (`SyncFailure`).
+- **The lease** on every branch this process holds is renewed with a hello every `keepAliveMs`
+  (30 s, `DEFAULT_KEEP_ALIVE_MS`), so an agent that thinks for minutes between batches keeps its
+  branch. The timer runs only while a branch is held, and never keeps the process alive.
+- **Close** releases the branch lock, which lets go of the server's lease (`library.locks`), so
+  another process can resume the branch at once; one that ends without a word frees it after the
+  server's lease time.
+
+An update from Main is "unchanged" when the base version's document is Main's head, whatever the
+revision numbers of the copy that holds them.
+
+`sync.test.ts` runs sessions against a real sync server (`test/sync-server.ts`, exported as
+`@manufakture/session/test-sync-server` for apps/mcp and apps/web): the version and branch on the
+server, batches and undo as log entries, the bundle and its image, a reviewer's request and
+approval taken in, an update from Main after the owner edited it (the comment carried over, the
+old branch gone with its start version), a branch started from a version of Main's head the
+server has, a resume in another process, one writer per branch, the lease renewed while an agent
+writes nothing, a revoked token and a token for other documents.
+
 ## Main is never written
 
 Three checks in this package (ADR 0016 decision 12; the MCP server and the sync server add theirs):
@@ -199,7 +270,8 @@ a session's branch is made by `branchFromRevision` with agent provenance or, on 
 it; `resume` refuses Main by name, and a branch without agent provenance; and the one function
 that saves (`#saveTo`) refuses Main whatever its caller checked. The library calls a session
 makes on Main are reads, and versions (Main's head named "Agent session ... start" or "... update
-from Main"), which name a revision and change no document.
+from Main"), which name a revision and change no document. Over sync, such a version reaches the
+server only with its branch, attributed to the agent token (above).
 
 **No path from input to storage paths.** Document ids must be `isStorableId`, branch and session
 ids `isBranchId`/`isStorableId`, before any library or lock call; the library and `NodeBackend`
@@ -361,5 +433,5 @@ them by the import feature's id as `bodyId`; a file that does not read is listed
 - **Exact clearance between bodies.** The kernel has no minimum-distance operation between two
   shapes; `clearance` reports overlap volumes exactly and, for bodies apart, a bounding-box gap,
   which is a lower bound. Distances between faces of one body are exact (`targets`).
-- **Sessions over sync** (T8.4b): opening from a sync server, batches as sync entries, and
-  carrying provenance with `adoptBranch`.
+- **A synced branch revision holds one batch.** Over sync, every revision is one entry of the
+  branch's server log; the session never saves several at once.
