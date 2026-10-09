@@ -2914,7 +2914,9 @@ export class DocumentLibrary {
    * Set the review state of agent branch `branch` (one with provenance), committed by the main
    * head like any branch change. A person's branch, and main, have none to set. The library does
    * not check who asks: its callers (the review UI, T8.3b, and the session server, T8.4b) decide
-   * who may call it, and an agent session must never reach it for its own branch. A branch synced
+   * who may call it. An agent session reaches it only for its own branch, and only to submit from
+   * open, reopen on a write, or restore after a failed save, always as a compare-and-set (ADR 0016
+   * decision 9); approving, rejecting and requesting changes are a person's. A branch synced
    * from the server keeps its provenance (`adoptBranch`), and its review state follows the
    * server's through this call (apps/web `src/sync/agents.ts`).
    *
