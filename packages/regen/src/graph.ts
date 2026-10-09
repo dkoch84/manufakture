@@ -11,6 +11,10 @@
 //   on the last change of the body owning the face. This is the `body` edge, one per body;
 // - the variables its expressions read, directly or through other variables.
 //
+// A variable that measures the part (`distance(...)`, #1202) is no node here: regen measures it
+// on the part built without the features reading it (`featuresReading`), so the graph needs no
+// edge from a variable to the features whose faces it measures.
+//
 // A feature whose own inputs changed is a seed; the dirty subgraph is the seeds plus everything
 // that depends on them, through any edge. A variable edit therefore dirties only the features
 // that read it (and what depends on those), not everything after the first of them.
@@ -22,7 +26,9 @@ import {
   featureExpressions,
   featureIdsInName,
   featureReferences,
+  measuredVariables,
   referenceNames,
+  splitMeasuredFace,
   type Feature,
   type ManufaktureDocument,
   type Part,
@@ -212,6 +218,48 @@ export function variableClosure(
     out.add(name);
     const v = byName.get(name);
     if (v) stack.push(...expressionVariableNames(v.expression));
+  }
+  return out;
+}
+
+/**
+ * The variables that read any of `names`, directly or through other variables, `names` included:
+ * those whose value is not known while `names` are not.
+ */
+export function variableReaders(
+  variables: readonly Variable[],
+  names: Iterable<string>,
+): Set<string> {
+  const out = new Set(names);
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const v of variables) {
+      if (out.has(v.name)) continue;
+      if (expressionVariableNames(v.expression).some((d) => out.has(d))) {
+        out.add(v.name);
+        grew = true;
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * The active features of `graph` that read any of the variables `names` (directly or through
+ * other variables), and every feature depending on one of those, through any edge (named, body).
+ * Building the part without them leaves exactly the features that do not depend on `names`.
+ */
+export function featuresReading(graph: DependencyGraph, names: ReadonlySet<string>): Set<string> {
+  const out = new Set<string>();
+  if (names.size === 0) return out;
+  const visit = (id: string) => {
+    if (out.has(id)) return;
+    out.add(id);
+    for (const d of graph.dependents.get(id) ?? []) visit(d);
+  };
+  for (const f of graph.active) {
+    if ((graph.variables.get(f.id) ?? []).some((v) => names.has(v))) visit(f.id);
   }
   return out;
 }
@@ -563,6 +611,25 @@ export function dirtyFeatures(
       graph.variables.get(f.id)!.some((v) => vars.has(v));
     if (seed) visit(f.id);
   });
+  // A measured variable (`distance(...)`, #1202) follows the geometry it measures: whenever
+  // something in the part may change, so may the features reading a variable measured on it.
+  if (dirty.size > 0) {
+    const here = measuredVariables(next.variables)
+      .filter((m) =>
+        m.calls.some((c) =>
+          c.faces.some((q) => {
+            const face = splitMeasuredFace(q.name);
+            if (face.partId !== undefined && face.partId !== next.part.id) return false;
+            return featureIdsInName(face.face).some((id) => graph.byId.has(id));
+          }),
+        ),
+      )
+      .map((m) => m.name);
+    const readers = variableReaders(next.variables, here);
+    for (const f of graph.active) {
+      if (graph.variables.get(f.id)!.some((v) => readers.has(v))) visit(f.id);
+    }
+  }
   return graph.active.filter((f) => dirty.has(f.id)).map((f) => f.id);
 }
 

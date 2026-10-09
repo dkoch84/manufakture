@@ -1,6 +1,8 @@
 import {
+  findMeasures,
   findReferences,
   isValidVariableName,
+  type MeasureReference,
   type Result as UnitsResult,
   type VariableReference,
 } from '@manufakture/units';
@@ -86,11 +88,38 @@ export function expressionVariableNames(expression: StoredExpression): string[] 
   return r.ok ? [...new Set(r.value.map((v) => v.name))] : [];
 }
 
+const measureCache = new Map<string, UnitsResult<MeasureReference[]>>();
+
+/**
+ * The `distance(...)` and `angle(...)` calls an expression makes, with their quoted face names
+ * (parse only; cached by source text).
+ */
+export function expressionMeasures(source: string): UnitsResult<MeasureReference[]> {
+  let r = measureCache.get(source);
+  if (!r) {
+    if (measureCache.size > 10_000) measureCache.clear();
+    r = findMeasures(source);
+    measureCache.set(source, r);
+  }
+  return r;
+}
+
+/**
+ * Whether an expression measures the model: a `distance(...)` or `angle(...)` with a quoted face
+ * name. Such an expression is evaluated by regen, from the part's geometry, and is allowed only
+ * in variables (and configuration rows, which give variables their values).
+ */
+export function measuresModel(expression: StoredExpression): boolean {
+  const r = expressionMeasures(expression.source);
+  return r.ok && r.value.some((m) => m.faces.length > 0);
+}
+
 function checkExpression(
   expression: StoredExpression,
   path: readonly (string | number)[],
   variables: ReadonlySet<string>,
   out: CoreError[],
+  options: { measures?: boolean } = {},
 ): void {
   const r = expressionReferences(expression.source);
   if (!r.ok) {
@@ -99,6 +128,18 @@ function checkExpression(
       message: `Invalid expression "${expression.source}": ${r.error.message}`,
       path: [...path, 'source'],
       unitsError: r.error,
+    });
+    return;
+  }
+  // Only quoted face names make a measuring call: before them, `distance(#a, #b)` parsed (and
+  // failed at regen as an unknown function), so documents holding one still load.
+  if (options.measures !== true && measuresModel(expression)) {
+    const m = expressionMeasures(expression.source);
+    const call = m.ok ? m.value.find((x) => x.faces.length > 0) : undefined;
+    out.push({
+      code: 'expression',
+      message: `${call?.fn ?? 'distance'}() measures the model, so it may only be used in a variable: define a variable with it and use the variable in "${expression.source}"`,
+      path: [...path, 'source'],
     });
     return;
   }
@@ -177,7 +218,7 @@ function checkVariables(variables: readonly Variable[], out: CoreError[]): Set<s
   });
   const before = out.length;
   variables.forEach((v, i) =>
-    checkExpression(v.expression, ['variables', i, 'expression'], names, out),
+    checkExpression(v.expression, ['variables', i, 'expression'], names, out, { measures: true }),
   );
   if (out.length === before) {
     const order = variableOrder(variables);
@@ -785,7 +826,8 @@ function checkConfigurations(
           path: vpath,
         });
       } else if (typeof value === 'object') {
-        checkExpression(value, vpath, variables, out);
+        // A variable's value in this row: it may measure the model as the variable may.
+        checkExpression(value, vpath, variables, out, { measures: p.kind === 'variable' });
       }
     }
     if (out.length === before) {

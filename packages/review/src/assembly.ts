@@ -72,7 +72,7 @@ const fmt = (v: number, unit: 'mm' | 'deg'): string => `${v.toFixed(2)} ${unit}`
  */
 export function assemblyScene(
   document: ManufaktureDocument,
-  result: Pick<RegenResult, 'names' | 'parts' | 'sources' | 'assemblies'>,
+  result: Pick<RegenResult, 'names' | 'parts' | 'sources' | 'assemblies' | 'measurements'>,
   at: AssemblyAt,
   bodyMeshes?: ReadonlyMap<string, CachedBodyMesh>,
 ): AssemblySceneResult {
@@ -89,7 +89,11 @@ export function assemblyScene(
       message: `The assembly's last solve is ${solved.outcome}${solved.message ? `: ${solved.message}` : ''}. Fix its mates (get_errors) before holding one at a value.`,
     };
   }
-  const input = resultSolverInput(assembly, solved, evaluateVariables(document.variables));
+  const input = resultSolverInput(
+    assembly,
+    solved,
+    evaluateVariables(document.variables, result.measurements),
+  );
   const kinds = new Map(input.mates.map((m) => [m.id, m.kind]));
   // Degrees in, radians to the solver.
   const values: Record<string, number> = {};

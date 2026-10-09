@@ -7,7 +7,12 @@
 // custom sheet size, a view's scale or a section's offset; and CAM: a tool's sizes and presets, a
 // setup's stock and heights, and an operation's fields.
 
-import { isValidVariableName } from '@manufakture/units';
+import {
+  isValidVariableName,
+  type MeasureFunction,
+  type MeasureLookup,
+  type MeasureReference,
+} from '@manufakture/units';
 import { variableParameters, type Command, type SimpleCommand } from './commands';
 import {
   camExpressions,
@@ -27,6 +32,7 @@ import {
 import { fail, ok, type CoreResult } from './result';
 import type {
   CamOperation,
+  Variable,
   CamSetup,
   CamTool,
   ConfigRow,
@@ -40,7 +46,10 @@ import type {
   SheetSize,
   StoredExpression,
 } from './schema';
-import { expressionReferences } from './validate';
+import { splitMeasuredFace, type MeasuredFace } from './names';
+import { expressionMeasures, expressionReferences } from './validate';
+
+export { splitMeasuredFace, type MeasuredFace };
 
 /** One place that reads a variable directly: another variable, or a feature's field. */
 export type VariableUse =
@@ -543,4 +552,56 @@ export function inlineVariable(
     { type: 'deleteVariable', name },
   ];
   return ok({ type: 'batch', commands });
+}
+
+// Measured variables (task #1202) -------------------------------------------------------------
+
+/**
+ * The variables whose own expression measures the model, with their calls (those with two
+ * quoted face names), in table order. A variable reading one of them is not listed: it is
+ * measured through it.
+ */
+export function measuredVariables(
+  variables: readonly Variable[],
+): { name: string; calls: MeasureReference[] }[] {
+  const out: { name: string; calls: MeasureReference[] }[] = [];
+  for (const v of variables) {
+    const r = expressionMeasures(v.expression.source);
+    if (!r.ok) continue;
+    const calls = r.value.filter((m) => m.faces.length === 2);
+    if (calls.length > 0) out.push({ name: v.name, calls });
+  }
+  return out;
+}
+
+/**
+ * One measurement regen made for a `distance(...)` or `angle(...)` call: the value (millimetres
+ * or radians) or why there is none. Plain data, so a regen result carries it to every client
+ * that evaluates variables (`measurementLookup`).
+ */
+export interface Measurement {
+  fn: MeasureFunction;
+  /** As written between the quotes. */
+  faces: [string, string];
+  /** The part the faces were measured on; null when it could not be told. */
+  partId: string | null;
+  /** Millimetres for `distance`, radians for `angle`; null when not measured (see `error`). */
+  value: number | null;
+  error?: string;
+}
+
+/** The key a measurement is looked up by: the function and its two face names as written. */
+export function measurementKey(fn: MeasureFunction, faces: readonly [string, string]): string {
+  return JSON.stringify([fn, faces[0], faces[1]]);
+}
+
+/** A units `measure` lookup answering from a regen's measurements (none: nothing answers). */
+export function measurementLookup(list: readonly Measurement[] | undefined): MeasureLookup {
+  const byKey = new Map((list ?? []).map((m) => [measurementKey(m.fn, m.faces), m]));
+  return (request) => {
+    const m = byKey.get(measurementKey(request.fn, request.faces));
+    if (m === undefined) return undefined;
+    if (m.value === null) return { ok: false, message: m.error ?? `${m.fn}() was not measured` };
+    return { ok: true, value: m.value };
+  };
 }

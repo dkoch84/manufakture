@@ -45,6 +45,7 @@ class ParseFailure {
 }
 
 function describeToken(token: Token): string {
+  if (token.kind === 'string') return `"${token.text}"`;
   return token.kind === 'variable' ? `#${token.text}` : token.text;
 }
 
@@ -57,6 +58,7 @@ function describeToken(token: Token): string {
  *   unary      := ('-' | '+') unary | power
  *   power      := primary ('^' unary)?            -- right-associative, `2^-1` allowed
  *   primary    := measure | '(' expression ')' unit? | variable | name '(' args ')' | name
+ *               | string                          -- a quoted face name, only as an argument
  *
  * `measure` is a number literal with its optional unit, fraction, mixed number, feet-inches
  * tail and per-time suffix (`mm/min`, `/min`); a bare `min` not followed by '(' is also a
@@ -309,6 +311,9 @@ class Parser {
         return this.parseMeasure();
       case '(':
         return this.parseParenthesised();
+      case 'string':
+        this.pos++;
+        return { type: 'string', value: token.text, start: token.start, end: token.end };
       case 'variable':
         this.pos++;
         return {

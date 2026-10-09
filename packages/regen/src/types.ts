@@ -11,7 +11,14 @@ import type {
   Outcome,
   Residual,
 } from '@manufakture/assembly';
-import type { BodyPropsFields, DomainData, FeatureKind, Pose, Vec3 } from '@manufakture/core';
+import type {
+  BodyPropsFields,
+  DomainData,
+  FeatureKind,
+  Measurement,
+  Pose,
+  Vec3,
+} from '@manufakture/core';
 import type { MeshData, ShapeId, ThreadReport, Topology, Via } from '@manufakture/kernel';
 import type { OutlineShape, RegionDiagnosticCode, SketchPlacement } from '@manufakture/sketch';
 import type { UnitsError } from '@manufakture/units';
@@ -370,8 +377,27 @@ export interface RegenResult {
    * every part's sets together). Absent when neither changed.
    */
   memberMeshes?: MemberMeshUpdate;
+  /**
+   * What the variables' `distance(...)` and `angle(...)` calls measured (#1202), one per distinct
+   * call: the value, or why there is none (a face not found, a cycle). Clients evaluate the
+   * variables with them (core's `measurementLookup`). Absent when no variable measures.
+   */
+  measurements?: Measurement[];
+  /**
+   * Variables that measure the model, or read one that does, and do not evaluate: one line each,
+   * naming the variable (and the face, for a measurement that failed). Absent when none fail.
+   */
+  variableErrors?: VariableError[];
   counters: RegenCounters;
   ms: number;
+}
+
+/** A variable that does not evaluate at regen, measured or reading a measured one. */
+export interface VariableError {
+  name: string;
+  /** The units error code: `measure` for a measurement that failed. */
+  code: string;
+  message: string;
 }
 
 // Assemblies -------------------------------------------------------------------------------

@@ -73,8 +73,18 @@ export interface PercentNode extends Span {
   readonly operand: Expression;
 }
 
+/**
+ * A quoted face name, an argument of `distance(...)` or `angle(...)`, which measure the model
+ * (`MEASURE_FUNCTION_NAMES`). It has no value of its own.
+ */
+export interface StringNode extends Span {
+  readonly type: 'string';
+  readonly value: string;
+}
+
 export type Expression =
   | NumberNode
+  | StringNode
   | MeasureNode
   | VariableNode
   | UnitNode

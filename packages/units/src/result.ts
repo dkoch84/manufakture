@@ -13,7 +13,14 @@ export type UnitsErrorCode =
   /** Incompatible dimensions, e.g. `length + angle` or an area where a length is expected. */
   | 'dimension'
   /** A mathematically invalid operation: division by zero, `sqrt` of a negative, non-finite result. */
-  | 'domain';
+  | 'domain'
+  /** `distance(...)` or `angle(...)` whose measurement failed: a face that is not found. */
+  | 'measure'
+  /**
+   * `distance(...)` or `angle(...)` where the model has not been measured (no `measure` lookup,
+   * or none that answers this call): not wrong, only not known here.
+   */
+  | 'not-measured';
 
 /**
  * An error with the source range it refers to. `start` and `end` are UTF-16 offsets into the

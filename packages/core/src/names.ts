@@ -281,3 +281,23 @@ export function subIdsInName(name: string): string[] {
 export function compareNames(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
+
+// Measured variables (task #1202) -------------------------------------------------------------
+
+/**
+ * A face named in `distance(...)` or `angle(...)`: written `part#2/<face name>` to say which
+ * part it is on, or just the face name, found on whichever part has the features it names.
+ */
+export interface MeasuredFace {
+  /** The part written before the `/`; absent when the name is not qualified. */
+  partId?: string;
+  face: string;
+}
+
+const PART_QUALIFIER = /^(part#[1-9][0-9]*)\/(.*)$/s;
+
+/** Splits a quoted face name into its part qualifier, if any, and the face name. */
+export function splitMeasuredFace(name: string): MeasuredFace {
+  const m = PART_QUALIFIER.exec(name.trim());
+  return m ? { partId: m[1]!, face: m[2]!.trim() } : { face: name.trim() };
+}

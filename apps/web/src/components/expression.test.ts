@@ -2,6 +2,7 @@ import type { DisplayUnits } from '@manufakture/core';
 import { angleQuantity, lengthQuantity, numberQuantity } from '@manufakture/units';
 import { describe, expect, it } from 'vitest';
 import {
+  MEASURED_AT_REGEN,
   analyzeExpression,
   applyCompletion,
   completionToken,
@@ -83,6 +84,31 @@ describe('analyzeExpression', () => {
     expect(highlightParts('-#w', analyzeExpression('-#w', 'length', MM, vars, positive))).toBe(
       null,
     );
+  });
+});
+
+describe('analyzeExpression with measurements (#1202)', () => {
+  const GAP = 'distance("a", "b")';
+  it('a distance() is an error where the model is not measured', () => {
+    expect(analyzeExpression(GAP, 'length', MM, vars)).toMatchObject({
+      state: 'error',
+      code: 'not-measured',
+    });
+  });
+
+  it('where it may be measured, reads the measurement, or is measured at the next rebuild', () => {
+    const known = analyzeExpression(`${GAP} - 5`, 'length', MM, vars, undefined, () => ({
+      ok: true,
+      value: 20,
+    }));
+    expect(known).toMatchObject({ state: 'ok', value: 15, formatted: '15.00 mm' });
+    const pending = analyzeExpression(GAP, 'any', MM, vars, undefined, () => undefined);
+    expect(pending).toMatchObject({ state: 'ok', formatted: MEASURED_AT_REGEN });
+    const lost = analyzeExpression(GAP, 'length', MM, vars, undefined, () => ({
+      ok: false,
+      message: 'Face "a" is not found on part#1',
+    }));
+    expect(lost).toMatchObject({ state: 'error', message: 'Face "a" is not found on part#1' });
   });
 });
 

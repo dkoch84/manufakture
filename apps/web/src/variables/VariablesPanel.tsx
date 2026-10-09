@@ -2,12 +2,15 @@
 // (which may read other variables), a type and its value in the display units, and lists where it
 // is used. Adding, editing (renaming included) and deleting are one undo step each; a variable in
 // use cannot simply be deleted, but its uses can take its current value first. Insert fit
-// variables adds #fit_press, #fit_slip and #fit_sliding in one step (fits.ts). The logic is in
-// variables.ts.
+// variables adds #fit_press, #fit_slip and #fit_sliding in one step (fits.ts). A variable may
+// measure the model (`distance(...)`, #1202): its value is what the shown regen measured, read
+// from the model store. The logic is in variables.ts.
 
 import { useMemo, useState } from 'react';
+import { measurementLookup as measureLookup, type Measurement } from '@manufakture/core';
 import { useStore } from 'zustand';
 import { ExpressionField } from '../components/ExpressionField';
+import { createModelStore, type ModelStore } from '../model/model';
 import type { DocumentStoreApi } from '../state/document';
 import { featureItem, type SelectionStore } from '../state/selection';
 import { insertFitVariables } from './fits';
@@ -39,7 +42,16 @@ export interface VariablesPanelProps {
    * workspace's active setup. Absent: the document's first setup.
    */
   printSetupId?: string | undefined;
+  /**
+   * The regen model, whose measurements give variables that measure the model their values.
+   * Absent: such variables show that they are measured at the next rebuild.
+   */
+  model?: ModelStore | undefined;
 }
+
+/** Stands in for an absent model: nothing measured. */
+const NO_MODEL = createModelStore();
+const NO_MEASUREMENTS: readonly Measurement[] = [];
 
 interface Editing {
   /** The variable being edited, or null for a new one. */
@@ -63,9 +75,11 @@ interface Blocked {
   warning: string | null;
 }
 
-export function VariablesPanel({ documents, selection, printSetupId }: VariablesPanelProps) {
+export function VariablesPanel({ documents, selection, printSetupId, model }: VariablesPanelProps) {
   const doc = useStore(documents, (s) => s.document);
-  const table = useMemo(() => evaluateTable(doc.variables), [doc]);
+  const measured = useStore(model ?? NO_MODEL, (s) => s.measurements);
+  const measurements = measured.length === 0 ? NO_MEASUREMENTS : measured;
+  const table = useMemo(() => evaluateTable(doc.variables, measurements), [doc, measurements]);
   const rows = useMemo(() => variableRows(doc, table), [doc, table]);
   const configured = useMemo(() => configuredVariablesInfo(doc), [doc]);
   const [editing, setEditing] = useState<Editing | null>(null);
@@ -84,7 +98,12 @@ export function VariablesPanel({ documents, selection, printSetupId }: Variables
 
   const startEdit = (name: string | null) => {
     setBlocked(null);
-    setEditing({ original: name, draft: draftOf(doc, name), submitted: false, failure: null });
+    setEditing({
+      original: name,
+      draft: draftOf(doc, name, measurements),
+      submitted: false,
+      failure: null,
+    });
   };
 
   const remove = (name: string) => {
@@ -105,7 +124,7 @@ export function VariablesPanel({ documents, selection, printSetupId }: Variables
 
   const replaceAndDelete = (name: string) => {
     // A configured variable: the warning is shown with the button, which confirms it.
-    const r = replaceWithValueCommand(doc, name);
+    const r = replaceWithValueCommand(doc, name, measurements);
     const done = r.ok ? documents.getState().execute(r.command, r.label) : null;
     if (!r.ok || (done && !done.ok)) {
       const failure = !r.ok ? r.message : done && !done.ok ? done.error.message : null;
@@ -123,6 +142,7 @@ export function VariablesPanel({ documents, selection, printSetupId }: Variables
       key={e.original ?? '(new)'}
       editing={e}
       documents={documents}
+      measurements={measurements}
       onChange={setEditing}
       onDone={() => setEditing(null)}
       variables={tableValues(table, e.original ?? undefined)}
@@ -318,6 +338,7 @@ function UseList({
 function VariableEditor({
   editing,
   documents,
+  measurements,
   variables,
   names,
   onChange,
@@ -325,6 +346,7 @@ function VariableEditor({
 }: {
   editing: Editing;
   documents: DocumentStoreApi;
+  measurements: readonly Measurement[];
   variables: ReturnType<typeof tableValues>;
   names: readonly string[];
   onChange: (e: Editing) => void;
@@ -332,7 +354,7 @@ function VariableEditor({
 }) {
   const doc = documents.getState().document;
   const { draft, original, submitted, failure } = editing;
-  const check = checkDraft(doc, draft, original);
+  const check = checkDraft(doc, draft, original, measurements);
   const set = (patch: Partial<VariableDraft>) =>
     onChange({ ...editing, draft: { ...draft, ...patch }, failure: null });
   // Loops are shown as soon as they are typed; other problems the field shows itself, or on Save.
@@ -412,6 +434,7 @@ function VariableEditor({
           variables={variables}
           names={names}
           error={expressionError}
+          measure={measureLookup(measurements)}
           onChange={(source) => set({ source })}
         />
         <div className="dialog-buttons">

@@ -9,6 +9,7 @@ export type {
   NumberNode,
   PercentNode,
   PitchNode,
+  StringNode,
   UnaryNode,
   UnitNode,
   VariableNode,
@@ -34,6 +35,7 @@ export {
 } from './dimension';
 export {
   FUNCTION_NAMES,
+  MEASURE_FUNCTION_NAMES,
   evaluate,
   evaluateParsed,
   evaluateParsedQuantity,
@@ -44,6 +46,9 @@ export {
   parseSpindleSpeed,
   type EvaluateOptions,
   type EvaluationContext,
+  type MeasureFunction,
+  type MeasureLookup,
+  type MeasureRequest,
   type VariableLookup,
 } from './evaluate';
 export {
@@ -62,9 +67,13 @@ export {
 } from './format';
 export { CONSTANT_NAMES, MAX_NESTING, MAX_TREE_DEPTH, parseExpression } from './parser';
 export {
+  collectMeasures,
   collectReferences,
+  findMeasures,
   findReferences,
   isValidVariableName,
+  type MeasureReference,
+  type QuotedFace,
   type VariableReference,
 } from './references';
 export type { Result, UnitsError, UnitsErrorCode } from './result';

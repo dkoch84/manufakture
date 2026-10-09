@@ -75,6 +75,41 @@ describe('symbolic ids', () => {
     expect(applyCommand(bracketDocument(), r.value.command).ok).toBe(true);
   });
 
+  it("resolves a symbol inside a measured variable's quoted face names (#1202)", () => {
+    const r = resolve([
+      {
+        type: 'setVariable',
+        name: 'boss_top',
+        expression: {
+          source: 'distance("extrude#$boss:end", "extrude#$boss:side:e$c") + 1 mm',
+          lengthUnit: 'mm',
+          angleUnit: 'deg',
+        },
+      },
+      sketch('sketch#$s'),
+      extrude('extrude#$boss', 'sketch#$s'),
+      {
+        type: 'setVariable',
+        name: 'qualified',
+        expression: {
+          source: 'angle("part#1/extrude#$boss:end", "extrude#1:cap:end")',
+          lengthUnit: 'mm',
+          angleUnit: 'deg',
+        },
+      },
+    ]);
+    if (!r.ok) throw new Error(JSON.stringify(r.problem));
+    expect(r.value.table).toMatchObject({ $boss: 'extrude#2', $c: 'e9' });
+    const sources = (
+      r.value.command as { commands: { expression?: { source: string } }[] }
+    ).commands.flatMap((c) => (c.expression ? [c.expression.source] : []));
+    expect(sources).toEqual([
+      'distance("extrude#2:end", "extrude#2:side:e9") + 1 mm',
+      'angle("part#1/extrude#2:end", "extrude#1:cap:end")',
+    ]);
+    expect(applyCommand(bracketDocument(), r.value.command).ok).toBe(true);
+  });
+
   it('starts past a literal fresh id of the same counter', () => {
     const r = resolve([sketch('sketch#3', PART, 'e9'), sketch('sketch#$next', PART, 'e$d')]);
     if (!r.ok) throw new Error(JSON.stringify(r.problem));

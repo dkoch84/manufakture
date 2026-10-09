@@ -29,7 +29,7 @@ type Result<T> = { ok: true; value: T } | { ok: false; error: UnitsError };
 
 interface UnitsError {
   code: UnitsErrorCode; // 'syntax' | 'unknown-unit' | 'unknown-variable' | 'unknown-function'
-  //                       | 'arity' | 'dimension' | 'domain'
+  //                       | 'arity' | 'dimension' | 'domain' | 'measure' | 'not-measured'
   message: string; // for example "Cannot add a length and an angle"
   start: number; // UTF-16 offset into the input, inclusive
   end: number; // exclusive; source.slice(start, end) is the text to highlight
@@ -156,6 +156,7 @@ term       := unary (('*' | '/') unary)*
 unary      := ('-' | '+') unary | power
 power      := primary ('^' unary)?           right-associative: 2^3^2 = 2^9
 primary    := number-literal | '(' expression ')' unit? | #name | name | name '(' args ')'
+            | '"' face-name '"'              only as an argument (after '(' or ',')
 ```
 
 - Precedence from lowest to highest: `+ -`, then the pitch colon `:` and the percent sign `%`,
@@ -188,6 +189,16 @@ primary    := number-literal | '(' expression ')' unit? | #name | name | name '(
   and a spindle speed to whole rpm. Any other
   value (a number, an area) is rounded as it is, in internal units. With a step they round
   to a multiple of it: `round(width, 1/16")`. `round` rounds halves away from zero.
+
+- **Measuring the model**: `distance("a", "b")` is a length and `angle("a", "b")` an angle,
+  where `a` and `b` are face names. They are read from the context's `measure` lookup (regen
+  answers it from the part's geometry; see `docs/agents/authoring.md`, "Measured variables"). A
+  `"` right after `(` or `,` opens a quoted name; anywhere else it is still the inch mark, so no
+  expression that parsed before reads differently. A quoted name is only an argument of these
+  two. With no `measure` lookup, or none that answers, the call is a `not-measured` error; a
+  measurement that failed (a face not found) is a `measure` error with its message. `distance`
+  and `angle` are not in `FUNCTION_NAMES` and stay valid variable names: written bare they are the
+  variable, followed by `(` always the call.
 
 ### Roof pitch and slopes
 
@@ -373,6 +384,10 @@ interface VariableReference { name: string; hashed: boolean; start: number; end:
 These return every variable an expression mentions, in source order and including duplicates.
 They fail only on syntax errors, so a dependency graph and cycle detection can be built before
 anything is evaluated. Bare `pi` is a constant and is not reported.
+
+`findMeasures(source)` and `collectMeasures(ast)` return every `distance(...)` and `angle(...)`
+call with its quoted face names and the range of each name's text (inside the quotes), so the
+faces an expression measures can be listed without evaluating anything.
 
 `isValidVariableName(name)` checks that `name` is an identifier that is not a function or
 constant name.

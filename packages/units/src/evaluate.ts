@@ -23,6 +23,26 @@ import { angleUnitFactor, lengthUnitFactor, type AngleUnit, type LengthUnit } fr
 /** Resolves a variable name (without `#`) to its value, or `undefined` if it does not exist. */
 export type VariableLookup = (name: string) => Quantity | undefined;
 
+/** The functions that measure the model: `distance(face, face)` and `angle(face, face)`. */
+export type MeasureFunction = 'distance' | 'angle';
+
+/** Names of the functions that measure the model. They are not in `FUNCTION_NAMES`. */
+export const MEASURE_FUNCTION_NAMES: readonly MeasureFunction[] = ['distance', 'angle'];
+
+/** A measurement an expression asks for: the function and its two face names. */
+export interface MeasureRequest {
+  readonly fn: MeasureFunction;
+  readonly faces: readonly [string, string];
+}
+
+/**
+ * Answers a measurement: the value (millimetres for `distance`, radians for `angle`), or why
+ * there is none (a face that is not found). `undefined` when the model was not measured.
+ */
+export type MeasureLookup = (
+  request: MeasureRequest,
+) => { ok: true; value: number } | { ok: false; message: string } | undefined;
+
 export interface EvaluationContext {
   /**
    * Unit that bare numbers are read in when a length is needed, and per minute when a feed is
@@ -33,6 +53,11 @@ export interface EvaluationContext {
   readonly angleUnit?: AngleUnit;
   /** Variable resolution. Without it every variable reference is an `unknown-variable` error. */
   readonly variables?: VariableLookup;
+  /**
+   * Measurements of the model, for `distance(...)` and `angle(...)`. Without it, or when it has
+   * no answer, those calls are a `measure` error.
+   */
+  readonly measure?: MeasureLookup;
 }
 
 export interface EvaluateOptions extends EvaluationContext {
@@ -52,6 +77,7 @@ interface Environment {
   readonly angleFactor: number;
   readonly angleUnit: AngleUnit;
   readonly variables: VariableLookup;
+  readonly measure: MeasureLookup;
   /** Whether percent slopes are allowed (slope fields only). */
   readonly slope: boolean;
 }
@@ -62,6 +88,7 @@ function environment(context: EvaluationContext, slope = false): Environment {
     angleFactor: angleUnitFactor(context.angleUnit ?? 'deg'),
     angleUnit: context.angleUnit ?? 'deg',
     variables: context.variables ?? (() => undefined),
+    measure: context.measure ?? (() => undefined),
     slope,
   };
 }
@@ -286,7 +313,44 @@ function plural(n: number, word: string): string {
   return `${n} ${word}${n === 1 ? '' : 's'}`;
 }
 
+/**
+ * `distance("a", "b")` or `angle("a", "b")`: two quoted face names, answered by the context's
+ * measurements. A distance is a length, an angle an angle.
+ */
+function evaluateMeasure(node: CallNode, fn: MeasureFunction, env: Environment): Result<Quantity> {
+  if (node.args.length !== 2) {
+    return err('arity', `${fn}() takes 2 arguments, got ${node.args.length}`, node.start, node.end);
+  }
+  const faces: string[] = [];
+  for (const a of node.args) {
+    if (a.type !== 'string') {
+      return err(
+        'syntax',
+        `${fn}() takes two face names in double quotes, like ${fn}("extrude#1:cap:start", "extrude#1:cap:end")`,
+        a.start,
+        a.end,
+      );
+    }
+    if (a.value.trim() === '') return err('syntax', 'Enter a face name', a.start, a.end);
+    faces.push(a.value);
+  }
+  const answer = env.measure({ fn, faces: [faces[0]!, faces[1]!] });
+  if (answer === undefined) {
+    return err(
+      'not-measured',
+      `${fn}() measures the model, and the model has not been measured here`,
+      node.start,
+      node.end,
+    );
+  }
+  if (!answer.ok) return err('measure', answer.message, node.start, node.end);
+  return ok({ value: answer.value, dimension: fn === 'distance' ? LENGTH : ANGLE });
+}
+
 function evaluateCall(node: CallNode, env: Environment): Result<Quantity> {
+  if ((MEASURE_FUNCTION_NAMES as readonly string[]).includes(node.name)) {
+    return evaluateMeasure(node, node.name as MeasureFunction, env);
+  }
   const spec = FUNCTIONS.get(node.name);
   if (spec === undefined) {
     return err('unknown-function', `Unknown function '${node.name}'`, node.start, node.nameEnd);
@@ -428,6 +492,13 @@ function evaluateNode(node: Expression, env: Environment): Result<Quantity> {
 
 function evaluateUnchecked(node: Expression, env: Environment): Result<Quantity> {
   switch (node.type) {
+    case 'string':
+      return err(
+        'syntax',
+        'A quoted face name is only an argument of distance() or angle()',
+        node.start,
+        node.end,
+      );
     case 'number':
       return ok({ value: node.value, dimension: DIMENSIONLESS });
     case 'measure':
@@ -573,6 +644,7 @@ function containsPitch(node: Expression): boolean {
   switch (node.type) {
     case 'pitch':
       return true;
+    case 'string':
     case 'number':
     case 'measure':
     case 'variable':

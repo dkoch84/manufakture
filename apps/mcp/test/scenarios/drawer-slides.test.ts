@@ -41,12 +41,18 @@ const add = (feature: Record<string, unknown>) => ({
   feature: { suppressed: false, ...feature },
 });
 
-/** A rectangle sketch (mm) from (x0, y0) to (x1, y1), its lines `e$<name>_0` to `_3`. */
+/**
+ * A rectangle sketch (mm) from (x0, y0) to (x1, y1), its lines `e$<name>_0` (bottom) to `_3`
+ * (left, `_1` the right side), on a plane or on a planar face (by name). With `size`, constrained
+ * fully: corners joined, sides square, the bottom-left corner fixed where it is drawn, and the
+ * width and height dimensions those expressions (inches), so the right side follows the width.
+ */
 function rectangle(
   id: string,
   name: string,
-  plane: { origin: V3; normal: V3; xDir: V3 },
+  plane: { origin: V3; normal: V3; xDir: V3 } | { face: string },
   [x0, y0, x1, y1]: [number, number, number, number],
+  size?: { width: string; height: string },
 ) {
   const c: [number, number][] = [
     [x0, y0],
@@ -55,19 +61,54 @@ function rectangle(
     [x0, y1],
   ];
   const key = id.slice('sketch#$'.length);
+  const e = (i: number) => `e$${key}_${i}`;
+  const k = (i: number) => `k$${key}_k${i}`;
+  const at = (i: number, end: 'start' | 'end') => ({ entity: e(i), at: end });
   return add({
     id,
     kind: 'sketch',
     name,
-    plane: { type: 'plane', ...plane },
+    plane:
+      'face' in plane
+        ? { type: 'face', face: { id: `r$${key}_on`, ref: { face: plane.face } } }
+        : { type: 'plane', ...plane },
     entities: c.map((start, i) => ({
-      id: `e$${key}_${i}`,
+      id: e(i),
       kind: 'line',
       construction: false,
       start,
       end: c[(i + 1) % 4],
     })),
-    constraints: [],
+    constraints:
+      size === undefined
+        ? []
+        : [
+            ...[0, 1, 2, 3].map((i) => ({
+              id: k(i),
+              kind: 'coincident',
+              a: at(i, 'end'),
+              b: at((i + 1) % 4, 'start'),
+            })),
+            { id: k(4), kind: 'horizontal', line: e(0) },
+            { id: k(5), kind: 'horizontal', line: e(2) },
+            { id: k(6), kind: 'vertical', line: e(1) },
+            { id: k(7), kind: 'vertical', line: e(3) },
+            { id: k(8), kind: 'fix', point: at(0, 'start') },
+            {
+              id: k(9),
+              kind: 'horizontalDistance',
+              a: at(0, 'start'),
+              b: at(0, 'end'),
+              value: inches(size.width),
+            },
+            {
+              id: k(10),
+              kind: 'verticalDistance',
+              a: at(1, 'start'),
+              b: at(1, 'end'),
+              value: inches(size.height),
+            },
+          ],
   });
 }
 
@@ -120,6 +161,11 @@ const T = PLY * IN;
 const SLIDE_HEIGHT = 1.75 * IN;
 const zMid = (z0 + z1) / 2;
 
+/** The opening's width, measured between the sides' faces at every regen (#1202). */
+const OPENING_WIDTH = `distance("${SIDES.left}", "${SIDES.right}")`;
+/** Between the drawer's sides: the front, back and bottom are this wide. */
+const INSIDE = { width: '#drawer_width - 2 * 15/32"', height: '12"' };
+
 const DRAWER = [
   {
     type: 'setVariable',
@@ -129,8 +175,9 @@ const DRAWER = [
   {
     type: 'setVariable',
     name: 'drawer_width',
-    // The opening's width is typed in: no expression can measure it (gap probe below).
-    expression: inches('22-9/16" - 2 * #slide_clearance'),
+    // Measured from the opening's side faces (#1202): it follows the cabinet. Found: no
+    // expression could measure the model, so it was typed in as 22-9/16" less the clearances.
+    expression: inches(`${OPENING_WIDTH} - 2 * #slide_clearance`),
   },
   rectangle(
     'sketch#$ls',
@@ -138,33 +185,38 @@ const DRAWER = [
     { origin: [xL, 0, 0], normal: [1, 0, 0], xDir: [0, 1, 0] },
     [0, z0, LENGTH, z1],
   ),
-  rectangle(
-    'sketch#$rs',
-    'Drawer right side',
-    { origin: [xR - T, 0, 0], normal: [1, 0, 0], xDir: [0, 1, 0] },
-    [0, z0, LENGTH, z1],
-  ),
+  // The front, back and bottom are as wide as the drawer less its sides, by dimension.
   rectangle(
     'sketch#$fr',
     'Drawer front',
     { origin: [0, T, 0], normal: [0, -1, 0], xDir: [1, 0, 0] },
     [xL + T, z0, xR - T, z1],
+    INSIDE,
   ),
   rectangle(
     'sketch#$bk',
     'Drawer back',
     { origin: [0, LENGTH, 0], normal: [0, -1, 0], xDir: [1, 0, 0] },
     [xL + T, z0, xR - T, z1],
+    INSIDE,
   ),
   rectangle(
     'sketch#$bt',
     'Drawer bottom',
     { origin: [0, 0, z0], normal: [0, 0, 1], xDir: [1, 0, 0] },
     [xL + T, T, xR - T, LENGTH - T],
+    { width: INSIDE.width, height: `${(LENGTH - 2 * T) / IN}"` },
   ),
   board('extension#$dls', 'Drawer left side', 'sketch#$ls', 'us-ply-15-32'),
-  board('extension#$drs', 'Drawer right side', 'sketch#$rs', 'us-ply-15-32'),
   board('extension#$dfr', 'Drawer front', 'sketch#$fr', 'us-ply-15-32'),
+  // The right side stands on the front's right end, so it goes where the front's width takes it.
+  rectangle('sketch#$rs', 'Drawer right side', { face: 'extension#$dfr:side:e$fr_1' }, [
+    0,
+    z0,
+    LENGTH,
+    z1,
+  ]),
+  board('extension#$drs', 'Drawer right side', 'sketch#$rs', 'us-ply-15-32'),
   board('extension#$dbk', 'Drawer back', 'sketch#$bk', 'us-ply-15-32'),
   board('extension#$dbt', 'Drawer bottom', 'sketch#$bt', 'us-ply-7-32'),
   dowels('extension#$j1', 'Drawer front to left side', 'extension#$dls', 'extension#$dfr'),
@@ -173,14 +225,19 @@ const DRAWER = [
   dowels('extension#$j4', 'Drawer back to right side', 'extension#$drs', 'extension#$dbk'),
 ];
 
-/** One slide member: a 1/4" steel bar the slide's length, its sketch on a plane at x (mm). */
-const member = (key: string, name: string, x: number) => [
-  rectangle(`sketch#$${key}`, name, { origin: [x, 0, 0], normal: [1, 0, 0], xDir: [0, 1, 0] }, [
-    0,
-    zMid - SLIDE_HEIGHT / 2,
-    LENGTH,
-    zMid + SLIDE_HEIGHT / 2,
-  ]),
+/**
+ * One slide member: a 1/4" steel bar the slide's length, its sketch on a plane at x (mm), or on a
+ * face (facing +X).
+ */
+const member = (key: string, name: string, on: number | string) => [
+  rectangle(
+    `sketch#$${key}`,
+    name,
+    typeof on === 'string'
+      ? { face: on }
+      : { origin: [on, 0, 0], normal: [1, 0, 0], xDir: [0, 1, 0] },
+    [0, zMid - SLIDE_HEIGHT / 2, LENGTH, zMid + SLIDE_HEIGHT / 2],
+  ),
   add({
     id: `extrude#$${key}_bar`,
     kind: 'extrude',
@@ -192,11 +249,15 @@ const member = (key: string, name: string, x: number) => [
   }),
 ];
 
-const SLIDES = [
+/**
+ * The slides. The right ones stand on the drawer's right side (`drs`, its body id), the drawer
+ * member on its outer face and the cabinet member on that, so they follow the drawer's width.
+ */
+const slides = (drs: string) => [
   ...member('lc', 'Left slide, cabinet member', OPENING.left * IN),
   ...member('ld', 'Left slide, drawer member', (OPENING.left + 0.25) * IN),
-  ...member('rc', 'Right slide, cabinet member', xR + 0.25 * IN),
-  ...member('rd', 'Right slide, drawer member', xR),
+  ...member('rd', 'Right slide, drawer member', `${drs}:cap:end`),
+  ...member('rc', 'Right slide, cabinet member', 'extrude#$rd_bar:cap:end'),
 ];
 
 /** The drawer's pose with the slides pulled out `d` mm (the drawer moves towards -Y). */
@@ -367,23 +428,67 @@ describe('scenario T8.6a: drawer slides', () => {
     await call('undo', { sessionId });
   });
 
-  it('gap probe: a variable cannot take a measured value', async () => {
-    // The functions are min, max, abs, sqrt, trig and rounding; there is nothing that reads the
-    // model, so the opening's width cannot drive the drawer's.
-    const r = await h.call('apply', {
+  it('a variable takes a measured value; a lost face is an error naming it', async () => {
+    // Found: the functions were min, max, abs, sqrt, trig and rounding, nothing that reads the
+    // model, so this was refused (`expression`). Now (#1202) `distance(...)` between two quoted
+    // face names reads the part at regen: here the opening's width, between faces of two bodies.
+    const width = await h.call('apply', {
       sessionId,
-      label: 'Drawer width from the opening',
+      label: 'The opening width, measured',
+      dryRun: true,
+      commands: [{ type: 'setVariable', name: 'opening_width', expression: inches(OPENING_WIDTH) }],
+    });
+    expect(value(width).errors).toEqual([]);
+    // A face name that is lost (no such dado wall) fails at regen, naming the variable and the face.
+    const lost = await call('apply', {
+      sessionId,
+      label: 'A measured variable on a face that is not there',
       dryRun: true,
       commands: [
         {
           type: 'setVariable',
           name: 'opening_width',
-          expression: inches('distance("extension#1:cap:end#1", "extension#2:cap:start#1")'),
+          expression: inches(
+            `distance("${SIDES.left}", "extension#2:cap:start{extension#99:groove:xmin}")`,
+          ),
         },
       ],
     });
-    expect(r.ok).toBe(false);
-    expect(r.error).toMatchObject({ kind: 'core', error: { code: 'expression' } });
+    expect(lost.errors).toEqual([
+      {
+        where: 'variable',
+        id: 'opening_width',
+        severity: 'error',
+        code: 'measure',
+        message:
+          '#opening_width: Face "extension#2:cap:start{extension#99:groove:xmin}" is not found on part#1: it has no extension#99',
+      },
+    ]);
+    // Measuring is for variables: a feature field reads the variable, never distance() itself.
+    const field = await h.call('apply', {
+      sessionId,
+      label: 'An extrude measuring the model',
+      dryRun: true,
+      commands: [
+        add({
+          id: 'extrude#$x',
+          kind: 'extrude',
+          name: 'x',
+          profile: { sketch: 'sketch#1' },
+          operation: 'new',
+          extent: { type: 'blind', distance: inches(OPENING_WIDTH) },
+          reverse: false,
+        }),
+      ],
+    });
+    expect(field.ok).toBe(false);
+    expect(field.error).toMatchObject({
+      kind: 'core',
+      error: {
+        code: 'expression',
+        message: expect.stringMatching(/may only be used in a variable/),
+      },
+    });
   });
 
   it('adds the drawer box: five boards and four dowel joints, symbols in params', async () => {
@@ -396,14 +501,14 @@ describe('scenario T8.6a: drawer slides', () => {
     expect(real.errors).toEqual([]);
     const symbols = real.symbols as Record<string, string>;
     for (const k of ['dls', 'drs', 'dfr', 'dbk', 'dbt']) ids[k] = symbols[`$${k}`]!;
-    expect(ids.dfr).toBe('extension#17');
-    // The drawer's width is the variable's value, but only because the sketches were drawn to
-    // the same typed-in number: sketch coordinates are numbers, not expressions.
+    expect(ids.dfr).toBe('extension#16');
+    // The drawer's width is measured from the opening (#1202), and its front, back and bottom are
+    // dimensioned from it; the right side stands on the front's end.
     const width = await call('get_object', {
       sessionId,
       query: { kind: 'variable', name: 'drawer_width' },
     });
-    expect(width.object.expression.source).toBe('22-9/16" - 2 * #slide_clearance');
+    expect(width.object.expression.source).toBe(`${OPENING_WIDTH} - 2 * #slide_clearance`);
     const variables = (await tree()).variables as Data[];
     close(variables.find((v) => v.name === 'drawer_width')!.value.value, 21.5625 * IN);
     const drawer = await clearance(ids.dls!, ids.drs!);
@@ -414,12 +519,13 @@ describe('scenario T8.6a: drawer slides', () => {
     const r = await call('apply', {
       sessionId,
       label: 'Add 18" side-mount slides',
-      commands: SLIDES,
+      commands: slides(ids.drs!),
     });
     expect(r.errors).toEqual([]);
     const s = r.symbols as Record<string, string>;
     for (const k of ['lc', 'ld', 'rc', 'rd']) ids[k] = s[`$${k}_bar`]!;
-    expect([ids.lc, ids.ld, ids.rc, ids.rd]).toEqual([
+    // The right drawer member first: the cabinet member stands on it.
+    expect([ids.lc, ids.ld, ids.rd, ids.rc]).toEqual([
       'extrude#1',
       'extrude#2',
       'extrude#3',
@@ -485,7 +591,7 @@ describe('scenario T8.6a: drawer slides', () => {
     expect(q.cutList.totals.map((t: Data) => t.group)).toEqual(['sheet', 'hardware']);
     // ... but they come only from joints: the slides are left out, as "not wood".
     expect(q.cutList.excluded).toEqual(
-      [ids.lc, ids.ld, ids.rc, ids.rd].map((bodyId) => ({ part: P, bodyId, reason: 'not-wood' })),
+      [ids.lc, ids.ld, ids.rd, ids.rc].map((bodyId) => ({ part: P, bodyId, reason: 'not-wood' })),
     );
     expect(q.cutList.rows.map((r: Data) => r.item)).toContain(
       'Drawer left side, Drawer right side',
@@ -908,7 +1014,7 @@ describe('scenario T8.6a: drawer slides', () => {
     expect((drawn.structuredContent as Data).images[0].assembly).toBeUndefined();
   });
 
-  it('gap probe: widening the cabinet leaves the drawer and slides where they were', async () => {
+  it('widening the cabinet widens the drawer, and the slides follow', async () => {
     // One inch wider: the right side moves out, and the fixed panels reach it.
     const right = 24 * IN - (23 / 32 - 1 / 4) * IN;
     const commands: unknown[] = [];
@@ -930,13 +1036,34 @@ describe('scenario T8.6a: drawer slides', () => {
     const r = await call('apply', { sessionId, label: 'Make the cabinet 25" wide', commands });
     expect(r.errors).toEqual([]);
     close((await clearance('extension#1', 'extension#2')).gaps[0].boxGap, 23.5625 * IN);
-    // The right slide now stands an inch off the side, and the drawer width variable still says
-    // 21-9/16": nothing followed the opening.
-    close((await clearance('extension#2', ids.rc!)).gaps[0].boxGap, IN);
+    // Found: the right slide stood an inch off the side, and `#drawer_width` still said 21-9/16"
+    // (it was typed in). Now (#1202) it measures the opening, 1" wider, and the drawer's front,
+    // back, bottom and right side, and the right slide on it, follow.
     const variables = (await tree()).variables as Data[];
-    close(variables.find((v) => v.name === 'drawer_width')!.value.value, 21.5625 * IN);
+    close(variables.find((v) => v.name === 'drawer_width')!.value.value, 22.5625 * IN);
+    close((await clearance(ids.dls!, ids.drs!)).gaps[0].boxGap, 22.5625 * IN - 2 * T);
+    const fit = await call('measure', {
+      sessionId,
+      query: {
+        kind: 'clearance',
+        bodies: ['extension#2', ids.rc, ids.rd, ids.drs].map((bodyId) => ({ partId: P, bodyId })),
+      },
+    });
+    // The right slide fills the 1/2" again, touching the side and the drawer, overlapping none.
+    expect(fit.measurement.pairs).toEqual([]);
+    close((await clearance('extension#2', ids.rc!)).gaps[0].boxGap, 0);
+    close((await clearance(ids.rd!, ids.drs!)).gaps[0].boxGap, 0);
+    // The drawer still opens fully at the new width.
+    for (const d of [0, LENGTH]) {
+      expect((await interference({ poses: { [ids.drawer!]: pulled(d) } })).pairs).toEqual([]);
+    }
+    expect((await call('get_errors', { sessionId })).errors).toEqual([]);
     await call('undo', { sessionId });
     close((await clearance('extension#2', ids.rc!)).gaps[0].boxGap, 0);
+    close(
+      (await tree()).variables.find((v: Data) => v.name === 'drawer_width').value.value,
+      21.5625 * IN,
+    );
   });
 
   it('exports the cut list and submits the branch for review', async () => {

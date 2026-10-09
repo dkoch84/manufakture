@@ -964,3 +964,52 @@ describe('SyncClient: entry and message size limits', () => {
     );
   });
 });
+
+describe('SyncClient: measured variables follow renames (#1202)', () => {
+  const sourceOf = (doc: ManufaktureDocument, name: string) =>
+    doc.variables.find((v) => v.name === name)?.expression.source;
+
+  it('renames the faces a pending variable measures, made by earlier pending entries', () => {
+    const lab = new Lab();
+    const a = lab.add('a', { online: false });
+    const o = lab.add('o');
+    const ev = events(a);
+    // Offline: two extrudes (extrude#3, extrude#4), then a variable measuring the second.
+    ok(a.submit({ command: addExtrude(a.document, 'sketch#2', 'A1'), label: 'A1' }));
+    ok(a.submit({ command: addExtrude(a.document, 'sketch#2', 'A2'), label: 'A2' }));
+    const gap = 'distance("extrude#4:cap:end", "extrude#3:cap:start") + 1 mm';
+    ok(a.submit({ command: setVar('gap', gap), label: 'gap' }));
+    // Another client's extrude#3 lands first: A1 becomes extrude#4, A2 extrude#5.
+    ok(o.submit({ command: addExtrude(o.document, 'sketch#1', 'O'), label: 'O' }));
+    lab.send('o');
+    lab.deliver('a');
+    expect(ev.remapped.map((e) => e.table)).toEqual([
+      { [`part:${PART}`]: { 'extrude#3': 'extrude#4', 'extrude#4': 'extrude#5' } },
+    ]);
+    expect(ev.remapped[0]!.report.unresolved).toBe(0);
+    const renamed = 'distance("extrude#5:cap:end", "extrude#4:cap:start") + 1 mm';
+    expect(sourceOf(a.document, 'gap')).toBe(renamed);
+    a.setOnline(true);
+    lab.settle();
+    expect(feature(lab.server.head, 'extrude#5')).toMatchObject({ name: 'A2' });
+    expect(sourceOf(lab.server.head, 'gap')).toBe(renamed);
+  });
+
+  it('renames them in a command waiting on the redo stack', () => {
+    const lab = new Lab();
+    const a = lab.add('a', { online: false });
+    const o = lab.add('o');
+    ok(a.submit({ command: addExtrude(a.document, 'sketch#2', 'A1'), label: 'A1' }));
+    ok(a.submit({ command: addExtrude(a.document, 'sketch#2', 'A2'), label: 'A2' }));
+    ok(
+      a.submit({ command: setVar('gap', 'distance("extrude#4:cap:end", "x#1:y")'), label: 'gap' }),
+    );
+    expect(a.undo()).toEqual({ ok: true });
+    expect(sourceOf(a.document, 'gap')).toBeUndefined();
+    ok(o.submit({ command: addExtrude(o.document, 'sketch#1', 'O'), label: 'O' }));
+    lab.send('o');
+    lab.deliver('a');
+    expect(a.redo()).toEqual({ ok: true });
+    expect(sourceOf(a.document, 'gap')).toBe('distance("extrude#5:cap:end", "x#1:y")');
+  });
+});

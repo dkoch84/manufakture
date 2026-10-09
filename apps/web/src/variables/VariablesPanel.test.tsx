@@ -1,6 +1,7 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { applyCommand, createPrintSetup } from '@manufakture/core';
 import { describe, expect, it } from 'vitest';
+import { createModelStore } from '../model/model';
 import { createDocumentStore } from '../state/document';
 import { createSelectionStore } from '../state/selection';
 import { boxDocument } from './box.test-fixture';
@@ -239,5 +240,37 @@ describe('the Variables panel', () => {
     // The 0.4 mm clearances scaled to a 0.6 mm nozzle, not the first setup's.
     expect(t.variables()).toMatchObject({ fit_slip: '0.3 mm' });
     expect(screen.getByTestId('variable-fits-status').textContent).toContain('(Big nozzle)');
+  });
+
+  it('shows a measured variable with what the model measured (#1202)', () => {
+    const GAP = 'distance("extrude#1:cap:start", "extrude#1:cap:end")';
+    const r = applyCommand(boxDocument(), {
+      type: 'setVariable',
+      name: 'gap',
+      expression: { source: GAP, lengthUnit: 'mm', angleUnit: 'deg' },
+    });
+    if (!r.ok) throw new Error(r.error.message);
+    const documents = createDocumentStore(r.value.document);
+    const model = createModelStore();
+    render(<VariablesPanel documents={documents} model={model} />);
+    expect(screen.getByTestId('variable-gap').textContent).toContain(
+      'Measured from the model at the next rebuild.',
+    );
+    act(() =>
+      model.setState({
+        measurements: [
+          {
+            fn: 'distance',
+            faces: ['extrude#1:cap:start', 'extrude#1:cap:end'],
+            partId: 'part#1',
+            value: 20,
+          },
+        ],
+      }),
+    );
+    expect(screen.getByTestId('variable-gap-value').textContent).toBe('20.00 mm');
+    // Editing it: the field previews the expression without an error.
+    fireEvent.click(within(screen.getByTestId('variable-gap')).getByText('Edit'));
+    expect(screen.getByTestId('variable-expression-note').textContent).toBe('= 20.00 mm');
   });
 });

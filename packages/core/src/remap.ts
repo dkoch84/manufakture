@@ -1,6 +1,7 @@
 import type { Command, SimpleCommand } from './commands';
 import { TOMBSTONE_NAME, parseSubId } from './ids';
-import { compareNames, mapName } from './names';
+import { findMeasures } from '@manufakture/units';
+import { compareNames, featureIdsInName, mapName, splitMeasuredFace } from './names';
 import type {
   Assembly,
   BodyGroup,
@@ -59,7 +60,12 @@ import {
  * Face names and body ids go through the name parser (`names.ts`): feature ids of born names,
  * merge and corner members and instance prefixes, sub-id tails with their suffixes kept, and of a
  * derived prefix only its own id. Opaque data is never read: derived and pinned sources (another
- * document), extension `params`, domain data, view params, names, labels and expressions.
+ * document), extension `params`, domain data, view params, names, labels and expressions, except
+ * the quoted face names of `distance(...)` and `angle(...)` in variables (and in configuration
+ * row values, which are variables' expressions): a `part#N/` qualifier is renamed in the document
+ * scope, and the name in its part's scope, the part being the qualifier's, else the part that has
+ * the feature the name starts with (`RemapResolver.featurePart`). Each is spliced back at the range
+ * the parser reports, so the rest of the text is never touched.
  *
  * Some names belong to a part the command does not name: a mate connector names faces of its
  * instance's part, an exploded step's direction faces of its instance's part, a CAM operation
@@ -101,6 +107,12 @@ export interface RemapResolver {
   setupPart(setupId: string): string | undefined;
   /** What a drawing view shows. */
   viewSource(drawingId: string, viewId: string): ViewSource | undefined;
+  /**
+   * The part an unqualified face name of a measured variable is on, from the feature ids in the
+   * name (old naming), by regen's rule (`callPart`): the parts with the first id, narrowed to
+   * those with every id when there are several; `undefined` unless exactly one is left.
+   */
+  featurePart(featureIds: readonly string[]): string | undefined;
 }
 
 export interface RemapReport {
@@ -129,6 +141,29 @@ export interface RemapOptions {
   readonly document?: ManufaktureDocument;
   /** Filled with counts as the remap goes. */
   readonly report?: RemapReport;
+  /**
+   * Features that commands before these created, as (feature id, part id) pairs in the same old
+   * naming (`createdFeatures` of those commands): a measured variable's face names resolve their
+   * part through them too. A sync queue passes its earlier pending entries' features here.
+   */
+  readonly features?: readonly (readonly [string, string])[];
+}
+
+/** The (feature id, part id) pairs of every feature `commands` create, in order. */
+export function createdFeatures(commands: readonly Command[]): [string, string][] {
+  const out: [string, string][] = [];
+  const walk = (c: Command) => {
+    if (c.type === 'batch') for (const x of c.commands) walk(x);
+    else if (c.type === 'addFeature' || c.type === 'restoreFeature') {
+      out.push([c.feature.id, c.partId]);
+    } else if (c.type === 'restorePart') {
+      for (const f of c.part.features) out.push([f.id, c.part.id]);
+    } else if (c.type === 'replaceDocument') {
+      for (const p of c.document.parts) for (const f of p.features) out.push([f.id, p.id]);
+    }
+  };
+  for (const c of commands) walk(c);
+  return out;
 }
 
 /**
@@ -139,6 +174,8 @@ export type IdVisitor = (scope: ScopeKey, id: string, inName: boolean) => string
 
 /** Resolves through a document plus the commands walked so far (old naming). */
 class QueueResolver implements RemapResolver {
+  /** Parts the commands create a feature in (all of them, known before the walk), by feature id. */
+  private readonly created = new Map<string, Set<string>>();
   private readonly instances = new Map<string, string | null>();
   private readonly setups = new Map<string, string>();
   private readonly views = new Map<string, ViewSource>();
@@ -155,6 +192,38 @@ class QueueResolver implements RemapResolver {
       .find((a) => a.id === assemblyId)
       ?.instances.find((i) => i.id === instanceId);
     return inst !== undefined && 'part' in inst.source ? inst.source.part : undefined;
+  }
+
+  /** The parts that have (or get) a feature with this id. */
+  private partsWith(featureId: string): Set<string> {
+    const parts = new Set(this.created.get(featureId) ?? []);
+    for (const p of this.doc?.parts ?? []) {
+      if (p.features.some((f) => f.id === featureId)) parts.add(p.id);
+    }
+    return parts;
+  }
+
+  featurePart(featureIds: readonly string[]): string | undefined {
+    if (featureIds.length === 0) return undefined;
+    let owners = [...this.partsWith(featureIds[0]!)];
+    if (owners.length > 1) {
+      const rest = featureIds.slice(1).map((id) => this.partsWith(id));
+      owners = owners.filter((p) => rest.every((s) => s.has(p)));
+    }
+    return owners.length === 1 ? owners[0] : undefined;
+  }
+
+  /**
+   * Learns, before the walk, the features the commands (and, with `before`, commands earlier in
+   * a queue) create and their parts: a measured variable may name a face of a feature that only
+   * a later command, or an earlier pending one, creates.
+   */
+  foresee(commands: readonly Command[], before: readonly (readonly [string, string])[] = []): void {
+    for (const [featureId, partId] of [...before, ...createdFeatures(commands)]) {
+      let set = this.created.get(featureId);
+      if (set === undefined) this.created.set(featureId, (set = new Set()));
+      set.add(partId);
+    }
   }
 
   setupPart(setupId: string): string | undefined {
@@ -529,9 +598,42 @@ export class IdWalker {
     };
   }
 
+  /**
+   * A variable's expression: the quoted face names of its `distance(...)` and `angle(...)` calls
+   * renamed (see the header), right to left so earlier ranges stay valid.
+   */
+  expression<E extends { source: string }>(e: E): E {
+    const r = findMeasures(e.source);
+    if (!r.ok) return e;
+    const quoted = r.value.flatMap((m) => m.faces).sort((a, b) => b.start - a.start);
+    let source = e.source;
+    for (const q of quoted) {
+      const next = this.measuredFace(q.name);
+      if (next !== q.name) source = source.slice(0, q.start) + next + source.slice(q.end);
+    }
+    return source === e.source ? e : { ...e, source };
+  }
+
+  /** One quoted face name of a measured variable; left as it is when its part is unknown. */
+  private measuredFace(written: string): string {
+    const { partId, face } = splitMeasuredFace(written);
+    const part = partId ?? this.resolver.featurePart(featureIdsInName(face));
+    if (part === undefined) {
+      this.report.unresolved++;
+      return written;
+    }
+    const named = this.name(part, face);
+    const qualifier = partId === undefined ? undefined : this.id(DOCUMENT_SCOPE, partId);
+    if (named === face && qualifier === partId) return written;
+    return qualifier === undefined ? named : `${qualifier}/${named}`;
+  }
+
   configRow(r: ConfigRow): ConfigRow {
     const values: Record<string, ConfigRow['values'][string]> = {};
-    for (const [k, v] of Object.entries(r.values)) values[this.id(DOCUMENT_SCOPE, k)] = v;
+    for (const [k, v] of Object.entries(r.values)) {
+      // An expression is a configured variable's value; a boolean, a suppression.
+      values[this.id(DOCUMENT_SCOPE, k)] = typeof v === 'object' ? this.expression(v) : v;
+    }
     return { ...r, id: this.id(DOCUMENT_SCOPE, r.id), values };
   }
 
@@ -836,11 +938,18 @@ export class IdWalker {
 
   // Documents and commands -------------------------------------------------------------------
 
-  /** A whole document: every id in every scope. Its own `id`, variables and domains stay. */
+  /**
+   * A whole document: every id in every scope. Its own `id`, domains and variable names stay; the
+   * face names its variables measure are renamed.
+   */
   document(doc: ManufaktureDocument): ManufaktureDocument {
     const inner = new IdWalker(this.visit, new QueueResolver(doc), this.report, this.counters);
     const out: ManufaktureDocument = {
       ...doc,
+      variables: doc.variables.map((v) => {
+        const expression = inner.expression(v.expression);
+        return expression === v.expression ? v : { ...v, expression };
+      }),
       parts: doc.parts.map((p) => inner.part(p)),
       assemblies: doc.assemblies.map((a) => inner.assembly(a)),
       print: inner.print(doc.print),
@@ -897,7 +1006,10 @@ export class IdWalker {
         return { ...c, partId: doc(c.partId), group: this.bodyGroup(c.partId, c.group) };
       case 'deleteBodyGroup':
         return { ...c, partId: doc(c.partId), groupId: this.id(partScope(c.partId), c.groupId) };
-      case 'setVariable':
+      case 'setVariable': {
+        const expression = this.expression(c.expression);
+        return expression === c.expression ? c : { ...c, expression };
+      }
       case 'deleteVariable':
       case 'setDisplayUnits':
       case 'renameDocument':
@@ -1195,6 +1307,7 @@ export function remapIds(
   if (isEmpty(table)) return [...commands];
   const report = options.report ?? emptyRemapReport();
   const resolver = new QueueResolver(options.document);
+  resolver.foresee(commands, options.features);
   const walker = new IdWalker(tableVisitor(table, report), resolver, report, counterRaiser(table));
   return commands.map((c) => {
     const out = walker.command(c);
@@ -1235,6 +1348,7 @@ export function commandIds(
   const out: { scope: ScopeKey; id: string }[] = [];
   const report = emptyRemapReport();
   const resolver = new QueueResolver(document);
+  resolver.foresee(commands);
   const walker = new IdWalker(
     (scope, id, inName) => {
       if (!inName) out.push({ scope, id });

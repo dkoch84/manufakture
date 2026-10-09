@@ -6,6 +6,7 @@ import {
   angleFormat,
   bareUnits,
   lengthFormat,
+  measurementLookup,
   variableOrder,
   type DisplayUnits,
   type ManufaktureDocument,
@@ -22,6 +23,7 @@ import {
   type Quantity,
   type UnitsError,
 } from '@manufakture/units';
+import { latestMeasurements } from '../model/measurements';
 
 // The display units to units-package format mapping lives in core, next to `DisplayUnits`;
 // re-exported here because the sketcher, construction and wood tools import it with the
@@ -33,9 +35,12 @@ export type Variables = Readonly<Record<string, Quantity>>;
 /**
  * The document's variables, evaluated in dependency order. A variable that
  * fails to evaluate is left out, so expressions naming it report it unknown.
+ * One that measures the model (`distance(...)`, #1202) reads what the shown
+ * regen measured (`latestMeasurements`).
  */
 export function evaluateVariables(doc: ManufaktureDocument): Variables {
   const out: Record<string, Quantity> = {};
+  const measure = measurementLookup(latestMeasurements());
   const order = variableOrder(doc.variables);
   if (!order.ok) return out;
   const byName = new Map(doc.variables.map((v) => [v.name, v]));
@@ -46,6 +51,7 @@ export function evaluateVariables(doc: ManufaktureDocument): Variables {
       lengthUnit: v.expression.lengthUnit,
       angleUnit: v.expression.angleUnit,
       variables: (n) => out[n],
+      measure,
     });
     if (r.ok) out[name] = r.value;
   }

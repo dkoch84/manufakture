@@ -5,8 +5,10 @@
 
 import {
   featureExpressions,
+  measurementLookup,
   variableOrder,
   type Feature,
+  type Measurement,
   type StoredExpression,
   type Variable,
 } from '@manufakture/core';
@@ -20,10 +22,23 @@ export interface VariableValues {
   readonly errors: ReadonlyMap<string, UnitsError>;
   /** The values as a plain record, for the sketch solver. */
   readonly record: Readonly<Record<string, Quantity>>;
+  /**
+   * The measurements `distance(...)` and `angle(...)` read (#1202), as given; empty when none
+   * were.
+   */
+  readonly measurements: readonly Measurement[];
 }
 
-/** Evaluate the variables table in dependency order. Variables have no declared kind. */
-export function evaluateVariables(variables: readonly Variable[]): VariableValues {
+/**
+ * Evaluate the variables table in dependency order. Variables have no declared kind. A variable
+ * that measures the model reads `measurements` (regen makes them, `RegenResult.measurements`
+ * carries them to clients); without one for its call it is a `measure` error.
+ */
+export function evaluateVariables(
+  variables: readonly Variable[],
+  measurements: readonly Measurement[] = [],
+): VariableValues {
+  const measure = measurementLookup(measurements);
   const values = new Map<string, Quantity>();
   const errors = new Map<string, UnitsError>();
   const order = variableOrder(variables);
@@ -46,6 +61,7 @@ export function evaluateVariables(variables: readonly Variable[]): VariableValue
         lengthUnit: v.expression.lengthUnit,
         angleUnit: v.expression.angleUnit,
         variables: (n) => values.get(n),
+        measure,
       });
       if (r.ok) values.set(name, r.value);
       else errors.set(name, r.error);
@@ -53,7 +69,7 @@ export function evaluateVariables(variables: readonly Variable[]): VariableValue
   }
   const record: Record<string, Quantity> = {};
   for (const [k, v] of values) record[k] = v;
-  return { values, errors, record };
+  return { values, errors, record, measurements };
 }
 
 /** A field path as a map key: `extent.distance`, `constraints.3.value`. */

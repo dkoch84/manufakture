@@ -7,6 +7,7 @@ import {
   evaluate,
   evaluateQuantity,
   formatFeed,
+  type MeasureLookup,
   formatNumber,
   formatSpindleSpeed,
   type Quantity,
@@ -48,6 +49,9 @@ export function formatKind(value: number, kind: ValueKind, units: DisplayUnits):
   return formatValue(value, kind, units);
 }
 
+/** What a field shows for a `distance(...)` that a regen has not measured yet. */
+export const MEASURED_AT_REGEN = 'measured from the model';
+
 /** The kind a quantity is, or null when it is none of them (an area, 1/length). */
 export function kindOfQuantity(q: Quantity): ValueKind | null {
   const { length, angle } = q.dimension;
@@ -77,18 +81,26 @@ export function analyzeExpression(
   units: DisplayUnits,
   variables: Variables,
   validate?: (value: number) => string | null,
+  measure?: MeasureLookup,
 ): Analysis {
   const text = source.trim();
   if (text === '') return { state: 'empty' };
   const expression: StoredExpression = { source: text, ...bareUnits(units) };
   const offset = source.length - source.trimStart().length;
+  // Where the model may be measured (a variable's value, #1202): a `distance(...)` not measured
+  // yet is no error, it is measured when the document is rebuilt.
+  const failed = (e: UnitsError): Analysis =>
+    measure !== undefined && e.code === 'not-measured'
+      ? { state: 'ok', value: Number.NaN, expression, formatted: MEASURED_AT_REGEN }
+      : errorOf(e, offset);
+  const context = { lengthUnit: expression.lengthUnit, angleUnit: expression.angleUnit };
   if (kind === 'any') {
     const q = evaluateQuantity(text, {
-      lengthUnit: expression.lengthUnit,
-      angleUnit: expression.angleUnit,
+      ...context,
       variables: (n) => variables[n],
+      ...(measure === undefined ? {} : { measure }),
     });
-    if (!q.ok) return errorOf(q.error, offset);
+    if (!q.ok) return failed(q.error);
     const problem = validate?.(q.value.value) ?? null;
     if (problem !== null) {
       return { state: 'error', message: problem, code: 'value', start: 0, end: 0 };
@@ -102,11 +114,11 @@ export function analyzeExpression(
   }
   const r = evaluate(text, {
     expected: kind,
-    lengthUnit: expression.lengthUnit,
-    angleUnit: expression.angleUnit,
+    ...context,
     variables: (n) => variables[n],
+    ...(measure === undefined ? {} : { measure }),
   });
-  if (!r.ok) return errorOf(r.error, offset);
+  if (!r.ok) return failed(r.error);
   const problem = validate?.(r.value) ?? null;
   if (problem !== null) {
     return { state: 'error', message: problem, code: 'value', start: 0, end: 0 };

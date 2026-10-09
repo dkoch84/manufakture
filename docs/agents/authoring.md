@@ -165,6 +165,45 @@ spacing"), make it a variable and use it, so the next edit is one change:
 }
 ```
 
+### Measured variables
+
+A variable can read the model: `distance("<face>", "<face>")` is the distance between two faces,
+measured at every regen, and `angle("<face>", "<face>")` the angle between them. Both are ordinary
+functions of the expression, so they compose with arithmetic and other variables:
+`distance("extension#1:cap:end", "extension#2:cap:start") - 2 * #clearance`. Use one when a size
+must follow the model ("the drawer is the opening less 1/2" each side"): when the opening changes,
+the variable changes, and every feature reading it follows.
+
+- **Only in variables.** A feature field, a mate, a drawing or CAM field that measures is refused
+  (`expression`); give it a variable and read the variable there. A configuration row's value for a
+  variable may measure, as the variable may.
+- **Faces by name**, in double quotes: the same names `find_geometry` and `measure` give, aliases
+  included. The two faces may be on two bodies of one part, never on two parts. A face is found on
+  the part with the feature its name starts with; when two parts have such a feature, write the
+  part first: `"part#2/extrude#1:cap:end"`.
+- **What it reads.** `distance` of two parallel planar faces is the distance between their planes
+  (the number `measure` answers as `distance.planes`); of any other pair, the minimum distance (0
+  when they touch). Faces count as parallel within 1e-9 radians, which holds for faces of rotated
+  bodies too (rounding error is far below that), but a face drafted even slightly is not parallel,
+  and gives the minimum distance instead. `angle` is 0 to 90 degrees, between the faces' planes or
+  axes.
+- **When it is measured.** On the part built without the features that read any measured
+  variable not measured yet (directly, through other variables, or through features built on
+  those), so a variable's readers come after its measurement. With two measured variables on one
+  part, each measures the part without the readers of either: a feature reading `#b` that changes
+  the faces `#a` measures does not count for `#a`. A variable may measure faces made by features
+  reading another measured variable: that one is measured first, and the next round includes its
+  readers.
+- **Errors, never stale values.** A face that is not found (renamed, suppressed, deleted) or a
+  variable measuring faces it shapes itself (a cycle) is a regen error on the variable, naming it and
+  the face: `get_errors` lists it with `where: "variable"`, `get_tree` shows the variable's `error`,
+  and every feature reading it fails with it. Fix the name, or the variable, and regen measures again.
+- Symbols work in quoted face names (`distance("extrude#$boss:cap:end", ...)` with the boss made
+  in the same batch), and so does `part#$side/` for a part the batch makes. Face names are kept up
+  to date when ids are renumbered (a rebase after another change landed), like any reference.
+  Two parts with the same feature ids (one duplicated from the other) need the part written
+  (`part#2/...`) for that too, as they do to measure at all.
+
 A document shows its own display units (`get_tree` gives them: millimetres, inch fractions, feet
 and inches). Use them when you talk to the person, and in the sources you write: in an inch
 document write `"23/32 in"`, not `18.256 mm`.
@@ -993,6 +1032,67 @@ are 159.54 mm (6-9/32") apart, parallel, facing each other (`normals` 180).
 
 ```json mcp:result
 { "ok": true, "measurement": { "angle": { "between": "planes", "value": 0 } } }
+```
+
+To keep that number in the document, make it a variable that measures it (see "Measured
+variables"): it is measured again at every regen, so it follows when either shelf moves.
+
+```json mcp:apply
+{
+  "sessionId": "<session>",
+  "label": "The space under the shelf, measured",
+  "commands": [
+    {
+      "type": "setVariable",
+      "name": "shelf_gap",
+      "expression": {
+        "source": "distance(\"extension#15:cap:end\", \"extension#5:cap:start\")",
+        "lengthUnit": "in",
+        "angleUnit": "deg"
+      }
+    }
+  ]
+}
+```
+
+```json mcp:result
+{ "ok": true, "errors": [] }
+```
+
+A face name that is not there is an error on the variable, naming it and the face (here as a dry
+run):
+
+```json mcp:apply regen-errors
+{
+  "sessionId": "<session>",
+  "label": "A measured variable on a face that is not there",
+  "dryRun": true,
+  "commands": [
+    {
+      "type": "setVariable",
+      "name": "shelf_gap",
+      "expression": {
+        "source": "distance(\"extension#15:cap:end\", \"extension#99:cap:start\")",
+        "lengthUnit": "in",
+        "angleUnit": "deg"
+      }
+    }
+  ]
+}
+```
+
+```json mcp:result
+{
+  "ok": true,
+  "errors": [
+    {
+      "where": "variable",
+      "id": "shelf_gap",
+      "code": "measure",
+      "message": "#shelf_gap: Face \"extension#99:cap:start\" is not found: no part has extension#99"
+    }
+  ]
+}
 ```
 
 ```json mcp:export

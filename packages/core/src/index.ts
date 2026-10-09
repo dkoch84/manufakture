@@ -18,8 +18,10 @@ export {
 export {
   bodyCreationProblem,
   checkDocument,
+  expressionMeasures,
   expressionReferences,
   expressionVariableNames,
+  measuresModel,
   validateDocument,
   variableOrder,
 } from './validate';
@@ -63,11 +65,17 @@ export {
   camVariableUses,
   drawingVariableUses,
   inlineVariable,
+  measuredVariables,
+  measurementKey,
+  measurementLookup,
   renameVariable,
   rewriteReferences,
+  splitMeasuredFace,
   variableUses,
   type CamVariableUse,
   type DrawingVariableUse,
+  type MeasuredFace,
+  type Measurement,
   type VariableUse,
 } from './variables';
 export {
@@ -158,6 +166,7 @@ export {
 export {
   TOMBSTONE_FIELD,
   commandIds,
+  createdFeatures,
   emptyRemapReport,
   isValidRename,
   remapDocument,

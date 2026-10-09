@@ -40,6 +40,14 @@ Changing the name of a variable renames it everywhere: in the other variables an
 
 **Delete** removes a variable nothing uses. A variable that is in use cannot simply be deleted: the panel lists where it is used and offers **Replace with value and delete**, which writes the variable's current value into each use (`#h` becomes `20mm`, and `#d - 10mm` becomes `(25mm) - 10mm` inside a larger expression) and then deletes it, as one step for Undo. The part does not change, since every use keeps the same value. **Keep it** closes the offer.
 
+### Measured variables
+
+A variable can take its value from the model: `distance("extension#1:cap:end", "extension#2:cap:start")` is the distance between two faces, and `angle("…", "…")` the angle between them. The faces are named as the measuring tool and the feature tree name them, in double quotes; they may be on two bodies of the part. Write it like any other value, with arithmetic around it: `distance("extension#1:cap:end", "extension#2:cap:start") - 1in` is the space between two sides less an inch.
+
+The model is measured again at every rebuild, so the variable follows when the model changes: widen a cabinet and a drawer width defined this way widens with it, and so does everything that reads it. Between two parallel flat faces the distance is the distance between their planes; between any other faces it is the shortest distance. Until the first rebuild after you add it, the panel shows the value as measured at the next rebuild. The faces are measured before anything that reads a measured variable is built, so with two measured variables in one part, neither sees what the features reading the other change, unless it measures faces those features make (then the other is measured first).
+
+Measuring is for variables: a feature's own field (a depth, a sketch dimension) reads the variable instead. When a face is not found any more (it was renamed, suppressed or deleted), or a variable measures faces that it shapes itself, the variable shows the error, naming the face, and the features that read it show it too. The variable never keeps an old value.
+
 ## Numbers in fields
 
 Every numeric field (the feature dialogs, the sketch dimension box and the Variables panel) takes the same expressions:

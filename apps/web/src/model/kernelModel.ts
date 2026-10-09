@@ -181,6 +181,7 @@ export function kernelRegenerator(
       parts,
       assemblies: result.assemblies,
       sources,
+      ...(result.measurements === undefined ? {} : { measurements: result.measurements }),
       ms: result.ms,
     };
   };

@@ -20,12 +20,13 @@
 // document's model and history are not touched; when the view ends, the open document is built
 // again.
 
-import { configured, type ManufaktureDocument } from '@manufakture/core';
+import { configured, type ManufaktureDocument, type Measurement } from '@manufakture/core';
 import type { AssemblyResult, FeatureResult } from '@manufakture/regen';
 import { useStore } from 'zustand';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { DocumentStoreApi } from '../state/document';
 import type { BodyInput } from '../viewport/bodies';
+import { setLatestMeasurements } from './measurements';
 
 /** One body of a regenerated part, as the app shows it. */
 export interface ModelBody {
@@ -82,6 +83,8 @@ export interface RegenView {
   assemblies?: readonly AssemblyResult[];
   /** Pinned parts the instances show. Absent: none. */
   sources?: readonly SourceModel[];
+  /** What the variables' `distance(...)` and `angle(...)` measured (#1202). Absent: none. */
+  measurements?: readonly Measurement[];
   ms: number;
 }
 
@@ -124,6 +127,11 @@ export interface ModelState {
   assemblies: readonly AssemblyResult[];
   /** Pinned parts of other documents that instances show. */
   sources: readonly SourceModel[];
+  /**
+   * What the shown result measured for the variables' `distance(...)` and `angle(...)` (#1202):
+   * the variables table evaluates measured variables with them.
+   */
+  measurements: readonly Measurement[];
   ms: number;
 }
 
@@ -140,6 +148,7 @@ export function createModelStore(): ModelStore {
     parts: [],
     assemblies: [],
     sources: [],
+    measurements: [],
     ms: 0,
   }));
 }
@@ -235,6 +244,7 @@ export function startRegen(
           return;
         }
         if (view.generation <= model.getState().generation) return;
+        setLatestMeasurements(view.measurements ?? []);
         model.setState({
           generation: view.generation,
           document,
@@ -242,6 +252,7 @@ export function startRegen(
           parts: view.parts,
           assemblies: view.assemblies ?? [],
           sources: view.sources ?? [],
+          measurements: view.measurements ?? [],
           ms: view.ms,
           error: null,
           pending: document !== latest,
@@ -381,6 +392,7 @@ export function startView(shared: SharedRegenerator, document: ManufaktureDocume
             return;
           }
           if (view.generation <= model.getState().generation) return;
+          setLatestMeasurements(view.measurements ?? []);
           model.setState({
             generation: view.generation,
             document,
@@ -388,6 +400,7 @@ export function startView(shared: SharedRegenerator, document: ManufaktureDocume
             parts: view.parts,
             assemblies: view.assemblies ?? [],
             sources: view.sources ?? [],
+            measurements: view.measurements ?? [],
             ms: view.ms,
             error: null,
             pending: mine !== requests,

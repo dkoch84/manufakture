@@ -45,6 +45,7 @@ import {
   bodyCreator,
   configurationRow,
   configured,
+  featureIdsInName,
   type Assembly,
   type BodyPropsFields,
   type ConfigRow,
@@ -59,6 +60,7 @@ import {
   type Feature,
   type ImportSource,
   type ManufaktureDocument,
+  type Measurement,
   type Part,
   type Pose,
   type Vec3,
@@ -68,6 +70,7 @@ import {
 } from '@manufakture/core';
 import {
   frameOnPlane,
+  measuredDistance,
   yieldToEventLoop,
   type BatchReply,
   type BatchRequest,
@@ -190,7 +193,9 @@ import {
   bodyUse,
   buildGraph,
   dirtyFeaturesOf,
+  featuresReading,
   readsBody,
+  variableReaders,
   routeBodies,
   type RoutedBody,
 } from './graph';
@@ -268,10 +273,20 @@ import type {
   RegenError,
   RegenResult,
   ReferenceResolution,
+  VariableError,
   RegenWarning,
   SourceResult,
 } from './types';
 import { evaluateFeature, evaluateField, evaluateVariables, type VariableValues } from './values';
+import {
+  callOwners,
+  callPart,
+  failedMeasurement,
+  measuredCalls,
+  stuckMessages,
+  variableList,
+  type MeasuredCall,
+} from './measured';
 import { profileOf } from './sketches';
 
 /**
@@ -454,6 +469,58 @@ interface LiveBody extends RoutedBody {
   solids: number;
 }
 
+/**
+ * A regen result's `measurements` and `variableErrors` (#1202): absent unless a variable
+ * measures the model.
+ */
+function measuredResults(
+  document: ManufaktureDocument,
+  variables: VariableValues,
+): Pick<RegenResult, 'measurements' | 'variableErrors'> {
+  if (variables.measurements.length === 0) return {};
+  const touched = variableReaders(
+    document.variables,
+    measuredCalls(document.variables).flatMap((c) => c.variables),
+  );
+  const errors: VariableError[] = [];
+  for (const v of document.variables) {
+    const e = variables.errors.get(v.name);
+    if (e === undefined || !touched.has(v.name)) continue;
+    const read = v.expression.source.slice(e.start, e.end).replace(/^#/, '');
+    const message =
+      e.code === 'unknown-variable' && variables.errors.has(read)
+        ? `#${v.name} reads #${read}, which does not evaluate`
+        : `#${v.name}: ${e.message}`;
+    errors.push({ name: v.name, code: e.code, message });
+  }
+  return {
+    measurements: variables.measurements.map((m) => ({ ...m, faces: [...m.faces] })),
+    ...(errors.length === 0 ? {} : { variableErrors: errors }),
+  };
+}
+
+/** Why a measurement found neither pair of faces: the kernel's word on the first face missing. */
+function measureFailure(
+  call: MeasuredCall,
+  partId: string,
+  replies: readonly { r: OpResult | null }[],
+): string {
+  for (const { r } of replies) {
+    if (r === null) continue;
+    if (!r.ok) return `${call.fn}() failed on ${partId}: ${r.error.message}`;
+    const items = (r.value as MeasureResult).items;
+    const i = items.findIndex((x) => !x.ok);
+    const item = items[i];
+    if (item !== undefined && !item.ok) {
+      const face = call.faces[i as 0 | 1].face;
+      return item.status === 'ambiguous'
+        ? `Face "${face}" is ambiguous on ${partId}: ${item.message}`
+        : `Face "${face}" is not found on ${partId}`;
+    }
+  }
+  return `${call.fn}() could not measure on ${partId}`;
+}
+
 /** A `shapesFrom` for a batch reading shapes of two instances: one of them is stale. */
 const MIXED_INSTANCES = -1;
 
@@ -492,6 +559,8 @@ interface Run {
   sources: Map<string, PartState>;
   /** The document as stored, which instances in other rows are configured from. */
   stored: ManufaktureDocument;
+  /** Each document's variables as this run measured and evaluated them (`#variables`). */
+  variables: Map<ManufaktureDocument, VariableValues>;
 }
 
 /** Where a part is built: the document being regenerated, or a derived part's source. */
@@ -1003,6 +1072,7 @@ export class RegenEngine {
         implementation: REGEN_IMPLEMENTATION_VERSION,
       },
       sources: new Map(),
+      variables: new Map(),
     };
     return this.#running;
   }
@@ -1028,6 +1098,7 @@ export class RegenEngine {
           run.instance = error.instance;
           run.used.clear();
           run.sources.clear();
+          run.variables.clear();
           continue;
         }
         throw error;
@@ -1048,7 +1119,7 @@ export class RegenEngine {
     document: ManufaktureDocument,
     options: RegenOptions,
   ): Promise<RegenResult> {
-    const variables = evaluateVariables(document.variables);
+    const variables = await this.#variables(run, document);
     this.#derived.begin();
     const reuseChange =
       options.change !== undefined &&
@@ -1214,6 +1285,7 @@ export class RegenEngine {
       assemblies: assembled.results,
       sources,
       ...(members.meshes === null ? {} : { memberMeshes: members.meshes }),
+      ...measuredResults(document, variables),
       counters: run.counters,
       ms: 0,
     };
@@ -1447,17 +1519,221 @@ export class RegenEngine {
     return reply;
   }
 
+  /**
+   * The variables of `document` as this run evaluates them, measured variables included (#1202;
+   * `measured.ts` says what is measured and when). Once per run and document: the parts a
+   * measurement needs are built without the features reading still unknown measured variables,
+   * which the full build that follows serves from the cache.
+   */
+  async #variables(
+    run: Run,
+    document: ManufaktureDocument,
+    scope: BuildScope = { ns: null, depth: 0, versions: run.versions },
+  ): Promise<VariableValues> {
+    const known = run.variables.get(document);
+    if (known !== undefined) return known;
+    const calls = measuredCalls(document.variables);
+    if (calls.length === 0) {
+      const values = evaluateVariables(document.variables);
+      run.variables.set(document, values);
+      return values;
+    }
+    const done = new Map<string, Measurement>();
+    const parts = new Map<string, Part>();
+    for (const c of calls) {
+      const p = callPart(document, c);
+      if (p.ok) parts.set(c.key, p.part);
+      else done.set(c.key, failedMeasurement(c, null, p.message));
+    }
+    for (;;) {
+      const waiting = calls.filter((c) => !done.has(c.key));
+      if (waiting.length === 0) break;
+      // Unknown until measured: the variables making a waiting call, and those reading them.
+      const unknown = variableReaders(
+        document.variables,
+        waiting.flatMap((c) => c.variables),
+      );
+      let progress = false;
+      for (const part of document.parts) {
+        const here = waiting.filter((c) => parts.get(c.key) === part);
+        if (here.length === 0) continue;
+        const graph = buildGraph(part, document.variables);
+        const skip = featuresReading(graph, unknown);
+        const ready: MeasuredCall[] = [];
+        for (const c of here) {
+          const blocked = callOwners(c).filter((id) => skip.has(id));
+          if (blocked.length === 0) {
+            ready.push(c);
+            continue;
+          }
+          // Made by a feature that depends on the very variables making the call: a cycle.
+          const own = featuresReading(graph, variableReaders(document.variables, c.variables));
+          const cyclic = blocked.find((id) => own.has(id));
+          if (cyclic === undefined) continue; // waits for another measured variable
+          const face = c.faces.find((f) => featureIdsInName(f.face).includes(cyclic))!.face;
+          const who = variableList(c.variables);
+          done.set(
+            c.key,
+            failedMeasurement(
+              c,
+              part.id,
+              `${who} measures face "${face}", which ${cyclic} makes, and ${cyclic} depends on ${who}: a variable cannot measure faces it shapes`,
+            ),
+          );
+          progress = true;
+        }
+        if (ready.length === 0) continue;
+        const values = evaluateVariables(document.variables, [...done.values()]);
+        const state = await this.#buildPart(run, part, document, values, scope, skip);
+        for (const [key, m] of await this.#measureCalls(run, state, ready)) done.set(key, m);
+        progress = true;
+      }
+      if (!progress) {
+        // Every waiting call measures faces made by features reading another waiting variable:
+        // some of them read one another, and the rest wait on those.
+        const why = stuckMessages(document, waiting, parts);
+        for (const c of waiting) {
+          done.set(c.key, failedMeasurement(c, parts.get(c.key)?.id ?? null, why.get(c.key)!));
+        }
+        break;
+      }
+    }
+    const measurements = calls.map((c) => done.get(c.key)!);
+    const values = evaluateVariables(document.variables, measurements);
+    run.variables.set(document, values);
+    return values;
+  }
+
+  /**
+   * Measure `calls` on the bodies of `state` (one kernel batch): each face on the body carrying
+   * it (the two may be different bodies), `distance` the planes' distance of two parallel planar
+   * faces, else the minimum distance (`measuredDistance`), `angle` the angle between them.
+   */
+  async #measureCalls(
+    run: Run,
+    state: PartState,
+    calls: readonly MeasuredCall[],
+  ): Promise<Map<string, Measurement>> {
+    const out = new Map<string, Measurement>();
+    const partId = state.part.id;
+    const pending: {
+      call: MeasuredCall;
+      replies: { a: LiveBody; b: LiveBody; r: OpResult | null }[];
+    }[] = [];
+    for (const call of calls) {
+      if (state.broken) {
+        out.set(
+          call.key,
+          failedMeasurement(call, partId, `${partId} failed to build before the faces measured`),
+        );
+        continue;
+      }
+      const candidates = call.faces.map((f) => {
+        const ids = featureIdsInName(f.face);
+        return state.bodies.filter((b) => ids.every((id) => b.carries.has(id)));
+      });
+      const lost = call.faces.findIndex((_, i) => candidates[i]!.length === 0);
+      if (lost >= 0) {
+        out.set(call.key, failedMeasurement(call, partId, this.#lostFace(state, call, lost)));
+        continue;
+      }
+      const replies: { a: LiveBody; b: LiveBody; r: OpResult | null }[] = [];
+      for (const a of candidates[0]!.slice(0, 8)) {
+        for (const b of candidates[1]!.slice(0, 8)) {
+          const reply: { a: LiveBody; b: LiveBody; r: OpResult | null } = { a, b, r: null };
+          replies.push(reply);
+          state.batch.ops.push({
+            op: 'measure',
+            shape: a.shape,
+            targets: [
+              { kind: 'face', name: call.faces[0].face },
+              b === a
+                ? { kind: 'face', name: call.faces[1].face }
+                : { kind: 'face', name: call.faces[1].face, shape: b.shape },
+            ],
+          });
+          state.batch.metas.push({ type: 'resolve', take: (r) => (reply.r = r) });
+          this.#usesBodies(state.batch, a === b ? [a] : [a, b]);
+        }
+      }
+      pending.push({ call, replies });
+    }
+    run.counters.otherOps += pending.reduce((n, p) => n + p.replies.length, 0);
+    await this.#flush(run, state);
+    for (const { call, replies } of pending) {
+      const found = replies.filter(
+        (x) => x.r?.ok === true && (x.r.value as MeasureResult).items.every((i) => i.ok),
+      );
+      if (found.length === 0) {
+        out.set(call.key, failedMeasurement(call, partId, measureFailure(call, partId, replies)));
+        continue;
+      }
+      const bodiesOf = (i: 0 | 1) => [...new Set(found.map((x) => (i === 0 ? x.a : x.b).id))];
+      const several = ([0, 1] as const).find((i) => bodiesOf(i).length > 1);
+      if (several !== undefined) {
+        out.set(
+          call.key,
+          failedMeasurement(
+            call,
+            partId,
+            `Face "${call.faces[several].face}" is on more than one body of ${partId} (${bodiesOf(several).join(', ')})`,
+          ),
+        );
+        continue;
+      }
+      const result = found[0]!.r!.ok ? (found[0]!.r!.value as MeasureResult) : null;
+      const value =
+        result === null
+          ? null
+          : call.fn === 'distance'
+            ? measuredDistance(result)
+            : (result.angle?.value ?? null);
+      out.set(
+        call.key,
+        value === null
+          ? failedMeasurement(
+              call,
+              partId,
+              `angle() needs two faces with a direction (planar, cylindrical or conical): "${call.written[0]}" and "${call.written[1]}"`,
+            )
+          : { fn: call.fn, faces: call.written, partId, value },
+      );
+    }
+    return out;
+  }
+
+  /** Why no body of `state` carries face `i` of `call`. */
+  #lostFace(state: PartState, call: MeasuredCall, i: number): string {
+    const face = call.faces[i]!.face;
+    const partId = state.part.id;
+    for (const id of featureIdsInName(face)) {
+      const status = state.results.get(id)?.status;
+      if (status === undefined && !state.part.features.some((f) => f.id === id)) continue;
+      if (status === undefined) {
+        return `Face "${face}" is not found on ${partId}: ${id} is rolled back or depends on the variable`;
+      }
+      if (status !== 'ok') return `Face "${face}" is not found on ${partId}: ${id} is ${status}`;
+    }
+    return `Face "${face}" is not found on ${partId}: no body has it`;
+  }
+
   /** A cache key of a feature of `state`'s part: its document's versions and namespace. */
   #key(state: BuildScope, parts: Record<string, unknown>): string {
     return cacheKey(state.versions, state.ns === null ? parts : { namespace: state.ns, ...parts });
   }
 
+  /**
+   * `skip`: features left out, as if they were not there (no result, no bodies). Only measured
+   * variables use it (`#variables`): the part without the features reading them, which never
+   * changes what any other feature reads.
+   */
   async #buildPart(
     run: Run,
     part: Part,
     document: ManufaktureDocument,
     variables: VariableValues,
     scope: BuildScope,
+    skip?: ReadonlySet<string>,
   ): Promise<PartState> {
     const graph = buildGraph(part, document.variables);
     const lookup = (id: string) => graph.byId.get(id);
@@ -1481,6 +1757,7 @@ export class RegenEngine {
     const domainReads = new Map<string, NamespaceRead>();
 
     for (const [i, f] of graph.active.entries()) {
+      if (skip?.has(f.id)) continue;
       const started = now();
       const result: FeatureResult = {
         featureId: f.id,
@@ -2033,11 +2310,13 @@ export class RegenEngine {
     const { document, part, row, namespace: ns } = opened;
     let built = run.sources.get(ns);
     if (built === undefined) {
-      built = await this.#buildPart(run, part, document, evaluateVariables(document.variables), {
+      const scope: BuildScope = {
         ns,
         depth,
         versions: { ...run.versions, namingScheme: document.namingScheme },
-      });
+      };
+      const variables = await this.#variables(run, document, scope);
+      built = await this.#buildPart(run, part, document, variables, scope);
       run.sources.set(ns, built);
     }
     const where = describeSource(source, row);
@@ -2322,7 +2601,7 @@ export class RegenEngine {
     }
     const run = this.#newRun(generation, document, stored);
     return this.#attempt(run, async () => {
-      const variables = evaluateVariables(document.variables);
+      const variables = await this.#variables(run, document);
       const states = new Map<string, PartState>();
       const assembled = await this.#assemble(
         run,
@@ -2415,7 +2694,9 @@ export class RegenEngine {
     options: DrawingRequestOptions,
     body: (host: DrawingHost) => Promise<T>,
   ): Promise<T | null> {
-    return this.#onDemand(document, options, (run) => body(this.#drawingHost(run, document)));
+    return this.#onDemand(document, options, async (run) =>
+      body(await this.#drawingHost(run, document)),
+    );
   }
 
   // Oriented sizes ----------------------------------------------------------------------------
@@ -2585,7 +2866,7 @@ export class RegenEngine {
         run,
         part,
         document,
-        evaluateVariables(document.variables),
+        await this.#variables(run, document),
         {
           ns: null,
           depth: 0,
@@ -2669,14 +2950,14 @@ export class RegenEngine {
     } catch (error) {
       return Promise.reject(error);
     }
-    return this.#onDemand(document, { ...options, generation }, (run) =>
-      this.#cam.geometry(this.#camHost(run, document), document, setup, options),
+    return this.#onDemand(document, { ...options, generation }, async (run) =>
+      this.#cam.geometry(await this.#camHost(run, document), document, setup, options),
     );
   }
 
   /** What the CAM stage builds and runs through, for one attempt of one request. */
-  #camHost(run: Run, document: ManufaktureDocument): CamHost {
-    const variables = evaluateVariables(document.variables);
+  async #camHost(run: Run, document: ManufaktureDocument): Promise<CamHost> {
+    const variables = await this.#variables(run, document);
     const states = new Map<string, PartState>();
     return {
       generation: run.generation,
@@ -2751,8 +3032,8 @@ export class RegenEngine {
   }
 
   /** What the drawing stage builds and runs through, for one attempt of one request. */
-  #drawingHost(run: Run, document: ManufaktureDocument): DrawingHost {
-    const variables = evaluateVariables(document.variables);
+  async #drawingHost(run: Run, document: ManufaktureDocument): Promise<DrawingHost> {
+    const variables = await this.#variables(run, document);
     const states = new Map<string, PartState>();
     const partFor = async (id: string): Promise<PartState | undefined> => {
       let state = states.get(id);
@@ -3345,7 +3626,7 @@ export class RegenEngine {
     const doc = variant.value;
     const part = doc.parts.find((p) => p.id === partId);
     if (part === undefined) return undefined;
-    const state = await this.#buildPart(run, part, doc, evaluateVariables(doc.variables), {
+    const state = await this.#buildPart(run, part, doc, await this.#variables(run, doc), {
       ns: null,
       depth: 0,
       versions: run.versions,

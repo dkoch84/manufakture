@@ -94,7 +94,8 @@ export interface TreeBody {
 
 /** The outline of the document and its last regen. */
 export function tree(document: ManufaktureDocument, result: RegenResult | null) {
-  const values = evaluateVariables(document.variables);
+  // A variable measuring the model (`distance(...)`) reads what the last regen measured.
+  const values = evaluateVariables(document.variables, result?.measurements);
   const parts = document.parts.map((part) => {
     const built = result?.parts.find((p) => p.partId === part.id);
     const status = new Map(built?.features.map((f) => [f.featureId, f]) ?? []);
@@ -896,7 +897,11 @@ async function assemblyInterference(
     placed.push({ instance: inst.instanceId, shapes, transform: inst.transform });
   }
   const instances = placed.map((i) => i.instance);
-  const input = resultSolverInput(assembly, solved, evaluateVariables(ctx.document.variables));
+  const input = resultSolverInput(
+    assembly,
+    solved,
+    evaluateVariables(ctx.document.variables, ctx.model.last?.measurements),
+  );
   if (q.travel !== undefined) {
     if (Object.keys(poses).length > 0) {
       return sessionError('invalid-input', 'Give poses or a travel, not both.');
@@ -1321,7 +1326,7 @@ export function quantities(ctx: QueryContext): Quantities {
 // Errors
 
 export interface ErrorLine {
-  where: 'feature' | 'instance' | 'mate' | 'reference-import';
+  where: 'feature' | 'instance' | 'mate' | 'reference-import' | 'variable';
   partId?: string;
   featureId?: string;
   assemblyId?: string;
@@ -1334,6 +1339,17 @@ export interface ErrorLine {
 /** Every regen error and warning of the head, errors first. */
 export function errorsOf(result: RegenResult | null, references: References): ErrorLine[] {
   const out: ErrorLine[] = [];
+  // Variables that measure the model (or read one that does) and do not evaluate: a lost face,
+  // a cycle. The features reading them carry their own errors below.
+  for (const v of result?.variableErrors ?? []) {
+    out.push({
+      where: 'variable',
+      id: v.name,
+      severity: 'error',
+      code: v.code,
+      message: v.message,
+    });
+  }
   for (const part of result?.parts ?? []) {
     for (const f of part.features) {
       for (const e of f.errors) {

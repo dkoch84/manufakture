@@ -30,6 +30,41 @@ afterEach(async () => {
 const inch = (x: number) => x * 25.4;
 
 describe('the cabinet', () => {
+  it('a measured variable: its value in the outline, a lost face in the errors (#1202)', async () => {
+    const s = await start(cabinetDocument());
+    const width = (source: string) => ({
+      type: 'setVariable' as const,
+      name: 'opening',
+      expression: { source, lengthUnit: 'in' as const, angleUnit: 'deg' as const },
+    });
+    // The bottom's top to the shelf's underside: the bottom opening's height.
+    const r = ok(
+      await s.apply({
+        label: 'Measure the opening',
+        commands: [width('distance("extension#3:cap:end", "extension#5:cap:start")')],
+      }),
+    );
+    expect(r.errors).toEqual([]);
+    const tree = ok(await s.tree());
+    const opening = tree.variables.find((v) => v.name === 'opening')!;
+    expect(opening.value!.value).toBeCloseTo(inch(14 - 23 / 32), 6);
+    expect(opening.error).toBeUndefined();
+
+    const lost = ok(
+      await s.apply({
+        label: 'Measure a face that is not there',
+        commands: [width('distance("extension#3:cap:end", "extension#5:cap:middle")')],
+      }),
+    );
+    const message = '#opening: Face "extension#5:cap:middle" is not found on part#1';
+    expect(lost.errors).toEqual([
+      { where: 'variable', id: 'opening', severity: 'error', code: 'measure', message },
+    ]);
+    expect(ok(await s.errors())).toEqual(lost.errors);
+    const after = ok(await s.tree()).variables.find((v) => v.name === 'opening')!;
+    expect(after).toMatchObject({ value: null, error: message.slice('#opening: '.length) });
+  });
+
   it('outlines the document and gives each object as JSON', async () => {
     const s = await start(cabinetDocument());
     const tree = ok(await s.tree());

@@ -2644,6 +2644,7 @@ export function App({
                   documents={documents}
                   selection={selection}
                   printSetupId={fitSetupId}
+                  model={model}
                 />
               </>
             ) : machining && assemblyId === null ? (
@@ -2663,6 +2664,7 @@ export function App({
                   documents={documents}
                   selection={selection}
                   printSetupId={fitSetupId}
+                  model={model}
                 />
               </>
             ) : assemblyId !== null && !locked && assemblyPanel?.kind === 'mate' ? (
@@ -2835,6 +2837,7 @@ export function App({
                       documents={documents}
                       selection={selection}
                       printSetupId={fitSetupId}
+                      model={model}
                     />
                     <ScriptsPanel
                       documents={documents}

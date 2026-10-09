@@ -7,6 +7,8 @@ import {
 import { dirtyFeaturesOf } from '@manufakture/regen';
 import { angleQuantity, evaluate, lengthQuantity, numberQuantity } from '@manufakture/units';
 import { describe, expect, it } from 'vitest';
+import { setLatestMeasurements } from '../model/measurements';
+import { evaluateVariables } from '../sketcher/values';
 import { boxDocument, mm } from './box.test-fixture';
 import {
   checkDraft,
@@ -568,5 +570,69 @@ describe('regeneration after a variable edit', () => {
       value: lengthQuantity(20),
     });
     expect(dirtyFeaturesOf(doc, hOnly, 'part#1')).toEqual(['extrude#1', 'fillet#1']);
+  });
+});
+
+describe('measured variables (#1202)', () => {
+  const GAP = 'distance("extrude#1:cap:start", "extrude#1:cap:end")';
+  const measured = [
+    {
+      fn: 'distance' as const,
+      faces: ['extrude#1:cap:start', 'extrude#1:cap:end'] as [string, string],
+      partId: 'part#1',
+      value: 20,
+    },
+  ];
+  const withGap = (source: string) =>
+    applyCommand(boxDocument(), { type: 'setVariable', name: 'gap', expression: mm(source) });
+
+  it('reads what the regen measured, and says when it has not measured yet', () => {
+    const r = withGap(`${GAP} - 5mm`);
+    if (!r.ok) throw new Error(r.error.message);
+    const doc = r.value.document;
+    expect(evaluateTable(doc.variables, measured).get('gap')).toEqual({
+      ok: true,
+      value: lengthQuantity(15),
+    });
+    expect(evaluateTable(doc.variables).get('gap')).toEqual({
+      ok: false,
+      message: 'Measured from the model at the next rebuild.',
+    });
+    const lost = [{ ...measured[0]!, value: null, error: 'Face "x" is not found on part#1' }];
+    expect(evaluateTable(doc.variables, lost).get('gap')).toEqual({
+      ok: false,
+      message: 'Face "x" is not found on part#1',
+    });
+    expect(variableRows(doc, evaluateTable(doc.variables, measured)).at(-1)).toMatchObject({
+      name: 'gap',
+      type: 'length',
+      value: '15.00 mm',
+      error: null,
+    });
+  });
+
+  it('the dialogs read the measurements of the result shown last', () => {
+    const r = withGap(`${GAP} - 5mm`);
+    if (!r.ok) throw new Error(r.error.message);
+    expect(evaluateVariables(r.value.document).gap).toBeUndefined();
+    setLatestMeasurements(measured);
+    try {
+      expect(evaluateVariables(r.value.document).gap).toEqual(lengthQuantity(15));
+      expect(evaluateTable(r.value.document.variables).get('gap')).toMatchObject({ ok: true });
+    } finally {
+      setLatestMeasurements([]);
+    }
+  });
+
+  it('a draft that measures is accepted before any regen, with its type checked', () => {
+    const doc = boxDocument();
+    const added = checkDraft(doc, { name: 'gap', source: `${GAP} / 2`, type: 'length' }, null);
+    expect(added).toMatchObject({ ok: true, label: 'Add variable #gap' });
+    expect(apply(doc, added).variables.at(-1)!.expression.source).toBe(`${GAP} / 2`);
+    const wrong = checkDraft(doc, { name: 'gap', source: GAP, type: 'angle' }, null);
+    expect(wrong).toMatchObject({
+      ok: false,
+      errors: { expression: expect.stringMatching(/not an angle/) },
+    });
   });
 });

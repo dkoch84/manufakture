@@ -16,6 +16,7 @@ import {
   drawingVariableUses,
   findPart,
   inlineVariable,
+  measurementLookup,
   renameVariable,
   variableOrder,
   variableParameters,
@@ -23,6 +24,7 @@ import {
   type Command,
   type DisplayUnits,
   type ManufaktureDocument,
+  type Measurement,
   type StoredExpression,
   type CamVariableUse,
   type DrawingVariableUse,
@@ -36,9 +38,11 @@ import {
   fromMillimetres,
   fromRadians,
   isValidVariableName,
+  type MeasureLookup,
   type Quantity,
 } from '@manufakture/units';
 import { formatQuantity, kindOfQuantity } from '../components/expression';
+import { latestMeasurements } from '../model/measurements';
 import { isPlainNumber, type Variables } from '../sketcher/values';
 
 export type VariableType = 'length' | 'angle' | 'number' | 'any';
@@ -52,11 +56,24 @@ export const VARIABLE_TYPES: readonly (readonly [VariableType, string])[] = [
 
 export type Evaluated = { ok: true; value: Quantity } | { ok: false; message: string };
 
+/** What a variable measuring the model shows before a regen has measured it. */
+export const NOT_MEASURED = 'Measured from the model at the next rebuild.';
+
 /**
  * Every variable evaluated in dependency order, each in the units it was stored with. A variable
- * that fails says why; one that reads a failing variable says which.
+ * that fails says why; one that reads a failing variable says which. A variable measuring the
+ * model (`distance(...)`, `angle(...)`) reads `measurements` (default: what the shown regen
+ * measured, `latestMeasurements`); one not measured yet says so, or with `provisional` takes 1 mm (or 1 rad), so a draft's
+ * type can still be checked before it is saved.
  */
-export function evaluateTable(variables: readonly Variable[]): Map<string, Evaluated> {
+export function evaluateTable(
+  variables: readonly Variable[],
+  measurements: readonly Measurement[] = latestMeasurements(),
+  options: { provisional?: boolean } = {},
+): Map<string, Evaluated> {
+  const known = measurementLookup(measurements);
+  const measure: MeasureLookup = (request) =>
+    known(request) ?? (options.provisional === true ? { ok: true, value: 1 } : undefined);
   const out = new Map<string, Evaluated>();
   const order = variableOrder(variables);
   if (!order.ok) {
@@ -73,6 +90,7 @@ export function evaluateTable(variables: readonly Variable[]): Map<string, Evalu
         const e = out.get(n);
         return e?.ok ? e.value : undefined;
       },
+      measure,
     });
     if (r.ok) {
       out.set(name, r);
@@ -80,12 +98,15 @@ export function evaluateTable(variables: readonly Variable[]): Map<string, Evalu
     }
     const failed = r.error.code === 'unknown-variable' ? r.error : null;
     const dep = failed ? v.expression.source.slice(failed.start, failed.end).replace(/^#/, '') : '';
+    const unmeasured = r.error.code === 'not-measured';
     out.set(name, {
       ok: false,
       message:
         failed && out.has(dep)
           ? `#${dep} does not evaluate, so neither does this.`
-          : r.error.message,
+          : unmeasured
+            ? NOT_MEASURED
+            : r.error.message,
     });
   }
   return out;
@@ -394,10 +415,14 @@ export function withUnit(source: string, type: 'length' | 'angle', units: Displa
 }
 
 /** The draft for a new variable, or for editing `name`. */
-export function draftOf(doc: ManufaktureDocument, name: string | null): VariableDraft {
+export function draftOf(
+  doc: ManufaktureDocument,
+  name: string | null,
+  measurements?: readonly Measurement[],
+): VariableDraft {
   const v = name === null ? undefined : doc.variables.find((x) => x.name === name);
   if (!v) return { name: '', source: '', type: 'length' };
-  const e = evaluateTable(doc.variables).get(v.name);
+  const e = evaluateTable(doc.variables, measurements, { provisional: true }).get(v.name);
   return { name: v.name, source: v.expression.source, type: e?.ok ? typeOf(e.value) : 'any' };
 }
 
@@ -409,6 +434,7 @@ export function checkDraft(
   doc: ManufaktureDocument,
   draft: VariableDraft,
   original: string | null,
+  measurements?: readonly Measurement[],
 ): DraftCheck {
   const errors: { name?: string; expression?: string } = {};
   const name = draft.name.trim().replace(/^#/, '');
@@ -457,7 +483,10 @@ export function checkDraft(
     );
   }
 
-  const evaluated = evaluateTable(probe(typed)).get(selfName);
+  // A measurement not made yet counts as 1 mm (or 1 rad) here: saved, it is measured at regen.
+  const evaluate = (source: string) =>
+    evaluateTable(probe(source), measurements, { provisional: true }).get(selfName);
+  const evaluated = evaluate(typed);
   if (!evaluated) return fail('This does not evaluate.');
   if (!evaluated.ok) return fail(evaluated.message);
   let source = typed;
@@ -466,7 +495,7 @@ export function checkDraft(
   if (draft.type !== 'any' && kind !== draft.type) {
     if ((draft.type === 'length' || draft.type === 'angle') && kind === 'number') {
       source = withUnit(typed, draft.type, doc.units);
-      const again = evaluateTable(probe(source)).get(selfName);
+      const again = evaluate(source);
       if (!again?.ok) return fail(again?.message ?? 'This does not evaluate.');
       value = again.value;
     } else {
@@ -557,8 +586,9 @@ export function deleteCommand(doc: ManufaktureDocument, name: string): DeleteChe
 export function replaceWithValueCommand(
   doc: ManufaktureDocument,
   name: string,
+  measurements?: readonly Measurement[],
 ): { ok: true; command: Command; label: string; literal: string } | { ok: false; message: string } {
-  const e = evaluateTable(doc.variables).get(name);
+  const e = evaluateTable(doc.variables, measurements).get(name);
   if (!e) return { ok: false, message: `There is no variable #${name}.` };
   if (!e.ok) return { ok: false, message: `#${name} has no value to use: ${e.message}` };
   const literal = quantityLiteral(e.value, doc.units);

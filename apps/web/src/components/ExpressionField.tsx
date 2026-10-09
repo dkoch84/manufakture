@@ -10,6 +10,7 @@
 // it is closed they go to `onKeyDown` as usual.
 
 import type { DisplayUnits } from '@manufakture/core';
+import type { MeasureLookup } from '@manufakture/units';
 import {
   useId,
   useLayoutEffect,
@@ -49,6 +50,12 @@ export interface ExpressionFieldProps {
   error?: string | undefined;
   /** An extra check of the value; returns what is wrong, or null. */
   validate?: ((value: number) => string | null) | undefined;
+  /**
+   * Measurements for `distance(...)` and `angle(...)`, where the field may measure the model (a
+   * variable's value); one not made yet shows as measured at the next rebuild, not as an error.
+   * Absent: such a call is an error, as everywhere but in variables.
+   */
+  measure?: MeasureLookup | undefined;
   /** `field`: a dialog field with its note under it. `compact`: the sketch's dimension box. */
   variant?: 'field' | 'compact';
   testId?: string;
@@ -73,6 +80,7 @@ export function ExpressionField({
   ariaLabel,
   error,
   validate,
+  measure,
   variant = 'field',
   testId,
   errorTestId,
@@ -98,7 +106,7 @@ export function ExpressionField({
     input.current.setSelectionRange(at, at);
   });
 
-  const analysis = analyzeExpression(value, kind, units, variables, validate);
+  const analysis = analyzeExpression(value, kind, units, variables, validate, measure);
   const token = caret === null ? null : completionToken(value, caret);
   const options = token ? matchingNames(names ?? Object.keys(variables), token.prefix) : [];
   const open = !dismissed && token !== null && worthOffering(options, token);

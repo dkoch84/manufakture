@@ -19,11 +19,19 @@ export type TokenKind =
   | ':'
   /** `%`, after a percent slope */
   | '%'
+  /**
+   * A quoted face name, `"extrude#1:cap:end"`: a `"` that starts an argument (right after `(` or
+   * `,`) opens one, where it could never be an inch mark. `text` holds what is between the quotes.
+   */
+  | 'string'
   | 'eof';
 
 export interface Token {
   readonly kind: TokenKind;
-  /** For `op` the normalised operator (`+ - * / ^`); for `variable` the bare name. */
+  /**
+   * For `op` the normalised operator (`+ - * / ^`); for `variable` the bare name; for `string`
+   * the text between the quotes.
+   */
   readonly text: string;
   readonly start: number;
   readonly end: number;
@@ -111,6 +119,14 @@ export function tokenize(source: string): Result<Token[]> {
       }
       while (isIdentPart(source[i])) i++;
       tokens.push({ kind: 'variable', text: source.slice(start + 1, i), start, end: i });
+      continue;
+    }
+    const previous = tokens[tokens.length - 1];
+    if (c === '"' && (previous?.kind === '(' || previous?.kind === ',')) {
+      const close = source.indexOf('"', i + 1);
+      if (close < 0) return err('syntax', 'Missing closing quote', start, start + 1);
+      tokens.push({ kind: 'string', text: source.slice(i + 1, close), start, end: close + 1 });
+      i = close + 1;
       continue;
     }
     const single = SINGLE_CHAR[c];

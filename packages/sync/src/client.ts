@@ -5,6 +5,7 @@ import {
   checkDocument,
   createdIds,
   documentCounters,
+  createdFeatures,
   emptyRemapReport,
   idCounter,
   idText,
@@ -1482,6 +1483,9 @@ export class SyncClient {
     const next = structuredClone(documentCounters(doc)) as MutableCounters;
     const aliases = new Set<ScopeKey>();
     const definers: Command[] = [];
+    // The features the pending entries walked so far create, in their old naming: a measured
+    // variable's face names find their part through them (`RemapOptions.features`).
+    const pendingFeatures: [string, string][] = [];
     const report = emptyRemapReport();
     let renamed = false;
     blocked = false;
@@ -1524,12 +1528,16 @@ export class SyncClient {
         const out = remapIds([...definers, oldCommand], table, {
           document: this.confirmed,
           report: walk,
+          features: pendingFeatures,
         });
         e.command = out[out.length - 1]!;
         e.created = remapCreatedIds(oldCreated, table);
         if (e.merge !== undefined) {
           const kept = e.merge.origins.filter((o): o is Command => o !== null);
-          const renamedOrigins = remapIds(kept, table, { document: this.confirmed });
+          const renamedOrigins = remapIds(kept, table, {
+            document: this.confirmed,
+            features: pendingFeatures,
+          });
           let k = 0;
           e.merge = {
             command: e.command,
@@ -1543,13 +1551,14 @@ export class SyncClient {
           renamed = true;
           if (walk !== report) {
             const own = emptyRemapReport();
-            remapIds([oldCommand], table, { report: own });
+            remapIds([oldCommand], table, { report: own, features: pendingFeatures });
             report.renamed += own.renamed;
             report.orderFlips += own.orderFlips;
           }
         }
       }
       if (defines(oldCommand)) definers.push(oldCommand);
+      pendingFeatures.push(...createdFeatures([oldCommand]));
       if (hidden.has(e) || blocked) {
         hidden.add(e);
         blocked = true;
@@ -1609,14 +1618,16 @@ export class SyncClient {
 
     // The undo and redo stacks follow the renames (decision 8).
     if (!isEmptyTable(table)) {
+      // Every pending entry's features, in old naming, so the stacks' measured variables resolve.
+      const options = { document: this.confirmed, features: pendingFeatures };
       for (const u of this.undoStack) {
         if (u.confirmed && u.inverse !== undefined) {
-          u.inverse = remapIds([u.inverse], table, { document: this.confirmed })[0]!;
+          u.inverse = remapIds([u.inverse], table, options)[0]!;
         }
         u.touched = renameObjectKeys(u.touched, table);
       }
       for (const r of this.redoStack) {
-        r.command = remapIds([r.command], table, { document: this.confirmed })[0]!;
+        r.command = remapIds([r.command], table, options)[0]!;
       }
     }
     this.pruneRefusals();

@@ -1087,3 +1087,121 @@ function textualRename(
   };
   return { ...(walk(doc) as ManufaktureDocument), id: doc.id };
 }
+
+describe('remap: face names a measured variable quotes (#1202)', () => {
+  const setVariable = (source: string): Command => ({
+    type: 'setVariable',
+    name: 'gap',
+    expression: mm(source),
+  });
+  const sourceOf = (c: Command) => (c as { expression: { source: string } }).expression.source;
+
+  it('renames a renumbered feature inside distance(), through the part that has it', () => {
+    const doc = bracket();
+    const table: RenameTable = { [P1]: { 'extrude#1': 'extrude#7', e1: 'e9' } };
+    const out = one(
+      setVariable('distance("extrude#1:side:e1", "extrude#1:cap:end") - 1in'),
+      table,
+      doc,
+    );
+    expect(sourceOf(out)).toBe('distance("extrude#7:side:e9", "extrude#7:cap:end") - 1in');
+    // A table for another part leaves it alone.
+    const other = one(
+      setVariable('distance("extrude#1:cap:start", "extrude#1:cap:end")'),
+      {
+        'part:part#2': { 'extrude#1': 'extrude#7' },
+      },
+      doc,
+    );
+    expect(sourceOf(other)).toBe('distance("extrude#1:cap:start", "extrude#1:cap:end")');
+  });
+
+  it('a tombstoned feature never binds again', () => {
+    const out = one(
+      setVariable('angle("extrude#1:cap:end", "extrude#1:side:e1")'),
+      { [P1]: { 'extrude#1': null } },
+      bracket(),
+    );
+    expect(sourceOf(out)).toBe(
+      `angle("extrude#${TOMBSTONE_NAME}:cap:end", "extrude#${TOMBSTONE_NAME}:side:e1")`,
+    );
+  });
+
+  it('a qualified name renames its part and the name in that part', () => {
+    const table: RenameTable = {
+      document: { 'part#1': 'part#4' },
+      'part:part#1': { 'extrude#1': 'extrude#2' },
+    };
+    const out = one(
+      setVariable('distance("part#1/extrude#1:cap:end", "part#1/extrude#1:cap:start")'),
+      table,
+    );
+    expect(sourceOf(out)).toBe(
+      'distance("part#4/extrude#2:cap:end", "part#4/extrude#2:cap:start")',
+    );
+  });
+
+  it('a feature created later in the list is known; an unknown part is counted', () => {
+    const report = emptyRemapReport();
+    const [variable] = remapIds(
+      [
+        setVariable('distance("extrude#5:cap:start", "extrude#5:cap:end")'),
+        {
+          type: 'addFeature',
+          partId: PART,
+          feature: {
+            id: 'extrude#5',
+            kind: 'extrude',
+            name: 'Late',
+            suppressed: false,
+            profile: { sketch: 'sketch#1' },
+            operation: 'new',
+            extent: { type: 'blind', distance: mm('5') },
+            reverse: false,
+          },
+        },
+      ],
+      { [P1]: { 'extrude#5': 'extrude#6' } },
+      { report },
+    );
+    expect(sourceOf(variable!)).toBe('distance("extrude#6:cap:start", "extrude#6:cap:end")');
+    const lost = emptyRemapReport();
+    remapIds(
+      [setVariable('distance("nowhere#3:cap:end", "x")')],
+      { [P1]: { 'extrude#1': 'extrude#2' } },
+      {
+        report: lost,
+      },
+    );
+    expect(lost.unresolved).toBe(2);
+  });
+
+  it("renames a document's variables and configuration row values", () => {
+    const doc = unwrap(
+      applyCommand(bracket(), {
+        type: 'batch',
+        commands: [
+          setVariable('distance("extrude#1:cap:start", "extrude#1:cap:end")'),
+          {
+            type: 'setConfigParameter',
+            parameter: { id: 'cp#1', name: 'Gap', kind: 'variable', variable: 'gap' },
+          },
+          {
+            type: 'setConfigRow',
+            row: {
+              id: 'cfg#1',
+              name: 'Row',
+              values: { 'cp#1': mm('distance("extrude#1:side:e1", "extrude#1:cap:end")') },
+            },
+          },
+        ],
+      }),
+    ).document;
+    const out = remapDocument(doc, { [P1]: { 'extrude#1': 'extrude#8' } });
+    expect(out.variables.find((v) => v.name === 'gap')!.expression.source).toBe(
+      'distance("extrude#8:cap:start", "extrude#8:cap:end")',
+    );
+    const row = out.configurations!.rows[0]!.values['cp#1'] as { source: string };
+    expect(row.source).toBe('distance("extrude#8:side:e1", "extrude#8:cap:end")');
+  });
+});

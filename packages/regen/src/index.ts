@@ -142,6 +142,7 @@ export {
   changedVariables,
   dirtyFeatures,
   dirtyFeaturesOf,
+  featuresReading,
   isBodyFeature,
   readsBody,
   regenOrder,
@@ -149,11 +150,13 @@ export {
   sameInputs,
   topologicalOrder,
   variableClosure,
+  variableReaders,
   type BodyUse,
   type DependencyGraph,
   type DirtyOptions,
   type RoutedBody,
 } from './graph';
+export { callPart, measuredCalls, type MeasuredCall } from './measured';
 export {
   evaluateFeature,
   evaluateField,
