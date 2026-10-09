@@ -3,7 +3,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createModelStore, type ModelStore } from '../model/model';
 import { ReviewPanel } from './ReviewPanel';
 import type { AgentBranch } from './review';
-import { PARTS, apply, measureAsBundle, seeded, type Seeded } from './review.test-fixture';
+import {
+  PARTS,
+  apply,
+  measureAsBundle,
+  renameLeftOut,
+  savedAfterBundle,
+  seeded,
+  type Seeded,
+} from './review.test-fixture';
 
 beforeEach(() => {
   let n = 0;
@@ -57,6 +65,11 @@ describe('ReviewPanel', () => {
     await waitFor(() =>
       expect(screen.getByTestId('review-check-regen').dataset.state).toBe('match'),
     );
+    // A bundle a session built: its command list is the log's, and nothing is flagged.
+    await waitFor(() =>
+      expect(screen.getByTestId('review-check-commands').dataset.state).toBe('match'),
+    );
+    expect(screen.queryByTestId('review-commands-mismatch')).toBeNull();
     expect(screen.getByTestId('review-note').textContent).toContain('A boss 4 mm tall');
     expect(screen.getByTestId('review-check-stale').textContent).toContain('revision 2');
     await waitFor(() =>
@@ -176,13 +189,67 @@ describe('ReviewPanel', () => {
     });
     const { view } = await panel(s);
     await waitFor(() => expect(screen.getByTestId('review-batches')).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId('review-commands-mismatch')).toBeTruthy());
     expect(view.container.querySelector('img[src="x"]')).toBeNull();
     expect(view.container.querySelector('b')).toBeNull();
-    expect(within(screen.getByTestId('review-batches')).getAllByText(hostile).length).toBe(2);
+    // The commands shown are the log's; the bundle's text shows only in the differences, as text.
+    expect(screen.getByTestId('review-batches').textContent).not.toContain(hostile);
+    expect(screen.getByTestId('review-commands-mismatch').textContent).toContain(hostile);
     const note = screen.getByTestId('review-note');
     expect(note.textContent!.length).toBeLessThan(700);
     fireEvent.click(within(note).getByText('Show all'));
     expect(note.textContent).toContain('n'.repeat(1000));
+  });
+
+  it('shows the log’s commands, not a bundle’s that leaves out a rename, and blocks Approve', async () => {
+    const s = await seeded();
+    const head = await renameLeftOut(s);
+    const model = createModelStore();
+    model.setState({ available: true, generation: 1, document: head, parts: PARTS });
+    await panel(s, { model });
+    await waitFor(() =>
+      expect(screen.getByTestId('review-check-commands').dataset.state).toBe('mismatch'),
+    );
+    // The command list is the log's: the rename the bundle leaves out is there.
+    const batches = screen.getByTestId('review-batches');
+    expect(batches.textContent).toContain('Rename a fillet');
+    expect(batches.textContent).toContain('Renamed Fillet 1 to Quiet round');
+    const flag = screen.getByTestId('review-commands-mismatch');
+    expect(flag.textContent).toContain('until the agent rebuilds its bundle');
+    expect(flag.textContent).toContain('The bundle lists 1 batch; the branch log has 2.');
+    expect(flag.textContent).toContain('"Rename a fillet": in the branch log');
+    // Everything else passes: the bundle is not stale and the regen matches.
+    await waitFor(() =>
+      expect(screen.getByTestId('review-check-regen').dataset.state).toBe('match'),
+    );
+    expect(screen.getByTestId('review-check-stale').textContent).toContain('revision 3');
+    await waitFor(() =>
+      expect(screen.getByTestId('review-blockers').textContent).toBe(
+        'The bundle’s command list does not match the branch log: the agent must rebuild its bundle.',
+      ),
+    );
+    expect((screen.getByTestId('review-approve') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('explains and blocks Approve when the log is longer than the list shows', async () => {
+    const s = await seeded();
+    const commands = Array.from({ length: 5001 }, (_, i) => ({
+      type: 'renameDocument',
+      name: `Name ${i}`,
+    }));
+    const head = await savedAfterBundle(s, { type: 'batch', commands }, 'Many renames');
+    const model = createModelStore();
+    model.setState({ available: true, generation: 1, document: head, parts: PARTS });
+    await panel(s, { model });
+    const note = await screen.findByTestId('review-commands-omitted');
+    expect(note.textContent).toContain('0 batches and 4 more commands are not shown');
+    expect(note.textContent).toContain('Approve would merge them unseen');
+    await waitFor(() =>
+      expect(screen.getByTestId('review-blockers').textContent).toContain(
+        'The branch log is longer than this view lists',
+      ),
+    );
+    expect((screen.getByTestId('review-approve') as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('says so when the bundle does not read', async () => {

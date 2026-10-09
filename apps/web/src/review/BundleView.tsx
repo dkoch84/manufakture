@@ -3,6 +3,8 @@
 // then the feature, document, domain and script diffs, and the command list with each command's
 // JSON one click away. The scripts are the branch head's, not the bundle's (`branchScripts`): what
 // **Run scripts** allows is what the reviewer reads, and hidden characters in them are found here.
+// The command list is the branch log's, replayed in this app (`logCommands`), not the bundle's:
+// Approve merges the log, so that is what the reviewer reads (threat model N-1).
 // Every other value comes from the bundle, which is untrusted: it is read through `list`, `text`,
 // `num` and `obj`, shown as React text, cut with `Clipped`, and listed a page at a time with
 // `Paged`. Each section is `Guarded`, so one malformed part shows as such and the rest still reads.
@@ -11,7 +13,16 @@ import { useState } from 'react';
 import type { ReviewBundle } from '@manufakture/review/data';
 import { Clipped, Guarded, Paged } from './Bounded';
 import { ReviewImage } from './ReviewImage';
-import { count, list, num, obj, shownNumber, text, type ShownScript } from './review';
+import {
+  count,
+  list,
+  num,
+  obj,
+  shownNumber,
+  text,
+  type CommandStatus,
+  type ShownScript,
+} from './review';
 
 type Read = (sha256: string) => Promise<Uint8Array | null>;
 
@@ -322,15 +333,23 @@ function Command({ c }: { c: Record<string, unknown> }) {
       {json && (
         <>
           <Clipped value={c.json} max={4000} pre />
-          {c.truncated === true && <p className="field-note">Cut short in the bundle.</p>}
+          {c.truncated === true && <p className="field-note">Cut short at 4,000 characters.</p>}
         </>
       )}
     </div>
   );
 }
 
-function Commands({ bundle }: { bundle: ReviewBundle }) {
-  const commands = obj(bundle.commands);
+function Commands({ status }: { status: CommandStatus }) {
+  if (status.kind === 'waiting') return <p className="field-note">Reading the branch log...</p>;
+  if (status.kind === 'error') {
+    return (
+      <p className="history-error">
+        The branch log cannot be read: <Clipped value={status.message} max={200} />
+      </p>
+    );
+  }
+  const commands = obj(status.commands);
   const batches = obj(commands.batches);
   const items = list(batches.items).map(obj);
   if (items.length === 0) return <p className="field-note">No commands.</p>;
@@ -389,11 +408,14 @@ function Domains({ bundle }: { bundle: ReviewBundle }) {
 export function BundleView({
   bundle,
   scripts,
+  commands,
   read,
 }: {
   bundle: ReviewBundle;
   /** The branch head's scripts (`branchScripts`): shown instead of the bundle's. */
   scripts: readonly ShownScript[];
+  /** The commands from the branch log (`logCommands`): shown instead of the bundle's. */
+  commands: CommandStatus;
   read: Read;
 }) {
   const features = obj(bundle.features);
@@ -450,7 +472,7 @@ export function BundleView({
       <section>
         <h4>Commands</h4>
         <Guarded what="The commands">
-          <Commands bundle={bundle} />
+          <Commands status={commands} />
         </Guarded>
       </section>
     </div>

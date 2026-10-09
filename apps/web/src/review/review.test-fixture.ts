@@ -146,3 +146,44 @@ export function measureAsBundle(bundle: ReviewBundle, scale = 1) {
     };
   };
 }
+
+/**
+ * Threat model N-1: a rename saved on the branch after its bundle, and the same bundle stored
+ * again for the new head, as an agent with its token could `PUT` it: not stale, its measurements
+ * still right (a rename changes no body), but its command list leaves the rename out. Returns
+ * the head now.
+ */
+export function renameLeftOut(s: Seeded): Promise<ManufaktureDocument> {
+  return savedAfterBundle(
+    s,
+    { type: 'renameFeature', partId: 'part#1', featureId: 'fillet#1', name: 'Quiet round' },
+    'Rename a fillet',
+  );
+}
+
+/** `command` saved on the branch after its bundle, and the bundle stored again for that head. */
+export async function savedAfterBundle(
+  s: Seeded,
+  command: unknown,
+  label: string,
+): Promise<ManufaktureDocument> {
+  const head = apply(s.head, command);
+  await s.lib.save(
+    head,
+    [{ cause: 'execute', label, command: command as Command, at: 'x' }],
+    s.branch.id,
+  );
+  const opened = await s.lib.open(s.id, s.branch.id);
+  if (!opened.ok) throw new Error(opened.message);
+  const stored = await s.lib.reviewBundle(s.id, s.branch.id);
+  if (!stored.ok || stored.value === null) throw new Error('There is no bundle.');
+  const record = structuredClone(stored.value.record) as {
+    revision: number;
+    bundle: { key: { headRevision: number } };
+  };
+  record.revision = opened.value.revision;
+  record.bundle.key.headRevision = opened.value.revision;
+  const put = await s.lib.storeReviewBundle(s.id, s.branch.id, opened.value.revision, record);
+  if (!put.ok) throw new Error(put.message);
+  return head;
+}

@@ -7,8 +7,10 @@
 // must match its measurements and names (`compareRegen`; any difference is listed, never hidden),
 // and the merge into Main as it would be made now must apply every change. The scripts shown are
 // the branch head's own (`branchScripts`), which is what **Run scripts** allows, and a bundle
-// whose scripts are not the head's blocks approval. What the bundle left out at its limits and so
-// could not be compared needs the reviewer's acknowledgement. Only then is **Approve** offered
+// whose scripts are not the head's blocks approval. The command list shown is the branch log's,
+// replayed here from the branch's base (`logCommands`), never the bundle's; a bundle whose list
+// says something else blocks approval until the agent rebuilds it. What the bundle left out at
+// its limits and so could not be compared needs the reviewer's acknowledgement. Only then is **Approve** offered
 // (`approveBlockers`). A branch approved whose approval no version of Main records (the tab closed
 // in between) offers **Finish approval**, behind the same checks. **Request changes** stores a comment for the agent, and
 // **Reject** closes the branch; both are compare-and-set from the state shown, so a decision is
@@ -26,9 +28,11 @@ import {
   branchScripts,
   compareRegen,
   loadReview,
+  logCommands,
   reviewStateText,
   sameJson,
   type AgentBranch,
+  type CommandStatus,
   type LoadedReview,
   type MeasuredHere,
   type MergeStatus,
@@ -191,6 +195,31 @@ export function ReviewPanel({
             ? { kind: 'done', check: checked.check }
             : { kind: 'waiting' };
 
+  // The commands from the branch log, compared with the bundle's list.
+  const [logged, setLogged] = useState<{ for: unknown; status: CommandStatus } | null>(null);
+  useEffect(() => {
+    if (ready === null) return undefined;
+    let cancelled = false;
+    logCommands(source, documentId, branch, ready.bundle, ready.head).then(
+      (status) => {
+        if (!cancelled) setLogged({ for: ready, status });
+      },
+      (e: unknown) => {
+        if (!cancelled) {
+          setLogged({
+            for: ready,
+            status: { kind: 'error', message: e instanceof Error ? e.message : String(e) },
+          });
+        }
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [source, documentId, branch, ready]);
+  const commands: CommandStatus =
+    logged !== null && logged.for === ready ? logged.status : { kind: 'waiting' };
+
   // The scripts from the branch head, compared with the bundle's.
   const scriptCheck = useMemo(
     () => (ready === null ? null : branchScripts(ready.bundle, ready.head.document)),
@@ -209,6 +238,7 @@ export function ReviewPanel({
           regen,
           merge,
           scripts: scriptCheck?.mismatches ?? [],
+          commands,
           acknowledged,
           finishing,
         });
@@ -357,6 +387,49 @@ export function ReviewPanel({
                   <Paged items={scriptCheck.mismatches} render={(m) => <span>{m}</span>} />
                 </div>
               )}
+            </li>
+          )}
+          {ready !== null && (
+            <li
+              data-testid="review-check-commands"
+              data-state={
+                commands.kind === 'done'
+                  ? commands.mismatches.length > 0
+                    ? 'mismatch'
+                    : 'match'
+                  : commands.kind
+              }
+            >
+              {commands.kind === 'waiting' && 'Reading the branch log...'}
+              {commands.kind === 'error' && (
+                <span className="history-error">
+                  The branch log cannot be read, so its commands cannot be shown:{' '}
+                  <Clipped value={commands.message} max={200} />
+                </span>
+              )}
+              {commands.kind === 'done' && commands.mismatches.length === 0 && (
+                <>The commands shown are the branch log’s, and the bundle lists the same.</>
+              )}
+              {commands.kind === 'done' && commands.mismatches.length > 0 && (
+                <div className="history-error" role="alert" data-testid="review-commands-mismatch">
+                  The bundle’s command list does not describe what the branch log holds, which is
+                  what Approve would merge. The commands below are the log’s, replayed here; Approve
+                  waits until the agent rebuilds its bundle (submits again). Where the bundle
+                  differs:
+                  <Paged items={commands.mismatches} render={(m) => <span>{m}</span>} />
+                </div>
+              )}
+              {commands.kind === 'done' &&
+                (commands.commands.batches.omitted > 0 ||
+                  commands.commands.omittedCommands > 0) && (
+                  <p className="history-error" role="alert" data-testid="review-commands-omitted">
+                    The branch log is too long to list here: past this view’s limits (2,000 batches,
+                    5,000 commands), {commands.commands.batches.omitted} batches and{' '}
+                    {commands.commands.omittedCommands} more commands are not shown, and Approve
+                    would merge them unseen. It cannot be approved here; ask the agent to split the
+                    work into smaller branches.
+                  </p>
+                )}
             </li>
           )}
           <li
@@ -554,7 +627,12 @@ export function ReviewPanel({
 
       {review?.kind === 'ready' && (
         <Guarded what="This part">
-          <BundleView bundle={review.bundle} scripts={scriptCheck?.scripts ?? []} read={read} />
+          <BundleView
+            bundle={review.bundle}
+            scripts={scriptCheck?.scripts ?? []}
+            commands={commands}
+            read={read}
+          />
         </Guarded>
       )}
     </aside>

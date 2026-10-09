@@ -77,12 +77,15 @@ const featureNames = (page: Page) =>
 
 /**
  * Main is the bracket; the agent branch has the agent's batch and its bundle, submitted, and is
- * open. `edit` changes the stored bundle before it is stored. Returns the page errors so far and
- * the branch's id.
+ * open. `edit` changes the stored bundle before it is stored. `extra` is a batch saved on the
+ * branch after the agent's, with the bundle then stored for that later head as it is, as an agent
+ * with its token could `PUT` it (threat model N-1). Returns the page errors so far and the
+ * branch's id.
  */
 async function seed(
   page: Page,
   edit?: (record: Record<string, unknown>) => void,
+  extra?: { command: unknown; label: string },
 ): Promise<{ errors: string[]; branchId: string }> {
   const errors = await openEmpty(page);
   const id = await page.evaluate(() => window.__manufakture!.document.getState().document.id);
@@ -110,6 +113,12 @@ async function seed(
   for (const b of FIXTURE.batches) await execute(page, b.command, b.label);
   await regenerated(page);
   await saved(page);
+  const revision = FIXTURE.record.revision + (extra === undefined ? 0 : 1);
+  if (extra !== undefined) {
+    await execute(page, extra.command, extra.label);
+    await regenerated(page);
+    await saved(page);
+  }
 
   const record = JSON.parse(
     JSON.stringify(FIXTURE.record)
@@ -122,6 +131,8 @@ async function seed(
       .split(P.session)
       .join(SESSION),
   ) as Record<string, unknown>;
+  record.revision = revision;
+  (record.bundle as { key: { headRevision: number } }).key.headRevision = revision;
   edit?.(record);
   await page.evaluate(
     async ([docId, branch, rec, images, revision]) => {
@@ -149,7 +160,7 @@ async function seed(
       });
       if (!submitted.ok) throw new Error(submitted.message);
     },
-    [id, made.branchId, record, FIXTURE.images, FIXTURE.record.revision] as const,
+    [id, made.branchId, record, FIXTURE.images, revision] as const,
   );
   return { errors, branchId: made.branchId };
 }
@@ -197,6 +208,9 @@ test('an agent branch is reviewed in History and approved into Main as one undoa
   );
   await review.getByTestId('review-command-json').first().click();
   await expect(review.getByTestId('review-batches')).toContainText('"type":"addFeature"');
+  // The commands are the branch log's, replayed here, and the bundle built in a session agrees.
+  await expect(review.getByTestId('review-check-commands')).toHaveAttribute('data-state', 'match');
+  await expect(review.getByTestId('review-commands-mismatch')).toHaveCount(0);
 
   // The checks pass: not stale, this app's regen matches, the merge applies everything.
   await expect(review.getByTestId('review-check-stale')).toContainText(
@@ -286,6 +300,47 @@ test('a bundle whose measurements disagree with this app’s regen shows the mis
   });
   await expect(review.getByTestId('review-mismatch')).toContainText(
     /Extrude 1: volume 14703\.78766 mm³ in the bundle, 14702\.78766 mm³ here/,
+  );
+  await expect(review.getByTestId('review-approve')).toBeDisabled();
+  expect(errors).toEqual([]);
+});
+
+test('a bundle whose command list leaves out a rename in the log shows the log’s and blocks Approve', async ({
+  page,
+}) => {
+  test.setTimeout(300_000);
+  // The rename is in the branch log; the bundle stored for that head is the one without it.
+  const { errors, branchId } = await seed(page, undefined, {
+    command: {
+      type: 'renameFeature',
+      partId: 'part#1',
+      featureId: 'fillet#1',
+      name: 'Quiet round',
+    },
+    label: 'Rename a fillet',
+  });
+  const { review } = await openReview(page, branchId);
+  await expect(review.getByTestId('review-check-stale')).toContainText(
+    'describes the branch head (revision 3)',
+  );
+  await expect(review.getByTestId('review-check-commands')).toHaveAttribute(
+    'data-state',
+    'mismatch',
+  );
+  await expect(review.getByTestId('review-batches')).toContainText('Rename a fillet');
+  await expect(review.getByTestId('review-batches')).toContainText(
+    'Renamed Fillet 1 to Quiet round',
+  );
+  const flag = review.getByTestId('review-commands-mismatch');
+  await expect(flag).toContainText('until the agent rebuilds its bundle');
+  await expect(flag).toContainText('The bundle lists 1 batch; the branch log has 2.');
+  // Everything else passes, so the command list alone blocks Approve.
+  await expect(review.getByTestId('review-check-regen')).toHaveAttribute('data-state', 'match', {
+    timeout: 60_000,
+  });
+  await expect(review.getByTestId('review-check-merge')).toContainText('2 batches apply');
+  await expect(review.getByTestId('review-blockers')).toHaveText(
+    'The bundle’s command list does not match the branch log: the agent must rebuild its bundle.',
   );
   await expect(review.getByTestId('review-approve')).toBeDisabled();
   expect(errors).toEqual([]);

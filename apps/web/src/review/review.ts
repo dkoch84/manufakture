@@ -15,7 +15,16 @@ import {
   type ReviewState,
   type Version,
 } from '@manufakture/library';
-import { isStale, readBundle, type ReviewBundle } from '@manufakture/review/data';
+import {
+  branchLog,
+  commandDiff,
+  commandMismatches,
+  isStale,
+  readBundle,
+  type CommandList,
+  type LogSource,
+  type ReviewBundle,
+} from '@manufakture/review/data';
 import type { PartModel } from '../model/model';
 
 // Reading untrusted values --------------------------------------------------------------------
@@ -146,6 +155,12 @@ export interface ReviewSource {
     options?: { expected?: ReviewState | readonly ReviewState[]; comment?: string | null },
   ): Promise<LibraryResult<Branch>>;
   listVersions(id: string, branch?: string): Promise<LibraryResult<Version[]>>;
+  readHistory: LogSource['readHistory'];
+  readLog: LogSource['readLog'];
+  readVersion(
+    id: string,
+    versionId: string,
+  ): Promise<LibraryResult<{ version: Version; document: ManufaktureDocument }>>;
 }
 
 /** The longest agent note shown before "Show all" (a session allows 4,000 characters). */
@@ -206,6 +221,63 @@ export async function loadReview(
     head,
     stale,
   };
+}
+
+// The commands, from the branch log --------------------------------------------------------
+
+/** How many batches and commands of the log the list leaves out (past `LIMITS`). */
+export const leftOut = (c: CommandList): { batches: number; commands: number } => ({
+  batches: c.batches.omitted,
+  commands: c.omittedCommands,
+});
+
+/** The command list the Review view shows: recomputed from the branch log, never the bundle's. */
+export type CommandStatus =
+  | { kind: 'waiting' }
+  | { kind: 'error'; message: string }
+  | {
+      kind: 'done';
+      /** The branch log replayed from the branch's base (`commandDiff`, as the bundle builder). */
+      commands: CommandList;
+      /** Where the bundle's list does not say what the log does: approval waits for none. */
+      mismatches: string[];
+    };
+
+/**
+ * The branch's commands as its log has them, and where the bundle's list differs (threat model
+ * N-1): the log is read here (`branchLog`) and replayed from the branch's base version with the
+ * same code the bundle builder uses, so a bundle a session built for this head matches exactly, and
+ * one stored straight through the API that leaves out or misnames a command does not. The log
+ * must end at `head`'s revision (the one the bundle and the regen are checked against), else it
+ * changed while it was read and nothing is shown as if it were the head's.
+ */
+export async function logCommands(
+  source: Pick<ReviewSource, 'readHistory' | 'readLog' | 'readVersion'>,
+  documentId: string,
+  branch: AgentBranch,
+  bundle: ReviewBundle,
+  head: { revision: number; document: ManufaktureDocument },
+): Promise<CommandStatus> {
+  if (branch.fromVersion === null) {
+    return { kind: 'error', message: 'The branch names no version of Main it was made from.' };
+  }
+  const base = await source.readVersion(documentId, branch.fromVersion);
+  if (!base.ok) return { kind: 'error', message: base.message };
+  let commands: CommandList;
+  try {
+    const log = await branchLog(source, documentId, branch.id);
+    const last = log.at(-1)?.revision;
+    if (last !== head.revision) {
+      return {
+        kind: 'error',
+        message: `The branch log ends at revision ${last ?? 'none'}, not at the head (revision ${head.revision}): it changed while it was read. Close the review and open it again.`,
+      };
+    }
+    commands = commandDiff(base.value.document, head.document, log);
+  } catch (e) {
+    return { kind: 'error', message: e instanceof Error ? e.message : String(e) };
+  }
+  return { kind: 'done', commands, mismatches: commandMismatches(bundle.commands, commands) };
 }
 
 // Comparing with the app's regen ------------------------------------------------------------
@@ -598,9 +670,10 @@ export type MergeStatus =
 
 /**
  * Why **Approve** is not offered, or an empty list when it is: the branch is submitted, the
- * bundle reads and is not stale, its scripts are the branch head's, this app's regen of the head
- * matches it (and the reviewer acknowledged what the bundle left out and could not be compared),
- * and the merge into Main applies everything and changes something.
+ * bundle reads and is not stale, its scripts are the branch head's, its command list is the
+ * branch log's, this app's regen of the head matches it (and the reviewer acknowledged what the
+ * bundle left out and could not be compared), and the merge into Main applies everything and
+ * changes something.
  *
  * `finishing`: the checks of **Finish approval**, for a branch already approved whose approval
  * was never recorded on Main (the tab closed in between): the branch must be approved instead,
@@ -613,6 +686,8 @@ export function approveBlockers(input: {
   merge: MergeStatus;
   /** Where the bundle's scripts are not the branch head's (`branchScripts`). */
   scripts: readonly string[];
+  /** The commands recomputed from the branch log, and where the bundle's differ (`logCommands`). */
+  commands: CommandStatus;
   /** The reviewer acknowledged `regen`'s `unverified`. */
   acknowledged: boolean;
   finishing?: boolean;
@@ -629,6 +704,40 @@ export function approveBlockers(input: {
   else if (r.kind === 'error') out.push(`The bundle cannot be read: ${r.message}`);
   else if (r.stale) out.push('The branch changed after its bundle was made.');
   if (input.scripts.length > 0) out.push('The bundle’s scripts are not the branch head’s.');
+  if (r.kind === 'ready') {
+    switch (input.commands.kind) {
+      case 'waiting':
+        out.push('Reading the branch log...');
+        break;
+      case 'error':
+        out.push(`The branch log cannot be read: ${input.commands.message}`);
+        break;
+      case 'done': {
+        if (input.commands.mismatches.length > 0) {
+          out.push(
+            'The bundle’s command list does not match the branch log: the agent must rebuild its bundle.',
+          );
+        }
+        const left = leftOut(input.commands.commands);
+        if (left.batches > 0 || left.commands > 0) {
+          out.push(
+            'The branch log is longer than this view lists, and Approve would merge what is not shown: it cannot be approved here.',
+          );
+        }
+        // Every batch the merge would carry must be one of the log's (threat model N-3: a branch
+        // whose base is not on Main would bring commands the log here does not show).
+        if (input.merge.kind === 'ready') {
+          const logged = input.commands.commands.batches.items.length + left.batches;
+          const merged = input.merge.plan.applied.length + input.merge.plan.dropped.length;
+          if (logged !== merged) {
+            out.push(
+              `The merge into Main carries ${merged} batches, but the branch log has ${logged}: it cannot be approved here.`,
+            );
+          }
+        }
+      }
+    }
+  }
   switch (input.regen.kind) {
     case 'not-open':
       out.push('Open the branch so this app can regenerate it and compare.');

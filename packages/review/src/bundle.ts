@@ -5,9 +5,9 @@
 
 import { createHash } from 'node:crypto';
 import type { ManufaktureDocument } from '@manufakture/core';
-import { MAIN_BRANCH, type DocumentLibrary, type MergePlan } from '@manufakture/library';
+import { MAIN_BRANCH, type MergePlan } from '@manufakture/library';
 import type { BundleBuilder, Engine, ErrorLine } from '@manufakture/session';
-import { commandDiff, type LoggedBatch } from './commands';
+import { branchLog, commandDiff, type LoggedBatch } from './commands';
 import { Names } from './describe';
 import { assemblyDiffs, documentChanges, partDiffs, scriptDiffs } from './diff';
 import { DEFAULT_SUMMARISERS, domainDiffs, summariserMap, type DomainSummariser } from './domains';
@@ -293,36 +293,14 @@ export interface BundleBuilderOptions {
   /** Views besides the fixed four, as the agent asked at submit (at most four). */
   views?: readonly ReviewView[];
   imageSize?: ImageSize;
+  /**
+   * Domain summarisers in place of the defaults. The app's Review view replays the log with
+   * `DEFAULT_SUMMARISERS` and blocks Approve when the bundle's command list differs, so a bundle
+   * built with other summarisers whose lines differ cannot be approved.
+   */
   summarisers?: readonly DomainSummariser[];
   /** The branch the merge preview is against (default Main). */
   mergeInto?: string;
-}
-
-/** The branch's log entries with the revision each led to, oldest first. */
-export async function branchLog(
-  library: DocumentLibrary,
-  documentId: string,
-  branch: string,
-): Promise<LoggedBatch[]> {
-  const history = await library.readHistory(documentId, branch);
-  if (!history.ok) throw new Error(history.message);
-  const log = await library.readLog(documentId, branch);
-  if (!log.ok) throw new Error(log.message);
-  const out: LoggedBatch[] = [];
-  let i = 0;
-  for (const revision of history.value) {
-    for (let k = 0; k < revision.entries.length; k++) {
-      const entry = log.value[i++];
-      if (entry === undefined) throw new Error('The branch log is incomplete.');
-      out.push({
-        revision: revision.revision,
-        cause: entry.cause,
-        label: entry.label,
-        command: entry.command,
-      });
-    }
-  }
-  return out;
 }
 
 /**

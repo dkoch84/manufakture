@@ -27,6 +27,7 @@ import {
 import { ok, seeded, type Seeded } from '@manufakture/session/test-setup';
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildBundle, bundleBuilder } from './bundle';
+import { branchLog, commandDiff, commandMismatches } from './commands';
 import { isStale, readBundle } from './data';
 import type { ReviewBundle } from './types';
 
@@ -125,13 +126,25 @@ function golden(name: string, bundle: ReviewBundle, images: 'exact' | 'shape' = 
   expect(found, `${name}.json`).toEqual([]);
 }
 
-/** Submit with the real builder and read the stored bundle back. */
+/**
+ * Submit with the real builder and read the stored bundle back. Its command list is what the app's
+ * Review view recomputes from the branch log (threat model N-1): the base version read again, the
+ * log replayed, and no difference.
+ */
 async function submitted(seed: Seeded, s: Session, note: string): Promise<ReviewBundle> {
   ok(await s.submit(bundleBuilder({ imageSize: SIZE }), note));
   const stored = await new BackendBundleStore(seed.backend).latest(seed.documentId, s.branch);
   expect(stored).not.toBeNull();
   const read = readBundle(stored!.bundle);
   if (!read.ok) throw new Error(read.message);
+  const branch = ok(await seed.library.listBranches(seed.documentId)).find(
+    (b) => b.id === s.branch,
+  )!;
+  const base = ok(await seed.library.readVersion(seed.documentId, branch.fromVersion!));
+  const log = await branchLog(seed.library, seed.documentId, s.branch);
+  const fromLog = commandDiff(base.document, s.document, log);
+  expect(commandMismatches(read.bundle.commands, fromLog)).toEqual([]);
+  expect(fromLog).toEqual(read.bundle.commands);
   return read.bundle;
 }
 

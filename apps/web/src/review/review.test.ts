@@ -8,12 +8,22 @@ import {
   compareRegen,
   hasHiddenCharacters,
   loadReview,
+  logCommands,
   reviewStateText,
+  type CommandStatus,
   type LoadedReview,
   type MergeStatus,
   type RegenStatus,
 } from './review';
-import { FIXTURE, PARTS, apply, measureAsBundle, seeded } from './review.test-fixture';
+import {
+  FIXTURE,
+  PARTS,
+  apply,
+  measureAsBundle,
+  renameLeftOut,
+  savedAfterBundle,
+  seeded,
+} from './review.test-fixture';
 
 describe('loadReview', () => {
   it('reads the newest bundle of an agent branch, checked against its head', async () => {
@@ -192,6 +202,12 @@ const ready = (stale = false): LoadedReview => ({
   stale,
 });
 const merge = { kind: 'ready', plan: { applied: [{}], dropped: [], changed: true } } as never;
+/** A log of one batch, as `merge` carries one. */
+const commands: CommandStatus = {
+  kind: 'done',
+  commands: { batches: { items: [{} as never], omitted: 0 }, omittedCommands: 0 },
+  mismatches: [],
+};
 
 describe('compareRegen with lists the bundle cut short', () => {
   const extraBody = {
@@ -225,7 +241,7 @@ describe('compareRegen with lists the bundle cut short', () => {
     ]);
     // It waits for the reviewer's acknowledgement.
     const regen = { kind: 'done', check } as const;
-    const base = { state: 'submitted', review: ready(), regen, merge, scripts: [] };
+    const base = { state: 'submitted', review: ready(), regen, merge, scripts: [], commands };
     expect(approveBlockers({ ...base, acknowledged: false })).toEqual([
       'Acknowledge what the bundle left out and this app could not compare.',
     ]);
@@ -400,7 +416,7 @@ describe('approveBlockers', () => {
     kind: 'done',
     check: { mismatches: [], unverified: [], notes: [], bodies: 1 },
   };
-  const gate = { scripts: [] as string[], acknowledged: false };
+  const gate = { scripts: [] as string[], commands, acknowledged: false };
 
   it('offers Approve only when every check passes', () => {
     expect(
@@ -450,6 +466,54 @@ describe('approveBlockers', () => {
     ).toEqual(['The branch has no review bundle.']);
   });
 
+  it('blocks while the log is read, when it cannot be, and when the bundle’s commands differ', () => {
+    const at = { ...gate, state: 'submitted', review: ready(), regen: matched, merge };
+    expect(approveBlockers({ ...at, commands: { kind: 'waiting' } })).toEqual([
+      'Reading the branch log...',
+    ]);
+    expect(approveBlockers({ ...at, commands: { kind: 'error', message: 'Gone.' } })).toEqual([
+      'The branch log cannot be read: Gone.',
+    ]);
+    expect(approveBlockers({ ...at, commands: { ...commands, mismatches: ['x'] } })).toEqual([
+      'The bundle’s command list does not match the branch log: the agent must rebuild its bundle.',
+    ]);
+    const omitted = (batches: number, cmds: number): CommandStatus => ({
+      ...commands,
+      commands: { batches: { items: [{} as never], omitted: batches }, omittedCommands: cmds },
+    });
+    const tooLong =
+      'The branch log is longer than this view lists, and Approve would merge what is not shown: it cannot be approved here.';
+    expect(approveBlockers({ ...at, commands: omitted(0, 1) })).toEqual([tooLong]);
+    // `merge` carries one batch; a log of two (one left out) does not match it either.
+    expect(approveBlockers({ ...at, commands: omitted(1, 0) })).toEqual([
+      tooLong,
+      'The merge into Main carries 1 batches, but the branch log has 2: it cannot be approved here.',
+    ]);
+  });
+
+  it('blocks Approve when the merge carries other batches than the branch log (N-3)', () => {
+    const at = { ...gate, state: 'submitted', review: ready(), regen: matched };
+    const logOf = (n: number): CommandStatus => ({
+      ...commands,
+      commands: {
+        batches: { items: Array.from({ length: n }, () => ({}) as never), omitted: 0 },
+        omittedCommands: 0,
+      },
+    });
+    const plan = (applied: number, dropped = 0): MergeStatus => ({
+      kind: 'ready',
+      plan: {
+        applied: Array.from({ length: applied }, () => ({}) as never),
+        dropped: Array.from({ length: dropped }, () => ({}) as never),
+        changed: true,
+      },
+    });
+    expect(approveBlockers({ ...at, commands: logOf(1), merge: plan(1) })).toEqual([]);
+    expect(approveBlockers({ ...at, commands: logOf(1), merge: plan(3) })).toEqual([
+      'The merge into Main carries 3 batches, but the branch log has 1: it cannot be approved here.',
+    ]);
+  });
+
   it('blocks on scripts that are not the head’s, and finishes only an approved branch', () => {
     expect(
       approveBlockers({
@@ -463,7 +527,7 @@ describe('approveBlockers', () => {
     ).toEqual(['The bundle’s scripts are not the branch head’s.']);
     const unchanged: MergeStatus = {
       kind: 'ready',
-      plan: { applied: [], dropped: [], changed: false },
+      plan: { applied: [{} as never], dropped: [], changed: false },
     };
     const finish = { ...gate, review: ready(), regen: matched, finishing: true };
     expect(approveBlockers({ ...finish, state: 'approved', merge: unchanged })).toEqual([]);
@@ -480,6 +544,109 @@ describe('approveBlockers', () => {
         merge: unchanged,
       }),
     ).toEqual(['Main already has everything it changed.']);
+  });
+});
+
+describe('logCommands (threat model N-1)', () => {
+  it('shows the log’s commands, and a bundle built for that log matches it', async () => {
+    const s = await seeded();
+    const r = await logCommands(s.lib, s.id, s.branch, s.bundle, { revision: 2, document: s.head });
+    expect(r.kind).toBe('done');
+    if (r.kind !== 'done') return;
+    expect(r.mismatches).toEqual([]);
+    // Exactly what the session's bundle builder made (the fixture is a real session's).
+    expect(r.commands).toEqual(s.bundle.commands);
+  });
+
+  it('flags a bundle whose list leaves out a rename the log has', async () => {
+    const s = await seeded();
+    const head = await renameLeftOut(s);
+    const loaded = await loadReview(s.lib, s.id, s.branch);
+    if (loaded.kind !== 'ready') throw new Error(loaded.kind);
+    expect(loaded.stale).toBe(false);
+    expect(loaded.head.document).toEqual(head);
+    const r = await logCommands(s.lib, s.id, s.branch, loaded.bundle, loaded.head);
+    if (r.kind !== 'done') throw new Error(r.kind);
+    const labels = r.commands.batches.items.map((b) => b.label);
+    expect(labels).toEqual([FIXTURE.batches[0]!.label, 'Rename a fillet']);
+    expect(r.commands.batches.items[1]!.commands[0]!.summary).toBe(
+      'Renamed Fillet 1 to Quiet round',
+    );
+    expect(r.mismatches).toEqual([
+      'The bundle lists 1 batch; the branch log has 2.',
+      'Batch 2 (revision 3) "Rename a fillet": in the branch log (1 command), not in the bundle.',
+    ]);
+    expect(
+      approveBlockers({
+        state: 'submitted',
+        review: loaded,
+        regen: { kind: 'done', check: { mismatches: [], unverified: [], notes: [], bodies: 1 } },
+        merge: { kind: 'ready', plan: { applied: [{}, {}] as never, dropped: [], changed: true } },
+        scripts: [],
+        commands: r,
+        acknowledged: false,
+      }),
+    ).toEqual([
+      'The bundle’s command list does not match the branch log: the agent must rebuild its bundle.',
+    ]);
+  });
+
+  it('says so when the log or the base cannot be read', async () => {
+    const s = await seeded();
+    expect(
+      await logCommands(s.lib, s.id, { ...s.branch, fromVersion: null }, s.bundle, {
+        revision: 2,
+        document: s.head,
+      }),
+    ).toEqual({ kind: 'error', message: 'The branch names no version of Main it was made from.' });
+    const r = await logCommands(
+      {
+        readVersion: (id, version) => s.lib.readVersion(id, version),
+        readHistory: (id, branch) => s.lib.readHistory(id, branch),
+        readLog: async () => ({ ok: false, message: 'Gone.' }),
+      },
+      s.id,
+      s.branch,
+      s.bundle,
+      { revision: 2, document: s.head },
+    );
+    expect(r).toEqual({ kind: 'error', message: 'Gone.' });
+    // A log that does not end at the head checked (written meanwhile) is not shown as the head's.
+    expect(
+      await logCommands(s.lib, s.id, s.branch, s.bundle, { revision: 3, document: s.head }),
+    ).toEqual({
+      kind: 'error',
+      message:
+        'The branch log ends at revision 2, not at the head (revision 3): it changed while it was read. Close the review and open it again.',
+    });
+  });
+
+  it('blocks Approve when the log is longer than the list, which leaves commands out', async () => {
+    const s = await seeded();
+    // One batch of 5,001 commands: past the 5,000 the list shows.
+    const commands = Array.from({ length: 5001 }, (_, i) => ({
+      type: 'renameDocument',
+      name: `Name ${i}`,
+    }));
+    await savedAfterBundle(s, { type: 'batch', commands }, 'Many renames');
+    const loaded = await loadReview(s.lib, s.id, s.branch);
+    if (loaded.kind !== 'ready') throw new Error(loaded.kind);
+    const r = await logCommands(s.lib, s.id, s.branch, loaded.bundle, loaded.head);
+    if (r.kind !== 'done') throw new Error(r.kind);
+    expect(r.commands.omittedCommands).toBeGreaterThan(0);
+    const blockers = approveBlockers({
+      state: 'submitted',
+      review: loaded,
+      regen: { kind: 'done', check: { mismatches: [], unverified: [], notes: [], bodies: 1 } },
+      merge: { kind: 'ready', plan: { applied: [{}, {}] as never, dropped: [], changed: true } },
+      scripts: [],
+      // Even a list that matched the bundle's would not do.
+      commands: { ...r, mismatches: [] },
+      acknowledged: false,
+    });
+    expect(blockers).toEqual([
+      'The branch log is longer than this view lists, and Approve would merge what is not shown: it cannot be approved here.',
+    ]);
   });
 });
 

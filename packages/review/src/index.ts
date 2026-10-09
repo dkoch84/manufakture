@@ -7,7 +7,6 @@
 export {
   DEFAULT_WORKBENCH_LIMITS,
   bodyDeltas,
-  branchLog,
   buildBundle,
   bundleBuilder,
   mergeError,
@@ -17,7 +16,15 @@ export {
   type BuiltBundle,
   type BundleBuilderOptions,
 } from './bundle';
-export { commandDiff, type LoggedBatch } from './commands';
+export {
+  MAX_COMMAND_MISMATCHES,
+  branchLog,
+  commandDiff,
+  commandMismatches,
+  type CommandList,
+  type LogSource,
+  type LoggedBatch,
+} from './commands';
 export { isStale, readBundle, type BranchHead } from './data';
 export { Names, describeFeature, featureKind, featureTitle } from './describe';
 export { assemblyDiffs, documentChanges, movedIds, partDiffs, scriptDiffs } from './diff';
