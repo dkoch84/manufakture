@@ -476,7 +476,8 @@ A `hole` drills at the points of a sketch, along the sketch's normal into the ma
 standard size (`M4`, `#10`, `1/4`) and fit when the person names a screw, and the matching diameter:
 a clearance hole for a screw to pass, the tap drill for a hole to thread. A `thread` on the hole's
 wall (or on a shaft) then makes it a threaded hole: `cosmetic` for holes tapped after printing or
-machining, and for heat-set inserts and self-tapping screws; `modelled` for printed threads.
+machining, `modelled` for printed threads. A hole for a heat-set insert takes no thread at all (see
+below).
 
 Here, an M5 tapped hole through the upright, 28 mm up, in one batch: the sketch on the upright's
 inner face (x = 6 mm, facing +X), the hole at the 4.2 mm tap drill, and a cosmetic thread on its
@@ -551,6 +552,101 @@ drill; a cosmetic thread keeps it there).
 
 ```json mcp:result
 { "ok": true, "hits": [{ "name": "hole#2:wall:e10", "surface": "cylinder", "radius": 2.1 }] }
+```
+
+### Heat-set inserts
+
+A heat-set insert is pressed hot into a plain hole and brings its own thread, so do **not** put a
+`thread` on its hole. A thread resizes its hole to the tap drill: a cosmetic M3 thread on a 4.0 mm
+insert hole fails with `M3 (internal) needs a hole 1.959 to 2.865 mm across`. Drill the insert's
+own hole instead, from the insert vendor's table (there is no insert hole type yet, and the table
+is not served to you; ask the person which inserts they use when they do not say). For CNC
+Kitchen's standard inserts:
+
+| Insert | Hole | Insert length | Minimum wall |
+| ------ | ---- | ------------- | ------------ |
+| M2     | 3.2  | 3.0           | 1.3          |
+| M2.5   | 4.0  | 4.0           | 1.6          |
+| M3     | 4.0  | 5.7           | 1.6          |
+| M4     | 5.6  | 8.1           | 2.1          |
+| M5     | 6.4  | 9.5           | 2.6          |
+
+All in mm. Make the hole blind and a little deeper than the insert is long (an M3 insert: 4.0 mm
+across, 6 to 6.5 mm deep), so the plastic it displaces has room. Name the hole after the insert
+(`M3 heat-set insert holes`): its purpose lives only in the name. Nothing checks the wall around
+an insert hole, so measure it yourself and widen the boss when it is under the minimum. A blind
+hole ends in a drill point (a cone) today; there is no flat-bottomed option.
+
+The bracket is 6 mm thick, too thin for an M3 insert's 4.0 mm hole and 1.6 mm wall, so here is an
+M2 insert in the end of the foot: a 3.2 mm hole, 3.5 mm deep, centred 3 mm up the end face
+(x = 50 mm, facing +X; the hole drills against the sketch's normal, into the foot):
+
+```json mcp:apply
+{
+  "sessionId": "<session>",
+  "label": "Add an M2 heat-set insert hole in the end of the foot",
+  "commands": [
+    {
+      "type": "addFeature",
+      "partId": "part#1",
+      "feature": {
+        "id": "sketch#$insert_sketch",
+        "kind": "sketch",
+        "name": "M2 insert centre",
+        "suppressed": false,
+        "plane": { "type": "plane", "origin": [50, 0, 0], "normal": [1, 0, 0], "xDir": [0, 1, 0] },
+        "entities": [
+          { "id": "e$insert_centre", "kind": "point", "construction": false, "position": [0, 3] }
+        ],
+        "constraints": []
+      }
+    },
+    {
+      "type": "addFeature",
+      "partId": "part#1",
+      "feature": {
+        "id": "hole#$insert",
+        "kind": "hole",
+        "name": "M2 heat-set insert hole",
+        "suppressed": false,
+        "sketch": "sketch#$insert_sketch",
+        "points": ["e$insert_centre"],
+        "diameter": { "source": "3.2 mm", "lengthUnit": "mm", "angleUnit": "deg" },
+        "extent": {
+          "type": "blind",
+          "depth": { "source": "3.5 mm", "lengthUnit": "mm", "angleUnit": "deg" }
+        },
+        "head": { "type": "simple" }
+      }
+    }
+  ]
+}
+```
+
+```json mcp:result
+{
+  "ok": true,
+  "symbols": { "$insert_sketch": "sketch#5", "$insert_centre": "e11", "$insert": "hole#3" }
+}
+```
+
+Then measure the wall between the hole and the foot's top face. The answer's distance is 1.4 mm
+(give or take floating point), over the M2 insert's 1.3 mm minimum; under it, move or widen the
+hole's surroundings before you go on.
+
+```json mcp:measure
+{
+  "sessionId": "<session>",
+  "query": {
+    "kind": "targets",
+    "partId": "part#1",
+    "bodyId": "extrude#1",
+    "targets": [
+      { "kind": "face", "name": "hole#3:wall:e11" },
+      { "kind": "face", "name": "extrude#1:side:e3" }
+    ]
+  }
+}
 ```
 
 ### CAM setups

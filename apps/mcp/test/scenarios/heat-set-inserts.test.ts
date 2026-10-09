@@ -199,15 +199,16 @@ describe('heat-set inserts in a printed enclosure (T8.6b)', () => {
     expect(
       resources.map((r) => r.uri).filter((u) => !u.startsWith('manufakture://schema/')),
     ).toEqual([GUIDE_URI]);
-    // The guide sends heat-set inserts to a cosmetic thread...
+    // The guide (fixed after this scenario found it sending inserts to a cosmetic thread) says to
+    // drill the insert's own hole and leave the thread off, and carries the vendor's sizes as
+    // prose: a stopgap, not a table a tool serves.
     const guide = (await h.client.readResource({ uri: GUIDE_URI })).contents[0] as { text: string };
-    expect(guide.text).toMatch(
-      /`cosmetic` for holes tapped after printing or\s+machining, and for heat-set inserts/,
-    );
-    expect(guide.text).not.toMatch(/4\.0 mm|D3/);
+    expect(guide.text).not.toMatch(/cosmetic[^.]*heat-set inserts/);
+    expect(guide.text).toMatch(/do \*\*not\*\* put a\s+`thread` on its hole/);
+    expect(guide.text).toMatch(/\| M3 +\| 4\.0 +\| 5\.7 +\| 1\.6 +\|/);
   });
 
-  it('gap probe: a cosmetic M3 thread on the insert hole fails, as the guide suggests it', async () => {
+  it('gap probe: a cosmetic M3 thread on the insert hole fails (the guide says leave it off)', async () => {
     const r = value(
       await h.call('apply', {
         sessionId,
