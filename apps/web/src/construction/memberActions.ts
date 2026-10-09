@@ -1,8 +1,11 @@
 // Per-member actions on a picked framing member (ADR 0015 decision 6): delete it, change its
 // stock, or put it back as framed. An override is a param of the member's owner (a wall or an
-// opening), keyed by the member's local id: `{ id, delete?, stock? }`, with its nudge in the
+// opening), keyed by the member's local id: `{ id, delete?, stock?, at? }`, with its nudge in the
 // expression `move_<n>` (n: its 1-based place in the list). Removing an override renumbers the
 // nudges after it, so each stays with its own override. Each action is one `editFeature`.
+// An override of a wall's layout stud or block records where the member is (`at`, #1215), so a
+// later spacing, origin or direction change finds it by position and says so (`moved`, `lost`)
+// instead of re-targeting the stud that inherits its id.
 
 import type {
   Command,
@@ -14,11 +17,14 @@ import {
   MAX_OVERRIDES,
   OPENING_SCHEMA_VERSION,
   WALL_SCHEMA_VERSION,
+  overridePosition,
   readOpeningParams,
   readWallParams,
   splitMemberFullId,
 } from '@manufakture/domain-construction';
 import { findStock } from '@manufakture/stock';
+import type { ModelStore } from '../model/model';
+import type { MemberStore } from '../viewport/memberStore';
 import { omit } from './kinds';
 import { isOpening, isWall } from './settings';
 
@@ -26,6 +32,8 @@ export interface StoredOverride {
   id: string;
   delete?: boolean;
   stock?: string;
+  /** Where the member was along its wall segment when the override was made, mm (#1215). */
+  at?: number;
 }
 
 export interface MemberOwner {
@@ -63,18 +71,40 @@ export function memberOwner(
   };
 }
 
+/**
+ * Where an override of the member should record it is (`overridePosition`), from the last regen:
+ * the part's feature results and member sets. Undefined when they do not have it.
+ */
+export function memberPosition(
+  model: ModelStore,
+  members: MemberStore,
+  partId: string,
+  owner: string,
+  localId: string,
+): number | undefined {
+  const features = model.getState().parts.find((p) => p.partId === partId)?.features ?? [];
+  const sets = members.getState().parts.get(partId) ?? [];
+  return overridePosition({ owner, features, sets }, localId);
+}
+
 export type MemberAction =
   { kind: 'delete' } | { kind: 'stock'; stock: string } | { kind: 'restore' };
 
 export type ActionOutcome =
   { ok: true; command: Command; label: string } | { ok: false; message: string };
 
-/** The edit of the owner's overrides that performs `action` on the member. */
+/**
+ * The edit of the owner's overrides that performs `action` on the member. `at` is where the
+ * member sits along its wall segment as the layout made it (`overridePosition`, from the last
+ * regen; undefined when positions do not apply): stored on a new override, and on an older one
+ * that has none. An override keeps the position it was first made with.
+ */
 export function memberActionCommand(
   doc: ManufaktureDocument,
   partId: string,
   fullId: string,
   action: MemberAction,
+  at?: number,
 ): ActionOutcome {
   const owner = memberOwner(doc, partId, fullId);
   if (!owner) return { ok: false, message: 'This member belongs to no wall or opening here.' };
@@ -89,6 +119,7 @@ export function memberActionCommand(
     label = `Restore ${fullId}`;
   } else {
     const next: StoredOverride = index >= 0 ? { ...overrides[index]! } : { id: localId };
+    if (next.at === undefined && at !== undefined && isWall(feature)) next.at = at;
     if (action.kind === 'delete') {
       next.delete = true;
       delete next.stock;

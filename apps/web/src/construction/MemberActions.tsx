@@ -6,19 +6,30 @@
 import { findStock } from '@manufakture/stock';
 import { useState } from 'react';
 import { useStore } from 'zustand';
+import type { ModelStore } from '../model/model';
 import type { DocumentStoreApi } from '../state/document';
 import type { SelectionStore } from '../state/selection';
 import { isMemberRef } from '../viewport/members';
+import type { MemberStore } from '../viewport/memberStore';
 import { StockPicker } from '../wood/StockPicker';
-import { memberActionCommand, memberOwner, type MemberAction } from './memberActions';
+import {
+  memberActionCommand,
+  memberOwner,
+  memberPosition,
+  type MemberAction,
+} from './memberActions';
 
 export function MemberActions({
   documents,
+  model,
+  members,
   selection,
   partId,
   disabled,
 }: {
   documents: DocumentStoreApi;
+  model: ModelStore;
+  members: MemberStore;
   selection: SelectionStore;
   partId: string;
   disabled: boolean;
@@ -31,7 +42,8 @@ export function MemberActions({
   const [message, setMessage] = useState<string | null>(null);
   if (!ref || !owner) return null;
   const act = (action: MemberAction) => {
-    const r = memberActionCommand(documents.getState().document, partId, ref.id, action);
+    const at = memberPosition(model, members, partId, owner.feature.id, owner.localId);
+    const r = memberActionCommand(documents.getState().document, partId, ref.id, action, at);
     if (!r.ok) {
       setMessage(r.message);
       return;

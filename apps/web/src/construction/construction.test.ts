@@ -575,4 +575,37 @@ describe('member actions', () => {
     );
     expect(memberActionCommand(after, PART, 'sketch#1:s1', { kind: 'delete' }).ok).toBe(false);
   });
+
+  it("stores a layout stud's position on a new override, and keeps the first one", () => {
+    const { doc, wall } = withWall();
+    const full = `${wall.id}:s3`;
+    const del = memberActionCommand(doc, PART, full, { kind: 'delete' }, 1219.2);
+    let after = run(doc, del.ok ? del.command : null);
+    const overrides = () => (after.parts[0]!.features[0] as ExtensionFeature).params.overrides;
+    expect(overrides()).toEqual([{ id: 's3', delete: true, at: 1219.2 }]);
+    const stock = memberActionCommand(after, PART, full, { kind: 'stock', stock: 'us-2x6' }, 900);
+    after = run(after, stock.ok ? stock.command : null);
+    expect(overrides()).toEqual([{ id: 's3', stock: 'us-2x6', at: 1219.2 }]);
+    // An older override without one gets the member's position when next changed.
+    const old = run(doc, {
+      type: 'editFeature',
+      partId: PART,
+      feature: {
+        ...(doc.parts[0]!.features[0] as ExtensionFeature),
+        params: {
+          ...(doc.parts[0]!.features[0] as ExtensionFeature).params,
+          overrides: [{ id: 's3', delete: true }],
+        },
+      },
+    });
+    const restock = memberActionCommand(
+      old,
+      PART,
+      full,
+      { kind: 'stock', stock: 'us-2x6' },
+      1219.2,
+    );
+    after = run(old, restock.ok ? restock.command : null);
+    expect(overrides()).toEqual([{ id: 's3', stock: 'us-2x6', at: 1219.2 }]);
+  });
 });

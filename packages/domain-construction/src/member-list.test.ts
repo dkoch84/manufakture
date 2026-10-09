@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { frameWall } from './framing/wall';
-import { memberListing, type MemberListingSources } from './member-list';
+import { memberListing, overridePosition, type MemberListingSources } from './member-list';
 import { S2X6, inch, straightWall, toInches } from './test-helpers';
 
 const WALL = 'extension#3';
@@ -177,5 +177,67 @@ describe('memberListing: added members', () => {
     const m = l.members.find((x) => x.local === 'add1')!;
     expect(m).toMatchObject({ id: `${WINDOW}:add1`, role: 'stud', added: true });
     expect(toInches(m.along!.centre)).toBeCloseTo(24, 3);
+  });
+});
+
+describe('memberListing: overrides by position (#1215)', () => {
+  // A 16' wall whose overrides were made on 16" centres (s3 nudged 2" at 48", s4 deleted at 64"),
+  // now at 24": s3's override moved to s2, s4's is lost.
+  const overrides = [
+    { id: 's3', move: inch(2), at: inch(48) },
+    { id: 's4', delete: true, at: inch(64) },
+  ];
+  const sources = (spacing: number): MemberListingSources => {
+    const r = frameWall(straightWall(192, {}, { spacing: inch(spacing) }, { overrides }));
+    return {
+      owner: WALL,
+      features: [
+        {
+          featureId: WALL,
+          metadata: {
+            kind: 'wall',
+            points: [
+              [0, 0],
+              [inch(192), 0],
+            ],
+            closed: false,
+            base: 0,
+            layers: [],
+            overrides,
+          } as never,
+        },
+      ],
+      sets: [{ group: WALL, members: r.members, metadata: { overrides: r.overrides } }],
+    };
+  };
+
+  it("lists a moved override's member and every override's position", () => {
+    const l = memberListing(sources(24))!;
+    expect(l.overrides).toEqual([
+      {
+        n: 1,
+        id: 's3',
+        member: `${WALL}:s3`,
+        status: 'moved',
+        appliedTo: `${WALL}:s2`,
+        at: 1219.2,
+        move: 50.8,
+      },
+      { n: 2, id: 's4', member: `${WALL}:s4`, status: 'lost', at: 1625.6, delete: true },
+    ]);
+  });
+
+  it('gives the position an override of a layout stud or block stores, before its nudge', () => {
+    const at16 = sources(16);
+    // s3 is nudged to 50" by its override: the position is still 48".
+    expect(overridePosition(at16, 's3')).toBe(1219.2);
+    expect(overridePosition(at16, 's5')).toBe(2032);
+    // At 24" the stud the moved override nudges (s2) is at 48" too.
+    expect(overridePosition(sources(24), 's2')).toBe(1219.2);
+    // Deleted, not framed, or not a layout stud or block: none.
+    expect(overridePosition(at16, 's4')).toBeUndefined();
+    expect(overridePosition(at16, 'top1:1')).toBeUndefined();
+    expect(overridePosition({ ...at16, sets: [] }, 's5')).toBeUndefined();
+    expect(overridePosition({ ...at16, owner: 'extension#99' }, 's5')).toBeUndefined();
   });
 });

@@ -45,6 +45,8 @@ describe('wall params', () => {
     [{ ...base, joins: { start: 'never' } }, ['joins', 'start']],
     [{ ...base, overrides: [{ id: 's1' }, { id: 's1' }] }, ['overrides', 1, 'id']],
     [{ ...base, overrides: [{ id: 'extension#3:s1' }] }, ['overrides', 0, 'id']],
+    [{ ...base, overrides: [{ id: 's1', at: '48' }] }, ['overrides', 0, 'at']],
+    [{ ...base, overrides: [{ id: 's1', at: 1e6 }] }, ['overrides', 0, 'at']],
     [{ ...base, wallId: 'extension#3' }, ['wallId']],
     [{ ...base, add: [{ id: 'extra1', role: 'stud' }] }, ['add', 0, 'id']],
     [{ ...base, add: [{ id: 'add201', role: 'stud' }] }, ['add', 0, 'id']],
@@ -78,6 +80,14 @@ describe('wall params', () => {
     expect(WALL_EXPRESSIONS.add1_at).toBe('length');
     expect(WALL_EXPRESSIONS.add200_z).toBe('length');
     expect(WALL_EXPRESSIONS.add201_at).toBeUndefined();
+  });
+
+  it("reads an override's position (#1215), and leaves it out when absent", () => {
+    const overrides = [{ id: 's3', delete: true, at: 1219.2 }, { id: 'top1:2' }];
+    expect(readWallParams({ ...base, overrides }, 1)).toMatchObject({
+      ok: true,
+      value: { overrides },
+    });
   });
 
   it('reads added members, and leaves `add` out when there are none', () => {
@@ -129,6 +139,8 @@ describe('opening params', () => {
     [{ kind: 'door', segment: 0 }, ['segment']],
     [{ kind: 'door', wall: 'extension#1' }, ['wall']],
     [{ kind: 'door', add: [{ id: 'add1', role: 'stud', segment: 1 }] }, ['add', 0, 'segment']],
+    // Opening members keep their ids as the wall's layout changes: no position.
+    [{ kind: 'door', overrides: [{ id: 'king-l', at: 100 }] }, ['overrides', 0, 'at']],
   ])('refuses %j at %j', (params, field) => {
     const r = readOpeningParams(params, 1);
     expect(r.ok).toBe(false);

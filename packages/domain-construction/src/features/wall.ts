@@ -7,7 +7,8 @@
 //   across the path: `left`, the default, puts it on the left, so the path is the framing's
 //   exterior face; the exterior is always on the path's right), `joins` (`free` keeps an end from
 //   joining another wall), `framing` (overrides of the document's framing settings that are not
-//   lengths), `overrides` (per-member, keyed by local id: `s12`, `top1:2`) and `add` (members
+//   lengths), `overrides` (per-member, keyed by local id: `s12`, `top1:2`; `at`, where a layout
+//   stud or block was when the override was made, finds it by position, #1215) and `add` (members
 //   the layout does not make, #1214: `{ id: "add<k>", role: "stud" | "blocking", stock?,
 //   plies?, segment? }`, owned by the wall). Lengths are expressions: `height` (default the
 //   level's), `spacing`, `layoutOrigin`, `move_<n>` (the nudge of the n-th override), and
@@ -276,7 +277,7 @@ function readCurrent(params: Json): Read<WallParams> {
   }
   const framing = readFramingParams(own(params, 'framing'));
   if (!framing.ok) return framing;
-  const overrides = readOverrides(own(params, 'overrides'), ['overrides']);
+  const overrides = readOverrides(own(params, 'overrides'), ['overrides'], true);
   if (!overrides.ok) return overrides;
   const add = readAdds(own(params, 'add'), ['add'], true);
   if (!add.ok) return add;

@@ -50,6 +50,7 @@ export {
 } from './member-ids';
 export {
   memberListing,
+  overridePosition,
   type ListableMember,
   type ListableSet,
   type ListedMember,
@@ -63,6 +64,7 @@ export {
   DEFAULT_WALL_SETTINGS,
   FramingInputError,
   MemberBudget,
+  OVERRIDE_AT_TOLERANCE,
   frameWall,
   resolveWallSettings,
   type AddedMember,

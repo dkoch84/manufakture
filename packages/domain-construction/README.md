@@ -134,7 +134,8 @@ model ids), `points` (2 to 64; the coordinates are the length expressions `x1`, 
 so the path is the framing's exterior face; the exterior is always right of the path), `joins`
 (`start`, `end`: `auto` or `free`), `framing` (`layoutFrom`, `bottomPlates`, `topPlates`,
 `kings`, `cornerStyle`, `blocking`: `none` or `mid-height`), `overrides` (`{ id, delete?,
-stock? }` keyed by local member id) and `add` (members the layout does not make, #1214: `{ id,
+stock?, at? }` keyed by local member id; `at`, a wall's only, is the member's position when the
+override was made, see "Overrides" below) and `add` (members the layout does not make, #1214: `{ id,
 role, stock?, plies?, segment? }` with `id` `add1` to `add200`, `role` `stud` or `blocking`,
 `plies` 1 to 4 for a stud, `segment` default 1; see "Added members" below). Expressions:
 `height` (default the level's), `spacing`, `layoutOrigin`, `move_<n>` (the nudge of the n-th
@@ -225,7 +226,8 @@ means it stops at the near side, both measured on the framing's centre line, at 
 each opening's position is moved by its segment's shift. `frameWall`'s warnings go on the wall,
 or on the opening they name, with their code; rule-of-thumb ones start with "Rule of thumb:".
 The group's metadata lists each opening's header and where it came from (`rule`, `default`, or
-`opening` when explicit) and each override as `applied` or `lost`.
+`opening` when explicit) and each override as `applied`, `moved` (with `appliedTo`) or `lost`.
+An override's `at` is moved by its segment's shift too, as an added member's is.
 
 ## Floors and roofs: `construction.floor`, `construction.roof`
 
@@ -340,7 +342,8 @@ role and layout, and fragile by design: lengthening a wall adds slots at the end
 others; an opening hides the layout members in its way, moving it brings them back under their
 old ids, and its own members keep theirs; changing the spacing, layout origin or direction
 renumbers the slots. Nothing in the document refers to a member except per-member overrides,
-which report `lost` when their member is gone.
+which report `lost` when their member is gone; one that records its member's position (`at`,
+#1215) finds a renumbered layout stud or block by position and reports `moved` (see "Overrides").
 
 Wall members (owned by the wall):
 
@@ -493,11 +496,38 @@ kept with a `framing-conflict` warning naming that member. Entries with an id no
 wall's `overrides` name its own members (`s12`, `top1:2`, `add1`), an opening's `overrides` name
 the opening's (`king-l`, `header`). They apply last, the wall's first and then each opening's:
 `delete`, `stock` (a new stock, same placement origin), `move` (mm along the wall). Each reports
-`{ owner, id, status }` with `applied` or `lost`; a lost one also warns `override-lost` with the
-reason: the owner no longer has that member (a layout form it does not make now), it never had
-that member (no layout form, and no entry of its `add`: to add one, list it there), the owner
-adds that member but it is left out, the opening is not framed, or an earlier override of the
-same member deleted it.
+`{ owner, id, status }` with `applied`, `moved` or `lost`; a lost one also warns `override-lost`
+with the reason: the owner no longer has that member (a layout form it does not make now), it
+never had that member (no layout form, and no entry of its `add`: to add one, list it there),
+the owner adds that member but it is left out, the opening is not framed, an earlier override of
+the same member deleted it, or the layout changed and nothing is where its member was (below).
+
+**Overrides by position** (#1215). A spacing, layout origin or layout direction change renumbers
+the slots (`s<k>`) and can renumber blocks (`block<r>:<n>`), so an override keyed by id alone
+would silently apply to whichever member inherited the id. A wall's override may therefore record
+`at`: where its member was when the override was made, the member's centre line along its
+segment, mm from the segment's first path point (the `members` listing's `along.centre`; in
+`frameWall`, from the framed segment's start), before the override's own `move`. A plain number
+in params, not an expression: it records a fact, nobody designs with it, and it stays with its
+entry when other entries are removed or merged by id. On a slot or block, an override with `at`
+applies to the member of the same form (a block: of the same row) in the same segment whose centre,
+as the layout and the added studs placed it, is within `OVERRIDE_AT_TOLERANCE` (1/2") of `at`, the
+nearest first (the named id on a tie):
+
+- the member with its own id: `applied`, as before;
+- another id: `moved`, with `appliedTo` (that member's local id) and an `override-moved` layout
+  warning naming both;
+- none: `lost`, with an `override-lost` warning; the member that kept the id is left as framed.
+
+`at` is not used for any other member, whose id a layout change does not renumber (plates,
+corners, tees, an opening's members, which move with their opening, and added members, whose ids
+are their entries'); openings refuse it. An override without `at` (every override made before
+#1215, and any an agent writes without one) matches by id as before, so stored documents frame
+exactly as they did; the format change is add-only. The app records `at` when it makes an
+override of a slot or block (`overridePosition` in `member-list.ts`, from the last regen) and
+adds it to an older override the next time it changes it; regen never writes it, since regen does
+not change the document. An agent should write `at` too: the member's `along.centre` from the
+`members` query, read before the override is made.
 
 **Errors.** Input the generator cannot frame at all (no segments, a segment shorter than two
 studs or too low for its plates, a thickness that is not the stud depth, spacing not wider than a

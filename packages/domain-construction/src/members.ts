@@ -72,7 +72,8 @@ export interface Member {
   /**
    * Local to its owner, stable by role and layout (ADR 0015 decision 6): `s12`, `top1:2`,
    * `king-l`. See `member-ids.ts` for every form. Fragile by design: changing a wall's spacing
-   * renumbers its slots. The full id is `<owner>:<id>` (`memberFullId`).
+   * renumbers its slots (an override that records its member's position, `at`, follows it,
+   * #1215). The full id is `<owner>:<id>` (`memberFullId`).
    */
   readonly id: string;
   /** The feature that owns the member: a wall, an opening, a floor or a roof. */

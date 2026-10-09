@@ -1,5 +1,13 @@
 import { createDocument } from '@manufakture/core';
-import { DISCLAIMER_SHORT } from '@manufakture/domain-construction';
+import { DISCLAIMER_SHORT, memberListing } from '@manufakture/domain-construction';
+import {
+  A as SHED_WALL,
+  DOOR as SHED_DOOR,
+  PART as SHED_PART,
+  shedDocument,
+  shedFeatures,
+  shedSets,
+} from '@manufakture/domain-construction/fixtures/shed-model';
 import { boxMesh, memberInstances, type MemberData } from '@manufakture/regen';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
@@ -226,6 +234,49 @@ describe('the construction panel', () => {
     expect(overrides()).toEqual([{ id: 's2', stock: 'us-2x6' }]);
     fireEvent.click(screen.getByTestId('member-restore'));
     expect(overrides()).toBeUndefined();
+  });
+});
+
+describe('member actions record where a layout stud is (#1215)', () => {
+  it("stores a wall stud's position with its override, and none for an opening's member", () => {
+    expect(SHED_PART).toBe(PART);
+    const t = setup(shedDocument());
+    act(() => {
+      t.model.setState({ parts: [{ partId: PART, features: shedFeatures(), bodies: [] }] });
+      t.members.getState().load(PART, { meshes: new Map(), sets: shedSets() });
+    });
+    const centre = memberListing({
+      owner: SHED_WALL,
+      features: shedFeatures(),
+      sets: shedSets(),
+    })!.members.find((m) => m.local === 's5')!.along!.centre;
+    const overridesOf = (id: string) => {
+      const f = t.documents.getState().document.parts[0]!.features.find((x) => x.id === id)!;
+      return f.kind === 'extension' ? f.params.overrides : undefined;
+    };
+    act(() => t.selection.getState().select([memberRef(`${SHED_WALL}:s5`)]));
+    fireEvent.click(within(screen.getByTestId('member-actions')).getByTestId('member-delete'));
+    expect(overridesOf(SHED_WALL)).toEqual([{ id: 's5', delete: true, at: centre }]);
+    // A later change keeps the position the override was made with.
+    fireEvent.change(screen.getByTestId('member-stock'), { target: { value: 'us-2x6' } });
+    fireEvent.click(screen.getByTestId('member-stock-apply'));
+    expect(overridesOf(SHED_WALL)).toEqual([{ id: 's5', stock: 'us-2x6', at: centre }]);
+    // An opening's members keep their ids whatever the wall's layout: no position. (The
+    // fixture's openings have no params; give the door its kind.)
+    act(() => {
+      const door = t.documents
+        .getState()
+        .document.parts[0]!.features.find((x) => x.id === SHED_DOOR)!;
+      if (door.kind !== 'extension') return;
+      t.documents.getState().execute({
+        type: 'editFeature',
+        partId: PART,
+        feature: { ...door, params: { kind: 'door' } },
+      });
+      t.selection.getState().select([memberRef(`${SHED_DOOR}:king-l`)]);
+    });
+    fireEvent.click(within(screen.getByTestId('member-actions')).getByTestId('member-delete'));
+    expect(overridesOf(SHED_DOOR)).toEqual([{ id: 'king-l', delete: true }]);
   });
 });
 

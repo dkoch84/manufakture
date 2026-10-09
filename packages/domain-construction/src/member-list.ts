@@ -20,12 +20,14 @@ import { memberCorners, type StockRef } from './members';
 import type { Placement, Vec3 } from './geom';
 
 /**
- * What became of an override in the last framing. `applied`: it found its member; `lost`: it did
- * not (the owner no longer has that member, or is not framed). Later statuses may be added (a
- * `moved` for an override whose member's slot moved, #1215); readers should treat an unknown
- * status as "not applied as written".
+ * What became of an override in the last framing. `applied`: it found its member; `moved` (#1215):
+ * it carries `at` and its member's id changed (a spacing, origin or direction change renumbered a
+ * wall's layout), so it applied to the member now where its member was (`appliedTo`); `lost`: it
+ * found none (the owner no longer has that member, nothing is at its position, or the owner is
+ * not framed). Later statuses may be added; readers should treat an unknown status as "not
+ * applied as written".
  */
-export type MemberOverrideStatus = 'applied' | 'lost';
+export type MemberOverrideStatus = 'applied' | 'moved' | 'lost';
 
 /** One member as listed. Lengths are mm. */
 export interface ListedMember {
@@ -64,6 +66,10 @@ export interface ListedOverride {
   /** The full member id it names. */
   readonly member: string;
   readonly status: MemberOverrideStatus;
+  /** `moved` only: the full id of the member it applied to. */
+  readonly appliedTo?: string;
+  /** Where its member was when it was made (#1215), along the wall segment, mm; absent if unknown. */
+  readonly at?: number;
   readonly delete?: true;
   /** The stock id it changes the member to. */
   readonly stock?: string;
@@ -147,16 +153,24 @@ function ownerOf(owner: string, features: MemberListingSources['features']): Own
   return undefined;
 }
 
-/** The statuses a group's metadata reports (`{ overrides: [{ owner, id, status }] }`). */
-function statusesOf(metadata: unknown, owner: string): Map<string, MemberOverrideStatus> {
-  const out = new Map<string, MemberOverrideStatus>();
+interface Status {
+  readonly status: MemberOverrideStatus;
+  readonly appliedTo?: string;
+}
+
+/** The statuses a group's metadata reports (`{ overrides: [{ owner, id, status, appliedTo? }] }`). */
+function statusesOf(metadata: unknown, owner: string): Map<string, Status> {
+  const out = new Map<string, Status>();
   const list = (metadata as { overrides?: unknown } | null | undefined)?.overrides;
   if (!Array.isArray(list)) return out;
   for (const r of list as unknown[]) {
-    const o = r as { owner?: unknown; id?: unknown; status?: unknown } | null;
+    const o = r as { owner?: unknown; id?: unknown; status?: unknown; appliedTo?: unknown } | null;
     if (o === null || typeof o !== 'object') continue;
     if (o.owner !== owner || typeof o.id !== 'string' || typeof o.status !== 'string') continue;
-    out.set(o.id, o.status as MemberOverrideStatus);
+    out.set(o.id, {
+      status: o.status as MemberOverrideStatus,
+      ...(typeof o.appliedTo === 'string' ? { appliedTo: o.appliedTo } : {}),
+    });
   }
   return out;
 }
@@ -251,15 +265,22 @@ export function memberListing(src: MemberListingSources): MemberListing | undefi
     );
   }
   const statuses = statusesOf(set?.metadata, src.owner);
-  const overrides = owner.overrides.map((o, i): ListedOverride => ({
-    n: i + 1,
-    id: o.id,
-    member: memberFullId({ owner: src.owner, id: o.id }),
-    status: set === undefined ? 'lost' : (statuses.get(o.id) ?? 'lost'),
-    ...(o.delete ? { delete: true as const } : {}),
-    ...(o.stock === undefined ? {} : { stock: o.stock.id }),
-    ...(o.move === undefined || o.move === 0 ? {} : { move: round(o.move) }),
-  }));
+  const overrides = owner.overrides.map((o, i): ListedOverride => {
+    const s = set === undefined ? undefined : statuses.get(o.id);
+    return {
+      n: i + 1,
+      id: o.id,
+      member: memberFullId({ owner: src.owner, id: o.id }),
+      status: s?.status ?? 'lost',
+      ...(s?.appliedTo === undefined
+        ? {}
+        : { appliedTo: memberFullId({ owner: src.owner, id: s.appliedTo }) }),
+      ...(o.at === undefined ? {} : { at: round(o.at) }),
+      ...(o.delete ? { delete: true as const } : {}),
+      ...(o.stock === undefined ? {} : { stock: o.stock.id }),
+      ...(o.move === undefined || o.move === 0 ? {} : { move: round(o.move) }),
+    };
+  });
   return {
     owner: src.owner,
     kind: owner.kind,
@@ -270,4 +291,28 @@ export function memberListing(src: MemberListingSources): MemberListing | undefi
     members,
     overrides,
   };
+}
+
+/**
+ * The `at` an override of the member `local` of `src.owner` should store (#1215): where the
+ * member sits along its wall segment as the layout made it (its listed centre, less the nudge of
+ * an override that already applies to it), mm from the segment's first point. Undefined when
+ * positions do not apply (not a wall's own layout stud `s<k>` or block `block<r>:<n>`) or the
+ * member is not in the last framing. What the app writes when it makes an override; an agent
+ * reads the same number as the member's `along.centre` before overriding it.
+ */
+export function overridePosition(src: MemberListingSources, local: string): number | undefined {
+  const form = parseWallMemberId(local)?.form;
+  if (form !== 'slot' && form !== 'block') return undefined;
+  const listing = memberListing(src);
+  if (listing === undefined || listing.kind !== 'wall') return undefined;
+  const m = listing.members.find((x) => x.local === local);
+  if (m?.along == null) return undefined;
+  const full = memberFullId({ owner: src.owner, id: local });
+  const applying = listing.overrides.find(
+    (o) =>
+      (o.status === 'applied' && o.member === full) ||
+      (o.status === 'moved' && o.appliedTo === full),
+  );
+  return round(m.along.centre - (applying?.move ?? 0));
 }

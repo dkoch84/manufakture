@@ -873,6 +873,166 @@ describe('frameWall: overrides', () => {
   });
 });
 
+describe('frameWall: overrides by position (#1215)', () => {
+  // The as-built overrides of the remodel-frame probe: s4 and s8 deleted, s3 nudged 3", each
+  // with where its stud was on 16" centres.
+  const asBuilt = {
+    overrides: [
+      { id: 's4', delete: true, at: inch(64) },
+      { id: 's8', delete: true, at: inch(128) },
+      { id: 's3', move: inch(3), at: inch(48) },
+    ],
+  };
+  const centre = (r: WallFraming & { byId: Map<string, Member> }, id: string) => {
+    const s = at2(straightWall(192).segments[0]!, r.byId.get(id)!);
+    return (s[0] + s[1]) / 2;
+  };
+
+  it('applies overrides with a position to the member they name while the layout holds', () => {
+    const r = frame(straightWall(192, {}, {}, asBuilt));
+    expect(r.overrides).toEqual([
+      { owner: WALL, id: 's4', status: 'applied' },
+      { owner: WALL, id: 's8', status: 'applied' },
+      { owner: WALL, id: 's3', status: 'applied' },
+    ]);
+    expect(r.warnings).toEqual([]);
+    expect(r.byId.has('s4')).toBe(false);
+    expect(r.byId.has('s8')).toBe(false);
+    expect(centre(r, 's3')).toBe(51);
+  });
+
+  it('follows a stud renumbered by a spacing change, and loses one nothing is at', () => {
+    const r = frame(straightWall(192, {}, { spacing: inch(24) }, asBuilt));
+    expect(r.overrides).toEqual([
+      { owner: WALL, id: 's4', status: 'lost' },
+      { owner: WALL, id: 's8', status: 'lost' },
+      { owner: WALL, id: 's3', status: 'moved', appliedTo: 's2' },
+    ]);
+    // s4 is now the stud at 96": left as framed. s2 is the stud at 48": nudged.
+    expect(centre(r, 's4')).toBe(96);
+    expect(centre(r, 's2')).toBe(51);
+    expect(centre(r, 's3')).toBe(72);
+    expect(r.warnings).toEqual([
+      expect.objectContaining({
+        code: 'override-lost',
+        member: `${WALL}:s4`,
+        message: `The override of s4 on ${WALL} is lost: the layout changed, and the wall has no layout stud where s4 was (s4 is now another stud, left as framed).`,
+      }),
+      expect.objectContaining({
+        code: 'override-lost',
+        member: `${WALL}:s8`,
+        message: `The override of s8 on ${WALL} is lost: the layout changed, and the wall has no layout stud where s8 was (s8 is now another stud, left as framed).`,
+      }),
+      expect.objectContaining({
+        code: 'override-moved',
+        member: `${WALL}:s2`,
+        message: `The override of s3 on ${WALL} now applies to s2: the layout changed, and s2 is the member where s3 was.`,
+      }),
+    ]);
+  });
+
+  it('says a stud whose id is gone is gone', () => {
+    const r = frame(
+      straightWall(
+        192,
+        {},
+        { spacing: inch(48) },
+        {
+          overrides: [{ id: 's8', delete: true, at: inch(128) }],
+        },
+      ),
+    );
+    expect(r.overrides).toEqual([{ owner: WALL, id: 's8', status: 'lost' }]);
+    expect(r.warnings.map((w) => w.message)).toEqual([
+      `The override of s8 on ${WALL} is lost: the layout changed, and the wall has no layout stud where s8 was.`,
+    ]);
+  });
+
+  it('follows a stud renumbered by a change of layout direction, and blocks by position', () => {
+    const blocking = { kind: 'mid-height' } as const;
+    const before = frame(straightWall(192, {}, { blocking }));
+    // The block between s3 and s4, centred at 56".
+    const mid = (m: Member) => {
+      const s = at2(straightWall(192).segments[0]!, m);
+      return (s[0] + s[1]) / 2;
+    };
+    const block = before.members.find((m) => m.role === 'blocking' && mid(m) === 56)!;
+    const r = frame(
+      straightWall(
+        192,
+        {},
+        { blocking, layoutFrom: 'end' },
+        {
+          overrides: [
+            { id: 's3', stock: S2X6, at: inch(48) },
+            { id: block.id, delete: true, at: inch(56) },
+          ],
+        },
+      ),
+    );
+    // s3 is renumbered from the far end; blocks are numbered along the wall either way, so the
+    // block keeps its id (and its override applies as written).
+    const to = r.overrides[0]!.appliedTo!;
+    expect(r.overrides[0]).toEqual({ owner: WALL, id: 's3', status: 'moved', appliedTo: to });
+    expect(to).not.toBe('s3');
+    expect(centre(r, to)).toBe(48);
+    expect(r.byId.get(to)!.stock).toBe(S2X6);
+    expect(r.overrides[1]).toEqual({ owner: WALL, id: block.id, status: 'applied' });
+    expect(r.members.some((m) => m.role === 'blocking' && mid(m) === 56)).toBe(false);
+    expect(r.warnings.map((w) => w.code)).toEqual(['override-moved']);
+    // A block found by position in another bay moves with it: the same override at 72" (the bay
+    // between s4 and s5) deletes that bay's block, whatever this one's id.
+    const other = frame(
+      straightWall(
+        192,
+        {},
+        { blocking },
+        { overrides: [{ id: block.id, delete: true, at: inch(72) }] },
+      ),
+    );
+    expect(other.overrides[0]!.status).toBe('moved');
+    expect(other.byId.has(block.id)).toBe(true);
+    expect(other.members.some((m) => m.role === 'blocking' && mid(m) === 72)).toBe(false);
+  });
+
+  it('matches within 1/2", the nearest stud first', () => {
+    const near = frame(
+      straightWall(192, {}, {}, { overrides: [{ id: 's9', delete: true, at: inch(48.4) }] }),
+    );
+    expect(near.overrides).toEqual([{ owner: WALL, id: 's9', status: 'moved', appliedTo: 's3' }]);
+    const far = frame(
+      straightWall(192, {}, {}, { overrides: [{ id: 's3', delete: true, at: inch(48.6) }] }),
+    );
+    expect(far.overrides).toEqual([{ owner: WALL, id: 's3', status: 'lost' }]);
+    expect(far.byId.has('s3')).toBe(true);
+  });
+
+  it('keeps matching by id without a position (older overrides), and on other members', () => {
+    // Without `at` a spacing change re-targets as before #1215: s4 deletes the stud at 96".
+    const old = frame(
+      straightWall(192, {}, { spacing: inch(24) }, { overrides: [{ id: 's4', delete: true }] }),
+    );
+    expect(old.overrides).toEqual([{ owner: WALL, id: 's4', status: 'applied' }]);
+    expect(old.warnings).toEqual([]);
+    // Plates, an opening's members and added members keep their ids: `at` is not used.
+    const r = frame(
+      straightWall(
+        192,
+        { openings: [{ ...DOOR, overrides: [{ id: 'king-l', stock: S2X6, at: inch(900) }] }] },
+        { spacing: inch(24) },
+        {
+          add: [{ id: 'add1', role: 'stud', at: inch(100) }],
+          overrides: [
+            { id: 'top1:1', stock: S2X6, at: inch(900) },
+            { id: 'add1', stock: S2X6, at: inch(900) },
+          ],
+        },
+      ),
+    );
+    expect(r.overrides.map((o) => o.status)).toEqual(['applied', 'applied', 'applied']);
+  });
+});
+
 describe('frameWall: segments', () => {
   it('prefixes every id but opening members with the segment in later segments', () => {
     const input: FrameWallInput = {

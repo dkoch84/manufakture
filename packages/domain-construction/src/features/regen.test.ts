@@ -798,6 +798,46 @@ describe('walls through regen with the real kernel', () => {
     await done(engine);
   });
 
+  it('finds an override with a position by where its stud was, measured from the path', async () => {
+    const engine = engineFor();
+    // extension#1 runs through the corner at (0, 0): its layout starts 3.5" before the path's
+    // first point, so on 16" centres s3 is centred at 44.5" along the path, and on 24" s2 is.
+    const walls = (spacing: number) =>
+      building(
+        wall(
+          'extension#1',
+          [
+            [0, 0],
+            [192, 0],
+          ],
+          { overrides: [{ id: 's3', delete: true, at: inch(44.5) }] },
+          { spacing: ins(spacing) },
+        ),
+        wall('extension#3', [
+          [0, 0],
+          [0, 144],
+        ]),
+      );
+    let result = await regen(engine, walls(16));
+    expectOk(result, 'extension#1', 'extension#3');
+    expect(ids(membersOf(result, 'extension#1'), 'extension#1')).not.toContain('s3');
+    expect(setOf(result, 'extension#1').metadata).toMatchObject({
+      overrides: [{ owner: 'extension#1', id: 's3', status: 'applied' }],
+    });
+    result = await regen(engine, walls(24));
+    expectOk(result, 'extension#1', 'extension#3');
+    const members = ids(membersOf(result, 'extension#1'), 'extension#1');
+    expect(members).toContain('s3');
+    expect(members).not.toContain('s2');
+    expect(setOf(result, 'extension#1').metadata).toMatchObject({
+      overrides: [{ owner: 'extension#1', id: 's3', status: 'moved', appliedTo: 's2' }],
+    });
+    expect(feature(result, 'extension#1').warnings).toEqual([
+      expect.objectContaining({ domainCode: 'override-moved', member: 'extension#1:s2' }),
+    ]);
+    await done(engine);
+  });
+
   it('adds members the layout does not make, measured from the path, owned by the feature', async () => {
     const engine = engineFor();
     // Two walls meeting at (0, 0): whichever butts, its framed start is not its path's first

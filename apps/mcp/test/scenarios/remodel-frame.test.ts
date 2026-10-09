@@ -395,6 +395,15 @@ describe('remodel-frame: gap probes', () => {
     // Was the GAP PROBE (as-built) "a stud can be nudged off the layout, but none can be added":
     // fixed by follow-up 2 (#1214), the wall's `add` params.
     const left = await feature(sessionId, LEFT);
+    // Each override records where its stud is (`at`, its `along.centre`, #1215), so a later layout
+    // change finds it by position (the layout probe below).
+    const centreOf = async (local: string): Promise<number> =>
+      ((await membersOf(sessionId, LEFT)).members as Data[]).find((m) => m.local === local)!.along
+        .centre;
+    const at = { s3: await centreOf('s3'), s4: await centreOf('s4'), s8: await centreOf('s8') };
+    // On 16" centres from the framing's start, which is 3.5" before the path's first point: the
+    // left wall butts the front wall's framing.
+    expect([at.s3, at.s4, at.s8]).toEqual([IN_MM(51.5), IN_MM(67.5), IN_MM(131.5)]);
     const r = value(
       await h.call('apply', {
         sessionId,
@@ -405,9 +414,9 @@ describe('remodel-frame: gap probes', () => {
             params: {
               ...f.params,
               overrides: [
-                { id: 's4', delete: true },
-                { id: 's8', delete: true },
-                { id: 's3' },
+                { id: 's4', delete: true, at: at.s4 },
+                { id: 's8', delete: true, at: at.s8 },
+                { id: 's3', at: at.s3 },
                 { id: 'extra1', stock: 'us-2x4' },
               ],
               add: [
@@ -433,9 +442,9 @@ describe('remodel-frame: gap probes', () => {
     ]);
     const listing = await membersOf(sessionId, LEFT);
     expect(listing.overrides).toEqual([
-      { n: 1, id: 's4', member: `${LEFT}:s4`, status: 'applied', delete: true },
-      { n: 2, id: 's8', member: `${LEFT}:s8`, status: 'applied', delete: true },
-      { n: 3, id: 's3', member: `${LEFT}:s3`, status: 'applied', move: 76.2 },
+      { n: 1, id: 's4', member: `${LEFT}:s4`, status: 'applied', at: at.s4, delete: true },
+      { n: 2, id: 's8', member: `${LEFT}:s8`, status: 'applied', at: at.s8, delete: true },
+      { n: 3, id: 's3', member: `${LEFT}:s3`, status: 'applied', at: at.s3, move: 76.2 },
       { n: 4, id: 'extra1', member: `${LEFT}:extra1`, status: 'lost', stock: 'us-2x4' },
     ]);
     // The added members are listed with the wall's own, marked as added, where they were put: the
@@ -493,7 +502,11 @@ describe('remodel-frame: gap probes', () => {
     expect(images[0]!.unmatched).toEqual([`${LEFT}:s4`]);
   });
 
-  it('GAP PROBE (layout): changing the spacing renumbers studs; overrides re-target or are lost', async () => {
+  it('layout: a spacing change finds each override by where its stud was, and says so', async () => {
+    // Was the GAP PROBE (layout) "changing the spacing renumbers studs; overrides re-target or are
+    // lost": the delete of s4 and the nudge of s3 silently applied to the studs that inherited
+    // their ids. Fixed by follow-up 3 (#1215): an override that records its stud's position (`at`)
+    // is matched by position, `moved` when the stud there has another id, `lost` when none is.
     const left = await feature(sessionId, LEFT);
     const r = value(
       await h.call('apply', {
@@ -504,27 +517,32 @@ describe('remodel-frame: gap probes', () => {
         ],
       }),
     );
-    // s8 (at 128" on 16" centres) no longer exists: lost, with a warning.
-    expect(warningsOf(r, LEFT)).toContain(
-      'The override of s8 on extension#4 is lost: the wall no longer has that member.',
+    // On 24" centres no stud is at 64" (s4's place) or 128" (s8's): both lost, with a warning
+    // each. The stud at 48" (s3's place) is now s2: the nudge applies to it, with a warning.
+    expect(warningsOf(r, LEFT)).toEqual([
+      'The override of s4 on extension#4 is lost: the layout changed, and the wall has no layout stud where s4 was (s4 is now another stud, left as framed).',
+      'The override of s8 on extension#4 is lost: the layout changed, and the wall has no layout stud where s8 was.',
+      'The override of s3 on extension#4 now applies to s2: the layout changed, and s2 is the member where s3 was.',
+      'The override of extra1 on extension#4 is lost: the wall never had that member (to add a member its layout does not make, list it in the wall\'s "add" params).',
+    ]);
+    const listing = await membersOf(sessionId, LEFT);
+    expect((listing.overrides as Data[]).map((o) => [o.id, o.status, o.appliedTo ?? null])).toEqual(
+      [
+        ['s4', 'lost', null],
+        ['s8', 'lost', null],
+        ['s3', 'moved', `${LEFT}:s2`],
+        ['extra1', 'lost', null],
+      ],
     );
-    // s4 still exists, now centred at 96" instead of 64": the delete silently applies to another
-    // stud, and the 3" nudge of s3 moves the stud at 72" instead of 48". No warning says so.
-    expect(warningsOf(r, LEFT).some((w) => /\bs4\b|\bs3\b/.test(w))).toBe(false);
-    // The members query says the same: s4 and s3 "applied", although to other studs.
-    const statuses = ((await membersOf(sessionId, LEFT)).overrides as Data[]).map((o) => [
-      o.id,
-      o.status,
-    ]);
-    expect(statuses).toEqual([
-      ['s4', 'applied'],
-      ['s8', 'lost'],
-      ['s3', 'applied'],
-      ['extra1', 'lost'],
-    ]);
+    // Nothing is re-targeted: s4 (now 96" along the layout) stays, s3 (now 72") is where the
+    // layout put it, and s2 is the stud nudged 3" off 48" (all 3.5" more from the path's start).
+    const stud = (local: string) => (listing.members as Data[]).find((m) => m.local === local)!;
+    expect(stud('s4').along.centre).toBeCloseTo(IN_MM(99.5), 3);
+    expect(stud('s3').along.centre).toBeCloseTo(IN_MM(75.5), 3);
+    expect(stud('s2').along.centre).toBeCloseTo(IN_MM(54.5), 3);
     const ids = ownedBy(memberIds(value(await h.call('get_quantities', { sessionId }))), LEFT);
     expect(ids.filter((id) => /:s\d+$/.test(id)).sort()).toEqual(
-      [`${LEFT}:s0`, `${LEFT}:s1`, `${LEFT}:s2`, `${LEFT}:s3`, `${LEFT}:s5`, `${LEFT}:s6`].sort(),
+      [0, 1, 2, 3, 4, 5, 6].map((k) => `${LEFT}:s${k}`).sort(),
     );
   });
 

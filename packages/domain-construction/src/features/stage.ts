@@ -20,9 +20,12 @@ import {
   FramingInputError,
   frameWall,
   type FramingWarning,
+  type MemberOverride,
   type OpeningReport,
+  type OverrideReport,
   type WallOpening,
 } from '../framing/wall';
+import { parseWallMemberId } from '../member-ids';
 import {
   OPENING_TYPE,
   WALL_TYPE,
@@ -36,7 +39,8 @@ import { framedWall, wallGraph, type GraphWall } from './graph';
 /** What a wall's group reports (`MemberSetResult.metadata`): which header each opening used. */
 export interface WallGroupMetadata {
   readonly openings: readonly (OpeningReport & { readonly header: { readonly source: string } })[];
-  readonly overrides: readonly { owner: string; id: string; status: 'applied' | 'lost' }[];
+  /** Each override's status; `appliedTo` on a `moved` one (#1215). */
+  readonly overrides: readonly OverrideReport[];
 }
 
 function walls(features: readonly MemberFeature[]): GraphWall[] {
@@ -90,6 +94,11 @@ export function frameConstructionGroup(ctx: MemberGroupContext): MemberOutput | 
     };
   }
   const framed = framedWall(graph, wall);
+  // Positions in params are from the segment's first path point, as an opening's position is.
+  const shift = (segment: number) => framed.shifts[segment - 1] ?? 0;
+  const overrides = wall.meta.overrides.map((o): MemberOverride =>
+    o.at === undefined ? o : { ...o, at: o.at - shift(parseWallMemberId(o.id)?.segment ?? 1) },
+  );
   const openings = openingsOf(ctx.features, wall.id);
   const bySegment = new Map<number, WallOpening[]>();
   const defaults = new Set<string>();
@@ -126,15 +135,11 @@ export function frameConstructionGroup(ctx: MemberGroupContext): MemberOutput | 
         return list === undefined ? s : { ...s, openings: list };
       }),
       settings: wall.meta.settings,
-      ...(wall.meta.overrides.length === 0 ? {} : { overrides: wall.meta.overrides }),
+      ...(overrides.length === 0 ? {} : { overrides }),
       ...(wall.meta.add === undefined || wall.meta.add.length === 0
         ? {}
         : {
-            // Measured from the segment's first path point, as an opening's position is.
-            add: wall.meta.add.map((a) => ({
-              ...a,
-              at: a.at - (framed.shifts[(a.segment ?? 1) - 1] ?? 0),
-            })),
+            add: wall.meta.add.map((a) => ({ ...a, at: a.at - shift(a.segment ?? 1) })),
           }),
     });
   } catch (error) {

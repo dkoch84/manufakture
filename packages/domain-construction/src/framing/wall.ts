@@ -15,6 +15,7 @@ import {
   parseWallMemberId,
   type CornerMemberName,
   type TeeMemberName,
+  type WallMemberId,
 } from '../member-ids';
 import { MEMBER_BUDGET, memberCorners, type Member, type Role, type StockRef } from '../members';
 import { IntervalIndex, firstIndex, overlaps, splice, subtract, type Interval } from './intervals';
@@ -176,7 +177,24 @@ export interface MemberOverride {
   readonly delete?: boolean;
   readonly stock?: StockRef;
   readonly move?: number;
+  /**
+   * Where its member was when the override was made (#1215): the member's centre line along its
+   * segment, mm from the framed segment's start, before `move`. On a wall's own layout stud
+   * (`s<k>`) or block (`block<r>:<n>`) the override applies to the member of that form (a block:
+   * of that row) in that segment whose centre is within `OVERRIDE_AT_TOLERANCE` of it, whatever
+   * its id now: `moved` when that is another id, `lost` when there is none, never to the member
+   * that merely kept the id. Ignored on any other member, whose id the layout does not renumber,
+   * and absent on overrides made before #1215, which match by id alone.
+   */
+  readonly at?: number;
 }
+
+/**
+ * How near (mm) a layout stud's or block's centre must be to an override's `at` to be its member:
+ * 1/2", well inside any spacing (at least `MIN_SPACING`, 50 mm) and a stud's width, so a typed or
+ * measured position finds its stud and never the next one.
+ */
+export const OVERRIDE_AT_TOLERANCE = 12.7;
 
 /**
  * A member the layout does not make (#1214), added by a wall or an opening and owned by it: an
@@ -235,6 +253,7 @@ export type WallWarningCode =
   | 'blocking-row-outside'
   | 'blocking-row-overlap'
   | 'added-member-left-out'
+  | 'override-moved'
   | 'override-lost';
 
 /**
@@ -277,7 +296,13 @@ export interface OverrideReport {
   readonly owner: string;
   /** The local member id the override names. */
   readonly id: string;
-  readonly status: 'applied' | 'lost';
+  /**
+   * `applied`: to the member it names; `moved` (an override with `at` whose member's id changed,
+   * #1215): to the member now at its position, `appliedTo`; `lost`: to nothing.
+   */
+  readonly status: 'applied' | 'moved' | 'lost';
+  /** `moved` only: the local id of the member it applied to. */
+  readonly appliedTo?: string;
 }
 
 export interface WallFraming {
@@ -550,6 +575,7 @@ export function frameWall(input: FrameWallInput): WallFraming {
     if (layout !== undefined) return `${who} no longer has that member.`;
     return `${who} never had that member (to add a member its layout does not make, list it in ${who}'s "add" params).`;
   };
+  const locate = byPosition(input.wall, members, frames, segOf);
   const first = applyOverrides(
     input.wall,
     members,
@@ -557,6 +583,7 @@ export function frameWall(input: FrameWallInput): WallFraming {
     dirOf,
     why,
     warnings,
+    locate,
   );
   const blocks: Member[] = [];
   for (const p of added.pending) {
@@ -571,6 +598,7 @@ export function frameWall(input: FrameWallInput): WallFraming {
     dirOf,
     why,
     warnings,
+    locate,
   );
   // Reports in the overrides' own order.
   const reports: OverrideReport[] = [];
@@ -749,6 +777,66 @@ function addedBlock(
   return f.box(p.a.id, 'blocking', stock, 'flat', bay, f.across, band, p.owner);
 }
 
+/** Which member an override applies to: a local id of its owner, or why none. */
+type Located = { readonly id: string } | { readonly lost: string };
+
+/**
+ * Finds the member of a wall override with `at` by position (`MemberOverride.at`): among the
+ * wall's own members of the id's form in the id's segment (slots, or blocks of the id's row), as
+ * the layout and the added studs placed them (before any override), the nearest whose centre is
+ * within `OVERRIDE_AT_TOLERANCE`, preferring the named id on a tie. Undefined (match by id) for
+ * every other override.
+ */
+function byPosition(
+  wall: string,
+  members: readonly Member[],
+  frames: readonly SegmentFrame[],
+  segOf: ReadonlyMap<string, number>,
+): (owner: string, o: MemberOverride) => Located | undefined {
+  const keyOf = (p: WallMemberId | undefined): string | undefined =>
+    p?.form === 'slot'
+      ? `${p.segment}/s`
+      : p?.form === 'block'
+        ? `${p.segment}/b${p.row}`
+        : undefined;
+  let found: Map<string, Array<{ id: string; at: number }>> | undefined;
+  const candidates = () => {
+    if (found !== undefined) return found;
+    found = new Map();
+    for (const m of members) {
+      if (m.owner !== wall) continue;
+      const key = keyOf(parseWallMemberId(m.id));
+      const frame = frames[(segOf.get(memberFullId(m)) ?? 0) - 1];
+      if (key === undefined || frame === undefined) continue;
+      const [from, to] = alongExtent(m, frame);
+      const list = found.get(key) ?? [];
+      list.push({ id: m.id, at: (from + to) / 2 });
+      found.set(key, list);
+    }
+    return found;
+  };
+  return (owner, o) => {
+    if (owner !== wall || o.at === undefined || !Number.isFinite(o.at)) return undefined;
+    const parsed = parseWallMemberId(o.id);
+    const key = keyOf(parsed);
+    if (key === undefined) return undefined;
+    let best: { id: string; d: number } | undefined;
+    for (const c of candidates().get(key) ?? []) {
+      const d = Math.abs(c.at - o.at);
+      if (d > OVERRIDE_AT_TOLERANCE + EPS) continue;
+      if (best === undefined || d < best.d - EPS || (d <= best.d + EPS && c.id === o.id)) {
+        best = { id: c.id, d };
+      }
+    }
+    if (best !== undefined) return { id: best.id };
+    const slot = parsed!.form === 'slot';
+    const what = slot ? 'layout stud' : `block in row ${(parsed as { row: number }).row}`;
+    const kept = (candidates().get(key) ?? []).some((c) => c.id === o.id);
+    const now = kept ? ` (${o.id} is now another ${slot ? 'stud' : 'block'}, left as framed)` : '';
+    return { lost: `the layout changed, and the wall has no ${what} where ${o.id} was${now}.` };
+  };
+}
+
 function applyOverrides(
   wall: string,
   members: readonly Member[],
@@ -756,30 +844,46 @@ function applyOverrides(
   dirOf: ReadonlyMap<string, Vec3>,
   lostWhy: (owner: string, id: string) => string,
   warnings: FramingWarning[],
+  locate: (owner: string, o: MemberOverride) => Located | undefined,
 ): { members: Member[]; reports: OverrideReport[] } {
   const byId = new Map(members.map((m, i) => [memberFullId(m), i]));
   const out: (Member | undefined)[] = [...members];
   const reports: OverrideReport[] = [];
   const deleted = new Set<string>();
   for (const { owner, o } of overrides) {
-    const full = memberFullId({ owner, id: o.id });
-    const i = byId.get(full);
+    const located = locate(owner, o) ?? { id: o.id };
+    const target = 'id' in located ? located.id : o.id;
+    const full = memberFullId({ owner, id: target });
+    const i = 'id' in located ? byId.get(full) : undefined;
     const m = i === undefined ? undefined : out[i];
     if (i === undefined || m === undefined) {
-      const why = deleted.has(full)
-        ? 'an earlier override of the same member deletes it.'
-        : lostWhy(owner, o.id);
+      const why =
+        'lost' in located
+          ? located.lost
+          : deleted.has(full)
+            ? `an earlier override of the same member${target === o.id ? '' : ` (${target}, where ${o.id} was)`} deletes it.`
+            : lostWhy(owner, o.id);
       reports.push({ owner, id: o.id, status: 'lost' });
       warnings.push({
         code: 'override-lost',
         kind: 'layout',
         message: `The override of ${o.id} on ${owner} is lost: ${why}`,
         ...(owner === wall ? {} : { opening: owner }),
-        member: full,
+        member: memberFullId({ owner, id: o.id }),
       });
       continue;
     }
-    reports.push({ owner, id: o.id, status: 'applied' });
+    if (target === o.id) reports.push({ owner, id: o.id, status: 'applied' });
+    else {
+      reports.push({ owner, id: o.id, status: 'moved', appliedTo: target });
+      warnings.push({
+        code: 'override-moved',
+        kind: 'layout',
+        message: `The override of ${o.id} on ${owner} now applies to ${target}: the layout changed, and ${target} is the member where ${o.id} was.`,
+        ...(owner === wall ? {} : { opening: owner }),
+        member: full,
+      });
+    }
     if (o.delete) {
       out[i] = undefined;
       deleted.add(full);

@@ -157,6 +157,8 @@ function ConstructionAside({
       )}
       <MemberActions
         documents={documents}
+        model={model}
+        members={members}
         selection={selection}
         partId={partId}
         disabled={disabled}

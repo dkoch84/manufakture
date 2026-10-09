@@ -123,11 +123,20 @@ export function stockFor(
 
 // Stored params ----------------------------------------------------------------------------------
 
-/** Per-member override params as stored: `{ id, delete?, stock? }`; a nudge is `move_<n>`. */
+/**
+ * Per-member override params as stored: `{ id, delete?, stock?, at? }`; a nudge is `move_<n>`.
+ * `at` (#1215, a wall's overrides only) is where the member was when the override was made: its
+ * centre line along its segment, mm from the segment's first point (as an opening's `position`),
+ * before the override's own nudge. A wall's layout studs (`s<k>`) and blocks (`block<r>:<n>`)
+ * are then found by position, not id, so a spacing, origin or direction change cannot re-target
+ * the override (`OverrideReport`). It is a plain number, not an expression: it records a fact, is
+ * written by whoever makes the override, and stays with its entry when others are removed.
+ */
 export interface StoredOverride {
   readonly id: string;
   readonly delete?: boolean;
   readonly stock?: string;
+  readonly at?: number;
 }
 
 /** Local member ids: letters, digits, `-`, `:` and `/` (`s12`, `top1:2`, `seg2/s0`, `king-l`). */
@@ -136,7 +145,11 @@ const LOCAL_ID = /^[a-z0-9][a-z0-9:/-]{0,127}$/;
 /** The expression that nudges the n-th override (1-based): `move_<n>`. */
 export const moveExpression = (n: number): string => `move_${n}`;
 
-export function readOverrides(v: unknown, at: Path): Read<StoredOverride[]> {
+/**
+ * A feature's `overrides` params. `positions`: whether entries may carry `at` (walls only: an
+ * opening's, a floor's and a roof's member ids do not renumber with a wall's layout).
+ */
+export function readOverrides(v: unknown, at: Path, positions = false): Read<StoredOverride[]> {
   if (v === undefined) return ok([]);
   if (!Array.isArray(v)) return fail('expected a list of member overrides', at);
   if (v.length > MAX_OVERRIDES) return fail(`at most ${MAX_OVERRIDES} overrides are allowed`, at);
@@ -145,8 +158,10 @@ export function readOverrides(v: unknown, at: Path): Read<StoredOverride[]> {
   for (let i = 0; i < v.length; i++) {
     const o: unknown = v[i];
     const oat = [...at, i];
-    if (!isObject(o)) return fail('expected an override { id, delete?, stock? }', oat);
-    const keys = onlyKeys(o, ['id', 'delete', 'stock'], oat);
+    if (!isObject(o)) {
+      return fail(`expected an override { id, delete?, stock?${positions ? ', at?' : ''} }`, oat);
+    }
+    const keys = onlyKeys(o, ['id', 'delete', 'stock', ...(positions ? ['at'] : [])], oat);
     if (!keys.ok) return keys;
     const id = own(o, 'id');
     if (typeof id !== 'string' || !LOCAL_ID.test(id)) {
@@ -166,10 +181,18 @@ export function readOverrides(v: unknown, at: Path): Read<StoredOverride[]> {
       const r = readId(stock, [...oat, 'stock'], 'a stock id');
       if (!r.ok) return r;
     }
+    const pos = own(o, 'at');
+    if (pos !== undefined && !(typeof pos === 'number' && Math.abs(pos) <= MAX_SEGMENT_LENGTH)) {
+      return fail(
+        `expected the member's position along its segment, mm, within ${MAX_SEGMENT_LENGTH}`,
+        [...oat, 'at'],
+      );
+    }
     out.push({
       id,
       ...(del === undefined ? {} : { delete: del }),
       ...(stock === undefined ? {} : { stock: stock as string }),
+      ...(pos === undefined ? {} : { at: pos }),
     });
   }
   return ok(out);
@@ -219,6 +242,7 @@ export function resolveOverrides(
             ]),
           }),
       ...(move === undefined ? {} : { move }),
+      ...(o.at === undefined ? {} : { at: o.at }),
     };
   });
 }
