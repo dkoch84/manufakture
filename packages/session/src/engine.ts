@@ -189,8 +189,15 @@ export class WorkerEngine implements Engine {
     if (this.#closed) throw new EngineLost('The session is closed.');
     const old = this.#current;
     await stop(old);
-    this.#current = await spawn(this.#options, this.#module);
-    this.#api = guard(this.#current);
+    const next = await spawn(this.#options, this.#module);
+    // The session may have closed while the new worker started (a start takes seconds, up to
+    // `startMs`): close stopped only the old one, so nothing would ever end this one.
+    if (this.#closed) {
+      await stop(next).catch(() => undefined);
+      throw new EngineLost('The session is closed.');
+    }
+    this.#current = next;
+    this.#api = guard(next);
     this.#replaced++;
   }
 
