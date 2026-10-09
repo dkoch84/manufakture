@@ -7,7 +7,7 @@
 
 import type { EdgeInfo, FaceInfo, VertexInfo } from '@manufakture/kernel';
 import { UNNAMED } from '@manufakture/kernel';
-import type { MemberData, MemberInstances, RegenResult } from '@manufakture/regen';
+import type { JsonValue, MemberData, MemberInstances, RegenResult } from '@manufakture/regen';
 
 export interface NamedFace extends FaceInfo {
   /** The face's persistent name, or null when regen has not named it. */
@@ -34,6 +34,8 @@ export interface KnownSet {
   setKey: string;
   members: MemberData[];
   instances: MemberInstances[];
+  /** What the member stage returned beside the members (override statuses, header sources). */
+  metadata?: JsonValue;
 }
 
 export class ModelState {
@@ -93,6 +95,7 @@ export class ModelState {
             setKey: set.setKey,
             members: set.members,
             instances: set.instances,
+            ...(set.metadata === undefined ? {} : { metadata: set.metadata }),
           });
         }
       }

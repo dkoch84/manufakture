@@ -217,6 +217,91 @@ describe('the shed', () => {
     const q = ok(await s.quantities());
     expect(q.takeoffs).toHaveLength(1);
   });
+
+  it("lists a feature's members along its wall, and its overrides' statuses", async () => {
+    const s = await start(shedDocument());
+    // Window 1 on the front wall, centred at 48", 24" wide, sill at 44".
+    const w = ok(await s.members({ kind: 'members', partId: PART, owner: 'extension#5' }));
+    expect(w).toMatchObject({
+      owner: 'extension#5',
+      kind: 'opening',
+      wall: 'extension#1',
+      segment: 1,
+      framed: true,
+      omitted: 0,
+      overrides: [],
+    });
+    expect(w.count).toBe(w.members.length);
+    const under = w.members.filter((m) => m.role === 'cripple' && m.above!.to <= inch(44) + 1e-6);
+    expect(under.length).toBeGreaterThan(0);
+    for (const m of under) expect(Math.abs(m.along!.centre - inch(48))).toBeLessThan(inch(12));
+
+    // Overrides on the left wall: one applies, one names a member the wall never had.
+    const left = s.document.parts[0]!.features.find((f) => f.id === 'extension#4')!;
+    const params = (left as { params: Record<string, unknown> }).params;
+    ok(
+      await s.apply({
+        label: 'Left wall overrides',
+        commands: [
+          {
+            type: 'editFeature',
+            partId: PART,
+            feature: {
+              ...left,
+              params: { ...params, overrides: [{ id: 's3', delete: true }, { id: 'extra1' }] },
+            },
+          },
+        ],
+      }),
+    );
+    const expected = [
+      { n: 1, id: 's3', member: 'extension#4:s3', status: 'applied', delete: true },
+      { n: 2, id: 'extra1', member: 'extension#4:extra1', status: 'lost' },
+    ];
+    const l = ok(await s.members({ kind: 'members', partId: PART, owner: 'extension#4' }));
+    expect(l.kind).toBe('wall');
+    expect(l.overrides).toEqual(expected);
+    expect(l.members.some((m) => m.local === 's3')).toBe(false);
+    expect(l.members.some((m) => m.local === 's4')).toBe(true);
+
+    // A regen that leaves the left wall's set alone does not resend it: the statuses stay.
+    const window = s.document.parts[0]!.features.find((f) => f.id === 'extension#5')!;
+    ok(
+      await s.apply({
+        label: 'Move window 1',
+        commands: [
+          {
+            type: 'editFeature',
+            partId: PART,
+            feature: {
+              ...window,
+              expressions: {
+                ...(window as { expressions: Record<string, unknown> }).expressions,
+                position: { source: '60', lengthUnit: 'in', angleUnit: 'deg' },
+              },
+            },
+          },
+        ],
+      }),
+    );
+    const again = ok(await s.members({ kind: 'members', partId: PART, owner: 'extension#4' }));
+    expect(again.overrides).toEqual(expected);
+
+    // Floors and roofs list their members with no position along a wall.
+    const floor = ok(await s.members({ kind: 'members', partId: PART, owner: 'extension#8' }));
+    expect(floor.kind).toBe('floor');
+    expect(floor.count).toBeGreaterThan(0);
+    expect(floor.members[0]).toMatchObject({ along: null, above: null });
+
+    expect(await s.members({ kind: 'members', partId: PART, owner: 'extension#99' })).toEqual({
+      ok: false,
+      error: expect.objectContaining({ code: 'not-found' }),
+    });
+    expect(await s.members({ kind: 'members', partId: PART })).toEqual({
+      ok: false,
+      error: expect.objectContaining({ code: 'invalid-input' }),
+    });
+  });
 });
 
 describe('the bracket', () => {

@@ -45,6 +45,17 @@ export {
   type WallMemberId,
 } from './member-ids';
 export {
+  memberListing,
+  type ListableMember,
+  type ListableSet,
+  type ListedMember,
+  type ListedOverride,
+  type MemberListing,
+  type MemberListingSources,
+  type MemberOverrideStatus,
+  type MemberOwnerKind,
+} from './member-list';
+export {
   DEFAULT_WALL_SETTINGS,
   FramingInputError,
   MemberBudget,

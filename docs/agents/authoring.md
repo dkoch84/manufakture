@@ -1083,6 +1083,40 @@ At house scale a 2x4 is a couple of pixels across a whole view: frame the member
 }
 ```
 
+To read the members themselves, ask `get_object` for `{ "kind": "members" }` with the feature
+that owns them (a wall, an opening, a floor or a roof). A wall owns its layout studs, plates,
+blocking and corner framing; an opening owns its kings, jacks, header, sill and cripples. Each
+member comes with its full id (`extension#2:s5`, what `render` highlights and takeoff sources
+name), its local id (what an override names), role, stock, blank length, and for walls and
+openings `along` (extent and centre in mm from the wall segment's first point, the same measure
+as an opening's `position`) and `above` (extent above the wall's base, like a `sill`). Members
+are sorted along the wall. `overrides` lists each per-member override the feature holds, in
+order (`n` is the `move_<n>` that nudges it), with its `status`: `applied` or `lost` (its member
+is gone, for example after a spacing change). Treat any other status a later version adds as not
+applied as written. The new window's studs under its sill are its `cripple` members with `above.to`
+at or below the sill; to see which wall studs an opening displaced, list the wall before and after.
+
+```json mcp:get_object
+{
+  "sessionId": "<session>",
+  "query": { "kind": "members", "partId": "part#1", "owner": "extension#10" }
+}
+```
+
+```json mcp:result
+{
+  "ok": true,
+  "members": {
+    "owner": "extension#10",
+    "kind": "opening",
+    "wall": "extension#2",
+    "group": "extension#2",
+    "framed": true,
+    "overrides": []
+  }
+}
+```
+
 The takeoff (lumber and sheet goods) is in the quantities:
 
 ```json mcp:get_quantities
@@ -1440,5 +1474,6 @@ Redo what was dropped, check, then submit. When Main has not moved, nothing happ
   `approved` or `rejected` branch is finished.
 - `render` draws at most 8 images a call, 2048 pixels a side.
 - `find_geometry` finds faces and edges, not vertices yet.
+- A `members` query lists at most 500 members; `count` and `omitted` say how many there are.
 - No tool approves, rejects, merges or requests changes, and none writes Main. Only the person
   does, in History.

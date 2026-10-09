@@ -49,12 +49,14 @@ import {
   findGeometry,
   mateFramesOf,
   measure,
+  membersOf,
   objectOf,
   quantities,
   tree,
   type ErrorLine,
   type GeometryHit,
   type MateFrames,
+  type MembersAnswer,
   type QueryContext,
   type Quantities,
 } from './queries';
@@ -1475,6 +1477,11 @@ export class Session {
   /** A mate's connector frames from the last regen (`mateFramesOf`); undefined for non-mates. */
   mateFrames(query: unknown): Promise<SessionResult<MateFrames | null | undefined>> {
     return this.#read(() => mateFramesOf(this.#document, this.#model.last, query));
+  }
+
+  /** The framing members a feature owns and its overrides' statuses (`membersOf`). */
+  members(query: unknown): Promise<SessionResult<MembersAnswer>> {
+    return this.#readResult(() => membersOf(this.#document, this.#model, query));
   }
 
   schema(query: {

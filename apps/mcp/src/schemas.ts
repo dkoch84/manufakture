@@ -118,6 +118,15 @@ export const ObjectQuery = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('configurations') }),
   z.strictObject({ kind: z.literal('domain'), namespace: z.string().min(1).max(64) }),
   z.strictObject({ kind: z.literal('script'), scriptId: ModelId }),
+  z
+    .strictObject({
+      kind: z.literal('members'),
+      partId: ModelId,
+      owner: ModelId.describe('A construction wall, opening, floor or roof.'),
+    })
+    .describe(
+      'The framing members the feature owns in the last regen, and the status of each override its params hold: answered as members, not object.',
+    ),
 ]);
 
 export const GeometryQuery = z.strictObject({
@@ -364,6 +373,58 @@ const ConnectorFrameOut = z
     "A connector's frame in world coordinates at the solved poses (mm, unit axes), after flip, rotate and offset; null when it did not resolve.",
   );
 
+const SpanOut = z.looseObject({ from: z.number(), to: z.number() });
+
+const MembersOut = z
+  .looseObject({
+    owner: z.string(),
+    kind: z.enum(['wall', 'opening', 'floor', 'roof']),
+    wall: z.string().optional().describe("An opening's host wall."),
+    segment: z.number().optional().describe("An opening's segment of its host wall, 1-based."),
+    group: z.string().describe('The framing group: the wall, for its openings too.'),
+    framed: z
+      .boolean()
+      .describe('False when the last regen has no members for the group (it failed).'),
+    count: z.number().describe('Members the feature owns.'),
+    omitted: z.number().describe('Members not listed past the limit.'),
+    members: z.array(
+      z.looseObject({
+        id: z.string().describe('Full id, <owner>:<local>: what render and takeoff sources use.'),
+        local: z.string().describe('Local id: what an override names (s4, king-l, top1:2).'),
+        role: z.string(),
+        stock: z.looseObject({ id: z.string(), name: z.string() }),
+        length: z.number().describe('Blank length, mm.'),
+        centre: z.array(z.number()).describe('Centre of the blank, world mm.'),
+        along: SpanOut.extend({ segment: z.number(), centre: z.number() })
+          .nullable()
+          .describe(
+            "Wall and opening members: extent and centre along the wall segment, mm from the segment's first point (as an opening's position); null for floors and roofs.",
+          ),
+        above: SpanOut.nullable().describe(
+          "Wall and opening members: extent above the wall's base, mm (as an opening's sill).",
+        ),
+      }),
+    ),
+    overrides: z.array(
+      z.looseObject({
+        n: z.number().describe('1-based; the expression move_<n> nudges it.'),
+        id: z.string().describe('The local member id it names.'),
+        member: z.string().describe('The full member id it names.'),
+        status: z
+          .string()
+          .describe(
+            "'applied' (it found its member) or 'lost' (it did not). More values may be added later (such as 'moved'): read any other as not applied as written.",
+          ),
+        delete: z.boolean().optional(),
+        stock: z.string().optional().describe('The stock id it changes the member to.'),
+        move: z.number().optional().describe('How far it moves the member, mm.'),
+      }),
+    ),
+  })
+  .describe(
+    "Query kind members only: the feature's framing members, sorted along the wall, and its overrides in params order.",
+  );
+
 function envelope(fields: Record<string, z.ZodType>) {
   const optional: Record<string, z.ZodType> = {};
   for (const [k, v] of Object.entries(fields)) optional[k] = v.optional();
@@ -434,6 +495,7 @@ export const Outputs: Record<ToolName, z.ZodType> = {
   get_tree: envelope({ tree: Any }),
   get_object: envelope({
     object: Any,
+    members: MembersOut,
     frames: z
       .looseObject({
         a: ConnectorFrameOut.nullable(),

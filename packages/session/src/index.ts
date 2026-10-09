@@ -49,6 +49,7 @@ export { builtInMergeValidator, replayOnto, type Replayed } from './rebase';
 export {
   MAX_GEOMETRY_RESULTS,
   MAX_MEASURE_ITEMS,
+  MAX_MEMBER_RESULTS,
   errorsOf,
   measure,
   quantities,
@@ -58,6 +59,8 @@ export {
   type GeometryQuery,
   type MateFrames,
   type MeasureQuery,
+  type MembersAnswer,
+  type MembersQuery,
   type ObjectQuery,
   type Quantities,
   type QueryContext,

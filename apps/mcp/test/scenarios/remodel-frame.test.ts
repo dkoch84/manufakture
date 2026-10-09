@@ -54,6 +54,22 @@ function memberIds(q: Data): Set<string> {
   );
 }
 
+/** A feature's framing members and overrides, read with get_object's members query. */
+async function membersOf(sessionId: string, owner: string): Promise<Data> {
+  return value(
+    await h.call('get_object', { sessionId, query: { kind: 'members', partId: PART, owner } }),
+  ).members;
+}
+
+/** The full ids of the members each of `owners` owns, read per feature (no takeoff). */
+async function ownedIds(sessionId: string, owners: readonly string[]): Promise<Set<string>> {
+  const ids = new Set<string>();
+  for (const owner of owners) {
+    for (const m of (await membersOf(sessionId, owner)).members as Data[]) ids.add(m.id);
+  }
+  return ids;
+}
+
 const minus = (a: Set<string>, b: Set<string>) => [...a].filter((x) => !b.has(x)).sort();
 const ownedBy = (ids: Iterable<string>, owner: string) =>
   [...ids].filter((id) => id.startsWith(`${owner}:`));
@@ -85,19 +101,28 @@ describe('remodel-frame: the request, scripted', () => {
   let window: string;
   let before: Data;
   let after: Data;
+  /** Member ids of the back wall, the right wall and the door as built, read per feature. */
+  let builtIds: Set<string>;
+  let backBefore: Data;
 
   it('opens a session on the shed and reads the takeoff as built', async () => {
     const s = value(await h.call('open_session', { documentId: DOC }));
     sessionId = s.sessionId;
     branch = s.branch;
     expect(s.branch).not.toBe(MAIN_BRANCH);
-    // The outline counts members per wall, but nothing lists them: they are reached only through
-    // the takeoff's row sources (and render patterns).
+    // The outline counts members per wall; get_object's members query lists them per feature.
     expect(s.outline.parts[0].memberSets).toEqual(
       expect.arrayContaining([expect.objectContaining({ group: BACK, count: 18 })]),
     );
     before = value(await h.call('get_quantities', { sessionId }));
     expect(memberIds(before).size).toBe(156);
+    backBefore = await membersOf(sessionId, BACK);
+    expect(backBefore).toMatchObject({ owner: BACK, kind: 'wall', framed: true, overrides: [] });
+    builtIds = await ownedIds(sessionId, [BACK, RIGHT, DOOR]);
+    // The same ids the takeoff counts.
+    expect([...builtIds].sort()).toEqual(
+      [...memberIds(before)].filter((id) => /^extension#[237]:/.test(id)).sort(),
+    );
     const door = await feature(sessionId, DOOR);
     expect(door.dependsOn).toEqual([RIGHT]);
     expect(door.expressions.position).toEqual(IN(72));
@@ -164,18 +189,37 @@ describe('remodel-frame: the request, scripted', () => {
 
   it('finds "new lumber" only as a difference of member ids, which the move hides', async () => {
     after = value(await h.call('get_quantities', { sessionId }));
-    const b = memberIds(before);
-    const a = memberIds(after);
+    // Ids read per feature with get_object's members query, not from the takeoff's row sources.
+    const b = builtIds;
+    const a = await ownedIds(sessionId, [BACK, RIGHT, DOOR, window]);
     const added = minus(a, b);
     const removed = minus(b, a);
     // The window's own members are all new: kings, jacks, header plies, sill, cripples.
-    const windowMembers = ownedBy(a, window);
+    const win = await membersOf(sessionId, window);
+    expect(win).toMatchObject({ kind: 'opening', wall: BACK, segment: 1, overrides: [] });
+    const windowMembers = (win.members as Data[]).map((m) => m.id as string);
     expect(windowMembers.length).toBeGreaterThanOrEqual(8);
     expect(ownedBy(added, window)).toEqual(windowMembers.sort());
-    // The window hides back-wall layout studs: they leave the takeoff as if they never existed,
-    // though on site they are demolished (or reused).
-    expect(ownedBy(removed, BACK).length).toBeGreaterThan(0);
-    expect(ownedBy(removed, BACK).every((id) => /:s\d+$/.test(id))).toBe(true);
+    // The studs under the window, found by position: the cripples below its 44" sill, within
+    // its 3' rough opening centred at 96" along the back wall.
+    const under = (win.members as Data[]).filter(
+      (m) => m.role === 'cripple' && m.above.to <= 44 * 25.4 + 1e-6,
+    );
+    expect(under.length).toBeGreaterThan(0);
+    for (const m of under) expect(Math.abs(m.along.centre - 96 * 25.4)).toBeLessThan(18 * 25.4);
+    // The window hides back-wall layout studs: they leave the frame as if they never existed,
+    // though on site they are demolished (or reused). They are the ones the wall listed between
+    // the window's king studs before.
+    const kings = (win.members as Data[]).filter((m) => m.role === 'king');
+    const zone = [
+      Math.min(...kings.map((m) => m.along.from)),
+      Math.max(...kings.map((m) => m.along.to)),
+    ];
+    const hidden = (backBefore.members as Data[])
+      .filter((m) => m.role === 'stud' && m.along.centre > zone[0]! && m.along.centre < zone[1]!)
+      .map((m) => m.id as string);
+    expect(hidden.sort()).toEqual([`${BACK}:s5`, `${BACK}:s6`, `${BACK}:s7`]);
+    expect(ownedBy(removed, BACK)).toEqual(hidden);
     // The door's old spot gets layout studs back and its new spot loses some.
     expect(ownedBy(added, RIGHT).length).toBeGreaterThan(0);
     expect(ownedBy(removed, RIGHT).length).toBeGreaterThan(0);
@@ -185,6 +229,7 @@ describe('remodel-frame: the request, scripted', () => {
     expect(ownedBy(a, DOOR).sort()).toEqual(ownedBy(b, DOOR).sort());
     expect(ownedBy(added, DOOR)).toEqual([]);
     // Nor do the right wall's bottom plate pieces either side of the door: same ids, new lengths.
+    const rightAfter = (await membersOf(sessionId, RIGHT)).members as Data[];
     const lengthOf = (q: Data, id: string): number =>
       (takeoffOf(q).rows as Data[]).find(
         (r) => r.category === 'framing' && (r.sources as { id: string }[]).some((s) => s.id === id),
@@ -192,6 +237,7 @@ describe('remodel-frame: the request, scripted', () => {
     for (const piece of [`${RIGHT}:bottom1:1`, `${RIGHT}:bottom1:2`]) {
       expect(a.has(piece) && b.has(piece)).toBe(true);
       expect(lengthOf(after, piece)).not.toBeCloseTo(lengthOf(before, piece), 0);
+      expect(rightAfter.find((m) => m.id === piece)!.length).toBeCloseTo(lengthOf(after, piece), 3);
     }
   });
 
@@ -372,6 +418,13 @@ describe('remodel-frame: gap probes', () => {
     expect(warningsOf(r, LEFT)).toEqual([
       'The override of extra1 on extension#4 is lost: the wall no longer has that member.',
     ]);
+    // The members query gives each override's status, the nudge in mm.
+    expect((await membersOf(sessionId, LEFT)).overrides).toEqual([
+      { n: 1, id: 's4', member: `${LEFT}:s4`, status: 'applied', delete: true },
+      { n: 2, id: 's8', member: `${LEFT}:s8`, status: 'applied', delete: true },
+      { n: 3, id: 's3', member: `${LEFT}:s3`, status: 'applied', move: 76.2 },
+      { n: 4, id: 'extra1', member: `${LEFT}:extra1`, status: 'lost', stock: 'us-2x4' },
+    ]);
     const ids = ownedBy(memberIds(value(await h.call('get_quantities', { sessionId }))), LEFT);
     expect(ids).toContain(`${LEFT}:s3`);
     expect(ids).not.toContain(`${LEFT}:s4`);
@@ -397,6 +450,17 @@ describe('remodel-frame: gap probes', () => {
     // s4 still exists, now centred at 96" instead of 64": the delete silently applies to another
     // stud, and the 3" nudge of s3 moves the stud at 72" instead of 48". No warning says so.
     expect(warningsOf(r, LEFT).some((w) => /\bs4\b|\bs3\b/.test(w))).toBe(false);
+    // The members query says the same: s4 and s3 "applied", although to other studs.
+    const statuses = ((await membersOf(sessionId, LEFT)).overrides as Data[]).map((o) => [
+      o.id,
+      o.status,
+    ]);
+    expect(statuses).toEqual([
+      ['s4', 'applied'],
+      ['s8', 'lost'],
+      ['s3', 'applied'],
+      ['extra1', 'lost'],
+    ]);
     const ids = ownedBy(memberIds(value(await h.call('get_quantities', { sessionId }))), LEFT);
     expect(ids.filter((id) => /:s\d+$/.test(id)).sort()).toEqual(
       [`${LEFT}:s0`, `${LEFT}:s1`, `${LEFT}:s2`, `${LEFT}:s3`, `${LEFT}:s5`, `${LEFT}:s6`].sort(),

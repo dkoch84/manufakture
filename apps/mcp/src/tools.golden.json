@@ -1,5 +1,5 @@
 {
-  "surfaceVersion": "1.3.0",
+  "surfaceVersion": "1.4.0",
   "tools": [
     {
       "name": "apply",
@@ -1162,6 +1162,29 @@
                 },
                 "required": ["kind", "scriptId"],
                 "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "const": "members",
+                    "type": "string"
+                  },
+                  "owner": {
+                    "maxLength": 512,
+                    "minLength": 1,
+                    "pattern": "^[\\x21-\\x7e]+$",
+                    "type": "string"
+                  },
+                  "partId": {
+                    "maxLength": 512,
+                    "minLength": 1,
+                    "pattern": "^[\\x21-\\x7e]+$",
+                    "type": "string"
+                  }
+                },
+                "required": ["kind", "partId", "owner"],
+                "type": "object"
               }
             ]
           },
@@ -1323,6 +1346,174 @@
                 "type": "null"
               }
             ]
+          },
+          "members": {
+            "additionalProperties": {},
+            "properties": {
+              "count": {
+                "type": "number"
+              },
+              "framed": {
+                "type": "boolean"
+              },
+              "group": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": ["wall", "opening", "floor", "roof"],
+                "type": "string"
+              },
+              "members": {
+                "items": {
+                  "additionalProperties": {},
+                  "properties": {
+                    "above": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": {},
+                          "properties": {
+                            "from": {
+                              "type": "number"
+                            },
+                            "to": {
+                              "type": "number"
+                            }
+                          },
+                          "required": ["from", "to"],
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "along": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": {},
+                          "properties": {
+                            "centre": {
+                              "type": "number"
+                            },
+                            "from": {
+                              "type": "number"
+                            },
+                            "segment": {
+                              "type": "number"
+                            },
+                            "to": {
+                              "type": "number"
+                            }
+                          },
+                          "required": ["from", "to", "segment", "centre"],
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "centre": {
+                      "items": {
+                        "type": "number"
+                      },
+                      "type": "array"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "length": {
+                      "type": "number"
+                    },
+                    "local": {
+                      "type": "string"
+                    },
+                    "role": {
+                      "type": "string"
+                    },
+                    "stock": {
+                      "additionalProperties": {},
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["id", "name"],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "local",
+                    "role",
+                    "stock",
+                    "length",
+                    "centre",
+                    "along",
+                    "above"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "omitted": {
+                "type": "number"
+              },
+              "overrides": {
+                "items": {
+                  "additionalProperties": {},
+                  "properties": {
+                    "delete": {
+                      "type": "boolean"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "member": {
+                      "type": "string"
+                    },
+                    "move": {
+                      "type": "number"
+                    },
+                    "n": {
+                      "type": "number"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "stock": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["n", "id", "member", "status"],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "owner": {
+                "type": "string"
+              },
+              "segment": {
+                "type": "number"
+              },
+              "wall": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "owner",
+              "kind",
+              "group",
+              "framed",
+              "count",
+              "omitted",
+              "members",
+              "overrides"
+            ],
+            "type": "object"
           },
           "object": {},
           "ok": {

@@ -13,8 +13,10 @@ import {
 import {
   constructionTakeoff,
   documentConstruction,
+  memberListing,
   takeoffModel,
   type ConstructionTakeoff,
+  type MemberListing,
 } from '@manufakture/domain-construction';
 import { documentCutList, type CutList } from '@manufakture/domain-wood';
 import type {
@@ -328,6 +330,61 @@ export function mateFramesOf(
   if (a === undefined || m === undefined) return undefined;
   const solved = result?.assemblies.find((r) => r.assemblyId === a.id);
   return (solved && connectorFrames(solved, m.id, m.kind)) ?? null;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Members
+
+/** Most members one `membersOf` answer lists; past it, `omitted` counts the rest. */
+export const MAX_MEMBER_RESULTS = 500;
+
+export interface MembersQuery {
+  kind: 'members';
+  partId: string;
+  /** A construction wall, opening, floor or roof: the feature that owns the members. */
+  owner: string;
+}
+
+/** `memberListing` with the members past `MAX_MEMBER_RESULTS` left out and counted. */
+export type MembersAnswer = MemberListing & { omitted: number };
+
+/**
+ * The framing members a feature owns in the last regen, and the status of each override its
+ * params hold (`memberListing`): what an agent reads instead of the takeoff's row sources.
+ */
+export function membersOf(
+  document: ManufaktureDocument,
+  model: ModelState,
+  query: unknown,
+): SessionResult<MembersAnswer> {
+  const q = (query ?? {}) as Record<string, unknown>;
+  if (!isString(q.partId) || !isString(q.owner)) {
+    return sessionError('invalid-input', 'Give the partId and the owner feature id.');
+  }
+  const part = document.parts.find((p) => p.id === q.partId);
+  if (part === undefined) return sessionError('not-found', 'There is no such part.');
+  if (!part.features.some((f) => f.id === q.owner)) {
+    return sessionError('not-found', 'The part has no such feature.');
+  }
+  const built = model.last?.parts.find((p) => p.partId === part.id);
+  if (built === undefined) return sessionError('not-found', 'The part has not been regenerated.');
+  const listing = memberListing({
+    owner: q.owner,
+    features: built.features,
+    sets: model.sets(part.id).filter((s) => s.namespace === 'construction'),
+  });
+  if (listing === undefined) {
+    return sessionError(
+      'invalid-input',
+      'That feature owns no framing members: ask for a built construction wall, opening, floor or roof.',
+    );
+  }
+  const omitted = Math.max(0, listing.members.length - MAX_MEMBER_RESULTS);
+  return done({
+    ...listing,
+    members: omitted === 0 ? listing.members : listing.members.slice(0, MAX_MEMBER_RESULTS),
+    omitted,
+  });
 }
 
 // ---------------------------------------------------------------------------------------------
