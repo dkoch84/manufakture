@@ -1091,9 +1091,10 @@ name), its local id (what an override names), role, stock, blank length, and for
 openings `along` (extent and centre in mm from the wall segment's first point, the same measure
 as an opening's `position`) and `above` (extent above the wall's base, like a `sill`). Members
 are sorted along the wall. `overrides` lists each per-member override the feature holds, in
-order (`n` is the `move_<n>` that nudges it), with its `status`: `applied` or `lost` (its member
-is gone, for example after a spacing change). Treat any other status a later version adds as not
-applied as written. The new window's studs under its sill are its `cripple` members with `above.to`
+order (`n` is the `move_<n>` that nudges it), with its `status`: `applied`, `moved` (it applied to
+another member, `appliedTo`, the one now where its member was: see below) or `lost` (no member for
+it, for example after a spacing change), and its `at` when it records its member's position.
+Treat any other status a later version adds as not applied as written. The new window's studs under its sill are its `cripple` members with `above.to`
 at or below the sill; to see which wall studs an opening displaced, list the wall before and after.
 
 ```json mcp:get_object
@@ -1199,6 +1200,95 @@ which studs it reached.
 {
   "ok": true,
   "members": { "owner": "extension#4", "kind": "wall", "framed": true, "overrides": [] }
+}
+```
+
+To change one member of a wall (delete a stud, restock it, nudge it), add an entry to the wall's
+`overrides` params, `{ "id": "s4", "delete"?: true, "stock"?: "<stock id>", "at"?: <mm> }`, and
+for a nudge the expression `move_<n>` (n is the entry's place in the list). A layout stud's id
+(`s<k>`) and a block's (`block<r>:<n>`) are renumbered when the wall's spacing, layout origin or
+layout direction changes, so give a stud's or block's override its `at`: where the member is as
+the layout made it, the member's `along.centre` from the `members` query read before you make the
+override, less its `move` if an override already nudges it (a plain number in mm, not an
+expression). After a layout change such an override applies to the member whose centre is within
+1/2" of `at`: `applied` when that is still its id, `moved` (with `appliedTo` and a warning) when
+the stud there has another id, `lost` (with a warning) when no stud is there; it never applies to
+the stud that merely inherited its id. Without `at` it matches by id, as overrides made before
+this did, and a layout change can silently re-target it. Plates, corner and tee framing, an
+opening's members and added members (`add<k>`) keep their ids through a layout change, so their
+overrides need no `at` (an opening refuses it). Keep `at` when you edit an override later: it
+records where the member was when the override was made. The app writes `at` itself, and its
+member panel follows a moved override: picking the stud it moved to shows that change and edits
+or restores it, rather than adding a second one.
+
+Delete the left wall's `s4` and nudge `s3` 3", each with its `at` (their `along.centre`, 67.5"
+and 51.5" from the path's first point: the wall's framing starts 3.5" before it, where it butts
+the front wall). The whole feature is sent again, with its added members:
+
+```json mcp:apply
+{
+  "sessionId": "<session>",
+  "label": "Delete s4 and nudge s3 on the left wall",
+  "commands": [
+    {
+      "type": "editFeature",
+      "partId": "part#1",
+      "feature": {
+        "id": "extension#4",
+        "kind": "extension",
+        "name": "Left",
+        "suppressed": false,
+        "extension": "construction.wall",
+        "schemaVersion": 1,
+        "dependsOn": [],
+        "references": [],
+        "operation": "new",
+        "expressions": {
+          "x1": { "source": "0", "lengthUnit": "in", "angleUnit": "deg" },
+          "y1": { "source": "144", "lengthUnit": "in", "angleUnit": "deg" },
+          "x2": { "source": "0", "lengthUnit": "in", "angleUnit": "deg" },
+          "y2": { "source": "0", "lengthUnit": "in", "angleUnit": "deg" },
+          "add1_at": { "source": "44", "lengthUnit": "in", "angleUnit": "deg" },
+          "add2_at": { "source": "40", "lengthUnit": "in", "angleUnit": "deg" },
+          "add2_z": { "source": "48", "lengthUnit": "in", "angleUnit": "deg" },
+          "move_2": { "source": "3", "lengthUnit": "in", "angleUnit": "deg" }
+        },
+        "params": {
+          "level": "level-1",
+          "wallType": "ext-2x4",
+          "points": 2,
+          "add": [
+            { "id": "add1", "role": "stud" },
+            { "id": "add2", "role": "blocking" }
+          ],
+          "overrides": [
+            { "id": "s4", "delete": true, "at": 1714.5 },
+            { "id": "s3", "at": 1308.1 }
+          ]
+        }
+      }
+    }
+  ]
+}
+```
+
+```json mcp:get_object
+{
+  "sessionId": "<session>",
+  "query": { "kind": "members", "partId": "part#1", "owner": "extension#4" }
+}
+```
+
+```json mcp:result
+{
+  "ok": true,
+  "members": {
+    "owner": "extension#4",
+    "overrides": [
+      { "n": 1, "id": "s4", "status": "applied", "at": 1714.5, "delete": true },
+      { "n": 2, "id": "s3", "status": "applied", "at": 1308.1, "move": 76.2 }
+    ]
+  }
 }
 ```
 

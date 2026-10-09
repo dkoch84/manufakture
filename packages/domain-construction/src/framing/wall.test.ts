@@ -1007,6 +1007,61 @@ describe('frameWall: overrides by position (#1215)', () => {
     expect(far.byId.has('s3')).toBe(true);
   });
 
+  it('applies two overrides that meet on one stud in order, saying which one met it', () => {
+    // At 24" an older id-only override of s2 and one of s3 made on 16" centres (now moved to s2,
+    // the stud at 48") both reach s2.
+    const spacing = { spacing: inch(24) };
+    // The moved override deletes s2 first: the id-only one is lost.
+    const movedFirst = frame(
+      straightWall(192, {}, spacing, {
+        overrides: [
+          { id: 's3', delete: true, at: inch(48) },
+          { id: 's2', stock: S2X6 },
+        ],
+      }),
+    );
+    expect(movedFirst.overrides).toEqual([
+      { owner: WALL, id: 's3', status: 'moved', appliedTo: 's2' },
+      { owner: WALL, id: 's2', status: 'lost' },
+    ]);
+    expect(movedFirst.byId.has('s2')).toBe(false);
+    expect(movedFirst.byId.get('s3')!.stock).toBe(S2X4);
+    expect(movedFirst.warnings.map((w) => [w.code, w.member, w.message])).toEqual([
+      [
+        'override-moved',
+        `${WALL}:s2`,
+        `The override of s3 on ${WALL} now applies to s2: the layout changed, and s2 is the member where s3 was.`,
+      ],
+      [
+        'override-lost',
+        `${WALL}:s2`,
+        `The override of s2 on ${WALL} is lost: an earlier override of the same member deletes it.`,
+      ],
+    ]);
+    // The id-only one deletes s2 first: the moved one is lost, and says which stud it met.
+    const idFirst = frame(
+      straightWall(192, {}, spacing, {
+        overrides: [
+          { id: 's2', delete: true },
+          { id: 's3', stock: S2X6, at: inch(48) },
+        ],
+      }),
+    );
+    expect(idFirst.overrides).toEqual([
+      { owner: WALL, id: 's2', status: 'applied' },
+      { owner: WALL, id: 's3', status: 'lost' },
+    ]);
+    expect(idFirst.byId.has('s2')).toBe(false);
+    expect(idFirst.byId.get('s3')!.stock).toBe(S2X4);
+    expect(idFirst.warnings.map((w) => [w.code, w.member, w.message])).toEqual([
+      [
+        'override-lost',
+        `${WALL}:s3`,
+        `The override of s3 on ${WALL} is lost: an earlier override of the same member (s2, where s3 was) deletes it.`,
+      ],
+    ]);
+  });
+
   it('keeps matching by id without a position (older overrides), and on other members', () => {
     // Without `at` a spacing change re-targets as before #1215: s4 deletes the stud at 96".
     const old = frame(

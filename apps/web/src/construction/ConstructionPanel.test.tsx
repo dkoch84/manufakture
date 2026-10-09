@@ -278,6 +278,60 @@ describe('member actions record where a layout stud is (#1215)', () => {
     fireEvent.click(within(screen.getByTestId('member-actions')).getByTestId('member-delete'));
     expect(overridesOf(SHED_DOOR)).toEqual([{ id: 'king-l', delete: true }]);
   });
+
+  it('shows and edits the override that moved to a stud, not a second one of its id', () => {
+    const t = setup(shedDocument());
+    // As the last regen framed it: the wall's override of s3 moved to s2 (the layout changed).
+    const features = shedFeatures().map((f) =>
+      f.featureId === SHED_WALL
+        ? { ...f, metadata: { ...(f.metadata as object), overrides: [{ id: 's3', at: 1300 }] } }
+        : f,
+    ) as ReturnType<typeof shedFeatures>;
+    const sets = shedSets().map((set) =>
+      set.group === SHED_WALL
+        ? {
+            ...set,
+            metadata: {
+              overrides: [{ owner: SHED_WALL, id: 's3', status: 'moved', appliedTo: 's2' }],
+            },
+          }
+        : set,
+    );
+    act(() => {
+      const wall = t.documents
+        .getState()
+        .document.parts[0]!.features.find((x) => x.id === SHED_WALL)!;
+      if (wall.kind !== 'extension') return;
+      t.documents.getState().execute({
+        type: 'editFeature',
+        partId: PART,
+        feature: { ...wall, params: { ...wall.params, overrides: [{ id: 's3', at: 1300 }] } },
+      });
+      t.model.setState({ parts: [{ partId: PART, features, bodies: [] }] });
+      t.members.getState().load(PART, { meshes: new Map(), sets });
+      t.selection.getState().select([memberRef(`${SHED_WALL}:s2`)]);
+    });
+    const overrides = () => {
+      const f = t.documents.getState().document.parts[0]!.features.find((x) => x.id === SHED_WALL)!;
+      return f.kind === 'extension' ? f.params.overrides : undefined;
+    };
+    expect(screen.getByTestId('member-actions-state').textContent).toContain(
+      'This is the change made for s3: the layout changed and it moved here.',
+    );
+    fireEvent.click(within(screen.getByTestId('member-actions')).getByTestId('member-delete'));
+    expect(overrides()).toEqual([{ id: 's3', at: 1300, delete: true }]);
+    expect(screen.getByTestId('member-actions-state').textContent).toContain('Deleted');
+    fireEvent.click(screen.getByTestId('member-restore'));
+    expect(overrides()).toBeUndefined();
+    // s3 itself: its id is held by that override while it was there.
+    act(() => {
+      t.documents.getState().undo();
+      t.selection.getState().select([memberRef(`${SHED_WALL}:s3`)]);
+    });
+    expect(screen.getByTestId('member-actions-state').textContent).toContain(
+      'An earlier change made for s3 no longer applies to it (moved); Restore removes it.',
+    );
+  });
 });
 
 describe('the wall tool', () => {

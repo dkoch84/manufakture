@@ -462,7 +462,17 @@ const MembersOut = z
         status: z
           .string()
           .describe(
-            "'applied' (it found its member) or 'lost' (it did not). More values may be added later (such as 'moved'): read any other as not applied as written.",
+            "'applied' (it found the member it names), 'moved' (it records at, and after a layout change it applied to the member now there, appliedTo) or 'lost' (it found none). More values may be added later: read any other as not applied as written.",
+          ),
+        appliedTo: z
+          .string()
+          .optional()
+          .describe("Status 'moved' only: the full id of the member it applied to."),
+        at: z
+          .number()
+          .optional()
+          .describe(
+            "Where its member was when it was made: the member's along.centre, mm, less any nudge. A wall's layout stud or block override with at is matched by position, not id.",
           ),
         delete: z.boolean().optional(),
         stock: z.string().optional().describe('The stock id it changes the member to.'),

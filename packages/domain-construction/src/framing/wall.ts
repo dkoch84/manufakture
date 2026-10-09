@@ -777,6 +777,12 @@ function addedBlock(
   return f.box(p.a.id, 'blocking', stock, 'flat', bay, f.across, band, p.owner);
 }
 
+/** The wall member forms a layout change renumbers, found by position (`MemberOverride.at`). */
+type Positioned = Extract<WallMemberId, { form: 'slot' | 'block' }>;
+
+const isPositioned = (p: WallMemberId | undefined): p is Positioned =>
+  p?.form === 'slot' || p?.form === 'block';
+
 /** Which member an override applies to: a local id of its owner, or why none. */
 type Located = { readonly id: string } | { readonly lost: string };
 
@@ -793,21 +799,18 @@ function byPosition(
   frames: readonly SegmentFrame[],
   segOf: ReadonlyMap<string, number>,
 ): (owner: string, o: MemberOverride) => Located | undefined {
-  const keyOf = (p: WallMemberId | undefined): string | undefined =>
-    p?.form === 'slot'
-      ? `${p.segment}/s`
-      : p?.form === 'block'
-        ? `${p.segment}/b${p.row}`
-        : undefined;
+  const keyOf = (p: Positioned): string =>
+    p.form === 'slot' ? `${p.segment}/s` : `${p.segment}/b${p.row}`;
   let found: Map<string, Array<{ id: string; at: number }>> | undefined;
   const candidates = () => {
     if (found !== undefined) return found;
     found = new Map();
     for (const m of members) {
       if (m.owner !== wall) continue;
-      const key = keyOf(parseWallMemberId(m.id));
+      const parsed = parseWallMemberId(m.id);
       const frame = frames[(segOf.get(memberFullId(m)) ?? 0) - 1];
-      if (key === undefined || frame === undefined) continue;
+      if (!isPositioned(parsed) || frame === undefined) continue;
+      const key = keyOf(parsed);
       const [from, to] = alongExtent(m, frame);
       const list = found.get(key) ?? [];
       list.push({ id: m.id, at: (from + to) / 2 });
@@ -818,8 +821,8 @@ function byPosition(
   return (owner, o) => {
     if (owner !== wall || o.at === undefined || !Number.isFinite(o.at)) return undefined;
     const parsed = parseWallMemberId(o.id);
+    if (!isPositioned(parsed)) return undefined;
     const key = keyOf(parsed);
-    if (key === undefined) return undefined;
     let best: { id: string; d: number } | undefined;
     for (const c of candidates().get(key) ?? []) {
       const d = Math.abs(c.at - o.at);
@@ -829,8 +832,8 @@ function byPosition(
       }
     }
     if (best !== undefined) return { id: best.id };
-    const slot = parsed!.form === 'slot';
-    const what = slot ? 'layout stud' : `block in row ${(parsed as { row: number }).row}`;
+    const slot = parsed.form === 'slot';
+    const what = parsed.form === 'slot' ? 'layout stud' : `block in row ${parsed.row}`;
     const kept = (candidates().get(key) ?? []).some((c) => c.id === o.id);
     const now = kept ? ` (${o.id} is now another ${slot ? 'stud' : 'block'}, left as framed)` : '';
     return { lost: `the layout changed, and the wall has no ${what} where ${o.id} was${now}.` };

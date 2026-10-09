@@ -1,5 +1,5 @@
 {
-  "surfaceVersion": "1.6.0",
+  "surfaceVersion": "1.7.0",
   "tools": [
     {
       "name": "apply",
@@ -1466,6 +1466,12 @@
                 "items": {
                   "additionalProperties": {},
                   "properties": {
+                    "appliedTo": {
+                      "type": "string"
+                    },
+                    "at": {
+                      "type": "number"
+                    },
                     "delete": {
                       "type": "boolean"
                     },

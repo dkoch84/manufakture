@@ -3,6 +3,7 @@
 // change to the overrides of the wall or opening that owns the member. The member's data (stock,
 // length, cuts) is in the info panel over the view.
 
+import { splitMemberFullId } from '@manufakture/domain-construction';
 import { findStock } from '@manufakture/stock';
 import { useState } from 'react';
 import { useStore } from 'zustand';
@@ -14,8 +15,8 @@ import type { MemberStore } from '../viewport/memberStore';
 import { StockPicker } from '../wood/StockPicker';
 import {
   memberActionCommand,
+  memberContext,
   memberOwner,
-  memberPosition,
   type MemberAction,
 } from './memberActions';
 
@@ -36,14 +37,18 @@ export function MemberActions({
 }) {
   const selected = useStore(selection, (s) => s.selected);
   const doc = useStore(documents, (s) => s.document);
+  // Re-read the context when a regen lands: an override may have moved to or from this member.
+  useStore(model, (s) => s.parts);
+  useStore(members, (s) => s.parts);
   const ref = [...selected].reverse().find(isMemberRef);
-  const owner = ref ? memberOwner(doc, partId, ref.id) : null;
+  const split = ref ? splitMemberFullId(ref.id) : undefined;
+  const context = split ? memberContext(model, members, partId, split.owner, split.id) : {};
+  const owner = ref ? memberOwner(doc, partId, ref.id, context.listed) : null;
   const [stock, setStock] = useState('');
   const [message, setMessage] = useState<string | null>(null);
   if (!ref || !owner) return null;
   const act = (action: MemberAction) => {
-    const at = memberPosition(model, members, partId, owner.feature.id, owner.localId);
-    const r = memberActionCommand(documents.getState().document, partId, ref.id, action, at);
+    const r = memberActionCommand(documents.getState().document, partId, ref.id, action, context);
     if (!r.ok) {
       setMessage(r.message);
       return;
@@ -58,11 +63,19 @@ export function MemberActions({
     : o?.stock
       ? `Stock changed to ${findStock(o.stock)?.name ?? o.stock}`
       : 'As framed';
+  // A change made for another id that the layout change moved here, or one that holds this
+  // member's id but no longer applies to it.
+  const note =
+    o && owner.status === 'moved' && o.id !== owner.localId
+      ? ` This is the change made for ${o.id}: the layout changed and it moved here.`
+      : owner.heldBy !== undefined
+        ? ` An earlier change made for ${owner.localId} no longer applies to it (${owner.heldStatus ?? 'lost'}); Restore removes it.`
+        : '';
   return (
     <section className="construction-section" aria-label="Member" data-testid="member-actions">
       <h3>Member {ref.id}</h3>
       <p className="field-note" data-testid="member-actions-state">
-        Of {owner.feature.name}. {state}.
+        Of {owner.feature.name}. {state}.{note}
       </p>
       <div className="construction-row">
         <button
@@ -73,7 +86,7 @@ export function MemberActions({
         >
           Delete member
         </button>
-        {o && (
+        {(o || owner.heldBy !== undefined) && (
           <button
             type="button"
             data-testid="member-restore"

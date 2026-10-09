@@ -576,14 +576,125 @@ describe('member actions', () => {
     expect(memberActionCommand(after, PART, 'sketch#1:s1', { kind: 'delete' }).ok).toBe(false);
   });
 
+  it('edits the override the last regen applied to a member, also one that moved to it', () => {
+    const { doc, wall } = withWall();
+    const W = wall.id;
+    // s3's override was made on 16" centres; at 24" the stud where s3 was is s2. An older
+    // override of s5 is lost (no stud where it was), and s6's applies as written.
+    const withOverrides = run(doc, {
+      type: 'editFeature',
+      partId: PART,
+      feature: {
+        ...(doc.parts[0]!.features[0] as ExtensionFeature),
+        params: {
+          ...(doc.parts[0]!.features[0] as ExtensionFeature).params,
+          overrides: [
+            { id: 's3', delete: true, at: 1219.2 },
+            { id: 's5', at: 2032 },
+            { id: 's6', stock: 'us-2x6' },
+          ],
+        },
+      },
+    });
+    const listed = [
+      { n: 1, id: 's3', member: `${W}:s3`, status: 'moved' as const, appliedTo: `${W}:s2` },
+      { n: 2, id: 's5', member: `${W}:s5`, status: 'lost' as const },
+      { n: 3, id: 's6', member: `${W}:s6`, status: 'applied' as const },
+    ];
+    const overrides = (d: typeof doc) =>
+      (d.parts[0]!.features[0] as ExtensionFeature).params.overrides;
+    // s2 has s3's override; s3 itself has none; s6 has its own.
+    expect(memberOwner(withOverrides, PART, `${W}:s2`, listed)).toMatchObject({
+      index: 0,
+      status: 'moved',
+      override: { id: 's3' },
+    });
+    expect(memberOwner(withOverrides, PART, `${W}:s3`, listed)).toMatchObject({
+      index: -1,
+      override: undefined,
+      heldBy: 0,
+      heldStatus: 'moved',
+    });
+    expect(memberOwner(withOverrides, PART, `${W}:s6`, listed)).toMatchObject({
+      index: 2,
+      status: 'applied',
+    });
+    // Without the listing, by id as before.
+    expect(memberOwner(withOverrides, PART, `${W}:s2`)).toMatchObject({ index: -1 });
+    // Changing s2's stock edits s3's override: no second override of s2.
+    const stock = memberActionCommand(
+      withOverrides,
+      PART,
+      `${W}:s2`,
+      { kind: 'stock', stock: 'us-2x6' },
+      { at: 1219.2, listed },
+    );
+    expect(overrides(run(withOverrides, stock.ok ? stock.command : null))).toEqual([
+      { id: 's3', stock: 'us-2x6', at: 1219.2 },
+      { id: 's5', at: 2032 },
+      { id: 's6', stock: 'us-2x6' },
+    ]);
+    // Restore on s2 removes s3's override; the nudges after it keep their own.
+    const nudged = run(withOverrides, {
+      type: 'editFeature',
+      partId: PART,
+      feature: {
+        ...(withOverrides.parts[0]!.features[0] as ExtensionFeature),
+        expressions: {
+          ...(withOverrides.parts[0]!.features[0] as ExtensionFeature).expressions,
+          move_3: { source: '1', lengthUnit: 'in', angleUnit: 'deg' },
+        },
+      },
+    });
+    const restore = memberActionCommand(nudged, PART, `${W}:s2`, { kind: 'restore' }, { listed });
+    const restored = run(nudged, restore.ok ? restore.command : null);
+    expect(overrides(restored)).toEqual([
+      { id: 's5', at: 2032 },
+      { id: 's6', stock: 'us-2x6' },
+    ]);
+    expect((restored.parts[0]!.features[0] as ExtensionFeature).expressions.move_2!.source).toBe(
+      '1',
+    );
+    // s5's id is held by its lost override: a change is refused until Restore removes it.
+    const held = memberActionCommand(
+      withOverrides,
+      PART,
+      `${W}:s5`,
+      { kind: 'delete' },
+      { listed },
+    );
+    expect(held).toMatchObject({ ok: false });
+    expect(!held.ok && held.message).toContain('no longer applies to it (lost');
+    const free = memberActionCommand(
+      withOverrides,
+      PART,
+      `${W}:s5`,
+      { kind: 'restore' },
+      { listed },
+    );
+    expect(overrides(run(withOverrides, free.ok ? free.command : null))).toEqual([
+      { id: 's3', delete: true, at: 1219.2 },
+      { id: 's6', stock: 'us-2x6' },
+    ]);
+    // A listing from before an edit (another override now at its place) is not trusted.
+    const stale = [{ ...listed[0]!, id: 's9' }];
+    expect(memberOwner(withOverrides, PART, `${W}:s2`, stale)).toMatchObject({ index: -1 });
+  });
+
   it("stores a layout stud's position on a new override, and keeps the first one", () => {
     const { doc, wall } = withWall();
     const full = `${wall.id}:s3`;
-    const del = memberActionCommand(doc, PART, full, { kind: 'delete' }, 1219.2);
+    const del = memberActionCommand(doc, PART, full, { kind: 'delete' }, { at: 1219.2 });
     let after = run(doc, del.ok ? del.command : null);
     const overrides = () => (after.parts[0]!.features[0] as ExtensionFeature).params.overrides;
     expect(overrides()).toEqual([{ id: 's3', delete: true, at: 1219.2 }]);
-    const stock = memberActionCommand(after, PART, full, { kind: 'stock', stock: 'us-2x6' }, 900);
+    const stock = memberActionCommand(
+      after,
+      PART,
+      full,
+      { kind: 'stock', stock: 'us-2x6' },
+      { at: 900 },
+    );
     after = run(after, stock.ok ? stock.command : null);
     expect(overrides()).toEqual([{ id: 's3', stock: 'us-2x6', at: 1219.2 }]);
     // An older override without one gets the member's position when next changed.
@@ -603,7 +714,7 @@ describe('member actions', () => {
       PART,
       full,
       { kind: 'stock', stock: 'us-2x6' },
-      1219.2,
+      { at: 1219.2 },
     );
     after = run(old, restock.ok ? restock.command : null);
     expect(overrides()).toEqual([{ id: 's3', stock: 'us-2x6', at: 1219.2 }]);
