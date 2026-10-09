@@ -1,0 +1,44 @@
+{
+  "note": "Wall-clock measurements of one e2e run (the MCP server over stdio with worker engines, the sync server in the test process, headless Chromium with SwiftShader), ms: estimates, not benchmarks.",
+  "machine": {
+    "cpu": "AMD Ryzen 5 7600X 6-Core Processor",
+    "cores": 12,
+    "memoryGiB": 62,
+    "node": "v26.10.0",
+    "platform": "linux x64"
+  },
+  "budgets": {
+    "sessionColdStartMs": {
+      "what": "MCP server process spawned until open_session answered (worker engine, over sync)",
+      "total": 3862,
+      "processReady": 1999,
+      "openSession": 1864
+    },
+    "batchRoundTripMs": {
+      "what": "apply, from the MCP client over stdio, through regen and the sync server, and back",
+      "batches": [
+        43,
+        12,
+        6
+      ],
+      "refused": 4,
+      "dryRuns": [
+        47,
+        29,
+        25,
+        25,
+        24
+      ],
+      "dryRunMedian": 25
+    },
+    "bundleBuildMs": {
+      "what": "submit_for_review: the bundle built in Node (8 renders, measurements, quantities, batches) and uploaded",
+      "submit": 2404
+    },
+    "reviewMs": {
+      "what": "in the browser: Open the branch until its regen matches the bundle; Approve until merged and recorded",
+      "regenCheck": 172,
+      "approve": 233
+    }
+  }
+}

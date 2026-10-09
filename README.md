@@ -33,7 +33,7 @@ Milestones 1 (a printable part) and 2 (multi-body parts and assemblies) are done
 
 Not there yet: CAM for a CNC router, construction (walls, framing, roofs), and a sync server with share links; see the plans for M5 to M7 in `docs/plans`.
 
-[docs/m1-acceptance.md](docs/m1-acceptance.md) walks through the milestone's acceptance part, a bracket, and lists the automated checks behind each step. [docs/m2-acceptance.md](docs/m2-acceptance.md) does the same for M2: a wall shelf with a derived bracket, assembled. [docs/m3-acceptance.md](docs/m3-acceptance.md) does it for M3: a PTFE tube cutting jig, from sketch to a multi-colour 3MF for the slicer. [docs/m4-acceptance.md](docs/m4-acceptance.md) does it for M4: a bookshelf of plywood and 1x2s, whose cut list and sheet layouts are checked against a hand calculation, with its exploded assembly and drawing.
+[docs/m1-acceptance.md](docs/m1-acceptance.md) walks through the milestone's acceptance part, a bracket, and lists the automated checks behind each step. [docs/m2-acceptance.md](docs/m2-acceptance.md) does the same for M2: a wall shelf with a derived bracket, assembled. [docs/m3-acceptance.md](docs/m3-acceptance.md) does it for M3: a PTFE tube cutting jig, from sketch to a multi-colour 3MF for the slicer. [docs/m4-acceptance.md](docs/m4-acceptance.md) does it for M4: a bookshelf of plywood and 1x2s, whose cut list and sheet layouts are checked against a hand calculation, with its exploded assembly and drawing. [docs/m8-acceptance.md](docs/m8-acceptance.md) does it for M8, the agent surface: an AI agent edits the bracket through the MCP server on a branch of its own, and a person reviews and approves it into Main before exporting G-code.
 
 ## Quick start
 
