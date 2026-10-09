@@ -214,6 +214,108 @@ describe('the shed', () => {
   });
 });
 
+describe('the bracket', () => {
+  /** A boss 6 mm in radius, 5 mm tall, on the foot over the first M4 hole (x = 25). */
+  const boss = [
+    {
+      type: 'addFeature',
+      partId: PART,
+      feature: {
+        id: 'sketch#$s',
+        kind: 'sketch',
+        name: 'Boss sketch',
+        suppressed: false,
+        plane: { type: 'plane', origin: [0, 0, 6], normal: [0, 0, 1], xDir: [1, 0, 0] },
+        entities: [{ id: 'e$c', kind: 'circle', construction: false, center: [25, 0], radius: 6 }],
+        constraints: [],
+      },
+    },
+    {
+      type: 'addFeature',
+      partId: PART,
+      feature: {
+        id: 'extrude#$boss',
+        kind: 'extrude',
+        name: 'Boss',
+        suppressed: false,
+        profile: { sketch: 'sketch#$s' },
+        operation: 'add',
+        extent: { type: 'blind', distance: { source: '5', lengthUnit: 'mm', angleUnit: 'deg' } },
+        reverse: false,
+      },
+    },
+  ];
+
+  it('gives cylinder hits a point on the axis and a hole-or-boss flag', async () => {
+    const s = await start(bracketDocument());
+    ok(await s.apply({ label: 'Boss', commands: boss }));
+    const [wall] = ok(await s.findGeometry({ name: 'hole#1:wall:e7' }));
+    expect(wall).toMatchObject({ surface: 'cylinder', radius: 2.25, hole: true });
+    expect(wall!.axisOrigin![0]).toBeCloseTo(25, 9);
+    expect(wall!.axisOrigin![1]).toBeCloseTo(0, 9);
+    const [side] = ok(await s.findGeometry({ name: 'extrude#2:side:e9' }));
+    expect(side).toMatchObject({ surface: 'cylinder', radius: 6, hole: false });
+    // A plane has neither.
+    const [top] = ok(await s.findGeometry({ normal: [0, 0, 1], nearest: [25, 0, 11], limit: 1 }));
+    expect(top).toMatchObject({ surface: 'plane', axisOrigin: null, hole: null });
+  });
+
+  it('finds the faces on one axis with coaxialWith, not the parallel ones', async () => {
+    const s = await start(bracketDocument());
+    ok(await s.apply({ label: 'Boss', commands: boss }));
+    const names = async (query: Record<string, unknown>) =>
+      ok(await s.findGeometry(query))
+        .map((h) => `${h.name} ${h.hole ? 'hole' : 'boss'}`)
+        .sort();
+    // The boss, the counterbore and the hole under it; not the hole at x = 40, nor the fillet.
+    const onAxis = ['extrude#2:side:e9 boss', 'hole#1:cbore:e7 hole', 'hole#1:wall:e7 hole'];
+    expect(await names({ coaxialWith: 'extrude#2:side:e9' })).toEqual(onAxis);
+    expect(await names({ coaxialWith: 'hole#1:wall:e7' })).toEqual(onAxis);
+    expect(await names({ coaxialWith: 'hole#1:wall:e8' })).toEqual([
+      'hole#1:cbore:e8 hole',
+      'hole#1:wall:e8 hole',
+    ]);
+    // Combined with the other filters; edges never match.
+    expect(await names({ coaxialWith: 'hole#1:wall:e7', radius: 4 })).toEqual([
+      'hole#1:cbore:e7 hole',
+    ]);
+    expect(await names({ coaxialWith: 'hole#1:wall:e7', kind: 'edge' })).toEqual([]);
+    expect(await names({ coaxialWith: 'fillet#1:round:r1' })).toEqual(['fillet#1:round:r1 hole']);
+    // A distance between the lines within tolerance counts; the holes are 15 mm apart.
+    expect(await names({ coaxialWith: 'hole#1:wall:e7', tolerance: 16, bornBy: 'hole#1' })).toEqual(
+      [
+        'hole#1:cbore:e7 hole',
+        'hole#1:cbore:e8 hole',
+        'hole#1:wall:e7 hole',
+        'hole#1:wall:e8 hole',
+      ],
+    );
+  });
+
+  it('refuses a coaxialWith that names no face, or a face that is not a cylinder', async () => {
+    const s = await start(bracketDocument());
+    expect(await s.findGeometry({ coaxialWith: 'hole#1:wall:e99' })).toEqual({
+      ok: false,
+      error: expect.objectContaining({
+        code: 'invalid-input',
+        message: expect.stringMatching(/names no face/),
+      }),
+    });
+    const [plane] = ok(await s.findGeometry({ normal: [0, 0, 1], limit: 1 }));
+    expect(await s.findGeometry({ coaxialWith: plane!.name })).toEqual({
+      ok: false,
+      error: expect.objectContaining({
+        code: 'invalid-input',
+        message: expect.stringMatching(/cylindrical/),
+      }),
+    });
+    expect(await s.findGeometry({ coaxialWith: 7 })).toEqual({
+      ok: false,
+      error: expect.objectContaining({ code: 'invalid-input' }),
+    });
+  });
+});
+
 describe('reference imports', () => {
   const service = createNodeService();
   afterAll(async () => {

@@ -146,7 +146,7 @@ describe('heat-set inserts in a printed enclosure (T8.6b)', () => {
     ]);
   });
 
-  it('gap probe: find_geometry hits have no axis point, no hole-or-boss flag, no coaxial query', async () => {
+  it('tells a boss from a hole, and gives a point on its axis', async () => {
     const hit = (
       value(
         await h.call('find_geometry', {
@@ -155,21 +155,23 @@ describe('heat-set inserts in a printed enclosure (T8.6b)', () => {
         }),
       ).hits as Data[]
     )[0]!;
-    // The kernel's topology has `axisOrigin` and `hole` for every cylinder; the hit drops both, so
-    // a boss and a hole of one radius look alike, and coaxial faces look like parallel ones.
-    expect([hit.surface, v6(hit.axis), hit.radius]).toEqual([
+    // The same axis line measure gives: the hit alone tells coaxial faces from parallel ones.
+    expect([hit.surface, v6(hit.axis), v6(hit.axisOrigin), hit.radius, hit.hole]).toEqual([
       'cylinder',
       [0, 0, -1],
+      [8, 8, BOSSES.bottom],
       BOSSES.radius,
+      false,
     ]);
-    expect(hit).not.toHaveProperty('axisOrigin');
-    expect(hit).not.toHaveProperty('hole');
-    const coaxial = await h.call('find_geometry', {
-      sessionId,
-      query: { kind: 'face', partId: PART, coaxialWith: 'extrude#2:side:e5' },
-    });
-    expect(coaxial).toMatchObject({ ok: false, error: { kind: 'input' } });
-    expect(coaxial.error!.message).toMatch(/Unrecognized key: "coaxialWith"/);
+    const lid = (
+      value(
+        await h.call('find_geometry', {
+          sessionId,
+          query: { kind: 'face', partId: PART, bodyId: LID, bornBy: 'hole#1' },
+        }),
+      ).hits as Data[]
+    ).map((f) => f.hole);
+    expect(lid).toEqual([true, true, true, true]);
   });
 
   it('gap probe: the four boss tops share one name, told apart only by an ordinal (fragile)', async () => {
@@ -308,6 +310,23 @@ describe('heat-set inserts in a printed enclosure (T8.6b)', () => {
       }),
     ).hits as Data[];
     expect(walls.map((w) => r6(w.radius))).toEqual([1.7, 1.7, 1.7, 1.7]);
+  });
+
+  it('finds the boss, its insert hole and the lid hole over it on one axis', async () => {
+    const hits = value(
+      await h.call('find_geometry', {
+        sessionId,
+        query: { kind: 'face', partId: PART, coaxialWith: 'extrude#2:side:e5' },
+      }),
+    ).hits as Data[];
+    // Across both bodies: the boss itself, the insert hole drilled into it and the clearance hole
+    // in the lid above, each with its side; the other three bosses are parallel, not coaxial.
+    expect(hits.map((f) => [f.bodyId, f.name, r6(f.radius), f.hole])).toEqual([
+      [BASE, 'extrude#2:side:e5', BOSSES.radius, false],
+      [BASE, `${insertHole}:wall:${insertPoints[0]}`, INSERT.hole / 2, true],
+      [LID, `hole#1:wall:${LID_HOLE.entities[0]}`, M3_CLEAR / 2, true],
+    ]);
+    expect(hits.every((f) => r6(f.centroid[0]) === 8 && r6(f.centroid[1]) === 8)).toBe(true);
   });
 
   it('gap probe: a boss wall under the insert minimum passes without a warning', async () => {

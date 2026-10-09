@@ -295,6 +295,12 @@ export interface GeometryQuery {
   normal?: Vec3;
   /** Cylindrical faces (and circular edges) of this radius, within `tolerance` mm. */
   radius?: number;
+  /**
+   * Cylindrical faces coaxial with the named cylindrical face (itself included): their axis lines
+   * coincide, within `tolerance` mm between the lines and `angleTolerance` degrees between the
+   * directions (either sign). Looked up in each part searched, on any of its bodies.
+   */
+  coaxialWith?: string;
   /** Sorted by distance from this point (a face's centroid, an edge's midpoint). */
   nearest?: Vec3;
   /** mm, default 0.01. */
@@ -324,6 +330,10 @@ export interface GeometryHit {
   normal?: Vec3 | null;
   axis?: Vec3 | null;
   radius?: number | null;
+  /** Cylinders: a point on the axis, so that coaxial faces can be told from parallel ones. */
+  axisOrigin?: Vec3 | null;
+  /** Cylinders: true for a hole (material outside), false for a boss or pin. */
+  hole?: boolean | null;
   /** Edges: the 1-based indices of the faces it bounds. */
   faces?: number[];
   /** Distance from `nearest`, when asked. */
@@ -331,7 +341,7 @@ export interface GeometryHit {
 }
 
 function checkGeometryQuery(q: Record<string, unknown>): string | null {
-  for (const key of ['partId', 'bodyId', 'name', 'bornBy']) {
+  for (const key of ['partId', 'bodyId', 'name', 'bornBy', 'coaxialWith']) {
     if (q[key] !== undefined && !isString(q[key])) return `${key} must be a string.`;
   }
   if (q.kind !== undefined && q.kind !== 'face' && q.kind !== 'edge') {
@@ -351,6 +361,41 @@ function checkGeometryQuery(q: Record<string, unknown>): string | null {
 
 const dot = (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const dist = (a: Vec3, b: Vec3) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+
+/** A cylinder's axis line: a point on it and its unit direction. */
+interface AxisLine {
+  origin: Vec3;
+  direction: Vec3;
+}
+
+function axisLine(f: NamedFace): AxisLine | null {
+  return f.axis !== null && f.axisOrigin !== undefined && f.axisOrigin !== null
+    ? { origin: f.axisOrigin, direction: f.axis }
+    : null;
+}
+
+/** Distance of `p` from the line through `l.origin` along the unit `l.direction`. */
+function lineDistance(p: Vec3, l: AxisLine): number {
+  const d: Vec3 = [p[0] - l.origin[0], p[1] - l.origin[1], p[2] - l.origin[2]];
+  const t = dot(d, l.direction);
+  return Math.hypot(
+    d[0] - t * l.direction[0],
+    d[1] - t * l.direction[1],
+    d[2] - t * l.direction[2],
+  );
+}
+
+/**
+ * The axis lines coincide: the directions agree in either sign within `cosTol`, and each origin
+ * lies within `tol` of the other line (both ways, so a slight tilt cannot hide behind a near point).
+ */
+function coaxial(a: AxisLine, b: AxisLine, tol: number, cosTol: number): boolean {
+  return (
+    Math.abs(dot(a.direction, b.direction)) >= cosTol &&
+    lineDistance(a.origin, b) <= tol &&
+    lineDistance(b.origin, a) <= tol
+  );
+}
 
 function bornBy(name: string | null, featureId: string): boolean {
   if (name === null) return false;
@@ -375,9 +420,32 @@ export function findGeometry(ctx: QueryContext, query: unknown): SessionResult<G
     if (!(n > 0)) return sessionError('invalid-input', 'normal must not be zero.');
     normal = [g.normal[0] / n, g.normal[1] / n, g.normal[2] / n];
   }
+  // The reference axis of `coaxialWith`, per part: names are a part's own, and so are coordinates.
+  const references = new Map<string, AxisLine>();
+  if (g.coaxialWith !== undefined) {
+    let named = false;
+    for (const part of result.parts) {
+      if (g.partId !== undefined && part.partId !== g.partId) continue;
+      for (const body of part.bodies) {
+        const face = ctx.model.geometry(body.bodyKey)?.faces.find((f) => f.name === g.coaxialWith);
+        if (face === undefined || references.has(part.partId)) continue;
+        named = true;
+        const line = axisLine(face);
+        if (line !== null) references.set(part.partId, line);
+      }
+    }
+    if (!named) {
+      return sessionError('invalid-input', 'coaxialWith names no face of the last regen.');
+    }
+    if (references.size === 0) {
+      return sessionError('invalid-input', 'coaxialWith must name a cylindrical face.');
+    }
+  }
   const hits: GeometryHit[] = [];
   for (const part of result.parts) {
     if (g.partId !== undefined && part.partId !== g.partId) continue;
+    const reference = references.get(part.partId);
+    if (g.coaxialWith !== undefined && reference === undefined) continue;
     for (const body of part.bodies) {
       if (g.bodyId !== undefined && body.bodyId !== g.bodyId) continue;
       const geometry = ctx.model.geometry(body.bodyKey);
@@ -395,6 +463,10 @@ export function findGeometry(ctx: QueryContext, query: unknown): SessionResult<G
           ) {
             continue;
           }
+          if (reference !== undefined) {
+            const line = axisLine(f);
+            if (line === null || !coaxial(line, reference, tol, cosTol)) continue;
+          }
           hits.push({
             partId: part.partId,
             bodyId: body.bodyId,
@@ -408,10 +480,12 @@ export function findGeometry(ctx: QueryContext, query: unknown): SessionResult<G
             normal: f.normal,
             axis: f.axis,
             radius: f.radius,
+            axisOrigin: f.axisOrigin ?? null,
+            hole: f.hole ?? null,
           });
         }
       }
-      if (g.kind !== 'face' && normal === null) {
+      if (g.kind !== 'face' && normal === null && reference === undefined) {
         for (const e of geometry.edges) {
           if (!keep(e)) continue;
           // An edge has a radius only through a circle: measure it to know (not indexed here).

@@ -173,9 +173,12 @@ document write `"23/32 in"`, not `18.256 mm`.
 
 A person picks a face in the viewport; you query for it. `find_geometry` finds faces and edges by
 name, by the feature that made them (`bornBy`), by outward normal (planar faces), by radius
-(cylinders, circles) and by distance from a point (`nearest`, which sorts the hits). Each hit has
-its name, whether the name is fragile, and hints: area, centroid, normal, axis and radius for a
-face; curve, length and midpoint for an edge.
+(cylinders, circles), by axis (`coaxialWith`, below) and by distance from a point (`nearest`,
+which sorts the hits). Each hit has its name, whether the name is fragile, and hints: area,
+centroid, normal, axis and radius for a face; curve, length and midpoint for an edge. A cylinder's
+hit also has `axisOrigin`, a point on its axis, and `hole`: true for a hole (material outside the
+cylinder), false for a boss or pin, so two cylinders of one radius are told apart. The sign of
+`axis` means nothing; compare axes as lines.
 
 The bracket's foot is 6 mm thick and lies along +X; its top face is the planar face facing up
 nearest the middle of the foot:
@@ -206,6 +209,29 @@ The walls of the two M4 holes, which are 4.5 mm across:
 {
   "sessionId": "<session>",
   "query": { "kind": "face", "partId": "part#1", "bornBy": "hole#1", "radius": 2.25 }
+}
+```
+
+`coaxialWith` takes a cylindrical face's name and gives the cylinders whose axis line coincides
+with it, on any body of the part, the face itself included: the counterbore over a hole, the
+insert hole in a boss, the clearance hole in a lid above it. Coaxial means the lines are within
+`tolerance` mm of each other and their directions within `angleTolerance` degrees, either way
+round. The first hole's wall and its counterbore, not the other hole's:
+
+```json mcp:find_geometry
+{
+  "sessionId": "<session>",
+  "query": { "kind": "face", "partId": "part#1", "coaxialWith": "hole#1:wall:e7" }
+}
+```
+
+```json mcp:result
+{
+  "ok": true,
+  "hits": [
+    { "name": "hole#1:cbore:e7", "radius": 4, "hole": true },
+    { "name": "hole#1:wall:e7", "radius": 2.25, "hole": true }
+  ]
 }
 ```
 

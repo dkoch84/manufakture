@@ -388,11 +388,14 @@ All plain JSON; text from the document (names, labels, notes) travels only in da
 - `findGeometry(query)`: faces and edges of the last regen's bodies, from the name table regen
   sent with each body's mesh and the kernel's topology (kept per body key between regens, since a
   regen sends a body only when it changed): by `name`, `bornBy` (a feature id), `normal` (planar
-  faces within `angleTolerance`), `radius` (cylinders within `tolerance`), `nearest` (sorted by
-  distance of a face's centroid or an edge's midpoint), `partId`, `bodyId`, `kind`, `limit`. Each
-  hit has its name (null when unnamed), whether the name is positional, its 1-based index (this
-  regen only), and hints: surface or curve type, area or length, centroid or midpoint, normal,
-  axis, radius.
+  faces within `angleTolerance`), `radius` (cylinders within `tolerance`), `coaxialWith` (a
+  cylindrical face's name: the cylinders of its part, on any body, whose axis line is within
+  `tolerance` of its line and `angleTolerance` of its direction, either sign; faces only),
+  `nearest` (sorted by distance of a face's centroid or an edge's midpoint), `partId`, `bodyId`,
+  `kind`, `limit`. Each hit has its name (null when unnamed), whether the name is positional, its
+  1-based index (this regen only), and hints: surface or curve type, area or length, centroid or
+  midpoint, normal, axis, radius, and for a cylinder `axisOrigin` (a point on the axis) and `hole`
+  (true for a hole, false for a boss), from the kernel's topology.
 - `measure(query)`, exact from the B-rep: `body` (volume, area, centre of mass, bounding box, and
   mass from the body's material, else the part's); `targets` on one body (each item, and between
   two the distance and the angle); `clearance` between bodies at optional placements (overlap

@@ -34,7 +34,8 @@ The full authoring guide could not be read here. In short:
   millimetres and angles degrees, except expression strings, which carry their own units.
 - In a batch, an id may have its number replaced by a symbol, keeping its counter:
   extrude#$boss, sketch#$s, e$p1. The answer maps each symbol to the real id; use real ids after.
-- Find faces and edges with find_geometry rather than guessing names; check results with
+- Find faces and edges with find_geometry rather than guessing names (cylinder hits say hole or
+  boss and carry a point on the axis; coaxialWith finds the faces on one axis); check results with
   get_errors, measure and render after each batch.
 - When the work is done, submit_for_review with a note; read the reviewer's answer with get_review.
 - export writes files from your branch into the configured output directory. Exports are not

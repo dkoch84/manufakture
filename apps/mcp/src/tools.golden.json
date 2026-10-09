@@ -1,5 +1,5 @@
 {
-  "surfaceVersion": "1.0.0",
+  "surfaceVersion": "1.1.0",
   "tools": [
     {
       "name": "apply",
@@ -610,6 +610,12 @@
                 "type": "string"
               },
               "bornBy": {
+                "maxLength": 512,
+                "minLength": 1,
+                "pattern": "^[\\x21-\\x7e]+$",
+                "type": "string"
+              },
+              "coaxialWith": {
                 "maxLength": 512,
                 "minLength": 1,
                 "pattern": "^[\\x21-\\x7e]+$",

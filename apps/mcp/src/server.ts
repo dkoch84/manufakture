@@ -122,7 +122,7 @@ const DESCRIPTIONS: Record<ToolName, string> = {
   get_schema:
     'The JSON Schema of a command type or feature kind, with descriptions; with neither, the index of both.',
   find_geometry:
-    'Faces and edges of the last regen by name or query (born by a feature, planar with a normal, cylinder of a radius, nearest a point), with their names and hints: area, length, centroid, normal, axis, radius.',
+    'Faces and edges of the last regen by name or query (born by a feature, planar with a normal, cylinder of a radius, coaxial with a cylinder, nearest a point), with their names and hints: area, length, centroid, normal, and for cylinders axis, axisOrigin (a point on the axis), radius and hole (true for a hole, false for a boss).',
   measure:
     'Exact measurements from the B-rep: a body (volume, area, centre of mass, box, mass), faces, edges or vertices of a body (distance, angle), clearance between bodies, interference of an assembly. mm, mm², mm³, g, degrees.',
   render:

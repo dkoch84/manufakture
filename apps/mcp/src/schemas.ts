@@ -128,6 +128,9 @@ export const GeometryQuery = z.strictObject({
   bornBy: ModelId.optional().describe('Made by this feature (the name starts with its id).'),
   normal: Vec3.optional().describe('Planar faces with this outward normal.'),
   radius: z.number().min(0).max(1e9).optional().describe('Cylinders (circles) of this radius, mm.'),
+  coaxialWith: ModelId.optional().describe(
+    "Cylindrical faces whose axis line coincides with this cylindrical face's (itself included), on any body of its part: within tolerance mm and angleTolerance degrees.",
+  ),
   nearest: Vec3.optional().describe('Sorted by distance from this point, mm.'),
   tolerance: z.number().min(0).max(1e6).optional().describe('mm, default 0.01.'),
   angleTolerance: z.number().min(0).max(180).optional().describe('Degrees, default 0.5.'),
