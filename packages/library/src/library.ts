@@ -712,6 +712,31 @@ function newProvenance(v: unknown): BranchProvenance | string {
 }
 
 /**
+ * The stored provenance whose review comment a new agent branch with `provenance` carries over
+ * (an update from Main, `reviewCommentFrom`): that of agent branch `from` among `branches`, of the
+ * same session and client. Its comment was checked when the list was read (`parseProvenance`).
+ * A string saying what is wrong.
+ */
+function commentSource(
+  branches: readonly Branch[],
+  from: string,
+  provenance: BranchProvenance | undefined,
+): BranchProvenance | string {
+  if (provenance === undefined) return 'Only an agent branch carries a review comment over.';
+  const source = branches.find((b) => b.id === from)?.provenance;
+  if (from === MAIN_BRANCH || source === undefined) {
+    return 'The branch to carry the review comment from is not an agent branch.';
+  }
+  if (source.sessionId !== provenance.sessionId || source.clientName !== provenance.clientName) {
+    return "The review comment carries over only to the same session's branch.";
+  }
+  if (source.comment !== undefined && !isReviewComment(source.comment)) {
+    return 'The stored review comment is invalid.';
+  }
+  return source;
+}
+
+/**
  * One branch record, checked field by field. Null when anything is off, provenance included: a
  * damaged provenance never reads as a person's branch.
  */
@@ -2750,17 +2775,30 @@ export class DocumentLibrary {
    * directory gets that version's document as revision 1 and a head, then the branch list
    * naming it is committed by the main head. A crash before that commit leaves a directory no
    * list names, which the next branch change deletes. The new branch is not opened.
+   *
+   * `options.reviewCommentFrom` names the agent branch an update from Main replaces (ADR 0016):
+   * the reviewer's comment stored with that branch, if any, carries over to the new one, which
+   * must have the same session and client in its provenance. The comment is read from the stored
+   * branch list under the library's lock, never taken from the caller: `provenance` itself still
+   * may not hold one.
    */
   createBranch(
     id: string,
     fromVersion: string,
     name: string,
-    options: { provenance?: BranchProvenance } = {},
+    options: { provenance?: BranchProvenance; reviewCommentFrom?: string } = {},
   ): Promise<LibraryResult<Branch>> {
     return this.#notify(
       id,
       'branches',
-      this.#createBranch(id, fromVersion, name, undefined, options.provenance),
+      this.#createBranch(
+        id,
+        fromVersion,
+        name,
+        undefined,
+        options.provenance,
+        options.reviewCommentFrom,
+      ),
     );
   }
 
@@ -2771,6 +2809,7 @@ export class DocumentLibrary {
    * `createBranch` with `options.provenance`. The name and provenance are checked before the
    * version is made; a branch that still cannot be made (its name taken meanwhile, the branch
    * limit) leaves the version, as versions are kept for good, and the failure says so.
+   * `options.reviewCommentFrom` is passed on to `createBranch`.
    */
   async branchFromRevision(
     id: string,
@@ -2780,6 +2819,7 @@ export class DocumentLibrary {
       version: VersionMeta;
       name: string;
       provenance?: BranchProvenance;
+      reviewCommentFrom?: string;
     },
   ): Promise<LibraryResult<{ version: Version; branch: Branch }>> {
     if (branchName(options.name) === null) {
@@ -2791,6 +2831,10 @@ export class DocumentLibrary {
     }
     const listed = await this.listBranches(id);
     if (!listed.ok) return listed;
+    if (options.reviewCommentFrom !== undefined) {
+      const source = commentSource(listed.value, options.reviewCommentFrom, options.provenance);
+      if (typeof source === 'string') return { ok: false, message: source };
+    }
     const problem = branchProblem(listed.value.slice(1), branchName(options.name)!);
     if (problem) return { ok: false, message: problem };
     if (listed.value.length - 1 >= MAX_BRANCHES) {
@@ -2804,6 +2848,9 @@ export class DocumentLibrary {
     if (!version.ok) return version;
     const branch = await this.createBranch(id, version.value.id, options.name, {
       ...(options.provenance ? { provenance: options.provenance } : {}),
+      ...(options.reviewCommentFrom === undefined
+        ? {}
+        : { reviewCommentFrom: options.reviewCommentFrom }),
     });
     if (!branch.ok) {
       return {
@@ -3025,6 +3072,7 @@ export class DocumentLibrary {
     name: string,
     given?: { id: string; createdAt: string },
     provenance?: BranchProvenance,
+    reviewCommentFrom?: string,
   ): Promise<LibraryResult<Branch>> {
     return this.#run(async () => {
       if (!isStorableId(id)) return { ok: false, message: `There is no document "${id}".` };
@@ -3046,6 +3094,12 @@ export class DocumentLibrary {
         if (!version) return { ok: false, message: `There is no version "${fromVersion}" of it.` };
         const branches = await this.#readList(BRANCH_LIST, id, await this.#head(id));
         if (!branches.ok) return branches;
+        let comment: string | undefined;
+        if (reviewCommentFrom !== undefined) {
+          const source = commentSource(branches.items, reviewCommentFrom, origin ?? undefined);
+          if (typeof source === 'string') return { ok: false, message: source };
+          comment = source.comment;
+        }
         if (given !== undefined) {
           const here = branches.items.find((b) => b.id === given.id);
           if (here) return { ok: true, value: here };
@@ -3072,7 +3126,9 @@ export class DocumentLibrary {
           name: named,
           fromVersion: version.id,
           createdAt: given?.createdAt ?? this.#now().toISOString(),
-          ...(origin ? { provenance: origin } : {}),
+          ...(origin
+            ? { provenance: { ...origin, ...(comment === undefined ? {} : { comment }) } }
+            : {}),
         };
         if (!isBranchId(branch.id) || branch.id === MAIN_BRANCH) {
           return { ok: false, message: 'The new branch has no usable id.' };

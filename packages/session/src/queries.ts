@@ -740,7 +740,7 @@ function placeBox(box: { min: Vec3; max: Vec3 }, t?: Placement): { min: Vec3; ma
 // Quantities
 
 export interface Quantities {
-  /** Always false on an agent's branch: nothing here was reviewed (ADR 0016 decision 11). */
+  /** Always false on an agent's branch: nothing here was reviewed (ADR 0016 decision 6). */
   reviewed: false;
   /** The woodworking cut list (boards and wood shapes), or null when it could not be made. */
   cutList: CutList | null;

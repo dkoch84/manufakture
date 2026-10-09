@@ -394,7 +394,10 @@ needs every release that may open the library to know it first, or a format chan
   the option it is kept. A comment is 1 to `MAX_REVIEW_COMMENT` (4,000) characters, not all
   blank, with line breaks and tabs but no other control or format characters and no lone
   surrogates (`isReviewComment`); `parseProvenance` checks it as it checks the client name, so a
-  damaged one makes the list read as damaged. A new branch has none. A release that does not know
+  damaged one makes the list read as damaged. A new branch has none, except that
+  `createBranch` and `branchFromRevision` with `{ reviewCommentFrom: <branch> }` (an update from
+  Main, ADR 0016) copy the comment stored with that agent branch, of the same session and
+  client, under the library's lock; the provenance passed in still may not hold one. A release that does not know
   the field reads the list as before (and drops it if it writes the list again).
 - `branchFromRevision(id, { from, revision, version, name, provenance })` makes a branch from any
   stored revision of a branch (default: main's head), through a version of that revision named

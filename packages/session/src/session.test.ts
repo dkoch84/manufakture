@@ -342,6 +342,37 @@ describe('update from Main', () => {
     ok(await s.undo());
     expect(s.document.parts[0]!.features.map((f) => f.id)).not.toContain('extrude#2');
   });
+
+  it('keeps the reviewer’s comment after changes were requested', async () => {
+    const s = await start();
+    ok(await s.apply({ label: 'Add a boss', commands: BOSS }));
+    const comment = 'Make the boss taller.';
+    ok(
+      await seed.library.setBranchReview(seed.documentId, s.branch, 'changes-requested', {
+        comment,
+      }),
+    );
+    // Main moves meanwhile.
+    const main = ok(await seed.library.open(seed.documentId, MAIN_BRANCH)).document;
+    const command: Command = { type: 'renameDocument', name: 'Bracket 2' };
+    const { applyCommand } = await import('@manufakture/core');
+    const next = applyCommand(main, command);
+    if (!next.ok) throw new Error(next.error.message);
+    await seed.library.save(next.value.document, [
+      { cause: 'execute', label: 'Rename', command, at: new Date().toISOString() },
+    ]);
+
+    const old = s.branch;
+    const report = ok(await s.updateFromMain());
+    expect(report.changed).toBe(true);
+    expect(report.applied).toEqual(['Add a boss']);
+    const branches = ok(await seed.library.listBranches(seed.documentId));
+    expect(branches.map((b) => b.id)).not.toContain(old);
+    const fresh = branches.find((b) => b.id === report.branch)!;
+    expect(fresh.provenance?.review).toBe('open');
+    expect(fresh.provenance?.comment).toBe(comment);
+    expect(s.document.name).toBe('Bracket 2');
+  });
 });
 
 describe('submit', () => {

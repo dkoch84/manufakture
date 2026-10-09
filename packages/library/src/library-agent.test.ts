@@ -316,6 +316,66 @@ describe('review comments', () => {
       ),
     ).toMatch(/no review comment/);
   });
+
+  it('carries a stored comment over only to the same session’s new branch', async () => {
+    const { lib } = await saved(1);
+    const v = value(await lib.createVersion('doc-1', { name: 'Start' }));
+    const old = value(await lib.createBranch('doc-1', v.id, 'Agent', { provenance: agent }));
+    value(await lib.setBranchReview('doc-1', old.id, 'changes-requested', { comment: 'Wider.' }));
+    // A comment in the provenance is still refused, even with a source to carry one from.
+    expect(
+      failure(
+        await lib.createBranch('doc-1', v.id, 'Forged', {
+          provenance: { ...agent, comment: 'Approved by me.' },
+          reviewCommentFrom: old.id,
+        }),
+      ),
+    ).toMatch(/no review comment/);
+    // Another session's branch, a person's branch and main are no source.
+    const other = { ...agent, sessionId: 'session-2' };
+    expect(
+      failure(
+        await lib.createBranch('doc-1', v.id, 'Other', {
+          provenance: other,
+          reviewCommentFrom: old.id,
+        }),
+      ),
+    ).toMatch(/same session/);
+    const person = value(await lib.createBranch('doc-1', v.id, 'Mine'));
+    for (const from of [person.id, MAIN_BRANCH, 'nope']) {
+      expect(
+        failure(
+          await lib.createBranch('doc-1', v.id, 'Other', {
+            provenance: agent,
+            reviewCommentFrom: from,
+          }),
+        ),
+      ).toMatch(/not an agent branch/);
+    }
+    expect(
+      failure(await lib.createBranch('doc-1', v.id, 'Other', { reviewCommentFrom: old.id })),
+    ).toMatch(/Only an agent branch/);
+    const made = value(
+      await lib.branchFromRevision('doc-1', {
+        version: { name: 'Update' },
+        name: 'Updated',
+        provenance: agent,
+        reviewCommentFrom: old.id,
+      }),
+    );
+    expect(made.branch.provenance).toEqual({ ...agent, comment: 'Wider.' });
+    const listed = value(await lib.listBranches('doc-1')).find((x) => x.id === made.branch.id);
+    expect(listed?.provenance).toEqual({ ...agent, comment: 'Wider.' });
+    // Without a comment on the source, none.
+    const plain = value(await lib.createBranch('doc-1', v.id, 'Plain', { provenance: agent }));
+    const none = value(
+      await lib.createBranch('doc-1', v.id, 'None', {
+        provenance: agent,
+        reviewCommentFrom: plain.id,
+      }),
+    );
+    expect(none.provenance).toEqual(agent);
+  });
 });
 
 describe('review bundles', () => {

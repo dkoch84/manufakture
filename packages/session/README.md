@@ -86,7 +86,9 @@ review: 'open' }` (the library checks `clientName`). The session takes the branc
 - **Update from Main**: the branch's commands since it was made (`readLog`) replayed onto Main's
   current head with T7.1f's merge (an offline `SyncClient` with id remap and restore intents),
   one command at a time, onto a new agent branch made from that head under the old branch's name;
-  the old branch is deleted. The answer names the new branch, the batches applied, and those
+  the old branch is deleted. The new branch is `open`, and a reviewer's comment on the old one
+  carries over (the library copies it, `reviewCommentFrom`), since the agent is still working on
+  the changes asked for; a comment changed meanwhile refuses the update. The answer names the new branch, the batches applied, and those
   dropped with the reason. Replaying onto a new branch, rather than saving the result as one
   `replaceDocument` on the old one, keeps one revision per batch, and a later merge into Main
   replays only the agent's own commands: a `replaceDocument` on the branch would be replayed as a
@@ -288,7 +290,7 @@ All plain JSON; text from the document (names, labels, notes) travels only in da
   given poses per instance.
 - `quantities()`: the cut list and its hardware (`documentCutList`), and a construction takeoff
   per part studio with framing members (`takeoffModel`, `constructionTakeoff`), as data, with
-  `reviewed: false` (ADR 0016 decision 11: on an agent
+  `reviewed: false` (ADR 0016 decision 6: on an agent
   branch nothing is reviewed).
 - `errors()`: every regen error and warning of the head (features, instances, mates, reference
   imports), errors first.

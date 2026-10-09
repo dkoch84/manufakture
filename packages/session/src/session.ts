@@ -1050,11 +1050,16 @@ export class Session {
       const name = old.name;
       const aside = await lib.renameBranch(id, old.id, `${name} (before update)`.slice(0, 200));
       if (!aside.ok) return sessionError('storage', aside.message);
-      const provenance = { ...old.provenance!, review: 'open' as const };
+      // The new branch is open, and a reviewer's comment carries over from the old one (the agent
+      // is still working on the changes asked for, ADR 0016): the library copies it from the
+      // stored branch, so it never comes from the session.
+      const { origin, sessionId, clientName } = old.provenance!;
+      const provenance = { origin, sessionId, clientName, review: 'open' as const };
       const made = await lib.branchFromRevision(id, {
         version: { name: `Agent session ${this.id} update from Main` },
         name,
         provenance,
+        reviewCommentFrom: old.id,
       });
       if (!made.ok) {
         await lib.renameBranch(id, old.id, name);
@@ -1121,7 +1126,11 @@ export class Session {
         await this.#restore(this.#document);
         return r;
       };
-      if (now === undefined || now.provenance?.review !== old.provenance?.review) {
+      if (
+        now === undefined ||
+        now.provenance?.review !== old.provenance?.review ||
+        now.provenance?.comment !== fresh.provenance?.comment
+      ) {
         return refuse(
           now === undefined && !listed.ok
             ? sessionError('storage', listed.message)
