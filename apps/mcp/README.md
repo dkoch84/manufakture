@@ -99,8 +99,9 @@ millimetres per pixel and the highlight names that matched nothing. With `compar
 drawn of the base version too, at the same camera (`@manufakture/review`'s `sharedCamera`).
 
 **Review.** `submit_for_review` passes `@manufakture/review`'s `bundleBuilder` (with the agent's
-views, at most four) to `Session.submit`; it is the only tool that moves a review state, and only
-to `submitted`. `get_review` reads the branch record from the library each time, so a reviewer's
+views, at most four) to `Session.submit`; it is the only tool that submits. A write by `apply` or
+`undo` also moves a review state: it returns a `submitted` or `changes-requested` branch to `open`
+(ADR 0016 decision 9). `get_review` reads the branch record from the library each time, so a reviewer's
 decision and comment are current.
 
 **Export.** Not gated (ADR 0016, "Acceptance"): any branch exports, an unreviewed agent branch
@@ -123,7 +124,8 @@ The security review's points (M8 plan T8.4a), and where each is held:
 - **Main.** No tool takes Main as a target to write: `open_session` refuses `branch: main` itself
   (`main-refused`), the session refuses it again, and every save checks.
 - **Review states.** No tool approves, rejects, merges or requests changes;
-  `submit_for_review` only submits.
+  `submit_for_review` only submits, and a write by `apply` or `undo` only reopens a `submitted`
+  or `changes-requested` branch.
 - **Paths.** Documents come only from the library root (ids are `isStorableId`, and
   `NodeBackend` confines every path), or over sync only from the sync server, where the agent
   token is checked on every request (apps/server README, "Agent tokens"). Exports go only into the output directory

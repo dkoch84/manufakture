@@ -1,6 +1,6 @@
 # 0016: Agent sessions: headless sessions on agent branches, an MCP surface, review in History before Main
 
-- Status: accepted, amended 2026-10-08 (at acceptance: no export gate, see "Acceptance"; then how `apply` checks commands, see the amendment)
+- Status: accepted, amended 2026-10-08 (at acceptance: no export gate, see "Acceptance"; then how `apply` checks commands, see the amendment); amended 2026-10-09 (decision 2: scripts and user fonts not yet wired in sessions)
 - Date: 2026-10-08
 
 ## Context
@@ -38,6 +38,8 @@ The inputs:
 
    Nothing else on the session path needs a browser API: Manifold, `crypto.subtle` and `navigator.locks` exist in Node 26, and no package reaches `OffscreenCanvas`.
 
+   Amended 2026-10-09: the last two items are not yet wired. A session runs no scripts (no `nodeScriptEngine`, no `setScriptPolicy`) and outlines no user fonts (no watchdog outliner); follow-up task #1224 wires them ([packages/session README](../../packages/session/README.md), "Not done"). Until then a scripted feature fails in the session, the agent's own included, so the bundle shows it failing; a reviewer who allows scripts gets that feature's bodies from the app's regen and none in the bundle, so the regen check reports a mismatch and **Approve** stays off (decision 11; [History, "Scripts in an agent branch"](../user/history.md#scripts-in-an-agent-branch)).
+
 3. **Limits.** Each ends with a typed error, as data (T8.1c). Values from T8.0a's recommendations:
 
    - **Commands per batch: 500.** 500 commands apply and validate in 3.0 ms; a batch's cost is its regen.
@@ -71,7 +73,7 @@ The inputs:
    - **Write**: `apply` (one batch with a label, symbolic ids of decision 8, `dryRun`), `undo`, `update_from_main` (moves the session to a new agent branch and reports the new branch id and dropped commands, decision 1), `submit_for_review` (builds and attaches the bundle of decision 11, with a note to the reviewer).
    - **Export**: `export` (a file from the session's branch into the configured output directory). **Not gated**: exports are allowed from any branch, including an unreviewed agent branch (see "Acceptance"). It calls the Node entry points of T8.1b: `exportGcode` and `exportLaser` (`@manufakture/cam/export`), `exportCutList` (`@manufakture/domain-wood/files`), `exportTakeoff` (`@manufakture/domain-construction/files`), `drawingFile` and `exportBodyFiles` (`@manufakture/io`; drawing PDF, DXF and SVG, STL, 3MF and STEP). Whether it also offers IFC, `.mfkview` and `.mfk` is T8.4a's call; a print setup's packed plate stays the app's (`apps/web/src/print/exportPrint.ts`) until it moves to a package.
 
-   There is no approve tool, no tool that writes Main or sets a review state other than through `submit_for_review`, no file path outside the configured roots, and no tool that evaluates code: the one way to run logic is a scripted feature added by command, which runs in ADR 0010's sandbox and appears in full in the bundle. The authoring guide (T8.5a) and the schema index are MCP resources.
+   There is no approve tool, no tool that writes Main, no tool other than `submit_for_review` that submits (a write by `apply` or `undo` only reopens a `submitted` or `changes-requested` branch, decision 9), no file path outside the configured roots, and no tool that evaluates code: the one way to run logic is a scripted feature added by command, which runs in ADR 0010's sandbox and appears in full in the bundle. The authoring guide (T8.5a) and the schema index are MCP resources.
 
    Amended 2026-10-08 in T8.4a: `apply`'s input schema checks a command's `type` only; the rest of each command is validated against core's zod schema in the session ([amendment](#amendment-how-apply-checks-commands-t84a)).
 
@@ -149,7 +151,7 @@ The inputs:
 - **Limits**: decision 3; the idle timeout and the regen overrun margin are T8.1c's.
 - **Releasing a recycled kernel** (terminating the worker, or `gc()` after each recycle): T8.1c verifies; 2 sessions per process until then.
 - **Node against browser determinism**: decision 4; the measurement tolerance is T8.3b's.
-- **Injections for Node** (text `fetchImpl`, domain registry, user fonts and scripts in a worker with a watchdog): decision 2; the script policy in sessions is T8.1c's.
+- **Injections for Node** (text `fetchImpl`, domain registry, user fonts and scripts in a worker with a watchdog): decision 2. The text `fetchImpl` and the domain registry are wired (T8.1c); user fonts, scripts and the script policy in sessions are not yet, and are follow-up task #1224's (decision 2's amendment of 2026-10-09).
 - **Rendering**: decision 5, landed in T8.2a.
 - **Tool list and versioning**: decisions 6 and 7; CI keeps a golden of the tool list and schemas, T8.4a's. Which export formats the `export` tool offers beyond T8.1b's entry points is T8.4a's.
 - **Symbolic ids**: decision 8, counter-prefixed; built in T8.1c.

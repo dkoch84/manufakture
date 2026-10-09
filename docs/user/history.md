@@ -148,6 +148,8 @@ Review does not hold back exports: G-code, cut lists and every other file export
 
 An agent can add or change scripts, so on an agent branch the scripts do not run just because you allowed this document's scripts before (on Main, say). The banner over the document lists every one of them, and **Run scripts** there allows exactly those, each as the branch has it now, on this device: a script the agent changes afterwards is asked about again. Read the scripts in the review first. The scripts of derived parts' source documents do not run on an agent branch, even when you allowed those documents.
 
+Agent sessions do not run scripts yet, so a scripted feature the agent added was failing when its review was built. If that feature makes geometry and you allow its script, your regen has bodies the review does not: the regen check reports the mismatch and **Approve** stays off (only the scripted feature's errors are left out of the comparison, not its bodies).
+
 ## Example
 
 1. Build a bracket whose walls are the variable `#thickness`, at 6 mm.
