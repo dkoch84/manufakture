@@ -125,7 +125,7 @@ const DESCRIPTIONS: Record<ToolName, string> = {
   find_geometry:
     'Faces and edges of the last regen by name or query (born by a feature, planar with a normal, cylinder of a radius, coaxial with a cylinder, nearest a point), with their names and hints: area, length, centroid, normal, and for cylinders axis, axisOrigin (a point on the axis), radius and hole (true for a hole, false for a boss).',
   measure:
-    "Exact measurements from the B-rep: a body (volume, area, centre of mass, box, mass), faces, edges or vertices of a body (distance, angle), clearance between bodies, interference of an assembly at its poses, at given ones, or swept over a slider's or revolute's travel. mm, mm², mm³, g, degrees.",
+    "Exact measurements from the B-rep: a body (volume, area, centre of mass, box, mass), faces, edges or vertices of a body or of two bodies of a part (distance, the planes' distance for parallel faces, angle), clearance between bodies, interference of an assembly at its poses, at given ones, or swept over a slider's or revolute's travel. mm, mm², mm³, g, degrees.",
   render:
     "PNG images of the head (and with compare, of the base version at the same camera): standard or given orthographic cameras, highlighted names, a section plane; the part studio, or an assembly at its solved poses, with sliders and revolutes held at given values, or with instances placed by hand. What each image is comes as data beside it, for an assembly each mate's coordinates as drawn and warnings for a value past a limit or a pose off its mate.",
   get_quantities:

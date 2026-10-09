@@ -21,6 +21,7 @@ import {
 import { documentCutList, type CutList } from '@manufakture/domain-wood';
 import type {
   BodyMeasure,
+  MeasureOpTarget,
   MeasureResult,
   MeasureTarget,
   Placement,
@@ -647,8 +648,16 @@ export interface BodyRef {
 export type MeasureQuery =
   /** Volume, area, centre of mass, bounding box, and mass when the body has a material. */
   | { kind: 'body'; partId: string; bodyId: string }
-  /** Faces, edges or vertices of one body; with exactly two, their distance and angle. */
-  | { kind: 'targets'; partId: string; bodyId: string; targets: MeasureTarget[] }
+  /**
+   * Faces, edges or vertices of a body; with exactly two, their distance and angle. A target with
+   * a `bodyId` is on that body of the same part instead: two faces of two bodies.
+   */
+  | {
+      kind: 'targets';
+      partId: string;
+      bodyId: string;
+      targets: (MeasureTarget & { bodyId?: string })[];
+    }
   /**
    * Overlap between bodies, each at an optional placement (its own coordinates by default): the
    * overlapping volume per pair, and the gap between their bounding boxes when apart.
@@ -775,18 +784,39 @@ export async function measure(ctx: QueryContext, query: unknown): Promise<Sessio
       ) {
         return sessionError(
           'invalid-input',
-          `targets: 1 to ${MAX_MEASURE_ITEMS} of { kind: face | edge | vertex, name } or { kind, index }.`,
+          `targets: 1 to ${MAX_MEASURE_ITEMS} of { kind: face | edge | vertex, name } or { kind, index }, each with an optional bodyId.`,
         );
+      }
+      // A target on another body of the part: that body's shape, in the same coordinates.
+      const shapes = new Map<string, ShapeId>([[q.bodyId as string, body.shape]]);
+      const ops: MeasureOpTarget[] = [];
+      for (const t of targets) {
+        const { bodyId, ...target } = t;
+        if (bodyId === undefined || bodyId === q.bodyId) {
+          ops.push(target);
+          continue;
+        }
+        let shape = shapes.get(bodyId);
+        if (shape === undefined) {
+          const other = liveBody(ctx, { partId: q.partId, bodyId });
+          if ('error' in other) return sessionError('not-found', `${bodyId}: ${other.error}`);
+          shape = other.shape;
+          shapes.set(bodyId, shape);
+        }
+        ops.push({ ...target, shape });
       }
       const r = await runOne<MeasureResult>(ctx, {
         op: 'measure',
         shape: body.shape,
-        targets,
+        targets: ops,
       });
       if (!r.ok) return r;
       const { angle } = r.value;
       return done({
-        items: r.value.items,
+        items: r.value.items.map((item, i) => ({
+          ...item,
+          bodyId: targets[i]!.bodyId ?? (q.bodyId as string),
+        })),
         distance: r.value.distance,
         angle:
           angle === null
@@ -1135,9 +1165,10 @@ async function travelInterference(
   });
 }
 
-function isTarget(t: unknown): t is MeasureTarget {
+function isTarget(t: unknown): t is MeasureTarget & { bodyId?: string } {
   const x = t as Record<string, unknown> | null;
   if (x === null || typeof x !== 'object') return false;
+  if (x.bodyId !== undefined && !isString(x.bodyId)) return false;
   if (x.kind !== 'face' && x.kind !== 'edge' && x.kind !== 'vertex') return false;
   if (isString(x.name)) return x.index === undefined;
   return Number.isSafeInteger(x.index) && (x.index as number) >= 1 && x.name === undefined;

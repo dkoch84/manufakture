@@ -157,6 +157,7 @@ export type {
   InterferenceOp,
   KernelOp,
   MeasureOp,
+  MeasureOpTarget,
   ObbOp,
   OpName,
   OpResult,
@@ -188,7 +189,9 @@ export type {
   MeasuredFace,
   MeasuredItem,
   MeasuredVertex,
+  ShapeMeasureTarget,
 } from './measure';
+export { measuredDistance } from './measure';
 export { DEFAULT_LOOP_DEFLECTION } from './loops';
 export type {
   FaceLoopsReport,

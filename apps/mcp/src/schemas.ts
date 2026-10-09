@@ -175,9 +175,16 @@ export const GeometryQuery = z.strictObject({
 });
 
 const BodyRef = { partId: ModelId, bodyId: ModelId };
+const TargetBody = ModelId.optional().describe(
+  "A body of the same part the target is on, when not the query's body: faces of two bodies.",
+);
 const Target = z.union([
-  z.strictObject({ kind: z.enum(['face', 'edge', 'vertex']), name: ModelId }),
-  z.strictObject({ kind: z.enum(['face', 'edge', 'vertex']), index: z.int().min(1).max(1e7) }),
+  z.strictObject({ kind: z.enum(['face', 'edge', 'vertex']), name: ModelId, bodyId: TargetBody }),
+  z.strictObject({
+    kind: z.enum(['face', 'edge', 'vertex']),
+    index: z.int().min(1).max(1e7),
+    bodyId: TargetBody,
+  }),
 ]);
 
 export const MeasureQuery = z.discriminatedUnion('kind', [

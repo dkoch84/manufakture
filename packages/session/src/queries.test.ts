@@ -89,6 +89,70 @@ describe('the cabinet', () => {
     expect(m.angle.value).toBeCloseTo(0, 9);
   });
 
+  it('measures between faces of two bodies of the part: distance and angle', async () => {
+    const s = await start(cabinetDocument());
+    const left = 'extension#1:cap:end{extension#11:groove:xmin}';
+    const right = 'extension#2:cap:start{extension#12:groove:xmin}';
+    const m = ok(
+      await s.measure({
+        kind: 'targets',
+        partId: PART,
+        bodyId: 'extension#1',
+        targets: [
+          { kind: 'face', name: left },
+          { kind: 'face', name: right, bodyId: 'extension#2' },
+        ],
+      }),
+    ) as {
+      items: { ok: boolean; name: string; bodyId: string }[];
+      distance: { value: number; planes: number | null };
+      angle: { value: number; normals: number; between: string };
+    };
+    expect(m.items.map((i) => [i.ok, i.name, i.bodyId])).toEqual([
+      [true, left, 'extension#1'],
+      [true, right, 'extension#2'],
+    ]);
+    // The sides' inner faces face each other across the cabinet: its width less two sides.
+    const width = inch(CABINET.width - 2 * CABINET.ply);
+    expect(m.distance.value).toBeCloseTo(width, 6);
+    expect(m.distance.planes).toBeCloseTo(width, 6);
+    expect(m.angle).toMatchObject({ between: 'planes', value: 0 });
+    expect(m.angle.normals).toBeCloseTo(180, 9);
+    // The bottom's top against a side: square, in degrees.
+    const square = ok(
+      await s.measure({
+        kind: 'targets',
+        partId: PART,
+        bodyId: 'extension#3',
+        targets: [
+          { kind: 'face', name: 'extension#3:cap:end' },
+          { kind: 'face', name: left, bodyId: 'extension#1' },
+        ],
+      }),
+    ) as { distance: { planes: number | null }; angle: { value: number } };
+    expect(square.angle.value).toBeCloseTo(90, 9);
+    expect(square.distance.planes).toBeNull();
+    // A body that is not there, and a bodyId that is not a string, are refused.
+    const missing = await s.measure({
+      kind: 'targets',
+      partId: PART,
+      bodyId: 'extension#1',
+      targets: [
+        { kind: 'face', name: left },
+        { kind: 'face', name: right, bodyId: 'extension#99' },
+      ],
+    });
+    expect(missing).toMatchObject({ ok: false, error: { code: 'not-found' } });
+    expect(JSON.stringify(missing)).toContain('extension#99');
+    const bad = await s.measure({
+      kind: 'targets',
+      partId: PART,
+      bodyId: 'extension#1',
+      targets: [{ kind: 'face', name: left, bodyId: 2 }],
+    });
+    expect(bad).toMatchObject({ ok: false, error: { code: 'invalid-input' } });
+  });
+
   it('gives the cut list and hardware as data, marked unreviewed', async () => {
     const s = await start(cabinetDocument());
     const q = ok(await s.quantities());

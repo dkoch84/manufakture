@@ -7,18 +7,33 @@
 //
 // Targets are named like the viewport names them: by the naming layer's name
 // on a body made by feature operations, or by 1-based index (a body with no
-// names, and vertices, which have no mesh name slots).
+// names, and vertices, which have no mesh name slots). A target may be on
+// another body than the measured one (`MeasureBody`), in the same coordinates
+// (the bodies of one part): the distance and angle between two targets work
+// the same whichever bodies they are on.
 
 import type { TopoDS_Edge, TopoDS_Face, TopoDS_Shape, TopoDS_Vertex } from 'libcascade/single/init';
 import { KernelError } from './errors';
 import type { NamedShape } from './kernel';
 import { answersTo, edgeAliases, vertexName } from './naming';
-import { cross, dot, mapShapes, norm, toVec3, type Oc, type Scope } from './occt';
-import type { BoundingBox, SubShapeKind, Vec3 } from './types';
+import { cross, dot, mapShapes, norm, toVec3, type IndexedMap, type Oc, type Scope } from './occt';
+import type { BoundingBox, ShapeId, SubShapeKind, Vec3 } from './types';
 
 /** A face, edge or vertex of the measured body: by name, or by 1-based index. */
 export type MeasureTarget =
   { kind: SubShapeKind; name: string } | { kind: SubShapeKind; index: number };
+
+/** A body a target is on, other than the measured shape: its shape and names (null for none). */
+export interface MeasureBody {
+  shape: TopoDS_Shape;
+  named: NamedShape | null;
+}
+
+/** A target, on the measured shape or, with `body`, on another body in the same coordinates. */
+export type BodyMeasureTarget = MeasureTarget & { body?: MeasureBody };
+
+/** `Kernel.measure`'s target: on the measured shape or, with `shape`, on that live body. */
+export type ShapeMeasureTarget = MeasureTarget & { shape?: ShapeId };
 
 export interface MeasureOptions {
   /** Also measure the whole body: volume, area, centre of mass, bounding box. */
@@ -87,6 +102,12 @@ export interface DistanceMeasure {
   to: Vec3;
   /** How many point pairs reach the minimum (parallel faces give several; one is reported). */
   solutions: number;
+  /**
+   * Two parallel planar faces only: the distance between their planes, measured along the
+   * normal. It equals `value` when the faces overlap seen along the normal, and is less when
+   * they are offset sideways (`value` then also counts the sideways offset). Null otherwise.
+   */
+  planes: number | null;
 }
 
 export interface AngleMeasure {
@@ -121,36 +142,85 @@ export interface MeasureResult {
 /** Parallel within this (radians) counts as parallel. */
 const ANGLE_TOL = 1e-9;
 
-/** Measure `targets` on `shape` (whose names, if any, are `named`). Everything is owned by `s`. */
+/**
+ * The one number a distance between two targets stands for: between two parallel planar faces
+ * the distance between their planes (`DistanceMeasure.planes`), otherwise the minimum distance
+ * (0 when they touch). Null unless both targets were found. What a `distance(...)` of two faces
+ * in an expression reads.
+ */
+export function measuredDistance(result: MeasureResult): number | null {
+  const d = result.distance;
+  return d === null ? null : (d.planes ?? d.value);
+}
+
+/**
+ * Measure `targets` on `shape` (whose names, if any, are `named`), each on its own `body` when
+ * it gives one. Everything is owned by `s`.
+ */
 export function measureShape(
   oc: Oc,
   s: Scope,
   shape: TopoDS_Shape,
   named: NamedShape | null,
-  targets: readonly MeasureTarget[],
+  targets: readonly BodyMeasureTarget[],
   options: MeasureOptions = {},
 ): MeasureResult {
-  const maps = {
-    face: mapShapes(oc, s, shape, 'face'),
-    edge: mapShapes(oc, s, shape, 'edge'),
-    vertex: mapShapes(oc, s, shape, 'vertex'),
+  type Maps = Record<SubShapeKind, IndexedMap>;
+  const mapsOf = new Map<TopoDS_Shape, Maps>();
+  const maps = (on: TopoDS_Shape): Maps => {
+    let m = mapsOf.get(on);
+    if (m === undefined) {
+      m = {
+        face: mapShapes(oc, s, on, 'face'),
+        edge: mapShapes(oc, s, on, 'edge'),
+        vertex: mapShapes(oc, s, on, 'vertex'),
+      };
+      mapsOf.set(on, m);
+    }
+    return m;
   };
   const found: { item: MeasuredItem; shape: TopoDS_Shape }[] = [];
-  const items = targets.map((target): MeasureItemReport => {
-    const located = locate(maps[target.kind].Extent(), named, target);
+  const items = targets.map((t): MeasureItemReport => {
+    const on = t.body ?? { shape, named };
+    const target = plain(t);
+    const map = maps(on.shape)[target.kind];
+    const located = locate(map.Extent(), on.named, target);
     if (!located.ok) return { ok: false, kind: target.kind, ...located.failure };
-    const sub = s.own(maps[target.kind].FindKey(located.index));
+    const sub = s.own(map.FindKey(located.index));
     const item = measureItem(oc, s, target.kind, sub, located.index, located.name);
     found.push({ item, shape: sub });
     return { ok: true, ...item };
   });
   const pair = targets.length === 2 && found.length === 2 ? found : null;
+  const between = pair ? angle(pair[0]!.item, pair[1]!.item) : null;
   return {
     items,
-    distance: pair ? distance(oc, s, pair[0]!.shape, pair[1]!.shape) : null,
-    angle: pair ? angle(pair[0]!.item, pair[1]!.item) : null,
+    distance: pair
+      ? {
+          ...distance(oc, s, pair[0]!.shape, pair[1]!.shape),
+          planes: planeGap(pair[0]!.item, pair[1]!.item, between),
+        }
+      : null,
+    angle: between,
     body: options.body ? bodyMeasure(oc, s, shape) : null,
   };
+}
+
+/** The target without its body: what `locate` reads. */
+function plain(t: BodyMeasureTarget): MeasureTarget {
+  return 'name' in t ? { kind: t.kind, name: t.name } : { kind: t.kind, index: t.index };
+}
+
+/** Two parallel planar faces: the distance between their planes, along the first's normal. */
+function planeGap(a: MeasuredItem, b: MeasuredItem, between: AngleMeasure | null): number | null {
+  if (a.kind !== 'face' || b.kind !== 'face' || a.normal === null || b.normal === null) return null;
+  if (between === null || between.between !== 'planes' || between.value !== 0) return null;
+  const d: Vec3 = [
+    b.centroid[0] - a.centroid[0],
+    b.centroid[1] - a.centroid[1],
+    b.centroid[2] - a.centroid[2],
+  ];
+  return Math.abs(dot(a.normal, d));
 }
 
 export type Located =
@@ -341,7 +411,12 @@ function measureFace(
   };
 }
 
-function distance(oc: Oc, s: Scope, a: TopoDS_Shape, b: TopoDS_Shape): DistanceMeasure {
+function distance(
+  oc: Oc,
+  s: Scope,
+  a: TopoDS_Shape,
+  b: TopoDS_Shape,
+): Omit<DistanceMeasure, 'planes'> {
   // Released before delete by `releaseOwned`, which unloads both shapes.
   const extrema = s.own(new oc.BRepExtrema_DistShapeShape(a, b));
   if (!extrema.IsDone() || extrema.NbSolution() < 1) {

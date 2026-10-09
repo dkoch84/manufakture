@@ -33,7 +33,7 @@ export function twoFaces(): MeasureResult {
         radius: null,
       },
     ],
-    distance: { value: 20, from: [10, 10, 20], to: [10, 10, 0], solutions: 4 },
+    distance: { value: 20, from: [10, 10, 20], to: [10, 10, 0], solutions: 4, planes: 20 },
     angle: { value: 0, between: 'planes', normals: Math.PI },
     body: {
       volume: 44000,

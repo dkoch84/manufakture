@@ -236,8 +236,9 @@ round. The first hole's wall and its counterbore, not the other hole's:
 ```
 
 Then measure what you found instead of assuming. A body gives volume, area, centre of mass,
-bounding box and (with a material) mass; `targets` measures faces, edges and vertices of one body
-against each other; `clearance` and `interference` check bodies and assemblies.
+bounding box and (with a material) mass; `targets` measures faces, edges and vertices of a body
+against each other, or of two bodies of one part (a target's `bodyId`, see Boards and joints);
+`clearance` and `interference` check bodies and assemblies.
 
 ```json mcp:measure
 {
@@ -964,6 +965,34 @@ marked `reviewed: false` on your branch), and a front view.
 
 ```json mcp:render
 { "sessionId": "<session>", "views": [{ "camera": "front", "highlight": ["extension#15"] }] }
+```
+
+Measure the space the new shelf leaves under the old one. Faces of two bodies of one part measure
+like two faces of one body: the query's `bodyId` is the first target's body, and a target with its
+own `bodyId` is on that body instead. Each item answers its `bodyId`. Between two parallel planar
+faces, `distance.planes` is the distance between their planes, the number a drawing dimension
+shows; `distance.value` is always the minimum distance between the faces, the same when they
+overlap seen along the normal and more when they are offset sideways. For any other pair `planes`
+is null, and `angle` (degrees) is there whenever both targets have a direction. Here the planes
+are 159.54 mm (6-9/32") apart, parallel, facing each other (`normals` 180).
+
+```json mcp:measure
+{
+  "sessionId": "<session>",
+  "query": {
+    "kind": "targets",
+    "partId": "part#1",
+    "bodyId": "extension#15",
+    "targets": [
+      { "kind": "face", "name": "extension#15:cap:end" },
+      { "kind": "face", "name": "extension#5:cap:start", "bodyId": "extension#5" }
+    ]
+  }
+}
+```
+
+```json mcp:result
+{ "ok": true, "measurement": { "angle": { "between": "planes", "value": 0 } } }
 ```
 
 ```json mcp:export

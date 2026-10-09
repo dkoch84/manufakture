@@ -6,7 +6,13 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import type { ExtrudeInput } from './features';
 import { XY, build, faceIndex, named, polygon, profile } from './fixtures/parts';
 import type { Kernel } from './kernel';
-import type { MeasureItemReport, MeasureResult, MeasuredEdge, MeasuredFace } from './measure';
+import {
+  measuredDistance,
+  type MeasureItemReport,
+  type MeasureResult,
+  type MeasuredEdge,
+  type MeasuredFace,
+} from './measure';
 import { createNodeKernel, createNodeService } from './node';
 import type { ShapeId, Topology, Vec3 } from './types';
 
@@ -104,6 +110,9 @@ describe('a 40 x 30 x 20 box at the origin', () => {
     nearVec(f.centroid, [20, 0, 10]);
     nearVec(f.normal, [0, -1, 0]);
     near(r.distance!.value, 30);
+    // Parallel planar faces: the distance between their planes too.
+    near(r.distance!.planes!, 30);
+    near(measuredDistance(r)!, 30);
     near(r.distance!.from[1], 0);
     near(r.distance!.to[1], 30);
     // The witness pair is the one nearest the middle of all solutions: square to both faces.
@@ -120,6 +129,7 @@ describe('a 40 x 30 x 20 box at the origin', () => {
       { kind: 'face', index: planeFace(t, [0, -1, 0], 0) },
     ]);
     near(r.distance!.value, 0);
+    expect(r.distance!.planes).toBeNull();
     near(r.angle!.value, 90 * DEG);
     near(r.angle!.normals!, 90 * DEG);
   });
@@ -398,6 +408,106 @@ describe('an arc edge', () => {
   });
 });
 
+describe('faces of two bodies', () => {
+  // Two named slabs 10 thick, side by side in the same coordinates: extrude#1 from x 0 to 40,
+  // extrude#2 from x 60 to 80, both y 0 to 30. Then two unnamed boxes, one offset sideways.
+  const slab = (id: string, x0: number, x1: number): ExtrudeInput => ({
+    kind: 'extrude',
+    id,
+    profile: profile(
+      XY,
+      polygon(
+        [
+          [x0, 0],
+          [x1, 0],
+          [x1, 30],
+          [x0, 30],
+        ],
+        ['e1', 'e2', 'e3', 'e4'],
+      ),
+    ),
+    extent: { type: 'blind', distance: 10 },
+    mode: 'new',
+  });
+  let a: ShapeId;
+  let b: ShapeId;
+  beforeAll(() => {
+    a = build(k, [slab('extrude#1', 0, 40)]).shape;
+    b = build(k, [slab('extrude#2', 60, 80)]).shape;
+  });
+
+  it('facing sides by name: 20 apart, parallel, whichever body is measured', () => {
+    // e2 runs up x = 40 on the first (normal +x); e4 runs down x = 60 on the second (normal -x).
+    const r = k.measure(a, [
+      { kind: 'face', name: 'extrude#1:side:e2' },
+      { kind: 'face', name: 'extrude#2:side:e4', shape: b },
+    ]);
+    nearVec(ok(r.items[0], 'face').normal, [1, 0, 0]);
+    const far = ok(r.items[1], 'face');
+    expect(far.name).toBe('extrude#2:side:e4');
+    expect(far.index).toBe(faceIndex(named(k, b), 'extrude#2:side:e4'));
+    nearVec(far.normal, [-1, 0, 0]);
+    near(r.distance!.value, 20);
+    near(r.distance!.planes!, 20);
+    near(r.distance!.from[0], 40);
+    near(r.distance!.to[0], 60);
+    expect(r.angle).toMatchObject({ between: 'planes' });
+    near(r.angle!.value, 0);
+    near(r.angle!.normals!, PI);
+    // The same with the second body measured and the first named on its own shape.
+    const back = k.measure(b, [
+      { kind: 'face', name: 'extrude#2:side:e4' },
+      { kind: 'face', name: 'extrude#1:side:e2', shape: a },
+    ]);
+    near(back.distance!.value, 20);
+    near(back.distance!.planes!, 20);
+  });
+
+  it("a name looks only on its own body: the other body's names are not found", () => {
+    const r = k.measure(a, [
+      { kind: 'face', name: 'extrude#2:side:e4' },
+      { kind: 'face', name: 'extrude#1:side:e2', shape: b },
+    ]);
+    expect(r.items[0]).toMatchObject({ ok: false, status: 'not-found' });
+    expect(r.items[1]).toMatchObject({ ok: false, status: 'not-found' });
+    expect(r.distance).toBeNull();
+    expect(r.angle).toBeNull();
+  });
+
+  it('a top and a side across bodies: the minimum distance at 90 degrees, no plane distance', () => {
+    const r = k.measure(a, [
+      { kind: 'face', name: 'extrude#1:cap:end' },
+      { kind: 'face', name: 'extrude#2:side:e4', shape: b },
+    ]);
+    // The top (z = 10, x up to 40) and the side (x = 60, z 0 to 10) meet nowhere: 20 apart.
+    near(r.distance!.value, 20);
+    expect(r.distance!.planes).toBeNull();
+    near(measuredDistance(r)!, 20);
+    near(r.angle!.value, 90 * DEG);
+  });
+
+  it('parallel faces offset sideways: the planes are nearer than the faces', () => {
+    const p = k.box(10, 10, 10);
+    const q = k.box(10, 10, 10, [30, 20, 0]);
+    const tp = k.topology(p);
+    const tq = k.topology(q);
+    const r = k.measure(p, [
+      { kind: 'face', index: planeFace(tp, [1, 0, 0], 10) },
+      { kind: 'face', index: planeFace(tq, [-1, 0, 0], 30), shape: q },
+    ]);
+    near(r.distance!.value, Math.hypot(20, 10));
+    near(r.distance!.planes!, 20);
+    near(measuredDistance(r)!, 20);
+    // The body measure is of the measured shape only.
+    const body = k.measure(p, [{ kind: 'vertex', index: 1, shape: q }], { body: true });
+    near(body.body!.volume, 1000);
+    nearVec(body.body!.boundingBox!.max, [10, 10, 10]);
+    expect(ok(body.items[0], 'vertex').point[1]).toBeGreaterThanOrEqual(20 - TOL);
+    k.release(p);
+    k.release(q);
+  });
+});
+
 describe('the measure op through the service', () => {
   it('measures a box made earlier in the batch, and reports bad ops as invalid-op', async () => {
     const service = await createNodeService();
@@ -416,6 +526,35 @@ describe('the measure op through the service', () => {
     near(value.body!.volume, 6000);
     expect(value.items[0]!.ok).toBe(true);
     expect(reply.results[2]).toMatchObject({ ok: false, error: { code: 'invalid-op' } });
+    expect(service.kernel.shapeCount).toBe(0);
+  });
+
+  it('measures between two boxes of the batch, a target naming its own shape', async () => {
+    const service = await createNodeService();
+    const reply = await service.run({
+      generation: 1,
+      ops: [
+        { op: 'box', size: [10, 10, 10], keep: false },
+        { op: 'box', size: [10, 10, 10], at: [0, 0, 25], keep: false },
+        {
+          op: 'measure',
+          shape: { result: 0 },
+          targets: [
+            { kind: 'vertex', index: 1 },
+            { kind: 'vertex', index: 1, shape: { result: 1 } },
+          ],
+        },
+        {
+          op: 'measure',
+          shape: { result: 0 },
+          targets: [{ kind: 'face', index: 1, shape: 'box' }],
+        } as never,
+      ],
+    });
+    expect(reply.status).toBe('done');
+    const value = (reply.results[2] as { value: MeasureResult }).value;
+    near(value.distance!.value, 25);
+    expect(reply.results[3]).toMatchObject({ ok: false, error: { code: 'invalid-op' } });
     expect(service.kernel.shapeCount).toBe(0);
   });
 });

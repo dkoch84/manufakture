@@ -1,5 +1,5 @@
 {
-  "surfaceVersion": "1.7.0",
+  "surfaceVersion": "1.8.0",
   "tools": [
     {
       "name": "apply",
@@ -2292,6 +2292,12 @@
                         {
                           "additionalProperties": false,
                           "properties": {
+                            "bodyId": {
+                              "maxLength": 512,
+                              "minLength": 1,
+                              "pattern": "^[\\x21-\\x7e]+$",
+                              "type": "string"
+                            },
                             "kind": {
                               "enum": ["face", "edge", "vertex"],
                               "type": "string"
@@ -2309,6 +2315,12 @@
                         {
                           "additionalProperties": false,
                           "properties": {
+                            "bodyId": {
+                              "maxLength": 512,
+                              "minLength": 1,
+                              "pattern": "^[\\x21-\\x7e]+$",
+                              "type": "string"
+                            },
                             "index": {
                               "maximum": 10000000,
                               "minimum": 1,

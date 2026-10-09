@@ -27,9 +27,10 @@ import { interferenceOf, type PlacedItem } from './interference';
 import { tessellate } from './mesh';
 import {
   measureShape,
+  type BodyMeasureTarget,
   type MeasureOptions,
   type MeasureResult,
-  type MeasureTarget,
+  type ShapeMeasureTarget,
 } from './measure';
 import {
   DEFAULT_LOOP_DEFLECTION,
@@ -897,15 +898,29 @@ export class Kernel {
   /**
    * Exact measurements of faces, edges and vertices of a shape (by name on a
    * named body, or by index), the distance and angle between two of them,
-   * and with `body` the shape's mass properties. See measure.ts.
+   * and with `body` the shape's mass properties. A target with a `shape` is on
+   * that body instead, in the same coordinates (another body of the part), so
+   * two faces of two bodies measure like two faces of one. See measure.ts;
+   * `measuredDistance` reads the one number a distance stands for.
    */
   measure(
     shape: ShapeId,
-    targets: readonly MeasureTarget[],
+    targets: readonly ShapeMeasureTarget[],
     options: MeasureOptions = {},
   ): MeasureResult {
     return this.op('measure', (s) =>
-      measureShape(this.oc, s, this.get(shape, 'measure'), this.named(shape), targets, options),
+      measureShape(
+        this.oc,
+        s,
+        this.get(shape, 'measure'),
+        this.named(shape),
+        targets.map((t): BodyMeasureTarget => {
+          if (t.shape === undefined) return t;
+          const { shape: on, ...target } = t;
+          return { ...target, body: { shape: this.get(on, 'measure'), named: this.named(on) } };
+        }),
+        options,
+      ),
     );
   }
 

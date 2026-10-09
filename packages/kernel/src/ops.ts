@@ -37,7 +37,7 @@ import {
 } from './features';
 import { DEFAULT_DEFLECTION, type BooleanKind, type Kernel } from './kernel';
 import type { FaceLoopsReport, FaceLoopsTarget, SectionLoops } from './loops';
-import type { MeasureResult, MeasureTarget } from './measure';
+import type { MeasureResult, MeasureTarget, ShapeMeasureTarget } from './measure';
 import type { OrientedBox } from './obb';
 import type { ProjectOptions, ProjectResult, ProjectView } from './project';
 import { applyNames, type NameTable } from './names';
@@ -160,14 +160,19 @@ export type PickOp = OpCommon & {
 /**
  * Exact measurements on a body: every target (a face, edge or vertex by name,
  * or by 1-based index), the distance and angle between exactly two, and with
- * `body` the body's volume, area, centre of mass and bounding box.
+ * `body` the body's volume, area, centre of mass and bounding box. A target
+ * with a `shape` is on that body instead (another body of the same part, in the
+ * same coordinates): the distance and angle between faces of two bodies.
  */
 export type MeasureOp = OpCommon & {
   op: 'measure';
   shape: ShapeRef;
-  targets: readonly MeasureTarget[];
+  targets: readonly MeasureOpTarget[];
   body?: boolean;
 };
+
+/** A measure op's target: on the op's shape, or with `shape` on that body. */
+export type MeasureOpTarget = MeasureTarget & { shape?: ShapeRef };
 
 /**
  * The oriented bounding box of a body: centre, unit axes and sizes, longest first
@@ -344,8 +349,8 @@ const topoRef: Check = (v, p) =>
 const measureTarget: Check = (v, p) => {
   const kind = oneOf('face', 'edge', 'vertex');
   return isObject(v) && 'name' in v
-    ? shape({ kind, name: str })(v, p)
-    : shape({ kind, index: num })(v, p);
+    ? shape({ kind, name: str }, { shape: shapeRef })(v, p)
+    : shape({ kind, index: num }, { shape: shapeRef })(v, p);
 };
 
 /** A face target: `{ name }` or `{ index }`. */
@@ -575,7 +580,10 @@ export function executeOp(
     case 'measure':
       return kernel.measure(
         resolve(op.shape, 'measure'),
-        op.targets,
+        op.targets.map((t): ShapeMeasureTarget => {
+          const { shape, ...target } = t;
+          return shape === undefined ? target : { ...target, shape: resolve(shape, 'measure') };
+        }),
         op.body === undefined ? {} : { body: op.body },
       );
     case 'obb':

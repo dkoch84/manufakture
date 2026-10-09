@@ -286,10 +286,37 @@ describe('scenario T8.6a: drawer slides', () => {
       SIDES.right,
       false,
     ]);
-    // The same sizes by measurement: `targets` measures within one body only, so the distances
-    // across the opening come from `clearance`'s gap between the bodies' boxes.
-    close((await clearance('extension#1', 'extension#2')).gaps[0].boxGap, 22.5625 * IN);
-    close((await clearance('extension#3', 'extension#5')).gaps[0].boxGap, (14 - 23 / 32) * IN);
+    // The same sizes by measurement, between faces of two bodies (#1206): a target's bodyId puts
+    // it on another body of the part. Found: `targets` measured within one body only, so these
+    // came from `clearance`'s gap between the bodies' boxes, which holds for aligned boxes only.
+    const across = async (a: [string, string], b: [string, string]) => {
+      const r = await call('measure', {
+        sessionId,
+        query: {
+          kind: 'targets',
+          partId: P,
+          bodyId: a[0],
+          targets: [
+            { kind: 'face', name: a[1] },
+            { kind: 'face', name: b[1], bodyId: b[0] },
+          ],
+        },
+      });
+      const m = r.measurement as Data;
+      expect(m.items.map((i: Data) => [i.ok, i.bodyId])).toEqual([
+        [true, a[0]],
+        [true, b[0]],
+      ]);
+      // Parallel faces facing each other: the planes' distance is the faces', square across.
+      expect(m.angle).toMatchObject({ between: 'planes', value: 0 });
+      close(m.angle.normals, 180);
+      close(m.distance.planes, m.distance.value);
+      return m.distance.planes as number;
+    };
+    const width = await across(['extension#1', SIDES.left], ['extension#2', SIDES.right]);
+    const height = await across(['extension#3', floor.name], ['extension#5', ceiling.name]);
+    close(width, 22.5625 * IN);
+    close(height, (14 - 23 / 32) * IN);
     // 21-25/32" from the front to the back's front face: an 18" slide fits.
     expect(back.centroid[1]).toBeGreaterThan(LENGTH);
   });
