@@ -14,15 +14,16 @@
 // table in docs/m8-acceptance/heat-set-inserts.md together.
 //
 // Insert numbers are CNC Kitchen's M3 standard insert (hole D3 4.0 mm, length L 5.7 mm, minimum
-// wall W 1.6 mm), the table packages/print holds as HEAT_SET_INSERTS; written out here because no
-// tool serves that table (one of the gaps). Set HEAT_SET_INSERTS_IMAGES to a directory to keep
-// the rendered PNGs for a look.
+// wall W 1.6 mm), the table packages/print holds as HEAT_SET_INSERTS. The run reads them, and M3
+// normal clearance, from the tables resource (manufakture://tables/holes) and checks them against
+// the numbers written out here. Set HEAT_SET_INSERTS_IMAGES to a directory to keep the rendered
+// PNGs for a look.
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { GUIDE_URI } from '../../src/resources';
+import { GUIDE_URI, TABLES_URI } from '../../src/resources';
 import {
   BOSSES,
   BOX,
@@ -36,7 +37,7 @@ import { harness, value, type Data, type Harness } from '../harness';
 const INSERT = { size: 'M3', hole: 4.0, length: 5.7, minWall: 1.6 } as const;
 /** The hole depth this run drills: the insert's length plus room for the plastic it displaces. */
 const INSERT_DEPTH = 6.5;
-/** ISO 273 normal clearance for M3, the kernel's HOLE_SIZES (also not served by any tool). */
+/** ISO 273 normal clearance for M3, the kernel's HOLE_SIZES. */
 const M3_CLEAR = 3.4;
 const BASE = 'extrude#1';
 const LID = 'extrude#3';
@@ -186,7 +187,38 @@ describe('heat-set inserts in a printed enclosure (T8.6b)', () => {
     ]);
   });
 
-  it('gap probe: no insert table and no insert hole type reach the agent', async () => {
+  it('reads the M3 insert hole and M3 clearance from the tables resource', async () => {
+    const { resources } = await h.client.listResources();
+    expect(resources.map((r) => r.uri)).toContain(TABLES_URI);
+    const first = (await h.client.readResource({ uri: TABLES_URI })).contents[0] as {
+      text: string;
+      mimeType: string;
+    };
+    expect(first.mimeType).toBe('application/json');
+    const tables = JSON.parse(first.text) as Data;
+    expect(tables.units).toEqual({ length: 'mm', angle: 'deg' });
+    const insert = (tables.heatSetInserts.sizes as Data[]).find((i) => i.size === INSERT.size)!;
+    expect(insert).toMatchObject({
+      hole: INSERT.hole,
+      length: INSERT.length,
+      minWall: INSERT.minWall,
+      verified: true,
+      source: expect.stringMatching(/CNC Kitchen/),
+    });
+    const clearance = (tables.clearanceHoles.sizes as Data[]).find((s) => s.size === 'M3')!;
+    expect(clearance.clearance.normal).toBe(M3_CLEAR);
+    expect(clearance.verified).toEqual({ clearance: true, counterbore: false, countersink: false });
+    expect(clearance.countersink.angle).toBe(90);
+    expect(tables.clearanceHoles.sources.clearance.metric).toMatch(/ISO 273/);
+    // The thread table says why the scenario leaves the thread off: an M3 thread wants a hole
+    // far smaller than the insert's.
+    const thread = (tables.threads.sizes as Data[]).find((s) => s.size === 'M3')!;
+    expect([thread.tapDrill, thread.internalHole]).toEqual([2.5, { min: 1.9587, max: 2.8647 }]);
+    expect(thread.internalHole.max).toBeLessThan(INSERT.hole);
+    expect((tables.selfTappingHoles.sizes as Data[]).every((h) => h.verified === false)).toBe(true);
+  });
+
+  it('gap probe: no insert hole type reaches the agent', async () => {
     const hole = value(await h.call('get_schema', { feature: 'hole' })).schema as Data;
     const heads = (hole.properties.head.oneOf as Data[]).map((o) => o.properties.type.const);
     expect(heads).toEqual(['simple', 'counterbore', 'countersink']);
@@ -194,18 +226,11 @@ describe('heat-set inserts in a printed enclosure (T8.6b)', () => {
     const thread = value(await h.call('get_schema', { feature: 'thread' })).schema as Data;
     expect(thread.properties.representation.enum).toEqual(['modelled', 'cosmetic']);
     for (const s of [hole, thread]) expect(JSON.stringify(s)).not.toMatch(/heat.?set|insert/i);
-    // The resources are the guide and the schemas: no table of insert (or clearance) sizes.
-    const { resources } = await h.client.listResources();
-    expect(
-      resources.map((r) => r.uri).filter((u) => !u.startsWith('manufakture://schema/')),
-    ).toEqual([GUIDE_URI]);
     // The guide (fixed after this scenario found it sending inserts to a cosmetic thread) says to
-    // drill the insert's own hole and leave the thread off, and carries the vendor's sizes as
-    // prose: a stopgap, not a table a tool serves.
+    // drill the insert's own hole and leave the thread off.
     const guide = (await h.client.readResource({ uri: GUIDE_URI })).contents[0] as { text: string };
     expect(guide.text).not.toMatch(/cosmetic[^.]*heat-set inserts/);
     expect(guide.text).toMatch(/do \*\*not\*\* put a\s+`thread` on its hole/);
-    expect(guide.text).toMatch(/\| M3 +\| 4\.0 +\| 5\.7 +\| 1\.6 +\|/);
   });
 
   it('gap probe: a cosmetic M3 thread on the insert hole fails (the guide says leave it off)', async () => {

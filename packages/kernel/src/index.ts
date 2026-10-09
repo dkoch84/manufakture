@@ -113,7 +113,7 @@ export type {
   TopoRef,
   Via,
 } from './naming';
-export { HOLE_SIZES, clearanceDiameter, holeSize } from './holes';
+export { HOLE_SIZES, HOLE_SIZE_SOURCES, clearanceDiameter, holeSize } from './holes';
 export type { HoleFit, HoleStandardSize } from './holes';
 export {
   THREAD_SIZES,

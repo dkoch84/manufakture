@@ -1,15 +1,19 @@
 // The MCP resources (ADR 0016 decision 6): the authoring guide for agents (docs/agents/authoring.md,
-// T8.5a; a short stub when the file cannot be read) and the schema index, plus a
-// template for the JSON Schema of each command type and feature kind. None holds text from a
-// document (ADR 0016 decision 13).
+// T8.5a; a short stub when the file cannot be read), the schema index, plus a template for the
+// JSON Schema of each command type and feature kind, and the reference tables for sizing holes
+// (clearance, counterbore and countersink sizes, threads, heat-set inserts, self-tapping holes).
+// None holds text from a document (ADR 0016 decision 13).
 
 import { readFile } from 'node:fs/promises';
 import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { HOLE_SIZES, HOLE_SIZE_SOURCES, THREAD_SIZES, threadLimits } from '@manufakture/kernel';
+import { HEAT_SET_INSERTS, SELF_TAPPING_HOLES } from '@manufakture/print';
 import { schemaIndex, schemaOf } from '@manufakture/session';
 
 export const GUIDE_URI = 'manufakture://guide/authoring';
 export const SCHEMA_INDEX_URI = 'manufakture://schema/index';
 export const SCHEMA_TEMPLATE = 'manufakture://schema/{kind}/{name}';
+export const TABLES_URI = 'manufakture://tables/holes';
 
 const GUIDE_FILE = new URL('../../../docs/agents/authoring.md', import.meta.url);
 
@@ -45,6 +49,81 @@ export async function guideText(): Promise<string> {
   }
 }
 
+/**
+ * Where `THREAD_SIZES` comes from, after the header of packages/kernel/src/threads.ts. The tables
+ * were checked against the secondary sources it names, so every size is served as verified.
+ */
+const THREAD_SOURCES = {
+  'iso-metric':
+    'ISO 261:1998 sizes and coarse pitches, basic diameters per ISO 724 from the ISO 68-1 profile, tap drills per ISO 2306 for 6H nuts; checked against the ISO 724 tables reproduced at engineersedge.com and mechahandbook.com, secondary sources',
+  unc: 'ASME B1.1 basic major diameter and threads per inch, minor diameter D - 1.082532 P, tap drills the usual 75% thread drills; checked against threadspec.org/unc and the Wikipedia list of drill and tap sizes, secondary sources',
+} as const;
+
+/** Rounded to 0.1 micrometre: inch sizes converted to mm without float noise. */
+const mm = (v: number) => Math.round(v * 1e4) / 1e4;
+const range = (l: { min: number; max: number }) => ({ min: mm(2 * l.min), max: mm(2 * l.max) });
+
+/**
+ * The tables an agent sizes holes from, as the product holds them: the hole feature's standard
+ * sizes (`standard.size` and `fit`), the thread feature's sizes, and packages/print's heat-set
+ * insert and self-tapping hole tables. Millimetres and degrees; every row says whether it was
+ * checked, and every table where it comes from.
+ */
+export function holeTables() {
+  return {
+    units: { length: 'mm', angle: 'deg' },
+    clearanceHoles: {
+      description:
+        "Clearance, counterbore and countersink sizes for screws: the hole feature's standard.size and standard.fit.",
+      sources: HOLE_SIZE_SOURCES,
+      sizes: HOLE_SIZES.map((s) => ({
+        size: s.size,
+        system: s.system,
+        nominal: mm(s.nominal),
+        clearance: {
+          close: mm(s.clearance.close),
+          normal: mm(s.clearance.normal),
+          loose: mm(s.clearance.loose),
+        },
+        counterbore: { diameter: mm(s.counterbore.diameter), depth: mm(s.counterbore.depth) },
+        countersink: {
+          diameter: mm(s.countersink.diameter),
+          angle: mm((s.countersink.angle * 180) / Math.PI),
+        },
+        verified: s.verified,
+      })),
+    },
+    threads: {
+      description:
+        "The thread feature's standard sizes. tapDrill is the hole a thread is drilled to; internalHole and externalShaft are the diameters the thread feature can cut into (at clearance 0).",
+      sources: THREAD_SOURCES,
+      sizes: THREAD_SIZES.map((s) => ({
+        system: s.system,
+        size: s.size,
+        major: mm(s.major),
+        pitch: mm(s.pitch),
+        tpi: s.tpi,
+        minor: mm(s.minor),
+        tapDrill: mm(s.tapDrill),
+        tapDrillName: s.tapDrillName,
+        internalHole: range(threadLimits('internal', s.major, s.pitch)),
+        externalShaft: range(threadLimits('external', s.major, s.pitch)),
+        verified: true,
+      })),
+    },
+    heatSetInserts: {
+      description:
+        'Heat-set threaded inserts for printed parts: drill a plain hole of diameter hole, at least length deep, with at least minWall of material around it, and put no thread feature on it. Other brands differ.',
+      sizes: HEAT_SET_INSERTS.map((i) => ({ ...i })),
+    },
+    selfTappingHoles: {
+      description:
+        'Holes for machine screws driven straight into a print. Not verified: print a test and adjust.',
+      sizes: SELF_TAPPING_HOLES.map((h) => ({ ...h })),
+    },
+  };
+}
+
 export function registerResources(server: McpServer): void {
   server.registerResource(
     'authoring-guide',
@@ -69,6 +148,21 @@ export function registerResources(server: McpServer): void {
     async (uri) => ({
       contents: [
         { uri: uri.href, mimeType: 'application/json', text: JSON.stringify(schemaIndex()) },
+      ],
+    }),
+  );
+  server.registerResource(
+    'hole-tables',
+    TABLES_URI,
+    {
+      title: 'Hole, insert and thread tables',
+      description:
+        'Clearance, counterbore and countersink sizes, thread sizes with tap drills, heat-set insert holes and self-tapping holes, each with its source and whether it was verified.',
+      mimeType: 'application/json',
+    },
+    async (uri) => ({
+      contents: [
+        { uri: uri.href, mimeType: 'application/json', text: JSON.stringify(holeTables()) },
       ],
     }),
   );

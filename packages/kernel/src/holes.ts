@@ -38,6 +38,26 @@ export interface HoleStandardSize {
   verified: { clearance: boolean; counterbore: boolean; countersink: boolean };
 }
 
+/**
+ * Where each group of `HOLE_SIZES` values comes from, as the header above cites it: for anything
+ * that serves the table (the MCP tables resource) next to each size's `verified` flags.
+ */
+export const HOLE_SIZE_SOURCES: Readonly<{
+  clearance: Readonly<Record<HoleStandardSize['system'], string>>;
+  counterbore: string;
+  countersink: string;
+}> = {
+  clearance: {
+    metric:
+      'ISO 273:1979 clearance holes, series fine / medium / coarse as close / normal / loose (ASME B18.2.8-1999 metric table gives the same values); checked against the ASME B18.2.8 metric chart reproduced at https://amesweb.info/Screws/Metric-Clearance-Hole-Chart.aspx, a secondary source',
+    inch: 'ASME B18.2.8-1999 (R2017) close / normal / loose, as the nominal diameter of the drill the standard names; checked against the chart reproduced at https://amesweb.info/Screws/Clearance-Hole-Chart.aspx, a secondary source',
+  },
+  counterbore:
+    'Not verified: sized for socket head cap screws (ISO 4762 metric, ASME B18.3 inch) after DIN 974-1 style tables, depth the head height plus a small allowance',
+  countersink:
+    "Not verified: 90 degrees for ISO 10642 metric flat heads, 82 degrees for ASME B18.3 inch flat heads, diameter the head's maximum diameter rounded up",
+};
+
 const IN = 25.4;
 const DEG = Math.PI / 180;
 

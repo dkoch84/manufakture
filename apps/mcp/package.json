@@ -20,6 +20,7 @@
     "@manufakture/io": "workspace:*",
     "@manufakture/kernel": "workspace:*",
     "@manufakture/library": "workspace:*",
+    "@manufakture/print": "workspace:*",
     "@manufakture/regen": "workspace:*",
     "@manufakture/render": "workspace:*",
     "@manufakture/review": "workspace:*",
