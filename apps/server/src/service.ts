@@ -1225,6 +1225,16 @@ export class SyncService {
     if (from === undefined) {
       return fail(400, 'no-version', 'The branch names a version that is not here');
     }
+    // An agent token starts only from a version of main (ADR 0016 decision 12, N-3): a version
+    // on another branch would bring that branch's commands along, and a merge into main would
+    // carry them too, though the agent branch's own log never shows them.
+    if (principal.kind === 'agent' && from.branch !== MAIN_BRANCH) {
+      return fail(
+        403,
+        'not-main-version',
+        'An agent token starts a branch only from a version of the main branch',
+      );
+    }
     // An agent token starts only from the owner's versions and its own: never from another
     // token's (its start version), which would keep that version alive past its own branch and
     // past that token's revocation.

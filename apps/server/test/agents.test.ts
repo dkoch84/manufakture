@@ -1201,6 +1201,65 @@ describe('start versions, bundle quotas and submitted branches (the security re-
     expect((await from(other.token, PERSON, V1)).status).toBe(201);
   });
 
+  it("an agent token starts a branch only from a version of main, never of an owner's other branch (N-3)", async () => {
+    const agent = await setUp();
+    // The owner's own branch, with a change of the owner's on it, and a version there.
+    expect((await from(undefined, PERSON, V1)).status).toBe(201);
+    const key = clientKey();
+    expect((await helloOn(TOKEN, PERSON, 'owner-1', key)).status).toBe(200);
+    const wrote = await submitOn(TOKEN, PERSON, key, baseDocument(), {
+      clientId: 'owner-1',
+      clientSeq: 1,
+    });
+    expect(wrote.status).toBe(200);
+    const onPerson = await call(server, 'POST', `/documents/${DOC}/versions`, {
+      body: {
+        version: {
+          id: 'v-person',
+          name: 'Owner work',
+          description: '',
+          branch: PERSON,
+          rev: 1,
+          createdAt: AT,
+        },
+      },
+    });
+    expect(onPerson.status).toBe(201);
+
+    // A branch from it would hold the owner's change, and its merge preview would carry the
+    // owner's commands into main, which the agent branch's log never shows.
+    const refused = await from(agent.token, B1, 'v-person');
+    expect(refused.status).toBe(403);
+    expect((refused.body as { code: string }).code).toBe('not-main-version');
+    // Nor from a version on the agent's own branch.
+    expect((await from(agent.token, B1, V1)).status).toBe(201);
+    const onAgent = await call(server, 'POST', `/documents/${DOC}/versions`, {
+      token: agent.token,
+      body: {
+        version: {
+          id: 'v-agent',
+          name: 'Agent work',
+          description: '',
+          branch: B1,
+          rev: 0,
+          createdAt: AT,
+        },
+      },
+    });
+    expect(onAgent.status).toBe(201);
+    const ownBranch = await from(agent.token, B2, 'v-agent');
+    expect(ownBranch.status).toBe(403);
+    expect((ownBranch.body as { code: string }).code).toBe('not-main-version');
+    // Nothing was made, and the owner is unaffected.
+    const branches = await call<{ branches: { id: string }[] }>(
+      server,
+      'GET',
+      `/documents/${DOC}/branches`,
+    );
+    expect(branches.body.branches.map((b) => b.id).sort()).toEqual([B1, PERSON].sort());
+    expect((await from(undefined, B2, 'v-person')).status).toBe(201);
+  });
+
   it('revoking a token sweeps the start versions it made that no branch starts from', async () => {
     const agent = await setUp();
     const other = await issue();
