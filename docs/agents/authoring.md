@@ -1366,6 +1366,14 @@ Redo what was dropped, check, then submit. When Main has not moved, nothing happ
 - Four sessions at once with the default worker engine, two with the in-process one (the
   `too-many-sessions` refusal says how many); a session is closed when the server stops, and the
   branch stays.
+- A session with no call for 30 minutes closes itself, for example when the person steps away.
+  Your next call then answers `ok: false` with the server error `no-session`. Every batch you
+  applied is saved on the branch. If you had not submitted yet, reopen it: `open_session` with the
+  same `documentId` and `branch` set to the branch id from your first `open_session` answer
+  (`list_documents` lists it too), check the outline, and carry on. If you had already submitted,
+  do not reopen it: read the state with `get_review` using `documentId` and `branch` (a `sessionId`
+  no longer works), and resume with `open_session` only once the state is `changes-requested`. An
+  `approved` or `rejected` branch is finished.
 - `render` draws at most 8 images a call, 2048 pixels a side.
 - `find_geometry` finds faces and edges, not vertices yet.
 - No tool approves, rejects, merges or requests changes, and none writes Main. Only the person

@@ -230,6 +230,7 @@ If the agent writes to a branch after you approved it but before your browser to
 - **Review needs the sync server**, on localhost for now (above). A session on a library directory cannot be reviewed in the app.
 - **The agent's branch starts from Main as it was when the session opened.** Your later edits on Main reach it only when the agent brings its branch up to date (above, "Reviewing").
 - **One MCP server holds four sessions at once** with the default `worker` engine, two with `in-process`; the agent closes one before it opens another (a refused open, `too-many-sessions`, says how many). Its branches stay.
+- **A session closes itself after 30 minutes without a call.** If you step away for longer, the agent's next call is refused because its session is gone. Ask it to reopen its branch: nothing is lost, since every batch it applied was saved to the branch, and it carries on from there. If it had already submitted, review the branch in History; the agent can pick it up again once you send it back with changes requested.
 - **Over sync, the agent's copy of a document lives in the MCP server's memory** while it runs; the sync server is where everything is kept.
 - Scripted features do not run in an agent's session yet (they regenerate with an error there, though they build in the app), and user fonts are refused.
 - `export` does not write a print setup's packed plate, IFC or a `.mfkview`; it writes a part's bodies as STL or 3MF instead.
