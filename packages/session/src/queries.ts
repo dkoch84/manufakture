@@ -26,6 +26,7 @@ import type {
   Vec3,
 } from '@manufakture/kernel';
 import {
+  connectorFrames,
   evaluateVariables,
   namedCoordinates,
   type InstanceResult,
@@ -303,6 +304,30 @@ export function objectOf(document: ManufaktureDocument, query: unknown): Session
         'Ask for a document, part, feature, variable, assembly, instance, mate, camSetup, drawing, configurations, domain or script.',
       );
   }
+}
+
+/** A mate's connector frames as the last regen resolved them (`connectorFrames`). */
+export type MateFrames = NonNullable<ReturnType<typeof connectorFrames>>;
+
+/**
+ * Where a mate's connectors resolved in the last regen: each one's origin and unit axes in world
+ * coordinates (mm) at the solved poses, after flip, rotate and offset, and the axis of connector
+ * a's frame each free coordinate runs along. What a connector offset is worked out against,
+ * without trial regens. Null before a regen has the mate; undefined for any other query (the
+ * query itself is `objectOf`'s to check).
+ */
+export function mateFramesOf(
+  document: ManufaktureDocument,
+  result: RegenResult | null,
+  query: unknown,
+): MateFrames | null | undefined {
+  const q = (query ?? {}) as Record<string, unknown>;
+  if (q.kind !== 'mate') return undefined;
+  const a = document.assemblies.find((x) => x.id === q.assemblyId);
+  const m = a?.mates.find((x) => x.id === q.mateId);
+  if (a === undefined || m === undefined) return undefined;
+  const solved = result?.assemblies.find((r) => r.assemblyId === a.id);
+  return (solved && connectorFrames(solved, m.id, m.kind)) ?? null;
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -1,5 +1,5 @@
 {
-  "surfaceVersion": "1.2.0",
+  "surfaceVersion": "1.3.0",
   "tools": [
     {
       "name": "apply",
@@ -1201,6 +1201,128 @@
             },
             "required": ["kind"],
             "type": "object"
+          },
+          "frames": {
+            "anyOf": [
+              {
+                "additionalProperties": {},
+                "properties": {
+                  "a": {
+                    "anyOf": [
+                      {
+                        "additionalProperties": {},
+                        "properties": {
+                          "connectorId": {
+                            "type": "string"
+                          },
+                          "instanceId": {
+                            "type": "string"
+                          },
+                          "origin": {
+                            "items": {
+                              "type": "number"
+                            },
+                            "type": "array"
+                          },
+                          "x": {
+                            "items": {
+                              "type": "number"
+                            },
+                            "type": "array"
+                          },
+                          "y": {
+                            "items": {
+                              "type": "number"
+                            },
+                            "type": "array"
+                          },
+                          "z": {
+                            "items": {
+                              "type": "number"
+                            },
+                            "type": "array"
+                          }
+                        },
+                        "required": ["connectorId", "instanceId", "origin", "x", "y", "z"],
+                        "type": "object"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "b": {
+                    "anyOf": [
+                      {
+                        "additionalProperties": {},
+                        "properties": {
+                          "connectorId": {
+                            "type": "string"
+                          },
+                          "instanceId": {
+                            "type": "string"
+                          },
+                          "origin": {
+                            "items": {
+                              "type": "number"
+                            },
+                            "type": "array"
+                          },
+                          "x": {
+                            "items": {
+                              "type": "number"
+                            },
+                            "type": "array"
+                          },
+                          "y": {
+                            "items": {
+                              "type": "number"
+                            },
+                            "type": "array"
+                          },
+                          "z": {
+                            "items": {
+                              "type": "number"
+                            },
+                            "type": "array"
+                          }
+                        },
+                        "required": ["connectorId", "instanceId", "origin", "x", "y", "z"],
+                        "type": "object"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "motion": {
+                    "items": {
+                      "additionalProperties": {},
+                      "properties": {
+                        "angular": {
+                          "type": "boolean"
+                        },
+                        "axis": {
+                          "enum": ["x", "y", "z"],
+                          "type": "string"
+                        },
+                        "coordinate": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["coordinate", "axis", "angular"],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": ["a", "b", "motion"],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "object": {},
           "ok": {

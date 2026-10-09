@@ -12,12 +12,15 @@
 
 import {
   compose,
+  coordinateAxes,
   coordinateNames,
+  frameAxes,
   isAngular,
   quatFromAxisAngle,
   type AssemblyInput,
   type AssemblyWarning,
   type DragReport,
+  type FrameAxes,
   type MateInput,
   type MateKind,
   type SolveReport,
@@ -363,6 +366,53 @@ export function namedCoordinates(
   const names = coordinateNames(kind);
   if (coordinates.length !== names.length) return [];
   return names.map((name, k) => ({ name, value: coordinates[k]!, angular: isAngular(kind, k) }));
+}
+
+/** A connector's resolved frame in world coordinates (mm): origin and unit axes. */
+export interface ConnectorFrame extends FrameAxes {
+  connectorId: string;
+  instanceId: string;
+}
+
+/**
+ * A mate's two connector frames in world coordinates at the solved instance poses, with flip,
+ * rotate and offset applied: the frames the solver mates. A connector is null when it did not
+ * resolve; undefined when the result has no such mate. `motion` names the axis of connector a's
+ * frame each free coordinate runs along or turns about (a slider's distance: z).
+ */
+export function connectorFrames(
+  result: AssemblyResult,
+  mateId: string,
+  kind: MateKind,
+):
+  | {
+      a: ConnectorFrame | null;
+      b: ConnectorFrame | null;
+      motion: { coordinate: string; axis: 'x' | 'y' | 'z'; angular: boolean }[];
+    }
+  | undefined {
+  const m = result.mates.find((x) => x.mateId === mateId);
+  if (m === undefined) return undefined;
+  const world = (c: ConnectorResult): ConnectorFrame | null => {
+    if (c.frame === null) return null;
+    const inst = result.instances.find((i) => i.instanceId === c.instanceId);
+    if (inst === undefined) return null;
+    return {
+      connectorId: c.connectorId,
+      instanceId: c.instanceId,
+      ...frameAxes(compose(inst.transform, c.frame)),
+    };
+  };
+  const axes = coordinateAxes(kind);
+  return {
+    a: world(m.connectors[0]),
+    b: world(m.connectors[1]),
+    motion: coordinateNames(kind).map((coordinate, k) => ({
+      coordinate,
+      axis: axes[k]!,
+      angular: isAngular(kind, k),
+    })),
+  };
 }
 
 /**

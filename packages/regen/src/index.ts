@@ -224,6 +224,7 @@ export {
   type Translation,
 } from './translate';
 export {
+  connectorFrames,
   connectorOrigin,
   connectorPose,
   framePose,
@@ -232,6 +233,7 @@ export {
   namedCoordinates,
   posesDiffer,
   solvedPoses,
+  type ConnectorFrame,
   type NamedCoordinate,
 } from './assembly';
 export {

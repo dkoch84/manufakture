@@ -5,4 +5,4 @@
 // new name, with the old one kept and marked deprecated in its description.
 
 export const SERVER_NAME = 'manufakture';
-export const SURFACE_VERSION = '1.2.0';
+export const SURFACE_VERSION = '1.3.0';

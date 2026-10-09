@@ -22,11 +22,14 @@ export type {
 export {
   MATE_KINDS,
   clampToLimits,
+  coordinateAxes,
   coordinateCount,
   coordinateNames,
+  frameAxes,
   hasLimits,
   isAngular,
   limitViolation,
+  type FrameAxes,
   type LimitViolation,
 } from './mates';
 export { drag, solve } from './solver';

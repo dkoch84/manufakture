@@ -119,7 +119,7 @@ const DESCRIPTIONS: Record<ToolName, string> = {
   get_tree:
     'The outline of the head: parts with features (status, errors), bodies, member sets, variables, assemblies with instances and mates, configurations, drawings, CAM setups, domain data.',
   get_object:
-    'The full JSON of one item: the document, a part, feature, variable, assembly, instance, mate, CAM setup, drawing, the configurations, a domain namespace or a script.',
+    "The full JSON of one item: the document, a part, feature, variable, assembly, instance, mate, CAM setup, drawing, the configurations, a domain namespace or a script. For a mate, also frames: each connector's resolved frame in world coordinates (origin and unit axes x, y, z, mm) at the solved poses, after flip, rotate and offset, and the axis of connector a's frame each free coordinate runs along or turns about.",
   get_schema:
     'The JSON Schema of a command type or feature kind, with descriptions; with neither, the index of both.',
   find_geometry:
@@ -414,9 +414,13 @@ export function createMcpServer(options: ServerOptions): ManufaktureServer {
   // Reads
 
   sessionTool('get_tree', async (s) => fromSession(await s.tree(), (tree) => ({ tree })));
-  sessionTool('get_object', async (s, a) =>
-    fromSession(await s.object(a.query), (object) => ({ object })),
-  );
+  sessionTool('get_object', async (s, a) => {
+    const object = await s.object(a.query);
+    if (!object.ok || a.query.kind !== 'mate') return fromSession(object, (o) => ({ object: o }));
+    // Beside the mate, not in it: the object stays the document's JSON, ready for editMate.
+    const frames = await s.mateFrames(a.query);
+    return fromSession(frames, (f) => ({ object: object.value, frames: f ?? null }));
+  });
   tool('get_schema', async (a) => {
     if (a.command === undefined && a.feature === undefined) return ok({ index: schemaIndex() });
     return fromSession(

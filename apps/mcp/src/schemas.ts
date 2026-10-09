@@ -351,6 +351,19 @@ const TruncatedOut = z.strictObject({
   ),
 });
 
+const ConnectorFrameOut = z
+  .looseObject({
+    connectorId: z.string(),
+    instanceId: z.string(),
+    origin: z.array(z.number()),
+    x: z.array(z.number()),
+    y: z.array(z.number()),
+    z: z.array(z.number()),
+  })
+  .describe(
+    "A connector's frame in world coordinates at the solved poses (mm, unit axes), after flip, rotate and offset; null when it did not resolve.",
+  );
+
 function envelope(fields: Record<string, z.ZodType>) {
   const optional: Record<string, z.ZodType> = {};
   for (const [k, v] of Object.entries(fields)) optional[k] = v.optional();
@@ -419,7 +432,25 @@ export const Outputs: Record<ToolName, z.ZodType> = {
   open_session: envelope({ ...SessionOut, resumed: z.boolean(), outline: Any }),
   close_session: envelope({ closed: z.boolean(), branch: z.string() }),
   get_tree: envelope({ tree: Any }),
-  get_object: envelope({ object: Any }),
+  get_object: envelope({
+    object: Any,
+    frames: z
+      .looseObject({
+        a: ConnectorFrameOut.nullable(),
+        b: ConnectorFrameOut.nullable(),
+        motion: z.array(
+          z.looseObject({
+            coordinate: z.string().describe("The coordinate's name, as get_tree gives it."),
+            axis: z.enum(['x', 'y', 'z']).describe("The axis of connector a's frame."),
+            angular: z.boolean().describe('Turns about the axis (true) or runs along it.'),
+          }),
+        ),
+      })
+      .nullable()
+      .describe(
+        'Mates only: where the last regen resolved the connectors; null before a regen has the mate.',
+      ),
+  }),
   get_schema: envelope({
     schema: Any,
     index: z.looseObject({ commands: z.array(z.string()), features: z.array(z.string()) }),

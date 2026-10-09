@@ -16,7 +16,15 @@
 // left increment in G's frame, which keeps its tangent directions G's axes everywhere.
 
 import type { MateKind, MateLimits } from './model';
-import { POSE, rotationExp, rotationLog, rotateVec } from './transform';
+import {
+  POSE,
+  rotationExp,
+  rotationLog,
+  rotateVec,
+  rotateVector,
+  type Pose,
+  type Vec3,
+} from './transform';
 
 export const MATE_KINDS: readonly MateKind[] = [
   'fastened',
@@ -62,6 +70,45 @@ export function coordinateNames(kind: MateKind): readonly string[] {
     case 'ball':
       return ['x', 'y', 'z'];
   }
+}
+
+/**
+ * The axis of connector a's frame (after its offset) each of a kind's coordinates runs along (a
+ * length) or turns about (an angle), in `coordinateNames` order: a slider's distance and a
+ * revolute's angle are both z; a planar's x, y and angle are x, y and z.
+ */
+export function coordinateAxes(kind: MateKind): readonly ('x' | 'y' | 'z')[] {
+  switch (kind) {
+    case 'fastened':
+      return [];
+    case 'revolute':
+    case 'slider':
+      return ['z'];
+    case 'cylindrical':
+      return ['z', 'z'];
+    case 'planar':
+    case 'ball':
+      return ['x', 'y', 'z'];
+  }
+}
+
+/** A frame's origin and unit axes, in the coordinates its pose maps into. */
+export interface FrameAxes {
+  origin: Vec3;
+  x: Vec3;
+  y: Vec3;
+  z: Vec3;
+}
+
+/** A frame given as a pose (frame coordinates to outer ones) as its origin and axes. */
+export function frameAxes(frame: Pose): FrameAxes {
+  const q = frame.rotation;
+  return {
+    origin: [frame.translation[0], frame.translation[1], frame.translation[2]],
+    x: rotateVector(q, [1, 0, 0]),
+    y: rotateVector(q, [0, 1, 0]),
+    z: rotateVector(q, [0, 0, 1]),
+  };
 }
 
 /** Whether a kind takes limits on its coordinate: revolute (radians) and slider (mm). */

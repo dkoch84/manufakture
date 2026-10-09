@@ -56,6 +56,7 @@ export {
   type ErrorLine,
   type GeometryHit,
   type GeometryQuery,
+  type MateFrames,
   type MeasureQuery,
   type ObjectQuery,
   type Quantities,

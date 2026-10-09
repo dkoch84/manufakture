@@ -49,6 +49,11 @@ describe('the cabinet', () => {
       error: expect.objectContaining({ code: 'invalid-input' }),
     });
     expect(ok(await s.object({ kind: 'document' }))).toMatchObject({ parts: [PART] });
+    // Connector frames are for mates only (the drawer-slides scenario reads a real one).
+    expect(ok(await s.mateFrames({ kind: 'document' }))).toBeUndefined();
+    expect(
+      ok(await s.mateFrames({ kind: 'mate', assemblyId: 'assembly#9', mateId: 'mate#1' })),
+    ).toBeUndefined();
   });
 
   it('finds faces by plane and position, and measures between them', async () => {

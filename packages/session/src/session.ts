@@ -47,12 +47,14 @@ import { ModelState } from './model';
 import {
   errorsOf,
   findGeometry,
+  mateFramesOf,
   measure,
   objectOf,
   quantities,
   tree,
   type ErrorLine,
   type GeometryHit,
+  type MateFrames,
   type QueryContext,
   type Quantities,
 } from './queries';
@@ -1468,6 +1470,11 @@ export class Session {
 
   object(query: unknown): Promise<SessionResult<unknown>> {
     return this.#readResult(() => objectOf(this.#document, query));
+  }
+
+  /** A mate's connector frames from the last regen (`mateFramesOf`); undefined for non-mates. */
+  mateFrames(query: unknown): Promise<SessionResult<MateFrames | null | undefined>> {
+    return this.#read(() => mateFramesOf(this.#document, this.#model.last, query));
   }
 
   schema(query: {

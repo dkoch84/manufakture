@@ -6,6 +6,7 @@ import type { ConnectorReport } from '@manufakture/kernel';
 import { describe, expect, it } from 'vitest';
 import {
   applyReport,
+  connectorFrames,
   emptyAssemblyResult,
   namedCoordinates,
   pickReport,
@@ -178,5 +179,57 @@ describe('namedCoordinates', () => {
     expect(namedCoordinates('fastened', [])).toEqual([]);
     // Not solved: no coordinates.
     expect(namedCoordinates('revolute', [])).toEqual([]);
+  });
+});
+
+describe('connectorFrames', () => {
+  it("gives each connector's frame in world coordinates at its instance's solved pose", () => {
+    const h = Math.SQRT1_2;
+    const result = emptyAssemblyResult('assembly#1');
+    const inst = (id: string, transform: InstanceResult['transform']): InstanceResult => ({
+      instanceId: id,
+      status: 'ok',
+      source: { part: 'part#1' },
+      bodies: [],
+      transform,
+      moved: false,
+      errors: [],
+      warnings: [],
+    });
+    // The cabinet turned a quarter about world x and lifted; the drawer where it is.
+    result.instances.push(
+      inst('cab', { translation: [0, 0, 10], rotation: [h, 0, 0, h] }),
+      inst('drawer', { translation: [5, 0, 0], rotation: [0, 0, 0, 1] }),
+    );
+    result.mates.push({
+      mateId: 'mate#1',
+      status: 'ok',
+      coordinates: [0],
+      residual: null,
+      connectors: [
+        {
+          connectorId: 'mc#1',
+          instanceId: 'cab',
+          frame: { translation: [0, 1, 0], rotation: [0, 0, 0, 1] },
+          reference: null,
+        },
+        { connectorId: 'mc#2', instanceId: 'drawer', frame: null, reference: null },
+      ],
+      errors: [],
+      warnings: [],
+    });
+    const frames = connectorFrames(result, 'mate#1', 'slider')!;
+    expect(frames.b).toBeNull();
+    expect(frames.motion).toEqual([{ coordinate: 'distance', axis: 'z', angular: false }]);
+    const a = frames.a!;
+    expect(a).toMatchObject({ connectorId: 'mc#1', instanceId: 'cab' });
+    const near = (v: readonly number[], w: number[]) =>
+      v.forEach((c, i) => expect(c).toBeCloseTo(w[i]!, 12));
+    // The frame's origin (0, 1, 0) in the cabinet turns to (0, 0, 1), then lifts by 10.
+    near(a.origin, [0, 0, 11]);
+    near(a.x, [1, 0, 0]);
+    near(a.y, [0, 0, 1]);
+    near(a.z, [0, -1, 0]);
+    expect(connectorFrames(result, 'mate#9', 'slider')).toBeUndefined();
   });
 });

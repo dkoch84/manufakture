@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   MATE_KINDS,
   clampToLimits,
+  coordinateAxes,
   coordinateCount,
   coordinateNames,
   coordinateTwist,
   extractCoordinates,
+  frameAxes,
   jointTransform,
   limitViolation,
   retract,
@@ -96,6 +98,24 @@ describe('coordinate names and limits', () => {
       expect(coordinateNames(kind)).toHaveLength(coordinateCount(kind));
     expect(coordinateNames('slider')).toEqual(['distance']);
     expect(coordinateNames('cylindrical')).toEqual(['distance', 'angle']);
+  });
+
+  it('gives the frame axis each coordinate runs along or turns about', () => {
+    for (const kind of MATE_KINDS) expect(coordinateAxes(kind)).toHaveLength(coordinateCount(kind));
+    expect(coordinateAxes('slider')).toEqual(['z']);
+    expect(coordinateAxes('planar')).toEqual(['x', 'y', 'z']);
+  });
+
+  it("reads a frame's origin and axes from its pose", () => {
+    // A quarter turn about x: y goes to z, z to -y.
+    const h = Math.SQRT1_2;
+    const f = frameAxes({ translation: [1, 2, 3], rotation: [h, 0, 0, h] });
+    expect(f.origin).toEqual([1, 2, 3]);
+    const near = (v: readonly number[], w: number[]) =>
+      v.forEach((c, i) => expect(c).toBeCloseTo(w[i]!, 12));
+    near(f.x, [1, 0, 0]);
+    near(f.y, [0, 0, 1]);
+    near(f.z, [0, -1, 0]);
   });
 
   it('finds the limit a value passes, within a tolerance, and clamps to it', () => {

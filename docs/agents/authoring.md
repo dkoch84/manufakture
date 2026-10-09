@@ -1119,6 +1119,36 @@ pose is wrong: pick one inside the travel, or change the limits if the travel re
 Inside a loop of mates limits are not enforced; the same code then flags a mate the loop leaves
 past a limit. Poses given to `measure` `interference` are not checked against limits.
 
+### Mate connector frames: work out an offset instead of trying
+
+A mate holds connector b's frame on connector a's frame, and a slider, revolute or cylindrical
+moves along or about a's z axis. A connector's frame comes from the geometry it is on (a planar
+face's centroid with the face's normal as z, an x the kernel picks), then `flip`, `rotate` and
+`offset`, each in the frame as it is by then: an `offset` translation is along the frame's own x,
+y and z, not the world's. So before writing an offset, read the frames: `get_object` on a mate
+answers the mate's JSON as `object` (unchanged, ready to edit and send back with `editMate`) and,
+beside it, `frames`: each connector's `origin` and unit axes `x`, `y`, `z` in world coordinates
+(mm) at the solved poses, after flip, rotate and offset, and `motion`, the axis of a's frame each
+free coordinate runs along or turns about. `frames` is null until a regen has the mate, and a
+connector is null when it did not resolve (`get_errors` says why).
+
+```text not-run
+"frames": {
+  "a": { "connectorId": "mc#1", "instanceId": "inst#1", "origin": [304.8, 0, 9.13],
+         "x": [1, 0, 0], "y": [0, 0, 1], "z": [0, -1, 0] },
+  "b": { "connectorId": "mc#2", "instanceId": "inst#2", ... },
+  "motion": [{ "coordinate": "distance", "axis": "z", "angular": false }]
+}
+```
+
+The way to an offset: add the mate without one, read `frames`, take the vector from a's origin to
+the point b should meet (a `find_geometry` centroid, say), and project it on a's `x` and `y` (dot
+products): those are the offset's translation x and y. Put them in the mate from `object` and send
+it with `editMate`; `get_tree` then shows the instance not `moved` when it already stood there.
+Here a's y was world up, so lifting the connector 174.228 mm to the drawer's mid-height is
+`[0, 174.228, 0]`. With an offset already in place, the frames include it: add the projection to
+the offset's translation (when the offset has no rotation, its axes are the ones `frames` shows).
+
 ## Scripted features, and when not to use them
 
 A `scripted` feature runs a script of the document's library (`setScript`) in a sandbox to make

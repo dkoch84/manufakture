@@ -421,10 +421,9 @@ describe('scenario T8.6a: drawer slides', () => {
     cabinetBodies.push('extension#5', 'extension#6', ids.lc!, ids.rc!);
     const drawerBodies = [ids.dls, ids.drs, ids.dfr, ids.dbk, ids.dbt, ids.ld, ids.rd];
     // The slider runs along its connectors' z axis: the normal of the cabinet bottom's front
-    // face and of the drawer front's face, both -Y. The two centroids are 174.228 mm apart in
-    // height, so the cabinet's connector is offset along its frame's y axis, which for these
-    // faces is world up (found by trying: the frame's axes are not readable through the tools).
-    const lift = `${zMid - (23 / 32 / 2) * IN} mm`;
+    // face and of the drawer front's face, both -Y. The two faces' centroids are not on one
+    // line, so the cabinet's connector needs an offset in its own frame: the mate goes in
+    // without one first, get_object reads where its connectors resolved, and the offset follows.
     const r = await call('apply', {
       sessionId,
       label: 'Put the drawer on its slides in an assembly',
@@ -469,10 +468,6 @@ describe('scenario T8.6a: drawer slides', () => {
               instance: 'inst#$cabinet',
               inference: 'centroid',
               origin: { id: 'r$cabinet_front', ref: { face: 'extension#3:side:e9' } },
-              offset: {
-                translation: [inches('0'), inches(lift), inches('0')],
-                rotation: [inches('0 deg'), inches('0 deg'), inches('0 deg')],
-              },
             },
             b: {
               id: 'mc#$on_drawer',
@@ -493,12 +488,53 @@ describe('scenario T8.6a: drawer slides', () => {
       drawer: s.$drawer,
       mate: s.$slides,
     });
+    // The frames as they resolved: the cabinet's connector at its face's centroid, its z axis
+    // the face's normal (-Y), which is the axis the slider's distance runs along.
+    const read = await call('get_object', {
+      sessionId,
+      query: { kind: 'mate', assemblyId: ids.assembly, mateId: ids.mate },
+    });
+    const { a, b, motion } = read.frames as Data;
+    expect(motion).toEqual([{ coordinate: 'distance', axis: 'z', angular: false }]);
+    expect(a).toMatchObject({ connectorId: expect.any(String), instanceId: ids.cabinet });
+    expect(b).toMatchObject({ instanceId: ids.drawer });
+    a.z.forEach((c: number, i: number) => close(c, [0, -1, 0][i]!, 9));
+    // The offset is the drawer front's centroid (in the part, where the drawer stands at rest)
+    // seen from the cabinet's connector, along the frame's x and y: no trial regens.
+    const front = await face({ name: `${ids.dfr}:cap:end` });
+    const d = (front.centroid as V3).map((c, i) => c - a.origin[i]);
+    const along = (axis: V3) => d.reduce((sum, c, i) => sum + c * axis[i]!, 0);
+    const [dx, dy] = [along(a.x), along(a.y)];
+    // 174.228 mm, from the bottom panel's mid-thickness up to the drawer's mid-height; the
+    // frame's y is world up for this face.
+    close(Math.abs(dy), zMid - (23 / 32 / 2) * IN);
+    close(dx, 0);
+    const mate = structuredClone(read.object) as Data;
+    mate.a.offset = {
+      translation: [inches(`${dx} mm`), inches(`${dy} mm`), inches('0')],
+      rotation: [inches('0 deg'), inches('0 deg'), inches('0 deg')],
+    };
+    const edited = await call('apply', {
+      sessionId,
+      label: "Offset the cabinet's slide connector to the drawer's height",
+      commands: [{ type: 'editMate', assemblyId: ids.assembly, mate }],
+    });
+    expect(edited.errors).toEqual([]);
+    // With the offset the drawer sits on the slider where it stands: the solve does not move it.
     const asm = ((await tree()).assemblies as Data[])[0]!;
     expect(asm).toMatchObject({
       id: ids.assembly,
       dof: 1,
+      instances: [{ id: ids.cabinet }, { id: ids.drawer, moved: false }],
       mates: [{ id: ids.mate, kind: 'slider', status: 'ok' }],
     });
+    const after = (
+      await call('get_object', {
+        sessionId,
+        query: { kind: 'mate', assemblyId: ids.assembly, mateId: ids.mate },
+      })
+    ).frames as Data;
+    after.a.origin.forEach((c: number, i: number) => close(c, front.centroid[i]));
     expect((await call('get_errors', { sessionId })).errors).toEqual([]);
   });
 
