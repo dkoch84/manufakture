@@ -605,3 +605,162 @@ describe('caps of several regions, named after their loops (aliases)', () => {
     ).toEqual([]);
   });
 });
+
+describe('pieces of a split face, named after their borders (keySplits)', () => {
+  // A board's inner face X crossed by a dado: the tool (operand 1) splits it into a piece below
+  // the dado (beside its lower wall L) and one above (beside its upper wall U). The front edge F
+  // borders both pieces; the board's bottom B and top T one each.
+  const X = 'extension#1:cap:end';
+  const [B, T, F] = ['extension#1:side:e1', 'extension#1:side:e3', 'extension#1:side:e2'];
+  const [L, U, D] = [
+    'extension#11:groove:xmin',
+    'extension#11:groove:xmax',
+    'extension#11:groove:zmax',
+  ];
+  const edge = (index: number, a: number, b: number) => ({
+    index,
+    faces: [a, b],
+    seam: false,
+    curve: 'line',
+    midpoint: [index, 0, 0] as [number, number, number],
+    length: 1,
+    vertices: [],
+  });
+  /** Result faces: 1 and 2 the pieces (at x `low` and `high`), 3 L, 4 U, 5 D, 6 B, 7 T, 8 F. */
+  const board = (
+    low: number,
+    high: number,
+    pairs = [
+      [1, 3],
+      [2, 4],
+    ],
+  ): Topology => ({
+    faces: [low, high, 2, 3, 4, 0, 6, 7].map((x, i) => face(i + 1, x)),
+    edges: [...pairs, [1, 6], [2, 7], [1, 8], [2, 8], [3, 5], [4, 5]].map(([a, b], i) =>
+      edge(i + 1, a!, b!),
+    ),
+    vertices: [],
+  });
+  const history = [
+    entry({
+      input: { kind: 'face', index: 1 },
+      modified: [1, 2].map((index) => ({ kind: 'face' as const, index })),
+    }),
+    entry({ input: { kind: 'face', index: 2 }, kept: 6 }),
+    entry({ input: { kind: 'face', index: 3 }, kept: 7 }),
+    entry({ input: { kind: 'face', index: 4 }, kept: 8 }),
+    entry({ operand: 1, input: { kind: 'face', index: 1 }, kept: 3 }),
+    entry({ operand: 1, input: { kind: 'face', index: 2 }, kept: 4 }),
+    entry({ operand: 1, input: { kind: 'face', index: 3 }, kept: 5 }),
+  ];
+  const split = (topology: Topology, body = [plain(X), plain(B), plain(T), plain(F)]) =>
+    propagateFaces([body, [plain(L), plain(U), plain(D)]], history, topology, undefined, {
+      keySplits: true,
+    }).faces;
+
+  it('names each piece after the tool face beside it, not fragile, the positional name an alias', () => {
+    const named = split(board(1, 5));
+    expect(named.slice(0, 2)).toEqual([
+      {
+        name: `${X}{${L}}`,
+        lineage: [`${X}{${L}}`, `${X}#1`, X],
+        fragile: false,
+        aliases: [`${X}#1`],
+      },
+      {
+        name: `${X}{${U}}`,
+        lineage: [`${X}{${U}}`, `${X}#2`, X],
+        fragile: false,
+        aliases: [`${X}#2`],
+      },
+    ]);
+    expect(named.slice(2).map((f) => f.name)).toEqual([L, U, D, B, T, F]);
+    const names = nameShape(named, board(1, 5));
+    expect(resolveFace(names, { face: `${X}{${L}}` })).toEqual({
+      ok: true,
+      index: 1,
+      via: 'exact',
+      fragile: false,
+    });
+    // A reference stored with the positional name resolves exactly to the same piece.
+    expect(resolveFace(names, { face: `${X}#2` })).toEqual({
+      ok: true,
+      index: 2,
+      via: 'exact',
+      fragile: true,
+    });
+    // Edges along a piece answer to their former names too.
+    const front = names.edges.findIndex(
+      (e) => e.faces.includes(F) && e.faces.includes(`${X}{${L}}`),
+    );
+    expect(edgeAliases(names.faces, names.edges[front]!)).toEqual([`${X}#1|${F}`]);
+  });
+
+  it('keeps the names with the walls when the pieces trade places, where ordinals swap', () => {
+    const named = split(board(9, 5));
+    expect(named.slice(0, 2).map((f) => [f.name, f.aliases])).toEqual([
+      [`${X}{${L}}`, [`${X}#2`]],
+      [`${X}{${U}}`, [`${X}#1`]],
+    ]);
+    // Without keySplits, the pieces stay positional, as before.
+    const plainSplit = propagateFaces(
+      [
+        [plain(X), plain(B), plain(T), plain(F)],
+        [plain(L), plain(U), plain(D)],
+      ],
+      history,
+      board(1, 5),
+    ).faces;
+    expect(plainSplit.slice(0, 2).map((f) => [f.name, f.fragile, 'aliases' in f])).toEqual([
+      [`${X}#1`, true, false],
+      [`${X}#2`, true, false],
+    ]);
+  });
+
+  it('falls back to the body faces beside a piece, then to the positional name', () => {
+    // Both pieces border L: it tells them apart no longer, so the body's bottom and top do.
+    const both = board(1, 5, [
+      [1, 3],
+      [2, 3],
+    ]);
+    expect(
+      split(both)
+        .slice(0, 2)
+        .map((f) => f.name),
+    ).toEqual([`${X}{${B}}`, `${X}{${T}}`]);
+    // A fragile face is never a key: the upper piece has nothing else, and stays positional.
+    const fragileTop = { name: `${T}#1`, lineage: [`${T}#1`, T], fragile: true };
+    const named = split(both, [plain(X), plain(B), fragileTop, plain(F)]);
+    expect(named.slice(0, 2).map((f) => [f.name, f.fragile])).toEqual([
+      [`${X}{${B}}`, false],
+      [`${X}#2`, true],
+    ]);
+  });
+
+  it("lists a renamed face's own former names first, and keeps a fragile face's pieces fragile", () => {
+    const renamed: FaceName = { ...plain(X), lineage: [X, 'x#1:old'], aliases: ['x#1:old'] };
+    const named = split(board(1, 5), [renamed, plain(B), plain(T), plain(F)]);
+    expect(named[0]!.aliases).toEqual(['x#1:old#1', `${X}#1`]);
+    const piece = { name: `${X}#3`, lineage: [`${X}#3`, X], fragile: true };
+    const again = split(board(1, 5), [piece, plain(B), plain(T), plain(F)]);
+    expect(again[0]).toMatchObject({ name: `${X}#3{${L}}`, fragile: true });
+    expect(isPositional(`${X}#3{${L}}`)).toBe(true);
+    expect(isPositional(`${X}{${L}}`)).toBe(false);
+  });
+
+  it('falls back to the whole face once the split is gone, and keeps keys whole in derived names', () => {
+    expect(splitParent(`${X}{${L}}`)).toBe(X);
+    expect(splitParent('a{b{c}}')).toBe('a');
+    expect(splitParent('a{b')).toBeNull();
+    const whole = nameShape([plain(X)], faces(0));
+    expect(resolveFace(whole, { face: `${X}{${L}}` })).toEqual({
+      ok: true,
+      index: 1,
+      via: 'ancestor',
+      fragile: false,
+    });
+    expect(derivedName(`${X}{a&b}&c`, 'derived#1')).toBe(
+      `derived#1:from/${X}{a&b}&derived#1:from/c`,
+    );
+  });
+});

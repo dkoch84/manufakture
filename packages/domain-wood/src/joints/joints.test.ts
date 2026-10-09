@@ -102,7 +102,7 @@ function built(ctx: ExtensionContext<JointParams>): { items: ToolItem[]; meta: J
   const { inputs, metadata } = out as ExtensionInputs;
   expect(inputs).toHaveLength(1);
   const input = inputs[0] as ToolsInput;
-  expect(input).toMatchObject({ kind: 'tools', id: 'extension#3' });
+  expect(input).toMatchObject({ kind: 'tools', id: 'extension#3', keySplits: true });
   const meta = readJointMetadata(metadata);
   expect(meta).toBeDefined();
   return { items: [...input.items], meta: meta! };

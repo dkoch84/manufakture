@@ -191,7 +191,12 @@ screws join boards that touch without overlapping (an overlap is refused, and vi
 with the kernel's roles (`xmin` .. `zmax` for boxes at the low and high ends of A's length, width
 and thickness axes; `start`, `wall`, `end`, `step`, `shoulder` for cylinders). They do not depend
 on where the boards are: a dado's names stay the same when either board grows, and when the shelf
-moves the dado moves with it under the same names.
+moves the dado moves with it under the same names. A board face a joint splits (a cabinet side
+crossed by a shelf's dado) is named piece by piece after the joint face beside each piece, through
+the kernel's `keySplits`: `extension#1:cap:end{extension#11:groove:xmin}` below the shelf,
+`{...:xmax}` above it, not fragile, so a reference to an opening between two joints survives
+moving them. The former positional names (`extension#1:cap:end#1`) still resolve, exactly, to the
+same pieces.
 
 **Pocket-hole jig.** The defaults follow the standard jig: a 3/8" stepped bit with an 11/64" pilot
 at 15° ([McFeely's](https://www.mcfeelys.com/pocket_hole_joinery-1)), the screw coming out at the

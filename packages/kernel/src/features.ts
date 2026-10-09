@@ -507,6 +507,13 @@ export interface ToolsInput {
   kind: 'tools';
   id: string;
   items: readonly ToolItem[];
+  /**
+   * Name the pieces of a body face that the tools split after a face that borders each piece
+   * and no other (the tools' own faces first): `X{extension#11:t1:zmin}` rather than the
+   * positional `X#1`, which stays an alias (naming's `splitKeys`). A wood joint sets it, so the
+   * pieces of a side that a shelf's dado crosses keep their names when the shelf moves.
+   */
+  keySplits?: boolean;
 }
 
 /** An extrude's `capRole`: a lower-case token that cannot read as a split, a name or a path. */
@@ -2138,9 +2145,10 @@ function propagated(
   operands: readonly (readonly FaceName[])[],
   history: readonly HistoryEntry[],
   namer?: GeneratedNamer,
+  options?: { keySplits?: boolean },
 ): Made {
   const topology = ctx.k.topology(shape);
-  const p = propagateFaces(operands, history, topology, namer);
+  const p = propagateFaces(operands, history, topology, namer, options);
   return { shape, faces: p.faces, topology, unnamed: p.unnamed };
 }
 
@@ -2150,6 +2158,7 @@ function booleanOf(
   kind: 'fuse' | 'cut' | 'common',
   base: { shape: ShapeId; faces: readonly FaceName[] },
   tools: readonly Made[],
+  options?: { keySplits?: boolean },
 ): Made {
   const result = temp(
     ctx,
@@ -2164,6 +2173,8 @@ function booleanOf(
     result.shape,
     [base.faces, ...tools.map((t) => t.faces)],
     result.history,
+    undefined,
+    options,
   );
   return { ...made, unnamed: [...made.unnamed, ...tools.flatMap((t) => t.unnamed)] };
 }
@@ -2399,7 +2410,7 @@ function tools(ctx: Ctx, slots: readonly Slot[], input: ToolsInput): Slot[] {
     };
     let changed = false;
     for (const run of runsOf(items)) {
-      const next = toolRun(ctx, slot.body.id, current, run);
+      const next = toolRun(ctx, slot.body.id, current, run, input.keySplits === true);
       if (next !== null) {
         current = next;
         changed = true;
@@ -2425,7 +2436,13 @@ function runsOf(items: readonly ToolItem[]): ToolItem[][] {
  * One run of items of one mode on one body: the body after it, or null when no item of the
  * run touched the body (each such item is reported, and the body keeps its shape).
  */
-function toolRun(ctx: Ctx, bodyId: string, body: Made, run: readonly ToolItem[]): Made | null {
+function toolRun(
+  ctx: Ctx,
+  bodyId: string,
+  body: Made,
+  run: readonly ToolItem[],
+  keySplits: boolean,
+): Made | null {
   const { k } = ctx;
   const mode = run[0]!.mode;
   const box = boxOf(ctx, body.shape);
@@ -2462,7 +2479,7 @@ function toolRun(ctx: Ctx, bodyId: string, body: Made, run: readonly ToolItem[])
       near.map((n) => n.made),
     ),
   );
-  const made = booleanOf(ctx, mode === 'subtract' ? 'cut' : 'fuse', body, [tool]);
+  const made = booleanOf(ctx, mode === 'subtract' ? 'cut' : 'fuse', body, [tool], { keySplits });
   if (made.topology.faces.length === 0) fail(ctx, 'empty', `${ctx.id} leaves nothing of ${bodyId}`);
   if (mode === 'add') return made;
   // A cut that reached the body left a face of the tool in it: one made by tools alone, since
@@ -3849,6 +3866,9 @@ export function validateFeature(input: unknown): string | null {
         if (bad) return `items[${i}]: ${bad}`;
         if (seen.has(item.id as string)) return `tool id '${String(item.id)}' is used twice`;
         seen.add(item.id as string);
+      }
+      if (f.keySplits !== undefined && typeof f.keySplits !== 'boolean') {
+        return 'keySplits must be a boolean';
       }
       return null;
     }

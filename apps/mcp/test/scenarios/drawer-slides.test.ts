@@ -102,6 +102,11 @@ const dowels = (id: string, name: string, a: string, b: string) =>
 // opening less 1/2" each side, 12" tall standing 1/2" above the bottom, 18" deep (the slide
 // length), its front flush with the cabinet's front (y = 0; the cabinet's back is at +Y).
 const OPENING = { left: 23 / 32, right: 24 - 23 / 32, bottom: 23 / 32, top: 14 };
+/** The sides' faces of the bottom opening: each piece below the shelf named after its dado wall. */
+const SIDES = {
+  left: 'extension#1:cap:end{extension#11:groove:xmin}',
+  right: 'extension#2:cap:start{extension#12:groove:xmin}',
+};
 const CLEARANCE = 0.5;
 const PLY = 15 / 32; // 1/2" plywood, actual
 const xL = (OPENING.left + CLEARANCE) * IN;
@@ -269,13 +274,14 @@ describe('scenario T8.6a: drawer slides', () => {
     close(ceiling.centroid[2], OPENING.top * IN);
     close(left.centroid[0], OPENING.left * IN);
     close(right.centroid[0], OPENING.right * IN);
-    // Finding: the sides' inner faces are split by the shelf's dados, so their names are
-    // fragile (an ordinal tells the pieces apart).
+    // The sides' inner faces are split by the shelf's dados. Found: their names were positional
+    // (`extension#1:cap:end#1`, fragile). Now (#1207) each piece is named after the dado wall
+    // beside it, not fragile; the positional names are aliases (next test).
     expect([left.name, left.fragile, right.name, right.fragile]).toEqual([
-      'extension#1:cap:end#1',
-      true,
-      'extension#2:cap:start#1',
-      true,
+      SIDES.left,
+      false,
+      SIDES.right,
+      false,
     ]);
     // The same sizes by measurement: `targets` measures within one body only, so the distances
     // across the opening come from `clearance`'s gap between the bodies' boxes.
@@ -283,6 +289,52 @@ describe('scenario T8.6a: drawer slides', () => {
     close((await clearance('extension#3', 'extension#5')).gaps[0].boxGap, (14 - 23 / 32) * IN);
     // 21-25/32" from the front to the back's front face: an 18" slide fits.
     expect(back.centroid[1]).toBeGreaterThan(LENGTH);
+  });
+
+  it("keeps the opening's side face names when the shelf moves; the old names still resolve", async () => {
+    const plane = async (bodyId: string, name: string) => {
+      const r = await call('measure', {
+        sessionId,
+        query: { kind: 'targets', partId: P, bodyId, targets: [{ kind: 'face', name }] },
+      });
+      const item = r.measurement.items[0] as Data;
+      return [item.index, item.centroid];
+    };
+    // A reference stored with the former positional name resolves to the same face.
+    expect(await plane('extension#1', 'extension#1:cap:end#1')).toEqual(
+      await plane('extension#1', SIDES.left),
+    );
+    expect(await plane('extension#2', 'extension#2:cap:start#1')).toEqual(
+      await plane('extension#2', SIDES.right),
+    );
+    // Move the shelf (and with it both dados) up 2": the faces below it keep their names.
+    const read = await call('get_object', {
+      sessionId,
+      query: { kind: 'feature', partId: P, featureId: 'sketch#5' },
+    });
+    const shelf = structuredClone(read.object) as Data;
+    shelf.plane.origin[2] += 2 * IN;
+    const r = await call('apply', {
+      sessionId,
+      label: 'Raise the shelf 2"',
+      commands: [{ type: 'editFeature', partId: P, feature: shelf }],
+    });
+    expect(r.errors).toEqual([]);
+    for (const [name, bodyId, x] of [
+      [SIDES.left, 'extension#1', OPENING.left],
+      [SIDES.right, 'extension#2', OPENING.right],
+    ] as const) {
+      const r = await call('find_geometry', {
+        sessionId,
+        query: { kind: 'face', partId: P, bodyId, name },
+      });
+      expect(r.hits).toHaveLength(1);
+      expect(r.hits[0].fragile).toBe(false);
+      close(r.hits[0].centroid[0], x * IN);
+      // The piece below the shelf grew 2" upwards: its centroid rose 1".
+      close(r.hits[0].centroid[2], ((OPENING.bottom + OPENING.top) / 2 + 1) * IN, 1);
+    }
+    await call('undo', { sessionId });
   });
 
   it('gap probe: a variable cannot take a measured value', async () => {

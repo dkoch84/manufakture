@@ -24,8 +24,15 @@
 //   pattern#7:i2/X, mirror#8:image/X         face X of pattern instance 2, of a mirror image
 //   import#9:face:4                          face 4 of an imported file, by its position in
 //                                            the file (no history: always fragile)
-//   X#1, X#2                                 face X split by the kernel into pieces, or
-//                                            several faces born with one name (fragile)
+//   X{K}                                     the piece of face X that a `tools` feature with
+//                                            `keySplits` (a wood joint) split, named after a
+//                                            face K that borders it and no other piece
+//                                            (`splitKeys`: the tool's faces first, so a dado's
+//                                            walls name the pieces of a board face it crosses);
+//                                            its former name, the positional `X#k`, stays an
+//                                            alias
+//   X#1, X#2                                 face X split by the kernel into pieces no face tells
+//                                            apart, or several faces born with one name (fragile)
 //   (A+B)                                    faces A and B merged into one
 // Every face also carries its lineage (itself and every name it descends
 // from), so a reference to X can still find X#1 or e2#a when it is unique.
@@ -176,7 +183,7 @@ export function refName(ref: TopoRef): string {
  * not count.
  */
 export function isPositional(name: string): boolean {
-  return /#\d+(?=$|[#+)&,|\]/])/.test(name) || IMPORTED_FACE.test(name);
+  return /#\d+(?=$|[#+)&,|\]/{}])/.test(name) || IMPORTED_FACE.test(name);
 }
 
 /** A face of an imported file, anywhere in a name. */
@@ -447,7 +454,7 @@ export function prefixFaces(faces: readonly FaceName[], prefix: string): FaceNam
  * A face name of a derived part's source as it reads in the deriving part: `<feature>:from/`
  * before it, in the form core's `featureIdsInName` reads (M2 plan, decision 6). A parenthesised
  * group is prefixed once (`(A+B)` gives `derived#1:from/(A+B)`), since the parser skips a whole
- * group after the prefix. A corner has no brackets (`fillet#3:corner:A&B&C`), so every member
+ * group after the prefix; so is a split piece's key in braces (`X{A&B}`). A corner has no brackets (`fillet#3:corner:A&B&C`), so every member
  * after an `&` outside brackets is prefixed too: none of them can then be read as a face of the
  * deriving part. A nested derived name simply gains another prefix.
  */
@@ -458,8 +465,8 @@ export function derivedName(name: string, feature: string): string {
   let from = 0;
   for (let i = 0; i < name.length; i++) {
     const c = name.charCodeAt(i);
-    if (c === 0x28 /* ( */) depth++;
-    else if (c === 0x29 /* ) */) depth = Math.max(0, depth - 1);
+    if (c === 0x28 /* ( */ || c === 0x7b /* { */) depth++;
+    else if (c === 0x29 /* ) */ || c === 0x7d /* } */) depth = Math.max(0, depth - 1);
     else if (depth === 0 && (c === 0x26 /* & */ || c === 0x2b) /* + */) {
       out += name.slice(from, i + 1) + prefix;
       from = i + 1;
@@ -551,28 +558,38 @@ export interface Propagation {
  *   offset wall); when it has no name for them and the input face was
  *   neither kept nor modified, they replace it and inherit its name (a
  *   drafted face is Generated, not Modified, by OCCT's draft);
- * - finally, faces that still share one name are numbered by position.
+ * - finally, faces that still share one name are numbered by position;
+ * - with `keySplits`, the pieces of a split face are then named after their borders where they
+ *   can be (`splitKeys`), the positional names kept as aliases.
  */
 export function propagateFaces(
   operands: readonly (readonly FaceName[])[],
   history: readonly HistoryEntry[],
   topology: Topology,
   generated: GeneratedNamer = () => null,
+  options: { keySplits?: boolean } = {},
 ): Propagation {
   const count = topology.faces.length;
   const sources: FaceName[][] = Array.from({ length: count }, () => []);
   const born: FaceName[][] = Array.from({ length: count }, () => []);
+  /** The operands each result face came from (none for a face only born of an edge or vertex). */
+  const origins: Set<number>[] = Array.from({ length: count }, () => new Set());
+  const splits: Split[] = [];
   const byPosition = (indices: number[]) =>
     [...indices].sort((p, q) =>
       comparePoints(topology.faces[p - 1]!.centroid, topology.faces[q - 1]!.centroid),
     );
-  const inherit = (input: FaceName, targets: number[]) => {
+  const inherit = (input: FaceName, targets: number[], operand: number) => {
+    for (const target of targets) origins[target - 1]!.add(operand);
     if (targets.length === 1) {
       sources[targets[0]! - 1]!.push(input);
       return;
     }
-    // One input face became several: order the pieces by position.
-    byPosition(targets).forEach((target, k) => {
+    // One input face became several: order the pieces by position (`splitKeys` names them
+    // after their borders afterwards, where it can).
+    const pieces = byPosition(targets);
+    splits.push({ input, operand, pieces });
+    pieces.forEach((target, k) => {
       const name = `${input.name}#${k + 1}`;
       const aliases = input.aliases?.map((a) => `${a}#${k + 1}`) ?? [];
       sources[target - 1]!.push({
@@ -622,11 +639,11 @@ export function propagateFaces(
         entry.kept > 0
           ? [entry.kept]
           : entry.modified.filter((r) => r.kind === 'face').map((r) => r.index);
-      if (targets.length > 0) inherit(input, targets);
+      if (targets.length > 0) inherit(input, targets, entry.operand);
       if (genFaces.length === 0) continue;
       const g = generated(entry, input);
       if (g === null) {
-        if (targets.length === 0) inherit(input, genFaces);
+        if (targets.length === 0) inherit(input, genFaces, entry.operand);
         continue;
       }
       const name = nameOf(g)!;
@@ -647,7 +664,79 @@ export function propagateFaces(
     return undefined;
   });
   const filled = fill(out);
-  return { faces: disambiguate(filled.faces, topology), unnamed: filled.unnamed };
+  const named = disambiguate(filled.faces, topology);
+  return {
+    faces: options.keySplits === true ? splitKeys(named, topology, splits, origins) : named,
+    unnamed: filled.unnamed,
+  };
+}
+
+/** One input face that an operation split into pieces, the pieces ordered by position. */
+interface Split {
+  input: FaceName;
+  operand: number;
+  pieces: number[];
+}
+
+/** The key of a split piece in its name, `X{K}`. */
+function keyedName(name: string, key: string): string {
+  return `${name}{${key}}`;
+}
+
+/**
+ * Name the pieces of every split face after their borders instead of their position: piece k of
+ * X (`X#k`) becomes `X{K}`, K the name of a face that shares an edge with that piece and with no
+ * other piece of X, so no two pieces get the same key. Among such faces, those the splitting
+ * came from (a face of another operand, such as the wall of the dado that crosses a board face,
+ * or a face born in the operation) come first, then the rest; within each, the smallest name by
+ * code unit. Fragile and placeholder faces are never keys. A piece named after a face follows
+ * that face, not its position, so it survives moving the cut (the shelf of a cabinet) and the
+ * other pieces' changing size. It is fragile only when X was. The positional name it had,
+ * `X#k`, stays an alias (after X's own former names, as `X'#k`), so a reference stored with it
+ * resolves exactly to the same piece. A piece with no such face (every border shared with
+ * another piece), or that ended up merged or renumbered, keeps its positional name.
+ * Neighbours are read under their positional names, so the keys never depend on each other.
+ */
+function splitKeys(
+  faces: FaceName[],
+  topology: Topology,
+  splits: readonly Split[],
+  origins: readonly Set<number>[],
+): FaceName[] {
+  if (splits.length === 0) return faces;
+  const around: Set<number>[] = Array.from({ length: faces.length }, () => new Set());
+  for (const edge of topology.edges) {
+    for (const a of edge.faces) {
+      for (const b of edge.faces) if (a !== b) around[a - 1]?.add(b);
+    }
+  }
+  const out = [...faces];
+  for (const { input, operand, pieces } of splits) {
+    const own = new Set(pieces);
+    pieces.forEach((piece, k) => {
+      const ordinal = `${input.name}#${k + 1}`;
+      const f = faces[piece - 1]!;
+      if (f.name !== ordinal) return;
+      const others = new Set(
+        pieces.filter((p) => p !== piece).flatMap((p) => [...(around[p - 1] ?? [])]),
+      );
+      const unique = [...(around[piece - 1] ?? [])].filter((n) => !own.has(n) && !others.has(n));
+      const usable = unique.filter((n) => !faces[n - 1]!.fragile && !isUnnamed(faces[n - 1]!.name));
+      const cutters = usable.filter((n) => !origins[n - 1]!.has(operand));
+      const pool = cutters.length > 0 ? cutters : usable;
+      if (pool.length === 0) return;
+      const key = pool.map((n) => faces[n - 1]!.name).sort()[0]!;
+      const name = keyedName(input.name, key);
+      const former = [...(input.aliases?.map((a) => `${a}#${k + 1}`) ?? []), ordinal];
+      out[piece - 1] = {
+        name,
+        lineage: [...new Set([name, ...f.lineage])],
+        fragile: input.fragile,
+        ...aliased(former, name),
+      };
+    });
+  }
+  return out;
 }
 
 function merge(from: FaceName[]): FaceName {
@@ -806,20 +895,31 @@ export function pickEdge(names: Names, index: number): EdgeRef | null {
 }
 
 /**
- * The face a positional piece came from: `X#2` gives `X`; anything else
- * gives null. A name ending in a nested positional component (a corner
+ * The face a split piece came from: `X#2` and `X{K}` give `X`; anything
+ * else gives null. A name ending in a nested positional component (a corner
  * `fillet#3:corner:A&B&C#2`, where `C#2` is a piece of C) reads the same
  * way: its "parent" is the same corner around the whole C, which is the
  * right face when C is whole again, and such a resolution is always
  * `fragile` because the name is positional.
  */
 export function splitParent(name: string): string | null {
-  const match = /^(.*)#\d+$/.exec(name);
-  if (!match) return null;
-  const parent = match[1]!;
+  const parent = /^(.*)#\d+$/.exec(name)?.[1] ?? keyedParent(name);
+  if (parent === null) return null;
   // Face names never contain `|`: `A|B[C,D]#1` is an edge ordinal, not a face piece.
   if (parent.length === 0 || parent.includes('|')) return null;
   return parent;
+}
+
+/** `X` for a keyed split piece `X{K}` (braces in K balanced), else null. */
+function keyedParent(name: string): string | null {
+  if (!name.endsWith('}')) return null;
+  let depth = 0;
+  for (let i = name.length - 1; i >= 0; i--) {
+    const c = name[i];
+    if (c === '}') depth++;
+    else if (c === '{' && --depth === 0) return name.slice(0, i);
+  }
+  return null;
 }
 
 export function resolveFace(names: Names, ref: FaceRef): Resolution {

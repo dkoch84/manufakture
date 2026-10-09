@@ -243,6 +243,9 @@ async function interference(engine: RegenEngine, result: RegenResult): Promise<n
 const jointNames = (result: RegenResult) =>
   result.names.filter((n) => n.startsWith('extension#3:')).sort();
 const jointFaces = (result: RegenResult) => jointNames(result).filter((n) => !n.includes('|'));
+/** The faces of the side's top face, which a through dado splits in two. */
+const sideTop = (result: RegenResult) =>
+  result.names.filter((n) => n.startsWith('extension#1:cap:end') && !n.includes('|')).sort();
 
 async function withEngine(run: (engine: RegenEngine) => Promise<void>) {
   const extensions = new ExtensionRegistry();
@@ -293,6 +296,12 @@ describe('joints through regen with the real kernel', () => {
         warnings: [],
         hardware: [],
       });
+      // The side's top face, split by the dado: each piece is named after the wall beside it.
+      const pieces = [
+        'extension#1:cap:end{extension#3:groove:xmax}',
+        'extension#1:cap:end{extension#3:groove:xmin}',
+      ];
+      expect(sideTop(after)).toEqual(pieces);
 
       // The side longer, and the shelf taller: the same names.
       const longer = await regen(
@@ -310,6 +319,7 @@ describe('joints through regen with the real kernel', () => {
       const moved = await regen(engine, scene({ a: SIDE, b: shelf(350, 12), joint: dado }));
       expectOk(moved);
       expect(jointNames(moved)).toEqual(names);
+      expect(sideTop(moved)).toEqual(pieces);
       expect(await volume(engine, moved, 'extension#1')).toBeCloseTo(SIDE_VOLUME - 18 * 300 * 6, 4);
       expect(await interference(engine, moved)).toBe(0);
     });

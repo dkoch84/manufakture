@@ -16,6 +16,7 @@ import { FEATURE_KINDS } from './featureKinds';
  * | a qualified sub-id tail (region cap)  | `extrude#1:cap:end:e5`, `cap:start:e2#a`  |
  * | a nested name as the tail             | `shell#5:offset:extrude#1:cap:end`        |
  * | kernel pieces, former region caps     | `X#2`, `(A+B)#2`, `extrude#1:cap:end#1`   |
+ * | keyed pieces (a joint's split)        | `extension#1:cap:end{extension#11:groove:xmin}` |
  * | merges                                | `(A+B)`                                   |
  * | corners and edge-face lists           | `fillet#3:corner:A&B&C`, `fillet#3:round:A&B` |
  * | instance prefixes                     | `pattern#7:i2/X`, `mirror#8:image/X`      |
@@ -47,6 +48,10 @@ import { FEATURE_KINDS } from './featureKinds';
  *   even when a local id looks like a part sub-id (`side:e2`). An operation id is never read
  *   as a derived prefix, even `from`.
  * - `text`: everything else: roles, punctuation, opaque tails, placeholders, junk.
+ *
+ * A keyed piece `X{K}` (the piece of face X that a split left beside face K) is X, then the
+ * text `{`, then K parsed as any name, then `}`: the ids in both X and K are found and rewritten.
+ * Braces nest like brackets, so a derived source inside K ends at its `}`.
  *
  * It is one left-to-right pass with no recursion, linear in the length of the name, so no input
  * can exhaust the stack: unbalanced brackets are read as far as they go, a stray `)` at the top
@@ -84,11 +89,11 @@ function isIdChar(c: number): boolean {
 }
 
 /** Characters that end a role: the next field, a prefix, brackets and member separators. */
-const ROLE_STOP = new Set([':', '/', '(', ')', '&', '+']);
+const ROLE_STOP = new Set([':', '/', '(', ')', '&', '+', '{', '}']);
 /** Characters that end a sub-id candidate. */
-const SUB_STOP = new Set([':', '/', '(', ')', '&', '+', '|', '[', ']', ',']);
+const SUB_STOP = new Set([':', '/', '(', ')', '&', '+', '|', '[', ']', ',', '{', '}']);
 /** Characters that may follow a sub-id tail. */
-const SUB_END = new Set(['&', '+', ')', '|', '[', ']', ',']);
+const SUB_END = new Set(['&', '+', ')', '|', '[', ']', ',', '{', '}']);
 
 /** Parses a face name (or a body id, or an edge name). Total: every string parses. */
 export function parseName(name: string): NamePart[] {
@@ -112,13 +117,13 @@ export function parseName(name: string): NamePart[] {
   let i = 0;
   while (i < n) {
     const c = name[i]!;
-    if (c === '(') {
+    if (c === '(' || c === '{') {
       depth++;
       text += c;
       i++;
       continue;
     }
-    if (c === ')') {
+    if (c === ')' || c === '}') {
       if (depth > 0) depth--;
       text += c;
       i++;
@@ -147,9 +152,9 @@ export function parseName(name: string): NamePart[] {
       }
     }
     if (name.startsWith(FROM, i)) {
-      // A derived prefix: the source name runs to the end of this member. Brackets inside it
-      // are skipped whole (an unclosed one runs to the end); a `)` that closes an enclosing
-      // group ends it, a stray one at the top level does not.
+      // A derived prefix: the source name runs to the end of this member. Brackets and braces
+      // inside it are skipped whole (an unclosed one runs to the end); a `)` or `}` that closes
+      // an enclosing group or key ends it, a stray one at the top level does not.
       text += FROM;
       i += FROM.length;
       flush();
@@ -157,8 +162,8 @@ export function parseName(name: string): NamePart[] {
       let local = 0;
       for (; j < n; j++) {
         const ch = name[j]!;
-        if (ch === '(') local++;
-        else if (ch === ')') {
+        if (ch === '(' || ch === '{') local++;
+        else if (ch === ')' || ch === '}') {
           if (local > 0) local--;
           else if (depth > 0) break;
         } else if ((ch === '&' || ch === '+') && local === 0) break;

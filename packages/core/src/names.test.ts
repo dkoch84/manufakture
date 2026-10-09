@@ -76,6 +76,40 @@ describe('parseName: every naming form', () => {
     ],
     ['kernel piece', 'extrude#1:cap:end#1', [feature('extrude#1'), text(':cap:end#1')]],
     [
+      'keyed piece, named after the joint face beside it',
+      'extension#1:cap:end{extension#11:groove:xmin}',
+      [feature('extension#1'), text(':cap:end{'), feature('extension#11'), text(':groove:xmin}')],
+    ],
+    [
+      'keyed piece of a side, key with a sub-id, then a positional piece',
+      'extrude#1:side:e2{extrude#3:side:e5}#2',
+      [
+        feature('extrude#1'),
+        text(':side:'),
+        sub('e2'),
+        text('{'),
+        feature('extrude#3'),
+        text(':side:'),
+        sub('e5'),
+        text('}#2'),
+      ],
+    ],
+    [
+      'keyed piece whose key is a derived face',
+      'extrude#1:cap:end{derived#1:from/extrude#1:side:e7}&extrude#2:side:e1',
+      [
+        feature('extrude#1'),
+        text(':cap:end{'),
+        feature('derived#1'),
+        text(':from/'),
+        source('extrude#1:side:e7'),
+        text('}&'),
+        feature('extrude#2'),
+        text(':side:'),
+        sub('e1'),
+      ],
+    ],
+    [
       'merge with a piece',
       '(extrude#1:cap:end+extrude#2:side:e5)#2',
       [
@@ -380,6 +414,7 @@ function randomName(rng: Rng, depth = 0): string {
     () =>
       `scripted#${1 + rng.int(3)}:${rng.pick(['rnd', 'from', 'p'])}/round:${inner()}&${inner()}`,
     () => `${inner()}#${1 + rng.int(3)}`,
+    () => `${inner()}{${inner()}}`,
     () => `${inner()}|${inner()}`,
   ])();
 }
@@ -404,6 +439,8 @@ describe('round trips over generated names', () => {
       '/',
       '#',
       '|',
+      '{',
+      '}',
       'e',
       '1',
       'extrude#1:',
@@ -454,6 +491,12 @@ describe('mapName', () => {
     ['extrude#1:cap:end:e7', 'extrude#4:cap:end:e9'],
     ['extrude#1:cap:end:e7#1|extrude#1:side:e7', 'extrude#4:cap:end:e9#1|extrude#4:side:e9'],
     ['(extrude#1:side:e7+extrude#1:side:e2)#2', '(extrude#4:side:e9+extrude#4:side:e2)#2'],
+    // A keyed piece: the ids of the face and of its key are both rewritten.
+    ['extrude#1:side:e7{fillet#3:round:r1}', 'extrude#4:side:e9{fillet#9:round:r5}'],
+    [
+      'derived#1:from/extrude#1:side:e7{extrude#1:x}',
+      'derived#2:from/extrude#1:side:e7{extrude#1:x}',
+    ],
     ['derived#1:from/extrude#1:side:e7', 'derived#2:from/extrude#1:side:e7'],
     ['extension#3:layer/sheathing', 'extension#3:layer/sheathing'],
     ['?face', '?face'],

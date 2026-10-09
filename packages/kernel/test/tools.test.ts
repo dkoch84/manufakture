@@ -173,6 +173,72 @@ describe('a dado across a board', () => {
   });
 });
 
+describe('keySplits: pieces of a split face named after the tool', () => {
+  const TOP = 'extrude#1:cap:end';
+  /** The board of `dadoBoard`, its dados (at x) cut by one tools feature with `keySplits`. */
+  const keyed = (...at: number[]) =>
+    named(
+      k,
+      build(k, [
+        block('extrude#1', [0, 0, 0], [600, 300, 19]),
+        {
+          ...tools(
+            ...at.map((x, i) => boxItem(`t${i + 1}`, 'extrude#1', [x, 0, 13], [x + 19, 300, 19])),
+          ),
+          keySplits: true,
+        },
+      ]).shape,
+    );
+  const pieces = (b: NamedBody) =>
+    b.names.faces
+      .filter((f) => f.lineage.includes(TOP))
+      .map((f) => [f.name, f.fragile, f.aliases])
+      .sort();
+
+  it('names each piece of the board top after the dado wall beside it, the old names aliases', () => {
+    const b = keyed(200);
+    expect(pieces(b)).toEqual([
+      [`${TOP}{${tool('t1', 'xmax')}}`, false, [`${TOP}#2`]],
+      [`${TOP}{${tool('t1', 'xmin')}}`, false, [`${TOP}#1`]],
+    ]);
+    expect(centroid(b, `${TOP}{${tool('t1', 'xmin')}}`)[0]).toBeCloseTo(100, 9);
+    // A reference stored with the positional name finds the same piece, exactly.
+    expect(resolveFace(b.names, { face: `${TOP}#1` })).toMatchObject({
+      ok: true,
+      index: faceIndex(b, `${TOP}{${tool('t1', 'xmin')}}`),
+      via: 'exact',
+      fragile: true,
+    });
+    // Without keySplits the pieces stay positional.
+    expect(
+      faceNames(named(k, dadoBoard().shape))
+        .filter((n) => n.startsWith(TOP))
+        .sort(),
+    ).toEqual([`${TOP}#1`, `${TOP}#2`]);
+  });
+
+  it('keeps the names when the dado moves and when a second dado is added beside it', () => {
+    const one = keyed(350);
+    expect(pieces(one).map((p) => p[0])).toEqual(pieces(keyed(200)).map((p) => p[0]));
+    // A second dado to the right: the pieces beside the first keep their names (the middle one
+    // is still named after t1's right wall), and the new piece is named after t2's.
+    const two = keyed(200, 400);
+    const names = pieces(two).map((p) => p[0]);
+    expect(names).toEqual([
+      `${TOP}{${tool('t1', 'xmax')}}`,
+      `${TOP}{${tool('t1', 'xmin')}}`,
+      `${TOP}{${tool('t2', 'xmax')}}`,
+    ]);
+    expect(centroid(two, `${TOP}{${tool('t1', 'xmax')}}`)[0]).toBeCloseTo(309.5, 9);
+  });
+
+  it('keySplits must be a boolean', () => {
+    const input = { ...tools(boxItem('t1', 'extrude#1', [0, 0, 15], [10, 30, 20])) };
+    expect(validateFeature({ ...input, keySplits: true })).toBeNull();
+    expect(validateFeature({ ...input, keySplits: 'yes' })).toMatch(/keySplits must be a boolean/);
+  });
+});
+
 describe('flush faces next to material', () => {
   it('a blind hole ending in the plane of a rabbet floor is not lengthened', () => {
     // A 100 x 100 x 19 board with a 20 wide rabbet along x = 0, its floor at z = 13; an 8 mm hole

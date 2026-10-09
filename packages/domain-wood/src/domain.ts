@@ -14,8 +14,9 @@ import { WOOD_DATA_VERSION, WOOD_NAMESPACE, readWoodData } from './wood-data';
 /**
  * Bump with any change that can alter what a translator returns (a board's inputs or frame), so
  * results built by older domain code are never served from regen's cache (ADR 0004 decision 8).
+ * 2: joints set `keySplits`, so board faces they split are named after the joint's faces (#1207).
  */
-export const WOOD_IMPLEMENTATION = 1;
+export const WOOD_IMPLEMENTATION = 2;
 
 /** The domain definition: what `registerWood` registers. */
 export const woodDomain: ExtensionDomain = {

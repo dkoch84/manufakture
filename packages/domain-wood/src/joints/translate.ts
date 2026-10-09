@@ -159,7 +159,15 @@ export function translateJoint(ctx: ExtensionContext<JointParams>): ExtensionOut
       return { error: error.message, field: error.field } satisfies Failure;
     throw error;
   }
-  const input: ToolsInput = { kind: 'tools', id: ctx.feature.id, items: out.built.items };
+  // `keySplits`: a board face the joint's tools split (a side crossed by a shelf's dado) is
+  // named piece by piece after the tool face beside it, `extension#1:cap:end{extension#11:...}`,
+  // not by position, so a reference to an opening between two joints survives moving them.
+  const input: ToolsInput = {
+    kind: 'tools',
+    id: ctx.feature.id,
+    items: out.built.items,
+    keySplits: true,
+  };
   const metadata: JointMetadata = {
     kind: ctx.params.kind,
     a: out.a.id,
