@@ -559,6 +559,13 @@ export function translateBoard(ctx: ExtensionContext<BoardParams>): ExtensionOut
 export const boardType: ExtensionType<BoardParams> = {
   schemaVersion: BOARD_SCHEMA_VERSION,
   expressions: BOARD_EXPRESSIONS,
+  // The sketch, and its entities a panel's region or a stick's line names.
+  idFields: [
+    { path: ['sketch'], kind: 'feature' },
+    { path: ['entities', '*'], kind: 'entity' },
+    { path: ['grain', 'entity'], kind: 'entity' },
+    { path: ['line'], kind: 'entity' },
+  ],
   params(params, schemaVersion) {
     return readBoardParams(params as Json, schemaVersion);
   },

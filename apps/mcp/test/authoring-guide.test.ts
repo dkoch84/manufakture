@@ -253,6 +253,24 @@ describe('the authoring guide', () => {
     }
   });
 
+  it('adds the second shelf in one batch, with symbols in params and no dry run', () => {
+    const label = 'Add a second shelf 7 inches up, in dados';
+    const shelf = calls.filter((c) => c.tool === 'apply' && c.args.label === label);
+    expect(shelf).toHaveLength(1);
+    const [call] = shelf;
+    expect(call!.args.dryRun).toBeUndefined();
+    expect(call!.flags.size).toBe(0);
+    const params = (call!.args.commands as { feature: { params?: unknown } }[]).map(
+      (c) => c.feature.params,
+    );
+    expect(params).toEqual([
+      undefined,
+      expect.objectContaining({ sketch: 'sketch#$shelf' }),
+      expect.objectContaining({ a: 'extension#1', b: 'extension#$board' }),
+      expect.objectContaining({ a: 'extension#2', b: 'extension#$board' }),
+    ]);
+  });
+
   it('is what the server serves as its authoring guide resource', async () => {
     expect(await guideText()).toBe(GUIDE);
     // Document text is data: the guide says so.

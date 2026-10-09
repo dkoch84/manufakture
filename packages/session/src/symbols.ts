@@ -13,8 +13,11 @@
 //    batch, as `previewIds` would hand them out.
 // 4. Core's `remapIds` substitutes them through the whole batch, face names included, through the
 //    naming parser: never by string replacement.
-// 5. A placeholder left in a string no id walk reaches (a name, a note) was text, not an id, and
-//    is put back as the agent wrote it.
+// 5. Core does not read an extension's `params` (ADR 0013 decision 2), so the fields its type
+//    declares as ids (`ParamIdField`: a board's `sketch`, a joint's `a` and `b`) get the real ids
+//    here, from the same table. A symbol there must be one the batch creates.
+// 6. A placeholder left in a string no id walk reaches (a name, a note, any other params field)
+//    was text, not an id, and is put back as the agent wrote it.
 //
 // Before any of it, the batch's shape is checked without recursion (`batchProblem`): commands
 // counted through nested batches, batches nested at most `MAX_BATCH_DEPTH` deep and the JSON at
@@ -26,6 +29,7 @@
 // scopes. Two creations of one symbol, or a use before its creation, are refused by core like any
 // such command (`duplicate`, `not-found`).
 
+import type { ParamIdField } from '@manufakture/regen';
 import {
   CommandSchema,
   commandIds,
@@ -135,6 +139,67 @@ export function batchProblem(
   return null;
 }
 
+/** The params fields of an extension type that hold ids; undefined for a type no domain builds. */
+export type IdFieldsOf = (extensionType: string) => readonly ParamIdField[] | undefined;
+
+export interface ResolveOptions {
+  /** Which params fields of each extension type hold ids. Without it, params are all text. */
+  idFields?: IdFieldsOf;
+}
+
+/** Single-letter counters: sketch entities and references, not features. */
+const ENTITY_COUNTER = /^[a-z]$/;
+
+/**
+ * `value` with `f` applied to the strings of every declared id field of every extension feature
+ * in it (`kind: 'extension'`, wherever a command carries one). Other strings are left alone.
+ */
+function mapIdFields(
+  value: unknown,
+  idFields: IdFieldsOf,
+  f: (s: string, field: ParamIdField, feature: string) => string,
+): unknown {
+  if (Array.isArray(value)) return value.map((v) => mapIdFields(v, idFields, f));
+  if (value === null || typeof value !== 'object') return value;
+  const o = value as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(o)) out[k] = mapIdFields(v, idFields, f);
+  const params = o.params;
+  if (
+    o.kind === 'extension' &&
+    typeof o.extension === 'string' &&
+    typeof o.id === 'string' &&
+    params !== null &&
+    typeof params === 'object' &&
+    !Array.isArray(params)
+  ) {
+    let p: unknown = params;
+    for (const field of idFields(o.extension) ?? []) {
+      p = mapPath(p, field.path, 0, (s) => f(s, field, o.id as string));
+    }
+    out.params = p;
+  }
+  return out;
+}
+
+/** `value` with `f` applied to the strings at `path` (from `i`); `*` is each element of a list. */
+function mapPath(
+  value: unknown,
+  path: readonly string[],
+  i: number,
+  f: (s: string) => string,
+): unknown {
+  if (i === path.length) return typeof value === 'string' ? f(value) : value;
+  const key = path[i]!;
+  if (key === '*') {
+    return Array.isArray(value) ? value.map((v) => mapPath(v, path, i + 1, f)) : value;
+  }
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return value;
+  if (!Object.hasOwn(value, key)) return value;
+  const o = value as Record<string, unknown>;
+  return { ...o, [key]: mapPath(o[key], path, i + 1, f) };
+}
+
 export interface ResolvedSymbols {
   /** The batch with real ids. */
   command: Command;
@@ -172,6 +237,7 @@ export function hasSymbols(command: unknown): boolean {
 export function resolveSymbols(
   document: ManufaktureDocument,
   command: unknown,
+  options: ResolveOptions = {},
 ): { ok: true; value: ResolvedSymbols } | { ok: false; problem: SymbolProblem } {
   const symbol = (message: string) => ({
     ok: false as const,
@@ -305,8 +371,31 @@ export function resolveSymbols(
       `The symbolic ids cannot be substituted: ${e instanceof Error ? e.message : String(e)}`,
     );
   }
-  // 5. Placeholders the walk did not reach were text: put back as written.
-  const restored = mapStrings(remapped, (s) =>
+  // 5. The id fields of extension params, which core does not walk.
+  const inParams =
+    options.idFields === undefined
+      ? remapped
+      : mapIdFields(remapped, options.idFields, (s, field, feature) =>
+          s.replace(PLACEHOLDER_TEXT, (id) => {
+            const name = placeholders.get(id);
+            if (name === undefined) return id;
+            const where = `params.${field.path.join('.')} of ${feature.replace(PLACEHOLDER_TEXT, (p) => tokens.get(p) ?? p)}`;
+            const entity = ENTITY_COUNTER.test(counters.get(name)!);
+            if (entity !== (field.kind === 'entity')) {
+              problem ??= `The symbol ${name} in ${where} is written as ${entity ? 'a sketch entity' : 'a feature'} id (${tokens.get(id)!}), but the field names ${field.kind === 'entity' ? 'a sketch entity' : 'a feature'}.`;
+              return id;
+            }
+            const real = result[name];
+            if (real === undefined) {
+              problem ??= `No command of the batch creates ${name}: a symbol names something the batch makes.`;
+              return id;
+            }
+            return real;
+          }),
+        );
+  if (problem !== null) return symbol(problem);
+  // 6. Placeholders the walk did not reach were text: put back as written.
+  const restored = mapStrings(inParams, (s) =>
     s.replace(PLACEHOLDER_TEXT, (id) => tokens.get(id) ?? id),
   ) as Command;
 

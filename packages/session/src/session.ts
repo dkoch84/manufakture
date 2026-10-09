@@ -31,7 +31,7 @@ import {
   type ReviewState,
   type Version,
 } from '@manufakture/library';
-import type { FeatureStatus, RegenResult } from '@manufakture/regen';
+import type { ExtensionRegistry, FeatureStatus, RegenResult } from '@manufakture/regen';
 import {
   MAX_BUNDLE_BYTES,
   MAX_NOTE,
@@ -56,10 +56,14 @@ import {
   type QueryContext,
   type Quantities,
 } from './queries';
+import { nodeExtensions } from './node-host';
 import { replayOnto } from './rebase';
 import { schemaIndex, schemaOf } from './schema';
 import { batchProblem, resolveSymbols } from './symbols';
 import { RemoteRefusal } from './sync';
+
+/** The domains the session's engine registers, built on first use. */
+let sessionExtensions: Pick<ExtensionRegistry, 'lookup'> | undefined;
 
 /** What a session needs from its host (`SessionManager` provides it). */
 export interface SessionHost {
@@ -68,6 +72,11 @@ export interface SessionHost {
   limits: SessionLimits;
   /** Starts the session's own engine (one kernel service per session, never shared). */
   engine: () => Promise<Engine>;
+  /**
+   * The extension types a batch may use, for the params fields that hold ids (symbolic ids are
+   * resolved there too). Default: the domains the session's engine registers (`nodeExtensions`).
+   */
+  extensions?: Pick<ExtensionRegistry, 'lookup'>;
   bundles?: BundleStore;
   now?: () => Date;
   /** Told when the session closes (the manager's bookkeeping). */
@@ -834,7 +843,12 @@ export class Session {
       // Nested commands counted, and depth capped, before anything parses the batch.
       const shape = batchProblem(commands, limits.commandsPerBatch);
       if (shape !== null) return sessionError(shape.code, shape.message, shape.limit);
-      const resolved = resolveSymbols(this.#document, { type: 'batch', commands });
+      const extensions = this.#host.extensions ?? (sessionExtensions ??= nodeExtensions());
+      const resolved = resolveSymbols(
+        this.#document,
+        { type: 'batch', commands },
+        { idFields: (type) => extensions.lookup(type)?.definition.idFields },
+      );
       if (!resolved.ok) {
         const p = resolved.problem;
         if (p.kind === 'core') return coreRefusal(p.error);

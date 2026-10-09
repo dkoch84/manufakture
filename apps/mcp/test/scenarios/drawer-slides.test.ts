@@ -98,18 +98,6 @@ const dowels = (id: string, name: string, a: string, b: string) =>
     params: { kind: 'dowel', a, b },
   });
 
-/** `v` with every symbolic id replaced by the real id `symbols` gives it (the guide's dry run). */
-function withIds(v: unknown, symbols: Record<string, string>): unknown {
-  if (typeof v === 'string') {
-    return v.replace(/(?:[a-z]+#|e|r)\$([A-Za-z0-9_]+)/g, (m, n: string) => symbols[`$${n}`] ?? m);
-  }
-  if (Array.isArray(v)) return v.map((x) => withIds(x, symbols));
-  if (v !== null && typeof v === 'object') {
-    return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, withIds(x, symbols)]));
-  }
-  return v;
-}
-
 // The layout, in mm, from the opening the test measures (asserted below): the drawer box is the
 // opening less 1/2" each side, 12" tall standing 1/2" above the bottom, 18" deep (the slide
 // length), its front flush with the cabinet's front (y = 0; the cabinet's back is at +Y).
@@ -316,20 +304,15 @@ describe('scenario T8.6a: drawer slides', () => {
     expect(r.error).toMatchObject({ kind: 'core', error: { code: 'expression' } });
   });
 
-  it('adds the drawer box: five boards and four dowel joints, ids from a dry run', async () => {
-    const dry = await call('apply', {
-      sessionId,
-      label: 'Add a drawer box for the bottom opening',
-      dryRun: true,
-      commands: DRAWER,
-    });
-    const symbols = dry.symbols as Record<string, string>;
+  it('adds the drawer box: five boards and four dowel joints, symbols in params', async () => {
+    // One batch: the symbols in the boards' `sketch` and the joints' `a` and `b` resolve too.
     const real = await call('apply', {
       sessionId,
       label: 'Add a drawer box for the bottom opening',
-      commands: withIds(DRAWER, symbols),
+      commands: DRAWER,
     });
     expect(real.errors).toEqual([]);
+    const symbols = real.symbols as Record<string, string>;
     for (const k of ['dls', 'drs', 'dfr', 'dbk', 'dbt']) ids[k] = symbols[`$${k}`]!;
     expect(ids.dfr).toBe('extension#17');
     // The drawer's width is the variable's value, but only because the sketches were drawn to

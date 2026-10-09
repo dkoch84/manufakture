@@ -175,6 +175,11 @@ export function translateJoint(ctx: ExtensionContext<JointParams>): ExtensionOut
 export const jointType: ExtensionType<JointParams> = {
   schemaVersion: JOINT_SCHEMA_VERSION,
   expressions: JOINT_EXPRESSIONS,
+  // The two boards it joins.
+  idFields: [
+    { path: ['a'], kind: 'feature' },
+    { path: ['b'], kind: 'feature' },
+  ],
   params(params, schemaVersion) {
     return readJointParams(params as Json, schemaVersion);
   },

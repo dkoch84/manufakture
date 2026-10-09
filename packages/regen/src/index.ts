@@ -68,6 +68,7 @@ export {
   type GeometryAnswer,
   type GeometryQuery,
   type JsonValue,
+  type ParamIdField,
   type ReadResult,
   type RegisteredDomainDrawings,
   type RegisteredExtension,

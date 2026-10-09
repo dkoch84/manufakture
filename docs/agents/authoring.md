@@ -245,8 +245,10 @@ Every command carries the ids of what it creates, and an id must be the next fre
 counter. You cannot reliably count, so do not: in a batch, write `$` and a name where the number
 goes, keeping the counter: `sketch#$boss_sketch`, `extrude#$boss`, `e$rim`, `r$edge`,
 `tool#$drill`, `setup#$s`. Use the symbol for later references in the same batch, also inside a
-face name (`extrude#$boss:cap:end`). The server gives each symbol a real id and answers with the
-table. A symbol lives for one batch: afterwards use the real ids from the table.
+face name (`extrude#$boss:cap:end`) and in the `params` fields of an extension that name a feature
+or a sketch entity (a board's `sketch`, a joint's `a` and `b`). The server gives each symbol a real
+id and answers with the table. A symbol lives for one batch: afterwards use the real ids from the
+table.
 
 ```json mcp:apply
 {
@@ -793,17 +795,14 @@ then open one on the cabinet.
 }
 ```
 
-**Symbols do not reach into `params`.** An extension's `params` are its domain's own data, which
-core does not read as ids, so a symbol written there stays as written and the feature fails (here
-the board cannot find `sketch#$shelf`). Symbols in `id`, `dependsOn` and `scope` are resolved. When
-`params` must name something the same batch creates, send the batch as a dry run first: the answer's
-`symbols` table gives the ids the real batch will get:
+Write symbols for what the batch creates, in `params` too: the board names its sketch and each
+joint names the board as `extension#$board`. Only the fields the extension's schema declares as ids
+are resolved; any other text in `params` stays as you wrote it.
 
-```json mcp:apply regen-errors
+```json mcp:apply
 {
   "sessionId": "<session>",
   "label": "Add a second shelf 7 inches up, in dados",
-  "dryRun": true,
   "commands": [
     {
       "type": "addFeature",
@@ -910,6 +909,9 @@ the board cannot find `sketch#$shelf`). Symbols in `id`, `dependsOn` and `scope`
 ```json mcp:result
 {
   "ok": true,
+  "dryRun": false,
+  "revision": 2,
+  "errors": [],
   "symbols": {
     "$shelf": "sketch#7",
     "$front": "e25",
@@ -922,32 +924,6 @@ the board cannot find `sketch#$shelf`). Symbols in `id`, `dependsOn` and `scope`
   }
 }
 ```
-
-Then send the same batch again, without `dryRun` and with each symbol written as the real id the
-table gave it, in `params` and everywhere else. The call is the batch above with these values put
-in (shown here as the changes, not repeated in full):
-
-```json mcp:apply as-previous
-{
-  "without": ["dryRun"],
-  "ids": {
-    "sketch#$shelf": "sketch#7",
-    "e$front": "e25",
-    "e$right": "e26",
-    "e$back": "e27",
-    "e$left": "e28",
-    "extension#$board": "extension#15",
-    "extension#$left_dado": "extension#16",
-    "extension#$right_dado": "extension#17"
-  }
-}
-```
-
-```json mcp:result
-{ "ok": true, "dryRun": false, "revision": 2, "errors": [] }
-```
-
-Nothing changed between the dry run and this batch, so the ids are the ones the table gave.
 
 Check the boards are where they should be: the new shelf in the cut list (quantities are data,
 marked `reviewed: false` on your branch), and a front view.

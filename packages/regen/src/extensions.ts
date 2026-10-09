@@ -159,6 +159,18 @@ export interface ExtensionContext<P = unknown> {
 }
 
 /**
+ * A params field that holds an id (ADR 0016 decision 8): a feature id (`sketch#3`, or a body name
+ * that starts with one, `extension#1:layer/2`) or a sketch entity id (`e4`). The path leads into
+ * the current version's params: object keys, and `*` for every element of a list
+ * (`['entities', '*']`). A session resolves a batch's symbolic ids (`sketch#$shelf`) in these
+ * fields and only these; any other string in params is text.
+ */
+export interface ParamIdField {
+  path: readonly string[];
+  kind: 'feature' | 'entity';
+}
+
+/**
  * One extension type. Methods, not function properties, so a domain's `ExtensionType<Board>`
  * registers where `ExtensionType` (of unknown params) is expected.
  */
@@ -167,6 +179,8 @@ export interface ExtensionType<P = unknown> {
   schemaVersion: number;
   /** The kind of each named expression; an undeclared one is a plain number in internal units. */
   expressions?: Readonly<Record<string, ExpressionKind>>;
+  /** The params fields that hold ids, so a batch's symbolic ids reach them (`ParamIdField`). */
+  idFields?: readonly ParamIdField[];
   /** Migrate params stored at `schemaVersion` to the current version and validate them. */
   params?(params: Readonly<Record<string, JsonValue>>, schemaVersion: number): ReadResult<P>;
   /** The two-step form's first step: what the translator needs to know about the part first. */
@@ -437,6 +451,16 @@ function checkType(entry: DomainEntry, type: string, definition: ExtensionType):
     throw new TypeError(`"${type}" has no translate function`);
   }
   checkVersion(definition.schemaVersion, `"${type}"`);
+  for (const field of definition.idFields ?? []) {
+    if (
+      !Array.isArray(field?.path) ||
+      field.path.length === 0 ||
+      !field.path.every((k) => typeof k === 'string' && k.length > 0) ||
+      (field.kind !== 'feature' && field.kind !== 'entity')
+    ) {
+      throw new TypeError(`"${type}": an id field needs a non-empty path and a kind`);
+    }
+  }
 }
 
 /**

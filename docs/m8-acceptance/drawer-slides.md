@@ -29,8 +29,11 @@ What it does, as an agent would:
    `clearance` box gaps: 22-9/16" by 13-9/32", 21-25/32" deep.
 3. Adds the drawer box in one batch: two variables (`#slide_clearance`, and `#drawer_width`, typed
    in as `22-9/16" - 2 * #slide_clearance`), five boards (1/2" plywood sides, front and back, a 1/4"
-   bottom; 21-9/16" x 12" x 18") and four dowel joints, as a dry run first for the ids in `params`
-   (the guide's pattern), then for real. No regen errors.
+   bottom; 21-9/16" x 12" x 18") and four dowel joints, with symbols for the new sketches and
+   boards in the boards' `sketch` and the joints' `a` and `b` too. When this scenario was first
+   written those `params` fields did not take symbols, so it sent the batch as a dry run for the
+   ids and then again with them put in; since #1223 the symbols resolve there and the batch goes
+   once. No regen errors.
 4. Adds the two slides as four plain extrudes (a cabinet member and a drawer member per side,
    1/4" x 1-3/4" x 18" each), made steel with `setBodyProps`; checks each slide touches but does not
    overlap the cabinet side and the drawer side.
