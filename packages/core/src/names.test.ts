@@ -43,7 +43,32 @@ describe('parseName: every naming form', () => {
       [feature('fillet#3'), text(':round:'), sub('r1')],
     ],
     ['hole point', 'hole#6:wall:e5', [feature('hole#6'), text(':wall:'), sub('e5')]],
-    ['region cap', 'extrude#1:cap:start#2', [feature('extrude#1'), text(':cap:start#2')]],
+    [
+      'region cap, named after its loop',
+      'extrude#1:cap:end:e5',
+      [feature('extrude#1'), text(':cap:end:'), sub('e5')],
+    ],
+    [
+      'region cap of a split loop edge, as a piece',
+      'revolve#2:cap:start:e2#a#1#3',
+      [feature('revolve#2'), text(':cap:start:'), sub('e2', '#a#1#3')],
+    ],
+    [
+      'merged region caps',
+      '(extrude#1:cap:end:e1+extrude#1:cap:end:e5)',
+      [
+        text('('),
+        feature('extrude#1'),
+        text(':cap:end:'),
+        sub('e1'),
+        text('+'),
+        feature('extrude#1'),
+        text(':cap:end:'),
+        sub('e5'),
+        text(')'),
+      ],
+    ],
+    ['former region cap', 'extrude#1:cap:start#2', [feature('extrude#1'), text(':cap:start#2')]],
     [
       'nested name',
       'shell#5:offset:extrude#1:cap:end',
@@ -205,6 +230,11 @@ describe('parseName: every naming form', () => {
     expect(subIdsInName('extension#7:e2:xmax')).toEqual([]);
     expect(subIdsInName('extrude#1:side:e7:more')).toEqual([]);
     expect(subIdsInName('extrude#1:side:e7')).toEqual(['e7']);
+    // A qualifier is one lower-case word; anything else before the sub-id stays text.
+    expect(subIdsInName('extrude#1:cap:end:e7')).toEqual(['e7']);
+    expect(subIdsInName('extrude#1:cap:end2:e7')).toEqual([]);
+    expect(subIdsInName('extrude#1:cap:end:e7:more')).toEqual([]);
+    expect(subIdsInName('thread#5:thread:root:3')).toEqual([]);
   });
 });
 
@@ -421,6 +451,8 @@ describe('mapName', () => {
     ['extrude#1:side:e7#a', 'extrude#4:side:e9#a'],
     ['extrude#1:side:e7#1', 'extrude#4:side:e9#1'],
     ['fillet#3:round:r1', 'fillet#9:round:r5'],
+    ['extrude#1:cap:end:e7', 'extrude#4:cap:end:e9'],
+    ['extrude#1:cap:end:e7#1|extrude#1:side:e7', 'extrude#4:cap:end:e9#1|extrude#4:side:e9'],
     ['(extrude#1:side:e7+extrude#1:side:e2)#2', '(extrude#4:side:e9+extrude#4:side:e2)#2'],
     ['derived#1:from/extrude#1:side:e7', 'derived#2:from/extrude#1:side:e7'],
     ['extension#3:layer/sheathing', 'extension#3:layer/sheathing'],

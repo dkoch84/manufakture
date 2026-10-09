@@ -174,19 +174,18 @@ describe('heat-set inserts in a printed enclosure (T8.6b)', () => {
     expect(lid).toEqual([true, true, true, true]);
   });
 
-  it('gap probe: the four boss tops share one name, told apart only by an ordinal (fragile)', async () => {
+  it('names each boss top after its circle, not by an ordinal, so the names are not fragile', async () => {
+    // Was a gap probe: one extrude of four circles named its tops `extrude#2:cap:end#1` to `#4`,
+    // all fragile. Each top is now named after its circle, like its side.
     const tops = value(
       await h.call('find_geometry', {
         sessionId,
         query: { kind: 'face', partId: PART, bornBy: 'extrude#2', normal: [0, 0, 1] },
       }),
     ).hits as Data[];
-    expect(tops.map((t) => [t.name, t.fragile])).toEqual([
-      ['extrude#2:cap:end#1', true],
-      ['extrude#2:cap:end#2', true],
-      ['extrude#2:cap:end#3', true],
-      ['extrude#2:cap:end#4', true],
-    ]);
+    expect(tops.map((t) => [t.name, t.fragile])).toEqual(
+      BOSSES.entities.map((e) => [`extrude#2:cap:end:${e}`, false]),
+    );
   });
 
   it('reads the M3 insert hole and M3 clearance from the tables resource', async () => {
@@ -371,18 +370,26 @@ describe('heat-set inserts in a printed enclosure (T8.6b)', () => {
       ]);
       expect(wall).toBeCloseTo(2, 6);
     }
+    // Every boss top keeps its name through the edit, over its own circle.
+    const tops = value(
+      await h.call('find_geometry', {
+        sessionId,
+        query: { kind: 'face', partId: PART, bornBy: 'extrude#2', normal: [0, 0, 1] },
+      }),
+    ).hits as Data[];
+    expect(tops.map((t) => [t.name, t.fragile, r6(t.centroid[0]), r6(t.centroid[1])])).toEqual(
+      BOSSES.entities.map((e, i) => [`extrude#2:cap:end:${e}`, false, ...BOSSES.centres[i]!]),
+    );
   });
 
   it('measures the hole depth from the boss top to the end of the wall', async () => {
     const p = insertPoints[0]!;
-    // The boss top is reachable only by its fragile ordinal name (see the probe above).
-    const depth = await distance(
-      'extrude#2:cap:end#1',
-      `${insertHole}:tip:${p}|${insertHole}:wall:${p}`,
-      ['face', 'edge'],
-    );
+    const end = `${insertHole}:tip:${p}|${insertHole}:wall:${p}`;
+    const depth = await distance(`extrude#2:cap:end:${BOSSES.entities[0]}`, end, ['face', 'edge']);
     expect(depth).toBeCloseTo(INSERT_DEPTH, 6);
     expect(depth).toBeGreaterThanOrEqual(INSERT.length);
+    // The ordinal name the top had before still finds the same face, for older documents.
+    expect(await distance('extrude#2:cap:end#1', end, ['face', 'edge'])).toBe(depth);
   });
 
   it('gap probe: a blind hole always ends in a drill point', async () => {

@@ -12,7 +12,7 @@
 import type { TopoDS_Edge, TopoDS_Face, TopoDS_Shape, TopoDS_Vertex } from 'libcascade/single/init';
 import { KernelError } from './errors';
 import type { NamedShape } from './kernel';
-import { vertexName } from './naming';
+import { answersTo, edgeAliases, vertexName } from './naming';
 import { cross, dot, mapShapes, norm, toVec3, type Oc, type Scope } from './occt';
 import type { BoundingBox, SubShapeKind, Vec3 } from './types';
 
@@ -167,13 +167,26 @@ export function locate(count: number, named: NamedShape | null, target: MeasureT
   }
   if (named === null) return notFound(`the body has no names, so ${target.name} is not on it`);
   const candidates: number[] = [];
+  // A name, or a former name of a face renamed since (`FaceName.aliases`), and the edge and
+  // vertex names built from former face names.
+  const faces = named.names.faces;
+  const former = faces.map((f) => ({ ...f, name: f.aliases?.[0] ?? f.name }));
+  const renamed = faces.some((f) => f.aliases !== undefined);
   if (target.kind === 'face') {
-    named.names.faces.forEach((f, i) => f.name === target.name && candidates.push(i + 1));
+    faces.forEach((f, i) => answersTo(f, target.name) && candidates.push(i + 1));
   } else if (target.kind === 'edge') {
-    named.names.edges.forEach((e, i) => e.name === target.name && candidates.push(i + 1));
+    named.names.edges.forEach(
+      (e, i) =>
+        (e.name === target.name || (renamed && edgeAliases(faces, e).includes(target.name))) &&
+        candidates.push(i + 1),
+    );
   } else {
     for (let v = 1; v <= named.topology.vertices.length; v++) {
-      if (vertexName(named.names.faces, named.topology, v) === target.name) candidates.push(v);
+      if (
+        vertexName(faces, named.topology, v) === target.name ||
+        (renamed && vertexName(former, named.topology, v) === target.name)
+      )
+        candidates.push(v);
     }
   }
   if (candidates.length === 0) return notFound(`no ${target.kind} is named ${target.name}`);

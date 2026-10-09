@@ -206,8 +206,8 @@ rectangle with its holes, and adding a hole's circle picks the disk too. Listed 
 gone are a `reference-lost` error on `profile`. One selected region goes to the kernel as its
 loops (`{ frame, loops }`, unchanged from M1, so cache keys of existing documents stay put); several
 go as `{ frame, regions }`, each region with its holes, in region id order. The kernel sweeps every
-region, fuses the ones that touch and numbers their caps `<id>:cap:start#k` and `<id>:cap:end#k` by
-edge id (kernel README, "Several regions"), so one extrude of a sketch with three separate regions
+region, fuses the ones that touch and names each region's caps after its outer loop,
+`<id>:cap:start:<edge id>` and `<id>:cap:end:<edge id>` (kernel README, "Several regions"), so one extrude of a sketch with three separate regions
 is one body of three solids with every region's faces. A `draft` is applied after the regions are
 joined, so touching regions taper as one outline (a draft of a Bezier side fails). Separate regions
 that a draft grows into each other (a negative draft, or the lower half of a `symmetric` extent
@@ -1492,9 +1492,11 @@ pnpm --filter @manufakture/regen test
   one, so each is flushed on its own (in the worker, a batch costs no structured clone).
 - **Detached bodies.** An `add` that touches no body used to stay in the part's one compound; it is
   now a body of its own (with a `detached` warning), so such an M1 document shows two bodies.
-- **Caps of several regions are fragile.** With several regions, the caps are numbered pieces
-  (`cap:end#2`), renumbered when a region is added or removed; a reference to one resolves with a
-  `fragile` warning. Pick a side face, or a single region, where a stable reference matters.
+- **Caps of several regions** are named after each region's outer loop (`cap:end:e5`), so they
+  are not fragile and stay put when another region is added, removed or resized (#1212). Before,
+  they were numbered pieces (`cap:end#2`), renumbered when a region was added or removed; those
+  names are kept as aliases, so a stored reference to one still resolves to the same face, with
+  the `fragile` warning it always had.
 - **Hole points** must be point entities.
 - **Glyph faces are fragile.** A text's side faces are named after positional glyph edge ids
   (`extrude#2:side:e5.g3.c0.s12#1`), so a reference to one resolves with a `fragile` warning, and

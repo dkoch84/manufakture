@@ -6,9 +6,11 @@
 // Faces are named where they are born and carried through every later
 // operation by history:
 //   extrude#1:cap:start, extrude#1:cap:end   the caps of an extrusion (or revolve)
-//   extrude#1:cap:start#2                    the start cap of region 2 of a profile of several
-//                                            regions, regions ordered by their outer loop's
-//                                            edge ids (`sweepRegionOrder`; fragile)
+//   extrude#1:cap:start:e5                   the start cap of the region of a profile of
+//                                            several regions whose outer loop has edge e5
+//                                            (`sweepRegionKeys`); its former name, the
+//                                            ordinal `extrude#1:cap:start#2` (regions ordered
+//                                            by `sweepRegionOrder`; fragile), stays an alias
 //   extrude#1:side:e2                        the face swept by sketch edge e2
 //   fillet#3:round:r1                        the face a fillet made from its reference r1
 //   fillet#3:round:A&B                       a round OCCT added along a tangent chain,
@@ -27,6 +29,10 @@
 //   (A+B)                                    faces A and B merged into one
 // Every face also carries its lineage (itself and every name it descends
 // from), so a reference to X can still find X#1 or e2#a when it is unique.
+// A face renamed by a later naming scheme keeps its former names as aliases
+// (`FaceName.aliases`): a reference by one still resolves exactly, to the
+// face it named before, and names built from the face (its split pieces,
+// merges, faces generated from it) get the matching former names too.
 //
 // The `#` separator has two meanings, told apart by what follows it: a letter
 // (`e2#a`) is a sketch split, made by the sketcher and deterministic; digits
@@ -49,6 +55,14 @@ export interface FaceName {
   lineage: string[];
   /** True when the name depends on a geometric ordering (a positional piece). */
   fragile: boolean;
+  /**
+   * Former names of this very face, from an older naming scheme: a cap of a profile of several
+   * regions was `<feature>:cap:end#k` before it was named after its loop. A reference stored
+   * with one resolves exactly, to the same face as before (its fragility is still that of the
+   * name it uses). Every alias is in `lineage` too. Absent when there are none, which is the
+   * case for every face that was never renamed.
+   */
+  aliases?: string[];
 }
 
 export interface EdgeName {
@@ -178,6 +192,37 @@ export function isUnnamed(name: string): boolean {
   return name.includes('?');
 }
 
+/** Whether face `f` goes by `name`: its own name or one of its former names (`aliases`). */
+export function answersTo(f: FaceName, name: string): boolean {
+  return f.name === name || (f.aliases?.includes(name) ?? false);
+}
+
+/** `aliases` as a property, left out when there are none (so unrenamed faces stay as they were). */
+function aliased(aliases: readonly (string | null | undefined)[] | undefined, name: string) {
+  const list = [...new Set(aliases ?? [])].filter(
+    (a): a is string => typeof a === 'string' && a !== name,
+  );
+  return list.length > 0 ? { aliases: list } : {};
+}
+
+/**
+ * The names an edge of `faces` went by before any of its faces was renamed: its name with every
+ * face name (and end face name) read as that face's first alias. Empty when none of the faces has
+ * an alias. Ordinals are kept: they order edges by position, which a rename does not change.
+ */
+export function edgeAliases(faces: readonly FaceName[], edge: EdgeName): string[] {
+  const byName = new Map(faces.map((f) => [f.name, f]));
+  const former = (n: string) => byName.get(n)?.aliases?.[0] ?? n;
+  const names = [...edge.faces, ...edge.ends];
+  if (!names.some((n) => byName.get(n)?.aliases?.[0] !== undefined)) return [];
+  const name = edgeRefName({
+    faces: edge.faces.map(former).sort(),
+    ...(edge.ends.length > 0 ? { ends: edge.ends.map(former).sort() } : {}),
+    ...(edge.ordinal > 0 ? { ordinal: edge.ordinal } : {}),
+  });
+  return name === edge.name ? [] : [name];
+}
+
 /** A readable message for a failed resolution of `target`. */
 export function describeFailure(target: string, failure: Failure): string {
   if (failure.status === 'ambiguous') {
@@ -264,7 +309,7 @@ export interface SweepFaces {
 
 /**
  * The order in which the regions of a profile of several regions are numbered
- * (`cap:start#k`, k from 1): by the edge ids of each region's outer loop,
+ * (the former cap names `cap:start#k`, k from 1, now aliases): by the edge ids of each region's outer loop,
  * sorted and compared as lists by code unit, then by every edge id of the
  * region, then by input order. Edge ids name sketch geometry, so the order
  * survives moving or resizing a region and changes only when regions are
@@ -291,17 +336,56 @@ export function sweepRegionOrder(regions: readonly (readonly (readonly string[])
 }
 
 /**
+ * The id each region of a profile of several regions names its caps after
+ * (`cap:end:<id>`), or null for a region without one: the smallest edge id
+ * (by code unit) of the region's outer loop that is on no other region's
+ * outer loop. Like a side's name, it follows sketch geometry, so it survives
+ * moving or resizing a region, and adding, removing or reordering the other
+ * regions; and no two regions get the same id. A region whose outer loop
+ * edges are all shared (or have no ids) gets null and keeps the ordinal name.
+ * `regions[i]` is region i's loops' edge ids, outer loop first, as for
+ * `sweepRegionOrder`. The same rule names any face that one feature makes
+ * once per loop of a sketch.
+ */
+export function sweepRegionKeys(
+  regions: readonly (readonly (readonly string[])[])[],
+): (string | null)[] {
+  const count = new Map<string, number>();
+  for (const loops of regions) {
+    for (const id of new Set(loops[0] ?? [])) count.set(id, (count.get(id) ?? 0) + 1);
+  }
+  return regions.map((loops) => {
+    const own = [...new Set(loops[0] ?? [])].filter((id) => id !== '' && count.get(id) === 1);
+    return own.length === 0 ? null : own.sort()[0]!;
+  });
+}
+
+/**
+ * A sweep that is one region of a profile of several: `ordinal` from
+ * `sweepRegionOrder` (from 1), `key` from `sweepRegionKeys`.
+ */
+export interface SweepRegion {
+  ordinal: number;
+  key: string | null;
+}
+
+/**
  * Name the faces of a fresh sweep (extrusion or revolution). Returns the
  * names and the faces nothing named, which a correct sweep does not have.
- * `roles.region`: the sweep is region k (from 1) of a profile of several, so
- * its caps are `<cap>:start#k` and `<cap>:end#k`, pieces of `<cap>:start` and
- * `<cap>:end` (positional, so fragile); sides are named as for one region.
+ * `roles.region`: the sweep is one region of a profile of several. Its caps
+ * are named after the region's loop, `<cap>:start:<key>` and
+ * `<cap>:end:<key>` (fragile only when the key is a positional sketch piece),
+ * with the ordinal names they had before, `<cap>:start#k` and `<cap>:end#k`,
+ * as aliases, so references stored with those still resolve to the same
+ * face. Their lineage holds the plain `<cap>:start` and `<cap>:end` too. A
+ * region without a key keeps the ordinal names (positional, so fragile).
+ * Sides are named as for one region. A bare number is an ordinal without a key.
  */
 export function nameSweep(
   feature: string,
   faces: SweepFaces,
   topology: Topology,
-  roles: { cap?: string; side?: string; region?: number } = {},
+  roles: { cap?: string; side?: string; region?: number | SweepRegion } = {},
 ): { faces: FaceName[]; unnamed: number[] } {
   const out: (FaceName | undefined)[] = new Array(topology.faces.length);
   const set = (index: number, face: FaceName) => {
@@ -311,9 +395,21 @@ export function nameSweep(
   };
   const cap = roles.cap ?? 'cap';
   const side = roles.side ?? 'side';
-  const piece = roles.region === undefined ? '' : `#${roles.region}`;
-  if (faces.capStart > 0) set(faces.capStart, bornFace(feature, cap, `start${piece}`));
-  if (faces.capEnd > 0) set(faces.capEnd, bornFace(feature, cap, `end${piece}`));
+  const region =
+    typeof roles.region === 'number' ? { ordinal: roles.region, key: null } : roles.region;
+  const capFace = (end: string): FaceName => {
+    if (region === undefined) return bornFace(feature, cap, end);
+    const ordinal = bornFace(feature, cap, `${end}#${region.ordinal}`);
+    if (region.key === null) return ordinal;
+    const keyed = bornFace(feature, cap, `${end}:${region.key}`);
+    return {
+      ...keyed,
+      lineage: [...new Set([...keyed.lineage, ...ordinal.lineage])],
+      aliases: [ordinal.name],
+    };
+  };
+  if (faces.capStart > 0) set(faces.capStart, capFace('start'));
+  if (faces.capEnd > 0) set(faces.capEnd, capFace('end'));
   for (const [id, index] of Object.entries(faces.sideIds)) set(index, bornFace(feature, side, id));
   return fill(out);
 }
@@ -340,6 +436,10 @@ export function prefixFaces(faces: readonly FaceName[], prefix: string): FaceNam
     name: `${prefix}/${f.name}`,
     lineage: f.lineage.map((n) => `${prefix}/${n}`),
     fragile: f.fragile,
+    ...aliased(
+      f.aliases?.map((a) => `${prefix}/${a}`),
+      `${prefix}/${f.name}`,
+    ),
   }));
 }
 
@@ -378,6 +478,10 @@ export function deriveFaces(faces: readonly FaceName[], feature: string): FaceNa
     name: derivedName(f.name, feature),
     lineage: f.lineage.map((n) => derivedName(n, feature)),
     fragile: f.fragile,
+    ...aliased(
+      f.aliases?.map((a) => derivedName(a, feature)),
+      derivedName(f.name, feature),
+    ),
   }));
 }
 
@@ -388,7 +492,47 @@ export function deriveFaces(faces: readonly FaceName[], feature: string): FaceNa
  * history entry and, for a face input, the input face's name. Return null
  * when the operation does not name what that input generated.
  */
-export type GeneratedNamer = (entry: HistoryEntry, input: FaceName | null) => string | null;
+export type GeneratedNamer = (
+  entry: HistoryEntry,
+  input: FaceName | null,
+) => string | GeneratedName | null;
+
+/**
+ * A generated face's name with the names it had before a face it was named after was renamed
+ * (`former`, from `formerFaces`), which become its aliases. A namer that builds names from an
+ * edge's or vertex's faces returns one (`namedWithFormer`); for a face input, `propagateFaces`
+ * works the former names out itself.
+ */
+export interface GeneratedName {
+  name: string;
+  former: string[];
+}
+
+/**
+ * `faces` with every renamed face read under its first former name (`aliases[0]`), or null when
+ * no face was renamed. Names built from these are the names built before the rename.
+ */
+export function formerFaces(faces: readonly FaceName[]): FaceName[] | null {
+  if (!faces.some((f) => f.aliases !== undefined)) return null;
+  return faces.map((f) => (f.aliases === undefined ? f : { ...f, name: f.aliases[0]! }));
+}
+
+/**
+ * A generated name built from `faces` by `build`, with the name `build` gives from the faces'
+ * former names (`formerFaces`) when that differs: what a namer that reads face names returns,
+ * so a reference stored with the old compound name (`fillet#3:round:A&B` with A's former name)
+ * still resolves exactly.
+ */
+export function namedWithFormer(
+  faces: readonly FaceName[],
+  build: (faces: readonly FaceName[]) => string,
+): string | GeneratedName {
+  const name = build(faces);
+  const old = formerFaces(faces);
+  if (old === null) return name;
+  const former = build(old);
+  return former === name ? name : { name, former: [former] };
+}
 
 export interface Propagation {
   faces: FaceName[];
@@ -430,21 +574,44 @@ export function propagateFaces(
     // One input face became several: order the pieces by position.
     byPosition(targets).forEach((target, k) => {
       const name = `${input.name}#${k + 1}`;
-      sources[target - 1]!.push({ name, lineage: [name, ...input.lineage], fragile: true });
+      const aliases = input.aliases?.map((a) => `${a}#${k + 1}`) ?? [];
+      sources[target - 1]!.push({
+        name,
+        lineage: [...new Set([name, ...aliases, ...input.lineage])],
+        fragile: true,
+        ...aliased(aliases, name),
+      });
     });
   };
-  const bear = (name: string, faces: number[]) => {
+  const bear = (name: string, faces: number[], former: readonly string[] = []) => {
     if (faces.length === 1) {
-      born[faces[0]! - 1]!.push({ name, lineage: [name], fragile: isPositional(name) });
+      born[faces[0]! - 1]!.push({
+        name,
+        lineage: [...new Set([name, ...former])],
+        fragile: isPositional(name),
+        ...aliased(former, name),
+      });
       return;
     }
     // One input generated several faces: number them by position, like a
     // split, never by the kernel's index order.
     byPosition(faces).forEach((target, k) => {
       const piece = `${name}#${k + 1}`;
-      born[target - 1]!.push({ name: piece, lineage: [piece, name], fragile: true });
+      const aliases = former.map((a) => `${a}#${k + 1}`);
+      born[target - 1]!.push({
+        name: piece,
+        lineage: [...new Set([piece, ...aliases, name, ...former])],
+        fragile: true,
+        ...aliased(aliases, piece),
+      });
     });
   };
+  const nameOf = (g: string | GeneratedName | null) => (typeof g === 'object' && g ? g.name : g);
+  /** What the namer called a face generated from `input` under each of its former names. */
+  const formerGenerated = (entry: HistoryEntry, input: FaceName, name: string): string[] =>
+    (input.aliases ?? [])
+      .map((a) => nameOf(generated(entry, { name: a, lineage: [a], fragile: input.fragile })))
+      .filter((n): n is string => n !== null && n !== name);
 
   for (const entry of history) {
     const genFaces = entry.generated.filter((r) => r.kind === 'face').map((r) => r.index);
@@ -457,13 +624,20 @@ export function propagateFaces(
           : entry.modified.filter((r) => r.kind === 'face').map((r) => r.index);
       if (targets.length > 0) inherit(input, targets);
       if (genFaces.length === 0) continue;
-      const name = generated(entry, input);
-      if (name !== null) bear(name, genFaces);
-      else if (targets.length === 0) inherit(input, genFaces);
+      const g = generated(entry, input);
+      if (g === null) {
+        if (targets.length === 0) inherit(input, genFaces);
+        continue;
+      }
+      const name = nameOf(g)!;
+      const own = typeof g === 'object' ? g.former : [];
+      bear(name, genFaces, [...own, ...formerGenerated(entry, input, name)]);
     } else {
       if (genFaces.length === 0) continue;
-      const name = generated(entry, null);
-      if (name !== null) bear(name, genFaces);
+      const g = generated(entry, null);
+      if (g === null) continue;
+      if (typeof g === 'string') bear(g, genFaces);
+      else bear(g.name, genFaces, g.former);
     }
   }
 
@@ -482,10 +656,15 @@ function merge(from: FaceName[]): FaceName {
   if (unique.size === 1) return [...unique.values()][0]!;
   const parts = [...unique.values()].sort((p, q) => (p.name < q.name ? -1 : 1));
   const name = `(${parts.map((p) => p.name).join('+')})`;
+  // The name the merge had before any part was renamed: the parts' former names, sorted alike.
+  const former = parts.some((p) => p.aliases !== undefined)
+    ? [`(${[...new Set(parts.map((p) => p.aliases?.[0] ?? p.name))].sort().join('+')})`]
+    : [];
   return {
     name,
-    lineage: [name, ...new Set(parts.flatMap((p) => p.lineage))],
+    lineage: [...new Set([name, ...former, ...parts.flatMap((p) => p.lineage)])],
     fragile: parts.some((p) => p.fragile),
+    ...aliased(former, name),
   };
 }
 
@@ -508,7 +687,13 @@ export function disambiguate(faces: FaceName[], topology: Topology): FaceName[] 
     ordered.forEach((i, k) => {
       const f = faces[i]!;
       const name = `${f.name}#${k + 1}`;
-      out[i] = { name, lineage: [name, ...f.lineage], fragile: true };
+      const aliases = f.aliases?.map((a) => `${a}#${k + 1}`) ?? [];
+      out[i] = {
+        name,
+        lineage: [...new Set([name, ...aliases, ...f.lineage])],
+        fragile: true,
+        ...aliased(aliases, name),
+      };
     });
   }
   return out;
@@ -640,7 +825,7 @@ export function splitParent(name: string): string | null {
 export function resolveFace(names: Names, ref: FaceRef): Resolution {
   if (isUnnamed(ref.face)) return { ok: false, status: 'lost', missing: [ref.face] };
   const fragile = isPositional(ref.face);
-  const exact = indicesWhere(names.faces, (f) => f.name === ref.face);
+  const exact = indicesWhere(names.faces, (f) => answersTo(f, ref.face));
   if (exact.length === 1) return { ok: true, index: exact[0]!, via: 'exact', fragile };
   const found =
     exact.length > 0 ? exact : indicesWhere(names.faces, (f) => f.lineage.includes(ref.face));
@@ -691,7 +876,7 @@ export function resolveEdge(names: Names, topology: Topology, ref: EdgeRef): Res
   const all = topology.edges.map((e) => e.index);
   let via: Via = 'exact';
   let fragile = ref.faces.some(isPositional);
-  let candidates = all.filter((i) => matches(i, (f, w) => f.name === w));
+  let candidates = all.filter((i) => matches(i, answersTo));
   if (candidates.length === 0) {
     via = 'descendant';
     candidates = all.filter((i) => matches(i, (f, w) => f.lineage.includes(w)));
@@ -721,9 +906,12 @@ export function resolveEdge(names: Names, topology: Topology, ref: EdgeRef): Res
       fragile ||= wanted.some(isPositional);
       // Ends that still match by name exactly are not a weaker resolution;
       // a partial or lineage-only match is.
-      const key = [...wanted].sort().join(',');
-      const unchanged = candidates.every(
-        (i) => endFaces(names.faces, topology, topology.edges[i - 1]!).join(',') === key,
+      const byName = new Map(names.faces.map((f) => [f.name, f]));
+      const unchanged = candidates.every((i) =>
+        sameFaces(
+          endFaces(names.faces, topology, topology.edges[i - 1]!).map((n) => byName.get(n)!),
+          wanted,
+        ),
       );
       if (!unchanged) via = 'ends';
     }
@@ -745,6 +933,18 @@ export function resolveEdge(names: Names, topology: Topology, ref: EdgeRef): Res
 
 export function resolve(names: Names, topology: Topology, ref: TopoRef): Resolution {
   return 'face' in ref ? resolveFace(names, ref) : resolveEdge(names, topology, ref);
+}
+
+/**
+ * Whether `faces` are exactly the faces `wanted` names, each by its name or a former name
+ * (`wanted` and `faces` both without repeats).
+ */
+export function sameFaces(faces: readonly FaceName[], wanted: readonly string[]): boolean {
+  return (
+    faces.length === wanted.length &&
+    wanted.every((w) => faces.some((f) => answersTo(f, w))) &&
+    faces.every((f) => wanted.some((w) => answersTo(f, w)))
+  );
 }
 
 function indicesWhere<T>(list: readonly T[], test: (item: T) => boolean): number[] {

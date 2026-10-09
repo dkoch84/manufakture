@@ -13,8 +13,9 @@ import { FEATURE_KINDS } from './featureKinds';
  * | born `<feature id>:<role>[:<tail>]`   | `extrude#1:cap:end`, `fillet#3:round:r1`  |
  * | a sub-id tail with split suffixes     | `extrude#1:side:e2#a`, `e2#a#b`           |
  * | a positional sub-id tail (region edge) | `extrude#1:side:e2#1`                    |
+ * | a qualified sub-id tail (region cap)  | `extrude#1:cap:end:e5`, `cap:start:e2#a`  |
  * | a nested name as the tail             | `shell#5:offset:extrude#1:cap:end`        |
- * | kernel pieces                         | `X#2`, `(A+B)#2`, `extrude#1:cap:end#1`   |
+ * | kernel pieces, former region caps     | `X#2`, `(A+B)#2`, `extrude#1:cap:end#1`   |
  * | merges                                | `(A+B)`                                   |
  * | corners and edge-face lists           | `fillet#3:corner:A&B&C`, `fillet#3:round:A&B` |
  * | instance prefixes                     | `pattern#7:i2/X`, `mirror#8:image/X`      |
@@ -32,8 +33,10 @@ import { FEATURE_KINDS } from './featureKinds';
  *   known feature kind, `#n`, then `:`, not preceded by a letter, digit or `#`). Its `:` is in
  *   the following text part.
  * - `sub`: the tail of a born name when the whole tail is a sub-id (`e7`, `k2`, `r1`) with its
- *   split and positional suffixes (`e7#a#1` is `e7` with suffix `#a#1`). `start#2`, `end`,
- *   `wall`, `4` and other tails are text.
+ *   split and positional suffixes (`e7#a#1` is `e7` with suffix `#a#1`), or the sub-id after
+ *   one lower-case word that qualifies the role (`end:e5`: the end cap of the region whose loop
+ *   has edge e5, where `end:` is text). `start#2`, `end`, `wall`, `root:3`, `4` and other tails
+ *   are text.
  * - `source`: what follows `<id>:from/`, up to the end of that merge or corner member: a name
  *   in a derived part's source document, never read for ids.
  * - A scripted feature's operation prefix, `<scripted id>:<operation id>/` (ADR 0010 decision
@@ -62,6 +65,8 @@ const KIND_ALTERNATION = FEATURE_KINDS.join('|');
 const HEAD = new RegExp(`(?:${KIND_ALTERNATION})#[1-9][0-9]*:`, 'y');
 /** A whole tail that is a sub-id: base, then split letters, then positional pieces. */
 const SUB_TAIL = /^([ekr][1-9][0-9]*)((?:#[a-z]+)*(?:#[1-9][0-9]*)*)$/;
+/** A word that qualifies a role before a sub-id (`end` in `cap:end:e5`). */
+const QUALIFIER = /^[a-z]+$/;
 /** What follows `<id>:` when the rest of the member is a name in another document. */
 const FROM = 'from/';
 /** The kind of feature whose faces carry an operation prefix (`scripted#2:boss/`). */
@@ -180,6 +185,17 @@ export function parseName(name: string): NamePart[] {
         flush();
         out.push({ kind: 'sub', id: m[1]!, suffix: m[2]! });
         i = k;
+      } else if (name[k] === ':' && QUALIFIER.test(name.slice(i, k))) {
+        // `<role>:<qualifier>:<sub-id>` (`cap:end:e5`): the qualifier is text.
+        let l = k + 1;
+        while (l < n && !SUB_STOP.has(name[l]!)) l++;
+        const q = SUB_TAIL.exec(name.slice(k + 1, l));
+        if (q && (l === n || SUB_END.has(name[l]!))) {
+          text += name.slice(i, k + 1);
+          flush();
+          out.push({ kind: 'sub', id: q[1]!, suffix: q[2]! });
+          i = l;
+        }
       }
     }
   }

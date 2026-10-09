@@ -137,11 +137,15 @@ describe('several regions through the kernel', () => {
       expect(r.props.valid).toBe(true);
       expect(r.body.solids).toBe(3);
       expect(r.props.volume).toBeCloseTo((40 * 30 + Math.PI * 25 + 200) * 5, 6);
-      // Regions numbered by their edge ids: the rectangle (e1..e4), the disk (e9), the triangle.
+      // Caps named after each region's outer loop: the rectangle (e1..e4), the disk (e9), the
+      // triangle (t1..t3).
       expect(r.names).toEqual(
         [
           ...['e1', 'e2', 'e3', 'e4', 'e9', 't1', 't2', 't3'].map((e) => `extrude#1:side:${e}`),
-          ...[1, 2, 3].flatMap((i) => [`extrude#1:cap:start#${i}`, `extrude#1:cap:end#${i}`]),
+          ...['e1', 'e9', 't1'].flatMap((e) => [
+            `extrude#1:cap:start:${e}`,
+            `extrude#1:cap:end:${e}`,
+          ]),
         ].sort(),
       );
     } finally {
@@ -162,8 +166,8 @@ describe('several regions through the kernel', () => {
       expect(r.body.solids).toBe(1);
       expect(r.props.volume).toBeCloseTo(40 * 30 * 5, 6);
       expect(r.names.filter((n) => n.includes(':cap:'))).toEqual([
-        '(extrude#1:cap:end#1+extrude#1:cap:end#2)',
-        '(extrude#1:cap:start#1+extrude#1:cap:start#2)',
+        '(extrude#1:cap:end:e1+extrude#1:cap:end:e9)',
+        '(extrude#1:cap:start:e1+extrude#1:cap:start:e9)',
       ]);
     } finally {
       k.release(r.body.shape);

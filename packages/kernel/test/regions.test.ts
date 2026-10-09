@@ -2,7 +2,8 @@
 // extrude and revolve features:
 //
 // - two separate rectangles in one extrude: the summed volume, both sets of named sides, caps
-//   numbered by region (`cap:start#k`) in an order that does not depend on the input order;
+//   named after each region's outer loop (`cap:start:a1`), not after the input order, with the
+//   ordinal names they had before (`cap:start#k`) still resolving to the same faces;
 // - a ring (a region with a hole) plus a disk inside its hole, apart and touching;
 // - overlapping regions (glyphs that touch after kerning) fuse into one clean solid;
 // - Bezier-bounded regions whose volumes match the analytic area of the curve times the depth;
@@ -21,7 +22,7 @@ import {
 } from '../src/features';
 import { XY, circle, rectangle } from '../src/fixtures/parts';
 import type { Kernel } from '../src/kernel';
-import type { FaceName } from '../src/naming';
+import { resolve, type FaceName, type TopoRef } from '../src/naming';
 import { createNodeKernel } from '../src/node';
 import type { ProfileEntity, ProfileLoop, Vec2, Vec3 } from '../src/types';
 
@@ -85,10 +86,11 @@ function bezierLoop(points: Vec2[], id = 'b1', line = 'l1'): ProfileEntity[] {
 const sub = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 
 describe('several regions in one extrude', () => {
-  it('two separate rectangles: summed volume, two sets of sides, numbered caps', () => {
+  it('two separate rectangles: summed volume, two sets of sides, caps named after their loops', () => {
     const a = rectangle(0, 0, 10, 5, ids('a'));
     const b = rectangle(20, 0, 23, 4, ids('b'));
-    // Given b first: the caps are numbered by edge id, so a's are still #1.
+    // Given b first: the caps are named by edge id (and their former ordinals came from edge
+    // ids too, so a's were #1).
     const r = only(extrude(regions([b], [a]), 2));
     try {
       expect(r.props.valid).toBe(true);
@@ -98,28 +100,163 @@ describe('several regions in one extrude', () => {
         [
           ...ids('a').map((id) => `extrude#1:side:${id}`),
           ...ids('b').map((id) => `extrude#1:side:${id}`),
-          'extrude#1:cap:start#1',
-          'extrude#1:cap:start#2',
-          'extrude#1:cap:end#1',
-          'extrude#1:cap:end#2',
+          'extrude#1:cap:start:a1',
+          'extrude#1:cap:start:b1',
+          'extrude#1:cap:end:a1',
+          'extrude#1:cap:end:b1',
         ].sort(),
       );
-      // Region 1 is the rectangle with the `a` edges, at x 0 to 10.
-      expect(r.byName('extrude#1:cap:end#1').centroid).toEqual([
+      // The rectangle with the `a` edges is at x 0 to 10.
+      expect(r.byName('extrude#1:cap:end:a1').centroid).toEqual([
         expect.closeTo(5, 9),
         expect.closeTo(2.5, 9),
         expect.closeTo(2, 9),
       ]);
-      expect(r.byName('extrude#1:cap:start#2').centroid[0]).toBeCloseTo(21.5, 9);
-      // Cap pieces descend from the plain cap name and are positional.
-      const cap = r.names.find((f) => f.name === 'extrude#1:cap:end#2')!;
-      expect(cap.lineage).toEqual(['extrude#1:cap:end#2', 'extrude#1:cap:end']);
-      expect(cap.fragile).toBe(true);
+      expect(r.byName('extrude#1:cap:start:b1').centroid[0]).toBeCloseTo(21.5, 9);
+      // A region cap is not positional; its former ordinal name is an alias, and both it and
+      // the plain cap name are in its lineage.
+      const cap = r.names.find((f) => f.name === 'extrude#1:cap:end:b1')!;
+      expect(cap).toEqual({
+        name: 'extrude#1:cap:end:b1',
+        lineage: ['extrude#1:cap:end:b1', 'extrude#1:cap:end#2', 'extrude#1:cap:end'],
+        fragile: false,
+        aliases: ['extrude#1:cap:end#2'],
+      });
       // Sides of each rectangle are where its edges are.
       expect(r.byName('extrude#1:side:b2').centroid[0]).toBeCloseTo(23, 9);
       expect(r.byName('extrude#1:side:a4').centroid[0]).toBeCloseTo(0, 9);
     } finally {
       r.done();
+    }
+  });
+
+  it('boss tops keep their names when the circles change size, or one is removed', () => {
+    // Four bosses of one extrude, as in the heat-set inserts scenario: each top is named after
+    // its circle, like its side, so no edit to another boss moves a reference to it.
+    const bosses = (radii: number[]) =>
+      radii.map((radius, i) => [circle([i * 10, 0], radius, `c${i + 1}`)]);
+    const tops = (r: ReturnType<typeof only>) =>
+      Object.fromEntries(
+        r.names
+          .map((f, i) => [f, r.topology.faces[i]!] as const)
+          .filter(([f]) => f.name.includes(':cap:end'))
+          .map(([f, t]) => [f.name, [Math.round(t.centroid[0]), Math.round(t.area * 100)]]),
+      );
+    const small = only(extrude(regions(...bosses([1, 2, 3, 4])), 5));
+    const swapped = only(extrude(regions(...bosses([4, 3, 2, 1])), 5));
+    const three = only(extrude(regions(...bosses([1, 2, 3, 4]).filter((_, i) => i !== 1)), 5));
+    try {
+      const area = (r: number) => Math.round(Math.PI * r * r * 100);
+      expect(tops(small)).toEqual({
+        'extrude#1:cap:end:c1': [0, area(1)],
+        'extrude#1:cap:end:c2': [10, area(2)],
+        'extrude#1:cap:end:c3': [20, area(3)],
+        'extrude#1:cap:end:c4': [30, area(4)],
+      });
+      expect(tops(swapped)).toEqual({
+        'extrude#1:cap:end:c1': [0, area(4)],
+        'extrude#1:cap:end:c2': [10, area(3)],
+        'extrude#1:cap:end:c3': [20, area(2)],
+        'extrude#1:cap:end:c4': [30, area(1)],
+      });
+      expect(tops(three)).toEqual({
+        'extrude#1:cap:end:c1': [0, area(1)],
+        'extrude#1:cap:end:c3': [20, area(3)],
+        'extrude#1:cap:end:c4': [30, area(4)],
+      });
+      expect(small.names.filter((f) => f.name.includes(':cap:')).every((f) => !f.fragile)).toBe(
+        true,
+      );
+    } finally {
+      small.done();
+      swapped.done();
+      three.done();
+    }
+  });
+
+  it('references stored with the former ordinal cap names resolve to the same faces', () => {
+    const r = only(
+      extrude(
+        regions([circle([20, 0], 3, 'c3')], [circle([0, 0], 1, 'c1')], [circle([10, 0], 2, 'c2')]),
+        5,
+      ),
+    );
+    try {
+      const names = r.body.names!;
+      const at = (ref: TopoRef) => {
+        const res = resolve(names, r.topology, ref);
+        if (!res.ok) throw new Error(JSON.stringify(res));
+        return res;
+      };
+      // Regions were numbered by `sweepRegionOrder` (c1, c2, c3): #k is still the k-th circle.
+      for (const [k, x] of [
+        [1, 0],
+        [2, 10],
+        [3, 20],
+      ] as const) {
+        const old = at({ face: `extrude#1:cap:end#${k}` });
+        expect(old).toMatchObject({ via: 'exact', fragile: true });
+        expect(r.topology.faces[old.index - 1]!.centroid[0]).toBeCloseTo(x, 9);
+        expect(names.faces[old.index - 1]!.name).toBe(`extrude#1:cap:end:c${k}`);
+        expect(at({ face: `extrude#1:cap:start#${k}` }).index).toBe(
+          at({ face: `extrude#1:cap:start:c${k}` }).index,
+        );
+        // An edge between the old cap name and a side, and the same edge by its new name.
+        const edge = at({ faces: [`extrude#1:cap:end#${k}`, `extrude#1:side:c${k}`] });
+        expect(edge).toMatchObject({ via: 'exact', fragile: true });
+        expect(edge.index).toBe(
+          at({ faces: [`extrude#1:cap:end:c${k}`, `extrude#1:side:c${k}`] }).index,
+        );
+      }
+    } finally {
+      r.done();
+    }
+  });
+
+  it('old round and corner names built from a former cap name resolve exactly', () => {
+    const OLD = 'extrude#1:cap:end#1';
+    const NEW = 'extrude#1:cap:end:a1';
+    const [a1, a2] = ['extrude#1:side:a1', 'extrude#1:side:a2'];
+    const base = () =>
+      extrude(regions([rectangle(0, 0, 10, 5, ids('a'))], [rectangle(20, 0, 23, 4, ids('b'))]), 2);
+    const fillet = (nameByFaces: boolean, edges: string[][]) => {
+      const b = base();
+      expect(b.errors).toEqual([]);
+      const body = b.bodies[0]!;
+      const out = applyFeature(k, [{ id: body.id, shape: body.shape }], {
+        kind: 'fillet',
+        id: 'fillet#2',
+        radius: 0.5,
+        nameByFaces,
+        // Stored with the former cap name, as an older document has them.
+        edges: edges.map((faces, i) => ({ id: `r${i + 1}`, ref: { faces } })),
+      });
+      k.release(body.shape);
+      return only(out);
+    };
+    const exactly = (r: ReturnType<typeof only>, old: string, name: string) => {
+      const res = resolve(r.body.names!, r.topology, { face: old });
+      expect(res).toMatchObject({ ok: true, via: 'exact', fragile: true });
+      expect(r.names[(res as { index: number }).index - 1]!.name).toBe(name);
+    };
+    // A round named by the faces of its edge (`nameByFaces`, as script fillets and tangent
+    // chains are).
+    const round = fillet(true, [[OLD, a1]]);
+    try {
+      exactly(round, `fillet#2:round:${OLD}&${a1}`, `fillet#2:round:${NEW}&${a1}`);
+    } finally {
+      round.done();
+    }
+    // A corner blend named by the faces around its vertex.
+    const corner = fillet(false, [
+      [OLD, a1],
+      [OLD, a2],
+      [a1, a2],
+    ]);
+    try {
+      exactly(corner, `fillet#2:corner:${OLD}&${a1}&${a2}`, `fillet#2:corner:${NEW}&${a1}&${a2}`);
+    } finally {
+      corner.done();
     }
   });
 
@@ -152,20 +289,20 @@ describe('several regions in one extrude', () => {
       expect(r.props.valid).toBe(true);
       expect(r.props.volume / (Math.PI * (100 - 36 + 16) * 3)).toBeCloseTo(1, 9);
       expect(r.body.solids).toBe(2);
-      // The ring's outer loop (c1) sorts before the disk's (c3): it is region 1.
+      // Each region's caps after its outer loop: the ring's c1, the disk's c3.
       expect(sorted(r.names)).toEqual(
         [
-          'extrude#1:cap:end#1',
-          'extrude#1:cap:end#2',
-          'extrude#1:cap:start#1',
-          'extrude#1:cap:start#2',
+          'extrude#1:cap:end:c1',
+          'extrude#1:cap:end:c3',
+          'extrude#1:cap:start:c1',
+          'extrude#1:cap:start:c3',
           'extrude#1:side:c1',
           'extrude#1:side:c2',
           'extrude#1:side:c3',
         ].sort(),
       );
-      expect(r.byName('extrude#1:cap:end#1').area).toBeCloseTo(Math.PI * 64, 6);
-      expect(r.byName('extrude#1:cap:end#2').area).toBeCloseTo(Math.PI * 16, 6);
+      expect(r.byName('extrude#1:cap:end:c1').area).toBeCloseTo(Math.PI * 64, 6);
+      expect(r.byName('extrude#1:cap:end:c3').area).toBeCloseTo(Math.PI * 16, 6);
     } finally {
       r.done();
     }
@@ -180,11 +317,16 @@ describe('several regions in one extrude', () => {
       expect(r.props.valid).toBe(true);
       expect(r.props.volume / (Math.PI * 100 * 3)).toBeCloseTo(1, 9);
       expect(r.body.solids).toBe(1);
-      // The shared side is gone; the caps of both regions are unified into one face each.
+      // The shared side is gone; the caps of both regions are unified into one face each. The
+      // disk's outer loop is the ring's hole, c2: only outer loops count for a cap's name.
       expect(sorted(r.names)).toEqual([
-        '(extrude#1:cap:end#1+extrude#1:cap:end#2)',
-        '(extrude#1:cap:start#1+extrude#1:cap:start#2)',
+        '(extrude#1:cap:end:c1+extrude#1:cap:end:c2)',
+        '(extrude#1:cap:start:c1+extrude#1:cap:start:c2)',
         'extrude#1:side:c1',
+      ]);
+      // The merge keeps the name it had before as an alias.
+      expect(r.names.find((f) => f.name.startsWith('(extrude#1:cap:end'))!.aliases).toEqual([
+        '(extrude#1:cap:end#1+extrude#1:cap:end#2)',
       ]);
     } finally {
       r.done();
@@ -209,8 +351,8 @@ describe('several regions in one extrude', () => {
         (f) => f.surface === 'plane' && Math.abs(f.centroid[2] - 1.5) < 1e-9,
       );
       expect(tops).toHaveLength(2);
-      expect(r.byName('(extrude#1:cap:end#1+extrude#1:cap:end#2)').area).toBeCloseTo(56, 6);
-      expect(r.byName('extrude#1:cap:end#3').area).toBeCloseTo(4, 6);
+      expect(r.byName('(extrude#1:cap:end:a1+extrude#1:cap:end:b1)').area).toBeCloseTo(56, 6);
+      expect(r.byName('extrude#1:cap:end:c1').area).toBeCloseTo(4, 6);
     } finally {
       r.done();
     }
@@ -244,8 +386,8 @@ describe('several regions in one extrude', () => {
       expect(r.props.valid).toBe(true);
       expect(r.props.volume).toBeCloseTo(600 + 24 + Math.PI * 9, 6);
       expect(r.body.solids).toBe(1);
-      expect(r.byName('extrude#2:cap:end#1').area).toBeCloseTo(24, 6);
-      expect(r.byName('extrude#2:cap:end#2').area).toBeCloseTo(Math.PI * 9, 6);
+      expect(r.byName('extrude#2:cap:end:a1').area).toBeCloseTo(24, 6);
+      expect(r.byName('extrude#2:cap:end:c1').area).toBeCloseTo(Math.PI * 9, 6);
       expect(r.byName('extrude#2:side:c1').surface).toBe('cylinder');
     } finally {
       r.done();
@@ -575,8 +717,8 @@ describe('Bezier profile edges', () => {
       const expected = area(outer) - area(inner) + 32;
       expect(Math.abs(r.props.volume / expected - 1)).toBeLessThan(1e-6);
       expect(r.body.solids).toBe(2);
-      // The O's outer loop (oa, ob) sorts before the bar's (r1..r4).
-      expect(r.byName('extrude#1:cap:end#1').area).toBeCloseTo(area(outer) - area(inner), 6);
+      // The O's caps are named after its outer loop (oa, ob), by its first edge id.
+      expect(r.byName('extrude#1:cap:end:oa').area).toBeCloseTo(area(outer) - area(inner), 6);
       for (const id of ['oa', 'ob', 'ia', 'ib']) r.byName(`extrude#1:side:${id}`);
     } finally {
       r.done();
@@ -631,7 +773,7 @@ describe('several regions in one revolve', () => {
     angle,
   });
 
-  it('two rings, a quarter turn: Pappus volumes and numbered caps', () => {
+  it('two rings, a quarter turn: Pappus volumes and caps named after their loops', () => {
     const profile: SketchProfile = {
       frame,
       regions: [
@@ -646,14 +788,14 @@ describe('several regions in one revolve', () => {
       expect(r.props.volume / expected).toBeCloseTo(1, 9);
       expect(r.body.solids).toBe(2);
       expect(sorted(r.names).filter((n) => n.includes(':cap:'))).toEqual([
-        'revolve#1:cap:end#1',
-        'revolve#1:cap:end#2',
-        'revolve#1:cap:start#1',
-        'revolve#1:cap:start#2',
+        'revolve#1:cap:end:a1',
+        'revolve#1:cap:end:b1',
+        'revolve#1:cap:start:a1',
+        'revolve#1:cap:start:b1',
       ]);
-      // Region 1 is the inner rectangle (edges a1..a4), area 10.
-      expect(r.byName('revolve#1:cap:start#1').area).toBeCloseTo(10, 9);
-      expect(r.byName('revolve#1:cap:start#2').area).toBeCloseTo(6, 9);
+      // The inner rectangle (edges a1..a4) has area 10.
+      expect(r.byName('revolve#1:cap:start:a1').area).toBeCloseTo(10, 9);
+      expect(r.byName('revolve#1:cap:start:b1').area).toBeCloseTo(6, 9);
     } finally {
       r.done();
     }

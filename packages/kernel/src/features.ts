@@ -45,12 +45,15 @@ import {
   isUnnamed,
   nameShape,
   nameSweep,
+  namedWithFormer,
   pickEdge,
   pickFace,
   prefixFaces,
   propagateFaces,
   refName,
   resolve,
+  sameFaces,
+  sweepRegionKeys,
   sweepRegionOrder,
   threadFace as threadFaceName,
   toolFace,
@@ -61,6 +64,7 @@ import {
   type GeneratedNamer,
   type Names,
   type Resolution,
+  type SweepRegion,
   type TopoRef,
   type Via,
 } from './naming';
@@ -1832,9 +1836,11 @@ function extrudeTool(
 /**
  * Sweep every region of a profile on its own and group the results: the
  * groups, gathered by `gatherTools`, are the tool. One region is swept as is
- * (`<id>:cap:start`, `<id>:cap:end`). Several are numbered by
- * `sweepRegionOrder` and their caps named `<id>:cap:start#k` and
- * `<id>:cap:end#k`; sides keep `<id>:side:<edge id>`. Regions whose
+ * (`<id>:cap:start`, `<id>:cap:end`). With several, each region's caps are
+ * named after its outer loop, `<id>:cap:start:<edge id>` and
+ * `<id>:cap:end:<edge id>` (`sweepRegionKeys`), with the ordinal names they
+ * had before (`<id>:cap:end#k`, k from `sweepRegionOrder`) kept as aliases;
+ * sides keep `<id>:side:<edge id>`. Regions whose
  * solids' bounding boxes meet (adjacent regions, glyphs that touch, a revolve
  * whose regions sweep through each other) are fused in one boolean per group
  * of such regions, with coplanar neighbours unified, so a cap or side that
@@ -1844,16 +1850,16 @@ function extrudeTool(
 function sweepRegions(
   ctx: Ctx,
   profile: SketchProfile,
-  sweep: (loops: readonly ProfileLoop[], region: number | undefined) => Made,
+  sweep: (loops: readonly ProfileLoop[], region: SweepRegion | undefined) => Made,
 ): Made[] {
   const regions = profileRegions(profile);
   if (regions.length === 1) return [sweep(regions[0]!, undefined)];
-  const order = sweepRegionOrder(
-    regions.map((loops) => loops.map((l) => l.entities.map((e) => e.id ?? ''))),
-  );
+  const ids = regions.map((loops) => loops.map((l) => l.entities.map((e) => e.id ?? '')));
+  const order = sweepRegionOrder(ids);
+  const keys = sweepRegionKeys(ids);
   const made = order.map((i, k) => {
     try {
-      return sweep(regions[i]!, k + 1);
+      return sweep(regions[i]!, { ordinal: k + 1, key: keys[i]! });
     } catch (error) {
       // Say which region a bad loop is in: `loop 0` alone is ambiguous with several.
       if (
@@ -2702,12 +2708,22 @@ function blendNamer(
   byFaces = false,
 ): GeneratedNamer {
   return (entry) => {
+    // Names built from face names carry the names they had before a face was renamed
+    // (`namedWithFormer`), so a stored reference to the old round or corner still resolves.
+    const { index } = entry.input;
     if (entry.input.kind === 'edge') {
-      const ref = byFaces ? undefined : refOfEdge.get(entry.input.index);
-      return `${ctx.id}:${role}:${ref ?? edgeFacesName(body.names.faces, body.topology, entry.input.index)}`;
+      const ref = byFaces ? undefined : refOfEdge.get(index);
+      if (ref !== undefined) return `${ctx.id}:${role}:${ref}`;
+      return namedWithFormer(
+        body.names.faces,
+        (faces) => `${ctx.id}:${role}:${edgeFacesName(faces, body.topology, index)}`,
+      );
     }
     if (entry.input.kind === 'vertex') {
-      return `${ctx.id}:corner:${vertexName(body.names.faces, body.topology, entry.input.index)}`;
+      return namedWithFormer(
+        body.names.faces,
+        (faces) => `${ctx.id}:corner:${vertexName(faces, body.topology, index)}`,
+      );
     }
     return null;
   };
@@ -2829,10 +2845,17 @@ function shellBody(ctx: Ctx, body: Body, faces: readonly number[], input: ShellI
   const result = temp(ctx, ctx.k.shell(body.shape, faces, input.thickness, outward));
   const namer: GeneratedNamer = (entry, face) => {
     if (face !== null) return `${ctx.id}:offset:${face.name}`;
+    const { index } = entry.input;
     if (entry.input.kind === 'edge') {
-      return `${ctx.id}:offset:${edgeFacesName(body.names.faces, body.topology, entry.input.index)}`;
+      return namedWithFormer(
+        body.names.faces,
+        (faces) => `${ctx.id}:offset:${edgeFacesName(faces, body.topology, index)}`,
+      );
     }
-    return `${ctx.id}:offset:${vertexName(body.names.faces, body.topology, entry.input.index)}`;
+    return namedWithFormer(
+      body.names.faces,
+      (faces) => `${ctx.id}:offset:${vertexName(faces, body.topology, index)}`,
+    );
   };
   const made = checked(
     ctx,
@@ -2906,7 +2929,13 @@ function hollow(ctx: Ctx, body: Body, thickness: number, outward: boolean): Made
     faces: moved.faces.map((f) => {
       // A placeholder stays one: the name keeps its `?`.
       const name = `${ctx.id}:offset:${f.name}`;
-      return { name, lineage: [name], fragile: f.fragile };
+      const aliases = f.aliases?.map((a) => `${ctx.id}:offset:${a}`);
+      return {
+        name,
+        lineage: [name, ...(aliases ?? [])],
+        fragile: f.fragile,
+        ...(aliases === undefined ? {} : { aliases }),
+      };
     }),
   };
   const b = k.properties(body.shape);
@@ -3399,13 +3428,9 @@ export function resolveVertex(names: Names, topology: Topology, ref: VertexRef):
   if (unnamed.length > 0) return { ok: false, status: 'lost', missing: unnamed };
   const around = (v: VertexInfo) => [...new Set(v.faces)].map((f) => names.faces[f - 1]!);
   let via: Via = 'exact';
+  // By name, or by a former name (`aliases`) of a face renamed since the reference was stored.
   let candidates = topology.vertices
-    .filter((v) => {
-      const have = around(v)
-        .map((f) => f.name)
-        .sort();
-      return have.length === wanted.length && have.every((n, i) => n === wanted[i]);
-    })
+    .filter((v) => sameFaces(around(v), wanted))
     .map((v) => v.index);
   if (candidates.length === 0) {
     via = 'descendant';

@@ -83,6 +83,7 @@ export type {
 } from './features';
 export {
   UNNAMED_PREFIX,
+  answersTo,
   derivedName,
   describeFailure,
   edgeRefName,
@@ -98,6 +99,7 @@ export {
   resolveEdge,
   resolveFace,
   splitParent,
+  sweepRegionKeys,
   sweepRegionOrder,
   threadFace,
   toolFace,
