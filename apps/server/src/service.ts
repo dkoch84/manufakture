@@ -104,6 +104,21 @@ interface BranchState {
   used: number;
 }
 
+/** An entry's size as the store keeps it (JSON), for the agent log quota. */
+function entryBytes(entry: unknown): number {
+  return Buffer.byteLength(JSON.stringify(entry));
+}
+
+/** A checkpoint snapshot's size as the store keeps it (document and high-water mark, as JSON). */
+function snapshotBytes(s: { document: ManufaktureDocument; highWater: CounterTable }): number {
+  return (
+    Buffer.byteLength(JSON.stringify(s.document)) + Buffer.byteLength(JSON.stringify(s.highWater))
+  );
+}
+
+/** How many entries one read of a branch's log takes when its stored size is counted. */
+const LOG_COUNT_PAGE = 1_000;
+
 export function sha256(bytes: Buffer | string): Buffer {
   return createHash('sha256').update(bytes).digest();
 }
@@ -172,6 +187,17 @@ export class SyncService {
     string,
     { clientId: string; at: number; tokenId: string | null }
   >();
+  /**
+   * Stored log bytes per branch (`documentId\u0000branch`), for the agent log quota
+   * (`maxAgentLogBytes`): the agent token that made the branch (null: none) and, once counted for
+   * that token's quota, the bytes of its entries and checkpoint snapshots. Counted from the store on
+   * first use and kept up to date as submits commit, so it always matches what is stored; a
+   * restart only means counting again.
+   */
+  private readonly logUse = new Map<
+    string,
+    { tokenId: string | null; bytes: number | undefined; used: number }
+  >();
   private lastSweep: number;
   /**
    * Agent tokens revoked while this process runs. The transport checks the token once, when a
@@ -210,6 +236,9 @@ export class SyncService {
     }
     for (const [key, w] of this.writers) {
       if (t - w.at >= this.limits.writerLeaseMs) this.writers.delete(key);
+    }
+    for (const [key, u] of this.logUse) {
+      if (t - u.used >= this.idleEvictMs) this.logUse.delete(key);
     }
   }
 
@@ -606,6 +635,19 @@ export class SyncService {
         `A client keeps at most ${this.limits.maxRowsPerClient} entries in flight; resolve older ones first`,
       );
     }
+    // An agent token's log quota, before the rate bucket so a refused submit costs no tokens:
+    // here on the entries alone, and again while judging, with the snapshots they make. Entries
+    // with a recorded outcome are answered from it and store nothing, so a resend of only those
+    // (to get its answers back) is never refused.
+    let logRoom: number | undefined;
+    if (principal.kind === 'agent') {
+      let incoming = 0;
+      for (const e of entries) if (!recorded(e.clientSeq)) incoming += entryBytes(e);
+      if (incoming > 0) {
+        logRoom = this.limits.maxAgentLogBytes - this.agentLogUsed(documentId, principal.tokenId);
+        if (incoming > logRoom) return this.logQuotaError();
+      }
+    }
     const bucket = this.bucket(documentId, clientId);
     const taken = bucket.take(entries.length);
     if (!taken.ok) {
@@ -623,9 +665,15 @@ export class SyncService {
       client.floor,
       newFloor,
       entries,
+      logRoom,
     );
   }
 
+  /**
+   * Judges a submit's entries and commits the outcome. `logRoom` (an agent token's submit): the
+   * bytes of log it may still store; a submit whose accepted entries and checkpoint snapshots
+   * need more is refused whole, before anything is written.
+   */
   private judge(
     documentId: string,
     branch: string,
@@ -635,8 +683,14 @@ export class SyncService {
     previousFloor: number,
     floor: number,
     entries: SubmitWrite['accepted'][number]['entry'][],
+    logRoom?: number,
   ): Reply {
     const started = this.now();
+    // Stored log bytes this submit adds, measured when a quota applies or the branch's count is
+    // cached (an agent's branch: the owner's entries there count against its quota too).
+    const use = this.logUse.get(`${documentId}\u0000${branch}`);
+    const measure = logRoom !== undefined || use?.bytes !== undefined;
+    let added = 0;
     let head = b.head;
     let highWater = b.highWater;
     let rev = b.rev;
@@ -688,6 +742,12 @@ export class SyncService {
           highWater = j.highWater;
           accepted.push({ rev, entry });
           if (rev % CHECKPOINT_EVERY === 0) snapshots.push({ rev, document: head, highWater });
+          if (measure) {
+            added += entryBytes(entry);
+            if (rev % CHECKPOINT_EVERY === 0) added += snapshotBytes(snapshots.at(-1)!);
+            // Nothing is written yet: stop at the first excess, before measuring more snapshots.
+            if (logRoom !== undefined && added > logRoom) return this.logQuotaError();
+          }
           const o: Outcome = { kind: 'accepted', rev };
           fresh.set(entry.clientSeq, o);
           outcomes.push({ clientSeq: entry.clientSeq, outcome: o });
@@ -713,6 +773,7 @@ export class SyncService {
         ...(accepted.length > 0 && { head: { rev, highWater } }),
         snapshots,
       });
+    if (use?.bytes !== undefined) use.bytes += added;
     b.head = head;
     b.highWater = highWater;
     b.rev = rev;
@@ -912,6 +973,70 @@ export class SyncService {
       status: 201,
       record: createdBy === null ? v : { ...v, createdBy },
     };
+  }
+
+  /**
+   * The log an agent token has stored in a document: the entries and checkpoint snapshots of
+   * every branch of it the token made (`maxAgentLogBytes`), open or closed, whoever wrote them.
+   * Counted from the store, so a fresh client id (the rate bucket is per client) or a restart does
+   * not reset it.
+   */
+  private agentLogUsed(documentId: string, tokenId: string): number {
+    let used = 0;
+    for (const r of this.store.listBranches(documentId)) {
+      used += this.agentLogBytes(documentId, r.id, tokenId);
+    }
+    return used;
+  }
+
+  private logQuotaError(): ReplyError {
+    return fail(
+      403,
+      'log-quota',
+      `An agent token stores at most ${this.limits.maxAgentLogBytes} bytes of log in a document; the owner deletes its closed branches to make room`,
+    );
+  }
+
+  /**
+   * The stored log bytes of a branch if agent token `tokenId` made it; 0 otherwise. Only the
+   * token's own branches are counted (and cached); another's is only noted as not its.
+   */
+  private agentLogBytes(documentId: string, branch: string, tokenId: string): number {
+    const key = `${documentId}\u0000${branch}`;
+    const t = this.now();
+    let use = this.logUse.get(key);
+    if (use === undefined) {
+      use = {
+        tokenId: this.store.branchMeta(documentId, branch)?.createdBy ?? null,
+        bytes: undefined,
+        used: t,
+      };
+      this.logUse.set(key, use);
+    }
+    use.used = t;
+    if (use.tokenId !== tokenId) return 0;
+    use.bytes ??= this.storedLogBytes(documentId, branch);
+    return use.bytes;
+  }
+
+  /**
+   * What a branch's log takes in the store: every entry, and every checkpoint snapshot after the
+   * one it started with (that one is the version it started from, not the writer's).
+   */
+  private storedLogBytes(documentId: string, branch: string): number {
+    let bytes = 0;
+    let head = 0;
+    for (;;) {
+      const page = this.store.entries(documentId, branch, head, LOG_COUNT_PAGE);
+      if (page.length === 0) break;
+      for (const p of page) bytes += entryBytes(p.entry);
+      head = page[page.length - 1]!.rev;
+    }
+    for (let rev = CHECKPOINT_EVERY; rev <= head; rev += CHECKPOINT_EVERY) {
+      const snapshot = this.store.snapshotAt(documentId, branch, rev);
+      if (snapshot?.rev === rev) bytes += snapshotBytes(snapshot);
+    }
+    return bytes;
   }
 
   /** Whether one more version fits: the document's limit, and an agent token's own. */
@@ -1124,6 +1249,7 @@ export class SyncService {
         ? { ok: true, status: 200, record: now.record }
         : fail(409, 'branch-exists', 'Another branch has this id');
     }
+    this.logUse.delete(`${documentId}\u0000${r.id}`);
     return { ok: true, status: 201, record: r };
   }
 
@@ -1273,6 +1399,7 @@ export class SyncService {
     const key = `${documentId}\u0000${branch}`;
     this.branches.delete(key);
     this.writers.delete(key);
+    this.logUse.delete(key);
     return { ok: true, status: 204 };
   }
 

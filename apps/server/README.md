@@ -52,39 +52,40 @@ Everything comes from environment variables.
 
 Limits (all positive integers; `src/limits.ts` documents each):
 
-| Variable                                    | Default                                     |
-| ------------------------------------------- | ------------------------------------------- |
-| `MANUFAKTURE_MAX_BODY_BYTES`                | 40 MiB                                      |
-| `MANUFAKTURE_MAX_MESSAGE_BYTES`             | 40 MiB                                      |
-| `MANUFAKTURE_MAX_ENTRY_BYTES`               | 12 MiB (under the app's 16 MiB)             |
-| `MANUFAKTURE_MAX_JSON_DEPTH`                | 64                                          |
-| `MANUFAKTURE_MAX_JSON_NODES`                | 1,000,000                                   |
-| `MANUFAKTURE_MAX_CREATED_IDS_PER_SUBMIT`    | 100,000                                     |
-| `MANUFAKTURE_MAX_BLOB_BYTES`                | 20 MiB (core's `MAX_IMPORT_BYTES`)          |
-| `MANUFAKTURE_MAX_BLOB_TOTAL_BYTES`          | 10 GiB                                      |
-| `MANUFAKTURE_MAX_DOCUMENTS`                 | 10,000                                      |
-| `MANUFAKTURE_MAX_CLIENTS_PER_DOCUMENT`      | 256                                         |
-| `MANUFAKTURE_MAX_ROWS_PER_CLIENT`           | 20,000                                      |
-| `MANUFAKTURE_ENTRIES_PER_MINUTE`            | 20,000 (at least 1,000)                     |
-| `MANUFAKTURE_MESSAGES_PER_MINUTE`           | 1,200                                       |
-| `MANUFAKTURE_VALIDATION_BUDGET_MS`          | 2,000                                       |
-| `MANUFAKTURE_MAX_CONNECTIONS`               | 256                                         |
-| `MANUFAKTURE_MAX_SOCKET_BUFFER_BYTES`       | 64 MiB                                      |
-| `MANUFAKTURE_HELLO_TIMEOUT_MS`              | 10,000                                      |
-| `MANUFAKTURE_MAX_VERSIONS_PER_DOCUMENT`     | 2,000                                       |
-| `MANUFAKTURE_MAX_BRANCHES_PER_DOCUMENT`     | 100                                         |
-| `MANUFAKTURE_MAX_PULL_BYTES`                | 8 MiB (at least one entry a pull)           |
-| `MANUFAKTURE_REQUEST_TIMEOUT_MS`            | 120,000 (a whole HTTP request)              |
-| `MANUFAKTURE_CONNECTION_TIMEOUT_MS`         | 300,000 (an idle connection)                |
-| `MANUFAKTURE_KEEP_ALIVE_TIMEOUT_MS`         | 72,000 (above the proxy's own)              |
-| `MANUFAKTURE_WRITER_LEASE_MS`               | 120,000 (one writer per agent branch)       |
-| `MANUFAKTURE_MAX_BUNDLE_BYTES`              | 64 MiB + 64 KiB (one review bundle request) |
-| `MANUFAKTURE_MAX_BUNDLE_BYTES_PER_DOCUMENT` | 512 MiB (a document's review bundles)       |
-| `MANUFAKTURE_MAX_BUNDLE_TOTAL_BYTES`        | 4 GiB (every review bundle together)        |
-| `MANUFAKTURE_MAX_AGENT_BRANCHES_PER_TOKEN`  | 20 (under way, per document)                |
-| `MANUFAKTURE_MAX_AGENT_VERSIONS_PER_TOKEN`  | 200 (per document)                          |
-| `MANUFAKTURE_MAX_AGENT_BLOB_BYTES`          | 1 GiB (blobs one agent token stored)        |
-| `MANUFAKTURE_MAX_AGENT_BUNDLE_BYTES`        | 256 MiB (bundles one agent token stored)    |
+| Variable                                    | Default                                            |
+| ------------------------------------------- | -------------------------------------------------- |
+| `MANUFAKTURE_MAX_BODY_BYTES`                | 40 MiB                                             |
+| `MANUFAKTURE_MAX_MESSAGE_BYTES`             | 40 MiB                                             |
+| `MANUFAKTURE_MAX_ENTRY_BYTES`               | 12 MiB (under the app's 16 MiB)                    |
+| `MANUFAKTURE_MAX_JSON_DEPTH`                | 64                                                 |
+| `MANUFAKTURE_MAX_JSON_NODES`                | 1,000,000                                          |
+| `MANUFAKTURE_MAX_CREATED_IDS_PER_SUBMIT`    | 100,000                                            |
+| `MANUFAKTURE_MAX_BLOB_BYTES`                | 20 MiB (core's `MAX_IMPORT_BYTES`)                 |
+| `MANUFAKTURE_MAX_BLOB_TOTAL_BYTES`          | 10 GiB                                             |
+| `MANUFAKTURE_MAX_DOCUMENTS`                 | 10,000                                             |
+| `MANUFAKTURE_MAX_CLIENTS_PER_DOCUMENT`      | 256                                                |
+| `MANUFAKTURE_MAX_ROWS_PER_CLIENT`           | 20,000                                             |
+| `MANUFAKTURE_ENTRIES_PER_MINUTE`            | 20,000 (at least 1,000)                            |
+| `MANUFAKTURE_MESSAGES_PER_MINUTE`           | 1,200                                              |
+| `MANUFAKTURE_VALIDATION_BUDGET_MS`          | 2,000                                              |
+| `MANUFAKTURE_MAX_CONNECTIONS`               | 256                                                |
+| `MANUFAKTURE_MAX_SOCKET_BUFFER_BYTES`       | 64 MiB                                             |
+| `MANUFAKTURE_HELLO_TIMEOUT_MS`              | 10,000                                             |
+| `MANUFAKTURE_MAX_VERSIONS_PER_DOCUMENT`     | 2,000                                              |
+| `MANUFAKTURE_MAX_BRANCHES_PER_DOCUMENT`     | 100                                                |
+| `MANUFAKTURE_MAX_PULL_BYTES`                | 8 MiB (at least one entry a pull)                  |
+| `MANUFAKTURE_REQUEST_TIMEOUT_MS`            | 120,000 (a whole HTTP request)                     |
+| `MANUFAKTURE_CONNECTION_TIMEOUT_MS`         | 300,000 (an idle connection)                       |
+| `MANUFAKTURE_KEEP_ALIVE_TIMEOUT_MS`         | 72,000 (above the proxy's own)                     |
+| `MANUFAKTURE_WRITER_LEASE_MS`               | 120,000 (one writer per agent branch)              |
+| `MANUFAKTURE_MAX_BUNDLE_BYTES`              | 64 MiB + 64 KiB (one review bundle request)        |
+| `MANUFAKTURE_MAX_BUNDLE_BYTES_PER_DOCUMENT` | 512 MiB (a document's review bundles)              |
+| `MANUFAKTURE_MAX_BUNDLE_TOTAL_BYTES`        | 4 GiB (every review bundle together)               |
+| `MANUFAKTURE_MAX_AGENT_BRANCHES_PER_TOKEN`  | 20 (under way, per document)                       |
+| `MANUFAKTURE_MAX_AGENT_VERSIONS_PER_TOKEN`  | 200 (per document)                                 |
+| `MANUFAKTURE_MAX_AGENT_BLOB_BYTES`          | 1 GiB (blobs one agent token stored)               |
+| `MANUFAKTURE_MAX_AGENT_BUNDLE_BYTES`        | 256 MiB (bundles one agent token stored)           |
+| `MANUFAKTURE_MAX_AGENT_LOG_BYTES`           | 256 MiB (log one agent token stored, per document) |
 
 The app refuses any message from the server over 16 MiB (`MAX_INBOUND_BYTES` in
 `apps/web/src/sync/transport.ts`). Every accepted entry is pushed to every client and may come

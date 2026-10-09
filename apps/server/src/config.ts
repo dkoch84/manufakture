@@ -59,6 +59,7 @@ const LIMIT_VARS: Record<keyof Limits, string> = {
   maxAgentVersionsPerToken: 'MANUFAKTURE_MAX_AGENT_VERSIONS_PER_TOKEN',
   maxAgentBlobBytes: 'MANUFAKTURE_MAX_AGENT_BLOB_BYTES',
   maxAgentBundleBytes: 'MANUFAKTURE_MAX_AGENT_BUNDLE_BYTES',
+  maxAgentLogBytes: 'MANUFAKTURE_MAX_AGENT_LOG_BYTES',
 };
 
 const positive = z.coerce.number().int().min(1).max(Number.MAX_SAFE_INTEGER);

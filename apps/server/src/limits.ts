@@ -114,6 +114,14 @@ export interface Limits {
   readonly maxAgentBlobBytes: number;
   /** The most review bundle bytes one agent token may have stored, every document's together. */
   readonly maxAgentBundleBytes: number;
+  /**
+   * The most log bytes one agent token may have stored in one document: the entries (as stored
+   * JSON) and the checkpoint snapshots of every branch it made there, open or closed. Counted from
+   * what is stored, so neither a fresh client id nor a restart resets it; the owner deletes the
+   * token's closed branches to make room. A submit that would go over, counting the snapshots it
+   * writes, is refused whole.
+   */
+  readonly maxAgentLogBytes: number;
 }
 
 export const DEFAULT_LIMITS: Limits = {
@@ -148,6 +156,7 @@ export const DEFAULT_LIMITS: Limits = {
   maxAgentVersionsPerToken: 200,
   maxAgentBlobBytes: 1024 * 1024 * 1024,
   maxAgentBundleBytes: 256 * 1024 * 1024,
+  maxAgentLogBytes: 256 * 1024 * 1024,
 };
 
 /**
