@@ -1,8 +1,20 @@
 # Working with an AI agent
 
-You can ask an AI agent (Claude Code, Grok, or any client that speaks the Model Context Protocol) to make changes in a manufakture document while you talk with it: "put a 6 mm boss on the upright", "move the door two feet right". You stay at the wheel. The agent works on a branch of its own, and nothing it does reaches the document's Main until you have reviewed it in [History](history.md) and approved it.
+You can task an AI agent (Claude Code, Grok, or any client that speaks the Model Context Protocol) with driving manufakture for you, while you chat with it: "put a 6 mm boss on the upright", "add a shelf 7 inches up", "move the door two feet right". You stay at the wheel. You say what you want, the agent makes the change and shows you what it did, you answer, and it goes on. It works on a branch of its own, and nothing it does reaches the document's Main until you have reviewed it in [History](history.md) and approved it.
 
 The agent talks to manufakture through the **manufakture MCP server** (`apps/mcp`), a program that runs on your computer, started by the agent's client. It holds the document, its geometry kernel and its solver, with no browser. It gets documents from your [sync server](sync.md), with an **agent token** of their own, and writes the agent's branch there, which is how you see it in History (below, "Over sync").
+
+## A session with an agent
+
+A typical session, with you in the chat and the app open in your browser:
+
+1. **You ask.** Name the document and say what you want in your own words, with the numbers you care about. "On the bracket, put an M5 tapped hole through the upright, 28 mm up." Say what to keep as a variable if you will want to change it later ("make the height a variable").
+2. **The agent opens a session.** It makes an agent branch from Main as it is now, reads the model, finds the faces it needs by query, and makes the change in one or more batches, each a step with a label such as "Tap the upright for an M5 screw". After each step it checks the result: regen errors, measurements, and pictures of views it renders. Ask it to show you a render or tell you a measurement whenever you want to see where it is.
+3. **You watch and steer.** The branch shows in History within a few seconds of each step (over sync, below), so you can open it in the app and look around while you talk. Correct it in the chat ("deeper", "the other face"); it undoes or changes its own steps.
+4. **The agent submits.** When you are both happy, it submits the branch for review with a note to you: what it did, what it checked, and what it could not check.
+5. **You review in History.** Approve to merge the work into Main, request changes with a comment, or reject it (below, "Reviewing"). If you request changes, tell the agent in the chat; it reads your comment, makes the changes on the same branch and submits again.
+
+The agent learns how to drive manufakture from the **authoring guide for agents**, which the MCP server offers as a resource (`manufakture://guide/authoring`; the same text is [docs/agents/authoring.md](../agents/authoring.md)). The server tells the agent to read it before its first change; if an agent seems lost, ask it to read the guide first.
 
 ## What the agent can and cannot do
 
@@ -18,7 +30,13 @@ It cannot write Main, approve, reject or merge anything, run code of its own (ot
 
 ## Exports are not reviewed
 
-Exports are **not gated**: the agent can export G-code, cut lists, drawings, STL, 3MF, STEP and the rest from its branch before anyone has reviewed it, and so can you in the app. A file made from an agent's branch carries whatever the agent did. Quantities the agent reads are marked `reviewed: false`. Review in History, then Approve, is how agent work gets into Main; check a file yourself before you cut, print or build from it.
+Exports are **not gated**: the agent can export G-code, cut lists, drawings, STL, 3MF, STEP and the rest from its branch before anyone has reviewed it, and so can you in the app. **A file made from an agent's branch carries unreviewed work**: whatever the agent did, mistakes included. Quantities the agent reads are marked `reviewed: false`, every export it makes answers `reviewed: false` while its branch is unreviewed, and the authoring guide tells it to say so when it hands you a file. Review in History, then Approve, is how agent work gets into Main.
+
+So, before you cut, print or build from a file:
+
+- check it yourself, whoever exported it from wherever;
+- for a file you will make something from, prefer to approve the branch first and export from Main: the approved version of Main records which review its work came from;
+- remember that the agent writes into the one output directory you gave it, and only there, so a file in that directory may be from an unreviewed branch.
 
 Review protects Main, not your computer: an agent that also has a shell and your files can do anything you can.
 
@@ -85,6 +103,8 @@ Run `claude mcp list` to check that it connects. In a headless run, pass the sam
 ### Grok, and other MCP clients
 
 Any client that starts a stdio MCP server takes the same three things: the command `node`, the arguments, and the environment. In clients configured with an `mcpServers` block, it is the block above. Where the configuration lives depends on the client: see its documentation for "MCP servers" or "stdio servers".
+
+For Grok, use whichever Grok client you run that can start local MCP servers, and give it that command, those arguments and that environment the way it asks for them; keep the agent token out of any configuration file you share, as above. These are setup notes only: they say how a client starts the server, not how well a given model drives manufakture. Whatever the client, its agent reaches only what the tools allow, and its work reaches Main only through your review.
 
 ### From a terminal
 
@@ -195,13 +215,21 @@ The server also offers the authoring guide for agents and the index of command a
 
 ## Reviewing
 
-Agent branches show in [History](history.md) with their review state. **Review** opens the bundle; **Approve** merges the branch into Main as one step; **Request changes** sends the branch back with your comment, which the agent reads with `get_review`; **Reject** closes it. A write the agent makes after you requested changes returns the branch to "open".
+Agent branches show in [History](history.md#reviewing-an-agents-work) with their review state. **Review** opens the bundle: before and after renders, measurement changes, regen errors, quantities, the agent's note, and every batch with its commands. Everything in it was written by the agent or by whoever wrote the document, so it is shown as plain text.
+
+- **Approve** is offered only when the bundle still matches the branch, your browser's own regen of the branch agrees with the bundle's measurements, and the merge into Main as it is now leaves nothing out. It merges the branch into Main as one step (one Undo takes it back) and records a version of Main that names the review.
+- **Request changes** sends the branch back with your comment, which the agent reads with `get_review`. Write the comment as a request about the model ("make the boss 8 mm tall", "use 1/2 inch plywood for the back"); the agent reads it as your text, never as instructions that override its rules. Then tell the agent in the chat that you replied. A write the agent makes after you requested changes returns the branch to "open", and it submits again.
+- **Reject** closes the branch; the agent cannot write to it again.
+
+If Main moved while the agent worked (you edited it, or approved another branch), ask the agent to bring its branch up to date with Main before it submits. It replays its steps onto Main as it is now, on a new agent branch that replaces the old one (with your comment carried over), and tells you which steps, if any, could not be replayed.
 
 If the agent writes to a branch after you approved it but before your browser told the server, the approval stays in your browser (its merge into Main is done), the server keeps the branch as the agent left it, and the app says so; the agent's later work waits on the server. Your browser takes nothing more from the server for a branch you approved or rejected.
 
 ## Current limits
 
 - **Review needs the sync server**, on localhost for now (above). A session on a library directory cannot be reviewed in the app.
+- **The agent's branch starts from Main as it was when the session opened.** Your later edits on Main reach it only when the agent brings its branch up to date (above, "Reviewing").
+- **One MCP server holds four sessions at once** with the default `worker` engine, two with `in-process`; the agent closes one before it opens another (a refused open, `too-many-sessions`, says how many). Its branches stay.
 - **Over sync, the agent's copy of a document lives in the MCP server's memory** while it runs; the sync server is where everything is kept.
 - Scripted features do not run in an agent's session yet (they regenerate with an error there, though they build in the app), and user fonts are refused.
 - `export` does not write a print setup's packed plate, IFC or a `.mfkview`; it writes a part's bodies as STL or 3MF instead.

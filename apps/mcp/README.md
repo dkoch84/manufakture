@@ -207,13 +207,20 @@ follows core's add-only rule for commands, not this golden.
 - `test/units.test.ts`: `boundJson` (strings cut in one pass), file names (unique after cutting,
   trailing dots), the hard link that never replaces, and an export that fails partway leaving
   nothing behind.
+- `test/authoring-guide.test.ts`: every example of the authoring guide for agents
+  ([docs/agents/authoring.md](../../docs/agents/authoring.md)), run in order through the server on
+  the bracket, the cabinet and the shed. Examples are fenced blocks tagged `json mcp:<tool>` (with
+  `refused` or `regen-errors` when that is what they show, or `as-previous` for the previous call
+  with some arguments changed), each optionally followed by a `json mcp:result` block matched
+  against the result; the convention is in a comment at the top of the guide. Any other fence
+  (any indentation, backticks or tildes, any json fence without `mcp:`) is refused unless marked
+  `<lang> not-run`, so a mistagged example cannot go unrun. A call that fails, a result that does
+  not match, or fewer than 30 examples fails the test.
 
 ## Not done
 
 - **`find_geometry` finds faces and edges, not vertices.** The ADR's tool list names vertices too;
   they are not found yet.
-- **The authoring guide** (T8.5a): `docs/agents/authoring.md` is served when it exists; until
-  then the resource is a short stub (`GUIDE_STUB`).
 - **Export formats**: a print setup's packed plate (still the app's), IFC and `.mfkview`. Laser
   sections (they need the kernel's section op through the scene) are not offered; faces and
   sketch regions are.
