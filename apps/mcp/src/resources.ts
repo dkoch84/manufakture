@@ -1,11 +1,19 @@
 // The MCP resources (ADR 0016 decision 6): the authoring guide for agents (docs/agents/authoring.md,
 // T8.5a; a short stub when the file cannot be read), the schema index, plus a template for the
-// JSON Schema of each command type and feature kind, and the reference tables for sizing holes
-// (clearance, counterbore and countersink sizes, threads, heat-set inserts, self-tapping holes).
-// None holds text from a document (ADR 0016 decision 13).
+// JSON Schema of each command type and feature kind, the reference tables for sizing holes
+// (clearance, counterbore and countersink sizes, threads, heat-set inserts, self-tapping holes),
+// and the hardware catalog (drawer slides, #1200) an agent picks purchased parts from. None holds
+// text from a document (ADR 0016 decision 13).
 
 import { readFile } from 'node:fs/promises';
 import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
+import {
+  MOUNT_EXPRESSIONS,
+  SLIDE_FAMILIES,
+  SLIDE_OPENS,
+  SLIDE_SCHEMA_VERSION,
+  SLIDE_TYPE,
+} from '@manufakture/domain-wood';
 import { HOLE_SIZES, HOLE_SIZE_SOURCES, THREAD_SIZES, threadLimits } from '@manufakture/kernel';
 import { HEAT_SET_INSERTS, SELF_TAPPING_HOLES } from '@manufakture/print';
 import { schemaIndex, schemaOf } from '@manufakture/session';
@@ -14,6 +22,7 @@ export const GUIDE_URI = 'manufakture://guide/authoring';
 export const SCHEMA_INDEX_URI = 'manufakture://schema/index';
 export const SCHEMA_TEMPLATE = 'manufakture://schema/{kind}/{name}';
 export const TABLES_URI = 'manufakture://tables/holes';
+export const HARDWARE_URI = 'manufakture://tables/hardware';
 
 const GUIDE_FILE = new URL('../../../docs/agents/authoring.md', import.meta.url);
 
@@ -125,6 +134,53 @@ export function holeTables() {
   };
 }
 
+/**
+ * The hardware catalog an agent places purchased parts from: drawer slides (`wood.slide`), each
+ * family with its clearance model, sizes (by length), screw holes, source and `verified` flag.
+ * Millimetres; hole positions are measured from the member's front end.
+ */
+export function hardwareTables() {
+  return {
+    units: { length: 'mm' },
+    drawerSlides: {
+      description:
+        'Drawer slides, placed one per side with an extension feature of type wood.slide between a cabinet board and a drawer side (boards of wood.board), counted as a hardware line in get_quantities and bom-csv. Pick a family, then the size whose cabinet member fits the cabinet (minCabinetDepth behind the drawer front) and whose drawer member fits the drawer (drawerLength). The clearance says the gap the drawer needs at each side. Not verified: check a real slide before cutting or drilling.',
+      feature: {
+        kind: 'extension',
+        extension: SLIDE_TYPE,
+        schemaVersion: SLIDE_SCHEMA_VERSION,
+        operation: 'new',
+        dependsOn: 'the cabinet board and the drawer side',
+        params: {
+          family: 'a family id below',
+          size: "one of the family's size ids",
+          cabinet: 'the board the slide is screwed to (a wood.board body id)',
+          drawer: "the drawer's side (a wood.board body id)",
+          opens: SLIDE_OPENS,
+        },
+        expressions: {
+          setback: "length: the slide's front behind the drawer side's front end (default 0)",
+          offset: 'length, side-mount only: up from centred on the drawer side (default 0)',
+        },
+        expressionsByMount: MOUNT_EXPRESSIONS,
+        bodies: '<feature id>:slide/cabinet and <feature id>:slide/drawer',
+      },
+      families: SLIDE_FAMILIES.map((f) => ({
+        id: f.id,
+        name: f.name,
+        item: f.item,
+        mount: f.mount,
+        extension: f.extension,
+        clearance: f.clearance,
+        screws: f.screws,
+        sizes: f.sizes.map((s) => ({ ...s, holes: { ...s.holes } })),
+        source: f.source,
+        verified: f.verified,
+      })),
+    },
+  };
+}
+
 export function registerResources(server: McpServer): void {
   server.registerResource(
     'authoring-guide',
@@ -164,6 +220,21 @@ export function registerResources(server: McpServer): void {
     async (uri) => ({
       contents: [
         { uri: uri.href, mimeType: 'application/json', text: JSON.stringify(holeTables()) },
+      ],
+    }),
+  );
+  server.registerResource(
+    'hardware-tables',
+    HARDWARE_URI,
+    {
+      title: 'Hardware catalog: drawer slides',
+      description:
+        'Purchased parts placed by a feature and counted in the bill of materials: drawer slides by family and length, with the clearance each needs, screw hole positions, source and whether it was verified.',
+      mimeType: 'application/json',
+    },
+    async (uri) => ({
+      contents: [
+        { uri: uri.href, mimeType: 'application/json', text: JSON.stringify(hardwareTables()) },
       ],
     }),
   );

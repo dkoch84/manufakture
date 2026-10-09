@@ -1268,7 +1268,7 @@ export interface Quantities {
   reviewed: false;
   /** The woodworking cut list (boards and wood shapes), or null when it could not be made. */
   cutList: CutList | null;
-  /** Hardware from joints (dowels, pocket screws): the cut list's hardware lines. */
+  /** Hardware from joints (dowels, pocket screws) and slides: the cut list's hardware lines. */
   hardware: CutList['hardware'];
   /** One construction takeoff per part studio with framing members. */
   takeoffs: { partId: string; takeoff: ConstructionTakeoff; notes: string[] }[];

@@ -1,7 +1,8 @@
 // @manufakture/domain-wood: the woodworking domain (ADR 0013). The stock catalog, the board
-// feature (`wood.board`) and the joint feature (`wood.joint`) with their translators, the
-// document data the domain owns (`domains.wood`, `domains.stock`), and the cut list (the
-// woodworking producer of `@manufakture/takeoff`). See README.md.
+// feature (`wood.board`), the joint feature (`wood.joint`) and the slide feature (`wood.slide`,
+// drawer slides from the hardware catalog) with their translators, the document data the domain
+// owns (`domains.wood`, `domains.stock`), and the cut list (the woodworking producer of
+// `@manufakture/takeoff`). See README.md.
 
 export const packageName = '@manufakture/domain-wood';
 
@@ -112,6 +113,29 @@ export {
   type RabbetParams,
   type TenonParams,
 } from './joints';
+export {
+  MOUNT_EXPRESSIONS,
+  SLIDE_EXPRESSIONS,
+  SLIDE_FAMILIES,
+  SLIDE_OPENS,
+  SLIDE_PARAMS,
+  SLIDE_SCHEMA_VERSION,
+  SLIDE_TYPE,
+  findSlideFamily,
+  findSlideSize,
+  readSlideMetadata,
+  readSlideParams,
+  slideType,
+  translateSlide,
+  type SideMountClearance,
+  type SlideClearance,
+  type SlideFamily,
+  type SlideMetadata,
+  type SlideOpens,
+  type SlideParams,
+  type SlideSize,
+  type UndermountClearance,
+} from './slides';
 export {
   blankBoardFeet,
   cutList,

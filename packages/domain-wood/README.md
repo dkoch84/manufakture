@@ -5,8 +5,9 @@ The woodworking domain ([ADR 0013](../../docs/adr/0013-domain-packages.md), M4 p
 kernel inputs, the document data the domain owns (`domains.wood` settings; it reads the
 `domains.stock` overrides, which the shared `@manufakture/stock` owns with the **stock catalog**,
 both re-exported here), the **joint** feature (`wood.joint`, T4.2b: six kinds of joint cut
-between two boards), and the **cut list** (T4.3a: the woodworking producer of
-`@manufakture/takeoff`). Plain TypeScript under GPL-3.0-or-later.
+between two boards), the **slide** feature (`wood.slide`, #1200: a drawer slide from the
+**hardware catalog**, placed between two boards), and the **cut list** (T4.3a: the woodworking
+producer of `@manufakture/takeoff`). Plain TypeScript under GPL-3.0-or-later.
 
 **Dependencies.** At run time only `@manufakture/core`, `@manufakture/units` and the shared
 `@manufakture/takeoff` (ADR 0013 decision 8), `@manufakture/stock` (ADR 0015 decision 1) and
@@ -222,6 +223,44 @@ not fit B or a mortise breaking out of A, holes coming out through a board, a cl
 takes a dado through A's edge or a rabbet across A, and boards that do
 not meet the way the kind needs (with a message saying how they should).
 
+## The slide feature
+
+`wood.slide` (`src/slides/`, #1200) places one drawer slide, a purchased part, between a cabinet's
+board and a drawer's side. It is the hardware catalog's first entry: `SLIDE_FAMILIES`
+(`slides/catalog.ts`) holds each family's size series by length, its fit data and its source, all
+`verified: false` until checked against a real slide (the convention of the stock catalog's and
+the print tables' flags). Two families, with a clearance model each, discriminated by `kind`:
+
+| Family                    | Sizes                | Clearance (`kind`)                                                                                                                                     |
+| ------------------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `side-mount-ball-bearing` | `10in` to `28in`, 2" | `side-mount`: a gap per side of 12.7 mm (to 13.5), 45.7 mm high; from the Accuride 3832E drawing                                                       |
+| `undermount-concealed`    | `9in` to `21in`      | `undermount`: sides 12 to 16 mm, inside 21 mm per side from the cabinet (1.5 mm play), 13 mm bottom recess, 14 mm under, 6 mm over, a 35 x 13 mm notch |
+
+Each size gives the nominal length, the cabinet and drawer members' lengths (a side-mount's closed
+length; an undermount's runner and drawer), the travel, the cabinet depth it needs behind the
+drawer's front, and the screw holes along each member from its front.
+
+**Params** (`readSlideParams`, version 1): `family`, `size` (one of the family's ids), `cabinet`
+and `drawer` (board body ids, also in `dependsOn`; both id fields, so a batch's symbols resolve),
+and `opens`, the world direction the drawer pulls out (`+x`, `-x`, `+y`, `-y`; Z is up).
+Expressions: `setback` (the slide's front behind the drawer side's front end) and, side-mount only,
+`offset` (up from centred). The operation is `new`; there is no scope.
+
+**Translation.** From the boards' frames as world boxes (both must be square to the world, their
+thickness across `opens`): two `new` extrudes with the feature's id, the bodies
+`<id>:slide/cabinet` and `<id>:slide/drawer`, cap roles `cap.cabinet` and `cap.drawer`, sides
+`<key>.bottom`, `.top`, `.front` and `.back`. A side-mount's members fill the gap half each, the
+slide centred on the drawer side; an undermount's runner reaches 37 mm in under the drawer side
+and its rail runs in the bottom recess, so a bottom not recessed or a back not notched shows as an
+overlap. Refused with the numbers: a gap out of range, a side out of the thickness range, a slide
+front ahead of the cabinet board, a cabinet board too shallow for the size (`minCabinetDepth`
+behind the front), a drawer side shorter than the drawer member, a slide off the boards' height.
+
+**Metadata** (`readSlideMetadata`): `{ kind: 'slide', family, size, item, cabinet, drawer,
+bodies, nominal, travel, opens, fit, holes, requires, verified }`: the fit as built (mm), the
+screw holes in world coordinates, and what the drawer needs that the slide does not check (an
+undermount's recess and notch). The cut list makes it a hardware line (below).
+
 ## The cut list
 
 `cutList(input)` (`src/cutlist/`) is pure: from the parts regen built, it gives the cut list,
@@ -238,7 +277,7 @@ const list = cutList({
   settings, // woodSettings(...).value: the grain rule for layouts (domains.wood)
   // assembly: { instances }, configuration: { id, name }
 });
-list.rows; // boards and wood shapes; list.hardware: dowels and pocket screws
+list.rows; // boards and wood shapes; list.hardware: dowels, pocket screws and slides
 list.rows.map((r) => formatRow(r, { unit: 'in-fraction', denominator: 32 }, stockName));
 list.sheets; // per sheet stock: sheet size (with overrides), grain, parts for layoutSheets
 list.lumber; // per lumber stock: lengths sold, parts for layoutSticks
@@ -263,6 +302,7 @@ part counts once.
 | Other body of a wood material     | `part`     | Oriented box, longest first             | `each`; `volume` if any | `estimated`     |
 | Same, no oriented size given      | `part`     | None                                    | `each`; `volume` if any | `size-unknown`  |
 | Joint hardware                    | `hardware` | Dowel: diameter, length; screw: length  | `each`                  |                 |
+| Slide (both members)              | `hardware` | Nominal length                          | `each`                  |                 |
 
 A board's size is its **blank**: the frame's sizes, the stock size before joinery. A tenon is cut
 from its board, so the board's drawn length (into the mortise) is the blank's length. Rows group
@@ -282,8 +322,10 @@ quarters by the actual width and length. Sheets count area instead.
 each instance that is not suppressed counts the bodies it shows (`bodies`, or all), with the
 instance in the row's sources; a joint's hardware counts as often as **both** its boards are
 shown (the smaller count), so an assembly of per-board instances gives exactly the part studio's
-list, and an instance showing only one board adds no dowels. Instances of parts or bodies the
-input lacks are reported in `missing`.
+list, and an instance showing only one board adds no dowels. A slide's members are never rows
+or `excluded`; the slide counts as often as **either** member is shown (the larger count), so a
+drawer instance with the drawer member and a cabinet instance with the cabinet member count it
+once. Instances of parts or bodies the input lacks are reported in `missing`.
 
 **Order and totals.** Sheets, then lumber, then shapes; within them by catalog order of the stock,
 then material, then thickest, longest, widest. `totals` are per category and unit, `stockTotals`
@@ -345,7 +387,12 @@ board, a price rebuilding nothing, a refused override failing every board). Join
 cylinders, refusals with their fields) and `joints/regen.test.ts` (every kind through regen with
 the real kernel: exact volumes, the kernel's interference check between the boards non-empty
 before a dado, tenon or box joint and empty after, face names unchanged when a board grows, a dado
-following its shelf, an odd angle refused on the joint while the boards still build). Cut list:
+following its shelf, an odd angle refused on the joint while the boards still build). Slides:
+`slides/slides.test.ts` (the catalog's series and flags, params, both families' members against
+boxes worked out by hand, the fit and holes, every refusal's message, the cut list's hardware
+line through an assembly) and `slides/regen.test.ts` (with the real kernel: the members touching
+the boards and each other and overlapping nothing, their face names, a wider gap widening them,
+a gap out of range an error with no members). Cut list:
 `cutlist/cutlist.test.ts` (a bookshelf by hand: two 3/4" plywood sides, four 1x12 shelves and a
 1/4" back give 18 and 11.25 sq ft of plywood, 11.5 board feet and 138" of 1x12, 32 dowels and 6
 pocket screws; grouping; a part inserted twice; per-board instances equal to the part studio;

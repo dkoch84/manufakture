@@ -1,14 +1,15 @@
 // The woodworking domain as regen registers it (ADR 0013 decisions 1 and 5): namespace `wood`,
-// its extension types, and the reader of the document data it owns (`wood`, its settings). It
-// reads `stock` (stock overrides), which the shared `@manufakture/stock` owns since T6.1a (ADR
-// 0015 decision 1). The app's regen worker entry calls `registerWood(registry)` at start-up;
-// regen imports no domain package.
+// its extension types (`wood.board`, `wood.joint`, `wood.slide`), and the reader of the document
+// data it owns (`wood`, its settings). It reads `stock` (stock overrides), which the shared
+// `@manufakture/stock` owns since T6.1a (ADR 0015 decision 1). The app's regen worker entry calls
+// `registerWood(registry)` at start-up; regen imports no domain package.
 
 import type { ExtensionDomain, ExtensionRegistry, ExtensionType } from '@manufakture/regen';
 import { STOCK_NAMESPACE, registerStock } from '@manufakture/stock';
 import { BOARD_TYPE, boardType } from './board';
 import { JOINT_TYPE, jointType } from './joints';
 import type { Json } from './migrations';
+import { SLIDE_TYPE, slideType } from './slides';
 import { WOOD_DATA_VERSION, WOOD_NAMESPACE, readWoodData } from './wood-data';
 
 /**
@@ -34,6 +35,7 @@ export const woodDomain: ExtensionDomain = {
   types: {
     [BOARD_TYPE]: boardType as ExtensionType,
     [JOINT_TYPE]: jointType as ExtensionType,
+    [SLIDE_TYPE]: slideType as ExtensionType,
   },
 };
 

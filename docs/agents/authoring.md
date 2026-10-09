@@ -1104,6 +1104,209 @@ run):
 }
 ```
 
+### Drawer slides from the hardware catalog
+
+A drawer slide is a purchased part, not a board: place it from the hardware catalog, never as a
+plain extrude (a plain body is in no bill of materials). The catalog is the resource
+`manufakture://tables/hardware`: each family of slides with its clearance model (`side-mount`: a
+gap of its own at each side, 1/2" for the ball-bearing series; `undermount`: the drawer side's
+thickness, a bottom recess, a notched back), its sizes by length (`10in` to `28in` for the
+side-mount series) with the room each needs (`minCabinetDepth` behind the drawer's front,
+`drawerLength` along the drawer side), the screw holes, its source and `verified: false` (nobody
+has checked it against a real slide yet: say so to the person). Pick the size from that data,
+not from memory.
+
+A slide is an `extension` of type `wood.slide` (`schemaVersion` 1, `operation` `"new"`), one per
+side, between two boards it names in `params` and `dependsOn`: `cabinet` (the side it is
+screwed to) and `drawer` (the drawer's side), with `family`, `size` and `opens`, the world
+direction the drawer pulls out (`-y` for these documents, whose fronts face -Y). It checks the
+fit and makes two bodies, `<id>:slide/cabinet` and `<id>:slide/drawer`, filling the room the
+slide takes, so they show in renders, measures and an assembly's instances. `setback` (length)
+moves it back from the drawer side's front; `offset` raises a side-mount slide from centred.
+
+This cabinet is 11-1/4" deep, so a 10" slide is the longest that fits. A drawer side of 1/2"
+plywood (15/32" actual) 10" long and 4" tall, 1/2" in from the left side, and the slide between
+them, in one batch:
+
+```json mcp:apply
+{
+  "sessionId": "<session>",
+  "label": "A drawer side and a 10 inch side-mount slide",
+  "commands": [
+    {
+      "type": "addFeature",
+      "partId": "part#1",
+      "feature": {
+        "id": "sketch#$dsketch",
+        "kind": "sketch",
+        "name": "Drawer left side",
+        "suppressed": false,
+        "plane": {
+          "type": "plane",
+          "origin": [30.95625, 0, 0],
+          "normal": [1, 0, 0],
+          "xDir": [0, 1, 0]
+        },
+        "entities": [
+          {
+            "id": "e$ds1",
+            "kind": "line",
+            "construction": false,
+            "start": [0, 31.75],
+            "end": [254, 31.75]
+          },
+          {
+            "id": "e$ds2",
+            "kind": "line",
+            "construction": false,
+            "start": [254, 31.75],
+            "end": [254, 133.35]
+          },
+          {
+            "id": "e$ds3",
+            "kind": "line",
+            "construction": false,
+            "start": [254, 133.35],
+            "end": [0, 133.35]
+          },
+          {
+            "id": "e$ds4",
+            "kind": "line",
+            "construction": false,
+            "start": [0, 133.35],
+            "end": [0, 31.75]
+          }
+        ],
+        "constraints": []
+      }
+    },
+    {
+      "type": "addFeature",
+      "partId": "part#1",
+      "feature": {
+        "id": "extension#$dside",
+        "kind": "extension",
+        "name": "Drawer left side",
+        "suppressed": false,
+        "extension": "wood.board",
+        "schemaVersion": 1,
+        "operation": "new",
+        "dependsOn": ["sketch#$dsketch"],
+        "references": [],
+        "expressions": {},
+        "params": { "form": "panel", "stock": "us-ply-15-32", "sketch": "sketch#$dsketch" }
+      }
+    },
+    {
+      "type": "addFeature",
+      "partId": "part#1",
+      "feature": {
+        "id": "extension#$slide",
+        "kind": "extension",
+        "name": "Left slide",
+        "suppressed": false,
+        "extension": "wood.slide",
+        "schemaVersion": 1,
+        "operation": "new",
+        "dependsOn": ["extension#1", "extension#$dside"],
+        "references": [],
+        "expressions": {},
+        "params": {
+          "family": "side-mount-ball-bearing",
+          "size": "10in",
+          "cabinet": "extension#1",
+          "drawer": "extension#$dside",
+          "opens": "-y"
+        }
+      }
+    }
+  ]
+}
+```
+
+```json mcp:result
+{
+  "ok": true,
+  "errors": [],
+  "symbols": { "$dside": "extension#18", "$slide": "extension#19" }
+}
+```
+
+The slide is a hardware line of the cut list and of `bom-csv` (by family and length), and its two
+bodies are in neither the cut list's rows nor its `excluded` list:
+
+```json mcp:get_quantities
+{ "sessionId": "<session>" }
+```
+
+```json mcp:result
+{
+  "ok": true,
+  "quantities": {
+    "hardware": [
+      { "item": "Drawer slide, side-mount ball-bearing, full extension", "quantity": 1 }
+    ],
+    "cutList": { "excluded": [] }
+  }
+}
+```
+
+The fit is checked, not assumed: a gap that is not the slide's, a drawer side shorter than the
+drawer member, or a cabinet too shallow for the size is an error on the slide that names the
+numbers. A 12" slide needs 300 mm of the cabinet side behind its front (here as a dry run):
+
+```json mcp:apply regen-errors
+{
+  "sessionId": "<session>",
+  "label": "A 12 inch slide in an 11-1/4 inch cabinet",
+  "dryRun": true,
+  "commands": [
+    {
+      "type": "addFeature",
+      "partId": "part#1",
+      "feature": {
+        "id": "extension#$long",
+        "kind": "extension",
+        "name": "Longer slide",
+        "suppressed": false,
+        "extension": "wood.slide",
+        "schemaVersion": 1,
+        "operation": "new",
+        "dependsOn": ["extension#1", "extension#18"],
+        "references": [],
+        "expressions": {},
+        "params": {
+          "family": "side-mount-ball-bearing",
+          "size": "12in",
+          "cabinet": "extension#1",
+          "drawer": "extension#18",
+          "opens": "-y"
+        }
+      }
+    }
+  ]
+}
+```
+
+```json mcp:result
+{
+  "ok": true,
+  "errors": [
+    {
+      "where": "feature",
+      "featureId": "extension#20",
+      "message": "the side-mount-ball-bearing 12in slide needs 300 mm of extension#1 behind its front, and there is 285.75 mm: the cabinet is too shallow for it, so pick a shorter size or a deeper cabinet"
+    }
+  ]
+}
+```
+
+For the right side, mirror it: the drawer's right side 1/2" in from the cabinet's right side and
+a second slide with `cabinet` the right side; the pair is then a line of quantity 2. To check the
+drawer opens, put the drawer's boards and the `slide/drawer` bodies in one instance of an
+assembly and the rest in another, with a `slider` mate limited to the slide's `travel` (see
+"Assemblies" below and `measure`'s interference `travel`).
+
 ```json mcp:close_session
 { "sessionId": "<session>" }
 ```

@@ -107,13 +107,24 @@ A joint is one step that **Undo** takes back.
 
 A joint shows in the tree with a joint icon, its name after its kind ("Dado 7", "Mortise and tenon 9"), the boards it joins ("Shelf into Side") and its hardware ("4 dowels"). It comes after both boards, and moving it above either of them is refused. Double-click it to open the Joint dialog again. A joint saved by a newer version of manufakture, which this version cannot read, keeps its place in the tree but cannot be edited here, like such a board.
 
+## Drawer slides
+
+A drawer slide is bought, not cut, so it comes from manufakture's **hardware catalog** rather than from a sketch. The catalog has two families, both marked **not verified** (their numbers come from one maker's published drawings and have not been checked against a real slide: check yours before you drill):
+
+- **Side-mount ball-bearing slides, full extension**, 10" to 28" in 2" steps. Each needs a gap of 1/2" (up to 1/2" + 1/32") between the cabinet side and the drawer side, and is 1.8" (45.7 mm) high, centred on the drawer side.
+- **Undermount concealed slides, full extension**, 9" to 21", for drawer sides 1/2" to 5/8" thick. The runner sits under the drawer side: the drawer's inside is 42 mm narrower than the opening, its bottom is recessed 1/2" (13 mm) above the sides' bottom edges, it needs 14 mm under it and 6 mm over it, and its back is notched at each bottom corner.
+
+A slide goes between two boards: the cabinet side it is screwed to and the drawer's side, one slide per side. It checks that it fits (the gap is the slide's, the drawer side is long enough, the cabinet is deep enough for the size) and, if not, shows an error on the feature with the numbers and the boards' ids ("... needs 450 mm of extension#1 behind its front, and there is 285.75 mm: the cabinet is too shallow for it ..."). It makes two bodies, the slide's cabinet member and its drawer member, so it shows in the view, in measurements and in an assembly (put the drawer member in the drawer's instance). It follows its boards when they move.
+
+The app has no dialog for slides yet: an agent places them for you (see [Working with agents](agents.md)), and they show in the feature tree under their names. In the [cut list](#the-cut-list) and the bill of materials file, a slide is a **Hardware** line ("Drawer slide, side-mount ball-bearing, full extension", 18", 2), never a piece and never a body left out.
+
 ## The cut list
 
 **Cut list**, in the toolbar once a document has a board, opens the **Cut list** panel in the side panel. It is made from the model as it is now, in the configuration shown by the configuration switcher (the panel says which), and it follows every edit.
 
 ### The list
 
-Each row is a set of identical pieces: the same stock, material and blank size. The size is the **blank**, the board as you cut it on the saw before any joinery (a tenon's length is part of its board), given as length along the grain by width by thickness. Plywood and other sheet goods total their area; lumber totals its **board feet** (on the nominal size for softwood, `2x4`, and on rough quarters with the real width for hardwood) and its length. The **Totals** under the list add each kind up, with all the board feet together; **Hardware** lists the dowels and pocket screws the joints need.
+Each row is a set of identical pieces: the same stock, material and blank size. The size is the **blank**, the board as you cut it on the saw before any joinery (a tenon's length is part of its board), given as length along the grain by width by thickness. Plywood and other sheet goods total their area; lumber totals its **board feet** (on the nominal size for softwood, `2x4`, and on rough quarters with the real width for hardwood) and its length. The **Totals** under the list add each kind up, with all the board feet together; **Hardware** lists the dowels and pocket screws the joints need, and the drawer slides (one line per kind and length).
 
 - Rows are grouped by stock. Click a column heading to sort the rows within each group (click again to reverse).
 - **Click a row** to select its bodies in the view.

@@ -6,12 +6,16 @@
 // stock, one material and one blank size. Sheet goods count area, lumber board feet (by the
 // stock's basis, `board-feet.ts`) and length. A body that is not a board but is made of a wood
 // material is listed by its oriented box (`estimated`), or by its volume alone (`size-unknown`)
-// when the input has no box for it. Joints' dowels and screws are the hardware lines.
+// when the input has no box for it. Joints' dowels and screws, and slides from the hardware
+// catalog (`wood.slide`, #1200), are the hardware lines; a slide's two member bodies are that line,
+// never pieces or excluded bodies.
 //
 // Counting: a part studio list counts every body once and every joint once. Through an assembly,
 // each instance that is not suppressed counts the bodies it shows; a joint counts as often as both
 // of its boards are shown (the smaller of the two counts), so an assembly of per-board instances
-// (one instance per board, M4 decision 5) gives exactly the part studio's list.
+// (one instance per board, M4 decision 5) gives exactly the part studio's list. A slide counts as
+// often as either of its members is shown (the larger count), so a drawer instance showing the
+// drawer member and a cabinet instance showing the cabinet member count it once.
 
 import { findMaterial } from '@manufakture/core';
 import {
@@ -25,6 +29,7 @@ import {
 import { readBoardMetadata, type BoardMetadata } from '../board';
 import { STOCK, findStock } from '../catalog';
 import { readJointMetadata, type JointMetadata } from '../joints';
+import { findSlideFamily, readSlideMetadata, type SlideMetadata } from '../slides';
 import { EMPTY_STOCK_DATA, resolveStock } from '../stock-data';
 import { blankBoardFeet } from './board-feet';
 import type { CutListBody, CutListInput, CutListPart } from './input';
@@ -98,7 +103,7 @@ export interface CutList {
    * then material, then thickest, longest and widest first.
    */
   rows: CutListRow[];
-  /** Hardware from joints (dowels, pocket screws), as bill of materials lines. */
+  /** Hardware from joints (dowels, pocket screws) and slides, as bill of materials lines. */
   hardware: CutListRow[];
   /** Totals per category (`sheet`, `lumber`, `part`, `hardware`) and unit. */
   totals: TakeoffTotal[];
@@ -269,6 +274,30 @@ function hardwareRows(
   });
 }
 
+/** The hardware line of one slide, counted `times`: the family's item, by nominal length. */
+function slideRow(
+  part: CutListPart,
+  featureId: string,
+  slide: SlideMetadata,
+  times: number,
+): CutListRow {
+  const size = { length: slide.nominal };
+  return {
+    key: `hardware|slide|${slide.family}|${slide.size}`,
+    kind: 'hardware',
+    item: findSlideFamily(slide.family)?.item ?? slide.item,
+    category: 'hardware',
+    size,
+    quantity: times,
+    unit: 'each',
+    extended: times,
+    measures: [],
+    sources: [{ id: featureId, part: part.id, quantity: times }],
+    flags: [],
+    grain: false,
+  };
+}
+
 /**
  * The cut list and bill of materials of `input`. Pure: the same input gives the same list, in
  * the same order.
@@ -286,6 +315,8 @@ export function cutList(input: CutListInput): CutList {
     if (byBody === undefined) shown.set(part.id, (byBody = new Map()));
     byBody.set(body.bodyId, (byBody.get(body.bodyId) ?? 0) + 1);
     const creator = part.features.find((f) => f.featureId === body.creator);
+    // A slide's members are a hardware line (counted below), not pieces.
+    if (readSlideMetadata(creator?.metadata) !== undefined) return;
     const item = body.name ?? creator?.name ?? body.bodyId;
     const board = readBoardMetadata(creator?.metadata);
     if (board !== undefined) {
@@ -333,6 +364,15 @@ export function cutList(input: CutListInput): CutList {
     const byBody = shown.get(part.id);
     if (byBody === undefined) continue;
     for (const f of part.features) {
+      const slide = readSlideMetadata(f.metadata);
+      if (slide !== undefined) {
+        const times = Math.max(
+          byBody.get(slide.bodies.cabinet) ?? 0,
+          byBody.get(slide.bodies.drawer) ?? 0,
+        );
+        if (times > 0) hardware.push(slideRow(part, f.featureId, slide, times));
+        continue;
+      }
       const joint = readJointMetadata(f.metadata);
       if (joint === undefined) continue;
       const times = Math.min(byBody.get(joint.a) ?? 0, byBody.get(joint.b) ?? 0);

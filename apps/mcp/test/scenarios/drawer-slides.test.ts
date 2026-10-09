@@ -6,10 +6,11 @@
 //
 // A fixed tool-call sequence through the real MCP server (in process), doing the scenario as far
 // as the product allows: measure the opening, a drawer box of boards with dowel joints, the slides
-// as plain steel bodies, an assembly with a slider mate limited to the slide's travel, and
-// interference checks at poses along that travel and swept over it. The plan's gap hypotheses,
-// and the gaps found on the way, are asserted as they are today in tests named "gap probe": when
-// a fix changes one, its test fails, and the write-up's gap table needs the same change.
+// from the hardware catalog (#1200; before, plain steel bodies), an assembly with a slider mate
+// limited to the slide's travel, and interference checks at poses along that travel and swept
+// over it. The plan's gap hypotheses, and the gaps found on the way, were asserted in tests named
+// "gap probe"; every one has since flipped into a test of the fix, which says what was found
+// before, and the write-up's gap table says the same.
 //
 // The guide's cabinet (packages/session's fixture) is a bookshelf 11-1/4" deep, too shallow for
 // an 18" slide; the first test shows that. The rest runs on the same cabinet made 22" deep by
@@ -22,6 +23,7 @@ import { NodeBackend } from '@manufakture/library/node';
 import { BackendBundleStore } from '@manufakture/session';
 import { cabinetDocument } from '@manufakture/session/test-fixtures';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { HARDWARE_URI } from '../../src/resources';
 import { BASE_CABINET_ID, baseCabinetDocument } from '../fixtures/drawer-slides/cabinet';
 import { harness, value, type Data, type Harness } from '../harness';
 
@@ -157,8 +159,7 @@ const z0 = (OPENING.bottom + CLEARANCE) * IN;
 const z1 = z0 + 12 * IN;
 const LENGTH = 18 * IN;
 const T = PLY * IN;
-/** A slide is 1/2" thick (two 1/4" members) and 1-3/4" tall, centred on the drawer's side. */
-const SLIDE_HEIGHT = 1.75 * IN;
+/** The slide is centred on the drawer's side. */
 const zMid = (z0 + z1) / 2;
 
 /** The opening's width, measured between the sides' faces at every regen (#1202). */
@@ -226,38 +227,28 @@ const DRAWER = [
 ];
 
 /**
- * One slide member: a 1/4" steel bar the slide's length, its sketch on a plane at x (mm), or on a
- * face (facing +X).
+ * A slide from the hardware catalog (#1200): a `wood.slide` feature between a cabinet side and a
+ * drawer side, the drawer pulling out towards -Y. Found: no catalog, so the slides were four plain
+ * extrudes (a 1/4" x 1-3/4" x 18" bar per member), made steel by hand, and in no bill of materials.
  */
-const member = (key: string, name: string, on: number | string) => [
-  rectangle(
-    `sketch#$${key}`,
-    name,
-    typeof on === 'string'
-      ? { face: on }
-      : { origin: [on, 0, 0], normal: [1, 0, 0], xDir: [0, 1, 0] },
-    [0, zMid - SLIDE_HEIGHT / 2, LENGTH, zMid + SLIDE_HEIGHT / 2],
-  ),
+const slide = (key: string, name: string, cabinet: string, drawer: string, size = '18in') =>
   add({
-    id: `extrude#$${key}_bar`,
-    kind: 'extrude',
+    id: `extension#$${key}`,
+    kind: 'extension',
     name,
-    profile: { sketch: `sketch#$${key}` },
+    extension: 'wood.slide',
+    schemaVersion: 1,
     operation: 'new',
-    extent: { type: 'blind', distance: inches('1/4"') },
-    reverse: false,
-  }),
-];
+    dependsOn: [cabinet, drawer],
+    references: [],
+    expressions: {},
+    params: { family: 'side-mount-ball-bearing', size, cabinet, drawer, opens: '-y' },
+  });
 
-/**
- * The slides. The right ones stand on the drawer's right side (`drs`, its body id), the drawer
- * member on its outer face and the cabinet member on that, so they follow the drawer's width.
- */
-const slides = (drs: string) => [
-  ...member('lc', 'Left slide, cabinet member', OPENING.left * IN),
-  ...member('ld', 'Left slide, drawer member', (OPENING.left + 0.25) * IN),
-  ...member('rd', 'Right slide, drawer member', `${drs}:cap:end`),
-  ...member('rc', 'Right slide, cabinet member', 'extrude#$rd_bar:cap:end'),
+/** The pair: the left one on the cabinet's left side, the right one on its right side. */
+const slides = (dls: string, drs: string, size = '18in') => [
+  slide('lslide', 'Left slide', 'extension#1', dls, size),
+  slide('rslide', 'Right slide', 'extension#2', drs, size),
 ];
 
 /** The drawer's pose with the slides pulled out `d` mm (the drawer moves towards -Y). */
@@ -515,93 +506,121 @@ describe('scenario T8.6a: drawer slides', () => {
     close(drawer.gaps[0].boxGap, 21.5625 * IN - 2 * T);
   });
 
-  it('adds the slides as plain steel bodies (gap probe: no purchased-part catalog)', async () => {
+  it('picks an 18" side-mount slide from the hardware catalog and places the pair', async () => {
+    // The catalog is a resource: the family's clearance is the 1/2" asked for, and the 18" size
+    // fits the 22" cabinet and the 18" drawer.
+    const { resources } = await h.client.listResources();
+    expect(resources.map((r) => r.uri)).toContain(HARDWARE_URI);
+    const first = (await h.client.readResource({ uri: HARDWARE_URI })).contents[0] as {
+      text: string;
+    };
+    const catalog = (JSON.parse(first.text) as Data).drawerSlides as Data;
+    expect(catalog.feature.extension).toBe('wood.slide');
+    const family = (catalog.families as Data[]).find((f) => f.clearance.kind === 'side-mount')!;
+    expect(family).toMatchObject({ id: 'side-mount-ball-bearing', verified: false });
+    close(family.clearance.side.nominal, CLEARANCE * IN);
+    expect((family.sizes as Data[]).map((s) => s.id)).toEqual(
+      [10, 12, 14, 16, 18, 20, 22, 24, 26, 28].map((n) => `${n}in`),
+    );
+    const size = (family.sizes as Data[]).find((s) => Math.abs(s.nominal - LENGTH) < 1e-6)!;
+    expect(size).toMatchObject({ id: '18in', cabinetLength: 450, minCabinetDepth: 450 });
+    expect(size.minCabinetDepth).toBeLessThan(22 * IN);
+    expect(size.drawerLength).toBeLessThanOrEqual(LENGTH);
+
+    // A size the cabinet is too shallow for is a regen error that says so (a dry run).
+    const long = await call('apply', {
+      sessionId,
+      label: 'A 24" slide pair',
+      dryRun: true,
+      commands: slides(ids.dls!, ids.drs!, '24in'),
+    });
+    expect(long.errors).toEqual(
+      ['extension#24', 'extension#25'].map((featureId) =>
+        expect.objectContaining({
+          featureId,
+          message: expect.stringMatching(
+            /needs 600 mm of extension#[12] behind its front, and there is 558\.8 mm: the cabinet is too shallow/,
+          ) as string,
+        }),
+      ),
+    );
+
+    // Found: no command or feature made a purchased part, and a `wood.slide` extension regenerated
+    // with `unsupported`. Now the pair goes in one batch, a slide per side.
     const r = await call('apply', {
       sessionId,
       label: 'Add 18" side-mount slides',
-      commands: slides(ids.drs!),
+      commands: slides(ids.dls!, ids.drs!),
     });
     expect(r.errors).toEqual([]);
     const s = r.symbols as Record<string, string>;
-    for (const k of ['lc', 'ld', 'rc', 'rd']) ids[k] = s[`$${k}_bar`]!;
-    // The right drawer member first: the cabinet member stands on it.
-    expect([ids.lc, ids.ld, ids.rd, ids.rc]).toEqual([
-      'extrude#1',
-      'extrude#2',
-      'extrude#3',
-      'extrude#4',
-    ]);
-    const steel = await call('apply', {
-      sessionId,
-      label: 'Make the slides steel',
-      commands: [ids.lc, ids.ld, ids.rc, ids.rd].map((bodyId) => ({
-        type: 'setBodyProps',
-        partId: P,
-        bodyId,
-        props: { material: 'steel' },
-      })),
+    expect([s.$lslide, s.$rslide]).toEqual(['extension#24', 'extension#25']);
+    // Each slide makes two bodies, its cabinet member and its drawer member.
+    Object.assign(ids, {
+      lslide: s.$lslide,
+      rslide: s.$rslide,
+      lc: `${s.$lslide}:slide/cabinet`,
+      ld: `${s.$lslide}:slide/drawer`,
+      rc: `${s.$rslide}:slide/cabinet`,
+      rd: `${s.$rslide}:slide/drawer`,
     });
-    expect(steel.errors).toEqual([]);
+    const bodies = ((await tree()).parts as Data[])[0]!.bodies as Data[];
+    expect(bodies.map((b) => b.id ?? b.bodyId)).toEqual(
+      expect.arrayContaining([ids.lc, ids.ld, ids.rc, ids.rd]),
+    );
     // Each slide fills its 1/2" exactly: touching both sides, overlapping neither.
-    const fit = await call('measure', {
+    for (const [side, c, d, drawer] of [
+      ['extension#1', ids.lc, ids.ld, ids.dls],
+      ['extension#2', ids.rc, ids.rd, ids.drs],
+    ]) {
+      const fit = await call('measure', {
+        sessionId,
+        query: {
+          kind: 'clearance',
+          bodies: [side, c, d, drawer].map((bodyId) => ({ partId: P, bodyId })),
+        },
+      });
+      expect(fit.measurement.pairs).toEqual([]);
+      close((await clearance(side!, c!)).gaps[0].boxGap, 0);
+      close((await clearance(d!, drawer!)).gaps[0].boxGap, 0);
+    }
+    // The slide's height, centred on the drawer side, and its closed length from the front.
+    const member = await call('measure', {
       sessionId,
-      query: {
-        kind: 'clearance',
-        bodies: ['extension#1', ids.lc, ids.ld, ids.dls].map((bodyId) => ({ partId: P, bodyId })),
-      },
+      query: { kind: 'body', partId: P, bodyId: ids.lc },
     });
-    expect(fit.measurement.pairs).toEqual([]);
-
-    // The gap: no command or feature makes a purchased part. The schema index knows boards and
-    // joints (extension features) and plain geometry; a slide as a domain feature is refused.
-    const { index } = await call('get_schema', {});
-    const kinds = [...index.commands, ...index.features].join(' ');
-    expect(kinds).not.toMatch(/hardware|component|catalog|purchased|slide/i);
-    const slide = await h.call('apply', {
-      sessionId,
-      label: 'An 18" slide from a catalog',
-      dryRun: true,
-      commands: [
-        add({
-          id: 'extension#$slide',
-          kind: 'extension',
-          name: '18" slide',
-          extension: 'wood.slide',
-          schemaVersion: 1,
-          dependsOn: [ids.dls],
-          references: [],
-          expressions: { length: inches('18') },
-          params: { series: 'side-mount', length: 18 },
-        }),
-      ],
-    });
-    expect(slide.ok).toBe(true);
-    expect(slide.errors).toEqual([
-      expect.objectContaining({ featureId: 'extension#24', code: 'unsupported' }),
-    ]);
+    const { min, max } = member.measurement.boundingBox;
+    close(max[2] - min[2], 45.7);
+    close((max[2] + min[2]) / 2, zMid);
+    close(min[1], 0);
+    close(max[1], 450);
+    close(max[0] - min[0], (CLEARANCE * IN) / 2);
   });
 
-  it('gap probe: the slides are not in the cut list or its hardware; dowels are', async () => {
+  it('counts the slides as hardware lines in the cut list and the bill of materials', async () => {
     const q = (await call('get_quantities', { sessionId })).quantities as Data;
     expect(q.reviewed).toBe(false);
-    // Hardware lines are separate from boards (the plan's fourth hypothesis does not hold) ...
+    // Found: the hardware lines came only from joints, and the slides were left out as "not
+    // wood". Now the pair is a line of its own, and its members are neither pieces nor excluded.
     expect(q.hardware.map((r: Data) => [r.kind, r.item, r.quantity])).toEqual([
       ['hardware', 'Dowel', 16],
+      ['hardware', 'Drawer slide, side-mount ball-bearing, full extension', 2],
     ]);
+    const line = (q.hardware as Data[])[1]!;
+    close(line.size.length, LENGTH);
+    expect(line.sources.map((x: Data) => x.id)).toEqual([ids.lslide, ids.rslide]);
     expect(q.cutList.totals.map((t: Data) => t.group)).toEqual(['sheet', 'hardware']);
-    // ... but they come only from joints: the slides are left out, as "not wood".
-    expect(q.cutList.excluded).toEqual(
-      [ids.lc, ids.ld, ids.rd, ids.rc].map((bodyId) => ({ part: P, bodyId, reason: 'not-wood' })),
-    );
+    expect(q.cutList.excluded).toEqual([]);
     expect(q.cutList.rows.map((r: Data) => r.item)).toContain(
       'Drawer left side, Drawer right side',
     );
-    // And so is the bill of materials file.
+    expect(q.cutList.rows.map((r: Data) => r.item).join(' ')).not.toMatch(/slide/i);
+    // And so is the bill of materials file: the dowels and the slides, by length.
     const bom = await call('export', { sessionId, format: 'bom-csv', fileName: 'drawer-bom' });
     expect(bom.reviewed).toBe(false);
     const csv = readFileSync(path.join(h.outputDir, bom.files[0].name), 'utf8');
     expect(csv).toMatch(/Dowel/);
-    expect(csv).not.toMatch(/slide/i);
+    expect(csv).toContain('"Drawer slide, side-mount ball-bearing, full extension","18""",2,');
   });
 
   it('mates the drawer to the cabinet on a slider limited to the 18" travel', async () => {
@@ -817,7 +836,7 @@ describe('scenario T8.6a: drawer slides', () => {
   });
 
   it('sweeps a shortened cabinet: the first colliding value and the pair', async () => {
-    // The cabinet made 17" deep (the slides and the 18" drawer as they were): the back now stands
+    // The cabinet made 17" deep (the 18" drawer as it was, the slides 16"): the back now stands
     // inside the drawer's travel.
     const depth = 17 * IN;
     const back = (7 / 32) * IN;
@@ -840,7 +859,44 @@ describe('scenario T8.6a: drawer slides', () => {
       }
       commands.push({ type: 'editFeature', partId: P, feature: f });
     }
-    const r = await call('apply', { sessionId, label: 'Make the cabinet 17" deep', commands });
+    // The 18" slides no longer fit (#1200): as a dry run, each is an error naming the room it
+    // needs, and the instances lose their members. Found: the plain bars stayed, 1/2" past the
+    // cabinet's back.
+    const tooShallow = await call('apply', {
+      sessionId,
+      label: 'Make the cabinet 17" deep',
+      dryRun: true,
+      commands,
+    });
+    expect(tooShallow.errors).toEqual([
+      ...[ids.lslide, ids.rslide].map((featureId) =>
+        expect.objectContaining({
+          where: 'feature',
+          featureId,
+          message: expect.stringMatching(
+            /needs 450 mm of extension#[12] behind its front, and there is 431\.8 mm: the cabinet is too shallow/,
+          ) as string,
+        }),
+      ),
+      ...[ids.cabinet, ids.drawer].map((id) =>
+        expect.objectContaining({ where: 'instance', id, code: 'reference-lost' }),
+      ),
+    ]);
+    // So the slides go down to 16" with it (400 mm closed), in the same batch.
+    for (const id of [ids.lslide!, ids.rslide!]) {
+      const read = await call('get_object', {
+        sessionId,
+        query: { kind: 'feature', partId: P, featureId: id },
+      });
+      const f = structuredClone(read.object) as Data;
+      f.params.size = '16in';
+      commands.push({ type: 'editFeature', partId: P, feature: f });
+    }
+    const r = await call('apply', {
+      sessionId,
+      label: 'Make the cabinet 17" deep, on 16" slides',
+      commands,
+    });
     expect(r.errors).toEqual([]);
     // Closed, the drawer runs through the back: the sweep's first value collides.
     const closed = await interference({ travel: { mateId: ids.mate } });
@@ -1088,9 +1144,10 @@ describe('scenario T8.6a: drawer slides', () => {
       sessionId,
       note:
         'Added a drawer box (21-9/16" x 12" x 18", 1/2" plywood, 1/4" bottom, dowelled) in the ' +
-        'bottom opening, on two 18" slides modelled as plain steel bars (1/2" each side), and an ' +
-        'assembly with a slider mate limited to 0 to 18". Checked: no interference closed, at 9" ' +
-        'and at 18". Not checked: the slides are not in the bill of materials.',
+        'bottom opening, on a pair of 18" side-mount slides from the hardware catalog (1/2" each ' +
+        'side, in the bill of materials; the catalog is not verified against a real slide), and ' +
+        'an assembly with a slider mate limited to 0 to 18". Checked: no interference closed, at ' +
+        '9" and at 18".',
       views: [
         { name: 'Drawer', camera: { view: 'front', fit: [`${ids.dfr}`] } },
         {
