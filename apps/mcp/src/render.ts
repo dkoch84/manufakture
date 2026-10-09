@@ -6,11 +6,27 @@
 // Bounds: at most `MAX_IMAGES_PER_CALL` images a call (views times sides), each side at most
 // `MAX_IMAGE_SIDE` pixels, each PNG at most `imageBytes` and all of them `totalImageBytes`; an
 // image over a bound is left out and listed in `failed`.
+//
+// A view with `assembly` draws that assembly instead of the part studio (`@manufakture/review`'s
+// `assemblyScene`): its instances' bodies at the solved poses, or with sliders and revolutes held
+// at values and instances placed by hand, and the pose read back beside the image (each mate's
+// coordinates, warnings for a value past a limit or a pose off its mate). With `compare`, the
+// base is drawn at the same request.
+//
+// Scripts: the workshop's engine runs in this thread with no script engine (a run here could not
+// be ended), so a scripted feature fails in these renders, as in exports; a session's own regen
+// and the review bundle run the branch's scripts in a worker (packages/session, "Scripts").
 
 import type { ManufaktureDocument } from '@manufakture/core';
 import type { MemberMesh, RegenResult } from '@manufakture/regen';
 import { buildScene, render, type RenderOptions, type Scene } from '@manufakture/render';
-import { sceneBox, sharedCamera } from '@manufakture/review';
+import {
+  assemblyScene,
+  sceneBox,
+  sharedCamera,
+  type AssemblyAt,
+  type PosedAssemblyView,
+} from '@manufakture/review';
 import type { z } from 'zod';
 import type { View } from './schemas';
 import type { Workshop } from './workshop';
@@ -37,6 +53,8 @@ export interface Drawn {
   height: number;
   mmPerPixel: number;
   unmatched: string[];
+  /** For a view of an assembly: the pose drawn, read back. */
+  assembly?: PosedAssemblyView;
 }
 
 export interface Failed {
@@ -46,7 +64,9 @@ export interface Failed {
   message: string;
 }
 
-type SceneOrError = { ok: true; value: Scene } | { ok: false; code: string; message: string };
+type SceneOrError =
+  | { ok: true; value: Scene; posed?: PosedAssemblyView }
+  | { ok: false; code: string; message: string };
 
 function sceneOf(document: ManufaktureDocument, result: RegenResult): SceneOrError {
   const memberMeshes = new Map<string, MemberMesh>(
@@ -71,6 +91,31 @@ function options(view: ViewInput): RenderOptions {
   return o;
 }
 
+/** One side's scene per view: the part studio's, or an assembly's at the view's pose. */
+function scenesOf(
+  document: ManufaktureDocument,
+  result: RegenResult,
+  views: readonly ViewInput[],
+): SceneOrError[] {
+  let part: SceneOrError | null = null;
+  return views.map((view) => {
+    if (view.assembly === undefined) return (part ??= sceneOf(document, result));
+    const r = assemblyScene(document, result, view.assembly as AssemblyAt);
+    return r.ok ? { ok: true, value: r.scene, posed: r.posed } : r;
+  });
+}
+
+type Box = NonNullable<ReturnType<typeof sceneBox>>;
+
+function union(a: Box | null, b: Box | null): Box | null {
+  if (a === null) return b === null ? null : { min: [...b.min], max: [...b.max] };
+  if (b === null) return a;
+  return {
+    min: [0, 1, 2].map((k) => Math.min(a.min[k]!, b.min[k]!)) as Box['min'],
+    max: [0, 1, 2].map((k) => Math.max(a.max[k]!, b.max[k]!)) as Box['max'],
+  };
+}
+
 /** Draw `views` of `head` (and of `base` at the same cameras), bounded by `limits`. */
 export async function renderViews(
   workshop: Workshop,
@@ -80,43 +125,33 @@ export async function renderViews(
   base: ManufaktureDocument | null,
   limits: ImageLimits,
 ): Promise<{ drawn: Drawn[]; failed: Failed[] }> {
-  const headScene = await workshop.run(head, regenMs, async (b) => sceneOf(head, b.result));
-  const baseScene =
-    base === null ? null : await workshop.run(base, regenMs, async (b) => sceneOf(base, b.result));
+  const headScenes = await workshop.run(head, regenMs, async (b) =>
+    scenesOf(head, b.result, views),
+  );
+  const baseScenes =
+    base === null
+      ? null
+      : await workshop.run(base, regenMs, async (b) => scenesOf(base, b.result, views));
 
   // With a comparison, a view that does not frame itself is framed on what both sides draw.
-  let box: ReturnType<typeof sceneBox> = null;
-  if (baseScene !== null) {
-    for (const s of [headScene, baseScene]) {
-      const b = s.ok ? sceneBox(s.value) : null;
-      if (b === null) continue;
-      box =
-        box === null
-          ? { min: [...b.min], max: [...b.max] }
-          : {
-              min: [0, 1, 2].map((k) => Math.min(box!.min[k]!, b.min[k]!)) as [
-                number,
-                number,
-                number,
-              ],
-              max: [0, 1, 2].map((k) => Math.max(box!.max[k]!, b.max[k]!)) as [
-                number,
-                number,
-                number,
-              ],
-            };
-    }
-  }
+  const boxes = new Map<Scene, Box | null>();
+  const boxOf = (s: SceneOrError): Box | null => {
+    if (!s.ok) return null;
+    if (!boxes.has(s.value)) boxes.set(s.value, sceneBox(s.value));
+    return boxes.get(s.value)!;
+  };
 
   const drawn: Drawn[] = [];
   const failed: Failed[] = [];
   let total = 0;
   views.forEach((view, i) => {
     const o = options(view);
+    const headScene = headScenes[i]!;
+    const baseScene = baseScenes === null ? null : baseScenes[i]!;
     if (baseScene !== null) {
       o.camera = sharedCamera(
         { name: 'view', ...(o.camera !== undefined ? { camera: o.camera } : {}) },
-        box,
+        union(boxOf(headScene), boxOf(baseScene)),
         { width: o.width ?? 1024, height: o.height ?? 768 },
       );
     }
@@ -151,6 +186,7 @@ export async function renderViews(
         height: r.value.height,
         mmPerPixel: r.value.mmPerPixel,
         unmatched: r.value.unmatched,
+        ...(scene.posed !== undefined ? { assembly: scene.posed } : {}),
       });
     }
   });

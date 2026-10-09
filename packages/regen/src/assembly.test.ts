@@ -12,6 +12,7 @@ import {
   namedCoordinates,
   pickReport,
   posedMates,
+  poseAssembly,
   resultSolverInput,
   solvedPoses,
   sweepPoses,
@@ -383,5 +384,42 @@ describe('sweeps over a mate from a regen result', () => {
     expect(checks[1]!.mateId).toBe('mate#2');
     expect(checks[1]!.residual.position).toBeCloseTo(400, 9);
     expect(checks[1]!.outsideLimits).toBeNull();
+  });
+
+  it('poses the assembly at mate values and at given poses, or refuses', () => {
+    const input = resultSolverInput(assembly, result(), variables);
+    // Nothing asked: the solved poses, the mates read there.
+    const rest = poseAssembly(input, {});
+    if (!rest.ok) throw new Error(rest.message);
+    expect(rest.value.poses.drawer!.translation[2]).toBeCloseTo(100, 9);
+    expect(rest.value.notReached).toEqual([]);
+    expect(rest.value.mates.map((m) => m.mateId)).toEqual(['mate#1', 'mate#2']);
+    // The slider held at 300 mm: the drawer there, the fastened knob following.
+    const open = poseAssembly(input, { mates: { 'mate#1': 300 } });
+    if (!open.ok) throw new Error(open.message);
+    expect(open.value.poses.drawer!.translation[2]).toBeCloseTo(300, 9);
+    expect(open.value.poses.knob!.translation[2]).toBeCloseTo(305, 9);
+    expect(open.value.poses.cab).toEqual(I);
+    expect(open.value.mates[0]!.coordinates[0]!.value).toBeCloseTo(300, 9);
+    expect(open.value.mates[0]!.outsideLimits).toBeNull();
+    // Past the limit it is held all the same, and the check says so.
+    const past = poseAssembly(input, { mates: { 'mate#1': 450 } });
+    if (!past.ok) throw new Error(past.message);
+    expect(past.value.poses.drawer!.translation[2]).toBeCloseTo(450, 9);
+    expect(past.value.mates[0]!.outsideLimits).toMatchObject({ bound: 'max', limit: 400 });
+    // A pose given by hand is placed after the solve: the knob left where it is put.
+    const knob: Pose = { translation: [50, 0, 300], rotation: [0, 0, 0, 1] };
+    const both = poseAssembly(input, { mates: { 'mate#1': 300 }, poses: { knob } });
+    if (!both.ok) throw new Error(both.message);
+    expect(both.value.poses.knob).toEqual(knob);
+    expect(both.value.mates[1]!.residual.position).toBeGreaterThan(49);
+    // Refused: an unknown or fastened mate, an unknown instance, a value that is not finite.
+    expect(poseAssembly(input, { mates: { 'mate#9': 1 } })).toMatchObject({ ok: false });
+    expect(poseAssembly(input, { mates: { 'mate#2': 1 } })).toMatchObject({
+      ok: false,
+      message: expect.stringMatching(/fastened mate/) as string,
+    });
+    expect(poseAssembly(input, { poses: { off: I } })).toMatchObject({ ok: false });
+    expect(poseAssembly(input, { mates: { 'mate#1': Number.NaN } })).toMatchObject({ ok: false });
   });
 });

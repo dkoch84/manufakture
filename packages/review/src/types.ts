@@ -161,6 +161,33 @@ export interface ViewPair {
   /** Why an image is missing (nothing to draw, a render error). */
   baseError?: string;
   headError?: string;
+  /** For a view of an assembly: which, at what, and what that pose does on each side. */
+  assembly?: AssemblyViewInfo;
+}
+
+/** An assembly view: the request as asked at submit, and each side's pose read back. */
+export interface AssemblyViewInfo {
+  assemblyId: string;
+  /** Slider distances (mm) and revolute angles (degrees) held, by mate id. */
+  mates: Record<string, number>;
+  /** Instances placed by hand, by instance id (mm, unit quaternion [x, y, z, w]). */
+  poses: Record<string, { translation: number[]; rotation: number[] }>;
+  /** Null when that side could not be posed (its error is the image's). */
+  base: AssemblyPoseInfo | null;
+  head: AssemblyPoseInfo | null;
+}
+
+export interface AssemblyPoseInfo {
+  /** Each solved mate's coordinates as drawn (mm, degrees). */
+  mates: Bounded<{
+    mateId: string;
+    kind: string;
+    coordinates: { name: string; value: number; unit: string }[];
+  }>;
+  /** What the pose does to the mates (a value past a limit, a pose off its mate), as text. */
+  warnings: Bounded<string>;
+  /** Instances not drawn: their source failed in the regen. */
+  skipped: Bounded<string>;
 }
 
 // Regen errors ----------------------------------------------------------------------------------

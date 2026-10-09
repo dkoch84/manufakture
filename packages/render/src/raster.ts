@@ -83,10 +83,17 @@ class Patterns {
     return this.patterns.length === 0;
   }
 
-  /** Whether `name` (of a thing in `partId`) matches, marking the patterns that do. */
-  test(partId: string, name: string | null): boolean {
+  /**
+   * Whether `name` (of a thing in `partId`, drawn as assembly instance `instanceId` if any)
+   * matches, marking the patterns that do: the name alone, qualified with its part, or with its
+   * instance.
+   */
+  test(partId: string, name: string | null, instanceId?: string): boolean {
     if (name === null || this.empty) return false;
-    return this.one(name) || this.one(`${partId}/${name}`);
+    const a = this.one(name);
+    const b = this.one(`${partId}/${name}`);
+    const c = instanceId !== undefined && this.one(`${instanceId}/${name}`);
+    return a || b || c;
   }
 
   private one(name: string): boolean {
@@ -132,13 +139,15 @@ interface Item {
 /** Per-name flags over a list of names, or null when none is set. */
 function flags(
   patterns: Patterns,
-  partId: string,
+  mesh: SceneMesh,
   names: readonly (string | null)[],
 ): Uint8Array | null {
   if (patterns.empty) return null;
   let out: Uint8Array | null = null;
   names.forEach((n, i) => {
-    if (patterns.test(partId, n)) (out ??= new Uint8Array(names.length))[i] = 1;
+    if (patterns.test(mesh.partId, n, mesh.instanceId)) {
+      (out ??= new Uint8Array(names.length))[i] = 1;
+    }
   });
   return out;
 }
@@ -167,8 +176,8 @@ export function rasterize(
     const count = m.matrices ? m.matrices.length / 16 : 1;
     for (let i = 0; i < count; i++) {
       const name = m.names[i]!;
-      if (hide.test(m.partId, name)) continue;
-      const whole = highlight.test(m.partId, name);
+      if (hide.test(m.partId, name, m.instanceId)) continue;
+      const whole = highlight.test(m.partId, name, m.instanceId);
       let mirrored = false;
       if (m.matrices) {
         const M = m.matrices;
@@ -179,7 +188,7 @@ export function rasterize(
           M[b + 8]! * (M[b + 1]! * M[b + 6]! - M[b + 5]! * M[b + 2]!);
         mirrored = det < 0;
       }
-      const fitAll = fit.test(m.partId, name);
+      const fitAll = fit.test(m.partId, name, m.instanceId);
       items.push({
         mesh: m,
         instance: i,
@@ -187,11 +196,11 @@ export function rasterize(
         edgeFirst: edgePointCount,
         color: whole ? HIGHLIGHT : m.colors[i]!,
         mirrored,
-        faceHighlight: whole ? null : flags(highlight, m.partId, m.faceNames),
-        edgeHighlight: flags(highlight, m.partId, m.edgeNames),
+        faceHighlight: whole ? null : flags(highlight, m, m.faceNames),
+        edgeHighlight: flags(highlight, m, m.edgeNames),
         fitAll,
-        fitFaces: fitAll ? null : flags(fit, m.partId, m.faceNames),
-        fitEdges: fitAll ? null : flags(fit, m.partId, m.edgeNames),
+        fitFaces: fitAll ? null : flags(fit, m, m.faceNames),
+        fitEdges: fitAll ? null : flags(fit, m, m.edgeNames),
       });
       vertexCount += m.positions.length / 3;
       edgePointCount += m.edgePositions.length / 3;

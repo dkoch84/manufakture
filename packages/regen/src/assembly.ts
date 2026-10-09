@@ -15,6 +15,7 @@ import {
   coordinateAxes,
   posedMate,
   solveAtCoordinate,
+  solve,
   coordinateNames,
   frameAxes,
   isAngular,
@@ -543,6 +544,94 @@ export function posedMates(
     });
   }
   return out;
+}
+
+/** What to draw or check an assembly at: mates held at values, instances placed by hand. */
+export interface AssemblyPoseRequest {
+  /**
+   * Slider distances (mm) and revolute angles (radians) by mate id, held by one solve with each
+   * mate's limits pinned to its value, every other mate kept. A value past the mate's limits is
+   * held all the same (the caller warns about it).
+   */
+  mates?: Readonly<Record<string, number>>;
+  /** Poses by instance id (instance coordinates to world), placed as given after that solve. */
+  poses?: Readonly<Record<string, Pose>>;
+}
+
+/** An assembly at a request's poses and mate values. */
+export interface PosedAssembly {
+  /** Every instance of the input, by id: as given, else as solved. */
+  poses: Record<string, Pose>;
+  /** Mates of `request.mates` the solve could not hold at their value (inside a loop of mates). */
+  notReached: string[];
+  /** Every mate of the input read at `poses`: its coordinates, residual and limits. */
+  mates: PosedMateCheck[];
+}
+
+/**
+ * `input` (an assembly's last solve, `resultSolverInput`) at `request`: the mates of
+ * `request.mates` held at their values by one solve from the solved poses, then the instances of
+ * `request.poses` placed as given. With neither, the solved poses. Refused (as a message) for a
+ * mate that is not in the input or is not a slider or a revolute, a value or pose that is not
+ * finite, and an instance that is not in the input.
+ */
+export function poseAssembly(
+  input: AssemblyInput,
+  request: AssemblyPoseRequest,
+): { ok: true; value: PosedAssembly } | { ok: false; message: string } {
+  const values = Object.entries(request.mates ?? {});
+  const given = Object.entries(request.poses ?? {});
+  for (const [id, value] of values) {
+    const mate = input.mates.find((m) => m.id === id);
+    if (mate === undefined) {
+      return { ok: false, message: `There is no mate ${id} that solved in the last regen.` };
+    }
+    if (mate.kind !== 'slider' && mate.kind !== 'revolute') {
+      return {
+        ok: false,
+        message: `${id} is a ${mate.kind} mate: only a slider's or a revolute's value is held.`,
+      };
+    }
+    if (!Number.isFinite(value)) return { ok: false, message: `${id}'s value is not finite.` };
+  }
+  for (const [id, pose] of given) {
+    if (!input.instances.some((i) => i.id === id)) {
+      return { ok: false, message: `There is no instance ${id} in the last solve.` };
+    }
+    if (![...pose.translation, ...pose.rotation].every(Number.isFinite)) {
+      return { ok: false, message: `${id}'s pose is not finite.` };
+    }
+  }
+  const poses: Record<string, Pose> = {};
+  for (const i of input.instances) poses[i.id] = plain(i.pose);
+  const notReached: string[] = [];
+  if (values.length > 0) {
+    const held = new Map(values);
+    const report = solve({
+      instances: input.instances,
+      mates: input.mates.map((m): MateInput => {
+        const v = held.get(m.id);
+        return v === undefined ? m : { ...m, limits: { min: v, max: v } };
+      }),
+    });
+    if (report.outcome === 'solved') {
+      for (const [id, pose] of Object.entries(report.poses)) poses[id] = plain(pose);
+    }
+    for (const [id, value] of values) {
+      const r = report.mates[id];
+      const kind = input.mates.find((m) => m.id === id)!.kind;
+      const c = r !== undefined && r.coordinates.length === 1 ? r.coordinates[0]! : null;
+      const off =
+        c === null
+          ? Infinity
+          : kind === 'revolute'
+            ? Math.abs(Math.atan2(Math.sin(c - value), Math.cos(c - value)))
+            : Math.abs(c - value);
+      if (report.outcome !== 'solved' || off > 1e-6) notReached.push(id);
+    }
+  }
+  for (const [id, pose] of given) poses[id] = plain(pose);
+  return { ok: true, value: { poses, notReached, mates: posedMates(input, poses) } };
 }
 
 /** A drag step's result from the solver's report. */

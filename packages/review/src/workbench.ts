@@ -21,6 +21,7 @@ import {
   type QueryContext,
   type Refusal,
 } from '@manufakture/session';
+import { assemblyScene, type AssemblyAt, type AssemblySceneResult } from './assembly';
 import { round, shown } from './text';
 import { LIMITS, type BodyMeasurement, type InterferencePair } from './types';
 
@@ -44,6 +45,8 @@ export interface SideReport {
   result: RegenResult;
   /** What the renderer draws, or why it cannot. */
   scene: { ok: true; value: Scene } | { ok: false; message: string };
+  /** Per view asked for with an assembly (`side`'s `assemblies`), its scene at the pose. */
+  assemblyScenes: (AssemblySceneResult | undefined)[];
   bodies: MeasuredBody[];
   /** Bodies left unmeasured past `LIMITS.bodies`. */
   bodiesOmitted: number;
@@ -163,6 +166,11 @@ export class Workbench {
         if (set.instances) this.#memberInstances.set(set.setKey, set.instances);
       }
     }
+    for (const source of result.sources) {
+      for (const body of source.bodies) {
+        if (body.mesh) this.#bodyMeshes.set(body.bodyKey, { mesh: body.mesh, names: result.names });
+      }
+    }
     for (const m of result.memberMeshes?.added ?? []) this.#memberMeshes.set(m.key, m);
     for (const k of result.memberMeshes?.removed ?? []) this.#memberMeshes.delete(k);
   }
@@ -190,8 +198,34 @@ export class Workbench {
     return scene.ok ? scene : { ok: false, message: scene.error.message };
   }
 
-  /** Regenerate `document` and read everything the bundle needs of it. */
-  async side(document: ManufaktureDocument): Promise<SideReport> {
+  /** Assembly scenes at the poses `assemblies` ask for (one per view; undefined for others). */
+  #assemblyScenes(
+    document: ManufaktureDocument,
+    result: RegenResult,
+    assemblies: readonly (AssemblyAt | undefined)[],
+  ): SideReport['assemblyScenes'] {
+    if (assemblies.every((a) => a === undefined)) return assemblies.map(() => undefined);
+    // Meshes of bodies this regen reports unchanged, by part (or source) and body.
+    const bodyMeshes = new Map<string, CachedBodyMesh>();
+    const add = (owner: string, body: { bodyId: string; bodyKey: string; mesh: unknown }) => {
+      const cached = this.#bodyMeshes.get(body.bodyKey);
+      if (!body.mesh && cached) bodyMeshes.set(`${owner}/${body.bodyId}`, cached);
+    };
+    for (const part of result.parts) for (const body of part.bodies) add(part.partId, body);
+    for (const source of result.sources) for (const body of source.bodies) add(source.key, body);
+    return assemblies.map((at) =>
+      at === undefined ? undefined : assemblyScene(document, result, at, bodyMeshes),
+    );
+  }
+
+  /**
+   * Regenerate `document` and read everything the bundle needs of it; with `assemblies`, the
+   * scene of each view that asks for an assembly too.
+   */
+  async side(
+    document: ManufaktureDocument,
+    assemblies: readonly (AssemblyAt | undefined)[] = [],
+  ): Promise<SideReport> {
     const result = await this.#regen(document);
     const api = this.#api();
     await this.#references.sync(document, api, this.#generation);
@@ -247,6 +281,7 @@ export class Workbench {
       document,
       result,
       scene: this.#scene(document, result),
+      assemblyScenes: this.#assemblyScenes(document, result, assemblies),
       bodies,
       bodiesOmitted: Math.max(0, all.length - LIMITS.bodies),
       interference,

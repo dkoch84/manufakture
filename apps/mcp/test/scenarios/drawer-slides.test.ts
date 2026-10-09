@@ -19,6 +19,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { DocumentLibrary } from '@manufakture/library';
 import { NodeBackend } from '@manufakture/library/node';
+import { BackendBundleStore } from '@manufakture/session';
 import { cabinetDocument } from '@manufakture/session/test-fixtures';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { BASE_CABINET_ID, baseCabinetDocument } from '../fixtures/drawer-slides/cabinet';
@@ -778,19 +779,106 @@ describe('scenario T8.6a: drawer slides', () => {
     expect((await call('get_errors', { sessionId })).errors).toEqual([]);
   });
 
-  it('gap probe: render draws the part, not the assembly at a pose', async () => {
-    const asked = await h.call('render', {
-      sessionId,
-      views: [{ camera: 'isometric', assemblyId: ids.assembly, width: 320, height: 240 }],
+  it('renders the assembly with the drawer closed and 18" open, and at a pose past the travel', async () => {
+    const view = (assembly: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
+      camera: 'right',
+      width: 480,
+      height: 320,
+      assembly: { assemblyId: ids.assembly, ...assembly },
+      ...extra,
     });
-    expect(asked.ok).toBe(false);
-    expect(asked.error!.message).toMatch(/Unrecognized key: "assemblyId"/);
+    // At the solved poses (closed), and with the slider held at 18": the drawer, highlighted by
+    // its instance, sticks out of the front. From the top, in a wide and low image, the closed
+    // one is framed on the 22" depth and the open one on that and the 18" the drawer came out,
+    // so the image's scale grows by 40/22.
+    const top = { camera: 'top', width: 480, height: 160, highlight: [`${ids.drawer}/*`] };
+    const r = await h.raw('render', {
+      sessionId,
+      views: [view({}, top), view({ mates: { [ids.mate!]: LENGTH } }, top)],
+    });
+    expect(r.isError).toBeFalsy();
+    expect(r.content.filter((c) => c.type === 'image')).toHaveLength(2);
+    const { images, failed } = r.structuredContent as Data;
+    expect(failed).toEqual([]);
+    const [closed, open] = images as [Data, Data];
+    for (const [image, distance] of [
+      [closed, 0],
+      [open, LENGTH],
+    ] as const) {
+      expect(image.unmatched).toEqual([]);
+      expect(image.assembly).toMatchObject({
+        assemblyId: ids.assembly,
+        mates: [{ mateId: ids.mate, kind: 'slider' }],
+        warnings: [],
+        skipped: [],
+      });
+      expect(image.assembly.mates[0].coordinates).toEqual([
+        { name: 'distance', value: expect.closeTo(distance, 6) as number, unit: 'mm' },
+      ]);
+    }
+    close(open.mmPerPixel / closed.mmPerPixel, 40 / 22, 2);
+    // Past the slide's travel: drawn there all the same, with the warning the interference check
+    // gives. So is a pose placed by hand; and a pose off the slider says so.
+    const past = await call('render', {
+      sessionId,
+      views: [
+        view({ mates: { [ids.mate!]: 600 } }),
+        view({ poses: { [ids.drawer!]: pulled(600) } }),
+        view({ poses: { [ids.drawer!]: { translation: [IN, -IN, 0], rotation: [0, 0, 0, 1] } } }),
+      ],
+    });
+    const [held, placed, sideways] = past.images as [Data, Data, Data];
+    for (const image of [held, placed]) {
+      expect(image.assembly.mates[0].coordinates[0].value).toBeCloseTo(600, 6);
+      expect(image.assembly.warnings).toEqual([
+        expect.objectContaining({
+          code: 'outside-limits',
+          mateId: ids.mate,
+          bound: 'max',
+          limit: expect.closeTo(LENGTH, 6) as number,
+          value: expect.closeTo(600, 6) as number,
+          unit: 'mm',
+        }),
+      ]);
+    }
+    expect(sideways.assembly.warnings).toEqual([
+      expect.objectContaining({
+        code: 'off-mate',
+        mateId: ids.mate,
+        position: expect.closeTo(IN, 6) as number,
+      }),
+    ]);
+    // Refused per view: an assembly that does not exist, a mate that does not move.
+    const wrong = await call('render', {
+      sessionId,
+      views: [
+        view({}),
+        { ...view({}), assembly: { assemblyId: 'assembly#99' } },
+        view({ mates: { 'mate#99': 1 } }),
+      ],
+    });
+    expect(wrong.images).toHaveLength(1);
+    expect(wrong.failed).toEqual([
+      expect.objectContaining({ view: 1, side: 'head', code: 'not-found' }),
+      expect.objectContaining({ view: 2, side: 'head', code: 'invalid-input' }),
+    ]);
+    // At most 64 mate values (and poses) a view.
+    const many = await h.call('render', {
+      sessionId,
+      views: [
+        view({ mates: Object.fromEntries(Array.from({ length: 65 }, (_, k) => [`mate#${k}`, 0])) }),
+      ],
+    });
+    expect(many.ok).toBe(false);
+    expect(many.error!.message).toMatch(/At most 64 entries/);
+    // The part studio is still drawn as before when no assembly is asked for.
     const drawn = await h.raw('render', {
       sessionId,
       views: [{ camera: 'front', width: 480, height: 400, highlight: [`${ids.dfr}`] }],
     });
     expect(drawn.isError).toBeFalsy();
     expect(drawn.content.filter((c) => c.type === 'image')).toHaveLength(1);
+    expect((drawn.structuredContent as Data).images[0].assembly).toBeUndefined();
   });
 
   it('gap probe: widening the cabinet leaves the drawer and slides where they were', async () => {
@@ -833,6 +921,15 @@ describe('scenario T8.6a: drawer slides', () => {
     });
     expect(cuts.reviewed).toBe(false);
     expect((await call('get_errors', { sessionId })).errors).toEqual([]);
+    // A review view's ids are at most 120 characters: the refusal says so.
+    const long = await h.call('submit_for_review', {
+      sessionId,
+      views: [
+        { name: 'Long', assembly: { assemblyId: ids.assembly, mates: { ['m'.repeat(121)]: 0 } } },
+      ],
+    });
+    expect(long.ok).toBe(false);
+    expect(long.error!.message).toMatch(/not valid review views\. .*1 to 120 characters/);
     const submitted = await call('submit_for_review', {
       sessionId,
       note:
@@ -840,8 +937,50 @@ describe('scenario T8.6a: drawer slides', () => {
         'bottom opening, on two 18" slides modelled as plain steel bars (1/2" each side), and an ' +
         'assembly with a slider mate limited to 0 to 18". Checked: no interference closed, at 9" ' +
         'and at 18". Not checked: the slides are not in the bill of materials.',
-      views: [{ name: 'Drawer', camera: { view: 'front', fit: [`${ids.dfr}`] } }],
+      views: [
+        { name: 'Drawer', camera: { view: 'front', fit: [`${ids.dfr}`] } },
+        {
+          name: 'Drawer open 18"',
+          camera: 'right',
+          highlight: [`${ids.drawer}/*`],
+          assembly: { assemblyId: ids.assembly, mates: { [ids.mate!]: LENGTH } },
+        },
+      ],
     });
     expect(submitted.review).toBe('submitted');
+    // The bundle's assembly view: the base has no assembly, the head shows the drawer open.
+    const { branch } = await call('get_review', { sessionId });
+    const stored = await new BackendBundleStore(new NodeBackend(h.libraryRoot)).latest(
+      BASE_CABINET_ID,
+      branch,
+    );
+    const renders = (stored!.bundle as Data).renders as Data[];
+    expect(renders.map((v) => v.name)).toEqual([
+      'isometric',
+      'front',
+      'top',
+      'right',
+      'Drawer',
+      'Drawer open 18"',
+    ]);
+    const open = renders[5]!;
+    expect(open.head).toMatchObject({ width: 800, height: 600 });
+    expect(open.base).toBeNull();
+    expect(open.baseError).toMatch(/no assembly/);
+    expect(open.assembly).toMatchObject({
+      assemblyId: ids.assembly,
+      mates: { [ids.mate!]: expect.closeTo(LENGTH, 6) as number },
+      poses: {},
+      base: null,
+      head: {
+        mates: {
+          items: [{ mateId: ids.mate, kind: 'slider', coordinates: [{ name: 'distance' }] }],
+          omitted: 0,
+        },
+        warnings: { items: [], omitted: 0 },
+        skipped: { items: [], omitted: 0 },
+      },
+    });
+    close(open.assembly.head.mates.items[0].coordinates[0].value, LENGTH);
   });
 });

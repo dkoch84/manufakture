@@ -1,8 +1,15 @@
 // @manufakture/render: views of a regen result as PNG, without a browser (M8 plan, T8.2a; the
 // design is T8.0b's software rasteriser, docs/spikes/T8.0b-render.md). See the README.
 
-export { buildScene, creaseEdges } from './scene';
-export type { CachedBodyMesh, Scene, SceneInput, SceneMesh } from './scene';
+export { buildAssemblyScene, buildScene, creaseEdges, poseMatrix } from './scene';
+export type {
+  AssemblySceneInput,
+  AssemblySceneInstance,
+  CachedBodyMesh,
+  Scene,
+  SceneInput,
+  SceneMesh,
+} from './scene';
 export {
   DEFAULT_HEIGHT,
   DEFAULT_SUPERSAMPLE,

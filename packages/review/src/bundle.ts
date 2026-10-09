@@ -8,6 +8,7 @@ import type { ManufaktureDocument } from '@manufakture/core';
 import { MAIN_BRANCH, type MergePlan } from '@manufakture/library';
 import type { BundleBuilder, Engine, ErrorLine } from '@manufakture/session';
 import { branchLog, commandDiff, type LoggedBatch } from './commands';
+import type { AssemblySceneResult } from './assembly';
 import { Names } from './describe';
 import { assemblyDiffs, documentChanges, partDiffs, scriptDiffs } from './diff';
 import { DEFAULT_SUMMARISERS, domainDiffs, summariserMap, type DomainSummariser } from './domains';
@@ -25,6 +26,8 @@ import {
   BUNDLE_VERSION,
   LIMITS,
   type AssemblyInterference,
+  type AssemblyPoseInfo,
+  type AssemblyViewInfo,
   type BodyDelta,
   type BundleKey,
   type ImageRef,
@@ -224,6 +227,69 @@ export function mergeError(message: string): MergePreview {
   };
 }
 
+// Assembly views --------------------------------------------------------------------------------
+
+function poseInfo(r: AssemblySceneResult | undefined): AssemblyPoseInfo | null {
+  if (r === undefined || !r.ok) return null;
+  const { mates, warnings, skipped } = r.posed;
+  return {
+    mates: bounded(
+      mates.map((m) => ({
+        mateId: shown(m.mateId, 120),
+        kind: shown(m.kind, 32),
+        coordinates: m.coordinates.map((c) => ({
+          name: shown(c.name, 32),
+          value: round(c.value),
+          unit: c.unit,
+        })),
+      })),
+      LIMITS.items,
+    ),
+    warnings: bounded(
+      warnings.map((w) => shown(w.message)),
+      LIMITS.errors,
+    ),
+    skipped: bounded(
+      skipped.map((id) => shown(id, 120)),
+      LIMITS.items,
+    ),
+  };
+}
+
+function viewInfo(
+  view: ReviewView,
+  index: number,
+  base: SideReport,
+  head: SideReport,
+): AssemblyViewInfo | undefined {
+  const at = view.assembly;
+  if (at === undefined) return undefined;
+  return {
+    assemblyId: shown(at.assemblyId, 120),
+    mates: Object.fromEntries(
+      Object.entries(at.mates ?? {}).map(([id, v]) => [shown(id, 120), round(v)]),
+    ),
+    poses: Object.fromEntries(
+      Object.entries(at.poses ?? {}).map(([id, p]) => [
+        shown(id, 120),
+        { translation: p.translation.map(round), rotation: p.rotation.map(round) },
+      ]),
+    ),
+    base: poseInfo(base.assemblyScenes[index]),
+    head: poseInfo(head.assemblyScenes[index]),
+  };
+}
+
+/** One side's scene for a view: the assembly's at its pose for an assembly view. */
+function sideScene(side: SideReport) {
+  return (view: ReviewView, index: number): SideReport['scene'] => {
+    if (view.assembly === undefined) return side.scene;
+    const r = side.assemblyScenes[index];
+    if (r === undefined) return { ok: false, message: 'The assembly was not posed.' };
+    return r.ok ? { ok: true, value: r.scene } : { ok: false, message: r.message };
+  };
+}
+
 // The bundle ------------------------------------------------------------------------------------
 
 /** The bundle for `head` against `base`, and the images it names. */
@@ -232,8 +298,9 @@ export async function buildBundle(input: BuildInput): Promise<BuiltBundle> {
   const views = reviewViews(input.views);
   const workbench = new Workbench(input.engine, input.limits ?? DEFAULT_WORKBENCH_LIMITS);
   // The base first: what the branch did not change is then cached for the head.
-  const base = await workbench.side(input.base);
-  const head = await workbench.side(input.head);
+  const assemblies = views.map((v) => v.assembly);
+  const base = await workbench.side(input.base, assemblies);
+  const head = await workbench.side(input.head, assemblies);
 
   const images = new Map<string, Uint8Array>();
   const ref = (img: { png: Uint8Array; width: number; height: number }): ImageRef => {
@@ -242,18 +309,22 @@ export async function buildBundle(input: BuildInput): Promise<BuiltBundle> {
     return { sha256: sha, bytes: img.png.length, width: img.width, height: img.height };
   };
   const renders: ViewPair[] = renderPairs(
-    base.scene,
-    head.scene,
+    sideScene(base),
+    sideScene(head),
     views,
     input.imageSize ?? DEFAULT_IMAGE_SIZE,
-  ).map((pair) => ({
-    name: pair.name,
-    camera: pair.camera,
-    base: pair.base && 'png' in pair.base ? ref(pair.base) : null,
-    head: pair.head && 'png' in pair.head ? ref(pair.head) : null,
-    ...(pair.base && 'error' in pair.base ? { baseError: pair.base.error } : {}),
-    ...(pair.head && 'error' in pair.head ? { headError: pair.head.error } : {}),
-  }));
+  ).map((pair, i) => {
+    const assembly = viewInfo(views[i]!, i, base, head);
+    return {
+      name: pair.name,
+      camera: pair.camera,
+      base: pair.base && 'png' in pair.base ? ref(pair.base) : null,
+      head: pair.head && 'png' in pair.head ? ref(pair.head) : null,
+      ...(pair.base && 'error' in pair.base ? { baseError: pair.base.error } : {}),
+      ...(pair.head && 'error' in pair.head ? { headError: pair.head.error } : {}),
+      ...(assembly !== undefined ? { assembly } : {}),
+    };
+  });
 
   const names = new Names([input.head, input.base]);
   const bodies = bodyDeltas(base.bodies, head.bodies);

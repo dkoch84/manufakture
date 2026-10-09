@@ -2,9 +2,15 @@
 // names from the result's name table, and their colours from the document) and framing members
 // as instances of shared meshes (a column-major 4x4 per member), as the app's viewport gets them.
 
-import type { ManufaktureDocument } from '@manufakture/core';
+import type { ManufaktureDocument, Pose } from '@manufakture/core';
 import { UNNAMED, type MeshData } from '@manufakture/kernel/types';
-import type { MemberInstances, MemberMeshData, RegenResult } from '@manufakture/regen';
+import type {
+  BodyResult,
+  InstanceSourceRef,
+  MemberInstances,
+  MemberMeshData,
+  RegenResult,
+} from '@manufakture/regen';
 import { BODY_PALETTE, memberColor, parseColor } from './colors';
 import { err, ok, type RenderResult, type Rgb } from './types';
 
@@ -30,6 +36,11 @@ export interface SceneMesh {
   colors: Rgb[];
   /** Per instance: its name (a body id, or a member's full id). */
   names: string[];
+  /**
+   * The assembly instance this mesh is drawn as (`buildAssemblyScene`): its names then also
+   * match patterns qualified with it (`inst#2/extrude#1`). Absent in a part studio scene.
+   */
+  instanceId?: string;
 }
 
 export interface Scene {
@@ -58,6 +69,32 @@ export interface SceneInput {
   memberInstances?: ReadonlyMap<string, readonly MemberInstances[]>;
 }
 
+/** One body's mesh as a scene mesh: its names from `names`, one instance at `matrix` (or none). */
+function bodySceneMesh(
+  partId: string,
+  bodyId: string,
+  mesh: MeshData,
+  names: readonly string[],
+  hex: string,
+  matrix: Float32Array | null,
+): SceneMesh {
+  const name = (slot: number) => (slot === UNNAMED ? null : (names[slot] ?? null));
+  return {
+    kind: 'body',
+    partId,
+    positions: mesh.positions,
+    indices: mesh.indices,
+    edgePositions: mesh.edgePositions,
+    edgeRanges: mesh.edgeRanges,
+    triangleFaces: mesh.triangleFaces,
+    faceNames: Array.from(mesh.faceNames, name),
+    edgeNames: Array.from(mesh.edgeNames, name),
+    matrices: matrix,
+    colors: [parseColor(hex)],
+    names: [bodyId],
+  };
+}
+
 /** The scene of a regen result; an error when a mesh is neither in the result nor supplied. */
 export function buildScene(input: SceneInput): RenderResult<Scene> {
   const meshes: SceneMesh[] = [];
@@ -81,21 +118,7 @@ export function buildScene(input: SceneInput): RenderResult<Scene> {
       const props = docPart?.bodies.find((b) => b.id === body.bodyId);
       const hex =
         props?.color ?? body.inherited?.color ?? BODY_PALETTE[index % BODY_PALETTE.length]!;
-      const name = (slot: number) => (slot === UNNAMED ? null : (names[slot] ?? null));
-      meshes.push({
-        kind: 'body',
-        partId: part.partId,
-        positions: mesh.positions,
-        indices: mesh.indices,
-        edgePositions: mesh.edgePositions,
-        edgeRanges: mesh.edgeRanges,
-        triangleFaces: mesh.triangleFaces,
-        faceNames: Array.from(mesh.faceNames, name),
-        edgeNames: Array.from(mesh.edgeNames, name),
-        matrices: null,
-        colors: [parseColor(hex)],
-        names: [body.bodyId],
-      });
+      meshes.push(bodySceneMesh(part.partId, body.bodyId, mesh, names, hex, null));
     });
     for (const set of part.members ?? []) {
       const key = `${part.partId}/${set.group}`;
@@ -126,6 +149,124 @@ export function buildScene(input: SceneInput): RenderResult<Scene> {
           names: [...inst.ids],
         });
       }
+    }
+  }
+  if (missing.length > 0)
+    return err('missing-mesh', `no mesh for ${missing.join(', ')}: pass them in the input`);
+  return ok({ meshes });
+}
+
+// Assemblies ------------------------------------------------------------------------------------
+
+/** An assembly instance to draw: the bodies it shows, where. */
+export interface AssemblySceneInstance {
+  instanceId: string;
+  /** Where its bodies are in the result (`InstanceResult.source`). */
+  source: InstanceSourceRef;
+  /** The body ids it shows (`InstanceResult.bodies`). */
+  bodies: readonly string[];
+  /** Instance coordinates to world. */
+  pose: Pose;
+}
+
+export interface AssemblySceneInput {
+  /** The regen result: its parts, the sources instances show, and its name table. */
+  result: Pick<RegenResult, 'names' | 'parts' | 'sources'>;
+  /** The instances drawn, in order (suppressed ones left out by the caller). */
+  instances: readonly AssemblySceneInstance[];
+  /** For body colours of this document's parts, as in `SceneInput`. */
+  document?: Pick<ManufaktureDocument, 'parts'>;
+  /**
+   * Meshes of bodies the result reports unchanged (no mesh): `<part id>/<body id>` for a part of
+   * this document, `<source key>/<body id>` for a source.
+   */
+  bodyMeshes?: ReadonlyMap<string, CachedBodyMesh>;
+}
+
+/**
+ * The column-major 4x4 of a pose (instance coordinates to world), from its translation and unit
+ * quaternion [x, y, z, w] (normalised here).
+ */
+export function poseMatrix(pose: Pose): Float32Array {
+  const [qx, qy, qz, qw] = pose.rotation;
+  const n = Math.hypot(qx, qy, qz, qw) || 1;
+  const x = qx / n;
+  const y = qy / n;
+  const z = qz / n;
+  const w = qw / n;
+  const [tx, ty, tz] = pose.translation;
+  // prettier-ignore
+  return new Float32Array([
+    1 - 2 * (y * y + z * z), 2 * (x * y + z * w), 2 * (x * z - y * w), 0,
+    2 * (x * y - z * w), 1 - 2 * (x * x + z * z), 2 * (y * z + x * w), 0,
+    2 * (x * z + y * w), 2 * (y * z - x * w), 1 - 2 * (x * x + y * y), 0,
+    tx, ty, tz, 1,
+  ]);
+}
+
+/**
+ * The scene of an assembly: each instance's bodies (meshes of its part or source, coloured as in
+ * the part studio) placed at its pose, named by body id and matched qualified with the instance
+ * too. Framing members are not drawn: an instance shows bodies. An error when an instance's
+ * source or a body's mesh is neither in the result nor supplied.
+ */
+export function buildAssemblyScene(input: AssemblySceneInput): RenderResult<Scene> {
+  const meshes: SceneMesh[] = [];
+  const missing: string[] = [];
+  const { result } = input;
+  for (const inst of input.instances) {
+    let partId: string;
+    let key: string;
+    let bodies: readonly BodyResult[];
+    let docPart: ManufaktureDocument['parts'][number] | undefined;
+    if ('part' in inst.source) {
+      const id = inst.source.part;
+      const part = result.parts.find((p) => p.partId === id);
+      if (part === undefined) {
+        missing.push(`${inst.instanceId} (part ${id})`);
+        continue;
+      }
+      partId = id;
+      key = id;
+      bodies = part.bodies;
+      docPart = input.document?.parts.find((p) => p.id === id);
+    } else {
+      const k = inst.source.source;
+      const source = result.sources.find((x) => x.key === k);
+      if (source === undefined) {
+        missing.push(`${inst.instanceId} (source ${k})`);
+        continue;
+      }
+      partId = source.partId;
+      key = k;
+      bodies = source.bodies;
+      docPart = undefined;
+    }
+    const matrix = poseMatrix(inst.pose);
+    for (const bodyId of inst.bodies) {
+      const index = bodies.findIndex((b) => b.bodyId === bodyId);
+      const body = bodies[index];
+      if (body === undefined) {
+        missing.push(`${inst.instanceId} (${key}/${bodyId})`);
+        continue;
+      }
+      let mesh = body.mesh;
+      let names: readonly string[] = result.names;
+      if (!mesh) {
+        const cached = input.bodyMeshes?.get(`${key}/${bodyId}`);
+        if (!cached) {
+          missing.push(`${inst.instanceId} (${key}/${bodyId})`);
+          continue;
+        }
+        mesh = cached.mesh;
+        names = cached.names;
+      }
+      const props = docPart?.bodies.find((b) => b.id === bodyId);
+      const hex =
+        props?.color ?? body.inherited?.color ?? BODY_PALETTE[index % BODY_PALETTE.length]!;
+      const m = bodySceneMesh(partId, bodyId, mesh, names, hex, matrix);
+      m.instanceId = inst.instanceId;
+      meshes.push(m);
     }
   }
   if (missing.length > 0)

@@ -127,7 +127,7 @@ const DESCRIPTIONS: Record<ToolName, string> = {
   measure:
     "Exact measurements from the B-rep: a body (volume, area, centre of mass, box, mass), faces, edges or vertices of a body (distance, angle), clearance between bodies, interference of an assembly at its poses, at given ones, or swept over a slider's or revolute's travel. mm, mm², mm³, g, degrees.",
   render:
-    'PNG images of the head (and with compare, of the base version at the same camera): standard or given orthographic cameras, highlighted names, a section plane. What each image is comes as data beside it.',
+    "PNG images of the head (and with compare, of the base version at the same camera): standard or given orthographic cameras, highlighted names, a section plane; the part studio, or an assembly at its solved poses, with sliders and revolutes held at given values, or with instances placed by hand. What each image is comes as data beside it, for an assembly each mate's coordinates as drawn and warnings for a value past a limit or a pose off its mate.",
   get_quantities:
     'The cut list, hardware and construction takeoffs of the head, as data, marked reviewed: false.',
   get_errors: 'Every regen error and warning of the head, errors first.',
@@ -138,7 +138,7 @@ const DESCRIPTIONS: Record<ToolName, string> = {
   update_from_main:
     "Replay the branch's batches onto Main's current head, on a new agent branch (the branch id changes). Reports the new branch, the batches applied and those dropped with why.",
   submit_for_review:
-    "Build the review bundle (command diff, renders of base and head, errors, measurements, merge preview) and submit the branch for a person's review, with an optional note. Never approves anything.",
+    "Build the review bundle (command diff, renders of base and head, errors, measurements, merge preview) and submit the branch for a person's review, with an optional note; views may add renders, of an assembly at a pose too. Never approves anything.",
   get_review:
     "The review state of an agent branch and the reviewer's comment when changes were requested (by session, or by document and branch).",
   export:
@@ -487,6 +487,7 @@ export function createMcpServer(options: ServerOptions): ManufaktureServer {
       mmPerPixel: d.mmPerPixel,
       unmatched: d.unmatched,
       bytes: d.png.length,
+      ...(d.assembly !== undefined ? { assembly: d.assembly } : {}),
     }));
     if (drawn.length === 0) {
       return fail(
@@ -526,8 +527,10 @@ export function createMcpServer(options: ServerOptions): ManufaktureServer {
     let builder;
     try {
       builder = bundleBuilder({ views: (a.views ?? []) as ReviewView[] });
-    } catch {
-      return fail(serverError('invalid-input', 'The views are not valid review views.'));
+    } catch (e) {
+      // `reviewViews`' own message: fixed text with its limits, never the input echoed.
+      const why = e instanceof Error ? ` ${e.message}` : '';
+      return fail(serverError('invalid-input', `The views are not valid review views.${why}`));
     }
     return fromSession(await s.submit(builder, a.note ?? ''), (r) => ({ ...r }));
   });

@@ -29,6 +29,117 @@ type Read = (sha256: string) => Promise<Uint8Array | null>;
 const signed = (x: number | null): string =>
   x === null ? 'none' : `${x > 0 ? '+' : ''}${shownNumber(x)}`;
 
+/** Coordinates shown inline before "and N more". */
+const INLINE_COORDINATES = 6;
+
+/** A mate's coordinates as drawn: name, value and unit each, the rest counted. */
+function Coordinates({ value }: { value: unknown }) {
+  const all = list(value).map(obj);
+  const rest = all.length - INLINE_COORDINATES;
+  return (
+    <>
+      {all.slice(0, INLINE_COORDINATES).map((c, k) => (
+        <span key={k}>
+          {k > 0 && ', '}
+          <Clipped value={c.name} max={32} /> {shownNumber(num(c.value))}{' '}
+          <Clipped value={c.unit} max={8} />
+        </span>
+      ))}
+      {rest > 0 && ` and ${rest} more`}
+    </>
+  );
+}
+
+/**
+ * One side of an assembly view: each mate's coordinates as drawn, the pose's warnings and the
+ * instances not drawn, each list in full a page at a time with what the bundle left out counted.
+ */
+function AssemblySide({ side, value, index }: { side: string; value: unknown; index: number }) {
+  if (value === null || value === undefined) return null;
+  const v = obj(value);
+  const mates = obj(v.mates);
+  const warnings = obj(v.warnings);
+  const skipped = obj(v.skipped);
+  const id = `review-assembly-${index}-${side}`;
+  return (
+    <div className="history-meta" data-testid={`review-assembly-${side}`}>
+      {side === 'base' ? 'Base' : 'Head'}
+      {list(mates.items).length === 0 && count(mates.omitted) === 0 && ': no mates'}
+      <Paged
+        items={list(mates.items).map(obj)}
+        omitted={count(mates.omitted)}
+        testId={`${id}-mates`}
+        render={(m) => (
+          <>
+            <Clipped value={m.mateId} max={80} /> <Coordinates value={m.coordinates} />
+          </>
+        )}
+      />
+      {(list(skipped.items).length > 0 || count(skipped.omitted) > 0) && (
+        <>
+          Not drawn:
+          <Paged
+            items={list(skipped.items)}
+            omitted={count(skipped.omitted)}
+            testId={`${id}-skipped`}
+            render={(x) => <Clipped value={x} max={80} />}
+          />
+        </>
+      )}
+      <Paged
+        items={list(warnings.items)}
+        omitted={count(warnings.omitted)}
+        testId={`${id}-warnings`}
+        render={(w) => (
+          <span className="history-error">
+            <Clipped value={w} max={200} />
+          </span>
+        )}
+      />
+    </div>
+  );
+}
+
+/** What an assembly view shows: the assembly and the pose asked for, and each side's pose. */
+function AssemblyCaption({ value, index }: { value: unknown; index: number }) {
+  const a = obj(value);
+  if (text(a.assemblyId) === '') return null;
+  const held = Object.entries(obj(a.mates));
+  const placed = Object.keys(obj(a.poses));
+  return (
+    <div className="review-render-assembly" data-testid={`review-render-assembly-${index}`}>
+      <div className="history-meta">
+        Assembly <Clipped value={a.assemblyId} max={80} />
+        {held.length === 0 && placed.length === 0 && ', at its solved poses'}
+      </div>
+      {held.length > 0 && (
+        <Paged
+          items={held}
+          testId={`review-assembly-${index}-held`}
+          render={([mate, v]) => (
+            <>
+              <Clipped value={mate} max={80} /> at {shownNumber(num(v))}
+            </>
+          )}
+        />
+      )}
+      {placed.length > 0 && (
+        <Paged
+          items={placed}
+          testId={`review-assembly-${index}-placed`}
+          render={(instance) => (
+            <>
+              <Clipped value={instance} max={80} /> placed by hand
+            </>
+          )}
+        />
+      )}
+      <AssemblySide side="base" value={a.base} index={index} />
+      <AssemblySide side="head" value={a.head} index={index} />
+    </div>
+  );
+}
+
 function Renders({ bundle, read }: { bundle: ReviewBundle; read: Read }) {
   const views = list(bundle.renders).slice(0, 8).map(obj);
   if (views.length === 0) return <p className="field-note">The bundle has no renders.</p>;
@@ -39,6 +150,7 @@ function Renders({ bundle, read }: { bundle: ReviewBundle; read: Read }) {
         return (
           <figure key={i} className="review-render" data-testid={`review-render-${i}`}>
             <figcaption>{name}</figcaption>
+            {v.assembly !== undefined && <AssemblyCaption value={v.assembly} index={i} />}
             <div className="review-render-pair">
               <div>
                 <span className="review-side">Base</span>

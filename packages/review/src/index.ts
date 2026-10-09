@@ -17,6 +17,13 @@ export {
   type BundleBuilderOptions,
 } from './bundle';
 export {
+  assemblyScene,
+  type AssemblyAt,
+  type AssemblyPoseWarning,
+  type AssemblySceneResult,
+  type PosedAssemblyView,
+} from './assembly';
+export {
   MAX_COMMAND_MISMATCHES,
   branchLog,
   commandDiff,
@@ -39,12 +46,14 @@ export { quantityDeltas } from './quantities';
 export {
   DEFAULT_IMAGE_SIZE,
   FIXED_VIEWS,
+  MAX_VIEW_POSES,
   renderPairs,
   reviewViews,
   sceneBox,
   sharedCamera,
   type ImageSize,
   type ReviewView,
+  type SceneSource,
 } from './renders';
 export { SUMMARIES, changesText, summarise, type SummaryContext } from './summaries';
 export * from './types';

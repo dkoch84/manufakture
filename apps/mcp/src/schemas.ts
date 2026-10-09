@@ -9,6 +9,7 @@
 
 import { PoseSchema, STANDARD_VIEW_NAMES, type StandardViewName } from '@manufakture/core';
 import { MAX_IMAGE_SIDE, MAX_IMAGES_PER_CALL } from '@manufakture/render';
+import { MAX_VIEW_POSES } from '@manufakture/review';
 import {
   DEFAULT_LIMITS,
   MAX_GEOMETRY_RESULTS,
@@ -71,6 +72,29 @@ export const Camera = z.union([
 
 const Section = z.strictObject({ origin: Vec3, normal: Vec3 });
 
+/** An assembly to draw instead of the part studio, and at what. */
+const atMost = <T extends z.ZodType>(record: T) =>
+  record.refine((o) => Object.keys(o as object).length <= MAX_VIEW_POSES, {
+    message: `At most ${MAX_VIEW_POSES} entries.`,
+  });
+const AssemblyAt = z
+  .strictObject({
+    assemblyId: ModelId,
+    mates: atMost(z.record(ModelId, Finite))
+      .optional()
+      .describe(
+        `Slider distances (mm) and revolute angles (degrees) to hold, by mate id (at most ${MAX_VIEW_POSES}): one solve from the solved poses, every other mate kept. A value past a mate's limits is drawn, with a warning. Refused while the assembly's solve conflicts or is invalid.`,
+      ),
+    poses: atMost(z.record(ModelId, Placement))
+      .optional()
+      .describe(
+        `Instances placed by hand after that solve (the rest as solved), at most ${MAX_VIEW_POSES}, each checked against its mates: warnings for a pose past a limit or off a mate.`,
+      ),
+  })
+  .describe(
+    "Draw this assembly instead of the part studio: each instance's bodies at the solved poses, or at these. Names also match qualified with an instance (inst#2/extrude#1, inst#2/*).",
+  );
+
 /** One view to render (`@manufakture/render`'s options, bounded). */
 export const View = z.strictObject({
   camera: Camera.optional().describe('Default isometric. Every camera is orthographic.'),
@@ -87,6 +111,7 @@ export const View = z.strictObject({
   supersample: z.int().min(1).max(3).optional(),
   edges: z.boolean().optional(),
   outlines: z.boolean().optional(),
+  assembly: AssemblyAt.optional(),
 });
 
 /** A view asked for in the review bundle, besides its fixed four. */
@@ -97,6 +122,9 @@ export const ReviewViewInput = z.strictObject({
   hide: Patterns.optional(),
   only: z.enum(['bodies', 'members']).optional(),
   section: Section.optional(),
+  assembly: AssemblyAt.optional().describe(
+    'As in render: the assembly drawn at a pose on both sides. Here its ids are at most 120 characters.',
+  ),
 });
 
 const COMMAND_TYPES = schemaIndex().commands as [string, ...string[]];
@@ -551,6 +579,35 @@ export const Outputs: Record<ToolName, z.ZodType> = {
         mmPerPixel: z.number(),
         unmatched: z.array(z.string()),
         bytes: z.number(),
+        assembly: z
+          .looseObject({
+            assemblyId: z.string(),
+            mates: z.array(
+              z.looseObject({
+                mateId: z.string(),
+                kind: z.string(),
+                coordinates: z.array(
+                  z.looseObject({
+                    name: z.string(),
+                    value: z.number(),
+                    unit: z.enum(['mm', 'deg']),
+                  }),
+                ),
+              }),
+            ),
+            warnings: z.array(
+              z.looseObject({
+                code: z.enum(['outside-limits', 'off-mate', 'not-reached']),
+                mateId: z.string(),
+                message: z.string(),
+              }),
+            ),
+            skipped: z.array(z.string()).describe('Instances not drawn: their source failed.'),
+          })
+          .optional()
+          .describe(
+            "A view of an assembly: each solved mate's coordinates as drawn (mm, degrees), and what the pose does to the mates.",
+          ),
       }),
     ),
     failed: z.array(

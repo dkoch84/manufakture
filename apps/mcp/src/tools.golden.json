@@ -1,5 +1,5 @@
 {
-  "surfaceVersion": "1.5.0",
+  "surfaceVersion": "1.6.0",
   "tools": [
     {
       "name": "apply",
@@ -2716,6 +2716,88 @@
             "items": {
               "additionalProperties": false,
               "properties": {
+                "assembly": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "assemblyId": {
+                      "maxLength": 512,
+                      "minLength": 1,
+                      "pattern": "^[\\x21-\\x7e]+$",
+                      "type": "string"
+                    },
+                    "mates": {
+                      "additionalProperties": {
+                        "maximum": 1000000000,
+                        "minimum": -1000000000,
+                        "type": "number"
+                      },
+                      "propertyNames": {
+                        "maxLength": 512,
+                        "minLength": 1,
+                        "pattern": "^[\\x21-\\x7e]+$",
+                        "type": "string"
+                      },
+                      "type": "object"
+                    },
+                    "poses": {
+                      "additionalProperties": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "rotation": {
+                            "additionalItems": false,
+                            "items": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "number"
+                              }
+                            ],
+                            "maxItems": 4,
+                            "minItems": 4,
+                            "readOnly": true,
+                            "type": "array"
+                          },
+                          "translation": {
+                            "additionalItems": false,
+                            "items": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "number"
+                              }
+                            ],
+                            "maxItems": 3,
+                            "minItems": 3,
+                            "readOnly": true,
+                            "type": "array"
+                          }
+                        },
+                        "required": ["translation", "rotation"],
+                        "type": "object"
+                      },
+                      "propertyNames": {
+                        "maxLength": 512,
+                        "minLength": 1,
+                        "pattern": "^[\\x21-\\x7e]+$",
+                        "type": "string"
+                      },
+                      "type": "object"
+                    }
+                  },
+                  "required": ["assemblyId"],
+                  "type": "object"
+                },
                 "camera": {
                   "anyOf": [
                     {
@@ -3074,6 +3156,78 @@
             "items": {
               "additionalProperties": {},
               "properties": {
+                "assembly": {
+                  "additionalProperties": {},
+                  "properties": {
+                    "assemblyId": {
+                      "type": "string"
+                    },
+                    "mates": {
+                      "items": {
+                        "additionalProperties": {},
+                        "properties": {
+                          "coordinates": {
+                            "items": {
+                              "additionalProperties": {},
+                              "properties": {
+                                "name": {
+                                  "type": "string"
+                                },
+                                "unit": {
+                                  "enum": ["mm", "deg"],
+                                  "type": "string"
+                                },
+                                "value": {
+                                  "type": "number"
+                                }
+                              },
+                              "required": ["name", "value", "unit"],
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "kind": {
+                            "type": "string"
+                          },
+                          "mateId": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["mateId", "kind", "coordinates"],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "skipped": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "warnings": {
+                      "items": {
+                        "additionalProperties": {},
+                        "properties": {
+                          "code": {
+                            "enum": ["outside-limits", "off-mate", "not-reached"],
+                            "type": "string"
+                          },
+                          "mateId": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["code", "mateId", "message"],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": ["assemblyId", "mates", "warnings", "skipped"],
+                  "type": "object"
+                },
                 "bytes": {
                   "type": "number"
                 },
@@ -3172,6 +3326,88 @@
             "items": {
               "additionalProperties": false,
               "properties": {
+                "assembly": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "assemblyId": {
+                      "maxLength": 512,
+                      "minLength": 1,
+                      "pattern": "^[\\x21-\\x7e]+$",
+                      "type": "string"
+                    },
+                    "mates": {
+                      "additionalProperties": {
+                        "maximum": 1000000000,
+                        "minimum": -1000000000,
+                        "type": "number"
+                      },
+                      "propertyNames": {
+                        "maxLength": 512,
+                        "minLength": 1,
+                        "pattern": "^[\\x21-\\x7e]+$",
+                        "type": "string"
+                      },
+                      "type": "object"
+                    },
+                    "poses": {
+                      "additionalProperties": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "rotation": {
+                            "additionalItems": false,
+                            "items": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "number"
+                              }
+                            ],
+                            "maxItems": 4,
+                            "minItems": 4,
+                            "readOnly": true,
+                            "type": "array"
+                          },
+                          "translation": {
+                            "additionalItems": false,
+                            "items": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "number"
+                              }
+                            ],
+                            "maxItems": 3,
+                            "minItems": 3,
+                            "readOnly": true,
+                            "type": "array"
+                          }
+                        },
+                        "required": ["translation", "rotation"],
+                        "type": "object"
+                      },
+                      "propertyNames": {
+                        "maxLength": 512,
+                        "minLength": 1,
+                        "pattern": "^[\\x21-\\x7e]+$",
+                        "type": "string"
+                      },
+                      "type": "object"
+                    }
+                  },
+                  "required": ["assemblyId"],
+                  "type": "object"
+                },
                 "camera": {
                   "anyOf": [
                     {

@@ -13,6 +13,8 @@ import {
   type SectionPlane,
   type Vec3,
 } from '@manufakture/render';
+import { MAX_POSE_TRANSLATION, PoseSchema } from '@manufakture/core';
+import type { AssemblyAt } from './assembly';
 import { round, shown } from './text';
 import { LIMITS } from './types';
 
@@ -26,7 +28,16 @@ export interface ReviewView {
   hide?: readonly string[];
   only?: 'bodies' | 'members';
   section?: SectionPlane;
+  /**
+   * Draw this assembly instead of the part studio: at its solved poses, or with mates held at
+   * values and instances placed by hand (`AssemblyAt`). Names then also match qualified with an
+   * instance (`inst#2/extrude#1`).
+   */
+  assembly?: AssemblyAt;
 }
+
+/** Mate values, and instance poses, one assembly view may give (each). */
+export const MAX_VIEW_POSES = 64;
 
 /** The fixed views every bundle has. */
 export const FIXED_VIEWS: readonly ReviewView[] = [
@@ -54,8 +65,41 @@ export function reviewViews(extra: readonly ReviewView[] = []): ReviewView[] {
     if (typeof v.name !== 'string' || v.name.length < 1 || v.name.length > 64) {
       throw new Error('A view name is 1 to 64 characters.');
     }
+    if (v.assembly !== undefined) checkAssemblyAt(v.assembly);
   }
   return [...FIXED_VIEWS, ...extra.map((v) => ({ ...v, name: shown(v.name, 64) }))];
+}
+
+const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+const isId = (v: unknown): v is string => typeof v === 'string' && v.length >= 1 && v.length <= 120;
+
+/** An assembly view's request, checked: bounded ids, finite values and poses. */
+function checkAssemblyAt(at: AssemblyAt): void {
+  if (typeof at !== 'object' || at === null || !isId(at.assemblyId)) {
+    throw new Error(
+      "A view's assembly is { assemblyId, mates?, poses? }, its ids 1 to 120 characters.",
+    );
+  }
+  const mates = Object.entries(at.mates ?? {});
+  const poses = Object.entries(at.poses ?? {});
+  if (mates.length > MAX_VIEW_POSES || poses.length > MAX_VIEW_POSES) {
+    throw new Error(
+      `A view holds at most ${MAX_VIEW_POSES} mate values and ${MAX_VIEW_POSES} poses.`,
+    );
+  }
+  for (const [id, v] of mates) {
+    if (!isId(id) || !finite(v))
+      throw new Error('A mate value is a finite number by mate id (1 to 120 characters).');
+  }
+  for (const [id, p] of poses) {
+    // Core's own check, as the MCP schema has it: finite, each translation component within
+    // MAX_POSE_TRANSLATION, the rotation a unit quaternion to 1e-6.
+    if (!isId(id) || !PoseSchema.safeParse(p).success) {
+      throw new Error(
+        `A pose, by instance id (1 to 120 characters), is { translation: [x, y, z], rotation: [x, y, z, w] }: translation at most ${MAX_POSE_TRANSLATION} mm on each axis, rotation a unit quaternion.`,
+      );
+    }
+  }
 }
 
 type Box = { min: [number, number, number]; max: [number, number, number] };
@@ -152,6 +196,9 @@ export interface RenderedPair {
 
 type SceneOrError = { ok: true; value: Scene } | { ok: false; message: string };
 
+/** What one side draws: one scene for every view, or a scene per view (assembly views). */
+export type SceneSource = SceneOrError | ((view: ReviewView, index: number) => SceneOrError);
+
 function draw(
   scene: SceneOrError,
   options: RenderOptions,
@@ -167,8 +214,8 @@ function draw(
 
 /** Every view of both sides, each pair at one camera. */
 export function renderPairs(
-  base: SceneOrError,
-  head: SceneOrError,
+  base: SceneSource,
+  head: SceneSource,
   views: readonly ReviewView[],
   size: ImageSize = DEFAULT_IMAGE_SIZE,
 ): RenderedPair[] {
@@ -182,12 +229,19 @@ export function renderPairs(
   ) {
     throw new Error(`Images are 64 to ${MAX_IMAGE_SIDE} pixels a side.`);
   }
-  let box: Box | null = null;
-  for (const s of [base, head]) {
-    const b = s.ok ? sceneBox(s.value) : null;
-    if (b) box = grow(grow(box, b.min), b.max);
-  }
-  return views.map((view) => {
+  const boxes = new WeakMap<Scene, Box | null>();
+  const boxOf = (s: Scene): Box | null => {
+    if (!boxes.has(s)) boxes.set(s, sceneBox(s));
+    return boxes.get(s)!;
+  };
+  return views.map((view, i) => {
+    const sides = [base, head].map((s) => (typeof s === 'function' ? s(view, i) : s));
+    const [b, h] = sides as [SceneOrError, SceneOrError];
+    let box: Box | null = null;
+    for (const s of sides) {
+      const found = s.ok ? boxOf(s.value) : null;
+      if (found) box = grow(grow(box, found.min), found.max);
+    }
     const camera = sharedCamera(view, box, size);
     const options: RenderOptions = {
       camera,
@@ -198,6 +252,6 @@ export function renderPairs(
       ...(view.only ? { only: view.only } : {}),
       ...(view.section ? { section: view.section } : {}),
     };
-    return { name: view.name, camera, base: draw(base, options), head: draw(head, options) };
+    return { name: view.name, camera, base: draw(b, options), head: draw(h, options) };
   });
 }

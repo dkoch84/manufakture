@@ -1279,6 +1279,35 @@ the `limit` passed; `off-mate` means the poses do not keep the mate at all (`pos
 `angle` degrees between where its connectors are and where it holds them), so a pose worked out
 by hand that slid the drawer sideways shows up here.
 
+To look at an assembly, give a `render` view an `assembly`: it then draws that assembly instead
+of the part studio, each instance's bodies (not its framing members) at its solved pose. `mates`
+holds sliders at a distance (mm) and revolutes at an angle (degrees), by mate id, in one solve
+from the solved poses with every other mate kept, so a part fastened to the drawer goes with it;
+it is refused while the assembly's solve is `conflicting` or `invalid`. `poses` places instances
+by hand after that solve (translation mm, quaternion `[x, y, z, w]`), the rest as solved. A name
+in `highlight`, `hide` or a camera's `fit` also matches qualified with an instance:
+`inst#2/extrude#1`, or `inst#2/*` for everything the instance shows.
+
+```text not-run
+"views": [{ "camera": "isometric", "highlight": ["inst#2/*"],
+            "assembly": { "assemblyId": "assembly#1", "mates": { "mate#1": 457.2 } } }]
+```
+
+Each image of an assembly view answers `assembly` beside it: every solved mate's `coordinates` as
+drawn (mm, degrees), `skipped` (instances whose source failed, not drawn) and `warnings`, as for
+interference: `outside-limits` for a value or pose past a limit (drawn there all the same, though
+the mate cannot get there), `off-mate` for a pose by hand that does not keep a mate on the
+instance, and `not-reached` for a value the solver could not hold (inside a loop of mates: drawn
+where the solve left it). An unknown assembly, mate or instance fails that view alone, in
+`failed`. With `compare` the base is drawn at the same request (a base without the assembly
+fails its side).
+
+```text not-run
+"assembly": { "assemblyId": "assembly#1", "skipped": [], "warnings": [],
+  "mates": [{ "mateId": "mate#1", "kind": "slider",
+              "coordinates": [{ "name": "distance", "value": 457.2, "unit": "mm" }] }] }
+```
+
 ### Mate connector frames: work out an offset instead of trying
 
 A mate holds connector b's frame on connector a's frame, and a slider, revolute or cylindrical
@@ -1397,7 +1426,9 @@ When the work is done and checked, submit the branch. The server builds the revi
 changed, before and after images, regen errors, measurements and what a merge into Main would do.
 Write the note to the person: what you did, what you checked, and anything you could not check or
 are unsure of. Ask for up to four views of your own besides the fixed isometric, front, top and
-right, framed on what changed.
+right, framed on what changed. A view may take an `assembly` as `render`'s do (at most 64 mate
+values and 64 poses), so the person sees the drawer open, say: the bundle shows each side's mate
+coordinates as drawn and the pose's warnings beside the images.
 
 The session opened for the scripted dry run is a new branch of the bracket (the first one was
 closed), so here is the boss again, as one batch with its variable, and then the submit.
