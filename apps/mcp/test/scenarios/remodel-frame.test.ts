@@ -437,7 +437,7 @@ describe('remodel-frame: gap probes', () => {
     value(await h.call('close_session', { sessionId }));
   });
 
-  it('GAP PROBE (merge): two branches touching one wall or the domain data: the later wins whole', async () => {
+  it('merge: two branches touching one wall and the domain data merge field by field', async () => {
     const domain = async (sid: string) =>
       value(
         await h.call('get_object', {
@@ -504,15 +504,27 @@ describe('remodel-frame: gap probes', () => {
     if (!merged.ok) throw new Error(merged.message);
     const plan = await h.app.library.previewMerge(DOC, b.branch, MAIN_BRANCH);
     if (!plan.ok) throw new Error(plan.message);
-    // Nothing is dropped: B's commands apply, and replace what A changed, whole.
+    // Nothing is dropped, and B's commands merge by field with what A changed: nothing of A's
+    // is overwritten, since the two never changed the same field.
     expect(plan.value.dropped).toEqual([]);
-    expect(plan.value.replaced.length).toBe(2);
+    expect(plan.value.replaced).toEqual([]);
+    expect(plan.value.overwritten).toEqual([]);
+    expect(plan.value.mergedWhole).toEqual([]);
     const doc = plan.value.document;
     const construction = doc.domains!.construction!.data as Data;
-    expect(construction.framing).toEqual({ blocking: { kind: 'mid-height' } });
-    expect(construction.headerRules).toBeUndefined(); // A's header rule is gone
+    expect(construction.framing).toEqual({ blocking: { kind: 'mid-height' } }); // B's
+    expect(construction.headerRules).toEqual([
+      { maxWidth: IN(48), header: { stock: 'us-2x8', plies: 2, jacks: 1 } },
+    ]); // A's
     const back = doc.parts[0]!.features.find((f) => f.id === BACK) as unknown as Data;
-    expect(back.expressions.height).toEqual(IN(96));
-    expect(back.params.overrides).toBeUndefined(); // A's left-out stud is back
+    expect(back.expressions.height).toEqual(IN(96)); // B's
+    expect(back.params.overrides).toEqual([{ id: 's3', delete: true }]); // A's
+    // Merged, Main has both.
+    const done = await h.app.library.mergeBranch(DOC, b.branch, MAIN_BRANCH);
+    if (!done.ok) throw new Error(done.message);
+    const main = await h.app.library.open(DOC);
+    if (!main.ok) throw new Error(main.message);
+    expect(main.value.document.domains).toEqual(doc.domains);
+    expect(main.value.document.parts).toEqual(doc.parts);
   });
 });

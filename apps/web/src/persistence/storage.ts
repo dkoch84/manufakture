@@ -2,6 +2,7 @@
 // whether the browser has agreed to keep it (persistent storage is not evicted under pressure).
 
 import { memoryBackend, type StorageBackend, DocumentLibrary } from '@manufakture/library';
+import { appMergeValidator } from '../history/mergeValidator';
 import { openIdb } from './idb';
 import { openOpfs } from './opfs';
 
@@ -11,7 +12,9 @@ export async function openBrowserBackend(): Promise<StorageBackend> {
 }
 
 export async function openBrowserLibrary(): Promise<DocumentLibrary> {
-  return new DocumentLibrary(await openBrowserBackend());
+  // Merges combine two branches' domain data and extension params only into values the app's
+  // domains read.
+  return new DocumentLibrary(await openBrowserBackend(), { mergeValidator: appMergeValidator });
 }
 
 export interface StorageInfo {

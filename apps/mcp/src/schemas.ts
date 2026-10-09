@@ -462,6 +462,14 @@ export const Outputs: Record<ToolName, z.ZodType> = {
     applied: z.array(z.string()),
     dropped: z.array(Any),
     renamed: z.array(Any),
+    overwritten: z
+      .array(z.strictObject({ name: z.string(), fields: z.array(z.string()) }))
+      .describe(
+        "Main's changes the update overwrote: fields both sides changed, where the branch's value wins. Empty fields: the whole object.",
+      ),
+    mergedWhole: z
+      .array(z.strictObject({ label: z.string(), reasons: z.array(z.string()) }))
+      .describe('Batches replayed whole instead of merged field by field, with why.'),
   }),
   submit_for_review: envelope({ revision: z.number(), review: Review }),
   get_review: envelope({

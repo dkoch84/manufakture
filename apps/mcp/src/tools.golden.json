@@ -1,5 +1,5 @@
 {
-  "surfaceVersion": "1.1.0",
+  "surfaceVersion": "1.2.0",
   "tools": [
     {
       "name": "apply",
@@ -3370,8 +3370,46 @@
             "required": ["kind"],
             "type": "object"
           },
+          "mergedWhole": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "label": {
+                  "type": "string"
+                },
+                "reasons": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": ["label", "reasons"],
+              "type": "object"
+            },
+            "type": "array"
+          },
           "ok": {
             "type": "boolean"
+          },
+          "overwritten": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "fields": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": ["name", "fields"],
+              "type": "object"
+            },
+            "type": "array"
           },
           "previousBranch": {
             "type": "string"

@@ -12,8 +12,22 @@ import {
   type ManufaktureDocument,
   type SyncEntry,
 } from '@manufakture/core';
-import type { LogEntry } from '@manufakture/library';
-import { SyncClient } from '@manufakture/sync';
+import { constructionDomain } from '@manufakture/domain-construction';
+import { woodDomain } from '@manufakture/domain-wood';
+import { mergeOverwritten, type LogEntry, type Rebased } from '@manufakture/library';
+import { stockDomain } from '@manufakture/stock';
+import { SyncClient, domainsValidator, type MergeValidator } from '@manufakture/sync';
+
+/**
+ * Reads domain data and extension params as the built-in domains (stock, wood, construction) do,
+ * so a merge keeps a field-merged value only when its domain reads it (sync's `./merge`). The
+ * library is given it as `mergeValidator` by the hosts that merge.
+ */
+export const builtInMergeValidator: MergeValidator = domainsValidator([
+  stockDomain,
+  woodDomain,
+  constructionDomain,
+]);
 
 export interface Replayed {
   /** The commands that applied, in order, renamed where needed. */
@@ -24,6 +38,10 @@ export interface Replayed {
   renamed: { from: string; to: string }[];
   /** The other state with the kept commands on top. */
   document: ManufaktureDocument;
+  /** What the replay overwrote of the other state's own changes since `base` (as a merge says). */
+  overwritten: Rebased['overwritten'];
+  /** Commands replayed whole where a field merge was possible, and why (as a merge says). */
+  mergedWhole: Rebased['mergedWhole'];
 }
 
 const CLIENT = 'session-update';
@@ -37,8 +55,19 @@ export function replayOnto(
   base: ManufaktureDocument,
   onto: ManufaktureDocument,
   entries: readonly LogEntry[],
+  options: { validate?: MergeValidator } = { validate: builtInMergeValidator },
 ): { ok: true; value: Replayed } | { ok: false; message: string } {
-  const client = new SyncClient(base, 0, { clientId: CLIENT, online: false });
+  // Merged by field, as the library's merge does: an edit of a feature or of domain data that the
+  // other state changed too keeps that state's edits of the other fields.
+  const client = new SyncClient(base, 0, {
+    clientId: CLIENT,
+    online: false,
+    mergeFields: { ...(options.validate && { validate: options.validate }) },
+  });
+  const whole = new Map<number, { label: string; reasons: string[] }>();
+  client.on('mergedWhole', ({ local, label, reasons }) => {
+    whole.set(local, { label, reasons });
+  });
   const dropped: Replayed['dropped'] = [];
   const renames = new Map<string, string>();
   client.on('dropped', ({ drops }) => {
@@ -92,6 +121,7 @@ export function replayOnto(
     command: p.command,
   }));
   const document = client.document;
+  const live = new Set(client.pending.map((p) => p.local));
   return {
     ok: true,
     value: {
@@ -99,6 +129,8 @@ export function replayOnto(
       dropped,
       renamed: [...renames].map(([from, to]) => ({ from, to })),
       document,
+      overwritten: mergeOverwritten(base, onto, document),
+      mergedWhole: [...whole].filter(([local]) => live.has(local)).map(([, w]) => w),
     },
   };
 }

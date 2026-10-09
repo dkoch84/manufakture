@@ -74,6 +74,26 @@ export {
 } from './state';
 export { changedObjects, documentObjects, renameObjectKeys, type ObjectKey } from './objects';
 export {
+  ORDER,
+  commandOrigins,
+  domainPolicy,
+  domainsValidator,
+  featurePolicy,
+  formatPath,
+  lostFields,
+  mergeCommandFields,
+  mergeValues,
+  sameValue,
+  shallowPolicy,
+  type FieldPath,
+  type MergeCheck,
+  type MergePolicy,
+  type MergeValidator,
+  type Origins,
+  type ReadableDomain,
+  type PathStep,
+} from './merge';
+export {
   CreateBranchSchema,
   CreateVersionSchema,
   AGENT_TOKEN_ID,

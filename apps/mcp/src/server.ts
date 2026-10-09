@@ -31,6 +31,7 @@ import { bundleBuilder, type ReviewView } from '@manufakture/review';
 import {
   BackendBundleStore,
   ServerApi,
+  builtInMergeValidator,
   SessionManager,
   SyncBundleStore,
   SyncedLibrary,
@@ -186,14 +187,15 @@ export function createMcpServer(options: ServerOptions): ManufaktureServer {
   if (config.sync !== null) {
     const api = new ServerApi({ url: config.sync.url, token: config.sync.token });
     const backend = new MemoryBackend();
-    synced = new SyncedLibrary(api, { backend });
+    // Merges combine domain data and extension params only into values the domains read.
+    synced = new SyncedLibrary(api, { backend, mergeValidator: builtInMergeValidator });
     library = synced;
     locks = synced.locks;
     bundles = new SyncBundleStore(new BackendBundleStore(backend), api);
   } else {
     const root = config.libraryRoot!;
     const backend = new NodeBackend(root);
-    library = new DocumentLibrary(backend);
+    library = new DocumentLibrary(backend, { mergeValidator: builtInMergeValidator });
     locks = new NodeBranchLocks(root);
     bundles = new BackendBundleStore(backend);
   }

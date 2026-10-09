@@ -45,6 +45,7 @@ export {
 export { SessionManager, type SessionManagerOptions } from './manager';
 export { ModelState, type BodyGeometry, type NamedEdge, type NamedFace } from './model';
 export { nodeExtensions, readBundledFont, sessionEngineApi } from './node-host';
+export { builtInMergeValidator, replayOnto, type Replayed } from './rebase';
 export {
   MAX_GEOMETRY_RESULTS,
   MAX_MEASURE_ITEMS,

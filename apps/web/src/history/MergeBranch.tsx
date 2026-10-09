@@ -166,6 +166,38 @@ export function MergeBranch({
               Nothing to merge: this branch already has everything {plan.fromName} changed.
             </p>
           )}
+          {plan.overwritten.length > 0 && (
+            <div className="history-merge-overwritten" role="alert" data-testid="merge-overwritten">
+              <h4>Overwritten here ({plan.overwritten.length})</h4>
+              <p className="history-description">
+                Both branches changed these fields since they parted, so {plan.fromName}&apos;s
+                value replaces this branch&apos;s. Fields only one branch changed are kept from
+                each; what is listed here is lost from this branch.
+              </p>
+              <ul className="history-merge-list" data-testid="merge-replaced">
+                {plan.overwritten.map((o, i) => (
+                  <li key={i}>
+                    <strong>{o.name}</strong>
+                    {o.fields.length === 0 ? ': all of it' : `: ${o.fields.join(', ')}`}
+                  </li>
+                ))}
+              </ul>
+              {plan.mergedWhole.length > 0 && (
+                <>
+                  <p className="history-description">
+                    Not combined field by field, so {plan.fromName}&apos;s whole version is used:
+                  </p>
+                  <ul className="history-merge-list" data-testid="merge-whole">
+                    {plan.mergedWhole.map((w, i) => (
+                      <li key={i}>
+                        {w.label}: {w.reasons.join('; ')}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+            </div>
+          )}
           {plan.changed && (
             <>
               <h4>Applies ({plan.applied.length})</h4>
@@ -193,20 +225,6 @@ export function MergeBranch({
                   <li key={i}>
                     {d.label}: {d.message}
                   </li>
-                ))}
-              </ul>
-            </>
-          )}
-          {plan.replaced.length > 0 && (
-            <>
-              <h4>Replaced whole ({plan.replaced.length})</h4>
-              <p className="history-description">
-                Changed here too since the branches parted. The later change wins whole, per
-                feature, not per field: {plan.fromName}&apos;s version replaces this one&apos;s.
-              </p>
-              <ul className="history-merge-list" data-testid="merge-replaced">
-                {plan.replaced.map((name, i) => (
-                  <li key={i}>{name}</li>
                 ))}
               </ul>
             </>

@@ -61,7 +61,7 @@ async function setup() {
 }
 
 describe('merging a branch in the History panel', () => {
-  it('previews what applies and what is replaced whole, then merges as one undo step', async () => {
+  it('previews what applies and the fields it overwrites, then merges as one undo step', async () => {
     const { lib, branches, documents } = await setup();
     const before = documents.getState().document;
     render(
@@ -80,9 +80,9 @@ describe('merging a branch in the History panel', () => {
       'Fillet 1 at 5',
       'Set #w',
     ]);
-    // Last writer wins per feature, and the preview says so.
-    expect(screen.getByTestId('merge-replaced').textContent).toBe('Fillet 1 (Demo part)');
-    expect(screen.getByTestId('merge-plan').textContent).toContain('not per field');
+    // Both changed the fillet's radius: the branch's wins, and the preview names the field first.
+    expect(screen.getByTestId('merge-replaced').textContent).toBe('Fillet 1 (Demo part): radius');
+    expect(screen.getByTestId('merge-overwritten').textContent).toContain('Overwritten here (1)');
     expect(screen.queryByTestId('merge-dropped')).toBeNull();
     // Nothing changed yet.
     expect(documents.getState().document).toBe(before);

@@ -170,6 +170,15 @@ export interface UpdateReport {
   dropped: { label: string; message: string }[];
   /** Ids the batches made that Main had taken meanwhile, and their new ids. */
   renamed: { from: string; to: string }[];
+  /**
+   * What the batches overwrote of Main's changes since the branch was made: each object (a
+   * feature, a variable, the domains, ...) with the fields Main's value is lost in (both changed
+   * them; the branch's wins), or `fields` empty for the whole object. Edits of a feature or of
+   * domain data are merged field by field, so only fields both sides changed are here.
+   */
+  overwritten: { name: string; fields: string[] }[];
+  /** Batches replayed whole where a field merge was possible, each with why. */
+  mergedWhole: { label: string; reasons: string[] }[];
 }
 
 export interface SessionInfo {
@@ -1098,6 +1107,8 @@ export class Session {
         applied: [],
         dropped: [],
         renamed: [],
+        overwritten: [],
+        mergedWhole: [],
       });
       if (
         (this.#base.branch ?? MAIN_BRANCH) === MAIN_BRANCH &&
@@ -1116,7 +1127,7 @@ export class Session {
       if (!log.ok) return sessionError('storage', log.message);
       const replayed = replayOnto(base.value.document, main.value.document, log.value);
       if (!replayed.ok) return sessionError('storage', replayed.message);
-      const { entries, dropped, renamed } = replayed.value;
+      const { entries, dropped, renamed, overwritten, mergedWhole } = replayed.value;
 
       // A new branch from Main's head, under the old branch's name: the old one is renamed aside
       // first, and deleted once the new one holds every batch.
@@ -1241,6 +1252,8 @@ export class Session {
         applied: entries.map((e) => e.label),
         dropped,
         renamed,
+        overwritten,
+        mergedWhole,
       });
     });
   }

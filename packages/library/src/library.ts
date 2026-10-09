@@ -58,7 +58,19 @@ import {
   type SyncEntry,
 } from '@manufakture/core';
 import { fileName, fromBase64, sha256Hex, toBase64 } from '@manufakture/io';
-import { SyncClient, changedObjects, documentObjects } from '@manufakture/sync';
+import {
+  SyncClient,
+  changedObjects,
+  documentObjects,
+  domainPolicy,
+  featurePolicy,
+  formatPath,
+  lostFields,
+  shallowPolicy,
+  type FieldPath,
+  type MergePolicy,
+  type MergeValidator,
+} from '@manufakture/sync';
 import type { BackendKind, StorageBackend } from './backend';
 import { BlobStore, blobRefs, externalize, hydrateFrom, isSha256 } from './blobs';
 
@@ -1063,6 +1075,13 @@ export interface LibraryOptions {
   locks?: DocumentLocks | null;
   /** Where recoveries worth knowing about are reported; default `console.warn`. */
   warn?: (message: string) => void;
+  /**
+   * Reads domain data and extension params as their domains do, for merges (sync's
+   * `domainsValidator` over the app's domains). Without it, a merge never combines two edits of
+   * a domain's data or of an extension feature's params by field: the merged branch's whole value
+   * wins. `previewMerge` and `mergeBranch` may pass their own.
+   */
+  mergeValidator?: MergeValidator;
 }
 
 /** A readable revision of a document, found without changing anything. */
@@ -1087,6 +1106,7 @@ export class DocumentLibrary {
   readonly #newId: () => string;
   readonly #locks: DocumentLocks | null;
   readonly #warn: (message: string) => void;
+  readonly #mergeValidator: MergeValidator | undefined;
   readonly #blobStores = new Map<string, BlobStore>();
   readonly #listeners = new Set<(change: LibraryChange) => void>();
   #remote: RemoteVersionSource | null = null;
@@ -1112,6 +1132,7 @@ export class DocumentLibrary {
     this.#newId = options.newId ?? (() => crypto.randomUUID());
     this.#locks = options.locks === undefined ? browserLocks() : options.locks;
     this.#warn = options.warn ?? ((message) => console.warn(message));
+    this.#mergeValidator = options.mergeValidator;
   }
 
   /** Where the documents are: OPFS, IndexedDB, or memory (nothing survives a reload). */
@@ -3379,12 +3400,13 @@ export class DocumentLibrary {
     id: string,
     from: string,
     into: string,
-    options: { document?: ManufaktureDocument } = {},
+    options: { document?: ManufaktureDocument; validate?: MergeValidator } = {},
   ): Promise<LibraryResult<MergePlan>> {
     return this.#run(async () => {
       if (!isStorableId(id)) return { ok: false, message: `There is no document "${id}".` };
       if (!isBranchId(from) || !isBranchId(into)) return NO_BRANCH;
-      return this.#locked(id, () => this.#planMerge(id, from, into, options.document));
+      const validate = options.validate ?? this.#mergeValidator;
+      return this.#locked(id, () => this.#planMerge(id, from, into, validate, options.document));
     });
   }
 
@@ -3400,12 +3422,14 @@ export class DocumentLibrary {
     id: string,
     from: string,
     into: string,
+    options: { validate?: MergeValidator } = {},
   ): Promise<LibraryResult<{ plan: MergePlan; saved: DocumentSummary | null }>> {
     return this.#run(async () => {
       if (!isStorableId(id)) return { ok: false, message: `There is no document "${id}".` };
       if (!isBranchId(from) || !isBranchId(into)) return NO_BRANCH;
       return this.#locked(id, async () => {
-        const planned = await this.#planMerge(id, from, into);
+        const validate = options.validate ?? this.#mergeValidator;
+        const planned = await this.#planMerge(id, from, into, validate);
         if (!planned.ok) return planned;
         const plan = planned.value;
         if (!plan.changed) return { ok: true, value: { plan, saved: null } };
@@ -3425,6 +3449,7 @@ export class DocumentLibrary {
     id: string,
     from: string,
     into: string,
+    validate: MergeValidator | undefined,
     current?: ManufaktureDocument,
   ): Promise<LibraryResult<MergePlan>> {
     if (from === into) return { ok: false, message: 'A branch cannot be merged into itself.' };
@@ -3438,7 +3463,10 @@ export class DocumentLibrary {
     const a = await this.#lineage(id, from, branches.items, versions.items);
     if (!a.ok) return a;
     if (a.remote !== undefined) {
-      return this.#planRemoteMerge(id, from, into, a.value, a.remote, branches.items, current);
+      return this.#planRemoteMerge(id, from, into, a.value, a.remote, branches.items, {
+        validate,
+        current,
+      });
     }
     const b = await this.#lineage(id, into, branches.items, versions.items);
     if (!b.ok) return b;
@@ -3469,7 +3497,7 @@ export class DocumentLibrary {
       branch === MAIN_BRANCH
         ? MAIN_BRANCH_NAME
         : (branches.items.find((x) => x.id === branch)?.name ?? branch);
-    const rebased = rebaseOnto(base.value.document, target, entries);
+    const rebased = rebaseOnto(base.value.document, target, entries, { validate });
     if (!rebased.ok) return rebased;
     return {
       ok: true,
@@ -3498,7 +3526,10 @@ export class DocumentLibrary {
     stretches: readonly Stretch[],
     remote: Version,
     branches: readonly Branch[],
-    current?: ManufaktureDocument,
+    {
+      validate,
+      current,
+    }: { validate: MergeValidator | undefined; current: ManufaktureDocument | undefined },
   ): Promise<LibraryResult<MergePlan>> {
     const made = branches.find((x) => x.id === stretches[0]?.branch);
     if (into !== MAIN_BRANCH || versionBranch(remote) !== MAIN_BRANCH) {
@@ -3523,7 +3554,7 @@ export class DocumentLibrary {
       if (!opened.ok) return opened;
       target = opened.value.document;
     }
-    const rebased = rebaseOnto(base.value.document, target, entries);
+    const rebased = rebaseOnto(base.value.document, target, entries, { validate });
     if (!rebased.ok) return rebased;
     return {
       ok: true,
@@ -3877,12 +3908,25 @@ export interface Rebased {
   /** Ids the merged commands made that the other branch had taken meanwhile, and their new ids. */
   renamed: { from: string; to: string }[];
   /**
-   * Objects (a feature, a variable, a part's settings, ...) the branch merged into changed since
-   * the fork that the merge changes again: the merged branch's version replaces its own whole.
-   * The merge is last-writer-wins per object, never per field (ADR 0009 decision 7), with the
-   * merged branch as the later writer. Named for the user.
+   * What the merge overwrote of the work of the branch merged into: each object (a feature, a
+   * variable, a part's settings, the domains, ...) it changed since the fork whose change is not
+   * all in the result, with the fields whose value it lost. `fields` empty: the whole object (the
+   * merge deleted it, or put it back). A feature edit or a domain's data replayed onto an object
+   * the other branch changed is merged by field (params and expressions by key, lists of objects
+   * with ids by id, domain data at any depth), so only a field both branches changed is lost, to
+   * the merged branch (the later writer); any other command replaces its object whole. Named for
+   * the user.
    */
+  overwritten: { name: string; fields: string[] }[];
+  /** `overwritten` as one line per object: `Back (Part 1): expressions.height`. */
   replaced: string[];
+  /**
+   * Commands replayed whole, or in part whole, where a field merge was possible, each with why:
+   * the merged domain data or extension params do not read (`LibraryOptions.mergeValidator`), or
+   * nothing here reads them, or core refuses the merged command. What that overwrote is in
+   * `overwritten`.
+   */
+  mergedWhole: { label: string; reasons: string[] }[];
   /** Whether the merge changes anything. */
   changed: boolean;
 }
@@ -3921,9 +3965,18 @@ export function rebaseOnto(
   base: ManufaktureDocument,
   into: ManufaktureDocument,
   entries: readonly LogEntry[],
+  options: { validate?: MergeValidator | undefined } = {},
 ): LibraryResult<Rebased> {
-  const client = new SyncClient(base, 0, { clientId: MERGE_CLIENT, online: false });
+  const client = new SyncClient(base, 0, {
+    clientId: MERGE_CLIENT,
+    online: false,
+    mergeFields: { ...(options.validate && { validate: options.validate }) },
+  });
   const dropped: Rebased['dropped'] = [];
+  const whole = new Map<number, { label: string; reasons: string[] }>();
+  client.on('mergedWhole', ({ local, label, reasons }) => {
+    whole.set(local, { label, reasons });
+  });
   const renames = new Map<string, string>();
   client.on('dropped', ({ drops }) => {
     for (const d of drops) {
@@ -3981,6 +4034,9 @@ export function rebaseOnto(
     cause: causes.get(p.local) ?? 'execute',
     label: p.label,
   }));
+  const overwritten = mergeOverwritten(base, into, document);
+  const kept = new Set(client.pending.map((p) => p.local));
+  const mergedWhole = [...whole].filter(([local]) => kept.has(local)).map(([, w]) => w);
   return {
     ok: true,
     value: {
@@ -3989,7 +4045,11 @@ export function rebaseOnto(
       applied,
       dropped,
       renamed: [...renames].map(([from, to]) => ({ from, to })),
-      replaced: replacedObjects(base, into, document),
+      overwritten,
+      mergedWhole,
+      replaced: overwritten.map((o) =>
+        o.fields.length === 0 ? o.name : `${o.name}: ${o.fields.join(', ')}`,
+      ),
       changed: serialize(document) !== serialize(into),
     },
   };
@@ -4001,21 +4061,39 @@ function causeOf(entries: readonly LogEntry[], label: string): LogEntry['cause']
 
 /**
  * The objects the branch merged into changed since `base` (`into`'s own work: added, edited or
- * deleted) that the merge changes again: what the merged branch's version replaced whole.
+ * deleted) whose change the merge does not keep, each with the fields it loses (sync's
+ * `lostFields`, at the granularity the merge works at). `Rebased.overwritten`.
  */
-function replacedObjects(
+export function mergeOverwritten(
   base: ManufaktureDocument,
   into: ManufaktureDocument,
   merged: ManufaktureDocument,
-): string[] {
+): Rebased['overwritten'] {
   const ours = changedObjects(base, into);
   if (ours.length === 0) return [];
+  const baseObjects = documentObjects(base);
   const intoObjects = documentObjects(into);
   const mergedObjects = documentObjects(merged);
-  const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
-  return ours
-    .filter((k) => !same(mergedObjects.get(k), intoObjects.get(k)))
-    .map((k) => objectName(k, [into, base]));
+  const out: Rebased['overwritten'] = [];
+  for (const k of ours) {
+    const kind = k.split('\u0000')[0];
+    const domains = k === 'k\u0000domains';
+    const policy: MergePolicy =
+      kind === 'f' ? featurePolicy : domains ? domainPolicy : shallowPolicy;
+    const lost = lostFields(baseObjects.get(k), intoObjects.get(k), mergedObjects.get(k), policy);
+    if (lost.length === 0) continue;
+    const whole = lost.some((p) => p.length === 0);
+    out.push({
+      name: objectName(k, [into, base]),
+      fields: whole ? [] : lost.map((p) => formatPath(domains ? domainPath(p) : p)),
+    });
+  }
+  return out;
+}
+
+/** A path into `domains` without the entry's `data` step: `construction.headerRules`. */
+function domainPath(path: FieldPath): FieldPath {
+  return path[1] === 'data' ? [path[0]!, ...path.slice(2)] : path;
 }
 
 /** How the preview names an object key of `documentObjects` (sync's `ObjectKey`). */

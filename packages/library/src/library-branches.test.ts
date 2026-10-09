@@ -954,11 +954,151 @@ describe('merging branches', () => {
     expect(plan.dropped).toEqual([
       { cause: 'execute', label: 'Hole 40', message: expect.any(String) as string },
     ]);
-    // Last writer wins per feature: the branch's whole fillet replaces main's.
-    expect(plan.replaced).toEqual(['Fillet 1 (Demo part)']);
+    // Both changed the fillet's radius: the merged branch, the later writer, wins that field.
+    expect(plan.replaced).toEqual(['Fillet 1 (Demo part): radius']);
+    expect(plan.overwritten).toEqual([{ name: 'Fillet 1 (Demo part)', fields: ['radius'] }]);
     expect(feature(plan.document, 'fillet#1')).toMatchObject({ radius: mm('4') });
     expect(feature(plan.document, 'extrude#2')).toBeUndefined();
     expect(plan.document.variables.map((v) => v.name)).toEqual(['w']);
+  });
+
+  it('merges an edit of a feature both branches changed field by field', async () => {
+    const { lib, base, branch } = await forked();
+    const fillet1 = feature(base, 'fillet#1') as Feature & { kind: 'fillet' };
+    await commit(lib, base, MAIN_BRANCH, [
+      'Name the fillet',
+      { type: 'editFeature', partId: 'part#1', feature: { ...fillet1, name: 'Round' } },
+    ]);
+    await commit(
+      lib,
+      base,
+      branch,
+      [
+        'Fillet 1 at 4',
+        { type: 'editFeature', partId: 'part#1', feature: { ...fillet1, radius: mm('4') } },
+      ],
+      // A second edit of the same feature, made on the first: still only the radius.
+      [
+        'Fillet 1 at 5',
+        { type: 'editFeature', partId: 'part#1', feature: { ...fillet1, radius: mm('5') } },
+      ],
+    );
+    const plan = value(await lib.previewMerge('doc-1', branch, MAIN_BRANCH));
+    expect(plan.applied.map((s) => s.label)).toEqual(['Fillet 1 at 4', 'Fillet 1 at 5']);
+    // Main's name and the branch's radius: nothing of main's is lost.
+    expect(feature(plan.document, 'fillet#1')).toMatchObject({ name: 'Round', radius: mm('5') });
+    expect(plan.replaced).toEqual([]);
+    expect(plan.overwritten).toEqual([]);
+    // Merged the other way, the same.
+    const back = value(await lib.previewMerge('doc-1', MAIN_BRANCH, branch));
+    expect(feature(back.document, 'fillet#1')).toMatchObject({ name: 'Round', radius: mm('5') });
+    expect(back.replaced).toEqual([]);
+  });
+
+  it('a delete of a feature the other branch edited replaces it whole, and says so', async () => {
+    const { lib, base, branch } = await forked();
+    const fillet1 = feature(base, 'fillet#1') as Feature & { kind: 'fillet' };
+    await commit(lib, base, MAIN_BRANCH, [
+      'Name the fillet',
+      { type: 'editFeature', partId: 'part#1', feature: { ...fillet1, name: 'Round' } },
+    ]);
+    await commit(lib, base, branch, [
+      'Delete the fillet',
+      { type: 'deleteFeature', partId: 'part#1', featureId: 'fillet#1' },
+    ]);
+    const plan = value(await lib.previewMerge('doc-1', branch, MAIN_BRANCH));
+    expect(feature(plan.document, 'fillet#1')).toBeUndefined();
+    expect(plan.overwritten).toEqual([{ name: 'Round (Demo part)', fields: [] }]);
+    expect(plan.replaced).toEqual(['Round (Demo part)']);
+  });
+
+  it('rebaseOnto: domain data merges by key and by id in lists, and names what it overwrites', () => {
+    const data = (
+      d: NonNullable<Extract<Command, { type: 'setDomainData' }>['data']>,
+    ): Command => ({
+      type: 'setDomainData',
+      namespace: 'wood',
+      schemaVersion: 1,
+      data: d,
+    });
+    const start = applyCommand(
+      partDocument('doc-1', 'Doc'),
+      data({
+        framing: { spacing: 16 },
+        levels: [
+          { id: 'L1', height: 1 },
+          { id: 'L2', height: 2 },
+          { id: 'L3', height: 3 },
+        ],
+      }),
+    );
+    if (!start.ok) throw new Error(start.error.message);
+    const base = start.value.document;
+    // The branch merged into: a header rule, L1 higher, L2 renamed, a level L4 after L1.
+    const into = applyCommand(
+      base,
+      data({
+        framing: { spacing: 16 },
+        headerRules: [{ maxWidth: 48 }],
+        levels: [
+          { id: 'L1', height: 10 },
+          { id: 'L4', height: 4 },
+          { id: 'L2', height: 2, name: 'Upper' },
+          { id: 'L3', height: 3 },
+        ],
+      }),
+    );
+    if (!into.ok) throw new Error(into.error.message);
+    // The merged branch: blocking in framing, L1 at 20 too, L2 and L3 deleted, a level L5.
+    const entries: LogEntry[] = [
+      {
+        cause: 'execute',
+        label: 'Framing',
+        command: data({
+          framing: { spacing: 16, blocking: 'mid' },
+          levels: [
+            { id: 'L1', height: 20 },
+            { id: 'L5', height: 5 },
+          ],
+        }),
+        at: 'a',
+      },
+    ];
+    // Without a reader for "wood" data, it is not merged by field: the branch's wins whole.
+    const unread = rebaseOnto(base, into.value.document, entries);
+    if (!unread.ok) throw new Error(unread.message);
+    expect(unread.value.document.domains!.wood!.data).toEqual(
+      (entries[0]!.command as { data: unknown }).data,
+    );
+    expect(unread.value.mergedWhole).toEqual([
+      {
+        label: 'Framing',
+        reasons: ['nothing here reads the domain data "wood", so it is not merged by field'],
+      },
+    ]);
+    const validate = {
+      domainData: () => ({ ok: true as const }),
+      extensionParams: () => ({ ok: true as const }),
+    };
+    const r = rebaseOnto(base, into.value.document, entries, { validate });
+    if (!r.ok) throw new Error(r.message);
+    expect(r.value.mergedWhole).toEqual([]);
+    expect(r.value.document.domains!.wood!.data).toEqual({
+      framing: { spacing: 16, blocking: 'mid' },
+      headerRules: [{ maxWidth: 48 }],
+      levels: [
+        { id: 'L1', height: 20 },
+        { id: 'L4', height: 4 },
+        { id: 'L5', height: 5 },
+      ],
+    });
+    // L1's height both changed (the branch's wins); L2 was renamed there and deleted here.
+    expect(r.value.overwritten).toEqual([
+      { name: "the document's domains", fields: ['wood.levels[L1].height', 'wood.levels[L2]'] },
+    ]);
+    expect(r.value.replaced).toEqual([
+      "the document's domains: wood.levels[L1].height, wood.levels[L2]",
+    ]);
   });
 
   it('merges main into a branch, from the version the branch was made from', async () => {

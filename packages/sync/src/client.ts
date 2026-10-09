@@ -29,6 +29,7 @@ import {
   type ScopeKey,
   type SyncEntry,
 } from '@manufakture/core';
+import { commandOrigins, mergeCommandFields, type MergeValidator, type Origins } from './merge';
 import { changedObjects, renameObjectKeys, type ObjectKey } from './objects';
 import {
   CURRENT_VERSIONS,
@@ -111,6 +112,12 @@ export interface SyncClientEvents {
    * document at `rev` holds it (T7.1e: a version made after it names that revision).
    */
   landed: { readonly local: number; readonly clientSeq: number; readonly rev: number };
+  /**
+   * With `mergeFields`: an entry, or some of what it replaces, was replayed whole instead of
+   * merged by field, each with why (a merged value its domain refuses or nothing here reads, a
+   * merged command core refuses). What that cost the other side is in the result, not here.
+   */
+  mergedWhole: { readonly local: number; readonly label: string; readonly reasons: string[] };
 }
 
 export interface SyncClientOptions {
@@ -138,6 +145,16 @@ export interface SyncClientOptions {
    * `SUBMIT_OVERHEAD`, so one entry always fits. Smaller only in tests.
    */
   readonly maxMessageBytes?: number;
+  /**
+   * Merge by field on replay (default false; branch merges set it, live sync does not): an
+   * entry that replaces a feature or a domain's data whole (`editFeature`, `restoreFeature`,
+   * `setDomainData`, alone or in a batch) is rebased onto a confirmed state that changed the same
+   * object by merging the two field by field (`./merge`), so the other side's edits of fields the
+   * entry did not change are kept. A field both changed goes to the entry. When the merged command
+   * does not apply, the entry's own command is replayed instead. Domain data and extension
+   * params are merged only with `validate`, and only into values it accepts (`./merge`).
+   */
+  readonly mergeFields?: boolean | { readonly validate?: MergeValidator };
 }
 
 export type UndoStatus = 'empty' | 'waiting' | 'ready';
@@ -194,6 +211,11 @@ interface QueueEntry {
   acceptedRev?: number;
   /** From the latest replay: the command's inverse on the document before it (not saved). */
   inverse?: Command;
+  /**
+   * With `mergeFields`: the command as made (renamed with the queue) and what it saw of each
+   * object it replaces, so each replay merges it by field again (not saved).
+   */
+  merge?: { command: Command; origins: Origins };
 }
 
 interface UndoRecord {
@@ -465,10 +487,13 @@ export class SyncClient {
     dropped: new Set(),
     incompatible: new Set(),
     landed: new Set(),
+    mergedWhole: new Set(),
   };
   private readonly window: number;
   private readonly maxEntryBytes: number;
   private readonly maxMessageBytes: number;
+  private readonly mergeFields: boolean;
+  private readonly mergeValidator: MergeValidator | undefined;
 
   /** A client at `revision` of the server's log, whose confirmed document is `document`. */
   constructor(document: ManufaktureDocument, revision: number, options: SyncClientOptions) {
@@ -482,6 +507,9 @@ export class SyncClient {
     this.window = options.pushWindow ?? PUSH_WINDOW;
     this.maxEntryBytes = options.maxEntryBytes ?? MAX_ENTRY_BYTES;
     this.maxMessageBytes = options.maxMessageBytes ?? MAX_MESSAGE_BYTES;
+    this.mergeFields = options.mergeFields !== undefined && options.mergeFields !== false;
+    this.mergeValidator =
+      typeof options.mergeFields === 'object' ? options.mergeFields.validate : undefined;
     if (this.maxMessageBytes < this.maxEntryBytes + SUBMIT_OVERHEAD) {
       throw new RangeError('maxMessageBytes must leave room for one entry of maxEntryBytes');
     }
@@ -787,6 +815,8 @@ export class SyncClient {
     if (!applied.ok) return applied;
     const created = createdIds(this.visible, command);
     if (!created.ok) return created;
+    const origins =
+      this.mergeFields && restore === undefined ? commandOrigins(this.visible, command) : [];
     const entry: QueueEntry = {
       local: this.nextLocal++,
       state: 'unsent',
@@ -798,6 +828,7 @@ export class SyncClient {
       ...(restore && { restore }),
       ...(undoOf !== undefined && { undoOf }),
       inverse: applied.value.inverse,
+      ...(origins.some((o) => o !== null) && { merge: { command, origins } }),
     };
     this.stats.made++;
     if (cause === 'execute') this.redoStack = [];
@@ -1464,7 +1495,8 @@ export class SyncClient {
         if (defines(e.command)) definers.push(e.command);
         continue;
       }
-      const oldCommand = e.command;
+      // A field-merged entry is renamed as made, then merged again below.
+      const oldCommand = e.merge?.command ?? e.command;
       const oldCreated = e.created;
       this.allocate(oldCreated, table, next, confirmedScopes, aliases);
       for (const [src, dst] of duplicates(oldCommand)) {
@@ -1495,6 +1527,15 @@ export class SyncClient {
         });
         e.command = out[out.length - 1]!;
         e.created = remapCreatedIds(oldCreated, table);
+        if (e.merge !== undefined) {
+          const kept = e.merge.origins.filter((o): o is Command => o !== null);
+          const renamedOrigins = remapIds(kept, table, { document: this.confirmed });
+          let k = 0;
+          e.merge = {
+            command: e.command,
+            origins: e.merge.origins.map((o) => (o === null ? null : renamedOrigins[k++]!)),
+          };
+        }
         if (
           out[out.length - 1] !== oldCommand &&
           JSON.stringify(e.command) !== JSON.stringify(oldCommand)
@@ -1527,7 +1568,26 @@ export class SyncClient {
         this.drop(e, tooLarge, table, oldCreated, drops);
         continue;
       }
-      const r = applyCommand(doc, e.command);
+      let r: ReturnType<typeof applyCommand> | undefined;
+      if (e.merge !== undefined) {
+        e.command = e.merge.command;
+        const merged = mergeCommandFields(
+          e.merge.command,
+          e.merge.origins,
+          doc,
+          this.mergeValidator,
+        );
+        const reasons = merged.whole;
+        if (merged.command !== e.merge.command) {
+          r = applyCommand(doc, merged.command);
+          if (r.ok) e.command = merged.command;
+          else reasons.push(`merged by field it does not apply (${r.error.message})`);
+        }
+        if (reasons.length > 0) {
+          this.emit('mergedWhole', { local: e.local, label: e.label, reasons });
+        }
+      }
+      if (r === undefined || !r.ok) r = applyCommand(doc, e.command);
       if (!r.ok) {
         this.drop(e, asRefusal(r.error), table, oldCreated, drops);
         continue;

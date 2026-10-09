@@ -191,3 +191,18 @@
 .history-merge-dropped {
   color: #a3261b;
 }
+
+/* What the merge overwrites of this branch's work: shown first, so it is not missed. */
+.history-merge-overwritten {
+  margin: 0.3rem 0;
+  padding: 0.25rem 0.4rem;
+  border: 1px solid #e0a23a;
+  border-left-width: 3px;
+  border-radius: 4px;
+  background: #fff7e6;
+}
+
+.history-merge-overwritten h4 {
+  margin-top: 0;
+  color: #8a4b00;
+}
