@@ -419,6 +419,50 @@ describe('openings', () => {
     expect(constructionLabel(r.feature)).toBe('Door');
   });
 
+  it("keeps an opening's overrides, nudges and added members when the form edits it", () => {
+    const { doc, wall } = withWall();
+    const form = { ...newOpeningForm(wall.id), width: `3'`, height: `6' 8"` };
+    const ctx = { doc, partId: PART, variables: {}, segmentLength: 12 * FT };
+    const first = buildOpening(form, ctx);
+    if (!first.ok) throw new Error(JSON.stringify(first.errors));
+    const inches = (source: string) => ({
+      source,
+      lengthUnit: 'in' as const,
+      angleUnit: 'deg' as const,
+    });
+    const existing: ExtensionFeature = {
+      ...first.feature,
+      params: {
+        ...first.feature.params,
+        overrides: [{ id: 'king-l' }],
+        add: [
+          { id: 'add1', role: 'stud' },
+          { id: 'add2', role: 'blocking' },
+        ],
+      } as ExtensionFeature['params'],
+      expressions: {
+        ...first.feature.expressions,
+        move_1: inches('1'),
+        add1_at: inches('-24'),
+        add2_at: inches('8'),
+        add2_z: inches('90'),
+      },
+    };
+    const r = buildOpening({ ...form, width: `4'` }, { ...ctx, existing });
+    if (!r.ok) throw new Error(JSON.stringify(r.errors));
+    expect(r.feature.params).toMatchObject({
+      overrides: [{ id: 'king-l' }],
+      add: existing.params.add,
+    });
+    expect(r.feature.expressions).toMatchObject({
+      width: { source: "4'" },
+      move_1: inches('1'),
+      add1_at: inches('-24'),
+      add2_at: inches('8'),
+      add2_z: inches('90'),
+    });
+  });
+
   it('needs a sill for a window, and every field of an explicit header', () => {
     const { doc, wall } = withWall();
     const base = { ...newOpeningForm(wall.id), kind: 'window' as const, width: "2'", height: "3'" };

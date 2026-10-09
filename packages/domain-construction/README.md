@@ -133,9 +133,13 @@ model ids), `points` (2 to 64; the coordinates are the length expressions `x1`, 
 `yn`, in plan), `closed`, `justification` (`left`, the default, puts the framing left of the path,
 so the path is the framing's exterior face; the exterior is always right of the path), `joins`
 (`start`, `end`: `auto` or `free`), `framing` (`layoutFrom`, `bottomPlates`, `topPlates`,
-`kings`, `cornerStyle`, `blocking`: `none` or `mid-height`) and `overrides` (`{ id, delete?,
-stock? }` keyed by local member id). Expressions: `height` (default the level's), `spacing`,
-`layoutOrigin`, and `move_<n>`, the nudge of the n-th override. Settings resolve wall over wall
+`kings`, `cornerStyle`, `blocking`: `none` or `mid-height`), `overrides` (`{ id, delete?,
+stock? }` keyed by local member id) and `add` (members the layout does not make, #1214: `{ id,
+role, stock?, plies?, segment? }` with `id` `add1` to `add200`, `role` `stud` or `blocking`,
+`plies` 1 to 4 for a stud, `segment` default 1; see "Added members" below). Expressions:
+`height` (default the level's), `spacing`, `layoutOrigin`, `move_<n>` (the nudge of the n-th
+override), `add<k>_at` (an added member's centre line along its segment, from the segment's first
+point; required for each entry) and `add<k>_z` (an added block's centre above the base). Settings resolve wall over wall
 type over `domains.construction` framing over `DEFAULT_WALL_SETTINGS`; the header rules are the
 document's. Operation `new` makes the layer bodies; a wall with no operation makes none (framing
 only). Bounds: 64 points, segments up to 100 m, coordinates within 500 m (half of regen's 1 km
@@ -176,16 +180,19 @@ member), height up to 30 m, stock sizes 1 mm to 2 m (with overrides), 500 overri
   shed of four walls: every layer body's volume exact, their fuse as large as their sum (no
   overlap), and the shed's layers identical to one closed wall's.
 - **Metadata** (`WallMetadata`): level, base, height, path, justification, the framing
-  thickness, each layer's extent across the path and body, the resolved settings and overrides.
+  thickness, each layer's extent across the path and body, the resolved settings and overrides,
+  and the resolved added members (`add`, only when there are any).
 
 **Opening** (`opening.ts`). Its host is the one `construction.wall` in its `dependsOn`. Params:
 `kind` (`door`, `window`, `opening`), `segment` (default 1), `from` (`start` or `end` of the
 segment), `sizing` (`rough`, or `unit` with the `allowance` expression added to width and
 height), `header` (`auto`: the narrowest header rule covering the width, else the wall type's
 default; `default`; `explicit` with `stock`, `plies`, `jacks`, `spacer?`), `kings`, `jacks`,
-`swing` and `hand` (doors, for drawings) and `overrides`. Expressions: `position` (to the centre
-line), `width`, `height` (the rough opening), `sill` (0 for a door, required for a window) and
-`move_<n>`. It has no operation: one `tools` input cuts a box through the whole wall at the rough
+`swing` and `hand` (doors, for drawings), `overrides` and `add` (as a wall's, without
+`segment`: they are on the opening's segment). Expressions: `position` (to the centre line),
+`width`, `height` (the rough opening), `sill` (0 for a door, required for a window), `move_<n>`,
+and `add<k>_at` (measured from the opening's centre line, positive towards the segment's end) and
+`add<k>_z`. It has no operation: one `tools` input cuts a box through the whole wall at the rough
 opening from every layer body (faces `<opening id>:<layer>:<role>`); with a `scope`, every body it
 cuts must be listed there. It is refused when it does not fit its segment or its wall's height.
 
@@ -350,6 +357,12 @@ Opening members (owned by the opening): `king-l`, `king-l2`, `king-r`, `jack-l`,
 (nearest the opening first), `header`, `header-2` (plies), `spacer`, `sill`, `cripple-a<n>`
 (above the header) and `cripple-b<n>` (below the rough sill), numbered along the wall.
 
+Added members (owned by the wall or opening whose `add` params list them, #1214): `add<k>`, the
+entry's own id (k from 1 to 200, chosen when the entry is added and never renumbered), and for a
+stud of several plies `add<k>-2`, `add<k>-3` for the later plies along the wall. No layout form
+starts with `add`, so an added member never shares an id with a framed one
+(`parseAddedMemberId`, `formatAddedMemberId`).
+
 Every member has one spelling: the first king is `king-l`, never `king-l1`; the first ply is
 `header`, never `header-1`; numbers have no leading zeros. `parseWallMemberId` and
 `parseOpeningMemberId` refuse any other spelling and round-trip with `formatWallMemberId` and
@@ -460,13 +473,31 @@ left out with a warning.
 base, between consecutive full-height studs, kings and corner studs, outside openings, corners
 and tees. A row outside the studs or overlapping another is left out with a warning.
 
+**Added members** (`add`, #1214): members the layout does not make, owned by the wall or the
+opening that lists them (`AddedMember`). A `stud` stands on the bottom plates up to the top plates,
+its `plies` side by side along the wall and centred on `at` (`plies: 2` is a doubled stud); a
+`blocking` block lies flat at height `z` (default mid-height of the studs), fitted between the
+nearest verticals (studs, kings, jacks, cripples, corner studs, added studs) either side of `at`.
+The wall's `at` is measured from the framed segment's start, an opening's from its centre line.
+Stock defaults to the stud stock. Added studs are made before the overrides, so overrides apply to
+them like any member; blocks fit between the verticals as the overrides leave them, and overrides
+naming a block apply to it after. One that does not fit (outside the wall, through an opening's
+framing, a block on a stud, outside the studs or with no stud each side) is left out with an
+`added-member-left-out` layout warning; so are an unframed opening's (one warning for the opening).
+An added stud that overlaps a stud the layout already has (layout, king, jack, cripple, corner) is
+kept with a `framing-conflict` warning naming that member. Entries with an id not of the form
+`add<k>`, twice in one owner, or with bad plies or a segment the wall does not have throw a
+`FramingInputError`.
+
 **Overrides** (ADR 0015 decision 6) are params of the member's owner, keyed by local id: the
-wall's `overrides` name its own members (`s12`, `top1:2`), an opening's `overrides` name the
-opening's (`king-l`, `header`). They apply last, the wall's first and then each opening's:
+wall's `overrides` name its own members (`s12`, `top1:2`, `add1`), an opening's `overrides` name
+the opening's (`king-l`, `header`). They apply last, the wall's first and then each opening's:
 `delete`, `stock` (a new stock, same placement origin), `move` (mm along the wall). Each reports
 `{ owner, id, status }` with `applied` or `lost`; a lost one also warns `override-lost` with the
-reason: the owner no longer has that member, the opening is not framed, or an earlier override
-of the same member deleted it.
+reason: the owner no longer has that member (a layout form it does not make now), it never had
+that member (no layout form, and no entry of its `add`: to add one, list it there), the owner
+adds that member but it is left out, the opening is not framed, or an earlier override of the
+same member deleted it.
 
 **Errors.** Input the generator cannot frame at all (no segments, a segment shorter than two
 studs or too low for its plates, a thickness that is not the stud depth, spacing not wider than a

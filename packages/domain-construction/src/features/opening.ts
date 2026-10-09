@@ -9,10 +9,13 @@
 //   `unit`: they are the unit's size and `allowance` is added to each), `header` (`auto`, the
 //   default: the narrowest header rule covering the width, else the wall type's default;
 //   `default`; or `explicit` with its stock, plies, jacks and optional spacer), `kings`, `jacks`,
-//   `swing` and `hand` (doors; drawings only) and `overrides` (per-member, keyed by local id:
-//   `king-l`, `header`). Lengths are expressions: `position` (to the opening's centre line),
-//   `width`, `height`, `sill` (the rough opening's bottom above the wall's base: 0 for a door,
-//   required for a window), `allowance`, and `move_<n>`.
+//   `swing` and `hand` (doors; drawings only), `overrides` (per-member, keyed by local id:
+//   `king-l`, `header`) and `add` (members its framing does not make, #1214: `{ id: "add<k>",
+//   role: "stud" | "blocking", stock?, plies? }`, owned by the opening). Lengths are
+//   expressions: `position` (to the opening's centre line), `width`, `height`, `sill` (the rough
+//   opening's bottom above the wall's base: 0 for a door, required for a window), `allowance`,
+//   `move_<n>`, and `add<k>_at` (an added member's centre line from the opening's, positive
+//   towards the segment's end) and `add<k>_z` (an added block's centre above the wall's base).
 // - **Cuts** (decision 3): one `tools` input with a box per layer body of the host, through the
 //   whole wall at the rough opening (`<id>:<layer id>:<role>` faces). With a `scope`, every body
 //   it cuts must be listed there. No operation: an opening makes no body of its own.
@@ -48,22 +51,27 @@ import {
 } from '@manufakture/stock';
 import type { HeaderData } from '../data';
 import {
+  ADD_EXPRESSIONS,
   MAX_OVERRIDES,
   MAX_SEGMENT_LENGTH,
   OPENING_TYPE,
   Refusal,
   WALL_TYPE,
   failure,
+  isAddExpression,
   moveExpression,
   planSegments,
+  readAdds,
   readOptionalCount,
   readOverrides,
   readWallMetadata,
+  resolveAdds,
   resolveOverrides,
   stockData,
   toJson,
   type OpeningHeader,
   type OpeningMetadata,
+  type StoredAdd,
   type StoredOverride,
 } from './common';
 import { headerSpec, wallLayerBodies } from './wall';
@@ -86,6 +94,8 @@ export interface OpeningParams {
   readonly swing?: 'in' | 'out';
   readonly hand?: 'left' | 'right';
   readonly overrides: readonly StoredOverride[];
+  /** Members its framing does not make (#1214); absent when the params have none. */
+  readonly add?: readonly StoredAdd[];
 }
 
 /** The params migrations of `construction.opening` (none yet: version 1 is current). */
@@ -98,6 +108,7 @@ export const OPENING_EXPRESSIONS: Readonly<Record<string, ExpressionKind>> = Obj
   Object.fromEntries([
     ...LENGTHS.map((k) => [k, 'length']),
     ...Array.from({ length: MAX_OVERRIDES }, (_, i) => [moveExpression(i + 1), 'length']),
+    ...ADD_EXPRESSIONS,
   ]) as Record<string, ExpressionKind>,
 );
 
@@ -143,7 +154,19 @@ function readCurrent(params: Json): Read<OpeningParams> {
   if (!isObject(params)) return fail('expected the opening params object');
   const keys = onlyKeys(
     params,
-    ['kind', 'segment', 'from', 'sizing', 'header', 'kings', 'jacks', 'swing', 'hand', 'overrides'],
+    [
+      'kind',
+      'segment',
+      'from',
+      'sizing',
+      'header',
+      'kings',
+      'jacks',
+      'swing',
+      'hand',
+      'overrides',
+      'add',
+    ],
     [],
   );
   if (!keys.ok) return keys;
@@ -176,6 +199,8 @@ function readCurrent(params: Json): Read<OpeningParams> {
   if (!jacks.ok) return jacks;
   const overrides = readOverrides(own(params, 'overrides'), ['overrides']);
   if (!overrides.ok) return overrides;
+  const add = readAdds(own(params, 'add'), ['add'], false);
+  if (!add.ok) return add;
   return ok({
     kind: kind.value,
     segment: segment.value ?? 1,
@@ -183,6 +208,7 @@ function readCurrent(params: Json): Read<OpeningParams> {
     sizing: sizing.value!,
     header: header.value,
     overrides: overrides.value,
+    ...(add.value.length === 0 ? {} : { add: add.value }),
     ...(kings.value === undefined ? {} : { kings: kings.value }),
     ...(jacks.value === undefined ? {} : { jacks: jacks.value }),
     ...(swing.value === undefined ? {} : { swing: swing.value }),
@@ -240,7 +266,8 @@ function build(ctx: ExtensionContext<OpeningParams>): {
     const move = /^move_([1-9][0-9]*)$/.exec(name);
     const allowed =
       (LENGTHS as readonly string[]).includes(name) ||
-      (move !== null && Number(move[1]) <= p.overrides.length);
+      (move !== null && Number(move[1]) <= p.overrides.length) ||
+      isAddExpression(name, p.add ?? []);
     if (!allowed || (name === 'allowance' && p.sizing !== 'unit')) {
       throw new Refusal(`this opening has no "${name}" value`, ['expressions', name]);
     }
@@ -354,6 +381,7 @@ function build(ctx: ExtensionContext<OpeningParams>): {
     sill,
     header,
     overrides: resolveOverrides(p.overrides, ctx.values, data),
+    ...(p.add === undefined ? {} : { add: resolveAdds(p.add, ctx.values, data) }),
     cuts: bodies.map((b) => b.body),
     ...(p.kings === undefined ? {} : { kings: p.kings }),
     ...(p.jacks === undefined ? {} : { jacks: p.jacks }),

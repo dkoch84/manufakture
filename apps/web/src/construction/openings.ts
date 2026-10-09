@@ -166,7 +166,7 @@ export function buildOpening(form: OpeningForm, ctx: OpeningContext): OpeningBui
   }
   const existingParams = (ctx.existing?.params ?? {}) as Record<string, unknown>;
   const params: Record<string, unknown> = {
-    // Keep what the tool does not edit (overrides, kings, a door's swing).
+    // Keep what the tool does not edit (overrides, added members, kings, a door's swing).
     ...existingParams,
     kind: form.kind,
     segment: form.segment,
@@ -177,10 +177,11 @@ export function buildOpening(form: OpeningForm, ctx: OpeningContext): OpeningBui
     delete params.swing;
     delete params.hand;
   }
-  // Nudges of the opening's own member overrides stay as they were.
+  // Nudges of the opening's own member overrides, and the positions of the members its `add`
+  // params add, stay as they were (the form edits neither).
   if (ctx.existing) {
     for (const [k, v] of Object.entries(ctx.existing.expressions)) {
-      if (/^move_[1-9][0-9]*$/.test(k)) expressions[k] = v;
+      if (/^move_[1-9][0-9]*$/.test(k) || /^add[1-9][0-9]*_(at|z)$/.test(k)) expressions[k] = v;
     }
   }
   if (Object.keys(errors).length === 0) {

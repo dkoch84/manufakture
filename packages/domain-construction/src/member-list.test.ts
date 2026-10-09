@@ -99,3 +99,83 @@ describe('memberListing', () => {
     expect(memberListing({ owner: 'extension#99', features, sets })).toBeUndefined();
   });
 });
+
+describe('memberListing: added members', () => {
+  // A wall of two segments, 12' along +x then 8' along +y, adding a doubled stud on its second
+  // segment and a block on its first; a window on the first segment adds a stud of its own.
+  const seg = (start: [number, number], end: [number, number]) => ({
+    ...straightWall(144).segments[0]!,
+    start,
+    end,
+  });
+  const add = [
+    { id: 'add1', role: 'stud' as const, at: inch(28), plies: 2, segment: 2 },
+    { id: 'add2', role: 'blocking' as const, at: inch(20) },
+  ];
+  const windowAdd = [{ id: 'add1', role: 'stud' as const, at: inch(-24) }];
+  const input = {
+    ...straightWall(144),
+    segments: [
+      { ...seg([0, 0], [inch(144), 0]), openings: [{ ...window, overrides: [], add: windowAdd }] },
+      seg([inch(144), 0], [inch(144), inch(96)]),
+    ],
+    add,
+    overrides: [{ id: 'add1-2', stock: S2X6 }],
+  };
+  const r = frameWall(input);
+  const feats: MemberListingSources['features'] = [
+    {
+      featureId: WALL,
+      metadata: {
+        kind: 'wall',
+        points: [
+          [0, 0],
+          [inch(144), 0],
+          [inch(144), inch(96)],
+        ],
+        closed: false,
+        base: 0,
+        layers: [],
+        overrides: input.overrides,
+        add,
+      } as never,
+    },
+    {
+      featureId: WINDOW,
+      metadata: {
+        kind: 'opening',
+        wall: WALL,
+        segment: 1,
+        position: inch(48),
+        overrides: [],
+        add: windowAdd,
+      } as never,
+    },
+  ];
+  const s = [{ group: WALL, members: r.members, metadata: { overrides: r.overrides } }];
+
+  it('lists added members with their role, where they are along the wall, and as added', () => {
+    expect(r.warnings).toEqual([]);
+    const l = memberListing({ owner: WALL, features: feats, sets: s })!;
+    const added = l.members.filter((m) => m.added);
+    expect(
+      added.map((m) => [m.local, m.role, m.along!.segment, toInches(m.along!.centre)]),
+    ).toEqual([
+      ['add2', 'blocking', 1, 20],
+      ['add1', 'stud', 2, 27.25],
+      ['add1-2', 'stud', 2, 28.75],
+    ]);
+    expect(added.find((m) => m.local === 'add1-2')!.stock.id).toBe('us-2x6');
+    expect(l.members.filter((m) => !m.added).every((m) => !('added' in m))).toBe(true);
+    expect(l.overrides).toEqual([
+      { n: 1, id: 'add1-2', member: `${WALL}:add1-2`, status: 'applied', stock: 'us-2x6' },
+    ]);
+  });
+
+  it("lists an opening's added member, from the opening's centre line", () => {
+    const l = memberListing({ owner: WINDOW, features: feats, sets: s })!;
+    const m = l.members.find((x) => x.local === 'add1')!;
+    expect(m).toMatchObject({ id: `${WINDOW}:add1`, role: 'stud', added: true });
+    expect(toInches(m.along!.centre)).toBeCloseTo(24, 3);
+  });
+});

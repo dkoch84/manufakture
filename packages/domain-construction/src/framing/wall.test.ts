@@ -21,6 +21,7 @@ import {
   FramingInputError,
   MemberBudget,
   frameWall,
+  type AddedMember,
   type FrameWallInput,
   type WallFraming,
   type WallOpening,
@@ -517,6 +518,239 @@ describe('frameWall: blocking', () => {
       'block2:3',
     ]);
     expect(r.warnings.map((w) => w.code)).toEqual(['blocking-row-outside']);
+  });
+});
+
+describe('frameWall: added members', () => {
+  it('adds a stud, a doubled stud and blocks the layout does not make, owned by the wall', () => {
+    const input = straightWall(
+      192,
+      {},
+      {},
+      {
+        add: [
+          { id: 'add1', role: 'stud', at: inch(30) },
+          { id: 'add2', role: 'stud', at: inch(56), plies: 2, stock: S2X6 },
+          { id: 'add3', role: 'blocking', at: inch(40) },
+          { id: 'add4', role: 'blocking', at: inch(24), z: inch(48) },
+        ],
+      },
+    );
+    const seg = input.segments[0]!;
+    const r = frame(input);
+    expect(r.warnings).toEqual([]);
+    expect(countByRole(r.members)).toEqual({
+      blocking: 2,
+      'bottom-plate': 1,
+      stud: 16,
+      'top-plate': 2,
+    });
+    const add1 = r.byId.get('add1')!;
+    expect(add1).toMatchObject({ owner: WALL, role: 'stud', stock: S2X4, length: inch(92.625) });
+    expect(extentInches(seg, add1)).toEqual({ s: [29.25, 30.75], t: [0, 3.5], z: [1.5, 94.125] });
+    // A doubled stud: two plies side by side, centred on its position, `add2` then `add2-2`.
+    expect(extentInches(seg, r.byId.get('add2')!).s).toEqual([54.5, 56]);
+    expect(extentInches(seg, r.byId.get('add2-2')!).s).toEqual([56, 57.5]);
+    expect(r.byId.get('add2-2')!.stock).toBe(S2X6);
+    // Blocks fit between the verticals either side: s2 and s3, and s1 and the added stud.
+    const add3 = r.byId.get('add3')!;
+    expect(add3.role).toBe('blocking');
+    expect(extentInches(seg, add3)).toEqual({
+      s: [32.75, 47.25],
+      t: [0, 3.5],
+      z: [47.062, 48.562],
+    });
+    expect(extentInches(seg, r.byId.get('add4')!)).toMatchObject({
+      s: [16.75, 29.25],
+      z: [47.25, 48.75],
+    });
+  });
+
+  it('applies overrides to added members, a block fitting between the studs as overridden', () => {
+    const input = straightWall(
+      192,
+      {},
+      {},
+      {
+        add: [
+          { id: 'add2', role: 'stud', at: inch(56), plies: 2 },
+          { id: 'add3', role: 'blocking', at: inch(40) },
+        ],
+        overrides: [
+          { id: 'add3', stock: S2X6 },
+          { id: 's3', move: inch(2) },
+          { id: 'add2-2', delete: true },
+        ],
+      },
+    );
+    const r = frame(input);
+    expect(r.overrides).toEqual([
+      { owner: WALL, id: 'add3', status: 'applied' },
+      { owner: WALL, id: 's3', status: 'applied' },
+      { owner: WALL, id: 'add2-2', status: 'applied' },
+    ]);
+    expect(r.byId.has('add2-2')).toBe(false);
+    expect(r.byId.has('add2')).toBe(true);
+    // s3 nudged from 47.25" to 49.25": the block reaches it.
+    expect(extentInches(input.segments[0]!, r.byId.get('add3')!).s).toEqual([32.75, 49.25]);
+    expect(r.byId.get('add3')!.stock).toBe(S2X6);
+  });
+
+  it("adds an opening's members from its centre line, owned by the opening", () => {
+    const input = straightWall(192, {
+      openings: [
+        {
+          ...DOOR,
+          add: [
+            { id: 'add1', role: 'stud', at: inch(-22.75) },
+            { id: 'add2', role: 'blocking', at: inch(8), z: inch(90.5) },
+          ],
+        },
+      ],
+    });
+    const seg = input.segments[0]!;
+    const r = frame(input);
+    expect(r.warnings).toEqual([]);
+    const stud = r.byId.get('extension#7:add1')!;
+    expect(stud).toMatchObject({ owner: 'extension#7', role: 'stud' });
+    expect(extentInches(seg, stud).s).toEqual([24.5, 26]);
+    // Above the header, between the cripples over 48" and 64".
+    expect(extentInches(seg, r.byId.get('extension#7:add2')!)).toMatchObject({
+      s: [48.75, 63.25],
+      z: [89.75, 91.25],
+    });
+  });
+
+  it('warns when an added stud overlaps a stud the wall already has, and keeps both', () => {
+    const r = frame(
+      straightWall(192, {}, {}, { add: [{ id: 'add1', role: 'stud', at: inch(33) }] }),
+    );
+    expect(r.byId.has('add1') && r.byId.has('s2')).toBe(true);
+    expect(r.warnings).toEqual([
+      expect.objectContaining({
+        code: 'framing-conflict',
+        member: `${WALL}:add1`,
+        message: `The added stud add1 of ${WALL} overlaps ${WALL}:s2; both are kept.`,
+      }),
+    ]);
+  });
+
+  it('leaves out an added member that does not fit, and says so', () => {
+    const r = frame(
+      straightWall(
+        192,
+        { openings: [DOOR] },
+        {},
+        {
+          add: [
+            { id: 'add1', role: 'stud', at: inch(48) },
+            { id: 'add2', role: 'stud', at: inch(500) },
+            { id: 'add3', role: 'blocking', at: inch(80) },
+            { id: 'add4', role: 'blocking', at: inch(88), z: inch(200) },
+            { id: 'add5', role: 'blocking', at: inch(48), z: inch(40) },
+          ],
+          overrides: [{ id: 'add1', delete: true }],
+        },
+      ),
+    );
+    expect(r.warnings.filter((w) => w.code === 'added-member-left-out')).toEqual([
+      expect.objectContaining({
+        member: `${WALL}:add1`,
+        message: `The added stud add1 of ${WALL} runs into the framing of opening extension#7; it is left out.`,
+      }),
+      expect.objectContaining({
+        member: `${WALL}:add2`,
+        message: `The added stud add2 of ${WALL} is outside the wall; it is left out.`,
+      }),
+      expect.objectContaining({
+        member: `${WALL}:add3`,
+        message: `The added block add3 of ${WALL} is on a stud, not between two; it is left out.`,
+      }),
+      expect.objectContaining({
+        member: `${WALL}:add4`,
+        message: `The added block add4 of ${WALL} is outside the studs; it is left out.`,
+      }),
+      expect.objectContaining({
+        member: `${WALL}:add5`,
+        message: `The added block add5 of ${WALL} runs into the framing of opening extension#7; it is left out.`,
+      }),
+    ]);
+    expect(r.members.some((m) => m.id.startsWith('add'))).toBe(false);
+    expect(r.overrides).toEqual([{ owner: WALL, id: 'add1', status: 'lost' }]);
+    expect(r.warnings.map((w) => w.message)).toContain(
+      `The override of add1 on ${WALL} is lost: the wall adds that member, but it is left out (see its warning).`,
+    );
+  });
+
+  it("drops an unframed opening's added members with one warning", () => {
+    const r = frame(
+      straightWall(192, {
+        openings: [
+          { ...DOOR, position: inch(10), add: [{ id: 'add1', role: 'stud', at: inch(30) }] },
+        ],
+      }),
+    );
+    expect(r.members.some((m) => m.owner === 'extension#7')).toBe(false);
+    expect(r.warnings).toContainEqual(
+      expect.objectContaining({
+        code: 'added-member-left-out',
+        opening: 'extension#7',
+        message: 'Opening extension#7 is not framed, so the members it adds are left out.',
+      }),
+    );
+  });
+
+  it('says an override of a member the feature never had was never had, not "no longer"', () => {
+    const r = frame(
+      straightWall(
+        192,
+        { openings: [DOOR] },
+        {},
+        {
+          overrides: [{ id: 'extra1' }, { id: 'king-l' }, { id: 'add9' }, { id: 's40' }],
+        },
+      ),
+    );
+    expect(r.overrides.map((o) => o.status)).toEqual(['lost', 'lost', 'lost', 'lost']);
+    const never = (id: string) =>
+      `The override of ${id} on ${WALL} is lost: the wall never had that member (to add a member its layout does not make, list it in the wall's "add" params).`;
+    expect(r.warnings.map((w) => w.message)).toEqual([
+      never('extra1'),
+      never('king-l'),
+      never('add9'),
+      `The override of s40 on ${WALL} is lost: the wall no longer has that member.`,
+    ]);
+  });
+
+  it.each([
+    [{ id: 'extra1', role: 'stud', at: 0 }, /not of the form add<k>/],
+    [{ id: 'add1-2', role: 'stud', at: 0 }, /not of the form add<k>/],
+    [{ id: 'add1', role: 'blocking', at: 0, plies: 2 }, /a block: it has one ply/],
+    [{ id: 'add1', role: 'stud', at: 0, plies: 5 }, /1 to 4 plies/],
+    [{ id: 'add1', role: 'stud', at: Number.NaN }, /position that is a number/],
+    [{ id: 'add1', role: 'stud', at: 0, segment: 2 }, /segment 2, which the wall does not have/],
+  ])('refuses %j', (add, message) => {
+    expect(() => frameWall(straightWall(192, {}, {}, { add: [add as AddedMember] }))).toThrow(
+      message,
+    );
+  });
+
+  it('refuses an added member id twice in one owner', () => {
+    expect(() =>
+      frameWall(
+        straightWall(
+          192,
+          {},
+          {},
+          {
+            add: [
+              { id: 'add1', role: 'stud', at: inch(30) },
+              { id: 'add1', role: 'stud', at: inch(40) },
+            ],
+          },
+        ),
+      ),
+    ).toThrow(FramingInputError);
   });
 });
 

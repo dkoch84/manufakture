@@ -26,6 +26,15 @@
 //   sill                           the rough sill (windows)
 //   cripple-a<n>, cripple-b<n>     cripples above the header and below the sill
 //
+// Added members (#1214), owned by the wall or opening whose `add` params list them: members the
+// layout does not make (an extra stud, a doubled stud, a block), named by their entry:
+//
+//   add<k>                         the entry's member, or the first ply of an added stud
+//   add<k>-2, add<k>-3, ...        the later plies of an added stud, along the wall
+//
+// k is the entry's own number (1 to MAX_ADDED, chosen when it is added, never renumbered). No
+// layout form starts with `add`, so an added member never shares an id with a framed one.
+//
 // Every id has exactly one spelling: the first king is `king-l`, never `king-l1`; the first
 // header ply is `header`, never `header-1`; numbers have no leading zeros. The parsers refuse any
 // other spelling, so one member has one id. A local id may contain a colon (`top1:2`), so a full
@@ -78,6 +87,11 @@ const PLATE = new RegExp(`^(bottom|top)(${N}):(${N})$`);
 const BLOCK = new RegExp(`^block(${N}):(${N})$`);
 const CORNER = new RegExp(`^(start|end):(corner|corner-2|backing${N})$`);
 const TEE = new RegExp(`^t(${N}):(corner-l|corner-r|corner-c|backing${N})$`);
+
+/** The most members one wall or opening may add (`add<k>`, k from 1 to this). */
+export const MAX_ADDED = 200;
+
+const ADDED = new RegExp(`^add(${N})(?:-(${N2}))?$`);
 
 const STUD = new RegExp(`^(king|jack)-([lr])(${N2})?$`);
 const HEADER = new RegExp(`^header(?:-(${N2}))?$`);
@@ -174,6 +188,26 @@ export function formatOpeningMemberId(p: OpeningMemberId): string {
   }
 }
 
+/** A parsed added member id: the entry's number and the ply (1 for the entry's own id). */
+export interface AddedMemberId {
+  readonly entry: number;
+  readonly ply: number;
+}
+
+/** Parses an added member id (`add3`, `add3-2`); undefined for any other id or k past MAX_ADDED. */
+export function parseAddedMemberId(id: string): AddedMemberId | undefined {
+  const m = ADDED.exec(id);
+  if (!m) return undefined;
+  const entry = Number(m[1]);
+  if (entry > MAX_ADDED) return undefined;
+  return { entry, ply: m[2] === undefined ? 1 : Number(m[2]) };
+}
+
+/** The id text of an added member: `add<k>` for ply 1, `add<k>-<p>` after it. */
+export function formatAddedMemberId(p: AddedMemberId): string {
+  return p.ply === 1 ? `add${p.entry}` : `add${p.entry}-${p.ply}`;
+}
+
 /** A member's full id: `<owner feature id>:<local id>` (`extension#7:king-l`). */
 export function memberFullId(m: { readonly owner: string; readonly id: string }): string {
   return `${m.owner}:${m.id}`;
@@ -203,4 +237,6 @@ export const memberIds = {
   tee: (segment: number, tee: number, name: TeeMemberName) =>
     formatWallMemberId({ form: 'tee', segment, tee, name }),
   opening: (p: OpeningMemberId) => formatOpeningMemberId(p),
+  /** Ply `ply` of the added member whose entry id is `entry` (`add3`). */
+  added: (entry: string, ply: number) => (ply === 1 ? entry : `${entry}-${ply}`),
 };

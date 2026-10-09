@@ -1117,6 +1117,91 @@ at or below the sill; to see which wall studs an opening displaced, list the wal
 }
 ```
 
+To frame what the layout does not make (an as-built wall with an extra stud, a doubled stud at
+a tub, a block for a grab bar), list the members in the wall's (or an opening's) `add` params.
+Each entry is `{ "id": "add<k>", "role": "stud" | "blocking", "stock"?, "plies"?, "segment"? }`:
+`k` is a number from 1 to 200 you choose and keep (it is the member's local id, so it never
+renumbers), `stock` a lumber stock id (the wall's stud stock when absent), `plies` how many studs
+side by side (2 is a doubled stud: `add<k>` and `add<k>-2`), `segment` which segment of a wall's
+path (1 when absent; an opening's members are on its own segment). Where it goes is an
+expression: `add<k>_at`, its centre line along the wall from the segment's first point (as an
+opening's `position`; for an opening's own entry, from the opening's centre line, positive
+towards the segment's end), and for a block `add<k>_z`, its centre above the wall's base
+(mid-height of the studs when absent). A stud stands on the bottom plates up to the top plates; a
+block lies flat, fitted between the nearest studs (layout, added, kings, jacks, cripples, corner
+studs) either side of its position. The feature owns them, the takeoff counts them, `render`
+draws them, and overrides (`delete`, `stock`, a `move_<n>` nudge) apply to them as to any member.
+One that does not fit (outside the wall, through an opening's framing, a block on a stud or with
+no stud each side) is left out with a warning, and the rest is framed. An override that names a
+member the feature never had (`extra1`) is lost with a warning that says so; use `add` for those. To
+remove an added member, drop its entry and its `add<k>_at` and `add<k>_z` expressions together
+(an expression left without its entry is refused). For a new entry pick the next `k` no entry of
+that feature uses yet, after reading the feature: two branches that both add `add1` to one wall
+collide when they merge.
+
+Add a stud 44" along the shed's left wall (`extension#4`, from (0, 144") to (0, 0)), with a block
+48" up between it and the layout stud before it:
+
+```json mcp:apply
+{
+  "sessionId": "<session>",
+  "label": "Add a stud and a block to the left wall",
+  "commands": [
+    {
+      "type": "editFeature",
+      "partId": "part#1",
+      "feature": {
+        "id": "extension#4",
+        "kind": "extension",
+        "name": "Left",
+        "suppressed": false,
+        "extension": "construction.wall",
+        "schemaVersion": 1,
+        "dependsOn": [],
+        "references": [],
+        "operation": "new",
+        "expressions": {
+          "x1": { "source": "0", "lengthUnit": "in", "angleUnit": "deg" },
+          "y1": { "source": "144", "lengthUnit": "in", "angleUnit": "deg" },
+          "x2": { "source": "0", "lengthUnit": "in", "angleUnit": "deg" },
+          "y2": { "source": "0", "lengthUnit": "in", "angleUnit": "deg" },
+          "add1_at": { "source": "44", "lengthUnit": "in", "angleUnit": "deg" },
+          "add2_at": { "source": "40", "lengthUnit": "in", "angleUnit": "deg" },
+          "add2_z": { "source": "48", "lengthUnit": "in", "angleUnit": "deg" }
+        },
+        "params": {
+          "level": "level-1",
+          "wallType": "ext-2x4",
+          "points": 2,
+          "add": [
+            { "id": "add1", "role": "stud" },
+            { "id": "add2", "role": "blocking" }
+          ]
+        }
+      }
+    }
+  ]
+}
+```
+
+The `members` query lists them with the wall's own, sorted along the wall, each with
+`"added": true`, its role and where it landed (`along`, `above`): check a block's `along` to see
+which studs it reached.
+
+```json mcp:get_object
+{
+  "sessionId": "<session>",
+  "query": { "kind": "members", "partId": "part#1", "owner": "extension#4" }
+}
+```
+
+```json mcp:result
+{
+  "ok": true,
+  "members": { "owner": "extension#4", "kind": "wall", "framed": true, "overrides": [] }
+}
+```
+
 The takeoff (lumber and sheet goods) is in the quantities:
 
 ```json mcp:get_quantities

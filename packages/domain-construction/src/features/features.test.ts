@@ -46,6 +46,24 @@ describe('wall params', () => {
     [{ ...base, overrides: [{ id: 's1' }, { id: 's1' }] }, ['overrides', 1, 'id']],
     [{ ...base, overrides: [{ id: 'extension#3:s1' }] }, ['overrides', 0, 'id']],
     [{ ...base, wallId: 'extension#3' }, ['wallId']],
+    [{ ...base, add: [{ id: 'extra1', role: 'stud' }] }, ['add', 0, 'id']],
+    [{ ...base, add: [{ id: 'add201', role: 'stud' }] }, ['add', 0, 'id']],
+    [{ ...base, add: [{ id: 'add1-2', role: 'stud' }] }, ['add', 0, 'id']],
+    [
+      {
+        ...base,
+        add: [
+          { id: 'add1', role: 'stud' },
+          { id: 'add1', role: 'stud' },
+        ],
+      },
+      ['add', 1, 'id'],
+    ],
+    [{ ...base, add: [{ id: 'add1', role: 'header' }] }, ['add', 0, 'role']],
+    [{ ...base, add: [{ id: 'add1', role: 'blocking', plies: 2 }] }, ['add', 0, 'plies']],
+    [{ ...base, add: [{ id: 'add1', role: 'stud', plies: 5 }] }, ['add', 0, 'plies']],
+    [{ ...base, add: [{ id: 'add1', role: 'stud', phase: 'new' }] }, ['add', 0, 'phase']],
+    [{ ...base, add: { id: 'add1' } }, ['add']],
   ])('refuses %j at %j', (params, field) => {
     const r = readWallParams(params, 1);
     expect(r.ok).toBe(false);
@@ -57,6 +75,19 @@ describe('wall params', () => {
     expect(WALL_EXPRESSIONS[`y${MAX_WALL_POINTS}`]).toBe('length');
     expect(WALL_EXPRESSIONS[`x${MAX_WALL_POINTS + 1}`]).toBeUndefined();
     expect(WALL_EXPRESSIONS.move_1).toBe('length');
+    expect(WALL_EXPRESSIONS.add1_at).toBe('length');
+    expect(WALL_EXPRESSIONS.add200_z).toBe('length');
+    expect(WALL_EXPRESSIONS.add201_at).toBeUndefined();
+  });
+
+  it('reads added members, and leaves `add` out when there are none', () => {
+    const add = [
+      { id: 'add1', role: 'stud', plies: 2, stock: 'us-2x6', segment: 1 },
+      { id: 'add7', role: 'blocking' },
+    ];
+    expect(readWallParams({ ...base, add }, 1)).toMatchObject({ ok: true, value: { add } });
+    const none = readWallParams({ ...base, add: [] }, 1);
+    expect(none.ok && 'add' in none.value).toBe(false);
   });
 });
 
@@ -97,6 +128,7 @@ describe('opening params', () => {
     [{ kind: 'door', header: { kind: 'rule' } }, ['header', 'kind']],
     [{ kind: 'door', segment: 0 }, ['segment']],
     [{ kind: 'door', wall: 'extension#1' }, ['wall']],
+    [{ kind: 'door', add: [{ id: 'add1', role: 'stud', segment: 1 }] }, ['add', 0, 'segment']],
   ])('refuses %j at %j', (params, field) => {
     const r = readOpeningParams(params, 1);
     expect(r.ok).toBe(false);

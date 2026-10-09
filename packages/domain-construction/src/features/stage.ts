@@ -111,6 +111,7 @@ export function frameConstructionGroup(ctx: MemberGroupContext): MemberOutput | 
       ...(meta.kings === undefined ? {} : { kings: meta.kings }),
       ...(meta.jacks === undefined ? {} : { jacks: meta.jacks }),
       ...(meta.overrides.length === 0 ? {} : { overrides: meta.overrides }),
+      ...(meta.add === undefined || meta.add.length === 0 ? {} : { add: meta.add }),
     };
     const list = bySegment.get(meta.segment) ?? [];
     list.push(opening);
@@ -126,6 +127,15 @@ export function frameConstructionGroup(ctx: MemberGroupContext): MemberOutput | 
       }),
       settings: wall.meta.settings,
       ...(wall.meta.overrides.length === 0 ? {} : { overrides: wall.meta.overrides }),
+      ...(wall.meta.add === undefined || wall.meta.add.length === 0
+        ? {}
+        : {
+            // Measured from the segment's first path point, as an opening's position is.
+            add: wall.meta.add.map((a) => ({
+              ...a,
+              at: a.at - (framed.shifts[(a.segment ?? 1) - 1] ?? 0),
+            })),
+          }),
     });
   } catch (error) {
     if (error instanceof FramingInputError) return { error: error.message };

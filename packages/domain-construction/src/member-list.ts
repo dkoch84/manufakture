@@ -1,8 +1,9 @@
 // The members of one feature as data (#1218, follow-up 6 of docs/m8-acceptance/remodel-frame.md):
 // what an agent reads instead of diffing takeoff row sources or guessing render patterns. For a
 // wall, an opening, a floor or a roof: each member it owns (full and local id, role, stock, blank
-// length, where it sits along its wall and above the wall's base), and each per-member override
-// its params hold, with the status the last framing gave it.
+// length, where it sits along its wall and above the wall's base, and whether its `add` params
+// add it, #1214), and each per-member override its params hold, with the status the last framing
+// gave it.
 //
 // Plain data in, plain data out: the caller passes the part's feature results (for the metadata
 // the translators returned) and the member sets as the last regen left them (members, and the
@@ -14,7 +15,7 @@ import type { PlanSegment, WallMetadata } from './features/common';
 import { readFloorMetadata } from './features/floor';
 import { readRoofMetadata } from './features/roof';
 import type { MemberOverride } from './framing/wall';
-import { memberFullId, parseWallMemberId } from './member-ids';
+import { memberFullId, parseAddedMemberId, parseWallMemberId } from './member-ids';
 import { memberCorners, type StockRef } from './members';
 import type { Placement, Vec3 } from './geom';
 
@@ -50,6 +51,8 @@ export interface ListedMember {
   } | null;
   /** Wall and opening members: its extent above the wall's base (as an opening's sill). */
   readonly above: { readonly from: number; readonly to: number } | null;
+  /** Present on a member the owner's `add` params add (`add3`, `add3-2`): its layout does not. */
+  readonly added?: true;
 }
 
 /** One override the owner's params hold, in their order. */
@@ -175,6 +178,11 @@ function segmentOf(
   if (owner.kind === 'opening' && owner.segment !== undefined) return owner.segment;
   const parsed = owner.kind === 'wall' ? parseWallMemberId(m.id) : undefined;
   if (parsed !== undefined && parsed.segment <= segments.length) return parsed.segment;
+  const add = parseAddedMemberId(m.id);
+  if (owner.kind === 'wall' && add !== undefined) {
+    const segment = owner.wall?.add?.find((a) => a.id === `add${add.entry}`)?.segment ?? 1;
+    if (segment <= segments.length) return segment;
+  }
   let best = 1;
   let distance = Infinity;
   segments.forEach((s, i) => {
@@ -200,6 +208,7 @@ function listed(m: ListableMember, owner: Owner, segments: readonly PlanSegment[
     stock: { id: m.stock.id, name: m.stock.name },
     length: round(m.length),
     centre,
+    ...(parseAddedMemberId(m.id) === undefined ? {} : { added: true as const }),
   };
   if (owner.wall === undefined || segments.length === 0) {
     return { ...base, along: null, above: null };

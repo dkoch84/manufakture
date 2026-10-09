@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  MAX_ADDED,
+  formatAddedMemberId,
   formatOpeningMemberId,
   formatWallMemberId,
   memberFullId,
   memberIds,
+  parseAddedMemberId,
   parseOpeningMemberId,
   parseWallMemberId,
   splitMemberFullId,
@@ -117,5 +120,28 @@ describe('full member ids', () => {
     expect(memberIds.opening({ form: 'king', side: 'l', n: 1 })).toBe('king-l');
     expect(memberIds.opening({ form: 'header', n: 1 })).toBe('header');
     expect(memberIds.opening({ form: 'header', n: 3 })).toBe('header-3');
+  });
+});
+
+describe('added member ids', () => {
+  it('parses add<k> and its later plies, one spelling each', () => {
+    expect(parseAddedMemberId('add1')).toEqual({ entry: 1, ply: 1 });
+    expect(parseAddedMemberId('add12-2')).toEqual({ entry: 12, ply: 2 });
+    expect(parseAddedMemberId(`add${MAX_ADDED}`)).toEqual({ entry: MAX_ADDED, ply: 1 });
+    for (const bad of ['add0', 'add01', 'add1-1', 'add1-02', 'add', `add${MAX_ADDED + 1}`, 's1']) {
+      expect(parseAddedMemberId(bad), bad).toBeUndefined();
+    }
+    for (const id of ['add1', 'add7-3']) {
+      expect(formatAddedMemberId(parseAddedMemberId(id)!)).toBe(id);
+    }
+    expect(memberIds.added('add4', 1)).toBe('add4');
+    expect(memberIds.added('add4', 2)).toBe('add4-2');
+  });
+
+  it('never collides with a layout id', () => {
+    for (const id of ['add1', 'add2-2']) {
+      expect(parseWallMemberId(id)).toBeUndefined();
+      expect(parseOpeningMemberId(id)).toBeUndefined();
+    }
   });
 });

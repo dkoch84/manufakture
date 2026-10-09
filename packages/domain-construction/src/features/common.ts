@@ -14,13 +14,21 @@ import {
   ok,
   onlyKeys,
   own,
+  readEnum,
   readId,
   type Path,
   type Read,
   type StockData,
 } from '@manufakture/stock';
 import { CONSTRUCTION_NAMESPACE, type ConstructionData } from '../data';
-import type { HeaderSpec, Justification, MemberOverride, WallSettingsInput } from '../framing/wall';
+import type {
+  AddedMember,
+  HeaderSpec,
+  Justification,
+  MemberOverride,
+  WallSettingsInput,
+} from '../framing/wall';
+import { MAX_ADDED, parseAddedMemberId } from '../member-ids';
 import type { StockRef } from '../members';
 import { stockKind, stockRef } from '../stock';
 
@@ -215,6 +223,139 @@ export function resolveOverrides(
   });
 }
 
+/**
+ * A member the layout does not make, as stored in a wall's or opening's `add` params (#1214):
+ * `{ id: "add<k>", role: "stud" | "blocking", stock?, plies?, segment? }`. Its position is the
+ * expression `add<k>_at` (along the wall: a wall's from its segment's first point, an opening's
+ * from its centre line) and a block's height the expression `add<k>_z` (its centre above the
+ * wall's base). `segment` is a wall's only; `plies` a stud's only.
+ */
+export interface StoredAdd {
+  readonly id: string;
+  readonly role: 'stud' | 'blocking';
+  readonly stock?: string;
+  readonly plies?: number;
+  readonly segment?: number;
+}
+
+/** The expression that places the added member `id` along the wall: `<id>_at`. */
+export const addAtExpression = (id: string): string => `${id}_at`;
+/** The expression that sets an added block's height: `<id>_z`. */
+export const addZExpression = (id: string): string => `${id}_z`;
+
+/** Every expression an added member may have, by kind (for a feature type's `expressions`). */
+export const ADD_EXPRESSIONS: readonly (readonly [string, 'length'])[] = Array.from(
+  { length: MAX_ADDED },
+  (_, i) => [
+    [addAtExpression(`add${i + 1}`), 'length'] as const,
+    [addZExpression(`add${i + 1}`), 'length'] as const,
+  ],
+).flat();
+
+/**
+ * Whether `name` is an expression of one of `adds`: `<id>_at` for any, `<id>_z` for a block.
+ */
+export function isAddExpression(name: string, adds: readonly StoredAdd[]): boolean {
+  const m = /^(add[1-9][0-9]*)_(at|z)$/.exec(name);
+  if (m === null) return false;
+  const a = adds.find((x) => x.id === m[1]);
+  return a !== undefined && (m[2] === 'at' || a.role === 'blocking');
+}
+
+/** A wall's or opening's `add` params; `segments` is whether entries may name a segment (walls). */
+export function readAdds(v: unknown, at: Path, segments: boolean): Read<StoredAdd[]> {
+  if (v === undefined) return ok([]);
+  if (!Array.isArray(v)) return fail('expected a list of added members', at);
+  if (v.length > MAX_ADDED) return fail(`at most ${MAX_ADDED} added members are allowed`, at);
+  const out: StoredAdd[] = [];
+  const ids = new Set<string>();
+  for (let i = 0; i < v.length; i++) {
+    const o: unknown = v[i];
+    const oat = [...at, i];
+    const shape = `{ id, role, stock?, plies?${segments ? ', segment?' : ''} }`;
+    if (!isObject(o)) return fail(`expected an added member ${shape}`, oat);
+    const keys = onlyKeys(
+      o,
+      ['id', 'role', 'stock', 'plies', ...(segments ? ['segment'] : [])],
+      oat,
+    );
+    if (!keys.ok) return keys;
+    const id = own(o, 'id');
+    const parsed = typeof id === 'string' ? parseAddedMemberId(id) : undefined;
+    if (parsed === undefined || parsed.ply !== 1) {
+      return fail(`expected an added member id, add1 to add${MAX_ADDED}`, [...oat, 'id']);
+    }
+    if (ids.has(id as string)) return fail(`two added members are "${id}"`, [...oat, 'id']);
+    ids.add(id as string);
+    const role = readEnum(own(o, 'role'), ['stud', 'blocking'] as const, [...oat, 'role']);
+    if (!role.ok) return role;
+    const stock = own(o, 'stock');
+    if (stock !== undefined) {
+      const r = readId(stock, [...oat, 'stock'], 'a stock id');
+      if (!r.ok) return r;
+    }
+    const plies = readOptionalCount(o, 'plies', oat, 1, role.value === 'stud' ? 4 : 1);
+    if (!plies.ok) return plies;
+    const segment = segments ? readOptionalCount(o, 'segment', oat, 1, 1_000) : ok(undefined);
+    if (!segment.ok) return segment;
+    out.push({
+      id: id as string,
+      role: role.value,
+      ...(stock === undefined ? {} : { stock: stock as string }),
+      ...(plies.value === undefined ? {} : { plies: plies.value }),
+      ...(segment.value === undefined ? {} : { segment: segment.value }),
+    });
+  }
+  return ok(out);
+}
+
+/**
+ * The added members resolved: stocks looked up (lumber, bounded), positions from `<id>_at` (which
+ * each needs) and block heights from `<id>_z`.
+ */
+export function resolveAdds(
+  stored: readonly StoredAdd[],
+  values: Readonly<Record<string, number>>,
+  data: StockData,
+): AddedMember[] {
+  return stored.map((a, i) => {
+    const atName = addAtExpression(a.id);
+    const at = values[atName];
+    if (at === undefined) {
+      throw new Refusal(`the added member ${a.id} needs its position along the wall, ${atName}`, [
+        'expressions',
+        atName,
+      ]);
+    }
+    if (!(Math.abs(at) <= MAX_SEGMENT_LENGTH)) {
+      throw new Refusal(`the position of ${a.id} is too far`, ['expressions', atName]);
+    }
+    const zName = addZExpression(a.id);
+    const z = values[zName];
+    if (z !== undefined && !(Math.abs(z) <= MAX_WALL_HEIGHT)) {
+      throw new Refusal(`the height of ${a.id} is too far`, ['expressions', zName]);
+    }
+    return {
+      id: a.id,
+      role: a.role,
+      at,
+      ...(a.segment === undefined ? {} : { segment: a.segment }),
+      ...(a.stock === undefined
+        ? {}
+        : {
+            stock: stockFor(a.stock, data, 'lumber', `The added member ${a.id}`, [
+              'params',
+              'add',
+              i,
+              'stock',
+            ]),
+          }),
+      ...(a.plies === undefined ? {} : { plies: a.plies }),
+      ...(z === undefined ? {} : { z }),
+    };
+  });
+}
+
 // Metadata ---------------------------------------------------------------------------------------
 
 /** One layer of a wall as built: where it lies across the path, and its body (none for framing). */
@@ -246,6 +387,8 @@ export interface WallMetadata {
   readonly layers: readonly LayerMetadata[];
   readonly settings: WallSettingsInput;
   readonly overrides: readonly MemberOverride[];
+  /** Members the wall adds; absent when none (so older metadata reads the same). */
+  readonly add?: readonly AddedMember[];
 }
 
 /** Which header an opening asks for (ADR 0015 decision 7). */
@@ -272,6 +415,8 @@ export interface OpeningMetadata {
   readonly kings?: number;
   readonly jacks?: number;
   readonly overrides: readonly MemberOverride[];
+  /** Members the opening adds (`at` from its centre line); absent when none. */
+  readonly add?: readonly AddedMember[];
   /** The layer bodies the opening cuts. */
   readonly cuts: readonly string[];
   readonly swing?: 'in' | 'out';

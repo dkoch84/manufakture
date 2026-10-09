@@ -30,6 +30,7 @@ const LEFT = 'extension#4';
 const DOOR = 'extension#7';
 
 const IN = (v: number | string) => ({ source: String(v), lengthUnit: 'in', angleUnit: 'deg' });
+const IN_MM = (v: number) => v * 25.4;
 
 let h: Harness;
 
@@ -390,12 +391,14 @@ describe('remodel-frame: gap probes', () => {
     );
   });
 
-  it('GAP PROBE (as-built): a stud can be nudged off the layout, but none can be added', async () => {
+  it('as-built: a stud nudged off the layout, two missing, an extra stud and a block added', async () => {
+    // Was the GAP PROBE (as-built) "a stud can be nudged off the layout, but none can be added":
+    // fixed by follow-up 2 (#1214), the wall's `add` params.
     const left = await feature(sessionId, LEFT);
     const r = value(
       await h.call('apply', {
         sessionId,
-        label: 'As built: s3 is 3" off, s4 and s8 are missing, one extra stud',
+        label: 'As built: s3 is 3" off, s4 and s8 are missing, one extra stud with a block',
         commands: [
           edit(left, (f) => ({
             ...f,
@@ -407,29 +410,87 @@ describe('remodel-frame: gap probes', () => {
                 { id: 's3' },
                 { id: 'extra1', stock: 'us-2x4' },
               ],
+              add: [
+                { id: 'add1', role: 'stud' },
+                { id: 'add2', role: 'blocking' },
+              ],
             },
-            expressions: { ...f.expressions, move_3: IN(3) },
+            expressions: {
+              ...f.expressions,
+              move_3: IN(3),
+              add1_at: IN(44),
+              add2_at: IN(40),
+              add2_z: IN(48),
+            },
           })),
         ],
       }),
     );
-    // The nudge and the deletes apply; the extra stud is an override of a member the wall does not
-    // have, reported lost (with a message that says "no longer").
+    // The nudge, the deletes and the added members apply. An override of a member the wall never
+    // had says so, and where to add one instead.
     expect(warningsOf(r, LEFT)).toEqual([
-      'The override of extra1 on extension#4 is lost: the wall no longer has that member.',
+      'The override of extra1 on extension#4 is lost: the wall never had that member (to add a member its layout does not make, list it in the wall\'s "add" params).',
     ]);
-    // The members query gives each override's status, the nudge in mm.
-    expect((await membersOf(sessionId, LEFT)).overrides).toEqual([
+    const listing = await membersOf(sessionId, LEFT);
+    expect(listing.overrides).toEqual([
       { n: 1, id: 's4', member: `${LEFT}:s4`, status: 'applied', delete: true },
       { n: 2, id: 's8', member: `${LEFT}:s8`, status: 'applied', delete: true },
       { n: 3, id: 's3', member: `${LEFT}:s3`, status: 'applied', move: 76.2 },
       { n: 4, id: 'extra1', member: `${LEFT}:extra1`, status: 'lost', stock: 'us-2x4' },
     ]);
-    const ids = ownedBy(memberIds(value(await h.call('get_quantities', { sessionId }))), LEFT);
+    // The added members are listed with the wall's own, marked as added, where they were put: the
+    // stud centred 44" along the wall, the block 48" up, fitted from the stud before it to the
+    // added stud.
+    const added = (listing.members as Data[]).filter((m) => m.added);
+    expect(added.map((m) => [m.id, m.role])).toEqual([
+      [`${LEFT}:add2`, 'blocking'],
+      [`${LEFT}:add1`, 'stud'],
+    ]);
+    const [block, stud] = added as [Data, Data];
+    expect(stud.along.centre).toBeCloseTo(IN_MM(44), 3);
+    expect(stud.along.to - stud.along.from).toBeCloseTo(IN_MM(1.5), 3);
+    expect((block.above.from + block.above.to) / 2).toBeCloseTo(IN_MM(48), 3);
+    expect(block.along.to).toBeCloseTo(stud.along.from, 3);
+    const before = (listing.members as Data[]).filter(
+      (m) => m.role === 'stud' && !m.added && m.along.to <= block.along.from + 1e-6,
+    );
+    expect(Math.max(...before.map((m) => m.along.to as number))).toBeCloseTo(block.along.from, 3);
+    // The takeoff counts them, as a stud (in the row of every equal 2x4 stud) and a block.
+    const q = value(await h.call('get_quantities', { sessionId }));
+    const ids = ownedBy(memberIds(q), LEFT);
     expect(ids).toContain(`${LEFT}:s3`);
     expect(ids).not.toContain(`${LEFT}:s4`);
     expect(ids).not.toContain(`${LEFT}:s8`);
     expect(ids.some((id) => id.includes('extra'))).toBe(false);
+    const rowOf = (id: string) =>
+      (takeoffOf(q).rows as Data[]).find(
+        (row) =>
+          row.category === 'framing' && (row.sources as { id: string }[]).some((x) => x.id === id),
+      );
+    expect(rowOf(`${LEFT}:add1`)).toMatchObject({
+      item: expect.stringMatching(/^Stud\b/),
+      stock: 'us-2x4',
+    });
+    expect(rowOf(`${LEFT}:add2`)).toMatchObject({
+      item: expect.stringContaining('Blocking'),
+      stock: 'us-2x4',
+    });
+    // And the render draws them: highlighting them matches, a deleted stud matches nothing.
+    const shot = await h.raw('render', {
+      sessionId,
+      views: [
+        {
+          camera: { view: 'left', fit: [`${LEFT}*`] },
+          only: 'members',
+          highlight: [`${LEFT}:add1`, `${LEFT}:add2`, `${LEFT}:s4`],
+          width: 480,
+          height: 360,
+        },
+      ],
+    });
+    const images = (shot.structuredContent as Data).images as Data[];
+    expect(images).toHaveLength(1);
+    expect(images[0]!.unmatched).toEqual([`${LEFT}:s4`]);
   });
 
   it('GAP PROBE (layout): changing the spacing renumbers studs; overrides re-target or are lost', async () => {

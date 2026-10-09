@@ -798,6 +798,105 @@ describe('walls through regen with the real kernel', () => {
     await done(engine);
   });
 
+  it('adds members the layout does not make, measured from the path, owned by the feature', async () => {
+    const engine = engineFor();
+    // Two walls meeting at (0, 0): whichever butts, its framed start is not its path's first
+    // point, and the added members are still measured from the path.
+    const doc = building(
+      wall(
+        'extension#1',
+        [
+          [0, 0],
+          [192, 0],
+        ],
+        {
+          add: [
+            { id: 'add1', role: 'stud', plies: 2 },
+            { id: 'add2', role: 'blocking', stock: 'us-2x6' },
+          ],
+          overrides: [{ id: 'extra1' }],
+        },
+        { add1_at: ins(30), add2_at: ins(40), add2_z: ins(24) },
+      ),
+      opening(
+        'extension#2',
+        'extension#1',
+        { kind: 'door', add: [{ id: 'add1', role: 'stud' }] },
+        { position: 96, width: 36, height: 80, add1_at: -24 },
+      ),
+      wall(
+        'extension#3',
+        [
+          [0, 0],
+          [0, 144],
+        ],
+        { add: [{ id: 'add4', role: 'stud' }] },
+        { add4_at: ins(60) },
+      ),
+    );
+    const result = await regen(engine, doc);
+    expectOk(result, 'extension#1', 'extension#2', 'extension#3');
+    const members = membersOf(result, 'extension#1');
+    expect(byId(members, 'extension#1:add1').placement.origin[0]).toBeCloseTo(inch(28.5), 6);
+    expect(byId(members, 'extension#1:add1-2').placement.origin[0]).toBeCloseTo(inch(30), 6);
+    expect(byId(members, 'extension#1:add1').role).toBe('stud');
+    const block = byId(members, 'extension#1:add2');
+    expect(block).toMatchObject({ role: 'blocking', stock: { id: 'us-2x6' } });
+    // From the doubled stud to s3: this wall runs through the corner, so its layout starts
+    // 3.5" before the path's first point (s3 is centred at 44.5").
+    expect(block.placement.origin[0]).toBeCloseTo(inch(31.5), 6);
+    expect(block.length).toBeCloseTo(inch(43.75 - 31.5), 6);
+    expect(byId(members, 'extension#2:add1').placement.origin[0]).toBeCloseTo(inch(71.25), 6);
+    const other = byId(membersOf(result, 'extension#3'), 'extension#3:add4');
+    expect(other.placement.origin[1]).toBeCloseTo(inch(59.25), 6);
+    // The doubled stud stands against s2, which is kept: a warning says so.
+    expect(feature(result, 'extension#1').warnings).toEqual([
+      expect.objectContaining({
+        domainCode: 'framing-conflict',
+        member: 'extension#1:add1',
+        message: 'The added stud add1 of extension#1 overlaps extension#1:s2; both are kept.',
+      }),
+      expect.objectContaining({
+        domainCode: 'override-lost',
+        member: 'extension#1:extra1',
+        message: expect.stringContaining('the wall never had that member'),
+      }),
+    ]);
+    await done(engine);
+  });
+
+  it("refuses an added member with no position, and another's expressions", async () => {
+    const engine = engineFor();
+    const doc = building(
+      wall(
+        'extension#1',
+        [
+          [0, 0],
+          [192, 0],
+        ],
+        { add: [{ id: 'add1', role: 'stud' }] },
+      ),
+      wall(
+        'extension#3',
+        [
+          [0, 48],
+          [0, 144],
+        ],
+        { add: [{ id: 'add1', role: 'stud' }] },
+        { add1_at: ins(30), add1_z: ins(30) },
+      ),
+    );
+    const result = await regen(engine, doc);
+    expect(feature(result, 'extension#1').errors[0]).toMatchObject({
+      message: expect.stringContaining('add1 needs its position along the wall, add1_at'),
+      field: ['expressions', 'add1_at'],
+    });
+    expect(feature(result, 'extension#3').errors[0]).toMatchObject({
+      message: expect.stringContaining('a wall has no "add1_z" value'),
+    });
+    await done(engine);
+  });
+
   it('refuses a wall past the member budget fast, as an error on the wall', async () => {
     // The review's case through regen: 64 points, the long runs 99 m, studs at 2", 20 blocking
     // rows. Framing only (no operation), so no layer bodies. Built in full it was 2.6 million

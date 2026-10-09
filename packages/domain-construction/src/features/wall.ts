@@ -7,9 +7,12 @@
 //   across the path: `left`, the default, puts it on the left, so the path is the framing's
 //   exterior face; the exterior is always on the path's right), `joins` (`free` keeps an end from
 //   joining another wall), `framing` (overrides of the document's framing settings that are not
-//   lengths) and `overrides` (per-member, keyed by local id: `s12`, `top1:2`). Lengths are
-//   expressions: `height` (default the level's), `spacing`, `layoutOrigin`, and `move_<n>`, the
-//   nudge of the n-th override.
+//   lengths), `overrides` (per-member, keyed by local id: `s12`, `top1:2`) and `add` (members
+//   the layout does not make, #1214: `{ id: "add<k>", role: "stud" | "blocking", stock?,
+//   plies?, segment? }`, owned by the wall). Lengths are expressions: `height` (default the
+//   level's), `spacing`, `layoutOrigin`, `move_<n>` (the nudge of the n-th override), and
+//   `add<k>_at` (an added member's centre line along its segment, from the segment's first
+//   point) and `add<k>_z` (an added block's centre above the wall's base).
 // - **Layer bodies** (decision 3): each sheet layer of the wall type (siding, sheathing, drywall)
 //   is one body, `<id>:layer/<layer id>`, an extrusion of the layer's outline in plan up the
 //   wall's height. The outline follows the whole path, so the layers are mitred at the wall's own
@@ -83,6 +86,7 @@ import {
   MAX_WALL_HEIGHT,
   MAX_WALL_POINTS,
   MIN_FEATURE_SPACING,
+  ADD_EXPRESSIONS,
   Refusal,
   WALL_TYPE,
   add2,
@@ -91,11 +95,14 @@ import {
   dot2,
   failure,
   framingBand,
+  isAddExpression,
   moveExpression,
   planSegments,
+  readAdds,
   readOptionalCount,
   readOverrides,
   readWallMetadata,
+  resolveAdds,
   resolveOverrides,
   scale2,
   stockData,
@@ -105,6 +112,7 @@ import {
   type LayerMetadata,
   type P2,
   type PlanSegment,
+  type StoredAdd,
   type StoredOverride,
   type WallMetadata,
 } from './common';
@@ -133,6 +141,8 @@ export interface WallParams {
   readonly joins: { readonly start: WallEndJoin; readonly end: WallEndJoin };
   readonly framing: WallFramingParams;
   readonly overrides: readonly StoredOverride[];
+  /** Members the layout does not make (#1214); absent when the params have none. */
+  readonly add?: readonly StoredAdd[];
 }
 
 /** The params migrations of `construction.wall` (none yet: version 1 is current). */
@@ -150,6 +160,7 @@ export const WALL_EXPRESSIONS: Readonly<Record<string, ExpressionKind>> = Object
       [`y${i + 1}`, 'length'],
     ]).flat(),
     ...Array.from({ length: MAX_OVERRIDES }, (_, i) => [moveExpression(i + 1), 'length']),
+    ...ADD_EXPRESSIONS,
   ]) as Record<string, ExpressionKind>,
 );
 
@@ -218,7 +229,17 @@ function readCurrent(params: Json): Read<WallParams> {
   if (!isObject(params)) return fail('expected the wall params object');
   const keys = onlyKeys(
     params,
-    ['level', 'wallType', 'points', 'closed', 'justification', 'joins', 'framing', 'overrides'],
+    [
+      'level',
+      'wallType',
+      'points',
+      'closed',
+      'justification',
+      'joins',
+      'framing',
+      'overrides',
+      'add',
+    ],
     [],
   );
   if (!keys.ok) return keys;
@@ -257,6 +278,8 @@ function readCurrent(params: Json): Read<WallParams> {
   if (!framing.ok) return framing;
   const overrides = readOverrides(own(params, 'overrides'), ['overrides']);
   if (!overrides.ok) return overrides;
+  const add = readAdds(own(params, 'add'), ['add'], true);
+  if (!add.ok) return add;
   return ok({
     level: level.value,
     wallType: wallType.value,
@@ -266,6 +289,7 @@ function readCurrent(params: Json): Read<WallParams> {
     joins: joins.value,
     framing: framing.value,
     overrides: overrides.value,
+    ...(add.value.length === 0 ? {} : { add: add.value }),
   });
 }
 
@@ -906,7 +930,8 @@ function build(ctx: ExtensionContext<WallParams>): {
     const known =
       ['height', 'spacing', 'layoutOrigin'].includes(name) ||
       (point !== null && Number(point[1]) <= p.points) ||
-      (move !== null && Number(move[1]) <= p.overrides.length);
+      (move !== null && Number(move[1]) <= p.overrides.length) ||
+      isAddExpression(name, p.add ?? []);
     if (!known) throw new Refusal(`a wall has no "${name}" value`, ['expressions', name]);
   }
   const data = constructionData(ctx);
@@ -986,7 +1011,19 @@ function build(ctx: ExtensionContext<WallParams>): {
     layers,
     settings,
     overrides: resolveOverrides(p.overrides, ctx.values, stock),
+    ...(p.add === undefined ? {} : { add: resolveAdds(p.add, ctx.values, stock) }),
   };
+  const segments = planSegments(points, p.closed).length;
+  (p.add ?? []).forEach((a, i) => {
+    if ((a.segment ?? 1) > segments) {
+      throw new Refusal(`the wall has ${segments} segment${segments === 1 ? '' : 's'}`, [
+        'params',
+        'add',
+        i,
+        'segment',
+      ]);
+    }
+  });
   // Only a wall that makes layer bodies joins them with the walls it names in dependsOn.
   const joined = makes ? joinLayers(ctx, metadata) : { ends: {}, items: [] };
   const inputs: FeatureInput[] = layers.flatMap((l): ExtrudeInput[] => {

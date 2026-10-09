@@ -7,8 +7,16 @@
 
 import { MM_PER_INCH } from '@manufakture/units';
 import type { Vec2, Vec3 } from '../geom';
-import { memberFullId, memberIds, type CornerMemberName, type TeeMemberName } from '../member-ids';
-import { MEMBER_BUDGET, type Member, type Role, type StockRef } from '../members';
+import {
+  memberFullId,
+  memberIds,
+  parseAddedMemberId,
+  parseOpeningMemberId,
+  parseWallMemberId,
+  type CornerMemberName,
+  type TeeMemberName,
+} from '../member-ids';
+import { MEMBER_BUDGET, memberCorners, type Member, type Role, type StockRef } from '../members';
 import { IntervalIndex, firstIndex, overlaps, splice, subtract, type Interval } from './intervals';
 
 // Input --------------------------------------------------------------------------------------
@@ -73,6 +81,8 @@ export interface WallOpening {
   readonly jacks?: number;
   /** Overrides of the opening's own members, keyed by local id (`king-l`, `header`). */
   readonly overrides?: readonly MemberOverride[];
+  /** Members the opening adds, owned by it; `at` is from its centre line (`AddedMember`). */
+  readonly add?: readonly AddedMember[];
 }
 
 /** Another wall's end meeting this wall's side (this wall is the host of a T intersection). */
@@ -168,6 +178,33 @@ export interface MemberOverride {
   readonly move?: number;
 }
 
+/**
+ * A member the layout does not make (#1214), added by a wall or an opening and owned by it: an
+ * extra stud (`plies` of them side by side, so 2 is a doubled stud) standing on the bottom plates
+ * up to the top plates, or a block (flat, as blocking rows are) fitted between the verticals
+ * either side of `at` at height `z`. Added members are made before the overrides apply, so an
+ * override can delete, restock or nudge one as any other member; a block is fitted between the
+ * verticals as the overrides leave them.
+ */
+export interface AddedMember {
+  /** The entry's id, `add<k>`: the member's local id (a stud's first ply; later plies `add<k>-2`). */
+  readonly id: string;
+  readonly role: 'stud' | 'blocking';
+  /**
+   * Its centre line along the segment, mm: a wall's from the framed segment's start, an
+   * opening's from the opening's centre line, positive towards the segment's end.
+   */
+  readonly at: number;
+  /** A wall's added members: the 1-based segment it is on; 1 when absent. Ignored on an opening. */
+  readonly segment?: number;
+  /** Its stock; the wall's stud stock when absent. */
+  readonly stock?: StockRef;
+  /** Studs: plies side by side along the wall, centred on `at`; 1 when absent. */
+  readonly plies?: number;
+  /** Blocks: its centre above the wall's base, mm; mid-height of the studs when absent. */
+  readonly z?: number;
+}
+
 export interface FrameWallInput {
   /**
    * The wall's feature id: the `owner` of its layout, plate, corner, tee and blocking members.
@@ -178,6 +215,8 @@ export interface FrameWallInput {
   readonly settings: WallSettingsInput;
   /** Overrides of the wall's own members, keyed by local id (`s12`, `top1:2`). */
   readonly overrides?: readonly MemberOverride[];
+  /** Members the wall adds (`AddedMember`), owned by the wall. */
+  readonly add?: readonly AddedMember[];
   /** The most members to make before refusing; `MEMBER_BUDGET` (regen's cap) when absent. */
   readonly maxMembers?: number;
 }
@@ -195,6 +234,7 @@ export type WallWarningCode =
   | 'splice-offset'
   | 'blocking-row-outside'
   | 'blocking-row-overlap'
+  | 'added-member-left-out'
   | 'override-lost';
 
 /**
@@ -429,32 +469,292 @@ export function frameWall(input: FrameWallInput): WallFraming {
   const warnings: FramingWarning[] = [];
   const openings: OpeningReport[] = [];
   const dirOf = new Map<string, Vec3>();
-  input.segments.forEach((seg, i) => {
+  const segOf = new Map<string, number>();
+  const frames = input.segments.map((seg, i) => {
     const framed = frameSegment(input.wall, seg, i + 1, settings, budget, warnings, openings);
     for (const m of framed.members) {
       members.push(m);
       dirOf.set(memberFullId(m), framed.dir);
+      segOf.set(memberFullId(m), framed.index);
     }
+    return framed;
   });
+  const unframed = new Set(openings.filter((o) => !o.framed).map((o) => o.id));
 
-  // The wall's overrides first, then each opening's, in the order the openings are given.
+  // Added members: the wall's, then each framed opening's, in the order the openings are framed.
+  const added = addedMembers(input, frames, unframed, warnings);
+  const leftOut = (p: PendingAdd, why: string) =>
+    warnings.push({
+      code: 'added-member-left-out',
+      kind: 'layout',
+      message: `The added ${p.a.role === 'stud' ? 'stud' : 'block'} ${p.a.id} of ${p.owner} ${why}; it is left out.`,
+      segment: p.frame.index,
+      ...(p.owner === input.wall ? {} : { opening: p.owner }),
+      member: memberFullId({ owner: p.owner, id: p.a.id }),
+    });
+  const place = (m: Member, frame: SegmentFrame) => {
+    budget.take();
+    dirOf.set(memberFullId(m), frame.dir);
+    segOf.set(memberFullId(m), frame.index);
+    return m;
+  };
+  for (const p of added.pending) {
+    if (p.a.role !== 'stud') continue;
+    const studs = addedStud(p, settings.studStock, leftOut);
+    if (studs.length > 0) {
+      const pack: Interval = [
+        alongExtent(studs[0]!, p.frame)[0],
+        alongExtent(studs[studs.length - 1]!, p.frame)[1],
+      ];
+      const hit = members.find(
+        (m) =>
+          VERTICAL_ROLES.has(m.role) &&
+          segOf.get(memberFullId(m)) === p.frame.index &&
+          overlaps(alongExtent(m, p.frame), pack, TOUCH),
+      );
+      if (hit !== undefined)
+        warnings.push({
+          code: 'framing-conflict',
+          kind: 'layout',
+          message: `The added stud ${p.a.id} of ${p.owner} overlaps ${memberFullId(hit)}; both are kept.`,
+          segment: p.frame.index,
+          ...(p.owner === input.wall ? {} : { opening: p.owner }),
+          member: memberFullId({ owner: p.owner, id: p.a.id }),
+        });
+    }
+    for (const m of studs) members.push(place(m, p.frame));
+  }
+
+  // The wall's overrides first, then each opening's, in the order the openings are given. Those of
+  // added blocks wait for the blocks, which fit between the verticals as the others leave them.
   const overrides: Array<{ owner: string; o: MemberOverride }> = [
     ...(input.overrides ?? []).map((o) => ({ owner: input.wall, o })),
     ...input.segments.flatMap((seg) =>
       (seg.openings ?? []).flatMap((op) => (op.overrides ?? []).map((o) => ({ owner: op.id, o }))),
     ),
   ];
-  const unframed = new Set(openings.filter((o) => !o.framed).map((o) => o.id));
-  const applied = applyOverrides(input.wall, unframed, members, overrides, dirOf, warnings);
-  return { members: applied.members, warnings, openings, overrides: applied.reports };
+  const blockIds = new Set(
+    added.pending
+      .filter((p) => p.a.role === 'blocking')
+      .map((p) => memberFullId({ owner: p.owner, id: p.a.id })),
+  );
+  const isBlock = (x: { owner: string; o: MemberOverride }) =>
+    blockIds.has(memberFullId({ owner: x.owner, id: x.o.id }));
+  const why = (owner: string, id: string): string => {
+    if (unframed.has(owner)) return 'the opening is not framed.';
+    const who = owner === input.wall ? 'the wall' : 'the opening';
+    if (added.declared.get(owner)?.has(id)) {
+      return `${who} adds that member, but it is left out (see its warning).`;
+    }
+    const layout = owner === input.wall ? parseWallMemberId(id) : parseOpeningMemberId(id);
+    if (layout !== undefined) return `${who} no longer has that member.`;
+    return `${who} never had that member (to add a member its layout does not make, list it in ${who}'s "add" params).`;
+  };
+  const first = applyOverrides(
+    input.wall,
+    members,
+    overrides.filter((x) => !isBlock(x)),
+    dirOf,
+    why,
+    warnings,
+  );
+  const blocks: Member[] = [];
+  for (const p of added.pending) {
+    if (p.a.role !== 'blocking') continue;
+    const block = addedBlock(p, settings.studStock, first.members, segOf, leftOut);
+    if (block !== undefined) blocks.push(place(block, p.frame));
+  }
+  const second = applyOverrides(
+    input.wall,
+    blocks,
+    overrides.filter(isBlock),
+    dirOf,
+    why,
+    warnings,
+  );
+  // Reports in the overrides' own order.
+  const reports: OverrideReport[] = [];
+  let i1 = 0;
+  let i2 = 0;
+  for (const x of overrides)
+    reports.push(isBlock(x) ? second.reports[i2++]! : first.reports[i1++]!);
+  return {
+    members: [...first.members, ...second.members],
+    warnings,
+    openings,
+    overrides: reports,
+  };
+}
+
+/** An added member waiting to be placed: its owner, its entry, and where along its segment. */
+interface PendingAdd {
+  readonly owner: string;
+  readonly a: AddedMember;
+  readonly frame: SegmentFrame;
+  /** Its centre line along the framed segment, mm. */
+  readonly at: number;
+}
+
+/**
+ * The added members to place, checked, and the local ids each owner adds (every ply's), so an
+ * override of one that is left out can say so. An unframed opening's are dropped with a warning.
+ */
+function addedMembers(
+  input: FrameWallInput,
+  frames: readonly SegmentFrame[],
+  unframed: ReadonlySet<string>,
+  warnings: FramingWarning[],
+): { pending: PendingAdd[]; declared: Map<string, Set<string>> } {
+  const pending: PendingAdd[] = [];
+  const declared = new Map<string, Set<string>>();
+  const declare = (owner: string, a: AddedMember) => {
+    const what = `${owner}'s added member "${a.id}"`;
+    const parsed = parseAddedMemberId(a.id);
+    if (parsed === undefined || parsed.ply !== 1)
+      throw new FramingInputError(`The id of ${what} is not of the form add<k>.`);
+    if (a.role !== 'stud' && a.role !== 'blocking')
+      throw new FramingInputError(`${what} is neither a stud nor blocking.`);
+    const plies = a.plies ?? 1;
+    if (!isCount(plies, 1, a.role === 'stud' ? 4 : 1))
+      throw new FramingInputError(
+        a.role === 'stud' ? `${what} needs 1 to 4 plies.` : `${what} is a block: it has one ply.`,
+      );
+    if (!Number.isFinite(a.at) || (a.z !== undefined && !Number.isFinite(a.z)))
+      throw new FramingInputError(`${what} needs a position that is a number.`);
+    if (a.stock) checkStock(a.stock, what);
+    const ids = declared.get(owner) ?? new Set<string>();
+    if (ids.has(a.id)) throw new FramingInputError(`${owner} adds "${a.id}" twice.`);
+    for (let p = 1; p <= plies; p++) ids.add(memberIds.added(a.id, p));
+    declared.set(owner, ids);
+  };
+  for (const a of input.add ?? []) {
+    declare(input.wall, a);
+    const frame = frames[(a.segment ?? 1) - 1];
+    if (frame === undefined)
+      throw new FramingInputError(
+        `The wall's added member "${a.id}" is on segment ${a.segment}, which the wall does not have.`,
+      );
+    pending.push({ owner: input.wall, a, frame, at: a.at });
+  }
+  for (const frame of frames)
+    for (const o of frame.openings)
+      for (const a of o.add) {
+        declare(o.id, a);
+        pending.push({ owner: o.id, a, frame, at: o.position + a.at });
+      }
+  for (const seg of input.segments)
+    for (const o of seg.openings ?? []) {
+      if (!unframed.has(o.id) || (o.add ?? []).length === 0) continue;
+      for (const a of o.add!) declare(o.id, a);
+      warnings.push({
+        code: 'added-member-left-out',
+        kind: 'layout',
+        message: `Opening ${o.id} is not framed, so the members it adds are left out.`,
+        opening: o.id,
+      });
+    }
+  return { pending, declared };
+}
+
+/** An added stud's plies, side by side along the wall and centred on its position. */
+function addedStud(
+  p: PendingAdd,
+  studStock: StockRef,
+  leftOut: (p: PendingAdd, why: string) => void,
+): Member[] {
+  const f = p.frame;
+  const stock = p.a.stock ?? studStock;
+  const plies = p.a.plies ?? 1;
+  const w = stock.width;
+  const s0 = p.at - (plies * w) / 2;
+  const pack: Interval = [s0, s0 + plies * w];
+  if (pack[0] < -EPS || pack[1] > f.length + EPS) {
+    leftOut(p, 'is outside the wall');
+    return [];
+  }
+  const o = f.openings.find((x) => overlaps(x.span, pack, TOUCH));
+  if (o !== undefined) {
+    leftOut(p, `runs into the framing of opening ${o.id}`);
+    return [];
+  }
+  return Array.from({ length: plies }, (_, i) =>
+    f.box(
+      memberIds.added(p.a.id, i + 1),
+      'stud',
+      stock,
+      'vertical',
+      [s0 + i * w, s0 + (i + 1) * w],
+      f.across,
+      [f.zbot, f.studTop],
+      p.owner,
+    ),
+  );
+}
+
+/** A member's extent along its segment, from the framed segment's start. */
+function alongExtent(m: Member, f: SegmentFrame): Interval {
+  const along = memberCorners(m).map(
+    (c) => (c[0] - f.start[0]) * f.dir[0] + (c[1] - f.start[1]) * f.dir[1],
+  );
+  return [Math.min(...along), Math.max(...along)];
+}
+
+/** Roles that stand up the wall: what an added block fits between. */
+const VERTICAL_ROLES: ReadonlySet<Role> = new Set(['stud', 'king', 'jack', 'corner', 'cripple']);
+
+/** An added block, flat, fitted between the nearest verticals either side of its position. */
+function addedBlock(
+  p: PendingAdd,
+  studStock: StockRef,
+  members: readonly Member[],
+  segOf: ReadonlyMap<string, number>,
+  leftOut: (p: PendingAdd, why: string) => void,
+): Member | undefined {
+  const f = p.frame;
+  const stock = p.a.stock ?? studStock;
+  const zc = p.a.z ?? (f.zbot + f.studTop) / 2;
+  const band: Interval = [zc - stock.width / 2, zc + stock.width / 2];
+  if (p.at < -EPS || p.at > f.length + EPS) {
+    leftOut(p, 'is outside the wall');
+    return undefined;
+  }
+  if (band[0] < f.zbot - EPS || band[1] > f.studTop + EPS) {
+    leftOut(p, 'is outside the studs');
+    return undefined;
+  }
+  let lo = -Infinity;
+  let hi = Infinity;
+  for (const m of members) {
+    if (!VERTICAL_ROLES.has(m.role) || segOf.get(memberFullId(m)) !== f.index) continue;
+    const up = memberCorners(m).map((c) => c[2] - f.base);
+    if (!(Math.min(...up) <= band[0] + EPS && Math.max(...up) >= band[1] - EPS)) continue;
+    const [from, to] = alongExtent(m, f);
+    if (from < p.at - EPS && to > p.at + EPS) {
+      leftOut(p, 'is on a stud, not between two');
+      return undefined;
+    }
+    if (to <= p.at + EPS) lo = Math.max(lo, to);
+    else hi = Math.min(hi, from);
+  }
+  if (!Number.isFinite(lo) || !Number.isFinite(hi) || hi - lo < MIN_MEMBER) {
+    leftOut(p, 'has no studs either side at its height to fit between');
+    return undefined;
+  }
+  const bay: Interval = [lo, hi];
+  const o = f.openings.find((x) => overlaps(x.span, bay, TOUCH) && overlaps(x.z, band, TOUCH));
+  if (o !== undefined) {
+    leftOut(p, `runs into the framing of opening ${o.id}`);
+    return undefined;
+  }
+  return f.box(p.a.id, 'blocking', stock, 'flat', bay, f.across, band, p.owner);
 }
 
 function applyOverrides(
   wall: string,
-  unframed: ReadonlySet<string>,
-  members: Member[],
+  members: readonly Member[],
   overrides: ReadonlyArray<{ owner: string; o: MemberOverride }>,
   dirOf: ReadonlyMap<string, Vec3>,
+  lostWhy: (owner: string, id: string) => string,
   warnings: FramingWarning[],
 ): { members: Member[]; reports: OverrideReport[] } {
   const byId = new Map(members.map((m, i) => [memberFullId(m), i]));
@@ -468,9 +768,7 @@ function applyOverrides(
     if (i === undefined || m === undefined) {
       const why = deleted.has(full)
         ? 'an earlier override of the same member deletes it.'
-        : unframed.has(owner)
-          ? 'the opening is not framed.'
-          : `${owner === wall ? 'the wall' : 'the opening'} no longer has that member.`;
+        : lostWhy(owner, o.id);
       reports.push({ owner, id: o.id, status: 'lost' });
       warnings.push({
         code: 'override-lost',
@@ -535,6 +833,44 @@ interface FixedGroup {
   readonly capGap?: Interval;
 }
 
+/** Makes one member of a segment from its extents along, across and up the wall. */
+type BoxMaker = (
+  id: string,
+  role: Role,
+  stock: StockRef,
+  o: Orientation,
+  s: Interval,
+  t: Interval,
+  z: Interval,
+  owner?: string,
+) => Member;
+
+/** A framed segment: its members, and what added members need to be placed on it. */
+interface SegmentFrame {
+  /** 1-based. */
+  readonly index: number;
+  readonly members: Member[];
+  readonly start: Vec2;
+  readonly dir: Vec3;
+  readonly length: number;
+  /** Elevation of the wall's base. */
+  readonly base: number;
+  /** Top of the bottom plates and bottom of the top plates, above the base. */
+  readonly zbot: number;
+  readonly studTop: number;
+  /** The framing's extent across the reference line. */
+  readonly across: Interval;
+  readonly box: BoxMaker;
+  /** The framed openings: centre, header span along the wall (jacks included), extent up it. */
+  readonly openings: ReadonlyArray<{
+    readonly id: string;
+    readonly position: number;
+    readonly span: Interval;
+    readonly z: Interval;
+    readonly add: readonly AddedMember[];
+  }>;
+}
+
 function frameSegment(
   wall: string,
   seg: WallSegment,
@@ -543,7 +879,7 @@ function frameSegment(
   budget: MemberBudget,
   warnings: FramingWarning[],
   reports: OpeningReport[],
-): { members: Member[]; dir: Vec3 } {
+): SegmentFrame {
   const where = `Wall segment ${index}`;
   const sw = st.studStock.width;
   const T = st.studStock.depth;
@@ -576,16 +912,7 @@ function frameSegment(
   ];
   const AX: Vec3[] = [dir, nrm, [0, 0, 1]];
   /** A member of the wall, or of the opening `owner` when given. */
-  const box = (
-    id: string,
-    role: Role,
-    stock: StockRef,
-    o: Orientation,
-    s: Interval,
-    t: Interval,
-    z: Interval,
-    owner = wall,
-  ): Member => {
+  const box: BoxMaker = (id, role, stock, o, s, t, z, owner = wall) => {
     const ranges = [s, t, z];
     const spec = ORIENT[o];
     const at: [number, number, number] = [s[0], t[0], z[0]];
@@ -1112,7 +1439,25 @@ function frameSegment(
     );
   }
 
-  return { members: out, dir };
+  return {
+    index,
+    members: out,
+    start: seg.start,
+    dir,
+    length: L,
+    base,
+    zbot,
+    studTop,
+    across,
+    box,
+    openings: accepted.map((a) => ({
+      id: a.o.id,
+      position: a.o.position,
+      span: [a.ro[0] - a.jacks * sw, a.ro[1] + a.jacks * sw],
+      z: [a.door ? 0 : a.o.sill - sw, a.o.sill + a.o.height + a.header.stock.depth],
+      add: a.o.add ?? [],
+    })),
+  };
 }
 
 function resolveHeader(
