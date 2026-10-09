@@ -224,7 +224,11 @@ async function spawn(options: WorkerEngineOptions, module: WebAssembly.Module): 
     execArgv,
     workerData: { port: port2, module },
     transferList: [port2 as unknown as Transferable] as never,
+    // The worker's stdout is not the host's: anything it prints goes to stderr, since a host's
+    // stdout may carry a protocol (apps/mcp's stdio transport).
+    stdout: true,
   });
+  worker.stdout.pipe(process.stderr, { end: false });
   let fail: (error: Error) => void = () => undefined;
   const lost = new Promise<never>((_, reject) => {
     fail = reject;

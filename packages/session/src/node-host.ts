@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { registerConstruction } from '@manufakture/domain-construction';
 import { registerWood } from '@manufakture/domain-wood';
 import type { WasmSource } from '@manufakture/kernel';
+import { STDERR_OUTPUT } from '@manufakture/kernel/node';
 import {
   ExtensionRegistry,
   createRegenWorkerApi,
@@ -39,10 +40,13 @@ export function nodeExtensions(): ExtensionRegistry {
  * The regen worker API (`createRegenWorkerApi`) for a session: its own kernel service on
  * `source`, the solver, the bundled fonts (user fonts are refused: they would be parsed with no
  * time limit), and the domains. Scripted features are not run (the API's policy denies all).
+ * The kernel's text output (the STEP writer's statistics) goes to stderr: a host's stdout may
+ * carry a protocol (apps/mcp).
  */
 export function sessionEngineApi(source: WasmSource): RegenWorkerApi {
   return createRegenWorkerApi({
     source,
+    loader: STDERR_OUTPUT,
     engine: {
       text: createTextOutliner({ fetchImpl: readBundledFont }),
       extensions: nodeExtensions(),

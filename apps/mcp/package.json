@@ -1,0 +1,31 @@
+{
+  "name": "@manufakture/mcp",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "GPL-3.0-or-later",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node --expose-gc --import ../../packages/session/src/worker/ts-hooks.ts src/main.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --root ../.. --project mcp"
+  },
+  "dependencies": {
+    "@manufakture/cam": "workspace:*",
+    "@manufakture/core": "workspace:*",
+    "@manufakture/domain-construction": "workspace:*",
+    "@manufakture/domain-wood": "workspace:*",
+    "@manufakture/io": "workspace:*",
+    "@manufakture/kernel": "workspace:*",
+    "@manufakture/library": "workspace:*",
+    "@manufakture/regen": "workspace:*",
+    "@manufakture/render": "workspace:*",
+    "@manufakture/review": "workspace:*",
+    "@manufakture/session": "workspace:*",
+    "@manufakture/sketch": "workspace:*",
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "zod": "^4.6.5"
+  }
+}

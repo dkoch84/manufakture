@@ -217,7 +217,7 @@ export { NameTable, applyNames, faceNameOfTriangle } from './names';
 export type { SubShapeName } from './names';
 export { meshBuffers } from './mesh';
 export { LIBCASCADE_WASM_BYTES, OcctLoader } from './loader';
-export type { LoadProgress, LoaderOptions, WasmSource } from './loader';
+export type { KernelOutput, LoadProgress, LoaderOptions, WasmSource } from './loader';
 export {
   DEFAULT_HEAP_THRESHOLD,
   KernelService,

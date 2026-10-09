@@ -1,8 +1,10 @@
-// Lets a Node worker thread load the workspace's TypeScript sources directly, for tests and
-// development only: a bundled host (apps/mcp) builds the worker entry ahead of time and never
-// loads this. Node strips types itself, but the packages use extensionless imports (bundler
-// resolution) and a few constructs type stripping refuses (parameter properties), so this
-// resolves `./x` to `./x.ts` or `./x/index.ts` and transpiles `.ts` files with TypeScript.
+// Lets Node load the workspace's TypeScript sources directly: a session's worker threads, and
+// apps/mcp, which runs from sources (its start script passes this file to `--import`, and its
+// session workers load it again). A host bundled ahead of time would pass its built worker entry
+// instead and never load this. Node strips types itself, but the packages use extensionless
+// imports (bundler resolution) and a few constructs type stripping refuses (parameter
+// properties), so this resolves `./x` to `./x.ts` or `./x/index.ts` and transpiles `.ts` files
+// with TypeScript.
 // Erasable syntax only, so Node runs this file as it is (`--import`).
 
 import { readFileSync } from 'node:fs';

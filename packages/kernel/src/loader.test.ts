@@ -2,7 +2,8 @@
 // against the real .wasm, served from memory.
 
 import { readFile } from 'node:fs/promises';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { Kernel } from './kernel';
 import { LIBCASCADE_WASM_BYTES, OcctLoader, type LoadProgress } from './loader';
 import { wasmPath } from './node';
 
@@ -133,6 +134,29 @@ describe('OcctLoader', () => {
     expect(events.map((e) => e.phase)).toEqual(['compile', 'instantiate', 'init', 'ready']);
     const ready = events.at(-1)!;
     expect(ready.phase === 'ready' && ready.ms > 0).toBe(true);
+  }, 60_000);
+
+  it("sends the instance's text output where the host says, never to the console", async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      const fromLoader: string[] = [];
+      const fromCall: string[] = [];
+      const loader = new OcctLoader({ bytes }, { print: (t) => fromLoader.push(t) });
+      // The STEP writer prints its transfer statistics to standard output.
+      const k = new Kernel(await loader.instantiate());
+      const box = k.box(10, 10, 10);
+      k.exportStep([{ shape: box, name: 'Box' }]);
+      expect(fromLoader.join('\n')).toContain('Statistics on Transfer (Write)');
+      // An instance's own output overrides the loader's.
+      const k2 = new Kernel(await loader.instantiate({ print: (t) => fromCall.push(t) }));
+      const before = fromLoader.length;
+      k2.exportStep([{ shape: k2.box(5, 5, 5), name: 'Box' }]);
+      expect(fromCall.join('\n')).toContain('Statistics on Transfer (Write)');
+      expect(fromLoader).toHaveLength(before);
+      expect(log).not.toHaveBeenCalled();
+    } finally {
+      log.mockRestore();
+    }
   }, 60_000);
 
   it('a module that cannot be instantiated rejects instead of hanging', async () => {

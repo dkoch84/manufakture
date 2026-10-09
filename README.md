@@ -86,6 +86,7 @@ The user guide lives in `docs/user`:
 - [Version history](docs/user/history.md): named versions, the timeline, viewing and restoring a past state
 - [Derived parts](docs/user/derived.md): a part from a version of another document, placed, and updated to newer versions
 - [Scripted features](docs/user/scripting.md): features computed by your own JavaScript or TypeScript, the script API, and when scripts run
+- [Working with an AI agent](docs/user/agents.md): connecting Claude Code or another MCP client, what an agent can do, and reviewing its branch
 - [Assemblies](docs/user/assemblies.md): instances of parts, mates between them, dragging within their freedom, exploded views
 - [Drawings](docs/user/drawings.md): sheets of views of a part studio or an assembly, dimensions, and export to SVG, DXF and PDF
 - [Measuring](docs/user/measure.md): exact measurements, material and mass
@@ -96,6 +97,7 @@ The user guide lives in `docs/user`:
 
 ```
 apps/web              React UI
+apps/mcp              MCP server for AI agents (headless sessions on agent branches)
 packages/core         Document model (pure TS)
 packages/kernel       Worker-hosted OpenCascade (WASM) wrapper
 packages/sketch       Sketch entities + planegcs solver wrapper

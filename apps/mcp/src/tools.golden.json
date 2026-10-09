@@ -1,0 +1,3415 @@
+{
+  "surfaceVersion": "1.0.0",
+  "tools": [
+    {
+      "name": "apply",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "commands": {
+            "items": {
+              "additionalProperties": {},
+              "properties": {
+                "type": {
+                  "enum": [
+                    "addAssembly",
+                    "addCamOperation",
+                    "addCamSetup",
+                    "addCamTool",
+                    "addDimension",
+                    "addDrawing",
+                    "addExplodeStep",
+                    "addExplodedView",
+                    "addFeature",
+                    "addFont",
+                    "addInstance",
+                    "addMate",
+                    "addNote",
+                    "addPart",
+                    "addPrintItem",
+                    "addPrintSetup",
+                    "addSheet",
+                    "addView",
+                    "batch",
+                    "deleteAssembly",
+                    "deleteBodyGroup",
+                    "deleteCamOperation",
+                    "deleteCamSetup",
+                    "deleteCamTool",
+                    "deleteConfigParameter",
+                    "deleteConfigRow",
+                    "deleteDimension",
+                    "deleteDrawing",
+                    "deleteExplodeStep",
+                    "deleteExplodedView",
+                    "deleteFeature",
+                    "deleteFont",
+                    "deleteInstance",
+                    "deleteMate",
+                    "deleteNote",
+                    "deletePart",
+                    "deletePrintItem",
+                    "deletePrintSetup",
+                    "deleteScript",
+                    "deleteSheet",
+                    "deleteVariable",
+                    "deleteView",
+                    "duplicatePart",
+                    "editCamOperation",
+                    "editCamSetup",
+                    "editCamTool",
+                    "editDimension",
+                    "editExplodeStep",
+                    "editExplodedView",
+                    "editFeature",
+                    "editInstance",
+                    "editMate",
+                    "editNote",
+                    "editPrintItem",
+                    "editPrintSetup",
+                    "editSheet",
+                    "editView",
+                    "moveView",
+                    "renameAssembly",
+                    "renameDocument",
+                    "renameDrawing",
+                    "renameFeature",
+                    "renamePart",
+                    "reorderCamOperation",
+                    "reorderCamSetups",
+                    "reorderDrawings",
+                    "reorderFeature",
+                    "reorderParts",
+                    "reorderSheets",
+                    "replaceDocument",
+                    "restoreAssembly",
+                    "restoreBodyGroup",
+                    "restoreCamOperation",
+                    "restoreCamSetup",
+                    "restoreCamTool",
+                    "restoreConfigParameter",
+                    "restoreConfigRow",
+                    "restoreDimension",
+                    "restoreDrawing",
+                    "restoreExplodeStep",
+                    "restoreExplodedView",
+                    "restoreFeature",
+                    "restoreFont",
+                    "restoreInstance",
+                    "restoreMate",
+                    "restoreNote",
+                    "restorePart",
+                    "restorePrintItem",
+                    "restorePrintSetup",
+                    "restoreScript",
+                    "restoreSheet",
+                    "restoreView",
+                    "setActiveConfiguration",
+                    "setBodyGroup",
+                    "setBodyProps",
+                    "setConfigParameter",
+                    "setConfigRow",
+                    "setDisplayUnits",
+                    "setDomainData",
+                    "setMaterial",
+                    "setPoses",
+                    "setRollback",
+                    "setScript",
+                    "setVariable",
+                    "suppressCamOperation",
+                    "suppressFeature",
+                    "suppressMate"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": ["type"],
+              "type": "object"
+            },
+            "maxItems": 500,
+            "minItems": 1,
+            "type": "array"
+          },
+          "dryRun": {
+            "type": "boolean"
+          },
+          "label": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "sessionId": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
+            "type": "string"
+          }
+        },
+        "required": ["sessionId", "label", "commands"],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": {},
+        "properties": {
+          "created": {},
+          "dryRun": {
+            "type": "boolean"
+          },
+          "error": {
+            "additionalProperties": {},
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "details": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "limit": {
+                "type": "number"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": ["kind"],
+            "type": "object"
+          },
+          "errors": {
+            "items": {},
+            "type": "array"
+          },
+          "label": {
+            "type": "string"
+          },
+          "measured": {
+            "items": {},
+            "type": "array"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "regenMs": {
+            "type": "number"
+          },
+          "review": {
+            "enum": ["open", "submitted", "changes-requested", "approved", "rejected"],
+            "type": "string"
+          },
+          "revision": {
+            "type": "number"
+          },
+          "statusChanges": {
+            "items": {},
+            "type": "array"
+          },
+          "symbols": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "truncated": {
+            "additionalProperties": false,
+            "properties": {
+              "cuts": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "kept": {
+                      "type": "number"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "total": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["path", "kept", "total"],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "limit": {
+                "type": "number"
+              }
+            },
+            "required": ["limit", "cuts"],
+            "type": "object"
+          }
+        },
+        "required": ["ok"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "close_session",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "sessionId": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
+            "type": "string"
+          }
+        },
+        "required": ["sessionId"],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": {},
+        "properties": {
+          "branch": {
+            "type": "string"
+          },
+          "closed": {
+            "type": "boolean"
+          },
+          "error": {
+            "additionalProperties": {},
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "details": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "limit": {
+                "type": "number"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": ["kind"],
+            "type": "object"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "truncated": {
+            "additionalProperties": false,
+            "properties": {
+              "cuts": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "kept": {
+                      "type": "number"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "total": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["path", "kept", "total"],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "limit": {
+                "type": "number"
+              }
+            },
+            "required": ["limit", "cuts"],
+            "type": "object"
+          }
+        },
+        "required": ["ok"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "export",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "assemblyId": {
+            "maxLength": 512,
+            "minLength": 1,
+            "pattern": "^[\\x21-\\x7e]+$",
+            "type": "string"
+          },
+          "bodyId": {
+            "maxLength": 512,
+            "minLength": 1,
+            "pattern": "^[\\x21-\\x7e]+$",
+            "type": "string"
+          },
+          "drawingId": {
+            "maxLength": 512,
+            "minLength": 1,
+            "pattern": "^[\\x21-\\x7e]+$",
+            "type": "string"
+          },
+          "fileName": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9 ._()+-]{0,99}$",
+            "type": "string"
+          },
+          "format": {
+            "enum": [
+              "step",
+              "stl",
+              "stl-each",
+              "3mf",
+              "cut-list-csv",
+              "bom-csv",
+              "cut-list-pdf",
+              "takeoff-csv",
+              "takeoff-pdf",
+              "drawing-pdf",
+              "drawing-dxf",
+              "drawing-svg",
+              "gcode",
+              "laser-dxf",
+              "laser-svg",
+              "mfk"
+            ],
+            "type": "string"
+          },
+          "kerf": {
+            "maximum": 10,
+            "minimum": 0,
+            "type": "number"
+          },
+          "overwrite": {
+            "type": "boolean"
+          },
+          "partId": {
+            "maxLength": 512,
+            "minLength": 1,
+            "pattern": "^[\\x21-\\x7e]+$",
+            "type": "string"
+          },
+          "sessionId": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
+            "type": "string"
+          },
+          "setupId": {
+            "maxLength": 512,
+            "minLength": 1,
+            "pattern": "^[\\x21-\\x7e]+$",
+            "type": "string"
+          },
+          "sheetId": {
+            "maxLength": 512,
+            "minLength": 1,
+            "pattern": "^[\\x21-\\x7e]+$",
+            "type": "string"
+          },
+          "sources": {
+            "items": {
+              "oneOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "face": {
+                      "maxLength": 512,
+                      "minLength": 1,
+                      "pattern": "^[\\x21-\\x7e]+$",
+                      "type": "string"
+                    },
+                    "kind": {
+                      "const": "face",
+                      "type": "string"
+                    },
+                    "label": {
+                      "maxLength": 200,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "layer": {
+                      "maxLength": 64,
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z0-9 _-]+$",
+                      "type": "string"
+                    }
+                  },
+                  "required": ["kind", "face", "label", "layer"],
+                  "type": "object"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "kind": {
+                      "const": "region",
+                      "type": "string"
+                    },
+                    "label": {
+                      "maxLength": 200,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "layer": {
+                      "maxLength": 64,
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z0-9 _-]+$",
+                      "type": "string"
+                    },
+                    "sketch": {
+                      "maxLength": 512,
+                      "minLength": 1,
+                      "pattern": "^[\\x21-\\x7e]+$",
+                      "type": "string"
+                    }
+                  },
+                  "required": ["kind", "sketch", "label", "layer"],
+                  "type": "object"
+                }
+              ]
+            },
+            "maxItems": 64,
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": ["sessionId", "format"],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": {},
+        "properties": {
+          "branch": {
+            "type": "string"
+          },
+          "error": {
+            "additionalProperties": {},
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "details": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "limit": {
+                "type": "number"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": ["kind"],
+            "type": "object"
+          },
+          "files": {
+            "items": {
+              "additionalProperties": {},
+              "properties": {
+                "bytes": {
+                  "type": "number"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                }
+              },
+              "required": ["name", "bytes", "type"],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "format": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "review": {
+            "enum": ["open", "submitted", "changes-requested", "approved", "rejected"],
+            "type": "string"
+          },
+          "reviewed": {
+            "type": "boolean"
+          },
+          "truncated": {
+            "additionalProperties": false,
+            "properties": {
+              "cuts": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "kept": {
+                      "type": "number"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "total": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["path", "kept", "total"],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "limit": {
+                "type": "number"
+              }
+            },
+            "required": ["limit", "cuts"],
+            "type": "object"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": ["ok"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "find_geometry",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "query": {
+            "additionalProperties": false,
+            "properties": {
+              "angleTolerance": {
+                "maximum": 180,
+                "minimum": 0,
+                "type": "number"
+              },
+              "bodyId": {
+                "maxLength": 512,
+                "minLength": 1,
+                "pattern": "^[\\x21-\\x7e]+$",
+                "type": "string"
+              },
+              "bornBy": {
+                "maxLength": 512,
+                "minLength": 1,
+                "pattern": "^[\\x21-\\x7e]+$",
+                "type": "string"
+              },
+              "kind": {
+                "enum": ["face", "edge"],
+                "type": "string"
+              },
+              "limit": {
+                "maximum": 200,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "name": {
+                "maxLength": 512,
+                "minLength": 1,
+                "pattern": "^[\\x21-\\x7e]+$",
+                "type": "string"
+              },
+              "nearest": {
+                "additionalItems": false,
+                "items": [
+                  {
+                    "maximum": 1000000000,
+                    "minimum": -1000000000,
+                    "type": "number"
+                  },
+                  {
+                    "maximum": 1000000000,
+                    "minimum": -1000000000,
+                    "type": "number"
+                  },
+                  {
+                    "maximum": 1000000000,
+                    "minimum": -1000000000,
+                    "type": "number"
+                  }
+                ],
+                "maxItems": 3,
+                "minItems": 3,
+                "type": "array"
+              },
+              "normal": {
+                "additionalItems": false,
+                "items": [
+                  {
+                    "maximum": 1000000000,
+                    "minimum": -1000000000,
+                    "type": "number"
+                  },
+                  {
+                    "maximum": 1000000000,
+                    "minimum": -1000000000,
+                    "type": "number"
+                  },
+                  {
+                    "maximum": 1000000000,
+                    "minimum": -1000000000,
+                    "type": "number"
+                  }
+                ],
+                "maxItems": 3,
+                "minItems": 3,
+                "type": "array"
+              },
+              "partId": {
+                "maxLength": 512,
+                "minLength": 1,
+                "pattern": "^[\\x21-\\x7e]+$",
+                "type": "string"
+              },
+              "radius": {
+                "maximum": 1000000000,
+                "minimum": 0,
+                "type": "number"
+              },
+              "tolerance": {
+                "maximum": 1000000,
+                "minimum": 0,
+                "type": "number"
+              }
+            },
+            "type": "object"
+          },
+          "sessionId": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
+            "type": "string"
+          }
+        },
+        "required": ["sessionId", "query"],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": {},
+        "properties": {
+          "error": {
+            "additionalProperties": {},
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "details": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "limit": {
+                "type": "number"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": ["kind"],
+            "type": "object"
+          },
+          "hits": {
+            "items": {},
+            "type": "array"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "truncated": {
+            "additionalProperties": false,
+            "properties": {
+              "cuts": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "kept": {
+                      "type": "number"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "total": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["path", "kept", "total"],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "limit": {
+                "type": "number"
+              }
+            },
+            "required": ["limit", "cuts"],
+            "type": "object"
+          }
+        },
+        "required": ["ok"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_errors",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "sessionId": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
+            "type": "string"
+          }
+        },
+        "required": ["sessionId"],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": {},
+        "properties": {
+          "error": {
+            "additionalProperties": {},
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "details": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "limit": {
+                "type": "number"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": ["kind"],
+            "type": "object"
+          },
+          "errors": {
+            "items": {},
+            "type": "array"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "truncated": {
+            "additionalProperties": false,
+            "properties": {
+              "cuts": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "kept": {
+                      "type": "number"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "total": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["path", "kept", "total"],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "limit": {
+                "type": "number"
+              }
+            },
+            "required": ["limit", "cuts"],
+            "type": "object"
+          }
+        },
+        "required": ["ok"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_history",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "sessionId": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
+            "type": "string"
+          }
+        },
+        "required": ["sessionId"],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": {},
+        "properties": {
+          "error": {
+            "additionalProperties": {},
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "details": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "limit": {
+                "type": "number"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": ["kind"],
+            "type": "object"
+          },
+          "history": {
+            "items": {},
+            "type": "array"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "truncated": {
+            "additionalProperties": false,
+            "properties": {
+              "cuts": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "kept": {
+                      "type": "number"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "total": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["path", "kept", "total"],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "limit": {
+                "type": "number"
+              }
+            },
+            "required": ["limit", "cuts"],
+            "type": "object"
+          }
+        },
+        "required": ["ok"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_object",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "query": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "const": "document",
+                    "type": "string"
+                  }
+                },
+                "required": ["kind"],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "const": "part",
+                    "type": "string"
+                  },
+                  "partId": {
+                    "maxLength": 512,
+                    "minLength": 1,
+                    "pattern": "^[\\x21-\\x7e]+$",
+                    "type": "string"
+                  }
+                },
+                "required": ["kind", "partId"],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "featureId": {
+                    "maxLength": 512,
+                    "minLength": 1,
+                    "pattern": "^[\\x21-\\x7e]+$",
+                    "type": "string"
+                  },
+                  "kind": {
+                    "const": "feature",
+                    "type": "string"
+                  },
+                  "partId": {
+                    "maxLength": 512,
+                    "minLength": 1,
+                    "pattern": "^[\\x21-\\x7e]+$",
+                    "type": "string"
+                  }
+                },
+                "required": ["kind", "partId", "featureId"],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "const": "variable",
+                    "type": "string"
+                  },
+                  "name": {
+                    "maxLength": 200,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": ["kind", "name"],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "assemblyId": {
+                    "maxLength": 512,
+                    "minLength": 1,
+                    "pattern": "^[\\x21-\\x7e]+$",
+                    "type": "string"
+                  },
+                  "kind": {
+                    "const": "assembly",
+                    "type": "string"
+                  }
+                },
+                "required": ["kind", "assemblyId"],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "assemblyId": {
+                    "maxLength": 512,
+                    "minLength": 1,
+                    "pattern": "^[\\x21-\\x7e]+$",
+                    "type": "string"
+                  },
+                  "instanceId": {
+                    "maxLength": 512,
+                    "minLength": 1,
+                    "pattern": "^[\\x21-\\x7e]+$",
+                    "type": "string"
+                  },
+                  "kind": {
+                    "const": "instance",
+                    "type": "string"
+                  }
+                },
+                "required": ["kind", "assemblyId", "instanceId"],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "assemblyId": {
+                    "maxLength": 512,
+                    "minLength": 1,
+                    "pattern": "^[\\x21-\\x7e]+$",
+                    "type": "string"
+                  },
+                  "kind": {
+                    "const": "mate",
+                    "type": "string"
+                  },
+                  "mateId": {
+                    "maxLength": 512,
+                    "minLength": 1,
+                    "pattern": "^[\\x21-\\x7e]+$",
+                    "type": "string"
+                  }
+                },
+                "required": ["kind", "assemblyId", "mateId"],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "const": "camSetup",
+                    "type": "string"
+                  },
+                  "setupId": {
+                    "maxLength": 512,
+                    "minLength": 1,
+                    "pattern": "^[\\x21-\\x7e]+$",
+                    "type": "string"
+                  }
+                },
+                "required": ["kind", "setupId"],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "drawingId": {
+                    "maxLength": 512,
+                    "minLength": 1,
+                    "pattern": "^[\\x21-\\x7e]+$",
+                    "type": "string"
+                  },
+                  "kind": {
+                    "const": "drawing",
+                    "type": "string"
+                  }
+                },
+                "required": ["kind", "drawingId"],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "const": "configurations",
+                    "type": "string"
+                  }
+                },
+                "required": ["kind"],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "const": "domain",
+                    "type": "string"
+                  },
+                  "namespace": {
+                    "maxLength": 64,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": ["kind", "namespace"],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "const": "script",
+                    "type": "string"
+                  },
+                  "scriptId": {
+                    "maxLength": 512,
+                    "minLength": 1,
+                    "pattern": "^[\\x21-\\x7e]+$",
+                    "type": "string"
+                  }
+                },
+                "required": ["kind", "scriptId"],
+                "type": "object"
+              }
+            ]
+          },
+          "sessionId": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
+            "type": "string"
+          }
+        },
+        "required": ["sessionId", "query"],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": {},
+        "properties": {
+          "error": {
+            "additionalProperties": {},
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "details": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "limit": {
+                "type": "number"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": ["kind"],
+            "type": "object"
+          },
+          "object": {},
+          "ok": {
+            "type": "boolean"
+          },
+          "truncated": {
+            "additionalProperties": false,
+            "properties": {
+              "cuts": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "kept": {
+                      "type": "number"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "total": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["path", "kept", "total"],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "limit": {
+                "type": "number"
+              }
+            },
+            "required": ["limit", "cuts"],
+            "type": "object"
+          }
+        },
+        "required": ["ok"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_quantities",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "sessionId": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
+            "type": "string"
+          }
+        },
+        "required": ["sessionId"],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": {},
+        "properties": {
+          "error": {
+            "additionalProperties": {},
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "details": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "limit": {
+                "type": "number"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": ["kind"],
+            "type": "object"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "quantities": {},
+          "reviewed": {
+            "type": "boolean"
+          },
+          "truncated": {
+            "additionalProperties": false,
+            "properties": {
+              "cuts": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "kept": {
+                      "type": "number"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "total": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["path", "kept", "total"],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "limit": {
+                "type": "number"
+              }
+            },
+            "required": ["limit", "cuts"],
+            "type": "object"
+          }
+        },
+        "required": ["ok"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_review",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "branch": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
+            "type": "string"
+          },
+          "documentId": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
+            "type": "string"
+          },
+          "sessionId": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": {},
+        "properties": {
+          "branch": {
+            "type": "string"
+          },
+          "branchName": {
+            "type": "string"
+          },
+          "bundle": {
+            "anyOf": [
+              {
+                "additionalProperties": {},
+                "properties": {
+                  "revision": {
+                    "type": "number"
+                  },
+                  "stale": {
+                    "type": ["boolean", "null"]
+                  }
+                },
+                "required": ["revision", "stale"],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "clientName": {
+            "type": "string"
+          },
+          "comment": {
+            "type": ["string", "null"]
+          },
+          "documentId": {
+            "type": "string"
+          },
+          "error": {
+            "additionalProperties": {},
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "details": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "limit": {
+                "type": "number"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": ["kind"],
+            "type": "object"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "review": {
+            "enum": ["open", "submitted", "changes-requested", "approved", "rejected"],
+            "type": "string"
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "truncated": {
+            "additionalProperties": false,
+            "properties": {
+              "cuts": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "kept": {
+                      "type": "number"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "total": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["path", "kept", "total"],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "limit": {
+                "type": "number"
+              }
+            },
+            "required": ["limit", "cuts"],
+            "type": "object"
+          }
+        },
+        "required": ["ok"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_schema",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "command": {
+            "enum": [
+              "addAssembly",
+              "addCamOperation",
+              "addCamSetup",
+              "addCamTool",
+              "addDimension",
+              "addDrawing",
+              "addExplodeStep",
+              "addExplodedView",
+              "addFeature",
+              "addFont",
+              "addInstance",
+              "addMate",
+              "addNote",
+              "addPart",
+              "addPrintItem",
+              "addPrintSetup",
+              "addSheet",
+              "addView",
+              "batch",
+              "deleteAssembly",
+              "deleteBodyGroup",
+              "deleteCamOperation",
+              "deleteCamSetup",
+              "deleteCamTool",
+              "deleteConfigParameter",
+              "deleteConfigRow",
+              "deleteDimension",
+              "deleteDrawing",
+              "deleteExplodeStep",
+              "deleteExplodedView",
+              "deleteFeature",
+              "deleteFont",
+              "deleteInstance",
+              "deleteMate",
+              "deleteNote",
+              "deletePart",
+              "deletePrintItem",
+              "deletePrintSetup",
+              "deleteScript",
+              "deleteSheet",
+              "deleteVariable",
+              "deleteView",
+              "duplicatePart",
+              "editCamOperation",
+              "editCamSetup",
+              "editCamTool",
+              "editDimension",
+              "editExplodeStep",
+              "editExplodedView",
+              "editFeature",
+              "editInstance",
+              "editMate",
+              "editNote",
+              "editPrintItem",
+              "editPrintSetup",
+              "editSheet",
+              "editView",
+              "moveView",
+              "renameAssembly",
+              "renameDocument",
+              "renameDrawing",
+              "renameFeature",
+              "renamePart",
+              "reorderCamOperation",
+              "reorderCamSetups",
+              "reorderDrawings",
+              "reorderFeature",
+              "reorderParts",
+              "reorderSheets",
+              "replaceDocument",
+              "restoreAssembly",
+              "restoreBodyGroup",
+              "restoreCamOperation",
+              "restoreCamSetup",
+              "restoreCamTool",
+              "restoreConfigParameter",
+              "restoreConfigRow",
+              "restoreDimension",
+              "restoreDrawing",
+              "restoreExplodeStep",
+              "restoreExplodedView",
+              "restoreFeature",
+              "restoreFont",
+              "restoreInstance",
+              "restoreMate",
+              "restoreNote",
+              "restorePart",
+              "restorePrintItem",
+              "restorePrintSetup",
+              "restoreScript",
+              "restoreSheet",
+              "restoreView",
+              "setActiveConfiguration",
+              "setBodyGroup",
+              "setBodyProps",
+              "setConfigParameter",
+              "setConfigRow",
+              "setDisplayUnits",
+              "setDomainData",
+              "setMaterial",
+              "setPoses",
+              "setRollback",
+              "setScript",
+              "setVariable",
+              "suppressCamOperation",
+              "suppressFeature",
+              "suppressMate"
+            ],
+            "type": "string"
+          },
+          "feature": {
+            "enum": [
+              "sketch",
+              "extrude",
+              "revolve",
+              "fillet",
+              "chamfer",
+              "shell",
+              "hole",
+              "pattern",
+              "mirror",
+              "extension",
+              "import",
+              "derived",
+              "thread",
+              "scripted"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": {},
+        "properties": {
+          "error": {
+            "additionalProperties": {},
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "details": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "limit": {
+                "type": "number"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": ["kind"],
+            "type": "object"
+          },
+          "index": {
+            "additionalProperties": {},
+            "properties": {
+              "commands": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "features": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": ["commands", "features"],
+            "type": "object"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "schema": {},
+          "truncated": {
+            "additionalProperties": false,
+            "properties": {
+              "cuts": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "kept": {
+                      "type": "number"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "total": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["path", "kept", "total"],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "limit": {
+                "type": "number"
+              }
+            },
+            "required": ["limit", "cuts"],
+            "type": "object"
+          }
+        },
+        "required": ["ok"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_tree",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "sessionId": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
+            "type": "string"
+          }
+        },
+        "required": ["sessionId"],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": {},
+        "properties": {
+          "error": {
+            "additionalProperties": {},
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "details": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "limit": {
+                "type": "number"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": ["kind"],
+            "type": "object"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "tree": {},
+          "truncated": {
+            "additionalProperties": false,
+            "properties": {
+              "cuts": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "kept": {
+                      "type": "number"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "total": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["path", "kept", "total"],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "limit": {
+                "type": "number"
+              }
+            },
+            "required": ["limit", "cuts"],
+            "type": "object"
+          }
+        },
+        "required": ["ok"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "list_documents",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": {},
+        "properties": {
+          "documents": {
+            "items": {
+              "additionalProperties": {},
+              "properties": {
+                "branches": {
+                  "items": {
+                    "additionalProperties": {},
+                    "properties": {
+                      "agent": {
+                        "anyOf": [
+                          {
+                            "additionalProperties": {},
+                            "properties": {
+                              "clientName": {
+                                "type": "string"
+                              },
+                              "comment": {
+                                "type": "boolean"
+                              },
+                              "review": {
+                                "enum": [
+                                  "open",
+                                  "submitted",
+                                  "changes-requested",
+                                  "approved",
+                                  "rejected"
+                                ],
+                                "type": "string"
+                              },
+                              "sessionId": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["sessionId", "clientName", "review", "comment"],
+                            "type": "object"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "createdAt": {
+                        "type": "string"
+                      },
+                      "fromVersion": {
+                        "type": ["string", "null"]
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["id", "name", "fromVersion", "createdAt", "agent"],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "damaged": {
+                  "type": "boolean"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "revision": {
+                  "type": "number"
+                },
+                "savedAt": {
+                  "type": "string"
+                }
+              },
+              "required": ["id", "name", "revision", "savedAt", "damaged", "branches"],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "error": {
+            "additionalProperties": {},
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "details": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "limit": {
+                "type": "number"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": ["kind"],
+            "type": "object"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "omitted": {
+            "type": "number"
+          },
+          "truncated": {
+            "additionalProperties": false,
+            "properties": {
+              "cuts": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "kept": {
+                      "type": "number"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "total": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["path", "kept", "total"],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "limit": {
+                "type": "number"
+              }
+            },
+            "required": ["limit", "cuts"],
+            "type": "object"
+          }
+        },
+        "required": ["ok"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "measure",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "query": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "bodyId": {
+                    "maxLength": 512,
+                    "minLength": 1,
+                    "pattern": "^[\\x21-\\x7e]+$",
+                    "type": "string"
+                  },
+                  "kind": {
+                    "const": "body",
+                    "type": "string"
+                  },
+                  "partId": {
+                    "maxLength": 512,
+                    "minLength": 1,
+                    "pattern": "^[\\x21-\\x7e]+$",
+                    "type": "string"
+                  }
+                },
+                "required": ["kind", "partId", "bodyId"],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "bodyId": {
+                    "maxLength": 512,
+                    "minLength": 1,
+                    "pattern": "^[\\x21-\\x7e]+$",
+                    "type": "string"
+                  },
+                  "kind": {
+                    "const": "targets",
+                    "type": "string"
+                  },
+                  "partId": {
+                    "maxLength": 512,
+                    "minLength": 1,
+                    "pattern": "^[\\x21-\\x7e]+$",
+                    "type": "string"
+                  },
+                  "targets": {
+                    "items": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "kind": {
+                              "enum": ["face", "edge", "vertex"],
+                              "type": "string"
+                            },
+                            "name": {
+                              "maxLength": 512,
+                              "minLength": 1,
+                              "pattern": "^[\\x21-\\x7e]+$",
+                              "type": "string"
+                            }
+                          },
+                          "required": ["kind", "name"],
+                          "type": "object"
+                        },
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "index": {
+                              "maximum": 10000000,
+                              "minimum": 1,
+                              "type": "integer"
+                            },
+                            "kind": {
+                              "enum": ["face", "edge", "vertex"],
+                              "type": "string"
+                            }
+                          },
+                          "required": ["kind", "index"],
+                          "type": "object"
+                        }
+                      ]
+                    },
+                    "maxItems": 64,
+                    "minItems": 1,
+                    "type": "array"
+                  }
+                },
+                "required": ["kind", "partId", "bodyId", "targets"],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "bodies": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "bodyId": {
+                          "maxLength": 512,
+                          "minLength": 1,
+                          "pattern": "^[\\x21-\\x7e]+$",
+                          "type": "string"
+                        },
+                        "partId": {
+                          "maxLength": 512,
+                          "minLength": 1,
+                          "pattern": "^[\\x21-\\x7e]+$",
+                          "type": "string"
+                        },
+                        "placement": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "rotation": {
+                              "additionalItems": false,
+                              "items": [
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "number"
+                                }
+                              ],
+                              "maxItems": 4,
+                              "minItems": 4,
+                              "readOnly": true,
+                              "type": "array"
+                            },
+                            "translation": {
+                              "additionalItems": false,
+                              "items": [
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "number"
+                                }
+                              ],
+                              "maxItems": 3,
+                              "minItems": 3,
+                              "readOnly": true,
+                              "type": "array"
+                            }
+                          },
+                          "required": ["translation", "rotation"],
+                          "type": "object"
+                        }
+                      },
+                      "required": ["partId", "bodyId"],
+                      "type": "object"
+                    },
+                    "maxItems": 64,
+                    "minItems": 2,
+                    "type": "array"
+                  },
+                  "kind": {
+                    "const": "clearance",
+                    "type": "string"
+                  }
+                },
+                "required": ["kind", "bodies"],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "assemblyId": {
+                    "maxLength": 512,
+                    "minLength": 1,
+                    "pattern": "^[\\x21-\\x7e]+$",
+                    "type": "string"
+                  },
+                  "kind": {
+                    "const": "interference",
+                    "type": "string"
+                  },
+                  "poses": {
+                    "additionalProperties": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "rotation": {
+                          "additionalItems": false,
+                          "items": [
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "number"
+                            }
+                          ],
+                          "maxItems": 4,
+                          "minItems": 4,
+                          "readOnly": true,
+                          "type": "array"
+                        },
+                        "translation": {
+                          "additionalItems": false,
+                          "items": [
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "number"
+                            }
+                          ],
+                          "maxItems": 3,
+                          "minItems": 3,
+                          "readOnly": true,
+                          "type": "array"
+                        }
+                      },
+                      "required": ["translation", "rotation"],
+                      "type": "object"
+                    },
+                    "propertyNames": {
+                      "maxLength": 512,
+                      "minLength": 1,
+                      "pattern": "^[\\x21-\\x7e]+$",
+                      "type": "string"
+                    },
+                    "type": "object"
+                  }
+                },
+                "required": ["kind", "assemblyId"],
+                "type": "object"
+              }
+            ]
+          },
+          "sessionId": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
+            "type": "string"
+          }
+        },
+        "required": ["sessionId", "query"],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": {},
+        "properties": {
+          "error": {
+            "additionalProperties": {},
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "details": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "limit": {
+                "type": "number"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": ["kind"],
+            "type": "object"
+          },
+          "measurement": {},
+          "ok": {
+            "type": "boolean"
+          },
+          "truncated": {
+            "additionalProperties": false,
+            "properties": {
+              "cuts": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "kept": {
+                      "type": "number"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "total": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["path", "kept", "total"],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "limit": {
+                "type": "number"
+              }
+            },
+            "required": ["limit", "cuts"],
+            "type": "object"
+          }
+        },
+        "required": ["ok"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "open_session",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "branch": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
+            "type": "string"
+          },
+          "clientName": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "documentId": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
+            "type": "string"
+          }
+        },
+        "required": ["documentId"],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": {},
+        "properties": {
+          "baseVersion": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "branchName": {
+            "type": "string"
+          },
+          "documentId": {
+            "type": "string"
+          },
+          "error": {
+            "additionalProperties": {},
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "details": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "limit": {
+                "type": "number"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": ["kind"],
+            "type": "object"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "outline": {},
+          "resumed": {
+            "type": "boolean"
+          },
+          "review": {
+            "enum": ["open", "submitted", "changes-requested", "approved", "rejected"],
+            "type": "string"
+          },
+          "revision": {
+            "type": "number"
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "truncated": {
+            "additionalProperties": false,
+            "properties": {
+              "cuts": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "kept": {
+                      "type": "number"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "total": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["path", "kept", "total"],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "limit": {
+                "type": "number"
+              }
+            },
+            "required": ["limit", "cuts"],
+            "type": "object"
+          }
+        },
+        "required": ["ok"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "render",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "compare": {
+            "type": "boolean"
+          },
+          "sessionId": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
+            "type": "string"
+          },
+          "views": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "camera": {
+                  "anyOf": [
+                    {
+                      "enum": ["front", "back", "left", "right", "top", "bottom", "isometric"],
+                      "type": "string"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "extent": {
+                          "exclusiveMinimum": 0,
+                          "maximum": 1000000000,
+                          "type": "number"
+                        },
+                        "fit": {
+                          "items": {
+                            "maxLength": 300,
+                            "minLength": 1,
+                            "pattern": "^[\\x21-\\x7e]+$",
+                            "type": "string"
+                          },
+                          "maxItems": 256,
+                          "type": "array"
+                        },
+                        "view": {
+                          "enum": ["front", "back", "left", "right", "top", "bottom", "isometric"],
+                          "type": "string"
+                        }
+                      },
+                      "required": ["view"],
+                      "type": "object"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "direction": {
+                          "additionalItems": false,
+                          "items": [
+                            {
+                              "maximum": 1000000000,
+                              "minimum": -1000000000,
+                              "type": "number"
+                            },
+                            {
+                              "maximum": 1000000000,
+                              "minimum": -1000000000,
+                              "type": "number"
+                            },
+                            {
+                              "maximum": 1000000000,
+                              "minimum": -1000000000,
+                              "type": "number"
+                            }
+                          ],
+                          "maxItems": 3,
+                          "minItems": 3,
+                          "type": "array"
+                        },
+                        "extent": {
+                          "exclusiveMinimum": 0,
+                          "maximum": 1000000000,
+                          "type": "number"
+                        },
+                        "fit": {
+                          "items": {
+                            "maxLength": 300,
+                            "minLength": 1,
+                            "pattern": "^[\\x21-\\x7e]+$",
+                            "type": "string"
+                          },
+                          "maxItems": 256,
+                          "type": "array"
+                        },
+                        "up": {
+                          "additionalItems": false,
+                          "items": [
+                            {
+                              "maximum": 1000000000,
+                              "minimum": -1000000000,
+                              "type": "number"
+                            },
+                            {
+                              "maximum": 1000000000,
+                              "minimum": -1000000000,
+                              "type": "number"
+                            },
+                            {
+                              "maximum": 1000000000,
+                              "minimum": -1000000000,
+                              "type": "number"
+                            }
+                          ],
+                          "maxItems": 3,
+                          "minItems": 3,
+                          "type": "array"
+                        }
+                      },
+                      "required": ["direction"],
+                      "type": "object"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "extent": {
+                          "exclusiveMinimum": 0,
+                          "maximum": 1000000000,
+                          "type": "number"
+                        },
+                        "fit": {
+                          "items": {
+                            "maxLength": 300,
+                            "minLength": 1,
+                            "pattern": "^[\\x21-\\x7e]+$",
+                            "type": "string"
+                          },
+                          "maxItems": 256,
+                          "type": "array"
+                        },
+                        "position": {
+                          "additionalItems": false,
+                          "items": [
+                            {
+                              "maximum": 1000000000,
+                              "minimum": -1000000000,
+                              "type": "number"
+                            },
+                            {
+                              "maximum": 1000000000,
+                              "minimum": -1000000000,
+                              "type": "number"
+                            },
+                            {
+                              "maximum": 1000000000,
+                              "minimum": -1000000000,
+                              "type": "number"
+                            }
+                          ],
+                          "maxItems": 3,
+                          "minItems": 3,
+                          "type": "array"
+                        },
+                        "target": {
+                          "additionalItems": false,
+                          "items": [
+                            {
+                              "maximum": 1000000000,
+                              "minimum": -1000000000,
+                              "type": "number"
+                            },
+                            {
+                              "maximum": 1000000000,
+                              "minimum": -1000000000,
+                              "type": "number"
+                            },
+                            {
+                              "maximum": 1000000000,
+                              "minimum": -1000000000,
+                              "type": "number"
+                            }
+                          ],
+                          "maxItems": 3,
+                          "minItems": 3,
+                          "type": "array"
+                        },
+                        "up": {
+                          "additionalItems": false,
+                          "items": [
+                            {
+                              "maximum": 1000000000,
+                              "minimum": -1000000000,
+                              "type": "number"
+                            },
+                            {
+                              "maximum": 1000000000,
+                              "minimum": -1000000000,
+                              "type": "number"
+                            },
+                            {
+                              "maximum": 1000000000,
+                              "minimum": -1000000000,
+                              "type": "number"
+                            }
+                          ],
+                          "maxItems": 3,
+                          "minItems": 3,
+                          "type": "array"
+                        }
+                      },
+                      "required": ["position", "target"],
+                      "type": "object"
+                    }
+                  ]
+                },
+                "edges": {
+                  "type": "boolean"
+                },
+                "height": {
+                  "maximum": 2048,
+                  "minimum": 64,
+                  "type": "integer"
+                },
+                "hide": {
+                  "items": {
+                    "maxLength": 300,
+                    "minLength": 1,
+                    "pattern": "^[\\x21-\\x7e]+$",
+                    "type": "string"
+                  },
+                  "maxItems": 256,
+                  "type": "array"
+                },
+                "highlight": {
+                  "items": {
+                    "maxLength": 300,
+                    "minLength": 1,
+                    "pattern": "^[\\x21-\\x7e]+$",
+                    "type": "string"
+                  },
+                  "maxItems": 256,
+                  "type": "array"
+                },
+                "only": {
+                  "enum": ["bodies", "members"],
+                  "type": "string"
+                },
+                "outlines": {
+                  "type": "boolean"
+                },
+                "section": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "normal": {
+                      "additionalItems": false,
+                      "items": [
+                        {
+                          "maximum": 1000000000,
+                          "minimum": -1000000000,
+                          "type": "number"
+                        },
+                        {
+                          "maximum": 1000000000,
+                          "minimum": -1000000000,
+                          "type": "number"
+                        },
+                        {
+                          "maximum": 1000000000,
+                          "minimum": -1000000000,
+                          "type": "number"
+                        }
+                      ],
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    },
+                    "origin": {
+                      "additionalItems": false,
+                      "items": [
+                        {
+                          "maximum": 1000000000,
+                          "minimum": -1000000000,
+                          "type": "number"
+                        },
+                        {
+                          "maximum": 1000000000,
+                          "minimum": -1000000000,
+                          "type": "number"
+                        },
+                        {
+                          "maximum": 1000000000,
+                          "minimum": -1000000000,
+                          "type": "number"
+                        }
+                      ],
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    }
+                  },
+                  "required": ["origin", "normal"],
+                  "type": "object"
+                },
+                "supersample": {
+                  "maximum": 3,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "width": {
+                  "maximum": 2048,
+                  "minimum": 64,
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            },
+            "maxItems": 8,
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": ["sessionId"],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": {},
+        "properties": {
+          "error": {
+            "additionalProperties": {},
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "details": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "limit": {
+                "type": "number"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": ["kind"],
+            "type": "object"
+          },
+          "failed": {
+            "items": {
+              "additionalProperties": {},
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "side": {
+                  "enum": ["head", "base"],
+                  "type": "string"
+                },
+                "view": {
+                  "type": "number"
+                }
+              },
+              "required": ["view", "side", "code", "message"],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "images": {
+            "items": {
+              "additionalProperties": {},
+              "properties": {
+                "bytes": {
+                  "type": "number"
+                },
+                "content": {
+                  "type": "number"
+                },
+                "height": {
+                  "type": "number"
+                },
+                "mmPerPixel": {
+                  "type": "number"
+                },
+                "side": {
+                  "enum": ["head", "base"],
+                  "type": "string"
+                },
+                "unmatched": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "view": {
+                  "type": "number"
+                },
+                "width": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "view",
+                "side",
+                "content",
+                "width",
+                "height",
+                "mmPerPixel",
+                "unmatched",
+                "bytes"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "truncated": {
+            "additionalProperties": false,
+            "properties": {
+              "cuts": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "kept": {
+                      "type": "number"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "total": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["path", "kept", "total"],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "limit": {
+                "type": "number"
+              }
+            },
+            "required": ["limit", "cuts"],
+            "type": "object"
+          }
+        },
+        "required": ["ok"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "submit_for_review",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "note": {
+            "maxLength": 4000,
+            "type": "string"
+          },
+          "sessionId": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
+            "type": "string"
+          },
+          "views": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "camera": {
+                  "anyOf": [
+                    {
+                      "enum": ["front", "back", "left", "right", "top", "bottom", "isometric"],
+                      "type": "string"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "extent": {
+                          "exclusiveMinimum": 0,
+                          "maximum": 1000000000,
+                          "type": "number"
+                        },
+                        "fit": {
+                          "items": {
+                            "maxLength": 300,
+                            "minLength": 1,
+                            "pattern": "^[\\x21-\\x7e]+$",
+                            "type": "string"
+                          },
+                          "maxItems": 256,
+                          "type": "array"
+                        },
+                        "view": {
+                          "enum": ["front", "back", "left", "right", "top", "bottom", "isometric"],
+                          "type": "string"
+                        }
+                      },
+                      "required": ["view"],
+                      "type": "object"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "direction": {
+                          "additionalItems": false,
+                          "items": [
+                            {
+                              "maximum": 1000000000,
+                              "minimum": -1000000000,
+                              "type": "number"
+                            },
+                            {
+                              "maximum": 1000000000,
+                              "minimum": -1000000000,
+                              "type": "number"
+                            },
+                            {
+                              "maximum": 1000000000,
+                              "minimum": -1000000000,
+                              "type": "number"
+                            }
+                          ],
+                          "maxItems": 3,
+                          "minItems": 3,
+                          "type": "array"
+                        },
+                        "extent": {
+                          "exclusiveMinimum": 0,
+                          "maximum": 1000000000,
+                          "type": "number"
+                        },
+                        "fit": {
+                          "items": {
+                            "maxLength": 300,
+                            "minLength": 1,
+                            "pattern": "^[\\x21-\\x7e]+$",
+                            "type": "string"
+                          },
+                          "maxItems": 256,
+                          "type": "array"
+                        },
+                        "up": {
+                          "additionalItems": false,
+                          "items": [
+                            {
+                              "maximum": 1000000000,
+                              "minimum": -1000000000,
+                              "type": "number"
+                            },
+                            {
+                              "maximum": 1000000000,
+                              "minimum": -1000000000,
+                              "type": "number"
+                            },
+                            {
+                              "maximum": 1000000000,
+                              "minimum": -1000000000,
+                              "type": "number"
+                            }
+                          ],
+                          "maxItems": 3,
+                          "minItems": 3,
+                          "type": "array"
+                        }
+                      },
+                      "required": ["direction"],
+                      "type": "object"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "extent": {
+                          "exclusiveMinimum": 0,
+                          "maximum": 1000000000,
+                          "type": "number"
+                        },
+                        "fit": {
+                          "items": {
+                            "maxLength": 300,
+                            "minLength": 1,
+                            "pattern": "^[\\x21-\\x7e]+$",
+                            "type": "string"
+                          },
+                          "maxItems": 256,
+                          "type": "array"
+                        },
+                        "position": {
+                          "additionalItems": false,
+                          "items": [
+                            {
+                              "maximum": 1000000000,
+                              "minimum": -1000000000,
+                              "type": "number"
+                            },
+                            {
+                              "maximum": 1000000000,
+                              "minimum": -1000000000,
+                              "type": "number"
+                            },
+                            {
+                              "maximum": 1000000000,
+                              "minimum": -1000000000,
+                              "type": "number"
+                            }
+                          ],
+                          "maxItems": 3,
+                          "minItems": 3,
+                          "type": "array"
+                        },
+                        "target": {
+                          "additionalItems": false,
+                          "items": [
+                            {
+                              "maximum": 1000000000,
+                              "minimum": -1000000000,
+                              "type": "number"
+                            },
+                            {
+                              "maximum": 1000000000,
+                              "minimum": -1000000000,
+                              "type": "number"
+                            },
+                            {
+                              "maximum": 1000000000,
+                              "minimum": -1000000000,
+                              "type": "number"
+                            }
+                          ],
+                          "maxItems": 3,
+                          "minItems": 3,
+                          "type": "array"
+                        },
+                        "up": {
+                          "additionalItems": false,
+                          "items": [
+                            {
+                              "maximum": 1000000000,
+                              "minimum": -1000000000,
+                              "type": "number"
+                            },
+                            {
+                              "maximum": 1000000000,
+                              "minimum": -1000000000,
+                              "type": "number"
+                            },
+                            {
+                              "maximum": 1000000000,
+                              "minimum": -1000000000,
+                              "type": "number"
+                            }
+                          ],
+                          "maxItems": 3,
+                          "minItems": 3,
+                          "type": "array"
+                        }
+                      },
+                      "required": ["position", "target"],
+                      "type": "object"
+                    }
+                  ]
+                },
+                "hide": {
+                  "items": {
+                    "maxLength": 300,
+                    "minLength": 1,
+                    "pattern": "^[\\x21-\\x7e]+$",
+                    "type": "string"
+                  },
+                  "maxItems": 256,
+                  "type": "array"
+                },
+                "highlight": {
+                  "items": {
+                    "maxLength": 300,
+                    "minLength": 1,
+                    "pattern": "^[\\x21-\\x7e]+$",
+                    "type": "string"
+                  },
+                  "maxItems": 256,
+                  "type": "array"
+                },
+                "name": {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "only": {
+                  "enum": ["bodies", "members"],
+                  "type": "string"
+                },
+                "section": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "normal": {
+                      "additionalItems": false,
+                      "items": [
+                        {
+                          "maximum": 1000000000,
+                          "minimum": -1000000000,
+                          "type": "number"
+                        },
+                        {
+                          "maximum": 1000000000,
+                          "minimum": -1000000000,
+                          "type": "number"
+                        },
+                        {
+                          "maximum": 1000000000,
+                          "minimum": -1000000000,
+                          "type": "number"
+                        }
+                      ],
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    },
+                    "origin": {
+                      "additionalItems": false,
+                      "items": [
+                        {
+                          "maximum": 1000000000,
+                          "minimum": -1000000000,
+                          "type": "number"
+                        },
+                        {
+                          "maximum": 1000000000,
+                          "minimum": -1000000000,
+                          "type": "number"
+                        },
+                        {
+                          "maximum": 1000000000,
+                          "minimum": -1000000000,
+                          "type": "number"
+                        }
+                      ],
+                      "maxItems": 3,
+                      "minItems": 3,
+                      "type": "array"
+                    }
+                  },
+                  "required": ["origin", "normal"],
+                  "type": "object"
+                }
+              },
+              "required": ["name"],
+              "type": "object"
+            },
+            "maxItems": 4,
+            "type": "array"
+          }
+        },
+        "required": ["sessionId"],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": {},
+        "properties": {
+          "error": {
+            "additionalProperties": {},
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "details": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "limit": {
+                "type": "number"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": ["kind"],
+            "type": "object"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "review": {
+            "enum": ["open", "submitted", "changes-requested", "approved", "rejected"],
+            "type": "string"
+          },
+          "revision": {
+            "type": "number"
+          },
+          "truncated": {
+            "additionalProperties": false,
+            "properties": {
+              "cuts": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "kept": {
+                      "type": "number"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "total": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["path", "kept", "total"],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "limit": {
+                "type": "number"
+              }
+            },
+            "required": ["limit", "cuts"],
+            "type": "object"
+          }
+        },
+        "required": ["ok"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "undo",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "sessionId": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
+            "type": "string"
+          }
+        },
+        "required": ["sessionId"],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": {},
+        "properties": {
+          "created": {},
+          "dryRun": {
+            "type": "boolean"
+          },
+          "error": {
+            "additionalProperties": {},
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "details": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "limit": {
+                "type": "number"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": ["kind"],
+            "type": "object"
+          },
+          "errors": {
+            "items": {},
+            "type": "array"
+          },
+          "label": {
+            "type": "string"
+          },
+          "measured": {
+            "items": {},
+            "type": "array"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "regenMs": {
+            "type": "number"
+          },
+          "review": {
+            "enum": ["open", "submitted", "changes-requested", "approved", "rejected"],
+            "type": "string"
+          },
+          "revision": {
+            "type": "number"
+          },
+          "statusChanges": {
+            "items": {},
+            "type": "array"
+          },
+          "symbols": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "truncated": {
+            "additionalProperties": false,
+            "properties": {
+              "cuts": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "kept": {
+                      "type": "number"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "total": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["path", "kept", "total"],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "limit": {
+                "type": "number"
+              }
+            },
+            "required": ["limit", "cuts"],
+            "type": "object"
+          }
+        },
+        "required": ["ok"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "update_from_main",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "sessionId": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
+            "type": "string"
+          }
+        },
+        "required": ["sessionId"],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": {},
+        "properties": {
+          "applied": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "baseVersion": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "changed": {
+            "type": "boolean"
+          },
+          "dropped": {
+            "items": {},
+            "type": "array"
+          },
+          "error": {
+            "additionalProperties": {},
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "details": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "limit": {
+                "type": "number"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": ["kind"],
+            "type": "object"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "previousBranch": {
+            "type": "string"
+          },
+          "renamed": {
+            "items": {},
+            "type": "array"
+          },
+          "revision": {
+            "type": "number"
+          },
+          "truncated": {
+            "additionalProperties": false,
+            "properties": {
+              "cuts": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "kept": {
+                      "type": "number"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "total": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["path", "kept", "total"],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "limit": {
+                "type": "number"
+              }
+            },
+            "required": ["limit", "cuts"],
+            "type": "object"
+          }
+        },
+        "required": ["ok"],
+        "type": "object"
+      }
+    }
+  ]
+}

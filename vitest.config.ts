@@ -73,6 +73,15 @@ export default defineConfig({
         },
       },
       {
+        // apps/mcp: the MCP server, through the SDK's client in process and over stdio.
+        test: {
+          name: 'mcp',
+          environment: 'node',
+          testTimeout: HEAVY_TEST_TIMEOUT,
+          include: ['apps/mcp/{src,test}/**/*.test.ts'],
+        },
+      },
+      {
         // tools/licenses: the third-party notices generator and the license check (ADR 0006).
         test: {
           name: 'tools',

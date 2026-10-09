@@ -1,4 +1,7 @@
-.PHONY: install dev test typecheck build lint licenses bench-house bench-memory
+.PHONY: install dev test typecheck build lint licenses bench-house bench-memory mcp
+
+# `make -C <checkout> mcp` must not print "Entering directory" on stdout: it carries the protocol.
+MAKEFLAGS += --no-print-directory
 
 install:
 	pnpm install
@@ -17,6 +20,11 @@ build:
 
 lint:
 	pnpm lint
+
+# The MCP server for agents, over stdio (apps/mcp; docs/user/agents.md). Configured from the
+# environment (MANUFAKTURE_LIBRARY, MANUFAKTURE_OUTPUT). Silent: stdout carries the protocol.
+mcp:
+	@pnpm --silent --filter @manufakture/mcp start
 
 # Every shipped dependency's license against ADR 0006's allowlist (tools/licenses); offline.
 licenses:

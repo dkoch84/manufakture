@@ -474,6 +474,8 @@ The tests run the real 42 MB kernel in Node, one instance per test file (about h
 
 For golden tests, `createNodeKernel()` gives a synchronous kernel and `createNodeService()` the full service, both from a module compiled once per process.
 
+OCCT prints to standard output (the STEP writer's transfer statistics), which Emscripten sends to `console.log` by default; the browser keeps that. `LoaderOptions.print` and `printErr` (or `instantiate({ print, printErr })` for one instance) send it elsewhere, and a Node host whose stdout carries a protocol passes `createNodeService({ output: STDERR_OUTPUT })` to send it to stderr (apps/mcp does, and so does `packages/session` for every session kernel).
+
 ## Deviations from the ADRs
 
 - **Op batches here, `regen` in the regen worker.** ADR 0007 decision 3 has one `regen` call per user intent. This worker exposes the plumbing under it: batches of kernel ops with in-batch references, including one `feature` op per part feature. `regen` is added on top of `KernelService` by the regen worker (`packages/regen`, `createRegenWorkerApi`), without changing the protocol rules (generations, errors as data, transfer).

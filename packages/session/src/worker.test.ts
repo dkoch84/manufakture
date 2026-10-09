@@ -3,7 +3,7 @@
 // its worker, and a kernel whose heap passed the threshold is replaced by a new worker.
 
 import { createDocument } from '@manufakture/core';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WorkerEngine } from './engine';
 import type { Session } from './session';
 import { PART, shedDocument } from './test/fixtures';
@@ -15,6 +15,25 @@ afterEach(async () => {
 });
 
 describe('the worker engine', () => {
+  it("sends the worker's stdout to the host's stderr", async () => {
+    const out = vi.spyOn(process.stdout, 'write');
+    const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const engine = await WorkerEngine.start({
+      heapThresholdBytes: 1024 ** 3,
+      url: new URL('./test/chatty-entry.ts', import.meta.url),
+    });
+    try {
+      await vi.waitFor(() =>
+        expect(err.mock.calls.map((c) => String(c[0])).join('')).toContain('chatty worker'),
+      );
+      expect(out.mock.calls.map((c) => String(c[0])).join('')).not.toContain('chatty worker');
+    } finally {
+      await engine.close();
+      out.mockRestore();
+      err.mockRestore();
+    }
+  }, 120_000);
+
   it('runs a session on the shed, and rolls back a regen it had to end', async () => {
     const seed = await seeded(shedDocument(), { engine: 'worker' });
     const s = ok(await seed.manager.open({ documentId: seed.documentId, clientName: 'Worker' }));

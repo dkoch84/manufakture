@@ -1,6 +1,6 @@
 # 0016: Agent sessions: headless sessions on agent branches, an MCP surface, review in History before Main
 
-- Status: accepted 2026-10-08, amended at acceptance (no export gate; see "Acceptance")
+- Status: accepted, amended 2026-10-08 (at acceptance: no export gate, see "Acceptance"; then how `apply` checks commands, see the amendment)
 - Date: 2026-10-08
 
 ## Context
@@ -73,7 +73,11 @@ The inputs:
 
    There is no approve tool, no tool that writes Main or sets a review state other than through `submit_for_review`, no file path outside the configured roots, and no tool that evaluates code: the one way to run logic is a scripted feature added by command, which runs in ADR 0010's sandbox and appears in full in the bundle. The authoring guide (T8.5a) and the schema index are MCP resources.
 
+   Amended 2026-10-08 in T8.4a: `apply`'s input schema checks a command's `type` only; the rest of each command is validated against core's zod schema in the session ([amendment](#amendment-how-apply-checks-commands-t84a)).
+
 7. **Tools are a public contract, like commands** (M7 plan cross-cutting decision 3). Agents, the authoring guide and people's prompts depend on tool names, input and output shapes and meanings. The rule is **add, never silently change**: a new tool, or a new optional input field or output field, is allowed; renaming, removing, tightening an input or changing what a field means is a new tool under a new name, with the old one kept and marked deprecated in its description. T8.4a keeps a golden of every tool's name and its input and output schemas, and a change that alters one fails CI unless it only adds. The server reports its surface version in the MCP server info, raised on every addition. Since tool inputs embed command schemas, a command change already follows core's rule.
+
+   Amended 2026-10-08 in T8.4a: tool inputs do not embed command schemas, so a command change follows core's add-only rule rather than the tool golden ([amendment](#amendment-how-apply-checks-commands-t84a)).
 
 8. **Symbolic ids, counter-prefixed** (as T8.1c built them, `packages/session/src/symbols.ts`). A model cannot reliably compute the next free id of each counter, so in a batch any id may have its number replaced by `$name` while its counter stays written: `extrude#$boss`, `sketch#$s`, `part#$side`, `e$p1`, and inside a face name `extrude#$boss:side:e$l1`. Every symbol therefore has exactly one counter, and `abc$x` in ordinary text is left alone. The session:
 
@@ -164,3 +168,11 @@ Accepted by the maintainer on 2026-10-08 (T8.0d), with these amendments made in 
 - **No export gate.** The proposed decision 12 (one `exportAllowed(branch)` refusing fabrication exports from an agent branch until approved) is dropped and its code removed. Exports (G-code, laser files, cut lists, takeoffs, drawings, STL, 3MF and STEP, IFC, `.mfkview`, `.mfk`) are allowed from any branch, including an unreviewed agent branch, in the app and through the MCP `export` tool. What T8.3c added for Main stays: the review reference on Main versions (decision 11). The later decisions are renumbered (agents never write Main is now 12, prompt injection 13). A proposed point about Duplicate on an agent branch giving an ungated Main is moot: with no gate there is no loophole to close.
 - **Unchanged**: agents never write Main; review in History, followed by Approve and merge, is how agent work gets into Main.
 - **Implementation calls recorded as decisions**, as the maintainer asked: symbolic ids are counter-prefixed (decision 8); update from Main makes a new agent branch (decision 1); CI keeps a golden of the MCP tool list (decision 7); the reviewer's comment is stored in the branch provenance (decisions 9 and 11).
+
+## Amendment: how `apply` checks commands (T8.4a)
+
+Amended 2026-10-08 in T8.4a (#1188), after its code review. Decision 6 says the tools' input schemas are generated from core's zod schemas, and decision 7 that tool inputs embed command schemas. The server does not embed them, by the orchestrator's decision:
+
+- **`apply` checks a command's `type` only**, against core's list of command types (an enum in the tool's input schema). Everything else in a command is validated against core's zod schema for that type inside the session, and a command that fails is answered as data (a `CoreError`), like any other refused command. Embedding every command's schema would make `tools/list` many times larger for every client on every connection, while the session checks each command anyway.
+- **`get_schema` serves the full schemas**: the JSON Schema of each command type and feature kind, generated from core's zod schemas, with doc comments; the schema index is an MCP resource too.
+- **What follows for the contract**: the tool golden holds the command type enum, so a new command type is an addition there and raises the surface version; a change to a command's own fields is not visible in the golden and follows core's add-only rule for commands (M7 plan cross-cutting decision 3), which already governs every command.

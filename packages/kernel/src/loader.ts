@@ -27,7 +27,20 @@ export type LoadProgress =
   | { phase: 'init' }
   | { phase: 'ready'; ms: number };
 
-export interface LoaderOptions {
+/**
+ * Where an instance's text output goes: OCCT prints to it (the STEP writer's transfer
+ * statistics, for one). Emscripten's default is `console.log` and `console.error`, which the
+ * browser keeps; a Node host whose stdout carries a protocol (apps/mcp) sends both to stderr
+ * (`STDERR_OUTPUT` in `@manufakture/kernel/node`) or to a callback of its own.
+ */
+export interface KernelOutput {
+  /** Each line OCCT writes to its standard output. */
+  print?: (text: string) => void;
+  /** Each line OCCT writes to its standard error. */
+  printErr?: (text: string) => void;
+}
+
+export interface LoaderOptions extends KernelOutput {
   onProgress?: (progress: LoadProgress) => void;
   /**
    * Uncompressed size of the pinned `opencascade_single.wasm`, used as the
@@ -71,8 +84,11 @@ export class OcctLoader {
     return this.compiled;
   }
 
-  /** A new, fully initialised libcascade instance from the cached module. */
-  async instantiate(): Promise<Oc> {
+  /**
+   * A new, fully initialised libcascade instance from the cached module. `output` overrides the
+   * loader's `print` and `printErr` for this instance.
+   */
+  async instantiate(output: KernelOutput = {}): Promise<Oc> {
     const t0 = performance.now();
     const module = await this.compile();
     this.report({ phase: 'instantiate' });
@@ -89,9 +105,15 @@ export class OcctLoader {
       }, fail);
       return {};
     };
+    const print = output.print ?? this.options.print;
+    const printErr = output.printErr ?? this.options.printErr;
     const oc = await Promise.race([
       // instantiateWasm is an Emscripten module option libcascade does not type.
-      createInstance({ instantiateWasm } as Parameters<typeof createInstance>[0]),
+      createInstance({
+        instantiateWasm,
+        ...(print !== undefined ? { print } : {}),
+        ...(printErr !== undefined ? { printErr } : {}),
+      } as Parameters<typeof createInstance>[0]),
       failed,
     ]);
     this.report({ phase: 'ready', ms: performance.now() - t0 });
