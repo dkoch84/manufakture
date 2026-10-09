@@ -1,0 +1,174 @@
+# M8 threat model and review notes
+
+Task T8.7a of the [agent surface plan](../plans/agent-surface.md). This is the written review of what M8 exposes: agent sessions, the MCP server, the review bundle and the Review view, and scoped agent tokens on the sync server. It lists who could attack them, what stops them (with the code and the test that proves it), and what is accepted or still open. It is the input to the maintainer's sign-off at the end, which is **pending**. Written against commit `5bcfed4`, 2026-10-09, from the security audit of that commit (verdict: approve). Line numbers are as of that commit.
+
+The design is [ADR 0016](../adr/0016-agent-sessions.md). Its user-facing side is [docs/user/agents.md](../user/agents.md).
+
+**Rule of this document.** A mitigation is listed only with a code link (`path:line`) and the test that exercises it. Test files are linked; the test is named in quotes as it appears in the file.
+
+## Scope
+
+Tasks marked for security review in the plan, plus T8.3a and T8.3c, which the review relies on; all covered here:
+
+| Task         | What it exposes                                                   | Section |
+| ------------ | ----------------------------------------------------------------- | ------- |
+| T8.1c, #1184 | `packages/session`: limits, Main refusal, storage paths           | A, B    |
+| T8.3a, #1186 | Review bundle: what the agent tells the reviewer                  | D, E    |
+| T8.3b, #1187 | Review view: untrusted text and images, the Approve gate          | D, E    |
+| T8.3c, #1185 | Export gate, dropped at acceptance; review reference on Main      | E, O1   |
+| T8.4a, #1188 | `apps/mcp`: inputs, path confinement, output size, stdout         | B, C    |
+| T8.4b, #1189 | `apps/server`: agent tokens, scopes, leases, quotas, review moves | F       |
+
+T8.3c's export gate was built and then removed when ADR 0016 was accepted: the maintainer decided that every export is allowed from any branch. What that leaves open is risk O1.
+
+## Deployment assumed
+
+- **Everything on one machine.** The agent's client starts the MCP server (`apps/mcp`) over stdio on the user's machine. The session holds core, regen, the kernel and the solver in that process (ADR 0016 decision 1).
+- **Review needs the sync server** (ADR 0016 decision 10). Until this review is signed, it runs on the same machine, listening on `127.0.0.1` (the default `MANUFAKTURE_HOST`), with `MANUFAKTURE_SYNC_URL` pointing at loopback. [docs/user/agents.md](../user/agents.md) says so ("Use it on localhost only for now").
+- **One owner per instance**, as in M7: the instance's own bearer token belongs to the person. M8 adds agent tokens, issued and revoked by the owner (ADR 0016 decision 12).
+- **A local library directory** (`MANUFAKTURE_LIBRARY`) is for tests and CI only; it has no review path.
+
+## Assets
+
+- **Documents.** The server's SQLite (logs, snapshots, versions); the MCP server's in-memory working copy over sync; a library directory in tests and CI.
+- **Main.** Changes only through a person: an Approve in History, or the person's own edit.
+- **The owner token.** Full access to the instance. Never given to an agent: the MCP server refuses it (`apps/mcp/src/config.ts:147`).
+- **Agent tokens.** `agent.<id>.<secret>`; the server stores only the SHA-256 of the secret (`apps/server/src/tokens.ts:126`). The plaintext lives in the MCP client's configuration or environment.
+- **Review bundles and their images.** The server's bundles table and blobs.
+- **Exports.** Files written to `MANUFAKTURE_OUTPUT`: G-code, laser files, cut lists, takeoffs, STL, 3MF, STEP and the rest. Not gated (O1).
+- **Server availability and disk.** Bounded per agent token by quotas (F8), except log storage (N-2).
+- **The reviewer's browser.** Scripts and rendering of what an agent wrote.
+
+## Actors
+
+- **A misbehaving or prompt-injected agent, through MCP.** Can call the tools the MCP server offers, on the documents its token is scoped to. Cannot run code (there is no code tool), work on Main, approve, or set a review comment.
+- **The same agent with a shell or file access.** Can read its own agent token and call the sync server's REST API directly, past every check the MCP server makes. Only the server's checks hold against it. ADR 0016 says it plainly: "scoped tokens protect the server, not the machine" (see N-1).
+- **A hostile document author.** Names, notes, labels, domain data, scripts, version and branch names, and other sessions' `clientName` reach the agent. A shared document can carry instructions aimed at the agent. Cannot make the MCP server present them as anything but data (C7); whatever an injected agent does lands on its own branch (E), but not in its exports (O1).
+- **A malicious or compromised sync server.** Can send the MCP server any bytes. Bounded by the result limits (C3) and the session's own checks. A plain-http URL to another machine draws a warning only (O11).
+- **The reviewer (the owner).** Trusted. Their review comment reaches the agent as data.
+
+## Entry points
+
+- **MCP tools over stdio** (`apps/mcp/src/server.ts`): `list_documents`, `open_session`, `close_session`, `get_tree`, `get_object`, `get_schema`, `find_geometry`, `measure`, `get_quantities`, `get_errors`, `get_history`, `render`, `apply`, `undo`, `update_from_main`, `submit_for_review`, `get_review`, `export`; and the MCP server's resources. Trust boundary: agent to the user's machine (files in the output directory) and to the sync server.
+- **Sync server routes an agent token may reach** (`apps/server/src/app.ts`, routes marked `agent`): document listing, snapshot, hello, entries, release, versions, branches, review moves, bundles, and the WebSocket. Everything else is owner-only by default (F2). Trust boundary: agent to the server's store.
+- **Agent token management**: `POST` and `GET /api/agent-tokens` and revocation, owner only (`apps/server/src/app.ts:621`).
+- **The Review view** (`apps/web/src/review`): a bundle and its images, read from the server. Trust boundary: agent to the reviewer's browser.
+- **Approve** (`apps/web/src/review/approve.ts`): the one path from an agent branch to Main.
+
+## Threats and mitigations
+
+### A. Sessions (T8.1c)
+
+- **A1. A session writes Main.** The session refuses to open or resume Main (`packages/session/src/session.ts:384`) and to write it (`packages/session/src/session.ts:695`). Tests: [`session.test.ts`](../../packages/session/src/session.test.ts) "refuses to resume Main, or a person's branch", "refuses writes once the branch was approved or rejected"; [`security.test.ts`](../../apps/mcp/test/security.test.ts) "refuses Main as a branch to work on, in the server and in the session".
+- **A2. Denial of service through a session.** `DEFAULT_LIMITS` (`packages/session/src/limits.ts:40`): 500 commands a batch, 2,000 batches a session, 30 s of regen a batch, 30 s a kernel call, the `.mfk` size limit, a kernel heap threshold, 30 minutes idle, 4 sessions a process; batches nested at most 8 deep (`MAX_BATCH_DEPTH`, `packages/session/src/symbols.ts:50`). Each ends in a typed error, as data. Tests: [`session.test.ts`](../../packages/session/src/session.test.ts) describe block "limits end in typed errors", and "a batch whose regen runs over the budget is rolled back"; [`hardening.test.ts`](../../packages/session/src/hardening.test.ts) "a measurement that hangs ends the kernel with kernel-timeout; the next call works", "refuses batches nested too deep without recursing", "counts nested commands before anything parses them", "close ends a session whose queue is stuck, and later calls answer closed at once"; [`security.test.ts`](../../apps/mcp/test/security.test.ts) "ends each limit of the session in its typed error".
+- **A3. A session overwrites a reviewer's decision made while it worked.** Review state is compared and set, never overwritten. Tests: [`hardening.test.ts`](../../packages/session/src/hardening.test.ts) "a batch does not overwrite an approval or rejection made while it regenerated", "submit does not overwrite a decision made while the bundle was built", "an update from Main is not committed over a decision made meanwhile".
+- **A4. Error text leaks storage paths to the agent.** Errors keep their code and lose their path. Test: [`hardening.test.ts`](../../packages/session/src/hardening.test.ts) "a storage error keeps its code and loses its path; the log has it all".
+
+### B. Path confinement (T8.1c, T8.4a)
+
+- **B1. A document or branch id reaches outside the library.** Every storage path must be plain segments under the root (`confinedSegments`, `packages/library/src/node.ts:36`, used at `:68`). Tests: [`node.test.ts`](../../packages/library/src/node.test.ts) "refuses every path that is not plain segments under the root"; [`security.test.ts`](../../apps/mcp/test/security.test.ts) "reads documents only from the library root".
+- **B2. A hostile document name becomes a file path.** Export names are reduced to one plain file name (`safeFileName`, `apps/mcp/src/files.ts:38`), checked again before writing and required to sit directly in the output directory (`apps/mcp/src/files.ts:156`, `:160`). Tests: [`security.test.ts`](../../apps/mcp/test/security.test.ts) "names files from a hostile document name safely, inside the directory"; [`units.test.ts`](../../apps/mcp/test/units.test.ts) "reduces any name to one plain file name".
+- **B3. Writes through a symbolic link, or over a file that appears after the check.** The output directory's real path is re-checked on each call (`apps/mcp/src/files.ts:141`); an existing name must be a plain file (`lstat`, `:164`); files are written to a fresh temp file opened with `wx` (`:187`) and then given their name by a hard link or a `COPYFILE_EXCL` copy that fails if anything has the name (`place`, `:221`). Tests: [`security.test.ts`](../../apps/mcp/test/security.test.ts) "refuses file names that are paths, and never writes through a symbolic link", "refuses when the output directory was swapped for a link after start", "replaces a file only with overwrite"; [`units.test.ts`](../../apps/mcp/test/units.test.ts) "never replaces what appears at the name after the check, link or file".
+- **B4. A failed export leaves half its files.** The files already written are removed (`apps/mcp/src/files.ts:199`). Test: [`units.test.ts`](../../apps/mcp/test/units.test.ts) "removes the files it wrote when a later one fails".
+- **B5. Configuration that lets exports reach the library.** The output and library directories must not contain each other (`apps/mcp/src/config.ts:116`); with no output directory configured, every export is refused (`apps/mcp/src/server.ts:575`). Tests: [`security.test.ts`](../../apps/mcp/test/security.test.ts) "refuses a configuration whose output and library contain each other, or are not real", "refuses every export when no output directory is configured".
+
+### C. The MCP surface (T8.4a)
+
+- **C1. The agent runs code, or sends inputs the tools do not expect.** There is no code tool (ADR 0016, "Alternatives considered"). Every input is checked against a schema generated from core's (`apps/mcp/src/schemas.ts`), with an element cap on tool input (`apps/mcp/src/server.ts:221`). CI keeps a golden of the tool list. Tests: [`security.test.ts`](../../apps/mcp/test/security.test.ts) "checks every input against its schema: unknown fields, bad ids, sizes"; [`golden.test.ts`](../../apps/mcp/test/golden.test.ts) "only ever grows, and the golden matches it".
+- **C2. The agent works on Main or approves its own work through MCP.** `open_session` refuses Main (`apps/mcp/src/server.ts:356`); there is no approve tool; the only review move is `submit_for_review` (`apps/mcp/src/server.ts:514`). Test: [`security.test.ts`](../../apps/mcp/test/security.test.ts) "refuses Main as a branch to work on, in the server and in the session".
+- **C3. Output floods the agent's client (a large document or a hostile server).** Results are bounded as JSON (`boundJson`, `apps/mcp/src/bounds.ts:106`) to 256 KiB (`apps/mcp/src/results.ts:79`), at most 50 details (`apps/mcp/src/results.ts:70`); images at most 8 MiB each and 16 MiB a call (`apps/mcp/src/render.ts:28`), 8 a call (`apps/mcp/src/server.ts:443`). What is cut is said, as data. Tests: [`security.test.ts`](../../apps/mcp/test/security.test.ts) "cuts a result over the JSON limit and says what was cut", "leaves out images over the image limit, as data"; [`units.test.ts`](../../apps/mcp/test/units.test.ts) describe block "boundJson".
+- **C4. A render or export that never ends.** Deadlines in `apps/mcp/src/workshop.ts`. Tests: [`workshop.test.ts`](../../apps/mcp/test/workshop.test.ts) "answers a regen over its limit with the regen timeout", "caps dropped kernels still running, answering busy, and lets each go once it settles".
+- **C5. Something prints to stdout and corrupts the protocol.** stdout is taken for the transport alone and everything else goes to stderr (`apps/mcp/src/stdout.ts:31`); a session worker's stdout is piped to stderr (`packages/session/src/engine.ts:229`). Tests: [`stdio.test.ts`](../../apps/mcp/test/stdio.test.ts) "keeps stdout to JSON-RPC while exports print, every line of it"; [`worker.test.ts`](../../packages/session/src/worker.test.ts) "sends the worker's stdout to the host's stderr".
+- **C6. The owner token handed to an agent, or the agent token leaked.** Only an agent token is taken, and a wrong one is never quoted (`apps/mcp/src/config.ts:147`); the token is deleted from the environment once read, so workers and children never inherit it (`apps/mcp/src/config.ts:132`); plain http to another machine draws a warning (`apps/mcp/src/config.ts:154`). Tests: [`security.test.ts`](../../apps/mcp/test/security.test.ts) "takes only an agent token for a sync server, never the instance’s own", "takes the sync token out of the environment once it is read", "warns about plain http to another machine, not to this one"; [`stdio.test.ts`](../../apps/mcp/test/stdio.test.ts) "refuses the instance’s own token for a sync server, without quoting it".
+- **C7. Prompt injection from a document to the agent.** The server's instructions and tool descriptions are fixed text (`INSTRUCTIONS`, `apps/mcp/src/server.ts:88`); document text travels only in data fields, never in a message the server composes (`apps/mcp/src/exports.ts:7` for export messages); the authoring guide (T8.5a) tells agents that document text is data. Test: [`security.test.ts`](../../apps/mcp/test/security.test.ts) "never reaches tool descriptions, resources or the messages the server writes". This cannot stop a model from following instructions it reads in data; the backstop is review before Main (E), and it does not cover exports (O1).
+
+### D. The Review view (T8.3a, T8.3b)
+
+The bundle is written by the agent's session, and an agent with its token can write one directly (N-1), so the app treats it as untrusted.
+
+- **D1. Bundle text rendered as markup, or spoofing with bidi and control characters.** Text is rendered as React text, clipped, isolated in `<bdi>`, with control and format characters shown as escapes (`Clipped`, `apps/web/src/review/Bounded.tsx:15`, `:33`); nothing under `apps/web/src/review` uses `dangerouslySetInnerHTML` or `innerHTML`. Tests: [`ReviewPanel.test.tsx`](../../apps/web/src/review/ReviewPanel.test.tsx) "renders bundle text as text, never as HTML, and cuts long text"; [`Bounded.test.tsx`](../../apps/web/src/review/Bounded.test.tsx) "renders an agent’s name with a bidi override as visible, isolated text", "shows control and format characters as escapes, keeping tabs and line breaks".
+- **D2. Hostile images.** An image reference must be a SHA-256, a byte count under the limit and sides of at most 4,096 pixels (`checkedRef`, `apps/web/src/review/image.ts:22`); the bytes must hash to it and start with a PNG signature and header (`imageProblem`, `apps/web/src/review/image.ts:36`); they are shown through a `blob:` URL of type `image/png` (`apps/web/src/review/ReviewImage.tsx:52`), revoked when the image goes (`:60`). Tests: [`ReviewImage.test.tsx`](../../apps/web/src/review/ReviewImage.test.tsx) "accepts a reference as the bundle writes one, and nothing else", "passes the bytes the reference names, and nothing else", "shows a checked PNG through a blob URL, and revokes it when it goes".
+- **D3. A bundle that does not parse breaks the view.** Parse failures are caught and reported (`Guarded`, `apps/web/src/review/Bounded.tsx`). Test: [`ReviewPanel.test.tsx`](../../apps/web/src/review/ReviewPanel.test.tsx) "says so when the bundle does not read".
+- **D4. Scripts an agent added run on the reviewer's device.** On an agent's branch nothing runs on a whole-document grant or the automatic setting; only exact sources the reviewer allows (`apps/web/src/scripts/policy.ts:242`). Tests: [`policy.test.ts`](../../apps/web/src/scripts/policy.test.ts) "on an agent’s branch asks again: no whole-document choice or setting, only exact sources"; [`ScriptsPanel.test.tsx`](../../apps/web/src/scripts/ScriptsPanel.test.tsx) "on an agent’s branch asks again, and Run scripts allows each script exactly as it is".
+
+### E. Review before Main (T8.3b)
+
+- **E1. Unreviewed or misdescribed work reaches Main.** Approve is offered only when every check passes (`approveBlockers`, `apps/web/src/review/review.ts:609`): the app's own regen of the head must match the bundle's measurements and names, failing closed (`compareRegen`, `apps/web/src/review/review.ts:268`), and the branch's scripts must match what the bundle lists (`branchScripts`, `apps/web/src/review/review.ts:520`). At approval the merge preview must drop nothing (`apps/web/src/review/approve.ts:115`), the head is read again and must be the bundle's revision (`apps/web/src/review/approve.ts:126`), and the state moves from `submitted` to `approved` by compare-and-set (`apps/web/src/review/approve.ts:132`). Tests: [`approve.test.ts`](../../apps/web/src/review/approve.test.ts) "refuses a branch written after its bundle, and changes nothing", "refuses when the state changed meanwhile, or when a change would be dropped"; [`review.test.ts`](../../apps/web/src/review/review.test.ts) "offers Approve only when every check passes", "never passes a bundle that lists no bodies and says it left them out", "lists every difference: a volume, a body only on one side, a name, an error"; e2e [`agent-review.spec.ts`](../../apps/web/e2e/agent-review.spec.ts) "a branch changed after its bundle cannot be approved", "a bundle whose measurements disagree with this app’s regen shows the mismatch". What these checks do not cover (command summaries, feature diffs, quantity deltas, and changes no measurement sees) is N-1.
+
+### F. Sync server and agent tokens (T8.4b)
+
+All tests in this section are in [`apps/server/test/agents.test.ts`](../../apps/server/test/agents.test.ts) unless named otherwise.
+
+- **F1. Guessing or stealing a token from the server.** A 128-bit id and a 256-bit secret from the CSPRNG (`apps/server/src/tokens.ts:123`); only the secret's SHA-256 is stored (`:126`); verified in constant time, with a hash compared even for an unknown id (`:147`). Test: "only the owner issues, lists and revokes; the secret is shown once and stored hashed".
+- **F2. An agent token reaches routes or documents it should not.** Deny by default: an agent token reaches only routes marked for it (`apps/server/src/app.ts:355`), and scoped routes only for its documents (`apps/server/src/app.ts:363`). Tests: "only the documents it is scoped to", "never the owner-only routes: new documents, blob reads, shares", "never the share routes".
+- **F3. An agent token writes Main.** `writeCheck` refuses it (`apps/server/src/service.ts:265`). Tests: "hello, submit, a merge, deleting or reviewing main: 403 over HTTP", "hello on main over the WebSocket is refused and closes the socket".
+- **F4. An agent token writes a person's branch or another token's.** Only agent branches it made (`apps/server/src/service.ts:271`, `:274`); it makes only agent branches, open and with no comment (`apps/server/src/service.ts:1010`, `:1026`). Tests: "an agent token writes its own agent branch, and no other branch", "an agent token makes agent branches only, open and without a comment".
+- **F5. An agent token approves, rejects, requests changes or forges a comment.** Only three moves are allowed: reopen, submit, and restoring the state a failed write left (`apps/server/src/service.ts:1175` to `:1196`); a comment from an agent is refused (`:1176`); a comment is carried over only by the server, from the branch an update from Main replaces (`:1040`). Tests: "allowed review moves pass; approving, rejecting, requesting changes and comments are refused", "carries a comment over only from the same session, and never from the request", "an agent token writes only an open branch: a submitted one is reopened first", "an agent adds a review bundle or a version only to an open branch of its own".
+- **F6. Writes to a branch the reviewer closed.** Approved and rejected branches take nothing more (`apps/server/src/service.ts:277`). Tests: "a branch the reviewer ${closed} takes no more writes, review moves, bundles or deletion", "the WebSocket checks every submit: a branch closed while connected refuses the next one".
+- **F7. Two writers on one agent branch.** A writer lease per branch (`apps/server/src/service.ts:287`), dropped on revocation (`:321`). Tests: "one writer per agent branch: another client is refused until the lease runs out", "a client lets go of the branch it holds (its session closed); nobody else can", "leases end when the reviewer closes a branch or the token is revoked (L2)".
+- **F8. Disk or row exhaustion by one token.** Per token: 20 agent branches under way and 200 versions in each document it is scoped to, and across all its documents 1 GiB of blobs and 256 MiB of bundles (`apps/server/src/limits.ts:147` to `:150`), enforced in `versionQuota` (`apps/server/src/service.ts:918`), `putBlob` (`:766`) and the bundle and branch paths. Tests: "an agent token keeps at most its quota of agent branches under way (M1)", "an agent token makes at most its quota of versions (M1, M2)", "an agent token stores at most its quota of blob bytes (L1)", "review bundles: a body limit of their own, a cap per document, and a cheap look (M3)", "review bundles count against a quota per agent token and a total for the instance". Log storage has no per-token quota: N-2.
+- **F9. A revoked token keeps working.** Revocation drops leases and sweeps start versions (`apps/server/src/service.ts:331`), terminates the token's open sockets (`apps/server/src/app.ts:660`), and refuses a request let in before it (`apps/server/src/app.ts:740`). Tests: "a revoked token fails at once, on HTTP and on an open WebSocket", "a request let in before its token was revoked is refused when it is handled (R-2)", "a revoked token writes nothing more over a WebSocket it has open (R-1)", "revoking a token sweeps the start versions it made that no branch starts from"; [`apps/mcp/test/sync.test.ts`](../../apps/mcp/test/sync.test.ts) "a revoked token: the next write and the next listing fail as data".
+- **F10. An agent token creates versions on Main, or keeps another token's alive.** A start version must be a version of Main sent with its agent branch (`apps/server/src/service.ts:1013`), attributed to the token (see N-3 for a branch started from an existing version); a branch never starts from another token's version (`apps/server/src/service.ts:1106`). Tests: "an agent token adds no version to main; a start version comes with its branch, attributed", "an agent token never starts a branch from another token's version", "an agent never deletes a start version the owner made, under a reused branch id (H-1)".
+
+## Evidence
+
+The security audit ran these files green at `5bcfed4`, 187 tests in all: `apps/mcp/test/security.test.ts`, `units.test.ts`, `sync.test.ts`, `stdio.test.ts`; `apps/server/test/agents.test.ts`; `packages/session/src/hardening.test.ts`, `sync.test.ts`, `session.test.ts`; `apps/web/src/review/*`; `apps/web/src/scripts/policy.test.ts`. Every test named above was checked to exist under that name.
+
+## Residual and open risks
+
+| #   | Risk                                                              | Severity          |
+| --- | ----------------------------------------------------------------- | ----------------- |
+| O1  | Exports are not gated                                             | Medium (decided)  |
+| O2  | Bundle swap through reopen and restore                            | Low               |
+| O3  | Agent deleting its own branch drops the reviewer's comment        | Low               |
+| O4  | Reads in flight after revocation                                  | Low               |
+| O5  | Blob existence probe                                              | Low               |
+| O6  | Version ids can be reused after deletion                          | Low               |
+| O7  | Bundle builds have no overall time limit                          | Nit               |
+| O8  | Review blobs are never pruned                                     | Nit               |
+| O9  | Local-library update from Main deletes without compare-and-set    | Nit               |
+| O10 | Read scope is per document, not per token                         | Low               |
+| O11 | Agent tokens in plaintext in the MCP client's config              | Low               |
+| N-1 | The Review view shows the bundle's account of the work, unchecked | Medium            |
+| N-2 | No per-token cap on log storage                                   | Medium            |
+| N-3 | An agent branch need not start from a Main version                | Low (unconfirmed) |
+
+- **O1. Exports are not gated.** The maintainer decided at ADR 0016's acceptance that every export is allowed from any branch (ADR 0016, "Acceptance"; `apps/mcp/src/server.ts:574`, `apps/mcp/src/exports.ts:3`). Review guards Main, not files: a fabrication file (G-code, laser file, cut list, drawing, STL, 3MF, STEP and the rest) made from an unreviewed agent branch, by a person in the app or by the agent through the `export` tool, carries whatever the agent did, a prompt-injected agent included. An agent can also fill the output directory: each call is capped at 512 MiB and 500 files (`apps/mcp/src/files.ts:28`, `:30`), with no total quota. Accepted by decision; the sign-off must name it.
+- **O2. Bundle swap through reopen and restore.** An agent can reopen its submitted branch, `PUT` a new bundle for the same revision, and restore the state to `submitted` (`apps/server/src/service.ts:1183`). The log is unchanged; only the bundle changes. Worse together with N-1.
+- **O3. Deleting its own branch drops the reviewer's comment.** `writeCheck` allows an agent to delete its branch in `submitted` and `changes-requested` (`apps/server/src/service.ts:1247`), and the comment goes with it.
+- **O4. Reads in flight after revocation.** Snapshot, entries, versions and bundle reads rely on the check when the request arrives (`apps/server/src/app.ts:346`), not on `revokedCheck` when it is handled.
+- **O5. Blob existence probe.** An agent's blob `PUT` answers 200 when the blob exists and 201 when it is new (`apps/server/src/service.ts:764`), and blob writes are not scoped to documents. The probe needs the full bytes.
+- **O6. Version ids can be reused after deletion** (by the start-version sweep or the owner). Not re-checked in depth.
+- **O7. Bundle builds have no overall time limit.** Each render and regen within one is bounded (C4).
+- **O8. Review blobs are never pruned.** Bundle rows are trimmed; their images stay.
+- **O9. Update from Main deletes the old branch without compare-and-set in local-library mode** (`packages/session/src/session.ts:1155`). Fixed over sync (`packages/session/src/sync.ts:723`); local libraries are for tests and CI only.
+- **O10. Read scope is per document, not per token.** A token reads other tokens' branches and bundles in documents it shares with them. Documented in [docs/user/agents.md](../user/agents.md).
+- **O11. Agent tokens are kept in plaintext** in the MCP client's configuration or environment, readable by an agent with file access; over plain http to another machine they cross the network unencrypted, with a warning only (C6). Localhost only until signed.
+- **N-1. The Review view shows the bundle's account of the work, unchecked.** Command summaries, feature diffs, renders and quantity deltas are shown as the bundle states them, never recomputed (`apps/web/src/review/BundleView.tsx:332` to `:362`; the merge preview in `apps/web/src/review/ReviewPanel.tsx:425` to `:448` shows counts only). What is cross-checked is volume, area, bounding box, mass, body names and error codes (`apps/web/src/review/review.ts:268`) and script sources (`apps/web/src/review/review.ts:520`). An agent that reads its own token (O11) can `PUT` a bundle directly, whose content the server does not read (`apps/server/src/service.ts:1285`), with a command list that misdescribes the log; Approve then merges the real log (`apps/web/src/review/approve.ts:112`). Changes no measurement sees pass unseen: renames, notes, CAM feeds and speeds, takeoff and other domain data, drawing text. Bundles built through MCP are honest; the gap is direct API use. This is the case ADR 0016 names in its consequences: "an agent that also has a shell and the user's files can do anything the user can, and scoped tokens protect the server, not the machine" ([ADR 0016, "Consequences"](../adr/0016-agent-sessions.md#consequences)). Fix: derive the shown command list (or its count and labels) from the branch log and flag any disagreement with the bundle. Accept by name or fix before sign-off.
+- **N-2. No per-token cap on log storage.** `submit` (`apps/server/src/service.ts:488`) is bounded per entry (up to 12 MiB) and per body (up to 40 MiB), and the rate bucket counts entries per client, not bytes (`apps/server/src/limits.ts:129`, `:131`). The writer lease lets one client write an agent branch at a time, but a client can let go of the lease and a fresh client id with a full rate bucket can take it at once; and `batchesPerSession` is enforced only in the MCP session, which an agent with its token can bypass. Fix: a per-token or per-agent-branch quota on log bytes or revisions in `submit`. Accept by name or fix before sign-off.
+- **N-3. An agent branch need not start from a Main version** (unconfirmed). The server does not require an agent branch's `fromVersion` to be a version of Main (`apps/server/src/service.ts:1079` to `:1117`); ADR 0016 decision 12 says it should. `previewMerge` (`packages/library/src/library.ts:3376`) might then carry commands from an owner's non-Main branch into Main on approve. That would be owner-authored work, not agent work. Fix: a test, or a check that the version is on Main for agent tokens.
+
+## Sign-off (T8.7a, human part)
+
+**Status: PENDING. Nothing has been signed.** The sign-off is the maintainer's alone; no agent may tick a line or fill in the record.
+
+What it gates: **documenting agent tokens for use beyond localhost** (ADR 0016 decision 12). It does not gate the M8 acceptance suite (T8.8), which runs on localhost. Until it is signed, [docs/user/agents.md](../user/agents.md) keeps its "Use it on localhost only for now".
+
+Tick each line, or write what must change first:
+
+- [ ] Until this is signed, agent tokens are used on localhost only: the sync server listens on `127.0.0.1` and `MANUFAKTURE_SYNC_URL` points at loopback.
+- [ ] Agent tokens are kept out of committed MCP configurations (`.mcp.json` and the like): `MANUFAKTURE_SYNC_TOKEN` comes from the environment or an untracked file. (The repository's `.gitignore` does not list `.mcp.json` today.)
+- [ ] **O1** (exports not gated) is accepted by name, knowing a file made from an unreviewed agent branch carries whatever the agent did.
+- [ ] **N-1** (bundle account not recomputed) is accepted by name, or fixed first.
+- [ ] **N-2** (no per-token cap on log storage) is accepted by name, or fixed first.
+- [ ] **N-3** is confirmed or ruled out by a test; if confirmed, fixed first or accepted by name.
+- [ ] O2 to O11 are accepted, or listed for a later fix.
+- [ ] Beyond localhost, the sync server is reached over https only (the plain-http warning, O11, is not a defence), behind the TLS proxy and settings of the [M7 checklist](m7-threat-model.md#checklist-for-the-human-sign-off-t76b), part A.
+- [ ] The test files under [Evidence](#evidence) are green on the build being signed.
+- [ ] Then, and only then, [docs/user/agents.md](../user/agents.md) may document agent tokens for use beyond localhost.
+
+**Sign-off record** (to be filled in by the maintainer)
+
+| Decision                                         | Status  | Signed by | Date |
+| ------------------------------------------------ | ------- | --------- | ---- |
+| Agent tokens documented for use beyond localhost | Pending |           |      |
