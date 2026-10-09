@@ -1,4 +1,4 @@
-// The review bundle as data (ADR 0016 decision 11; M8 plan "The review bundle and the gate"). Plain
+// The review bundle as data (ADR 0016 decision 11; M8 plan "The review bundle and approval"). Plain
 // JSON: the app (T8.3b) renders it as untrusted content, as text, so every string, list and image
 // here is bounded (`LIMITS`), and `readBundle` checks the bounds again when it is read back.
 // Lengths mm, areas mm², volumes mm³, masses g.

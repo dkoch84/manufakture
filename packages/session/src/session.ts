@@ -1266,8 +1266,9 @@ export class Session {
           `The review bundle was not stored: ${this.#public(e, 'storing the bundle')}`,
         );
       }
-      // The only review state an agent may set, on its own branch (ADR 0016 decision 9), and
-      // only from open: a reviewer's decision made while the bundle was built stands.
+      // Submitting is the one forward move an agent makes on its own branch (ADR 0016 decision 9;
+      // the other is back to open on a write), and only from open: a reviewer's decision made
+      // while the bundle was built stands.
       const set = await this.#host.library.setBranchReview(
         this.documentId,
         this.#branch.id,

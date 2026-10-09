@@ -103,8 +103,8 @@ review: 'open' }` (the library checks `clientName`). The session takes the branc
   blob of the document (`documents/<id>/blobs/<sha256>`, at most `MAX_BUNDLE_BLOB_BYTES`) and
   returns its SHA-256. It returns the bundle as JSON data. It is stored with the branch
   (`BundleStore`, keyed by the head revision; at most `MAX_BUNDLE_BYTES`) and the branch's review
-  state set to `submitted`, the only state an
-  agent may set (ADR 0016 decision 9), and only from `open`. A later write returns the branch to
+  state set to `submitted`, the one forward move an agent makes (ADR 0016 decision 9), and only
+  from `open`. A later write returns the branch to
   `open`, and `info().bundle.stale` turns true. A write to a branch the reviewer has `approved`
   or `rejected` is refused; one with `changes-requested` returns it to `open`.
 - **Close**: releases the engine (a worker is terminated), the branch lock and the idle timer.
