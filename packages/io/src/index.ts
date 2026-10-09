@@ -147,15 +147,6 @@ export {
 export { POINTS_PER_MM, contentStream, pdfTextString, writePdf, type PdfWriteOptions } from './pdf';
 export { FABRICATION_MIME, documentFileName, type FabricationFile } from './fabrication';
 export {
-  ExportRefusedError,
-  UNKNOWN_EXPORT_SOURCE,
-  UNREVIEWED_EXPORT,
-  assertExportAllowed,
-  exportAllowed,
-  type ExportSource,
-  type ExportVerdict,
-} from './export-gate';
-export {
   exportBodyFiles,
   kernelExchanger,
   type BodyExchanger,

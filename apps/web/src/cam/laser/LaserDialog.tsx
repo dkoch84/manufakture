@@ -11,8 +11,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from 'zustand';
 import { ExpressionField } from '../../components/ExpressionField';
 import type { ExportedFile } from '../../io/actions';
-import { ExportGateNotice } from '../../io/ExportGateNotice';
-import { currentExportSource, useExportRefusal } from '../../io/exportSource';
 import { formatBytes } from '../../io/files';
 import type { DocumentStoreApi } from '../../state/document';
 import {
@@ -218,10 +216,7 @@ export function LaserDialog({
   const kerfCheck = checkField(kerf, 'length', 'nonNegative', units, variables, true);
   const kerfValue = kerfCheck.ok ? (kerfCheck.value ?? 0) : null;
   const kerfError = kerfCheck.ok ? (kerfProblem(kerfValue!, size) ?? undefined) : undefined;
-  // The export gate (T8.3c): nothing is written from an agent's unreviewed branch.
-  const gated = useExportRefusal();
-  const ready =
-    outline.state === 'ok' && kerfValue !== null && kerfError === undefined && gated === null;
+  const ready = outline.state === 'ok' && kerfValue !== null && kerfError === undefined;
 
   const addSection = () => {
     const c = checkField(position, 'length', 'any', units, variables);
@@ -243,12 +238,7 @@ export function LaserDialog({
   const save = () => {
     if (outline.state !== 'ok' || kerfValue === null) return;
     const base = body?.name ?? part?.name ?? doc.name;
-    const r = laserFile(outline.layers, {
-      format,
-      kerf: kerfValue,
-      baseName: base,
-      source: currentExportSource(),
-    });
+    const r = laserFile(outline.layers, { format, kerf: kerfValue, baseName: base });
     if (!r.ok) {
       setResult({ error: true, text: r.message, warnings: [] });
       return;
@@ -279,7 +269,6 @@ export function LaserDialog({
         Outlines of {part?.name ?? partId} as DXF or SVG, in millimetres, with the lower left corner
         at 0, 0.
       </p>
-      <ExportGateNotice refusal={gated} />
       <form
         onSubmit={(e) => {
           e.preventDefault();

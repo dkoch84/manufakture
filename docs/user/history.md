@@ -135,7 +135,7 @@ manufakture does not take the bundle's word for anything. **Approve** is offered
 
 If the tab closes (or Main cannot be saved, or the version cannot be recorded) after the branch was marked approved, the branch is **Approved** but no version of Main records it. Its Review view says so and offers **Finish approval**: the same checks, then the merge if Main does not have it yet (one already saved is not merged twice) and the version.
 
-Only an approved agent branch can be exported for fabrication (G-code, cut lists, and the other fabrication files): the export dialogs refuse the others with "This is an agent's unreviewed branch. Review it in History first."
+Review does not hold back exports: G-code, cut lists and every other file export from any branch, an agent's unreviewed branch included. What review decides is whether the agent's work gets into Main, which only **Approve** does.
 
 ### Request changes and Reject
 

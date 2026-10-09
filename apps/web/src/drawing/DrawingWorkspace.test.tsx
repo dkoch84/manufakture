@@ -1,17 +1,11 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { Dimension } from '@manufakture/core';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createDocumentStore } from '../state/document';
 import { BODY, boxDocument, fakeDrawer } from './drawing.test-fixture';
 import { DrawingTabs } from './DrawingTabs';
 import { DrawingWorkspace } from './DrawingWorkspace';
 import { createDrawingUiStore } from './state';
-import { exportSourceStore } from '../io/exportSource';
-import { agentSource } from '../io/exportGate.test-fixture';
-import { UNREVIEWED_EXPORT } from '@manufakture/io';
-
-// Main is open: the export gate (T8.3c) lets these exports through unless a test says otherwise.
-beforeEach(() => exportSourceStore.setState({ source: { id: 'main' } }));
 
 // The sheet maps 1 px to 1 paper mm, from the page's top left (paper y runs up).
 const W = 297;
@@ -240,20 +234,6 @@ describe('DrawingWorkspace', () => {
     await waitFor(() => expect(s.onSave).toHaveBeenCalledTimes(3));
     expect(decode(2).startsWith('%PDF-')).toBe(true);
     expect(s.onSave.mock.calls[2]!.slice(1)).toEqual(['Drawing 1.pdf', 'application/pdf']);
-  });
-
-  it('neither exports nor prints a sheet from an agent’s unreviewed branch, and says why', async () => {
-    exportSourceStore.setState({ source: agentSource('submitted') });
-    const s = setup();
-    await drawingWithView(s);
-    expect(screen.getByTestId('export-gate-refusal').textContent).toBe(UNREVIEWED_EXPORT);
-    for (const id of ['drawing-export-svg', 'drawing-export-dxf', 'drawing-export-pdf']) {
-      expect(screen.getByTestId(id)).toHaveProperty('disabled', true);
-      fireEvent.click(screen.getByTestId(id));
-    }
-    expect(screen.getByTestId('drawing-print')).toHaveProperty('disabled', true);
-    await new Promise((r) => setTimeout(r, 0));
-    expect(s.onSave).not.toHaveBeenCalled();
   });
 
   it('says why a sheet cannot be drawn or exported', async () => {

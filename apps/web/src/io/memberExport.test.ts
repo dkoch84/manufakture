@@ -7,9 +7,6 @@ import { exportBodies } from './actions';
 import type { Exchanger } from './exchange';
 import { matrix3x4, memberExportBodies, shownMemberExports } from './memberExport';
 
-/** Main: the export gate (T8.3c) lets every export here through. */
-const MAIN = { id: 'main' };
-
 function fakeExchanger(): Exchanger {
   const bodies = [{ id: 'body1', name: 'Sheathing' }];
   return {
@@ -60,7 +57,7 @@ describe('member export', () => {
     const members = memberExportBodies(shed.view);
     const ex = fakeExchanger();
 
-    const threemf = await exportBodies(ex, '3mf', { source: MAIN, members });
+    const threemf = await exportBodies(ex, '3mf', { members });
     if (!threemf.ok) throw new Error(threemf.message);
     const report = validate3mf(threemf.value[0]!.bytes);
     expect(report.problems).toEqual([]);
@@ -70,7 +67,7 @@ describe('member export', () => {
     expect(names).toContain('wall-s:s1');
     expect(names).toContain('door-1:header:2');
 
-    const stl = await exportBodies(ex, 'stl', { source: MAIN, members });
+    const stl = await exportBodies(ex, 'stl', { members });
     if (!stl.ok) throw new Error(stl.message);
     // Members touch (studs stand on plates), so the welded soup is not one manifold, but each
     // member was checked closed on the way out, and the volumes add up.
@@ -81,24 +78,19 @@ describe('member export', () => {
       .reduce((v, m) => v + m.length * m.stock.width * m.stock.depth, 0);
     expect(meshProperties(mesh).volume).toBeCloseTo(blanks + 100 * 11 * 50, -3);
 
-    const each = await exportBodies(ex, 'stl-each', { source: MAIN, members, fileBase: 'Shed' });
+    const each = await exportBodies(ex, 'stl-each', { members, fileBase: 'Shed' });
     if (!each.ok) throw new Error(each.message);
     expect(each.value.map((f) => f.name)).toEqual(['Sheathing.stl', 'Shed members.stl']);
 
-    const step = await exportBodies(ex, 'step', { source: MAIN, members });
+    const step = await exportBodies(ex, 'step', { members });
     if (!step.ok) throw new Error(step.message);
     expect(step.message).toMatch(/Framing members are not exported to STEP here\.$/);
 
     // Members alone still export as meshes.
-    const only = await exportBodies(ex, '3mf', {
-      source: MAIN,
-      bodies: [],
-      members,
-      fileBase: 'Shed',
-    });
+    const only = await exportBodies(ex, '3mf', { bodies: [], members, fileBase: 'Shed' });
     if (!only.ok) throw new Error(only.message);
     expect(validate3mf(only.value[0]!.bytes).parsed!.objects).toHaveLength(members.length);
-    expect((await exportBodies(ex, 'step', { source: MAIN, bodies: [], members })).ok).toBe(false);
+    expect((await exportBodies(ex, 'step', { bodies: [], members })).ok).toBe(false);
   });
 
   it('STEP: members as B-reps built on demand, in one file with the bodies, under a disclaimer', async () => {
@@ -126,7 +118,6 @@ describe('member export', () => {
     ex.exportStepWithMembers = withMembers;
     const text = "Not an engineering tool: don't build from this alone.";
     const r = await exportBodies(ex, 'step', {
-      source: MAIN,
       members,
       partId: 'part#1',
       stepDescription: text,
@@ -151,15 +142,10 @@ describe('member export', () => {
     expect(out).toContain("#1 = PRODUCT('Sheathing'");
 
     // Members alone, no bodies: still one STEP file.
-    const only = await exportBodies(ex, 'step', {
-      source: MAIN,
-      bodies: [],
-      members,
-      partId: 'part#1',
-    });
+    const only = await exportBodies(ex, 'step', { bodies: [], members, partId: 'part#1' });
     expect(only.ok).toBe(true);
     // No part named: the members cannot be built, and the bodies go alone.
-    const plain = await exportBodies(ex, 'step', { source: MAIN, members });
+    const plain = await exportBodies(ex, 'step', { members });
     if (!plain.ok) throw new Error(plain.message);
     expect(plain.message).toMatch(/Framing members are not exported to STEP here\.$/);
   });

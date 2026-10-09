@@ -58,7 +58,6 @@ import {
   MAX_MFK_FILE_BYTES,
   versionBranch,
 } from '@manufakture/library';
-import { branchExportSource, currentExportSource, exportSourceStore } from './io/exportSource';
 import { requestPersistence, storageInfo } from './persistence/storage';
 import { askPersistenceOnce, noteLibraryKind } from './pwa/persistence';
 import { registerAutosave } from './pwa/saveGate';
@@ -1259,18 +1258,12 @@ export function App({
       cancelled = true;
     };
   }, [library, document.id, branch, branchesRevision, storedOnce]);
-  // The export gate's source (T8.3c): the branch of what is shown (a viewed version or revision's
-  // own branch, else the open one) as the library lists it. Set before the browser paints, so no
-  // export runs against the branch shown before; unknown (refused) until the list names it.
+  // The branch of what is shown: a viewed version or revision's own branch, else the open one.
   const shownBranch = viewing
     ? viewing.target.kind === 'version'
       ? versionBranch(viewing.target.version)
       : (viewing.target.branch ?? branch)
     : branch;
-  useLayoutEffect(() => {
-    exportSourceStore.setState({ source: branchExportSource(shownBranch, branches) });
-  }, [shownBranch, branches]);
-  useLayoutEffect(() => () => exportSourceStore.setState({ source: null }), []);
   // Scripts on an agent's branch (T8.3b): the reviewer is asked again, whatever was allowed for
   // the document (scripts/policy.ts). The open branch and the shown one count; a branch other than
   // main whose record is not read yet counts as an agent's until it is (fail closed).
@@ -1617,16 +1610,10 @@ export function App({
               assemblies: modelAssemblies,
               sources: modelSources,
             });
-            return plan.ok
-              ? exportAssembly(exchanger, format, plan.value, {
-                  tolerance,
-                  source: currentExportSource(),
-                })
-              : plan;
+            return plan.ok ? exportAssembly(exchanger, format, plan.value, { tolerance }) : plan;
           })
         : import('./io/actions').then(({ exportBodies }) =>
             exportBodies(exchanger, format, {
-              source: currentExportSource(),
               tolerance,
               documentName: document.name,
               // STEP builds the framing members' B-reps in the part they belong to, and a
@@ -1815,7 +1802,6 @@ export function App({
         .then(({ exportConfigurations }) =>
           shared.exclusive((regen) =>
             exportConfigurations(exchanger, regen, {
-              source: currentExportSource(),
               document: doc,
               partId,
               format,

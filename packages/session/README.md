@@ -192,7 +192,7 @@ never reach the agent: it reads a general message with the system error code (`s
 
 ## Main is never written
 
-Three checks in this package (ADR 0016 decision 13; the MCP server and the sync server add theirs):
+Three checks in this package (ADR 0016 decision 12; the MCP server and the sync server add theirs):
 a session's branch is made by `branchFromRevision` with agent provenance or, on resume, must carry
 it; `resume` refuses Main by name, and a branch without agent provenance; and the one function
 that saves (`#saveTo`) refuses Main whatever its caller checked. The library calls a session
@@ -262,7 +262,7 @@ URL (`SessionManagerOptions.workerUrl`); the hooks are never loaded then.
 ## Reads
 
 All plain JSON; text from the document (names, labels, notes) travels only in data fields
-(ADR 0016 decision 14). Lengths mm, areas mm², volumes mm³, masses g, angles degrees.
+(ADR 0016 decision 13). Lengths mm, areas mm², volumes mm³, masses g, angles degrees.
 
 - `tree()`: parts with features (kind, status, error counts), bodies (name, material, solids)
   and member sets; variables with values; assemblies with instances and mates and their solved
@@ -288,7 +288,7 @@ All plain JSON; text from the document (names, labels, notes) travels only in da
   given poses per instance.
 - `quantities()`: the cut list and its hardware (`documentCutList`), and a construction takeoff
   per part studio with framing members (`takeoffModel`, `constructionTakeoff`), as data, with
-  `reviewed: false` (ADR 0016 decision 12: quantities as data are not gated, but on an agent
+  `reviewed: false` (ADR 0016 decision 11: on an agent
   branch nothing is reviewed).
 - `errors()`: every regen error and warning of the head (features, instances, mates, reference
   imports), errors first.

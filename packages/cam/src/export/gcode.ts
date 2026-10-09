@@ -38,13 +38,7 @@ import {
   type WcsCorner,
 } from '../index';
 import type { CamOperation, CamSetup } from '@manufakture/core';
-import {
-  assertExportAllowed,
-  exportAllowed,
-  fileName,
-  type ExportSource,
-  type FabricationFile,
-} from '@manufakture/io';
+import { fileName, type FabricationFile } from '@manufakture/io';
 import { MM_PER_INCH } from '@manufakture/units';
 import { zipSync, strToU8, type Zippable } from 'fflate';
 import { machineDial, type MachineProfile } from '../library/index';
@@ -230,11 +224,6 @@ export interface ExportInput {
   readonly machine: MachineProfile;
   /** Date text for the files and the sheet; the caller formats it. */
   readonly date: string;
-  /**
-   * The branch the document comes from. G-code is a fabrication file: an agent's branch that is
-   * not approved is refused (`exportAllowed`, ADR 0016 decision 12).
-   */
-  readonly source: ExportSource | null;
 }
 
 const CORNER_WORDS: Readonly<Record<WcsCorner, string>> = {
@@ -331,12 +320,8 @@ const spanOf = (box: Box3): Vec3 => [
  * The export of a generation: every operation of the document's setup that is not suppressed
  * must have a generated toolpath (`exportReadiness` says which do not). Refuses, with every
  * reason, when an operation has an error, the job cannot be assembled, or the post refuses.
- * Refuses with the gate's reason alone, before posting anything, when `input.source` is an
- * agent's unreviewed branch or is not known.
  */
 export function buildExport(input: ExportInput): ExportBuild {
-  const gate = exportAllowed(input.source);
-  if (!gate.ok) return { ok: false, reasons: [gate.message] };
   const { data, settings, machine } = input;
   const setup: Setup = data.setup;
   const suppressed = new Set(input.operations.filter((o) => o.suppressed).map((o) => o.id));
@@ -585,15 +570,9 @@ export const HTML_MIME = 'text/html';
 
 /**
  * What Save writes: the one G-code file, or for a job written as several files a zip of them
- * with the setup sheet, so they arrive together and in order. Throws `ExportRefusedError` when
- * `source` is an agent's unreviewed branch or is not known (`buildExport` refuses first).
+ * with the setup sheet, so they arrive together and in order.
  */
-export function exportFiles(
-  plan: ExportPlan,
-  sheetHtml: string,
-  source: ExportSource | null,
-): FabricationFile[] {
-  assertExportAllowed(source);
+export function exportFiles(plan: ExportPlan, sheetHtml: string): FabricationFile[] {
   if (plan.files.length === 1) {
     const f = plan.files[0]!;
     return [{ name: f.name, bytes: strToU8(f.text), type: GCODE_MIME }];

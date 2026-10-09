@@ -438,17 +438,7 @@ The library never reads a bundle's content: the review view checks it (apps/web 
 `library-agent.test.ts` covers comments and bundle storage; `packages/session`'s
 `bundles.test.ts` checks that what `BackendBundleStore` writes the library reads, and back.
 
-### The export gate
-
-`exportAllowed(branch)` (M8 plan T8.3c, ADR 0016 decision 12) says whether a fabrication file may
-be made from a branch, given its record as `listBranches` lists it: yes for main and a person's
-branch, and for an agent's branch in review state `approved`; no for an agent's branch in any other
-state, with `UNREVIEWED_EXPORT` ("This is an agent's unreviewed branch. Review it in History
-first."), and no (`UNKNOWN_EXPORT_SOURCE`) for a missing or malformed record. The rule itself is
-`@manufakture/io`'s `exportAllowed`, since every package with a fabrication entry point depends on
-`@manufakture/io` and this one does too; the library exports the same function typed for `Branch`.
-Every entry point takes the branch as a required `source` and refuses before it does any work (io
-README, "Fabrication exports").
+### Review references
 
 A version of main can record the review its work came from: `createVersion(id, { name, review })`
 with a `ReviewReference` (`branch`, the agent branch's id; `sessionId`; `clientName`;
@@ -461,8 +451,8 @@ imported `.mfk` keeps none (a review recorded in another library is not this one
 release reading the list drops the field, as it drops any field it does not know.
 `reviewOf(id, revision?)` reads it back: the latest version of main at or before `revision`
 (default: main's head) that records a review, with its reference, or null when main's work there
-is a person's. `library-export-gate.test.ts` covers the gate over every review state and a merge,
-the reference round trip and its checks, and the revision check.
+is a person's. `library-review.test.ts` covers the reference round trip through a merge, its
+checks, and the revision check.
 
 `library-agent.test.ts` covers provenance round trips, old lists, damaged provenance, review
 states (and that a new branch starts `open`), client names with format characters or lone

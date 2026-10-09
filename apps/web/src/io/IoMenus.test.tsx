@@ -1,13 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { chosenBodies, type ExportableBody } from './chosenBodies';
 import { ExportMenu, ExportProgress } from './IoMenus';
-import { exportSourceStore } from './exportSource';
-import { agentSource } from './exportGate.test-fixture';
-import { UNREVIEWED_EXPORT } from '@manufakture/io';
-
-// Main is open: the export gate (T8.3c) lets these exports through unless a test says otherwise.
-beforeEach(() => exportSourceStore.setState({ source: { id: 'main' } }));
 
 const body = (id: string, hidden = false): ExportableBody => ({ id, name: id, hidden });
 
@@ -38,25 +32,6 @@ describe('the Export menu', () => {
     open();
     fireEvent.click(item('step'));
     expect(onExport).toHaveBeenCalledWith('step', 'normal', ['only']);
-  });
-
-  it('offers no STL, 3MF or STEP on an agent’s unreviewed branch, and says why', () => {
-    exportSourceStore.setState({ source: agentSource('changes-requested') });
-    const onExport = vi.fn();
-    const onIfc = vi.fn();
-    render(
-      <ExportMenu bodies={[body('only')]} onExport={onExport} onIfc={onIfc} onLaser={vi.fn()} />,
-    );
-    open();
-    expect(screen.getByTestId('export-gate-refusal').textContent).toBe(UNREVIEWED_EXPORT);
-    for (const format of ['stl', 'stl-each', '3mf', 'step']) {
-      expect(item(format)).toHaveProperty('disabled', true);
-      fireEvent.click(item(format));
-    }
-    expect(onExport).not.toHaveBeenCalled();
-    // IFC is not a fabrication file; the laser dialog says why itself.
-    expect(item('ifc')).toHaveProperty('disabled', false);
-    expect(item('laser')).toHaveProperty('disabled', false);
   });
 
   it('opens the laser and plasma export in a part studio, never in an assembly', () => {

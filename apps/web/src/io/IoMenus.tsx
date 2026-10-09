@@ -12,8 +12,6 @@ import { EXPORT_TOLERANCES, type ExportTolerancePreset } from '@manufakture/io';
 import { useEffect, useRef, useState } from 'react';
 import type { ExportFormat } from './actions';
 import { chosenBodies, type ExportableBody } from './chosenBodies';
-import { ExportGateNotice } from './ExportGateNotice';
-import { useExportRefusal } from './exportSource';
 
 export type { ExportableBody };
 
@@ -104,9 +102,6 @@ export function ExportMenu({
   // A scene without regen lists no bodies and exports what the kernel holds.
   const nothing = bodies.length > 0 && ids.length === 0;
   const all = every && configurations > 0 && onExportAll !== undefined;
-  // The export gate (T8.3c): STL, 3MF and STEP are fabrication files, not written from an agent's
-  // unreviewed branch. IFC and published views are not, and stay offered.
-  const gated = useExportRefusal();
   const root = useRef<HTMLDivElement>(null);
   // A press anywhere else closes the menu.
   useEffect(() => {
@@ -150,7 +145,7 @@ export function ExportMenu({
               role="menuitem"
               title={all && format === 'stl-each' ? 'One file per configuration: use STL' : title}
               data-testid={`export-${format}`}
-              disabled={nothing || gated !== null || (all && format === 'stl-each')}
+              disabled={nothing || (all && format === 'stl-each')}
               onClick={() => {
                 setOpen(false);
                 if (all && format !== 'stl-each' && onExportAll)
@@ -221,7 +216,6 @@ export function ExportMenu({
               Include source
             </label>
           )}
-          <ExportGateNotice refusal={gated} />
           {nothing && (
             <p className="io-note" role="note" data-testid="export-nothing">
               {several

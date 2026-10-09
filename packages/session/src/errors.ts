@@ -9,7 +9,7 @@ import type { CoreError } from '@manufakture/core';
 export type SessionErrorCode =
   /** The session was closed (by the caller, or after it was idle). */
   | 'closed'
-  /** A write would land on Main, which an agent never writes (ADR 0016 decision 13). */
+  /** A write would land on Main, which an agent never writes (ADR 0016 decision 12). */
   | 'main-refused'
   /** The branch is not an agent branch, or not in a review state the call allows. */
   | 'branch-state'

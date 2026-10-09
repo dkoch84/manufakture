@@ -5,13 +5,7 @@
 // write the same bytes for the same input.
 
 import type { DisplayUnits, ManufaktureDocument } from '@manufakture/core';
-import {
-  FABRICATION_MIME,
-  assertExportAllowed,
-  documentFileName,
-  type ExportSource,
-  type FabricationFile,
-} from '@manufakture/io';
+import { FABRICATION_MIME, documentFileName, type FabricationFile } from '@manufakture/io';
 import { documentStock } from '@manufakture/stock';
 import { documentConstruction } from '../data';
 import { displayRows, subtotalLines, takeoffCsv, type TakeoffDisplayRow } from '../takeoff/display';
@@ -30,17 +24,11 @@ export interface TakeoffFileOptions {
   subtotals: readonly { kind: string; name: string; text: string }[];
   /** What the takeoff could not count (`TakeoffModel.notes`), for the PDF. */
   notes: readonly string[];
-  /**
-   * The branch the document comes from. Takeoffs are fabrication files: an agent's branch that
-   * is not approved is refused (`exportAllowed`, ADR 0016 decision 12).
-   */
-  source: ExportSource | null;
 }
 
 /**
  * One file of a takeoff. Throws a RangeError for input the PDF writer cannot write (the app's
- * panel catches it and reports it), and an `ExportRefusedError` when `options.source` is an
- * agent's unreviewed branch or is not known.
+ * panel catches it and reports it).
  */
 export function takeoffFile(
   kind: TakeoffFileKind,
@@ -48,7 +36,6 @@ export function takeoffFile(
   rows: readonly TakeoffDisplayRow[],
   options: TakeoffFileOptions,
 ): FabricationFile {
-  assertExportAllowed(options?.source);
   const { documentName, units, subtotals } = options;
   const common = { title: documentName, units, subtotals };
   if (kind === 'pdf') {
@@ -70,15 +57,12 @@ export function takeoffFile(
  * sessions): its feature results and member sets (regen's `PartResult.features` and `members` from
  * a completed regen), with the document's construction settings and stock prices, written as the
  * panel writes it. As in the panel, settings that cannot be read count as none. Throws when the
- * takeoff cannot be counted, and an `ExportRefusedError`, before counting, when `source` (the
- * branch the document comes from) is an agent's unreviewed branch or is not known.
+ * takeoff cannot be counted.
  */
 export function exportTakeoff(
   kind: TakeoffFileKind,
   sources: Omit<TakeoffSources, 'settings' | 'stock'>,
-  source: ExportSource | null,
 ): FabricationFile {
-  assertExportAllowed(source);
   const doc: ManufaktureDocument = sources.document;
   const data = documentConstruction(doc);
   const settings = data.ok ? data.data?.settings : undefined;
@@ -90,6 +74,5 @@ export function exportTakeoff(
     units: doc.units,
     subtotals: subtotalLines(takeoff, doc, sources.partId, settings),
     notes: model.notes,
-    source,
   });
 }

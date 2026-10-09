@@ -1,6 +1,6 @@
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { DISCLAIMER_SHORT } from '@manufakture/domain-construction';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createModelStore } from '../../model/model';
 import { createDocumentStore } from '../../state/document';
 import { createSelectionStore } from '../../state/selection';
@@ -13,12 +13,6 @@ import {
   shedFeatures,
   shedSets,
 } from '@manufakture/domain-construction/fixtures/shed-model';
-import { exportSourceStore } from '../../io/exportSource';
-import { REFUSED_REVIEWS, agentSource } from '../../io/exportGate.test-fixture';
-import { UNREVIEWED_EXPORT } from '@manufakture/io';
-
-// Main is open: the export gate (T8.3c) lets these exports through unless a test says otherwise.
-beforeEach(() => exportSourceStore.setState({ source: { id: 'main' } }));
 
 function setup() {
   const documents = createDocumentStore(shedDocument({ prices: true }));
@@ -127,20 +121,6 @@ describe('the takeoff panel', () => {
     fireEvent.click(screen.getByTestId('takeoff-settings-save'));
     expect(screen.getByTestId('takeoff-settings').textContent).toMatch(/3": Must be at least/);
     expect(t.documents.getState().document).toBe(before);
-  });
-
-  it('writes no file from an agent’s unreviewed branch, and says why', () => {
-    for (const review of REFUSED_REVIEWS) {
-      exportSourceStore.setState({ source: agentSource(review) });
-      const t = setup();
-      expect(screen.getByTestId('export-gate-refusal').textContent).toBe(UNREVIEWED_EXPORT);
-      for (const id of ['takeoff-csv', 'takeoff-pdf']) {
-        expect(screen.getByTestId(id)).toHaveProperty('disabled', true);
-        fireEvent.click(screen.getByTestId(id));
-      }
-      expect(t.download).not.toHaveBeenCalled();
-      cleanup();
-    }
   });
 
   it('saves the CSV and the PDF, each with the disclaimer', () => {

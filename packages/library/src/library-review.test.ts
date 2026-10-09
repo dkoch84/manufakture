@@ -1,20 +1,16 @@
-// The export gate by branch record (M8 plan T8.3c, ADR 0016 decision 12): `exportAllowed` over
-// branches as `listBranches` lists them through every review state and a merge into main; the
-// review reference a version of main records and `reviewOf` reads back; and the check that a
-// revision named for a version is one of the branch's before a file name is made of it.
+// The review reference a version of main records when an agent's approved branch is merged
+// (ADR 0016 decision 11), which `reviewOf` reads back; and the check that a revision named for a
+// version is one of the branch's before a file name is made of it.
 
 import { applyCommand, type ManufaktureDocument } from '@manufakture/core';
 import { describe, expect, it } from 'vitest';
-import { UNREVIEWED_EXPORT, exportAllowed } from './export-gate';
 import {
   DocumentLibrary,
   MAIN_BRANCH,
   MAX_REVIEW_LABEL,
-  REVIEW_STATES,
   mergeLabel,
   parseReviewReference,
   parseVersions,
-  type Branch,
   type BranchProvenance,
   type LogEntry,
   type ReviewReference,
@@ -85,11 +81,6 @@ async function withAgentBranch() {
   return { backend, lib, branch };
 }
 
-async function listed(lib: DocumentLibrary, id: string): Promise<Branch> {
-  const branches = value(await lib.listBranches('doc-1'));
-  return branches.find((b) => b.id === id)!;
-}
-
 const reference = (over: Partial<ReviewReference> = {}): ReviewReference => ({
   branch: 'branch-1',
   sessionId: 'session-1',
@@ -99,40 +90,8 @@ const reference = (over: Partial<ReviewReference> = {}): ReviewReference => ({
   ...over,
 });
 
-describe('exportAllowed by branch record', () => {
-  it('allows main and a person’s branch', async () => {
-    const { lib } = await withAgentBranch();
-    const v = value(await lib.createVersion('doc-1', { name: 'Mine' }));
-    const mine = value(await lib.createBranch('doc-1', v.id, 'Mine'));
-    expect(exportAllowed(await listed(lib, MAIN_BRANCH))).toEqual({ ok: true });
-    expect(exportAllowed(await listed(lib, mine.id))).toEqual({ ok: true });
-  });
-
-  it('refuses an agent’s branch in every review state but approved, as the library lists it', async () => {
-    const { lib, branch } = await withAgentBranch();
-    expect(exportAllowed(await listed(lib, branch.id))).toEqual({
-      ok: false,
-      message: UNREVIEWED_EXPORT,
-    });
-    for (const review of REVIEW_STATES) {
-      value(await lib.setBranchReview('doc-1', branch.id, review));
-      const record = await listed(lib, branch.id);
-      expect(record.provenance?.review).toBe(review);
-      expect(exportAllowed(record)).toEqual(
-        review === 'approved' ? { ok: true } : { ok: false, message: UNREVIEWED_EXPORT },
-      );
-    }
-    expect(UNREVIEWED_EXPORT).toBe(
-      "This is an agent's unreviewed branch. Review it in History first.",
-    );
-  });
-
-  it('fails closed on a branch it cannot find or read', () => {
-    expect(exportAllowed(undefined).ok).toBe(false);
-    expect(exportAllowed(null).ok).toBe(false);
-  });
-
-  it('allows main once the approved branch is merged, and records which review it came from', async () => {
+describe('review references', () => {
+  it('record which review a merge into main came from', async () => {
     const { backend, lib, branch } = await withAgentBranch();
     value(await lib.setBranchReview('doc-1', branch.id, 'approved'));
     const merged = value(await lib.mergeBranch('doc-1', branch.id, MAIN_BRANCH));
@@ -143,7 +102,6 @@ describe('exportAllowed by branch record', () => {
     );
     expect(version).toMatchObject({ revision: 3, review: ref });
     expect(version).not.toHaveProperty('branch');
-    expect(exportAllowed(await listed(lib, MAIN_BRANCH))).toEqual({ ok: true });
 
     // Read back by another library: the version, and what main's head came from.
     const other = library(backend);
@@ -158,9 +116,7 @@ describe('exportAllowed by branch record', () => {
     await lib.save(partDocument('doc-1', 'R4'), [renameEntry('R4')]);
     expect(value(await other.reviewOf('doc-1'))?.version.id).toBe(version.id);
   });
-});
 
-describe('review references', () => {
   it('are refused on a version of another branch, and when they do not check', async () => {
     const { lib, branch } = await withAgentBranch();
     expect(

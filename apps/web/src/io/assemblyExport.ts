@@ -13,11 +13,9 @@ import {
   NotWatertightError,
   deflectionOf,
   export3mfAssembly,
-  exportAllowed,
   exportStlAssembly,
   fileName,
   type ExportAssembly,
-  type ExportSource,
   type ExportTolerancePreset,
 } from '@manufakture/io';
 import type { StepAssemblyLayout } from '@manufakture/kernel';
@@ -172,18 +170,14 @@ function partNames(
  * Write the assembly a plan describes: STEP (an assembly of placed parts), 3MF (an object per
  * body, a build item per instance) or STL (every instance placed, merged into one file). One
  * file per body is not offered for an assembly. Meshes are tessellated once per part body, at
- * `tolerance`, and must be watertight. Refused, before the kernel is asked for anything, when
- * `options.source` (the branch the document comes from) is an agent's unreviewed branch or is not
- * known: STL, 3MF and STEP are fabrication files (`exportAllowed`, T8.3c).
+ * `tolerance`, and must be watertight.
  */
 export async function exportAssembly(
   exchanger: Exchanger,
   format: ExportFormat,
   plan: AssemblyExportPlan,
-  options: { source: ExportSource | null; tolerance?: ExportTolerancePreset },
+  options: { tolerance?: ExportTolerancePreset } = {},
 ): Promise<ActionResult<ExportedFile[]>> {
-  const gate = exportAllowed(options?.source);
-  if (!gate.ok) return gate;
   if (format === 'stl-each') {
     return { ok: false, message: 'An assembly is exported as one file: choose STL, 3MF or STEP.' };
   }

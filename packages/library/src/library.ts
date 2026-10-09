@@ -350,14 +350,14 @@ export interface Version {
   serverRev?: number;
   /**
    * Set on a version of main that records an approved review (T8.3b writes it when it merges an
-   * agent's branch): which review the work came from, so a later export can say so. Only main's
-   * versions carry one; an imported `.mfk` keeps none.
+   * agent's branch): which review the work came from. Only main's versions carry one; an imported
+   * `.mfk` keeps none.
    */
   review?: ReviewReference;
 }
 
 /**
- * The review a merge into main came from (ADR 0016 decisions 11 and 12): the agent branch, its
+ * The review a merge into main came from (ADR 0016 decision 11): the agent branch, its
  * session and client as its provenance names them, the bundle the reviewer approved (stored in
  * that branch's directory as `review-<bundleRevision>.json`) and the merge's label.
  */
@@ -2128,7 +2128,7 @@ export class DocumentLibrary {
    * The review main's work at `revision` (default: main's head) last came from: the latest
    * version of main at or before that revision that records one (`Version.review`, written when
    * an agent's branch is approved and merged), with that record. Null when none does: the work is
-   * a person's. What an export from main says about where its work came from.
+   * a person's.
    */
   reviewOf(
     id: string,

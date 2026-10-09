@@ -66,23 +66,6 @@ Turning a part on the bed to make it fit is not considered: the export moves cop
 3. The part appears at its real size, named after the body in the object list. Bambu Studio may say the file was not made by Bambu Studio and load the geometry only; that is expected, since manufakture writes geometry, not slicer settings.
 4. Slice. The slicer should report no errors about the mesh (no "open edges" or "non-manifold" warnings, and no automatic repair).
 
-### Exports from an agent's branch
-
-An agent working on a document through manufakture (Claude Code, Grok or another client) works on a branch of its own, and nothing it does counts until a person has reviewed it in History. Until then, no file you could make something from is written from its branch. On an agent's branch that is open, submitted for review, sent back with changes requested, or rejected, these are refused:
-
-- G-code and the setup sheet (Manufacture, **Export G-code**);
-- laser and plasma files (DXF, SVG);
-- the cut list and bill of materials (CSV) and the shop PDF;
-- the takeoff (CSV, PDF);
-- drawings and construction drawing sets (PDF, DXF, SVG), and printing a sheet;
-- STL, 3MF and STEP, from the header's **Export**, an assembly, every configuration, and the Print workspace's **Export for printing** and **Open in slicer**.
-
-Each of these says why instead of saving: "This is an agent's unreviewed branch. Review it in History first." Its buttons stay off. You can still look at everything on the branch (the model, toolpaths, the cut list and takeoff tables, drawings on screen); only the files are held back.
-
-Once the branch is **approved** in History, its work exports like any other. Main and your own branches are never refused. IFC and published views (`.mfkview`) are not fabrication files and are not refused; neither is a `.mfk` copy of the document.
-
-When an approved agent branch is merged into Main, the merge can record which review it came from (the agent's session and client, the bundle that was approved and the merge's label) on a version of Main, so you can tell later where the work in an export came from.
-
 ## Import
 
 Click **Import** and pick a file:

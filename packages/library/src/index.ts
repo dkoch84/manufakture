@@ -5,7 +5,6 @@
 
 export * from './backend';
 export * from './blobs';
-export * from './export-gate';
 export * from './library';
 export * from './limits';
 export * from './locks';

@@ -31,8 +31,6 @@ import {
 } from '../construction/drawings/ConstructionDrawingPanels';
 import { canMakeSet, constructionSetCommand, type SetOptions } from '../construction/drawings/set';
 import { constructionSource } from '../construction/drawings/strings';
-import { ExportGateNotice } from '../io/ExportGateNotice';
-import { currentExportSource, useExportRefusal } from '../io/exportSource';
 import { downloadBytes } from '../io/files';
 import type { DocumentStoreApi } from '../state/document';
 import { testHooksEnabled } from '../testHooks';
@@ -186,9 +184,6 @@ export function DrawingWorkspace({
   const [zoom, setZoom] = useState(1);
   const [drag, setDrag] = useState<{ owner: Owner; from: Vec2; to: Vec2 } | null>(null);
   const [busy, setBusy] = useState(false);
-  // The export gate (T8.3c): drawings are fabrication files, not written or printed from an
-  // agent's unreviewed branch.
-  const gated = useExportRefusal();
   // The New construction set form (M6 T6.4b), and why it last refused.
   const [settingUp, setSettingUp] = useState(false);
   const [setError, setSetError] = useState<string | null>(null);
@@ -489,7 +484,6 @@ export function DrawingWorkspace({
         format,
         results.map((r) => r?.display ?? null),
         { drawing: drawing.name, sheets: sheets.map((s) => s.name) },
-        currentExportSource(),
       );
       if (!file.ok) {
         setMessage({ error: true, text: file.message });
@@ -695,7 +689,7 @@ export function DrawingWorkspace({
             <button
               key={f}
               type="button"
-              disabled={!drawer || busy || !sheet || gated !== null}
+              disabled={!drawer || busy || !sheet}
               data-testid={`drawing-export-${f}`}
               title={
                 f === 'pdf'
@@ -709,11 +703,11 @@ export function DrawingWorkspace({
           ))}
           <button
             type="button"
-            disabled={!display || gated !== null}
+            disabled={!display}
             data-testid="drawing-print"
             title="Print this sheet at its paper size"
             onClick={() => {
-              if (!display || gated !== null) return;
+              if (!display) return;
               const r = printSheet(display, drawing.name);
               if (!r.ok) setMessage({ error: true, text: r.message ?? 'Printing failed.' });
             }}
@@ -731,7 +725,6 @@ export function DrawingWorkspace({
           </span>
         )}
       </div>
-      <ExportGateNotice refusal={gated} />
       <div className="drawing-body">
         <div className="drawing-canvas" data-testid="drawing-canvas">
           {!drawer ? (

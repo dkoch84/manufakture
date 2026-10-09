@@ -51,7 +51,6 @@ import {
 } from './export.test-fixture';
 import { POST_IDS, postName } from '../commands';
 import { exportReadiness } from './readiness';
-import { UNKNOWN_EXPORT_SOURCE, UNREVIEWED_EXPORT } from '@manufakture/io';
 
 const machine = findMachine('shapeoko-5-pro-4x4')!;
 const settings = (over: Partial<ExportSettings> = {}): ExportSettings => ({
@@ -71,7 +70,6 @@ function plan(over: Partial<ExportSettings> = {}, data = exportGeneration()): Ex
     setupName: 'Top',
     machine,
     date: '2026-10-02',
-    source: { id: 'main' },
   });
   if (!r.ok) throw new Error(r.reasons.join('\n'));
   return r.plan;
@@ -299,7 +297,6 @@ describe('buildExport', () => {
       setupName: 'Top',
       machine,
       date: '2026-10-02',
-      source: { id: 'main' },
     });
     expect(r).toEqual({
       ok: false,
@@ -317,7 +314,6 @@ describe('buildExport', () => {
       setupName: 'Top',
       machine,
       date: '2026-10-02',
-      source: { id: 'main' },
     });
     expect(ok.ok && ok.plan.toolChanges.map((c) => c.operation)).toEqual(['Clean']);
   });
@@ -340,7 +336,6 @@ describe('buildExport', () => {
       setupName: 'Top',
       machine,
       date: '2026-10-02',
-      source: { id: 'main' },
     });
     expect(r).toEqual({
       ok: false,
@@ -359,7 +354,6 @@ describe('buildExport', () => {
       setupName: 'Top',
       machine,
       date: '2026-10-02',
-      source: { id: 'main' },
     });
     expect(r).toEqual({ ok: false, reasons: ['Holes: its geometry did not resolve.'] });
   });
@@ -373,7 +367,6 @@ describe('buildExport', () => {
       setupName: 'Top',
       machine,
       date: '2026-10-02',
-      source: { id: 'main' },
     });
     if (!r.ok) throw new Error(r.reasons.join('\n'));
     expect(r.plan.operations.map((o) => o.name)).toEqual(['Outline', 'Clean']);
@@ -401,7 +394,6 @@ describe('buildExport', () => {
         setupName: 'Top',
         machine,
         date: '2026-10-02',
-        source: { id: 'main' },
       });
     const r = run(doc);
     if (!r.ok) throw new Error(r.reasons.join('\n'));
@@ -426,7 +418,6 @@ describe('buildExport', () => {
       setupName: 'Top',
       machine,
       date: '2026-10-02',
-      source: { id: 'main' },
     });
     expect(r.ok).toBe(false);
     expect(!r.ok && r.reasons[0]).toMatch(/^The Carbide Motion post refuses the job: /);
@@ -439,7 +430,6 @@ describe('buildExport', () => {
       setupName: 'Top',
       machine,
       date: '2026-10-02',
-      source: { id: 'main' },
     });
     expect(grbl.ok).toBe(true);
   });
@@ -462,7 +452,7 @@ describe('groupingWarnings', () => {
 describe('exportFiles', () => {
   it('saves one G-code file as it is', () => {
     const p = plan();
-    const files = exportFiles(p, setupSheetHtml(p), { id: 'main' });
+    const files = exportFiles(p, setupSheetHtml(p));
     expect(files).toHaveLength(1);
     expect(files[0]!.name).toBe('Sign - Top.nc');
     expect(files[0]!.type).toBe('text/plain');
@@ -472,7 +462,7 @@ describe('exportFiles', () => {
   it('saves files per tool as one zip, with the setup sheet', () => {
     const p = plan({ post: 'grbl', multiTool: 'files' });
     const sheet = setupSheetHtml(p);
-    const files = exportFiles(p, sheet, { id: 'main' });
+    const files = exportFiles(p, sheet);
     expect(files.map((f) => [f.name, f.type])).toEqual([['Sign - Top.zip', 'application/zip']]);
     const entries = unzipSync(files[0]!.bytes);
     expect(Object.keys(entries)).toEqual([
@@ -481,44 +471,6 @@ describe('exportFiles', () => {
     ]);
     expect(strFromU8(entries[p.files[1]!.name]!)).toBe(p.files[1]!.text);
     expect(strFromU8(entries['Sign - Top - setup sheet.html']!)).toBe(sheet);
-  });
-});
-
-describe('the export gate (G-code)', () => {
-  const agent = (review: string) => ({
-    id: 'b-1',
-    provenance: { origin: 'agent' as const, review },
-  });
-  const build = (source: Parameters<typeof buildExport>[0]['source']) =>
-    buildExport({
-      data: exportGeneration(),
-      operations: DOC_OPERATIONS,
-      settings: settings(),
-      jobName: 'Sign',
-      setupName: 'Top',
-      machine,
-      date: '2026-10-02',
-      source,
-    });
-
-  it('refuses the job and the files from an agent’s open, submitted, changes-requested or rejected branch', () => {
-    const p = plan();
-    for (const review of ['open', 'submitted', 'changes-requested', 'rejected']) {
-      expect(build(agent(review))).toEqual({ ok: false, reasons: [UNREVIEWED_EXPORT] });
-      expect(() => exportFiles(p, setupSheetHtml(p), agent(review))).toThrow(UNREVIEWED_EXPORT);
-    }
-    expect(build(undefined as never)).toEqual({ ok: false, reasons: [UNKNOWN_EXPORT_SOURCE] });
-    expect(() => exportFiles(p, setupSheetHtml(p), undefined as never)).toThrow(
-      UNKNOWN_EXPORT_SOURCE,
-    );
-  });
-
-  it('writes it from main, a person’s branch and an approved agent branch', () => {
-    const p = plan();
-    for (const source of [{ id: 'main' }, { id: 'b-2' }, agent('approved')]) {
-      expect(build(source).ok).toBe(true);
-      expect(exportFiles(p, setupSheetHtml(p), source)).toHaveLength(1);
-    }
   });
 });
 

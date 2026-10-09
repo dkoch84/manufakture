@@ -4,7 +4,7 @@
 // still export. Kept free of React, like the other actions.
 
 import { configured, findPart, type ConfigRow, type ManufaktureDocument } from '@manufakture/core';
-import { exportAllowed, type ExportSource, type ExportTolerancePreset } from '@manufakture/io';
+import type { ExportTolerancePreset } from '@manufakture/io';
 import { partBodies } from '../model/bodies';
 import type { RegenView } from '../model/model';
 import { exportBodies, type ExportFormat, type ExportedFile } from './actions';
@@ -16,8 +16,6 @@ export type ConfigurationExportFormat = Exclude<ExportFormat, 'stl-each'>;
 export interface ConfigurationExportRequest {
   /** The document as stored; each row is applied to it with `configured`. */
   document: ManufaktureDocument;
-  /** The branch it comes from: the export gate refuses an agent's unreviewed branch (T8.3c). */
-  source: ExportSource | null;
   /** The rows to export, in order (default: every row of the table). */
   rowIds?: readonly string[];
   /** The part studio whose bodies are written. */
@@ -57,18 +55,13 @@ const RETRIES = 1;
  * Export each row of `request.document`'s configuration table as one file named
  * `<document>-<row>.<ext>`: the row is applied, regenerated with `regen`, and the part's bodies
  * that are not skipped are written like a normal export. `regen` must build documents that are
- * not the open one (see `shareRegenerator`). Refused before any regen when `request.source` is
- * an agent's unreviewed branch or is not known.
+ * not the open one (see `shareRegenerator`).
  */
 export async function exportConfigurations(
   exchanger: Exchanger,
   regen: (document: ManufaktureDocument, stored?: ManufaktureDocument) => Promise<RegenView | null>,
   request: ConfigurationExportRequest,
 ): Promise<ConfigurationExportResult> {
-  const gate = exportAllowed(request.source);
-  if (!gate.ok) {
-    return { files: [], failures: [], cancelled: false, ok: false, message: gate.message };
-  }
   const { document, partId, format, skip = new Set<string>(), signal } = request;
   const table = document.configurations?.rows ?? [];
   const rows = request.rowIds
@@ -130,7 +123,6 @@ export async function exportConfigurations(
       continue;
     }
     const r = await exportBodies(exchanger, format, {
-      source: request.source,
       ...(request.tolerance ? { tolerance: request.tolerance } : {}),
       bodies,
       fileBase: configurationFileBase(document.name, row.name),

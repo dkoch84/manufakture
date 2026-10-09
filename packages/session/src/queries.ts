@@ -1,6 +1,6 @@
 // The read queries behind the MCP read tools (ADR 0016 decision 6): `tree`, `object`,
 // `findGeometry`, `measure`, `quantities` and `errors`. Everything returned is plain JSON data:
-// text from the document (names, notes, labels) travels only inside data fields (decision 14).
+// text from the document (names, notes, labels) travels only inside data fields (decision 13).
 // Lengths are millimetres, areas mm², volumes mm³, masses grams, angles degrees.
 
 import {
@@ -740,7 +740,7 @@ function placeBox(box: { min: Vec3; max: Vec3 }, t?: Placement): { min: Vec3; ma
 // Quantities
 
 export interface Quantities {
-  /** Always false on an agent's branch: nothing here was reviewed (ADR 0016 decision 12). */
+  /** Always false on an agent's branch: nothing here was reviewed (ADR 0016 decision 11). */
   reviewed: false;
   /** The woodworking cut list (boards and wood shapes), or null when it could not be made. */
   cutList: CutList | null;

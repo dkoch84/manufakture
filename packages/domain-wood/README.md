@@ -313,19 +313,17 @@ fabrication format is in the io README, "Fabrication exports"):
 ```ts
 import { exportCutList } from '@manufakture/domain-wood/files';
 
-const file = await exportCutList(
-  'pdf',
-  { document, parts: result.parts, assemblies: result.assemblies },
-  { source: branch }, // the export gate: the branch the document comes from
-);
+const file = await exportCutList('pdf', {
+  document,
+  parts: result.parts,
+  assemblies: result.assemblies,
+});
 // { name: 'Bookshelf cut list.pdf', bytes, type: 'application/pdf' }; 'list' and 'bom' are CSV
 ```
 
-`exportCutList(kind, sources, { source, sizingErrors?, signal? })` builds the list, lays it out
-in-process and writes the file; `cutListFile(kind, list, options)` writes one from a list and
-layouts already known (the app's panel, whose layouts come from its nesting worker). Both throw an
-`ExportRefusedError` when `source` is an agent's unreviewed branch or is not known (the export
-gate, io README "Fabrication exports"), before anything is laid out. `cutListPdf` is the shop PDF:
+`exportCutList(kind, sources, { sizingErrors?, signal? })` builds the list, lays it out in-process
+and writes the file; `cutListFile(kind, list, options)` writes one from a list and layouts already
+known (the app's panel, whose layouts come from its nesting worker). `cutListPdf` is the shop PDF:
 the list, hardware and totals, a page per sheet drawn to scale with its cut order, and the lumber
 plans, Letter for inch and foot documents, A4 otherwise.
 

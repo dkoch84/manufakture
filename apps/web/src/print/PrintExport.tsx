@@ -11,8 +11,6 @@ import { useEffect, useRef, useState } from 'react';
 import { useStore } from 'zustand';
 import type { ExportedFile } from '../io/actions';
 import type { Exchanger } from '../io/exchange';
-import { ExportGateNotice } from '../io/ExportGateNotice';
-import { currentExportSource, useExportRefusal } from '../io/exportSource';
 import { downloadBytes } from '../io/files';
 import type { SharedRegenerator } from '../model/model';
 import { viewSettingsStore, type ViewSettingsStore } from '../state/viewSettings';
@@ -92,8 +90,6 @@ export function PrintExport({
   useEffect(() => () => running.current?.abort(), []);
   const slicer = useStore(settings, (s) => s.slicer);
   const dismissed = useStore(settings, (s) => s.slicerHelpDismissed);
-  // The export gate (T8.3c): nothing is exported from an agent's unreviewed branch.
-  const gated = useExportRefusal();
 
   if (!resolved) return null;
   const setup = resolved.setup;
@@ -102,8 +98,7 @@ export function PrintExport({
   const empty = resolved.items.length === 0;
   const refusal = pending || empty ? null : exportRefusal(resolved, doc.units);
   const rows = doc.configurations?.rows ?? [];
-  const off =
-    disabled || busy || !exporter || pending || empty || refusal !== null || gated !== null;
+  const off = disabled || busy || !exporter || pending || empty || refusal !== null;
   const defaultName = fileName(printFileBase(doc.name, setup.name), '3mf');
 
   const run = async (as: PrintExportFormat, open: boolean) => {
@@ -117,7 +112,6 @@ export function PrintExport({
     setStatus(null);
     try {
       const r = await exportPrintSetup(exporter.exchanger, resolved, {
-        source: currentExportSource(),
         documentName: doc.name,
         units: doc.units,
         format: as,
@@ -158,7 +152,6 @@ export function PrintExport({
     try {
       const r = await exclusive((regen) =>
         exportPrintConfigurations(exporter.exchanger, regen, {
-          source: currentExportSource(),
           document: doc,
           setupId: setup.id,
           format,
@@ -230,7 +223,6 @@ export function PrintExport({
           Waiting for the model.
         </p>
       )}
-      <ExportGateNotice refusal={gated} />
       {refusal && (
         <p className="field-error" role="alert" data-testid="print-export-refusal">
           {refusal}
@@ -260,7 +252,7 @@ export function PrintExport({
           <button
             type="button"
             data-testid="print-export-configurations"
-            disabled={disabled || busy || !exporter || modelPending || gated !== null}
+            disabled={disabled || busy || !exporter || modelPending}
             title={`One file per configuration: ${fileName(printFileBase(doc.name, setup.name, rows[0]!.name), format === '3mf' ? '3mf' : 'stl')}, ...`}
             onClick={() => void runAll()}
           >

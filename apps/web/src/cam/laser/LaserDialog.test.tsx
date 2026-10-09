@@ -6,7 +6,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import type { Loop2, PlanarLoops } from '@manufakture/cam';
 import type { ManufaktureDocument } from '@manufakture/core';
 import type { CamGeometryResult, CamSourceResult } from '@manufakture/regen';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDocumentStore } from '../../state/document';
 import { createSelectionStore, geometryRef, type GeometryRef } from '../../state/selection';
 import { setupDocument } from '../cam.test-fixture';
@@ -15,12 +15,6 @@ import type { FacePick } from '../picking';
 import { middleAlong, type LaserBody } from '@manufakture/cam/export';
 import { LaserDialog } from './LaserDialog';
 import { svgLoops } from './readBack.test-fixture';
-import { exportSourceStore } from '../../io/exportSource';
-import { REFUSED_REVIEWS, agentSource } from '../../io/exportGate.test-fixture';
-import { UNREVIEWED_EXPORT } from '@manufakture/io';
-
-// Main is open: the export gate (T8.3c) lets these exports through unless a test says otherwise.
-beforeEach(() => exportSourceStore.setState({ source: { id: 'main' } }));
 
 afterEach(cleanup);
 
@@ -172,21 +166,6 @@ describe('the laser and plasma export dialog', () => {
     expect(loop!.layer).toBe('cut');
     // 20 x 4 grown by 0.1 all round, with round outside corners: + P d + pi d^2.
     expect(loop!.area).toBeCloseTo(80 + 48 * 0.1 + Math.PI * 0.01, 2);
-  });
-
-  it('exports nothing from an agent’s unreviewed branch, and says why', async () => {
-    for (const review of REFUSED_REVIEWS) {
-      exportSourceStore.setState({ source: agentSource(review) });
-      const { onSave, pick } = mount();
-      expect(screen.getByTestId('export-gate-refusal').textContent).toBe(UNREVIEWED_EXPORT);
-      await pick('extrude#1:top');
-      // The outline still reads, to see; the file is not written.
-      await waitFor(() => expect(outline().dataset.state).toBe('ok'));
-      expect(exportButton().disabled).toBe(true);
-      fireEvent.submit(exportButton().form!);
-      expect(onSave).not.toHaveBeenCalled();
-      cleanup();
-    }
   });
 
   it('checks the kerf as it is typed, with a visible message', async () => {

@@ -5,7 +5,7 @@
 // decision 1). See README.md, "Exports".
 
 import type { ManufaktureDocument } from '@manufakture/core';
-import { exportAllowed, type ExportSource, type FabricationFile } from '@manufakture/io';
+import type { FabricationFile } from '@manufakture/io';
 import { findMachine } from '../library/index';
 import { createCamWorkerApi, type CamWorkerApi } from '../worker/api';
 import { registerBuiltinOperations } from '../worker/builtin';
@@ -122,9 +122,7 @@ export type GcodeExport =
  * writes them. `options.settings` changes the defaults (the setup's post, millimetres, the post's
  * first multi-tool mode, the user's order); `options.date` is the text the files and the sheet
  * carry. Refuses, with every reason, when the setup or its machine is unknown, the model changed
- * meanwhile, an operation's geometry or toolpath has an error, or the post refuses the job; and
- * first of all, before generating anything, when `options.source` (the branch `document` comes
- * from) is an agent's unreviewed branch or is not known (`exportAllowed`).
+ * meanwhile, an operation's geometry or toolpath has an error, or the post refuses the job.
  */
 export async function exportGcode(
   document: ManufaktureDocument,
@@ -132,13 +130,10 @@ export async function exportGcode(
   geometer: CamGeometer,
   options: {
     date: string;
-    source: ExportSource | null;
     settings?: (defaults: ExportSettings) => ExportSettings;
     api?: CamWorkerApi;
   },
 ): Promise<GcodeExport> {
-  const gate = exportAllowed(options?.source);
-  if (!gate.ok) return { ok: false, reasons: [gate.message] };
   const setup = document.cam?.setups.find((s) => s.id === setupId);
   if (setup === undefined) return { ok: false, reasons: [`There is no CAM setup ${setupId}.`] };
   const machine = findMachine(setup.machine);
@@ -179,16 +174,10 @@ export async function exportGcode(
     setupName: setup.name,
     machine,
     date: options.date,
-    source: options.source,
   });
   if (!result.ok) return { ok: false, reasons: [...result.reasons] };
   const sheet = setupSheetHtml(result.plan);
-  return {
-    ok: true,
-    files: exportFiles(result.plan, sheet, options.source),
-    sheet,
-    plan: result.plan,
-  };
+  return { ok: true, files: exportFiles(result.plan, sheet), sheet, plan: result.plan };
 }
 
 export type LaserExport =
@@ -199,25 +188,15 @@ export type LaserExport =
  * The laser or plasma file of `sources` (faces, sketch regions and sections of `scope`'s part,
  * each on a named layer; the entry point for headless sessions): their loops through `services`
  * (regen's CAM stage and the kernel's `section` op), compensated for `kerf` mm and written as the
- * app's laser dialog writes them. The warnings are the outline's and the file's. Refused before
- * any geometry is asked for when `options.source` (the branch `document` comes from) is an
- * agent's unreviewed branch or is not known (`exportAllowed`).
+ * app's laser dialog writes them. The warnings are the outline's and the file's.
  */
 export async function exportLaser(
   document: ManufaktureDocument,
   scope: LaserScope,
   sources: readonly LaserSource[],
   services: LaserServices,
-  options: {
-    format: LaserFormat;
-    kerf: number;
-    baseName: string;
-    title?: string;
-    source: ExportSource | null;
-  },
+  options: { format: LaserFormat; kerf: number; baseName: string; title?: string },
 ): Promise<LaserExport> {
-  const gate = exportAllowed(options?.source);
-  if (!gate.ok) return { ok: false, messages: [gate.message] };
   const outline = await extractLoops(document, scope, sources, services);
   if (!outline.ok) return { ok: false, messages: outline.messages };
   const r = laserFile(outline.layers, options);
