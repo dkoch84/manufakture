@@ -3,7 +3,8 @@
 // `3' 4-1/2"` and a metric one `1016.00 mm`. Areas, volumes and masses have
 // no formatter there yet; they follow the length unit here: square and cubic
 // millimetres, centimetres, metres, inches or feet (inches for the
-// fractional formats), and grams or ounces and pounds.
+// fractional formats), grams or ounces and pounds, and mass moments of inertia
+// in g·mm² or kg·m², or lb·in².
 
 import type { DisplayUnits } from '@manufakture/core';
 import { angleFormat, lengthFormat } from '@manufakture/core/display';
@@ -106,4 +107,17 @@ export function formatDensityIn(kgPerM3: number, units: DisplayUnits): string {
     return `${formatNumber(kgPerM3 / (GRAMS_PER_POUND / 1000 / (MM_PER_FOOT / 1000) ** 3), 1)} lb/ft³`;
   }
   return `${formatNumber(kgPerM3, 0)} kg/m³`;
+}
+
+/** g·mm² in one lb·in². */
+export const GMM2_PER_LB_IN2 = GRAMS_PER_POUND * MM_PER_INCH * MM_PER_INCH;
+
+/** A mass moment of inertia given in g·mm²: g·mm² or kg·m² for metric documents, lb·in² for imperial ones. */
+export function formatInertiaIn(gmm2: number, units: DisplayUnits): string {
+  if (!Number.isFinite(gmm2)) return String(gmm2);
+  if (isImperial(units)) return `${formatNumber(gmm2 / GMM2_PER_LB_IN2, 4)} lb·in²`;
+  // 1 kg·m² = 1e9 g·mm²; past 1e6 g·mm² (0.001 kg·m²) kilograms and metres read better.
+  return Math.abs(gmm2) < 1e6
+    ? `${formatNumber(gmm2, 1)} g·mm²`
+    : `${formatNumber(gmm2 / 1e9, 6)} kg·m²`;
 }

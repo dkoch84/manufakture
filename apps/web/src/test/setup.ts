@@ -42,6 +42,14 @@ for (const name of ['localStorage', 'sessionStorage'] as const) {
   }
 }
 
+/**
+ * jsdom has no layout, so it leaves out `Element.prototype.scrollTo`, which
+ * every browser has. Install a no-op so components that scroll a panel run.
+ */
+if (typeof Element !== 'undefined' && typeof Element.prototype.scrollTo !== 'function') {
+  Element.prototype.scrollTo = function scrollTo(): void {};
+}
+
 afterEach(() => {
   cleanup();
   localStorage.clear();

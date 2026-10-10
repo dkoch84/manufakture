@@ -426,12 +426,17 @@ All plain JSON; text from the document (names, labels, notes) travels only in da
   1-based index (this regen only), and hints: surface or curve type, area or length, centroid or
   midpoint, normal, axis, radius, and for a cylinder `axisOrigin` (a point on the axis) and `hole`
   (true for a hole, false for a boss), from the kernel's topology.
-- `measure(query)`, exact from the B-rep: `body` (volume, area, centre of mass, bounding box, and
-  mass from the body's material, else the part's); `targets` on one body (each item, and between
+- `measure(query)`, exact from the B-rep: `body` (volume, area, centre of mass, bounding box, the
+  volume inertia in mm⁵, and mass from the body's material, else the part's, with its `inertia`
+  in g·mm²: the tensor about the centre of mass, the principal moments and axes, and `aboutAxis`
+  for an optional `axis` in part coordinates); `targets` on one body (each item, and between
   two the distance and the angle); `clearance` between bodies at optional placements (overlap
   volume per pair from the kernel's `interference`, and for pairs apart the gap between their
   placed bounding boxes, a lower bound); `interference` of an assembly at its solved poses or at
-  given poses per instance.
+  given poses per instance; `mass` of an assembly (T9.1c): every part instance's bodies weighed
+  with their materials at the instance's solved pose and added up (total mass, centre of mass,
+  `inertia` as for a body with `aboutAxis` in assembly coordinates, each instance's mass and
+  centre, and the bodies `omitted`: no material, no volume, not built, or a sub-assembly).
 - `quantities()`: the cut list and its hardware (`documentCutList`), and a construction takeoff
   per part studio with framing members (`takeoffModel`, `constructionTakeoff`), as data, with
   `reviewed: false` (ADR 0016 decision 6: on an agent

@@ -178,6 +178,8 @@ test('bodies: two new bodies, named, coloured, weighed, hidden, exported, then f
   await expect(measure.getByTestId('measure-body2').getByRole('heading')).toHaveText('Lid');
   // 2000 mm3 of PETG at 1270 kg/m3.
   await expect(measure.getByTestId('measure-value-body2.mass')).toHaveText('2.54 g');
+  // Its moment of inertia about Z through its centre of mass: m (20² + 10²) / 12 (T9.1c).
+  await expect(measure.getByTestId('measure-value-body2.izz')).toHaveText('105.8 g·mm²');
   await expect(measure.getByTestId('measure-value-body1.mass')).toHaveCount(0);
 
   // Hidden, the body is neither drawn nor picked; hiding is no undo step.

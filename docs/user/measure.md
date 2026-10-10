@@ -47,6 +47,15 @@ Pick a **Material** under Body to get the body's **Mass**. The choice is saved i
 | Aluminium 6061       | 2700 kg/m³      | ASM data sheet for 6061-T6                               |
 | Steel (carbon)       | 7850 kg/m³      | EN 1993-1-1 (Eurocode 3)                                 |
 
+With a material, Body also shows the **moments of inertia**, which say how hard the body is to spin (what a motor needs to speed up a spool or a flywheel):
+
+- **Ixx**, **Iyy** and **Izz**: about axes along X, Y and Z through the centre of mass.
+- **Principal moments**: the smallest, middle and largest moment, about the body's principal axes. Hover over them to see those axes as directions. A shaft's smallest principal moment is the one about its own axis.
+
+Metric documents show g·mm² for small values and kg·m² from 0.001 kg·m² up (1 kg·m² is 1,000,000,000 g·mm²); imperial ones lb·in². They use the same typical density as the mass, so they are estimates too. A mesh body (an imported STL) shows no moments of inertia.
+
+For the moment about any other axis (a hinge, a mate's axis), or for a whole assembly at its poses, ask an [agent](agents.md): its `measure` tool gives the full inertia tensor, the moment about an axis it names, and the total of an assembly's instances.
+
 These are typical values, so the mass is an estimate. Real stock varies: wood with the species, the board and how dry it is; panels by maker; filament by brand. A 3D print weighs less than its solid volume suggests, because of its infill. Hover over the mass to see the density and source it used. Metric documents show grams or kilograms, imperial ones ounces or pounds.
 
 ## Copying values

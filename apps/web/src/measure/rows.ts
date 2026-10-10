@@ -4,11 +4,13 @@
 
 import type { DisplayUnits, Material } from '@manufakture/core';
 import { massGrams } from '@manufakture/core';
+import { bodyMassProperties, principalInertia } from '@manufakture/kernel/inertia';
 import type { MeasureItemReport } from '@manufakture/kernel';
 import {
   formatAngleIn,
   formatAreaIn,
   formatDensityIn,
+  formatInertiaIn,
   formatLengthIn,
   formatMassIn,
   formatPointIn,
@@ -100,7 +102,10 @@ export interface BodyContext {
   title?: string;
 }
 
-/** Volume, area, mass (with a material), centre of mass and bounding box of a body. */
+/**
+ * Volume, area, mass (with a material), centre of mass, moments of inertia (with a material) and
+ * bounding box of a body.
+ */
 export function bodyRows(
   b: BodyMeasurement,
   units: DisplayUnits,
@@ -135,6 +140,9 @@ export function bodyRows(
       value: formatPointIn(b.centerOfMass, units),
     });
   }
+  if (m && b.volume !== null && b.centerOfMass && b.volumeInertia) {
+    rows.push(...inertiaRows(b.volume, b.centerOfMass, b.volumeInertia, m, units, key));
+  }
   if (b.boundingBox) {
     const { min, max } = b.boundingBox;
     rows.push(
@@ -148,6 +156,37 @@ export function bodyRows(
       { key: `${key}.max`, label: 'Box max', value: formatPointIn(max, units) },
     );
   }
+  return rows;
+}
+
+const AXIS_DIGITS = 3;
+
+/** The moments of inertia about the centre of mass along X, Y and Z, and the principal ones. */
+function inertiaRows(
+  volume: number,
+  centerOfMass: readonly [number, number, number],
+  volumeInertia: NonNullable<BodyMeasurement['volumeInertia']>,
+  m: Material,
+  units: DisplayUnits,
+  key: string,
+): MeasureRow[] {
+  const I = bodyMassProperties(volume, centerOfMass, volumeInertia, m.density).inertia;
+  const principal = principalInertia(I);
+  const estimate = `Estimate at the ${m.name} density; about the centre of mass`;
+  const rows: MeasureRow[] = (['x', 'y', 'z'] as const).map((axis, i) => ({
+    key: `${key}.i${axis}${axis}`,
+    label: `I${axis}${axis}`,
+    value: formatInertiaIn(I[i]![i]!, units),
+    note: `${estimate}, about an axis along ${axis.toUpperCase()}`,
+  }));
+  const direction = (v: readonly number[]) =>
+    `(${v.map((c) => (Math.abs(c) < 0.5 * 10 ** -AXIS_DIGITS ? 0 : c).toFixed(AXIS_DIGITS)).join(', ')})`;
+  rows.push({
+    key: `${key}.principal`,
+    label: 'Principal moments',
+    value: principal.moments.map((v) => formatInertiaIn(v, units)).join(', '),
+    note: `${estimate}, about the principal axes ${principal.axes.map(direction).join(', ')}`,
+  });
   return rows;
 }
 

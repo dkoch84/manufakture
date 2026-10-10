@@ -2,12 +2,14 @@ import type { DisplayUnits } from '@manufakture/core';
 import * as display from '@manufakture/core/display';
 import { describe, expect, it } from 'vitest';
 import {
+  GMM2_PER_LB_IN2,
   GRAMS_PER_OUNCE,
   GRAMS_PER_POUND,
   angleFormat,
   formatAngleIn,
   formatAreaIn,
   formatDensityIn,
+  formatInertiaIn,
   formatLengthIn,
   formatMassIn,
   formatPointIn,
@@ -110,5 +112,20 @@ describe('masses and densities', () => {
     // 1 lb/ft3 is 16.0185 kg/m3.
     expect(formatDensityIn(16.0184634, FT_IN)).toBe('1.0 lb/ft³');
     expect(formatDensityIn(7850, IN_FRACTION)).toBe('490.1 lb/ft³');
+  });
+});
+
+describe('moments of inertia', () => {
+  it('gives g·mm², then kg·m², in metric documents', () => {
+    expect(formatInertiaIn(92.5, MM)).toBe('92.5 g·mm²');
+    expect(formatInertiaIn(1.5e9, CM)).toBe('1.500000 kg·m²');
+    expect(formatInertiaIn(4.9866e6, M)).toBe('0.004987 kg·m²');
+  });
+
+  it('gives lb·in² in imperial documents', () => {
+    // 1 lb·in² is 453.59237 g times 645.16 mm².
+    expect(GMM2_PER_LB_IN2).toBeCloseTo(292_639.7, 1);
+    expect(formatInertiaIn(GMM2_PER_LB_IN2 * 2, FT_IN)).toBe('2.0000 lb·in²');
+    expect(formatInertiaIn(Number.NaN, MM)).toBe('NaN');
   });
 });

@@ -400,7 +400,7 @@
               "name": "Extrude 1",
               "change": "changed",
               "base": {
-                "volume": 14729.778835,
+                "volume": 14729.7788349,
                 "area": 6566.15262378,
                 "mass": null,
                 "material": null,
@@ -413,7 +413,7 @@
                 "material": null,
                 "boundingBox": { "min": [0, -15, 0], "max": [50, 15, 44] }
               },
-              "delta": { "volume": -26.9911788, "area": 70.86725877, "mass": null }
+              "delta": { "volume": -26.9911787, "area": 70.86725877, "mass": null }
             }
           ],
           "omitted": 0

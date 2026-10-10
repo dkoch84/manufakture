@@ -1,7 +1,8 @@
 // The read queries behind the MCP read tools (ADR 0016 decision 6): `tree`, `object`,
 // `findGeometry`, `measure`, `quantities` and `errors`. Everything returned is plain JSON data:
 // text from the document (names, notes, labels) travels only inside data fields (decision 13).
-// Lengths are millimetres, areas mm², volumes mm³, masses grams, angles degrees.
+// Lengths are millimetres, areas mm², volumes mm³, masses grams, angles degrees, mass moments of
+// inertia g·mm² (1 kg·m² = 1e9 g·mm²).
 
 import {
   findMaterial,
@@ -23,8 +24,16 @@ import {
   type MemberListing,
 } from '@manufakture/domain-construction';
 import { documentCutList, type CutList } from '@manufakture/domain-wood';
+import {
+  bodyMassProperties,
+  combineMassProperties,
+  inertiaReport,
+  placeMassProperties,
+  type MassProperties,
+} from '@manufakture/kernel/inertia';
 import type {
   BodyMeasure,
+  MeasureAxis,
   MeasureOpTarget,
   MeasureResult,
   MeasureTarget,
@@ -655,8 +664,17 @@ export interface BodyRef {
 }
 
 export type MeasureQuery =
-  /** Volume, area, centre of mass, bounding box, and mass when the body has a material. */
-  | { kind: 'body'; partId: string; bodyId: string }
+  /**
+   * Volume, area, centre of mass, bounding box, and with a material the mass and the inertia
+   * (g·mm²): about the centre of mass, principal, and about `axis` when given (part coordinates).
+   */
+  | { kind: 'body'; partId: string; bodyId: string; axis?: MeasureAxis }
+  /**
+   * An assembly's mass properties at its solved poses: total mass, centre of mass and inertia
+   * (g·mm², about the centre of mass, principal, and about `axis` in assembly coordinates), each
+   * instance's share, and the bodies left out (no material, no volume).
+   */
+  | { kind: 'mass'; assemblyId: string; axis?: MeasureAxis }
   /**
    * Faces, edges or vertices of a body; with exactly two, their distance and angle. A target with
    * a `bodyId` is on that body of the same part instead: two faces of two bodies.
@@ -722,15 +740,41 @@ function liveBody(ctx: QueryContext, ref: unknown): LiveBody | { error: string }
   return { error: 'There is no such body in the last regen.' };
 }
 
-function withMass(body: BodyMeasure, material: string | undefined) {
+function withMass(body: BodyMeasure, material: string | undefined, axis?: MeasureAxis) {
   const m = material === undefined ? undefined : findMaterial(material);
+  const props = m === undefined ? null : massProperties(body, m.density);
   return {
     ...body,
     ...(m === undefined
-      ? { mass: null }
-      : { mass: massGrams(body.volume, m.density), material: m.id, density: m.density }),
+      ? { mass: null, inertia: null }
+      : {
+          mass: massGrams(body.volume, m.density),
+          material: m.id,
+          density: m.density,
+          inertia: props === null ? null : inertiaReport(props, axis),
+        }),
   };
 }
+
+/** A body's mass properties at a density (kg/m³); null without a volume. */
+function massProperties(body: BodyMeasure, density: number): MassProperties | null {
+  if (body.centerOfMass === null || body.volumeInertia === null || !(body.volume > 0)) return null;
+  return bodyMassProperties(body.volume, body.centerOfMass, body.volumeInertia, density);
+}
+
+/** An axis given to a measure query: a point and a non-zero direction. */
+function checkAxis(a: unknown): a is MeasureAxis {
+  const x = a as MeasureAxis | undefined;
+  return (
+    typeof x === 'object' &&
+    x !== null &&
+    isVec3(x.origin) &&
+    isVec3(x.direction) &&
+    Math.hypot(...x.direction) > 0
+  );
+}
+
+const AXIS_ERROR = 'axis is { origin: [x, y, z], direction: [x, y, z] }, the direction not zero.';
 
 /** One kernel op on the session's engine; its value, or why not. */
 async function runOne<T>(
@@ -766,9 +810,12 @@ export async function measure(ctx: QueryContext, query: unknown): Promise<Sessio
         isString(q.partId) && isString(q.bodyId)
           ? ctx.references.find(q.partId, q.bodyId)
           : undefined;
+      if (q.axis !== undefined && !checkAxis(q.axis)) {
+        return sessionError('invalid-input', AXIS_ERROR);
+      }
       if (reference?.mesh !== undefined) {
         const m = reference.mesh;
-        return done({ ...m, mass: null, mesh: true });
+        return done({ ...m, mass: null, inertia: null, mesh: true });
       }
       const body = liveBody(ctx, q);
       if ('error' in body) return sessionError('not-found', body.error);
@@ -779,7 +826,7 @@ export async function measure(ctx: QueryContext, query: unknown): Promise<Sessio
         body: true,
       });
       if (!r.ok || r.value.body === null) return r.ok ? sessionError('kernel', 'No body.') : r;
-      return done(withMass(r.value.body, body.material));
+      return done(withMass(r.value.body, body.material, q.axis as MeasureAxis | undefined));
     }
     case 'targets': {
       const body = liveBody(ctx, q);
@@ -859,9 +906,103 @@ export async function measure(ctx: QueryContext, query: unknown): Promise<Sessio
     }
     case 'interference':
       return assemblyInterference(ctx, q);
+    case 'mass':
+      return assemblyMass(ctx, q);
     default:
-      return sessionError('invalid-input', 'kind is body, targets, clearance or interference.');
+      return sessionError(
+        'invalid-input',
+        'kind is body, targets, clearance, interference or mass.',
+      );
   }
+}
+
+/** A body an assembly's mass leaves out, and why. */
+interface MassOmission {
+  instanceId: string;
+  bodyId: string | null;
+  reason: 'no-material' | 'no-volume' | 'not-a-part' | 'not-built';
+  message: string;
+}
+
+/**
+ * An assembly's mass properties at its solved poses: each instance's bodies weighed with their
+ * materials, moved to the instance's pose (the tensor rotated, then shifted to the common centre
+ * of mass by the parallel axis theorem) and added up.
+ */
+async function assemblyMass(
+  ctx: QueryContext,
+  q: Record<string, unknown>,
+): Promise<SessionResult<unknown>> {
+  if (!isString(q.assemblyId)) return sessionError('invalid-input', 'assemblyId is a string.');
+  if (q.axis !== undefined && !checkAxis(q.axis)) return sessionError('invalid-input', AXIS_ERROR);
+  const axis = q.axis as MeasureAxis | undefined;
+  const solved = ctx.model.last?.assemblies.find((a) => a.assemblyId === q.assemblyId);
+  if (solved === undefined) return sessionError('not-found', 'There is no such assembly.');
+  const measured = new Map<ShapeId, BodyMeasure | string>();
+  const omitted: MassOmission[] = [];
+  const instances: { instanceId: string; mass: number; centerOfMass: Vec3 }[] = [];
+  const all: MassProperties[] = [];
+  for (const inst of solved.instances) {
+    if (inst.status === 'suppressed') continue;
+    const omit = (bodyId: string | null, reason: MassOmission['reason'], message: string) =>
+      omitted.push({ instanceId: inst.instanceId, bodyId, reason, message });
+    if (!('part' in inst.source)) {
+      omit(null, 'not-a-part', 'Only instances of parts are weighed.');
+      continue;
+    }
+    if (inst.status !== 'ok') {
+      omit(null, 'not-built', 'The instance did not build; see get_errors.');
+      continue;
+    }
+    const partId = inst.source.part;
+    const own: MassProperties[] = [];
+    for (const bodyId of inst.bodies) {
+      const body = liveBody(ctx, { partId, bodyId });
+      if ('error' in body) {
+        omit(bodyId, 'not-built', body.error);
+        continue;
+      }
+      const m = body.material === undefined ? undefined : findMaterial(body.material);
+      if (m === undefined) {
+        omit(bodyId, 'no-material', 'The body has no material, so no mass.');
+        continue;
+      }
+      let b = measured.get(body.shape);
+      if (b === undefined) {
+        const r = await runOne<MeasureResult>(ctx, {
+          op: 'measure',
+          shape: body.shape,
+          targets: [],
+          body: true,
+        });
+        b = r.ok ? (r.value.body ?? 'No body.') : 'The kernel could not measure the body.';
+        measured.set(body.shape, b);
+      }
+      const props = typeof b === 'string' ? null : massProperties(b, m.density);
+      if (props === null) {
+        omit(bodyId, 'no-volume', typeof b === 'string' ? b : 'The body encloses no volume.');
+        continue;
+      }
+      own.push(placeMassProperties(props, inst.transform));
+    }
+    const total = combineMassProperties(own);
+    if (total === null) continue;
+    instances.push({
+      instanceId: inst.instanceId,
+      mass: total.mass,
+      centerOfMass: total.centerOfMass,
+    });
+    all.push(total);
+  }
+  const total = combineMassProperties(all);
+  return done({
+    assemblyId: q.assemblyId,
+    mass: total?.mass ?? 0,
+    centerOfMass: total?.centerOfMass ?? null,
+    inertia: total === null ? null : inertiaReport(total, axis),
+    instances,
+    omitted,
+  });
 }
 
 /** An instance an interference check places: its bodies' shapes and its solved pose. */

@@ -188,8 +188,23 @@ const Target = z.union([
   }),
 ]);
 
+const InertiaAxis = z
+  .strictObject({
+    origin: Vec3.describe('A point on the axis, mm.'),
+    direction: Vec3.describe('Its direction, not zero; any length.'),
+  })
+  .describe(
+    'Also the moment of inertia about this axis (aboutAxis, g·mm²), by the parallel axis theorem: a shaft or a mate axis.',
+  );
+
 export const MeasureQuery = z.discriminatedUnion('kind', [
-  z.strictObject({ kind: z.literal('body'), ...BodyRef }),
+  z.strictObject({
+    kind: z.literal('body'),
+    ...BodyRef,
+    axis: InertiaAxis.optional().describe(
+      "Also the body's moment of inertia about this axis, in the part's coordinates (aboutAxis, g·mm²; needs a material).",
+    ),
+  }),
   z.strictObject({
     kind: z.literal('targets'),
     ...BodyRef,
@@ -227,6 +242,13 @@ export const MeasureQuery = z.discriminatedUnion('kind', [
       .describe(
         "Sweep a slider's distance (mm) or a revolute's angle (degrees) from `from` to `to`, the other mates kept, checking each step for pairs with an instance that moves: the first colliding value and its pairs, every colliding value, the values checked (at most 101, within one kernel call's time budget), pairs of instances that never move checked once as staticPairs, and warnings for values past the limits. Not with poses; refused while the assembly's solve conflicts or is invalid.",
       ),
+  }),
+  z.strictObject({
+    kind: z.literal('mass'),
+    assemblyId: ModelId,
+    axis: InertiaAxis.optional().describe(
+      "Also the assembly's moment of inertia about this axis, in assembly coordinates (aboutAxis, g·mm²).",
+    ),
   }),
 ]);
 

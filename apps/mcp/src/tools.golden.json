@@ -1,5 +1,5 @@
 {
-  "surfaceVersion": "1.11.0",
+  "surfaceVersion": "1.12.0",
   "tools": [
     {
       "name": "apply",
@@ -2414,6 +2414,59 @@
               {
                 "additionalProperties": false,
                 "properties": {
+                  "axis": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "direction": {
+                        "additionalItems": false,
+                        "items": [
+                          {
+                            "maximum": 1000000000,
+                            "minimum": -1000000000,
+                            "type": "number"
+                          },
+                          {
+                            "maximum": 1000000000,
+                            "minimum": -1000000000,
+                            "type": "number"
+                          },
+                          {
+                            "maximum": 1000000000,
+                            "minimum": -1000000000,
+                            "type": "number"
+                          }
+                        ],
+                        "maxItems": 3,
+                        "minItems": 3,
+                        "type": "array"
+                      },
+                      "origin": {
+                        "additionalItems": false,
+                        "items": [
+                          {
+                            "maximum": 1000000000,
+                            "minimum": -1000000000,
+                            "type": "number"
+                          },
+                          {
+                            "maximum": 1000000000,
+                            "minimum": -1000000000,
+                            "type": "number"
+                          },
+                          {
+                            "maximum": 1000000000,
+                            "minimum": -1000000000,
+                            "type": "number"
+                          }
+                        ],
+                        "maxItems": 3,
+                        "minItems": 3,
+                        "type": "array"
+                      }
+                    },
+                    "required": ["origin", "direction"],
+                    "type": "object"
+                  },
                   "bodyId": {
                     "maxLength": 512,
                     "minLength": 1,
@@ -2687,6 +2740,76 @@
                     },
                     "required": ["mateId"],
                     "type": "object"
+                  }
+                },
+                "required": ["kind", "assemblyId"],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "assemblyId": {
+                    "maxLength": 512,
+                    "minLength": 1,
+                    "pattern": "^[\\x21-\\x7e]+$",
+                    "type": "string"
+                  },
+                  "axis": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "direction": {
+                        "additionalItems": false,
+                        "items": [
+                          {
+                            "maximum": 1000000000,
+                            "minimum": -1000000000,
+                            "type": "number"
+                          },
+                          {
+                            "maximum": 1000000000,
+                            "minimum": -1000000000,
+                            "type": "number"
+                          },
+                          {
+                            "maximum": 1000000000,
+                            "minimum": -1000000000,
+                            "type": "number"
+                          }
+                        ],
+                        "maxItems": 3,
+                        "minItems": 3,
+                        "type": "array"
+                      },
+                      "origin": {
+                        "additionalItems": false,
+                        "items": [
+                          {
+                            "maximum": 1000000000,
+                            "minimum": -1000000000,
+                            "type": "number"
+                          },
+                          {
+                            "maximum": 1000000000,
+                            "minimum": -1000000000,
+                            "type": "number"
+                          },
+                          {
+                            "maximum": 1000000000,
+                            "minimum": -1000000000,
+                            "type": "number"
+                          }
+                        ],
+                        "maxItems": 3,
+                        "minItems": 3,
+                        "type": "array"
+                      }
+                    },
+                    "required": ["origin", "direction"],
+                    "type": "object"
+                  },
+                  "kind": {
+                    "const": "mass",
+                    "type": "string"
                   }
                 },
                 "required": ["kind", "assemblyId"],

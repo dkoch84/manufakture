@@ -14,6 +14,7 @@
 
 import type { TopoDS_Edge, TopoDS_Face, TopoDS_Shape, TopoDS_Vertex } from 'libcascade/single/init';
 import { KernelError } from './errors';
+import type { Matrix3 } from './inertia';
 import type { NamedShape } from './kernel';
 import { answersTo, edgeAliases, vertexName } from './naming';
 import { cross, dot, mapShapes, norm, toVec3, type IndexedMap, type Oc, type Scope } from './occt';
@@ -36,7 +37,7 @@ export type BodyMeasureTarget = MeasureTarget & { body?: MeasureBody };
 export type ShapeMeasureTarget = MeasureTarget & { shape?: ShapeId };
 
 export interface MeasureOptions {
-  /** Also measure the whole body: volume, area, centre of mass, bounding box. */
+  /** Also measure the whole body: volume, area, centre of mass, volume inertia, bounding box. */
   body?: boolean;
 }
 
@@ -125,6 +126,12 @@ export interface BodyMeasure {
   area: number;
   /** Of the volume, at uniform density. Null for a body without volume. */
   centerOfMass: Vec3 | null;
+  /**
+   * mm⁵: the inertia tensor of the volume at unit density, about `centerOfMass`, along X, Y and Z
+   * (moments on the diagonal, minus the products of inertia off it). Times a density it is a mass
+   * moment of inertia (`bodyMassProperties` in ./inertia). Null for a body without volume.
+   */
+  volumeInertia: Matrix3 | null;
   /** Tight (not enlarged by tolerances); null for an empty shape. */
   boundingBox: BoundingBox | null;
 }
@@ -491,9 +498,19 @@ function angle(a: MeasuredItem, b: MeasuredItem): AngleMeasure | null {
   return { value: Math.PI / 2 - acute(line, plane), between: 'line-plane', normals: null };
 }
 
+/** The relative error the volume integration aims for. */
+const VOLUME_EPS = 1e-7;
+
+function matrix(m: { Value(row: number, col: number): number }): Matrix3 {
+  const row = (r: number): Vec3 => [m.Value(r, 1), m.Value(r, 2), m.Value(r, 3)];
+  return [row(1), row(2), row(3)];
+}
+
 function bodyMeasure(oc: Oc, s: Scope, shape: TopoDS_Shape): BodyMeasure {
   const vprops = s.own(new oc.GProp_GProps());
-  oc.BRepGProp.VolumeProperties(shape, vprops, false, false, false);
+  // The adaptive overload with a tolerance: the plain one can be far off on long B-spline faces
+  // (a helical thread groove), and the inertia needs the second moments right too.
+  oc.BRepGProp.VolumeProperties(shape, vprops, VOLUME_EPS, false, false);
   const sprops = s.own(new oc.GProp_GProps());
   oc.BRepGProp.SurfaceProperties(shape, sprops, false, false);
   const box = s.own(new oc.Bnd_Box());
@@ -504,6 +521,7 @@ function bodyMeasure(oc: Oc, s: Scope, shape: TopoDS_Shape): BodyMeasure {
     volume,
     area: sprops.Mass(),
     centerOfMass: Math.abs(volume) > 0 ? toVec3(s.own(vprops.CentreOfMass())) : null,
+    volumeInertia: Math.abs(volume) > 0 ? matrix(s.own(vprops.MatrixOfInertia())) : null,
     boundingBox: box.IsVoid()
       ? null
       : { min: toVec3(s.own(box.CornerMin())), max: toVec3(s.own(box.CornerMax())) },

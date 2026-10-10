@@ -152,6 +152,17 @@ describe('a session on the bracket', () => {
       }),
     );
     expect(body.measurement.volume).toBeGreaterThan(10_000);
+    // The volume inertia always; the mass inertia (g·mm²) only with a material, which this part
+    // has none of (the session tests weigh one).
+    const axis = { origin: [0, 0, 0], direction: [0, 0, 1] };
+    const turning = value(
+      await h.call('measure', {
+        sessionId,
+        query: { kind: 'body', partId: 'part#1', bodyId: 'extrude#1', axis },
+      }),
+    );
+    expect(turning.measurement.volumeInertia).toHaveLength(3);
+    expect(turning.measurement).toMatchObject({ mass: null, inertia: null });
     const named = found.hits.filter((x: { name: string | null }) => x.name !== null);
     const between = value(
       await h.call('measure', {

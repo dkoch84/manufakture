@@ -47,6 +47,27 @@ describe('measure sections', () => {
     expect(mass.note).toContain(plywood.source);
   });
 
+  it('adds the moments of inertia for a material: about X, Y and Z, and the principal ones', () => {
+    const plywood = findMaterial('plywood')!;
+    const sections = measureSections(twoFaces(), MM, { material: plywood });
+    // 44000 mm3 at 680 kg/m3 is 29.92 g; Ixx = m (40² + 20²) / 12 = 4986.7 g·mm².
+    expect(values(sections)).toMatchObject({
+      'body.ixx': '4986.7 g·mm²',
+      'body.iyy': '9973.3 g·mm²',
+      'body.izz': '12965.3 g·mm²',
+      'body.principal': '4986.7 g·mm², 9973.3 g·mm², 12965.3 g·mm²',
+    });
+    const principal = sections.at(-1)!.rows.find((r) => r.key === 'body.principal')!;
+    expect(principal.note).toContain('(1.000, 0.000, 0.000), (0.000, 1.000, 0.000)');
+    // No material, no inertia; nor for a mesh body, which has no volume inertia.
+    expect(values(measureSections(twoFaces(), MM))['body.ixx']).toBeUndefined();
+    const r = twoFaces();
+    const mesh = { ...r.body!, volumeInertia: null };
+    expect(
+      values(measureSections({ ...r, body: mesh }, MM, { material: plywood }))['body.ixx'],
+    ).toBeUndefined();
+  });
+
   it('shows an open mesh as having no volume, with the reason, and no mass', () => {
     const r = twoFaces();
     const open = { ...r, body: { ...r.body!, volume: null, note: 'The mesh is not closed' } };

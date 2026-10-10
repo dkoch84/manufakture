@@ -199,7 +199,7 @@ The agent sees these tools (each with its schema and a description):
 | `get_object`        | The full data of one feature, part, assembly, instance, mate, setup, drawing or domain entry       |
 | `get_schema`        | The schema of a command or feature kind                                                            |
 | `find_geometry`     | Faces and edges by name or by query, with area, centroid, normal and radius                        |
-| `measure`           | Volume, area, mass, bounding box, distances, angles, clearance, interference                       |
+| `measure`           | Volume, area, mass, inertia, bounding box, distances, angles, clearance, interference              |
 | `render`            | PNG images of views, with highlighted names and section planes; before and after side by side      |
 | `get_quantities`    | Cut list, hardware and takeoff as data (or what changed), marked `reviewed: false`                 |
 | `get_errors`        | Regen errors and warnings                                                                          |

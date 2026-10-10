@@ -193,6 +193,20 @@ export type {
   ShapeMeasureTarget,
 } from './measure';
 export { measuredDistance } from './measure';
+export {
+  GMM2_PER_KGM2,
+  GRAMS_PER_MM3_PER_KG_M3,
+  bodyMassProperties,
+  combineMassProperties,
+  inertiaAt,
+  inertiaReport,
+  momentAboutAxis,
+  placeMassProperties,
+  principalInertia,
+  rotateTensor,
+  rotationMatrix,
+} from './inertia';
+export type { InertiaReport, MassProperties, Matrix3, PrincipalInertia } from './inertia';
 export { DEFAULT_WALL_RANGE, MAX_WALL_FACES } from './walls';
 export type { HoleWall, HoleWallOptions } from './walls';
 export { DEFAULT_LOOP_DEFLECTION } from './loops';

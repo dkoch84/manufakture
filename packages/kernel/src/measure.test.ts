@@ -5,6 +5,15 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import type { ExtrudeInput } from './features';
 import { XY, build, faceIndex, named, polygon, profile } from './fixtures/parts';
+import {
+  bodyMassProperties,
+  combineMassProperties,
+  momentAboutAxis,
+  placeMassProperties,
+  principalInertia,
+  type MassProperties,
+  type Matrix3,
+} from './inertia';
 import type { Kernel } from './kernel';
 import {
   measuredDistance,
@@ -505,6 +514,168 @@ describe('faces of two bodies', () => {
     expect(ok(body.items[0], 'vertex').point[1]).toBeGreaterThanOrEqual(20 - TOL);
     k.release(p);
     k.release(q);
+  });
+});
+
+// Mass moments of inertia (T9.1c) against closed forms, to 0.1% as the plan asks (the B-rep
+// integration in fact agrees far closer). Unit density gives the volume inertia, mm⁵.
+describe('inertia', () => {
+  const REL = 1e-3;
+  function rel(actual: number, expected: number): void {
+    const scale = Math.max(Math.abs(expected), 1e-9);
+    expect(Math.abs(actual - expected) / scale, `${actual} vs ${expected}`).toBeLessThanOrEqual(
+      REL,
+    );
+  }
+  /** A tensor against one, entries relative to the largest moment. */
+  function nearTensor(actual: Matrix3 | null | undefined, expected: Matrix3): void {
+    expect(actual).not.toBeNull();
+    const scale = Math.max(...expected.map((row, i) => Math.abs(row[i]!)));
+    for (let r = 0; r < 3; r++) {
+      for (let c = 0; c < 3; c++) {
+        const d = Math.abs(actual![r]![c]! - expected[r]![c]!) / scale;
+        expect(d, `[${r}][${c}] ${actual![r]![c]} vs ${expected[r]![c]}`).toBeLessThanOrEqual(REL);
+      }
+    }
+  }
+  const diag = (x: number, y: number, z: number): Matrix3 => [
+    [x, 0, 0],
+    [0, y, 0],
+    [0, 0, z],
+  ];
+  /** The body's mass properties in steel (7850 kg/m³): grams and g·mm². */
+  function steel(shape: ShapeId): MassProperties {
+    const b = k.measure(shape, [], { body: true }).body!;
+    return bodyMassProperties(b.volume, b.centerOfMass!, b.volumeInertia!, 7850);
+  }
+
+  it('a solid cylinder: m r²/2 about its axis, m (3r² + h²)/12 across it', () => {
+    const [r, h] = [5, 12];
+    const cyl = k.cylinder(r, h);
+    const b = k.measure(cyl, [], { body: true }).body!;
+    const V = PI * r * r * h;
+    const across = (V * (3 * r * r + h * h)) / 12;
+    nearTensor(b.volumeInertia, diag(across, across, (V * r * r) / 2));
+    // In steel: 7.40 g, 92.5 g·mm² about the axis.
+    const p = steel(cyl);
+    rel(p.mass, V * 7850e-6);
+    rel(p.inertia[2][2], (p.mass * r * r) / 2);
+    k.release(cyl);
+  });
+
+  it('a tube: m (ro² + ri²)/2 about its axis, m (3(ro² + ri²) + h²)/12 across it', () => {
+    const [ro, ri, h] = [10, 6, 30];
+    const outer = k.cylinder(ro, h);
+    const inner = k.cylinder(ri, h + 2, [0, 0, -1]);
+    const tube = k.boolean('cut', outer, [inner]).shape;
+    const b = k.measure(tube, [], { body: true }).body!;
+    const V = PI * (ro * ro - ri * ri) * h;
+    near(b.volume, V, 1e-6 * V);
+    nearVec(b.centerOfMass, [0, 0, h / 2]);
+    const across = (V * (3 * (ro * ro + ri * ri) + h * h)) / 12;
+    nearTensor(b.volumeInertia, diag(across, across, (V * (ro * ro + ri * ri)) / 2));
+    const principal = principalInertia(b.volumeInertia!);
+    rel(principal.moments[2], across);
+    rel(principal.moments[0], (V * (ro * ro + ri * ri)) / 2);
+    // The axis of the smallest moment is the tube's.
+    nearVec(principal.axes[0], [0, 0, 1], 1e-9);
+    for (const id of [outer, inner, tube]) k.release(id);
+  });
+
+  it('an offset block: m (b² + c²)/12 about its centre, and about an axis through the origin', () => {
+    const [a, bb, c] = [40, 30, 20];
+    const at: Vec3 = [100, -50, 25];
+    const block = k.box(a, bb, c, at);
+    const b = k.measure(block, [], { body: true }).body!;
+    const V = a * bb * c;
+    const com: Vec3 = [at[0] + a / 2, at[1] + bb / 2, at[2] + c / 2];
+    nearVec(b.centerOfMass, com);
+    const central = diag(
+      (V * (bb * bb + c * c)) / 12,
+      (V * (a * a + c * c)) / 12,
+      (V * (a * a + bb * bb)) / 12,
+    );
+    nearTensor(b.volumeInertia, central);
+    // Unit density: the moment about the world Z axis is Izz + V (cx² + cy²) (parallel axis).
+    const p = bodyMassProperties(b.volume, b.centerOfMass!, b.volumeInertia!, 1e6);
+    rel(p.mass, V);
+    rel(
+      momentAboutAxis(p, { origin: [0, 0, 0], direction: [0, 0, 1] }),
+      central[2][2] + V * (com[0] ** 2 + com[1] ** 2),
+    );
+    // About an axis along X through (0, 0, 5): Ixx + V ((cy)² + (cz - 5)²), whatever its length.
+    rel(
+      momentAboutAxis(p, { origin: [7, 0, 5], direction: [3, 0, 0] }),
+      central[0][0] + V * (com[1] ** 2 + (com[2] - 5) ** 2),
+    );
+    // A diagonal axis through the centre of mass: d . I . d.
+    const d = [1, 1, 1].map((x) => x / Math.sqrt(3));
+    rel(
+      momentAboutAxis(p, { origin: com, direction: d as unknown as Vec3 }),
+      (central[0][0] + central[1][1] + central[2][2]) / 3,
+    );
+    k.release(block);
+  });
+
+  it('a block turned 30 degrees about Z: products of inertia in tensor form, principal axes', () => {
+    const [a, bb, c] = [40, 30, 20];
+    const block = k.box(a, bb, c, [-a / 2, -bb / 2, -c / 2]);
+    const th = 30 * DEG;
+    const turned = k.transform(block, {
+      kind: 'rotate',
+      axis: { origin: [0, 0, 0], direction: [0, 0, 1] },
+      angle: th,
+    }).shape;
+    const b = k.measure(turned, [], { body: true }).body!;
+    const V = a * bb * c;
+    const [ix, iy, iz] = [(bb * bb + c * c) / 12, (a * a + c * c) / 12, (a * a + bb * bb) / 12].map(
+      (x) => x * V,
+    ) as [number, number, number];
+    const [co, si] = [Math.cos(th), Math.sin(th)];
+    // R I Rᵀ: the long side leans into +x +y, so the xy product is positive and its entry negative.
+    const xy = co * si * (ix - iy);
+    expect(xy).toBeLessThan(0);
+    nearTensor(b.volumeInertia, [
+      [ix * co * co + iy * si * si, xy, 0],
+      [xy, ix * si * si + iy * co * co, 0],
+      [0, 0, iz],
+    ]);
+    const principal = principalInertia(b.volumeInertia!);
+    rel(principal.moments[0], ix);
+    rel(principal.moments[1], iy);
+    rel(principal.moments[2], iz);
+    nearVec(principal.axes[0], [co, si, 0], 1e-6);
+    nearVec(principal.axes[1], [-si, co, 0], 1e-6);
+    nearVec(principal.axes[2], [0, 0, 1], 1e-6);
+    k.release(block);
+    k.release(turned);
+  });
+
+  it('two placed blocks add up to the block twice as long (an assembly total)', () => {
+    const [a, bb, c] = [40, 30, 20];
+    const block = k.box(a, bb, c);
+    const one = steel(block);
+    // The second copy turned 180 degrees about Z and moved so it lies against the first along X:
+    // together they are a 80 x 30 x 20 block from x = 0 to 80.
+    const half = Math.SQRT1_2;
+    const placed = combineMassProperties([
+      placeMassProperties(one, { translation: [0, 0, 0], rotation: [0, 0, 0, 1] }),
+      placeMassProperties(one, { translation: [80, 30, 0], rotation: [0, 0, 1, 0] }),
+    ])!;
+    const long = k.box(2 * a, bb, c);
+    const whole = steel(long);
+    rel(placed.mass, whole.mass);
+    nearVec(placed.centerOfMass, whole.centerOfMass, 1e-6);
+    nearTensor(placed.inertia, whole.inertia);
+    // A quarter turn about Z swaps the moments about X and Y.
+    const quarter = placeMassProperties(one, {
+      translation: [0, 0, 0],
+      rotation: [0, 0, half, half],
+    });
+    rel(quarter.inertia[0][0], one.inertia[1][1]);
+    rel(quarter.inertia[1][1], one.inertia[0][0]);
+    k.release(block);
+    k.release(long);
   });
 });
 

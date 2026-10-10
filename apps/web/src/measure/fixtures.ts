@@ -39,6 +39,12 @@ export function twoFaces(): MeasureResult {
       volume: 44000,
       area: 9000,
       centerOfMass: [0, 0, 10],
+      // A 60 x 40 x 20 block's at its volume: V (b² + c²) / 12 and so on, mm⁵.
+      volumeInertia: [
+        [(44000 * (40 * 40 + 20 * 20)) / 12, 0, 0],
+        [0, (44000 * (60 * 60 + 20 * 20)) / 12, 0],
+        [0, 0, (44000 * (60 * 60 + 40 * 40)) / 12],
+      ],
       boundingBox: { min: [-30, -20, 0], max: [30, 20, 20] },
     },
   };

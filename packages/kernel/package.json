@@ -7,6 +7,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./names": "./src/names.ts",
+    "./inertia": "./src/inertia.ts",
     "./types": "./src/types.ts",
     "./kernel-client": "./src/kernel-client.ts",
     "./node": "./src/node.ts",

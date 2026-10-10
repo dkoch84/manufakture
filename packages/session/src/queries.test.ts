@@ -1,6 +1,6 @@
 // The read queries on the cabinet (M4) and the shed (M6), and reference imports on the bracket:
 // tree, object, schema, findGeometry, measure (bodies, targets, clearance, interference at
-// poses), quantities as data marked unreviewed, errors and history.
+// poses, mass properties of bodies and assemblies), quantities as data marked unreviewed, errors and history.
 
 import { applyCommand, type ManufaktureDocument } from '@manufakture/core';
 import { importSource, writeBinaryStl } from '@manufakture/io';
@@ -280,6 +280,122 @@ describe('assemblies', () => {
     expect(apart.pairs).toEqual([]);
     const tree = ok(await s.tree());
     expect(tree.assemblies[0]!.instances.map((i) => i.id)).toEqual(['inst#1', 'inst#2']);
+  });
+});
+
+describe('mass properties (T9.1c)', () => {
+  type Inertia = {
+    aboutCenterOfMass: number[][];
+    principal: { moments: number[]; axes: number[][] };
+    aboutAxis?: number;
+  };
+  type Body = { mass: number | null; centerOfMass: number[]; inertia: Inertia | null };
+  type Mass = {
+    mass: number;
+    centerOfMass: number[] | null;
+    inertia: Inertia | null;
+    instances: { instanceId: string; mass: number; centerOfMass: number[] }[];
+    omitted: { instanceId: string; bodyId: string | null; reason: string }[];
+  };
+  const close = (a: number, b: number, scale = Math.abs(b)) =>
+    expect(Math.abs(a - b), `${a} vs ${b}`).toBeLessThanOrEqual(1e-9 * Math.max(scale, 1));
+
+  it('a body in g·mm² about its centre, principal and about an axis; an assembly of two at poses', async () => {
+    const s = await start(bracketDocument());
+    const quarter = [0, 0, Math.SQRT1_2, Math.SQRT1_2];
+    const instance = (id: string, translation: number[], rotation: number[]) => ({
+      type: 'addInstance',
+      assemblyId: 'assembly#$a',
+      instance: {
+        id,
+        name: id,
+        source: { part: PART },
+        fixed: true,
+        suppressed: false,
+        pose: { translation, rotation },
+      },
+    });
+    ok(
+      await s.apply({
+        label: 'Two brackets',
+        commands: [
+          { type: 'addAssembly', assemblyId: 'assembly#$a', name: 'Pair' },
+          instance('inst#$one', [0, 0, 0], [0, 0, 0, 1]),
+          instance('inst#$two', [100, 0, 0], quarter),
+        ],
+      }),
+    );
+    // No material: no mass, so no inertia, and the assembly says which bodies it left out.
+    const bare = ok(await s.measure({ kind: 'body', partId: PART, bodyId: 'extrude#1' })) as Body;
+    expect(bare.inertia).toBeNull();
+    const none = ok(await s.measure({ kind: 'mass', assemblyId: 'assembly#1' })) as Mass;
+    expect(none).toMatchObject({ mass: 0, centerOfMass: null, inertia: null, instances: [] });
+    expect(none.omitted.map((o) => [o.instanceId, o.reason])).toEqual([
+      ['inst#1', 'no-material'],
+      ['inst#2', 'no-material'],
+    ]);
+
+    ok(
+      await s.apply({
+        label: 'Steel',
+        commands: [{ type: 'setMaterial', partId: PART, material: 'steel' }],
+      }),
+    );
+    const axis = { origin: [0, 0, 0], direction: [0, 0, 1] };
+    const body = ok(
+      await s.measure({ kind: 'body', partId: PART, bodyId: 'extrude#1', axis }),
+    ) as Body;
+    const m = body.mass!;
+    const c = body.centerOfMass;
+    const I = body.inertia!.aboutCenterOfMass;
+    expect(m).toBeGreaterThan(0);
+    // About Z through the origin: Izz plus m times the squared distance of the centre from it.
+    close(body.inertia!.aboutAxis!, I[2]![2]! + m * (c[0]! ** 2 + c[1]! ** 2));
+    const moments = body.inertia!.principal.moments;
+    close(moments[0]! + moments[1]! + moments[2]!, I[0]![0]! + I[1]![1]! + I[2]![2]!);
+
+    // The second bracket turned a quarter about Z and moved 100 along X: its tensor has X and Y
+    // swapped (the xy entry negated), its centre at (100 - cy, cx, cz).
+    const c2 = [100 - c[1]!, c[0]!, c[2]!];
+    const I2 = [
+      [I[1]![1]!, -I[0]![1]!, -I[1]![2]!],
+      [-I[0]![1]!, I[0]![0]!, I[0]![2]!],
+      [-I[1]![2]!, I[0]![2]!, I[2]![2]!],
+    ];
+    const com = [0, 1, 2].map((i) => (c[i]! + c2[i]!) / 2);
+    const shift = (p: number[]) => {
+      const r = p.map((v, i) => v - com[i]!);
+      const rr = r[0]! ** 2 + r[1]! ** 2 + r[2]! ** 2;
+      return [0, 1, 2].map((i) => [0, 1, 2].map((j) => m * ((i === j ? rr : 0) - r[i]! * r[j]!)));
+    };
+    const s1 = shift(c);
+    const s2 = shift(c2);
+    const expected = [0, 1, 2].map((i) =>
+      [0, 1, 2].map((j) => I[i]![j]! + s1[i]![j]! + I2[i]![j]! + s2[i]![j]!),
+    );
+    const both = ok(await s.measure({ kind: 'mass', assemblyId: 'assembly#1', axis })) as Mass;
+    close(both.mass, 2 * m);
+    both.centerOfMass!.forEach((v, i) => close(v, com[i]!, 100));
+    const scale = expected[2]![2]!;
+    both.inertia!.aboutCenterOfMass.forEach((row, i) =>
+      row.forEach((v, j) => close(v, expected[i]![j]!, scale)),
+    );
+    close(
+      both.inertia!.aboutAxis!,
+      expected[2]![2]! + 2 * m * (com[0]! ** 2 + com[1]! ** 2),
+      scale,
+    );
+    expect(both.instances.map((i) => i.instanceId)).toEqual(['inst#1', 'inst#2']);
+    both.instances[1]!.centerOfMass.forEach((v, i) => close(v, c2[i]!, 100));
+    expect(both.omitted).toEqual([]);
+
+    expect(
+      await s.measure({
+        kind: 'mass',
+        assemblyId: 'assembly#1',
+        axis: { origin: [0, 0, 0], direction: [0, 0, 0] },
+      }),
+    ).toMatchObject({ ok: false, error: { code: 'invalid-input' } });
   });
 });
 
