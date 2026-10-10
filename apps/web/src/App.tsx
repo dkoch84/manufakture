@@ -129,6 +129,7 @@ import {
 } from './construction/kinds';
 import { createConstructionUiStore, type ConstructionUiStore } from './construction/state';
 import { MechToolbar } from './mech/MechStart';
+import { MechChecksButton } from './mech/checks/ChecksPanel';
 import { MechPartsButton } from './mech/parts/PartsDialog';
 import { DrawingTabs } from './drawing/DrawingTabs';
 import { createDrawingUiStore } from './drawing/state';
@@ -2416,6 +2417,7 @@ export function App({
             />
             <MechToolbar documents={documents} disabled={dialog !== null} />
             <MechPartsButton documents={documents} disabled={dialog !== null} />
+            <MechChecksButton model={model} disabled={dialog !== null} />
           </div>
         )}
       {!locked && !printing && !drawingOpen && assemblyId !== null && (

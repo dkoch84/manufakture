@@ -72,9 +72,21 @@ export {
   type ReadResult,
   type RegisteredDomainDrawings,
   type RegisteredExtension,
+  type RegisteredEvaluation,
   type RegisteredMemberStage,
   type ResolvedReference,
 } from './extensions';
+export {
+  DOMAIN_EVALUATION_WARNING_CODES,
+  MAX_EVALUATION_QUERIES,
+  MAX_EVALUATION_WARNINGS,
+  type DomainEvaluation,
+  type EvaluatedPart,
+  type EvaluationAnswer,
+  type EvaluationContext,
+  type EvaluationOutput,
+  type EvaluationQuery,
+} from './evaluation';
 export {
   DOMAIN_VIEW_LAYERS,
   MAX_CHAIN_OFFSET,

@@ -6,6 +6,7 @@ import type { CalcRecord } from './record';
 function sample(): CalcRecord[] {
   return [
     calc.strengthFactor({ stress: 2e8, strength: 4e8, requiredFactor: 3 }),
+    calc.loadFactor({ load: 1000, rating: 4500, requiredFactor: 5 }),
     calc.cantileverPointLoad({ F: 10, L: 1, E: 2e11, I: 1e-8 }),
     calc.cantileverUniformLoad({ w: 10, L: 1, E: 2e11, I: 1e-8 }),
     calc.simplySupportedCentreLoad({ F: 10, L: 1, E: 2e11, I: undefined }),

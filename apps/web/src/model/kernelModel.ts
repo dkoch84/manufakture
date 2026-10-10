@@ -182,6 +182,7 @@ export function kernelRegenerator(
       assemblies: result.assemblies,
       sources,
       ...(result.measurements === undefined ? {} : { measurements: result.measurements }),
+      ...(result.evaluations === undefined ? {} : { evaluations: result.evaluations }),
       ms: result.ms,
     };
   };

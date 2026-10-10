@@ -1030,6 +1030,40 @@ missed the same way; and against an outside not parallel to the axis the rays re
 true wall. The heat-set insert scenario (`apps/mcp/test/scenarios/heat-set-inserts.test.ts`) and
 `src/wall-check.test.ts` test it end to end.
 
+## Domain evaluation
+
+`src/evaluation.ts` (ADR 0017 decision 15, T9.5a): a domain's registration has an optional
+**evaluation stage** (`ExtensionDomain.evaluation`), called once per regen after the parts and
+assemblies, in ADR 0013 decision 5's two-step form, which it extends from translators to the whole
+document:
+
+1. `measure(context)` returns what to measure: `{ type: 'body', part, body }` queries (at most
+   `MAX_EVALUATION_QUERIES`, 10,000), one final body of a part measured whole. Each becomes a
+   `measure` op (`body: true`, no targets) in the regen's mesh batch, so it costs no extra round
+   trip. Measurements are kept by body key for the next regen only, as the wall checks' are, so an
+   unchanged body is not measured again. A query for a body that is not there is answered with
+   `measure: null` and a message.
+2. `evaluate(context, answers)` returns the domain's own plain JSON `data` and its `warnings`.
+
+The context is the document as regenerated, the domain data of the namespaces it reads (read by
+their owners, as translators get it), the variables that evaluated (measured ones included), the
+parts with their final body ids, and the assemblies as solved. The answers are in the queries'
+order, in the part's coordinates and millimetres (`BodyMeasure`).
+
+What comes back is the result's `evaluations` (sorted by namespace; one
+`DomainEvaluationResult` `{ namespace, data?, warnings, error?, ms }` per domain that reported
+data, a warning or an error; absent when none did). Containment is the translators': a throw, a
+malformed result (queries that are not body queries, a warning whose code is not an evaluation
+code, data that is not JSON) or domain data that does not read is an `extension` error on that
+domain's entry, never a failed regen. Warnings past `MAX_EVALUATION_WARNINGS` (5,000) are dropped,
+the last saying how many. The warning codes an evaluation may report are
+`DOMAIN_EVALUATION_WARNING_CODES`, ADR 0017's six: `mech-check` (`check`, `recordId`, `status:
+'warning' | 'unknown'`), `mech-requirement`, `mech-reference`, `mech-catalog`, `mech-budget` and
+`erc`; they are part of the `RegenWarning` union too. Regen caches nothing of a domain's results:
+the domain keys its own (the mechanical checks cache each record by its inputs). The mechanical
+domain is the one user (`packages/domain-mech`, "Checks"); `src/evaluation.test.ts` tests the stage
+against the scripted kernel.
+
 ## CAM geometry
 
 `src/cam.ts` is the CAM geometry stage (M5 plan T5.1f; [ADR 0014](../../docs/adr/0014-cam-architecture.md)
@@ -1208,7 +1242,8 @@ fragile resolutions), `missed` and `direction`. Regen adds `expression`, `sketch
 `source`, `font` and `extension` errors (the last when a domain's code throws or returns something
 malformed, see "Extensions"), and `sketch`, `redundant`, `reference-body`, `derived-source`, `text`,
 `font-changed`, `thin-wall` and `wall-unchecked` warnings (the last two see "Wall checks around
-holes"). The `extension`
+holes"); a domain's evaluation stage reports its own codes on its result entry (see "Domain
+evaluation"). The `extension`
 warning is no longer emitted.
 
 **Propagation.** A failed feature is skipped: the kernel passes the bodies through, so independent
@@ -1257,6 +1292,9 @@ interface RegenResult {
   assemblies?: AssemblyResult[]; // per assembly (always set by the engine; see Assemblies)
   sources?: SourceResult[]; // pinned parts and parts in another row that instances show: key, pin details, partName, row, bodies with meshes
   memberMeshes?: MemberMeshUpdate; // member shape meshes added and removed (see Member sets)
+  measurements?: Measurement[]; // what the variables' distance() and angle() calls measured
+  variableErrors?: VariableError[]; // measured variables that do not evaluate
+  evaluations?: DomainEvaluationResult[]; // the domains' evaluation stages (see Domain evaluation)
   counters: RegenCounters; // featureOps, otherOps, batches, solves, cacheHits, cacheMisses
   ms: number;
 }

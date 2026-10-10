@@ -80,6 +80,7 @@ import {
   type FeatureInput,
   type FeatureOutcome,
   type HoleWall,
+  type BodyMeasure,
   type MeasureResult,
   type InterferenceOp,
   type InterferenceResult,
@@ -152,6 +153,13 @@ import {
 } from './drawing';
 import { mapFailure, mapOutcome, planeReport } from './errors';
 import {
+  checkEvaluationOutput,
+  checkEvaluationQueries,
+  type EvaluatedPart,
+  type EvaluationAnswer,
+  type EvaluationContext,
+} from './evaluation';
+import {
   CamStage,
   type CamGeometryOptions,
   type CamGeometryResult,
@@ -189,6 +197,7 @@ import {
   type GeometryQuery,
   type NamespaceRead,
   type RegisteredDomainDrawings,
+  type RegisteredEvaluation,
   type ResolvedReference,
 } from './extensions';
 import {
@@ -261,6 +270,7 @@ import type {
   AssemblyResult,
   BodyResult,
   ConsumedBody,
+  DomainEvaluationResult,
   DragResult,
   FeatureResult,
   InstanceInterference,
@@ -816,6 +826,8 @@ export class RegenEngine {
    * a body that did not change is not measured again.
    */
   #walls = new Map<string, HoleWall[]>();
+  /** What the evaluation stages had measured in the last regen, by body key (`#evaluate`). */
+  #bodyMeasures = new Map<string, BodyMeasure | null>();
   readonly #stats: EngineStats = { ...emptyCounters(), regens: 0, superseded: 0, retries: 0 };
   readonly #unsubscribe: (() => void) | undefined;
   /**
@@ -1206,6 +1218,8 @@ export class RegenEngine {
     const finalBodies = (state: PartState) => (state.broken ? [] : state.bodies);
     // The wall checks around holes ride along (#1210): their warnings join the features after it.
     const finishWalls = this.#wallChecks(document, variables, built, batch);
+    // So do the domains' evaluation stages' measurements (ADR 0017 decision 15).
+    const finishEvaluations = this.#evaluate(document, variables, built, assembled.results, batch);
     for (const { state } of built) {
       for (const b of finalBodies(state)) {
         const slot = slotOf(state.part.id, b.id);
@@ -1255,6 +1269,7 @@ export class RegenEngine {
     }
     this.#checkStale(run);
     finishWalls();
+    const evaluations = finishEvaluations();
 
     // Completed: this is now the state the next edit is compared with.
     const reported = new Map<string, string>();
@@ -1310,8 +1325,145 @@ export class RegenEngine {
       sources,
       ...(members.meshes === null ? {} : { memberMeshes: members.meshes }),
       ...measuredResults(document, variables),
+      ...(evaluations.length === 0 ? {} : { evaluations }),
       counters: run.counters,
       ms: 0,
+    };
+  }
+
+  /**
+   * The domains' evaluation stages (ADR 0017 decision 15, `evaluation.ts`): each domain's first
+   * step runs now and its measurements join `batch` (a body measured in the last regen, by key, is
+   * not measured again); the returned function, called once the batch ran, runs each second step
+   * and gives the results. A throw, a malformed result or domain data that does not read is an
+   * error on that domain's result, never a failed regen.
+   */
+  #evaluate(
+    document: ManufaktureDocument,
+    variables: VariableValues,
+    built: readonly { state: PartState }[],
+    assemblies: readonly AssemblyResult[],
+    batch: Batch,
+  ): () => DomainEvaluationResult[] {
+    const stages = this.#extensions.evaluations();
+    if (stages.length === 0) {
+      this.#bodyMeasures.clear();
+      return () => [];
+    }
+    const parts: EvaluatedPart[] = built.map(({ state }) => ({
+      partId: state.part.id,
+      built: !state.broken,
+      bodies: state.broken ? [] : state.bodies.map((b) => b.id),
+    }));
+    const live = new Map<string, LiveBody>();
+    for (const { state } of built) {
+      if (state.broken) continue;
+      for (const b of state.bodies) live.set(slotOf(state.part.id, b.id), b);
+    }
+    interface Pending {
+      stage: RegisteredEvaluation;
+      context?: EvaluationContext;
+      answers: EvaluationAnswer[];
+      error?: RegenError;
+      ms: number;
+    }
+    const pending: Pending[] = [];
+    const kept = new Map<string, BodyMeasure | null>();
+    const toMeasure = new Map<string, { body: LiveBody; answers: EvaluationAnswer[] }>();
+    const domainReads = new Map<string, NamespaceRead>();
+    for (const stage of stages) {
+      const t0 = now();
+      const read = readDomainData(this.#extensions, stage, document.domains, domainReads);
+      if (!read.ok) {
+        pending.push({ stage, answers: [], error: read.error, ms: now() - t0 });
+        continue;
+      }
+      const context: EvaluationContext = {
+        document,
+        data: read.data,
+        variables: variables.values,
+        parts,
+        assemblies,
+      };
+      const evaluation = stage.evaluation;
+      let answers: EvaluationAnswer[] = [];
+      if (evaluation.measure !== undefined) {
+        const asked = guard(stage.namespace, 'evaluation measure step', () =>
+          evaluation.measure!(context),
+        );
+        const queries = asked.ok ? checkEvaluationQueries(stage.namespace, asked.value) : asked;
+        if (!queries.ok) {
+          pending.push({ stage, answers: [], error: queries.error, ms: now() - t0 });
+          continue;
+        }
+        answers = queries.value.map((q) => {
+          const answer: EvaluationAnswer = {
+            type: 'body',
+            part: q.part,
+            body: q.body,
+            measure: null,
+          };
+          const body = live.get(slotOf(q.part, q.body));
+          if (body === undefined) {
+            answer.message = `${q.part} has no body ${q.body} in this regen`;
+            return answer;
+          }
+          if (this.#bodyMeasures.has(body.key)) {
+            answer.measure = this.#bodyMeasures.get(body.key)!;
+            kept.set(body.key, answer.measure);
+            return answer;
+          }
+          let entry = toMeasure.get(body.key);
+          if (entry === undefined) {
+            entry = { body, answers: [] };
+            toMeasure.set(body.key, entry);
+          }
+          entry.answers.push(answer);
+          return answer;
+        });
+      }
+      pending.push({ stage, context, answers, ms: now() - t0 });
+    }
+    for (const [key, entry] of toMeasure) {
+      batch.ops.push({ op: 'measure', shape: entry.body.shape, targets: [], body: true });
+      batch.metas.push({
+        type: 'resolve',
+        take: (r) => {
+          const measure = r.ok ? (r.value as MeasureResult).body : null;
+          if (r.ok) kept.set(key, measure);
+          for (const a of entry.answers) {
+            a.measure = measure;
+            if (!r.ok) a.message = r.error.message;
+          }
+        },
+      });
+      this.#usesBodies(batch, [entry.body]);
+    }
+    return () => {
+      this.#bodyMeasures = kept;
+      const out: DomainEvaluationResult[] = [];
+      for (const p of pending) {
+        const namespace = p.stage.namespace;
+        if (p.context === undefined) {
+          out.push({ namespace, warnings: [], ...(p.error ? { error: p.error } : {}), ms: p.ms });
+          continue;
+        }
+        const t0 = now();
+        const context = p.context;
+        const given = guard(namespace, 'evaluation', () =>
+          p.stage.evaluation.evaluate(context, p.answers),
+        );
+        const checked = given.ok ? checkEvaluationOutput(namespace, given.value) : given;
+        const ms = p.ms + now() - t0;
+        if (!checked.ok) {
+          out.push({ namespace, warnings: [], error: checked.error, ms });
+          continue;
+        }
+        const { data, warnings } = checked.value;
+        if (data === undefined && warnings.length === 0) continue;
+        out.push({ namespace, ...(data === undefined ? {} : { data }), warnings, ms });
+      }
+      return out;
     };
   }
 

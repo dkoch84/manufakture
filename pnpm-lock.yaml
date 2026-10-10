@@ -349,6 +349,9 @@ importers:
 
   packages/domain-mech:
     dependencies:
+      '@manufakture/calc':
+        specifier: workspace:*
+        version: link:../calc
       '@manufakture/core':
         specifier: workspace:*
         version: link:../core

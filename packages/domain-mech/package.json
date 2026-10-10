@@ -12,6 +12,7 @@
     "test": "vitest run --root ../.. --project packages packages/domain-mech"
   },
   "dependencies": {
+    "@manufakture/calc": "workspace:*",
     "@manufakture/core": "workspace:*",
     "@manufakture/io": "workspace:*",
     "@manufakture/takeoff": "workspace:*",

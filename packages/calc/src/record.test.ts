@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { strengthFactor } from './factor';
+import { loadFactor, strengthFactor } from './factor';
 import { derivedValue, fromDerived, fromRecord, given, marginOf } from './record';
 import { shaftStress } from './shafts';
 import { MPA } from './test-units';
@@ -71,6 +71,28 @@ describe('calc records', () => {
       value: 1,
       source: 'default: no stress concentration',
     });
+  });
+
+  it('states no margin against a limit of zero or below: unknown with a note, never Infinity', () => {
+    expect(marginOf(3, 0, 'at-least')).toBeNaN();
+    expect(marginOf(3, -2, 'at-most')).toBeNaN();
+    expect(marginOf(Number.POSITIVE_INFINITY, 2, 'at-least')).toBeNaN();
+    for (const requiredFactor of [0, -2]) {
+      const r = strengthFactor({ stress: 100 * MPA, strength: 415 * MPA, requiredFactor });
+      expect(r.status).toBe('unknown');
+      expect(r.result).toBeCloseTo(4.15, 9);
+      expect(r.limit).toBe(requiredFactor);
+      expect(r.margin).toBeUndefined();
+      expect(r.note).toMatch(/above zero/);
+    }
+  });
+
+  it('loadFactor (closed-form check, not a textbook example): rated load over load', () => {
+    const r = loadFactor({ load: 890, rating: given(4500, 'rope, minimum breaking load') });
+    expect(r.result).toBeCloseTo(5.0562, 4);
+    expect(r.status).toBe('ok');
+    expect(loadFactor({ load: 890, rating: 1500, requiredFactor: 2 }).status).toBe('warning');
+    expect(loadFactor({ load: 0, rating: 1500 }).status).toBe('unknown');
   });
 
   it('computes margins for both limit kinds', () => {

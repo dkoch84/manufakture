@@ -13,6 +13,7 @@ import type {
 } from '@manufakture/assembly';
 import type {
   BodyPropsFields,
+  CatalogRef,
   DomainData,
   FeatureKind,
   Measurement,
@@ -259,7 +260,74 @@ export type RegenWarning =
       bound: 'min' | 'max';
       limit: number;
       value: number;
+    }
+  | DomainEvaluationWarning;
+
+/**
+ * The warnings a domain's evaluation stage reports (ADR 0017 decision 15), on
+ * `DomainEvaluationResult.warnings`. One code per kind of finding, with the check id as a field,
+ * rather than one per check. Messages state the numbers and never call a design safe.
+ */
+export type DomainEvaluationWarning =
+  /** A check's record below the user's factor (`warning`) or not computed (`unknown`). */
+  | {
+      code: 'mech-check';
+      message: string;
+      check: string;
+      recordId: string;
+      status: 'warning' | 'unknown';
+    }
+  /** A requirement the design misses, or that could not be evaluated. */
+  | {
+      code: 'mech-requirement';
+      message: string;
+      requirementId: string;
+      status: 'misses' | 'unknown';
+    }
+  /** A mechanical item names something that is gone: an instance, a mate, a purchased use. */
+  | { code: 'mech-reference'; message: string; objectId: string; target: string }
+  /** A catalog entry that is not in this build, has a newer revision, or is deprecated. */
+  | {
+      code: 'mech-catalog';
+      message: string;
+      entry: CatalogRef;
+      reason: 'unknown-entry' | 'newer-version' | 'deprecated';
+    }
+  /** Automatic work that stopped at its budget: the results it would give are `unknown`. */
+  | {
+      code: 'mech-budget';
+      message: string;
+      what: 'simulation' | 'sizing' | 'fea';
+      objectId: string;
+    }
+  /** An electrical rules check finding on a schematic sheet, at grid points. */
+  | {
+      code: 'erc';
+      message: string;
+      schematicId: string;
+      sheetId: string;
+      rule: string;
+      at: [number, number][];
     };
+
+/**
+ * What one domain's evaluation stage gave in this regen (ADR 0017 decision 15): its own data
+ * (the mechanical domain's calc records), its warnings, or the error it stopped at. Recomputed
+ * on every regen, never stored.
+ */
+export interface DomainEvaluationResult {
+  namespace: string;
+  /** The domain's plain JSON result; the domain documents its shape. Absent: nothing to report. */
+  data?: DomainData['data'];
+  warnings: RegenWarning[];
+  /**
+   * The stage threw, returned something malformed, or the domain data it reads does not read:
+   * an error on the domain, never a failed regen.
+   */
+  error?: RegenError;
+  /** Milliseconds in the domain's code, both steps. */
+  ms: number;
+}
 
 /** How one reference of a feature resolved (ADR 0004 decision 6: recomputed, never stored). */
 export interface ReferenceResolution {
@@ -416,6 +484,11 @@ export interface RegenResult {
    * naming the variable (and the face, for a measurement that failed). Absent when none fail.
    */
   variableErrors?: VariableError[];
+  /**
+   * What the domains' evaluation stages gave (ADR 0017 decision 15), by namespace, sorted; one
+   * entry per domain that reported data, a warning or an error. Absent when none did.
+   */
+  evaluations?: DomainEvaluationResult[];
   counters: RegenCounters;
   ms: number;
 }

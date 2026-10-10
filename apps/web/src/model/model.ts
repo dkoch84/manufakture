@@ -21,7 +21,7 @@
 // again.
 
 import { configured, type ManufaktureDocument, type Measurement } from '@manufakture/core';
-import type { AssemblyResult, FeatureResult } from '@manufakture/regen';
+import type { AssemblyResult, DomainEvaluationResult, FeatureResult } from '@manufakture/regen';
 import { useStore } from 'zustand';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { DocumentStoreApi } from '../state/document';
@@ -85,6 +85,8 @@ export interface RegenView {
   sources?: readonly SourceModel[];
   /** What the variables' `distance(...)` and `angle(...)` measured (#1202). Absent: none. */
   measurements?: readonly Measurement[];
+  /** What the domains' evaluation stages gave: the mechanical checks' records. Absent: none. */
+  evaluations?: readonly DomainEvaluationResult[];
   ms: number;
 }
 
@@ -132,6 +134,8 @@ export interface ModelState {
    * the variables table evaluates measured variables with them.
    */
   measurements: readonly Measurement[];
+  /** What the domains' evaluation stages gave (the checks panel reads the mechanical one). */
+  evaluations: readonly DomainEvaluationResult[];
   ms: number;
 }
 
@@ -149,6 +153,7 @@ export function createModelStore(): ModelStore {
     assemblies: [],
     sources: [],
     measurements: [],
+    evaluations: [],
     ms: 0,
   }));
 }
@@ -253,6 +258,7 @@ export function startRegen(
           assemblies: view.assemblies ?? [],
           sources: view.sources ?? [],
           measurements: view.measurements ?? [],
+          evaluations: view.evaluations ?? [],
           ms: view.ms,
           error: null,
           pending: document !== latest,
@@ -401,6 +407,7 @@ export function startView(shared: SharedRegenerator, document: ManufaktureDocume
             assemblies: view.assemblies ?? [],
             sources: view.sources ?? [],
             measurements: view.measurements ?? [],
+            evaluations: view.evaluations ?? [],
             ms: view.ms,
             error: null,
             pending: mine !== requests,

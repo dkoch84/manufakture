@@ -39,3 +39,35 @@ export function strengthFactor(
     },
   );
 }
+
+/**
+ * n = F_rated / F: a rated load (a rope's minimum breaking load, a static load rating) over the
+ * load it carries. The same comparison as `strengthFactor`, in newtons.
+ */
+export function loadFactor(
+  p: { load: Param; rating: Param; requiredFactor?: Param },
+  options?: RecordOptions,
+) {
+  return calc(
+    {
+      id: 'factor.load',
+      title: 'Factor against a rated load',
+      method: 'Rated load divided by the load it carries',
+      formula: 'n = F_rated / F',
+      unit: '1',
+      sources: [shigley10('Sec. 1-10, design factor')],
+      inputs: {
+        load: { name: 'Load', symbol: 'F', unit: 'N' },
+        rating: { name: 'Rated load', symbol: 'F_rated', unit: 'N' },
+      },
+      optional: { requiredFactor: REQUIRED_FACTOR },
+      limit: { input: 'requiredFactor', kind: 'at-least' },
+    },
+    p,
+    options,
+    (v) => {
+      requireRange(v.load > 0, 'The load must be positive');
+      return { result: v.rating / v.load };
+    },
+  );
+}

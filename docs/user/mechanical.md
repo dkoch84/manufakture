@@ -59,6 +59,17 @@ A purchased part (a bearing, a belt, a motor, a cell, a fuse) is a catalog entry
 
 The **bill of materials** lists each part used with its quantity (the instances in the assembly it is counted through, or a typed quantity for parts not modelled), its alternates and the ratings the design relies on: "C at least 5100 N; n at least 3000 rpm". Until the checks say what each part must carry, those are the chosen part's own values, so a substitute must match them. The BOM is saved as CSV here and in `bom-csv`. Catalog data is typical and not verified unless you mark it: check the maker's current datasheet.
 
+## Checks
+
+Every time the design regenerates, the checks run on it and each one makes **records**: one number with its working. **Checks** in the part studio's toolbar lists them (with a count of the ones to look at), each with one line that states the numbers ("Cable tension, Rope in Hold: load 890 N, rated load 4.50 kN; factor 5.06, above your 2"). **Working** shows how it was computed: the method and formula, every input with its value and where it came from (a load case, a catalog field, a measured body, the simulation, your setting or override), the values derived on the way, the assumptions and the published sources.
+
+- A strength or life result is a **factor against yours**: "above your 2" or "below your 2". Below your factor is a warning. With no factor set, the factor is shown with nothing to compare it to, and there is no warning.
+- A record that could not be computed says so and **names what is missing** ("Missing: Peak cable tension (no simulation of lc#4 has run)").
+- Records below your factor or not computed also appear as warnings in an agent's `get_errors`, with the record and check ids.
+- **Per-check factors and inputs** live in the document as check overrides: one for a single check (`cable.tension`) or a family (`cable.`), for every subject or for one (a load case, a part). The most specific one applies; an override's factor that does not evaluate makes the record "not compared" rather than quietly dropping the comparison.
+
+Records are never saved; they are recomputed from the document, and only the ones whose inputs changed are computed again. The first check is the cable's tension against the rope's minimum breaking load, for each load case that pulls the cable; the shaft, bearing, bolt, gear and belt, electrical, thermal and stability checks follow.
+
 ## Your own materials
 
 Besides the built-in materials, a document can hold materials of its own, with a density and any of the mechanical and thermal properties (elastic modulus, yield and ultimate strength, endurance limit, conductivity, maximum service temperature and more), each with its source and whether it is a typical value. Material values are constants with units (`1240 kg/m^3`, `45 MPa`); a variable is refused, because a material is a library entry. Parts and bodies can use them like the built-in ones; a material in use cannot be deleted.

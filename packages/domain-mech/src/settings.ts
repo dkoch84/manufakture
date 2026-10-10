@@ -352,13 +352,27 @@ export function factorFor(
   check: string,
   kind: 'strength' | 'fatigue',
 ): number | undefined {
+  return factorSetting(settings, check, kind)?.value;
+}
+
+/**
+ * `factorFor` with the setting it came from, as a key of `domains.mech`
+ * (`factors.checks.cable.`, `factors.strength`), for a record's provenance. Undefined: none set.
+ */
+export function factorSetting(
+  settings: MechSettings,
+  check: string,
+  kind: 'strength' | 'fatigue',
+): { value: number; key: string } | undefined {
   const checks = settings.factors.checks ?? {};
-  if (Object.hasOwn(checks, check)) return checks[check];
+  if (Object.hasOwn(checks, check))
+    return { value: checks[check]!, key: `factors.checks.${check}` };
   let best: string | undefined;
   for (const k of Object.keys(checks)) {
     if (k.endsWith('.') && check.startsWith(k) && (best === undefined || k.length > best.length))
       best = k;
   }
-  if (best !== undefined) return checks[best];
-  return settings.factors[kind];
+  if (best !== undefined) return { value: checks[best]!, key: `factors.checks.${best}` };
+  const value = settings.factors[kind];
+  return value === undefined ? undefined : { value, key: `factors.${kind}` };
 }

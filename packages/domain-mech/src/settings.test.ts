@@ -4,6 +4,7 @@ import {
   DEFAULT_MECH_SETTINGS,
   MECH_NAMESPACE,
   factorFor,
+  factorSetting,
   factorText,
   mechSettings,
   mechStarted,
@@ -44,6 +45,14 @@ describe('mech settings', () => {
     expect(factorFor(s, 'bolt.preload', 'strength')).toBe(1.5);
     expect(factorFor(s, 'bearing.l10', 'strength')).toBe(2);
     expect(factorFor(s, 'bearing.l10', 'fatigue')).toBeUndefined();
+    // With the setting it came from, for a record's provenance.
+    expect(factorSetting(s, 'shaft.fatigue', 'fatigue')).toEqual({
+      value: 2.5,
+      key: 'factors.checks.shaft.',
+    });
+    expect(factorSetting(s, 'bolt.preload', 'strength')?.key).toBe('factors.checks.bolt.preload');
+    expect(factorSetting(s, 'bearing.l10', 'strength')?.key).toBe('factors.strength');
+    expect(factorSetting(s, 'bearing.l10', 'fatigue')).toBeUndefined();
   });
 
   it('refuse unknown keys, bad values and newer versions, naming the field', () => {

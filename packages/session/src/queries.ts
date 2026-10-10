@@ -42,6 +42,7 @@ import type {
   Vec3,
 } from '@manufakture/kernel';
 import {
+  DOMAIN_EVALUATION_WARNING_CODES,
   MAX_SWEEP_VALUES,
   connectorFrames,
   evaluateVariables,
@@ -51,8 +52,10 @@ import {
   resultSolverInput,
   sweepPoses,
   sweepValues,
+  type DomainEvaluationWarning,
   type InstanceResult,
   type RegenResult,
+  type RegenWarning,
 } from '@manufakture/regen';
 import { documentStock } from '@manufakture/stock';
 import type { EngineApi } from './engine';
@@ -1560,14 +1563,40 @@ export function quantities(ctx: QueryContext, scope: QuantityScope = {}): Quanti
 // Errors
 
 export interface ErrorLine {
-  where: 'feature' | 'instance' | 'mate' | 'reference-import' | 'variable';
+  /**
+   * `mech`: the mechanical domain's evaluation (ADR 0017 decision 15): `id` is the record,
+   * requirement or object id, `check` the check id of a `mech-check` warning.
+   */
+  where: 'feature' | 'instance' | 'mate' | 'reference-import' | 'variable' | 'mech';
   partId?: string;
   featureId?: string;
   assemblyId?: string;
   id?: string;
+  /** The check id, for a `mech-check` warning. */
+  check?: string;
   severity: 'error' | 'warning';
   code: string;
   message: string;
+}
+
+const isEvaluationWarning = (w: RegenWarning): w is DomainEvaluationWarning =>
+  (DOMAIN_EVALUATION_WARNING_CODES as readonly string[]).includes(w.code);
+
+/** The object a domain evaluation warning is about: a record, a requirement, an object. */
+function evaluationWarningId(w: DomainEvaluationWarning): string {
+  switch (w.code) {
+    case 'mech-check':
+      return w.recordId;
+    case 'mech-requirement':
+      return w.requirementId;
+    case 'mech-reference':
+    case 'mech-budget':
+      return w.objectId;
+    case 'mech-catalog':
+      return w.entry.id;
+    case 'erc':
+      return `${w.schematicId}/${w.sheetId}`;
+  }
 }
 
 /** Every regen error and warning of the head, errors first. */
@@ -1652,6 +1681,32 @@ export function errorsOf(result: RegenResult | null, references: References): Er
           message: w.message,
         });
       }
+    }
+  }
+  // The mechanical domain's evaluation (ADR 0017 decision 15): its records below the user's
+  // factor or not computed, and anything else it reports, as warnings; an evaluation that could
+  // not run is an error on the domain.
+  for (const ev of result?.evaluations ?? []) {
+    if (ev.namespace !== 'mech') continue;
+    if (ev.error !== undefined) {
+      out.push({
+        where: 'mech',
+        id: ev.namespace,
+        severity: 'error',
+        code: ev.error.code,
+        message: ev.error.message,
+      });
+    }
+    for (const w of ev.warnings) {
+      if (!isEvaluationWarning(w)) continue;
+      out.push({
+        where: 'mech',
+        id: evaluationWarningId(w),
+        ...(w.code === 'mech-check' ? { check: w.check } : {}),
+        severity: 'warning',
+        code: w.code,
+        message: w.message,
+      });
     }
   }
   for (const r of references.list()) {

@@ -25,7 +25,7 @@ interface CalcRecord {
   method: string; // how it was computed, in words
   formula: string;
   inputs: CalcInput[]; // { name, symbol, value (SI or null), unit, source }
-  result: number | null; // SI; null when the status is 'unknown'
+  result: number | null; // SI; null when an input is missing or out of range
   unit: string;
   derived: CalcValue[]; // intermediate values: { name, symbol, value, unit }
   limit?: number; // your limit, when you gave one
@@ -38,6 +38,10 @@ interface CalcRecord {
   note?: string; // why 'unknown' otherwise (outside a fit's range, invalid geometry)
 }
 ```
+
+A margin is a fraction of the limit, so a limit that is not above zero states none: the record
+keeps its result and is `unknown` with a note, rather than reporting an infinite margin as room to
+spare (`marginOf` returns NaN for it).
 
 Every parameter takes a bare number (its source is then "given"), a `Given` (`{ value, source }`),
 or nothing. A missing required input makes the record `unknown` and names the input; an input with a
@@ -64,7 +68,7 @@ volts, amperes, ohms. Converting to display units is the caller's job (`@manufak
 
 | Area                 | Functions                                                                                                                                                         | Sources                                                                                             |
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| Factors              | `strengthFactor`                                                                                                                                                  | Shigley 10th ed. Sec. 1-10                                                                          |
+| Factors              | `strengthFactor`, `loadFactor`                                                                                                                                    | Shigley 10th ed. Sec. 1-10                                                                          |
 | Beams                | `cantileverPointLoad`, `cantileverUniformLoad`, `simplySupportedCentreLoad`, `simplySupportedUniformLoad`                                                         | Roark 7th ed. Table 8.1; Shigley Table A-9                                                          |
 | Shafts               | `shaftStress` (von Mises), `shaftFatigueFactor` (DE-Goodman, DE-Gerber, DE-ASME elliptic, DE-Soderberg), `shaftTwist`                                             | Shigley 10th ed. Sec. 7-4, Eqs. (7-8) to (7-15)                                                     |
 | Critical speed       | `uniformShaftCriticalSpeed`, `rayleighCriticalSpeed`, `dunkerleyCriticalSpeed`                                                                                    | Shigley 10th ed. Eqs. (7-22), (7-23), (7-32)                                                        |

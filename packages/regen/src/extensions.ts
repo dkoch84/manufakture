@@ -36,6 +36,7 @@ import type {
   Via,
 } from '@manufakture/kernel';
 import { MAX_DOMAIN_TITLE_NOTE_LENGTH, type DomainDrawings } from './domain-views';
+import type { DomainEvaluation } from './evaluation';
 import { stableStringify } from './hash';
 import type { MemberStage } from './members';
 
@@ -223,6 +224,12 @@ export interface ExtensionDomain {
    * (`domain-views.ts`). Pure; computed on request, never cached between requests.
    */
   drawings?: DomainDrawings;
+  /**
+   * Its evaluation stage (ADR 0017 decision 15, `evaluation.ts`): called once per regen after
+   * the parts and assemblies, in the two-step form (measure, then evaluate). Its data and
+   * warnings are the regen result's `evaluations`.
+   */
+  evaluation?: DomainEvaluation;
 }
 
 interface DomainEntry {
@@ -233,6 +240,15 @@ interface DomainEntry {
   types: Map<string, ExtensionType>;
   members: MemberStage | undefined;
   drawings: DomainDrawings | undefined;
+  evaluation: DomainEvaluation | undefined;
+}
+
+/** A registered domain's evaluation stage, with the namespaces it reads. */
+export interface RegisteredEvaluation {
+  namespace: string;
+  implementation: number;
+  reads: readonly string[];
+  evaluation: DomainEvaluation;
 }
 
 /** A registered domain's views, with the namespaces its view reads. */
@@ -309,7 +325,16 @@ export class ExtensionRegistry {
       types: new Map(),
       members: domain.members,
       drawings: domain.drawings,
+      evaluation: domain.evaluation,
     };
+    if (
+      domain.evaluation !== undefined &&
+      (typeof domain.evaluation.evaluate !== 'function' ||
+        (domain.evaluation.measure !== undefined &&
+          typeof domain.evaluation.measure !== 'function'))
+    ) {
+      throw new TypeError(`domain "${ns}": an evaluation stage needs an evaluate function`);
+    }
     if (
       domain.drawings !== undefined &&
       (typeof domain.drawings.view !== 'function' ||
@@ -410,6 +435,19 @@ export class ExtensionRegistry {
         implementation: d.implementation,
         reads: d.reads,
         stage: d.members!,
+      }));
+  }
+
+  /** The evaluation stages of the registered domains, by namespace, sorted. */
+  evaluations(): RegisteredEvaluation[] {
+    return [...this.#domains.values()]
+      .filter((d) => d.evaluation !== undefined)
+      .sort((a, b) => a.namespace.localeCompare(b.namespace))
+      .map((d) => ({
+        namespace: d.namespace,
+        implementation: d.implementation,
+        reads: d.reads,
+        evaluation: d.evaluation!,
       }));
   }
 

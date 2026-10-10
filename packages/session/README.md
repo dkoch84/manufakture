@@ -448,7 +448,8 @@ All plain JSON; text from the document (names, labels, notes) travels only in da
   the same for the branch's base version, regenerated once on an engine of its own (as the review
   bundle's base is) and kept until the base changes: the MCP server's `get_quantities` `compare`.
 - `errors()`: every regen error and warning of the head (features, instances, mates, reference
-  imports), errors first.
+  imports, measured variables, and the mechanical checks as `where: 'mech'` lines with the record
+  id as `id` and the check id as `check`), errors first.
 - `history()`: the branch's log entries with revisions, causes, labels and times.
 - `info()`: ids, branch, base version, revision, review state, batches, engine, kernel
   replacements, and the newest bundle with whether it is stale.

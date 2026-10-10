@@ -22,6 +22,7 @@ export {
   MECH_NAMESPACE,
   MECH_SETTINGS_VERSION,
   factorFor,
+  factorSetting,
   factorText,
   mechSettings,
   mechStarted,
@@ -33,3 +34,4 @@ export {
   type StartFactors,
 } from './settings';
 export * from './parts';
+export * from './checks';

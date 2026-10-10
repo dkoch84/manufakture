@@ -3,6 +3,7 @@
 // solver returns the stored coordinates. Not exported from the package.
 
 import type {
+  MeasureResult,
   BatchReply,
   BatchRequest,
   ConnectorReport,
@@ -52,6 +53,7 @@ export class FakeKernel implements RegenKernel {
   readonly connectorOps: string[][] = [];
   /** Every `interference` op run. */
   readonly interferenceOps: Extract<KernelOp, { op: 'interference' }>[] = [];
+  readonly measureOps: Extract<KernelOp, { op: 'measure' }>[] = [];
   gate: Promise<void> | null = null;
   onRun: (() => void) | null = null;
 
@@ -325,6 +327,35 @@ export class FakeKernel implements RegenKernel {
           source: 'aabb',
         };
         return { ok: true, op: 'obb', value, ms: 0 };
+      }
+      case 'measure': {
+        this.measureOps.push(op);
+        const body = this.#shape(op.shape, results);
+        if (body !== null && typeof body === 'object') return body.fail;
+        // Every body is the 40 x 30 x 20 box `obb` gives, measured whole when asked.
+        const w = 40;
+        const d = 30;
+        const h = 20;
+        const v = w * d * h;
+        const value: MeasureResult = {
+          items: [],
+          distance: null,
+          angle: null,
+          body: op.body
+            ? {
+                volume: v,
+                area: 2 * (w * d + w * h + d * h),
+                centerOfMass: [20, 15, 10],
+                volumeInertia: [
+                  [(v * (d * d + h * h)) / 12, 0, 0],
+                  [0, (v * (w * w + h * h)) / 12, 0],
+                  [0, 0, (v * (w * w + d * d)) / 12],
+                ],
+                boundingBox: { min: [0, 0, 0], max: [w, d, h] },
+              }
+            : null,
+        };
+        return { ok: true, op: 'measure', value, ms: 0 };
       }
       case 'holeWalls': {
         const body = this.#shape(op.shape, results);

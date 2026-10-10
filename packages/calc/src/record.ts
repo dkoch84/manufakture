@@ -45,7 +45,10 @@ export interface CalcRecord {
   method: string;
   formula: string;
   inputs: CalcInput[];
-  /** SI value; null when the status is 'unknown'. */
+  /**
+   * SI value; null when an input is missing or outside the method's range. A record whose limit
+   * is not above zero keeps its result with the status 'unknown' and a note: no margin.
+   */
   result: number | null;
   unit: string;
   /** Intermediate values, in the order they were computed. */
@@ -103,8 +106,13 @@ export function derivedValue(record: CalcRecord, symbol: string): number | undef
   return record.derived.find((d) => d.symbol === symbol)?.value;
 }
 
-/** Margin of a result against a limit, positive when the limit is met. */
+/**
+ * Margin of a result against a limit, positive when the limit is met. A margin is a fraction of
+ * the limit, so a limit that is not above zero (or anything not finite) gives no margin: NaN,
+ * never an Infinity that would read as plenty of room.
+ */
 export function marginOf(result: number, limit: number, kind: LimitKind): number {
+  if (!Number.isFinite(result) || !Number.isFinite(limit) || !(limit > 0)) return Number.NaN;
   return kind === 'at-least' ? (result - limit) / limit : (limit - result) / limit;
 }
 
@@ -250,8 +258,15 @@ export function calc<R extends string, O extends string = never>(
     if (limit !== undefined) {
       record.limit = limit;
       record.limitKind = def.limit.kind;
-      record.margin = marginOf(out.result, limit, def.limit.kind);
-      if (record.margin < 0) record.status = 'warning';
+      const margin = marginOf(out.result, limit, def.limit.kind);
+      if (Number.isFinite(margin)) {
+        record.margin = margin;
+        if (margin < 0) record.status = 'warning';
+      } else {
+        // A limit of zero or below states no margin: the result stands, the comparison does not.
+        record.status = 'unknown';
+        record.note = `The limit must be above zero to state a margin against it; it is ${limit}`;
+      }
     }
   }
   return record;

@@ -25,7 +25,7 @@ export {
   type Param,
   type RecordOptions,
 } from './record';
-export { REQUIRED_FACTOR, strengthFactor } from './factor';
+export { REQUIRED_FACTOR, loadFactor, strengthFactor } from './factor';
 export {
   cantileverPointLoad,
   cantileverUniformLoad,

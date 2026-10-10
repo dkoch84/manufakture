@@ -1,0 +1,80 @@
+/* The checks panel: the records of the mechanical checks, each with its working. */
+
+.checks-panel {
+  width: min(46rem, 96vw);
+}
+
+.checks-records {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.checks-record {
+  padding: 0.35rem 0.45rem;
+  border: 1px solid #e3e7ec;
+  border-left-width: 4px;
+  border-radius: 4px;
+}
+
+.checks-record.checks-warning {
+  border-left-color: #c77700;
+}
+
+.checks-record.checks-unknown {
+  border-left-color: #8a96a3;
+}
+
+.checks-record.checks-computed {
+  border-left-color: #2f6fb0;
+}
+
+.checks-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.checks-status {
+  flex: none;
+  min-width: 9rem;
+  color: #3d4752;
+  font-weight: 600;
+}
+
+.checks-text {
+  flex: 1;
+}
+
+.checks-working {
+  margin-top: 0.35rem;
+}
+
+.checks-working p {
+  margin: 0.2rem 0;
+}
+
+.checks-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.checks-table th,
+.checks-table td {
+  padding: 0.15rem 0.3rem;
+  border-bottom: 1px solid #e3e7ec;
+  text-align: left;
+  vertical-align: top;
+}
+
+.checks-symbol {
+  color: #5b6672;
+}
+
+.checks-list {
+  margin: 0.2rem 0;
+  padding-left: 1.5em;
+}
