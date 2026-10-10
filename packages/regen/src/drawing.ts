@@ -713,6 +713,33 @@ export function refTarget(ref: DimensionRef): string {
   return refName('edge' in ref ? (ref.edge as TopoRef) : (ref.face as TopoRef));
 }
 
+/**
+ * The text a diameter dimension shows by default when it measures the wall of a hole made for a
+ * heat-set insert (`standard.purpose`, core format 18), so the drawing says what the hole is for:
+ * `<> for M3 heat-set insert` (`<>` is the value, `⌀4`). Null for anything else, and for a
+ * dimension with a text of its own. `partId` is the part the view shows (null for an assembly
+ * view, whose instances' features are not looked up here).
+ */
+export function insertCallout(
+  document: ManufaktureDocument,
+  partId: string | null,
+  dim: Dimension,
+): string | null {
+  if (dim.kind !== 'diameter' || dim.text !== undefined || partId === null) return null;
+  const ref = dim.refs[0];
+  const names = 'edge' in ref ? ref.edge.faces : 'face' in ref ? [ref.face.face] : [];
+  const part = document.parts.find((p) => p.id === partId);
+  for (const name of names) {
+    const m = /^(hole#[1-9][0-9]*):wall:/.exec(name);
+    if (m === null) continue;
+    const f = part?.features.find((x) => x.id === m[1]);
+    if (f?.kind === 'hole' && f.standard?.purpose === 'heat-set-insert') {
+      return `<> for ${f.standard.size} heat-set insert`;
+    }
+  }
+  return null;
+}
+
 /** Where a reference anchors a linear dimension: a point, or a plane. */
 type Anchor = { plane: false; point: Vec3 } | { plane: true; point: Vec3; normal: Vec3 };
 
@@ -1421,10 +1448,14 @@ export class DrawingStage {
     }
 
     const dims = sheet.dimensions.filter((d) => d.view === view.id);
+    const shownPart = 'part' in view.source ? view.source.part : null;
     const dimensions = await this.#dimensions(
       host,
       document,
-      dims,
+      dims.map((d) => {
+        const text = insertCallout(document, shownPart, d);
+        return text === null ? d : { ...d, text };
+      }),
       bodies,
       frame,
       scale.ok ? scale.scale : null,

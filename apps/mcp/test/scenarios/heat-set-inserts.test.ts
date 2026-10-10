@@ -219,22 +219,85 @@ describe('heat-set inserts in a printed enclosure (T8.6b)', () => {
     expect((tables.selfTappingHoles.sizes as Data[]).every((h) => h.verified === false)).toBe(true);
   });
 
-  it('gap probe: no insert hole type reaches the agent', async () => {
+  it('offers an insert hole kind and a tip angle in the hole schema', async () => {
+    // Was a gap probe: heads, fits and thread representations had nothing for an insert, so the
+    // hole's purpose lived only in its name. A hole standard now says what the hole is for.
     const hole = value(await h.call('get_schema', { feature: 'hole' })).schema as Data;
     const heads = (hole.properties.head.oneOf as Data[]).map((o) => o.properties.type.const);
     expect(heads).toEqual(['simple', 'counterbore', 'countersink']);
-    expect(hole.properties.standard.properties.fit.enum).toEqual(['close', 'normal', 'loose']);
+    const standard = hole.properties.standard as Data;
+    expect(standard.properties.fit.enum).toEqual(['close', 'normal', 'loose']);
+    expect(standard.properties.purpose.enum).toEqual(['heat-set-insert']);
+    expect(standard.required).toEqual(['size']);
+    expect(hole.properties.standard.description).toMatch(/heat-set insert/);
+    // A blind hole takes a tip angle; 180 deg is a flat bottom.
+    const blind = (hole.properties.extent.oneOf as Data[]).find(
+      (o) => o.properties.type.const === 'blind',
+    )!;
+    expect(Object.keys(blind.properties)).toEqual(['type', 'depth', 'tipAngle']);
+    expect(blind.required).toEqual(['type', 'depth']);
+    expect(hole.properties.extent.description).toMatch(/180 deg is a flat bottom/);
+    // Still no thread for an insert: the thread feature cuts threads, an insert brings its own.
     const thread = value(await h.call('get_schema', { feature: 'thread' })).schema as Data;
     expect(thread.properties.representation.enum).toEqual(['modelled', 'cosmetic']);
-    for (const s of [hole, thread]) expect(JSON.stringify(s)).not.toMatch(/heat.?set|insert/i);
+    expect(JSON.stringify(thread)).not.toMatch(/heat.?set|insert/i);
     // The guide (fixed after this scenario found it sending inserts to a cosmetic thread) says to
     // drill the insert's own hole and leave the thread off.
     const guide = (await h.client.readResource({ uri: GUIDE_URI })).contents[0] as { text: string };
     expect(guide.text).not.toMatch(/cosmetic[^.]*heat-set inserts/);
     expect(guide.text).toMatch(/do \*\*not\*\* put a\s+`thread` on its hole/);
+    expect(guide.text).toMatch(/purpose: 'heat-set-insert'/);
   });
 
-  it('gap probe: a cosmetic M3 thread on the insert hole fails (the guide says leave it off)', async () => {
+  it('makes an M3 insert hole from the table: 4.0 mm, the insert length deep, flat bottomed', async () => {
+    // In a session of its own, so the scenario's model is untouched: the table's numbers as they
+    // come, the insert standard and a flat bottom.
+    const tables = JSON.parse(
+      ((await h.client.readResource({ uri: TABLES_URI })).contents[0] as { text: string }).text,
+    ) as Data;
+    const row = (tables.heatSetInserts.sizes as Data[]).find((i) => i.size === INSERT.size)!;
+    const own = value(await h.call('open_session', { documentId: ENCLOSURE_ID })).sessionId;
+    const r = value(
+      await h.call('apply', {
+        sessionId: own,
+        label: 'One M3 insert hole from the table',
+        commands: insertBatch(`${row.hole} mm`, `${row.length} mm`, { flat: true, points: 1 }),
+      }),
+    );
+    expect(r.errors).toEqual([]);
+    const hole = r.symbols.$insert;
+    const p = r.symbols.$p1;
+    const faces = value(
+      await h.call('find_geometry', {
+        sessionId: own,
+        query: { kind: 'face', partId: PART, bornBy: hole },
+      }),
+    ).hits as Data[];
+    expect(faces.map((f) => [f.name, f.surface]).sort()).toEqual(
+      [
+        [`${hole}:bottom:${p}`, 'plane'],
+        [`${hole}:wall:${p}`, 'cylinder'],
+      ].sort(),
+    );
+    const wall = faces.find((f) => f.surface === 'cylinder')!;
+    const bottom = faces.find((f) => f.surface === 'plane')!;
+    expect([r6(2 * wall.radius), r6(BOSSES.top - bottom.centroid[2])]).toEqual([
+      INSERT.hole,
+      INSERT.length,
+    ]);
+    // The model keeps what the hole is for, and the review says it.
+    const feature = value(
+      await h.call('get_object', {
+        sessionId: own,
+        query: { kind: 'feature', partId: PART, featureId: hole },
+      }),
+    ).object as Data;
+    expect(feature.standard).toEqual({ size: 'M3', purpose: 'heat-set-insert' });
+    expect(feature.extent.tipAngle.source).toBe('180 deg');
+    value(await h.call('close_session', { sessionId: own }));
+  });
+
+  it('a cosmetic M3 thread on the insert hole fails (the guide says leave it off)', async () => {
     const r = value(
       await h.call('apply', {
         sessionId,
@@ -259,7 +322,7 @@ describe('heat-set inserts in a printed enclosure (T8.6b)', () => {
         commands: [
           { type: 'setVariable', name: 'insert_hole', expression: mm(INSERT.hole) },
           { type: 'setVariable', name: 'insert_depth', expression: mm(INSERT_DEPTH) },
-          ...insertBatch('#insert_hole', '#insert_depth'),
+          ...insertBatch('#insert_hole', '#insert_depth', { flat: true }),
         ],
       }),
     );
@@ -335,7 +398,7 @@ describe('heat-set inserts in a printed enclosure (T8.6b)', () => {
     ]);
     expect(wall).toBeCloseTo(BOSSES.radius - INSERT.hole / 2, 6);
     expect(wall).toBeLessThan(INSERT.minWall);
-    // Nothing in the model knows the hole holds an insert, so nothing checks the wall around it.
+    // The hole says it holds an M3 insert, but nothing checks the wall around it yet.
     expect(value(await h.call('get_errors', { sessionId })).errors).toEqual([]);
   });
 
@@ -384,7 +447,7 @@ describe('heat-set inserts in a printed enclosure (T8.6b)', () => {
 
   it('measures the hole depth from the boss top to the end of the wall', async () => {
     const p = insertPoints[0]!;
-    const end = `${insertHole}:tip:${p}|${insertHole}:wall:${p}`;
+    const end = `${insertHole}:bottom:${p}|${insertHole}:wall:${p}`;
     const depth = await distance(`extrude#2:cap:end:${BOSSES.entities[0]}`, end, ['face', 'edge']);
     expect(depth).toBeCloseTo(INSERT_DEPTH, 6);
     expect(depth).toBeGreaterThanOrEqual(INSERT.length);
@@ -392,16 +455,17 @@ describe('heat-set inserts in a printed enclosure (T8.6b)', () => {
     expect(await distance('extrude#2:cap:end#1', end, ['face', 'edge'])).toBe(depth);
   });
 
-  it('gap probe: a blind hole always ends in a drill point', async () => {
+  it('ends the insert holes flat, as asked, where a blind hole used to end in a drill point', async () => {
+    // Was a gap probe: core's hole had no tip option, so every blind hole ended in a cone.
     const tips = value(
       await h.call('find_geometry', {
         sessionId,
         query: { kind: 'face', partId: PART, bornBy: insertHole, nearest: [8, 8, 30], limit: 2 },
       }),
     ).hits as Data[];
-    expect(tips.map((t) => [t.name, t.surface])).toEqual([
-      [`${insertHole}:tip:${insertPoints[0]}`, 'cone'],
-      [`${insertHole}:wall:${insertPoints[0]}`, 'cylinder'],
+    expect(tips.map((t) => [t.name, t.surface, v6(t.normal ?? [])])).toEqual([
+      [`${insertHole}:bottom:${insertPoints[0]}`, 'plane', [0, 0, 1]],
+      [`${insertHole}:wall:${insertPoints[0]}`, 'cylinder', []],
     ]);
   });
 
@@ -465,8 +529,17 @@ describe('heat-set inserts in a printed enclosure (T8.6b)', () => {
   });
 });
 
-/** The insert holes: a sketch of points on the boss tops (z = 40) and a blind hole into the base. */
-function insertBatch(diameter: string = `${INSERT.hole} mm`, depth: string = `${INSERT_DEPTH} mm`) {
+/**
+ * The insert holes: a sketch of points on the boss tops (z = 40) and a blind hole into the base,
+ * made as M3 heat-set insert holes (`standard.purpose`); `flat` ends them flat (tip angle 180 deg),
+ * `points` drills only the first few bosses.
+ */
+function insertBatch(
+  diameter: string = `${INSERT.hole} mm`,
+  depth: string = `${INSERT_DEPTH} mm`,
+  options: { flat?: boolean; points?: number } = {},
+) {
+  const centres = BOSSES.centres.slice(0, options.points ?? BOSSES.centres.length);
   return [
     {
       type: 'addFeature',
@@ -477,7 +550,7 @@ function insertBatch(diameter: string = `${INSERT.hole} mm`, depth: string = `${
         name: 'Insert centres',
         suppressed: false,
         plane: { type: 'plane', origin: [0, 0, BOSSES.top], normal: [0, 0, 1], xDir: [1, 0, 0] },
-        entities: BOSSES.centres.map((position, i) => ({
+        entities: centres.map((position, i) => ({
           id: `e$p${i + 1}`,
           kind: 'point',
           construction: false,
@@ -495,10 +568,15 @@ function insertBatch(diameter: string = `${INSERT.hole} mm`, depth: string = `${
         name: 'M3 heat-set insert holes',
         suppressed: false,
         sketch: 'sketch#$insert_centres',
-        points: ['e$p1', 'e$p2', 'e$p3', 'e$p4'],
+        points: centres.map((_, i) => `e$p${i + 1}`),
         diameter: mm(diameter),
-        extent: { type: 'blind', depth: mm(depth) },
+        extent: {
+          type: 'blind',
+          depth: mm(depth),
+          ...(options.flat ? { tipAngle: mm('180 deg') } : {}),
+        },
         head: { type: 'simple' },
+        standard: { size: INSERT.size, purpose: 'heat-set-insert' },
         scope: [BASE],
       },
     },

@@ -547,6 +547,13 @@ wall (or on a shaft) then makes it a threaded hole: `cosmetic` for holes tapped 
 machining, `modelled` for printed threads. A hole for a heat-set insert takes no thread at all (see
 below).
 
+Take the numbers from the resource `manufakture://tables/holes`, never from memory. It holds
+clearance holes (`clearanceHoles`: close, normal and loose fits, counterbore and countersink sizes;
+M3 normal is 3.4 mm), threads (`threads`: the tap drill, and the hole and shaft diameters a thread
+can cut), heat-set inserts (`heatSetInserts`) and self-tapping holes (`selfTappingHoles`). Every row
+says whether it was `verified`; when you use one that was not (counterbores, countersinks and
+self-tapping holes are not), say so in your note.
+
 Here, an M5 tapped hole through the upright, 28 mm up, in one batch: the sketch on the upright's
 inner face (x = 6 mm, facing +X), the hole at the 4.2 mm tap drill, and a cosmetic thread on its
 wall. The thread's face is named after the hole and its point, both symbols:
@@ -627,27 +634,26 @@ drill; a cosmetic thread keeps it there).
 A heat-set insert is pressed hot into a plain hole and brings its own thread, so do **not** put a
 `thread` on its hole. A thread resizes its hole to the tap drill: a cosmetic M3 thread on a 4.0 mm
 insert hole fails with `M3 (internal) needs a hole 1.959 to 2.865 mm across`. Drill the insert's
-own hole instead, from the insert vendor's table (there is no insert hole type yet, and the table
-is not served to you; ask the person which inserts they use when they do not say). For CNC
-Kitchen's standard inserts:
+own hole instead, sized from `heatSetInserts` in `manufakture://tables/holes`: CNC Kitchen's
+standard inserts, M2 to M5, each row with the `hole` to drill, the insert's `length`, the minimum
+wall around it (`minWall`) and its `source`. Other brands differ; ask the person which inserts
+they use when they do not say.
 
-| Insert | Hole | Insert length | Minimum wall |
-| ------ | ---- | ------------- | ------------ |
-| M2     | 3.2  | 3.0           | 1.3          |
-| M2.5   | 4.0  | 4.0           | 1.6          |
-| M3     | 4.0  | 5.7           | 1.6          |
-| M4     | 5.6  | 8.1           | 2.1          |
-| M5     | 6.4  | 9.5           | 2.6          |
-
-All in mm. Make the hole blind and a little deeper than the insert is long (an M3 insert: 4.0 mm
-across, 6 to 6.5 mm deep), so the plastic it displaces has room. Name the hole after the insert
-(`M3 heat-set insert holes`): its purpose lives only in the name. Nothing checks the wall around
-an insert hole, so measure it yourself and widen the boss when it is under the minimum. A blind
-hole ends in a drill point (a cone) today; there is no flat-bottomed option.
+Make it an insert hole: `standard: { size: 'M3', purpose: 'heat-set-insert' }` says what the hole
+is for, so the model, the review bundle and a drawing's diameter dimension
+(`⌀4 for M3 heat-set insert`) all carry it, and the insert's row (its length and minimum wall)
+goes with the size. Like a clearance hole's standard it is informational: `diameter` and the
+depth are what regen drills, so set them from the same row. The diameter is the row's `hole`; make
+the hole blind and at least the insert's `length` deep, a little deeper so the plastic it
+displaces has room (an M3 insert: 4.0 mm across, 6 to 6.5 mm deep). A blind hole ends in a 118
+degree drill point unless its extent has a `tipAngle`; `180 deg` gives the flat bottom an insert
+pocket wants. Nothing checks the wall around an insert hole yet, so measure it yourself and widen
+the boss when it is under the minimum.
 
 The bracket is 6 mm thick, too thin for an M3 insert's 4.0 mm hole and 1.6 mm wall, so here is an
-M2 insert in the end of the foot: a 3.2 mm hole, 3.5 mm deep, centred 3 mm up the end face
-(x = 50 mm, facing +X; the hole drills against the sketch's normal, into the foot):
+M2 insert in the end of the foot (the table's M2 row: hole 3.2 mm, length 3.0 mm, wall 1.3 mm): a
+3.2 mm hole, 3.5 mm deep and flat bottomed, centred 3 mm up the end face (x = 50 mm, facing +X; the
+hole drills against the sketch's normal, into the foot):
 
 ```json mcp:apply
 {
@@ -682,9 +688,11 @@ M2 insert in the end of the foot: a 3.2 mm hole, 3.5 mm deep, centred 3 mm up th
         "diameter": { "source": "3.2 mm", "lengthUnit": "mm", "angleUnit": "deg" },
         "extent": {
           "type": "blind",
-          "depth": { "source": "3.5 mm", "lengthUnit": "mm", "angleUnit": "deg" }
+          "depth": { "source": "3.5 mm", "lengthUnit": "mm", "angleUnit": "deg" },
+          "tipAngle": { "source": "180 deg", "lengthUnit": "mm", "angleUnit": "deg" }
         },
-        "head": { "type": "simple" }
+        "head": { "type": "simple" },
+        "standard": { "size": "M2", "purpose": "heat-set-insert" }
       }
     }
   ]

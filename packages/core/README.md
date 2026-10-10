@@ -23,7 +23,7 @@ import {
 ```ts
 interface ManufaktureDocument {
   format: 'manufakture';
-  version: 17; // file format version, FORMAT_VERSION
+  version: 18; // file format version, FORMAT_VERSION
   namingScheme: 1; // topological naming scheme version (T0.5), NAMING_SCHEME
   id: string;
   name: string;
@@ -1080,7 +1080,7 @@ union is discriminated by `kind`.
 | `fillet`    | `edges` (edge references), `radius`                                                                                                                                                                                                                                    |
 | `chamfer`   | `edges`, `distance`, optional `secondDistance` or `angle` (not both)                                                                                                                                                                                                   |
 | `shell`     | `faces` to remove (face references), `thickness`, `outward`                                                                                                                                                                                                            |
-| `hole`      | `sketch` and its `points`, `diameter`, `extent` (blind depth or through all), `head` (simple, counterbore, countersink), optional `standard` (`size`, `fit`)                                                                                                           |
+| `hole`      | `sketch` and its `points`, `diameter`, `extent` (blind depth, optional `tipAngle` since version 18, or through all), `head` (simple, counterbore, countersink), optional `standard` (`size` and `fit`, or `purpose`)                                                   |
 | `pattern`   | `features` to repeat, or `body: true` (and no features) for the bodies with an optional `mode` (`new`, `add`), `layout` (linear: direction, count, spacing; circular: axis, count, angle; `flip`)                                                                      |
 | `mirror`    | `features`, or `body: true` with an optional `mode`, `plane` (a planar face reference)                                                                                                                                                                                 |
 | `extension` | a domain feature: `extension` type (`wood.board`), `schemaVersion`, `dependsOn`, `references`, `expressions`, opaque JSON `params`, optional `operation` (`new`, `add`, `cut`, `intersect`) and `scope` (since version 11)                                             |
@@ -1100,8 +1100,14 @@ takes none.
 The kernel implements these as `applyFeature` inputs (`packages/kernel`, Part features). Unequal
 chamfers measure `distance` on the reference face of each edge, the adjacent face whose name sorts
 first. A hole's `standard` records the screw size and clearance fit (`close`, `normal`, `loose`)
-of the kernel's `HOLE_SIZES` table it was sized from; `diameter` and the head sizes stay what
-regen uses. A shell with no `faces` is a closed hollow.
+of the kernel's `HOLE_SIZES` table it was sized from, or (since version 18) the size and
+`purpose: 'heat-set-insert'` of the insert it holds (packages/print's `HEAT_SET_INSERTS`, whose
+row gives the hole, the insert length and the minimum wall); a standard has a `fit` or a
+`purpose`, never both. Either way `diameter`, the depth and the head sizes stay what regen uses.
+A blind hole ends in a drill point of `extent.tipAngle` (an angle expression, more than 0 and at
+most 180 deg, checked at regen; absent: 118 deg), and 180 deg is a flat bottom, its face named
+`<hole>:bottom:<point>` instead of `<hole>:tip:<point>` (since version 18). A shell with no
+`faces` is a closed hollow.
 
 A direction or axis taken from an edge or face reference (a revolve's edge axis, a pattern's
 direction or axis) points the way the kernel's naming rules orient it, never the way OCCT happens

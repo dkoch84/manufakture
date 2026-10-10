@@ -32,7 +32,7 @@ import { MATERIAL_IDS } from './materials';
  */
 
 /** The file format version this code reads and writes. Bump it only together with a migration. */
-export const FORMAT_VERSION = 17;
+export const FORMAT_VERSION = 18;
 /** The topological naming scheme version (T0.5) that stored references are written in. */
 export const NAMING_SCHEME = 1;
 export const FORMAT_TAG = 'manufakture';
@@ -718,23 +718,71 @@ export const HoleHeadSchema = z.discriminatedUnion('type', [
 /** Clearance fits of the standard hole tables (ISO 273 fine / medium / coarse, ASME B18.2.8). */
 export const HoleFitSchema = z.enum(['close', 'normal', 'loose']);
 
+/**
+ * What a hole is for when it is not a clearance hole for a screw: `heat-set-insert`, a hole sized
+ * for a heat-set threaded insert of `standard.size` (packages/print's `HEAT_SET_INSERTS`, served to
+ * agents in the tables resource). Since version 18.
+ */
+export const HOLE_PURPOSES = ['heat-set-insert'] as const;
+export const HolePurposeSchema = z.enum(HOLE_PURPOSES);
+
+/**
+ * The standard a hole was sized from: a clearance hole for a screw (`size` and `fit`, from the
+ * kernel's `HOLE_SIZES`), or, since version 18, a hole for something the screw goes into (`size`
+ * and `purpose`: `{ size: 'M3', purpose: 'heat-set-insert' }`, from the insert table).
+ */
+export const HoleStandardSchema = z
+  .strictObject({
+    size: z.string().min(1),
+    /** A clearance hole's fit; absent with a `purpose`. */
+    fit: HoleFitSchema.exactOptional(),
+    /** What the hole is for instead of a clearance fit. Since version 18. */
+    purpose: HolePurposeSchema.exactOptional(),
+  })
+  .check((ctx) => {
+    const { fit, purpose } = ctx.value;
+    if ((fit === undefined) === (purpose === undefined)) {
+      ctx.issues.push({
+        code: 'custom',
+        message:
+          fit === undefined
+            ? 'a hole standard needs a fit (a clearance hole) or a purpose'
+            : 'a hole standard has a fit (a clearance hole) or a purpose, not both',
+        input: ctx.value,
+        path: fit === undefined ? ['fit'] : ['purpose'],
+      });
+    }
+  });
+
 export const HoleFeatureSchema = z.strictObject({
   ...base('hole'),
   /** The sketch whose points place the holes, drilled along its normal. */
   sketch: featureId,
   points: z.array(EntityIdSchema).min(1),
   diameter: StoredExpressionSchema,
+  /**
+   * How deep: `blind` to `depth` (to the shoulder, where the wall ends), or `throughAll`. A blind
+   * hole ends in a drill point of `tipAngle` (an angle, more than 0 and at most 180 deg; absent:
+   * 118 deg); 180 deg is a flat bottom, as for a heat-set insert. `tipAngle` since version 18.
+   */
   extent: z.discriminatedUnion('type', [
-    z.strictObject({ type: z.literal('blind'), depth: StoredExpressionSchema }),
+    z.strictObject({
+      type: z.literal('blind'),
+      depth: StoredExpressionSchema,
+      tipAngle: StoredExpressionSchema.exactOptional(),
+    }),
     z.strictObject({ type: z.literal('throughAll') }),
   ]),
   head: HoleHeadSchema,
   /**
-   * The screw size and fit the hole was sized for (`M6`, `#10`, `1/4`), from the kernel's
-   * `HOLE_SIZES`. Informational: `diameter` and the head sizes are what regen uses, so a
+   * What the hole was sized for: a screw's clearance hole (`{ size, fit }`: `M6`, `#10`, `1/4`
+   * from the kernel's `HOLE_SIZES`), or since version 18 a heat-set insert (`{ size,
+   * purpose: 'heat-set-insert' }`: `M2` to `M5` from packages/print's `HEAT_SET_INSERTS`, whose
+   * hole is the diameter, whose length is the least depth, and whose minimum wall goes with the
+   * size). Informational: `diameter`, the depth and the head sizes are what regen uses, so a
    * standard hole can still be edited by hand.
    */
-  standard: z.strictObject({ size: z.string().min(1), fit: HoleFitSchema }).exactOptional(),
+  standard: HoleStandardSchema.exactOptional(),
   /** The bodies the holes are drilled into; absent: every body. */
   scope,
 });
@@ -2896,6 +2944,8 @@ export type ChamferFeature = z.infer<typeof ChamferFeatureSchema>;
 export type ShellFeature = z.infer<typeof ShellFeatureSchema>;
 export type HoleFeature = z.infer<typeof HoleFeatureSchema>;
 export type HoleFit = z.infer<typeof HoleFitSchema>;
+export type HolePurpose = z.infer<typeof HolePurposeSchema>;
+export type HoleStandard = z.infer<typeof HoleStandardSchema>;
 export type PatternFeature = z.infer<typeof PatternFeatureSchema>;
 export type MirrorFeature = z.infer<typeof MirrorFeatureSchema>;
 export type ExtensionFeature = z.infer<typeof ExtensionFeatureSchema>;

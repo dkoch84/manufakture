@@ -13,6 +13,7 @@ import { twoBodyDocument } from '../model/twoBodies.test-fixture';
 import {
   addRef,
   applyStandard,
+  chooseHoleStandard,
   buildFeature,
   checkExpression,
   formOf,
@@ -28,6 +29,7 @@ import {
   type FeatureForm,
   type FilletForm,
   type HoleForm,
+  HOLE_FORM_SIZES,
   type PatternForm,
   type RefItem,
   type ThreadForm,
@@ -345,6 +347,66 @@ describe('shell, revolve, hole, pattern, mirror', () => {
     expect(build(noPoints, onDemo)).toMatchObject({
       errors: { points: expect.stringContaining('has no points') },
     });
+  });
+
+  it('makes a heat-set insert hole from the table, flat bottomed, and reads it back on edit', () => {
+    const doc = apply(sketchOnly(), {
+      id: 'extrude#1',
+      kind: 'extrude',
+      name: 'Extrude 1',
+      suppressed: false,
+      profile: { sketch: 'sketch#1' },
+      operation: 'new',
+      extent: { type: 'blind', distance: { source: '8', lengthUnit: 'mm', angleUnit: 'deg' } },
+      reverse: false,
+    });
+    const form = newForm('hole', { doc, partId: PART, selectedFeatures: ['sketch#1'] }) as HoleForm;
+    expect(form).toMatchObject({ tip: 'drill', tipAngle: '118' });
+    expect(HOLE_FORM_SIZES).toEqual(expect.arrayContaining(['M2', 'M2.5', 'M3', '1/2']));
+    // CNC Kitchen's M3: a 4.0 mm hole, 5.7 mm long; choosing it sets the depth and a flat bottom.
+    const m3 = chooseHoleStandard({ ...form, standard: 'M3' }, { fit: 'insert' }, MM);
+    expect(m3).toMatchObject({
+      standard: 'M3',
+      fit: 'insert',
+      diameter: '4',
+      extent: 'blind',
+      depth: '5.7',
+      tip: 'flat',
+    });
+    const r = build(doc, m3);
+    if (!r.ok) throw new Error(JSON.stringify(r.errors));
+    const hole = r.feature as HoleFeature;
+    expect(hole).toMatchObject({
+      diameter: { source: '4' },
+      extent: { type: 'blind', depth: { source: '5.7' }, tipAngle: { source: '180 deg' } },
+      standard: { size: 'M3', purpose: 'heat-set-insert' },
+    });
+    expect(applyCommand(doc, r.command).ok).toBe(true);
+    expect(formOf(hole, new Set())).toMatchObject({
+      standard: 'M3',
+      fit: 'insert',
+      tip: 'flat',
+      depth: '5.7',
+    });
+    // M2 has an insert and no clearance row: it is only an insert hole.
+    expect(chooseHoleStandard(form, { standard: 'M2' }, MM)).toMatchObject({
+      fit: 'insert',
+      diameter: '3.2',
+      depth: '3',
+    });
+    // An insert fit on a size with no insert falls back to a clearance fit.
+    expect(applyStandard({ ...m3, standard: 'M8' }, MM)).toMatchObject({
+      fit: 'normal',
+      diameter: '9',
+    });
+    // A tip angle of its own is kept as typed; the drill point stores none.
+    const angled = build(doc, { ...m3, tip: 'angle', tipAngle: '135' });
+    expect(angled.ok && (angled.feature as HoleFeature).extent).toMatchObject({
+      tipAngle: { source: '135' },
+    });
+    const drilled = build(doc, { ...m3, tip: 'drill' });
+    expect(drilled.ok && (drilled.feature as HoleFeature).extent).not.toHaveProperty('tipAngle');
+    if (angled.ok) expect(formOf(angled.feature, new Set())).toMatchObject({ tip: 'angle' });
   });
 
   it('offers printed fits: the nominal size plus a fit variable, read back on edit', () => {

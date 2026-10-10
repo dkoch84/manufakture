@@ -455,7 +455,8 @@
     "hole": {
       "fields": {
         "sketch": "The sketch whose points place the holes, drilled along its normal.",
-        "standard": "The screw size and fit the hole was sized for (`M6`, `#10`, `1/4`), from the kernel's `HOLE_SIZES`. Informational: `diameter` and the head sizes are what regen uses, so a standard hole can still be edited by hand.",
+        "extent": "How deep: `blind` to `depth` (to the shoulder, where the wall ends), or `throughAll`. A blind hole ends in a drill point of `tipAngle` (an angle, more than 0 and at most 180 deg; absent: 118 deg); 180 deg is a flat bottom, as for a heat-set insert. `tipAngle` since version 18.",
+        "standard": "What the hole was sized for: a screw's clearance hole (`{ size, fit }`: `M6`, `#10`, `1/4` from the kernel's `HOLE_SIZES`), or since version 18 a heat-set insert (`{ size, purpose: 'heat-set-insert' }`: `M2` to `M5` from packages/print's `HEAT_SET_INSERTS`, whose hole is the diameter, whose length is the least depth, and whose minimum wall goes with the size). Informational: `diameter`, the depth and the head sizes are what regen uses, so a standard hole can still be edited by hand.",
         "scope": "The bodies the holes are drilled into; absent: every body."
       }
     },

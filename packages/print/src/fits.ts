@@ -230,6 +230,17 @@ export function heatSetInsert(size: string): HeatSetInsert | undefined {
   return HEAT_SET_INSERTS.find((i) => i.size === size);
 }
 
+/**
+ * The insert a hole feature's `standard` names (`{ size: 'M3', purpose: 'heat-set-insert' }`,
+ * core format 18): its table row, with the hole, length and minimum wall the hole was made for.
+ * Undefined for a clearance standard, no standard, or a size the table has no row for.
+ */
+export function holeInsert(
+  standard: { readonly size: string; readonly purpose?: string } | undefined,
+): HeatSetInsert | undefined {
+  return standard?.purpose === 'heat-set-insert' ? heatSetInsert(standard.size) : undefined;
+}
+
 export function selfTappingHole(size: string): SelfTappingHole | undefined {
   return SELF_TAPPING_HOLES.find((h) => h.size === size);
 }

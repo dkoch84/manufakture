@@ -75,8 +75,8 @@ const range = (l: { min: number; max: number }) => ({ min: mm(2 * l.min), max: m
 
 /**
  * The tables an agent sizes holes from, as the product holds them: the hole feature's standard
- * sizes (`standard.size` and `fit`), the thread feature's sizes, and packages/print's heat-set
- * insert and self-tapping hole tables. Millimetres and degrees; every row says whether it was
+ * sizes (`standard.size` and `fit`), the thread feature's sizes, packages/print's heat-set
+ * insert table (`standard.purpose: 'heat-set-insert'`) and its self-tapping hole table. Millimetres and degrees; every row says whether it was
  * checked, and every table where it comes from.
  */
 export function holeTables() {
@@ -84,7 +84,7 @@ export function holeTables() {
     units: { length: 'mm', angle: 'deg' },
     clearanceHoles: {
       description:
-        "Clearance, counterbore and countersink sizes for screws: the hole feature's standard.size and standard.fit.",
+        "Clearance, counterbore and countersink sizes for screws: the hole feature's standard { size, fit }.",
       sources: HOLE_SIZE_SOURCES,
       sizes: HOLE_SIZES.map((s) => ({
         size: s.size,
@@ -123,7 +123,7 @@ export function holeTables() {
     },
     heatSetInserts: {
       description:
-        'Heat-set threaded inserts for printed parts: drill a plain hole of diameter hole, at least length deep, with at least minWall of material around it, and put no thread feature on it. Other brands differ.',
+        "Heat-set threaded inserts for printed parts: a hole feature with standard { size, purpose: 'heat-set-insert' }, diameter hole, a blind extent at least length deep (tipAngle 180 deg for a flat bottom), at least minWall of material around it, and no thread feature on it. Other brands differ.",
       sizes: HEAT_SET_INSERTS.map((i) => ({ ...i })),
     },
     selfTappingHoles: {

@@ -269,7 +269,9 @@ export interface HoleInput extends Scoped {
   diameter: number;
   /**
    * `blind`: `depth` to the shoulder, plus a drill point of `tipAngle`
-   * (default 118 degrees). `throughAll`: through the whole body, flat bottom.
+   * (radians, more than 0 and at most pi; default 118 degrees). A tip angle
+   * of pi (180 degrees) is a flat bottom, named `bottom` instead of `tip`.
+   * `throughAll`: through the whole body, flat bottom.
    */
   extent: { type: 'blind'; depth: number; tipAngle?: number } | { type: 'throughAll' };
   head: HoleHead;
@@ -1971,6 +1973,8 @@ function revolveTool(ctx: Ctx, all: readonly Body[], input: RevolveInput): Tool 
 }
 
 const DEFAULT_TIP = (118 * Math.PI) / 180;
+/** How close to pi (radians) a hole's tip angle is taken as a flat bottom. */
+const FLAT_TIP = 1e-9;
 
 /**
  * One revolved tool per point, from a half cross-section in the plane of the
@@ -2021,9 +2025,10 @@ function holeTool(ctx: Ctx, scoped: readonly Body[], input: HoleInput, motion?: 
     depth = input.extent.depth;
     if (!(depth > 0)) fail(ctx, 'invalid', 'the hole depth must be positive');
     const angle = input.extent.tipAngle ?? DEFAULT_TIP;
-    if (!(angle > 0 && angle < Math.PI))
-      fail(ctx, 'invalid', 'the tip angle must be between 0 and pi');
-    tip = r / Math.tan(angle / 2);
+    if (!(angle > 0 && angle <= Math.PI + FLAT_TIP))
+      fail(ctx, 'invalid', 'the tip angle must be more than 0 and at most pi');
+    // A 180 degree point is a flat-bottomed hole (a flat-bottom drill or an insert pocket).
+    tip = angle >= Math.PI - FLAT_TIP ? 0 : r / Math.tan(angle / 2);
   } else {
     depth = throughLength(
       ctx,
@@ -3677,7 +3682,9 @@ export function validateFeature(input: unknown): string | null {
         if (!isObj(x) || (x.type !== 'blind' && x.type !== 'throughAll'))
           return 'extent.type must be blind or throughAll';
         if (x.type === 'blind') {
-          const bad = num(x.depth, 'extent.depth');
+          const bad =
+            num(x.depth, 'extent.depth') ??
+            (x.tipAngle === undefined ? null : num(x.tipAngle, 'extent.tipAngle'));
           if (bad) return bad;
         }
         const h = v.head;

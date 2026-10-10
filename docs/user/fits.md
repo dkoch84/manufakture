@@ -31,7 +31,7 @@ Editing the hole later shows the same size and printed fit again. Change the dia
 
 ## Heat-set inserts and self-tapping screws
 
-`packages/print` also holds hole sizes for M2 to M5 (`HEAT_SET_INSERTS`, `SELF_TAPPING_HOLES`); the app does not offer them in a dialog yet, so type the diameter yourself:
+`packages/print` also holds hole sizes for M2 to M5 (`HEAT_SET_INSERTS`, `SELF_TAPPING_HOLES`). In the hole dialog, pick a **Size** and the **Fit** **Heat-set insert**: the hole takes the insert's diameter, becomes blind at the insert's length with a **Flat** bottom, and the hole remembers it is for that insert (a drawing's diameter dimension on it reads, for example, `⌀4 for M3 heat-set insert`). Make it a little deeper than the insert so the displaced plastic has room. Self-tapping holes are not offered in a dialog; type their diameter yourself:
 
 | Size | Heat-set insert hole (CNC Kitchen, standard length) | Insert length | Min. wall | Self-tapping hole (unverified) |
 | ---- | --------------------------------------------------- | ------------- | --------- | ------------------------------ |

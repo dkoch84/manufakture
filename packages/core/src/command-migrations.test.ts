@@ -14,6 +14,7 @@ import v0Bracket from './fixtures/v0-bracket.json';
 import v3Bracket from './fixtures/v3-bracket.json';
 import v13Bracket from './fixtures/v13-bracket.json';
 import v16Bracket from './fixtures/v16-bracket.json';
+import v17Bracket from './fixtures/v17-bracket.json';
 
 describe('command migrations', () => {
   it('has one command step per document format step, in step', () => {
@@ -86,7 +87,7 @@ describe('command migrations', () => {
     const restore = { type: 'restorePart', part: { ...v16.parts[0]!, id: 'part#2' }, index: 1 };
     expect(unwrap(migrateCommand(restore, 16))).toEqual(restore);
     const replaced = unwrap(migrateCommand({ type: 'replaceDocument', document: v16 }, 16));
-    expect(replaced.type === 'replaceDocument' && replaced.document.version).toBe(17);
+    expect(replaced.type === 'replaceDocument' && replaced.document.version).toBe(FORMAT_VERSION);
     // A version 16 restored part cannot have groups: the document step refuses the key.
     const document = { ...v16, parts: [{ ...v16.parts[0]!, bodyGroups: [] }] };
     const refused = migrateCommand({ type: 'replaceDocument', document }, 16);
@@ -98,6 +99,42 @@ describe('command migrations', () => {
       group: { id: 'group#1', name: 'Frame', bodies: ['extrude#1'] },
     };
     expect(unwrap(migrateCommand(group, 17))).toEqual(group);
+  });
+
+  it('brings version 17 commands to version 18 unchanged', () => {
+    // Version 18 added a hole's tip angle and insert standard; a version 17 hole keeps its shape.
+    const hole = {
+      id: 'hole#1',
+      kind: 'hole',
+      name: 'Holes',
+      suppressed: false,
+      sketch: 'sketch#2',
+      points: ['e5'],
+      diameter: mm('5.5'),
+      extent: { type: 'blind', depth: mm('8') },
+      head: { type: 'simple' },
+      standard: { size: 'M5', fit: 'normal' },
+    };
+    const add = { type: 'addFeature', partId: PART, feature: hole };
+    expect(unwrap(migrateCommand(add, 17))).toEqual(add);
+    const v17 = clone(v17Bracket) as { parts: { features: unknown[] }[] };
+    const replaced = unwrap(migrateCommand({ type: 'replaceDocument', document: v17 }, 17));
+    expect(replaced.type === 'replaceDocument' && replaced.document.version).toBe(FORMAT_VERSION);
+    // A version 17 document cannot hold a flat-bottomed hole: the document step refuses it.
+    const flat = { ...hole, extent: { ...hole.extent, tipAngle: mm('180deg') } };
+    const document = { ...v17, parts: [{ ...v17.parts[0]!, features: [flat] }] };
+    const refused = migrateCommand({ type: 'replaceDocument', document }, 17);
+    expect(!refused.ok && refused.error.code).toBe('migration');
+    // An insert hole, new in 18, passes through as it is.
+    const insert = {
+      ...add,
+      feature: {
+        ...flat,
+        diameter: mm('4'),
+        standard: { size: 'M3', purpose: 'heat-set-insert' },
+      },
+    };
+    expect(unwrap(migrateCommand(insert, 18))).toEqual(insert);
   });
 
   it('refuses a newer format, a bad format and a command that is not one', () => {

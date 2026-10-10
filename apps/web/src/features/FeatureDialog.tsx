@@ -6,8 +6,8 @@
 // works at once) and gives it back to where it was when it closes. The form logic is in forms.ts.
 
 import { defaultFeatureName, findPart, previewIds } from '@manufakture/core';
-import { HOLE_SIZES, threadSize } from '@manufakture/kernel';
-import { FIT_DESCRIPTIONS, FIT_KINDS, FIT_VARIABLES } from '@manufakture/print';
+import { holeSize, threadSize } from '@manufakture/kernel';
+import { FIT_DESCRIPTIONS, FIT_KINDS, FIT_VARIABLES, heatSetInsert } from '@manufakture/print';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { partBodies } from '../model/bodies';
 import { featureResult, modelBodies, type ModelStore } from '../model/model';
@@ -29,6 +29,7 @@ import {
   availableSketches,
   buildFeature,
   checkExpression,
+  chooseHoleStandard,
   formOf,
   lostReferences,
   newForm,
@@ -45,6 +46,8 @@ import {
   type FormKind,
   type HoleForm,
   type HoleFormFit,
+  type HoleFormTip,
+  HOLE_FORM_SIZES,
   type Operation,
   type RefField,
   type RefKind,
@@ -532,6 +535,10 @@ function PartFeatureDialog({
       const points = sketch?.entities.filter((e) => e.kind === 'point') ?? [];
       const hole = (patch: Partial<HoleForm>) =>
         setForm((f) => applyStandard({ ...(f as HoleForm), ...patch }, units));
+      const standard = (patch: Pick<Partial<HoleForm>, 'standard' | 'fit'>) =>
+        setForm((f) => chooseHoleStandard(f as HoleForm, patch, units));
+      const insert = form.standard === '' ? undefined : heatSetInsert(form.standard);
+      const clearance = form.standard !== '' && holeSize(form.standard) !== undefined;
       body.push(
         <SketchSelect
           key="sketch"
@@ -572,12 +579,12 @@ function PartFeatureDialog({
           value={form.standard}
           options={[
             ['', 'Custom'],
-            ...HOLE_SIZES.map((s): [string, string] => [
-              s.size,
-              s.system === 'metric' ? s.size : `${s.size}${s.size.startsWith('#') ? '' : '"'}`,
+            ...HOLE_FORM_SIZES.map((size): [string, string] => [
+              size,
+              size.startsWith('M') || size.startsWith('#') ? size : `${size}"`,
             ]),
           ]}
-          onChange={(v) => hole({ standard: v })}
+          onChange={(v) => standard({ standard: v })}
         />,
       );
       if (form.standard !== '') {
@@ -590,17 +597,29 @@ function PartFeatureDialog({
             name="fit"
             value={form.fit}
             options={[
-              ['close', 'Close'],
-              ['normal', 'Normal'],
-              ['loose', 'Loose'],
-              ...FIT_KINDS.map((k): [string, string] => [
-                k,
-                `Printed fit: ${k} (#${FIT_VARIABLES[k]})`,
-              ]),
+              ...(clearance
+                ? ([
+                    ['close', 'Close'],
+                    ['normal', 'Normal'],
+                    ['loose', 'Loose'],
+                    ...FIT_KINDS.map((k): [string, string] => [
+                      k,
+                      `Printed fit: ${k} (#${FIT_VARIABLES[k]})`,
+                    ]),
+                  ] as [string, string][])
+                : []),
+              ...(insert ? ([['insert', 'Heat-set insert']] as [string, string][]) : []),
             ]}
-            onChange={(v) => hole({ fit: v as HoleFormFit })}
+            onChange={(v) => standard({ fit: v as HoleFormFit })}
           />,
         );
+        if (form.fit === 'insert' && insert) {
+          body.push(
+            <p key="fit-note" className="field-note" data-testid="field-fit-note">
+              {`${insert.size} heat-set insert: a ${insert.hole} mm hole at least ${insert.length} mm deep, with ${insert.minWall} mm of wall around it (CNC Kitchen standard; other brands differ).`}
+            </p>,
+          );
+        }
         if (printed) {
           body.push(
             <p key="fit-note" className="field-note" data-testid="field-fit-note">
@@ -625,7 +644,26 @@ function PartFeatureDialog({
           onChange={(v) => set('extent', v)}
         />,
       );
-      if (form.extent === 'blind') body.push(expression('depth', 'Depth', 'length', form.depth));
+      if (form.extent === 'blind') {
+        body.push(
+          expression('depth', 'Depth', 'length', form.depth),
+          <Select
+            key="tip"
+            label="Bottom"
+            name="tip"
+            value={form.tip}
+            options={[
+              ['drill', 'Drill point (118°)'],
+              ['flat', 'Flat'],
+              ['angle', 'Tip angle'],
+            ]}
+            onChange={(v) => set('tip', v as HoleFormTip)}
+          />,
+        );
+        if (form.tip === 'angle') {
+          body.push(expression('tipAngle', 'Tip angle', 'angle', form.tipAngle));
+        }
+      }
       body.push(
         <Select
           key="head"

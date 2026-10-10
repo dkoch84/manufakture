@@ -249,11 +249,18 @@ export function featureDetail(f: Feature, lookup: Names, partId: string): string
         lookup,
       )}`;
     case 'hole': {
+      const tip =
+        f.extent.type === 'blind' && f.extent.tipAngle !== undefined
+          ? `, ${expressionText(f.extent.tipAngle, 'angle')} tip`
+          : '';
       const extent =
-        f.extent.type === 'blind' ? expressionText(f.extent.depth) + ' deep' : 'through all';
+        f.extent.type === 'blind' ? expressionText(f.extent.depth) + ' deep' + tip : 'through all';
       const head =
         f.head.type === 'simple' ? '' : `, ${f.head.type} ${expressionText(f.head.diameter)}`;
-      const size = f.standard ? `${shown(f.standard.size, 40)} ${f.standard.fit}, ` : '';
+      const s = f.standard;
+      const size = s
+        ? `${shown(s.size, 40)} ${s.purpose === 'heat-set-insert' ? 'heat-set insert' : s.fit}, `
+        : '';
       return ` (${plural(f.points.length, 'hole')}, ${size}${expressionText(f.diameter)} ${extent}${head}) on ${lookup.feature(partId, f.sketch)}`;
     }
     case 'pattern': {

@@ -258,6 +258,26 @@ describe('featureExpressions', () => {
       ],
     ],
     [
+      'flat-bottomed insert hole',
+      {
+        id: 'hole#2',
+        kind: 'hole',
+        name: 'H',
+        suppressed: false,
+        sketch: 'sketch#2',
+        points: ['e5'],
+        diameter: mm('4'),
+        extent: { type: 'blind', depth: mm('5.7'), tipAngle: mm('180deg') },
+        head: { type: 'simple' },
+        standard: { size: 'M3', purpose: 'heat-set-insert' },
+      },
+      [
+        ['diameter', 'length'],
+        ['extent.depth', 'length'],
+        ['extent.tipAngle', 'angle'],
+      ],
+    ],
+    [
       'circular pattern',
       {
         id: 'pattern#1',

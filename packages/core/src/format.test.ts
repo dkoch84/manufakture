@@ -21,6 +21,7 @@ import {
   migrateV14ToV15,
   migrateV15ToV16,
   migrateV16ToV17,
+  migrateV17ToV18,
   type Migration,
 } from './migrations';
 import type { CoreErrorCode } from './result';
@@ -46,6 +47,7 @@ import v14Bracket from './fixtures/v14-bracket.json';
 import v15Bracket from './fixtures/v15-bracket.json';
 import v16Bracket from './fixtures/v16-bracket.json';
 import v17Bracket from './fixtures/v17-bracket.json';
+import v18Bracket from './fixtures/v18-bracket.json';
 
 /** One fixture per older file version; `migrates every older version` checks this is complete. */
 const FIXTURES: Record<number, unknown> = {
@@ -66,17 +68,34 @@ const FIXTURES: Record<number, unknown> = {
   14: v14Bracket,
   15: v15Bracket,
   16: v16Bracket,
+  17: v17Bracket,
 };
 
 function load(value: unknown): ManufaktureDocument {
   return unwrap(parseDocument(value)).document;
 }
 
+/** A hole feature on the bracket's hole sketch (sketch#2), for the hole format tests. */
+function holeOn(id: string, extent: unknown, standard?: unknown): Record<string, unknown> {
+  return {
+    id,
+    kind: 'hole',
+    name: 'Insert holes',
+    suppressed: false,
+    sketch: 'sketch#2',
+    points: ['e5'],
+    diameter: mm('4'),
+    extent,
+    head: { type: 'simple' },
+    ...(standard === undefined ? {} : { standard }),
+  };
+}
+
 describe('serialize and deserialize', () => {
   const documents: [string, () => ManufaktureDocument][] = [
     ['an empty document', () => createDocument({ id: 'd', name: 'Empty' })],
     ['the bracket', bracket],
-    ['the current fixture', () => load(v17Bracket)],
+    ['the current fixture', () => load(v18Bracket)],
     ['the two-body fixture', () => load(v4TwoBodies)],
     [
       'a document with body props and a scope',
@@ -231,7 +250,7 @@ describe('serialize and deserialize', () => {
     expect(serialize(unwrap(deserialize(serialize(shuffled))).document)).toBe(serialize(doc));
     expect(
       serialize(doc).startsWith(
-        '{\n  "format": "manufakture",\n  "version": 17,\n  "namingScheme": 1,',
+        '{\n  "format": "manufakture",\n  "version": 18,\n  "namingScheme": 1,',
       ),
     ).toBe(true);
   });
@@ -244,7 +263,7 @@ describe('serialize and deserialize', () => {
 });
 
 describe('loading errors', () => {
-  const current = () => clone(v17Bracket) as Record<string, unknown>;
+  const current = () => clone(v18Bracket) as Record<string, unknown>;
   const cases: [string, string | (() => unknown), CoreErrorCode, RegExp?][] = [
     ['not JSON', '{ "format": ', 'json'],
     ['an array', '[]', 'format'],
@@ -300,7 +319,7 @@ describe('loading errors', () => {
   it('never modifies the value it is given, even a newer one', () => {
     for (const value of [
       clone(v0Bracket),
-      { ...clone(v17Bracket), version: 99 },
+      { ...clone(v18Bracket), version: 99 },
       clone(v1Bracket),
       clone(v3Bracket),
       clone(v4Bracket),
@@ -317,6 +336,7 @@ describe('loading errors', () => {
       clone(v15Bracket),
       clone(v16Bracket),
       clone(v17Bracket),
+      clone(v18Bracket),
     ]) {
       const frozen = deepFreeze(value);
       const snapshot = JSON.stringify(frozen);
@@ -326,7 +346,7 @@ describe('loading errors', () => {
   });
 
   it('reports schema problems with paths', () => {
-    const d = clone(v17Bracket) as { variables: { expression: unknown }[] };
+    const d = clone(v18Bracket) as { variables: { expression: unknown }[] };
     d.variables[0]!.expression = 6;
     const r = parseDocument(d);
     expect(r.ok).toBe(false);
@@ -370,11 +390,14 @@ describe('migrations', () => {
     expect(migrateV16ToV17.migrate(clone(v16Bracket) as Record<string, unknown>)).toEqual(
       v17Bracket,
     );
+    expect(migrateV17ToV18.migrate(clone(v17Bracket) as Record<string, unknown>)).toEqual(
+      v18Bracket,
+    );
     const loaded = unwrap(parseDocument(v0Bracket));
     expect(loaded.from).toEqual({ version: 0, namingScheme: 1 });
     expect(loaded.migrated).toBe(true);
-    expect(loaded.document).toEqual(load(v17Bracket));
-    expect(JSON.parse(serialize(loaded.document))).toEqual(v17Bracket);
+    expect(loaded.document).toEqual(load(v18Bracket));
+    expect(JSON.parse(serialize(loaded.document))).toEqual(v18Bracket);
   });
 
   it('v1 to v2 changes only the version: a version 1 part has no material', () => {
@@ -552,8 +575,8 @@ describe('migrations', () => {
     const loaded = unwrap(parseDocument(v9Bracket));
     expect(loaded.from.version).toBe(9);
     expect(loaded.migrated).toBe(true);
-    expect(loaded.document).toEqual(load(v17Bracket));
-    expect(serialize(loaded.document)).toBe(serialize(load(v17Bracket)));
+    expect(loaded.document).toEqual(load(v18Bracket));
+    expect(serialize(loaded.document)).toBe(serialize(load(v18Bracket)));
   });
 
   it('v10 to v11 changes only the version: a version 10 file has no domain data', () => {
@@ -564,10 +587,10 @@ describe('migrations', () => {
     const loaded = unwrap(parseDocument(v10Bracket));
     expect(loaded.from.version).toBe(10);
     expect(loaded.migrated).toBe(true);
-    expect(loaded.document).toEqual(load(v17Bracket));
+    expect(loaded.document).toEqual(load(v18Bracket));
     expect('domains' in loaded.document).toBe(false);
-    expect(serialize(loaded.document)).toBe(serialize(load(v17Bracket)));
-    expect(JSON.parse(serialize(loaded.document))).toEqual(v17Bracket);
+    expect(serialize(loaded.document)).toBe(serialize(load(v18Bracket)));
+    expect(JSON.parse(serialize(loaded.document))).toEqual(v18Bracket);
   });
 
   it('v11 to v12 changes only the version: a version 11 file has no drawings or exploded views', () => {
@@ -578,11 +601,11 @@ describe('migrations', () => {
     const loaded = unwrap(parseDocument(v11Bracket));
     expect(loaded.from.version).toBe(11);
     expect(loaded.migrated).toBe(true);
-    expect(loaded.document).toEqual(load(v17Bracket));
+    expect(loaded.document).toEqual(load(v18Bracket));
     expect('drawings' in loaded.document).toBe(false);
     expect(loaded.document.assemblies.every((a) => !('explodedViews' in a))).toBe(true);
-    expect(serialize(loaded.document)).toBe(serialize(load(v17Bracket)));
-    expect(JSON.parse(serialize(loaded.document))).toEqual(v17Bracket);
+    expect(serialize(loaded.document)).toBe(serialize(load(v18Bracket)));
+    expect(JSON.parse(serialize(loaded.document))).toEqual(v18Bracket);
   });
 
   it('v12 to v13 changes only the version: a version 12 file has no SVG outlines', () => {
@@ -593,9 +616,9 @@ describe('migrations', () => {
     const loaded = unwrap(parseDocument(v12Bracket));
     expect(loaded.from.version).toBe(12);
     expect(loaded.migrated).toBe(true);
-    expect(loaded.document).toEqual(load(v17Bracket));
-    expect(serialize(loaded.document)).toBe(serialize(load(v17Bracket)));
-    expect(JSON.parse(serialize(loaded.document))).toEqual(v17Bracket);
+    expect(loaded.document).toEqual(load(v18Bracket));
+    expect(serialize(loaded.document)).toBe(serialize(load(v18Bracket)));
+    expect(JSON.parse(serialize(loaded.document))).toEqual(v18Bracket);
   });
 
   it('v13 to v14 adds an empty CAM section after the fonts, and changes nothing else', () => {
@@ -613,9 +636,9 @@ describe('migrations', () => {
     expect(loaded.from.version).toBe(13);
     expect(loaded.migrated).toBe(true);
     expect(loaded.document.cam).toEqual({ tools: [], setups: [], nextIds: {} });
-    expect(loaded.document).toEqual(load(v17Bracket));
-    expect(serialize(loaded.document)).toBe(serialize(load(v17Bracket)));
-    expect(JSON.parse(serialize(loaded.document))).toEqual(v17Bracket);
+    expect(loaded.document).toEqual(load(v18Bracket));
+    expect(serialize(loaded.document)).toBe(serialize(load(v18Bracket)));
+    expect(JSON.parse(serialize(loaded.document))).toEqual(v18Bracket);
   });
 
   it('v13 to v14 refuses a version 13 file that already has a cam key', () => {
@@ -642,9 +665,9 @@ describe('migrations', () => {
     const loaded = unwrap(parseDocument(v14Bracket));
     expect(loaded.from.version).toBe(14);
     expect(loaded.migrated).toBe(true);
-    expect(loaded.document).toEqual(load(v17Bracket));
-    expect(serialize(loaded.document)).toBe(serialize(load(v17Bracket)));
-    expect(JSON.parse(serialize(loaded.document))).toEqual(v17Bracket);
+    expect(loaded.document).toEqual(load(v18Bracket));
+    expect(serialize(loaded.document)).toBe(serialize(load(v18Bracket)));
+    expect(JSON.parse(serialize(loaded.document))).toEqual(v18Bracket);
   });
 
   it('v15 to v16 changes only the version: a version 15 file has no scripts', () => {
@@ -656,9 +679,9 @@ describe('migrations', () => {
     expect(loaded.from.version).toBe(15);
     expect(loaded.migrated).toBe(true);
     expect('scripts' in loaded.document).toBe(false);
-    expect(loaded.document).toEqual(load(v17Bracket));
-    expect(serialize(loaded.document)).toBe(serialize(load(v17Bracket)));
-    expect(JSON.parse(serialize(loaded.document))).toEqual(v17Bracket);
+    expect(loaded.document).toEqual(load(v18Bracket));
+    expect(serialize(loaded.document)).toBe(serialize(load(v18Bracket)));
+    expect(JSON.parse(serialize(loaded.document))).toEqual(v18Bracket);
   });
 
   it('v15 to v16 refuses a version 15 file that already has a scripts key', () => {
@@ -680,9 +703,9 @@ describe('migrations', () => {
     expect(loaded.from.version).toBe(16);
     expect(loaded.migrated).toBe(true);
     expect(loaded.document.parts.every((p) => !('bodyGroups' in p))).toBe(true);
-    expect(loaded.document).toEqual(load(v17Bracket));
-    expect(serialize(loaded.document)).toBe(serialize(load(v17Bracket)));
-    expect(JSON.parse(serialize(loaded.document))).toEqual(v17Bracket);
+    expect(loaded.document).toEqual(load(v18Bracket));
+    expect(serialize(loaded.document)).toBe(serialize(load(v18Bracket)));
+    expect(JSON.parse(serialize(loaded.document))).toEqual(v18Bracket);
   });
 
   it('v16 to v17 refuses a version 16 part that already has a bodyGroups key', () => {
@@ -696,8 +719,78 @@ describe('migrations', () => {
     }
   });
 
+  it('v17 to v18 changes only the version: a version 17 hole has no tip angle or purpose', () => {
+    expect(migrateV17ToV18.migrate(clone(v17Bracket) as Record<string, unknown>)).toEqual({
+      ...clone(v17Bracket),
+      version: 18,
+    });
+    // A version 17 hole with a clearance standard and a blind extent reads as it was.
+    const v17 = clone(v17Bracket) as {
+      parts: { features: unknown[]; nextIds: Record<string, number> }[];
+    };
+    v17.parts[0]!.nextIds = { ...v17.parts[0]!.nextIds, hole: 2 };
+    v17.parts[0]!.features.push(
+      holeOn(
+        'hole#1',
+        { type: 'blind', depth: mm('8') },
+        {
+          size: 'M5',
+          fit: 'normal',
+        },
+      ),
+    );
+    const loaded = unwrap(parseDocument(v17));
+    expect(loaded.from.version).toBe(17);
+    expect(loaded.migrated).toBe(true);
+    expect(loaded.document.parts[0]!.features.at(-1)).toEqual(v17.parts[0]!.features.at(-1));
+  });
+
+  it('v17 to v18 refuses a version 17 hole with a tip angle or a purpose', () => {
+    const refused = (hole: unknown, why: RegExp) => {
+      const v17 = clone(v17Bracket) as { parts: { features: unknown[] }[] };
+      v17.parts[0]!.features.push(hole);
+      const r = parseDocument(v17);
+      expect(r.ok).toBe(false);
+      if (!r.ok) {
+        expect(r.error.code).toBe('migration');
+        expect(r.error.message).toMatch(why);
+      }
+    };
+    refused(
+      holeOn('hole#1', { type: 'blind', depth: mm('8'), tipAngle: mm('180deg') }),
+      /tipAngle/,
+    );
+    refused(
+      holeOn(
+        'hole#1',
+        { type: 'blind', depth: mm('8') },
+        { size: 'M3', purpose: 'heat-set-insert' },
+      ),
+      /purpose/,
+    );
+  });
+
+  it('v18 reads and writes a flat-bottomed heat-set insert hole', () => {
+    const doc = clone(v18Bracket) as {
+      parts: { features: unknown[]; nextIds: Record<string, number> }[];
+    };
+    const hole = holeOn(
+      'hole#1',
+      { type: 'blind', depth: mm('5.7'), tipAngle: mm('180deg') },
+      { size: 'M3', purpose: 'heat-set-insert' },
+    );
+    doc.parts[0]!.features.push(hole);
+    doc.parts[0]!.nextIds = { ...doc.parts[0]!.nextIds, hole: 2 };
+    const loaded = unwrap(parseDocument(doc));
+    expect(loaded.migrated).toBe(false);
+    expect(loaded.document.parts[0]!.features.at(-1)).toEqual(hole);
+    const text = serialize(loaded.document);
+    expect(text.indexOf('"depth"')).toBeLessThan(text.indexOf('"tipAngle"'));
+    expect(serialize(unwrap(deserialize(text)).document)).toBe(text);
+  });
+
   it('v17 reads and writes body groups, right after the body props', () => {
-    const doc = clone(v17Bracket) as {
+    const doc = clone(v18Bracket) as {
       parts: { nextIds: Record<string, number>; bodyGroups?: unknown }[];
     };
     const part = doc.parts[0]!;
@@ -716,7 +809,7 @@ describe('migrations', () => {
 
   it('v17 refuses an empty group list, an unallocated group id and a body in two groups', () => {
     const withGroups = (groups: unknown, next = 3) => {
-      const doc = clone(v17Bracket) as {
+      const doc = clone(v18Bracket) as {
         parts: { nextIds: Record<string, number>; bodyGroups?: unknown }[];
       };
       doc.parts[0]!.bodyGroups = groups;
@@ -752,7 +845,7 @@ describe('migrations', () => {
   });
 
   it('v16 reads and writes a script library and a scripted feature', () => {
-    const doc = clone(v17Bracket) as {
+    const doc = clone(v18Bracket) as {
       scripts?: unknown;
       nextIds: Record<string, number>;
       parts: { features: unknown[]; nextIds: Record<string, number> }[];
@@ -867,8 +960,8 @@ describe('migrations', () => {
       expect(loaded.from.version).toBe(v);
       expect(loaded.document.version).toBe(FORMAT_VERSION);
       // Every fixture is the same bracket: each migrates to exactly the current one.
-      expect(loaded.document, `version ${v}`).toEqual(load(v17Bracket));
-      expect(serialize(loaded.document), `version ${v}`).toBe(serialize(load(v17Bracket)));
+      expect(loaded.document, `version ${v}`).toEqual(load(v18Bracket));
+      expect(serialize(loaded.document), `version ${v}`).toBe(serialize(load(v18Bracket)));
     }
   });
 

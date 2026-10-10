@@ -70,6 +70,7 @@ export {
   SELF_TAPPING_HOLES,
   fitDefaults,
   heatSetInsert,
+  holeInsert,
   printerFamily,
   selfTappingHole,
 } from './fits';

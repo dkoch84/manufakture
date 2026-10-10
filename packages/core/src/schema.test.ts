@@ -155,6 +155,17 @@ const validFeatures: Feature[] = [
     standard: { size: 'M5', fit: 'normal' },
   },
   {
+    id: 'hole#3',
+    kind: 'hole',
+    ...common,
+    sketch: 'sketch#2',
+    points: ['e5'],
+    diameter: mm('4'),
+    extent: { type: 'blind', depth: mm('5.7'), tipAngle: mm('180deg') },
+    head: { type: 'simple' },
+    standard: { size: 'M3', purpose: 'heat-set-insert' },
+  },
+  {
     id: 'pattern#1',
     kind: 'pattern',
     ...common,
@@ -421,6 +432,26 @@ describe('FeatureSchema', () => {
       'hole with an unknown fit',
       { ...holeFeature(), standard: { size: 'M5', fit: 'snug' } },
       'standard.fit',
+    ],
+    [
+      'hole with an unknown purpose',
+      { ...holeFeature(), standard: { size: 'M3', purpose: 'press-nut' } },
+      'standard.purpose',
+    ],
+    [
+      'hole standard with both a fit and a purpose',
+      { ...holeFeature(), standard: { size: 'M3', fit: 'normal', purpose: 'heat-set-insert' } },
+      'standard.purpose',
+    ],
+    [
+      'hole standard with neither a fit nor a purpose',
+      { ...holeFeature(), standard: { size: 'M3' } },
+      'standard.fit',
+    ],
+    [
+      'through hole with a tip angle',
+      { ...holeFeature(), extent: { type: 'throughAll', tipAngle: mm('180deg') } },
+      'extent',
     ],
     [
       'thread with an unknown system',

@@ -215,6 +215,25 @@ describe('the hole dialog', () => {
     expect(screen.getByTestId('field-points').textContent).toContain('has no points');
   });
 
+  it('makes a heat-set insert hole: the insert table sizes it, blind and flat bottomed', () => {
+    setup({ kind: 'hole' }, { features: ['sketch#2'] });
+    fireEvent.change(screen.getByTestId('field-standard'), { target: { value: 'M3' } });
+    fireEvent.change(screen.getByTestId('field-fit'), { target: { value: 'insert' } });
+    expect((screen.getByTestId('field-diameter') as HTMLInputElement).value).toBe('4');
+    expect((screen.getByTestId('field-extent') as HTMLSelectElement).value).toBe('blind');
+    expect((screen.getByTestId('field-depth') as HTMLInputElement).value).toBe('5.7');
+    expect((screen.getByTestId('field-tip') as HTMLSelectElement).value).toBe('flat');
+    expect(screen.getByTestId('field-fit-note').textContent).toContain('1.6 mm of wall');
+    // M2 is offered only as an insert hole.
+    fireEvent.change(screen.getByTestId('field-standard'), { target: { value: 'M2' } });
+    const fit = screen.getByTestId('field-fit') as HTMLSelectElement;
+    expect(Array.from(fit.options, (o) => o.value)).toEqual(['insert']);
+    expect((screen.getByTestId('field-diameter') as HTMLInputElement).value).toBe('3.2');
+    // A tip angle of its own shows its own field.
+    fireEvent.change(screen.getByTestId('field-tip'), { target: { value: 'angle' } });
+    expect(screen.getByTestId('field-tipAngle')).toBeTruthy();
+  });
+
   it('offers printed fits next to the ISO fits, and suggests the fit variables first', () => {
     const t = setup({ kind: 'hole' }, { features: ['sketch#2'] });
     const fit = screen.getByTestId('field-fit') as HTMLSelectElement;
@@ -225,6 +244,7 @@ describe('the hole dialog', () => {
       'press',
       'slip',
       'sliding',
+      'insert',
     ]);
     fireEvent.change(screen.getByTestId('field-standard'), { target: { value: 'M3' } });
     fireEvent.change(fit, { target: { value: 'slip' } });

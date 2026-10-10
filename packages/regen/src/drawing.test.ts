@@ -10,6 +10,7 @@ import {
   type DimensionRef,
   type Drawing,
   type DrawingView,
+  type HoleFeature,
   type ManufaktureDocument,
   type Sheet,
 } from '@manufakture/core';
@@ -35,6 +36,7 @@ import {
   edgeSamples,
   drawingOffset,
   evaluateScale,
+  insertCallout,
   pickInView,
   sheetInput,
   titleBlockInput,
@@ -695,6 +697,81 @@ const pickRef = (
 };
 
 describe('drawing views with the real kernel', () => {
+  it('calls out a heat-set insert hole on a diameter dimension of its wall', async () => {
+    const engine = new RegenEngine({ kernel: service, solver });
+    let doc = withDrawing(bracket(), [view('view#1', 'top')]);
+    doc = apply(
+      doc,
+      {
+        type: 'addFeature',
+        partId: PART,
+        feature: {
+          id: 'sketch#3',
+          kind: 'sketch',
+          name: 'Insert centre',
+          suppressed: false,
+          plane: { type: 'plane', origin: [0, 0, 6], normal: [0, 0, 1], xDir: [1, 0, 0] },
+          entities: [{ id: 'e9', kind: 'point', construction: false, position: [8, 10] }],
+          constraints: [],
+        },
+      },
+      {
+        type: 'addFeature',
+        partId: PART,
+        feature: {
+          id: 'hole#1',
+          kind: 'hole',
+          name: 'M3 insert',
+          suppressed: false,
+          sketch: 'sketch#3',
+          points: ['e9'],
+          diameter: mm('4'),
+          extent: { type: 'blind', depth: mm('5'), tipAngle: { ...mm('180'), angleUnit: 'deg' } },
+          head: { type: 'simple' },
+          standard: { size: 'M3', purpose: 'heat-set-insert' },
+        },
+      },
+      addDimension({
+        id: 'dim#1',
+        view: 'view#1',
+        kind: 'diameter',
+        refs: [{ face: { face: 'hole#1:wall:e9' }, body: BODY }],
+        at: [6, 6],
+      }),
+    );
+    await engine.regen(doc);
+    const top = (await engine.drawingView(doc, D, 'view#1'))!;
+    expect(top.diagnostics).toEqual([]);
+    const [insert] = top.dimensions;
+    expect(insert).toMatchObject({
+      outcome: 'exact',
+      input: { text: '<> for M3 heat-set insert' },
+    });
+    expect(insert!.value).toBeCloseTo(4, 9);
+    // Only a diameter without a text of its own, on an insert hole of the part shown.
+    const dim = {
+      id: 'dim#3',
+      view: 'view#1',
+      kind: 'diameter',
+      refs: [{ edge: { faces: ['extrude#1:cap:end#1', 'hole#1:wall:e9'] }, body: BODY }],
+      at: [6, 6],
+    } satisfies Dimension;
+    expect(insertCallout(doc, PART, dim)).toBe('<> for M3 heat-set insert');
+    expect(insertCallout(doc, PART, { ...dim, text: 'insert <>' })).toBeNull();
+    expect(insertCallout(doc, null, dim)).toBeNull();
+    expect(insertCallout(doc, PART, { ...dim, kind: 'radius' })).toBeNull();
+    const clearance = apply(doc, {
+      type: 'editFeature',
+      partId: PART,
+      feature: {
+        ...(doc.parts[0]!.features.find((f) => f.id === 'hole#1') as HoleFeature),
+        standard: { size: 'M3', fit: 'close' },
+      },
+    });
+    expect(insertCallout(clearance, PART, dim)).toBeNull();
+    await engine.dispose();
+  });
+
   it('projects the bracket front view, dimensions it on picked references, and follows #thickness and a deleted fillet', async () => {
     const engine = new RegenEngine({ kernel: service, solver });
     let doc = withDrawing(bracket(), [

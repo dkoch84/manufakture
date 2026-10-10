@@ -10,6 +10,7 @@ import {
   SELF_TAPPING_HOLES,
   fitDefaults,
   heatSetInsert,
+  holeInsert,
   printerFamily,
   selfTappingHole,
 } from './fits';
@@ -120,6 +121,17 @@ describe('inserts and screws', () => {
     }
     expect(heatSetInsert('M3')?.hole).toBe(4.0);
     expect(heatSetInsert('M6')).toBeUndefined();
+  });
+
+  it("finds the insert a hole's standard names, and only for an insert standard", () => {
+    expect(holeInsert({ size: 'M3', purpose: 'heat-set-insert' })).toMatchObject({
+      hole: 4.0,
+      length: 5.7,
+      minWall: 1.6,
+    });
+    expect(holeInsert({ size: 'M3', fit: 'normal' } as { size: string })).toBeUndefined();
+    expect(holeInsert({ size: 'M8', purpose: 'heat-set-insert' })).toBeUndefined();
+    expect(holeInsert(undefined)).toBeUndefined();
   });
 
   it('marks every self-tapping hole unverified, at nominal minus pitch', () => {

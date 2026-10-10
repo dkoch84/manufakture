@@ -152,6 +152,7 @@ const FIELD_LABELS: Record<string, string> = {
   thickness: 'Thickness',
   diameter: 'Diameter',
   'extent.depth': 'Depth',
+  'extent.tipAngle': 'Tip angle',
   'head.diameter': 'Head diameter',
   'head.depth': 'Head depth',
   'head.angle': 'Countersink angle',

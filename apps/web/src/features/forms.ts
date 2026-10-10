@@ -39,8 +39,14 @@ import {
   type HoleFit,
   type ThreadSystem,
 } from '@manufakture/kernel';
-import { FIT_VARIABLES, type FitKind } from '@manufakture/print';
-import { evaluate, evaluateQuantity, fromMillimetres, fromRadians } from '@manufakture/units';
+import { FIT_VARIABLES, HEAT_SET_INSERTS, heatSetInsert, type FitKind } from '@manufakture/print';
+import {
+  evaluate,
+  evaluateQuantity,
+  fromMillimetres,
+  fromRadians,
+  parseAngle,
+} from '@manufakture/units';
 import { parsePrintedFit, printedFitDiameter } from '../variables/fits';
 import { evaluateVariables, type Variables } from '../sketcher/values';
 
@@ -53,10 +59,20 @@ export type Operation = ExtrudeFeature['operation'];
 export type BodyCopyMode = NonNullable<PatternFeature['mode']>;
 
 /**
- * A hole's fit: an ISO 273 clearance fit of the size tables, or a printed fit, whose diameter is
- * the screw's nominal size plus `#fit_press`, `#fit_slip` or `#fit_sliding` (ADR 0012 decision 10).
+ * A hole's fit: an ISO 273 clearance fit of the size tables, a printed fit, whose diameter is
+ * the screw's nominal size plus `#fit_press`, `#fit_slip` or `#fit_sliding` (ADR 0012 decision 10),
+ * or `insert`: a hole for a heat-set insert of the size (core's `standard.purpose`).
  */
-export type HoleFormFit = HoleFit | FitKind;
+export type HoleFormFit = HoleFit | FitKind | 'insert';
+
+/** The sizes the hole dialog offers: the clearance table's, then insert sizes it lacks (M2). */
+export const HOLE_FORM_SIZES: readonly string[] = [
+  ...HOLE_SIZES.map((s) => s.size),
+  ...HEAT_SET_INSERTS.map((i) => i.size).filter((size) => !holeSize(size)),
+];
+
+/** How a blind hole ends: the default drill point, flat (180 deg), or a tip angle of its own. */
+export type HoleFormTip = 'drill' | 'flat' | 'angle';
 
 const ISO_FITS: readonly string[] = ['close', 'normal', 'loose'];
 export function isIsoFit(fit: HoleFormFit): fit is HoleFit {
@@ -138,6 +154,9 @@ export interface HoleForm {
   diameter: string;
   extent: 'blind' | 'throughAll';
   depth: string;
+  /** How a blind hole ends; `tipAngle` is the angle when `tip` is `angle`. */
+  tip: HoleFormTip;
+  tipAngle: string;
   head: 'simple' | 'counterbore' | 'countersink';
   headDiameter: string;
   headDepth: string;
@@ -486,6 +505,8 @@ export function newForm(kind: FormKind, ctx: FormContext): FeatureForm {
         fit: 'normal',
         extent: 'throughAll',
         depth: len(10),
+        tip: 'drill',
+        tipAngle: angleText(Math.PI * (118 / 180), units),
         head: 'simple',
       };
     }
@@ -551,7 +572,9 @@ export function standardFields(
     standard: s.size,
     diameter: isIsoFit(fit)
       ? lengthText(s.clearance[fit], units)
-      : printedFitDiameter(s.nominal, fit, units),
+      : fit === 'insert'
+        ? lengthText(heatSetInsert(size)?.hole ?? s.clearance.normal, units)
+        : printedFitDiameter(s.nominal, fit, units),
     headDiameter: lengthText(s.counterbore.diameter, units),
     headDepth: lengthText(s.counterbore.depth, units),
     headAngle: angleText(s.countersink.angle, units),
@@ -562,7 +585,14 @@ export function standardFields(
 export function applyStandard(form: HoleForm, units: DisplayUnits): HoleForm {
   if (form.standard === '') return form;
   const s = holeSize(form.standard);
-  if (!s) return { ...form, standard: '' };
+  // An insert hole takes the insert's hole; a size with an insert and no clearance row (M2) is
+  // only offered as one, and an insert fit on a size with no insert falls back to a clearance fit.
+  if (form.fit === 'insert' || !s) {
+    const insert = heatSetInsert(form.standard);
+    if (insert) return { ...form, fit: 'insert', diameter: lengthText(insert.hole, units) };
+    if (!s) return { ...form, standard: '' };
+    return applyStandard({ ...form, fit: 'normal' }, units);
+  }
   const f = standardFields(form.standard, form.fit, units);
   return {
     ...form,
@@ -574,7 +604,29 @@ export function applyStandard(form: HoleForm, units: DisplayUnits): HoleForm {
   };
 }
 
+/**
+ * A hole form after choosing a size or a fit in the dialog: as `applyStandard`, and when that makes
+ * it an insert hole, blind at the insert's length with a flat bottom, as an insert pocket wants.
+ */
+export function chooseHoleStandard(
+  form: HoleForm,
+  patch: Pick<Partial<HoleForm>, 'standard' | 'fit'>,
+  units: DisplayUnits,
+): HoleForm {
+  const next = applyStandard({ ...form, ...patch }, units);
+  const insert = next.fit === 'insert' ? heatSetInsert(next.standard) : undefined;
+  if (!insert) return next;
+  return { ...next, extent: 'blind', depth: lengthText(insert.length, units), tip: 'flat' };
+}
+
 const text = (e: StoredExpression | undefined) => e?.source ?? '';
+
+/** How a stored blind hole ends, for the form: absent is the drill point, 180 deg is flat. */
+function tipOf(tipAngle: StoredExpression | undefined): HoleFormTip {
+  if (tipAngle === undefined) return 'drill';
+  const r = parseAngle(tipAngle.source, tipAngle.angleUnit);
+  return r.ok && Math.abs(r.value - Math.PI) < 1e-9 ? 'flat' : 'angle';
+}
 
 /**
  * The standard size and printed fit of a diameter written as `<nominal> + #fit_<kind>`, when the
@@ -661,15 +713,22 @@ export function formOf(
     case 'hole': {
       const h = feature.head;
       const printed = feature.standard ? null : printedFitOf(feature.diameter);
+      const standard = feature.standard;
+      const tipAngle = feature.extent.type === 'blind' ? feature.extent.tipAngle : undefined;
       return {
         kind: 'hole',
         sketch: feature.sketch,
         points: [...feature.points],
-        standard: feature.standard?.size ?? printed?.size ?? '',
-        fit: feature.standard?.fit ?? printed?.fit ?? 'normal',
+        standard: standard?.size ?? printed?.size ?? '',
+        fit:
+          standard?.purpose === 'heat-set-insert'
+            ? 'insert'
+            : (standard?.fit ?? printed?.fit ?? 'normal'),
         diameter: feature.diameter.source,
         extent: feature.extent.type,
         depth: feature.extent.type === 'blind' ? feature.extent.depth.source : '10',
+        tip: tipOf(tipAngle),
+        tipAngle: tipAngle?.source ?? '118 deg',
         head: h.type,
         headDiameter: h.type === 'simple' ? '' : h.diameter.source,
         headDepth: h.type === 'counterbore' ? h.depth.source : '',
@@ -952,9 +1011,17 @@ export function buildFeature(
             : { type: 'throughAll' },
         head,
       };
+      if (f.extent.type === 'blind' && form.tip !== 'drill') {
+        f.extent.tipAngle =
+          form.tip === 'flat'
+            ? { source: '180 deg', ...bareUnits(units) }
+            : expr('tipAngle', form.tipAngle, 'angle', { positive: true });
+      }
       // A printed fit is not one of core's standard fits: the diameter carries it.
       if (form.standard !== '' && holeSize(form.standard) && isIsoFit(form.fit)) {
         f.standard = { size: form.standard, fit: form.fit };
+      } else if (form.standard !== '' && form.fit === 'insert' && heatSetInsert(form.standard)) {
+        f.standard = { size: form.standard, purpose: 'heat-set-insert' };
       }
       feature = f;
       break;

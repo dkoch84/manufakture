@@ -315,6 +315,41 @@ describe('holes and patterns', () => {
     });
   });
 
+  it('passes a blind hole tip angle through, 180 deg as a flat bottom, and refuses one out of range', () => {
+    const s = solved([...rect, pt]);
+    const blind = (tipAngle?: string): HoleFeature => ({
+      ...holeFeature(['e7']),
+      head: { type: 'simple' },
+      extent: {
+        type: 'blind',
+        depth: mm('5.7'),
+        ...(tipAngle === undefined ? {} : { tipAngle: mm(tipAngle) }),
+      },
+      standard: { size: 'M3', purpose: 'heat-set-insert' },
+    });
+    const extent = (f: HoleFeature, values: Record<string, number>) => {
+      const r = translate(f, s, { diameter: 4, 'extent.depth': 5.7, ...values });
+      return r.ok ? (r.input as { extent: unknown }).extent : r;
+    };
+    expect(extent(blind(), {})).toEqual({ type: 'blind', depth: 5.7 });
+    expect(extent(blind('180deg'), { 'extent.tipAngle': Math.PI })).toEqual({
+      type: 'blind',
+      depth: 5.7,
+      tipAngle: Math.PI,
+    });
+    expect(extent(blind('180deg'), { 'extent.tipAngle': Math.PI * (1 + 1e-15) })).toEqual({
+      type: 'blind',
+      depth: 5.7,
+      tipAngle: Math.PI,
+    });
+    for (const bad of [0, -1, Math.PI * 1.01]) {
+      expect(extent(blind('x'), { 'extent.tipAngle': bad })).toMatchObject({
+        ok: false,
+        errors: [{ code: 'invalid', field: ['extent', 'tipAngle'] }],
+      });
+    }
+  });
+
   const pattern = (features: string[]): PatternFeature => ({
     id: 'pattern#1',
     kind: 'pattern',

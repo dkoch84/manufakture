@@ -248,7 +248,10 @@ export function featureExpressions(feature: Feature): ExpressionSite[] {
       break;
     case 'hole':
       add(['diameter'], feature.diameter, 'length');
-      if (feature.extent.type === 'blind') add(['extent', 'depth'], feature.extent.depth, 'length');
+      if (feature.extent.type === 'blind') {
+        add(['extent', 'depth'], feature.extent.depth, 'length');
+        add(['extent', 'tipAngle'], feature.extent.tipAngle, 'angle');
+      }
       if (feature.head.type === 'counterbore') {
         add(['head', 'diameter'], feature.head.diameter, 'length');
         add(['head', 'depth'], feature.head.depth, 'length');

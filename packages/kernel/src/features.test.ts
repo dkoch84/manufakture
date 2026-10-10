@@ -842,6 +842,43 @@ describe('hole', () => {
     expect(b.topology.faces[faceIndex(b, 'hole#2:tip:e5') - 1]!.surface).toBe('cone');
   });
 
+  it('blind with a 180 degree tip: a flat bottom, named bottom', () => {
+    const { shape } = build(k, [
+      block(),
+      hole({ extent: { type: 'blind', depth: 10, tipAngle: PI } }),
+    ]);
+    expectGolden(k, shape, {
+      volume: 24000 - 2 * PI * r * r * 10,
+      faces: 10,
+      min: [0, 0, 0],
+      max: [40, 30, 20],
+    });
+    const b = named(k, shape);
+    expect(faceNames(b)).not.toEqual(expect.arrayContaining(['hole#2:tip:e5']));
+    const bottom = b.topology.faces[faceIndex(b, 'hole#2:bottom:e5') - 1]!;
+    expect(bottom.surface).toBe('plane');
+    expect(bottom.centroid[2]).toBeCloseTo(10, 9);
+  });
+
+  it('blind with another tip angle, and a tip angle out of range', () => {
+    const { shape } = build(k, [
+      block(),
+      hole({ extent: { type: 'blind', depth: 10, tipAngle: PI / 2 } }),
+    ]);
+    // A 90 degree point is as deep as the hole is wide in radius.
+    expectGolden(k, shape, {
+      volume: 24000 - 2 * (PI * r * r * 10 + (PI * r * r * r) / 3),
+      faces: 10,
+      min: [0, 0, 0],
+      max: [40, 30, 20],
+    });
+    const base = build(k, [block()]).shape;
+    for (const tipAngle of [0, PI * 1.01]) {
+      const out = apply(k, base, hole({ extent: { type: 'blind', depth: 10, tipAngle } }));
+      expect(out.errors).toMatchObject([{ code: 'invalid', message: /tip angle/ }]);
+    }
+  });
+
   it('counterbore', () => {
     const size = holeSize('M6')!;
     const { shape } = build(k, [

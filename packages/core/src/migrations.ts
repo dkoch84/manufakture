@@ -333,6 +333,35 @@ export const migrateV16ToV17: Migration = {
   },
 };
 
+/**
+ * Version 18 added two optional fields to the hole feature: a blind extent's `tipAngle` (180 deg
+ * for a flat bottom) and the insert standard (`standard: { size, purpose: 'heat-set-insert' }`).
+ * Nothing in a version 17 file changes: its blind holes end in the default drill point, which is
+ * what an absent `tipAngle` means, and its standards are clearance standards. A version 17 hole
+ * that already has a `tipAngle` or a `standard.purpose` is refused rather than read.
+ */
+export const migrateV17ToV18: Migration = {
+  from: 17,
+  to: 18,
+  description: 'Add hole tip angles and heat-set insert holes',
+  migrate(doc) {
+    const parts = Array.isArray(doc.parts) ? doc.parts : [];
+    for (const part of parts) {
+      const features = isObject(part) && Array.isArray(part.features) ? part.features : [];
+      for (const f of features) {
+        if (!isObject(f) || f.kind !== 'hole') continue;
+        if (isObject(f.extent) && 'tipAngle' in f.extent) {
+          throw new Error('a version 17 hole has no "tipAngle"');
+        }
+        if (isObject(f.standard) && 'purpose' in f.standard) {
+          throw new Error('a version 17 hole standard has no "purpose"');
+        }
+      }
+    }
+    return { ...doc, version: 18 };
+  },
+};
+
 /** File format migrations, in order: `FORMAT_MIGRATIONS[i]` goes from version i to i + 1. */
 export const FORMAT_MIGRATIONS: readonly Migration[] = [
   migrateV0ToV1,
@@ -352,6 +381,7 @@ export const FORMAT_MIGRATIONS: readonly Migration[] = [
   migrateV14ToV15,
   migrateV15ToV16,
   migrateV16ToV17,
+  migrateV17ToV18,
 ];
 
 /**
@@ -463,6 +493,7 @@ export const COMMAND_MIGRATIONS: readonly CommandMigration[] = [
   commandStep(migrateV14ToV15),
   commandStep(migrateV15ToV16),
   commandStep(migrateV16ToV17),
+  commandStep(migrateV17ToV18),
 ];
 
 export interface CommandMigrationOptions {

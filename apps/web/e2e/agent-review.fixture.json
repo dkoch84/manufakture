@@ -2,7 +2,7 @@
   "about": "Made by apps/web/src/review/agentReviewFixture.test.ts for e2e/agent-review.spec.ts: rewrite it there.",
   "base": {
     "format": "manufakture",
-    "version": 17,
+    "version": 18,
     "namingScheme": 1,
     "id": "doc-bracket",
     "name": "Bracket",

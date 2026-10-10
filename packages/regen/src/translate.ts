@@ -266,6 +266,25 @@ function holeInput(ctx: TranslateContext, f: Extract<Feature, { kind: 'hole' }>)
       };
       break;
   }
+  let extent: HoleInput['extent'] = { type: 'throughAll' };
+  if (f.extent.type === 'blind') {
+    extent = { type: 'blind', depth: value(ctx, 'extent', 'depth') };
+    if (f.extent.tipAngle !== undefined) {
+      const tipAngle = value(ctx, 'extent', 'tipAngle');
+      // 180 deg is a flat bottom; a hair over it (a computed angle) is still flat.
+      if (!(tipAngle > 0 && tipAngle <= Math.PI * (1 + 1e-12))) {
+        throw new Failed([
+          {
+            code: 'invalid',
+            field: ['extent', 'tipAngle'],
+            message:
+              'The tip angle must be more than 0 and at most 180 deg (180 deg: a flat bottom)',
+          },
+        ]);
+      }
+      extent.tipAngle = Math.min(tipAngle, Math.PI);
+    }
+  }
   const { placement } = sketch;
   return {
     kind: 'hole',
@@ -273,10 +292,7 @@ function holeInput(ctx: TranslateContext, f: Extract<Feature, { kind: 'hole' }>)
     frame: { origin: placement.origin, xDir: placement.xDir, normal: placement.normal },
     points,
     diameter,
-    extent:
-      f.extent.type === 'blind'
-        ? { type: 'blind', depth: value(ctx, 'extent', 'depth') }
-        : { type: 'throughAll' },
+    extent,
     head,
   };
 }
