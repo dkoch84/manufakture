@@ -167,6 +167,72 @@ describe('domain data', () => {
   });
 });
 
+describe('mechanical diff', () => {
+  const se = (source: string) => ({ source, lengthUnit: 'mm' as const, angleUnit: 'deg' as const });
+  const loadCase = {
+    id: 'lc#1',
+    name: 'Max set',
+    static: [
+      {
+        kind: 'acceleration' as const,
+        name: 'Drop',
+        acceleration: se('5 gn'),
+        direction: [0, 0, -1] as const,
+      },
+    ],
+  };
+
+  it("joins the settings' lines and the section's under the mech namespace, with the notice", () => {
+    const base = bracketDocument();
+    const head = edit(
+      base,
+      {
+        type: 'setDomainData',
+        namespace: 'mech',
+        schemaVersion: 1,
+        data: { factors: { strength: 2 } },
+      },
+      { type: 'setMechLoadCase', loadCase },
+    );
+    const [mech] = domainDiffs(base, head, summariserMap());
+    expect(mech!.namespace).toBe('mech');
+    expect(mech!.change).toBe('added');
+    expect(mech!.lines.slice(0, 4)).toEqual([
+      'Started the mechanical domain',
+      'Strength factor (on yield): 2',
+      'Fatigue factor: not set',
+      'Added load case "Max set" (lc#1)',
+    ]);
+    expect(mech!.lines.at(-1)).toMatch(/^manufakture calculates by the methods/);
+    // A section change alone is reported too, and a change back to nothing is "removed".
+    const renamed = edit(head, {
+      type: 'setMechLoadCase',
+      loadCase: { ...loadCase, name: 'Heavy' },
+    });
+    expect(domainDiffs(head, renamed, summariserMap())[0]!.lines[0]).toBe(
+      'Changed load case "Heavy" (lc#1): name',
+    );
+    for (const line of mech!.lines.slice(0, -1)) {
+      expect(line).not.toMatch(/\b(safe|certified|compliant|pass|fail|ok)\b/i);
+    }
+  });
+
+  it('lists user materials among the document changes', () => {
+    const base = bracketDocument();
+    const head = edit(base, {
+      type: 'setMaterialDef',
+      material: {
+        id: 'material#1',
+        name: 'My PETG',
+        category: 'plastic',
+        form: 'printed',
+        density: { value: se('1270 kg/m^3'), source: 'label', typical: true },
+      },
+    });
+    expect(documentChanges(base, head).map((c) => c.path)).toContain('materials.material#1');
+  });
+});
+
 describe('regen issues', () => {
   const line = (featureId: string, severity: 'error' | 'warning', code = 'x'): ErrorLine => ({
     where: 'feature',

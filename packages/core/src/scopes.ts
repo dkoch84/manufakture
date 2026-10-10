@@ -10,12 +10,13 @@ import type { ManufaktureDocument } from './schema';
  *
  * | Key                      | `nextIds`       | Counters                                                     |
  * | ------------------------ | --------------- | ------------------------------------------------------------ |
- * | `document`               | the document's  | `part`, `assembly`, `cp`, `cfg`, `font`, `drawing`, `script` |
+ * | `document`               | the document's  | `part`, `assembly`, `cp`, `cfg`, `font`, `drawing`, `script`, `material` |
  * | `part:<part id>`         | each part's     | one per feature kind, `e`, `k`, `r`, `group`                 |
  * | `assembly:<assembly id>` | each assembly's | `inst`, `mate`, `mc`, `r`, `explode`, `step`                 |
  * | `cam`                    | `cam.nextIds`   | `tool`, `setup`, one per operation kind, `r`                 |
  * | `print`                  | `print.nextIds` | `print`, `item`, `r`                                         |
  * | `drawing:<drawing id>`   | each drawing's  | `sheet`, `view`, `dim`, `note`                               |
+ * | `mech`                   | `mech.nextIds`  | `req`, `lc`, `drive`, `stage`, ... (`MECH_COUNTERS`), `r`    |
  *
  * A counter added to an existing `nextIds` (as `script` was to the document's) needs nothing
  * here. A new `nextIds` object is one entry in `COUNTER_SCOPES`.
@@ -28,6 +29,8 @@ export type CounterTable = Readonly<Record<ScopeKey, Readonly<Record<string, num
 export const DOCUMENT_SCOPE = 'document';
 export const CAM_SCOPE = 'cam';
 export const PRINT_SCOPE = 'print';
+/** The mechanical section's counters (`mech.nextIds`, since version 19). */
+export const MECH_SCOPE = 'mech';
 
 export function partScope(partId: string): ScopeKey {
   return `part:${partId}`;
@@ -63,6 +66,9 @@ export const COUNTER_SCOPES: readonly CounterScopeKind[] = [
     name: 'drawing',
     list: (doc) => (doc.drawings ?? []).map((d) => [drawingScope(d.id), d.nextIds] as const),
   },
+  // Listed (empty) while the section is absent, so the first mechanical id is a created id that
+  // sync can check, like any other.
+  { name: MECH_SCOPE, list: (doc) => [[MECH_SCOPE, doc.mech?.nextIds ?? {}]] },
 ];
 
 /** Every counter of every scope in `doc`. A scope with no counters yet is present and empty. */

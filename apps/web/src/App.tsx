@@ -128,6 +128,7 @@ import {
   partHasWalls,
 } from './construction/kinds';
 import { createConstructionUiStore, type ConstructionUiStore } from './construction/state';
+import { MechToolbar } from './mech/MechStart';
 import { DrawingTabs } from './drawing/DrawingTabs';
 import { createDrawingUiStore } from './drawing/state';
 import { ConfigurationSwitcher } from './configurations/ConfigurationSwitcher';
@@ -2412,6 +2413,7 @@ export function App({
               hasLevel={constructionHasLevel(document)}
               hasWalls={partHasWalls(document, activePartId)}
             />
+            <MechToolbar documents={documents} disabled={dialog !== null} />
           </div>
         )}
       {!locked && !printing && !drawingOpen && assemblyId !== null && (

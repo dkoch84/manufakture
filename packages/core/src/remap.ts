@@ -1,10 +1,27 @@
 import type { Command, SimpleCommand } from './commands';
+import { USER_MATERIAL_ID_PATTERN } from './materials';
+import { MECH_LIST_COMMANDS } from './mech-commands';
 import { TOMBSTONE_NAME, parseSubId } from './ids';
 import { findMeasures } from '@manufakture/units';
 import { compareNames, featureIdsInName, mapName, splitMeasuredFace } from './names';
 import type {
   Assembly,
   BodyGroup,
+  CatalogEntry,
+  CatalogRef,
+  CheckOverride,
+  Drivetrain,
+  Electrical,
+  LoadCase,
+  MaterialDefData,
+  MechData,
+  PurchasedUse,
+  Requirement,
+  Schematic,
+  SpecNote,
+  Study,
+  SubjectRef,
+  SymbolRef,
   CamData,
   CamOperation,
   CamSetup,
@@ -40,6 +57,7 @@ import type {
 import {
   CAM_SCOPE,
   DOCUMENT_SCOPE,
+  MECH_SCOPE,
   PRINT_SCOPE,
   assemblyScope,
   drawingScope,
@@ -573,7 +591,12 @@ export class IdWalker {
       id: this.id(DOCUMENT_SCOPE, p.id),
       features: p.features.map((f) => this.feature(p.id, f)),
       nextIds: this.nextIds(ps, p.nextIds),
-      bodies: p.bodies.map((b) => ({ ...b, id: this.body(p.id, b.id) })),
+      ...(p.material !== undefined && { material: this.material(p.material) }),
+      bodies: p.bodies.map((b) => ({
+        ...b,
+        id: this.body(p.id, b.id),
+        ...(b.material !== undefined && { material: this.material(b.material) }),
+      })),
       ...(p.bodyGroups !== undefined && {
         bodyGroups: p.bodyGroups.map((g) => this.bodyGroup(p.id, g)) as typeof p.bodyGroups,
       }),
@@ -936,6 +959,340 @@ export class IdWalker {
     };
   }
 
+  // User materials and the mechanical section (since version 19) ------------------------------
+
+  /** A material id: a user material's in the document scope; a built-in one stays. */
+  material<M extends string>(id: M): M {
+    return (USER_MATERIAL_ID_PATTERN.test(id) ? this.id(DOCUMENT_SCOPE, id) : id) as M;
+  }
+
+  materialDef(m: MaterialDefData): MaterialDefData {
+    return { ...m, id: this.material(m.id) };
+  }
+
+  private mechId(id: string): string {
+    return this.id(MECH_SCOPE, id);
+  }
+
+  /** An instance id of an assembly that may be unknown (left as it is, and counted). */
+  private instanceIn(assembly: string | undefined, id: string): string {
+    if (assembly === undefined) {
+      this.report.unresolved++;
+      return id;
+    }
+    return this.id(assemblyScope(assembly), id);
+  }
+
+  catalogRef(r: CatalogRef): CatalogRef {
+    return r.source === 'document' ? { ...r, id: this.mechId(r.id) } : r;
+  }
+
+  symbolRef(r: SymbolRef): SymbolRef {
+    return r.source === 'document' ? { ...r, id: this.mechId(r.id) } : r;
+  }
+
+  subject(r: SubjectRef): SubjectRef {
+    switch (r.kind) {
+      case 'part':
+        return { ...r, part: this.id(DOCUMENT_SCOPE, r.part) };
+      case 'body':
+        return { ...r, part: this.id(DOCUMENT_SCOPE, r.part), body: this.body(r.part, r.body) };
+      case 'instance':
+        return {
+          ...r,
+          assembly: this.id(DOCUMENT_SCOPE, r.assembly),
+          instance: this.id(assemblyScope(r.assembly), r.instance),
+        };
+      case 'mate':
+        return {
+          ...r,
+          assembly: this.id(DOCUMENT_SCOPE, r.assembly),
+          mate: this.id(assemblyScope(r.assembly), r.mate),
+        };
+      case 'drivetrain':
+        return { ...r, drivetrain: this.mechId(r.drivetrain) };
+      case 'stage':
+        return { ...r, drivetrain: this.mechId(r.drivetrain), stage: this.mechId(r.stage) };
+      case 'purchased':
+        return { ...r, use: this.mechId(r.use) };
+      case 'component':
+        return { ...r, component: this.mechId(r.component) };
+      case 'connection':
+        return { ...r, connection: this.mechId(r.connection) };
+      case 'segment':
+        return { ...r, segment: this.mechId(r.segment) };
+      case 'schematic':
+        return { ...r, schematic: this.mechId(r.schematic) };
+      case 'study':
+        return { ...r, study: this.mechId(r.study) };
+      case 'loadCase':
+        return { ...r, loadCase: this.mechId(r.loadCase) };
+      case 'requirement':
+        return { ...r, requirement: this.mechId(r.requirement) };
+    }
+  }
+
+  /** `value` with each listed optional id field renamed by `rename`. */
+  private optionalIds<T extends object>(
+    value: T,
+    keys: readonly (keyof T)[],
+    rename: (id: string) => string,
+  ): T {
+    const out = { ...value } as Record<keyof T, unknown>;
+    for (const k of keys) {
+      const v = value[k];
+      if (typeof v === 'string') out[k] = rename(v);
+    }
+    return out as T;
+  }
+
+  requirement(r: Requirement): Requirement {
+    return this.optionalIds({ ...r, id: this.mechId(r.id) }, ['loadCase', 'drivetrain'], (id) =>
+      this.mechId(id),
+    );
+  }
+
+  loadCase(lc: LoadCase): LoadCase {
+    const out = this.optionalIds({ ...lc, id: this.mechId(lc.id) }, ['drivetrain'], (id) =>
+      this.mechId(id),
+    );
+    if (lc.static !== undefined) {
+      out.static = lc.static.map((s) =>
+        s.kind === 'point' ? { ...s, at: this.subject(s.at) } : s,
+      ) as typeof lc.static;
+    }
+    return out;
+  }
+
+  drivetrain(d: Drivetrain): Drivetrain {
+    const a = d.assembly;
+    const m = (id: string) => this.mechId(id);
+    const inst = (id: string) => this.instanceIn(a, id);
+    const id = m(d.id);
+    const stages = d.stages.map((s): Drivetrain['stages'][number] => {
+      const base = { ...s, id: m(s.id) };
+      switch (base.kind) {
+        case 'motor': {
+          const out = this.optionalIds({ ...base, use: m(base.use) }, ['instance'], inst);
+          if (base.mate !== undefined) {
+            out.mate = a === undefined ? base.mate : this.id(assemblyScope(a), base.mate);
+            if (a === undefined) this.report.unresolved++;
+          }
+          return out;
+        }
+        case 'belt': {
+          const out = this.optionalIds(base, ['belt'], m);
+          if (base.pulleys !== undefined) out.pulleys = base.pulleys.map(m);
+          return out;
+        }
+        case 'gear':
+        case 'planetary': {
+          const out = { ...base };
+          if (base.uses !== undefined) out.uses = base.uses.map(m);
+          if (base.instances !== undefined) out.instances = base.instances.map(inst);
+          return out;
+        }
+        case 'shaft':
+          return this.optionalIds(
+            {
+              ...base,
+              bearings: base.bearings.map((b) =>
+                this.optionalIds({ ...b, use: m(b.use) }, ['instance'], inst),
+              ),
+            },
+            ['instance'],
+            inst,
+          );
+        case 'coupling':
+          return this.optionalIds(this.optionalIds(base, ['use'], m), ['instance'], inst);
+      }
+    });
+    const o = d.output;
+    let output: Drivetrain['output'];
+    if (o.kind === 'spool') {
+      const part =
+        a !== undefined && o.instance !== undefined
+          ? this.resolver.instancePart(a, o.instance)
+          : undefined;
+      const spool = this.optionalIds({ ...o, cable: m(o.cable) }, ['instance'], inst);
+      if (o.body !== undefined) spool.body = this.body(part, o.body);
+      if (o.fairlead !== undefined) {
+        spool.fairlead = this.optionalIds(o.fairlead, ['instance'], inst);
+      }
+      output = spool;
+    } else output = this.optionalIds(o, ['instance'], inst);
+    const out: Drivetrain = { ...d, id, stages, output };
+    if (a !== undefined) out.assembly = this.id(DOCUMENT_SCOPE, a);
+    return out;
+  }
+
+  purchased(p: PurchasedUse): PurchasedUse {
+    const out: PurchasedUse = {
+      ...p,
+      id: this.mechId(p.id),
+      entry: this.catalogRef(p.entry),
+      alternates: p.alternates.map((r) => this.catalogRef(r)),
+    };
+    if (p.part !== undefined) out.part = this.id(DOCUMENT_SCOPE, p.part);
+    return out;
+  }
+
+  catalogEntry(e: CatalogEntry): CatalogEntry {
+    const out: CatalogEntry = { ...e, id: this.mechId(e.id) };
+    if (e.derivedFrom !== undefined) out.derivedFrom = this.catalogRef(e.derivedFrom);
+    return out;
+  }
+
+  electrical(e: Electrical): Electrical {
+    const a = e.assembly;
+    const m = (id: string) => this.mechId(id);
+    const inst = (id: string) => this.instanceIn(a, id);
+    const end = (x: { component: string } | { instance: string }) =>
+      'component' in x ? { component: m(x.component) } : { instance: inst(x.instance) };
+    const out: Electrical = {
+      ...e,
+      components: e.components.map((c) =>
+        this.optionalIds(this.optionalIds({ ...c, id: m(c.id) }, ['use'], m), ['instance'], inst),
+      ),
+      connections: e.connections.map((c) =>
+        this.optionalIds(
+          {
+            ...c,
+            id: m(c.id),
+            from: { ...c.from, component: m(c.from.component) },
+            to: { ...c.to, component: m(c.to.component) },
+          },
+          ['wire'],
+          m,
+        ),
+      ),
+      harness: e.harness.map((sg) => ({
+        ...sg,
+        id: m(sg.id),
+        from: end(sg.from),
+        to: end(sg.to),
+        connections: sg.connections.map(m),
+      })),
+    };
+    if (a !== undefined) out.assembly = this.id(DOCUMENT_SCOPE, a);
+    return out;
+  }
+
+  schematic(s: Schematic): Schematic {
+    const m = (id: string) => this.mechId(id);
+    const out: Schematic = {
+      ...s,
+      id: m(s.id),
+      sheets: s.sheets.map((sh) => ({
+        ...sh,
+        id: m(sh.id),
+        symbols: sh.symbols.map((p) =>
+          this.optionalIds({ ...p, id: m(p.id), symbol: this.symbolRef(p.symbol) }, ['use'], m),
+        ),
+        wires: sh.wires.map((w) => ({ ...w, id: m(w.id) })),
+        labels: sh.labels.map((l) => ({ ...l, id: m(l.id) })),
+        ports: sh.ports.map((p) => ({ ...p, id: m(p.id) })),
+        notes: sh.notes.map((n) => ({ ...n, id: m(n.id) })),
+      })) as Schematic['sheets'],
+    };
+    if (s.details !== undefined) out.details = m(s.details);
+    return out;
+  }
+
+  study(s: Study): Study {
+    const part = s.part;
+    const faces = <F extends { faces: Study['mesh']['refine'] }>(x: F): F => ({
+      ...x,
+      faces: x.faces.map((r) => this.reference(MECH_SCOPE, part, r)) as F['faces'],
+    });
+    const out: Study = {
+      ...s,
+      id: this.mechId(s.id),
+      part: this.id(DOCUMENT_SCOPE, part),
+      bodies: this.bodies(part, s.bodies) as Study['bodies'],
+      fixtures: s.fixtures.map(faces),
+      loads: s.loads.map(faces),
+      mesh: { ...s.mesh, refine: s.mesh.refine.map((r) => this.reference(MECH_SCOPE, part, r)) },
+    };
+    if (s.loadCase !== undefined) out.loadCase = this.mechId(s.loadCase);
+    return out;
+  }
+
+  checkOverride(c: CheckOverride): CheckOverride {
+    const out: CheckOverride = { ...c, id: this.mechId(c.id) };
+    if (c.subject !== undefined) out.subject = this.subject(c.subject);
+    return out;
+  }
+
+  specNote(n: SpecNote): SpecNote {
+    const out: SpecNote = { ...n, id: this.mechId(n.id) };
+    if (n.subject !== undefined) out.subject = this.subject(n.subject);
+    return out;
+  }
+
+  /** One item of a `mech` list, by the list's name. */
+  mechItem(list: string, item: unknown): unknown {
+    switch (list) {
+      case 'requirements':
+        return this.requirement(item as Requirement);
+      case 'loadCases':
+        return this.loadCase(item as LoadCase);
+      case 'drivetrains':
+        return this.drivetrain(item as Drivetrain);
+      case 'purchased':
+        return this.purchased(item as PurchasedUse);
+      case 'catalog':
+        return this.catalogEntry(item as CatalogEntry);
+      case 'schematics':
+        return this.schematic(item as Schematic);
+      case 'studies':
+        return this.study(item as Study);
+      case 'checks':
+        return this.checkOverride(item as CheckOverride);
+      case 'specNotes':
+        return this.specNote(item as SpecNote);
+      default: {
+        // Symbols, hazards and test bands own only their id: names, record ids and test ids
+        // inside them are text.
+        const x = item as { id: string };
+        return { ...x, id: this.mechId(x.id) };
+      }
+    }
+  }
+
+  mech(d: MechData): MechData {
+    const out: Record<string, unknown> = { ...d };
+    for (const [key, value] of Object.entries(d)) {
+      if (key === 'nextIds') out[key] = this.nextIds(MECH_SCOPE, d.nextIds);
+      else if (key === 'electrical') out[key] = this.electrical(value as Electrical);
+      else if (Array.isArray(value)) out[key] = value.map((x) => this.mechItem(key, x));
+    }
+    return out as MechData;
+  }
+
+  /** A mech command's item, delete id or whole list. */
+  private mechCommand(c: SimpleCommand): SimpleCommand | undefined {
+    const fields = c as unknown as Record<string, unknown>;
+    if (c.type === 'setMechRequirements' || c.type === 'restoreMechRequirements') {
+      return { ...c, requirements: c.requirements.map((r) => this.requirement(r)) };
+    }
+    if (c.type === 'setElectrical' || c.type === 'restoreElectrical') {
+      return { ...c, electrical: this.electrical(c.electrical) };
+    }
+    for (const [list, names] of Object.entries(MECH_LIST_COMMANDS)) {
+      if (c.type === names.set || c.type === names.restore) {
+        return { ...c, [names.field]: this.mechItem(list, fields[names.field]) } as SimpleCommand;
+      }
+      if (c.type === names.delete) {
+        return {
+          ...c,
+          [names.idField]: this.mechId(fields[names.idField] as string),
+        } as SimpleCommand;
+      }
+    }
+    return undefined;
+  }
+
   // Documents and commands -------------------------------------------------------------------
 
   /**
@@ -966,6 +1323,10 @@ export class IdWalker {
     if (doc.scripts !== undefined) {
       out.scripts = doc.scripts.map((x) => inner.script(x)) as typeof doc.scripts;
     }
+    if (doc.materials !== undefined) {
+      out.materials = doc.materials.map((x) => inner.materialDef(x)) as typeof doc.materials;
+    }
+    if (doc.mech !== undefined) out.mech = inner.mech(doc.mech);
     return out;
   }
 
@@ -978,7 +1339,14 @@ export class IdWalker {
 
   private simple(c: SimpleCommand): SimpleCommand {
     const doc = (id: string) => this.id(DOCUMENT_SCOPE, id);
+    const mech = this.mechCommand(c);
+    if (mech !== undefined) return mech;
     switch (c.type) {
+      case 'setMaterialDef':
+      case 'restoreMaterialDef':
+        return { ...c, material: this.materialDef(c.material) };
+      case 'deleteMaterialDef':
+        return { ...c, materialId: this.material(c.materialId) };
       case 'addFeature':
       case 'editFeature':
       case 'restoreFeature':
@@ -993,14 +1361,24 @@ export class IdWalker {
           featureId: this.id(partScope(c.partId), c.featureId),
         };
       case 'setMaterial':
+        return {
+          ...c,
+          partId: doc(c.partId),
+          material: c.material === null ? null : this.material(c.material),
+        };
       case 'setRollback':
       case 'addPart':
       case 'renamePart':
       case 'deletePart':
       case 'reorderParts':
         return { ...c, partId: doc(c.partId) };
-      case 'setBodyProps':
-        return { ...c, partId: doc(c.partId), bodyId: this.body(c.partId, c.bodyId) };
+      case 'setBodyProps': {
+        const props =
+          c.props.material === undefined
+            ? c.props
+            : { ...c.props, material: this.material(c.props.material) };
+        return { ...c, partId: doc(c.partId), bodyId: this.body(c.partId, c.bodyId), props };
+      }
       case 'setBodyGroup':
       case 'restoreBodyGroup':
         return { ...c, partId: doc(c.partId), group: this.bodyGroup(c.partId, c.group) };
@@ -1263,6 +1641,45 @@ export class IdWalker {
         };
       case 'replaceDocument':
         return { ...c, document: this.document(c.document) };
+      case 'setMechRequirements':
+      case 'restoreMechRequirements':
+      case 'setElectrical':
+      case 'restoreElectrical':
+      case 'setMechLoadCase':
+      case 'deleteMechLoadCase':
+      case 'restoreMechLoadCase':
+      case 'setDrivetrain':
+      case 'deleteDrivetrain':
+      case 'restoreDrivetrain':
+      case 'setPurchasedUse':
+      case 'deletePurchasedUse':
+      case 'restorePurchasedUse':
+      case 'setCatalogEntry':
+      case 'deleteCatalogEntry':
+      case 'restoreCatalogEntry':
+      case 'setSchematic':
+      case 'deleteSchematic':
+      case 'restoreSchematic':
+      case 'setSymbol':
+      case 'deleteSymbol':
+      case 'restoreSymbol':
+      case 'setStudy':
+      case 'deleteStudy':
+      case 'restoreStudy':
+      case 'setCheckOverride':
+      case 'deleteCheckOverride':
+      case 'restoreCheckOverride':
+      case 'setSpecNote':
+      case 'deleteSpecNote':
+      case 'restoreSpecNote':
+      case 'setHazard':
+      case 'deleteHazard':
+      case 'restoreHazard':
+      case 'setTestBand':
+      case 'deleteTestBand':
+      case 'restoreTestBand':
+        // Walked by `mechCommand` above.
+        return mech!;
     }
   }
 }

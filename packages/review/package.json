@@ -15,6 +15,7 @@
   "dependencies": {
     "@manufakture/core": "workspace:*",
     "@manufakture/domain-construction": "workspace:*",
+    "@manufakture/domain-mech": "workspace:*",
     "@manufakture/domain-wood": "workspace:*",
     "@manufakture/library": "workspace:*",
     "@manufakture/regen": "workspace:*",

@@ -2,14 +2,15 @@
 // read from disk, since Node's `fetch` refuses `file:` URLs; user fonts outlined in a text worker
 // thread under the watchdog (ADR 0011's amendment); QuickJS for scripted features (ADR 0010),
 // given only in a session's worker thread, which the main thread terminates when a run passes
-// the hard limit (`engine.ts`); and a domain registry of its own with stock, woodworking and
-// construction, as the app's regen worker registers them. Used both in this thread
+// the hard limit (`engine.ts`); and a domain registry of its own with stock, woodworking,
+// construction and mechanical, as the app's regen worker registers them. Used both in this thread
 // (`InProcessEngine`) and in a session's worker thread (`worker/entry.ts`).
 
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
 import { registerConstruction } from '@manufakture/domain-construction';
+import { registerMech } from '@manufakture/domain-mech';
 import { registerWood } from '@manufakture/domain-wood';
 import type { WasmSource } from '@manufakture/kernel';
 import { STDERR_OUTPUT } from '@manufakture/kernel/node';
@@ -42,6 +43,7 @@ export function nodeExtensions(): ExtensionRegistry {
   registerStock(registry);
   registerWood(registry);
   registerConstruction(registry);
+  registerMech(registry);
   return registry;
 }
 

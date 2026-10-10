@@ -12,6 +12,7 @@ import {
   NAMING_SCHEME,
   type DomainData,
   type ManufaktureDocument,
+  type MechData,
 } from './schema';
 import { checkDocument } from './validate';
 
@@ -65,13 +66,19 @@ function sortKeys(value: unknown, deep: boolean): unknown {
  * Schema-shaped objects already come out of zod in schema order. Records (`nextIds` of the
  * document, its parts, its assemblies, its print and CAM sections and its drawings, an extension's
  * `expressions` and its opaque `params`, a scripted feature's `params`, a configuration row's
- * `values`, the `domains` namespaces and each one's opaque `data`) keep insertion order, so they
- * are sorted here; otherwise two equal documents could be saved as different text.
+ * `values`, the `domains` namespaces and each one's opaque `data`, the display units per kind,
+ * and in `mech` its `nextIds`, a catalog entry's ratings and dimensions, a placed symbol's fields
+ * and a check override's inputs) keep insertion order, so they are sorted here; otherwise two
+ * equal documents could be saved as different text.
  */
 function canonical(doc: ManufaktureDocument): ManufaktureDocument {
-  const { configurations, domains, drawings } = doc;
+  const { configurations, domains, drawings, mech, units } = doc;
   return {
     ...doc,
+    ...(units.quantities && {
+      units: { ...units, quantities: sortKeys(units.quantities, false) as typeof units.quantities },
+    }),
+    ...(mech && { mech: canonicalMech(mech) }),
     ...(drawings && {
       drawings: drawings.map((drawing) => ({
         ...drawing,
@@ -126,6 +133,37 @@ function canonical(doc: ManufaktureDocument): ManufaktureDocument {
       ),
     })),
   };
+}
+
+function canonicalMech(mech: MechData): MechData {
+  const out: MechData = {
+    ...mech,
+    nextIds: sortKeys(mech.nextIds, false) as Record<string, number>,
+  };
+  if (mech.catalog) {
+    out.catalog = mech.catalog.map((e) => ({
+      ...e,
+      ratings: sortKeys(e.ratings, false) as typeof e.ratings,
+      ...(e.dimensions && { dimensions: sortKeys(e.dimensions, false) as typeof e.dimensions }),
+    })) as typeof mech.catalog;
+  }
+  if (mech.schematics) {
+    out.schematics = mech.schematics.map((s) => ({
+      ...s,
+      sheets: s.sheets.map((sheet) => ({
+        ...sheet,
+        symbols: sheet.symbols.map((p) =>
+          p.fields ? { ...p, fields: sortKeys(p.fields, false) as typeof p.fields } : p,
+        ),
+      })),
+    })) as typeof mech.schematics;
+  }
+  if (mech.checks) {
+    out.checks = mech.checks.map((c) =>
+      c.inputs ? { ...c, inputs: sortKeys(c.inputs, false) as typeof c.inputs } : c,
+    ) as typeof mech.checks;
+  }
+  return out;
 }
 
 function isObject(v: unknown): v is JsonObject {

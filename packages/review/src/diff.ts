@@ -258,6 +258,7 @@ export function documentChanges(
       setups: Object.fromEntries(d.cam.setups.map((s) => [s.id, s])),
     },
     print: Object.fromEntries(d.print.setups.map((s) => [s.id, s])),
+    materials: Object.fromEntries((d.materials ?? []).map((m) => [m.id, m])),
   });
   return fieldChanges(view(base), view(head), { depth: 3 });
 }

@@ -4,7 +4,13 @@
 // bodies, the body of the selection is shown with its own material (falling
 // back to the part's), and with nothing selected every body is listed.
 
-import { MATERIALS, findMaterial, type Material, type MaterialId } from '@manufakture/core';
+import {
+  MATERIALS,
+  findMaterial,
+  materialIn,
+  type Material,
+  type MaterialRef,
+} from '@manufakture/core';
 import { useState } from 'react';
 import { useStore } from 'zustand';
 import type { DocumentStoreApi } from '../state/document';
@@ -24,7 +30,7 @@ export interface MeasuredBody {
   viewId: string;
   name: string;
   /** Its material, or the part's when it has none; null when neither is set. */
-  material: MaterialId | null;
+  material: MaterialRef | null;
 }
 
 export interface MeasurePanelProps {
@@ -45,9 +51,6 @@ function browserCopy(text: string): Promise<void> {
 
 const NO_BODIES: readonly MeasuredBody[] = [];
 
-const materialOf = (id: MaterialId | null): Material | null =>
-  id === null ? null : (findMaterial(id) ?? null);
-
 export function MeasurePanel({
   measure,
   documents,
@@ -66,6 +69,10 @@ export function MeasurePanel({
     (s) => s.document.parts.find((p) => p.id === s.activePartId) ?? null,
   );
   const [copied, setCopied] = useState<string | null>(null);
+  // Built-in materials and the document's own (since format version 19).
+  const materials = useStore(documents, (s) => s.document.materials);
+  const materialOf = (id: MaterialRef | null): Material | null =>
+    id === null ? null : (materialIn(materials, id) ?? null);
 
   const several = bodies.length > 1;
   const shown = bodies.find((b) => b.viewId === request?.bodyId);
@@ -106,7 +113,7 @@ export function MeasurePanel({
   };
   const setMaterial = (value: string) => {
     if (!part) return;
-    const next = value === '' ? null : (value as MaterialId);
+    const next = value === '' ? null : (value as MaterialRef);
     const name = next === null ? 'none' : (findMaterial(next)?.name ?? next);
     documents
       .getState()

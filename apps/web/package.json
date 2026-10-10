@@ -23,6 +23,7 @@
     "@manufakture/cam": "workspace:*",
     "@manufakture/core": "workspace:*",
     "@manufakture/domain-construction": "workspace:*",
+    "@manufakture/domain-mech": "workspace:*",
     "@manufakture/domain-wood": "workspace:*",
     "@manufakture/drawing": "workspace:*",
     "@manufakture/io": "workspace:*",

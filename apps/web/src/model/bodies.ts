@@ -12,7 +12,7 @@ import {
   type BodyProps,
   type BodyPropsFields,
   type Command,
-  type MaterialId,
+  type MaterialRef,
   type Part,
 } from '@manufakture/core';
 import type { BodyInput } from '../viewport/bodies';
@@ -69,9 +69,9 @@ export interface PartBody {
   /** `#rrggbb`: its own colour, or the palette's by body order. */
   color: string;
   /** Its own material, if it has one. */
-  ownMaterial: MaterialId | null;
+  ownMaterial: MaterialRef | null;
   /** What it is made of: its own material, else the part's; null when neither is set. */
-  material: MaterialId | null;
+  material: MaterialRef | null;
   hidden: boolean;
   /** Its entry in `Part.bodies`, if the user set anything on it. */
   props: BodyProps | undefined;

@@ -23,11 +23,11 @@ import {
 ```ts
 interface ManufaktureDocument {
   format: 'manufakture';
-  version: 18; // file format version, FORMAT_VERSION
+  version: 19; // file format version, FORMAT_VERSION
   namingScheme: 1; // topological naming scheme version (T0.5), NAMING_SCHEME
   id: string;
   name: string;
-  units: DisplayUnits; // display only; never changes geometry
+  units: DisplayUnits; // display only; never changes geometry; `quantities` per physical kind (since version 19)
   variables: Variable[]; // { name, expression: StoredExpression }, in display order
   parts: Part[];
   assemblies: Assembly[]; // instances of parts placed by mates, in tab order (since version 7)
@@ -36,9 +36,11 @@ interface ManufaktureDocument {
   cam: CamData; // CAM tools and setups with their operations (since version 14)
   scripts?: Script[]; // the script library, in library order; absent: none (since version 16)
   drawings?: Drawing[]; // drawings of parts and assemblies, in tab order; absent: none (since version 12)
+  materials?: MaterialDef[]; // the document's own materials, in list order; absent: none (since version 19)
+  mech?: MechData; // the mechanical section (ADR 0017); absent until first used (since version 19)
   configurations?: Configurations; // the configuration table; absent: none (since version 5)
   domains?: Record<string, DomainData>; // domain settings by namespace; absent: none (since version 11)
-  nextIds: Record<string, number>; // document-level counters: `part` (since version 4), `cp`, `cfg`, `assembly`, `font`, `drawing`, `script`
+  nextIds: Record<string, number>; // document-level counters: `part` (since version 4), `cp`, `cfg`, `assembly`, `font`, `drawing`, `script`, `material`
 }
 
 interface Part {
@@ -47,7 +49,7 @@ interface Part {
   features: Feature[]; // regen order
   rollbackIndex: number | null; // features [0, rollbackIndex) regenerate; null means all
   nextIds: Record<string, number>; // next number per id counter; only ever increases
-  material?: MaterialId; // default material of the part's bodies; absent: not set (since version 2)
+  material?: MaterialRef; // default material of the part's bodies: built-in, or `material#n` (since version 19); absent: not set (since version 2)
   bodies: BodyProps[]; // per-body name, colour, material, for bodies that have any (since version 4)
   bodyGroups?: BodyGroup[]; // named groups of bodies, in list order; absent: none (since version 17)
 }
@@ -56,7 +58,7 @@ interface BodyProps {
   id: string; // a body id: 'extrude#3', 'pattern#2:i3', 'derived#1:from/extrude#1'
   name?: string;
   color?: string; // '#rrggbb', lower-case
-  material?: MaterialId; // overrides Part.material for this body
+  material?: MaterialRef; // overrides Part.material for this body
 }
 
 interface BodyGroup {
@@ -889,6 +891,63 @@ is apart from `variableUses` so that code switching over every `VariableUse` kin
 `forEachView` are the generic views, in `src/features.ts`; `createDrawing(id, name)` makes an
 empty drawing and `findDrawing(doc, id)` finds one.
 
+### Mechanical section
+
+`mech` (since version 19; [ADR 0017](../../docs/adr/0017-mechanical-domain.md) decision 2, with its
+"Deltas from T9.1e") is the mechanical domain's model, typed so that core's commands, variable
+rename and inline, the id remap and `diffDocuments` reach it:
+
+```ts
+interface MechData {
+  requirements?: Requirement[]; // req#n
+  loadCases?: LoadCase[]; // lc#n
+  drivetrains?: Drivetrain[]; // drive#n, stages stage#n
+  purchased?: PurchasedUse[]; // pp#n
+  catalog?: CatalogEntry[]; // entry#n: the user's own entries
+  electrical?: Electrical; // components el#n, connections conn#n, harness segments seg#n
+  schematics?: Schematic[]; // sch#n: sheets sheet#n, symbols us#n, wires wire#n, labels label#n, ports port#n, notes text#n
+  symbols?: SymbolDef[]; // sym#n: the user's own symbols
+  studies?: Study[]; // study#n, face references r<n>
+  checks?: CheckOverride[]; // chk#n
+  specNotes?: SpecNote[]; // note#n
+  hazards?: Hazard[]; // hz#n
+  testBands?: TestBand[]; // vt#n
+  nextIds: Record<string, number>; // every counter above; only ever increases
+}
+```
+
+- **Absent when unused.** The section appears with the first id it allocates. Each list is
+  absent when empty and `electrical` with no components, connections or segments; once the
+  section has counters it keeps them, alone if need be (`{ nextIds }`), so an id is never reused.
+  A document that never used it has no `mech` key and its file is unchanged.
+- **Core checks shape, limits, ids and expressions.** The size limits of ADR 0017 decision 16 are
+  in the schema (`MAX_REQUIREMENTS` and the rest). Every id, nested ones included, must be
+  allocated by `mech.nextIds` and used once in the section. Every expression must parse and name
+  existing variables, and none may measure the model; each is parsed in its field's mode
+  (`isPhysicalSite`: physical for a physical kind or an inferred one, so `2 m/s` names no variable
+  `s`). What the data means (a load case naming a missing drivetrain, an instance that no longer
+  exists) is the domain's, as warnings: no core rule follows a reference out of an item.
+- **Generic views** (`src/mech.ts`): `MECH_LISTS`, `mechItems`, `mechItemIds` and `electricalIds`
+  (the ids an item owns, with their counters), `mechItemExpressions`, `electricalExpressions` and
+  `mechExpressions` (every expression with the kind its field expects; `requirementKind`), and
+  `withMech(doc, mech)`.
+- **Commands** (`src/mech-commands.ts`): `setMechRequirements` replaces the requirements list;
+  `setElectrical` the electrical system; every other list has `set...` (create or replace by id),
+  `delete...` and a history-only `restore...` (`MECH_LIST_COMMANDS`): `setMechLoadCase`,
+  `setDrivetrain`, `setPurchasedUse`, `setCatalogEntry`, `setSchematic`, `setSymbol`, `setStudy`,
+  `setCheckOverride`, `setSpecNote`, `setHazard`, `setTestBand`. Ids a `set` introduces must be
+  fresh, a restore's allocated. No delete is refused.
+- **Variables.** Mechanical expressions are uses: `variableUsers` lists the items by id,
+  `mechVariableUses` gives each use with its path and kind, and `renameVariable` and
+  `inlineVariable` rewrite them (each in its own parse mode).
+- **Changes.** `diffDocuments` reports `mechChanged`, sorted `<collection>/<id>` entries (items
+  added, removed, edited, or reading a changed variable), and `materialsChanged`, the ids of user
+  materials that changed. Neither is a regen trigger.
+
+**Display units per kind** (since version 19): `units.quantities` maps a physical kind to one of its
+display units (`displayUnitsOf` in `@manufakture/units`), absent when no kind has a choice; a kind
+without one follows the length format's unit system.
+
 ### Materials
 
 `MATERIALS` (`src/materials.ts`) is the built-in table: PLA, PETG, ABS, pine, oak, plywood, MDF,
@@ -903,6 +962,19 @@ A part stores only the id (`material`), set with the `setMaterial` command. It i
 the part's bodies; a body can override it in `Part.bodies` with `setBodyProps` (see Bodies). Ids
 are permanent: the table
 may gain materials, but an id is never removed or given another meaning.
+
+**User materials** (since version 19, ADR 0017 decision 4) are the document's own: `materials`, a
+list of `MaterialDef` (`material#n` from the document's `nextIds.material`, a name, a category, a
+form, a required `density` and any of the property set of `MATERIAL_PROPERTIES`, and an optional
+fatigue curve), absent when empty. Each value is `{ value: StoredExpression, source, typical,
+note? }`: a constant typed with units (`1240 kg/m^3`, `45 MPa`, `0.2 W/(m*K)`, `70degC`); a
+variable is refused, and so is a value not of its property's kind (`MATERIAL_VALUE_KINDS`) or a
+density that is not above zero. `Part.material` and a body's `material` take a built-in id or the
+id of a user material of the same document (`MaterialRef`). Commands: `setMaterialDef` (create or
+replace by id), `deleteMaterialDef` (refused while a part or body uses it; `materialUsers`) and
+the history-only `restoreMaterialDef`. `documentMaterial(doc, id)` (or `materialIn(materials,
+id)`) gives a built-in or a user material as a `Material` with its values in SI; a user value that
+does not evaluate is left out.
 
 ### Numbers are expressions
 
@@ -1754,7 +1826,8 @@ the same way.
 ### Counter scopes
 
 A scope is a `nextIds` object, keyed as a string: `document`, `part:<id>`, `assembly:<id>`,
-`cam`, `print`, `drawing:<id>`. `documentCounters(doc)` snapshots every scope's counters as plain
+`cam`, `print`, `drawing:<id>`, `mech` (since version 19; listed, empty, while the section is
+absent, so the first mechanical ids are created ids). `documentCounters(doc)` snapshots every scope's counters as plain
 JSON (`CounterTable`); `maxCounters(a, b)` is a high-water mark that keeps deleted scopes;
 `counterRegressions(before, after)` lists every counter of `after` below `before` for scopes in
 both. A new `nextIds` object is one entry in `COUNTER_SCOPES`; a new counter in an existing one
@@ -1879,7 +1952,8 @@ to exactly `v4-bracket.json` and that to exactly `v5-bracket.json` and that to e
 and that to exactly `v9-bracket.json` and that to exactly `v10-bracket.json` and that to exactly
 `v11-bracket.json` and that to exactly `v12-bracket.json` and that to exactly `v13-bracket.json`
 and that to exactly `v14-bracket.json` and that to exactly `v15-bracket.json` and that to exactly
-`v16-bracket.json` and that to exactly `v17-bracket.json` (and every older
+`v16-bracket.json` and that to exactly `v17-bracket.json` and that to exactly `v18-bracket.json`
+and that to exactly `v19-bracket.json` (and every older
 fixture loads as exactly the current one),
 and
 `v3-two-bodies.json` to
@@ -1927,7 +2001,14 @@ version 15 command carries no scripted feature. Version 17 added body groups (th
 `bodyGroups` of a part, absent when empty, with the part counter `group`); `migrateV16ToV17` only
 bumps the version, since a version 16 part has no groups, and refuses one that already has a
 `bodyGroups` key (`migration`); `v16-bracket.json` migrates to exactly `v17-bracket.json`. Its
-command step changes no command: the body group commands are new.
+command step changes no command: the body group commands are new. Version 18 added a hole's tip angle and
+the heat-set insert standard; `migrateV17ToV18` only bumps the version. Version 19 added the
+mechanical section (`mech`), user materials (`materials`, with the document counter `material`)
+and display units per kind (`units.quantities`), ADR 0017's one bump; `migrateV18ToV19` only bumps
+the version, since a version 18 file has none of them, and refuses one that already has any
+(`migration`); `v18-bracket.json` migrates to exactly `v19-bracket.json`, and `v19-mech.json` is a
+version 19 document with every mechanical shape. Its command step changes no command: the
+mechanical and material commands are new.
 
 Commands carry parts of the document shape too (a feature, a whole part, a whole document), and
 log entries and sync queues store them as written, with the format they were written under.

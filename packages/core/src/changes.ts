@@ -13,6 +13,8 @@ import type {
   CamData,
   Domains,
   Drawing,
+  Electrical,
+  MechData,
   ManufaktureDocument,
   Part,
   PrintData,
@@ -21,6 +23,14 @@ import type {
   Variable,
 } from './schema';
 import { expressionVariableNames } from './validate';
+import {
+  MECH_LISTS,
+  electricalExpressions,
+  isPhysicalSite,
+  mechItemExpressions,
+  mechItems,
+  type MechExpressionSite,
+} from './mech';
 
 /**
  * What changed between two documents, for subscribers: regen (T1.9) restarts from
@@ -106,6 +116,21 @@ export interface DocumentChange {
    */
   readonly drawingChanged: boolean;
   readonly drawings: DrawingsChange;
+  /**
+   * What changed in the mechanical section (since version 19), as `<collection>/<id>` entries,
+   * sorted: an item of a list added, removed or edited (`loadCases/lc#2`), or a component,
+   * connection or segment of the electrical system (`electrical/el#3`; `electrical` alone for
+   * its assembly), and items whose
+   * expressions read a changed variable (also through other variables, or through the active
+   * configuration row). Never a regen trigger: the mechanical domain decides what to compute
+   * again (ADR 0017 decision 15).
+   */
+  readonly mechChanged: readonly string[];
+  /**
+   * The ids of user materials added, removed or changed, sorted (since version 19). No geometry
+   * changes; the masses of parts and bodies made of them do, and `parts` does not list them.
+   */
+  readonly materialsChanged: readonly string[];
 }
 
 /**
@@ -626,7 +651,66 @@ function diffRaw(prev: ManufaktureDocument, next: ManufaktureDocument): Document
       added.length + removed.length + changed.length > 0 ||
       !deepEqual(prev.drawings, next.drawings),
     drawings,
+    mechChanged: diffMech(prev.mech, next.mech, vars),
+    materialsChanged: diffById(prev.materials, next.materials),
   };
+}
+
+/** The ids of items added, removed or changed between two lists, sorted. */
+function diffById(
+  prev: readonly { id: string }[] | undefined,
+  next: readonly { id: string }[] | undefined,
+): string[] {
+  if (prev === next) return [];
+  const p = new Map((prev ?? []).map((x) => [x.id, x]));
+  const n = new Map((next ?? []).map((x) => [x.id, x]));
+  const ids = new Set([...p.keys(), ...n.keys()]);
+  return [...ids].filter((id) => !deepEqual(p.get(id), n.get(id))).sort();
+}
+
+function readsMech(sites: readonly MechExpressionSite[], vars: ReadonlySet<string>): boolean {
+  if (vars.size === 0) return false;
+  return sites.some((s) =>
+    expressionVariableNames(s.expression, { physical: isPhysicalSite(s.expected) }).some((v) =>
+      vars.has(v),
+    ),
+  );
+}
+
+function electricalItems(e: Electrical | undefined): { id: string }[] {
+  return e === undefined ? [] : [...e.components, ...e.connections, ...e.harness];
+}
+
+/** The mechanical items that changed, as `<collection>/<id>`, sorted. */
+function diffMech(
+  prev: MechData | undefined,
+  next: MechData | undefined,
+  vars: ReadonlySet<string>,
+): string[] {
+  if (prev === next && vars.size === 0) return [];
+  const out = new Set<string>();
+  for (const list of MECH_LISTS) {
+    const a = mechItems(prev, list);
+    const b = mechItems(next, list);
+    for (const id of diffById(a, b)) out.add(`${list}/${id}`);
+    for (const item of b) {
+      if (readsMech(mechItemExpressions(list, item), vars)) out.add(`${list}/${item.id}`);
+    }
+  }
+  // The system's own field, its assembly: the entry is the collection alone.
+  if (prev?.electrical?.assembly !== next?.electrical?.assembly) out.add('electrical');
+  for (const id of diffById(electricalItems(prev?.electrical), electricalItems(next?.electrical))) {
+    out.add(`electrical/${id}`);
+  }
+  const e = next?.electrical;
+  if (e !== undefined) {
+    for (const site of electricalExpressions(e)) {
+      if (!readsMech([site], vars)) continue;
+      const [key, i] = site.path as [string, number];
+      out.add(`electrical/${key === 'components' ? e.components[i]!.id : e.harness[i]!.id}`);
+    }
+  }
+  return [...out].sort();
 }
 
 /**
@@ -764,6 +848,7 @@ export function diffDocuments(
       setups: mergeItems(raw.cam.setups, configured.cam.setups),
       reordered: raw.cam.reordered || configured.cam.reordered,
     },
+    mechChanged: union(raw.mechChanged, configured.mechChanged).sort(),
     drawingChanged: raw.drawingChanged || configured.drawingChanged,
     drawings: {
       drawings: mergeItems(raw.drawings.drawings, configured.drawings.drawings),

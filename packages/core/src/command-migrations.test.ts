@@ -15,6 +15,7 @@ import v3Bracket from './fixtures/v3-bracket.json';
 import v13Bracket from './fixtures/v13-bracket.json';
 import v16Bracket from './fixtures/v16-bracket.json';
 import v17Bracket from './fixtures/v17-bracket.json';
+import v18Bracket from './fixtures/v18-bracket.json';
 
 describe('command migrations', () => {
   it('has one command step per document format step, in step', () => {
@@ -135,6 +136,26 @@ describe('command migrations', () => {
       },
     };
     expect(unwrap(migrateCommand(insert, 18))).toEqual(insert);
+  });
+
+  it('brings version 18 commands to version 19 unchanged', () => {
+    // Version 19 added the mech section, user materials and display units per kind; no version 18
+    // command carries any of them.
+    const material = { type: 'setMaterial', partId: PART, material: 'pla' };
+    expect(unwrap(migrateCommand(material, 18))).toEqual(material);
+    const v18 = clone(v18Bracket) as Record<string, unknown>;
+    const replaced = unwrap(migrateCommand({ type: 'replaceDocument', document: v18 }, 18));
+    expect(replaced.type === 'replaceDocument' && replaced.document.version).toBe(FORMAT_VERSION);
+    // A version 18 document cannot hold a mech section: the document step refuses it.
+    const document = { ...v18, mech: { nextIds: { req: 2 } } };
+    const refused = migrateCommand({ type: 'replaceDocument', document }, 18);
+    expect(!refused.ok && refused.error.code).toBe('migration');
+    // A mech command, new in 19, passes through as it is.
+    const lc = {
+      type: 'deleteMechLoadCase',
+      loadCaseId: 'lc#1',
+    };
+    expect(unwrap(migrateCommand(lc, 19))).toEqual(lc);
   });
 
   it('refuses a newer format, a bad format and a command that is not one', () => {

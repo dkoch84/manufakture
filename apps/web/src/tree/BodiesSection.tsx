@@ -11,7 +11,7 @@ import {
   findMaterial,
   findPart,
   type Command,
-  type MaterialId,
+  type MaterialRef,
 } from '@manufakture/core';
 import { useMemo, useRef, useState } from 'react';
 import { useStore } from 'zustand';
@@ -229,7 +229,7 @@ export function BodiesSection({
         value={b.ownMaterial ?? ''}
         onChange={(e) => {
           const value = e.target.value;
-          const next = value === '' ? null : (value as MaterialId);
+          const next = value === '' ? null : (value as MaterialRef);
           const name = next === null ? 'the part material' : (findMaterial(next)?.name ?? next);
           run(bodyPropsCommand(partId, b, { material: next }), `Set ${b.name} to ${name}`);
         }}

@@ -414,6 +414,166 @@
     "suppressCamOperation": {
       "fields": {}
     },
+    "setMechRequirements": {
+      "doc": "Replace the mechanical requirements (ADR 0017 decision 10), as a whole list in table order. Ids it introduces must be fresh `req#n` from `mech.nextIds`. An empty list removes them. What a requirement names (a load case, a drivetrain, a record) is not checked: a missing one is the domain's warning. Since version 19.",
+      "fields": {}
+    },
+    "restoreMechRequirements": {
+      "doc": "History only: put a requirements list back (its ids were allocated before).",
+      "fields": {}
+    },
+    "setElectrical": {
+      "doc": "Replace the electrical system (ADR 0017 decision 11): components with their diagram nudges, connections and harness segments. Ids it introduces must be fresh (`el#n`, `conn#n`, `seg#n` from `mech.nextIds`). With no components, connections or segments it removes the system. Since version 19.",
+      "fields": {}
+    },
+    "restoreElectrical": {
+      "doc": "History only: put an electrical system back (its ids were allocated before).",
+      "fields": {}
+    },
+    "setMechLoadCase": {
+      "doc": "Create or replace a load case of the mechanical section, by id (ADR 0017 decision 2). A new one goes at `index` (default: last); `index` is ignored on replace. Ids it introduces must be fresh: `lc#n` from `mech.nextIds`. Since version 19.",
+      "fields": {}
+    },
+    "deleteMechLoadCase": {
+      "doc": "Remove a load case. Nothing refers to it in a way core checks. Since version 19.",
+      "fields": {}
+    },
+    "restoreMechLoadCase": {
+      "doc": "History only: put a load case state back, replacing the one with the same id (at `index`) or inserting it at `index`. Its ids must have been allocated before.",
+      "fields": {}
+    },
+    "setDrivetrain": {
+      "doc": "Create or replace a drivetrain of the mechanical section, by id (ADR 0017 decision 2). A new one goes at `index` (default: last); `index` is ignored on replace. Ids it introduces must be fresh: `drive#n` (its stages `stage#n`) from `mech.nextIds`. Since version 19.",
+      "fields": {}
+    },
+    "deleteDrivetrain": {
+      "doc": "Remove a drivetrain. Nothing refers to it in a way core checks. Since version 19.",
+      "fields": {}
+    },
+    "restoreDrivetrain": {
+      "doc": "History only: put a drivetrain state back, replacing the one with the same id (at `index`) or inserting it at `index`. Its ids must have been allocated before.",
+      "fields": {}
+    },
+    "setPurchasedUse": {
+      "doc": "Create or replace a purchased part use of the mechanical section, by id (ADR 0017 decision 2). A new one goes at `index` (default: last); `index` is ignored on replace. Ids it introduces must be fresh: `pp#n` from `mech.nextIds`. Since version 19.",
+      "fields": {}
+    },
+    "deletePurchasedUse": {
+      "doc": "Remove a purchased part use. Nothing refers to it in a way core checks. Since version 19.",
+      "fields": {}
+    },
+    "restorePurchasedUse": {
+      "doc": "History only: put a purchased part use state back, replacing the one with the same id (at `index`) or inserting it at `index`. Its ids must have been allocated before.",
+      "fields": {}
+    },
+    "setCatalogEntry": {
+      "doc": "Create or replace a user catalog entry of the mechanical section, by id (ADR 0017 decision 2). A new one goes at `index` (default: last); `index` is ignored on replace. Ids it introduces must be fresh: `entry#n` from `mech.nextIds`. Since version 19.",
+      "fields": {}
+    },
+    "deleteCatalogEntry": {
+      "doc": "Remove a user catalog entry. Nothing refers to it in a way core checks. Since version 19.",
+      "fields": {}
+    },
+    "restoreCatalogEntry": {
+      "doc": "History only: put a user catalog entry state back, replacing the one with the same id (at `index`) or inserting it at `index`. Its ids must have been allocated before.",
+      "fields": {}
+    },
+    "setSchematic": {
+      "doc": "Create or replace a schematic of the mechanical section, by id (ADR 0017 decision 2). A new one goes at `index` (default: last); `index` is ignored on replace. Ids it introduces must be fresh: `sch#n` (its sheets, symbols, wires, labels, ports and notes `sheet#n`, `us#n`, `wire#n`, `label#n`, `port#n`, `text#n`) from `mech.nextIds`. Since version 19.",
+      "fields": {}
+    },
+    "deleteSchematic": {
+      "doc": "Remove a schematic. Nothing refers to it in a way core checks. Since version 19.",
+      "fields": {}
+    },
+    "restoreSchematic": {
+      "doc": "History only: put a schematic state back, replacing the one with the same id (at `index`) or inserting it at `index`. Its ids must have been allocated before.",
+      "fields": {}
+    },
+    "setSymbol": {
+      "doc": "Create or replace a user symbol of the mechanical section, by id (ADR 0017 decision 2). A new one goes at `index` (default: last); `index` is ignored on replace. Ids it introduces must be fresh: `sym#n` from `mech.nextIds`. Since version 19.",
+      "fields": {}
+    },
+    "deleteSymbol": {
+      "doc": "Remove a user symbol. Nothing refers to it in a way core checks. Since version 19.",
+      "fields": {}
+    },
+    "restoreSymbol": {
+      "doc": "History only: put a user symbol state back, replacing the one with the same id (at `index`) or inserting it at `index`. Its ids must have been allocated before.",
+      "fields": {}
+    },
+    "setStudy": {
+      "doc": "Create or replace a stress study of the mechanical section, by id (ADR 0017 decision 2). A new one goes at `index` (default: last); `index` is ignored on replace. Ids it introduces must be fresh: `study#n` (its face references `r<n>`) from `mech.nextIds`. Since version 19.",
+      "fields": {}
+    },
+    "deleteStudy": {
+      "doc": "Remove a stress study. Nothing refers to it in a way core checks. Since version 19.",
+      "fields": {}
+    },
+    "restoreStudy": {
+      "doc": "History only: put a stress study state back, replacing the one with the same id (at `index`) or inserting it at `index`. Its ids must have been allocated before.",
+      "fields": {}
+    },
+    "setCheckOverride": {
+      "doc": "Create or replace a check override of the mechanical section, by id (ADR 0017 decision 2). A new one goes at `index` (default: last); `index` is ignored on replace. Ids it introduces must be fresh: `chk#n` from `mech.nextIds`. Since version 19.",
+      "fields": {}
+    },
+    "deleteCheckOverride": {
+      "doc": "Remove a check override. Nothing refers to it in a way core checks. Since version 19.",
+      "fields": {}
+    },
+    "restoreCheckOverride": {
+      "doc": "History only: put a check override state back, replacing the one with the same id (at `index`) or inserting it at `index`. Its ids must have been allocated before.",
+      "fields": {}
+    },
+    "setSpecNote": {
+      "doc": "Create or replace a specification note of the mechanical section, by id (ADR 0017 decision 2). A new one goes at `index` (default: last); `index` is ignored on replace. Ids it introduces must be fresh: `note#n` from `mech.nextIds`. Since version 19.",
+      "fields": {}
+    },
+    "deleteSpecNote": {
+      "doc": "Remove a specification note. Nothing refers to it in a way core checks. Since version 19.",
+      "fields": {}
+    },
+    "restoreSpecNote": {
+      "doc": "History only: put a specification note state back, replacing the one with the same id (at `index`) or inserting it at `index`. Its ids must have been allocated before.",
+      "fields": {}
+    },
+    "setHazard": {
+      "doc": "Create or replace a hazard of the mechanical section, by id (ADR 0017 decision 2). A new one goes at `index` (default: last); `index` is ignored on replace. Ids it introduces must be fresh: `hz#n` from `mech.nextIds`. Since version 19.",
+      "fields": {}
+    },
+    "deleteHazard": {
+      "doc": "Remove a hazard. Nothing refers to it in a way core checks. Since version 19.",
+      "fields": {}
+    },
+    "restoreHazard": {
+      "doc": "History only: put a hazard state back, replacing the one with the same id (at `index`) or inserting it at `index`. Its ids must have been allocated before.",
+      "fields": {}
+    },
+    "setTestBand": {
+      "doc": "Create or replace a test band of the mechanical section, by id (ADR 0017 decision 2). A new one goes at `index` (default: last); `index` is ignored on replace. Ids it introduces must be fresh: `vt#n` from `mech.nextIds`. Since version 19.",
+      "fields": {}
+    },
+    "deleteTestBand": {
+      "doc": "Remove a test band. Nothing refers to it in a way core checks. Since version 19.",
+      "fields": {}
+    },
+    "restoreTestBand": {
+      "doc": "History only: put a test band state back, replacing the one with the same id (at `index`) or inserting it at `index`. Its ids must have been allocated before.",
+      "fields": {}
+    },
+    "setMaterialDef": {
+      "doc": "Create or replace a user material (ADR 0017 decision 4), by id. A new one needs a fresh `material#n` from the document's `nextIds.material` and goes at `index` (default: last); `index` is ignored on replace. Its values are constants of their properties' kinds. Since version 19.",
+      "fields": {}
+    },
+    "deleteMaterialDef": {
+      "doc": "Remove a user material. Refused while a part or a body uses it. Since version 19.",
+      "fields": {}
+    },
+    "restoreMaterialDef": {
+      "doc": "History only: put a deleted user material back at `index` (its id was allocated before).",
+      "fields": {}
+    },
     "replaceDocument": {
       "doc": "History only: put a whole document in place of this one (restore a version or revision; the undo of a restore). The replacement must be this document (same `id`) and valid as a whole, assemblies and configurations included. Its inverse is `replaceDocument` of the document it replaced. Clients restoring an older state build the replacement with `restoredDocument`, which keeps the id counters from going back.",
       "fields": {}

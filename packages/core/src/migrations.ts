@@ -362,6 +362,29 @@ export const migrateV17ToV18: Migration = {
   },
 };
 
+/**
+ * Version 19 added the mechanical domain's shapes (ADR 0017, M9 plan T9.1e) in one step: the
+ * optional `mech` section, user materials (`materials`, with the document counter `material`, and
+ * `Part.material` and a body's `material` naming them) and per-kind display units
+ * (`units.quantities`). Nothing in a version 18 file changes: it has no mechanical section, no
+ * user materials and no display units per kind, which is what their absence means. A version 18
+ * file that already has a `mech` or `materials` key, or a `units.quantities`, is refused rather
+ * than read.
+ */
+export const migrateV18ToV19: Migration = {
+  from: 18,
+  to: 19,
+  description: 'Add the mechanical section, user materials and display units per kind',
+  migrate(doc) {
+    if ('mech' in doc) throw new Error('a version 18 document has no "mech" section');
+    if ('materials' in doc) throw new Error('a version 18 document has no "materials"');
+    if (isObject(doc.units) && 'quantities' in doc.units) {
+      throw new Error('a version 18 document has no "units.quantities"');
+    }
+    return { ...doc, version: 19 };
+  },
+};
+
 /** File format migrations, in order: `FORMAT_MIGRATIONS[i]` goes from version i to i + 1. */
 export const FORMAT_MIGRATIONS: readonly Migration[] = [
   migrateV0ToV1,
@@ -382,6 +405,7 @@ export const FORMAT_MIGRATIONS: readonly Migration[] = [
   migrateV15ToV16,
   migrateV16ToV17,
   migrateV17ToV18,
+  migrateV18ToV19,
 ];
 
 /**
@@ -494,6 +518,7 @@ export const COMMAND_MIGRATIONS: readonly CommandMigration[] = [
   commandStep(migrateV15ToV16),
   commandStep(migrateV16ToV17),
   commandStep(migrateV17ToV18),
+  commandStep(migrateV18ToV19),
 ];
 
 export interface CommandMigrationOptions {

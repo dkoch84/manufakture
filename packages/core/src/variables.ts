@@ -5,7 +5,9 @@
 // mentions one. So do mates: a connector offset or a limit that reads a variable; print setups:
 // a threshold or an item's orientation angle; exploded views: a step's distance; and drawings: a
 // custom sheet size, a view's scale or a section's offset; and CAM: a tool's sizes and presets, a
-// setup's stock and heights, and an operation's fields.
+// setup's stock and heights, and an operation's fields; and the mechanical section (since
+// version 19): requirements, load cases, drivetrains, purchased parts, the electrical system,
+// studies, check overrides and test bands, each read in its field's parse mode.
 
 import {
   isValidVariableName,
@@ -47,7 +49,17 @@ import type {
   StoredExpression,
 } from './schema';
 import { splitMeasuredFace, type MeasuredFace } from './names';
-import { expressionMeasures, expressionReferences } from './validate';
+import { expressionMeasures, expressionReferences, type ExpressionMode } from './validate';
+import {
+  MECH_LISTS,
+  electricalExpressions,
+  isPhysicalSite,
+  mechItemExpressions,
+  mechItems,
+  type MechExpressionKind,
+  type MechList,
+} from './mech';
+import { MECH_LIST_COMMANDS } from './mech-commands';
 
 export { splitMeasuredFace, type MeasuredFace };
 
@@ -146,9 +158,64 @@ export type CamVariableUse =
       expected: CamExpressionKind;
     };
 
-function mentions(expression: StoredExpression, name: string): boolean {
-  const r = expressionReferences(expression.source);
+/**
+ * A use of a variable in the mechanical section (since version 19). Kept apart from `VariableUse`
+ * so code that switches over every `VariableUse` kind keeps working; list them with
+ * `mechVariableUses`. `renameVariable`, `inlineVariable` and `variableUsers` cover them.
+ */
+export interface MechVariableUse {
+  readonly kind: 'mech';
+  /** The list, or `electrical`. */
+  readonly collection: MechList | 'electrical';
+  /** The item's id (for `electrical`, the component's or segment's). */
+  readonly itemId: string;
+  /** Path from the item (from the electrical system for `electrical`). */
+  readonly path: readonly (string | number)[];
+  readonly expected: MechExpressionKind;
+}
+
+function mentions(expression: StoredExpression, name: string, mode: ExpressionMode = {}): boolean {
+  const r = expressionReferences(expression.source, mode);
   return r.ok && r.value.some((ref) => ref.name === name);
+}
+
+/** The parse mode of a mechanical expression site. */
+function siteMode(expected: MechExpressionKind): ExpressionMode {
+  return { physical: isPhysicalSite(expected) };
+}
+
+/** Every use of variable `name` in the mechanical section, list by list, then the electrical system. */
+export function mechVariableUses(doc: ManufaktureDocument, name: string): MechVariableUse[] {
+  const out: MechVariableUse[] = [];
+  const mech = doc.mech;
+  if (mech === undefined) return out;
+  for (const list of MECH_LISTS) {
+    for (const item of mechItems(mech, list)) {
+      for (const site of mechItemExpressions(list, item)) {
+        if (!mentions(site.expression, name, siteMode(site.expected))) continue;
+        out.push({
+          kind: 'mech',
+          collection: list,
+          itemId: item.id,
+          path: site.path,
+          expected: site.expected,
+        });
+      }
+    }
+  }
+  const e = mech.electrical;
+  for (const site of electricalExpressions(e)) {
+    if (!mentions(site.expression, name, siteMode(site.expected))) continue;
+    const [key, i] = site.path as [string, number];
+    out.push({
+      kind: 'mech',
+      collection: 'electrical',
+      itemId: key === 'components' ? e!.components[i]!.id : e!.harness[i]!.id,
+      path: site.path,
+      expected: site.expected,
+    });
+  }
+  return out;
 }
 
 /**
@@ -306,8 +373,9 @@ export function rewriteReferences(
   source: string,
   name: string,
   replacement: (ref: { hashed: boolean; whole: boolean }) => string,
+  mode: ExpressionMode = {},
 ): string | null {
-  const r = expressionReferences(source);
+  const r = expressionReferences(source, mode);
   if (!r.ok) return null;
   const refs = r.value.filter((ref) => ref.name === name);
   let out = source;
@@ -342,7 +410,7 @@ function replaceAt<T>(value: T, path: readonly (string | number)[], next: unknow
 function rewriteUses(
   doc: ManufaktureDocument,
   name: string,
-  rewrite: (source: string) => string | null,
+  rewrite: (source: string, mode?: ExpressionMode) => string | null,
 ): SimpleCommand[] {
   const commands: SimpleCommand[] = [];
   for (const v of doc.variables) {
@@ -473,6 +541,7 @@ function rewriteUses(
       }
     }
   }
+  commands.push(...rewriteMech(doc, name, rewrite));
   for (const row of doc.configurations?.rows ?? []) {
     let values: ConfigRow['values'] | undefined;
     for (const [id, value] of Object.entries(row.values)) {
@@ -482,6 +551,48 @@ function rewriteUses(
       values = { ...(values ?? row.values), [id]: { ...value, source } };
     }
     if (values) commands.push({ type: 'setConfigRow', row: { ...row, values } });
+  }
+  return commands;
+}
+
+/** The commands that rewrite every mechanical expression reading `name` (section order). */
+function rewriteMech(
+  doc: ManufaktureDocument,
+  name: string,
+  rewrite: (source: string, mode?: ExpressionMode) => string | null,
+): SimpleCommand[] {
+  const mech = doc.mech;
+  if (mech === undefined) return [];
+  const commands: SimpleCommand[] = [];
+  const edit = <T>(value: T, sites: ReturnType<typeof electricalExpressions>): T => {
+    let next = value;
+    for (const site of sites) {
+      const mode = siteMode(site.expected);
+      if (!mentions(site.expression, name, mode)) continue;
+      const source = rewrite(site.expression.source, mode);
+      if (source === null) continue;
+      next = replaceAt(next, site.path, { ...site.expression, source });
+    }
+    return next;
+  };
+  const requirements = mechItems(mech, 'requirements');
+  const nextRequirements = requirements.map((r) => edit(r, mechItemExpressions('requirements', r)));
+  if (nextRequirements.some((r, i) => r !== requirements[i])) {
+    commands.push({ type: 'setMechRequirements', requirements: nextRequirements });
+  }
+  for (const list of MECH_LISTS) {
+    if (list === 'requirements') continue;
+    const names = MECH_LIST_COMMANDS[list];
+    for (const item of mechItems(mech, list)) {
+      const next = edit(item, mechItemExpressions(list, item));
+      if (next !== item) {
+        commands.push({ type: names.set, [names.field]: next } as unknown as SimpleCommand);
+      }
+    }
+  }
+  if (mech.electrical !== undefined) {
+    const next = edit(mech.electrical, electricalExpressions(mech.electrical));
+    if (next !== mech.electrical) commands.push({ type: 'setElectrical', electrical: next });
   }
   return commands;
 }
@@ -511,7 +622,7 @@ export function renameVariable(
   const commands: SimpleCommand[] = [
     // In at the old position; the old one moves down one and goes last.
     { type: 'setVariable', name: to, expression: own, index: i },
-    ...rewriteUses(doc, from, (s) => rewriteReferences(s, from, () => `#${to}`)),
+    ...rewriteUses(doc, from, (s, mode) => rewriteReferences(s, from, () => `#${to}`, mode)),
     ...variableParameters(doc, from).map((parameter): SimpleCommand => ({
       type: 'setConfigParameter',
       parameter: { ...parameter, variable: to },
@@ -542,8 +653,8 @@ export function inlineVariable(
     return fail('expression', `"${literal}" is not a valid expression`, ['literal']);
   }
   const commands: SimpleCommand[] = [
-    ...rewriteUses(doc, name, (s) =>
-      rewriteReferences(s, name, ({ whole }) => (whole ? lit : `(${lit})`)),
+    ...rewriteUses(doc, name, (s, mode) =>
+      rewriteReferences(s, name, ({ whole }) => (whole ? lit : `(${lit})`), mode),
     ),
     ...variableParameters(doc, name).map((p): SimpleCommand => ({
       type: 'deleteConfigParameter',

@@ -83,6 +83,33 @@ import {
   MAX_BODY_GROUPS,
   MAX_SCRIPTS,
   MaterialIdSchema,
+  CatalogEntryIdSchema,
+  CatalogEntrySchema,
+  CheckOverrideIdSchema,
+  CheckOverrideSchema,
+  DrivetrainIdSchema,
+  DrivetrainSchema,
+  ElectricalSchema,
+  HazardIdSchema,
+  HazardSchema,
+  LoadCaseIdSchema,
+  LoadCaseSchema,
+  MAX_REQUIREMENTS,
+  MaterialDefSchema,
+  PurchasedUseIdSchema,
+  PurchasedUseSchema,
+  RequirementSchema,
+  SchematicIdSchema,
+  SchematicSchema,
+  SpecNoteIdSchema,
+  SpecNoteSchema,
+  StudyIdSchema,
+  StudySchema,
+  SymbolDefSchema,
+  SymbolIdSchema,
+  TestBandIdSchema,
+  TestBandSchema,
+  UserMaterialIdSchema,
   NoteSchema,
   PaperPointSchema,
   PartSchema,
@@ -135,6 +162,7 @@ import {
 } from './schema';
 import { createAssembly, createPart } from './document';
 import { checkDocument, expressionVariableNames } from './validate';
+import { applyToMaterials, applyToMech, mechVariableUsers } from './mech-commands';
 import {
   CAM_SCOPE,
   DOCUMENT_SCOPE,
@@ -784,6 +812,216 @@ export const SimpleCommandSchema = z.discriminatedUnion('type', [
     suppressed: z.boolean(),
   }),
   /**
+   * Replace the mechanical requirements (ADR 0017 decision 10), as a whole list in table order.
+   * Ids it introduces must be fresh `req#n` from `mech.nextIds`. An empty list removes them. What
+   * a requirement names (a load case, a drivetrain, a record) is not checked: a missing one is the
+   * domain's warning. Since version 19.
+   */
+  z.strictObject({
+    type: z.literal('setMechRequirements'),
+    requirements: z.array(RequirementSchema).max(MAX_REQUIREMENTS),
+  }),
+  /** History only: put a requirements list back (its ids were allocated before). */
+  z.strictObject({
+    type: z.literal('restoreMechRequirements'),
+    requirements: z.array(RequirementSchema).max(MAX_REQUIREMENTS),
+  }),
+  /**
+   * Replace the electrical system (ADR 0017 decision 11): components with their diagram nudges,
+   * connections and harness segments. Ids it introduces must be fresh (`el#n`, `conn#n`, `seg#n`
+   * from `mech.nextIds`). With no components, connections or segments it removes the system.
+   * Since version 19.
+   */
+  z.strictObject({ type: z.literal('setElectrical'), electrical: ElectricalSchema }),
+  /** History only: put an electrical system back (its ids were allocated before). */
+  z.strictObject({ type: z.literal('restoreElectrical'), electrical: ElectricalSchema }),
+  /**
+   * Create or replace a load case of the mechanical section, by id (ADR 0017 decision 2). A new one
+   * goes at `index` (default: last); `index` is ignored on replace. Ids it introduces must be
+   * fresh: `lc#n` from `mech.nextIds`. Since version 19.
+   */
+  z.strictObject({
+    type: z.literal('setMechLoadCase'),
+    loadCase: LoadCaseSchema,
+    index: index.optional(),
+  }),
+  /** Remove a load case. Nothing refers to it in a way core checks. Since version 19. */
+  z.strictObject({ type: z.literal('deleteMechLoadCase'), loadCaseId: LoadCaseIdSchema }),
+  /**
+   * History only: put a load case state back, replacing the one with the same id (at `index`) or
+   * inserting it at `index`. Its ids must have been allocated before.
+   */
+  z.strictObject({ type: z.literal('restoreMechLoadCase'), loadCase: LoadCaseSchema, index }),
+  /**
+   * Create or replace a drivetrain of the mechanical section, by id (ADR 0017 decision 2). A new one
+   * goes at `index` (default: last); `index` is ignored on replace. Ids it introduces must be
+   * fresh: `drive#n` (its stages `stage#n`) from `mech.nextIds`. Since version 19.
+   */
+  z.strictObject({
+    type: z.literal('setDrivetrain'),
+    drivetrain: DrivetrainSchema,
+    index: index.optional(),
+  }),
+  /** Remove a drivetrain. Nothing refers to it in a way core checks. Since version 19. */
+  z.strictObject({ type: z.literal('deleteDrivetrain'), drivetrainId: DrivetrainIdSchema }),
+  /**
+   * History only: put a drivetrain state back, replacing the one with the same id (at `index`) or
+   * inserting it at `index`. Its ids must have been allocated before.
+   */
+  z.strictObject({ type: z.literal('restoreDrivetrain'), drivetrain: DrivetrainSchema, index }),
+  /**
+   * Create or replace a purchased part use of the mechanical section, by id (ADR 0017 decision 2). A new one
+   * goes at `index` (default: last); `index` is ignored on replace. Ids it introduces must be
+   * fresh: `pp#n` from `mech.nextIds`. Since version 19.
+   */
+  z.strictObject({
+    type: z.literal('setPurchasedUse'),
+    use: PurchasedUseSchema,
+    index: index.optional(),
+  }),
+  /** Remove a purchased part use. Nothing refers to it in a way core checks. Since version 19. */
+  z.strictObject({ type: z.literal('deletePurchasedUse'), useId: PurchasedUseIdSchema }),
+  /**
+   * History only: put a purchased part use state back, replacing the one with the same id (at `index`) or
+   * inserting it at `index`. Its ids must have been allocated before.
+   */
+  z.strictObject({ type: z.literal('restorePurchasedUse'), use: PurchasedUseSchema, index }),
+  /**
+   * Create or replace a user catalog entry of the mechanical section, by id (ADR 0017 decision 2). A new one
+   * goes at `index` (default: last); `index` is ignored on replace. Ids it introduces must be
+   * fresh: `entry#n` from `mech.nextIds`. Since version 19.
+   */
+  z.strictObject({
+    type: z.literal('setCatalogEntry'),
+    entry: CatalogEntrySchema,
+    index: index.optional(),
+  }),
+  /** Remove a user catalog entry. Nothing refers to it in a way core checks. Since version 19. */
+  z.strictObject({ type: z.literal('deleteCatalogEntry'), entryId: CatalogEntryIdSchema }),
+  /**
+   * History only: put a user catalog entry state back, replacing the one with the same id (at `index`) or
+   * inserting it at `index`. Its ids must have been allocated before.
+   */
+  z.strictObject({ type: z.literal('restoreCatalogEntry'), entry: CatalogEntrySchema, index }),
+  /**
+   * Create or replace a schematic of the mechanical section, by id (ADR 0017 decision 2). A new one
+   * goes at `index` (default: last); `index` is ignored on replace. Ids it introduces must be
+   * fresh: `sch#n` (its sheets, symbols, wires, labels, ports and notes `sheet#n`, `us#n`, `wire#n`, `label#n`, `port#n`, `text#n`) from `mech.nextIds`. Since version 19.
+   */
+  z.strictObject({
+    type: z.literal('setSchematic'),
+    schematic: SchematicSchema,
+    index: index.optional(),
+  }),
+  /** Remove a schematic. Nothing refers to it in a way core checks. Since version 19. */
+  z.strictObject({ type: z.literal('deleteSchematic'), schematicId: SchematicIdSchema }),
+  /**
+   * History only: put a schematic state back, replacing the one with the same id (at `index`) or
+   * inserting it at `index`. Its ids must have been allocated before.
+   */
+  z.strictObject({ type: z.literal('restoreSchematic'), schematic: SchematicSchema, index }),
+  /**
+   * Create or replace a user symbol of the mechanical section, by id (ADR 0017 decision 2). A new one
+   * goes at `index` (default: last); `index` is ignored on replace. Ids it introduces must be
+   * fresh: `sym#n` from `mech.nextIds`. Since version 19.
+   */
+  z.strictObject({
+    type: z.literal('setSymbol'),
+    symbol: SymbolDefSchema,
+    index: index.optional(),
+  }),
+  /** Remove a user symbol. Nothing refers to it in a way core checks. Since version 19. */
+  z.strictObject({ type: z.literal('deleteSymbol'), symbolId: SymbolIdSchema }),
+  /**
+   * History only: put a user symbol state back, replacing the one with the same id (at `index`) or
+   * inserting it at `index`. Its ids must have been allocated before.
+   */
+  z.strictObject({ type: z.literal('restoreSymbol'), symbol: SymbolDefSchema, index }),
+  /**
+   * Create or replace a stress study of the mechanical section, by id (ADR 0017 decision 2). A new one
+   * goes at `index` (default: last); `index` is ignored on replace. Ids it introduces must be
+   * fresh: `study#n` (its face references `r<n>`) from `mech.nextIds`. Since version 19.
+   */
+  z.strictObject({ type: z.literal('setStudy'), study: StudySchema, index: index.optional() }),
+  /** Remove a stress study. Nothing refers to it in a way core checks. Since version 19. */
+  z.strictObject({ type: z.literal('deleteStudy'), studyId: StudyIdSchema }),
+  /**
+   * History only: put a stress study state back, replacing the one with the same id (at `index`) or
+   * inserting it at `index`. Its ids must have been allocated before.
+   */
+  z.strictObject({ type: z.literal('restoreStudy'), study: StudySchema, index }),
+  /**
+   * Create or replace a check override of the mechanical section, by id (ADR 0017 decision 2). A new one
+   * goes at `index` (default: last); `index` is ignored on replace. Ids it introduces must be
+   * fresh: `chk#n` from `mech.nextIds`. Since version 19.
+   */
+  z.strictObject({
+    type: z.literal('setCheckOverride'),
+    override: CheckOverrideSchema,
+    index: index.optional(),
+  }),
+  /** Remove a check override. Nothing refers to it in a way core checks. Since version 19. */
+  z.strictObject({ type: z.literal('deleteCheckOverride'), overrideId: CheckOverrideIdSchema }),
+  /**
+   * History only: put a check override state back, replacing the one with the same id (at `index`) or
+   * inserting it at `index`. Its ids must have been allocated before.
+   */
+  z.strictObject({ type: z.literal('restoreCheckOverride'), override: CheckOverrideSchema, index }),
+  /**
+   * Create or replace a specification note of the mechanical section, by id (ADR 0017 decision 2). A new one
+   * goes at `index` (default: last); `index` is ignored on replace. Ids it introduces must be
+   * fresh: `note#n` from `mech.nextIds`. Since version 19.
+   */
+  z.strictObject({ type: z.literal('setSpecNote'), note: SpecNoteSchema, index: index.optional() }),
+  /** Remove a specification note. Nothing refers to it in a way core checks. Since version 19. */
+  z.strictObject({ type: z.literal('deleteSpecNote'), noteId: SpecNoteIdSchema }),
+  /**
+   * History only: put a specification note state back, replacing the one with the same id (at `index`) or
+   * inserting it at `index`. Its ids must have been allocated before.
+   */
+  z.strictObject({ type: z.literal('restoreSpecNote'), note: SpecNoteSchema, index }),
+  /**
+   * Create or replace a hazard of the mechanical section, by id (ADR 0017 decision 2). A new one
+   * goes at `index` (default: last); `index` is ignored on replace. Ids it introduces must be
+   * fresh: `hz#n` from `mech.nextIds`. Since version 19.
+   */
+  z.strictObject({ type: z.literal('setHazard'), hazard: HazardSchema, index: index.optional() }),
+  /** Remove a hazard. Nothing refers to it in a way core checks. Since version 19. */
+  z.strictObject({ type: z.literal('deleteHazard'), hazardId: HazardIdSchema }),
+  /**
+   * History only: put a hazard state back, replacing the one with the same id (at `index`) or
+   * inserting it at `index`. Its ids must have been allocated before.
+   */
+  z.strictObject({ type: z.literal('restoreHazard'), hazard: HazardSchema, index }),
+  /**
+   * Create or replace a test band of the mechanical section, by id (ADR 0017 decision 2). A new one
+   * goes at `index` (default: last); `index` is ignored on replace. Ids it introduces must be
+   * fresh: `vt#n` from `mech.nextIds`. Since version 19.
+   */
+  z.strictObject({ type: z.literal('setTestBand'), band: TestBandSchema, index: index.optional() }),
+  /** Remove a test band. Nothing refers to it in a way core checks. Since version 19. */
+  z.strictObject({ type: z.literal('deleteTestBand'), bandId: TestBandIdSchema }),
+  /**
+   * History only: put a test band state back, replacing the one with the same id (at `index`) or
+   * inserting it at `index`. Its ids must have been allocated before.
+   */
+  z.strictObject({ type: z.literal('restoreTestBand'), band: TestBandSchema, index }),
+  /**
+   * Create or replace a user material (ADR 0017 decision 4), by id. A new one needs a fresh
+   * `material#n` from the document's `nextIds.material` and goes at `index` (default: last);
+   * `index` is ignored on replace. Its values are constants of their properties' kinds. Since
+   * version 19.
+   */
+  z.strictObject({
+    type: z.literal('setMaterialDef'),
+    material: MaterialDefSchema,
+    index: index.optional(),
+  }),
+  /** Remove a user material. Refused while a part or a body uses it. Since version 19. */
+  z.strictObject({ type: z.literal('deleteMaterialDef'), materialId: UserMaterialIdSchema }),
+  /** History only: put a deleted user material back at `index` (its id was allocated before). */
+  z.strictObject({ type: z.literal('restoreMaterialDef'), material: MaterialDefSchema, index }),
+  /**
    * History only: put a whole document in place of this one (restore a version or revision; the
    * undo of a restore). The replacement must be this document (same `id`) and valid as a whole,
    * assemblies and configurations included. Its inverse is `replaceDocument` of the document it
@@ -958,6 +1196,48 @@ function applyUnchecked(doc: ManufaktureDocument, command: Command): CoreResult<
     case 'deleteScript':
     case 'restoreScript':
       return applyToScripts(doc, command);
+    case 'setMechRequirements':
+    case 'restoreMechRequirements':
+    case 'setElectrical':
+    case 'restoreElectrical':
+    case 'setMechLoadCase':
+    case 'deleteMechLoadCase':
+    case 'restoreMechLoadCase':
+    case 'setDrivetrain':
+    case 'deleteDrivetrain':
+    case 'restoreDrivetrain':
+    case 'setPurchasedUse':
+    case 'deletePurchasedUse':
+    case 'restorePurchasedUse':
+    case 'setCatalogEntry':
+    case 'deleteCatalogEntry':
+    case 'restoreCatalogEntry':
+    case 'setSchematic':
+    case 'deleteSchematic':
+    case 'restoreSchematic':
+    case 'setSymbol':
+    case 'deleteSymbol':
+    case 'restoreSymbol':
+    case 'setStudy':
+    case 'deleteStudy':
+    case 'restoreStudy':
+    case 'setCheckOverride':
+    case 'deleteCheckOverride':
+    case 'restoreCheckOverride':
+    case 'setSpecNote':
+    case 'deleteSpecNote':
+    case 'restoreSpecNote':
+    case 'setHazard':
+    case 'deleteHazard':
+    case 'restoreHazard':
+    case 'setTestBand':
+    case 'deleteTestBand':
+    case 'restoreTestBand':
+      return applyToMech(doc, command);
+    case 'setMaterialDef':
+    case 'deleteMaterialDef':
+    case 'restoreMaterialDef':
+      return applyToMaterials(doc, command);
     case 'addCamTool':
     case 'editCamTool':
     case 'deleteCamTool':
@@ -3977,6 +4257,7 @@ export function variableUsers(doc: ManufaktureDocument, name: string): string[] 
   }
   for (const drawing of variableDrawings(doc, name)) users.push(drawing.id);
   users.push(...variableCamUsers(doc, name));
+  users.push(...mechVariableUsers(doc, name));
   for (const p of variableParameters(doc, name)) users.push(p.id);
   for (const row of doc.configurations?.rows ?? []) {
     const mentions = Object.values(row.values).some(

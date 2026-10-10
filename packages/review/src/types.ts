@@ -117,7 +117,10 @@ export interface ContainerDiff {
 export interface DomainDiff {
   namespace: string;
   change: 'added' | 'removed' | 'changed';
-  /** From the namespace's summariser, else a generic list of changed fields. */
+  /**
+   * From the namespace's summariser, else a generic list of changed fields; for a domain that owns
+   * a typed section (`mech`), the section's lines follow the settings' lines.
+   */
   lines: string[];
   omitted: number;
 }
@@ -335,7 +338,10 @@ export interface ReviewBundle {
   documentName: string;
   commands: { batches: Bounded<BatchDiff>; omittedCommands: number };
   features: { parts: ContainerDiff[]; assemblies: ContainerDiff[] };
-  /** Other document-level changes (variables, units, configurations, drawings, CAM, print). */
+  /**
+   * Other document-level changes (variables, units, configurations, drawings, CAM, print, user
+   * materials).
+   */
   document: FieldChange[];
   domains: DomainDiff[];
   scripts: ScriptDiff[];

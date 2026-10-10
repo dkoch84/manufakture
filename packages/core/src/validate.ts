@@ -29,6 +29,18 @@ import {
   viewExpressions,
 } from './features';
 import { PART_COUNTER, parseAnyId, parseFeatureId, parseSubId, peekCounter } from './ids';
+import { materialDefProblems } from './material-defs';
+import { findMaterial } from './materials';
+import {
+  MECH_LISTS,
+  electricalExpressions,
+  electricalIds,
+  isPhysicalSite,
+  mechItemExpressions,
+  mechItemIds,
+  mechItems,
+  type OwnedId,
+} from './mech';
 import { fail, ok, type CoreError, type CoreResult } from './result';
 import {
   ASSEMBLY_COUNTER,
@@ -37,6 +49,7 @@ import {
   CONFIG_ROW_COUNTER,
   DRAWING_COUNTER,
   FONT_COUNTER,
+  MATERIAL_COUNTER,
   SCRIPT_COUNTER,
   MAX_SKETCH_OUTLINE_TEXT,
   MAX_SKETCH_SVG_COMMANDS,
@@ -51,6 +64,7 @@ import {
   type Drawing,
   type Feature,
   type ManufaktureDocument,
+  type MechData,
   type Part,
   type PrintData,
   type SketchFeature,
@@ -69,22 +83,43 @@ import {
  * is never blocked by the features built on it.
  */
 
+/**
+ * How an expression is parsed (`ParseOptions` of `@manufakture/units`): `physical` for a field of
+ * a physical kind (ADR 0017 decision 3, "a physical parse mode"), where `5 m/s` is a speed rather
+ * than `5 m` divided by a variable `s`. Default: the old reading.
+ */
+export interface ExpressionMode {
+  readonly physical?: boolean;
+}
+
 const parseCache = new Map<string, UnitsResult<VariableReference[]>>();
 
-/** The variables an expression mentions (parse only; cached by source text). */
-export function expressionReferences(source: string): UnitsResult<VariableReference[]> {
-  let r = parseCache.get(source);
+/** A cache key: the parse mode, then the source, since the reading depends on both. */
+function modeKey(source: string, mode: ExpressionMode): string {
+  return `${mode.physical === true ? 'p' : 'g'}\u0000${source}`;
+}
+
+/** The variables an expression mentions (parse only; cached by parse mode and source text). */
+export function expressionReferences(
+  source: string,
+  mode: ExpressionMode = {},
+): UnitsResult<VariableReference[]> {
+  const key = modeKey(source, mode);
+  let r = parseCache.get(key);
   if (!r) {
     if (parseCache.size > 10_000) parseCache.clear();
-    r = findReferences(source);
-    parseCache.set(source, r);
+    r = findReferences(source, { physical: mode.physical === true });
+    parseCache.set(key, r);
   }
   return r;
 }
 
 /** Names of the variables an expression mentions, without duplicates; empty when it does not parse. */
-export function expressionVariableNames(expression: StoredExpression): string[] {
-  const r = expressionReferences(expression.source);
+export function expressionVariableNames(
+  expression: StoredExpression,
+  mode: ExpressionMode = {},
+): string[] {
+  const r = expressionReferences(expression.source, mode);
   return r.ok ? [...new Set(r.value.map((v) => v.name))] : [];
 }
 
@@ -92,14 +127,18 @@ const measureCache = new Map<string, UnitsResult<MeasureReference[]>>();
 
 /**
  * The `distance(...)` and `angle(...)` calls an expression makes, with their quoted face names
- * (parse only; cached by source text).
+ * (parse only; cached by parse mode and source text).
  */
-export function expressionMeasures(source: string): UnitsResult<MeasureReference[]> {
-  let r = measureCache.get(source);
+export function expressionMeasures(
+  source: string,
+  mode: ExpressionMode = {},
+): UnitsResult<MeasureReference[]> {
+  const key = modeKey(source, mode);
+  let r = measureCache.get(key);
   if (!r) {
     if (measureCache.size > 10_000) measureCache.clear();
-    r = findMeasures(source);
-    measureCache.set(source, r);
+    r = findMeasures(source, { physical: mode.physical === true });
+    measureCache.set(key, r);
   }
   return r;
 }
@@ -109,8 +148,8 @@ export function expressionMeasures(source: string): UnitsResult<MeasureReference
  * name. Such an expression is evaluated by regen, from the part's geometry, and is allowed only
  * in variables (and configuration rows, which give variables their values).
  */
-export function measuresModel(expression: StoredExpression): boolean {
-  const r = expressionMeasures(expression.source);
+export function measuresModel(expression: StoredExpression, mode: ExpressionMode = {}): boolean {
+  const r = expressionMeasures(expression.source, mode);
   return r.ok && r.value.some((m) => m.faces.length > 0);
 }
 
@@ -119,9 +158,10 @@ function checkExpression(
   path: readonly (string | number)[],
   variables: ReadonlySet<string>,
   out: CoreError[],
-  options: { measures?: boolean } = {},
+  options: { measures?: boolean; physical?: boolean } = {},
 ): void {
-  const r = expressionReferences(expression.source);
+  const mode: ExpressionMode = { physical: options.physical === true };
+  const r = expressionReferences(expression.source, mode);
   if (!r.ok) {
     out.push({
       code: 'expression',
@@ -133,8 +173,8 @@ function checkExpression(
   }
   // Only quoted face names make a measuring call: before them, `distance(#a, #b)` parsed (and
   // failed at regen as an unknown function), so documents holding one still load.
-  if (options.measures !== true && measuresModel(expression)) {
-    const m = expressionMeasures(expression.source);
+  if (options.measures !== true && measuresModel(expression, mode)) {
+    const m = expressionMeasures(expression.source, mode);
     const call = m.ok ? m.value.find((x) => x.faces.length > 0) : undefined;
     out.push({
       code: 'expression',
@@ -1383,6 +1423,106 @@ function checkCam(
 }
 
 /** `<counter>#n` for an assembly-level counter, `<prefix>n` for a reference prefix. */
+/**
+ * The user materials: ids allocated by the document's `nextIds.material` and used once, and every
+ * value a constant of its property's kind. Returns their ids.
+ */
+function checkMaterials(doc: ManufaktureDocument, out: CoreError[]): Set<string> {
+  const ids = new Set<string>();
+  const defs = doc.materials ?? [];
+  defs.forEach((def, i) => {
+    const path = ['materials', i];
+    checkAllocated(def.id, MATERIAL_COUNTER, doc.nextIds, 'Material', [...path, 'id'], out);
+    ids.add(def.id);
+    for (const problem of materialDefProblems(def)) {
+      out.push({
+        code: 'expression',
+        message: `${def.id} (${def.name}): ${problem.message}`,
+        path: [...path, ...problem.path, 'source'],
+      });
+    }
+  });
+  checkUnique(
+    defs.map((d) => d.id),
+    'Material id',
+    (i) => ['materials', i, 'id'],
+    out,
+  );
+  return ids;
+}
+
+/** A part's and its bodies' materials: each a built-in material or a user material of the document. */
+function checkPartMaterials(
+  part: Part,
+  pi: number,
+  userMaterials: ReadonlySet<string>,
+  out: CoreError[],
+): void {
+  const check = (id: string | undefined, path: readonly (string | number)[]) => {
+    if (id === undefined || findMaterial(id) !== undefined || userMaterials.has(id)) return;
+    out.push({
+      code: 'dependency',
+      message: `Material "${id}" is neither a built-in material nor one of the document's`,
+      path,
+      blockers: [id],
+    });
+  };
+  check(part.material, ['parts', pi, 'material']);
+  part.bodies.forEach((b, bi) => check(b.material, ['parts', pi, 'bodies', bi, 'material']));
+}
+
+/**
+ * The mechanical section (ADR 0017 decision 2): every id, nested ones included, allocated by
+ * `mech.nextIds` and used once in the section (its counters are shared by all of it); every
+ * expression parses in its field's mode (physical for a physical kind) and names existing
+ * variables, and none measures the model. References to document objects and to other mechanical
+ * items are not checked here: a missing one is the domain's `mech-reference` warning, never a
+ * load error (decision 9).
+ */
+function checkMech(
+  mech: MechData | undefined,
+  variables: ReadonlySet<string>,
+  out: CoreError[],
+): void {
+  if (mech === undefined) return;
+  const seen = new Set<string>();
+  const visit = (owned: OwnedId, base: readonly (string | number)[]) => {
+    const path = [...base, ...owned.path];
+    const p = parseAnyId(owned.id);
+    if (p !== undefined && p.counter === owned.counter) {
+      const next = peekCounter(mech.nextIds, owned.counter);
+      if (p.n >= next) {
+        out.push({
+          code: 'invalid-id',
+          message: `Id "${owned.id}" was never allocated (next is ${previewId(owned.counter, next)})`,
+          path,
+        });
+      }
+    }
+    if (seen.has(owned.id)) {
+      out.push({ code: 'duplicate', message: `Id "${owned.id}" is used twice in mech`, path });
+    }
+    seen.add(owned.id);
+  };
+  for (const list of MECH_LISTS) {
+    mechItems(mech, list).forEach((item, i) => {
+      const base = ['mech', list, i];
+      for (const owned of mechItemIds(list, item)) visit(owned, base);
+      for (const site of mechItemExpressions(list, item)) {
+        checkExpression(site.expression, [...base, ...site.path], variables, out, {
+          physical: isPhysicalSite(site.expected),
+        });
+      }
+    });
+  }
+  for (const owned of electricalIds(mech.electrical)) visit(owned, ['mech', 'electrical']);
+  for (const site of electricalExpressions(mech.electrical)) {
+    checkExpression(site.expression, ['mech', 'electrical', ...site.path], variables, out, {
+      physical: isPhysicalSite(site.expected),
+    });
+  }
+}
+
 function previewId(counter: string, n: number): string {
   return counter.length === 1 ? `${counter}${n}` : `${counter}#${n}`;
 }
@@ -1414,8 +1554,10 @@ export function validateDocument(doc: ManufaktureDocument): CoreError[] {
     (i) => ['scripts', i, 'id'],
     out,
   );
+  const userMaterials = checkMaterials(doc, out);
   const partIds = new Set<string>();
   doc.parts.forEach((part, pi) => {
+    checkPartMaterials(part, pi, userMaterials, out);
     const parsed = parseFeatureId(part.id);
     if (parsed?.counter === PART_COUNTER && parsed.n >= peekCounter(doc.nextIds, PART_COUNTER)) {
       out.push({
@@ -1456,6 +1598,7 @@ export function validateDocument(doc: ManufaktureDocument): CoreError[] {
   checkPrint(doc.print, partIds, variables, out);
   checkCam(doc.cam, partIds, variables, out);
   checkDrawings(doc, partIds, variables, out);
+  checkMech(doc.mech, variables, out);
   return out;
 }
 

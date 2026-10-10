@@ -4,7 +4,13 @@
 // until it has one. Each takes the command and the documents before and after it, for names
 // and for what an edit changed.
 
-import type { Command, CommandType, ManufaktureDocument } from '@manufakture/core';
+import {
+  mechItems,
+  type Command,
+  type CommandType,
+  type ManufaktureDocument,
+  type MechList,
+} from '@manufakture/core';
 import { describeFeature, featureTitle, materialName, type Names } from './describe';
 import { domainLines, type DomainSummariser } from './domains';
 import { an, expressionText, fieldChanges, omit, plural, shown, valueText } from './text';
@@ -53,6 +59,47 @@ const PARAMETER = (p: Of<'setConfigParameter'>['parameter'], ctx: SummaryContext
   p.kind === 'variable'
     ? `${shown(p.name)} (variable ${shown(p.variable, 80)})`
     : `${shown(p.name)} (suppression of ${ctx.names.feature(p.partId, p.featureId)})`;
+
+/** A mechanical item as a reviewer reads it: its name (or what identifies it) and id. */
+function mechLabel(item: { id: string; name?: string } & Record<string, unknown>): string {
+  const what =
+    typeof item.name === 'string'
+      ? item.name
+      : typeof item.check === 'string'
+        ? item.check
+        : typeof item.test === 'string'
+          ? item.test
+          : typeof item.partNumber === 'string'
+            ? `${String(item.maker)} ${item.partNumber}`
+            : typeof item.spec === 'string'
+              ? `${item.spec} ${String(item.field)}`
+              : undefined;
+  return what === undefined ? shown(item.id, 40) : `${shown(what)} (${shown(item.id, 40)})`;
+}
+
+/** "Added load case ..." or "Changed load case ...: fields", from the document before. */
+function mechSet(
+  list: MechList,
+  what: string,
+  item: { id: string; name?: string },
+  ctx: SummaryContext,
+): string {
+  const old = (mechItems(ctx.before?.mech, list) as readonly { id: string }[]).find(
+    (x) => x.id === item.id,
+  );
+  const label = mechLabel(item as { id: string } & Record<string, unknown>);
+  return old === undefined
+    ? `Added ${what} ${label}`
+    : `Changed ${what} ${label}: ${edited(old, item)}`;
+}
+
+/** The name of a mechanical item the document before has, else its id. */
+function mechNamed(list: MechList, id: string, ctx: SummaryContext): string {
+  const old = (
+    mechItems(ctx.before?.mech, list) as readonly ({ id: string } & Record<string, unknown>)[]
+  ).find((x) => x.id === id);
+  return old === undefined ? shown(id, 40) : mechLabel(old);
+}
 
 export const SUMMARIES: { [K in CommandType]: Summariser<K> } = {
   addFeature: (c, ctx) =>
@@ -228,6 +275,75 @@ export const SUMMARIES: { [K in CommandType]: Summariser<K> } = {
   deleteScript: (c, ctx) => `Deleted script ${ctx.names.script(c.scriptId)}`,
   restoreScript: (c) =>
     `Restored script ${shown(c.script.name)} (${c.script.language}; source in the bundle's scripts)`,
+  setMechRequirements: (c, ctx) => {
+    const before = mechItems(ctx.before?.mech, 'requirements');
+    const ids = new Set(before.map((r) => r.id));
+    const added = c.requirements.filter((r) => !ids.has(r.id)).length;
+    const kept = new Set(c.requirements.map((r) => r.id));
+    const removed = before.filter((r) => !kept.has(r.id)).length;
+    return `Set the requirements: ${plural(c.requirements.length, 'requirement')} (${added} added, ${removed} removed)`;
+  },
+  restoreMechRequirements: (c) =>
+    `Restored the requirements (${plural(c.requirements.length, 'requirement')})`,
+  setElectrical: (c) =>
+    `Set the electrical system: ${plural(c.electrical.components.length, 'component')}, ${plural(c.electrical.connections.length, 'connection')}, ${plural(c.electrical.harness.length, 'harness segment')}`,
+  restoreElectrical: (c) =>
+    `Restored the electrical system (${plural(c.electrical.components.length, 'component')})`,
+  setMechLoadCase: (c, ctx) => mechSet('loadCases', 'load case', c.loadCase, ctx),
+  deleteMechLoadCase: (c, ctx) => `Deleted load case ${mechNamed('loadCases', c.loadCaseId, ctx)}`,
+  restoreMechLoadCase: (c) =>
+    `Restored load case ${mechLabel(c.loadCase as { id: string } & Record<string, unknown>)}`,
+  setDrivetrain: (c, ctx) => mechSet('drivetrains', 'drivetrain', c.drivetrain, ctx),
+  deleteDrivetrain: (c, ctx) =>
+    `Deleted drivetrain ${mechNamed('drivetrains', c.drivetrainId, ctx)}`,
+  restoreDrivetrain: (c) =>
+    `Restored drivetrain ${mechLabel(c.drivetrain as { id: string } & Record<string, unknown>)}`,
+  setPurchasedUse: (c, ctx) => mechSet('purchased', 'purchased part', c.use, ctx),
+  deletePurchasedUse: (c, ctx) => `Deleted purchased part ${mechNamed('purchased', c.useId, ctx)}`,
+  restorePurchasedUse: (c) =>
+    `Restored purchased part ${mechLabel(c.use as { id: string } & Record<string, unknown>)}`,
+  setCatalogEntry: (c, ctx) => mechSet('catalog', 'catalog entry', c.entry, ctx),
+  deleteCatalogEntry: (c, ctx) => `Deleted catalog entry ${mechNamed('catalog', c.entryId, ctx)}`,
+  restoreCatalogEntry: (c) =>
+    `Restored catalog entry ${mechLabel(c.entry as { id: string } & Record<string, unknown>)}`,
+  setSchematic: (c, ctx) => mechSet('schematics', 'schematic', c.schematic, ctx),
+  deleteSchematic: (c, ctx) => `Deleted schematic ${mechNamed('schematics', c.schematicId, ctx)}`,
+  restoreSchematic: (c) =>
+    `Restored schematic ${mechLabel(c.schematic as { id: string } & Record<string, unknown>)}`,
+  setSymbol: (c, ctx) => mechSet('symbols', 'symbol', c.symbol, ctx),
+  deleteSymbol: (c, ctx) => `Deleted symbol ${mechNamed('symbols', c.symbolId, ctx)}`,
+  restoreSymbol: (c) =>
+    `Restored symbol ${mechLabel(c.symbol as { id: string } & Record<string, unknown>)}`,
+  setStudy: (c, ctx) => mechSet('studies', 'stress study', c.study, ctx),
+  deleteStudy: (c, ctx) => `Deleted stress study ${mechNamed('studies', c.studyId, ctx)}`,
+  restoreStudy: (c) =>
+    `Restored stress study ${mechLabel(c.study as { id: string } & Record<string, unknown>)}`,
+  setCheckOverride: (c, ctx) => mechSet('checks', 'check override', c.override, ctx),
+  deleteCheckOverride: (c, ctx) =>
+    `Deleted check override ${mechNamed('checks', c.overrideId, ctx)}`,
+  restoreCheckOverride: (c) =>
+    `Restored check override ${mechLabel(c.override as { id: string } & Record<string, unknown>)}`,
+  setSpecNote: (c, ctx) => mechSet('specNotes', 'specification note', c.note, ctx),
+  deleteSpecNote: (c, ctx) => `Deleted specification note ${mechNamed('specNotes', c.noteId, ctx)}`,
+  restoreSpecNote: (c) =>
+    `Restored specification note ${mechLabel(c.note as { id: string } & Record<string, unknown>)}`,
+  setHazard: (c, ctx) => mechSet('hazards', 'hazard', c.hazard, ctx),
+  deleteHazard: (c, ctx) => `Deleted hazard ${mechNamed('hazards', c.hazardId, ctx)}`,
+  restoreHazard: (c) =>
+    `Restored hazard ${mechLabel(c.hazard as { id: string } & Record<string, unknown>)}`,
+  setTestBand: (c, ctx) => mechSet('testBands', 'test band', c.band, ctx),
+  deleteTestBand: (c, ctx) => `Deleted test band ${mechNamed('testBands', c.bandId, ctx)}`,
+  restoreTestBand: (c) =>
+    `Restored test band ${mechLabel(c.band as { id: string } & Record<string, unknown>)}`,
+  setMaterialDef: (c, ctx) => {
+    const old = ctx.before?.materials?.find((m) => m.id === c.material.id);
+    return old === undefined
+      ? `Added material ${shown(c.material.name)} (${c.material.form}, density ${expressionText(c.material.density.value)})`
+      : `Changed material ${shown(c.material.name)}: ${edited(old, c.material)}`;
+  },
+  deleteMaterialDef: (c, ctx) =>
+    `Deleted material ${shown(ctx.before?.materials?.find((m) => m.id === c.materialId)?.name ?? c.materialId)}`,
+  restoreMaterialDef: (c) => `Restored material ${shown(c.material.name)}`,
   setDomainData: (c, ctx) => {
     const before = ctx.before?.domains?.[c.namespace];
     const after =

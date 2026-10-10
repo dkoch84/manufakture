@@ -1,10 +1,13 @@
 // Domain data in the bundle (ADR 0013 decision 3: `domains.<namespace>` is opaque to core). Each
 // domain package that owns a namespace exports a summariser (`woodDataSummariser`,
-// `stockDataSummariser` in domain-wood, `constructionDataSummariser` in domain-construction);
-// a namespace without one gets a generic list of the fields that changed.
+// `stockDataSummariser` in domain-wood, `constructionDataSummariser` in domain-construction,
+// `mechDataSummariser` in domain-mech); a namespace without one gets a generic list of the fields
+// that changed. A domain that owns a typed document section (domain-mech's `mech`, ADR 0017
+// decision 2) also summarises it (`mechSectionSummariser`): its lines join the namespace's entry.
 
 import type { DomainData, ManufaktureDocument } from '@manufakture/core';
 import { constructionDataSummariser } from '@manufakture/domain-construction';
+import { mechDataSummariser, mechSectionSummariser } from '@manufakture/domain-mech';
 import { stockDataSummariser, woodDataSummariser } from '@manufakture/domain-wood';
 import { bounded, fieldChanges, shown } from './text';
 import { LIMITS, type DomainDiff } from './types';
@@ -24,7 +27,44 @@ export const DEFAULT_SUMMARISERS: readonly DomainSummariser[] = [
   woodDataSummariser,
   stockDataSummariser,
   constructionDataSummariser,
+  mechDataSummariser,
 ];
+
+/**
+ * The hook for a typed document section a domain owns: lines for how the section changed from
+ * `before` to `after` (undefined when absent). It must not throw; one that does is replaced by a
+ * generic list of the fields that changed.
+ */
+export interface SectionSummariser {
+  readonly section: string;
+  summarise(before: unknown, after: unknown): readonly string[];
+}
+
+/** The typed sections domain packages own, by key in the document and namespace. */
+const SECTIONS: readonly {
+  readonly namespace: string;
+  readonly read: (doc: ManufaktureDocument) => unknown;
+  readonly summariser: SectionSummariser;
+}[] = [{ namespace: 'mech', read: (doc) => doc.mech, summariser: mechSectionSummariser }];
+
+function sectionLines(summariser: SectionSummariser, before: unknown, after: unknown): string[] {
+  let lines: readonly string[] | null = null;
+  try {
+    const r = summariser.summarise(before, after);
+    if (Array.isArray(r) && r.every((l) => typeof l === 'string')) lines = r;
+  } catch {
+    lines = null;
+  }
+  if (lines === null) {
+    const isObject = (v: unknown) => typeof v === 'object' && v !== null && !Array.isArray(v);
+    const a = before ?? (isObject(after) ? {} : undefined);
+    const b = after ?? (isObject(before) ? {} : undefined);
+    lines = fieldChanges(a, b, { max: LIMITS.domainLines }).map(
+      (c) => `${c.path}: ${c.before} to ${c.after}`,
+    );
+  }
+  return lines.map((l) => shown(l));
+}
 
 export function summariserMap(
   list: readonly DomainSummariser[] = DEFAULT_SUMMARISERS,
@@ -78,14 +118,27 @@ export function domainDiffs(
   const a = base.domains ?? {};
   const b = head.domains ?? {};
   const out: DomainDiff[] = [];
-  for (const ns of [...new Set([...Object.keys(a), ...Object.keys(b)])].sort()) {
+  const sections = new Map(SECTIONS.map((s) => [s.namespace, s]));
+  const namespaces = new Set([...Object.keys(a), ...Object.keys(b), ...sections.keys()]);
+  for (const ns of [...namespaces].sort()) {
     const x = Object.hasOwn(a, ns) ? a[ns] : undefined;
     const y = Object.hasOwn(b, ns) ? b[ns] : undefined;
-    if (JSON.stringify(x) === JSON.stringify(y)) continue;
-    const lines = bounded(domainLines(ns, x, y, summarisers), LIMITS.domainLines);
+    const section = sections.get(ns);
+    const sx = section?.read(base);
+    const sy = section?.read(head);
+    const dataChanged = JSON.stringify(x) !== JSON.stringify(y);
+    const sectionChanged = section !== undefined && JSON.stringify(sx) !== JSON.stringify(sy);
+    if (!dataChanged && !sectionChanged) continue;
+    const all = [
+      ...(dataChanged ? domainLines(ns, x, y, summarisers) : []),
+      ...(sectionChanged ? sectionLines(section.summariser, sx, sy) : []),
+    ];
+    const lines = bounded(all, LIMITS.domainLines);
+    const was = x !== undefined || sx !== undefined;
+    const is = y !== undefined || sy !== undefined;
     out.push({
       namespace: shown(ns, 64),
-      change: x === undefined ? 'added' : y === undefined ? 'removed' : 'changed',
+      change: !was ? 'added' : !is ? 'removed' : 'changed',
       lines: lines.items,
       omitted: lines.omitted,
     });

@@ -11,9 +11,16 @@ import type {
   Vec2,
   Vec3,
 } from '@manufakture/sketch/model';
+import { PHYSICAL_KINDS, displayUnitsOf, type PhysicalKind } from '@manufakture/units';
 import { z } from 'zod';
 import { FEATURE_ID_PATTERN, hasTombstoneSubId, isSubId } from './ids';
-import { MATERIAL_IDS } from './materials';
+import {
+  MATERIAL_IDS,
+  USER_MATERIAL_ID_PATTERN,
+  type MaterialDef,
+  type MaterialDefProperty,
+  type MaterialId,
+} from './materials';
 
 /**
  * The document schema, current file format version (ADR 0004). Everything here is plain JSON
@@ -32,7 +39,7 @@ import { MATERIAL_IDS } from './materials';
  */
 
 /** The file format version this code reads and writes. Bump it only together with a migration. */
-export const FORMAT_VERSION = 18;
+export const FORMAT_VERSION = 19;
 /** The topological naming scheme version (T0.5) that stored references are written in. */
 export const NAMING_SCHEME = 1;
 export const FORMAT_TAG = 'manufakture';
@@ -188,9 +195,40 @@ export const AngleDisplaySchema = z.strictObject({
   unit: AngleUnitSchema,
   decimals: decimals.optional(),
 });
+/**
+ * The display unit chosen per physical kind (`QuantityDisplayUnits` of `@manufakture/units`, ADR
+ * 0017 decision 3): one of the kind's display units. A kind without an entry follows the length
+ * format's unit system. Never empty: absent when no kind has a choice. Since version 19.
+ */
+export const QuantityDisplaySchema = z
+  .partialRecord(
+    z.enum(PHYSICAL_KINDS as unknown as [PhysicalKind, ...PhysicalKind[]]),
+    z.string().max(32),
+  )
+  .check((ctx) => {
+    const entries = Object.entries(ctx.value) as [PhysicalKind, string | undefined][];
+    if (entries.length === 0) {
+      ctx.issues.push({
+        code: 'custom',
+        message: 'an empty quantities record is not allowed; leave the key out instead',
+        input: ctx.value,
+      });
+    }
+    for (const [kind, unit] of entries) {
+      if (unit !== undefined && !displayUnitsOf(kind).includes(unit)) {
+        ctx.issues.push({
+          code: 'custom',
+          message: `"${unit}" is not a display unit of ${kind} (one of ${displayUnitsOf(kind).join(', ')})`,
+          input: unit,
+          path: [kind],
+        });
+      }
+    }
+  });
 export const DisplayUnitsSchema = z.strictObject({
   length: LengthDisplaySchema,
   angle: AngleDisplaySchema,
+  quantities: QuantityDisplaySchema.exactOptional(),
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -1377,7 +1415,22 @@ export const VariableSchema = z.strictObject({
   expression: StoredExpressionSchema,
 });
 
-export const MaterialIdSchema = z.enum(MATERIAL_IDS);
+/** The document-level `nextIds` key for user material ids (`material#n`). Since version 19. */
+export const MATERIAL_COUNTER = 'material';
+/** A user material's id: `material#n`, from `nextIds.material`, never reused. */
+export type UserMaterialId = `material#${number}`;
+export const UserMaterialIdSchema = z.custom<UserMaterialId>(
+  (v) => typeof v === 'string' && v.length <= 32 && USER_MATERIAL_ID_PATTERN.test(v),
+  'Expected a user material id like "material#1"',
+);
+/** A built-in material id (`MATERIALS`). */
+export const BuiltinMaterialIdSchema = z.enum(MATERIAL_IDS);
+/**
+ * What `Part.material` and a body's `material` hold: a built-in material id, or (since version 19)
+ * the id of a user material in the document's `materials`.
+ */
+export type MaterialRef = MaterialId | UserMaterialId;
+export const MaterialIdSchema = z.union([BuiltinMaterialIdSchema, UserMaterialIdSchema]);
 
 /** A display colour: `#rrggbb`, lower-case hex, so equal colours are equal text. */
 export const ColorSchema = z
@@ -2773,6 +2826,1078 @@ export const CamDataSchema = z
     }
   });
 
+// ---------------------------------------------------------------------------------------------
+// User materials (since version 19; ADR 0017 decision 4). The id schema is with the document's
+// material fields, above; `MaterialDef` itself is in `materials.ts`.
+
+/** The most user materials one document may hold. */
+export const MAX_MATERIAL_DEFS = 1000;
+/** The most S-N points a user material's fatigue curve may hold. */
+export const MAX_FATIGUE_POINTS = 100;
+/** The longest source or note text of a user material's property, in characters. */
+export const MAX_PROPERTY_TEXT = 2000;
+
+const propertyText = (what: string, min = 0) => codePoints(MAX_PROPERTY_TEXT, what, min);
+
+export const MaterialDefPropertySchema = z.strictObject({
+  /** The value as typed (`70 GPa`): constant, in the property's kind. */
+  value: StoredExpressionSchema,
+  /** Where the value comes from. */
+  source: propertyText('A source', 1),
+  typical: z.boolean(),
+  note: propertyText('A note').exactOptional(),
+}) satisfies z.ZodType<MaterialDefProperty>;
+
+const materialProperty = MaterialDefPropertySchema.exactOptional();
+
+export const MaterialDefSchema = z.strictObject({
+  id: UserMaterialIdSchema,
+  name: featureName,
+  category: z.enum(['plastic', 'wood', 'metal']),
+  form: z.enum(['wrought', 'cast', 'printed', 'moulded', 'wood', 'panel']),
+  /** Required: every mass result needs it. A mass per volume (`1240 kg/m^3`). */
+  density: MaterialDefPropertySchema,
+  properties: z
+    .strictObject({
+      elasticModulus: materialProperty,
+      poissonRatio: materialProperty,
+      yieldStrength: materialProperty,
+      ultimateStrength: materialProperty,
+      yieldStrengthZ: materialProperty,
+      ultimateStrengthZ: materialProperty,
+      enduranceLimit: materialProperty,
+      elongation: materialProperty,
+      thermalConductivity: materialProperty,
+      specificHeat: materialProperty,
+      thermalExpansion: materialProperty,
+      maxServiceTemperature: materialProperty,
+    })
+    .exactOptional(),
+  fatigue: z
+    .strictObject({
+      points: z
+        .array(
+          z.strictObject({
+            cycles: z.number().positive(),
+            /** A stress amplitude: a constant pressure expression. */
+            stress: StoredExpressionSchema,
+          }),
+        )
+        .min(1)
+        .max(MAX_FATIGUE_POINTS),
+      source: propertyText('A source', 1),
+      typical: z.boolean(),
+      note: propertyText('A note').exactOptional(),
+    })
+    .exactOptional(),
+}) satisfies z.ZodType<MaterialDef>;
+
+// ---------------------------------------------------------------------------------------------
+// The mechanical section (since version 19; ADR 0017 decisions 2 and 7 to 13). Core checks the
+// shape and the size limits of decision 16 here, and ids and expressions in `validate.ts`; what
+// the data means (a load case naming a missing drivetrain, a stage with no ratio, an instance
+// that no longer exists) is the mechanical domain's, as warnings, never a load error.
+
+/** Counters of `mech.nextIds`, one per kind of id the section holds. */
+export const MECH_COUNTERS = {
+  requirement: 'req',
+  loadCase: 'lc',
+  drivetrain: 'drive',
+  stage: 'stage',
+  purchased: 'pp',
+  entry: 'entry',
+  component: 'el',
+  connection: 'conn',
+  segment: 'seg',
+  schematic: 'sch',
+  sheet: 'sheet',
+  placed: 'us',
+  wire: 'wire',
+  label: 'label',
+  port: 'port',
+  text: 'text',
+  symbol: 'sym',
+  study: 'study',
+  check: 'chk',
+  note: 'note',
+  hazard: 'hz',
+  testBand: 'vt',
+  reference: 'r',
+} as const;
+export type MechCounterKind = keyof typeof MECH_COUNTERS;
+
+/** The id pattern of a `mech` counter (`req#n`); face references in studies are `r<n>`. */
+export function mechIdPattern(kind: Exclude<MechCounterKind, 'reference'>): RegExp {
+  return new RegExp(`^${MECH_COUNTERS[kind]}#[1-9][0-9]{0,14}$`);
+}
+const mechId = (kind: Exclude<MechCounterKind, 'reference'>) =>
+  counted(mechIdPattern(kind), `${MECH_COUNTERS[kind]}#1`);
+
+export const RequirementIdSchema = mechId('requirement');
+export const LoadCaseIdSchema = mechId('loadCase');
+export const DrivetrainIdSchema = mechId('drivetrain');
+export const StageIdSchema = mechId('stage');
+export const PurchasedUseIdSchema = mechId('purchased');
+export const CatalogEntryIdSchema = mechId('entry');
+export const ComponentIdSchema = mechId('component');
+export const ConnectionIdSchema = mechId('connection');
+export const SegmentIdSchema = mechId('segment');
+export const SchematicIdSchema = mechId('schematic');
+export const SchematicSheetIdSchema = mechId('sheet');
+export const PlacedSymbolIdSchema = mechId('placed');
+export const WireIdSchema = mechId('wire');
+export const LabelIdSchema = mechId('label');
+export const PortIdSchema = mechId('port');
+export const SheetTextIdSchema = mechId('text');
+export const SymbolIdSchema = mechId('symbol');
+export const StudyIdSchema = mechId('study');
+export const CheckOverrideIdSchema = mechId('check');
+export const SpecNoteIdSchema = mechId('note');
+export const HazardIdSchema = mechId('hazard');
+export const TestBandIdSchema = mechId('testBand');
+
+// Size limits (ADR 0017 decision 16), checked by core so that no document can make a client
+// compute or allocate without bound. The ones the ADR names first, then the bounds it leaves to
+// this format (lists inside the named objects).
+export const MAX_REQUIREMENTS = 500;
+export const MAX_LOAD_CASES = 200;
+export const MAX_DRIVETRAINS = 32;
+export const MAX_STAGES = 64;
+export const MAX_PURCHASED_USES = 2000;
+export const MAX_CATALOG_ENTRIES = 2000;
+export const MAX_COMPONENTS = 2000;
+export const MAX_CONNECTIONS = 10_000;
+export const MAX_SEGMENTS = 2000;
+export const MAX_SCHEMATICS = 100;
+export const MAX_SCHEMATIC_SHEETS = 50;
+/** Placed symbols per sheet, and wires per sheet. */
+export const MAX_SHEET_SYMBOLS = 2000;
+export const MAX_SHEET_WIRES = 5000;
+export const MAX_USER_SYMBOLS = 1000;
+export const MAX_SYMBOL_PINS = 1000;
+export const MAX_STUDIES = 200;
+export const MAX_CHECK_OVERRIDES = 2000;
+export const MAX_SPEC_NOTES = 2000;
+export const MAX_SPEC_NOTE_TEXT = 10_000;
+export const MAX_HAZARDS = 500;
+export const MAX_TEST_BANDS = 500;
+export const MAX_TABLE_POINTS = 10_000;
+/** Labels, ports, junctions, no-connect markers and text notes per sheet, each. */
+export const MAX_SHEET_ITEMS = 5000;
+/** Points of one wire or one symbol line. */
+export const MAX_POLYLINE_POINTS = 1000;
+/** Graphics of one symbol's body. */
+export const MAX_SYMBOL_GRAPHICS = 1000;
+/** Static loads of one load case; fixtures and loads of one study. */
+export const MAX_STATIC_LOADS = 100;
+export const MAX_STUDY_FIXTURES = 100;
+export const MAX_STUDY_LOADS = 100;
+/** Face references of one fixture, load or mesh refinement list. */
+export const MAX_STUDY_FACES = 1000;
+/** Rating fields of one catalog entry, and its dimension fields. */
+export const MAX_RATINGS = 200;
+export const MAX_DIMENSIONS = 100;
+export const MAX_ENTRY_SOURCES = 32;
+export const MAX_ALTERNATES = 32;
+/** Terminals of one component. */
+export const MAX_TERMINALS = 256;
+/** Inputs one check override sets; fields one placed symbol carries. */
+export const MAX_OVERRIDE_INPUTS = 64;
+export const MAX_SYMBOL_FIELDS = 64;
+/** Records a hazard's mitigation names. */
+export const MAX_HAZARD_RECORDS = 100;
+/** The largest grid coordinate of a schematic, a symbol or a diagram nudge, either sign. */
+export const MAX_GRID_COORDINATE = 100_000;
+/** The largest STEP data all user catalog entries may hold together, in bytes. */
+export const MAX_CATALOG_STEP_BYTES = 64 * 1024 * 1024;
+/** Short texts (a name, a maker, a part number, a designator's value) and long ones. */
+export const MAX_MECH_NAME = 200;
+export const MAX_MECH_TEXT = 10_000;
+
+const mechName = codePoints(MAX_MECH_NAME, 'A name', 1);
+const shortText = (what: string, min = 0) => codePoints(MAX_MECH_NAME, what, min);
+const longText = (what: string, min = 0) => codePoints(MAX_MECH_TEXT, what, min);
+const partRef = z.string().min(1).max(MAX_PART_ID_LENGTH, { abort: true });
+const expression = StoredExpressionSchema;
+
+/** A whole number on the schematic and diagram grid (1.27 mm, 50 mil), as `[x, y]`. */
+const gridNumber = z.int().min(-MAX_GRID_COORDINATE).max(MAX_GRID_COORDINATE);
+export const GridPointSchema = z.tuple([gridNumber, gridNumber]).readonly();
+/** A point of a symbol's drawing, in grid units; not limited to whole numbers. */
+const drawNumber = z.number().min(-MAX_GRID_COORDINATE).max(MAX_GRID_COORDINATE);
+const DrawPointSchema = z.tuple([drawNumber, drawNumber]).readonly();
+
+/** A data point of a table: two plain SI numbers (a time and a length, a position and a force). */
+const tablePoints = z
+  .array(z.tuple([finite, finite]).readonly())
+  .min(2)
+  .max(MAX_TABLE_POINTS);
+
+/** A sub-location of a subject (a shaft's seat, a bearing's side): free text. */
+const subjectAt = shortText('A location', 1).exactOptional();
+
+/**
+ * What a record, an override or a note is about (ADR 0017 decision 5): a document object or a
+ * mechanical one, by id, with an optional sub-location. Ids are not resolved by core: a subject
+ * that no longer exists is the domain's `mech-reference` warning.
+ */
+export const SubjectRefSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('part'), part: partRef, at: subjectAt }),
+  z.strictObject({ kind: z.literal('body'), part: partRef, body: BodyIdSchema, at: subjectAt }),
+  z.strictObject({
+    kind: z.literal('instance'),
+    assembly: AssemblyIdSchema,
+    instance: InstanceIdSchema,
+    at: subjectAt,
+  }),
+  z.strictObject({
+    kind: z.literal('mate'),
+    assembly: AssemblyIdSchema,
+    mate: MateIdSchema,
+    at: subjectAt,
+  }),
+  z.strictObject({ kind: z.literal('drivetrain'), drivetrain: DrivetrainIdSchema, at: subjectAt }),
+  z.strictObject({
+    kind: z.literal('stage'),
+    drivetrain: DrivetrainIdSchema,
+    stage: StageIdSchema,
+    at: subjectAt,
+  }),
+  z.strictObject({ kind: z.literal('purchased'), use: PurchasedUseIdSchema, at: subjectAt }),
+  z.strictObject({ kind: z.literal('component'), component: ComponentIdSchema, at: subjectAt }),
+  z.strictObject({ kind: z.literal('connection'), connection: ConnectionIdSchema, at: subjectAt }),
+  z.strictObject({ kind: z.literal('segment'), segment: SegmentIdSchema, at: subjectAt }),
+  z.strictObject({ kind: z.literal('schematic'), schematic: SchematicIdSchema, at: subjectAt }),
+  z.strictObject({ kind: z.literal('study'), study: StudyIdSchema, at: subjectAt }),
+  z.strictObject({ kind: z.literal('loadCase'), loadCase: LoadCaseIdSchema, at: subjectAt }),
+  z.strictObject({
+    kind: z.literal('requirement'),
+    requirement: RequirementIdSchema,
+    at: subjectAt,
+  }),
+]);
+
+// Purchased parts (decision 7) -----------------------------------------------------------------
+
+/** The families of catalog entries. */
+export const CATALOG_FAMILIES = [
+  'motor',
+  'controller',
+  'cell',
+  'pack',
+  'bms',
+  'bearing',
+  'belt',
+  'pulley',
+  'gear',
+  'rope',
+  'wire',
+  'connector',
+  'fuse',
+  'switch',
+  'resistor',
+  'generic',
+] as const;
+export const CatalogFamilySchema = z.enum(CATALOG_FAMILIES);
+
+/** A built-in catalog entry's id: `<family>/<slug>` (`motor/odrive-d6374-150kv`). */
+export const BUILTIN_ENTRY_ID_PATTERN = /^[a-z][a-z0-9-]{0,31}\/[a-z0-9][a-z0-9._-]{0,127}$/;
+/** A built-in symbol's id (`resistor`, `connector/1x4`). */
+export const BUILTIN_SYMBOL_ID_PATTERN =
+  /^[a-z0-9][a-z0-9._-]{0,63}(\/[a-z0-9][a-z0-9._-]{0,63})?$/;
+/** The newest version a built-in reference may pin. */
+export const MAX_BUILTIN_VERSION = 1_000_000;
+
+const builtinVersion = z.int().min(1).max(MAX_BUILTIN_VERSION);
+
+/** A catalog entry: a built-in one pinned by id and version, or one of `mech.catalog`. */
+export const CatalogRefSchema = z.discriminatedUnion('source', [
+  z.strictObject({
+    source: z.literal('builtin'),
+    id: z.string().max(161, { abort: true }).regex(BUILTIN_ENTRY_ID_PATTERN),
+    version: builtinVersion,
+  }),
+  z.strictObject({ source: z.literal('document'), id: CatalogEntryIdSchema }),
+]);
+
+/** A symbol: a built-in one pinned by id and version, or one of `mech.symbols`. */
+export const SymbolRefSchema = z.discriminatedUnion('source', [
+  z.strictObject({
+    source: z.literal('builtin'),
+    id: z.string().max(129, { abort: true }).regex(BUILTIN_SYMBOL_ID_PATTERN),
+    version: builtinVersion,
+  }),
+  z.strictObject({ source: z.literal('document'), id: SymbolIdSchema }),
+]);
+
+/** A rating, dimension or catalog input name (`kt`, `ratedCurrent`, `boreDiameter`). */
+export const FIELD_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
+const fieldName = z.string().max(64, { abort: true }).regex(FIELD_NAME_PATTERN);
+
+/**
+ * One rated value of a catalog entry: a number in SI with the convention it was entered in and the
+ * basis a rating needs (decision 8), a value the datasheet does not give (`unknown`), or a text
+ * value for a field that is not a number (a chemistry, a bearing type).
+ */
+export const RatedSchema = z.union([
+  z.strictObject({
+    value: finite,
+    convention: shortText('A convention').exactOptional(),
+    basis: codePoints(1000, 'A basis').exactOptional(),
+    estimated: z.literal(true).exactOptional(),
+  }),
+  z.strictObject({ unknown: z.literal(true) }),
+  z.strictObject({ text: shortText('A rating text') }),
+]);
+
+const ratedRecord = (max: number, what: string) =>
+  z.record(fieldName, RatedSchema).check((ctx) => {
+    const n = Object.keys(ctx.value).length;
+    if (n > max) {
+      ctx.issues.push({
+        code: 'custom',
+        message: `an entry holds ${n} ${what}; at most ${max} are allowed`,
+        input: n,
+      });
+    }
+  });
+
+/** The generic solid a placeholder builds from an entry's dimensions. */
+export const PlaceholderShapeSchema = z.strictObject({
+  kind: z.enum(['cylinder', 'ring', 'box']),
+  /** The axis of a cylinder or ring in the part's frame (default `z`). */
+  axis: z.enum(['x', 'y', 'z']).exactOptional(),
+});
+
+/** A read date of a source: `YYYY-MM-DD`. */
+const readDate = z
+  .string()
+  .regex(/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/, 'Expected a date like 2026-10-10');
+/** A web address: http or https only, so a document never names another scheme for a link. */
+const webUrl = codePoints(2000, 'A URL').refine(
+  (u) => /^https?:\/\/[^\s]+$/.test(u),
+  'Expected an http or https address',
+);
+
+export const CatalogEntrySchema = z.strictObject({
+  /** `entry#n`: a user entry; built-in entries live in the domain package, never here. */
+  id: CatalogEntryIdSchema,
+  /** The revision of this entry, from 1. */
+  version: z.int().min(1).max(MAX_BUILTIN_VERSION),
+  family: CatalogFamilySchema,
+  /** The version of the family's field schema the ratings are written in. */
+  fieldsVersion: z.int().min(1).max(MAX_BUILTIN_VERSION),
+  maker: shortText('A maker'),
+  partNumber: shortText('A part number'),
+  description: codePoints(1000, 'A description'),
+  ratings: ratedRecord(MAX_RATINGS, 'ratings'),
+  /** Millimetres. */
+  dimensions: ratedRecord(MAX_DIMENSIONS, 'dimensions').exactOptional(),
+  /** Kilograms. */
+  mass: RatedSchema.exactOptional(),
+  geometry: z
+    .discriminatedUnion('kind', [
+      z.strictObject({ kind: z.literal('placeholder'), shape: PlaceholderShapeSchema }),
+      /** A STEP file, base64, within the `.mfk` import limit. */
+      z.strictObject({
+        kind: z.literal('step'),
+        blob: z
+          .string()
+          .max(Math.ceil(MAX_IMPORT_BYTES / 3) * 4, { abort: true })
+          .regex(/^[A-Za-z0-9+/]*={0,2}$/, 'Expected base64'),
+      }),
+    ])
+    .exactOptional(),
+  sources: z
+    .array(
+      z.strictObject({
+        title: codePoints(1000, 'A source title', 1),
+        url: webUrl.exactOptional(),
+        revision: shortText('A revision').exactOptional(),
+        read: readDate,
+      }),
+    )
+    .max(MAX_ENTRY_SOURCES),
+  /** False until someone checks it against the maker's current datasheet. */
+  verified: z.boolean(),
+  /** The built-in entry a user entry was copied from. */
+  derivedFrom: CatalogRefSchema.exactOptional(),
+  notes: longText('Notes').exactOptional(),
+});
+
+/** One use of a purchased part in the design. */
+export const PurchasedUseSchema = z.strictObject({
+  id: PurchasedUseIdSchema,
+  entry: CatalogRefSchema,
+  /** The part that holds its geometry (a STEP import or a placeholder). */
+  part: partRef.exactOptional(),
+  /** A count for parts not modelled (screws, ferrules); a `number` expression. */
+  quantity: expression.exactOptional(),
+  alternates: z.array(CatalogRefSchema).max(MAX_ALTERNATES),
+  name: mechName.exactOptional(),
+});
+
+// Requirements and load cases (decision 10) ----------------------------------------------------
+
+export const REQUIREMENT_QUANTITIES = [
+  'maxForce',
+  'minForce',
+  'forceStep',
+  'peakCableSpeed',
+  'travel',
+  'holdDuration',
+  'sessionsPerCharge',
+  'chargeTime',
+  'packEnergy',
+  'mass',
+  'envelope',
+  'surfaceTemperature',
+] as const;
+export const SIMULATION_STATISTICS = ['peak', 'rms', 'mean', 'energy', 'final'] as const;
+/** A series name of the simulation (`motor.current`), or a record id (`shaft.stress@inst#3`). */
+const seriesName = codePoints(500, 'A name', 1);
+
+export const RequirementQuantitySchema = z.union([
+  z.enum(REQUIREMENT_QUANTITIES),
+  z.strictObject({ record: seriesName }),
+  z.strictObject({ series: seriesName, statistic: z.enum(SIMULATION_STATISTICS) }),
+]);
+
+export const RequirementSchema = z
+  .strictObject({
+    id: RequirementIdSchema,
+    name: mechName,
+    quantity: RequirementQuantitySchema,
+    comparison: z.enum(['>=', '<=', '>', '<', 'within']),
+    /** One expression; three (x, y, z) for an envelope. */
+    value: z.union([expression, z.tuple([expression, expression, expression]).readonly()]),
+    tolerance: expression.exactOptional(),
+    loadCase: LoadCaseIdSchema.exactOptional(),
+    drivetrain: DrivetrainIdSchema.exactOptional(),
+  })
+  .check((ctx) => {
+    const { quantity, value, comparison } = ctx.value;
+    const envelope = quantity === 'envelope';
+    if (envelope !== Array.isArray(value)) {
+      ctx.issues.push({
+        code: 'custom',
+        message: envelope
+          ? 'an envelope requirement has three values (x, y, z)'
+          : 'only an envelope requirement has three values',
+        input: value,
+        path: ['value'],
+      });
+    }
+    if ((comparison === 'within') !== envelope) {
+      ctx.issues.push({
+        code: 'custom',
+        message: envelope
+          ? 'an envelope requirement compares with "within"'
+          : '"within" compares an envelope only',
+        input: comparison,
+        path: ['comparison'],
+      });
+    }
+  });
+
+export const ResistanceModeSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('constant') }),
+  z.strictObject({ kind: z.literal('eccentric'), factor: expression }),
+  z.strictObject({ kind: z.literal('band'), rate: expression }),
+  z.strictObject({ kind: z.literal('chains'), rate: expression, from: expression }),
+  z.strictObject({ kind: z.literal('isokinetic'), speed: expression }),
+  z.strictObject({ kind: z.literal('damper'), coefficient: expression }),
+  z.strictObject({ kind: z.literal('rowing'), coefficient: expression }),
+  z.strictObject({ kind: z.literal('isometric'), duration: expression }),
+  /** SI pairs: (position m or speed m/s, force N). */
+  z.strictObject({
+    kind: z.literal('table'),
+    by: z.enum(['position', 'speed']),
+    points: tablePoints,
+  }),
+]);
+
+export const MotionSchema = z.discriminatedUnion('kind', [
+  z.strictObject({
+    kind: z.literal('half-cosine'),
+    stroke: expression,
+    pullSpeed: expression,
+    returnSpeed: expression,
+    pause: expression,
+  }),
+  /** SI pairs: (time s, cable position m). */
+  z.strictObject({ kind: z.literal('table'), points: tablePoints }),
+]);
+
+/**
+ * A static load of a load case: a cable pull at an angle (`angle` from the cable's free direction,
+ * `azimuth` around it), a point load on a subject in a direction of the assembly's frame, or an
+ * acceleration of the whole machine (a drop as a static equivalent, transport).
+ */
+export const StaticLoadSchema = z.discriminatedUnion('kind', [
+  z.strictObject({
+    kind: z.literal('cable'),
+    name: mechName,
+    force: expression,
+    angle: expression,
+    azimuth: expression.exactOptional(),
+  }),
+  z.strictObject({
+    kind: z.literal('point'),
+    name: mechName,
+    force: expression,
+    direction: nonZeroVec3,
+    at: SubjectRefSchema,
+  }),
+  z.strictObject({
+    kind: z.literal('acceleration'),
+    name: mechName,
+    acceleration: expression,
+    direction: nonZeroVec3,
+  }),
+]);
+
+export const LoadCaseSchema = z.strictObject({
+  id: LoadCaseIdSchema,
+  name: mechName,
+  drivetrain: DrivetrainIdSchema.exactOptional(),
+  dynamic: z
+    .strictObject({
+      mode: ResistanceModeSchema,
+      force: expression,
+      motion: MotionSchema,
+      reps: expression,
+      sets: expression.exactOptional(),
+      rest: expression.exactOptional(),
+      /** State of charge at the start, a fraction. */
+      startCharge: expression.exactOptional(),
+      ambient: expression.exactOptional(),
+    })
+    .exactOptional(),
+  static: z.array(StaticLoadSchema).min(1).max(MAX_STATIC_LOADS).exactOptional(),
+});
+
+// Drivetrains (decision 9) ---------------------------------------------------------------------
+
+/** A ratio: one number expression, or two tooth counts. */
+export const RatioSchema = z.union([
+  expression,
+  z.strictObject({ driver: expression, driven: expression }),
+]);
+
+const useIds = z.array(PurchasedUseIdSchema).max(MAX_STAGES);
+
+export const StageSchema = z.discriminatedUnion('kind', [
+  z.strictObject({
+    id: StageIdSchema,
+    kind: z.literal('motor'),
+    use: PurchasedUseIdSchema,
+    instance: InstanceIdSchema.exactOptional(),
+    /** A revolute mate of the motor's shaft. */
+    mate: MateIdSchema.exactOptional(),
+  }),
+  z.strictObject({
+    id: StageIdSchema,
+    kind: z.literal('belt'),
+    ratio: RatioSchema,
+    efficiency: expression,
+    belt: PurchasedUseIdSchema.exactOptional(),
+    pulleys: useIds.exactOptional(),
+  }),
+  z.strictObject({
+    id: StageIdSchema,
+    kind: z.enum(['gear', 'planetary']),
+    ratio: RatioSchema,
+    efficiency: expression,
+    uses: useIds.exactOptional(),
+    instances: z.array(InstanceIdSchema).max(MAX_STAGES).exactOptional(),
+  }),
+  z.strictObject({
+    id: StageIdSchema,
+    kind: z.literal('shaft'),
+    instance: InstanceIdSchema.exactOptional(),
+    bearings: z
+      .array(
+        z.strictObject({
+          use: PurchasedUseIdSchema,
+          instance: InstanceIdSchema.exactOptional(),
+        }),
+      )
+      .max(MAX_STAGES),
+  }),
+  z.strictObject({
+    id: StageIdSchema,
+    kind: z.literal('coupling'),
+    use: PurchasedUseIdSchema.exactOptional(),
+    instance: InstanceIdSchema.exactOptional(),
+  }),
+]);
+
+export const DrivetrainOutputSchema = z.discriminatedUnion('kind', [
+  z.strictObject({
+    kind: z.literal('spool'),
+    instance: InstanceIdSchema.exactOptional(),
+    /** A body of the instance's part. */
+    body: BodyIdSchema.exactOptional(),
+    /** The rope entry's use. */
+    cable: PurchasedUseIdSchema,
+    length: expression,
+    core: expression.exactOptional(),
+    flange: expression.exactOptional(),
+    width: expression.exactOptional(),
+    fairlead: z
+      .strictObject({ instance: InstanceIdSchema.exactOptional(), bendDiameter: expression })
+      .exactOptional(),
+  }),
+  z.strictObject({ kind: z.literal('rotary'), instance: InstanceIdSchema.exactOptional() }),
+  z.strictObject({
+    kind: z.literal('linear'),
+    lead: expression,
+    efficiency: expression,
+    instance: InstanceIdSchema.exactOptional(),
+  }),
+]);
+
+export const DrivetrainSchema = z.strictObject({
+  id: DrivetrainIdSchema,
+  name: mechName,
+  /** The assembly its instances and mates live in. */
+  assembly: AssemblyIdSchema.exactOptional(),
+  /** Ordered from the source to the output. */
+  stages: z.array(StageSchema).max(MAX_STAGES),
+  output: DrivetrainOutputSchema,
+});
+
+// The electrical system (decision 11) ----------------------------------------------------------
+
+export const COMPONENT_ROLES = [
+  'pack',
+  'bms',
+  'fuse',
+  'switch',
+  'precharge',
+  'controller',
+  'brake-resistor',
+  'chopper',
+  'motor',
+  'charger-input',
+  'dcdc',
+  'board',
+  'encoder',
+  'load-cell',
+  'display',
+  'connector',
+  'other',
+] as const;
+
+/** A terminal's id on its component (`+`, `bus+`, `a`, `signal`). */
+export const TERMINAL_ID_PATTERN = /^[A-Za-z0-9+-][A-Za-z0-9+_.-]{0,31}$/;
+export const TerminalIdSchema = z.string().max(32, { abort: true }).regex(TERMINAL_ID_PATTERN);
+
+export const ComponentSchema = z.strictObject({
+  id: ComponentIdSchema,
+  name: mechName,
+  role: z.enum(COMPONENT_ROLES),
+  use: PurchasedUseIdSchema.exactOptional(),
+  /** Where it sits in the electrical system's assembly, for harness lengths. */
+  instance: InstanceIdSchema.exactOptional(),
+  /** Overrides the family's default terminals. */
+  terminals: z
+    .array(
+      z.strictObject({
+        id: TerminalIdSchema,
+        name: shortText('A terminal name', 1),
+        kind: z.enum(['power', 'ground', 'phase', 'signal']),
+      }),
+    )
+    .max(MAX_TERMINALS)
+    .exactOptional(),
+  /** An always-on load the simulation does not model. */
+  load: z
+    .strictObject({ current: expression, voltage: expression.exactOptional() })
+    .exactOptional(),
+  /** Manual nudges per diagram, grid units, offsets from the automatic placement. */
+  layout: z
+    .strictObject({
+      block: GridPointSchema.exactOptional(),
+      wiring: GridPointSchema.exactOptional(),
+    })
+    .exactOptional(),
+});
+
+const terminalEnd = z.strictObject({ component: ComponentIdSchema, terminal: TerminalIdSchema });
+
+export const ConnectionSchema = z.strictObject({
+  id: ConnectionIdSchema,
+  from: terminalEnd,
+  to: terminalEnd,
+  /** The use of a wire entry. */
+  wire: PurchasedUseIdSchema.exactOptional(),
+  colour: codePoints(32, 'A colour').exactOptional(),
+  /** The wire number on the wiring diagram. */
+  number: codePoints(32, 'A wire number').exactOptional(),
+});
+
+const segmentEnd = z.union([
+  z.strictObject({ component: ComponentIdSchema }),
+  z.strictObject({ instance: InstanceIdSchema }),
+]);
+
+export const SegmentSchema = z.strictObject({
+  id: SegmentIdSchema,
+  from: segmentEnd,
+  to: segmentEnd,
+  /** Typed, or measured between the ends' instances in the assembly plus `slack`. */
+  length: z.union([expression, z.strictObject({ measured: z.literal(true), slack: expression })]),
+  connections: z.array(ConnectionIdSchema).max(MAX_CONNECTIONS),
+});
+
+export const ElectricalSchema = z.strictObject({
+  /** The assembly its components' and segments' instances live in. */
+  assembly: AssemblyIdSchema.exactOptional(),
+  components: z.array(ComponentSchema).max(MAX_COMPONENTS),
+  connections: z.array(ConnectionSchema).max(MAX_CONNECTIONS),
+  harness: z.array(SegmentSchema).max(MAX_SEGMENTS),
+});
+
+// Schematics and symbols (decision 12) ---------------------------------------------------------
+
+export const PIN_TYPES = [
+  'input',
+  'output',
+  'bidirectional',
+  'tristate',
+  'passive',
+  'power-in',
+  'power-out',
+  'open-collector',
+  'open-emitter',
+  'no-connect',
+  'unspecified',
+] as const;
+export const PinTypeSchema = z.enum(PIN_TYPES);
+
+const rotation = z.union([z.literal(0), z.literal(90), z.literal(180), z.literal(270)]);
+const sheetList = <T extends z.ZodType>(item: T) => z.array(item).max(MAX_SHEET_ITEMS);
+
+export const PlacedSymbolSchema = z.strictObject({
+  id: PlacedSymbolIdSchema,
+  /** `R3`, `U1`: unique per schematic, which the ERC checks. */
+  designator: codePoints(32, 'A designator', 1),
+  symbol: SymbolRefSchema,
+  at: GridPointSchema,
+  rotation,
+  mirror: z.boolean(),
+  value: shortText('A value').exactOptional(),
+  use: PurchasedUseIdSchema.exactOptional(),
+  /** Free text for the netlist (`Resistor_SMD:R_0603_1608Metric`); not validated. */
+  footprint: shortText('A footprint').exactOptional(),
+  fields: z
+    .record(fieldName, codePoints(1000, 'A field'))
+    .check((ctx) => {
+      const n = Object.keys(ctx.value).length;
+      if (n > MAX_SYMBOL_FIELDS) {
+        ctx.issues.push({
+          code: 'custom',
+          message: `a symbol holds ${n} fields; at most ${MAX_SYMBOL_FIELDS} are allowed`,
+          input: n,
+        });
+      }
+    })
+    .exactOptional(),
+});
+
+export const SchematicSheetSchema = z.strictObject({
+  id: SchematicSheetIdSchema,
+  name: mechName,
+  size: z.enum(['A4', 'A3', 'letter', 'tabloid']),
+  symbols: z.array(PlacedSymbolSchema).max(MAX_SHEET_SYMBOLS),
+  wires: z
+    .array(
+      z.strictObject({
+        id: WireIdSchema,
+        points: z.array(GridPointSchema).min(2).max(MAX_POLYLINE_POINTS),
+      }),
+    )
+    .max(MAX_SHEET_WIRES),
+  junctions: sheetList(GridPointSchema),
+  labels: sheetList(
+    z.strictObject({
+      id: LabelIdSchema,
+      name: codePoints(64, 'A net name', 1),
+      at: GridPointSchema,
+      scope: z.enum(['local', 'global']),
+    }),
+  ),
+  /** A terminal of the component the schematic details. */
+  ports: sheetList(
+    z.strictObject({ id: PortIdSchema, at: GridPointSchema, terminal: TerminalIdSchema }),
+  ),
+  noConnects: sheetList(GridPointSchema),
+  notes: sheetList(
+    z.strictObject({ id: SheetTextIdSchema, at: GridPointSchema, text: longText('A note', 1) }),
+  ),
+});
+
+export const SchematicSchema = z.strictObject({
+  id: SchematicIdSchema,
+  name: mechName,
+  /** The system-level component this schematic is the inside of. */
+  details: ComponentIdSchema.exactOptional(),
+  sheets: z.array(SchematicSheetSchema).min(1).max(MAX_SCHEMATIC_SHEETS),
+});
+
+const fill = z.boolean();
+/** A symbol's drawing, in grid units: lines, rectangles, circles, arcs (degrees) and text. */
+export const SymbolGraphicSchema = z.discriminatedUnion('kind', [
+  z.strictObject({
+    kind: z.literal('line'),
+    points: z.array(DrawPointSchema).min(2).max(MAX_POLYLINE_POINTS),
+  }),
+  z.strictObject({ kind: z.literal('rect'), from: DrawPointSchema, to: DrawPointSchema, fill }),
+  z.strictObject({
+    kind: z.literal('circle'),
+    center: DrawPointSchema,
+    radius: z.number().positive().max(MAX_GRID_COORDINATE),
+    fill,
+  }),
+  z.strictObject({
+    kind: z.literal('arc'),
+    center: DrawPointSchema,
+    radius: z.number().positive().max(MAX_GRID_COORDINATE),
+    /** Counter-clockwise from `start` to `end`, degrees from +x. */
+    start: z.number().min(-360).max(360),
+    end: z.number().min(-360).max(360),
+  }),
+  z.strictObject({
+    kind: z.literal('text'),
+    at: DrawPointSchema,
+    text: shortText('A text', 1),
+    rotation,
+  }),
+]);
+
+export const SymbolDefSchema = z.strictObject({
+  id: SymbolIdSchema,
+  name: mechName,
+  body: z.array(SymbolGraphicSchema).max(MAX_SYMBOL_GRAPHICS),
+  pins: z
+    .array(
+      z.strictObject({
+        number: codePoints(16, 'A pin number', 1),
+        name: codePoints(64, 'A pin name'),
+        at: GridPointSchema,
+        orientation: z.enum(['left', 'right', 'up', 'down']),
+        length: z.int().min(0).max(1000),
+        type: PinTypeSchema,
+      }),
+    )
+    .max(MAX_SYMBOL_PINS),
+  /** A power symbol (GND, VBUS, +3V3): names a global net. */
+  power: z.strictObject({ net: codePoints(64, 'A net name', 1) }).exactOptional(),
+});
+
+// Stress studies (decision 13) -----------------------------------------------------------------
+
+const studyFaces = z.array(FaceReferenceSchema).min(1).max(MAX_STUDY_FACES);
+
+/**
+ * Where a study holds its part: faces fixed in place, or bolted holes, fixed or (with
+ * `stiffness`, a `stiffness` expression) as axial springs.
+ */
+export const FixtureSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('fixed'), faces: studyFaces }),
+  z.strictObject({
+    kind: z.literal('bolted'),
+    faces: studyFaces,
+    stiffness: expression.exactOptional(),
+  }),
+]);
+
+/**
+ * What a study loads its part with, on faces. Directions are in the part's frame; a force with no
+ * direction acts along each face's normal, into the body. `simulated` takes a load case's
+ * simulated value (`series`, a cable tension or a bearing reaction) as a force or a bearing load.
+ */
+export const LoadSchema = z.discriminatedUnion('kind', [
+  z.strictObject({
+    kind: z.literal('force'),
+    faces: studyFaces,
+    force: expression,
+    direction: nonZeroVec3.exactOptional(),
+  }),
+  z.strictObject({ kind: z.literal('pressure'), faces: studyFaces, pressure: expression }),
+  z.strictObject({
+    kind: z.literal('bearing'),
+    faces: studyFaces,
+    force: expression,
+    direction: nonZeroVec3,
+  }),
+  z.strictObject({
+    kind: z.literal('torque'),
+    faces: studyFaces,
+    torque: expression,
+    axis: nonZeroVec3,
+  }),
+  z.strictObject({
+    kind: z.literal('simulated'),
+    faces: studyFaces,
+    series: seriesName,
+    statistic: z.enum(['peak', 'rms', 'mean', 'final']),
+    apply: z.enum(['force', 'bearing']),
+    direction: nonZeroVec3,
+  }),
+]);
+
+export const StudySchema = z.strictObject({
+  id: StudyIdSchema,
+  name: mechName,
+  part: partRef,
+  bodies: z.array(BodyIdSchema).min(1).max(MAX_BODY_LIST),
+  fixtures: z.array(FixtureSchema).max(MAX_STUDY_FIXTURES),
+  loads: z.array(LoadSchema).max(MAX_STUDY_LOADS),
+  mesh: z.strictObject({
+    /** The element size (a length); absent: the domain's default. */
+    size: expression.exactOptional(),
+    refine: z.array(FaceReferenceSchema).max(MAX_STUDY_FACES),
+  }),
+  loadCase: LoadCaseIdSchema.exactOptional(),
+});
+
+// Checks and specifications (decisions 5 and 2) ------------------------------------------------
+
+/** A check id (`bolt.preload`) or a family prefix ending in a dot (`shaft.`). */
+export const CHECK_ID_PATTERN = /^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)*\.?$/;
+/** A check input symbol (`preload`, `fitClass`, `F_i`). */
+export const INPUT_SYMBOL_PATTERN = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
+
+export const CheckOverrideSchema = z.strictObject({
+  id: CheckOverrideIdSchema,
+  check: z.string().max(128, { abort: true }).regex(CHECK_ID_PATTERN, 'Expected a check id'),
+  /** Absent: every subject of the check. */
+  subject: SubjectRefSchema.exactOptional(),
+  /** The user's safety factor for this check, a `number` expression. */
+  factor: expression.exactOptional(),
+  /** By input symbol: an expression (a preload) or a text (a fit class, `thread-locker`). */
+  inputs: z
+    .record(
+      z.string().max(64, { abort: true }).regex(INPUT_SYMBOL_PATTERN),
+      z.union([expression, shortText('An input')]),
+    )
+    .check((ctx) => {
+      const n = Object.keys(ctx.value).length;
+      if (n > MAX_OVERRIDE_INPUTS) {
+        ctx.issues.push({
+          code: 'custom',
+          message: `an override sets ${n} inputs; at most ${MAX_OVERRIDE_INPUTS} are allowed`,
+          input: n,
+        });
+      }
+    })
+    .exactOptional(),
+});
+
+export const SpecNoteSchema = z.strictObject({
+  id: SpecNoteIdSchema,
+  spec: z.enum(['mechanical', 'electrical', 'control', 'hazard', 'test']),
+  /** Absent: the whole specification. */
+  subject: SubjectRefSchema.exactOptional(),
+  field: z.enum(['condition', 'process', 'finish', 'assembly', 'fault-response', 'note']),
+  text: codePoints(MAX_SPEC_NOTE_TEXT, 'A note', 1),
+});
+
+export const HazardSchema = z.strictObject({
+  id: HazardIdSchema,
+  name: mechName,
+  cause: longText('A cause', 1),
+  mitigation: longText('A mitigation').exactOptional(),
+  /** What is left for the builder. */
+  remaining: longText('A remaining risk').exactOptional(),
+  /** Record ids the mitigation relies on. */
+  records: z.array(seriesName).max(MAX_HAZARD_RECORDS).exactOptional(),
+});
+
+export const TestBandSchema = z.strictObject({
+  id: TestBandIdSchema,
+  /** A derived test's id: `proof-load@drive#1`, `thermal@lc#2`. */
+  test: seriesName,
+  low: expression.exactOptional(),
+  high: expression.exactOptional(),
+});
+
+/** Base64 STEP bytes held by user catalog entries. */
+export function catalogStepBytes(
+  catalog: readonly { geometry?: { kind: string; blob?: string } }[],
+): number {
+  let total = 0;
+  for (const e of catalog) {
+    if (e.geometry?.kind === 'step') total += Math.floor(((e.geometry.blob ?? '').length * 3) / 4);
+  }
+  return total;
+}
+
+const mechList = <T extends z.ZodType>(item: T, max: number) =>
+  z.array(item).min(1).max(max).exactOptional();
+
+/**
+ * The mechanical section (ADR 0017 decision 2). Every collection is absent when empty, so the
+ * section costs nothing that is not used; the section itself is absent until the first id is
+ * allocated, and stays, with only its counters, once everything in it has been deleted, so its ids
+ * are never handed out twice.
+ */
+export const MechDataSchema = z
+  .strictObject({
+    requirements: mechList(RequirementSchema, MAX_REQUIREMENTS),
+    loadCases: mechList(LoadCaseSchema, MAX_LOAD_CASES),
+    drivetrains: mechList(DrivetrainSchema, MAX_DRIVETRAINS),
+    purchased: mechList(PurchasedUseSchema, MAX_PURCHASED_USES),
+    /** The user's own catalog entries. */
+    catalog: mechList(CatalogEntrySchema, MAX_CATALOG_ENTRIES),
+    /** Absent when it has no components, connections or segments. */
+    electrical: ElectricalSchema.exactOptional(),
+    schematics: mechList(SchematicSchema, MAX_SCHEMATICS),
+    /** The user's own symbols. */
+    symbols: mechList(SymbolDefSchema, MAX_USER_SYMBOLS),
+    studies: mechList(StudySchema, MAX_STUDIES),
+    checks: mechList(CheckOverrideSchema, MAX_CHECK_OVERRIDES),
+    specNotes: mechList(SpecNoteSchema, MAX_SPEC_NOTES),
+    hazards: mechList(HazardSchema, MAX_HAZARDS),
+    testBands: mechList(TestBandSchema, MAX_TEST_BANDS),
+    /** Next number per counter (`MECH_COUNTERS`). Only ever increases. */
+    nextIds: z.record(z.string(), z.int().min(1)),
+  })
+  .check((ctx) => {
+    const { electrical, nextIds, catalog } = ctx.value;
+    if (Object.keys(nextIds).length === 0) {
+      ctx.issues.push({
+        code: 'custom',
+        message: 'a mech section with no counters is not allowed; leave the key out instead',
+        input: nextIds,
+        path: ['nextIds'],
+      });
+    }
+    if (
+      electrical !== undefined &&
+      electrical.components.length + electrical.connections.length + electrical.harness.length === 0
+    ) {
+      ctx.issues.push({
+        code: 'custom',
+        message: 'an empty electrical system is not allowed; leave the key out instead',
+        input: electrical,
+        path: ['electrical'],
+      });
+    }
+    const step = catalogStepBytes(catalog ?? []);
+    if (step > MAX_CATALOG_STEP_BYTES) {
+      ctx.issues.push({
+        code: 'custom',
+        message: `the catalog holds ${step} bytes of STEP data; at most ${MAX_CATALOG_STEP_BYTES} are allowed`,
+        input: step,
+        path: ['catalog'],
+      });
+    }
+  });
+
 export const DomainNamespaceSchema = z
   .string()
   .max(MAX_DOMAIN_NAMESPACE_LENGTH, { abort: true })
@@ -2876,6 +4001,17 @@ export const DocumentSchema = z.strictObject({
     .exactOptional(),
 
   /**
+   * The user's own materials (ADR 0017 decision 4), in list order; absent when the document has
+   * none, never empty. `Part.material` and a body's `material` may name them. Since version 19.
+   */
+  materials: z.array(MaterialDefSchema).min(1).max(MAX_MATERIAL_DEFS).exactOptional(),
+  /**
+   * The mechanical section (ADR 0017 decision 2): requirements, load cases, drivetrains, purchased
+   * parts, the electrical system, schematics, studies and what the user adds to checks and
+   * specifications; absent until the first mechanical id is allocated. Since version 19.
+   */
+  mech: MechDataSchema.exactOptional(),
+  /**
    * Drawings of the document's parts and assemblies, in tab order; absent when the document has
    * none, never empty. Since version 12.
    */
@@ -2890,8 +4026,8 @@ export const DocumentSchema = z.strictObject({
   /**
    * Next number per document-level id counter (`part`, giving `part#n`; `cp` and `cfg`, giving
    * configuration parameter and row ids; `assembly`, giving `assembly#n`; `font`, giving
-   * `font#n`; `drawing`, giving `drawing#n`; `script`, giving `script#n`). Only ever increases,
-   * so an id is never reused. Since version 4.
+   * `font#n`; `drawing`, giving `drawing#n`; `script`, giving `script#n`; `material`, giving
+   * `material#n`). Only ever increases, so an id is never reused. Since version 4.
    */
   nextIds: z.record(z.string(), z.int().min(1)),
 });
@@ -3034,4 +4170,44 @@ export type Sheet = z.infer<typeof SheetSchema>;
 export type Drawing = z.infer<typeof DrawingSchema>;
 export type DomainData = z.infer<typeof DomainDataSchema>;
 export type Domains = z.infer<typeof DomainsSchema>;
+export type QuantityDisplay = z.infer<typeof QuantityDisplaySchema>;
+export type SubjectRef = z.infer<typeof SubjectRefSchema>;
+export type CatalogFamily = z.infer<typeof CatalogFamilySchema>;
+export type CatalogRef = z.infer<typeof CatalogRefSchema>;
+export type SymbolRef = z.infer<typeof SymbolRefSchema>;
+export type Rated = z.infer<typeof RatedSchema>;
+export type PlaceholderShape = z.infer<typeof PlaceholderShapeSchema>;
+export type CatalogEntry = z.infer<typeof CatalogEntrySchema>;
+export type PurchasedUse = z.infer<typeof PurchasedUseSchema>;
+export type RequirementQuantity = z.infer<typeof RequirementQuantitySchema>;
+export type Requirement = z.infer<typeof RequirementSchema>;
+export type ResistanceMode = z.infer<typeof ResistanceModeSchema>;
+export type Motion = z.infer<typeof MotionSchema>;
+export type StaticLoad = z.infer<typeof StaticLoadSchema>;
+export type LoadCase = z.infer<typeof LoadCaseSchema>;
+export type Ratio = z.infer<typeof RatioSchema>;
+export type Stage = z.infer<typeof StageSchema>;
+export type DrivetrainOutput = z.infer<typeof DrivetrainOutputSchema>;
+export type Drivetrain = z.infer<typeof DrivetrainSchema>;
+export type ComponentRole = (typeof COMPONENT_ROLES)[number];
+export type Component = z.infer<typeof ComponentSchema>;
+export type Connection = z.infer<typeof ConnectionSchema>;
+export type Segment = z.infer<typeof SegmentSchema>;
+export type Electrical = z.infer<typeof ElectricalSchema>;
+export type PinType = z.infer<typeof PinTypeSchema>;
+export type PlacedSymbol = z.infer<typeof PlacedSymbolSchema>;
+export type SchematicSheet = z.infer<typeof SchematicSheetSchema>;
+export type Schematic = z.infer<typeof SchematicSchema>;
+export type SymbolGraphic = z.infer<typeof SymbolGraphicSchema>;
+export type SymbolDef = z.infer<typeof SymbolDefSchema>;
+export type Fixture = z.infer<typeof FixtureSchema>;
+export type Load = z.infer<typeof LoadSchema>;
+export type Study = z.infer<typeof StudySchema>;
+export type CheckOverride = z.infer<typeof CheckOverrideSchema>;
+export type SpecNote = z.infer<typeof SpecNoteSchema>;
+export type Hazard = z.infer<typeof HazardSchema>;
+export type TestBand = z.infer<typeof TestBandSchema>;
+export type MechData = z.infer<typeof MechDataSchema>;
+/** A user material as the document stores it (`MaterialDef` of `materials.ts`, from the schema). */
+export type MaterialDefData = z.infer<typeof MaterialDefSchema>;
 export type ManufaktureDocument = z.infer<typeof DocumentSchema>;

@@ -1,0 +1,4500 @@
+{
+  "format": "manufakture-golden-log",
+  "version": 19,
+  "description": "The mechanical section and user materials (format v19): every collection of mech added, edited and the edit undone, deleted and the delete undone (the restore commands), the requirements list and the electrical system replaced and restored, a user material set on the part, deleted, undone and redone.",
+  "base": {
+    "format": "manufakture",
+    "version": 19,
+    "namingScheme": 1,
+    "id": "doc-1",
+    "name": "Bracket",
+    "units": {
+      "length": {
+        "unit": "mm"
+      },
+      "angle": {
+        "unit": "deg"
+      }
+    },
+    "variables": [
+      {
+        "name": "thickness",
+        "expression": {
+          "source": "6mm",
+          "lengthUnit": "mm",
+          "angleUnit": "deg"
+        }
+      },
+      {
+        "name": "width",
+        "expression": {
+          "source": "40",
+          "lengthUnit": "mm",
+          "angleUnit": "deg"
+        }
+      },
+      {
+        "name": "height",
+        "expression": {
+          "source": "width / 2",
+          "lengthUnit": "mm",
+          "angleUnit": "deg"
+        }
+      }
+    ],
+    "parts": [
+      {
+        "id": "part#1",
+        "name": "Part 1",
+        "features": [
+          {
+            "id": "sketch#1",
+            "kind": "sketch",
+            "name": "Sketch 1",
+            "suppressed": false,
+            "plane": {
+              "type": "plane",
+              "origin": [0, 0, 0],
+              "normal": [0, 0, 1],
+              "xDir": [1, 0, 0]
+            },
+            "entities": [
+              {
+                "id": "e1",
+                "kind": "line",
+                "construction": false,
+                "start": [0, 0],
+                "end": [40, 0]
+              },
+              {
+                "id": "e2",
+                "kind": "line",
+                "construction": false,
+                "start": [40, 0],
+                "end": [40, 20]
+              },
+              {
+                "id": "e3",
+                "kind": "line",
+                "construction": false,
+                "start": [40, 20],
+                "end": [0, 20]
+              },
+              {
+                "id": "e4",
+                "kind": "line",
+                "construction": false,
+                "start": [0, 20],
+                "end": [0, 0]
+              }
+            ],
+            "constraints": [
+              {
+                "id": "k1",
+                "kind": "coincident",
+                "a": {
+                  "entity": "e1",
+                  "at": "end"
+                },
+                "b": {
+                  "entity": "e2",
+                  "at": "start"
+                }
+              },
+              {
+                "id": "k2",
+                "kind": "horizontal",
+                "line": "e1"
+              },
+              {
+                "id": "k3",
+                "kind": "distance",
+                "value": {
+                  "source": "width",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                "a": {
+                  "entity": "e1",
+                  "at": "start"
+                },
+                "b": {
+                  "entity": "e1",
+                  "at": "end"
+                }
+              },
+              {
+                "id": "k4",
+                "kind": "distance",
+                "value": {
+                  "source": "height",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                "a": {
+                  "entity": "e2",
+                  "at": "start"
+                },
+                "b": {
+                  "entity": "e2",
+                  "at": "end"
+                }
+              },
+              {
+                "id": "k5",
+                "kind": "coincident",
+                "a": {
+                  "entity": "e1",
+                  "at": "start"
+                },
+                "b": {
+                  "entity": "@origin"
+                }
+              }
+            ]
+          },
+          {
+            "id": "extrude#1",
+            "kind": "extrude",
+            "name": "Extrude 1",
+            "suppressed": false,
+            "profile": {
+              "sketch": "sketch#1"
+            },
+            "operation": "new",
+            "extent": {
+              "type": "blind",
+              "distance": {
+                "source": "thickness",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            },
+            "reverse": false
+          },
+          {
+            "id": "sketch#2",
+            "kind": "sketch",
+            "name": "Sketch 2",
+            "suppressed": false,
+            "plane": {
+              "type": "face",
+              "face": {
+                "id": "r1",
+                "ref": {
+                  "face": "extrude#1:cap:end"
+                }
+              }
+            },
+            "entities": [
+              {
+                "id": "e5",
+                "kind": "circle",
+                "construction": false,
+                "center": [20, 10],
+                "radius": 3
+              }
+            ],
+            "constraints": [
+              {
+                "id": "k6",
+                "kind": "diameter",
+                "entity": "e5",
+                "value": {
+                  "source": "6mm",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                }
+              }
+            ]
+          },
+          {
+            "id": "extrude#2",
+            "kind": "extrude",
+            "name": "Extrude 2",
+            "suppressed": false,
+            "profile": {
+              "sketch": "sketch#2"
+            },
+            "operation": "cut",
+            "extent": {
+              "type": "throughAll"
+            },
+            "reverse": false
+          },
+          {
+            "id": "fillet#1",
+            "kind": "fillet",
+            "name": "Fillet 1",
+            "suppressed": false,
+            "edges": [
+              {
+                "id": "r2",
+                "ref": {
+                  "faces": ["extrude#1:side:e1", "extrude#1:side:e2"]
+                }
+              }
+            ],
+            "radius": {
+              "source": "2mm",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            }
+          }
+        ],
+        "rollbackIndex": null,
+        "nextIds": {
+          "e": 6,
+          "extrude": 3,
+          "fillet": 2,
+          "k": 7,
+          "r": 3,
+          "sketch": 3
+        },
+        "bodies": []
+      }
+    ],
+    "assemblies": [],
+    "print": {
+      "setups": [],
+      "nextIds": {}
+    },
+    "fonts": [],
+    "cam": {
+      "tools": [],
+      "setups": [],
+      "nextIds": {}
+    },
+    "nextIds": {
+      "part": 2
+    }
+  },
+  "entries": [
+    {
+      "cause": "execute",
+      "label": "setVariable",
+      "command": {
+        "type": "setVariable",
+        "name": "pull",
+        "expression": {
+          "source": "200 lbf",
+          "lengthUnit": "mm",
+          "angleUnit": "deg"
+        }
+      },
+      "at": "2026-10-10T09:00:01.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "setVariable",
+      "command": {
+        "type": "setVariable",
+        "name": "spoolCore",
+        "expression": {
+          "source": "30",
+          "lengthUnit": "mm",
+          "angleUnit": "deg"
+        }
+      },
+      "at": "2026-10-10T09:00:02.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "setDisplayUnits",
+      "command": {
+        "type": "setDisplayUnits",
+        "units": {
+          "length": {
+            "unit": "mm"
+          },
+          "angle": {
+            "unit": "deg"
+          },
+          "quantities": {
+            "force": "lbf",
+            "torque": "N·m"
+          }
+        }
+      },
+      "at": "2026-10-10T09:00:03.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "setMaterialDef",
+      "command": {
+        "type": "setMaterialDef",
+        "material": {
+          "id": "material#1",
+          "name": "My PETG",
+          "category": "plastic",
+          "form": "printed",
+          "density": {
+            "value": {
+              "source": "1270 kg/m^3",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "source": "spool label",
+            "typical": true
+          },
+          "properties": {
+            "yieldStrength": {
+              "value": {
+                "source": "45 MPa",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "source": "data sheet",
+              "typical": true,
+              "note": "XY"
+            },
+            "poissonRatio": {
+              "value": {
+                "source": "0.38",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "source": "handbook",
+              "typical": true
+            },
+            "thermalConductivity": {
+              "value": {
+                "source": "0.2 W/(m*K)",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "source": "handbook",
+              "typical": true
+            },
+            "maxServiceTemperature": {
+              "value": {
+                "source": "70degC",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "source": "data sheet",
+              "typical": true
+            }
+          },
+          "fatigue": {
+            "points": [
+              {
+                "cycles": 10000,
+                "stress": {
+                  "source": "30 MPa",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                }
+              },
+              {
+                "cycles": 1000000,
+                "stress": {
+                  "source": "18 MPa",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                }
+              }
+            ],
+            "source": "paper",
+            "typical": true
+          }
+        }
+      },
+      "at": "2026-10-10T09:00:04.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "setMaterial",
+      "command": {
+        "type": "setMaterial",
+        "partId": "part#1",
+        "material": "material#1"
+      },
+      "at": "2026-10-10T09:00:05.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "setMechRequirements",
+      "command": {
+        "type": "setMechRequirements",
+        "requirements": [
+          {
+            "id": "req#1",
+            "name": "Peak pull",
+            "quantity": "maxForce",
+            "comparison": ">=",
+            "value": {
+              "source": "#pull",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "loadCase": "lc#1",
+            "drivetrain": "drive#1"
+          },
+          {
+            "id": "req#2",
+            "name": "Cable speed",
+            "quantity": "peakCableSpeed",
+            "comparison": ">=",
+            "value": {
+              "source": "2 m/s",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "tolerance": {
+              "source": "0.1 m/s",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            }
+          },
+          {
+            "id": "req#3",
+            "name": "Fits a bag",
+            "quantity": "envelope",
+            "comparison": "within",
+            "value": [
+              {
+                "source": "300",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              {
+                "source": "200",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              {
+                "source": "150",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            ]
+          },
+          {
+            "id": "req#4",
+            "name": "Winding",
+            "quantity": {
+              "series": "motor.winding",
+              "statistic": "peak"
+            },
+            "comparison": "<=",
+            "value": {
+              "source": "120degC",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            }
+          }
+        ]
+      },
+      "at": "2026-10-10T09:00:06.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "setMechLoadCase",
+      "command": {
+        "type": "setMechLoadCase",
+        "loadCase": {
+          "id": "lc#1",
+          "name": "Max set",
+          "drivetrain": "drive#1",
+          "dynamic": {
+            "mode": {
+              "kind": "eccentric",
+              "factor": {
+                "source": "1.2",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            },
+            "force": {
+              "source": "#pull",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "motion": {
+              "kind": "half-cosine",
+              "stroke": {
+                "source": "0.6 m",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "pullSpeed": {
+                "source": "1.5 m/s",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "returnSpeed": {
+                "source": "1 m/s",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "pause": {
+                "source": "0.5 s",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            },
+            "reps": {
+              "source": "10",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "sets": {
+              "source": "3",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "rest": {
+              "source": "90 s",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "ambient": {
+              "source": "25degC",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            }
+          },
+          "static": [
+            {
+              "kind": "cable",
+              "name": "Side pull",
+              "force": {
+                "source": "#pull",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "angle": {
+                "source": "45deg",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            },
+            {
+              "kind": "point",
+              "name": "Handle",
+              "force": {
+                "source": "300 N",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "direction": [0, 0, -1],
+              "at": {
+                "kind": "instance",
+                "assembly": "assembly#1",
+                "instance": "inst#1"
+              }
+            },
+            {
+              "kind": "acceleration",
+              "name": "Drop",
+              "acceleration": {
+                "source": "5 gn",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "direction": [0, 0, -1]
+            }
+          ]
+        }
+      },
+      "at": "2026-10-10T09:00:07.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "setDrivetrain",
+      "command": {
+        "type": "setDrivetrain",
+        "drivetrain": {
+          "id": "drive#1",
+          "name": "Main",
+          "assembly": "assembly#1",
+          "stages": [
+            {
+              "id": "stage#1",
+              "kind": "motor",
+              "use": "pp#1",
+              "instance": "inst#2",
+              "mate": "mate#1"
+            },
+            {
+              "id": "stage#2",
+              "kind": "belt",
+              "ratio": {
+                "driver": {
+                  "source": "20",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                "driven": {
+                  "source": "60",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                }
+              },
+              "efficiency": {
+                "source": "0.95",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            },
+            {
+              "id": "stage#3",
+              "kind": "shaft",
+              "instance": "inst#3",
+              "bearings": [
+                {
+                  "use": "pp#2"
+                }
+              ]
+            }
+          ],
+          "output": {
+            "kind": "spool",
+            "instance": "inst#1",
+            "body": "extrude#1",
+            "cable": "pp#3",
+            "length": {
+              "source": "2.5 m",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "core": {
+              "source": "#spoolCore",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "fairlead": {
+              "bendDiameter": {
+                "source": "20",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            }
+          }
+        }
+      },
+      "at": "2026-10-10T09:00:08.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "setPurchasedUse",
+      "command": {
+        "type": "setPurchasedUse",
+        "use": {
+          "id": "pp#1",
+          "entry": {
+            "source": "builtin",
+            "id": "motor/odrive-d6374-150kv",
+            "version": 1
+          },
+          "part": "part#1",
+          "alternates": [
+            {
+              "source": "document",
+              "id": "entry#1"
+            }
+          ],
+          "name": "Drive motor"
+        }
+      },
+      "at": "2026-10-10T09:00:09.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "setCatalogEntry",
+      "command": {
+        "type": "setCatalogEntry",
+        "entry": {
+          "id": "entry#1",
+          "version": 1,
+          "family": "bearing",
+          "fieldsVersion": 1,
+          "maker": "SKF",
+          "partNumber": "6001-2RSH",
+          "description": "Deep groove ball bearing, sealed",
+          "ratings": {
+            "dynamicLoad": {
+              "value": 5400,
+              "basis": "ISO 281"
+            },
+            "staticLoad": {
+              "value": 2360
+            },
+            "sealing": {
+              "text": "2RSH"
+            },
+            "limitingSpeed": {
+              "unknown": true
+            }
+          },
+          "dimensions": {
+            "bore": {
+              "value": 12
+            },
+            "outside": {
+              "value": 28
+            },
+            "width": {
+              "value": 8
+            }
+          },
+          "mass": {
+            "value": 0.022
+          },
+          "geometry": {
+            "kind": "placeholder",
+            "shape": {
+              "kind": "ring",
+              "axis": "z"
+            }
+          },
+          "sources": [
+            {
+              "title": "SKF 6001-2RSH product page",
+              "url": "https://www.skf.com/",
+              "read": "2026-10-10"
+            }
+          ],
+          "verified": false
+        }
+      },
+      "at": "2026-10-10T09:00:10.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "setElectrical",
+      "command": {
+        "type": "setElectrical",
+        "electrical": {
+          "assembly": "assembly#1",
+          "components": [
+            {
+              "id": "el#1",
+              "name": "Pack",
+              "role": "pack",
+              "use": "pp#1",
+              "layout": {
+                "block": [2, -1]
+              }
+            },
+            {
+              "id": "el#2",
+              "name": "Board",
+              "role": "board",
+              "instance": "inst#2",
+              "terminals": [
+                {
+                  "id": "vin",
+                  "name": "VIN",
+                  "kind": "power"
+                },
+                {
+                  "id": "gnd",
+                  "name": "GND",
+                  "kind": "ground"
+                }
+              ],
+              "load": {
+                "current": {
+                  "source": "80 mA",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                "voltage": {
+                  "source": "5 V",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                }
+              }
+            }
+          ],
+          "connections": [
+            {
+              "id": "conn#1",
+              "from": {
+                "component": "el#1",
+                "terminal": "+"
+              },
+              "to": {
+                "component": "el#2",
+                "terminal": "vin"
+              },
+              "colour": "red",
+              "number": "1"
+            }
+          ],
+          "harness": [
+            {
+              "id": "seg#1",
+              "from": {
+                "component": "el#1"
+              },
+              "to": {
+                "instance": "inst#2"
+              },
+              "length": {
+                "measured": true,
+                "slack": {
+                  "source": "50",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                }
+              },
+              "connections": ["conn#1"]
+            }
+          ]
+        }
+      },
+      "at": "2026-10-10T09:00:11.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "setSymbol",
+      "command": {
+        "type": "setSymbol",
+        "symbol": {
+          "id": "sym#1",
+          "name": "Load cell amplifier",
+          "body": [
+            {
+              "kind": "rect",
+              "from": [-2, -2],
+              "to": [2, 2],
+              "fill": false
+            },
+            {
+              "kind": "text",
+              "at": [0, 0],
+              "text": "HX711",
+              "rotation": 0
+            },
+            {
+              "kind": "arc",
+              "center": [0, 0],
+              "radius": 0.5,
+              "start": 0,
+              "end": 180
+            }
+          ],
+          "pins": [
+            {
+              "number": "1",
+              "name": "VCC",
+              "at": [-4, 1],
+              "orientation": "right",
+              "length": 2,
+              "type": "power-in"
+            },
+            {
+              "number": "2",
+              "name": "DOUT",
+              "at": [4, 0],
+              "orientation": "left",
+              "length": 2,
+              "type": "output"
+            }
+          ]
+        }
+      },
+      "at": "2026-10-10T09:00:12.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "setSchematic",
+      "command": {
+        "type": "setSchematic",
+        "schematic": {
+          "id": "sch#1",
+          "name": "Interface board",
+          "details": "el#2",
+          "sheets": [
+            {
+              "id": "sheet#1",
+              "name": "Power",
+              "size": "A4",
+              "symbols": [
+                {
+                  "id": "us#1",
+                  "designator": "R1",
+                  "symbol": {
+                    "source": "builtin",
+                    "id": "resistor",
+                    "version": 1
+                  },
+                  "at": [10, 10],
+                  "rotation": 90,
+                  "mirror": false,
+                  "value": "10k",
+                  "footprint": "Resistor_SMD:R_0603_1608Metric",
+                  "fields": {
+                    "tolerance": "1%"
+                  }
+                },
+                {
+                  "id": "us#2",
+                  "designator": "U1",
+                  "symbol": {
+                    "source": "document",
+                    "id": "sym#1"
+                  },
+                  "at": [20, 10],
+                  "rotation": 0,
+                  "mirror": false
+                }
+              ],
+              "wires": [
+                {
+                  "id": "wire#1",
+                  "points": [
+                    [12, 10],
+                    [18, 10]
+                  ]
+                }
+              ],
+              "junctions": [[15, 10]],
+              "labels": [
+                {
+                  "id": "label#1",
+                  "name": "VIN",
+                  "at": [15, 10],
+                  "scope": "global"
+                }
+              ],
+              "ports": [
+                {
+                  "id": "port#1",
+                  "at": [5, 10],
+                  "terminal": "vin"
+                }
+              ],
+              "noConnects": [[25, 12]],
+              "notes": [
+                {
+                  "id": "text#1",
+                  "at": [5, 20],
+                  "text": "Keep the trace short"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "at": "2026-10-10T09:00:13.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "setStudy",
+      "command": {
+        "type": "setStudy",
+        "study": {
+          "id": "study#1",
+          "name": "Bracket under pull",
+          "part": "part#1",
+          "bodies": ["extrude#1"],
+          "fixtures": [
+            {
+              "kind": "bolted",
+              "faces": [
+                {
+                  "id": "r1",
+                  "ref": {
+                    "face": "extrude#2:side:e5"
+                  }
+                }
+              ]
+            }
+          ],
+          "loads": [
+            {
+              "kind": "force",
+              "faces": [
+                {
+                  "id": "r2",
+                  "ref": {
+                    "face": "extrude#1:top"
+                  }
+                }
+              ],
+              "force": {
+                "source": "#pull",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "direction": [0, 0, -1]
+            }
+          ],
+          "mesh": {
+            "size": {
+              "source": "2",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "refine": [
+              {
+                "id": "r3",
+                "ref": {
+                  "face": "fillet#1:face:e1"
+                }
+              }
+            ]
+          },
+          "loadCase": "lc#1"
+        }
+      },
+      "at": "2026-10-10T09:00:14.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "setCheckOverride",
+      "command": {
+        "type": "setCheckOverride",
+        "override": {
+          "id": "chk#1",
+          "check": "bolt.preload",
+          "subject": {
+            "kind": "stage",
+            "drivetrain": "drive#1",
+            "stage": "stage#3",
+            "at": "seat-A"
+          },
+          "factor": {
+            "source": "2",
+            "lengthUnit": "mm",
+            "angleUnit": "deg"
+          },
+          "inputs": {
+            "preload": {
+              "source": "4 kN",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "locker": "thread-locker"
+          }
+        }
+      },
+      "at": "2026-10-10T09:00:15.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "setSpecNote",
+      "command": {
+        "type": "setSpecNote",
+        "note": {
+          "id": "note#1",
+          "spec": "mechanical",
+          "subject": {
+            "kind": "part",
+            "part": "part#1"
+          },
+          "field": "finish",
+          "text": "Anodise clear"
+        }
+      },
+      "at": "2026-10-10T09:00:16.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "setHazard",
+      "command": {
+        "type": "setHazard",
+        "hazard": {
+          "id": "hz#1",
+          "name": "Cable snaps",
+          "cause": "Worn cable under peak load",
+          "mitigation": "Cable rated well above the peak pull",
+          "records": ["cable.tension@drive#1"]
+        }
+      },
+      "at": "2026-10-10T09:00:17.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "setTestBand",
+      "command": {
+        "type": "setTestBand",
+        "band": {
+          "id": "vt#1",
+          "test": "proof-load@drive#1",
+          "low": {
+            "source": "#pull * 1.5",
+            "lengthUnit": "mm",
+            "angleUnit": "deg"
+          }
+        }
+      },
+      "at": "2026-10-10T09:00:18.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Edit Requirements",
+      "command": {
+        "type": "setMechRequirements",
+        "requirements": [
+          {
+            "id": "req#2",
+            "name": "Cable speed",
+            "quantity": "peakCableSpeed",
+            "comparison": ">=",
+            "value": {
+              "source": "2 m/s",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "tolerance": {
+              "source": "0.1 m/s",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            }
+          },
+          {
+            "id": "req#3",
+            "name": "Fits a bag",
+            "quantity": "envelope",
+            "comparison": "within",
+            "value": [
+              {
+                "source": "300",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              {
+                "source": "200",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              {
+                "source": "150",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            ]
+          },
+          {
+            "id": "req#4",
+            "name": "Winding",
+            "quantity": {
+              "series": "motor.winding",
+              "statistic": "peak"
+            },
+            "comparison": "<=",
+            "value": {
+              "source": "120degC",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            }
+          }
+        ]
+      },
+      "at": "2026-10-10T09:00:19.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Edit Requirements",
+      "command": {
+        "type": "restoreMechRequirements",
+        "requirements": [
+          {
+            "id": "req#1",
+            "name": "Peak pull",
+            "quantity": "maxForce",
+            "comparison": ">=",
+            "value": {
+              "source": "#pull",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "loadCase": "lc#1",
+            "drivetrain": "drive#1"
+          },
+          {
+            "id": "req#2",
+            "name": "Cable speed",
+            "quantity": "peakCableSpeed",
+            "comparison": ">=",
+            "value": {
+              "source": "2 m/s",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "tolerance": {
+              "source": "0.1 m/s",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            }
+          },
+          {
+            "id": "req#3",
+            "name": "Fits a bag",
+            "quantity": "envelope",
+            "comparison": "within",
+            "value": [
+              {
+                "source": "300",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              {
+                "source": "200",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              {
+                "source": "150",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            ]
+          },
+          {
+            "id": "req#4",
+            "name": "Winding",
+            "quantity": {
+              "series": "motor.winding",
+              "statistic": "peak"
+            },
+            "comparison": "<=",
+            "value": {
+              "source": "120degC",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            }
+          }
+        ]
+      },
+      "at": "2026-10-10T09:00:20.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Delete Requirements",
+      "command": {
+        "type": "setMechRequirements",
+        "requirements": []
+      },
+      "at": "2026-10-10T09:00:21.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Delete Requirements",
+      "command": {
+        "type": "restoreMechRequirements",
+        "requirements": [
+          {
+            "id": "req#1",
+            "name": "Peak pull",
+            "quantity": "maxForce",
+            "comparison": ">=",
+            "value": {
+              "source": "#pull",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "loadCase": "lc#1",
+            "drivetrain": "drive#1"
+          },
+          {
+            "id": "req#2",
+            "name": "Cable speed",
+            "quantity": "peakCableSpeed",
+            "comparison": ">=",
+            "value": {
+              "source": "2 m/s",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "tolerance": {
+              "source": "0.1 m/s",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            }
+          },
+          {
+            "id": "req#3",
+            "name": "Fits a bag",
+            "quantity": "envelope",
+            "comparison": "within",
+            "value": [
+              {
+                "source": "300",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              {
+                "source": "200",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              {
+                "source": "150",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            ]
+          },
+          {
+            "id": "req#4",
+            "name": "Winding",
+            "quantity": {
+              "series": "motor.winding",
+              "statistic": "peak"
+            },
+            "comparison": "<=",
+            "value": {
+              "source": "120degC",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            }
+          }
+        ]
+      },
+      "at": "2026-10-10T09:00:22.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Edit Electrical",
+      "command": {
+        "type": "setElectrical",
+        "electrical": {
+          "assembly": "assembly#1",
+          "components": [
+            {
+              "id": "el#1",
+              "name": "Pack",
+              "role": "pack",
+              "use": "pp#1",
+              "layout": {
+                "block": [2, -1]
+              }
+            },
+            {
+              "id": "el#2",
+              "name": "Board",
+              "role": "board",
+              "instance": "inst#2",
+              "terminals": [
+                {
+                  "id": "vin",
+                  "name": "VIN",
+                  "kind": "power"
+                },
+                {
+                  "id": "gnd",
+                  "name": "GND",
+                  "kind": "ground"
+                }
+              ],
+              "load": {
+                "current": {
+                  "source": "80 mA",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                "voltage": {
+                  "source": "5 V",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                }
+              }
+            }
+          ],
+          "connections": [
+            {
+              "id": "conn#1",
+              "from": {
+                "component": "el#1",
+                "terminal": "+"
+              },
+              "to": {
+                "component": "el#2",
+                "terminal": "vin"
+              },
+              "colour": "red",
+              "number": "1"
+            }
+          ],
+          "harness": []
+        }
+      },
+      "at": "2026-10-10T09:00:23.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Edit Electrical",
+      "command": {
+        "type": "restoreElectrical",
+        "electrical": {
+          "assembly": "assembly#1",
+          "components": [
+            {
+              "id": "el#1",
+              "name": "Pack",
+              "role": "pack",
+              "use": "pp#1",
+              "layout": {
+                "block": [2, -1]
+              }
+            },
+            {
+              "id": "el#2",
+              "name": "Board",
+              "role": "board",
+              "instance": "inst#2",
+              "terminals": [
+                {
+                  "id": "vin",
+                  "name": "VIN",
+                  "kind": "power"
+                },
+                {
+                  "id": "gnd",
+                  "name": "GND",
+                  "kind": "ground"
+                }
+              ],
+              "load": {
+                "current": {
+                  "source": "80 mA",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                "voltage": {
+                  "source": "5 V",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                }
+              }
+            }
+          ],
+          "connections": [
+            {
+              "id": "conn#1",
+              "from": {
+                "component": "el#1",
+                "terminal": "+"
+              },
+              "to": {
+                "component": "el#2",
+                "terminal": "vin"
+              },
+              "colour": "red",
+              "number": "1"
+            }
+          ],
+          "harness": [
+            {
+              "id": "seg#1",
+              "from": {
+                "component": "el#1"
+              },
+              "to": {
+                "instance": "inst#2"
+              },
+              "length": {
+                "measured": true,
+                "slack": {
+                  "source": "50",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                }
+              },
+              "connections": ["conn#1"]
+            }
+          ]
+        }
+      },
+      "at": "2026-10-10T09:00:24.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Delete Electrical",
+      "command": {
+        "type": "setElectrical",
+        "electrical": {
+          "components": [],
+          "connections": [],
+          "harness": []
+        }
+      },
+      "at": "2026-10-10T09:00:25.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Delete Electrical",
+      "command": {
+        "type": "restoreElectrical",
+        "electrical": {
+          "assembly": "assembly#1",
+          "components": [
+            {
+              "id": "el#1",
+              "name": "Pack",
+              "role": "pack",
+              "use": "pp#1",
+              "layout": {
+                "block": [2, -1]
+              }
+            },
+            {
+              "id": "el#2",
+              "name": "Board",
+              "role": "board",
+              "instance": "inst#2",
+              "terminals": [
+                {
+                  "id": "vin",
+                  "name": "VIN",
+                  "kind": "power"
+                },
+                {
+                  "id": "gnd",
+                  "name": "GND",
+                  "kind": "ground"
+                }
+              ],
+              "load": {
+                "current": {
+                  "source": "80 mA",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                "voltage": {
+                  "source": "5 V",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                }
+              }
+            }
+          ],
+          "connections": [
+            {
+              "id": "conn#1",
+              "from": {
+                "component": "el#1",
+                "terminal": "+"
+              },
+              "to": {
+                "component": "el#2",
+                "terminal": "vin"
+              },
+              "colour": "red",
+              "number": "1"
+            }
+          ],
+          "harness": [
+            {
+              "id": "seg#1",
+              "from": {
+                "component": "el#1"
+              },
+              "to": {
+                "instance": "inst#2"
+              },
+              "length": {
+                "measured": true,
+                "slack": {
+                  "source": "50",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                }
+              },
+              "connections": ["conn#1"]
+            }
+          ]
+        }
+      },
+      "at": "2026-10-10T09:00:26.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Edit Load case",
+      "command": {
+        "type": "setMechLoadCase",
+        "loadCase": {
+          "id": "lc#1",
+          "name": "Renamed",
+          "drivetrain": "drive#1",
+          "dynamic": {
+            "mode": {
+              "kind": "eccentric",
+              "factor": {
+                "source": "1.2",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            },
+            "force": {
+              "source": "#pull",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "motion": {
+              "kind": "half-cosine",
+              "stroke": {
+                "source": "0.6 m",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "pullSpeed": {
+                "source": "1.5 m/s",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "returnSpeed": {
+                "source": "1 m/s",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "pause": {
+                "source": "0.5 s",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            },
+            "reps": {
+              "source": "10",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "sets": {
+              "source": "3",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "rest": {
+              "source": "90 s",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "ambient": {
+              "source": "25degC",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            }
+          },
+          "static": [
+            {
+              "kind": "cable",
+              "name": "Side pull",
+              "force": {
+                "source": "#pull",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "angle": {
+                "source": "45deg",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            },
+            {
+              "kind": "point",
+              "name": "Handle",
+              "force": {
+                "source": "300 N",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "direction": [0, 0, -1],
+              "at": {
+                "kind": "instance",
+                "assembly": "assembly#1",
+                "instance": "inst#1"
+              }
+            },
+            {
+              "kind": "acceleration",
+              "name": "Drop",
+              "acceleration": {
+                "source": "5 gn",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "direction": [0, 0, -1]
+            }
+          ]
+        }
+      },
+      "at": "2026-10-10T09:00:27.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Edit Load case",
+      "command": {
+        "type": "restoreMechLoadCase",
+        "loadCase": {
+          "id": "lc#1",
+          "name": "Max set",
+          "drivetrain": "drive#1",
+          "dynamic": {
+            "mode": {
+              "kind": "eccentric",
+              "factor": {
+                "source": "1.2",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            },
+            "force": {
+              "source": "#pull",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "motion": {
+              "kind": "half-cosine",
+              "stroke": {
+                "source": "0.6 m",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "pullSpeed": {
+                "source": "1.5 m/s",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "returnSpeed": {
+                "source": "1 m/s",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "pause": {
+                "source": "0.5 s",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            },
+            "reps": {
+              "source": "10",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "sets": {
+              "source": "3",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "rest": {
+              "source": "90 s",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "ambient": {
+              "source": "25degC",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            }
+          },
+          "static": [
+            {
+              "kind": "cable",
+              "name": "Side pull",
+              "force": {
+                "source": "#pull",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "angle": {
+                "source": "45deg",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            },
+            {
+              "kind": "point",
+              "name": "Handle",
+              "force": {
+                "source": "300 N",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "direction": [0, 0, -1],
+              "at": {
+                "kind": "instance",
+                "assembly": "assembly#1",
+                "instance": "inst#1"
+              }
+            },
+            {
+              "kind": "acceleration",
+              "name": "Drop",
+              "acceleration": {
+                "source": "5 gn",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "direction": [0, 0, -1]
+            }
+          ]
+        },
+        "index": 0
+      },
+      "at": "2026-10-10T09:00:28.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Delete Load case",
+      "command": {
+        "type": "deleteMechLoadCase",
+        "loadCaseId": "lc#1"
+      },
+      "at": "2026-10-10T09:00:29.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Delete Load case",
+      "command": {
+        "type": "restoreMechLoadCase",
+        "loadCase": {
+          "id": "lc#1",
+          "name": "Max set",
+          "drivetrain": "drive#1",
+          "dynamic": {
+            "mode": {
+              "kind": "eccentric",
+              "factor": {
+                "source": "1.2",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            },
+            "force": {
+              "source": "#pull",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "motion": {
+              "kind": "half-cosine",
+              "stroke": {
+                "source": "0.6 m",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "pullSpeed": {
+                "source": "1.5 m/s",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "returnSpeed": {
+                "source": "1 m/s",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "pause": {
+                "source": "0.5 s",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            },
+            "reps": {
+              "source": "10",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "sets": {
+              "source": "3",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "rest": {
+              "source": "90 s",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "ambient": {
+              "source": "25degC",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            }
+          },
+          "static": [
+            {
+              "kind": "cable",
+              "name": "Side pull",
+              "force": {
+                "source": "#pull",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "angle": {
+                "source": "45deg",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            },
+            {
+              "kind": "point",
+              "name": "Handle",
+              "force": {
+                "source": "300 N",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "direction": [0, 0, -1],
+              "at": {
+                "kind": "instance",
+                "assembly": "assembly#1",
+                "instance": "inst#1"
+              }
+            },
+            {
+              "kind": "acceleration",
+              "name": "Drop",
+              "acceleration": {
+                "source": "5 gn",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "direction": [0, 0, -1]
+            }
+          ]
+        },
+        "index": 0
+      },
+      "at": "2026-10-10T09:00:30.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Edit Drivetrain",
+      "command": {
+        "type": "setDrivetrain",
+        "drivetrain": {
+          "id": "drive#1",
+          "name": "Spool drive",
+          "assembly": "assembly#1",
+          "stages": [
+            {
+              "id": "stage#1",
+              "kind": "motor",
+              "use": "pp#1",
+              "instance": "inst#2",
+              "mate": "mate#1"
+            },
+            {
+              "id": "stage#2",
+              "kind": "belt",
+              "ratio": {
+                "driver": {
+                  "source": "20",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                "driven": {
+                  "source": "60",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                }
+              },
+              "efficiency": {
+                "source": "0.95",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            },
+            {
+              "id": "stage#3",
+              "kind": "shaft",
+              "instance": "inst#3",
+              "bearings": [
+                {
+                  "use": "pp#2"
+                }
+              ]
+            }
+          ],
+          "output": {
+            "kind": "spool",
+            "instance": "inst#1",
+            "body": "extrude#1",
+            "cable": "pp#3",
+            "length": {
+              "source": "2.5 m",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "core": {
+              "source": "#spoolCore",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "fairlead": {
+              "bendDiameter": {
+                "source": "20",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            }
+          }
+        }
+      },
+      "at": "2026-10-10T09:00:31.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Edit Drivetrain",
+      "command": {
+        "type": "restoreDrivetrain",
+        "drivetrain": {
+          "id": "drive#1",
+          "name": "Main",
+          "assembly": "assembly#1",
+          "stages": [
+            {
+              "id": "stage#1",
+              "kind": "motor",
+              "use": "pp#1",
+              "instance": "inst#2",
+              "mate": "mate#1"
+            },
+            {
+              "id": "stage#2",
+              "kind": "belt",
+              "ratio": {
+                "driver": {
+                  "source": "20",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                "driven": {
+                  "source": "60",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                }
+              },
+              "efficiency": {
+                "source": "0.95",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            },
+            {
+              "id": "stage#3",
+              "kind": "shaft",
+              "instance": "inst#3",
+              "bearings": [
+                {
+                  "use": "pp#2"
+                }
+              ]
+            }
+          ],
+          "output": {
+            "kind": "spool",
+            "instance": "inst#1",
+            "body": "extrude#1",
+            "cable": "pp#3",
+            "length": {
+              "source": "2.5 m",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "core": {
+              "source": "#spoolCore",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "fairlead": {
+              "bendDiameter": {
+                "source": "20",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            }
+          }
+        },
+        "index": 0
+      },
+      "at": "2026-10-10T09:00:32.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Delete Drivetrain",
+      "command": {
+        "type": "deleteDrivetrain",
+        "drivetrainId": "drive#1"
+      },
+      "at": "2026-10-10T09:00:33.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Delete Drivetrain",
+      "command": {
+        "type": "restoreDrivetrain",
+        "drivetrain": {
+          "id": "drive#1",
+          "name": "Main",
+          "assembly": "assembly#1",
+          "stages": [
+            {
+              "id": "stage#1",
+              "kind": "motor",
+              "use": "pp#1",
+              "instance": "inst#2",
+              "mate": "mate#1"
+            },
+            {
+              "id": "stage#2",
+              "kind": "belt",
+              "ratio": {
+                "driver": {
+                  "source": "20",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                "driven": {
+                  "source": "60",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                }
+              },
+              "efficiency": {
+                "source": "0.95",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            },
+            {
+              "id": "stage#3",
+              "kind": "shaft",
+              "instance": "inst#3",
+              "bearings": [
+                {
+                  "use": "pp#2"
+                }
+              ]
+            }
+          ],
+          "output": {
+            "kind": "spool",
+            "instance": "inst#1",
+            "body": "extrude#1",
+            "cable": "pp#3",
+            "length": {
+              "source": "2.5 m",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "core": {
+              "source": "#spoolCore",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "fairlead": {
+              "bendDiameter": {
+                "source": "20",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            }
+          }
+        },
+        "index": 0
+      },
+      "at": "2026-10-10T09:00:34.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Edit Purchased part",
+      "command": {
+        "type": "setPurchasedUse",
+        "use": {
+          "id": "pp#1",
+          "entry": {
+            "source": "builtin",
+            "id": "motor/odrive-d6374-150kv",
+            "version": 1
+          },
+          "part": "part#1",
+          "alternates": [],
+          "name": "Drive motor"
+        }
+      },
+      "at": "2026-10-10T09:00:35.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Edit Purchased part",
+      "command": {
+        "type": "restorePurchasedUse",
+        "use": {
+          "id": "pp#1",
+          "entry": {
+            "source": "builtin",
+            "id": "motor/odrive-d6374-150kv",
+            "version": 1
+          },
+          "part": "part#1",
+          "alternates": [
+            {
+              "source": "document",
+              "id": "entry#1"
+            }
+          ],
+          "name": "Drive motor"
+        },
+        "index": 0
+      },
+      "at": "2026-10-10T09:00:36.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Delete Purchased part",
+      "command": {
+        "type": "deletePurchasedUse",
+        "useId": "pp#1"
+      },
+      "at": "2026-10-10T09:00:37.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Delete Purchased part",
+      "command": {
+        "type": "restorePurchasedUse",
+        "use": {
+          "id": "pp#1",
+          "entry": {
+            "source": "builtin",
+            "id": "motor/odrive-d6374-150kv",
+            "version": 1
+          },
+          "part": "part#1",
+          "alternates": [
+            {
+              "source": "document",
+              "id": "entry#1"
+            }
+          ],
+          "name": "Drive motor"
+        },
+        "index": 0
+      },
+      "at": "2026-10-10T09:00:38.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Edit Catalog entry",
+      "command": {
+        "type": "setCatalogEntry",
+        "entry": {
+          "id": "entry#1",
+          "version": 2,
+          "family": "bearing",
+          "fieldsVersion": 1,
+          "maker": "SKF",
+          "partNumber": "6001-2RSH",
+          "description": "Deep groove ball bearing, sealed",
+          "ratings": {
+            "dynamicLoad": {
+              "value": 5400,
+              "basis": "ISO 281"
+            },
+            "staticLoad": {
+              "value": 2360
+            },
+            "sealing": {
+              "text": "2RSH"
+            },
+            "limitingSpeed": {
+              "unknown": true
+            }
+          },
+          "dimensions": {
+            "bore": {
+              "value": 12
+            },
+            "outside": {
+              "value": 28
+            },
+            "width": {
+              "value": 8
+            }
+          },
+          "mass": {
+            "value": 0.022
+          },
+          "geometry": {
+            "kind": "placeholder",
+            "shape": {
+              "kind": "ring",
+              "axis": "z"
+            }
+          },
+          "sources": [
+            {
+              "title": "SKF 6001-2RSH product page",
+              "url": "https://www.skf.com/",
+              "read": "2026-10-10"
+            }
+          ],
+          "verified": true
+        }
+      },
+      "at": "2026-10-10T09:00:39.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Edit Catalog entry",
+      "command": {
+        "type": "restoreCatalogEntry",
+        "entry": {
+          "id": "entry#1",
+          "version": 1,
+          "family": "bearing",
+          "fieldsVersion": 1,
+          "maker": "SKF",
+          "partNumber": "6001-2RSH",
+          "description": "Deep groove ball bearing, sealed",
+          "ratings": {
+            "dynamicLoad": {
+              "value": 5400,
+              "basis": "ISO 281"
+            },
+            "staticLoad": {
+              "value": 2360
+            },
+            "sealing": {
+              "text": "2RSH"
+            },
+            "limitingSpeed": {
+              "unknown": true
+            }
+          },
+          "dimensions": {
+            "bore": {
+              "value": 12
+            },
+            "outside": {
+              "value": 28
+            },
+            "width": {
+              "value": 8
+            }
+          },
+          "mass": {
+            "value": 0.022
+          },
+          "geometry": {
+            "kind": "placeholder",
+            "shape": {
+              "kind": "ring",
+              "axis": "z"
+            }
+          },
+          "sources": [
+            {
+              "title": "SKF 6001-2RSH product page",
+              "url": "https://www.skf.com/",
+              "read": "2026-10-10"
+            }
+          ],
+          "verified": false
+        },
+        "index": 0
+      },
+      "at": "2026-10-10T09:00:40.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Delete Catalog entry",
+      "command": {
+        "type": "deleteCatalogEntry",
+        "entryId": "entry#1"
+      },
+      "at": "2026-10-10T09:00:41.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Delete Catalog entry",
+      "command": {
+        "type": "restoreCatalogEntry",
+        "entry": {
+          "id": "entry#1",
+          "version": 1,
+          "family": "bearing",
+          "fieldsVersion": 1,
+          "maker": "SKF",
+          "partNumber": "6001-2RSH",
+          "description": "Deep groove ball bearing, sealed",
+          "ratings": {
+            "dynamicLoad": {
+              "value": 5400,
+              "basis": "ISO 281"
+            },
+            "staticLoad": {
+              "value": 2360
+            },
+            "sealing": {
+              "text": "2RSH"
+            },
+            "limitingSpeed": {
+              "unknown": true
+            }
+          },
+          "dimensions": {
+            "bore": {
+              "value": 12
+            },
+            "outside": {
+              "value": 28
+            },
+            "width": {
+              "value": 8
+            }
+          },
+          "mass": {
+            "value": 0.022
+          },
+          "geometry": {
+            "kind": "placeholder",
+            "shape": {
+              "kind": "ring",
+              "axis": "z"
+            }
+          },
+          "sources": [
+            {
+              "title": "SKF 6001-2RSH product page",
+              "url": "https://www.skf.com/",
+              "read": "2026-10-10"
+            }
+          ],
+          "verified": false
+        },
+        "index": 0
+      },
+      "at": "2026-10-10T09:00:42.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Edit Schematic",
+      "command": {
+        "type": "setSchematic",
+        "schematic": {
+          "id": "sch#1",
+          "name": "Board",
+          "details": "el#2",
+          "sheets": [
+            {
+              "id": "sheet#1",
+              "name": "Power",
+              "size": "A4",
+              "symbols": [
+                {
+                  "id": "us#1",
+                  "designator": "R1",
+                  "symbol": {
+                    "source": "builtin",
+                    "id": "resistor",
+                    "version": 1
+                  },
+                  "at": [10, 10],
+                  "rotation": 90,
+                  "mirror": false,
+                  "value": "10k",
+                  "footprint": "Resistor_SMD:R_0603_1608Metric",
+                  "fields": {
+                    "tolerance": "1%"
+                  }
+                },
+                {
+                  "id": "us#2",
+                  "designator": "U1",
+                  "symbol": {
+                    "source": "document",
+                    "id": "sym#1"
+                  },
+                  "at": [20, 10],
+                  "rotation": 0,
+                  "mirror": false
+                }
+              ],
+              "wires": [
+                {
+                  "id": "wire#1",
+                  "points": [
+                    [12, 10],
+                    [18, 10]
+                  ]
+                }
+              ],
+              "junctions": [[15, 10]],
+              "labels": [
+                {
+                  "id": "label#1",
+                  "name": "VIN",
+                  "at": [15, 10],
+                  "scope": "global"
+                }
+              ],
+              "ports": [
+                {
+                  "id": "port#1",
+                  "at": [5, 10],
+                  "terminal": "vin"
+                }
+              ],
+              "noConnects": [[25, 12]],
+              "notes": [
+                {
+                  "id": "text#1",
+                  "at": [5, 20],
+                  "text": "Keep the trace short"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "at": "2026-10-10T09:00:43.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Edit Schematic",
+      "command": {
+        "type": "restoreSchematic",
+        "schematic": {
+          "id": "sch#1",
+          "name": "Interface board",
+          "details": "el#2",
+          "sheets": [
+            {
+              "id": "sheet#1",
+              "name": "Power",
+              "size": "A4",
+              "symbols": [
+                {
+                  "id": "us#1",
+                  "designator": "R1",
+                  "symbol": {
+                    "source": "builtin",
+                    "id": "resistor",
+                    "version": 1
+                  },
+                  "at": [10, 10],
+                  "rotation": 90,
+                  "mirror": false,
+                  "value": "10k",
+                  "footprint": "Resistor_SMD:R_0603_1608Metric",
+                  "fields": {
+                    "tolerance": "1%"
+                  }
+                },
+                {
+                  "id": "us#2",
+                  "designator": "U1",
+                  "symbol": {
+                    "source": "document",
+                    "id": "sym#1"
+                  },
+                  "at": [20, 10],
+                  "rotation": 0,
+                  "mirror": false
+                }
+              ],
+              "wires": [
+                {
+                  "id": "wire#1",
+                  "points": [
+                    [12, 10],
+                    [18, 10]
+                  ]
+                }
+              ],
+              "junctions": [[15, 10]],
+              "labels": [
+                {
+                  "id": "label#1",
+                  "name": "VIN",
+                  "at": [15, 10],
+                  "scope": "global"
+                }
+              ],
+              "ports": [
+                {
+                  "id": "port#1",
+                  "at": [5, 10],
+                  "terminal": "vin"
+                }
+              ],
+              "noConnects": [[25, 12]],
+              "notes": [
+                {
+                  "id": "text#1",
+                  "at": [5, 20],
+                  "text": "Keep the trace short"
+                }
+              ]
+            }
+          ]
+        },
+        "index": 0
+      },
+      "at": "2026-10-10T09:00:44.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Delete Schematic",
+      "command": {
+        "type": "deleteSchematic",
+        "schematicId": "sch#1"
+      },
+      "at": "2026-10-10T09:00:45.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Delete Schematic",
+      "command": {
+        "type": "restoreSchematic",
+        "schematic": {
+          "id": "sch#1",
+          "name": "Interface board",
+          "details": "el#2",
+          "sheets": [
+            {
+              "id": "sheet#1",
+              "name": "Power",
+              "size": "A4",
+              "symbols": [
+                {
+                  "id": "us#1",
+                  "designator": "R1",
+                  "symbol": {
+                    "source": "builtin",
+                    "id": "resistor",
+                    "version": 1
+                  },
+                  "at": [10, 10],
+                  "rotation": 90,
+                  "mirror": false,
+                  "value": "10k",
+                  "footprint": "Resistor_SMD:R_0603_1608Metric",
+                  "fields": {
+                    "tolerance": "1%"
+                  }
+                },
+                {
+                  "id": "us#2",
+                  "designator": "U1",
+                  "symbol": {
+                    "source": "document",
+                    "id": "sym#1"
+                  },
+                  "at": [20, 10],
+                  "rotation": 0,
+                  "mirror": false
+                }
+              ],
+              "wires": [
+                {
+                  "id": "wire#1",
+                  "points": [
+                    [12, 10],
+                    [18, 10]
+                  ]
+                }
+              ],
+              "junctions": [[15, 10]],
+              "labels": [
+                {
+                  "id": "label#1",
+                  "name": "VIN",
+                  "at": [15, 10],
+                  "scope": "global"
+                }
+              ],
+              "ports": [
+                {
+                  "id": "port#1",
+                  "at": [5, 10],
+                  "terminal": "vin"
+                }
+              ],
+              "noConnects": [[25, 12]],
+              "notes": [
+                {
+                  "id": "text#1",
+                  "at": [5, 20],
+                  "text": "Keep the trace short"
+                }
+              ]
+            }
+          ]
+        },
+        "index": 0
+      },
+      "at": "2026-10-10T09:00:46.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Edit Symbol",
+      "command": {
+        "type": "setSymbol",
+        "symbol": {
+          "id": "sym#1",
+          "name": "Amp",
+          "body": [
+            {
+              "kind": "rect",
+              "from": [-2, -2],
+              "to": [2, 2],
+              "fill": false
+            },
+            {
+              "kind": "text",
+              "at": [0, 0],
+              "text": "HX711",
+              "rotation": 0
+            },
+            {
+              "kind": "arc",
+              "center": [0, 0],
+              "radius": 0.5,
+              "start": 0,
+              "end": 180
+            }
+          ],
+          "pins": [
+            {
+              "number": "1",
+              "name": "VCC",
+              "at": [-4, 1],
+              "orientation": "right",
+              "length": 2,
+              "type": "power-in"
+            },
+            {
+              "number": "2",
+              "name": "DOUT",
+              "at": [4, 0],
+              "orientation": "left",
+              "length": 2,
+              "type": "output"
+            }
+          ]
+        }
+      },
+      "at": "2026-10-10T09:00:47.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Edit Symbol",
+      "command": {
+        "type": "restoreSymbol",
+        "symbol": {
+          "id": "sym#1",
+          "name": "Load cell amplifier",
+          "body": [
+            {
+              "kind": "rect",
+              "from": [-2, -2],
+              "to": [2, 2],
+              "fill": false
+            },
+            {
+              "kind": "text",
+              "at": [0, 0],
+              "text": "HX711",
+              "rotation": 0
+            },
+            {
+              "kind": "arc",
+              "center": [0, 0],
+              "radius": 0.5,
+              "start": 0,
+              "end": 180
+            }
+          ],
+          "pins": [
+            {
+              "number": "1",
+              "name": "VCC",
+              "at": [-4, 1],
+              "orientation": "right",
+              "length": 2,
+              "type": "power-in"
+            },
+            {
+              "number": "2",
+              "name": "DOUT",
+              "at": [4, 0],
+              "orientation": "left",
+              "length": 2,
+              "type": "output"
+            }
+          ]
+        },
+        "index": 0
+      },
+      "at": "2026-10-10T09:00:48.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Delete Symbol",
+      "command": {
+        "type": "deleteSymbol",
+        "symbolId": "sym#1"
+      },
+      "at": "2026-10-10T09:00:49.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Delete Symbol",
+      "command": {
+        "type": "restoreSymbol",
+        "symbol": {
+          "id": "sym#1",
+          "name": "Load cell amplifier",
+          "body": [
+            {
+              "kind": "rect",
+              "from": [-2, -2],
+              "to": [2, 2],
+              "fill": false
+            },
+            {
+              "kind": "text",
+              "at": [0, 0],
+              "text": "HX711",
+              "rotation": 0
+            },
+            {
+              "kind": "arc",
+              "center": [0, 0],
+              "radius": 0.5,
+              "start": 0,
+              "end": 180
+            }
+          ],
+          "pins": [
+            {
+              "number": "1",
+              "name": "VCC",
+              "at": [-4, 1],
+              "orientation": "right",
+              "length": 2,
+              "type": "power-in"
+            },
+            {
+              "number": "2",
+              "name": "DOUT",
+              "at": [4, 0],
+              "orientation": "left",
+              "length": 2,
+              "type": "output"
+            }
+          ]
+        },
+        "index": 0
+      },
+      "at": "2026-10-10T09:00:50.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Edit Study",
+      "command": {
+        "type": "setStudy",
+        "study": {
+          "id": "study#1",
+          "name": "Pull",
+          "part": "part#1",
+          "bodies": ["extrude#1"],
+          "fixtures": [
+            {
+              "kind": "bolted",
+              "faces": [
+                {
+                  "id": "r1",
+                  "ref": {
+                    "face": "extrude#2:side:e5"
+                  }
+                }
+              ]
+            }
+          ],
+          "loads": [
+            {
+              "kind": "force",
+              "faces": [
+                {
+                  "id": "r2",
+                  "ref": {
+                    "face": "extrude#1:top"
+                  }
+                }
+              ],
+              "force": {
+                "source": "#pull",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "direction": [0, 0, -1]
+            }
+          ],
+          "mesh": {
+            "size": {
+              "source": "2",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "refine": [
+              {
+                "id": "r3",
+                "ref": {
+                  "face": "fillet#1:face:e1"
+                }
+              }
+            ]
+          },
+          "loadCase": "lc#1"
+        }
+      },
+      "at": "2026-10-10T09:00:51.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Edit Study",
+      "command": {
+        "type": "restoreStudy",
+        "study": {
+          "id": "study#1",
+          "name": "Bracket under pull",
+          "part": "part#1",
+          "bodies": ["extrude#1"],
+          "fixtures": [
+            {
+              "kind": "bolted",
+              "faces": [
+                {
+                  "id": "r1",
+                  "ref": {
+                    "face": "extrude#2:side:e5"
+                  }
+                }
+              ]
+            }
+          ],
+          "loads": [
+            {
+              "kind": "force",
+              "faces": [
+                {
+                  "id": "r2",
+                  "ref": {
+                    "face": "extrude#1:top"
+                  }
+                }
+              ],
+              "force": {
+                "source": "#pull",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "direction": [0, 0, -1]
+            }
+          ],
+          "mesh": {
+            "size": {
+              "source": "2",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "refine": [
+              {
+                "id": "r3",
+                "ref": {
+                  "face": "fillet#1:face:e1"
+                }
+              }
+            ]
+          },
+          "loadCase": "lc#1"
+        },
+        "index": 0
+      },
+      "at": "2026-10-10T09:00:52.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Delete Study",
+      "command": {
+        "type": "deleteStudy",
+        "studyId": "study#1"
+      },
+      "at": "2026-10-10T09:00:53.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Delete Study",
+      "command": {
+        "type": "restoreStudy",
+        "study": {
+          "id": "study#1",
+          "name": "Bracket under pull",
+          "part": "part#1",
+          "bodies": ["extrude#1"],
+          "fixtures": [
+            {
+              "kind": "bolted",
+              "faces": [
+                {
+                  "id": "r1",
+                  "ref": {
+                    "face": "extrude#2:side:e5"
+                  }
+                }
+              ]
+            }
+          ],
+          "loads": [
+            {
+              "kind": "force",
+              "faces": [
+                {
+                  "id": "r2",
+                  "ref": {
+                    "face": "extrude#1:top"
+                  }
+                }
+              ],
+              "force": {
+                "source": "#pull",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "direction": [0, 0, -1]
+            }
+          ],
+          "mesh": {
+            "size": {
+              "source": "2",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "refine": [
+              {
+                "id": "r3",
+                "ref": {
+                  "face": "fillet#1:face:e1"
+                }
+              }
+            ]
+          },
+          "loadCase": "lc#1"
+        },
+        "index": 0
+      },
+      "at": "2026-10-10T09:00:54.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Edit Check override",
+      "command": {
+        "type": "setCheckOverride",
+        "override": {
+          "id": "chk#1",
+          "check": "bolt.preload",
+          "subject": {
+            "kind": "stage",
+            "drivetrain": "drive#1",
+            "stage": "stage#3",
+            "at": "seat-A"
+          },
+          "factor": {
+            "source": "2.5",
+            "lengthUnit": "mm",
+            "angleUnit": "deg"
+          },
+          "inputs": {
+            "preload": {
+              "source": "4 kN",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "locker": "thread-locker"
+          }
+        }
+      },
+      "at": "2026-10-10T09:00:55.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Edit Check override",
+      "command": {
+        "type": "restoreCheckOverride",
+        "override": {
+          "id": "chk#1",
+          "check": "bolt.preload",
+          "subject": {
+            "kind": "stage",
+            "drivetrain": "drive#1",
+            "stage": "stage#3",
+            "at": "seat-A"
+          },
+          "factor": {
+            "source": "2",
+            "lengthUnit": "mm",
+            "angleUnit": "deg"
+          },
+          "inputs": {
+            "preload": {
+              "source": "4 kN",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "locker": "thread-locker"
+          }
+        },
+        "index": 0
+      },
+      "at": "2026-10-10T09:00:56.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Delete Check override",
+      "command": {
+        "type": "deleteCheckOverride",
+        "overrideId": "chk#1"
+      },
+      "at": "2026-10-10T09:00:57.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Delete Check override",
+      "command": {
+        "type": "restoreCheckOverride",
+        "override": {
+          "id": "chk#1",
+          "check": "bolt.preload",
+          "subject": {
+            "kind": "stage",
+            "drivetrain": "drive#1",
+            "stage": "stage#3",
+            "at": "seat-A"
+          },
+          "factor": {
+            "source": "2",
+            "lengthUnit": "mm",
+            "angleUnit": "deg"
+          },
+          "inputs": {
+            "preload": {
+              "source": "4 kN",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "locker": "thread-locker"
+          }
+        },
+        "index": 0
+      },
+      "at": "2026-10-10T09:00:58.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Edit Spec note",
+      "command": {
+        "type": "setSpecNote",
+        "note": {
+          "id": "note#1",
+          "spec": "mechanical",
+          "subject": {
+            "kind": "part",
+            "part": "part#1"
+          },
+          "field": "finish",
+          "text": "Bead blast"
+        }
+      },
+      "at": "2026-10-10T09:00:59.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Edit Spec note",
+      "command": {
+        "type": "restoreSpecNote",
+        "note": {
+          "id": "note#1",
+          "spec": "mechanical",
+          "subject": {
+            "kind": "part",
+            "part": "part#1"
+          },
+          "field": "finish",
+          "text": "Anodise clear"
+        },
+        "index": 0
+      },
+      "at": "2026-10-10T09:01:00.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Delete Spec note",
+      "command": {
+        "type": "deleteSpecNote",
+        "noteId": "note#1"
+      },
+      "at": "2026-10-10T09:01:01.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Delete Spec note",
+      "command": {
+        "type": "restoreSpecNote",
+        "note": {
+          "id": "note#1",
+          "spec": "mechanical",
+          "subject": {
+            "kind": "part",
+            "part": "part#1"
+          },
+          "field": "finish",
+          "text": "Anodise clear"
+        },
+        "index": 0
+      },
+      "at": "2026-10-10T09:01:02.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Edit Hazard",
+      "command": {
+        "type": "setHazard",
+        "hazard": {
+          "id": "hz#1",
+          "name": "Cable snaps",
+          "cause": "Worn cable under peak load",
+          "mitigation": "Cable rated well above the peak pull",
+          "records": ["cable.tension@drive#1"],
+          "remaining": "Inspect the cable"
+        }
+      },
+      "at": "2026-10-10T09:01:03.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Edit Hazard",
+      "command": {
+        "type": "restoreHazard",
+        "hazard": {
+          "id": "hz#1",
+          "name": "Cable snaps",
+          "cause": "Worn cable under peak load",
+          "mitigation": "Cable rated well above the peak pull",
+          "records": ["cable.tension@drive#1"]
+        },
+        "index": 0
+      },
+      "at": "2026-10-10T09:01:04.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Delete Hazard",
+      "command": {
+        "type": "deleteHazard",
+        "hazardId": "hz#1"
+      },
+      "at": "2026-10-10T09:01:05.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Delete Hazard",
+      "command": {
+        "type": "restoreHazard",
+        "hazard": {
+          "id": "hz#1",
+          "name": "Cable snaps",
+          "cause": "Worn cable under peak load",
+          "mitigation": "Cable rated well above the peak pull",
+          "records": ["cable.tension@drive#1"]
+        },
+        "index": 0
+      },
+      "at": "2026-10-10T09:01:06.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Edit Test band",
+      "command": {
+        "type": "setTestBand",
+        "band": {
+          "id": "vt#1",
+          "test": "proof-load@drive#1",
+          "low": {
+            "source": "#pull * 1.5",
+            "lengthUnit": "mm",
+            "angleUnit": "deg"
+          },
+          "high": {
+            "source": "#pull * 2",
+            "lengthUnit": "mm",
+            "angleUnit": "deg"
+          }
+        }
+      },
+      "at": "2026-10-10T09:01:07.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Edit Test band",
+      "command": {
+        "type": "restoreTestBand",
+        "band": {
+          "id": "vt#1",
+          "test": "proof-load@drive#1",
+          "low": {
+            "source": "#pull * 1.5",
+            "lengthUnit": "mm",
+            "angleUnit": "deg"
+          }
+        },
+        "index": 0
+      },
+      "at": "2026-10-10T09:01:08.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Delete Test band",
+      "command": {
+        "type": "deleteTestBand",
+        "bandId": "vt#1"
+      },
+      "at": "2026-10-10T09:01:09.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Delete Test band",
+      "command": {
+        "type": "restoreTestBand",
+        "band": {
+          "id": "vt#1",
+          "test": "proof-load@drive#1",
+          "low": {
+            "source": "#pull * 1.5",
+            "lengthUnit": "mm",
+            "angleUnit": "deg"
+          }
+        },
+        "index": 0
+      },
+      "at": "2026-10-10T09:01:10.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Edit material",
+      "command": {
+        "type": "setMaterialDef",
+        "material": {
+          "id": "material#1",
+          "name": "PETG blue",
+          "category": "plastic",
+          "form": "printed",
+          "density": {
+            "value": {
+              "source": "1270 kg/m^3",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "source": "spool label",
+            "typical": true
+          },
+          "properties": {
+            "yieldStrength": {
+              "value": {
+                "source": "45 MPa",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "source": "data sheet",
+              "typical": true,
+              "note": "XY"
+            },
+            "poissonRatio": {
+              "value": {
+                "source": "0.38",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "source": "handbook",
+              "typical": true
+            },
+            "thermalConductivity": {
+              "value": {
+                "source": "0.2 W/(m*K)",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "source": "handbook",
+              "typical": true
+            },
+            "maxServiceTemperature": {
+              "value": {
+                "source": "70degC",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "source": "data sheet",
+              "typical": true
+            }
+          },
+          "fatigue": {
+            "points": [
+              {
+                "cycles": 10000,
+                "stress": {
+                  "source": "30 MPa",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                }
+              },
+              {
+                "cycles": 1000000,
+                "stress": {
+                  "source": "18 MPa",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                }
+              }
+            ],
+            "source": "paper",
+            "typical": true
+          }
+        }
+      },
+      "at": "2026-10-10T09:01:11.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Material",
+      "command": {
+        "type": "setMaterial",
+        "partId": "part#1",
+        "material": "petg"
+      },
+      "at": "2026-10-10T09:01:12.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Delete material",
+      "command": {
+        "type": "deleteMaterialDef",
+        "materialId": "material#1"
+      },
+      "at": "2026-10-10T09:01:13.000Z"
+    },
+    {
+      "cause": "undo",
+      "label": "Delete material",
+      "command": {
+        "type": "restoreMaterialDef",
+        "material": {
+          "id": "material#1",
+          "name": "PETG blue",
+          "category": "plastic",
+          "form": "printed",
+          "density": {
+            "value": {
+              "source": "1270 kg/m^3",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "source": "spool label",
+            "typical": true
+          },
+          "properties": {
+            "poissonRatio": {
+              "value": {
+                "source": "0.38",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "source": "handbook",
+              "typical": true
+            },
+            "yieldStrength": {
+              "value": {
+                "source": "45 MPa",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "source": "data sheet",
+              "typical": true,
+              "note": "XY"
+            },
+            "thermalConductivity": {
+              "value": {
+                "source": "0.2 W/(m*K)",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "source": "handbook",
+              "typical": true
+            },
+            "maxServiceTemperature": {
+              "value": {
+                "source": "70degC",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "source": "data sheet",
+              "typical": true
+            }
+          },
+          "fatigue": {
+            "points": [
+              {
+                "cycles": 10000,
+                "stress": {
+                  "source": "30 MPa",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                }
+              },
+              {
+                "cycles": 1000000,
+                "stress": {
+                  "source": "18 MPa",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                }
+              }
+            ],
+            "source": "paper",
+            "typical": true
+          }
+        },
+        "index": 0
+      },
+      "at": "2026-10-10T09:01:14.000Z"
+    },
+    {
+      "cause": "redo",
+      "label": "Delete material",
+      "command": {
+        "type": "deleteMaterialDef",
+        "materialId": "material#1"
+      },
+      "at": "2026-10-10T09:01:15.000Z"
+    },
+    {
+      "cause": "execute",
+      "label": "Requirements",
+      "command": {
+        "type": "setMechRequirements",
+        "requirements": [
+          {
+            "id": "req#5",
+            "name": "Cable speed",
+            "quantity": "peakCableSpeed",
+            "comparison": ">=",
+            "value": {
+              "source": "2 m/s",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "tolerance": {
+              "source": "0.1 m/s",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            }
+          }
+        ]
+      },
+      "at": "2026-10-10T09:01:16.000Z"
+    }
+  ],
+  "expected": {
+    "format": "manufakture",
+    "version": 19,
+    "namingScheme": 1,
+    "id": "doc-1",
+    "name": "Bracket",
+    "units": {
+      "length": {
+        "unit": "mm"
+      },
+      "angle": {
+        "unit": "deg"
+      },
+      "quantities": {
+        "force": "lbf",
+        "torque": "N·m"
+      }
+    },
+    "variables": [
+      {
+        "name": "thickness",
+        "expression": {
+          "source": "6mm",
+          "lengthUnit": "mm",
+          "angleUnit": "deg"
+        }
+      },
+      {
+        "name": "width",
+        "expression": {
+          "source": "40",
+          "lengthUnit": "mm",
+          "angleUnit": "deg"
+        }
+      },
+      {
+        "name": "height",
+        "expression": {
+          "source": "width / 2",
+          "lengthUnit": "mm",
+          "angleUnit": "deg"
+        }
+      },
+      {
+        "name": "pull",
+        "expression": {
+          "source": "200 lbf",
+          "lengthUnit": "mm",
+          "angleUnit": "deg"
+        }
+      },
+      {
+        "name": "spoolCore",
+        "expression": {
+          "source": "30",
+          "lengthUnit": "mm",
+          "angleUnit": "deg"
+        }
+      }
+    ],
+    "parts": [
+      {
+        "id": "part#1",
+        "name": "Part 1",
+        "features": [
+          {
+            "id": "sketch#1",
+            "kind": "sketch",
+            "name": "Sketch 1",
+            "suppressed": false,
+            "plane": {
+              "type": "plane",
+              "origin": [0, 0, 0],
+              "normal": [0, 0, 1],
+              "xDir": [1, 0, 0]
+            },
+            "entities": [
+              {
+                "id": "e1",
+                "kind": "line",
+                "construction": false,
+                "start": [0, 0],
+                "end": [40, 0]
+              },
+              {
+                "id": "e2",
+                "kind": "line",
+                "construction": false,
+                "start": [40, 0],
+                "end": [40, 20]
+              },
+              {
+                "id": "e3",
+                "kind": "line",
+                "construction": false,
+                "start": [40, 20],
+                "end": [0, 20]
+              },
+              {
+                "id": "e4",
+                "kind": "line",
+                "construction": false,
+                "start": [0, 20],
+                "end": [0, 0]
+              }
+            ],
+            "constraints": [
+              {
+                "id": "k1",
+                "kind": "coincident",
+                "a": {
+                  "entity": "e1",
+                  "at": "end"
+                },
+                "b": {
+                  "entity": "e2",
+                  "at": "start"
+                }
+              },
+              {
+                "id": "k2",
+                "kind": "horizontal",
+                "line": "e1"
+              },
+              {
+                "id": "k3",
+                "kind": "distance",
+                "value": {
+                  "source": "width",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                "a": {
+                  "entity": "e1",
+                  "at": "start"
+                },
+                "b": {
+                  "entity": "e1",
+                  "at": "end"
+                }
+              },
+              {
+                "id": "k4",
+                "kind": "distance",
+                "value": {
+                  "source": "height",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                "a": {
+                  "entity": "e2",
+                  "at": "start"
+                },
+                "b": {
+                  "entity": "e2",
+                  "at": "end"
+                }
+              },
+              {
+                "id": "k5",
+                "kind": "coincident",
+                "a": {
+                  "entity": "e1",
+                  "at": "start"
+                },
+                "b": {
+                  "entity": "@origin"
+                }
+              }
+            ]
+          },
+          {
+            "id": "extrude#1",
+            "kind": "extrude",
+            "name": "Extrude 1",
+            "suppressed": false,
+            "profile": {
+              "sketch": "sketch#1"
+            },
+            "operation": "new",
+            "extent": {
+              "type": "blind",
+              "distance": {
+                "source": "thickness",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            },
+            "reverse": false
+          },
+          {
+            "id": "sketch#2",
+            "kind": "sketch",
+            "name": "Sketch 2",
+            "suppressed": false,
+            "plane": {
+              "type": "face",
+              "face": {
+                "id": "r1",
+                "ref": {
+                  "face": "extrude#1:cap:end"
+                }
+              }
+            },
+            "entities": [
+              {
+                "id": "e5",
+                "kind": "circle",
+                "construction": false,
+                "center": [20, 10],
+                "radius": 3
+              }
+            ],
+            "constraints": [
+              {
+                "id": "k6",
+                "kind": "diameter",
+                "entity": "e5",
+                "value": {
+                  "source": "6mm",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                }
+              }
+            ]
+          },
+          {
+            "id": "extrude#2",
+            "kind": "extrude",
+            "name": "Extrude 2",
+            "suppressed": false,
+            "profile": {
+              "sketch": "sketch#2"
+            },
+            "operation": "cut",
+            "extent": {
+              "type": "throughAll"
+            },
+            "reverse": false
+          },
+          {
+            "id": "fillet#1",
+            "kind": "fillet",
+            "name": "Fillet 1",
+            "suppressed": false,
+            "edges": [
+              {
+                "id": "r2",
+                "ref": {
+                  "faces": ["extrude#1:side:e1", "extrude#1:side:e2"]
+                }
+              }
+            ],
+            "radius": {
+              "source": "2mm",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            }
+          }
+        ],
+        "rollbackIndex": null,
+        "nextIds": {
+          "e": 6,
+          "extrude": 3,
+          "fillet": 2,
+          "k": 7,
+          "r": 3,
+          "sketch": 3
+        },
+        "material": "petg",
+        "bodies": []
+      }
+    ],
+    "assemblies": [],
+    "print": {
+      "setups": [],
+      "nextIds": {}
+    },
+    "fonts": [],
+    "cam": {
+      "tools": [],
+      "setups": [],
+      "nextIds": {}
+    },
+    "mech": {
+      "requirements": [
+        {
+          "id": "req#5",
+          "name": "Cable speed",
+          "quantity": "peakCableSpeed",
+          "comparison": ">=",
+          "value": {
+            "source": "2 m/s",
+            "lengthUnit": "mm",
+            "angleUnit": "deg"
+          },
+          "tolerance": {
+            "source": "0.1 m/s",
+            "lengthUnit": "mm",
+            "angleUnit": "deg"
+          }
+        }
+      ],
+      "loadCases": [
+        {
+          "id": "lc#1",
+          "name": "Max set",
+          "drivetrain": "drive#1",
+          "dynamic": {
+            "mode": {
+              "kind": "eccentric",
+              "factor": {
+                "source": "1.2",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            },
+            "force": {
+              "source": "#pull",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "motion": {
+              "kind": "half-cosine",
+              "stroke": {
+                "source": "0.6 m",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "pullSpeed": {
+                "source": "1.5 m/s",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "returnSpeed": {
+                "source": "1 m/s",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "pause": {
+                "source": "0.5 s",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            },
+            "reps": {
+              "source": "10",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "sets": {
+              "source": "3",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "rest": {
+              "source": "90 s",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "ambient": {
+              "source": "25degC",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            }
+          },
+          "static": [
+            {
+              "kind": "cable",
+              "name": "Side pull",
+              "force": {
+                "source": "#pull",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "angle": {
+                "source": "45deg",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            },
+            {
+              "kind": "point",
+              "name": "Handle",
+              "force": {
+                "source": "300 N",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "direction": [0, 0, -1],
+              "at": {
+                "kind": "instance",
+                "assembly": "assembly#1",
+                "instance": "inst#1"
+              }
+            },
+            {
+              "kind": "acceleration",
+              "name": "Drop",
+              "acceleration": {
+                "source": "5 gn",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "direction": [0, 0, -1]
+            }
+          ]
+        }
+      ],
+      "drivetrains": [
+        {
+          "id": "drive#1",
+          "name": "Main",
+          "assembly": "assembly#1",
+          "stages": [
+            {
+              "id": "stage#1",
+              "kind": "motor",
+              "use": "pp#1",
+              "instance": "inst#2",
+              "mate": "mate#1"
+            },
+            {
+              "id": "stage#2",
+              "kind": "belt",
+              "ratio": {
+                "driver": {
+                  "source": "20",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                },
+                "driven": {
+                  "source": "60",
+                  "lengthUnit": "mm",
+                  "angleUnit": "deg"
+                }
+              },
+              "efficiency": {
+                "source": "0.95",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            },
+            {
+              "id": "stage#3",
+              "kind": "shaft",
+              "instance": "inst#3",
+              "bearings": [
+                {
+                  "use": "pp#2"
+                }
+              ]
+            }
+          ],
+          "output": {
+            "kind": "spool",
+            "instance": "inst#1",
+            "body": "extrude#1",
+            "cable": "pp#3",
+            "length": {
+              "source": "2.5 m",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "core": {
+              "source": "#spoolCore",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "fairlead": {
+              "bendDiameter": {
+                "source": "20",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            }
+          }
+        }
+      ],
+      "purchased": [
+        {
+          "id": "pp#1",
+          "entry": {
+            "source": "builtin",
+            "id": "motor/odrive-d6374-150kv",
+            "version": 1
+          },
+          "part": "part#1",
+          "alternates": [
+            {
+              "source": "document",
+              "id": "entry#1"
+            }
+          ],
+          "name": "Drive motor"
+        }
+      ],
+      "catalog": [
+        {
+          "id": "entry#1",
+          "version": 1,
+          "family": "bearing",
+          "fieldsVersion": 1,
+          "maker": "SKF",
+          "partNumber": "6001-2RSH",
+          "description": "Deep groove ball bearing, sealed",
+          "ratings": {
+            "dynamicLoad": {
+              "value": 5400,
+              "basis": "ISO 281"
+            },
+            "limitingSpeed": {
+              "unknown": true
+            },
+            "sealing": {
+              "text": "2RSH"
+            },
+            "staticLoad": {
+              "value": 2360
+            }
+          },
+          "dimensions": {
+            "bore": {
+              "value": 12
+            },
+            "outside": {
+              "value": 28
+            },
+            "width": {
+              "value": 8
+            }
+          },
+          "mass": {
+            "value": 0.022
+          },
+          "geometry": {
+            "kind": "placeholder",
+            "shape": {
+              "kind": "ring",
+              "axis": "z"
+            }
+          },
+          "sources": [
+            {
+              "title": "SKF 6001-2RSH product page",
+              "url": "https://www.skf.com/",
+              "read": "2026-10-10"
+            }
+          ],
+          "verified": false
+        }
+      ],
+      "electrical": {
+        "assembly": "assembly#1",
+        "components": [
+          {
+            "id": "el#1",
+            "name": "Pack",
+            "role": "pack",
+            "use": "pp#1",
+            "layout": {
+              "block": [2, -1]
+            }
+          },
+          {
+            "id": "el#2",
+            "name": "Board",
+            "role": "board",
+            "instance": "inst#2",
+            "terminals": [
+              {
+                "id": "vin",
+                "name": "VIN",
+                "kind": "power"
+              },
+              {
+                "id": "gnd",
+                "name": "GND",
+                "kind": "ground"
+              }
+            ],
+            "load": {
+              "current": {
+                "source": "80 mA",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "voltage": {
+                "source": "5 V",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            }
+          }
+        ],
+        "connections": [
+          {
+            "id": "conn#1",
+            "from": {
+              "component": "el#1",
+              "terminal": "+"
+            },
+            "to": {
+              "component": "el#2",
+              "terminal": "vin"
+            },
+            "colour": "red",
+            "number": "1"
+          }
+        ],
+        "harness": [
+          {
+            "id": "seg#1",
+            "from": {
+              "component": "el#1"
+            },
+            "to": {
+              "instance": "inst#2"
+            },
+            "length": {
+              "measured": true,
+              "slack": {
+                "source": "50",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              }
+            },
+            "connections": ["conn#1"]
+          }
+        ]
+      },
+      "schematics": [
+        {
+          "id": "sch#1",
+          "name": "Interface board",
+          "details": "el#2",
+          "sheets": [
+            {
+              "id": "sheet#1",
+              "name": "Power",
+              "size": "A4",
+              "symbols": [
+                {
+                  "id": "us#1",
+                  "designator": "R1",
+                  "symbol": {
+                    "source": "builtin",
+                    "id": "resistor",
+                    "version": 1
+                  },
+                  "at": [10, 10],
+                  "rotation": 90,
+                  "mirror": false,
+                  "value": "10k",
+                  "footprint": "Resistor_SMD:R_0603_1608Metric",
+                  "fields": {
+                    "tolerance": "1%"
+                  }
+                },
+                {
+                  "id": "us#2",
+                  "designator": "U1",
+                  "symbol": {
+                    "source": "document",
+                    "id": "sym#1"
+                  },
+                  "at": [20, 10],
+                  "rotation": 0,
+                  "mirror": false
+                }
+              ],
+              "wires": [
+                {
+                  "id": "wire#1",
+                  "points": [
+                    [12, 10],
+                    [18, 10]
+                  ]
+                }
+              ],
+              "junctions": [[15, 10]],
+              "labels": [
+                {
+                  "id": "label#1",
+                  "name": "VIN",
+                  "at": [15, 10],
+                  "scope": "global"
+                }
+              ],
+              "ports": [
+                {
+                  "id": "port#1",
+                  "at": [5, 10],
+                  "terminal": "vin"
+                }
+              ],
+              "noConnects": [[25, 12]],
+              "notes": [
+                {
+                  "id": "text#1",
+                  "at": [5, 20],
+                  "text": "Keep the trace short"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "symbols": [
+        {
+          "id": "sym#1",
+          "name": "Load cell amplifier",
+          "body": [
+            {
+              "kind": "rect",
+              "from": [-2, -2],
+              "to": [2, 2],
+              "fill": false
+            },
+            {
+              "kind": "text",
+              "at": [0, 0],
+              "text": "HX711",
+              "rotation": 0
+            },
+            {
+              "kind": "arc",
+              "center": [0, 0],
+              "radius": 0.5,
+              "start": 0,
+              "end": 180
+            }
+          ],
+          "pins": [
+            {
+              "number": "1",
+              "name": "VCC",
+              "at": [-4, 1],
+              "orientation": "right",
+              "length": 2,
+              "type": "power-in"
+            },
+            {
+              "number": "2",
+              "name": "DOUT",
+              "at": [4, 0],
+              "orientation": "left",
+              "length": 2,
+              "type": "output"
+            }
+          ]
+        }
+      ],
+      "studies": [
+        {
+          "id": "study#1",
+          "name": "Bracket under pull",
+          "part": "part#1",
+          "bodies": ["extrude#1"],
+          "fixtures": [
+            {
+              "kind": "bolted",
+              "faces": [
+                {
+                  "id": "r1",
+                  "ref": {
+                    "face": "extrude#2:side:e5"
+                  }
+                }
+              ]
+            }
+          ],
+          "loads": [
+            {
+              "kind": "force",
+              "faces": [
+                {
+                  "id": "r2",
+                  "ref": {
+                    "face": "extrude#1:top"
+                  }
+                }
+              ],
+              "force": {
+                "source": "#pull",
+                "lengthUnit": "mm",
+                "angleUnit": "deg"
+              },
+              "direction": [0, 0, -1]
+            }
+          ],
+          "mesh": {
+            "size": {
+              "source": "2",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            },
+            "refine": [
+              {
+                "id": "r3",
+                "ref": {
+                  "face": "fillet#1:face:e1"
+                }
+              }
+            ]
+          },
+          "loadCase": "lc#1"
+        }
+      ],
+      "checks": [
+        {
+          "id": "chk#1",
+          "check": "bolt.preload",
+          "subject": {
+            "kind": "stage",
+            "drivetrain": "drive#1",
+            "stage": "stage#3",
+            "at": "seat-A"
+          },
+          "factor": {
+            "source": "2",
+            "lengthUnit": "mm",
+            "angleUnit": "deg"
+          },
+          "inputs": {
+            "locker": "thread-locker",
+            "preload": {
+              "source": "4 kN",
+              "lengthUnit": "mm",
+              "angleUnit": "deg"
+            }
+          }
+        }
+      ],
+      "specNotes": [
+        {
+          "id": "note#1",
+          "spec": "mechanical",
+          "subject": {
+            "kind": "part",
+            "part": "part#1"
+          },
+          "field": "finish",
+          "text": "Anodise clear"
+        }
+      ],
+      "hazards": [
+        {
+          "id": "hz#1",
+          "name": "Cable snaps",
+          "cause": "Worn cable under peak load",
+          "mitigation": "Cable rated well above the peak pull",
+          "records": ["cable.tension@drive#1"]
+        }
+      ],
+      "testBands": [
+        {
+          "id": "vt#1",
+          "test": "proof-load@drive#1",
+          "low": {
+            "source": "#pull * 1.5",
+            "lengthUnit": "mm",
+            "angleUnit": "deg"
+          }
+        }
+      ],
+      "nextIds": {
+        "chk": 2,
+        "conn": 2,
+        "drive": 2,
+        "el": 3,
+        "entry": 2,
+        "hz": 2,
+        "label": 2,
+        "lc": 2,
+        "note": 2,
+        "port": 2,
+        "pp": 2,
+        "r": 4,
+        "req": 6,
+        "sch": 2,
+        "seg": 2,
+        "sheet": 2,
+        "stage": 4,
+        "study": 2,
+        "sym": 2,
+        "text": 2,
+        "us": 3,
+        "vt": 2,
+        "wire": 2
+      }
+    },
+    "nextIds": {
+      "material": 2,
+      "part": 2
+    }
+  }
+}
