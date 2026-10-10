@@ -3387,6 +3387,13 @@ export const RatioSchema = z.union([
 
 const useIds = z.array(PurchasedUseIdSchema).max(MAX_STAGES);
 
+/**
+ * A typed moment of inertia (an `inertia` expression, kg·m²) that replaces what the kernel or the
+ * catalog gives (decision 9). A reduction's is referred to its input, as gearbox datasheets give
+ * it; every other one is at the element's own speed.
+ */
+const inertiaOverride = expression.exactOptional();
+
 export const StageSchema = z.discriminatedUnion('kind', [
   z.strictObject({
     id: StageIdSchema,
@@ -3395,6 +3402,8 @@ export const StageSchema = z.discriminatedUnion('kind', [
     instance: InstanceIdSchema.exactOptional(),
     /** A revolute mate of the motor's shaft. */
     mate: MateIdSchema.exactOptional(),
+    /** The rotor's inertia; absent: the catalog's `rotorInertia`. */
+    inertia: inertiaOverride,
   }),
   z.strictObject({
     id: StageIdSchema,
@@ -3403,6 +3412,7 @@ export const StageSchema = z.discriminatedUnion('kind', [
     efficiency: expression,
     belt: PurchasedUseIdSchema.exactOptional(),
     pulleys: useIds.exactOptional(),
+    inertia: inertiaOverride,
   }),
   z.strictObject({
     id: StageIdSchema,
@@ -3411,6 +3421,7 @@ export const StageSchema = z.discriminatedUnion('kind', [
     efficiency: expression,
     uses: useIds.exactOptional(),
     instances: z.array(InstanceIdSchema).max(MAX_STAGES).exactOptional(),
+    inertia: inertiaOverride,
   }),
   z.strictObject({
     id: StageIdSchema,
@@ -3424,12 +3435,14 @@ export const StageSchema = z.discriminatedUnion('kind', [
         }),
       )
       .max(MAX_STAGES),
+    inertia: inertiaOverride,
   }),
   z.strictObject({
     id: StageIdSchema,
     kind: z.literal('coupling'),
     use: PurchasedUseIdSchema.exactOptional(),
     instance: InstanceIdSchema.exactOptional(),
+    inertia: inertiaOverride,
   }),
 ]);
 
@@ -3448,8 +3461,14 @@ export const DrivetrainOutputSchema = z.discriminatedUnion('kind', [
     fairlead: z
       .strictObject({ instance: InstanceIdSchema.exactOptional(), bendDiameter: expression })
       .exactOptional(),
+    /** The spool's inertia; absent: measured from the body (or the instance's bodies). */
+    inertia: inertiaOverride,
   }),
-  z.strictObject({ kind: z.literal('rotary'), instance: InstanceIdSchema.exactOptional() }),
+  z.strictObject({
+    kind: z.literal('rotary'),
+    instance: InstanceIdSchema.exactOptional(),
+    inertia: inertiaOverride,
+  }),
   z.strictObject({
     kind: z.literal('linear'),
     lead: expression,

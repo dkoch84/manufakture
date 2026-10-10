@@ -1,0 +1,90 @@
+/* The drivetrain panel: the stages in order, the output, and what the chain gives. */
+
+.dt-panel {
+  width: min(58rem, 96vw);
+}
+
+.dt-panel h3 {
+  margin: 0.4rem 0 0.2rem;
+  font-size: 0.9rem;
+}
+
+.dt-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.dt-tabs button[aria-selected='true'] {
+  border-color: #2f6fb0;
+  background: #eaf2fb;
+}
+
+.dt-form,
+.dt-results,
+.dt-torque {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.dt-form {
+  padding: 0.5rem;
+  border: 1px solid #e3e7ec;
+  border-radius: 4px;
+}
+
+.dt-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: 0.35rem 0.6rem;
+}
+
+.dt-stages {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0;
+  padding-left: 1.5em;
+}
+
+.dt-stage {
+  padding: 0.35rem 0.4rem;
+  border-left: 3px solid #c9d1da;
+}
+
+.dt-stage-head,
+.dt-add {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-bottom: 0.25rem;
+}
+
+.dt-id {
+  color: #5b6672;
+}
+
+.dt-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.dt-table th,
+.dt-table td {
+  padding: 0.15rem 0.3rem;
+  border-bottom: 1px solid #e3e7ec;
+  text-align: left;
+  vertical-align: top;
+}
+
+.dt-working {
+  padding: 0.4rem 0.5rem;
+  background: #f6f8fa;
+  border-radius: 4px;
+}
+
+.dt-notes {
+  margin: 0.2rem 0;
+  padding-left: 1.5em;
+}

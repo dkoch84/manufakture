@@ -1,10 +1,18 @@
 // The mechanical domain's evaluation stage (ADR 0017 decision 15): what regen calls after the
 // parts and assemblies. Its first step asks regen to measure the bodies the checks need; its
 // second runs every check and returns the records (with their lines) as the result's data and a
-// `mech-check` warning for each record below the user's factor or not computed. A document that
+// `mech-check` warning for each record below the user's factor or not computed, with every
+// drivetrain read into numbers (T9.3a: the bodies its stages name are measured in the first step)
+// and a `mech-reference` warning for what a stage names that is not there. A document that
 // uses neither the `mech` section nor `domains.mech` reports nothing.
 
 import { DISCLAIMER_SHORT } from '../disclaimer';
+import {
+  analyseDrivetrains,
+  drivetrainNeeds,
+  drivetrainWarnings,
+  type DrivetrainAnalysis,
+} from '../drivetrain';
 import { DEFAULT_MECH_SETTINGS, type MechSettings } from '../settings';
 import { cableTension } from './cable';
 import { measuredFrom, NOTHING_MEASURED } from './measured';
@@ -26,6 +34,11 @@ export interface MechEvaluation {
   version: number;
   /** Every check's records, in check order, each with its line for people. */
   checks: CheckEntry[];
+  /**
+   * Every drivetrain read into numbers, with its records (T9.3a); absent when the document has
+   * none (results of builds before T9.3a lack it too).
+   */
+  drivetrains?: DrivetrainAnalysis[];
   /** The short notice, shown with the records. */
   disclaimer: string;
 }
@@ -61,6 +74,14 @@ export function checkModel(
   };
 }
 
+/** A part's final bodies as regen built them, for the drivetrain's measurements. */
+function partBodies(context: EvaluationContext): (part: string) => readonly string[] | undefined {
+  return (part) => {
+    const p = context.parts.find((x) => x.partId === part);
+    return p === undefined || !p.built ? undefined : p.bodies;
+  };
+}
+
 /** Whether a document uses the mechanical domain at all. */
 function inUse(context: EvaluationContext): boolean {
   const d = context.document;
@@ -84,27 +105,38 @@ export function createMechEvaluation(options: MechEvaluationOptions): DomainEval
       const model = checkModel(context, simulation(context));
       const seen = new Set<string>();
       const out: EvaluationQuery[] = [];
-      for (const def of registry.list()) {
-        for (const need of def.measures?.(model) ?? []) {
-          const k = `${need.part}\n${need.body}`;
-          if (seen.has(k)) continue;
-          seen.add(k);
-          out.push({ type: 'body', part: need.part, body: need.body });
-        }
+      const needs = registry.list().flatMap((def) => def.measures?.(model) ?? []);
+      needs.push(...drivetrainNeeds(context.document, partBodies(context)));
+      for (const need of needs) {
+        const k = `${need.part}\n${need.body}`;
+        if (seen.has(k)) continue;
+        seen.add(k);
+        out.push({ type: 'body', part: need.part, body: need.body });
       }
       return out;
     },
     evaluate(context, answers) {
       if (!inUse(context)) return {};
-      const model = checkModel(context, simulation(context), measuredFrom(answers));
+      const measured = measuredFrom(answers);
+      const model = checkModel(context, simulation(context), measured);
       const run = runChecks(model, registry, cache, options.implementation);
-      if (run.entries.length === 0) return {};
+      const drivetrains = analyseDrivetrains({
+        document: context.document,
+        variables: (n) => context.variables.get(n),
+        measured,
+        partBodies: partBodies(context),
+      });
+      if (run.entries.length === 0 && drivetrains.length === 0) return {};
       const data: MechEvaluation = {
         version: MECH_EVALUATION_VERSION,
         checks: run.entries,
+        ...(drivetrains.length > 0 ? { drivetrains } : {}),
         disclaimer: DISCLAIMER_SHORT,
       };
-      return { data: data as unknown as JsonValue, warnings: run.warnings };
+      return {
+        data: data as unknown as JsonValue,
+        warnings: [...drivetrainWarnings(drivetrains), ...run.warnings],
+      };
     },
   };
 }

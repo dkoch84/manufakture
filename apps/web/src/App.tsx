@@ -130,6 +130,7 @@ import {
 import { createConstructionUiStore, type ConstructionUiStore } from './construction/state';
 import { MechToolbar } from './mech/MechStart';
 import { MechChecksButton } from './mech/checks/ChecksPanel';
+import { MechDrivetrainButton } from './mech/drivetrain/DrivetrainPanel';
 import { MechPartsButton } from './mech/parts/PartsDialog';
 import { MechRequirementsButton } from './mech/requirements/RequirementsDialog';
 import { DrawingTabs } from './drawing/DrawingTabs';
@@ -2419,6 +2420,7 @@ export function App({
             <MechToolbar documents={documents} disabled={dialog !== null} />
             <MechPartsButton documents={documents} disabled={dialog !== null} />
             <MechRequirementsButton documents={documents} disabled={dialog !== null} />
+            <MechDrivetrainButton documents={documents} model={model} disabled={dialog !== null} />
             <MechChecksButton model={model} disabled={dialog !== null} />
           </div>
         )}

@@ -435,6 +435,33 @@ describe('mech expressions', () => {
     ]);
   });
 
+  it('read a drivetrain’s typed inertias as inertias, on stages and the output', () => {
+    const doc = mechDocument();
+    const d = drivetrain();
+    const typed = {
+      ...d,
+      stages: d.stages.map((s) => (s.id === 'stage#2' ? { ...s, inertia: x('2e-5 kg*m^2') } : s)),
+      output: { ...d.output, inertia: x('20 g*cm^2') },
+    } as typeof d;
+    const done = apply(doc, { type: 'setDrivetrain', drivetrain: typed }).document;
+    const sites = mechExpressions(done.mech).filter(
+      (s) => s.itemId === 'drive#1' && s.path.includes('inertia'),
+    );
+    expect(sites.map((s) => [s.path, s.expected])).toEqual([
+      [['stages', 1, 'inertia'], 'inertia'],
+      [['output', 'inertia'], 'inertia'],
+    ]);
+    expect(serialize(done)).toContain('2e-5 kg*m^2');
+    // A linear output has no inertia field.
+    const linear = {
+      ...d,
+      output: { kind: 'linear', lead: x('5'), efficiency: x('0.9'), inertia: x('1 kg*m^2') },
+    } as unknown as typeof d;
+    expect(
+      DocumentSchema.safeParse({ ...doc, mech: { ...doc.mech, drivetrains: [linear] } }).success,
+    ).toBe(false);
+  });
+
   it('must name existing variables and must not measure the model', () => {
     const doc = mechDocument();
     const lc = { ...loadCase(), dynamic: { ...loadCase().dynamic!, force: x('#missing') } };

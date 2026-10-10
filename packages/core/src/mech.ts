@@ -329,8 +329,10 @@ export function drivetrainExpressions(d: Drivetrain): MechExpressionSite[] {
       }
       add(['stages', i, 'efficiency'], s.efficiency, 'number');
     }
+    add(['stages', i, 'inertia'], s.inertia, 'inertia');
   });
   const o = d.output;
+  if (o.kind !== 'linear') add(['output', 'inertia'], o.inertia, 'inertia');
   if (o.kind === 'spool') {
     add(['output', 'length'], o.length, 'length');
     add(['output', 'core'], o.core, 'length');

@@ -6,7 +6,8 @@
 // specification notes, hazards, test bands) is core's `mech` section. Purchased parts (the
 // catalog model, BOM lines, the `mech.placeholder` feature) are `./parts`; the built-in family
 // catalogs and the motor constant conversions are `./catalog`; the resistance laws, motions, duty
-// cycles and templates of requirements and load cases are `./requirements`. See README.md.
+// cycles and templates of requirements and load cases are `./requirements`; the drivetrain chain
+// (ratios, efficiencies, reflected inertia, motor torque) is `./drivetrain`. See README.md.
 
 export const packageName = '@manufakture/domain-mech';
 
@@ -39,3 +40,4 @@ export * from './parts';
 export * from './catalog';
 export * from './checks';
 export * from './requirements';
+export * from './drivetrain';

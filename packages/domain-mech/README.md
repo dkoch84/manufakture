@@ -299,6 +299,70 @@ them meaning, in SI throughout.
   part: the full charge within 2.5 h is a requirement but the 140 W USB-C input is not stated, and
   of R14's 0 to 40 °C only the 40 °C end appears (as the hold case's ambient).
 
+## Drivetrain (`src/drivetrain/`, T9.3a)
+
+Core stores the chain (`mech.drivetrains`, ADR 0017 decision 9); this module reads it into numbers
+and states them as calc records. One degree of freedom per drivetrain, from the motor to the
+output; couplings between drivetrains and coupling mates are a later phase.
+
+- **The chain** (`chain.ts`): `drivetrainChain({ document, variables, measured?, partBodies? }, d)`
+  gives each stage's ratio and efficiency, `n` (the motor's speed over an element's) at every
+  stage's input and output, every turning element with its inertia, and the problems by path from
+  the drivetrain. A ratio is input speed over output speed (a 5:1 reduction is 5); tooth counts
+  give driven over driver. A ratio must be above 0, a tooth count a whole number from 1, an
+  efficiency above 0 and at most 1, an inertia not below 0.
+- **Where an inertia comes from**, in order: the stage's typed `inertia` (it wins, the user typed it
+  on purpose), the motor entry's `rotorInertia` (catalog), or the kernel's mass properties of the
+  bodies the named instance shows (each body's volume inertia times its material's density, moved
+  to the common centre of mass). A motor's instance is never measured (its housing is not its
+  rotor). A reduction's typed inertia is referred to its input, as gearbox datasheets give it; a
+  gear or planetary stage's `instances` are measured with the first at the input speed and the
+  rest at the output speed (the order of `{ driver, driven }`). A belt's inertia is typed or not
+  counted. A gear or planetary member fixed in the assembly (a held ring) does not turn and is not
+  counted; members that turn at a third speed (planets, a turning ring) need the stage's inertia
+  typed, which the records say for every planetary stage. The spin axis is not in the model, so a
+  measured element turns about its axis of symmetry: the principal axis whose moment differs most
+  from the other two (the largest for a disc or spool, the smallest for a shaft); the records say
+  so with the three moments, and add that the axis is a guess when no two moments agree within
+  `SYMMETRY_TOLERANCE` (5 %). A linear output adds a zero element for the screw and the load it
+  carries, and every record says that the screw's lead, efficiency, inertia and carried mass are
+  not in it (the numbers stop at the screw shaft). An element
+  with no source counts as zero, stated in the records' assumptions; one whose source gives no
+  value (a missing instance, an unmeasured body, no material, a catalog entry with no rotor
+  inertia) makes the records that need it `unknown`, naming why.
+- **Nested sub-assemblies**: an instance of a part from another document (how a sub-assembly
+  enters an assembly) is not measured, as the session's assembly mass skips it; type its inertia.
+  A suppressed instance is not measured either.
+- **Records** (`records.ts`), `MechRecord`s with `check` and the drivetrain as subject, none with a
+  factor or limit: `drivetrain.ratio` (the product of the ratios), `drivetrain.efficiency` (the
+  product of the efficiencies), `drivetrain.inertia` (reflected to the motor, `J = sum J_k / n_k^2`,
+  by equal kinetic energy, each term in the working) and `drivetrain.inertia-output` (`J i^2`).
+  `analyseDrivetrain` / `analyseDrivetrains` give the chain with its records and the two inertias.
+- **Torque** (`torque.ts`): `motorTorque(chain, { outputTorque, outputAcceleration?, flow })`, a
+  `drivetrain.torque` record. A positive acceleration speeds the motion up in its own direction.
+  With `flow: 'driving'` the motor's torque is in the direction of motion and every efficiency
+  divides on the way back to it, `T_m = T_out / (i eta) + sum J_k alpha_m / (n_k^2 eta_k)`. With
+  `'back-driven'` (the user pulling the cable out, the motor generating) the motor's torque is
+  against the motion: the user's torque crosses the chain toward the motor, each element takes
+  what its acceleration needs on the way, and what is left reaches the motor times the
+  efficiencies, so `T_m = T_out eta / i - sum J_k alpha_m eta_k / n_k^2`. Here
+  `alpha_m = i alpha_out` and `eta_k` is the product of the efficiencies between the motor and
+  element k. A steady torque needs no inertias.
+- **References**: a stage naming an instance, mate, purchased use or body that is not there is a
+  `reference` problem, and `drivetrainWarnings` turns each into a `mech-reference` warning on the
+  drivetrain (`objectId` the drivetrain, `target` the missing id). A chain not starting at its one
+  motor, a motor stage whose use is not a motor, or a mate that is not revolute is a `structure`
+  problem; an expression that does not read or is out of range, a `value` problem.
+- **Through regen**: the evaluation stage's first step also asks for the bodies of every instance a
+  drivetrain would measure (`drivetrainNeeds`: nothing typed or catalog-given); its second adds
+  `drivetrains: DrivetrainAnalysis[]` to `MechEvaluation` (absent when the document has none) and
+  the `mech-reference` warnings. `MECH_IMPLEMENTATION` is 4.
+- **The typed override** is core's optional `inertia` (an `inertia` expression) on every stage and
+  on spool and rotary outputs, added within format version 19 (ADR 0017 decision 9 lists it).
+- Tests: `drivetrain.test.ts` holds the acceptance, direct drive and a 5:1 belt drive of the same
+  spool against a hand calculation written out step by step; `drivetrain.regen.test.ts` measures a
+  placed bearing (a tube) with the real kernel against `m (ro^2 + ri^2) / 2`.
+
 ## Review
 
 `mechDataSummariser` describes a change of `domains.mech` (a start lists both factors, set or not)
