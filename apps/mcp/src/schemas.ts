@@ -19,6 +19,7 @@ import {
   schemaIndex,
 } from '@manufakture/session';
 import { z } from 'zod';
+import { QUANTITY_CATEGORIES, QUANTITY_LISTS } from './quantities';
 
 // -----------------------------------------------------------------------------------------------
 // Pieces
@@ -323,7 +324,43 @@ export const Inputs = {
       .optional()
       .describe("Also draw the branch's base version at the same camera (two images per view)."),
   }),
-  get_quantities: z.strictObject(session),
+  get_quantities: z.strictObject({
+    ...session,
+    lists: z
+      .array(z.enum(QUANTITY_LISTS))
+      .min(1)
+      .max(QUANTITY_LISTS.length)
+      .optional()
+      .describe(
+        'Only these lists: cutList (boards and wood shapes), hardware, takeoffs (construction). Default all of them; with owner, takeoffs.',
+      ),
+    categories: z
+      .array(z.enum(QUANTITY_CATEGORIES))
+      .min(1)
+      .max(QUANTITY_CATEGORIES.length)
+      .optional()
+      .describe(
+        "Only rows of these categories, and totals of these groups. The cut list's: sheet, lumber, part, hardware; a takeoff's: framing, linear, faces (as built), lumber, sheet (to buy). A takeoff's cost is then the kept rows' sum, and its subtotals are left out.",
+      ),
+    owner: z
+      .union([ModelId, z.array(ModelId).min(1).max(64)])
+      .optional()
+      .describe(
+        "Count only the framing members and sheet faces these features own (walls, openings, floors, roofs; an opening's members are its own, not its wall's). The takeoff is made for them alone: its lumber and sheets to buy are theirs. No cut list.",
+      ),
+    detail: z
+      .boolean()
+      .optional()
+      .describe(
+        "false: no row's sources and no layouts (the cut list's sheets and lumber, a takeoff's faces, sheets and lumber). Default true.",
+      ),
+    compare: z
+      .boolean()
+      .optional()
+      .describe(
+        "Answer what changed instead: the base version's quantities against the head's, as the review bundle shows them (rows and totals that differ, each with base and head). lists, categories and owner apply to both sides first.",
+      ),
+  }),
   get_errors: z.strictObject(session),
   get_history: z.strictObject(session),
   apply: z.strictObject({
@@ -636,7 +673,14 @@ export const Outputs: Record<ToolName, z.ZodType> = {
       }),
     ),
   }),
-  get_quantities: envelope({ quantities: Any, reviewed: z.boolean() }),
+  get_quantities: envelope({
+    quantities: Any,
+    reviewed: z.boolean(),
+    baseVersion: z
+      .string()
+      .optional()
+      .describe('With compare: the base version the head was compared with.'),
+  }),
   get_errors: envelope({ errors: z.array(Any) }),
   get_history: envelope({ history: z.array(Any) }),
   apply: envelope(BatchReportOut),

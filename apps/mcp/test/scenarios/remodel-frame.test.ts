@@ -17,10 +17,11 @@
 
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { MAIN_BRANCH } from '@manufakture/library';
 import { shedDocument } from '@manufakture/session/test-fixtures';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { harness, value, type Data, type Harness } from '../harness';
+import { harness, value, type Data, type Harness, type Structured } from '../harness';
 
 const DOC = 'doc-shed';
 const PART = 'part#1';
@@ -105,11 +106,15 @@ describe('remodel-frame: the request, scripted', () => {
   /** Member ids of the back wall, the right wall and the door as built, read per feature. */
   let builtIds: Set<string>;
   let backBefore: Data;
+  let baseVersion: string;
+  /** get_quantities' compare answer, base against head. */
+  let compared: Data;
 
   it('opens a session on the shed and reads the takeoff as built', async () => {
     const s = value(await h.call('open_session', { documentId: DOC }));
     sessionId = s.sessionId;
     branch = s.branch;
+    baseVersion = s.baseVersion;
     expect(s.branch).not.toBe(MAIN_BRANCH);
     // The outline counts members per wall; get_object's members query lists them per feature.
     expect(s.outline.parts[0].memberSets).toEqual(
@@ -242,6 +247,58 @@ describe('remodel-frame: the request, scripted', () => {
     }
   });
 
+  it('answers "what changed" in one readable result: get_quantities with compare', async () => {
+    // Found: the whole answer was 79,269 and 83,825 characters for this shed, over Claude Code's
+    // limit for one tool result. Follow-up 5 (#1217): options that narrow it.
+    const length = (r: CallToolResult) => (r.content[0] as { text: string }).text.length;
+    expect(length(await h.raw('get_quantities', { sessionId }))).toBeGreaterThan(80_000);
+    const r = await h.raw('get_quantities', { sessionId, compare: true });
+    expect(length(r)).toBeLessThan(20_000);
+    compared = value(r.structuredContent as Structured);
+    expect(compared).toMatchObject({ reviewed: false, baseVersion });
+    const rows = compared.quantities.rows;
+    expect(rows.omitted).toBe(0);
+    expect(new Set((rows.items as Data[]).map((x) => x.list))).toEqual(new Set(['takeoff Part 1']));
+    const row = (category: string, item: string) =>
+      (rows.items as Data[]).find((x) => x.category === category && x.item === item)!;
+    // The window's rough sill is new; its two header plies double the header row.
+    expect(row('framing', 'Rough sill')).toMatchObject({ base: null, head: { quantity: 1 } });
+    expect(row('framing', 'Header').head.quantity - row('framing', 'Header').base.quantity).toBe(2);
+    // GAP PROBE (phase): net counts per row: the studs the window displaces cancel against new
+    // ones, and the door's rebuilt members do not show at all.
+    const studs = row('framing', 'Stud, Corner stud, King stud');
+    expect(studs.head.quantity).toBeLessThan(studs.base.quantity);
+    const each = (compared.quantities.totals as Data[]).find(
+      (x) => x.group === 'framing' && x.unit === 'each',
+    )!;
+    expect([each.base, each.head]).toEqual([memberIds(before).size, memberIds(after).size]);
+    // What to buy changes too, from the 1D layout of the whole frame.
+    expect((rows.items as Data[]).some((x) => x.category === 'lumber')).toBe(true);
+
+    // One feature alone: the window's takeoff is all new, lumber to buy included.
+    const own = await h.raw('get_quantities', { sessionId, compare: true, owner: window });
+    expect(length(own)).toBeLessThan(20_000);
+    const ownRows = value(own.structuredContent as Structured).quantities.rows.items as Data[];
+    expect(ownRows.length).toBeGreaterThan(0);
+    for (const x of ownRows) expect(x.base).toBeNull();
+    const win = (await membersOf(sessionId, window)).members as Data[];
+    expect(
+      ownRows
+        .filter((x) => x.category === 'framing')
+        .reduce((n, x) => n + (x.head.quantity as number), 0),
+    ).toBe(win.length);
+    expect(ownRows.some((x) => x.category === 'lumber')).toBe(true);
+
+    // The head's whole takeoff without source lists and layouts fits too.
+    const lean = await h.raw('get_quantities', { sessionId, lists: ['takeoffs'], detail: false });
+    expect(length(lean)).toBeLessThan(20_000);
+    expect(Object.keys(value(lean.structuredContent as Structured).quantities).sort()).toEqual([
+      'notes',
+      'reviewed',
+      'takeoffs',
+    ]);
+  });
+
   it('GAP PROBE (phase): the takeoff counts the whole frame, with no phase on any row', async () => {
     const t = takeoffOf(after);
     const each = (t.totals as Data[]).find((x) => x.group === 'framing' && x.unit === 'each');
@@ -330,6 +387,9 @@ describe('remodel-frame: the request, scripted', () => {
     const stored = await h.app.library.reviewBundle(DOC, branch);
     if (!stored.ok || stored.value === null) throw new Error('no bundle');
     const bundle = (stored.value.record as Data).bundle as Data;
+    // The bundle's quantity delta is the one get_quantities' compare gave (a drawing and an export
+    // since change no quantity).
+    expect(bundle.quantities).toEqual(compared.quantities);
     const totals = bundle.quantities.totals as Data[];
     const each = totals.find((x) => x.group === 'framing' && x.unit === 'each')!;
     // GAP PROBE (phase): base and head totals, not new material: the door's rebuilt members do

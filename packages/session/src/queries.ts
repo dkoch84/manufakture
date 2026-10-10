@@ -16,6 +16,7 @@ import {
   memberListing,
   takeoffModel,
   type ConstructionTakeoff,
+  type ConstructionTakeoffInput,
   type MemberListing,
 } from '@manufakture/domain-construction';
 import { documentCutList, type CutList } from '@manufakture/domain-wood';
@@ -1266,23 +1267,51 @@ function placeBox(box: { min: Vec3; max: Vec3 }, t?: Placement): { min: Vec3; ma
 export interface Quantities {
   /** Always false on an agent's branch: nothing here was reviewed (ADR 0016 decision 6). */
   reviewed: false;
-  /** The woodworking cut list (boards and wood shapes), or null when it could not be made. */
+  /**
+   * The woodworking cut list (boards and wood shapes), or null when it could not be made or the
+   * scope leaves it out (`owners`).
+   */
   cutList: CutList | null;
   /** Hardware from joints (dowels, pocket screws) and slides: the cut list's hardware lines. */
   hardware: CutList['hardware'];
-  /** One construction takeoff per part studio with framing members. */
+  /** One construction takeoff per part studio with framing members (in the scope). */
   takeoffs: { partId: string; takeoff: ConstructionTakeoff; notes: string[] }[];
   /** What could not be counted, for people. */
   notes: string[];
 }
 
-/** Cut list, hardware and takeoffs of the last regen, as data (T8.1b's builders). */
-export function quantities(ctx: QueryContext): Quantities {
+/**
+ * What the quantities count. Empty: everything, as the regen made it. A scope narrows what goes
+ * into the takeoffs, so their purchase rows (`lumber`, `sheet`), layouts and totals are worked out
+ * for what is counted alone, not cut out of the whole frame's.
+ */
+export interface QuantityScope {
+  /**
+   * Feature ids (walls, openings, floors, roofs): only the framing members and sheet faces these
+   * features own are counted, and part studios with none are left out. The cut list and its
+   * hardware are not counted (they have no owner). An opening's members are its own, not its
+   * wall's.
+   */
+  owners?: readonly string[];
+}
+
+/**
+ * What the quantities are made from, before any scope: the cut list and each part studio's
+ * takeoff input. Plain data, so a host may keep it (the session keeps its base's).
+ */
+export interface QuantitySources {
+  cutList: CutList | null;
+  takeoffs: { partId: string; input: ConstructionTakeoffInput; notes: string[] }[];
+  notes: string[];
+}
+
+/** Cut list and takeoff inputs of the last regen (T8.1b's builders). */
+export function quantitySources(ctx: Pick<QueryContext, 'document' | 'model'>): QuantitySources {
   const document = ctx.document;
   const result = ctx.model.last;
   const notes: string[] = [];
   let cutList: CutList | null = null;
-  const takeoffs: Quantities['takeoffs'] = [];
+  const takeoffs: QuantitySources['takeoffs'] = [];
   if (result !== null) {
     try {
       cutList = documentCutList({ document, parts: result.parts, assemblies: result.assemblies });
@@ -1307,11 +1336,7 @@ export function quantities(ctx: QueryContext): Quantities {
           settings,
           stock: stock.ok ? stock.data : undefined,
         });
-        takeoffs.push({
-          partId: part.partId,
-          takeoff: constructionTakeoff(model.input),
-          notes: model.notes,
-        });
+        takeoffs.push({ partId: part.partId, input: model.input, notes: model.notes });
       } catch (e) {
         notes.push(
           `The takeoff of ${part.partId} could not be made: ${e instanceof Error ? e.message : String(e)}`,
@@ -1319,7 +1344,37 @@ export function quantities(ctx: QueryContext): Quantities {
       }
     }
   }
+  return { cutList, takeoffs, notes };
+}
+
+/** The quantities of `sources` within `scope`. */
+export function quantitiesOf(sources: QuantitySources, scope: QuantityScope = {}): Quantities {
+  const notes = [...sources.notes];
+  const owners = scope.owners === undefined ? null : new Set(scope.owners);
+  const cutList = owners === null ? sources.cutList : null;
+  const takeoffs: Quantities['takeoffs'] = [];
+  for (const t of sources.takeoffs) {
+    let input = t.input;
+    if (owners !== null) {
+      const members = input.members.filter((m) => owners.has(m.owner));
+      const faces = (input.faces ?? []).filter((f) => owners.has(f.owner));
+      if (members.length === 0 && faces.length === 0) continue;
+      input = { ...input, members, faces };
+    }
+    try {
+      takeoffs.push({ partId: t.partId, takeoff: constructionTakeoff(input), notes: t.notes });
+    } catch (e) {
+      notes.push(
+        `The takeoff of ${t.partId} could not be made: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  }
   return { reviewed: false, cutList, hardware: cutList?.hardware ?? [], takeoffs, notes };
+}
+
+/** Cut list, hardware and takeoffs of the last regen, as data, within `scope`. */
+export function quantities(ctx: QueryContext, scope: QuantityScope = {}): Quantities {
+  return quantitiesOf(quantitySources(ctx), scope);
 }
 
 // ---------------------------------------------------------------------------------------------

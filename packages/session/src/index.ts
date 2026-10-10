@@ -53,6 +53,8 @@ export {
   errorsOf,
   measure,
   quantities,
+  quantitiesOf,
+  quantitySources,
   type BodyRef,
   type ErrorLine,
   type GeometryHit,
@@ -63,6 +65,8 @@ export {
   type MembersQuery,
   type ObjectQuery,
   type Quantities,
+  type QuantityScope,
+  type QuantitySources,
   type QueryContext,
 } from './queries';
 export { schemaIndex, schemaOf } from './schema';

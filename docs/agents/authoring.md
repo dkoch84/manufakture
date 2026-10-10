@@ -1640,10 +1640,45 @@ the front wall). The whole feature is sent again, with its added members:
 }
 ```
 
-The takeoff (lumber and sheet goods) is in the quantities:
+The takeoff (lumber and sheet goods) is in the quantities. The whole answer is large (about
+80,000 characters for this small shed, more than many clients take in one tool result), so ask
+for what you need. To see what your branch changed, ask for `compare`: the base version's
+quantities against the head's, as the review bundle shows them. Only rows and totals that differ
+are listed, each with `base` and `head` (`null` where the row is not there on that side), and
+`baseVersion` says what was compared.
 
 ```json mcp:get_quantities
-{ "sessionId": "<session>" }
+{ "sessionId": "<session>", "compare": true }
+```
+
+```json mcp:result
+{ "ok": true, "reviewed": false, "quantities": { "rows": { "omitted": 0 } } }
+```
+
+These are net counts per row: a stud the window displaces and a stud it adds cancel out, and a
+moved opening keeps its members' ids, so the door's rebuilt framing does not show as new. The
+`lumber` and `sheet` rows (what to buy) come from laying out the whole frame again, so some of
+their changes are only reshuffles. To count one feature alone, name it in `owner` (a list for
+several): the takeoff is then made for its members and sheet faces only, its lumber and sheets to
+buy included. An opening's members are its own, not its wall's. With `owner` there is no cut list.
+
+```json mcp:get_quantities
+{ "sessionId": "<session>", "owner": "extension#10", "compare": true }
+```
+
+The other options narrow what is shown: `lists` (any of `cutList`, `hardware`, `takeoffs`),
+`categories` (rows of those categories and totals of those groups: a takeoff's `framing`,
+`linear` and `faces` as built, `lumber` and `sheet` to buy; the cut list's `sheet`, `lumber`,
+`part` and `hardware`) and `detail: false` (no row's `sources`, and no layouts). They apply to
+both sides of a `compare` too. With no option the answer is everything, as before.
+
+```json mcp:get_quantities
+{
+  "sessionId": "<session>",
+  "lists": ["takeoffs"],
+  "categories": ["lumber", "sheet"],
+  "detail": false
+}
 ```
 
 ```json mcp:close_session
@@ -2056,6 +2091,8 @@ Redo what was dropped, check, then submit. When Main has not moved, nothing happ
   an error you can read (`error.kind` is `core`, `session` or `server`). Nothing is thrown.
 - A batch holds at most 500 commands, a label 200 characters. Results over 256 KiB are cut, and
   the cuts are listed under `truncated`: ask for less (a `limit`, one object) rather than more.
+  Your client may take much less in one result: `get_quantities` without options can be tens of
+  thousands of characters, so use its `compare`, `owner`, `lists`, `categories` and `detail`.
 - Four sessions at once with the default worker engine, two with the in-process one (the
   `too-many-sessions` refusal says how many); a session is closed when the server stops, and the
   branch stays.

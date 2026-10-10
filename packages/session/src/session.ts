@@ -51,7 +51,8 @@ import {
   measure,
   membersOf,
   objectOf,
-  quantities,
+  quantitiesOf,
+  quantitySources,
   tree,
   type ErrorLine,
   type GeometryHit,
@@ -59,6 +60,8 @@ import {
   type MembersAnswer,
   type QueryContext,
   type Quantities,
+  type QuantityScope,
+  type QuantitySources,
 } from './queries';
 import { nodeExtensions } from './node-host';
 import { replayOnto } from './rebase';
@@ -297,6 +300,8 @@ export class Session {
   /** `close` was asked: new calls answer `closed`; the call in flight gets `regenStopMs`. */
   #closing = false;
   #queue: Promise<unknown> = Promise.resolve();
+  /** The base version's quantity sources, made on first use: the base never changes under it. */
+  #baseSources: { version: string; sources: QuantitySources } | null = null;
   #idle: ReturnType<typeof setTimeout> | null = null;
   /** Kernels replaced by this session (restarts and kills). */
   #replacements = 0;
@@ -1504,8 +1509,61 @@ export class Session {
     return this.#readResult(() => measure(this.#context(), query));
   }
 
-  quantities(): Promise<SessionResult<Quantities>> {
-    return this.#read(() => quantities(this.#context()));
+  /** The head's quantities within `scope` (`quantitiesOf`). */
+  quantities(scope: QuantityScope = {}): Promise<SessionResult<Quantities>> {
+    return this.#read(() => quantitiesOf(quantitySources(this.#context()), scope));
+  }
+
+  /**
+   * The base version's quantities within `scope`: what the branch started from, to compare with
+   * the head. The base is regenerated once, on an engine of its own (as the review bundle's is,
+   * running the same scripts), and its quantity sources kept until the base changes.
+   */
+  baseQuantities(scope: QuantityScope = {}): Promise<SessionResult<Quantities>> {
+    return this.#readResult(async () => {
+      const version = this.#base.id;
+      let kept = this.#baseSources;
+      if (kept?.version !== version) {
+        const made = await this.#regenBaseSources(version);
+        if (!made.ok) return made;
+        kept = { version, sources: made.value };
+        this.#baseSources = kept;
+      }
+      return done(quantitiesOf(kept.sources, scope));
+    });
+  }
+
+  async #regenBaseSources(version: string): Promise<SessionResult<QuantitySources>> {
+    const base = await this.#host.library.readVersion(this.documentId, version);
+    if (!base.ok) return sessionError('storage', base.message);
+    const document = base.value.document;
+    let engine: Engine;
+    try {
+      engine = await this.#host.engine();
+    } catch (e) {
+      return sessionError('kernel', this.#public(e, 'starting the base engine'));
+    }
+    try {
+      engine.scriptBase = document;
+      await engine.addRunawayScripts?.(this.#engine.runawayScripts ?? []);
+      const ms = this.#host.limits.regenMsPerBatch;
+      const regen = await within(engine.api.regen(document, { generation: 1 }), ms);
+      if (regen === 'timeout') {
+        engine.api.cancel(1).catch(() => undefined);
+        return sessionError('regen-timeout', `The base's regen took longer than ${ms} ms.`, ms);
+      }
+      if ('error' in regen) {
+        return sessionError('kernel', this.#public(regen.error, 'regenerating the base'));
+      }
+      if (regen.value === null) return sessionError('kernel', 'The base regen was superseded.');
+      const model = new ModelState();
+      model.update(regen.value);
+      return done(quantitySources({ document, model }));
+    } catch (e) {
+      return sessionError('kernel', this.#public(e, 'regenerating the base'));
+    } finally {
+      await engine.close().catch(() => undefined);
+    }
   }
 
   errors(): Promise<SessionResult<ErrorLine[]>> {

@@ -33,6 +33,7 @@ written to `process.stdout`, and `console.log`, `info` and `debug`, to stderr.
 | `src/schemas.ts`        | Every tool's input and output schema (zod).                                                            |
 | `src/results.ts`        | Results as data: `{ ok, ...fields }` or `{ ok: false, error }`, held under the JSON limit.             |
 | `src/bounds.ts`         | `boundJson`: cuts the largest lists and the longest strings until a result fits, and reports the cuts. |
+| `src/quantities.ts`     | `get_quantities`' options: the scope (`owner`), the lists and categories shown, `detail: false`.       |
 | `src/render.ts`         | The `render` tool: PNG views of the head (and the base) through `@manufakture/render`.                 |
 | `src/exports.ts`        | The `export` tool's formats, through T8.1b's Node entry points.                                        |
 | `src/files.ts`          | Writing into the output directory and nowhere else: safe names, `realpath`, no symbolic links.         |

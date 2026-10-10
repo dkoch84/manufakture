@@ -1,5 +1,5 @@
 {
-  "surfaceVersion": "1.8.0",
+  "surfaceVersion": "1.9.0",
   "tools": [
     {
       "name": "apply",
@@ -1565,6 +1565,51 @@
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": false,
         "properties": {
+          "categories": {
+            "items": {
+              "enum": ["sheet", "lumber", "part", "hardware", "framing", "linear", "faces"],
+              "type": "string"
+            },
+            "maxItems": 7,
+            "minItems": 1,
+            "type": "array"
+          },
+          "compare": {
+            "type": "boolean"
+          },
+          "detail": {
+            "type": "boolean"
+          },
+          "lists": {
+            "items": {
+              "enum": ["cutList", "hardware", "takeoffs"],
+              "type": "string"
+            },
+            "maxItems": 3,
+            "minItems": 1,
+            "type": "array"
+          },
+          "owner": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "minLength": 1,
+                "pattern": "^[\\x21-\\x7e]+$",
+                "type": "string"
+              },
+              {
+                "items": {
+                  "maxLength": 512,
+                  "minLength": 1,
+                  "pattern": "^[\\x21-\\x7e]+$",
+                  "type": "string"
+                },
+                "maxItems": 64,
+                "minItems": 1,
+                "type": "array"
+              }
+            ]
+          },
           "sessionId": {
             "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
             "type": "string"
@@ -1577,6 +1622,9 @@
         "$schema": "http://json-schema.org/draft-07/schema#",
         "additionalProperties": {},
         "properties": {
+          "baseVersion": {
+            "type": "string"
+          },
           "error": {
             "additionalProperties": {},
             "properties": {

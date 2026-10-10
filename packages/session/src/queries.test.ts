@@ -591,6 +591,51 @@ describe('the shed', () => {
     expect(q.takeoffs).toHaveLength(1);
   });
 
+  it("counts one feature's members alone, and gives the base version's quantities (#1217)", async () => {
+    const s = await start(shedDocument());
+    const before = ok(await s.quantities());
+    // Window 1's members only: the takeoff is made for them, its purchase rows theirs alone.
+    const own = ok(await s.quantities({ owners: ['extension#5'] }));
+    expect(own.cutList).toBeNull();
+    expect(own.takeoffs).toHaveLength(1);
+    const rows = own.takeoffs[0]!.takeoff.rows;
+    const sources = rows.filter((r) => r.category === 'framing').flatMap((r) => r.sources);
+    const listed = ok(await s.members({ kind: 'members', partId: PART, owner: 'extension#5' }));
+    expect(sources.map((x) => x.id).sort()).toEqual(listed.members.map((m) => m.id).sort());
+    expect(rows.some((r) => r.category === 'lumber')).toBe(true);
+    const each = (q: typeof own) =>
+      q.takeoffs[0]!.takeoff.totals.find((t) => t.group === 'framing' && t.unit === 'each')!.value;
+    expect(each(own)).toBe(listed.members.length);
+    expect(each(own)).toBeLessThan(each(before));
+    // A feature that owns nothing leaves every part studio out.
+    expect(ok(await s.quantities({ owners: ['extension#99'] })).takeoffs).toEqual([]);
+
+    const window = s.document.parts[0]!.features.find((f) => f.id === 'extension#5')!;
+    ok(
+      await s.apply({
+        label: 'Move window 1',
+        commands: [
+          {
+            type: 'editFeature',
+            partId: PART,
+            feature: {
+              ...window,
+              expressions: {
+                ...(window as { expressions: Record<string, unknown> }).expressions,
+                position: { source: '60', lengthUnit: 'in', angleUnit: 'deg' },
+              },
+            },
+          },
+        ],
+      }),
+    );
+    const head = ok(await s.quantities());
+    expect(head).not.toEqual(before);
+    // The base is what the session opened on, regenerated on an engine of its own, and kept.
+    expect(ok(await s.baseQuantities())).toEqual(before);
+    expect(ok(await s.baseQuantities({ owners: ['extension#5'] }))).toEqual(own);
+  });
+
   it("lists a feature's members along its wall, and its overrides' statuses", async () => {
     const s = await start(shedDocument());
     // Window 1 on the front wall, centred at 48", 24" wide, sill at 44".

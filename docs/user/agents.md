@@ -201,7 +201,7 @@ The agent sees these tools (each with its schema and a description):
 | `find_geometry`     | Faces and edges by name or by query, with area, centroid, normal and radius                        |
 | `measure`           | Volume, area, mass, bounding box, distances, angles, clearance, interference                       |
 | `render`            | PNG images of views, with highlighted names and section planes; before and after side by side      |
-| `get_quantities`    | Cut list, hardware and takeoff as data, marked `reviewed: false`                                   |
+| `get_quantities`    | Cut list, hardware and takeoff as data (or what changed), marked `reviewed: false`                 |
 | `get_errors`        | Regen errors and warnings                                                                          |
 | `get_history`       | The branch's batches with labels                                                                   |
 | `apply`             | One batch of commands with a label (or a dry run)                                                  |

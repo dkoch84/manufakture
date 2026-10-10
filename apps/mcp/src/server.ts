@@ -19,6 +19,7 @@
 
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { ManufaktureDocument } from '@manufakture/core';
 import {
   DocumentLibrary,
   MAIN_BRANCH,
@@ -27,7 +28,7 @@ import {
   type BranchLocks,
 } from '@manufakture/library';
 import { NodeBackend, NodeBranchLocks } from '@manufakture/library/node';
-import { bundleBuilder, type ReviewView } from '@manufakture/review';
+import { Names, bundleBuilder, quantityDeltas, type ReviewView } from '@manufakture/review';
 import {
   BackendBundleStore,
   ServerApi,
@@ -48,6 +49,7 @@ import type { McpConfig } from './config';
 import { makeExport } from './exports';
 import { outputNames, writeOutputs } from './files';
 import { DEFAULT_IMAGE_LIMITS, renderViews, type ImageLimits } from './render';
+import { narrowed, optionProblem, ownersOf, quantityView, scopeOf } from './quantities';
 import { registerResources } from './resources';
 import {
   DEFAULT_RESULT_LIMITS,
@@ -130,7 +132,7 @@ const DESCRIPTIONS: Record<ToolName, string> = {
   render:
     "PNG images of the head (and with compare, of the base version at the same camera): standard or given orthographic cameras, highlighted names, a section plane; the part studio, or an assembly at its solved poses, with sliders and revolutes held at given values, or with instances placed by hand. What each image is comes as data beside it, for an assembly each mate's coordinates as drawn and warnings for a value past a limit or a pose off its mate.",
   get_quantities:
-    'The cut list, hardware and construction takeoffs of the head, as data, marked reviewed: false.',
+    "The cut list, hardware and construction takeoffs of the head, as data, marked reviewed: false. The whole answer can be tens of thousands of characters: narrow it with lists, categories, owner (one feature's members alone) and detail: false; with compare, only what changed from the branch's base version, row by row.",
   get_errors: 'Every regen error and warning of the head, errors first.',
   get_history: "The branch's log: each batch with its revision, cause, label and time.",
   apply:
@@ -441,9 +443,50 @@ export function createMcpServer(options: ServerOptions): ManufaktureServer {
   sessionTool('measure', async (s, a) =>
     fromSession(await s.measure(a.query), (measurement) => ({ measurement })),
   );
-  sessionTool('get_quantities', async (s) =>
-    fromSession(await s.quantities(), (quantities) => ({ quantities, reviewed: false })),
-  );
+  sessionTool('get_quantities', async (s, a) => {
+    const problem = optionProblem(a);
+    if (problem !== null) return fail(serverError('invalid-input', problem));
+    const scope = scopeOf(a);
+    let base: ManufaktureDocument | undefined;
+    let baseVersion: string | undefined;
+    if (a.compare) {
+      baseVersion = (await s.info()).baseVersion;
+      const read = await library.readVersion(s.documentId, baseVersion);
+      if (!read.ok) {
+        return fail(
+          serverError('not-found', 'The base version could not be read.', {
+            details: [read.message],
+          }),
+        );
+      }
+      base = read.value.document;
+    }
+    // An owner is a feature of the head, or with compare of the base (one the branch deleted).
+    const features = new Set(
+      [s.document, base].flatMap((d) => d?.parts.flatMap((p) => p.features.map((f) => f.id)) ?? []),
+    );
+    if (ownersOf(a).some((id) => !features.has(id))) {
+      return fail(
+        serverError(
+          'invalid-input',
+          a.compare
+            ? 'Each owner must be the id of a feature of the head or of the base.'
+            : 'Each owner must be the id of a feature of the head.',
+        ),
+      );
+    }
+    const head = await s.quantities(scope);
+    if (!a.compare || !head.ok) {
+      return fromSession(head, (q) => ({ quantities: quantityView(q, a), reviewed: false }));
+    }
+    const was = await s.baseQuantities(scope);
+    if (!was.ok) return fromSession(was, () => ({}));
+    const names = new Names([s.document, base]);
+    const delta = quantityDeltas(narrowed(was.value, a), narrowed(head.value, a), (id) =>
+      names.part(id),
+    );
+    return ok({ quantities: delta, reviewed: false, baseVersion });
+  });
   sessionTool('get_errors', async (s) => fromSession(await s.errors(), (errors) => ({ errors })));
   sessionTool('get_history', async (s) =>
     fromSession(await s.history(), (history) => ({ history })),
