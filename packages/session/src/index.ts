@@ -69,6 +69,12 @@ export {
   type QuantitySources,
   type QueryContext,
 } from './queries';
+export {
+  AddConstructionSetSchema,
+  HELPER_SCHEMAS,
+  expandHelpers,
+  type AddConstructionSet,
+} from './helpers';
 export { schemaIndex, schemaOf } from './schema';
 export {
   MAX_LABEL,

@@ -136,7 +136,7 @@ const DESCRIPTIONS: Record<ToolName, string> = {
   get_errors: 'Every regen error and warning of the head, errors first.',
   get_history: "The branch's log: each batch with its revision, cause, label and time.",
   apply:
-    'Apply one batch of core commands with a label: all or nothing, one revision of the branch. Ids may be symbolic (extrude#$boss); the answer maps each symbol to its real id. dryRun applies and regenerates without saving. Returns ids made, status changes, regen errors and measurements of changed bodies.',
+    'Apply one batch of core commands with a label: all or nothing, one revision of the branch. Ids may be symbolic (extrude#$boss); the answer maps each symbol to its real id. A helper command (addConstructionSet: a construction drawing set, or one framing elevation of a wall, as the button in the app makes it) is expanded into core commands first; get_schema has it. dryRun applies and regenerates without saving. Returns ids made, status changes, regen errors and measurements of changed bodies.',
   undo: "Undo the branch's last batch, as a new revision.",
   update_from_main:
     "Replay the branch's batches onto Main's current head, on a new agent branch (the branch id changes). Reports the new branch, the batches applied and those dropped with why.",

@@ -903,6 +903,30 @@ reads `2' 6"`, `3' 0"`, `10' 6"`, `16' 0"`; the door wall's elevation has every 
 members' rectangles; the gable wall's elevation has the `6/12` symbol; moving the door 12" moves
 the strings; the title block has the disclaimer, also when the sheet's only construction view fails and on a plain part view of the shed; forty copies of one view are drawn once and stop at the request budget.
 
+### The construction set (`drawings/set.ts`)
+
+`constructionSetCommand(doc, drawing, like, options, context?)` gives the commands that add a
+building's drawing set to a drawing, as one batch: a plan of each level with walls (`strings:
+'architectural'`), the four building elevations (part views of the layer bodies), a framing
+elevation sheet per wall (a view per segment, from outside) and a roof framing plan per roof, each
+sheet at the largest architectural (or metric) scale that fits its views' places, unless
+`planScale` or `framingScale` names one of `setScales`. With `wall` (and `segment`) only that
+wall's framing elevation sheet. Views are placed from the walls' stored coordinates evaluated with
+the document's variables (`setVariables`, or the caller's), so nothing is regenerated. The app's
+Construction set button (`apps/web/src/construction/drawings/set.ts`) and the session's
+`addConstructionSet` helper both make their sets here; the context gives the variables, the ids
+of new sheets and views (the session's are symbolic), a fresh title block's labels, the part's
+building already read, and a command `budget`: past it the answer is `tooMany`, decided from the
+planned sheets and views (and the empty sheet's removal, only when there is one) before any is
+built. `buildingOf` works out the walls by id and the building's extents once, so a set of one
+wall plans only that wall; a caller building several sets from one document passes `setReads`
+(the construction settings and the part studios by id, read once) so each `buildingOf` reads
+neither again. Names are cut to `MAX_SET_NAME` code points
+(`clipSetName`), never inside a surrogate pair.
+`framingElevationViews` makes one wall's framing elevation views, for the set and for anything
+that adds to an elevation's params. Bounded by `MAX_SET_SHEETS` (200) and `MAX_SET_VIEWS`
+(1,000), checked before anything is built. Tests: `set.test.ts`.
+
 ## Takeoff
 
 `constructionTakeoff({ members, faces, levels?, stock?, settings? })` (`src/takeoff/`, T6.3a,

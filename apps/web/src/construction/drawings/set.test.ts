@@ -6,11 +6,13 @@ import {
   isDomainViewSource,
   type Command,
   type Drawing,
+  type DrawingView,
   type ExtensionFeature,
   type ManufaktureDocument,
 } from '@manufakture/core';
+import { SET_TITLE_FIELDS } from '@manufakture/domain-construction';
 import { describe, expect, it } from 'vitest';
-import { newDrawingCommand } from '../../drawing/model';
+import { TITLE_FIELDS, newDrawingCommand } from '../../drawing/model';
 import { FT, IN, PART, constructionDocument, run, settingsOf } from '../construction.test-fixture';
 import {
   buildingOf,
@@ -214,6 +216,21 @@ describe('the construction set', () => {
     const { drawing: d } = made(withNote, withNote.drawings![0]!);
     expect(d.sheets.map((s) => s.name)[0]).toBe('Sheet 1');
     expect(d.sheets).toHaveLength(8);
+  });
+
+  it("makes one wall's framing elevation with the shared builder, in place of the empty sheet", () => {
+    const { doc, drawing } = withDrawing(shed());
+    const r = made(doc, drawing, { ...AUTO, wall: 'extension#2' });
+    expect(r.c.label).toBe('New framing elevation of Back in Shed set');
+    expect(r.drawing.sheets.map((s) => s.name)).toEqual(['Framing: Back']);
+    // The view the whole set makes for the back wall, but for its id.
+    const set = made(doc, drawing);
+    const withoutId = (v: DrawingView) => ({ ...v, id: '' });
+    expect(r.drawing.sheets[0]!.views.map(withoutId)).toEqual(
+      set.drawing.sheets[3]!.views.map(withoutId),
+    );
+    // A title block made from scratch has the workspace's fields.
+    expect(SET_TITLE_FIELDS).toEqual(TITLE_FIELDS);
   });
 
   it('offers architectural scales for feet and inches, metric ones otherwise', () => {

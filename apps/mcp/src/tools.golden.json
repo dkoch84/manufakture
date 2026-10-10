@@ -1,5 +1,5 @@
 {
-  "surfaceVersion": "1.9.0",
+  "surfaceVersion": "1.10.0",
   "tools": [
     {
       "name": "apply",
@@ -17,6 +17,7 @@
                     "addCamOperation",
                     "addCamSetup",
                     "addCamTool",
+                    "addConstructionSet",
                     "addDimension",
                     "addDrawing",
                     "addExplodeStep",
@@ -1832,6 +1833,7 @@
               "addCamOperation",
               "addCamSetup",
               "addCamTool",
+              "addConstructionSet",
               "addDimension",
               "addDrawing",
               "addExplodeStep",

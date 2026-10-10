@@ -1,12 +1,14 @@
 // JSON Schemas of command types and feature kinds (the `get_schema` read tool, ADR 0016 decision
 // 6): generated from core's zod schemas (`z.toJSONSchema`, input side), with the doc comments of
-// `doc-comments.json` as descriptions.
+// `doc-comments.json` as descriptions. The session's helpers (`helpers.ts`) are listed with the
+// commands, since a batch takes them like one.
 
 import { FEATURE_KINDS, FeatureSchema, SimpleCommandSchema } from '@manufakture/core';
 import { z } from 'zod';
 import docs from './doc-comments.json' with { type: 'json' };
 import type { DocEntry, DocTable } from './doc-comments';
 import { done, sessionError, type SessionResult } from './errors';
+import { HELPER_SCHEMAS } from './helpers';
 
 type JsonSchema = Record<string, unknown>;
 
@@ -77,6 +79,8 @@ function commands(): Map<string, JsonSchema> {
       required: ['type', 'commands'],
       additionalProperties: false,
     });
+    // Session helpers (#1219): expanded into core commands before a batch applies.
+    for (const [type, schema] of HELPER_SCHEMAS) commandSchemas.set(type, toJson(schema));
   }
   return commandSchemas;
 }

@@ -155,6 +155,36 @@ A symbol written with two counters, or used for two different things (two scopes
 (`symbol`), as is one that no command of the batch creates. Two creations of one symbol, or a use
 before its creation, are refused by core like any such batch. A symbol lives for one batch.
 
+### Helpers
+
+A helper is a command type a batch takes that core does not have: the session expands it into
+core commands where it stands, before symbols are resolved (`helpers.ts`, #1219), so the branch's
+log, its replays and the review bundle hold only core commands. `get_schema` lists each helper
+with the commands, with its schema. There is one:
+
+- `addConstructionSet`: a construction drawing set, or with `wall` (and `segment`) one wall's
+  framing elevation, as the app's Construction set button makes it (the construction domain's
+  `constructionSetCommand`, the same code). It becomes an `addDrawing` (for a new drawing: no
+  `drawing`, or a symbolic one) and an `addSheet` and `addView` per sheet and view, plus a
+  `deleteSheet` when an existing drawing's only sheet is still empty.
+
+Helpers sit at the top level of a batch (one inside a nested `batch` is `invalid-input`, saying
+so) and read the document as the batch found it (walls an earlier command of the same batch adds
+are not seen, and a helper naming a drawing symbol an earlier command made is refused). What they
+make gets symbolic ids (`sheet#$__set1s1`), so real ids come from the batch's symbol resolution
+and never collide with another helper's or the agent's; agents may not write symbols starting
+with `__set` (`symbol`), and the symbols the helpers made are left out of the batch report's
+`symbols`. A helper that does not parse or names what is not there is `invalid-input`, naming the
+command by its place in the batch. The expanded batch is bounded by `commandsPerBatch`: each
+helper gets what the batch has left (its own commands counted first), and is refused as
+`too-many-commands` as soon as its planned sheets and views pass that, before any is built, so a
+batch of 500 helpers on a large building stops at the first one past the limit. The part's walls
+are read once per batch (and the variables, the construction settings, the part studios and the
+drawings once for the whole batch, whatever parts the helpers name), with the extents a framing elevation needs, so each later helper on
+the same part costs only its own wall. Wall coordinates are evaluated with the document's
+variables; a variable that measures the model (`distance(...)`) reads the measurements of the
+session's last regen, as the app reads those of the regen it shows.
+
 ## Limits
 
 ADR 0016 decision 3. Each ends in a typed error (`SessionError` with `code` and `limit`), never a

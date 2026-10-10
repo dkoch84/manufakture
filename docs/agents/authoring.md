@@ -1681,6 +1681,53 @@ both sides of a `compare` too. With no option the answer is everything, as befor
 }
 ```
 
+To show the frame, make the drawings the app's **Construction set** button makes, with one
+`addConstructionSet` command. It is a session helper, not a core command: the session expands it
+into `addDrawing`, `addSheet` and `addView` commands (made by the same code as the button) before
+the batch applies, so your branch's history and the review hold those. With `wall` it makes that
+wall's framing elevation (one sheet, a view per segment, seen from outside at the largest scale that
+fits; `segment` picks one); without it, the whole set: a plan per level, the four building
+elevations, a framing elevation sheet per wall and a roof framing plan per roof. `drawing` names an
+existing drawing to add the sheets to, or a symbolic id for a new one (the answer's `symbols` gives
+its real id); left out, a new drawing's id is in `created`. `size`, `orientation`, `planScale` and
+`framingScale` default to tabloid, landscape and `auto`; `get_schema` with
+`{ "command": "addConstructionSet" }` lists the scales. The helper reads the document as the batch
+found it, so add walls in an earlier batch than their drawings; for the same reason, a note an
+earlier command of the batch puts on an existing drawing's only empty sheet does not stop the helper
+from deleting that sheet. Put the helper at the top level of the batch: one inside a nested `batch`
+is refused. The framing elevation of the back wall, with the window you added:
+
+```json mcp:apply
+{
+  "sessionId": "<session>",
+  "label": "Framing elevation of the back wall",
+  "commands": [
+    {
+      "type": "addConstructionSet",
+      "part": "part#1",
+      "wall": "extension#2",
+      "drawing": "drawing#$framing"
+    }
+  ]
+}
+```
+
+```json mcp:result
+{ "ok": true, "symbols": { "$framing": "drawing#1" }, "errors": [] }
+```
+
+A sheet is drawn when it is exported, so export it to look at it (or to hand it over):
+
+```json mcp:export
+{
+  "sessionId": "<session>",
+  "format": "drawing-svg",
+  "drawingId": "drawing#1",
+  "fileName": "back-wall-framing",
+  "overwrite": true
+}
+```
+
 ```json mcp:close_session
 { "sessionId": "<session>" }
 ```

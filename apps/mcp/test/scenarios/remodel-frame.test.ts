@@ -322,52 +322,34 @@ describe('remodel-frame: the request, scripted', () => {
     expect(csv).toMatch(/Header/);
   });
 
-  it('draws the back wall framing only by building the drawing by hand', async () => {
-    // The app's "Construction set" button is app code (apps/web/src/construction/drawings/set.ts),
-    // not a command: an agent writes the drawing, its sheet and its view itself.
+  it("makes the back wall's framing elevation with one helper command and exports it", async () => {
+    // `addConstructionSet` is the app's "Construction set" button as a session helper (#1219):
+    // the session expands it into addDrawing, addSheet and addView, made by the same code.
     const r = value(
       await h.call('apply', {
         sessionId,
         label: 'Framing elevation of the back wall',
         commands: [
-          {
-            type: 'addDrawing',
-            drawing: {
-              id: 'drawing#$framing',
-              name: 'Remodel',
-              nextIds: { sheet: 2, view: 2 },
-              sheets: [
-                {
-                  id: 'sheet#1',
-                  name: 'Framing: Back',
-                  size: 'tabloid',
-                  orientation: 'landscape',
-                  titleBlock: { fields: [{ label: 'Title', value: 'Shed remodel' }] },
-                  views: [
-                    {
-                      id: 'view#1',
-                      source: {
-                        domain: 'construction',
-                        part: PART,
-                        schemaVersion: 1,
-                        params: { kind: 'elevation', wall: BACK },
-                      },
-                      direction: { direction: [0, -1, 0], up: [0, 0, 1] },
-                      scale: { paper: IN('1/4'), model: IN(12) },
-                      position: [215, 140],
-                      options: { hidden: false, smooth: false },
-                    },
-                  ],
-                  dimensions: [],
-                  notes: [],
-                },
-              ],
-            },
-          },
+          { type: 'addConstructionSet', part: PART, wall: BACK, drawing: 'drawing#$framing' },
         ],
       }),
     );
     expect(r.errors).toEqual([]);
+    // The helper's own sheet and view symbols are not reported; the agent's is.
+    expect(Object.keys(r.symbols)).toEqual(['$framing']);
+    const drawing = value(
+      await h.call('get_object', {
+        sessionId,
+        query: { kind: 'drawing', drawingId: r.symbols.$framing },
+      }),
+    ).object as Data;
+    expect(drawing.name).toBe('Framing: Back');
+    expect(drawing.sheets).toHaveLength(1);
+    const view = drawing.sheets[0].views[0];
+    expect(view.source.params).toEqual({ kind: 'elevation', wall: BACK, segment: 1 });
+    // The back wall runs west: seen from outside, looking south, at the largest scale that fits.
+    expect(view.direction).toEqual({ direction: [-0, -1, 0], up: [0, 0, 1] });
+    expect(view.scale.paper.source).toMatch(/"$/);
     const drawingId = r.symbols.$framing as string;
     const svg = value(
       await h.call('export', { sessionId, format: 'drawing-svg', drawingId, fileName: 'back' }),

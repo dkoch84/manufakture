@@ -374,7 +374,9 @@ export const Inputs = {
       .array(CommandInput)
       .min(1)
       .max(DEFAULT_LIMITS.commandsPerBatch)
-      .describe('Core commands, applied as one batch. Ids may be symbolic: extrude#$boss.'),
+      .describe(
+        'Core commands, applied as one batch. Ids may be symbolic: extrude#$boss. A session helper (addConstructionSet) is expanded into core commands where it stands.',
+      ),
     dryRun: z.boolean().optional().describe('Apply and regenerate, then put everything back.'),
   }),
   undo: z.strictObject(session),

@@ -63,6 +63,7 @@ import {
   type QuantityScope,
   type QuantitySources,
 } from './queries';
+import { expandHelpers, hasHelpers, reservedSymbolProblem, withoutHelperSymbols } from './helpers';
 import { nodeExtensions } from './node-host';
 import { replayOnto } from './rebase';
 import { schemaIndex, schemaOf } from './schema';
@@ -861,10 +862,28 @@ export class Session {
       // Nested commands counted, and depth capped, before anything parses the batch.
       const shape = batchProblem(commands, limits.commandsPerBatch);
       if (shape !== null) return sessionError(shape.code, shape.message, shape.limit);
+      // Helpers (`addConstructionSet`) become core commands here, against the head (#1219).
+      const reserved = reservedSymbolProblem(commands);
+      if (reserved !== null) return sessionError('symbol', reserved);
+      let list: readonly unknown[] = commands;
+      let helperSymbols: ReadonlySet<string> = new Set();
+      if (hasHelpers(commands)) {
+        const expanded = expandHelpers(
+          this.#document,
+          commands,
+          limits.commandsPerBatch,
+          this.#model.last?.measurements,
+        );
+        if (!expanded.ok) return sessionError(expanded.code, expanded.message, expanded.limit);
+        list = expanded.commands;
+        helperSymbols = expanded.symbols;
+        const after = batchProblem(list, limits.commandsPerBatch);
+        if (after !== null) return sessionError(after.code, after.message, after.limit);
+      }
       const extensions = this.#host.extensions ?? (sessionExtensions ??= nodeExtensions());
       const resolved = resolveSymbols(
         this.#document,
-        { type: 'batch', commands },
+        { type: 'batch', commands: list },
         { idFields: (type) => extensions.lookup(type)?.definition.idFields },
       );
       if (!resolved.ok) {
@@ -883,7 +902,13 @@ export class Session {
           limits.commandsPerBatch,
         );
       }
-      return this.#write(command, label!.trim(), 'execute', dryRun, table);
+      return this.#write(
+        command,
+        label!.trim(),
+        'execute',
+        dryRun,
+        withoutHelperSymbols(table, helperSymbols),
+      );
     });
   }
 
