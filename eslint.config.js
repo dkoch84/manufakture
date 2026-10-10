@@ -9,7 +9,14 @@ import tseslint from 'typescript-eslint';
 export default defineConfig([
   // spikes/ is outside the pnpm workspace (pnpm-workspace.yaml), so its dependencies are not
   // installed and its files are not linted.
-  globalIgnores(['**/node_modules/', '**/dist/', '**/coverage/', 'spikes/']),
+  // packages/fea/wasm/gmsh.mjs is the mesher's Emscripten glue (packages/fea/build/build-gmsh.sh).
+  globalIgnores([
+    '**/node_modules/',
+    '**/dist/',
+    '**/coverage/',
+    'spikes/',
+    'packages/fea/wasm/gmsh.mjs',
+  ]),
   js.configs.recommended,
   tseslint.configs.recommended,
   {

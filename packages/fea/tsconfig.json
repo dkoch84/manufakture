@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // Node worker threads run these sources with Node's own type stripping (worker/node-hooks.ts),
+    // so the package is erasable syntax only. The tests import the kernel, which is not, so they
+    // are checked by tsconfig.test.json.
+    "erasableSyntaxOnly": true,
+    "lib": ["ES2023", "DOM"],
+    "types": ["node"]
+  },
+  "include": ["src", "wasm/*.d.mts"],
+  "exclude": ["src/**/*.test.ts"]
+}

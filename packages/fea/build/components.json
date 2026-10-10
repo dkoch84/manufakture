@@ -1,0 +1,92 @@
+{
+  "$comment": "What build-gmsh.sh compiles into wasm/gmsh.wasm, with the licence each is used under and the texts in wasm/licenses/ (ADR 0006, amendment of 2026-10-10). `config` is the word gmsh's configuration string (wasm/build-info.json gmshConfig) uses for it; src/licenses.test.ts checks that every word has an entry, that every text exists, that every licence is allowed inside this separate module, and that nothing names Blossom.",
+  "components": [
+    {
+      "name": "gmsh",
+      "version": "5.0.0, commit 29726e7237db13ff77ef3f2db2d7fb9499c4e65c",
+      "config": ["Mesh", "Post", "Solver", "Dlopen"],
+      "license": "GPL-2.0-or-later",
+      "source": "https://gitlab.onelab.info/gmsh/gmsh",
+      "texts": ["gmsh-LICENSE.txt", "gmsh-CREDITS.txt"],
+      "note": "GPL-2.0-or-later with an exception permitting combination with OpenCASCADE, Netgen, METIS and ParaView; we use it under GPL-3.0-or-later. Dlopen is gmsh's plugin loader switch, no code of its own."
+    },
+    {
+      "name": "HXT (gmsh contrib)",
+      "version": "as in gmsh 29726e7",
+      "config": ["Hxt"],
+      "license": "GPL-2.0-or-later",
+      "source": "https://gitlab.onelab.info/gmsh/gmsh/-/tree/master/contrib/hxt",
+      "texts": ["hxt-LICENSE.txt", "hxt-CREDITS.txt"],
+      "note": "Universite catholique de Louvain; GPL-2.0-or-later with an exception permitting combination with gmsh. The default 3D algorithm."
+    },
+    {
+      "name": "TetGen/BR (in gmsh and HXT)",
+      "version": "as in gmsh 29726e7",
+      "config": ["TetGen/BR"],
+      "license": "GPL-2.0-or-later",
+      "source": "https://gitlab.onelab.info/gmsh/gmsh",
+      "texts": ["gmsh-LICENSE.txt", "gmsh-CREDITS.txt"],
+      "note": "Hang Si's boundary recovery code, relicensed under gmsh's licence for use in gmsh by agreement between WIAS and GMESH SPRL (gmsh-CREDITS.txt, hxt-CREDITS.txt). Not the AGPL TetGen."
+    },
+    {
+      "name": "QuadMeshingTools (gmsh contrib)",
+      "version": "as in gmsh 29726e7",
+      "config": ["QuadMeshingTools"],
+      "license": "GPL-2.0-or-later",
+      "source": "https://gitlab.onelab.info/gmsh/gmsh/-/tree/master/contrib/QuadMeshingTools",
+      "texts": ["gmsh-LICENSE.txt"],
+      "note": "Maxence Reberol; its files say 'See the LICENSE.txt file in the Gmsh root directory'. Compiled in only because gmsh's mesh generation calls it on every run (build-gmsh.sh)."
+    },
+    {
+      "name": "Eigen (gmsh contrib)",
+      "version": "as in gmsh 29726e7",
+      "config": ["Eigen[contrib]"],
+      "license": "MPL-2.0",
+      "source": "https://gitlab.com/libeigen/eigen",
+      "texts": [
+        "eigen-COPYING.MPL2.txt",
+        "eigen-COPYING.README.txt",
+        "eigen-COPYING.BSD.txt",
+        "eigen-COPYING.APACHE.txt",
+        "eigen-COPYING.MINPACK.txt"
+      ],
+      "note": "Header-only; primarily MPL-2.0 without Exhibit B, a few files under the BSD, Apache-2.0 and MINPACK texts copied with it."
+    },
+    {
+      "name": "tinyobjloader (gmsh contrib)",
+      "version": "as in gmsh 29726e7",
+      "config": ["tinyobjloader"],
+      "license": "MIT",
+      "source": "https://github.com/tinyobjloader/tinyobjloader",
+      "texts": ["tinyobjloader-LICENSE.txt"],
+      "note": "Wavefront OBJ reading; unused by FEA, compiled because gmsh 5.0.0 does not build without it."
+    },
+    {
+      "name": "Code by other authors in gmsh's sources",
+      "version": "as in gmsh 29726e7",
+      "config": [],
+      "license": "MIT AND BSD-2-Clause AND LicenseRef-UC-permission AND LicenseRef-public-domain",
+      "source": "https://gitlab.onelab.info/gmsh/gmsh",
+      "texts": ["gmsh-CREDITS.txt"],
+      "note": "Listed with their notices in gmsh-CREDITS.txt: libOL and robin_hood (MIT), picojson and nanoflann (BSD-2-Clause), the AVL tree (the University of California's permission notice, a permissive grant), Shewchuk's robust predicates (public domain)."
+    },
+    {
+      "name": "OpenCASCADE Technology",
+      "version": "7.8.1",
+      "config": ["OpenCASCADE"],
+      "license": "LGPL-2.1-only WITH Open-CASCADE-Exception-1.0",
+      "source": "https://github.com/Open-Cascade-SAS/OCCT",
+      "texts": ["occt-LICENSE_LGPL_21.txt", "occt-OCCT_LGPL_EXCEPTION.txt"],
+      "note": "Statically linked into gmsh.wasm (FoundationClasses, ModelingData, ModelingAlgorithms, DataExchange, ApplicationFramework built; the link keeps what gmsh's OCC kernel calls). A second copy of OCCT besides libcascade's; the module stays a separate, replaceable .wasm (ADR 0006 decision 4)."
+    },
+    {
+      "name": "Emscripten runtime and system libraries (musl, libc++, libc++abi)",
+      "version": "Emscripten 3.1.74",
+      "config": [],
+      "license": "(MIT OR NCSA) AND MIT AND Apache-2.0 WITH LLVM-exception",
+      "source": "https://github.com/emscripten-core/emscripten",
+      "texts": ["emscripten-LICENSE.txt", "musl-COPYRIGHT.txt", "llvm-libcxx-LICENSE.txt"],
+      "note": "The glue (gmsh.mjs) and the libraries every Emscripten C++ build links."
+    }
+  ]
+}

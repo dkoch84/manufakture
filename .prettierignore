@@ -8,3 +8,5 @@ playwright-report
 spikes/*/results
 # Written by the e2e acceptance runs (JSON.stringify output, not Prettier style).
 docs/m*-acceptance/numbers.json
+# The mesher's Emscripten glue, written by packages/fea/build/build-gmsh.sh.
+packages/fea/wasm/gmsh.mjs

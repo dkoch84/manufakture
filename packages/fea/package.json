@@ -1,0 +1,25 @@
+{
+  "name": "@manufakture/fea",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "GPL-3.0-or-later",
+  "exports": {
+    ".": "./src/index.ts",
+    "./client": "./src/client.ts",
+    "./browser": "./src/browser.ts",
+    "./node": "./src/node.ts",
+    "./worker": "./src/worker/api.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
+    "test": "vitest run --root ../.. --project packages packages/fea",
+    "build:gmsh": "build/build-gmsh.sh"
+  },
+  "dependencies": {
+    "comlink": "^4.4.2"
+  },
+  "devDependencies": {
+    "@manufakture/kernel": "workspace:*"
+  }
+}

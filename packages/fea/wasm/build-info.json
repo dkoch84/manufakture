@@ -1,0 +1,13 @@
+{
+  "emscripten": "emcc (Emscripten gcc/clang-like replacement + linker emulating GNU ld) 3.1.74 (1092ec30a3fb1d46b1782ff1b4db5094d3d06ae5)",
+  "emsdk": "3.1.74",
+  "emsdkCommit": "35ff8a6d150541276abbc6bae512ca90bcfbe220",
+  "cmake": "4.4.3",
+  "ninja": "1.13.2.git.kitware.jobserver-pipe-1",
+  "gmsh": "29726e7237db13ff77ef3f2db2d7fb9499c4e65c",
+  "gmshConfig": "Dlopen Eigen[contrib] Hxt Mesh OpenCASCADE Post QuadMeshingTools Solver TetGen/BR tinyobjloader",
+  "occt": "7.8.1",
+  "mjsBytes": 199790,
+  "wasmBytes": 28617084,
+  "wasmSha256": "a19ed5796a8ae274c0591d987cf5655ab4e2854992bd1576ce0250177d98f34e"
+}
