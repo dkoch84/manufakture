@@ -59,6 +59,30 @@ A purchased part (a bearing, a belt, a motor, a cell, a fuse) is a catalog entry
 
 The **bill of materials** lists each part used with its quantity (the instances in the assembly it is counted through, or a typed quantity for parts not modelled), its alternates and the ratings the design relies on: "C at least 5100 N; n at least 3000 rpm". Until the checks say what each part must carry, those are the chosen part's own values, so a substitute must match them. The BOM is saved as CSV here and in `bom-csv`. Catalog data is typical and not verified unless you mark it: check the maker's current datasheet.
 
+## Requirements and load cases
+
+**Requirements** in the part studio's toolbar opens your targets and the load cases the machine sees.
+
+- **Requirements** are a table: a name, a quantity (maximum or minimum force, force step, peak cable speed, travel, hold duration, sessions per charge, charge time, pack energy, mass, envelope, surface temperature), a comparison, your target and an optional tolerance. A requirement can name the load case it is about: the speed at full force is measured in the full force rep, the sessions per charge in a session. An envelope takes three sizes and is always "within". **Save requirements** checks every value (a force target must be a force, `200 lbf`; a size must be above zero) and names the row and field of each problem; nothing is saved until all of them read. Results against requirements say "meets" or "misses" and by how much; they are your targets, so meeting all of them does not make a design safe.
+- **Load cases** are listed by name; choose one to edit it or **New load case** to add one. A load case has a **resistance mode** (the force law), a **force**, a **motion** and a **duty cycle**:
+  - **Constant**: the same force out and back.
+  - **Eccentric**: the force on the pull and the force times a factor (at least 1) on the return, so more force on the way back.
+  - **Band**: the force plus a rate (`200 N/m`) times the extension.
+  - **Chains**: the force, plus a rate times the extension beyond where the chains leave the floor.
+  - **Isokinetic**: the cable goes no faster than a speed limit; the force is felt only at the limit, none below it.
+  - **Damper**: a coefficient (`100 N*s/m`) times the speed on the pull, up to the force.
+  - **Rowing**: a coefficient (`25 N*s^2/m^2`) times the speed squared on the pull, up to the force, as a fan does.
+  - **Isometric**: the force, held at mid-stroke for a duration.
+  - **Table**: your own force curve, by extension or by speed, typed one point per line in metres or metres per second and newtons (`0.3, 450`), straight between points and flat beyond the ends, up to the force.
+
+  Extension is measured from where the rep starts; on the return the speed counts as negative. The damper and rowing modes give no force on the return; the take-up tension that keeps the cable wound belongs to the drivetrain.
+
+- **The motion** is a rep (pull over the stroke with a half-cosine whose peak is the pull speed, a pause, the return peaking at the return speed, a pause) or a table of time and extension. The isokinetic limit slows any move that would go faster.
+- **The duty cycle** is reps per set, sets and the rest between sets, with the charge at the start (a fraction, 1 for full) and the ambient temperature when they matter. The editor states how long a rep, a set and the session take.
+- Each load case's law is **plotted** from the law itself: force against extension (pulling and returning at the motion's speeds) and force against speed (at mid-stroke; below zero is the return). Static loads (a side pull, a drop as an acceleration) are kept as they are when you edit a load case.
+
+**Templates** fill in a starting set for you to change: a **cable trainer**, whose targets come from the published specifications of comparable machines and a few estimates (5 to 200 lbf in 1 lbf steps, 2.85 m of travel, 1.5 m/s at full force and 3 m/s for light rowing, a 30 s hold at 200 lbf at 40 °C, 6 sessions of 13 sets of 9 reps at 100 lbf and 14 at 60 lbf per charge, a pack under 100 Wh charged within 2.5 h, at most 6 kg in 330 x 140 x 100 mm, touchable surfaces at most 60 °C, an estimate to replace with your limit), a **winch** and a **linear axis** with example targets. A template is added to what the document already has, in one undo step. No template fills in a safety factor. Targets a requirement cannot state yet (force accuracy, the fault response, the parts' own limits) are left to the checks and the control specification.
+
 ## Checks
 
 Every time the design regenerates, the checks run on it and each one makes **records**: one number with its working. **Checks** in the part studio's toolbar lists them (with a count of the ones to look at), each with one line that states the numbers ("Cable tension, Rope in Hold: load 890 N, rated load 4.50 kN; factor 5.06, above your 2"). **Working** shows how it was computed: the method and formula, every input with its value and where it came from (a load case, a catalog field, a measured body, the simulation, your setting or override), the values derived on the way, the assumptions and the published sources.

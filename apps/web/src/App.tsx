@@ -131,6 +131,7 @@ import { createConstructionUiStore, type ConstructionUiStore } from './construct
 import { MechToolbar } from './mech/MechStart';
 import { MechChecksButton } from './mech/checks/ChecksPanel';
 import { MechPartsButton } from './mech/parts/PartsDialog';
+import { MechRequirementsButton } from './mech/requirements/RequirementsDialog';
 import { DrawingTabs } from './drawing/DrawingTabs';
 import { createDrawingUiStore } from './drawing/state';
 import { ConfigurationSwitcher } from './configurations/ConfigurationSwitcher';
@@ -2417,6 +2418,7 @@ export function App({
             />
             <MechToolbar documents={documents} disabled={dialog !== null} />
             <MechPartsButton documents={documents} disabled={dialog !== null} />
+            <MechRequirementsButton documents={documents} disabled={dialog !== null} />
             <MechChecksButton model={model} disabled={dialog !== null} />
           </div>
         )}

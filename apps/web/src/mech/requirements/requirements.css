@@ -1,0 +1,140 @@
+/* Requirements and load cases: the requirements table, the load case form and the law's plots. */
+
+.req-dialog {
+  width: min(58rem, 96vw);
+}
+
+.req-dialog h3 {
+  margin: 0.4rem 0 0.2rem;
+  font-size: 0.9rem;
+}
+
+.req-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.req-template {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+
+.req-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.req-table th,
+.req-table td {
+  padding: 0.15rem 0.2rem;
+  border-bottom: 1px solid #e3e7ec;
+  text-align: left;
+  vertical-align: top;
+}
+
+.req-table input {
+  width: 100%;
+  min-width: 4.5rem;
+  box-sizing: border-box;
+}
+
+.req-values {
+  display: flex;
+  gap: 0.2rem;
+}
+
+.lc-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.lc-list button[aria-selected='true'] {
+  border-color: #2f6fb0;
+  background: #eaf2fb;
+}
+
+.lc-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.5rem;
+  border: 1px solid #e3e7ec;
+  border-radius: 4px;
+}
+
+.lc-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: 0.35rem 0.6rem;
+}
+
+.law-plots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.law-plot {
+  flex: 1 1 16rem;
+  margin: 0;
+}
+
+.law-plot figcaption {
+  font-weight: 600;
+}
+
+.law-plot svg {
+  width: 100%;
+  height: auto;
+}
+
+.law-axis {
+  stroke: #5b6672;
+  stroke-width: 1;
+}
+
+.law-zero {
+  stroke: #c9d1da;
+  stroke-dasharray: 3 3;
+}
+
+.law-tick {
+  fill: #5b6672;
+  font-size: 9px;
+}
+
+.law-line {
+  fill: none;
+  stroke-width: 2;
+}
+
+.law-pull {
+  stroke: #2f6fb0;
+  color: #2f6fb0;
+}
+
+.law-return {
+  stroke: #c77700;
+  color: #c77700;
+  stroke-dasharray: 5 3;
+}
+
+.law-legend {
+  display: flex;
+  gap: 0.8rem;
+  margin: 0;
+  font-size: 0.75rem;
+}
+
+/* A label for screen readers only (table headers of columns with no visible heading). */
+.req-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

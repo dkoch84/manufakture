@@ -230,6 +230,50 @@ One way for every check to gather its inputs, compute and report (ADR 0017 decis
   case reads the simulation's peak `cable.tension` (`unknown` until T9.4b runs it); a static one,
   its largest cable pull. T9.5e may refine it.
 
+## Requirements and load cases (`src/requirements/`, T9.4a)
+
+Core stores them (`mech.requirements`, `mech.loadCases`, ADR 0017 decision 10); this module gives
+them meaning, in SI throughout.
+
+- **Values** (`values.ts`): `siValue(expr, kind, variables, dimension?)` reads one expression in
+  coherent SI (a length site in metres, an angle in radians, a physical kind in its SI unit; a site
+  of kind `any` against an optional dimension). `FieldReader` collects `ItemProblem`s
+  (`{ path, message }`, the path from the item) with range checks.
+- **Resistance laws** (`laws.ts`): `resolveForceLaw(dynamic, variables)` gives a `ForceLaw` or every
+  problem by field, and `forceAt(law, x, v)` evaluates it: `x` the cable extension (m) from where
+  the rep starts, `v` the speed (m/s, positive paying out). The load case's `force` is the base
+  force for constant, eccentric (`factor` at least 1 on the return), band (`F + rate x`), chains
+  (`F + rate max(0, x - from)`), isokinetic (`F` at the speed limit, none below it) and isometric;
+  for damper (`min(c v, F)`, N·s/m), rowing (`min(c v^2, F)`, N·s²/m²) and table (linear in its
+  points, flat beyond the ends) it is the most the law gives. Damper and rowing give nothing on the
+  return; take-up tension is the drivetrain's. `limitSpeed` caps a speed at the isokinetic limit.
+  `forceCurves(law, range)` samples force against extension (pull and return) and against speed
+  (at mid-stroke), breakpoints on both sides, for the editor's plot.
+- **Motion and duty cycle** (`motion.ts`): `resolveDynamic(dynamic, variables)` gives a
+  `ResolvedDynamic` (law, motion, reps, sets defaulting to 1, rest to 0, start charge, ambient in
+  K) or every problem by field; reps and sets are whole numbers up to `MAX_REPS` and `MAX_SETS`.
+  `repSegments(law, motion)` cuts one rep into `Segment`s as the T9.0b spike did: a half-cosine
+  pull peaking at `pullSpeed` (pi stroke / (2 pullSpeed) long), a pause, the return, a pause; a
+  table motion as straight moves; an isometric case as a hold at mid-stroke (or the table's first
+  extension). Under the isokinetic law a faster half-cosine follows the cosine to the limit, holds
+  it and still covers the stroke (`capped`); a straight move is slowed. `segmentKinematics`,
+  `sessionSegments` (sets of reps with rests, at most `MAX_SESSION_SEGMENTS`), `stateAt` (extension,
+  speed and the law's force at a time) and `dutyCycle` (rep, set, session and working time) are
+  what the rep simulation (T9.4b) steps through.
+- **Requirements** (`requirement.ts`): `REQUIREMENT_QUANTITY_TEXT`, `quantityText`,
+  `comparisonWords`, `requirementText(r, loadCases)` (the values as typed), and
+  `requirementProblems` / `loadCaseProblems` (values in their kind, sizes above zero, tolerances
+  not below zero, named load cases and drivetrains that exist, a load case with a motion or static
+  loads), with `itemProblemText` for a line.
+- **Templates** (`templates.ts`): `MECH_TEMPLATES` (cable trainer, winch, linear axis) and
+  `templateCommand(doc, id)`, one batch that appends the template's load cases (fresh `lc#n`) and
+  requirements (fresh `req#n`, naming those load cases) to the document's. The cable trainer takes
+  its targets from T9.0c's drafted list (`docs/research/electromechanical.md`, R1 to R18), each
+  requirement named with its R number; targets the model cannot state (R3, R5, R15's other modes,
+  R16, R17) are left out, and no template fills in a safety factor. R11 and R14 are used only in
+  part: the full charge within 2.5 h is a requirement but the 140 W USB-C input is not stated, and
+  of R14's 0 to 40 °C only the 40 °C end appears (as the hold case's ambient).
+
 ## Review
 
 `mechDataSummariser` describes a change of `domains.mech` (a start lists both factors, set or not)
