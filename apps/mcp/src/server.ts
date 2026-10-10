@@ -101,6 +101,7 @@ const INSTRUCTIONS = [
   'Read the authoring guide resource (manufakture://guide/authoring) before your first batch.',
   'Size clearance holes, threads and heat-set insert holes from the tables resource (manufakture://tables/holes), not from memory.',
   'Place drawer slides from the hardware catalog resource (manufakture://tables/hardware) as wood.slide features, not as plain bodies: they are then counted in the bill of materials.',
+  'Take purchased parts with engineering ratings (bearings, belts, motors, cells) from the parts resource (manufakture://tables/parts) or add them as catalog entries from a datasheet; their numbers are typical and unverified unless marked.',
 ].join(' ');
 
 type Annotations = {

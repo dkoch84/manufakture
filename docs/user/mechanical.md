@@ -48,6 +48,17 @@ Values are typed with units, as everywhere else: `200 lbf`, `22 N*m`, `2 m/s`, `
 
 Display units can be chosen per kind (newtons or pound-force, N·m or lbf·ft); a kind without a choice follows the document's length unit, SI for millimetres and metres, US customary for inches and feet.
 
+## Purchased parts
+
+A purchased part (a bearing, a belt, a motor, a cell, a fuse) is a catalog entry: a family, the maker and part number, the ratings the family's datasheets state, the dimensions, the mass, where the numbers came from and whether you checked them. **Parts** in the part studio's toolbar opens the catalog: a few built-in sample entries with typical published values, and your document's own entries.
+
+- **Add from a datasheet** types an entry in field by field. Ratings take units (`5.4 kN`, `17000 rpm`, `8 kHz`); a bare number is in the unit shown next to the field, your display unit for that kind. A frequency field refuses `rpm`: write `Hz`. Write `unknown` for a value the datasheet does not give. Fields whose value depends on a convention (a motor's Kv and Kt, a winding resistance) ask which one; ratings that depend on test conditions (a continuous current, a belt's working tension) ask for the conditions.
+- **Import CSV** adds many entries at once. The first row names the columns: `family`, `maker`, `partNumber`, `description`, `mass`, `verified`, `notes`, `shape`, `axis`, `sourceTitle`, `sourceUrl` (http or https only), `sourceRevision`, `sourceRead`, `dim.<name>` for a dimension and the family's rating names (with `<rating>.convention`, `.basis` and `.estimated`). A file with any malformed row is refused as a whole, with the line of each problem; nothing is imported until every row is good.
+- An entry can carry a **STEP file** for its geometry. Without one, placing it builds a **placeholder**: a ring, a cylinder or a box from its dimensions.
+- **Place** adds a part studio holding the geometry (the STEP file as a reference body, or the placeholder) and records the part as used; with an assembly chosen, it also puts an instance in it.
+
+The **bill of materials** lists each part used with its quantity (the instances in the assembly it is counted through, or a typed quantity for parts not modelled), its alternates and the ratings the design relies on: "C at least 5100 N; n at least 3000 rpm". Until the checks say what each part must carry, those are the chosen part's own values, so a substitute must match them. The BOM is saved as CSV here and in `bom-csv`. Catalog data is typical and not verified unless you mark it: check the maker's current datasheet.
+
 ## Your own materials
 
 Besides the built-in materials, a document can hold materials of its own, with a density and any of the mechanical and thermal properties (elastic modulus, yield and ultimate strength, endurance limit, conductivity, maximum service temperature and more), each with its source and whether it is a typical value. Material values are constants with units (`1240 kg/m^3`, `45 MPa`); a variable is refused, because a material is a library entry. Parts and bodies can use them like the built-in ones; a material in use cannot be deleted.

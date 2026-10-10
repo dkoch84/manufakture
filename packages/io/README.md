@@ -267,7 +267,7 @@ Each problem is counted once per element too, not once per visit.
 
 ## STEP
 
-The kernel writes and reads STEP (`exportStep`, `importStep` ops). Here: `isStep(bytes)`, `sniffFormat(bytes, fileName)` (STEP, STL or 3MF by content, the name only breaking ties) and `stepProductNames(bytes)`, the `PRODUCT` names in file order with ISO 10303-21 string escapes decoded. The app names an imported body after the file's first product.
+The kernel writes and reads STEP (`exportStep`, `importStep` ops). Here: `isStep(bytes)`, `sniffFormat(bytes, fileName)` (STEP, STL or 3MF by content, the name only breaking ties) and `stepProductNames(bytes)`, the `PRODUCT` names in file order with ISO 10303-21 string escapes decoded. The app names an imported body after the file's first product. `checkStepFile(bytes, maxBytes = MAX_STEP_FILE_BYTES)` is a quick check of an untrusted file (a purchased part's STEP file, ADR 0017 decision 7) before it is stored: not empty, within the size (20 MiB by default), the ISO 10303-21 signature, no NUL byte, a `HEADER;` and a `DATA;` section and `END-ISO-10303-21;` at the end, each problem with its line, in one linear pass. These STEP text helpers have their own entry point, `@manufakture/io/step` (also re-exported from the package index), so `packages/domain-mech` checks an entry's file again when it is placed without loading the other formats.
 
 ## Imported files
 

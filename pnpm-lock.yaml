@@ -59,6 +59,9 @@ importers:
       '@manufakture/domain-construction':
         specifier: workspace:*
         version: link:../../packages/domain-construction
+      '@manufakture/domain-mech':
+        specifier: workspace:*
+        version: link:../../packages/domain-mech
       '@manufakture/domain-wood':
         specifier: workspace:*
         version: link:../../packages/domain-wood
@@ -156,6 +159,9 @@ importers:
       '@manufakture/domain-construction':
         specifier: workspace:*
         version: link:../../packages/domain-construction
+      '@manufakture/domain-mech':
+        specifier: workspace:*
+        version: link:../../packages/domain-mech
       '@manufakture/domain-wood':
         specifier: workspace:*
         version: link:../../packages/domain-wood
@@ -341,6 +347,28 @@ importers:
         specifier: workspace:*
         version: link:../regen
 
+  packages/domain-mech:
+    dependencies:
+      '@manufakture/core':
+        specifier: workspace:*
+        version: link:../core
+      '@manufakture/io':
+        specifier: workspace:*
+        version: link:../io
+      '@manufakture/takeoff':
+        specifier: workspace:*
+        version: link:../takeoff
+      '@manufakture/units':
+        specifier: workspace:*
+        version: link:../units
+    devDependencies:
+      '@manufakture/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      '@manufakture/regen':
+        specifier: workspace:*
+        version: link:../regen
+
   packages/domain-wood:
     dependencies:
       '@manufakture/core':
@@ -377,6 +405,16 @@ importers:
       '@manufakture/units':
         specifier: workspace:*
         version: link:../units
+
+  packages/fea:
+    dependencies:
+      comlink:
+        specifier: ^4.4.2
+        version: 4.4.2
+    devDependencies:
+      '@manufakture/kernel':
+        specifier: workspace:*
+        version: link:../kernel
 
   packages/io:
     dependencies:
@@ -527,6 +565,9 @@ importers:
       '@manufakture/domain-construction':
         specifier: workspace:*
         version: link:../domain-construction
+      '@manufakture/domain-mech':
+        specifier: workspace:*
+        version: link:../domain-mech
       '@manufakture/domain-wood':
         specifier: workspace:*
         version: link:../domain-wood
@@ -563,6 +604,9 @@ importers:
       '@manufakture/domain-construction':
         specifier: workspace:*
         version: link:../domain-construction
+      '@manufakture/domain-mech':
+        specifier: workspace:*
+        version: link:../domain-mech
       '@manufakture/domain-wood':
         specifier: workspace:*
         version: link:../domain-wood

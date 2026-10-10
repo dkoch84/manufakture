@@ -2,11 +2,13 @@
 // T8.5a; a short stub when the file cannot be read), the schema index, plus a template for the
 // JSON Schema of each command type and feature kind, the reference tables for sizing holes
 // (clearance, counterbore and countersink sizes, threads, heat-set inserts, self-tapping holes),
-// and the hardware catalog (drawer slides, #1200) an agent picks purchased parts from. None holds
-// text from a document (ADR 0016 decision 13).
+// the hardware catalog (drawer slides, #1200) an agent picks purchased parts from, and the
+// purchased parts catalog with ratings (ADR 0017 decision 7, T9.2a). None holds text from a
+// document (ADR 0016 decision 13).
 
 import { readFile } from 'node:fs/promises';
 import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { partsTables } from '@manufakture/domain-mech';
 import {
   MOUNT_EXPRESSIONS,
   SLIDE_FAMILIES,
@@ -23,6 +25,7 @@ export const SCHEMA_INDEX_URI = 'manufakture://schema/index';
 export const SCHEMA_TEMPLATE = 'manufakture://schema/{kind}/{name}';
 export const TABLES_URI = 'manufakture://tables/holes';
 export const HARDWARE_URI = 'manufakture://tables/hardware';
+export const PARTS_URI = 'manufakture://tables/parts';
 
 const GUIDE_FILE = new URL('../../../docs/agents/authoring.md', import.meta.url);
 
@@ -235,6 +238,21 @@ export function registerResources(server: McpServer): void {
     async (uri) => ({
       contents: [
         { uri: uri.href, mimeType: 'application/json', text: JSON.stringify(hardwareTables()) },
+      ],
+    }),
+  );
+  server.registerResource(
+    'parts-tables',
+    PARTS_URI,
+    {
+      title: 'Purchased parts with ratings',
+      description:
+        'Catalog families with their rating fields (kinds, conventions, the ratings a bill of materials line relies on), the mech.placeholder feature, and the built-in entries at every version with sources and whether each was verified. Ratings in SI, dimensions in mm.',
+      mimeType: 'application/json',
+    },
+    async (uri) => ({
+      contents: [
+        { uri: uri.href, mimeType: 'application/json', text: JSON.stringify(partsTables()) },
       ],
     }),
   );

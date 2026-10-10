@@ -12,7 +12,13 @@ import {
   type LengthFormat,
   type QuantityDisplayUnits,
 } from '@manufakture/units';
-import type { TakeoffMeasure, TakeoffRow, TakeoffSize, TakeoffUnit } from './takeoff';
+import type {
+  TakeoffMeasure,
+  TakeoffRating,
+  TakeoffRow,
+  TakeoffSize,
+  TakeoffUnit,
+} from './takeoff';
 
 /** Whether a display format is an inch or foot one (areas in sq ft, volumes in in³). */
 export function isImperial(format: LengthFormat): boolean {
@@ -132,4 +138,36 @@ export function formatRow(
     extended: formatMeasure({ unit: row.unit, value: row.extended }, format, quantities),
     measures: row.measures.map((m) => formatMeasure(m, format, quantities)),
   };
+}
+
+const COMPARISON_WORDS: Readonly<Record<TakeoffRating['comparison'], string>> = {
+  'at-least': 'at least',
+  'at-most': 'at most',
+  equals: '',
+};
+
+/**
+ * A number to four significant digits without trailing zeros or exponent noise: `5.4`, `17000`,
+ * `0.0806`, `2360`.
+ */
+export function significant(value: number, digits = 4): string {
+  if (!Number.isFinite(value)) return String(value);
+  if (value === 0) return '0';
+  const exact = Number(value.toPrecision(digits));
+  const text =
+    Math.abs(exact) >= 1e21 || Math.abs(exact) < 1e-6 ? exact.toExponential() : String(exact);
+  return text === '-0' ? '0' : text;
+}
+
+/**
+ * A rating as words: `C at least 5400 N`, `n at least 17000 rpm`, `closure contact seal`,
+ * `poles 2`.
+ */
+export function formatRating(rating: TakeoffRating): string {
+  const value =
+    typeof rating.value === 'number'
+      ? `${significant(rating.value)}${rating.unit === '' ? '' : ` ${rating.unit}`}`
+      : rating.value;
+  const words = COMPARISON_WORDS[rating.comparison];
+  return words === '' ? `${rating.name} ${value}` : `${rating.name} ${words} ${value}`;
 }

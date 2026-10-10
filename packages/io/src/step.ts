@@ -37,6 +37,56 @@ export function decodeStepString(raw: string): string {
     .replace(/\\\\/g, '\\');
 }
 
+/**
+ * The largest STEP file `checkStepFile` accepts by default, in bytes (20 MiB: core's import limit,
+ * `MAX_IMPORT_BYTES`, which this package does not import).
+ */
+export const MAX_STEP_FILE_BYTES = 20 * 1024 * 1024;
+
+export type StepCheck = { ok: true } | { ok: false; line: number; message: string };
+
+/**
+ * A quick check of untrusted bytes said to be a STEP file (a catalog entry's file, ADR 0017
+ * decision 7), before they are stored or handed to the kernel: not empty, within `maxBytes`, the
+ * ISO 10303-21 signature first, no NUL bytes, a `HEADER;` and a `DATA;` section, and
+ * `END-ISO-10303-21;` at the end. Each problem names its line. One linear pass over the bytes, so
+ * it cannot hang; the geometry itself is the kernel's to read.
+ */
+export function checkStepFile(bytes: Uint8Array, maxBytes = MAX_STEP_FILE_BYTES): StepCheck {
+  if (bytes.length === 0) return { ok: false, line: 1, message: 'the file is empty' };
+  if (bytes.length > maxBytes) {
+    return {
+      ok: false,
+      line: 1,
+      message: `the file is ${bytes.length} bytes; at most ${maxBytes} are accepted`,
+    };
+  }
+  if (!isStep(bytes)) {
+    return { ok: false, line: 1, message: 'not a STEP file: it does not start with ISO-10303-21;' };
+  }
+  let line = 1;
+  for (let i = 0; i < bytes.length; i++) {
+    const b = bytes[i]!;
+    if (b === 0x0a) line++;
+    else if (b === 0) return { ok: false, line, message: 'a NUL byte' };
+  }
+  const text = new TextDecoder('latin1').decode(bytes);
+  const lineAt = (index: number) => {
+    let n = 1;
+    for (let i = 0; i < index; i++) if (text.charCodeAt(i) === 0x0a) n++;
+    return n;
+  };
+  const header = text.indexOf('HEADER;');
+  if (header < 0) return { ok: false, line: 1, message: 'no HEADER; section' };
+  const data = text.indexOf('DATA;', header);
+  if (data < 0)
+    return { ok: false, line: lineAt(header), message: 'no DATA; section after the header' };
+  if (!/END-ISO-10303-21;\s*$/.test(text.slice(-4096))) {
+    return { ok: false, line, message: 'the file does not end with END-ISO-10303-21;' };
+  }
+  return { ok: true };
+}
+
 export type FileFormat = 'step' | 'stl' | '3mf';
 
 /** What kind of file the bytes are, from their content (the name only breaks ties). */

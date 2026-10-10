@@ -18,6 +18,7 @@ export {
   totals,
   type Takeoff,
   type TakeoffMeasure,
+  type TakeoffRating,
   type TakeoffRow,
   type TakeoffSize,
   type TakeoffSource,
@@ -28,9 +29,11 @@ export {
   UNIT_LABELS,
   exactLengthFormat,
   formatMeasure,
+  formatRating,
   formatRow,
   formatSize,
   isImperial,
+  significant,
   type FormattedRow,
 } from './format';
 export { csvField, csvTextField } from './csv';

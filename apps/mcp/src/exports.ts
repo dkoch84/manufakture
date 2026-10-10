@@ -10,6 +10,7 @@
 import { exportGcode, exportLaser, type LaserSource } from '@manufakture/cam/export';
 import type { ManufaktureDocument } from '@manufakture/core';
 import { DISCLAIMER_SHORT } from '@manufakture/domain-construction';
+import { PURCHASED_FLAGS, purchasedBom, withPurchasedRows } from '@manufakture/domain-mech';
 import { exportTakeoff } from '@manufakture/domain-construction/files';
 import { exportCutList } from '@manufakture/domain-wood/files';
 import {
@@ -57,6 +58,17 @@ function bodiesOf(result: RegenResult, doc: ManufaktureDocument, partId?: string
       }));
     });
 }
+
+/**
+ * Purchased row flags a `bom-csv` export warns about: a use not counted or not found, and a
+ * placeholder whose sizes no longer match its entry.
+ */
+const WARNED_FLAGS = new Set([
+  'unknown-entry',
+  'part-missing',
+  'quantity-unknown',
+  'placeholder-drift',
+]);
 
 const BODY_FORMATS: Partial<Record<ExportFormat, BodyFileFormat>> = {
   step: 'step',
@@ -192,6 +204,30 @@ export async function makeExport(
             },
             { signal },
           );
+          // Purchased parts with their ratings join the bill of materials (ADR 0017 decision 7).
+          if (kind === 'bom' && (doc.mech?.purchased?.length ?? 0) > 0) {
+            const bom = purchasedBom(
+              doc,
+              input.assemblyId !== undefined ? { assemblyId: input.assemblyId } : {},
+            );
+            const text = withPurchasedRows(
+              new TextDecoder().decode(file.bytes),
+              bom.rows,
+              doc.units,
+            );
+            return {
+              ok: true,
+              files: [{ ...file, bytes: new TextEncoder().encode(text) }],
+              // Ids and fixed words only: a use's name is document text (ADR 0016 decision 13).
+              warnings: bom.rows.flatMap((r) =>
+                r.flags
+                  .filter((f) => WARNED_FLAGS.has(f))
+                  .map(
+                    (f) => `${r.sources.map((x) => x.id).join(', ')}: ${PURCHASED_FLAGS[f] ?? f}.`,
+                  ),
+              ),
+            };
+          }
           return { ok: true, files: [file], warnings: [] };
         }
         case 'takeoff-csv':

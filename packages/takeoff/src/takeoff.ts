@@ -55,6 +55,20 @@ export interface TakeoffMeasure {
   value: number;
 }
 
+/**
+ * A rating a purchased part's row relies on (ADR 0017 decision 7): what a substitute must meet,
+ * "C at least 5.4 kN". `value` is in `unit` (the producer converts to the document's display unit),
+ * or a text for a rating that is not a number (`closure equals contact seal`). `record` names the
+ * calc record the requirement comes from, when one does.
+ */
+export interface TakeoffRating {
+  name: string;
+  comparison: 'at-least' | 'at-most' | 'equals';
+  value: number | string;
+  unit: string;
+  record?: string;
+}
+
 export interface TakeoffRow {
   /** Rows with the same key are the same thing and merge into one (`mergeRows`). */
   key: string;
@@ -79,6 +93,10 @@ export interface TakeoffRow {
   sources: TakeoffSource[];
   /** Short machine-readable notes (`estimated`, `size-unknown`); the producer documents them. */
   flags: string[];
+  /** A purchased part's ratings the design relies on; rows that merge keep the first row's. */
+  ratings?: TakeoffRating[];
+  /** Parts that may be bought instead (`SKF 6001-2Z`); merged rows join them without repeats. */
+  alternates?: string[];
 }
 
 /** A total of rows in one unit. `quantity` is the pieces of the rows that have this unit. */
@@ -184,6 +202,8 @@ export function mergeRows(rows: readonly TakeoffRow[]): TakeoffRow[] {
         measures: row.measures.map((m) => ({ ...m })),
         sources: row.sources.map((s) => ({ ...s })),
         flags: [...row.flags],
+        ...(row.ratings === undefined ? {} : { ratings: row.ratings.map((r) => ({ ...r })) }),
+        ...(row.alternates === undefined ? {} : { alternates: [...row.alternates] }),
       });
       continue;
     }
@@ -196,6 +216,10 @@ export function mergeRows(rows: readonly TakeoffRow[]): TakeoffRow[] {
     addMeasures(seen.measures, row.measures);
     seen.sources.push(...row.sources.map((s) => ({ ...s })));
     for (const f of row.flags) if (!seen.flags.includes(f)) seen.flags.push(f);
+    if (row.alternates !== undefined) {
+      const alternates = (seen.alternates ??= []);
+      for (const a of row.alternates) if (!alternates.includes(a)) alternates.push(a);
+    }
   }
   const out = [...byKey.values()];
   for (const row of out) {
@@ -215,6 +239,8 @@ export function scaleRow(row: TakeoffRow, factor: number): TakeoffRow {
     measures: row.measures.map((m) => ({ unit: m.unit, value: m.value * factor })),
     sources: row.sources.map((s) => ({ ...s, quantity: s.quantity * factor })),
     flags: [...row.flags],
+    ...(row.ratings === undefined ? {} : { ratings: row.ratings.map((r) => ({ ...r })) }),
+    ...(row.alternates === undefined ? {} : { alternates: [...row.alternates] }),
   };
 }
 

@@ -4,9 +4,11 @@ import {
   UNIT_LABELS,
   exactLengthFormat,
   formatMeasure,
+  formatRating,
   formatRow,
   formatSize,
   isImperial,
+  significant,
 } from './format';
 import {
   MM3_PER_BOARD_FOOT,
@@ -289,5 +291,44 @@ describe('takeoff files', () => {
       "'\tx",
       'Side 1',
     ]);
+  });
+});
+
+describe('purchased part rows: ratings and alternates', () => {
+  const rating = { name: 'C', comparison: 'at-least' as const, value: 5400, unit: 'N' };
+
+  it('merge keeping the first ratings and joining alternates; scale copies both', () => {
+    const a = row({ key: 'p', unit: 'each', ratings: [rating], alternates: ['SKF 6001-2Z'] });
+    const b = row({
+      key: 'p',
+      unit: 'each',
+      ratings: [{ ...rating, value: 1 }],
+      alternates: ['SKF 6001-2Z', 'NSK 6001'],
+    });
+    const [m] = mergeRows([a, b]);
+    expect(m!.ratings).toEqual([rating]);
+    expect(m!.alternates).toEqual(['SKF 6001-2Z', 'NSK 6001']);
+    expect(m!.ratings).not.toBe(a.ratings);
+    const s = scaleRow(m!, 2);
+    expect(s.ratings).toEqual([rating]);
+    expect(s.alternates).toEqual(m!.alternates);
+    expect(mergeRows([row({ key: 'x' })])[0]).not.toHaveProperty('ratings');
+  });
+
+  it('format as words with four significant digits', () => {
+    expect(formatRating(rating)).toBe('C at least 5400 N');
+    expect(formatRating({ ...rating, comparison: 'at-most', value: 0.01234567, unit: 'ohm' })).toBe(
+      'C at most 0.01235 ohm',
+    );
+    expect(
+      formatRating({ name: 'closure', comparison: 'equals', value: 'contact seal', unit: '' }),
+    ).toBe('closure contact seal');
+    expect(formatRating({ name: 'poles', comparison: 'equals', value: 2, unit: '' })).toBe(
+      'poles 2',
+    );
+    expect(significant(1570.796)).toBe('1571');
+    expect(significant(-0.00001)).toBe('-0.00001');
+    expect(significant(0)).toBe('0');
+    expect(significant(1e-9)).toBe('1e-9');
   });
 });

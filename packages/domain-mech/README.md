@@ -52,8 +52,62 @@ or `factor 2.28; not compared: no factor set` when the user set none, with no wa
 `mechDomain` is the `ExtensionDomain` (namespace `mech`, the reader of `domains.mech`);
 `registerMech(registry)` registers it. The app's regen worker (`apps/web/src/viewport/regen-worker.ts`)
 and the session's Node host (`packages/session/src/node-host.ts`) call it beside the wood and
-construction domains. The evaluation hook (checks, the simulation; T9.5a) and the
-`mech.placeholder` extension type (T9.2a) join it later.
+construction domains. It registers one extension type, `mech.placeholder` (T9.2a); the evaluation
+hook (checks, the simulation; T9.5a) joins it later.
+
+## Purchased parts (`src/parts/`, T9.2a)
+
+One model for every bought part with ratings (ADR 0017 decision 7). Core stores user entries
+(`mech.catalog`, `CatalogEntry`) and uses (`mech.purchased`, `PurchasedUse`); this package gives
+them meaning.
+
+- **Family field schemas** (`families.ts`): `FAMILY_SCHEMAS`, one per `CATALOG_FAMILIES` family at
+  `fieldsVersion` 1, from T9.0c's field lists. Each `RatingField` has a kind (a `packages/units`
+  physical kind stored in SI, `number`, `count` or `text`), optional `options`, `conventions`,
+  `basis` and `bom` (the comparison a BOM line states: `at-least`, `at-most`, `equals`). Geometric
+  sizes are dimensions (mm, `DIMENSION_NAMES`), not ratings. `entryProblems(entry)` checks an
+  entry against its family; `migrateEntry` migrates ratings in memory and refuses a newer
+  `fieldsVersion`.
+- **The built-in catalog** (`catalog.ts`): `BUILTIN_ENTRIES`, every version ever shipped, a few
+  samples with typical published values, all `verified: false` (T9.2b to T9.2e add the catalogs).
+  `resolveEntry(doc, ref)` gives the entry a `CatalogRef` names (pinned version for built-ins), or
+  `unknown-entry` / `newer-fields`, never a guess; it reports a `newer` version and `deprecated`.
+  `copyBuiltin` copies one into a user entry with `derivedFrom`.
+- **Typing values in** (`input.ts`, `entry.ts`): every value through `packages/units`. With a
+  unit the unit decides; a bare number is the document's display unit for the kind (catalog values
+  are stored as SI numbers, not expressions, so a stored value never depends on a display
+  preference); `unknown` is a value the datasheet does not give; a frequency refuses `rpm`.
+  `readEntryFields(fields, id, units)` builds a checked entry from text fields by name, as the
+  app's datasheet form and each CSV row give them; `entryFields(entry)` is its inverse.
+- **CSV import** (`csv.ts`): `parseCsv(text, limits)` is a one-pass RFC 4180 reader bounded in
+  characters (2 Mi), rows (2,000; empty lines are skipped and cost none), columns (256) and field
+  length (10,000), refusing control characters (kept only with `keepControls`, for this program's
+  own text), stray and unclosed quotes with the line. `entryProblems` refuses bidirectional
+  controls in short texts and negative physical ratings. `importCatalogCsv(doc, text, { units })`
+  returns one batch of `setCatalogEntry` commands, or every problem (at most 50) with its line and
+  column; all or nothing.
+- **The `mech.placeholder` extension** (`placeholder.ts`): params `{ entry: CatalogRef, shape:
+'cylinder' | 'ring' | 'box', axis }` (schema version 1), sizes as the feature's length
+  expressions (`PLACEHOLDER_SIZES`), each above zero and at most 10 m. `placeholderFeature` fills
+  them from an entry's dimensions; `placeholderDrift` says when they differ from the entry now
+  (a BOM line flag, below).
+  A translator never reads `mech.catalog`, so the sizes travel with the feature.
+- **Placing** (`place.ts`): `placePurchasedPart(doc, ref, { assemblyId?, name?, alternates? })`
+  gives one batch: `addPart`, the geometry (an `import` feature, operation `reference`, for an
+  entry with a STEP file, checked in full by `@manufakture/io`'s `checkStepFile` whoever wrote the
+  entry; else the placeholder), `setPurchasedUse` and, with an assembly, `addInstance`, named
+  uniquely (`uniqueName`: `Name (2)`, cut so the suffix fits in 200 characters). A name with a
+  bidirectional control is refused.
+- **BOM lines** (`bom.ts`): `purchasedBom(doc, { assemblyId? })` gives `@manufakture/takeoff` rows
+  (category `purchased`, one per entry) with `ratings` (`bomRatings`: the family's BOM fields in
+  display units, "C at least 5100 N") and `alternates`; instances of the use's part count it
+  (the part once without an assembly), else its `quantity` expression. Flags: `unverified`,
+  `unknown-entry`, `newer-version`, `deprecated`, `part-missing`, `quantity-ignored`,
+  `quantity-unknown`, `estimated`, `placeholder-drift` (with the sizes as a warning). `purchasedBomCsv` writes them; `withPurchasedRows(bomCsv, rows,
+units)` adds them to the cut list's `bom-csv` (columns `BOM_COLUMNS`). Text cells go through
+  `csvTextField`, so a cell starting with `=`, `+`, `-` or `@` is written as text.
+- **Tables** (`tables.ts`): `partsTables()` is what the MCP server serves at
+  `manufakture://tables/parts`.
 
 ## Review
 
@@ -69,6 +123,6 @@ Keep it and the long form in `docs/user/mechanical.md` saying the same thing.
 
 ## Dependencies
 
-`@manufakture/core` and `@manufakture/units` at run time; `@manufakture/regen` for types only. ADR
-0017 decision 1 also allows `@manufakture/calc` (formulas) and `@manufakture/takeoff` (BOM lines),
-which join with the tasks that use them.
+`@manufakture/core`, `@manufakture/units` and `@manufakture/takeoff` (BOM lines) at run time;
+`@manufakture/regen` and `@manufakture/kernel` for types and tests only. ADR 0017 decision 1 also
+allows `@manufakture/calc` (formulas), which joins with the tasks that use it.

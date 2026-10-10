@@ -63,7 +63,16 @@ export {
   type Matrix3x4,
   type Placement,
 } from './placement';
-export { decodeStepString, isStep, sniffFormat, stepProductNames, type FileFormat } from './step';
+export {
+  MAX_STEP_FILE_BYTES,
+  checkStepFile,
+  decodeStepString,
+  isStep,
+  sniffFormat,
+  stepProductNames,
+  type FileFormat,
+  type StepCheck,
+} from './step';
 export {
   formatBytes,
   fromBase64,

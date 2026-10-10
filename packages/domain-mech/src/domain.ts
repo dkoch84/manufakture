@@ -2,18 +2,20 @@
 // namespace `mech` and the reader of the settings it owns (`domains.mech`). Its model is core's
 // typed `mech` section, which core validates and its commands reach; the domain adds meaning
 // (checks, the simulation, specifications) in later M9 tasks, through the evaluation hook of
-// decision 15 (T9.5a) and the `mech.placeholder` extension type (T9.2a). The app's regen worker
+// decision 15 (T9.5a). Its one extension type is `mech.placeholder` (T9.2a): the generic solid of a
+// purchased part with no STEP file (`parts/placeholder.ts`). The app's regen worker
 // entry and the session's Node host call `registerMech(registry)` at start-up; regen imports no
 // domain package.
 
 import type { ExtensionDomain, ExtensionRegistry, JsonValue } from '@manufakture/regen';
+import { PLACEHOLDER_TYPE, placeholderType } from './parts/placeholder';
 import { MECH_NAMESPACE, MECH_SETTINGS_VERSION, readMechSettings } from './settings';
 
 /**
  * Bump with any change that can alter what the domain returns to regen, so results built by older
  * domain code are never served from regen's cache (ADR 0004 decision 8).
  */
-export const MECH_IMPLEMENTATION = 1;
+export const MECH_IMPLEMENTATION = 2;
 
 /** The domain definition: what `registerMech` registers. */
 export const mechDomain: ExtensionDomain = {
@@ -25,6 +27,7 @@ export const mechDomain: ExtensionDomain = {
       read: (data: JsonValue, schemaVersion: number) => readMechSettings(data, schemaVersion),
     },
   },
+  types: { [PLACEHOLDER_TYPE]: placeholderType },
 };
 
 /** Register the mechanical domain on a regen registry. Returns a function that unregisters it. */

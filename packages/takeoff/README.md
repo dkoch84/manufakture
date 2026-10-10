@@ -35,17 +35,19 @@ formatRow(merged[0], { unit: 'in-fraction', denominator: 32 });
 // { item: 'Shelf', size: '34-1/2" x 11-1/4" x 3/4"', quantity: '1', extended: '2.88 bd ft', ... }
 ```
 
-| Field              | Meaning                                                                                                |
-| ------------------ | ------------------------------------------------------------------------------------------------------ |
-| `key`              | Rows with one key are the same thing; `mergeRows` adds them up. Rows of one key must share `unit`.     |
-| `item`             | For people. Merging joins different items without repeats (`Shelf, Top`).                              |
-| `category`         | The producer's section (`sheet`, `lumber`, `part`, `hardware` for wood); totals are per category.      |
-| `size`             | One piece, mm: `length`, `width`, `thickness`, `diameter`, each optional.                              |
-| `quantity`         | Pieces: the sum of the sources' quantities.                                                            |
-| `unit`, `extended` | What the row adds up to, all pieces together.                                                          |
-| `measures`         | The row's totals in other units (lumber's length next to its board feet).                              |
-| `sources`          | What was counted: an id (a body, a joint, a wall), its part and instance, and how many pieces it gave. |
-| `flags`            | Short notes the producer defines (`estimated`).                                                        |
+| Field              | Meaning                                                                                                    |
+| ------------------ | ---------------------------------------------------------------------------------------------------------- |
+| `key`              | Rows with one key are the same thing; `mergeRows` adds them up. Rows of one key must share `unit`.         |
+| `item`             | For people. Merging joins different items without repeats (`Shelf, Top`).                                  |
+| `category`         | The producer's section (`sheet`, `lumber`, `part`, `hardware` for wood); totals are per category.          |
+| `size`             | One piece, mm: `length`, `width`, `thickness`, `diameter`, each optional.                                  |
+| `quantity`         | Pieces: the sum of the sources' quantities.                                                                |
+| `unit`, `extended` | What the row adds up to, all pieces together.                                                              |
+| `measures`         | The row's totals in other units (lumber's length next to its board feet).                                  |
+| `sources`          | What was counted: an id (a body, a joint, a wall), its part and instance, and how many pieces it gave.     |
+| `flags`            | Short notes the producer defines (`estimated`).                                                            |
+| `ratings`          | Optional: a purchased part's ratings the design relies on (`TakeoffRating`), merged rows keep the first's. |
+| `alternates`       | Optional: parts that may be bought instead; merged rows join them without repeats.                         |
 
 **Units** (`TakeoffUnit`), all in internal units: `length` mm, `area` mm², `volume` mm³;
 `mass` kg (SI, as `@manufakture/units` evaluates a mass), for BOM and weight rows; `board-foot`,
@@ -68,6 +70,7 @@ lb as the length format implies (`@manufakture/units`, "Display units per kind")
 | `formatMeasure(m, format, q?)`     | `5.33 bd ft`; areas in sq ft or m², volumes in in³ or cm³ (by the format being imperial); masses in kg or lb. |
 | `formatRow(row, format, name, q?)` | A row's cells as text, for a table or CSV.                                                                    |
 | `exactLengthFormat(format)`        | The format takeoff files show sizes in: fractions to 1/64", so `23/32"` never reads `3/4"`.                   |
+| `formatRating(rating)`             | `C at least 5400 N`, `closure contact seal`: a rating as words, four significant digits (`significant`).      |
 | `csvField(value)`                  | One CSV field, quoted when it needs to be (RFC 4180).                                                         |
 | `csvTextField(text)`               | A field of user text: a leading `'` on one a spreadsheet would read as a formula.                             |
 
