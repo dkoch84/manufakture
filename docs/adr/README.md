@@ -22,6 +22,7 @@ Product decisions (license, local-first storage, target machines, what comes fir
 - [0014: CAM architecture: a document-level cam section, a pure cam package and worker, posts as data](0014-cam-architecture.md). Accepted.
 - [0015: The construction domain: walls, openings, floors and roofs as extensions, framing members as data](0015-construction-domain.md). Accepted.
 - [0016: Agent sessions: headless sessions on agent branches, an MCP surface, review in History before Main](0016-agent-sessions.md). Accepted 2026-10-08, amended at acceptance (no export gate: exports are allowed from any branch; implementation calls recorded as decisions) and 2026-10-08 (`apply` checks command types; core's schemas validate the rest in the session).
+- [0017: The mechanical domain: a typed mech section, calc records that never certify, purchased parts as versioned data, simulation and FEA on the client](0017-mechanical-domain.md). Proposed 2026-10-10.
 
 ## Adding an ADR
 
