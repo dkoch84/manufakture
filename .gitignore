@@ -11,3 +11,6 @@ coverage/
 # Playwright output (apps/web)
 test-results/
 playwright-report/
+
+# Machine-local helpers (deploy targets, private hosts)
+*.local

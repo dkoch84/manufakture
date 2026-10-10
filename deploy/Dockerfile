@@ -24,6 +24,10 @@ RUN find /srv -type f -size +1k \
 
 # Caddy 2.11 or later: 2.10 answers every precompressed file with 206 Partial Content.
 FROM caddy:2.11-alpine
+# The base image gives the binary cap_net_bind_service as a file capability. Port 8080 does not
+# need it, and with every capability dropped and no privilege escalation (deploy/k8s/), the kernel
+# refuses to exec a binary that carries one ("operation not permitted").
+RUN setcap -r /usr/bin/caddy
 COPY Caddyfile /etc/caddy/Caddyfile
 RUN caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 COPY --from=compress /srv /srv
