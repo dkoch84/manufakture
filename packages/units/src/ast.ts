@@ -5,6 +5,12 @@ import type { UnitDefinition } from './units';
 interface Span {
   readonly start: number;
   readonly end: number;
+  /**
+   * Set on the root of an AST from `parseExpression` whose reading depends on the parse mode (a
+   * compound unit after a length unit, a rate, `rpm`): whether it was parsed for a physical
+   * field. Absent elsewhere. A plain field, so a cloned or serialised tree keeps it.
+   */
+  readonly parsedPhysical?: boolean;
 }
 
 /** A bare number (or `pi`). Dimensionless until context says otherwise. */
@@ -13,11 +19,25 @@ export interface NumberNode extends Span {
   readonly value: number;
 }
 
-/** A number with a unit, including compound imperial forms like `3' 4-1/2"`. Value in mm / rad. */
+/**
+ * A number with a unit, including compound imperial forms like `3' 4-1/2"` and compound units
+ * like `22 N*m`. Value in internal units (mm, rad, min, kg, A, K).
+ */
 export interface MeasureNode extends Span {
   readonly type: 'measure';
   readonly value: number;
   readonly dimension: Dimension;
+  /**
+   * A lone `degC` or `degF` value: `value` is the temperature difference in kelvin, and
+   * `value + offset` the absolute temperature. Which one applies depends on the use (README,
+   * "Temperature").
+   */
+  readonly offset?: number;
+  /**
+   * A physical literal's value in SI, rounded once from the number typed (`1 kgf` is exactly
+   * 9.80665), which a physical field reads instead of converting `value` back.
+   */
+  readonly si?: number;
 }
 
 /** A variable reference: `#thickness` (`hashed`) or `thickness`. */

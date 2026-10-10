@@ -4,20 +4,29 @@ import {
   DIMENSIONLESS,
   FEED,
   LENGTH,
+  PHYSICAL_KINDS,
   SPINDLE_SPEED,
   describeDimension,
+  describeKind,
   dimensionOfKind,
   dimensionsEqual,
+  dimensionsEqualIgnoringAngle,
   divideDimensions,
+  hasPhysicalBase,
   isDimensionless,
+  isPhysicalKind,
+  isTemperature,
   multiplyDimensions,
   powerDimension,
   type Dimension,
+  type PhysicalKind,
   type Quantity,
   type QuantityKind,
 } from './dimension';
-import { parseExpression } from './parser';
+import { parseExpression, parsedPhysical } from './parser';
+import { defaultDisplayUnit } from './quantities';
 import { err, ok, type Result } from './result';
+import { fromSI, siMagnitude, toSI } from './si';
 import { angleUnitFactor, lengthUnitFactor, type AngleUnit, type LengthUnit } from './units';
 
 /** Resolves a variable name (without `#`) to its value, or `undefined` if it does not exist. */
@@ -58,6 +67,12 @@ export interface EvaluationContext {
    * no answer, those calls are a `measure` error.
    */
   readonly measure?: MeasureLookup;
+  /**
+   * The physical-field rules (README, "Physical fields") for any expected kind, or for
+   * `evaluateQuantity`: no bare numbers in display units, compound units after any unit, `rpm`
+   * as an angular speed. Implied when the expected kind is a physical kind. Default `false`.
+   */
+  readonly physical?: boolean;
 }
 
 export interface EvaluateOptions extends EvaluationContext {
@@ -80,9 +95,11 @@ interface Environment {
   readonly measure: MeasureLookup;
   /** Whether percent slopes are allowed (slope fields only). */
   readonly slope: boolean;
+  /** A physical field: bare numbers never take a display unit. */
+  readonly physical: boolean;
 }
 
-function environment(context: EvaluationContext, slope = false): Environment {
+function environment(context: EvaluationContext, slope = false, physical = false): Environment {
   return {
     lengthFactor: lengthUnitFactor(context.lengthUnit ?? 'mm'),
     angleFactor: angleUnitFactor(context.angleUnit ?? 'deg'),
@@ -90,7 +107,198 @@ function environment(context: EvaluationContext, slope = false): Environment {
     variables: context.variables ?? (() => undefined),
     measure: context.measure ?? (() => undefined),
     slope,
+    physical,
   };
+}
+
+// --- temperatures and bare numbers in physical fields ---------------------------------------------
+
+/**
+ * How a temperature value is affine (README, "Temperature"). `absolute`: a temperature, `value` in
+ * kelvin. `delta`: a difference. `either`: a `degC` or `degF` literal (or arithmetic on one) that
+ * is a difference of `value` kelvin or the absolute temperature `value + offset`, whichever its
+ * use needs. A value without one is a plain kelvin value, the same number either way.
+ */
+type Temp =
+  | { readonly kind: 'absolute' }
+  | { readonly kind: 'delta' }
+  | { readonly kind: 'either'; readonly offset: number };
+
+/**
+ * An intermediate value: a quantity, how it is affine if it is a temperature, and its value in SI
+ * computed alongside, so that a physical field returns `1 kgf` as exactly 9.80665 rather than
+ * converting the internal value back (`si` is absent where it is not tracked: functions and
+ * temperatures, which then convert `value`).
+ */
+interface Value extends Quantity {
+  readonly temp?: Temp;
+  readonly si?: number;
+}
+
+/** A plain value with its SI value, when known. */
+function plain(value: number, dimension: Dimension, si: number | undefined): Value {
+  return si === undefined ? { value, dimension } : { value, dimension, si };
+}
+
+const ABSOLUTE: Temp = { kind: 'absolute' };
+const DELTA: Temp = { kind: 'delta' };
+
+function withTemp(value: number, dimension: Dimension, temp: Temp | undefined): Value {
+  if (temp === undefined || (temp.kind === 'either' && temp.offset === 0)) {
+    return { value, dimension };
+  }
+  return { value, dimension, temp };
+}
+
+function isAbsolute(v: Value): boolean {
+  return v.temp?.kind === 'absolute';
+}
+
+function isDelta(v: Value): boolean {
+  return v.temp?.kind === 'delta';
+}
+
+/** The kelvin offset of an `either` value, 0 for anything else. */
+function offsetOf(v: Value): number {
+  return v.temp?.kind === 'either' ? v.temp.offset : 0;
+}
+
+/** `either` or plain: an `either` value with no offset is plain. */
+function either(value: number, dimension: Dimension, offset: number): Value {
+  return withTemp(value, dimension, { kind: 'either', offset });
+}
+
+/**
+ * A value as a `Quantity`: an `either` temperature resolves to its absolute reading, and a
+ * difference is marked `absolute: false`.
+ */
+function toQuantity(v: Value): Quantity {
+  if (v.temp?.kind === 'absolute')
+    return { value: v.value, dimension: v.dimension, absolute: true };
+  if (v.temp?.kind === 'delta') return { value: v.value, dimension: v.dimension, absolute: false };
+  if (v.temp?.kind === 'either') {
+    return { value: v.value + v.temp.offset, dimension: v.dimension, absolute: true };
+  }
+  return { value: v.value, dimension: v.dimension };
+}
+
+/** `a + b` or `a - b` of two temperatures, one of them affine (README, "Temperature"). */
+function temperatureSum(node: BinaryNode, a: Value, b: Value): Result<Value> {
+  const d = a.dimension;
+  if (node.op === '+') {
+    if (isAbsolute(a) && isAbsolute(b)) {
+      return err(
+        'dimension',
+        'Cannot add two absolute temperatures: add a temperature difference, or subtract them',
+        node.start,
+        node.end,
+      );
+    }
+    const sum = a.value + b.value;
+    if (isAbsolute(a) || isAbsolute(b)) return ok(withTemp(sum, d, ABSOLUTE));
+    if (isDelta(a) || isDelta(b)) {
+      const offset = isDelta(a) ? offsetOf(b) : offsetOf(a);
+      return ok(offset === 0 ? withTemp(sum, d, DELTA) : either(sum, d, offset));
+    }
+    // Two `degC`/`degF` literals cannot both be absolute (ADR 0017: two absolute temperatures
+    // added is an error), so their sum is a difference: `20degC + 5degC` is 25 K.
+    if (offsetOf(a) !== 0 && offsetOf(b) !== 0) return ok(withTemp(sum, d, DELTA));
+    return ok(either(sum, d, offsetOf(a) !== 0 ? offsetOf(a) : offsetOf(b)));
+  }
+  if (isAbsolute(a) && isAbsolute(b)) return ok(withTemp(a.value - b.value, d, DELTA));
+  if (isAbsolute(a)) {
+    // A difference, a plain kelvin value or a `degC` literal taken from an absolute temperature:
+    // absolute in a temperature field; a literal with an offset could also be the other absolute.
+    if (isDelta(b) || offsetOf(b) === 0) return ok(withTemp(a.value - b.value, d, ABSOLUTE));
+    return ok(either(a.value - b.value - offsetOf(b), d, offsetOf(b)));
+  }
+  if (isAbsolute(b)) {
+    if (isDelta(a)) {
+      return err(
+        'dimension',
+        'Cannot subtract an absolute temperature from a temperature difference',
+        node.start,
+        node.end,
+      );
+    }
+    return ok(withTemp(a.value + offsetOf(a) - b.value, d, DELTA));
+  }
+  if (isDelta(a)) return ok(withTemp(a.value - b.value, d, DELTA));
+  if (isDelta(b) || offsetOf(b) === 0) return ok(either(a.value - b.value, d, offsetOf(a)));
+  // Two `degC`/`degF` literals are two absolute temperatures, so the result is their difference
+  // (`80degC - 20degC` is 60 K): a temperature field refuses it.
+  if (offsetOf(a) !== 0) {
+    return ok(withTemp(a.value + offsetOf(a) - b.value - offsetOf(b), d, DELTA));
+  }
+  return ok(either(a.value - b.value - offsetOf(b), d, offsetOf(b)));
+}
+
+/** The error for an absolute temperature used where only a difference can be. */
+function absoluteMisuse(verb: string, span: Span): Result<never> {
+  return err(
+    'dimension',
+    `Cannot ${verb} an absolute temperature: only a temperature difference can be (subtract two temperatures, or write it in K)`,
+    span.start,
+    span.end,
+  );
+}
+
+function capitalise(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/** `30°`, `5 N`: a number and a unit as the user would type them. */
+function withUnit(n: string, unit: string): string {
+  return unit === '°' ? `${n}°` : `${n} ${unit}`;
+}
+
+/** The physical kind a dimension is, for messages: exact first, then ignoring angle. */
+function kindOfDimension(d: Dimension): PhysicalKind | undefined {
+  const candidates = PHYSICAL_KINDS.filter((k) => k !== 'temperatureDelta');
+  return (
+    candidates.find((k) => dimensionsEqual(dimensionOfKind(k), d)) ??
+    candidates.find((k) => dimensionsEqualIgnoringAngle(dimensionOfKind(k), d))
+  );
+}
+
+/**
+ * "A force needs a unit: write 200 N or 200 lbf", for a bare `value` where a quantity of `kind`
+ * (or, without one, of dimension `d`) is needed.
+ */
+function needsUnit(value: number, kind: QuantityKind | undefined, d: Dimension): string {
+  const n = String(Number(value.toPrecision(6)));
+  const physical = kind !== undefined && isPhysicalKind(kind) ? kind : kindOfDimension(d);
+  let what: string;
+  let units: string[];
+  if (physical !== undefined) {
+    what = describeKind(physical);
+    units = [defaultDisplayUnit(physical, 'si'), defaultDisplayUnit(physical, 'us')];
+  } else if (dimensionsEqual(d, LENGTH)) {
+    what = 'a length';
+    units = ['mm', 'in'];
+  } else if (dimensionsEqual(d, ANGLE)) {
+    what = 'an angle';
+    units = ['°', 'rad'];
+  } else {
+    return `Write a unit after ${n}: a bare number here has no unit`;
+  }
+  const choices = [...new Set(units)].map((u) => withUnit(n, u)).join(' or ');
+  return `${capitalise(what)} needs a unit: write ${choices}`;
+}
+
+/**
+ * In a physical field (or next to a physical quantity), a bare operand where a quantity is needed
+ * is an error at that operand, with the units to write. `undefined` when that is not the case.
+ */
+function bareOperand(
+  bare: Quantity,
+  other: Quantity,
+  span: Span,
+  env: Environment,
+): Result<never> | undefined {
+  if (!isDimensionless(bare.dimension) || isDimensionless(other.dimension)) return undefined;
+  if (!env.physical && !hasPhysicalBase(other.dimension)) return undefined;
+  return err('dimension', needsUnit(bare.value, undefined, other.dimension), span.start, span.end);
 }
 
 /**
@@ -112,7 +320,7 @@ function displayFactor(d: Dimension, env: Environment): number | undefined {
  * returned unchanged.
  */
 function promote(q: Quantity, target: Dimension, env: Environment): Quantity {
-  if (!isDimensionless(q.dimension)) return q;
+  if (env.physical || !isDimensionless(q.dimension)) return q;
   const factor = displayFactor(target, env);
   return factor === undefined ? q : { value: q.value * factor, dimension: target };
 }
@@ -141,12 +349,19 @@ function argSpan(node: CallNode, index: number): [number, number] {
   return arg === undefined ? [node.start, node.end] : [arg.start, arg.end];
 }
 
+function spanOf([start, end]: [number, number]): Span {
+  return { start, end };
+}
+
 function arg(args: readonly Quantity[], index: number): Quantity {
   return args[index] as Quantity;
 }
 
 /** Trig input: an angle, or a bare number read in the display angle unit. */
 function angleArgument(node: CallNode, q: Quantity, env: Environment): Result<number> {
+  if (env.physical && isDimensionless(q.dimension)) {
+    return err('dimension', needsUnit(q.value, 'angle', ANGLE), ...argSpan(node, 0));
+  }
   const angle = promote(q, ANGLE, env);
   if (!dimensionsEqual(angle.dimension, ANGLE)) {
     return err(
@@ -204,6 +419,10 @@ function extremum(pick: (a: number, b: number) => number): FunctionSpec {
       for (let i = 1; i < args.length; i++) {
         const pair = unify(acc, arg(args, i), env);
         if (pair === undefined) {
+          const bare =
+            bareOperand(arg(args, i), acc, spanOf(argSpan(node, i)), env) ??
+            bareOperand(acc, arg(args, i), spanOf(argSpan(node, 0)), env);
+          if (bare !== undefined) return bare;
           return err(
             'dimension',
             `${node.name}() arguments must have the same dimension: got ${describeDimension(acc.dimension)} and ${describeDimension(arg(args, i).dimension)}`,
@@ -228,11 +447,20 @@ function rounding(rounder: Rounder): FunctionSpec {
     apply(args, node, env) {
       const x = arg(args, 0);
       if (args.length === 1) {
+        if (env.physical || hasPhysicalBase(x.dimension)) {
+          // No display unit for a physical value: round it in SI.
+          const si = rounder(toSI(x.value, x.dimension));
+          return ok({ value: fromSI(si, x.dimension), dimension: x.dimension });
+        }
         const scale = displayFactor(x.dimension, env) ?? 1;
         return ok({ value: rounder(x.value / scale) * scale, dimension: x.dimension });
       }
       const pair = unify(x, arg(args, 1), env);
       if (pair === undefined) {
+        const bare =
+          bareOperand(arg(args, 1), x, spanOf(argSpan(node, 1)), env) ??
+          bareOperand(x, arg(args, 1), spanOf(argSpan(node, 0)), env);
+        if (bare !== undefined) return bare;
         return err(
           'dimension',
           `${node.name}() step must have the same dimension as the value: got ${describeDimension(x.dimension)} and ${describeDimension(arg(args, 1).dimension)}`,
@@ -291,6 +519,10 @@ const FUNCTIONS: ReadonlyMap<string, FunctionSpec> = new Map<string, FunctionSpe
       apply(args, node, env) {
         const pair = unify(arg(args, 0), arg(args, 1), env);
         if (pair === undefined) {
+          const bare =
+            bareOperand(arg(args, 1), arg(args, 0), spanOf(argSpan(node, 1)), env) ??
+            bareOperand(arg(args, 0), arg(args, 1), spanOf(argSpan(node, 0)), env);
+          if (bare !== undefined) return bare;
           return err(
             'dimension',
             `atan2() arguments must have the same dimension: got ${describeDimension(arg(args, 0).dimension)} and ${describeDimension(arg(args, 1).dimension)}`,
@@ -365,13 +597,68 @@ function evaluateCall(node: CallNode, env: Environment): Result<Quantity> {
           : `${spec.minArgs} to ${plural(spec.maxArgs, 'argument')}`;
     return err('arity', `${node.name}() takes ${expected}, got ${count}`, node.start, node.end);
   }
-  const args: Quantity[] = [];
+  const args: Value[] = [];
   for (const a of node.args) {
     const value = evaluateNode(a, env);
     if (!value.ok) return value;
     args.push(value.value);
   }
-  return spec.apply(args, node, env);
+  if (!args.some((a) => a.temp !== undefined)) return spec.apply(args, node, env);
+  return temperatureCall(node, spec, args, env);
+}
+
+const EXTREMA: ReadonlySet<string> = new Set(['min', 'max']);
+const ROUNDING: ReadonlySet<string> = new Set(['round', 'floor', 'ceil']);
+
+/**
+ * A function of temperatures (README, "Temperature"): a `degC` or `degF` value is absolute, except
+ * as a rounding step, which is a difference. `min` and `max` take absolute temperatures or
+ * differences but not both, a rounding keeps its value absolute, and any other function refuses
+ * an absolute temperature.
+ */
+function temperatureCall(
+  node: CallNode,
+  spec: FunctionSpec,
+  raw: readonly Value[],
+  env: Environment,
+): Result<Value> {
+  const args = raw.map((a, i): Value => {
+    if (a.temp?.kind !== 'either') return a;
+    if (ROUNDING.has(node.name) && i === 1) return withTemp(a.value, a.dimension, DELTA);
+    return withTemp(a.value + a.temp.offset, a.dimension, ABSOLUTE);
+  });
+  const absolute = args.findIndex(isAbsolute);
+  if (absolute < 0) {
+    const result = spec.apply(args, node, env);
+    if (!result.ok || !isTemperature(result.value.dimension)) return result;
+    return ok(withTemp(result.value.value, result.value.dimension, DELTA));
+  }
+  if (EXTREMA.has(node.name)) {
+    const other = args.findIndex((a) => !isAbsolute(a) && isTemperature(a.dimension));
+    if (other >= 0) {
+      return err(
+        'dimension',
+        `${node.name}() cannot compare an absolute temperature with a temperature difference`,
+        ...argSpan(node, other),
+      );
+    }
+  } else if (!ROUNDING.has(node.name) || absolute !== 0) {
+    if (ROUNDING.has(node.name)) {
+      return err(
+        'dimension',
+        `${node.name}() step must be a temperature difference, not an absolute temperature`,
+        ...argSpan(node, absolute),
+      );
+    }
+    return err(
+      'dimension',
+      `${node.name}() cannot take an absolute temperature`,
+      ...argSpan(node, absolute),
+    );
+  }
+  const result = spec.apply(args, node, env);
+  if (!result.ok) return result;
+  return ok(withTemp(result.value.value, result.value.dimension, ABSOLUTE));
 }
 
 interface Span {
@@ -455,14 +742,18 @@ function evaluatePercent(node: PercentNode, env: Environment): Result<Quantity> 
 }
 
 /** `a + b` or `a - b` for the binary node `node`, bringing bare operands to a common dimension. */
-function addOrSubtract(
-  node: BinaryNode,
-  a: Quantity,
-  b: Quantity,
-  env: Environment,
-): Result<Quantity> {
+function addOrSubtract(node: BinaryNode, a: Value, b: Value, env: Environment): Result<Value> {
+  if (
+    (a.temp !== undefined || b.temp !== undefined) &&
+    isTemperature(a.dimension) &&
+    isTemperature(b.dimension)
+  ) {
+    return temperatureSum(node, a, b);
+  }
   const pair = unify(a, b, env);
   if (pair === undefined) {
+    const bare = bareOperand(b, a, node.right, env) ?? bareOperand(a, b, node.left, env);
+    if (bare !== undefined) return bare;
     const verb = node.op === '+' ? 'add' : 'subtract';
     const joiner = node.op === '+' ? 'and' : 'from';
     const [first, second] = node.op === '+' ? [a, b] : [b, a];
@@ -475,14 +766,17 @@ function addOrSubtract(
   }
   const [x, y] = pair;
   const value = node.op === '+' ? x.value + y.value : x.value - y.value;
-  return ok({ value, dimension: x.dimension });
+  // The SI value follows only when neither operand was promoted to a display unit.
+  const tracked = x === a && y === b && a.si !== undefined && b.si !== undefined;
+  const si = tracked ? (node.op === '+' ? a.si! + b.si! : a.si! - b.si!) : undefined;
+  return ok(plain(value, x.dimension, si));
 }
 
 /**
  * Evaluates one node and rejects a non-finite result right there, so an overflow is reported
  * where it happens rather than disappearing later (`1/1e300^2` would otherwise give 0).
  */
-function evaluateNode(node: Expression, env: Environment): Result<Quantity> {
+function evaluateNode(node: Expression, env: Environment): Result<Value> {
   const result = evaluateUnchecked(node, env);
   if (result.ok && !Number.isFinite(result.value.value)) {
     return err('domain', 'Result is not a finite number', node.start, node.end);
@@ -490,7 +784,7 @@ function evaluateNode(node: Expression, env: Environment): Result<Quantity> {
   return result;
 }
 
-function evaluateUnchecked(node: Expression, env: Environment): Result<Quantity> {
+function evaluateUnchecked(node: Expression, env: Environment): Result<Value> {
   switch (node.type) {
     case 'string':
       return err(
@@ -500,16 +794,20 @@ function evaluateUnchecked(node: Expression, env: Environment): Result<Quantity>
         node.end,
       );
     case 'number':
-      return ok({ value: node.value, dimension: DIMENSIONLESS });
+      return ok({ value: node.value, dimension: DIMENSIONLESS, si: node.value });
     case 'measure':
-      return ok({ value: node.value, dimension: node.dimension });
+      if (node.offset !== undefined) return ok(either(node.value, node.dimension, node.offset));
+      return ok(plain(node.value, node.dimension, node.si ?? toSI(node.value, node.dimension)));
     case 'variable': {
       const value = env.variables(node.name);
       if (value === undefined) {
         const shown = node.hashed ? `#${node.name}` : node.name;
         return err('unknown-variable', `Unknown variable '${shown}'`, node.start, node.end);
       }
-      return ok(value);
+      if (value.absolute !== undefined && isTemperature(value.dimension)) {
+        return ok(withTemp(value.value, value.dimension, value.absolute ? ABSOLUTE : DELTA));
+      }
+      return ok(plain(value.value, value.dimension, toSI(value.value, value.dimension)));
     }
     case 'unit': {
       const operand = evaluateNode(node.operand, env);
@@ -522,12 +820,20 @@ function evaluateUnchecked(node: Expression, env: Environment): Result<Quantity>
           node.end,
         );
       }
-      return ok({ value: operand.value.value * node.unit.factor, dimension: node.unit.dimension });
+      const value = operand.value.value * node.unit.factor;
+      if (node.unit.offset !== undefined) {
+        return ok(either(value, node.unit.dimension, node.unit.offset));
+      }
+      const si = siMagnitude(operand.value.value, node.unit.si);
+      return ok({ value, dimension: node.unit.dimension, si });
     }
     case 'unary': {
       const operand = evaluateNode(node.operand, env);
       if (!operand.ok || node.op === '+') return operand;
-      return ok({ value: -operand.value.value, dimension: operand.value.dimension });
+      const v = operand.value;
+      if (isAbsolute(v)) return absoluteMisuse('negate', node);
+      if (v.temp !== undefined) return ok(withTemp(-v.value, v.dimension, v.temp));
+      return ok(plain(-v.value, v.dimension, v.si === undefined ? undefined : -v.si));
     }
     case 'call':
       return evaluateCall(node, env);
@@ -542,46 +848,68 @@ function evaluateUnchecked(node: Expression, env: Environment): Result<Quantity>
       if (!right.ok) return right;
       const a = left.value;
       const b = right.value;
-      switch (node.op) {
-        case '+':
-        case '-':
-          return addOrSubtract(node, a, b, env);
-        case '*':
-          return ok({
-            value: a.value * b.value,
-            dimension: multiplyDimensions(a.dimension, b.dimension),
-          });
-        case '/':
-          if (b.value === 0) {
-            return err('domain', 'Division by zero', node.right.start, node.right.end);
-          }
-          return ok({
-            value: a.value / b.value,
-            dimension: divideDimensions(a.dimension, b.dimension),
-          });
-        case '^': {
-          if (!isDimensionless(b.dimension)) {
-            return err(
-              'dimension',
-              `An exponent must be a number, got ${describeDimension(b.dimension)}`,
-              node.right.start,
-              node.right.end,
-            );
-          }
-          const value = Math.pow(a.value, b.value);
-          if (Number.isNaN(value)) {
-            return err('domain', 'Fractional power of a negative value', node.start, node.end);
-          }
-          return ok({ value, dimension: powerDimension(a.dimension, b.value) });
-        }
+      if (node.op === '+' || node.op === '-') return addOrSubtract(node, a, b, env);
+      if (isAbsolute(a) || isAbsolute(b)) {
+        const verb = node.op === '*' ? 'multiply' : node.op === '/' ? 'divide' : 'raise';
+        return absoluteMisuse(verb, isAbsolute(a) ? node.left : node.right);
       }
+      const result = arithmetic(node, a, b);
+      // A difference stays a difference through arithmetic (`2 * 5degC` is 10 K).
+      if (!result.ok || (a.temp === undefined && b.temp === undefined)) return result;
+      if (!isTemperature(result.value.dimension)) return result;
+      return ok(withTemp(result.value.value, result.value.dimension, DELTA));
+    }
+  }
+}
+
+/** `*`, `/` and `^` of two evaluated operands (`+` and `-` are `addOrSubtract`). */
+function arithmetic(node: BinaryNode, a: Value, b: Value): Result<Value> {
+  const both = a.si !== undefined && b.si !== undefined;
+  switch (node.op) {
+    case '+':
+    case '-':
+      return err('syntax', 'Unexpected operator', node.start, node.end);
+    case '*':
+      return ok(
+        plain(
+          a.value * b.value,
+          multiplyDimensions(a.dimension, b.dimension),
+          both ? a.si! * b.si! : undefined,
+        ),
+      );
+    case '/':
+      if (b.value === 0) {
+        return err('domain', 'Division by zero', node.right.start, node.right.end);
+      }
+      return ok(
+        plain(
+          a.value / b.value,
+          divideDimensions(a.dimension, b.dimension),
+          both && b.si !== 0 ? a.si! / b.si! : undefined,
+        ),
+      );
+    case '^': {
+      if (!isDimensionless(b.dimension)) {
+        return err(
+          'dimension',
+          `An exponent must be a number, got ${describeDimension(b.dimension)}`,
+          node.right.start,
+          node.right.end,
+        );
+      }
+      const value = Math.pow(a.value, b.value);
+      if (Number.isNaN(value)) {
+        return err('domain', 'Fractional power of a negative value', node.start, node.end);
+      }
+      const si = a.si === undefined ? undefined : Math.pow(a.si, b.value);
+      return ok(plain(value, powerDimension(a.dimension, b.value), si));
     }
   }
 }
 
 /** Results never carry `-0`, so `formatX` and equality checks need not care. */
 function withoutNegativeZero(q: Quantity): Quantity {
-  return q.value === 0 ? { value: 0, dimension: q.dimension } : q;
+  return q.value === 0 ? { ...q, value: 0 } : q;
 }
 
 /**
@@ -660,26 +988,105 @@ function containsPitch(node: Expression): boolean {
   }
 }
 
+/**
+ * An AST parsed for the other mode reads differently (a compound unit, `rpm`), so evaluating it
+ * would silently give another value: refuse instead.
+ */
+function checkMode(expression: Expression, physical: boolean): Result<never> | undefined {
+  const parsed = parsedPhysical(expression);
+  if (parsed === undefined || parsed === physical) return undefined;
+  return err(
+    'syntax',
+    physical
+      ? 'This expression was parsed for a field without a physical kind, where it reads differently: parse it with { physical: true }'
+      : 'This expression was parsed for a physical field, where it reads differently: parse it without { physical: true }',
+    expression.start,
+    expression.end,
+  );
+}
+
 /** Evaluates an already-parsed expression without imposing an expected kind. */
 export function evaluateParsedQuantity(
   expression: Expression,
   context: EvaluationContext = {},
 ): Result<Quantity> {
-  const result = evaluateNode(expression, environment(context));
-  return result.ok ? ok(withoutNegativeZero(result.value)) : result;
+  const physical = context.physical === true;
+  const wrongMode = checkMode(expression, physical);
+  if (wrongMode !== undefined) return wrongMode;
+  const result = evaluateNode(expression, environment(context, false, physical));
+  return result.ok ? ok(withoutNegativeZero(toQuantity(result.value))) : result;
+}
+
+/** The value of a physical field: checked against the kind, then in SI. */
+function physicalResult(expression: Expression, v: Value, kind: PhysicalKind): Result<number> {
+  const span = [expression.start, expression.end] as const;
+  const target = dimensionOfKind(kind);
+  if (isDimensionless(v.dimension)) {
+    return err('dimension', needsUnit(v.value, kind, target), ...span);
+  }
+  if (!dimensionsEqualIgnoringAngle(v.dimension, target)) {
+    return err(
+      'dimension',
+      `Expected ${describeKind(kind)} but got ${describeDimension(v.dimension)}`,
+      ...span,
+    );
+  }
+  if (kind === 'frequency' && Math.abs(v.dimension.angle) > 1e-9) {
+    return err(
+      'dimension',
+      'An angular speed is not a frequency: write the frequency in Hz, or divide by (2*pi)rad',
+      ...span,
+    );
+  }
+  let value = v.value;
+  if (kind === 'temperature') {
+    if (isDelta(v)) {
+      return err(
+        'dimension',
+        'Expected a temperature but got a temperature difference: add it to a temperature',
+        ...span,
+      );
+    }
+    value += offsetOf(v);
+  } else if (kind === 'temperatureDelta' && isAbsolute(v)) {
+    return err(
+      'dimension',
+      'Expected a temperature difference but got an absolute temperature: subtract another temperature from it',
+      ...span,
+    );
+  }
+  const si = v.temp === undefined && v.si !== undefined ? v.si : toSI(value, target);
+  if (!Number.isFinite(si)) return err('domain', 'Result is not a finite number', ...span);
+  return ok(si === 0 ? 0 : si);
 }
 
 /**
  * Evaluates an already-parsed expression and checks it against `options.expected`. Returns the
- * value in internal units: millimetres, radians, mm/min, rpm, or a plain number.
+ * value in internal units (millimetres, radians, mm/min, rpm, or a plain number), or in SI for a
+ * physical kind. Parse with `{ physical: true }` for a physical kind (or `options.physical`).
  */
 export function evaluateParsed(expression: Expression, options: EvaluateOptions): Result<number> {
-  const slope = options.slope === true && options.expected === 'angle';
-  const env = environment(options, slope);
+  const physicalKind = isPhysicalKind(options.expected);
+  const physical = physicalKind || options.physical === true;
+  const wrongMode = checkMode(expression, physical);
+  if (wrongMode !== undefined) return wrongMode;
+  const slope = options.slope === true && options.expected === 'angle' && !physical;
+  const env = environment(options, slope, physical);
   const result = slope ? evaluateSlope(expression, env) : evaluateNode(expression, env);
   if (!result.ok) return result;
+  if (isPhysicalKind(options.expected)) {
+    return physicalResult(expression, result.value, options.expected);
+  }
   const target = dimensionOfKind(options.expected);
   const value = promote(result.value, target, env);
+  if (physical && isDimensionless(value.dimension) && !isDimensionless(target)) {
+    return err(
+      'dimension',
+      needsUnit(value.value, options.expected, target),
+      expression.start,
+      expression.end,
+    );
+  }
   if (!dimensionsEqual(value.dimension, target) && dimensionsEqual(value.dimension, ANGLE)) {
     if (containsPitch(expression)) {
       return err(
@@ -707,24 +1114,35 @@ export function evaluateParsed(expression: Expression, options: EvaluateOptions)
 
 /**
  * Evaluates `source` without imposing an expected kind: bare numbers stay dimensionless.
- * Useful for a variables table where the kind is inferred from the expression.
+ * Useful for a variables table where the kind is inferred from the expression. A lone `25degC`
+ * is an absolute temperature (`absolute: true`).
  */
 export function evaluateQuantity(
   source: string,
   context: EvaluationContext = {},
 ): Result<Quantity> {
-  const parsed = parseExpression(source);
+  const parsed = parseExpression(source, { physical: context.physical === true });
   return parsed.ok ? evaluateParsedQuantity(parsed.value, context) : parsed;
 }
 
 /**
  * Parses and evaluates `source` as `options.expected`. Returns millimetres for lengths, radians
- * for angles, mm/min for feeds, rpm for spindle speeds and a plain number for numbers. A
- * dimensionless result is read in the display unit.
+ * for angles, mm/min for feeds, rpm for spindle speeds, a plain number for numbers and SI for a
+ * physical kind. A dimensionless result is read in the display unit, except in a physical field,
+ * where it is an error.
  */
 export function evaluate(source: string, options: EvaluateOptions): Result<number> {
-  const parsed = parseExpression(source);
+  const physical = isPhysicalKind(options.expected) || options.physical === true;
+  const parsed = parseExpression(source, { physical });
   return parsed.ok ? evaluateParsed(parsed.value, options) : parsed;
+}
+
+/**
+ * Parses a value of `kind` without variables: SI for a physical kind (`parseQuantity('200 lbf',
+ * 'force')` is 889.64), internal units with bare numbers in millimetres and degrees otherwise.
+ */
+export function parseQuantity(source: string, kind: QuantityKind): Result<number> {
+  return evaluate(source, { expected: kind });
 }
 
 /** Parses a length (or length expression without variables); bare numbers are in `unit`. */

@@ -1,6 +1,6 @@
 import type { Expression } from './ast';
 import { FUNCTION_NAMES, MEASURE_FUNCTION_NAMES, type MeasureFunction } from './evaluate';
-import { CONSTANT_NAMES, parseExpression } from './parser';
+import { CONSTANT_NAMES, parseExpression, type ParseOptions } from './parser';
 import { ok, type Result } from './result';
 
 /** A variable mentioned in an expression. */
@@ -50,10 +50,14 @@ export function collectReferences(expression: Expression): VariableReference[] {
 
 /**
  * Every variable reference in `source`, in source order (duplicates included). Fails only on
- * syntax errors. Used for dependency graphs and cycle detection in the variables table.
+ * syntax errors. Pass `{ physical: true }` for a physical field, where `5 m/s` mentions no
+ * variable `s`. Used for dependency graphs and cycle detection in the variables table.
  */
-export function findReferences(source: string): Result<VariableReference[]> {
-  const parsed = parseExpression(source);
+export function findReferences(
+  source: string,
+  options: ParseOptions = {},
+): Result<VariableReference[]> {
+  const parsed = parseExpression(source, options);
   return parsed.ok ? ok(collectReferences(parsed.value)) : parsed;
 }
 
@@ -118,8 +122,11 @@ export function collectMeasures(expression: Expression): MeasureReference[] {
 }
 
 /** Every `distance(...)` and `angle(...)` in `source`. Fails only on syntax errors. */
-export function findMeasures(source: string): Result<MeasureReference[]> {
-  const parsed = parseExpression(source);
+export function findMeasures(
+  source: string,
+  options: ParseOptions = {},
+): Result<MeasureReference[]> {
+  const parsed = parseExpression(source, options);
   return parsed.ok ? ok(collectMeasures(parsed.value)) : parsed;
 }
 

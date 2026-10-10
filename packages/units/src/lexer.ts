@@ -49,6 +49,7 @@ const SINGLE_CHAR: Readonly<Record<string, { kind: TokenKind; text: string }>> =
   '−': { kind: 'op', text: '-' }, // unicode minus sign
   '*': { kind: 'op', text: '*' },
   '×': { kind: 'op', text: '*' }, // multiplication sign
+  '·': { kind: 'op', text: '*' }, // middle dot, as in N·m
   '/': { kind: 'op', text: '/' },
   '^': { kind: 'op', text: '^' },
   '(': { kind: '(', text: '(' },
@@ -101,6 +102,35 @@ export function tokenize(source: string): Result<Token[]> {
         }
       }
       tokens.push({ kind: 'number', text: source.slice(start, i), start, end: i });
+      continue;
+    }
+    if (c === 'Ω' || c === '\u2126') {
+      // Ohm (Greek capital omega or the ohm sign): a unit name of its own, or the end of `kΩ` and
+      // `mΩ` when it follows the prefix letter directly.
+      i++;
+      const previous = tokens[tokens.length - 1];
+      if (
+        previous?.kind === 'ident' &&
+        previous.end === start &&
+        (previous.text === 'k' || previous.text === 'm')
+      ) {
+        tokens[tokens.length - 1] = { ...previous, text: `${previous.text}Ω`, end: i };
+        continue;
+      }
+      tokens.push({ kind: 'ident', text: 'Ω', start, end: i });
+      continue;
+    }
+    if (c === '℃' || c === '℉') {
+      // The degree Celsius and degree Fahrenheit signs: unit names of their own.
+      i++;
+      tokens.push({ kind: 'ident', text: c, start, end: i });
+      continue;
+    }
+    if ((c === 'µ' || c === 'μ') && isLetter(source[i + 1])) {
+      // Micro (micro sign or Greek mu) starts a unit name: `µH`. Normalised to the micro sign.
+      i++;
+      while (isLetter(source[i])) i++;
+      tokens.push({ kind: 'ident', text: `µ${source.slice(start + 1, i)}`, start, end: i });
       continue;
     }
     if (IDENT_START.test(c)) {

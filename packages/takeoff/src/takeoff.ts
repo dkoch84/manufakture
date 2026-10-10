@@ -3,16 +3,17 @@
 // drywall in M6), with the grouping and the totals every producer shares.
 //
 // Values are internal units: lengths in millimetres, areas in square millimetres, volumes in cubic
-// millimetres; board feet, sheets and pieces are plain counts. Formatting for display is in
+// millimetres, masses in kilograms (SI, as `@manufakture/units` gives a mass); board feet, sheets
+// and pieces are plain counts. Formatting for display is in
 // `format.ts`, through `@manufakture/units`, in the document's display units.
 
 import { MM_PER_INCH } from '@manufakture/units';
 
 /**
  * What a row adds up to. `each`: pieces; `board-foot`: board feet (a count); `length`: mm;
- * `area`: mm²; `volume`: mm³; `sheet`: whole or estimated sheets (a count).
+ * `area`: mm²; `volume`: mm³; `mass`: kg; `sheet`: whole or estimated sheets (a count).
  */
-export type TakeoffUnit = 'each' | 'board-foot' | 'length' | 'area' | 'volume' | 'sheet';
+export type TakeoffUnit = 'each' | 'board-foot' | 'length' | 'area' | 'volume' | 'mass' | 'sheet';
 
 /** Every unit, in the order totals list them. */
 export const TAKEOFF_UNITS: readonly TakeoffUnit[] = [
@@ -21,6 +22,7 @@ export const TAKEOFF_UNITS: readonly TakeoffUnit[] = [
   'sheet',
   'length',
   'volume',
+  'mass',
   'each',
 ];
 

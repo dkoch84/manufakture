@@ -1,8 +1,17 @@
 // Takeoff values for display, in the document's display units (ADR 0005), through
 // `@manufakture/units`: lengths as the document formats them (`3' 4-1/2"`, `40-1/2"`, `1028.70 mm`),
-// areas in square feet or square metres, volumes in cubic inches or cubic centimetres.
+// areas in square feet or square metres, volumes in cubic inches or cubic centimetres, masses in
+// the document's mass unit (kg or lb by default).
 
-import { MM_PER_INCH, formatLength, formatNumber, type LengthFormat } from '@manufakture/units';
+import {
+  MM_PER_INCH,
+  formatLength,
+  formatNumber,
+  formatQuantity,
+  resolveDisplayUnit,
+  type LengthFormat,
+  type QuantityDisplayUnits,
+} from '@manufakture/units';
 import type { TakeoffMeasure, TakeoffRow, TakeoffSize, TakeoffUnit } from './takeoff';
 
 /** Whether a display format is an inch or foot one (areas in sq ft, volumes in in³). */
@@ -51,9 +60,14 @@ function count(value: number, decimals: number): string {
 
 /**
  * An amount in its unit: `5.33 bd ft`, `11.25 sq ft` or `1.045 m²`, a length as the document
- * formats it, `4 pcs`, `2.5 sheets`.
+ * formats it, `2.350 kg` or `5.181 lb`, `4 pcs`, `2.5 sheets`. A mass takes the document's mass
+ * display unit from `quantities` (its `units.quantities`), else kg or lb by the length format.
  */
-export function formatMeasure(measure: TakeoffMeasure, format: LengthFormat): string {
+export function formatMeasure(
+  measure: TakeoffMeasure,
+  format: LengthFormat,
+  quantities?: QuantityDisplayUnits,
+): string {
   const { unit, value } = measure;
   switch (unit) {
     case 'board-foot':
@@ -68,6 +82,10 @@ export function formatMeasure(measure: TakeoffMeasure, format: LengthFormat): st
         : `${formatNumber(value / 1e3, 0)} cm³`;
     case 'length':
       return formatLength(value, format);
+    case 'mass':
+      return formatQuantity(value, 'mass', {
+        unit: resolveDisplayUnit('mass', quantities, format.unit),
+      });
     case 'sheet':
       return `${count(value, 2)} ${value === 1 ? 'sheet' : 'sheets'}`;
     case 'each':
@@ -82,6 +100,7 @@ export const UNIT_LABELS: Readonly<Record<TakeoffUnit, string>> = {
   sheet: 'Sheets',
   length: 'Length',
   volume: 'Volume',
+  mass: 'Mass',
   each: 'Pieces',
 };
 
@@ -95,18 +114,22 @@ export interface FormattedRow {
   measures: string[];
 }
 
-/** A row as text in the document's display units. `stockName` names a stock id (default: the id). */
+/**
+ * A row as text in the document's display units. `stockName` names a stock id (default: the id);
+ * `quantities` is the document's display unit per physical kind, for masses.
+ */
 export function formatRow(
   row: TakeoffRow,
   format: LengthFormat,
   stockName: (id: string) => string = (id) => id,
+  quantities?: QuantityDisplayUnits,
 ): FormattedRow {
   return {
     item: row.item,
     stock: row.stock === undefined ? '' : stockName(row.stock),
     size: formatSize(row.size, format),
     quantity: count(row.quantity, 2),
-    extended: formatMeasure({ unit: row.unit, value: row.extended }, format),
-    measures: row.measures.map((m) => formatMeasure(m, format)),
+    extended: formatMeasure({ unit: row.unit, value: row.extended }, format, quantities),
+    measures: row.measures.map((m) => formatMeasure(m, format, quantities)),
   };
 }

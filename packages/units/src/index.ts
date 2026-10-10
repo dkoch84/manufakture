@@ -16,20 +16,35 @@ export type {
 } from './ast';
 export {
   ANGLE,
+  CURRENT,
   DIMENSIONLESS,
+  ENERGY,
   FEED,
+  FORCE,
   LENGTH,
+  MASS,
+  PHYSICAL_KINDS,
+  POWER,
   SPINDLE_SPEED,
+  TEMPERATURE,
   TIME,
+  VOLTAGE,
   angleQuantity,
   describeDimension,
+  describeKind,
+  dimensionOfKind,
   dimensionsEqual,
+  dimensionsEqualIgnoringAngle,
   feedQuantity,
+  isPhysicalKind,
   lengthQuantity,
+  makeDimension,
   numberQuantity,
   spindleSpeedQuantity,
   timeQuantity,
   type Dimension,
+  type GeometricKind,
+  type PhysicalKind,
   type Quantity,
   type QuantityKind,
 } from './dimension';
@@ -43,6 +58,7 @@ export {
   parseAngle,
   parseFeed,
   parseLength,
+  parseQuantity,
   parseSpindleSpeed,
   type EvaluateOptions,
   type EvaluationContext,
@@ -65,7 +81,26 @@ export {
   type FractionalLengthFormat,
   type LengthFormat,
 } from './format';
-export { CONSTANT_NAMES, MAX_NESTING, MAX_TREE_DEPTH, parseExpression } from './parser';
+export {
+  CONSTANT_NAMES,
+  MAX_NESTING,
+  MAX_TREE_DEPTH,
+  parseExpression,
+  type ParseOptions,
+} from './parser';
+export {
+  defaultDisplayUnit,
+  displayUnitsOf,
+  formatQuantity,
+  fromDisplayUnit,
+  resolveDisplayUnit,
+  toDisplayUnit,
+  unitSystemOf,
+  type QuantityDisplayUnits,
+  type QuantityFormat,
+  type UnitSystem,
+} from './quantities';
+export { physicalQuantity, quantityFromSI, quantityToSI } from './si';
 export {
   collectMeasures,
   collectReferences,
@@ -88,6 +123,7 @@ export {
   lengthUnitFactor,
   toMillimetres,
   toRadians,
+  PHYSICAL_UNIT_NAMES,
   type AngleUnit,
   type LengthUnit,
 } from './units';

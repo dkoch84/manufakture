@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { csvField, csvTextField } from './csv';
-import { exactLengthFormat, formatMeasure, formatRow, formatSize, isImperial } from './format';
+import {
+  UNIT_LABELS,
+  exactLengthFormat,
+  formatMeasure,
+  formatRow,
+  formatSize,
+  isImperial,
+} from './format';
 import {
   MM3_PER_BOARD_FOOT,
   boardFeet,
@@ -206,6 +213,55 @@ describe('formatting', () => {
       measures: ['138"'],
     });
     expect(formatRow(row({ key: 'b' }), frac).stock).toBe('');
+  });
+});
+
+describe('mass', () => {
+  const frac = { unit: 'in-fraction', denominator: 32 } as const;
+  const LB = 0.45359237;
+
+  it('formats a mass in kg or lb by the length format, or in the chosen unit', () => {
+    expect(formatMeasure({ unit: 'mass', value: 2.35 }, { unit: 'mm' })).toBe('2.350 kg');
+    expect(formatMeasure({ unit: 'mass', value: 2.35 }, { unit: 'm' })).toBe('2.350 kg');
+    expect(formatMeasure({ unit: 'mass', value: 5 * LB }, frac)).toBe('5.000 lb');
+    expect(formatMeasure({ unit: 'mass', value: 5 * LB }, { unit: 'ft-in' })).toBe('5.000 lb');
+    expect(formatMeasure({ unit: 'mass', value: 0.25 }, { unit: 'mm' }, { mass: 'g' })).toBe(
+      '250.0 g',
+    );
+    expect(formatMeasure({ unit: 'mass', value: 0.25 }, frac, { mass: 'kN' })).toBe('0.551 lb');
+  });
+
+  it('totals mass rows and measures, after volume', () => {
+    const rows = [
+      row({
+        key: 'motor',
+        category: 'part',
+        unit: 'each',
+        extended: 1,
+        measures: [{ unit: 'mass', value: 1.2 }],
+      }),
+      row({
+        key: 'frame',
+        category: 'part',
+        unit: 'mass',
+        extended: 3.4,
+        quantity: 2,
+        measures: [{ unit: 'volume', value: 1e6 }],
+      }),
+    ];
+    expect(totals(rows)).toEqual([
+      { group: '', unit: 'volume', value: 1e6, quantity: 2 },
+      { group: '', unit: 'mass', value: 4.6, quantity: 3 },
+      { group: '', unit: 'each', value: 1, quantity: 1 },
+    ]);
+    expect(scaleRow(rows[1]!, 2).extended).toBe(6.8);
+  });
+
+  it('formats a weight row in the chosen unit', () => {
+    const r = row({ key: 'frame', item: 'Frame', unit: 'mass', extended: 3.4, quantity: 2 });
+    expect(formatRow(r, { unit: 'mm' }).extended).toBe('3.400 kg');
+    expect(formatRow(r, { unit: 'mm' }, undefined, { mass: 'lb' }).extended).toBe('7.496 lb');
+    expect(UNIT_LABELS.mass).toBe('Mass');
   });
 });
 

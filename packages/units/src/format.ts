@@ -83,12 +83,12 @@ function clampDecimals(decimals: number): number {
  * Text for a value that cannot be formatted: `NaN`, `Infinity` or `-Infinity`, without a unit.
  * It deliberately does not parse back as a value.
  */
-function nonFinite(value: number): string {
+export function nonFinite(value: number): string {
   return String(value);
 }
 
 /** Fixed-point text without a negative sign on values that round to zero. */
-function fixed(value: number, decimals: number): string {
+export function fixed(value: number, decimals: number): string {
   const text = value.toFixed(clampDecimals(decimals));
   return /^-[0.]*$/.test(text) ? text.slice(1) : text;
 }
