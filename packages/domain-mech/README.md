@@ -56,7 +56,7 @@ construction domains. It registers one extension type, `mech.placeholder` (T9.2a
 evaluation stage of decision 15 (`createMechEvaluation`, below: the checks; the simulation joins it
 in T9.4b).
 
-## Purchased parts (`src/parts/`, T9.2a; `src/catalog/`, T9.2b and T9.2c)
+## Purchased parts (`src/parts/`, T9.2a; `src/catalog/`, T9.2b to T9.2d)
 
 One model for every bought part with ratings (ADR 0017 decision 7). Core stores user entries
 (`mech.catalog`, `CatalogEntry`) and uses (`mech.purchased`, `PurchasedUse`); this package gives
@@ -75,8 +75,17 @@ them meaning.
   5, 10 to 90 by tens, 95 and 100 %, named by `ocvField` (`ocv50`); pack: the cell, full and empty
   voltage, DC resistance, interconnect resistance, peak discharge and maximum charge current; BMS:
   chemistry setting, peak discharge, cell overcharge and overdischarge thresholds, short-circuit
-  response time, protections, communication and operating temperatures). Version 2 only added
-  fields, so the migration from 1 leaves the ratings as they are. Each `RatingField` has a kind (a `packages/units`
+  response time, protections, communication and operating temperatures), and bearing, belt,
+  pulley, gear and rope, which T9.2d raised to 2 (bearing: SKF's calculation factors `kr` and `f0`
+  and the contact angle; belt: the rated working tension on the largest pulley of the maker's
+  table and its grooves, so a check interpolates between it and the rating at the fewest grooves,
+  teeth in mesh the rating assumes, tensile stiffness EA, mass per length, drive efficiency and an
+  endless belt's teeth; pulley: material, flanges, mounting and highest rim speed, the pitch
+  diameter being derived; gear: surface durability torque, helix angle, material, hardness and
+  quality grade; rope: suggested bend ratio, what the breaking loads are (`strengthBasis`:
+  spliced, unterminated, terminated, not stated), termination efficiency, elastic elongation with
+  the fraction of break it is stated at, design factor, cycle rating, creep and fatigue notes).
+  Version 2 only added fields, so the migration from 1 leaves the ratings as they are. Each `RatingField` has a kind (a `packages/units`
   physical kind stored in SI, `number`, `count` or `text`), optional `options`, `conventions`,
   `basis` and `bom` (the comparison a BOM line states: `at-least`, `at-most`, `equals`). Geometric
   sizes are dimensions (mm, `DIMENSION_NAMES`), not ratings. `entryProblems(entry)` checks an
@@ -89,6 +98,12 @@ them meaning.
   temperature windows upside down, a BMS's fewest cells above its most or overdischarge above
   overcharge, cutoff above maximum voltage, a pack's empty above its full voltage, `ocv0` below the
   cutoff, `ocv100` above the maximum voltage) and a cell OCV curve that falls as the charge rises (a flat stretch is fine).
+  Since T9.2d it keeps a bearing's `kr` and `f0` above zero, contact, pressure and helix angles
+  below 90 degrees, a belt's efficiency, a rope's termination efficiency and the elongation load
+  fraction in (0, 1], elongation from 0 below 1, bend ratios above zero, a design factor from 1 and
+  teeth in mesh from 1, and refuses a bearing's fatigue limit above C0, a belt's large-pulley
+  grooves or tension below the fewest-grooves ones or either tension above the breaking strength,
+  and a rope's minimum breaking load above the average or minimum bend ratio above the suggested.
   `KV_CONVENTIONS` and `KT_CONVENTIONS` list the conventions, each also at the output side
   (`OUTPUT_SIDE`). `migrateEntry` migrates ratings in memory and refuses a newer `fieldsVersion`.
 - **The built-in catalog** (`catalog.ts`): `BUILTIN_ENTRIES`, every version ever shipped, sorted
@@ -98,8 +113,18 @@ them meaning.
   `unknown-entry` / `newer-fields`, never a guess; it reports a `newer` version and `deprecated`.
   `copyBuiltin` copies one into a user entry with `derivedFrom`.
 - **The family catalogs** (`src/catalog/`): `MOTOR_ENTRIES` and `CONTROLLER_ENTRIES` (T9.2b),
-  `CELL_ENTRIES` and `BMS_ENTRIES` (T9.2c), joined into `BUILTIN_ENTRIES`; T9.2d and T9.2e add
-  theirs the same way. Cells: Molicel P45B and P42A, Samsung 40T and 30Q, Murata VTC6, the small
+  `CELL_ENTRIES` and `BMS_ENTRIES` (T9.2c), `BEARING_ENTRIES`, `BELT_ENTRIES`,
+  `PULLEY_ENTRIES`, `GEAR_ENTRIES` and `ROPE_ENTRIES` (T9.2d), joined into `BUILTIN_ENTRIES`;
+  T9.2e adds its own the same way. Bearings: SKF 6202-2RSH, 6204-2RSH, thin-section 61805-2RS1
+  and angular contact 7202 BEP from a catalogue mirror (SKF's pages render with script), and the
+  INA HK1612 drawn cup needle bearing. Belts: Gates 2MGT 6 mm, 3MGT 15 mm and HTD 5M 15 and 25 mm,
+  rated at the fewest grooves and at 45 from the design manual's table 6, efficiency typical and
+  estimated. Pulleys: Gates P20 and P90-5MGT-15 (a 4.5:1 pair) and a 20-tooth GT2 printer pulley.
+  Gears: KHK SS1-20 and SS1-60 (module 1 steel, 3:1) and the moulded acetal DS1-20. Rope: Samson
+  AmSteel-Blue HMPE at 2.5 and 3 mm (spliced strengths; the 3 mm line is T9.3b's spool example)
+  and galvanised 7x19 steel at 3/32 and 1/8 in, whose 34:1 minimum bend ratio is why a portable
+  trainer uses fibre. T9.2a's samples (`bearing/skf-6001-2rsh`, `bearing/skf-6005-2rsh`,
+  `belt/gates-5mgt-15`) stay at fields version 1 and migrate. Cells: Molicel P45B and P42A, Samsung 40T and 30Q, Murata VTC6, the small
   high-rate Murata VTC3 (sixteen in series make 92.2 Wh, the class of a 16S pack under 100 Wh) and
   the A123 ANR26650M1-B (LFP). No maker publishes an OCV table, so built-in cells use the generic
   curve; no datasheet gives specific heat, so it is a typical value, estimated. BMS boards: Daly

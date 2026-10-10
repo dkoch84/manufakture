@@ -1,13 +1,18 @@
-// The built-in catalogs per family (ADR 0017 decision 7, T9.2b to T9.2e), the conversions of
-// motor constants to the one internal convention (decision 8) and the pack builder (T9.2c).
+// The built-in catalogs per family (ADR 0017 decision 7, T9.2b to T9.2e: motors and controllers,
+// cells and BMS, bearings, belts, pulleys, gears and rope), the conversions of motor constants to the
+// one internal convention (decision 8) and the pack builder (T9.2c).
 // `../parts/catalog.ts` adds these entries to `BUILTIN_ENTRIES`, where references resolve. Data is
 // typical and unverified unless an entry says otherwise.
 
 import type { BuiltinEntry } from '../parts/catalog';
+import { BEARING_ENTRIES } from './bearings';
+import { BELT_ENTRIES, PULLEY_ENTRIES } from './belts';
 import { BMS_ENTRIES } from './bms';
 import { CELL_ENTRIES } from './cells';
 import { CONTROLLER_ENTRIES } from './controllers';
+import { GEAR_ENTRIES } from './gears';
 import { MOTOR_ENTRIES } from './motors';
+import { ROPE_ENTRIES } from './rope';
 
 export {
   KT_CONVENTIONS,
@@ -16,10 +21,14 @@ export {
   OUTPUT_SIDE,
   ocvField,
 } from '../parts/families';
+export { BEARING_ENTRIES } from './bearings';
+export { BELT_ENTRIES, PULLEY_ENTRIES } from './belts';
 export { BMS_ENTRIES } from './bms';
 export { CELL_ENTRIES } from './cells';
 export { CONTROLLER_ENTRIES } from './controllers';
+export { GEAR_ENTRIES } from './gears';
 export { MOTOR_ENTRIES } from './motors';
+export { ROPE_ENTRIES } from './rope';
 export {
   GENERIC_OCV,
   MAX_PACK_COUNT,
@@ -51,4 +60,9 @@ export const FAMILY_CATALOG_ENTRIES: readonly BuiltinEntry[] = [
   ...CONTROLLER_ENTRIES,
   ...CELL_ENTRIES,
   ...BMS_ENTRIES,
+  ...BEARING_ENTRIES,
+  ...BELT_ENTRIES,
+  ...PULLEY_ENTRIES,
+  ...GEAR_ENTRIES,
+  ...ROPE_ENTRIES,
 ];

@@ -10,7 +10,8 @@
 // Each family's fields have a version (`fieldsVersion`): an entry written at an older version is
 // migrated in memory by the family's migrations and written back only when the user edits it
 // (decision 7, as ADR 0013 decision 4 does for params). Version 1 is the first; T9.2b to T9.2e
-// add fields by raising it with a migration (motors, controllers, cells, packs and BMS are at 2).
+// add fields by raising it with a migration (motors, controllers, cells, packs and BMS are at 2,
+// and so, since T9.2d, are bearings, belts, pulleys, gears and rope).
 
 import { CATALOG_FAMILIES, type CatalogEntry } from '@manufakture/core';
 import type { PhysicalKind } from '@manufakture/units';
@@ -449,7 +450,7 @@ export const FAMILY_SCHEMAS: readonly FamilySchema[] = [
   {
     family: 'bearing',
     label: 'Bearing',
-    fieldsVersion: 1,
+    fieldsVersion: 2,
     placeholder: 'ring',
     dimensions: [
       dim('innerDiameter', 'bore d', true),
@@ -483,12 +484,17 @@ export const FAMILY_SCHEMAS: readonly FamilySchema[] = [
       { name: 'referenceSpeed', label: 'reference speed', kind: 'angularSpeed' },
       choice('closure', 'closure', ['open', 'shield', 'contact seal'], { bom: 'equals' }),
       choice('clearance', 'clearance', ['C2', 'CN', 'C3']),
+      // Fields version 2 (T9.2d): the maker's calculation factors (SKF gives both) and the contact
+      // angle of an angular contact bearing, which the equivalent load needs.
+      { name: 'kr', label: 'minimum load factor kr', symbol: 'kr', kind: 'number' },
+      { name: 'f0', label: 'calculation factor f0', symbol: 'f0', kind: 'number' },
+      { name: 'contactAngle', label: 'contact angle', kind: 'number', unit: '°' },
     ],
   },
   {
     family: 'belt',
     label: 'Timing belt',
-    fieldsVersion: 1,
+    fieldsVersion: 2,
     placeholder: 'box',
     dimensions: [dim('pitch', 'pitch', true), dim('width', 'width', true), dim('length', 'length')],
     fields: [
@@ -508,12 +514,31 @@ export const FAMILY_SCHEMAS: readonly FamilySchema[] = [
       { name: 'breakingStrength', label: 'minimum breaking strength', kind: 'force' },
       choice('cord', 'cord', ['fibreglass', 'aramid', 'steel', 'carbon']),
       { name: 'minimumPulleyGrooves', label: 'fewest pulley grooves', kind: 'count' },
+      // Fields version 2 (T9.2d). Gates rates a belt by the grooves of the smaller pulley: the
+      // rating at the fewest grooves (`ratedWorkingTension`) and at the largest pulley of the table
+      // bound it, and a check interpolates between them.
+      {
+        name: 'ratedWorkingTensionLarge',
+        label: 'rated working tension on the largest pulley of the table',
+        kind: 'force',
+        basis: true,
+      },
+      { name: 'largePulleyGrooves', label: 'grooves of that largest pulley', kind: 'count' },
+      { name: 'minimumTeethInMesh', label: 'teeth in mesh the rating assumes', kind: 'count' },
+      {
+        name: 'tensileStiffness',
+        label: 'tensile stiffness EA (force per unit strain)',
+        kind: 'force',
+      },
+      { name: 'massPerLength', label: 'mass per length', kind: 'linearDensity' },
+      { name: 'efficiency', label: 'drive efficiency, 0 to 1', kind: 'number' },
+      { name: 'teeth', label: 'teeth (an endless belt)', kind: 'count' },
     ],
   },
   {
     family: 'pulley',
     label: 'Pulley',
-    fieldsVersion: 1,
+    fieldsVersion: 2,
     placeholder: 'ring',
     dimensions: [
       dim('outerDiameter', 'outside diameter'),
@@ -529,12 +554,17 @@ export const FAMILY_SCHEMAS: readonly FamilySchema[] = [
         ['GT2', '3MGT', '5MGT', 'HTD 3M', 'HTD 5M', 'HTD 8M', 'T', 'MXL', 'XL'],
         { bom: 'equals' },
       ),
+      // Fields version 2 (T9.2d). The pitch diameter is grooves x pitch / pi, derived, not stored.
+      { name: 'material', label: 'material', kind: 'text' },
+      choice('flanges', 'flanges', ['none', 'one side', 'both sides']),
+      { name: 'mounting', label: 'mounting (pilot bore, set screws, taper bush)', kind: 'text' },
+      { name: 'maxRimSpeed', label: 'highest rim speed', kind: 'speed' },
     ],
   },
   {
     family: 'gear',
     label: 'Gear',
-    fieldsVersion: 1,
+    fieldsVersion: 2,
     placeholder: 'ring',
     dimensions: [
       dim('outerDiameter', 'outside diameter'),
@@ -546,12 +576,24 @@ export const FAMILY_SCHEMAS: readonly FamilySchema[] = [
       { name: 'teeth', label: 'teeth', kind: 'count', bom: 'equals' },
       { name: 'pressureAngle', label: 'pressure angle (degrees)', kind: 'number' },
       { name: 'ratedTorque', label: 'rated torque', kind: 'torque', basis: true, bom: 'at-least' },
+      // Fields version 2 (T9.2d): what AGMA's simplified bending and contact methods read, and the
+      // surface durability rating some makers (KHK) state beside the bending one.
+      {
+        name: 'surfaceTorque',
+        label: 'rated torque, surface durability',
+        kind: 'torque',
+        basis: true,
+      },
+      { name: 'helixAngle', label: 'helix angle (0 for spur)', kind: 'number', unit: '°' },
+      { name: 'material', label: 'material', kind: 'text' },
+      { name: 'hardness', label: 'tooth hardness (HB, HRC or HRR)', kind: 'text' },
+      { name: 'quality', label: 'quality grade (ISO 1328, AGMA or JIS)', kind: 'text' },
     ],
   },
   {
     family: 'rope',
     label: 'Rope or cable',
-    fieldsVersion: 1,
+    fieldsVersion: 2,
     placeholder: 'cylinder',
     dimensions: [dim('diameter', 'diameter', true), dim('length', 'length')],
     fields: [
@@ -573,6 +615,33 @@ export const FAMILY_SCHEMAS: readonly FamilySchema[] = [
       { name: 'averageBreakingLoad', label: 'average breaking load', kind: 'force' },
       { name: 'minimumBendRatio', label: 'minimum bend ratio D/d', kind: 'number' },
       { name: 'massPerLength', label: 'mass per length', kind: 'linearDensity' },
+      // Fields version 2 (T9.2d): what the spool (T9.3b) and the rope checks (T9.5e) read.
+      { name: 'suggestedBendRatio', label: 'suggested bend ratio D/d', kind: 'number' },
+      choice('strengthBasis', 'breaking loads are', [
+        'spliced',
+        'unterminated',
+        'terminated',
+        'not stated',
+      ]),
+      {
+        name: 'terminationEfficiency',
+        label: 'termination efficiency, 0 to 1',
+        kind: 'number',
+      },
+      {
+        name: 'elasticElongation',
+        label: 'elastic elongation, as a fraction (0.007 is 0.7 %)',
+        kind: 'number',
+      },
+      {
+        name: 'elongationLoad',
+        label: 'at this fraction of the breaking load',
+        kind: 'number',
+      },
+      { name: 'designFactor', label: "the maker's or guide's design factor", kind: 'number' },
+      { name: 'cycleRating', label: 'cycle rating (conditions in the notes)', kind: 'count' },
+      { name: 'creepNote', label: 'creep', kind: 'text' },
+      { name: 'fatigueNote', label: 'fatigue', kind: 'text' },
     ],
   },
   {
@@ -711,6 +780,15 @@ const MIGRATIONS: Partial<Record<CatalogFamily, readonly RatingsMigration[]>> = 
   cell: [addedFields],
   pack: [addedFields],
   bms: [addedFields],
+  // T9.2d: bearing calculation factors and contact angle; belt tension table bounds, stiffness,
+  // mass, efficiency and teeth; pulley material, flanges, mounting and rim speed; gear surface
+  // rating, helix angle, material, hardness and quality; rope bend, strength basis, termination,
+  // elongation, design factor, cycles, creep and fatigue.
+  bearing: [addedFields],
+  belt: [addedFields],
+  pulley: [addedFields],
+  gear: [addedFields],
+  rope: [addedFields],
 };
 
 export type ReadEntry =
@@ -771,6 +849,22 @@ const NUMBER_RANGES: Readonly<Record<string, { ok: (v: number) => boolean; messa
   'pack.series': { ok: (v) => v >= 1, message: 'is at least 1' },
   'pack.parallel': { ok: (v) => v >= 1, message: 'is at least 1' },
   'bms.minCells': { ok: (v) => v >= 1, message: 'is at least 1' },
+  'bearing.kr': { ok: (v) => v > 0, message: 'must be above zero' },
+  'bearing.f0': { ok: (v) => v > 0, message: 'must be above zero' },
+  'bearing.contactAngle': { ok: (v) => v >= 0 && v < 90, message: 'is from 0 up to 90' },
+  'belt.minimumTeethInMesh': { ok: (v) => v >= 1, message: 'is at least 1' },
+  'belt.efficiency': { ok: (v) => v > 0 && v <= 1, message: 'must be above 0 and at most 1' },
+  'gear.pressureAngle': { ok: (v) => v > 0 && v < 90, message: 'is above 0 and below 90' },
+  'gear.helixAngle': { ok: (v) => v >= 0 && v < 90, message: 'is from 0 up to 90' },
+  'rope.minimumBendRatio': { ok: (v) => v > 0, message: 'must be above zero' },
+  'rope.suggestedBendRatio': { ok: (v) => v > 0, message: 'must be above zero' },
+  'rope.terminationEfficiency': {
+    ok: (v) => v > 0 && v <= 1,
+    message: 'must be above 0 and at most 1',
+  },
+  'rope.elasticElongation': { ok: (v) => v >= 0 && v < 1, message: 'is from 0 up to 1' },
+  'rope.elongationLoad': { ok: (v) => v > 0 && v <= 1, message: 'must be above 0 and at most 1' },
+  'rope.designFactor': { ok: (v) => v >= 1, message: 'is at least 1' },
 };
 
 /**
@@ -803,6 +897,19 @@ const ORDERED: Partial<Record<CatalogFamily, readonly (readonly [string, string]
     ['continuousDischarge', 'peakDischarge'],
     ['overdischargeVoltage', 'overchargeVoltage'],
     ['minOperatingTemperature', 'maxOperatingTemperature'],
+  ],
+  // T9.2d: the fatigue limit lies below the static rating; a belt's tension rises with the pulley
+  // and stays below its breaking strength; a minimum is not above its average or suggested value.
+  bearing: [['fatigueLimit', 'staticLoad']],
+  belt: [
+    ['minimumPulleyGrooves', 'largePulleyGrooves'],
+    ['ratedWorkingTension', 'ratedWorkingTensionLarge'],
+    ['ratedWorkingTension', 'breakingStrength'],
+    ['ratedWorkingTensionLarge', 'breakingStrength'],
+  ],
+  rope: [
+    ['minimumBreakingLoad', 'averageBreakingLoad'],
+    ['minimumBendRatio', 'suggestedBendRatio'],
   ],
 };
 
@@ -856,9 +963,14 @@ function hasRatio(entry: CatalogEntry): boolean {
  * field's list or missing where the field has conventions (decision 8: Kv, Kt, R and L), an
  * output-side convention with no gear ratio, a motor's ratio not above zero, gear efficiency
  * outside (0, 1] or backlash below zero, a cell's specific heat not above zero, a pack's series or
- * parallel count or a BMS's fewest cells below 1, a pair out of order (a cutoff voltage above the
- * nominal, a minimum capacity above the typical, a temperature window upside down, a peak current
- * below the continuous, an OCV curve's ends outside the cutoff and maximum voltage; `ORDERED`), a cell's open-circuit voltage falling as its charge rises, a
+ * parallel count or a BMS's fewest cells below 1, a plain number outside its range (a bearing's
+ * factors, a contact, pressure or helix angle, a belt's efficiency, a rope's bend ratios,
+ * elongation, termination efficiency and design factor; `NUMBER_RANGES`), a pair out of order (a
+ * cutoff voltage above the nominal, a minimum capacity above the typical, a temperature window
+ * upside down, a peak current below the continuous, an OCV curve's ends outside the cutoff and
+ * maximum voltage, a bearing's fatigue limit above C0, a belt's tension falling with the pulley or
+ * above its breaking strength, a rope's minimum breaking load above the average or minimum bend
+ * ratio above the suggested; `ORDERED`), a cell's open-circuit voltage falling as its charge rises, a
  * dimension the family does not read or that is not above zero, and a bidirectional control
  * character in a short text (the maker, the part number, a text rating, a convention, the source's
  * title and revision). Pure.

@@ -31,8 +31,20 @@ describe('the family field schemas', () => {
       expect(new Set(names).size, s.family).toBe(names.length);
       for (const n of names) expect(n, `${s.family}.${n}`).toMatch(FIELD_NAME_PATTERN);
       for (const d of s.dimensions) expect(DIMENSION_NAMES).toContain(d.name);
-      // Motors and controllers (T9.2b), cells, packs and BMS (T9.2c) are at 2; the rest at 1.
-      const raised = ['motor', 'controller', 'cell', 'pack', 'bms'];
+      // Motors and controllers (T9.2b), cells, packs and BMS (T9.2c), bearings, belts, pulleys,
+      // gears and rope (T9.2d) are at 2; the rest at 1.
+      const raised = [
+        'motor',
+        'controller',
+        'cell',
+        'pack',
+        'bms',
+        'bearing',
+        'belt',
+        'pulley',
+        'gear',
+        'rope',
+      ];
       expect(s.fieldsVersion, s.family).toBe(raised.includes(s.family) ? 2 : 1);
     }
   });
@@ -191,6 +203,9 @@ describe('checking an entry against its family', () => {
       ok: false,
       reason: 'newer-fields',
     });
-    expect(migrateEntry(base)).toEqual({ ok: true, entry: base });
+    // T9.2a's sample is at bearing fields version 1; T9.2d's version 2 only added fields.
+    expect(migrateEntry(base)).toEqual({ ok: true, entry: { ...base, fieldsVersion: 2 } });
+    const current = { ...base, fieldsVersion: 2 };
+    expect(migrateEntry(current)).toEqual({ ok: true, entry: current });
   });
 });
