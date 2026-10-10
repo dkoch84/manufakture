@@ -10,7 +10,7 @@
 // Each family's fields have a version (`fieldsVersion`): an entry written at an older version is
 // migrated in memory by the family's migrations and written back only when the user edits it
 // (decision 7, as ADR 0013 decision 4 does for params). Version 1 is the first; T9.2b to T9.2e
-// add fields by raising it with a migration.
+// add fields by raising it with a migration (motors and controllers are at 2).
 
 import { CATALOG_FAMILIES, type CatalogEntry } from '@manufakture/core';
 import type { PhysicalKind } from '@manufakture/units';
@@ -91,12 +91,40 @@ const BOX: readonly DimensionField[] = [
 ];
 const CYLINDER: readonly DimensionField[] = [dim('diameter', 'diameter'), dim('length', 'length')];
 
+/** The output-side form of a motor constant's conventions (a geared actuator's, decision 8). */
+export const OUTPUT_SIDE = ', output side';
+
+const withOutputSide = (base: readonly string[]): readonly string[] => [
+  ...base,
+  ...base.map((c) => `${c}${OUTPUT_SIDE}`),
+];
+
+/**
+ * How a velocity constant Kv may be entered (decision 8): rpm per volt of line-to-line amplitude
+ * (the internal one), of line-to-line RMS, of line-to-line peak-to-peak (mjbots' newer
+ * definition), or the DC speed constant of a block-commutated motor (maxon, FAULHABER); each at
+ * the motor or, for a geared actuator, at the output.
+ */
+export const KV_CONVENTIONS = withOutputSide([
+  'line-to-line amplitude',
+  'line-to-line rms',
+  'line-to-line peak-to-peak',
+  'dc (six-step)',
+]);
+
+/**
+ * How a torque constant Kt may be entered (decision 8): per ampere of phase amplitude (the
+ * internal one), per ampere RMS, or the DC torque constant of a block-commutated motor; each at
+ * the motor or at a geared actuator's output.
+ */
+export const KT_CONVENTIONS = withOutputSide(['phase amplitude', 'phase rms', 'dc (six-step)']);
+
 /** Every family's fields at their current version. */
 export const FAMILY_SCHEMAS: readonly FamilySchema[] = [
   {
     family: 'motor',
     label: 'Motor',
-    fieldsVersion: 1,
+    fieldsVersion: 2,
     placeholder: 'cylinder',
     dimensions: CYLINDER,
     fields: [
@@ -114,14 +142,14 @@ export const FAMILY_SCHEMAS: readonly FamilySchema[] = [
         label: 'velocity constant Kv',
         symbol: 'Kv',
         kind: 'velocityConstant',
-        conventions: ['line-to-line amplitude', 'line-to-line rms', 'line-to-line peak-to-peak'],
+        conventions: KV_CONVENTIONS,
       },
       {
         name: 'kt',
         label: 'torque constant Kt',
         symbol: 'Kt',
         kind: 'torqueConstant',
-        conventions: ['phase amplitude', 'phase rms', 'dc (six-step)'],
+        conventions: KT_CONVENTIONS,
       },
       {
         name: 'resistance',
@@ -166,12 +194,40 @@ export const FAMILY_SCHEMAS: readonly FamilySchema[] = [
       },
       { name: 'thermalTimeConstant', label: 'winding thermal time constant', kind: 'time' },
       { name: 'maxWindingTemperature', label: 'maximum winding temperature', kind: 'temperature' },
+      // Fields version 2 (T9.2b).
+      {
+        name: 'windingHousingResistance',
+        label: 'thermal resistance, winding to housing',
+        kind: 'thermalResistance',
+      },
+      { name: 'housingTimeConstant', label: 'housing (motor) thermal time constant', kind: 'time' },
+      { name: 'noLoadCurrent', label: 'no-load current', kind: 'current', basis: true },
+      {
+        name: 'dragTorque',
+        label: 'constant loss torque (friction and hysteresis)',
+        kind: 'torque',
+      },
+      {
+        name: 'viscousDrag',
+        label: 'speed-proportional loss torque (eddy current and windage)',
+        kind: 'number',
+        unit: 'N*m*s/rad',
+      },
+      { name: 'cogging', label: 'peak cogging torque', kind: 'torque' },
+      { name: 'ratio', label: 'gear ratio (geared actuators)', kind: 'number' },
+      {
+        name: 'gearEfficiency',
+        label: 'gear efficiency, 0 to 1 (geared actuators)',
+        kind: 'number',
+      },
+      { name: 'backlash', label: 'backlash', kind: 'number', unit: 'arcmin' },
+      { name: 'sensors', label: 'sensors (Hall, encoder bits, thermistor)', kind: 'text' },
     ],
   },
   {
     family: 'controller',
     label: 'Motor controller',
-    fieldsVersion: 1,
+    fieldsVersion: 2,
     placeholder: 'box',
     dimensions: BOX,
     fields: [
@@ -195,6 +251,37 @@ export const FAMILY_SCHEMAS: readonly FamilySchema[] = [
       { name: 'loopRate', label: 'current loop rate', kind: 'frequency' },
       { name: 'pwmFrequency', label: 'PWM frequency', kind: 'frequency' },
       { name: 'maxElectricalFrequency', label: 'maximum electrical frequency', kind: 'frequency' },
+      // Fields version 2 (T9.2b).
+      { name: 'continuousPower', label: 'continuous power', kind: 'power', basis: true },
+      { name: 'peakPower', label: 'peak power', kind: 'power', basis: true },
+      { name: 'chopperCurrent', label: 'braking chopper current', kind: 'current' },
+      {
+        name: 'minBrakeResistance',
+        label: 'smallest braking resistor',
+        kind: 'resistance',
+      },
+      { name: 'feedback', label: 'encoder and feedback interfaces', kind: 'text' },
+      { name: 'communication', label: 'communication interfaces', kind: 'text' },
+      {
+        name: 'minOperatingTemperature',
+        label: 'lowest operating temperature',
+        kind: 'temperature',
+      },
+      {
+        name: 'maxOperatingTemperature',
+        label: 'highest operating temperature',
+        kind: 'temperature',
+      },
+      // The loss model of T9.0b's spike: a fixed loss, conduction (1.5 R_on i^2 with i the phase
+      // amplitude) and switching (in proportion to the bus voltage, the current and the PWM rate).
+      { name: 'fixedLoss', label: 'fixed loss (logic and gate drive)', kind: 'power' },
+      {
+        name: 'legResistance',
+        label: 'conduction resistance per leg (R on)',
+        kind: 'resistance',
+        basis: true,
+      },
+      { name: 'switchingTime', label: 'switching time per transition', kind: 'time' },
     ],
   },
   {
@@ -518,11 +605,17 @@ export function ratingField(family: CatalogFamily, name: string): RatingField | 
 }
 
 /**
- * One family's migration from `fieldsVersion` n to n + 1 of its ratings, pure. None yet: every
- * family is at version 1. T9.2b to T9.2e add theirs here as they raise a version.
+ * One family's migration from `fieldsVersion` n to n + 1 of its ratings, pure. T9.2b to T9.2e add
+ * theirs here as they raise a version.
  */
 type RatingsMigration = (ratings: CatalogEntry['ratings']) => CatalogEntry['ratings'];
-const MIGRATIONS: Partial<Record<CatalogFamily, readonly RatingsMigration[]>> = {};
+/** Version 2 only added fields: a version 1 entry's ratings mean the same. */
+const addedFields: RatingsMigration = (ratings) => ratings;
+const MIGRATIONS: Partial<Record<CatalogFamily, readonly RatingsMigration[]>> = {
+  // T9.2b: motor thermal, loss and gear fields; controller power, braking, interface and loss fields.
+  motor: [addedFields],
+  controller: [addedFields],
+};
 
 export type ReadEntry =
   { ok: true; entry: CatalogEntry } | { ok: false; reason: 'newer-fields'; message: string };
@@ -573,19 +666,33 @@ export function hasBidiControl(text: string): boolean {
  */
 const SIGNED_KINDS: ReadonlySet<RatingKind> = new Set(['temperatureDelta', 'number']);
 
+/** Plain-number ratings with a range of their own, by `<family>.<field>`: a check and its words. */
+const NUMBER_RANGES: Readonly<Record<string, { ok: (v: number) => boolean; message: string }>> = {
+  'motor.ratio': { ok: (v) => v > 0, message: 'must be above zero' },
+  'motor.gearEfficiency': { ok: (v) => v > 0 && v <= 1, message: 'must be above 0 and at most 1' },
+  'motor.backlash': { ok: (v) => v >= 0, message: 'is not below zero' },
+};
+
 /** A problem with an entry's fields, against its family's schema. */
 export interface FieldProblem {
   field: string;
   message: string;
 }
 
+function hasRatio(entry: CatalogEntry): boolean {
+  const ratio = entry.ratings.ratio;
+  return ratio !== undefined && 'value' in ratio;
+}
+
 /**
  * What is wrong with an entry's fields for its family (core checks only the shape): a rating the
  * family does not have, a number where a text is wanted or the other way round, a count that is
  * not whole, a physical value below zero, a choice outside its options, a convention outside the
- * field's list, a dimension the family does not read or that is not above zero, and a
- * bidirectional control character in a short text (the maker, the part number, a text rating, a
- * convention, the source's title and revision). Pure.
+ * field's list or missing where the field has conventions (decision 8: Kv, Kt, R and L), an
+ * output-side convention with no gear ratio, a motor's ratio not above zero, gear efficiency
+ * outside (0, 1] or backlash below zero, a dimension the family does not read or that is not
+ * above zero, and a bidirectional control character in a short text (the maker, the part number,
+ * a text rating, a convention, the source's title and revision). Pure.
  */
 export function entryProblems(entry: CatalogEntry): FieldProblem[] {
   const schema = familySchema(entry.family);
@@ -630,8 +737,18 @@ export function entryProblems(entry: CatalogEntry): FieldProblem[] {
     } else if (!SIGNED_KINDS.has(field.kind) && rated.value < 0) {
       out.push({ field: name, message: `${field.label} is not below zero` });
     }
+    const range = NUMBER_RANGES[`${entry.family}.${name}`];
+    if (range !== undefined && !range.ok(rated.value)) {
+      out.push({ field: name, message: `${field.label} ${range.message}` });
+    }
     bidi(`${name}.convention`, rated.convention);
-    if (
+    if (rated.convention === undefined && field.conventions !== undefined) {
+      // Decision 8: the same number means values a factor of two apart in another convention.
+      out.push({
+        field: `${name}.convention`,
+        message: `${field.label} needs its convention (one of ${field.conventions.join(', ')})`,
+      });
+    } else if (
       rated.convention !== undefined &&
       field.conventions !== undefined &&
       !field.conventions.includes(rated.convention)
@@ -639,6 +756,12 @@ export function entryProblems(entry: CatalogEntry): FieldProblem[] {
       out.push({
         field: name,
         message: `${field.label} is entered as ${field.conventions.join(', ')}, not "${rated.convention}"`,
+      });
+    } else if (rated.convention?.endsWith(OUTPUT_SIDE) === true && !hasRatio(entry)) {
+      // An output-side constant reaches the motor only through the gear ratio.
+      out.push({
+        field: 'ratio',
+        message: `${field.label} is given at the output side, so the gear ratio is needed`,
       });
     }
   }

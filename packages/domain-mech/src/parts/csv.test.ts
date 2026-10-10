@@ -280,7 +280,9 @@ describe('the datasheet form', () => {
       maker: 'A',
       partNumber: 'B',
       inductance: '0.000000123 H',
+      'inductance.convention': 'phase-neutral',
       kv: '150 rpm/V',
+      'kv.convention': 'line-to-line amplitude',
       rotorInertia: '1.5e-7 kg*m^2',
     };
     const r = readEntryFields(fields, 'entry#1', SI);

@@ -4,7 +4,8 @@
 // short notice every mechanical output carries. The model itself (requirements, load cases,
 // drivetrains, purchased parts, the electrical system, schematics, studies, check overrides,
 // specification notes, hazards, test bands) is core's `mech` section. Purchased parts (the
-// catalog model, BOM lines, the `mech.placeholder` feature) are `./parts`. See README.md.
+// catalog model, BOM lines, the `mech.placeholder` feature) are `./parts`; the built-in family
+// catalogs and the motor constant conversions are `./catalog`. See README.md.
 
 export const packageName = '@manufakture/domain-mech';
 
@@ -34,4 +35,5 @@ export {
   type StartFactors,
 } from './settings';
 export * from './parts';
+export * from './catalog';
 export * from './checks';

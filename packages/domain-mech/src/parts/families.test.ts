@@ -31,7 +31,8 @@ describe('the family field schemas', () => {
       expect(new Set(names).size, s.family).toBe(names.length);
       for (const n of names) expect(n, `${s.family}.${n}`).toMatch(FIELD_NAME_PATTERN);
       for (const d of s.dimensions) expect(DIMENSION_NAMES).toContain(d.name);
-      expect(s.fieldsVersion).toBe(1);
+      // Motors and controllers are at 2 (T9.2b added fields); the rest at 1.
+      expect(s.fieldsVersion).toBe(s.family === 'motor' || s.family === 'controller' ? 2 : 1);
     }
   });
 

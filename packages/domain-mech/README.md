@@ -56,24 +56,47 @@ construction domains. It registers one extension type, `mech.placeholder` (T9.2a
 evaluation stage of decision 15 (`createMechEvaluation`, below: the checks; the simulation joins it
 in T9.4b).
 
-## Purchased parts (`src/parts/`, T9.2a)
+## Purchased parts (`src/parts/`, T9.2a; `src/catalog/`, T9.2b)
 
 One model for every bought part with ratings (ADR 0017 decision 7). Core stores user entries
 (`mech.catalog`, `CatalogEntry`) and uses (`mech.purchased`, `PurchasedUse`); this package gives
 them meaning.
 
-- **Family field schemas** (`families.ts`): `FAMILY_SCHEMAS`, one per `CATALOG_FAMILIES` family at
-  `fieldsVersion` 1, from T9.0c's field lists. Each `RatingField` has a kind (a `packages/units`
+- **Family field schemas** (`families.ts`): `FAMILY_SCHEMAS`, one per `CATALOG_FAMILIES` family,
+  from T9.0c's field lists, at `fieldsVersion` 1 except motor and controller, which T9.2b raised
+  to 2 (motor: thermal resistance winding to housing, housing time constant, no-load current, drag
+  and viscous loss torques, cogging, and for geared actuators ratio, gear efficiency, backlash, plus
+  sensors; controller: continuous and peak power, braking chopper current and smallest resistor,
+  feedback and communication interfaces, operating temperatures, and the loss model's fixed loss,
+  leg resistance and switching time). Version 2 only added fields, so the migration from 1 leaves
+  the ratings as they are. Each `RatingField` has a kind (a `packages/units`
   physical kind stored in SI, `number`, `count` or `text`), optional `options`, `conventions`,
   `basis` and `bom` (the comparison a BOM line states: `at-least`, `at-most`, `equals`). Geometric
   sizes are dimensions (mm, `DIMENSION_NAMES`), not ratings. `entryProblems(entry)` checks an
-  entry against its family; `migrateEntry` migrates ratings in memory and refuses a newer
-  `fieldsVersion`.
-- **The built-in catalog** (`catalog.ts`): `BUILTIN_ENTRIES`, every version ever shipped, a few
-  samples with typical published values, all `verified: false` (T9.2b to T9.2e add the catalogs).
+  entry against its family; since T9.2b it requires a convention on any Kv, Kt, R or L given (an
+  `unknown` needs none), refuses a convention ending `, output side` when no gear ratio is given,
+  and keeps a motor's ratio above zero, gear efficiency in (0, 1] and backlash not below zero.
+  `KV_CONVENTIONS` and `KT_CONVENTIONS` list the conventions, each also at the output side
+  (`OUTPUT_SIDE`). `migrateEntry` migrates ratings in memory and refuses a newer `fieldsVersion`.
+- **The built-in catalog** (`catalog.ts`): `BUILTIN_ENTRIES`, every version ever shipped, sorted
+  by id then version: T9.2a's few samples plus the family catalogs of `src/catalog/`
+  (`FAMILY_CATALOG_ENTRIES`), all typical published values, all `verified: false`.
   `resolveEntry(doc, ref)` gives the entry a `CatalogRef` names (pinned version for built-ins), or
   `unknown-entry` / `newer-fields`, never a guess; it reports a `newer` version and `deprecated`.
   `copyBuiltin` copies one into a user entry with `derivedFrom`.
+- **The family catalogs** (`src/catalog/`): `MOTOR_ENTRIES` and `CONTROLLER_ENTRIES` (T9.2b),
+  joined into `BUILTIN_ENTRIES`; T9.2c to T9.2e add theirs the same way. Each entry stores Kv, Kt,
+  R and L as the datasheet gives them, with the convention named, and its sources and notes say
+  where they disagree. `motorTorqueConstant`, `motorVelocityConstant`, `motorResistance` and
+  `motorInductance` (`conventions.ts`, ADR 0017 decision 8) turn an entry's value into the one
+  internal convention: Kt in N*m per ampere of phase current amplitude, Kv in rad/s per volt of
+  line-to-line amplitude, R and L as the equivalent wye phase-to-neutral values, all motor side
+  (an output-side constant is moved through the ratio). Each returns
+  `{ ok: true, value, derivation, derived?, estimated? }`, with the working in words for a calc
+  record to cite (`derived` when Kt came from Kv, `estimated` when an input was), or
+  `{ ok: false, missing, message }` naming the missing fields (`kt.convention` for no convention
+  or one not in the list, `ratio` for an output-side constant without a usable ratio). They never
+  guess.
 - **Typing values in** (`input.ts`, `entry.ts`): every value through `packages/units`. With a
   unit the unit decides; a bare number is the document's display unit for the kind (catalog values
   are stored as SI numbers, not expressions, so a stored value never depends on a display

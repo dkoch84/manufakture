@@ -4,8 +4,8 @@
 // An entry is never removed; a withdrawn one is marked `deprecated` with a reason.
 //
 // This task ships a few sample entries with typical published values from T9.0c's research, all
-// `verified: false`; the per-family catalogs are T9.2b to T9.2e (`src/catalog/`). Nothing here
-// claims a part is current or that a design using it is safe.
+// `verified: false`; the per-family catalogs are T9.2b to T9.2e (`src/catalog/`), added below.
+// Nothing here claims a part is current or that a design using it is safe.
 
 import {
   BUILTIN_ENTRY_ID_PATTERN,
@@ -14,6 +14,7 @@ import {
   type CatalogRef,
   type ManufaktureDocument,
 } from '@manufakture/core';
+import { FAMILY_CATALOG_ENTRIES } from '../catalog';
 import { migrateEntry } from './families';
 
 /** A built-in entry: a catalog entry whose id is `<family>/<slug>`, perhaps withdrawn. */
@@ -28,7 +29,7 @@ const kn = (v: number) => v * 1000;
 const rpm = (v: number) => (v * 2 * Math.PI) / 60;
 
 /** Every built-in entry, every version (sorted by id, then version). */
-export const BUILTIN_ENTRIES: readonly BuiltinEntry[] = [
+export const BUILTIN_ENTRIES: readonly BuiltinEntry[] = byIdThenVersion([
   {
     id: 'bearing/skf-6001-2rsh',
     version: 1,
@@ -124,7 +125,12 @@ export const BUILTIN_ENTRIES: readonly BuiltinEntry[] = [
     verified: false,
     notes: 'Converted from pounds. Rate drives with at least 6 teeth in mesh.',
   },
-];
+  ...FAMILY_CATALOG_ENTRIES,
+]);
+
+function byIdThenVersion(list: BuiltinEntry[]): BuiltinEntry[] {
+  return list.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : a.version - b.version));
+}
 
 for (const e of BUILTIN_ENTRIES) {
   if (!BUILTIN_ENTRY_ID_PATTERN.test(e.id) || !e.id.startsWith(`${e.family}/`)) {
