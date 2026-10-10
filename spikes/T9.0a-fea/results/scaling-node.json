@@ -1,0 +1,589 @@
+{
+  "machine": {
+    "cpu": "AMD Ryzen 5 7600X 6-Core Processor",
+    "logicalCpus": 12,
+    "memoryGiB": 62,
+    "node": "v26.10.0",
+    "v8": "14.6.202.34-node.34",
+    "date": "2026-10-10"
+  },
+  "loadAverage": [
+    1.63,
+    3.71,
+    4.07
+  ],
+  "runs": [
+    {
+      "solid": "bracket",
+      "target": 50000,
+      "sizeMax": 4.048239651978445,
+      "nodes": 16357,
+      "elements": 9499,
+      "dof": 49071,
+      "preconditioner": "amg",
+      "iterations": 24,
+      "relResidual": 8.99269491972522e-9,
+      "ms": {
+        "import": 28.843857999999955,
+        "mesh": 213.01414599999998,
+        "extract": 16.417187999999896,
+        "reorder": 28.211276999999882,
+        "boundary": 16.336859999999888,
+        "pattern": 14.981890000000021,
+        "assemble": 50.14626199999998,
+        "precondition": 364.7636799999998,
+        "solve": 460.1005289999998,
+        "stress": 10.366331000000173,
+        "total": 1206.5089610000002
+      },
+      "solverBytes": 65069747,
+      "levels": [
+        {
+          "dofs": 49071,
+          "blocks": 406291
+        },
+        {
+          "dofs": 2676,
+          "blocks": 20712
+        },
+        {
+          "dofs": 234,
+          "blocks": 1015
+        }
+      ],
+      "amgPhases": {
+        "full": 16.38405899999998,
+        "diagonal": 9.418555000000197,
+        "lambda": 54.229437999999845,
+        "aggregate": 15.155398000000105,
+        "tentative": 10.60012800000004,
+        "smooth": 47.73281800000018,
+        "transpose": 4.126248000000032,
+        "AP": 123.40247900000008,
+        "RAP": 74.6306460000003,
+        "cholesky": 5.64072299999998
+      },
+      "gmshBytes": 67108864,
+      "totalLoad": [
+        0,
+        0,
+        -1999.9999999999945
+      ],
+      "peakVonMises": 195.1973706218269,
+      "rssBeforeMiB": 477,
+      "rssAfterMiB": 582
+    },
+    {
+      "solid": "bracket",
+      "target": 50000,
+      "sizeMax": 4.048239651978445,
+      "nodes": 16357,
+      "elements": 9499,
+      "dof": 49071,
+      "preconditioner": "ic0",
+      "iterations": 395,
+      "relResidual": 9.177345932753551e-9,
+      "ms": {
+        "import": 26.16037899999992,
+        "mesh": 206.4851349999999,
+        "extract": 9.442176000000018,
+        "reorder": 32.63304999999991,
+        "boundary": 15.393514000000323,
+        "pattern": 15.905905999999959,
+        "assemble": 31.720134000000144,
+        "precondition": 156.39221399999997,
+        "solve": 1723.0656059999997,
+        "stress": 9.718681000000288,
+        "total": 2230.150595
+      },
+      "solverBytes": 56658507,
+      "gmshBytes": 67108864,
+      "totalLoad": [
+        0,
+        0,
+        -1999.9999999999945
+      ],
+      "peakVonMises": 195.19737061924607,
+      "rssBeforeMiB": 556,
+      "rssAfterMiB": 569
+    },
+    {
+      "solid": "bracket",
+      "target": 200000,
+      "sizeMax": 2.3828262007946774,
+      "nodes": 68507,
+      "elements": 43840,
+      "dof": 205521,
+      "preconditioner": "amg",
+      "iterations": 24,
+      "relResidual": 4.362370905387402e-9,
+      "ms": {
+        "import": 23.429441000000224,
+        "mesh": 845.7706390000003,
+        "extract": 28.878897999999936,
+        "reorder": 97.78125099999943,
+        "boundary": 76.69295500000044,
+        "pattern": 69.01094300000022,
+        "assemble": 242.29103699999996,
+        "precondition": 1515.929819,
+        "solve": 2632.7728939999997,
+        "stress": 79.60518000000047,
+        "total": 5624.602895999999
+      },
+      "solverBytes": 296301473,
+      "levels": [
+        {
+          "dofs": 205521,
+          "blocks": 1798379
+        },
+        {
+          "dofs": 10404,
+          "blocks": 105368
+        },
+        {
+          "dofs": 732,
+          "blocks": 6450
+        }
+      ],
+      "amgPhases": {
+        "full": 47.496712000000116,
+        "diagonal": 40.28652199999851,
+        "lambda": 206.25631900000008,
+        "aggregate": 61.17630199999985,
+        "tentative": 27.442549999999756,
+        "smooth": 134.32753199999934,
+        "transpose": 16.478825999998662,
+        "AP": 546.0814920000012,
+        "RAP": 380.5515780000005,
+        "cholesky": 49.60929000000033
+      },
+      "gmshBytes": 67108864,
+      "totalLoad": [
+        0,
+        0,
+        -1999.9999999999868
+      ],
+      "peakVonMises": 197.3959218964663,
+      "rssBeforeMiB": 590,
+      "rssAfterMiB": 855
+    },
+    {
+      "solid": "bracket",
+      "target": 200000,
+      "sizeMax": 2.3828262007946774,
+      "nodes": 68507,
+      "elements": 43840,
+      "dof": 205521,
+      "preconditioner": "ic0",
+      "iterations": 657,
+      "relResidual": 8.928920252155244e-9,
+      "ms": {
+        "import": 38.79618499999924,
+        "mesh": 1295.383049,
+        "extract": 72.48898899999949,
+        "reorder": 116.61615299999903,
+        "boundary": 147.5292389999995,
+        "pattern": 86.61836299999959,
+        "assemble": 320.750215,
+        "precondition": 780.2309239999995,
+        "solve": 13130.017786999999,
+        "stress": 36.941593999999895,
+        "total": 16031.358704999999
+      },
+      "solverBytes": 249705205,
+      "gmshBytes": 67108864,
+      "totalLoad": [
+        0,
+        0,
+        -1999.9999999999868
+      ],
+      "peakVonMises": 197.39592188748074,
+      "rssBeforeMiB": 626,
+      "rssAfterMiB": 565
+    },
+    {
+      "solid": "bracket",
+      "target": 500000,
+      "sizeMax": 1.7196061973255934,
+      "nodes": 165655,
+      "elements": 110676,
+      "dof": 496965,
+      "preconditioner": "amg",
+      "iterations": 26,
+      "relResidual": 7.137007918434593e-9,
+      "ms": {
+        "import": 21.44586100000015,
+        "mesh": 2214.2178669999994,
+        "extract": 80.16909100000339,
+        "reorder": 211.14697400000296,
+        "boundary": 211.384361000004,
+        "pattern": 169.61539099999936,
+        "assemble": 682.251354,
+        "precondition": 3904.4337240000023,
+        "solve": 5694.165206000005,
+        "stress": 96.53069099999993,
+        "total": 13303.574581
+      },
+      "solverBytes": 729887909,
+      "levels": [
+        {
+          "dofs": 496965,
+          "blocks": 4458919
+        },
+        {
+          "dofs": 23958,
+          "blocks": 274189
+        },
+        {
+          "dofs": 1572,
+          "blocks": 19422
+        },
+        {
+          "dofs": 90,
+          "blocks": 211
+        }
+      ],
+      "amgPhases": {
+        "full": 167.2178469999999,
+        "diagonal": 86.73867100000643,
+        "lambda": 529.8186309999946,
+        "aggregate": 95.4880869999979,
+        "tentative": 39.59000299999752,
+        "smooth": 344.4221220000036,
+        "transpose": 23.84445499999856,
+        "AP": 1515.9520859999975,
+        "RAP": 1073.7565860000032,
+        "cholesky": 2.920254999997269
+      },
+      "gmshBytes": 67108864,
+      "totalLoad": [
+        0,
+        0,
+        -2000.000000000001
+      ],
+      "peakVonMises": 198.4759365760522,
+      "rssBeforeMiB": 610,
+      "rssAfterMiB": 1392
+    },
+    {
+      "solid": "bracket",
+      "target": 500000,
+      "sizeMax": 1.7196061973255934,
+      "nodes": 165655,
+      "elements": 110676,
+      "dof": 496965,
+      "preconditioner": "ic0",
+      "iterations": 899,
+      "relResidual": 9.795876403864112e-9,
+      "ms": {
+        "import": 22.46962600000552,
+        "mesh": 1921.522361999996,
+        "extract": 70.35765199999878,
+        "reorder": 198.8201029999982,
+        "boundary": 190.13851599999907,
+        "pattern": 167.48367300000245,
+        "assemble": 589.9227799999935,
+        "precondition": 1762.6625859999986,
+        "solve": 42746.823985999996,
+        "stress": 93.45482800000173,
+        "total": 47774.828689
+      },
+      "solverBytes": 617948249,
+      "gmshBytes": 67108864,
+      "totalLoad": [
+        0,
+        0,
+        -2000.000000000001
+      ],
+      "peakVonMises": 198.47593657596036,
+      "rssBeforeMiB": 728,
+      "rssAfterMiB": 1012
+    },
+    {
+      "solid": "cantilever",
+      "target": 50000,
+      "sizeMax": 3.403139545278542,
+      "nodes": 17645,
+      "elements": 10558,
+      "dof": 52935,
+      "preconditioner": "amg",
+      "iterations": 24,
+      "relResidual": 5.511694230279082e-9,
+      "ms": {
+        "import": 8.651157999993302,
+        "mesh": 202.5101760000107,
+        "extract": 6.005168000003323,
+        "reorder": 20.651954000000842,
+        "boundary": 16.5536460000003,
+        "pattern": 15.833176999993157,
+        "assemble": 45.08447899999737,
+        "precondition": 316.31811199999356,
+        "solve": 500.791504000008,
+        "stress": 12.043655999994371,
+        "total": 1148.661275999999
+      },
+      "solverBytes": 71543899,
+      "levels": [
+        {
+          "dofs": 52935,
+          "blocks": 445361
+        },
+        {
+          "dofs": 2874,
+          "blocks": 22633
+        },
+        {
+          "dofs": 258,
+          "blocks": 979
+        }
+      ],
+      "amgPhases": {
+        "full": 15.735897999998997,
+        "diagonal": 10.775774999987334,
+        "lambda": 46.09664299999713,
+        "aggregate": 9.048972000004142,
+        "tentative": 3.858250000004773,
+        "smooth": 29.79640500000096,
+        "transpose": 2.4472619999869494,
+        "AP": 113.4673710000061,
+        "RAP": 76.2368209999986,
+        "cholesky": 7.74930100000347
+      },
+      "gmshBytes": 67108864,
+      "totalLoad": [
+        0,
+        0,
+        -1000.0000000000052
+      ],
+      "peakVonMises": 163.7122806704738,
+      "rssBeforeMiB": 700,
+      "rssAfterMiB": 706
+    },
+    {
+      "solid": "cantilever",
+      "target": 50000,
+      "sizeMax": 3.403139545278542,
+      "nodes": 17645,
+      "elements": 10558,
+      "dof": 52935,
+      "preconditioner": "ic0",
+      "iterations": 473,
+      "relResidual": 9.841781741784008e-9,
+      "ms": {
+        "import": 8.586957999999868,
+        "mesh": 201.47292200000084,
+        "extract": 6.086736999990535,
+        "reorder": 20.262438999998267,
+        "boundary": 16.485688000000664,
+        "pattern": 15.696428999988711,
+        "assemble": 40.016256999995676,
+        "precondition": 172.24124999999185,
+        "solve": 2200.443453999993,
+        "stress": 9.443645999999717,
+        "total": 2692.523982999992
+      },
+      "solverBytes": 62026459,
+      "gmshBytes": 67108864,
+      "totalLoad": [
+        0,
+        0,
+        -1000.0000000000052
+      ],
+      "peakVonMises": 163.71228071843663,
+      "rssBeforeMiB": 706,
+      "rssAfterMiB": 706
+    },
+    {
+      "solid": "cantilever",
+      "target": 200000,
+      "sizeMax": 2.0858901124152047,
+      "nodes": 64713,
+      "elements": 41881,
+      "dof": 194139,
+      "preconditioner": "amg",
+      "iterations": 24,
+      "relResidual": 5.415679153935862e-9,
+      "ms": {
+        "import": 8.454240999999456,
+        "mesh": 716.8910529999994,
+        "extract": 23.52158899999631,
+        "reorder": 72.52474899998924,
+        "boundary": 66.63785899999493,
+        "pattern": 63.81868199999735,
+        "assemble": 189.56032499999856,
+        "precondition": 1359.6237219999894,
+        "solve": 1957.4909179999959,
+        "stress": 38.76105600000301,
+        "total": 4503.136001999999
+      },
+      "solverBytes": 279623443,
+      "levels": [
+        {
+          "dofs": 194139,
+          "blocks": 1709547
+        },
+        {
+          "dofs": 9684,
+          "blocks": 99138
+        },
+        {
+          "dofs": 672,
+          "blocks": 4406
+        }
+      ],
+      "amgPhases": {
+        "full": 42.86811300000409,
+        "diagonal": 33.18143199998303,
+        "lambda": 188.6439790000004,
+        "aggregate": 36.485719999996945,
+        "tentative": 18.250520000001416,
+        "smooth": 118.94221700000344,
+        "transpose": 8.97529200000281,
+        "AP": 515.9773620000051,
+        "RAP": 351.3975050000008,
+        "cholesky": 42.34341100000893
+      },
+      "gmshBytes": 67108864,
+      "totalLoad": [
+        0,
+        0,
+        -999.9999999999983
+      ],
+      "peakVonMises": 199.48755891985297,
+      "rssBeforeMiB": 709,
+      "rssAfterMiB": 850
+    },
+    {
+      "solid": "cantilever",
+      "target": 200000,
+      "sizeMax": 2.0858901124152047,
+      "nodes": 64713,
+      "elements": 41881,
+      "dof": 194139,
+      "preconditioner": "ic0",
+      "iterations": 748,
+      "relResidual": 9.586634385917959e-9,
+      "ms": {
+        "import": 9.26521800000046,
+        "mesh": 714.700966000004,
+        "extract": 22.718361999999615,
+        "reorder": 72.75899500001105,
+        "boundary": 62.700728999989224,
+        "pattern": 62.77749700000277,
+        "assemble": 190.3185339999909,
+        "precondition": 653.1161890000076,
+        "solve": 13843.159407,
+        "stress": 36.92394399999466,
+        "total": 15672.298242000004
+      },
+      "solverBytes": 237255279,
+      "gmshBytes": 67108864,
+      "totalLoad": [
+        0,
+        0,
+        -999.9999999999983
+      ],
+      "peakVonMises": 199.4875589128752,
+      "rssBeforeMiB": 733,
+      "rssAfterMiB": 668
+    },
+    {
+      "solid": "cantilever",
+      "target": 500000,
+      "sizeMax": 1.497889823195947,
+      "nodes": 165326,
+      "elements": 111541,
+      "dof": 495978,
+      "preconditioner": "amg",
+      "iterations": 26,
+      "relResidual": 5.374864624998081e-9,
+      "ms": {
+        "import": 8.263963000004878,
+        "mesh": 1885.192875000008,
+        "extract": 69.58320400000957,
+        "reorder": 203.74692700000014,
+        "boundary": 209.56497799999488,
+        "pattern": 161.6579020000063,
+        "assemble": 599.9172749999998,
+        "precondition": 3796.735136000003,
+        "solve": 5648.408044999989,
+        "stress": 100.43617000000086,
+        "total": 12694.299830000004
+      },
+      "solverBytes": 730746666,
+      "levels": [
+        {
+          "dofs": 495978,
+          "blocks": 4475594
+        },
+        {
+          "dofs": 23670,
+          "blocks": 275077
+        },
+        {
+          "dofs": 1548,
+          "blocks": 17070
+        },
+        {
+          "dofs": 84,
+          "blocks": 148
+        }
+      ],
+      "amgPhases": {
+        "full": 104.53700799999933,
+        "diagonal": 91.95211100002052,
+        "lambda": 528.6785260000033,
+        "aggregate": 96.97735400000238,
+        "tentative": 37.42349600000307,
+        "smooth": 321.112368000031,
+        "transpose": 24.063480000011623,
+        "AP": 1514.7211240000033,
+        "RAP": 1067.7430640000093,
+        "cholesky": 1.1639020000002347
+      },
+      "gmshBytes": 67108864,
+      "totalLoad": [
+        0,
+        0,
+        -999.9999999999982
+      ],
+      "peakVonMises": 218.8278252673081,
+      "rssBeforeMiB": 668,
+      "rssAfterMiB": 975
+    },
+    {
+      "solid": "cantilever",
+      "target": 500000,
+      "sizeMax": 1.497889823195947,
+      "nodes": 165326,
+      "elements": 111541,
+      "dof": 495978,
+      "preconditioner": "ic0",
+      "iterations": 1073,
+      "relResidual": 9.548472114404914e-9,
+      "ms": {
+        "import": 9.87295799999265,
+        "mesh": 1982.3305060000275,
+        "extract": 74.9354910000111,
+        "reorder": 212.59510199999204,
+        "boundary": 220.23677400001907,
+        "pattern": 164.60440700000618,
+        "assemble": 624.0683840000129,
+        "precondition": 1777.1851510000124,
+        "solve": 52040.76796900001,
+        "stress": 91.76466300000902,
+        "total": 57202.84345699998
+      },
+      "solverBytes": 619993986,
+      "gmshBytes": 67108864,
+      "totalLoad": [
+        0,
+        0,
+        -999.9999999999982
+      ],
+      "peakVonMises": 218.82782524333396,
+      "rssBeforeMiB": 685,
+      "rssAfterMiB": 698
+    }
+  ]
+}

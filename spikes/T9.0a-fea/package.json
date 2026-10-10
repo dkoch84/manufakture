@@ -1,0 +1,11 @@
+{
+  "name": "@manufakture/spike-t9-0a-fea",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "GPL-3.0-or-later",
+  "dependencies": {
+    "@loumalouomega/gmsh-wasm": "0.3.0",
+    "float-tetwild-wasm": "0.2.0"
+  }
+}

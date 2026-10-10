@@ -1,0 +1,107 @@
+{
+  "machine": {
+    "cpu": "AMD Ryzen 5 7600X 6-Core Processor",
+    "logicalCpus": 12,
+    "memoryGiB": 62,
+    "node": "v26.10.0",
+    "v8": "14.6.202.34-node.34",
+    "date": "2026-10-10"
+  },
+  "browser": "chromium 153.0.8010.12",
+  "loadAverage": [
+    0.73,
+    0.73,
+    1.84
+  ],
+  "plan": {
+    "accuracy": false,
+    "threads": 1,
+    "scaling": [
+      {
+        "solid": "bracket",
+        "target": 1000000,
+        "sizeMax": 1.365,
+        "preconditioner": "amg"
+      }
+    ]
+  },
+  "log": [],
+  "rssIdleMiB": {
+    "max": 77,
+    "sum": 199
+  },
+  "rssPeakMiB": {
+    "bracket-1000000-amg": {
+      "maxMiB": 2983,
+      "sumMiB": 3302
+    }
+  },
+  "crossOriginIsolated": true,
+  "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+  "hardwareConcurrency": 12,
+  "gmshLoadMs": 105.5100000500679,
+  "scaling": [
+    {
+      "solid": "bracket",
+      "target": 1000000,
+      "sizeMax": 1.365,
+      "preconditioner": "amg",
+      "nodes": 312832,
+      "elements": 214412,
+      "dof": 938496,
+      "iterations": 26,
+      "relResidual": 5.952280819734457e-9,
+      "ms": {
+        "import": 136.58499997854233,
+        "mesh": 4380.439999997616,
+        "extract": 213.6449999809265,
+        "reorder": 388.2450000047684,
+        "boundary": 231.50999999046326,
+        "pattern": 257.25,
+        "assemble": 1328.800000011921,
+        "precondition": 9676.860000014305,
+        "solve": 11825.149999976158,
+        "stress": 203.15500003099442,
+        "total": 28650.475000023842
+      },
+      "solverBytes": 1409445872,
+      "levels": [
+        {
+          "dofs": 938496,
+          "blocks": 8548300
+        },
+        {
+          "dofs": 44244,
+          "blocks": 547536
+        },
+        {
+          "dofs": 2718,
+          "blocks": 41749
+        },
+        {
+          "dofs": 156,
+          "blocks": 562
+        }
+      ],
+      "amgPhases": {
+        "full": 214.87999999523163,
+        "diagonal": 145.06999999284744,
+        "lambda": 1093.4050000309944,
+        "aggregate": 192.27999997138977,
+        "tentative": 94.65499997138977,
+        "smooth": 755.4049999713898,
+        "transpose": 54.68000000715256,
+        "AP": 3621.789999961853,
+        "RAP": 3485.8800000548363,
+        "cholesky": 4.5799999833106995
+      },
+      "gmshBytes": 96665600,
+      "totalLoad": [
+        0,
+        0,
+        -1999.9999999996364
+      ],
+      "peakVonMises": 199.44045685225498
+    }
+  ]
+}

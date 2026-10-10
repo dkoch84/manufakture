@@ -1,0 +1,36 @@
+{
+  "machine": {
+    "cpu": "AMD Ryzen 5 7600X 6-Core Processor",
+    "logicalCpus": 12,
+    "memoryGiB": 62,
+    "node": "v26.10.0",
+    "v8": "14.6.202.34-node.34",
+    "date": "2026-10-10"
+  },
+  "solids": {
+    "cantilever": {
+      "kernelFaces": 6,
+      "gmshSurfaces": 6,
+      "sameOrder": 6,
+      "worstCentreDistanceMm": 0
+    },
+    "plate-hole": {
+      "kernelFaces": 7,
+      "gmshSurfaces": 7,
+      "sameOrder": 7,
+      "worstCentreDistanceMm": 0.00023321938128175696
+    },
+    "lame": {
+      "kernelFaces": 6,
+      "gmshSurfaces": 6,
+      "sameOrder": 6,
+      "worstCentreDistanceMm": 0.0009328775250830652
+    },
+    "bracket": {
+      "kernelFaces": 12,
+      "gmshSurfaces": 12,
+      "sameOrder": 12,
+      "worstCentreDistanceMm": 0.00005329975596359362
+    }
+  }
+}

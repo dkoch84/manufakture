@@ -1,0 +1,112 @@
+{
+  "machine": {
+    "cpu": "AMD Ryzen 5 7600X 6-Core Processor",
+    "logicalCpus": 12,
+    "memoryGiB": 62,
+    "node": "v26.10.0",
+    "v8": "14.6.202.34-node.34",
+    "date": "2026-10-10"
+  },
+  "surfaceTriangles": 276,
+  "runs": [
+    {
+      "idealEdgeLengthRel": 0.08,
+      "dof": 13026,
+      "elements": 2546,
+      "meshMs": 2927.9509900000003,
+      "solveMs": 311.37656400000014,
+      "iterations": 19,
+      "totalLoad": [
+        9998.72071003265,
+        10000.059307088022,
+        -1.3201530139107973
+      ],
+      "metrics": [
+        {
+          "name": "hoop stress, inner surface (MPa)",
+          "fea": 167.51835397176583,
+          "analytical": 166.66666666666669,
+          "error": 0.0051101238305948865
+        },
+        {
+          "name": "hoop stress, outer surface (MPa)",
+          "fea": 66.55289161664342,
+          "analytical": 66.66666666666667,
+          "error": -0.001706625750348749
+        },
+        {
+          "name": "radial displacement, inner surface (mm)",
+          "fea": 0.009518436831120051,
+          "analytical": 0.009533333333333336,
+          "error": -0.0015625701622327128
+        }
+      ]
+    },
+    {
+      "idealEdgeLengthRel": 0.04,
+      "dof": 81450,
+      "elements": 18594,
+      "meshMs": 4769.037671000001,
+      "solveMs": 1510.5011110000014,
+      "iterations": 21,
+      "totalLoad": [
+        10004.824761485683,
+        10004.561556432003,
+        0.48211485820814753
+      ],
+      "metrics": [
+        {
+          "name": "hoop stress, inner surface (MPa)",
+          "fea": 165.51972279747818,
+          "analytical": 166.66666666666669,
+          "error": -0.006881663215131026
+        },
+        {
+          "name": "hoop stress, outer surface (MPa)",
+          "fea": 66.56472321924701,
+          "analytical": 66.66666666666667,
+          "error": -0.0015291517112948582
+        },
+        {
+          "name": "radial displacement, inner surface (mm)",
+          "fea": 0.009522357095059887,
+          "analytical": 0.009533333333333336,
+          "error": -0.0011513536650470902
+        }
+      ]
+    },
+    {
+      "idealEdgeLengthRel": 0.025,
+      "dof": 239454,
+      "elements": 55372,
+      "meshMs": 11990.336714,
+      "solveMs": 6060.6605960000015,
+      "iterations": 34,
+      "totalLoad": [
+        9993.993274463903,
+        9995.887060962908,
+        -0.9751049097926787
+      ],
+      "metrics": [
+        {
+          "name": "hoop stress, inner surface (MPa)",
+          "fea": 166.96632904726388,
+          "analytical": 166.66666666666669,
+          "error": 0.0017979742835831868
+        },
+        {
+          "name": "hoop stress, outer surface (MPa)",
+          "fea": 66.55500705247249,
+          "analytical": 66.66666666666667,
+          "error": -0.0016748942129127186
+        },
+        {
+          "name": "radial displacement, inner surface (mm)",
+          "fea": 0.009518000854717042,
+          "analytical": 0.009533333333333336,
+          "error": -0.0016083019527581128
+        }
+      ]
+    }
+  ]
+}

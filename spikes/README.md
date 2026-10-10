@@ -31,3 +31,7 @@ repository's own Vitest, as their READMEs describe.
 `T8.0b-render` (rendering views without a browser) has no `package.json` either; its README also covers the Chromium reference's setup.
 
 `T8.0a-headless` (a headless session in Node) has no `package.json` either; its README also covers the Chromium comparison's setup.
+
+`T9.0b-sim` (an electromechanical rep simulation of the cable trainer) has no `package.json` either; it runs with plain `node` and the repository's own Vitest, as its README describes.
+
+`T9.0a-fea` (FEA in the browser: gmsh in WebAssembly and a TypeScript solver) has a `package.json` for its two npm meshers only; install them with `npm install --no-package-lock` in its folder, which leaves the workspace and the lockfile alone, then run it with the repository's own Vitest, as its README describes.

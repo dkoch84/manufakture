@@ -1,0 +1,505 @@
+{
+  "machine": {
+    "cpu": "AMD Ryzen 5 7600X 6-Core Processor",
+    "logicalCpus": 12,
+    "memoryGiB": 62,
+    "node": "v26.10.0",
+    "v8": "14.6.202.34-node.34",
+    "date": "2026-10-10"
+  },
+  "tolerance": 1e-8,
+  "runs": [
+    {
+      "density": "medium",
+      "order": "rcm",
+      "nodes": 6598,
+      "elements": 3582,
+      "dof": 19794,
+      "preconditioner": "jacobi",
+      "iterations": 1615,
+      "relResidual": 9.976045372859846e-9,
+      "ms": {
+        "import": 81.26538299999999,
+        "mesh": 145.870023,
+        "extract": 7.402535999999941,
+        "reorder": 15.810788000000002,
+        "boundary": 9.291418000000021,
+        "pattern": 7.250678999999991,
+        "assemble": 15.497361999999953,
+        "precondition": 0.2593859999999495,
+        "solve": 794.760329,
+        "stress": 4.4888019999998505,
+        "total": 1084.8976089999999
+      },
+      "solverBytes": 7588514,
+      "gmshBytes": 67108864,
+      "totalLoad": [
+        0,
+        0,
+        -999.999999999996
+      ],
+      "metrics": [
+        {
+          "name": "tip deflection (mm)",
+          "fea": 0.9997673297312379,
+          "analytical": 1.00765,
+          "error": -0.007822825652520213
+        },
+        {
+          "name": "bending stress at mid-span, top fibre (MPa)",
+          "fea": 74.99926249648064,
+          "analytical": 75,
+          "error": -0.000009833380258138883
+        }
+      ]
+    },
+    {
+      "density": "medium",
+      "order": "rcm",
+      "nodes": 6598,
+      "elements": 3582,
+      "dof": 19794,
+      "preconditioner": "block-jacobi",
+      "iterations": 1436,
+      "relResidual": 9.712558029539963e-9,
+      "ms": {
+        "import": 11.178779000000077,
+        "mesh": 96.70493699999997,
+        "extract": 3.0926230000000032,
+        "reorder": 8.132795999999871,
+        "boundary": 8.680646000000024,
+        "pattern": 8.940031999999974,
+        "assemble": 15.074108999999908,
+        "precondition": 1.3879590000001372,
+        "solve": 709.3499300000001,
+        "stress": 3.643844000000172,
+        "total": 868.6128970000002
+      },
+      "solverBytes": 7905218,
+      "gmshBytes": 67108864,
+      "totalLoad": [
+        0,
+        0,
+        -999.999999999996
+      ],
+      "metrics": [
+        {
+          "name": "tip deflection (mm)",
+          "fea": 0.9997673297317874,
+          "analytical": 1.00765,
+          "error": -0.007822825651974936
+        },
+        {
+          "name": "bending stress at mid-span, top fibre (MPa)",
+          "fea": 74.99926249895677,
+          "analytical": 75,
+          "error": -0.000009833347243102252
+        }
+      ]
+    },
+    {
+      "density": "medium",
+      "order": "gmsh",
+      "nodes": 6598,
+      "elements": 3582,
+      "dof": 19794,
+      "preconditioner": "ic0",
+      "iterations": 470,
+      "relResidual": 9.756236596862078e-9,
+      "ms": {
+        "import": 10.855473000000075,
+        "mesh": 93.58911500000022,
+        "extract": 2.8798259999998663,
+        "reorder": 0.00044000000025334884,
+        "boundary": 5.492335999999796,
+        "pattern": 5.331509000000096,
+        "assemble": 11.822449000000233,
+        "precondition": 68.5228689999999,
+        "solve": 766.0705389999998,
+        "stress": 3.9737089999998716,
+        "total": 969.1572940000001
+      },
+      "solverBytes": 22055034,
+      "gmshBytes": 67108864,
+      "totalLoad": [
+        0,
+        0,
+        -999.999999999996
+      ],
+      "metrics": [
+        {
+          "name": "tip deflection (mm)",
+          "fea": 0.9997673297332561,
+          "analytical": 1.00765,
+          "error": -0.007822825650517373
+        },
+        {
+          "name": "bending stress at mid-span, top fibre (MPa)",
+          "fea": 74.99926249522707,
+          "analytical": 75,
+          "error": -0.000009833396972377766
+        }
+      ]
+    },
+    {
+      "density": "medium",
+      "order": "rcm",
+      "nodes": 6598,
+      "elements": 3582,
+      "dof": 19794,
+      "preconditioner": "ic0",
+      "iterations": 342,
+      "relResidual": 8.191325525099366e-9,
+      "ms": {
+        "import": 12.205172999999832,
+        "mesh": 93.35056899999972,
+        "extract": 3.0363130000000638,
+        "reorder": 15.674959999999828,
+        "boundary": 6.225135000000137,
+        "pattern": 5.48067600000013,
+        "assemble": 12.04747499999985,
+        "precondition": 55.74686500000007,
+        "solve": 549.120836,
+        "stress": 2.8639459999999417,
+        "total": 756.0191629999999
+      },
+      "solverBytes": 22055034,
+      "gmshBytes": 67108864,
+      "totalLoad": [
+        0,
+        0,
+        -999.999999999996
+      ],
+      "metrics": [
+        {
+          "name": "tip deflection (mm)",
+          "fea": 0.9997673297328461,
+          "analytical": 1.00765,
+          "error": -0.007822825650924264
+        },
+        {
+          "name": "bending stress at mid-span, top fibre (MPa)",
+          "fea": 74.99926249015606,
+          "analytical": 75,
+          "error": -0.000009833464585919198
+        }
+      ]
+    },
+    {
+      "density": "medium",
+      "order": "rcm",
+      "nodes": 6598,
+      "elements": 3582,
+      "dof": 19794,
+      "preconditioner": "amg",
+      "iterations": 25,
+      "relResidual": 6.63609742985728e-9,
+      "ms": {
+        "import": 10.306021000000328,
+        "mesh": 90.51049200000034,
+        "extract": 3.9347490000000107,
+        "reorder": 6.83308500000021,
+        "boundary": 7.225989999999911,
+        "pattern": 6.331393000000389,
+        "assemble": 12.824063000000024,
+        "precondition": 136.47047699999985,
+        "solve": 175.88601199999994,
+        "stress": 3.1636319999997795,
+        "total": 454.03667499999983
+      },
+      "solverBytes": 24754614,
+      "levels": [
+        {
+          "dofs": 19794,
+          "blocks": 157660
+        },
+        {
+          "dofs": 1176,
+          "blocks": 6954
+        },
+        {
+          "dofs": 108,
+          "blocks": 228
+        }
+      ],
+      "amgPhases": {
+        "full": 6.103186000000278,
+        "diagonal": 3.330310000001191,
+        "lambda": 20.749802000000273,
+        "aggregate": 11.116420999999718,
+        "tentative": 4.647447999999713,
+        "smooth": 16.57576599999902,
+        "transpose": 2.8123660000010204,
+        "AP": 42.5986869999997,
+        "RAP": 24.665351999999075,
+        "cholesky": 1.568546000000424
+      },
+      "gmshBytes": 67108864,
+      "totalLoad": [
+        0,
+        0,
+        -999.999999999996
+      ],
+      "metrics": [
+        {
+          "name": "tip deflection (mm)",
+          "fea": 0.9997673297281362,
+          "analytical": 1.00765,
+          "error": -0.007822825655598407
+        },
+        {
+          "name": "bending stress at mid-span, top fibre (MPa)",
+          "fea": 74.99926249205019,
+          "analytical": 75,
+          "error": -0.000009833439330767153
+        }
+      ]
+    },
+    {
+      "density": "fine",
+      "order": "rcm",
+      "nodes": 39445,
+      "elements": 24854,
+      "dof": 118335,
+      "preconditioner": "jacobi",
+      "iterations": 2881,
+      "relResidual": 9.922281882543473e-9,
+      "ms": {
+        "import": 9.912728000000243,
+        "mesh": 442.9403549999997,
+        "extract": 14.539956999999958,
+        "reorder": 51.69927699999971,
+        "boundary": 41.031300999999985,
+        "pattern": 35.82246100000066,
+        "assemble": 101.39107400000012,
+        "precondition": 1.4720670000006066,
+        "solve": 10542.780339,
+        "stress": 20.066791999999623,
+        "total": 11263.75348
+      },
+      "solverBytes": 48561591,
+      "gmshBytes": 67108864,
+      "totalLoad": [
+        0,
+        0,
+        -999.9999999999973
+      ],
+      "metrics": [
+        {
+          "name": "tip deflection (mm)",
+          "fea": 1.0005272649055943,
+          "analytical": 1.00765,
+          "error": -0.00706865984657931
+        },
+        {
+          "name": "bending stress at mid-span, top fibre (MPa)",
+          "fea": 74.99962975263458,
+          "analytical": 75,
+          "error": -0.000004936631538991302
+        }
+      ]
+    },
+    {
+      "density": "fine",
+      "order": "rcm",
+      "nodes": 39445,
+      "elements": 24854,
+      "dof": 118335,
+      "preconditioner": "block-jacobi",
+      "iterations": 2569,
+      "relResidual": 9.993606163086644e-9,
+      "ms": {
+        "import": 10.276662000000215,
+        "mesh": 443.5473259999999,
+        "extract": 14.553056999999171,
+        "reorder": 44.32942000000003,
+        "boundary": 41.43479400000069,
+        "pattern": 36.26971400000002,
+        "assemble": 102.89941100000215,
+        "precondition": 5.3386480000008305,
+        "solve": 9525.695926,
+        "stress": 20.552585000001272,
+        "total": 10247.346536000001
+      },
+      "solverBytes": 50454951,
+      "gmshBytes": 67108864,
+      "totalLoad": [
+        0,
+        0,
+        -999.9999999999973
+      ],
+      "metrics": [
+        {
+          "name": "tip deflection (mm)",
+          "fea": 1.0005272649059442,
+          "analytical": 1.00765,
+          "error": -0.007068659846232024
+        },
+        {
+          "name": "bending stress at mid-span, top fibre (MPa)",
+          "fea": 74.99962973327209,
+          "analytical": 75,
+          "error": -0.000004936889705504655
+        }
+      ]
+    },
+    {
+      "density": "fine",
+      "order": "gmsh",
+      "nodes": 39445,
+      "elements": 24854,
+      "dof": 118335,
+      "preconditioner": "ic0",
+      "iterations": 849,
+      "relResidual": 9.724234101559064e-9,
+      "ms": {
+        "import": 10.101559999999154,
+        "mesh": 441.5692449999988,
+        "extract": 14.00144299999738,
+        "reorder": 0.00011000000085914508,
+        "boundary": 35.52113299999837,
+        "pattern": 32.65829500000109,
+        "assemble": 99.41851400000087,
+        "precondition": 459.8466640000006,
+        "solve": 13005.740551000003,
+        "stress": 21.18485500000679,
+        "total": 14120.696078999998
+      },
+      "solverBytes": 142554595,
+      "gmshBytes": 67108864,
+      "totalLoad": [
+        0,
+        0,
+        -999.9999999999973
+      ],
+      "metrics": [
+        {
+          "name": "tip deflection (mm)",
+          "fea": 1.0005272649054027,
+          "analytical": 1.00765,
+          "error": -0.00706865984676948
+        },
+        {
+          "name": "bending stress at mid-span, top fibre (MPa)",
+          "fea": 74.99962975047269,
+          "analytical": 75,
+          "error": -0.000004936660364099528
+        }
+      ]
+    },
+    {
+      "density": "fine",
+      "order": "rcm",
+      "nodes": 39445,
+      "elements": 24854,
+      "dof": 118335,
+      "preconditioner": "ic0",
+      "iterations": 615,
+      "relResidual": 9.630798877710317e-9,
+      "ms": {
+        "import": 10.806499999998778,
+        "mesh": 447.9674889999951,
+        "extract": 13.851214999995136,
+        "reorder": 45.10439000000042,
+        "boundary": 35.2495459999991,
+        "pattern": 35.476824000004854,
+        "assemble": 97.5445120000004,
+        "precondition": 394.7005900000004,
+        "solve": 6742.767337000005,
+        "stress": 19.73385699999926,
+        "total": 7843.886790999997
+      },
+      "solverBytes": 142554595,
+      "gmshBytes": 67108864,
+      "totalLoad": [
+        0,
+        0,
+        -999.9999999999973
+      ],
+      "metrics": [
+        {
+          "name": "tip deflection (mm)",
+          "fea": 1.0005272649065884,
+          "analytical": 1.00765,
+          "error": -0.007068659845592763
+        },
+        {
+          "name": "bending stress at mid-span, top fibre (MPa)",
+          "fea": 74.99962974450492,
+          "analytical": 75,
+          "error": -0.00000493673993446464
+        }
+      ]
+    },
+    {
+      "density": "fine",
+      "order": "rcm",
+      "nodes": 39445,
+      "elements": 24854,
+      "dof": 118335,
+      "preconditioner": "amg",
+      "iterations": 24,
+      "relResidual": 5.916805306678295e-9,
+      "ms": {
+        "import": 11.56433900000411,
+        "mesh": 442.25693400000455,
+        "extract": 13.604548000002978,
+        "reorder": 44.01068700000178,
+        "boundary": 35.501822999998694,
+        "pattern": 35.63856100000703,
+        "assemble": 97.97053599999344,
+        "precondition": 807.2389049999983,
+        "solve": 1150.849933999998,
+        "stress": 19.13895600000251,
+        "total": 2658.8587449999977
+      },
+      "solverBytes": 165735511,
+      "levels": [
+        {
+          "dofs": 118335,
+          "blocks": 1025959
+        },
+        {
+          "dofs": 6018,
+          "blocks": 55799
+        },
+        {
+          "dofs": 444,
+          "blocks": 2310
+        }
+      ],
+      "amgPhases": {
+        "full": 29.973455000006652,
+        "diagonal": 15.788706000006641,
+        "lambda": 110.84780500000488,
+        "aggregate": 28.199980999997933,
+        "tentative": 15.880624999997963,
+        "smooth": 93.54756999999518,
+        "transpose": 7.955542000003334,
+        "AP": 292.0403040000019,
+        "RAP": 193.41871899999387,
+        "cholesky": 14.899908999999752
+      },
+      "gmshBytes": 67108864,
+      "totalLoad": [
+        0,
+        0,
+        -999.9999999999973
+      ],
+      "metrics": [
+        {
+          "name": "tip deflection (mm)",
+          "fea": 1.0005272649121724,
+          "analytical": 1.00765,
+          "error": -0.0070686598400511785
+        },
+        {
+          "name": "bending stress at mid-span, top fibre (MPa)",
+          "fea": 74.9996297436285,
+          "analytical": 75,
+          "error": -0.000004936751619955733
+        }
+      ]
+    }
+  ]
+}

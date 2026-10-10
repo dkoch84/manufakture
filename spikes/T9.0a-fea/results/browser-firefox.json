@@ -1,0 +1,1125 @@
+{
+  "machine": {
+    "cpu": "AMD Ryzen 5 7600X 6-Core Processor",
+    "logicalCpus": 12,
+    "memoryGiB": 62,
+    "node": "v26.10.0",
+    "v8": "14.6.202.34-node.34",
+    "date": "2026-10-10"
+  },
+  "browser": "firefox 155.0",
+  "loadAverage": [
+    1.15,
+    2.12,
+    3.27
+  ],
+  "plan": {
+    "accuracy": true,
+    "threads": 1,
+    "scaling": [
+      {
+        "solid": "bracket",
+        "target": 50000,
+        "sizeMax": 4.048239651978445,
+        "preconditioner": "amg"
+      },
+      {
+        "solid": "bracket",
+        "target": 200000,
+        "sizeMax": 2.3828262007946774,
+        "preconditioner": "amg"
+      },
+      {
+        "solid": "bracket",
+        "target": 500000,
+        "sizeMax": 1.7196061973255934,
+        "preconditioner": "amg"
+      },
+      {
+        "solid": "cantilever",
+        "target": 50000,
+        "sizeMax": 3.403139545278542,
+        "preconditioner": "amg"
+      },
+      {
+        "solid": "cantilever",
+        "target": 200000,
+        "sizeMax": 2.0858901124152047,
+        "preconditioner": "amg"
+      },
+      {
+        "solid": "cantilever",
+        "target": 500000,
+        "sizeMax": 1.497889823195947,
+        "preconditioner": "amg"
+      }
+    ]
+  },
+  "log": [],
+  "rssIdleMiB": {
+    "max": 148,
+    "sum": 216
+  },
+  "rssPeakMiB": {
+    "cantilever-coarse": {
+      "maxMiB": 493,
+      "sumMiB": 1193
+    },
+    "cantilever-medium": {
+      "maxMiB": 493,
+      "sumMiB": 1252
+    },
+    "cantilever-fine": {
+      "maxMiB": 753,
+      "sumMiB": 1520
+    },
+    "plate-hole-coarse": {
+      "maxMiB": 756,
+      "sumMiB": 1511
+    },
+    "plate-hole-medium": {
+      "maxMiB": 789,
+      "sumMiB": 1550
+    },
+    "plate-hole-fine": {
+      "maxMiB": 790,
+      "sumMiB": 1554
+    },
+    "lame-coarse": {
+      "maxMiB": 536,
+      "sumMiB": 1175
+    },
+    "lame-medium": {
+      "maxMiB": 599,
+      "sumMiB": 1237
+    },
+    "lame-fine": {
+      "maxMiB": 801,
+      "sumMiB": 1412
+    },
+    "bracket-50000-amg": {
+      "maxMiB": 803,
+      "sumMiB": 1414
+    },
+    "bracket-200000-amg": {
+      "maxMiB": 1035,
+      "sumMiB": 1643
+    },
+    "bracket-500000-amg": {
+      "maxMiB": 1810,
+      "sumMiB": 2418
+    },
+    "cantilever-50000-amg": {
+      "maxMiB": 1961,
+      "sumMiB": 2569
+    },
+    "cantilever-200000-amg": {
+      "maxMiB": 2096,
+      "sumMiB": 2704
+    },
+    "cantilever-500000-amg": {
+      "maxMiB": 1806,
+      "sumMiB": 2414
+    }
+  },
+  "crossOriginIsolated": true,
+  "userAgent": "Mozilla/5.0 (X11; Linux x86_64; rv:155.0) Gecko/20100101 Firefox/155.0",
+  "hardwareConcurrency": 12,
+  "gmshLoadMs": 217.24,
+  "accuracy": [
+    {
+      "case": "cantilever",
+      "density": "coarse",
+      "nodes": 999,
+      "elements": 434,
+      "dof": 2997,
+      "preconditioner": "amg",
+      "iterations": 23,
+      "relResidual": 3.5429725752438477e-9,
+      "ms": {
+        "import": 31.779999999999973,
+        "mesh": 46.54000000000002,
+        "extract": 2.8999999999999773,
+        "reorder": 4.239999999999952,
+        "boundary": 1.3000000000000114,
+        "pattern": 1.8999999999999773,
+        "assemble": 2.9600000000000364,
+        "precondition": 25.359999999999957,
+        "solve": 24.160000000000025,
+        "stress": 1.3599999999999568,
+        "total": 143.77999999999997
+      },
+      "solverBytes": 3737989,
+      "levels": [
+        {
+          "dofs": 2997,
+          "blocks": 21105
+        },
+        {
+          "dofs": 258,
+          "blocks": 623
+        }
+      ],
+      "amgPhases": {
+        "full": 2.2799999999999727,
+        "diagonal": 0.8400000000000318,
+        "lambda": 3.339999999999975,
+        "aggregate": 1.9599999999999795,
+        "tentative": 1.3199999999999932,
+        "smooth": 3.240000000000009,
+        "transpose": 0.8000000000000114,
+        "AP": 4.920000000000016,
+        "RAP": 2.3799999999999955,
+        "cholesky": 3.519999999999982
+      },
+      "gmshBytes": 67108864,
+      "totalLoad": [
+        0,
+        0,
+        -999.9999999999968
+      ],
+      "metrics": [
+        {
+          "name": "tip deflection (mm)",
+          "fea": 0.9982043035775905,
+          "analytical": 1.00765,
+          "error": -0.009373985433840564
+        },
+        {
+          "name": "bending stress at mid-span, top fibre (MPa)",
+          "fea": 74.98973443907686,
+          "analytical": 75,
+          "error": -0.00013687414564193053
+        }
+      ]
+    },
+    {
+      "case": "cantilever",
+      "density": "medium",
+      "nodes": 6598,
+      "elements": 3582,
+      "dof": 19794,
+      "preconditioner": "amg",
+      "iterations": 25,
+      "relResidual": 6.636097429977406e-9,
+      "ms": {
+        "import": 16.560000000000002,
+        "mesh": 163.86,
+        "extract": 4.980000000000018,
+        "reorder": 8.539999999999964,
+        "boundary": 4.1200000000000045,
+        "pattern": 4.960000000000036,
+        "assemble": 12.699999999999932,
+        "precondition": 132.12,
+        "solve": 226.07999999999993,
+        "stress": 3.7200000000000273,
+        "total": 578.36
+      },
+      "solverBytes": 24754614,
+      "levels": [
+        {
+          "dofs": 19794,
+          "blocks": 157660
+        },
+        {
+          "dofs": 1176,
+          "blocks": 6954
+        },
+        {
+          "dofs": 108,
+          "blocks": 228
+        }
+      ],
+      "amgPhases": {
+        "full": 4,
+        "diagonal": 1.5000000000001137,
+        "lambda": 18.500000000000114,
+        "aggregate": 8.739999999999895,
+        "tentative": 3.759999999999991,
+        "smooth": 15.160000000000082,
+        "transpose": 2.3999999999999773,
+        "AP": 42.27999999999997,
+        "RAP": 30.459999999999923,
+        "cholesky": 3.099999999999909
+      },
+      "gmshBytes": 67108864,
+      "totalLoad": [
+        0,
+        0,
+        -999.999999999996
+      ],
+      "metrics": [
+        {
+          "name": "tip deflection (mm)",
+          "fea": 0.9997673297323575,
+          "analytical": 1.00765,
+          "error": -0.007822825651409165
+        },
+        {
+          "name": "bending stress at mid-span, top fibre (MPa)",
+          "fea": 74.99926249243269,
+          "analytical": 75,
+          "error": -0.000009833434230775613
+        }
+      ]
+    },
+    {
+      "case": "cantilever",
+      "density": "fine",
+      "nodes": 39445,
+      "elements": 24854,
+      "dof": 118335,
+      "preconditioner": "amg",
+      "iterations": 24,
+      "relResidual": 5.916805306595443e-9,
+      "ms": {
+        "import": 15.819999999999936,
+        "mesh": 732.16,
+        "extract": 29.160000000000082,
+        "reorder": 43.77999999999997,
+        "boundary": 26.87999999999988,
+        "pattern": 32.039999999999964,
+        "assemble": 104.81999999999994,
+        "precondition": 967.9599999999998,
+        "solve": 1354.0200000000004,
+        "stress": 23.840000000000146,
+        "total": 3332.2800000000007
+      },
+      "solverBytes": 165735511,
+      "levels": [
+        {
+          "dofs": 118335,
+          "blocks": 1025959
+        },
+        {
+          "dofs": 6018,
+          "blocks": 55799
+        },
+        {
+          "dofs": 444,
+          "blocks": 2310
+        }
+      ],
+      "amgPhases": {
+        "full": 19.539999999999964,
+        "diagonal": 10.160000000000764,
+        "lambda": 125.30000000000018,
+        "aggregate": 38.91999999999962,
+        "tentative": 11.040000000000418,
+        "smooth": 92.5,
+        "transpose": 7.300000000000182,
+        "AP": 386.53999999999996,
+        "RAP": 260.4599999999996,
+        "cholesky": 13.359999999999673
+      },
+      "gmshBytes": 67108864,
+      "totalLoad": [
+        0,
+        0,
+        -999.9999999999973
+      ],
+      "metrics": [
+        {
+          "name": "tip deflection (mm)",
+          "fea": 1.0005272649016679,
+          "analytical": 1.00765,
+          "error": -0.007068659850475916
+        },
+        {
+          "name": "bending stress at mid-span, top fibre (MPa)",
+          "fea": 74.99962974288577,
+          "analytical": 75,
+          "error": -0.000004936761523026689
+        }
+      ]
+    },
+    {
+      "case": "plate-hole",
+      "density": "coarse",
+      "nodes": 2508,
+      "elements": 1160,
+      "dof": 7524,
+      "preconditioner": "amg",
+      "iterations": 41,
+      "relResidual": 7.428773294341532e-9,
+      "ms": {
+        "import": 22.919999999999163,
+        "mesh": 120.03999999999996,
+        "extract": 1.819999999999709,
+        "reorder": 2.0600000000004,
+        "boundary": 1.3999999999996362,
+        "pattern": 1.680000000000291,
+        "assemble": 4.319999999999709,
+        "precondition": 61.35999999999967,
+        "solve": 99.48000000000047,
+        "stress": 1,
+        "total": 317.3199999999997
+      },
+      "solverBytes": 11255492,
+      "levels": [
+        {
+          "dofs": 7524,
+          "blocks": 55014
+        },
+        {
+          "dofs": 612,
+          "blocks": 1992
+        }
+      ],
+      "amgPhases": {
+        "full": 1.2999999999992724,
+        "diagonal": 0.47999999999956344,
+        "lambda": 4.220000000000255,
+        "aggregate": 2,
+        "tentative": 0.6999999999998181,
+        "smooth": 4.399999999999636,
+        "transpose": 0.6599999999998545,
+        "AP": 10.5,
+        "RAP": 6.400000000000546,
+        "cholesky": 30.44000000000051
+      },
+      "gmshBytes": 67108864,
+      "totalLoad": [
+        2500,
+        0,
+        0
+      ],
+      "metrics": [
+        {
+          "name": "peak stress at the hole, mid-plane (MPa)",
+          "fea": 313.05474077318706,
+          "analytical": 314.88000000000005,
+          "error": -0.005796681995722143
+        },
+        {
+          "name": "peak stress at the hole, through thickness max (MPa)",
+          "fea": 319.22009471542935,
+          "analytical": 314.88000000000005,
+          "error": 0.013783329253776998
+        }
+      ]
+    },
+    {
+      "case": "plate-hole",
+      "density": "medium",
+      "nodes": 4788,
+      "elements": 2275,
+      "dof": 14364,
+      "preconditioner": "amg",
+      "iterations": 30,
+      "relResidual": 8.188648561576829e-9,
+      "ms": {
+        "import": 19.960000000000036,
+        "mesh": 176.42000000000007,
+        "extract": 2.880000000000109,
+        "reorder": 3.8400000000001455,
+        "boundary": 2.4600000000000364,
+        "pattern": 3.300000000000182,
+        "assemble": 7.980000000000473,
+        "precondition": 72.34000000000015,
+        "solve": 153.84000000000015,
+        "stress": 2.0799999999999272,
+        "total": 446.2600000000002
+      },
+      "solverBytes": 16919816,
+      "levels": [
+        {
+          "dofs": 14364,
+          "blocks": 106644
+        },
+        {
+          "dofs": 1104,
+          "blocks": 3950
+        },
+        {
+          "dofs": 156,
+          "blocks": 392
+        }
+      ],
+      "amgPhases": {
+        "full": 2.0399999999999636,
+        "diagonal": 1.2399999999997817,
+        "lambda": 11.659999999998945,
+        "aggregate": 4.1200000000008,
+        "tentative": 1.519999999999527,
+        "smooth": 9.079999999999927,
+        "transpose": 1.3200000000006185,
+        "AP": 25.05999999999949,
+        "RAP": 15.340000000000146,
+        "cholesky": 0.5200000000004366
+      },
+      "gmshBytes": 67108864,
+      "totalLoad": [
+        2499.999999999991,
+        0,
+        0
+      ],
+      "metrics": [
+        {
+          "name": "peak stress at the hole, mid-plane (MPa)",
+          "fea": 316.2957348833205,
+          "analytical": 314.88000000000005,
+          "error": 0.004496109258512619
+        },
+        {
+          "name": "peak stress at the hole, through thickness max (MPa)",
+          "fea": 317.5081592178146,
+          "analytical": 314.88000000000005,
+          "error": 0.008346542231372354
+        }
+      ]
+    },
+    {
+      "case": "plate-hole",
+      "density": "fine",
+      "nodes": 12544,
+      "elements": 6384,
+      "dof": 37632,
+      "preconditioner": "amg",
+      "iterations": 23,
+      "relResidual": 6.360404165467172e-9,
+      "ms": {
+        "import": 21.23999999999978,
+        "mesh": 343.10000000000036,
+        "extract": 10.55999999999949,
+        "reorder": 17.68000000000029,
+        "boundary": 7.399999999999636,
+        "pattern": 9.639999999999418,
+        "assemble": 24.579999999999927,
+        "precondition": 229.22000000000025,
+        "solve": 363.8800000000001,
+        "stress": 7.399999999999636,
+        "total": 1039.0999999999995
+      },
+      "solverBytes": 46174812,
+      "levels": [
+        {
+          "dofs": 37632,
+          "blocks": 289990
+        },
+        {
+          "dofs": 2568,
+          "blocks": 11622
+        },
+        {
+          "dofs": 300,
+          "blocks": 1000
+        }
+      ],
+      "amgPhases": {
+        "full": 8.38000000000011,
+        "diagonal": 3.7600000000002183,
+        "lambda": 34.99999999999909,
+        "aggregate": 12.960000000000036,
+        "tentative": 5.680000000000291,
+        "smooth": 29.339999999999236,
+        "transpose": 3.100000000000364,
+        "AP": 73.8799999999992,
+        "RAP": 47.600000000000364,
+        "cholesky": 6.880000000000109
+      },
+      "gmshBytes": 67108864,
+      "totalLoad": [
+        2500.000000000004,
+        0,
+        0
+      ],
+      "metrics": [
+        {
+          "name": "peak stress at the hole, mid-plane (MPa)",
+          "fea": 317.34692034501205,
+          "analytical": 314.88000000000005,
+          "error": 0.007834477721709854
+        },
+        {
+          "name": "peak stress at the hole, through thickness max (MPa)",
+          "fea": 317.64876788302035,
+          "analytical": 314.88000000000005,
+          "error": 0.008793089059388663
+        }
+      ]
+    },
+    {
+      "case": "lame",
+      "density": "coarse",
+      "nodes": 1364,
+      "elements": 684,
+      "dof": 4092,
+      "preconditioner": "amg",
+      "iterations": 17,
+      "relResidual": 6.277602461590599e-9,
+      "ms": {
+        "import": 17.9399999999996,
+        "mesh": 35.400000000000546,
+        "extract": 1.319999999999709,
+        "reorder": 1.7200000000002547,
+        "boundary": 1.199999999999818,
+        "pattern": 0.9600000000000364,
+        "assemble": 2.5600000000004,
+        "precondition": 27.38000000000011,
+        "solve": 23.24000000000069,
+        "stress": 0.6199999999998909,
+        "total": 113.5600000000004
+      },
+      "solverBytes": 5368072,
+      "levels": [
+        {
+          "dofs": 4092,
+          "blocks": 31160
+        },
+        {
+          "dofs": 270,
+          "blocks": 1255
+        }
+      ],
+      "amgPhases": {
+        "full": 1.0799999999999272,
+        "diagonal": 0.31999999999970896,
+        "lambda": 2.5200000000004366,
+        "aggregate": 1.639999999999418,
+        "tentative": 0.42000000000007276,
+        "smooth": 2.6599999999998545,
+        "transpose": 0.3599999999996726,
+        "AP": 6.460000000000036,
+        "RAP": 5.279999999999745,
+        "cholesky": 6.460000000000036
+      },
+      "gmshBytes": 67108864,
+      "totalLoad": [
+        9999.999999999949,
+        9999.99999999996,
+        -4.4551619609190657e-13
+      ],
+      "metrics": [
+        {
+          "name": "hoop stress, inner surface (MPa)",
+          "fea": 166.0996699532963,
+          "analytical": 166.66666666666669,
+          "error": -0.0034019802802222328
+        },
+        {
+          "name": "hoop stress, outer surface (MPa)",
+          "fea": 66.57881081739781,
+          "analytical": 66.66666666666667,
+          "error": -0.0013178377390329387
+        },
+        {
+          "name": "radial displacement, inner surface (mm)",
+          "fea": 0.00953039088338492,
+          "analytical": 0.009533333333333336,
+          "error": -0.00030864859598768186
+        }
+      ]
+    },
+    {
+      "case": "lame",
+      "density": "medium",
+      "nodes": 6300,
+      "elements": 3708,
+      "dof": 18900,
+      "preconditioner": "amg",
+      "iterations": 18,
+      "relResidual": 8.99288184607762e-9,
+      "ms": {
+        "import": 16.68000000000029,
+        "mesh": 118.96000000000004,
+        "extract": 4.480000000000473,
+        "reorder": 7.260000000000218,
+        "boundary": 3.9399999999996,
+        "pattern": 5.239999999999782,
+        "assemble": 13.199999999999818,
+        "precondition": 148.4399999999996,
+        "solve": 152.78000000000065,
+        "stress": 3.219999999999345,
+        "total": 475.3199999999997
+      },
+      "solverBytes": 25687552,
+      "levels": [
+        {
+          "dofs": 18900,
+          "blocks": 157536
+        },
+        {
+          "dofs": 1086,
+          "blocks": 8667
+        },
+        {
+          "dofs": 96,
+          "blocks": 256
+        }
+      ],
+      "amgPhases": {
+        "full": 2.800000000000182,
+        "diagonal": 1.4400000000005093,
+        "lambda": 19.18000000000029,
+        "aggregate": 6.199999999999818,
+        "tentative": 2.0600000000004,
+        "smooth": 15.5,
+        "transpose": 1.3800000000001091,
+        "AP": 59.52000000000044,
+        "RAP": 39.55999999999949,
+        "cholesky": 0.15999999999985448
+      },
+      "gmshBytes": 67108864,
+      "totalLoad": [
+        10000.000000000005,
+        9999.999999999949,
+        -2.302467813448888e-13
+      ],
+      "metrics": [
+        {
+          "name": "hoop stress, inner surface (MPa)",
+          "fea": 166.51529691947175,
+          "analytical": 166.66666666666669,
+          "error": -0.0009082184831696053
+        },
+        {
+          "name": "hoop stress, outer surface (MPa)",
+          "fea": 66.64872476462074,
+          "analytical": 66.66666666666667,
+          "error": -0.00026912853068900233
+        },
+        {
+          "name": "radial displacement, inner surface (mm)",
+          "fea": 0.009532819230810454,
+          "analytical": 0.009533333333333336,
+          "error": -0.00005392683806460991
+        }
+      ]
+    },
+    {
+      "case": "lame",
+      "density": "fine",
+      "nodes": 34895,
+      "elements": 22926,
+      "dof": 104685,
+      "preconditioner": "amg",
+      "iterations": 22,
+      "relResidual": 3.3042694561993324e-9,
+      "ms": {
+        "import": 16.399999999999636,
+        "mesh": 573.5,
+        "extract": 24.480000000000473,
+        "reorder": 38.899999999999636,
+        "boundary": 24.659999999999854,
+        "pattern": 32.64000000000033,
+        "assemble": 100.21999999999935,
+        "precondition": 1031.8799999999992,
+        "solve": 1203.2200000000012,
+        "stress": 21.419999999998254,
+        "total": 3070.039999999999
+      },
+      "solverBytes": 154290501,
+      "levels": [
+        {
+          "dofs": 104685,
+          "blocks": 929975
+        },
+        {
+          "dofs": 5340,
+          "blocks": 58148
+        },
+        {
+          "dofs": 372,
+          "blocks": 3102
+        }
+      ],
+      "amgPhases": {
+        "full": 17.76000000000022,
+        "diagonal": 9.44000000000051,
+        "lambda": 123.36000000000058,
+        "aggregate": 35.81999999999971,
+        "tentative": 9.979999999999563,
+        "smooth": 89.27999999999884,
+        "transpose": 6.680000000000291,
+        "AP": 425.21999999999935,
+        "RAP": 302.9200000000001,
+        "cholesky": 8.520000000000437
+      },
+      "gmshBytes": 67108864,
+      "totalLoad": [
+        9999.999999999924,
+        9999.99999999985,
+        -2.9523572028081527e-13
+      ],
+      "metrics": [
+        {
+          "name": "hoop stress, inner surface (MPa)",
+          "fea": 166.6196052736966,
+          "analytical": 166.66666666666669,
+          "error": -0.0002823683578204736
+        },
+        {
+          "name": "hoop stress, outer surface (MPa)",
+          "fea": 66.66287235476481,
+          "analytical": 66.66666666666667,
+          "error": -0.00005691467852784626
+        },
+        {
+          "name": "radial displacement, inner surface (mm)",
+          "fea": 0.009533279901276843,
+          "analytical": 0.009533333333333336,
+          "error": -0.0000056047611705809745
+        }
+      ]
+    }
+  ],
+  "scaling": [
+    {
+      "solid": "bracket",
+      "target": 50000,
+      "sizeMax": 4.048239651978445,
+      "preconditioner": "amg",
+      "nodes": 16357,
+      "elements": 9499,
+      "dof": 49071,
+      "iterations": 24,
+      "relResidual": 8.992694919740993e-9,
+      "ms": {
+        "import": 36.94000000000051,
+        "mesh": 314.2600000000002,
+        "extract": 10.3799999999992,
+        "reorder": 16.44000000000051,
+        "boundary": 10.959999999999127,
+        "pattern": 14.680000000000291,
+        "assemble": 32.63999999999942,
+        "precondition": 362.4200000000001,
+        "solve": 538.3999999999996,
+        "stress": 8.6200000000008,
+        "total": 1348.1400000000012
+      },
+      "solverBytes": 65069747,
+      "levels": [
+        {
+          "dofs": 49071,
+          "blocks": 406291
+        },
+        {
+          "dofs": 2676,
+          "blocks": 20712
+        },
+        {
+          "dofs": 234,
+          "blocks": 1015
+        }
+      ],
+      "amgPhases": {
+        "full": 7.680000000000291,
+        "diagonal": 4.260000000000218,
+        "lambda": 50.68000000000029,
+        "aggregate": 15.680000000000291,
+        "tentative": 4.979999999999563,
+        "smooth": 38,
+        "transpose": 2.8800000000010186,
+        "AP": 139.3799999999992,
+        "RAP": 95.34000000000015,
+        "cholesky": 2.219999999999345
+      },
+      "gmshBytes": 67108864,
+      "totalLoad": [
+        0,
+        0,
+        -1999.9999999999945
+      ],
+      "peakVonMises": 195.1973706221545
+    },
+    {
+      "solid": "bracket",
+      "target": 200000,
+      "sizeMax": 2.3828262007946774,
+      "preconditioner": "amg",
+      "nodes": 68507,
+      "elements": 43840,
+      "dof": 205521,
+      "iterations": 24,
+      "relResidual": 4.362370905392061e-9,
+      "ms": {
+        "import": 35.5,
+        "mesh": 1176.199999999999,
+        "extract": 54.780000000000655,
+        "reorder": 86.69999999999891,
+        "boundary": 48.600000000000364,
+        "pattern": 64.05999999999949,
+        "assemble": 217.82000000000153,
+        "precondition": 1881.7599999999984,
+        "solve": 2613.26,
+        "stress": 43.5,
+        "total": 6226.480000000001
+      },
+      "solverBytes": 296301473,
+      "levels": [
+        {
+          "dofs": 205521,
+          "blocks": 1798379
+        },
+        {
+          "dofs": 10404,
+          "blocks": 105368
+        },
+        {
+          "dofs": 732,
+          "blocks": 6450
+        }
+      ],
+      "amgPhases": {
+        "full": 46.35999999999876,
+        "diagonal": 19.480000000001382,
+        "lambda": 236.79999999999927,
+        "aggregate": 72.64000000000124,
+        "tentative": 21.6200000000008,
+        "smooth": 167.63999999999942,
+        "transpose": 12,
+        "AP": 725.3399999999983,
+        "RAP": 509,
+        "cholesky": 64.76000000000022
+      },
+      "gmshBytes": 67108864,
+      "totalLoad": [
+        0,
+        0,
+        -1999.9999999999868
+      ],
+      "peakVonMises": 197.39592189648022
+    },
+    {
+      "solid": "bracket",
+      "target": 500000,
+      "sizeMax": 1.7196061973255934,
+      "preconditioner": "amg",
+      "nodes": 165655,
+      "elements": 110676,
+      "dof": 496965,
+      "iterations": 26,
+      "relResidual": 7.137007918397328e-9,
+      "ms": {
+        "import": 36.31999999999971,
+        "mesh": 2872.640000000003,
+        "extract": 139.0199999999968,
+        "reorder": 199.78000000000247,
+        "boundary": 130.55999999999767,
+        "pattern": 152.13999999999942,
+        "assemble": 634.7800000000025,
+        "precondition": 5248.2800000000025,
+        "solve": 6372.460000000003,
+        "stress": 102.77999999999884,
+        "total": 15892.159999999996
+      },
+      "solverBytes": 729887909,
+      "levels": [
+        {
+          "dofs": 496965,
+          "blocks": 4458919
+        },
+        {
+          "dofs": 23958,
+          "blocks": 274189
+        },
+        {
+          "dofs": 1572,
+          "blocks": 19422
+        },
+        {
+          "dofs": 90,
+          "blocks": 211
+        }
+      ],
+      "amgPhases": {
+        "full": 86.36000000000058,
+        "diagonal": 44.79999999999927,
+        "lambda": 613.619999999999,
+        "aggregate": 167.15999999999985,
+        "tentative": 48.95999999999913,
+        "smooth": 446.6399999999994,
+        "transpose": 30.340000000000146,
+        "AP": 2202.5599999999977,
+        "RAP": 1596.4800000000032,
+        "cholesky": 1.4400000000023283
+      },
+      "gmshBytes": 67108864,
+      "totalLoad": [
+        0,
+        0,
+        -2000.000000000001
+      ],
+      "peakVonMises": 198.47593657593916
+    },
+    {
+      "solid": "cantilever",
+      "target": 50000,
+      "sizeMax": 3.403139545278542,
+      "preconditioner": "amg",
+      "nodes": 17645,
+      "elements": 10558,
+      "dof": 52935,
+      "iterations": 24,
+      "relResidual": 5.511694230279082e-9,
+      "ms": {
+        "import": 17.339999999996508,
+        "mesh": 314.5200000000041,
+        "extract": 14.979999999995925,
+        "reorder": 26.10000000000582,
+        "boundary": 11.739999999997963,
+        "pattern": 15.139999999999418,
+        "assemble": 40,
+        "precondition": 402.1800000000003,
+        "solve": 551.1999999999971,
+        "stress": 10.180000000000291,
+        "total": 1406.9599999999991
+      },
+      "solverBytes": 71543899,
+      "levels": [
+        {
+          "dofs": 52935,
+          "blocks": 445361
+        },
+        {
+          "dofs": 2874,
+          "blocks": 22633
+        },
+        {
+          "dofs": 258,
+          "blocks": 979
+        }
+      ],
+      "amgPhases": {
+        "full": 11.960000000006403,
+        "diagonal": 4.959999999999127,
+        "lambda": 51.859999999993306,
+        "aggregate": 17.0199999999968,
+        "tentative": 6.140000000006694,
+        "smooth": 40.479999999995925,
+        "transpose": 3.7400000000052387,
+        "AP": 156.8399999999965,
+        "RAP": 99.88000000000466,
+        "cholesky": 6.180000000000291
+      },
+      "gmshBytes": 67108864,
+      "totalLoad": [
+        0,
+        0,
+        -1000.0000000000052
+      ],
+      "peakVonMises": 163.7122806704738
+    },
+    {
+      "solid": "cantilever",
+      "target": 200000,
+      "sizeMax": 2.0858901124152047,
+      "preconditioner": "amg",
+      "nodes": 64713,
+      "elements": 41881,
+      "dof": 194139,
+      "iterations": 24,
+      "relResidual": 5.415679153935862e-9,
+      "ms": {
+        "import": 15.360000000000582,
+        "mesh": 1071.2400000000052,
+        "extract": 45.69999999999709,
+        "reorder": 73.58000000000175,
+        "boundary": 44.54000000000087,
+        "pattern": 58.580000000001746,
+        "assemble": 197.47999999999593,
+        "precondition": 1750.8199999999997,
+        "solve": 2339.279999999999,
+        "stress": 41.55999999999767,
+        "total": 5639.659999999996
+      },
+      "solverBytes": 279623443,
+      "levels": [
+        {
+          "dofs": 194139,
+          "blocks": 1709547
+        },
+        {
+          "dofs": 9684,
+          "blocks": 99138
+        },
+        {
+          "dofs": 672,
+          "blocks": 4406
+        }
+      ],
+      "amgPhases": {
+        "full": 44.13999999999942,
+        "diagonal": 17.279999999998836,
+        "lambda": 210.09999999999854,
+        "aggregate": 61.38000000000466,
+        "tentative": 16.639999999999418,
+        "smooth": 157.5,
+        "transpose": 11,
+        "AP": 712.3399999999965,
+        "RAP": 466.3199999999997,
+        "cholesky": 50.23999999999796
+      },
+      "gmshBytes": 67108864,
+      "totalLoad": [
+        0,
+        0,
+        -999.9999999999983
+      ],
+      "peakVonMises": 199.48755891985297
+    },
+    {
+      "solid": "cantilever",
+      "target": 500000,
+      "sizeMax": 1.497889823195947,
+      "preconditioner": "amg",
+      "nodes": 165326,
+      "elements": 111541,
+      "dof": 495978,
+      "iterations": 26,
+      "relResidual": 5.37486462500856e-9,
+      "ms": {
+        "import": 17.37999999999738,
+        "mesh": 2782.5800000000017,
+        "extract": 136.8000000000029,
+        "reorder": 215.58000000000175,
+        "boundary": 120.91999999999825,
+        "pattern": 152.77999999999884,
+        "assemble": 651.5,
+        "precondition": 5371.8399999999965,
+        "solve": 6426.419999999998,
+        "stress": 106.45999999999913,
+        "total": 15988.259999999995
+      },
+      "solverBytes": 730746666,
+      "levels": [
+        {
+          "dofs": 495978,
+          "blocks": 4475594
+        },
+        {
+          "dofs": 23670,
+          "blocks": 275077
+        },
+        {
+          "dofs": 1548,
+          "blocks": 17070
+        },
+        {
+          "dofs": 84,
+          "blocks": 148
+        }
+      ],
+      "amgPhases": {
+        "full": 85.83999999999651,
+        "diagonal": 44.520000000004075,
+        "lambda": 635.9599999999919,
+        "aggregate": 178.8199999999997,
+        "tentative": 51.75999999999476,
+        "smooth": 452.1800000000003,
+        "transpose": 30.400000000001455,
+        "AP": 2255.040000000001,
+        "RAP": 1625.1199999999953,
+        "cholesky": 1.4599999999991269
+      },
+      "gmshBytes": 67108864,
+      "totalLoad": [
+        0,
+        0,
+        -999.9999999999982
+      ],
+      "peakVonMises": 218.82782526822828
+    }
+  ]
+}
