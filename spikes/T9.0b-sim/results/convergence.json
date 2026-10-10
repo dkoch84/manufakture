@@ -1,0 +1,357 @@
+{
+  "machine": {
+    "node": "v26.10.0",
+    "cpu": "AMD Ryzen 5 7600X 6-Core Processor",
+    "cores": 12,
+    "memoryGiB": 62,
+    "date": "2026-10-10"
+  },
+  "profile": "10 reps at 200 lbf, direct drive, SoC 0.5",
+  "reference": {
+    "dtUs": 10,
+    "theta": 0.5,
+    "electrical": "full",
+    "copper": 2498.081978903554,
+    "resistor": 3191.3799317716507,
+    "packChemical": 7405.611878233118,
+    "tWindingEnd": 35.663166474171284
+  },
+  "rows": [
+    {
+      "electrical": "full",
+      "theta": 0.5,
+      "dt": 0.0002,
+      "dtUs": 200,
+      "runtimeMs": 12,
+      "residualRelative": 2.449e-8,
+      "residualJ": -0.000339,
+      "copperJ": 2498.086,
+      "resistorJ": 3191.444,
+      "packChemicalJ": 7405.566,
+      "tWindingEnd": 35.6632,
+      "errVsRef": {
+        "copper": 0.00000148,
+        "resistor": 0.0000201,
+        "packChemical": -0.00000623,
+        "tRiseWinding": 0.00000147
+      },
+      "forceErrorMaxN": 28.03,
+      "voltageLimitedSteps": 0
+    },
+    {
+      "electrical": "full",
+      "theta": 0.5,
+      "dt": 0.0001,
+      "dtUs": 100,
+      "runtimeMs": 23,
+      "residualRelative": 1.224e-8,
+      "residualJ": -0.00017,
+      "copperJ": 2498.084,
+      "resistorJ": 3191.41,
+      "packChemicalJ": 7405.59,
+      "tWindingEnd": 35.6632,
+      "errVsRef": {
+        "copper": 9.51e-7,
+        "resistor": 0.00000954,
+        "packChemical": -0.00000289,
+        "tRiseWinding": 9.1e-7
+      },
+      "forceErrorMaxN": 49,
+      "voltageLimitedSteps": 0
+    },
+    {
+      "electrical": "full",
+      "theta": 0.5,
+      "dt": 0.00005,
+      "dtUs": 50,
+      "runtimeMs": 46,
+      "residualRelative": 6.172e-9,
+      "residualJ": -0.000086,
+      "copperJ": 2498.084,
+      "resistorJ": 3191.394,
+      "packChemicalJ": 7405.603,
+      "tWindingEnd": 35.6632,
+      "errVsRef": {
+        "copper": 6.83e-7,
+        "resistor": 0.00000425,
+        "packChemical": -0.00000118,
+        "tRiseWinding": 6.2e-7
+      },
+      "forceErrorMaxN": 59.8,
+      "voltageLimitedSteps": 0
+    },
+    {
+      "electrical": "full",
+      "theta": 0.5,
+      "dt": 0.000025,
+      "dtUs": 25,
+      "runtimeMs": 91,
+      "residualRelative": 3.002e-9,
+      "residualJ": -0.000042,
+      "copperJ": 2498.08,
+      "resistorJ": 3191.385,
+      "packChemicalJ": 7405.606,
+      "tWindingEnd": 35.6632,
+      "errVsRef": {
+        "copper": -6.92e-7,
+        "resistor": 0.0000016,
+        "packChemical": -8.27e-7,
+        "tRiseWinding": -5.79e-7
+      },
+      "forceErrorMaxN": 65.28,
+      "voltageLimitedSteps": 0
+    },
+    {
+      "electrical": "full",
+      "theta": 0.5,
+      "dt": 0.00001,
+      "dtUs": 10,
+      "runtimeMs": 229,
+      "residualRelative": 1.438e-9,
+      "residualJ": -0.00002,
+      "copperJ": 2498.082,
+      "resistorJ": 3191.38,
+      "packChemicalJ": 7405.612,
+      "tWindingEnd": 35.6632,
+      "errVsRef": {
+        "copper": 0,
+        "resistor": 0,
+        "packChemical": 0,
+        "tRiseWinding": 0
+      },
+      "forceErrorMaxN": 68.59,
+      "voltageLimitedSteps": 0
+    },
+    {
+      "electrical": "quasi-static",
+      "theta": 0.5,
+      "dt": 0.01,
+      "dtUs": 10000,
+      "runtimeMs": 0,
+      "residualRelative": 0.000001236,
+      "residualJ": -0.017132,
+      "copperJ": 2497.732,
+      "resistorJ": 3190.21,
+      "packChemicalJ": 7403.629,
+      "tWindingEnd": 35.6619,
+      "errVsRef": {
+        "copper": -0.00014,
+        "resistor": -0.000367,
+        "packChemical": -0.000268,
+        "tRiseWinding": -0.000115
+      },
+      "forceErrorMaxN": 0,
+      "voltageLimitedSteps": 0
+    },
+    {
+      "electrical": "quasi-static",
+      "theta": 0.5,
+      "dt": 0.001,
+      "dtUs": 1000,
+      "runtimeMs": 2,
+      "residualRelative": 1.334e-7,
+      "residualJ": -0.001849,
+      "copperJ": 2498.064,
+      "resistorJ": 3191.712,
+      "packChemicalJ": 7405.758,
+      "tWindingEnd": 35.6631,
+      "errVsRef": {
+        "copper": -0.00000711,
+        "resistor": 0.000104,
+        "packChemical": 0.0000198,
+        "tRiseWinding": -0.00000567
+      },
+      "forceErrorMaxN": 0,
+      "voltageLimitedSteps": 0
+    },
+    {
+      "electrical": "quasi-static",
+      "theta": 0.5,
+      "dt": 0.0001,
+      "dtUs": 100,
+      "runtimeMs": 22,
+      "residualRelative": 2.309e-8,
+      "residualJ": -0.00032,
+      "copperJ": 2498.087,
+      "resistorJ": 3191.727,
+      "packChemicalJ": 7405.803,
+      "tWindingEnd": 35.6632,
+      "errVsRef": {
+        "copper": 0.00000185,
+        "resistor": 0.000109,
+        "packChemical": 0.0000258,
+        "tRiseWinding": 0.00000178
+      },
+      "forceErrorMaxN": 0,
+      "voltageLimitedSteps": 0
+    },
+    {
+      "electrical": "full",
+      "theta": 1,
+      "dt": 0.0002,
+      "dtUs": 200,
+      "runtimeMs": 11,
+      "residualRelative": 0.000009265,
+      "residualJ": 0.12845,
+      "copperJ": 2498.086,
+      "resistorJ": 3191.445,
+      "packChemicalJ": 7405.584,
+      "tWindingEnd": 35.6632,
+      "errVsRef": {
+        "copper": 0.00000156,
+        "resistor": 0.0000203,
+        "packChemical": -0.00000372,
+        "tRiseWinding": 1.02e-7
+      },
+      "forceErrorMaxN": 11.58,
+      "voltageLimitedSteps": 0
+    },
+    {
+      "electrical": "full",
+      "theta": 1,
+      "dt": 0.0001,
+      "dtUs": 100,
+      "runtimeMs": 23,
+      "residualRelative": 0.000004445,
+      "residualJ": 0.06163,
+      "copperJ": 2498.084,
+      "resistorJ": 3191.411,
+      "packChemicalJ": 7405.596,
+      "tWindingEnd": 35.6632,
+      "errVsRef": {
+        "copper": 8.96e-7,
+        "resistor": 0.00000961,
+        "packChemical": -0.00000209,
+        "tRiseWinding": 1.29e-7
+      },
+      "forceErrorMaxN": 28.03,
+      "voltageLimitedSteps": 0
+    },
+    {
+      "electrical": "full",
+      "theta": 1,
+      "dt": 0.00005,
+      "dtUs": 50,
+      "runtimeMs": 46,
+      "residualRelative": 0.000002199,
+      "residualJ": 0.030491,
+      "copperJ": 2498.084,
+      "resistorJ": 3191.394,
+      "packChemicalJ": 7405.606,
+      "tWindingEnd": 35.6632,
+      "errVsRef": {
+        "copper": 6.43e-7,
+        "resistor": 0.00000427,
+        "packChemical": -8.4e-7,
+        "tRiseWinding": 2.17e-7
+      },
+      "forceErrorMaxN": 49,
+      "voltageLimitedSteps": 0
+    },
+    {
+      "electrical": "full",
+      "theta": 1,
+      "dt": 0.000025,
+      "dtUs": 25,
+      "runtimeMs": 91,
+      "residualRelative": 0.000001095,
+      "residualJ": 0.015183,
+      "copperJ": 2498.08,
+      "resistorJ": 3191.385,
+      "packChemicalJ": 7405.607,
+      "tWindingEnd": 35.6632,
+      "errVsRef": {
+        "copper": -7.15e-7,
+        "resistor": 0.0000016,
+        "packChemical": -6.63e-7,
+        "tRiseWinding": -7.82e-7
+      },
+      "forceErrorMaxN": 59.8,
+      "voltageLimitedSteps": 0
+    },
+    {
+      "electrical": "full",
+      "theta": 1,
+      "dt": 0.00001,
+      "dtUs": 10,
+      "runtimeMs": 229,
+      "residualRelative": 4.369e-7,
+      "residualJ": 0.006057,
+      "copperJ": 2498.082,
+      "resistorJ": 3191.38,
+      "packChemicalJ": 7405.612,
+      "tWindingEnd": 35.6632,
+      "errVsRef": {
+        "copper": -9.68e-9,
+        "resistor": 2.2e-9,
+        "packChemical": 6.33e-8,
+        "tRiseWinding": -8.14e-8
+      },
+      "forceErrorMaxN": 66.38,
+      "voltageLimitedSteps": 0
+    },
+    {
+      "electrical": "quasi-static",
+      "theta": 1,
+      "dt": 0.01,
+      "dtUs": 10000,
+      "runtimeMs": 0,
+      "residualRelative": 0.0004017,
+      "residualJ": 5.570599,
+      "copperJ": 2497.709,
+      "resistorJ": 3188.308,
+      "packChemicalJ": 7408.039,
+      "tWindingEnd": 35.6611,
+      "errVsRef": {
+        "copper": -0.000149,
+        "resistor": -0.000962,
+        "packChemical": 0.000328,
+        "tRiseWinding": -0.000196
+      },
+      "forceErrorMaxN": 0,
+      "voltageLimitedSteps": 0
+    },
+    {
+      "electrical": "quasi-static",
+      "theta": 1,
+      "dt": 0.001,
+      "dtUs": 1000,
+      "runtimeMs": 2,
+      "residualRelative": 0.00004055,
+      "residualJ": 0.562209,
+      "copperJ": 2498.062,
+      "resistorJ": 3191.387,
+      "packChemicalJ": 7406.049,
+      "tWindingEnd": 35.663,
+      "errVsRef": {
+        "copper": -0.00000811,
+        "resistor": 0.00000237,
+        "packChemical": 0.0000591,
+        "tRiseWinding": -0.0000138
+      },
+      "forceErrorMaxN": 0,
+      "voltageLimitedSteps": 0
+    },
+    {
+      "electrical": "quasi-static",
+      "theta": 1,
+      "dt": 0.0001,
+      "dtUs": 100,
+      "runtimeMs": 22,
+      "residualRelative": 0.000004049,
+      "residualJ": 0.056134,
+      "copperJ": 2498.086,
+      "resistorJ": 3191.693,
+      "packChemicalJ": 7405.831,
+      "tWindingEnd": 35.6632,
+      "errVsRef": {
+        "copper": 0.00000175,
+        "resistor": 0.000098,
+        "packChemical": 0.0000295,
+        "tRiseWinding": 9.6e-7
+      },
+      "forceErrorMaxN": 0,
+      "voltageLimitedSteps": 0
+    }
+  ]
+}

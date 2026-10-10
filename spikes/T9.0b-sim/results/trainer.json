@@ -1,0 +1,1083 @@
+{
+  "machine": {
+    "node": "v26.10.0",
+    "cpu": "AMD Ryzen 5 7600X 6-Core Processor",
+    "cores": 12,
+    "memoryGiB": 62,
+    "date": "2026-10-10"
+  },
+  "rep": {
+    "stroke": 0.6,
+    "pullTime": 0.6283185307179586,
+    "returnTime": 1,
+    "pauseTop": 0.2,
+    "pauseBottom": 0.2,
+    "force": 889.6444
+  },
+  "pack": {
+    "seriesCells": 16,
+    "capacityAh": 1.7,
+    "ocvSoc": [
+      0,
+      0.1,
+      0.2,
+      0.3,
+      0.4,
+      0.5,
+      0.6,
+      0.7,
+      0.8,
+      0.9,
+      1
+    ],
+    "ocvVolts": [
+      3,
+      3.45,
+      3.55,
+      3.61,
+      3.66,
+      3.72,
+      3.8,
+      3.88,
+      3.97,
+      4.07,
+      4.18
+    ],
+    "rInternal": 0.42000000000000004,
+    "chargeLimit": 3.4,
+    "taperStart": 0.85,
+    "cutoffCell": 2.8,
+    "nominalV": 57.6,
+    "ratedWh": 97.9,
+    "chemicalWhFromCurve": 101.46,
+    "meanCellOcv": 3.73
+  },
+  "direct": {
+    "machine": {
+      "motor": {
+        "name": "direct-drive torque motor (assumed)",
+        "polePairs": 14,
+        "kt": 0.5,
+        "rPhase": 0.04,
+        "lPhase": 0.0001,
+        "inertia": 0.003,
+        "frictionCoulomb": 0.03,
+        "frictionViscous": 0.0001,
+        "ironHyst": 0.06,
+        "ironEddy": 0.0008,
+        "copperAlpha": 0.00393,
+        "magnetAlpha": -0.0012,
+        "tRef": 25,
+        "commutation": "foc"
+      },
+      "drivetrain": {
+        "spoolRadius": 0.025,
+        "ratio": 1,
+        "etaReduction": 1,
+        "etaCable": 0.97,
+        "spoolInertia": 0.0002
+      },
+      "controller": {
+        "currentLimit": 60,
+        "modulationMax": 0.95,
+        "currentLoopHz": 1000,
+        "fixed": 1.5,
+        "rOn": 0.004,
+        "tSwitch": 1e-7,
+        "fSwitch": 20000,
+        "aux": 2.5
+      },
+      "pack": {
+        "seriesCells": 16,
+        "capacityAh": 1.7,
+        "ocvSoc": [
+          0,
+          0.1,
+          0.2,
+          0.3,
+          0.4,
+          0.5,
+          0.6,
+          0.7,
+          0.8,
+          0.9,
+          1
+        ],
+        "ocvVolts": [
+          3,
+          3.45,
+          3.55,
+          3.61,
+          3.66,
+          3.72,
+          3.8,
+          3.88,
+          3.97,
+          4.07,
+          4.18
+        ],
+        "rInternal": 0.42000000000000004,
+        "chargeLimit": 3.4,
+        "taperStart": 0.85,
+        "cutoffCell": 2.8
+      },
+      "brake": {
+        "resistance": 2.5
+      },
+      "thermal": {
+        "cWinding": 200,
+        "rWindingHousing": 0.3,
+        "cHousing": 1000,
+        "rHousingAmbient": 1,
+        "tAmbient": 25
+      }
+    },
+    "closedForm": {
+      "shaftTorqueNm": 22.241,
+      "holdCurrentA": 44.482,
+      "holdCopperW25C": 118.72,
+      "reflectedInertiaKgM2": 0.0032,
+      "inertiaAtSpoolKgM2": 0.0032,
+      "peakShaftSpeedRadS": 60,
+      "peakMechanicalW": 1334.5
+    },
+    "set10": {
+      "perRep": {
+        "userWorkPullJ": 533.8,
+        "busReturnedPerPullJ": 433.8,
+        "busReturnedPeakW": 1156,
+        "busReturnedMeanOverPullW": 690,
+        "packAcceptedPerPullJ": 114.7,
+        "resistorPerPullJ": 319.1,
+        "copperPerRepJ": 249.8,
+        "returnBusDrawPerRepJ": 704.9,
+        "machineWorkOnUserPerReturnJ": 533.8,
+        "packChemicalPerRepJ": 740.6
+      },
+      "runtimeMs": 72,
+      "steps": 405664,
+      "ledgerJ": {
+        "userWork": -0.158,
+        "userWorkIn": 5337.737,
+        "userWorkOut": 5337.894,
+        "packChemical": 7405.603,
+        "kinetic": 0,
+        "magnetic": 0,
+        "cable": 325.222,
+        "reduction": 0,
+        "friction": 16.242,
+        "iron": 43.533,
+        "copper": 2498.084,
+        "controller": 373.341,
+        "aux": 50.708,
+        "resistor": 3191.394,
+        "packResistance": 906.924,
+        "residual": 0,
+        "residualRelative": 6.172e-9
+      },
+      "thermalJ": {
+        "heatIn": 2557.8579,
+        "stored": 2554.7173,
+        "rejected": 3.1406,
+        "residual": 0
+      },
+      "phases": {
+        "pull": {
+          "duration": 6.283,
+          "userWork": 5337.737,
+          "busEnergy": -4311.065,
+          "busReturned": 4338.495,
+          "busReturnedPeakW": 1156.239,
+          "busReturnedMeanW": 690.491,
+          "packCharged": 1147.102,
+          "resistor": 3191.394,
+          "copper": 708.885
+        },
+        "pause": {
+          "duration": 4,
+          "userWork": 0,
+          "busEnergy": 569.044,
+          "busReturned": 0,
+          "busReturnedPeakW": 0,
+          "busReturnedMeanW": 0,
+          "packCharged": 0,
+          "resistor": 0,
+          "copper": 485.763
+        },
+        "return": {
+          "duration": 10,
+          "userWork": -5337.894,
+          "busEnergy": 7049.307,
+          "busReturned": 0,
+          "busReturnedPeakW": 0,
+          "busReturnedMeanW": 0,
+          "packCharged": 0,
+          "resistor": 0,
+          "copper": 1303.436
+        }
+      },
+      "end": {
+        "t": 20.2832,
+        "soc": 0.4796,
+        "tWinding": 35.6632,
+        "tHousing": 25.4221
+      },
+      "peaks": {
+        "tWinding": 35.663,
+        "tHousing": 25.422,
+        "current": 46.82,
+        "torque": 23.399,
+        "copperW": 136.745,
+        "busReturnedW": 1156.239,
+        "resistorW": 949.009,
+        "packDischargeA": 20.11,
+        "packChargeA": 3.4,
+        "voltageUse": 0.557,
+        "minTerminalV": 50.89,
+        "maxTerminalV": 60.952,
+        "brakeDuty": 0.64
+      },
+      "flags": {
+        "currentLimited": 0,
+        "voltageLimited": 0,
+        "brakeOverload": 0,
+        "slack": 0,
+        "belowCutoff": 0
+      },
+      "forceErrorN": {
+        "maxAbs": 59.801,
+        "rms": 0.483
+      }
+    },
+    "hold30": {
+      "runtimeMs": 70,
+      "steps": 600000,
+      "ledgerJ": {
+        "userWork": 0,
+        "userWorkIn": 0,
+        "userWorkOut": 0,
+        "packChemical": 4374.042,
+        "kinetic": 0,
+        "magnetic": 0,
+        "cable": 0,
+        "reduction": 0,
+        "friction": 0,
+        "iron": 0,
+        "copper": 3672.916,
+        "controller": 550.353,
+        "aux": 75,
+        "resistor": 0,
+        "packResistance": 75.772,
+        "residual": 0,
+        "residualRelative": 1.618e-9
+      },
+      "thermalJ": {
+        "heatIn": 3672.9164,
+        "stored": 3665.132,
+        "rejected": 7.7844,
+        "residual": 0
+      },
+      "phases": {
+        "hold": {
+          "duration": 30,
+          "userWork": 0,
+          "busEnergy": 4298.27,
+          "busReturned": 0,
+          "busReturnedPeakW": 0,
+          "busReturnedMeanW": 0,
+          "packCharged": 0,
+          "resistor": 0,
+          "copper": 3672.916
+        }
+      },
+      "end": {
+        "t": 30,
+        "soc": 0.488,
+        "tWinding": 39.6007,
+        "tHousing": 25.745
+      },
+      "peaks": {
+        "tWinding": 39.601,
+        "tHousing": 25.745,
+        "current": 44.522,
+        "torque": 22.241,
+        "copperW": 125.757,
+        "busReturnedW": 0,
+        "resistorW": 0,
+        "packDischargeA": 2.513,
+        "packChargeA": 0,
+        "voltageUse": 0.059,
+        "minTerminalV": 58.349,
+        "maxTerminalV": 58.518,
+        "brakeDuty": 0
+      },
+      "flags": {
+        "currentLimited": 0,
+        "voltageLimited": 0,
+        "brakeOverload": 0,
+        "slack": 0,
+        "belowCutoff": 0
+      },
+      "forceErrorN": {
+        "maxAbs": 0,
+        "rms": 0
+      }
+    },
+    "session": {
+      "packWh": 10.886,
+      "runtimeMs": 1420,
+      "steps": 9328319,
+      "ledgerJ": {
+        "userWork": -0.807,
+        "userWorkIn": 26688.669,
+        "userWorkOut": 26689.476,
+        "packChemical": 39188.212,
+        "kinetic": 0,
+        "magnetic": 0,
+        "cable": 1626.108,
+        "reduction": 0,
+        "friction": 81.208,
+        "iron": 217.663,
+        "copper": 13061.714,
+        "controller": 2455.324,
+        "aux": 1166.04,
+        "resistor": 15906.292,
+        "packResistance": 4673.056,
+        "residual": 0,
+        "residualRelative": 6.085e-9
+      },
+      "thermalJ": {
+        "heatIn": 13360.5851,
+        "stored": 11498.3816,
+        "rejected": 1862.2035,
+        "residual": 0
+      },
+      "phases": {
+        "pause": {
+          "duration": 25,
+          "userWork": 0,
+          "busEnergy": 3177.966,
+          "busReturned": 0,
+          "busReturnedPeakW": 0,
+          "busReturnedMeanW": 0,
+          "packCharged": 0,
+          "resistor": 0,
+          "copper": 2707.413
+        },
+        "pull": {
+          "duration": 31.416,
+          "userWork": 26688.669,
+          "busEnergy": -21449.417,
+          "busReturned": 21593.714,
+          "busReturnedPeakW": 1156.196,
+          "busReturnedMeanW": 687.349,
+          "packCharged": 5687.422,
+          "resistor": 15906.292,
+          "copper": 3647.695
+        },
+        "return": {
+          "duration": 50,
+          "userWork": -26689.476,
+          "busEnergy": 35440.315,
+          "busReturned": 0,
+          "busReturnedPeakW": 0,
+          "busReturnedMeanW": 0,
+          "packCharged": 0,
+          "resistor": 0,
+          "copper": 6706.606
+        },
+        "rest": {
+          "duration": 360,
+          "userWork": 0,
+          "busEnergy": 1440,
+          "busReturned": 0,
+          "busReturnedPeakW": 0,
+          "busReturnedMeanW": 0,
+          "packCharged": 0,
+          "resistor": 0,
+          "copper": 0
+        }
+      },
+      "end": {
+        "t": 466.416,
+        "soc": 0.3915,
+        "tWinding": 44.9983,
+        "tHousing": 32.4987
+      },
+      "peaks": {
+        "tWinding": 45.038,
+        "tHousing": 32.499,
+        "current": 47.221,
+        "torque": 23.399,
+        "copperW": 144.001,
+        "busReturnedW": 1156.196,
+        "resistorW": 948.969,
+        "packDischargeA": 20.689,
+        "packChargeA": 3.4,
+        "voltageUse": 0.558,
+        "minTerminalV": 49.813,
+        "maxTerminalV": 60.951,
+        "brakeDuty": 0.655
+      },
+      "flags": {
+        "currentLimited": 0,
+        "voltageLimited": 0,
+        "brakeOverload": 0,
+        "slack": 3527646,
+        "belowCutoff": 0
+      },
+      "forceErrorN": {
+        "maxAbs": 59.593,
+        "rms": 0.228
+      }
+    },
+    "sessionUnlimitedAcceptance": {
+      "packWh": 6.955,
+      "resistorJ": 0,
+      "packResistanceJ": 6420.3,
+      "peakChargeA": 17.35
+    },
+    "socVariants": [
+      {
+        "soc": 1,
+        "resistorPerPullJ": 425.5,
+        "packAcceptedPerPullJ": 8,
+        "packChemicalPerRepJ": 823.4,
+        "minTerminalV": 59.29,
+        "maxTerminalV": 66.88,
+        "peakPackDischargeA": 17.27,
+        "belowCutoffSteps": 0
+      },
+      {
+        "soc": 0.5,
+        "resistorPerPullJ": 319.1,
+        "packAcceptedPerPullJ": 114.7,
+        "packChemicalPerRepJ": 740.6,
+        "minTerminalV": 50.89,
+        "maxTerminalV": 60.95,
+        "peakPackDischargeA": 20.11,
+        "belowCutoffSteps": 0
+      },
+      {
+        "soc": 0.1,
+        "resistorPerPullJ": 328.2,
+        "packAcceptedPerPullJ": 105.9,
+        "packChemicalPerRepJ": 772.7,
+        "minTerminalV": 43.82,
+        "maxTerminalV": 56.63,
+        "peakPackDischargeA": 23.34,
+        "belowCutoffSteps": 19186
+      }
+    ],
+    "perCharge": {
+      "completed": 8,
+      "sessions": [
+        {
+          "session": 1,
+          "socStart": 1,
+          "socEnd": 0.8972,
+          "packWh": 11.535,
+          "minTerminalV": 57.57,
+          "belowCutoffSteps": 0
+        },
+        {
+          "session": 2,
+          "socStart": 0.8972,
+          "socEnd": 0.7997,
+          "packWh": 10.647,
+          "minTerminalV": 55.77,
+          "belowCutoffSteps": 0
+        },
+        {
+          "session": 3,
+          "socStart": 0.7997,
+          "socEnd": 0.7003,
+          "packWh": 10.613,
+          "minTerminalV": 54.1,
+          "belowCutoffSteps": 0
+        },
+        {
+          "session": 4,
+          "socStart": 0.7003,
+          "socEnd": 0.5978,
+          "packWh": 10.706,
+          "minTerminalV": 52.55,
+          "belowCutoffSteps": 0
+        },
+        {
+          "session": 5,
+          "socStart": 0.5978,
+          "socEnd": 0.4921,
+          "packWh": 10.802,
+          "minTerminalV": 50.96,
+          "belowCutoffSteps": 0
+        },
+        {
+          "session": 6,
+          "socStart": 0.4921,
+          "socEnd": 0.3834,
+          "packWh": 10.892,
+          "minTerminalV": 49.73,
+          "belowCutoffSteps": 0
+        },
+        {
+          "session": 7,
+          "socStart": 0.3834,
+          "socEnd": 0.2721,
+          "packWh": 10.969,
+          "minTerminalV": 48.6,
+          "belowCutoffSteps": 0
+        },
+        {
+          "session": 8,
+          "socStart": 0.2721,
+          "socEnd": 0.1577,
+          "packWh": 11.062,
+          "minTerminalV": 46.92,
+          "belowCutoffSteps": 0
+        },
+        {
+          "session": 9,
+          "socStart": 0.1577,
+          "socEnd": 0.0347,
+          "packWh": 11.329,
+          "minTerminalV": 39.72,
+          "belowCutoffSteps": 8873
+        }
+      ]
+    },
+    "forceSweep": [
+      {
+        "lbf": 200,
+        "packChemicalPerRepJ": 740.6,
+        "copperPerRepJ": 249.8,
+        "resistorPerRepJ": 319.2,
+        "packAcceptedPerPullJ": 114.7
+      },
+      {
+        "lbf": 100,
+        "packChemicalPerRepJ": 243,
+        "copperPerRepJ": 61.6,
+        "resistorPerRepJ": 121.4,
+        "packAcceptedPerPullJ": 111.7
+      },
+      {
+        "lbf": 60,
+        "packChemicalPerRepJ": 98,
+        "copperPerRepJ": 22.2,
+        "resistorPerRepJ": 39.2,
+        "packAcceptedPerPullJ": 102.9
+      }
+    ]
+  },
+  "belt": {
+    "machine": {
+      "motor": {
+        "name": "outrunner, 5:1 belt (assumed)",
+        "polePairs": 14,
+        "kt": 0.09,
+        "rPhase": 0.035,
+        "lPhase": 0.00002,
+        "inertia": 0.0004,
+        "frictionCoulomb": 0.008,
+        "frictionViscous": 0.00001,
+        "ironHyst": 0.02,
+        "ironEddy": 0.00005,
+        "copperAlpha": 0.00393,
+        "magnetAlpha": -0.0012,
+        "tRef": 25,
+        "commutation": "foc"
+      },
+      "drivetrain": {
+        "spoolRadius": 0.025,
+        "ratio": 5,
+        "etaReduction": 0.95,
+        "etaCable": 0.97,
+        "spoolInertia": 0.0002
+      },
+      "controller": {
+        "currentLimit": 70,
+        "modulationMax": 0.95,
+        "currentLoopHz": 1000,
+        "fixed": 1.5,
+        "rOn": 0.004,
+        "tSwitch": 1e-7,
+        "fSwitch": 20000,
+        "aux": 2.5
+      },
+      "pack": {
+        "seriesCells": 16,
+        "capacityAh": 1.7,
+        "ocvSoc": [
+          0,
+          0.1,
+          0.2,
+          0.3,
+          0.4,
+          0.5,
+          0.6,
+          0.7,
+          0.8,
+          0.9,
+          1
+        ],
+        "ocvVolts": [
+          3,
+          3.45,
+          3.55,
+          3.61,
+          3.66,
+          3.72,
+          3.8,
+          3.88,
+          3.97,
+          4.07,
+          4.18
+        ],
+        "rInternal": 0.42000000000000004,
+        "chargeLimit": 3.4,
+        "taperStart": 0.85,
+        "cutoffCell": 2.8
+      },
+      "brake": {
+        "resistance": 2.5
+      },
+      "thermal": {
+        "cWinding": 60,
+        "rWindingHousing": 0.6,
+        "cHousing": 350,
+        "rHousingAmbient": 1.5,
+        "tAmbient": 25
+      }
+    },
+    "closedForm": {
+      "shaftTorqueNm": 4.448,
+      "holdCurrentA": 49.425,
+      "holdCopperW25C": 128.25,
+      "reflectedInertiaKgM2": 0.000408,
+      "inertiaAtSpoolKgM2": 0.0102,
+      "peakShaftSpeedRadS": 300,
+      "peakMechanicalW": 1334.5
+    },
+    "set10": {
+      "perRep": {
+        "userWorkPullJ": 533.7,
+        "busReturnedPerPullJ": 403.5,
+        "busReturnedPeakW": 1096,
+        "busReturnedMeanOverPullW": 642,
+        "packAcceptedPerPullJ": 113.4,
+        "resistorPerPullJ": 290.1,
+        "copperPerRepJ": 294.8,
+        "returnBusDrawPerRepJ": 777,
+        "machineWorkOnUserPerReturnJ": 533.8,
+        "packChemicalPerRepJ": 844
+      },
+      "runtimeMs": 58,
+      "steps": 405664,
+      "ledgerJ": {
+        "userWork": -0.55,
+        "userWorkIn": 5337.405,
+        "userWorkOut": 5337.956,
+        "packChemical": 8439.622,
+        "kinetic": 0,
+        "magnetic": 0,
+        "cable": 325.214,
+        "reduction": 548.498,
+        "friction": 23.804,
+        "iron": 71.02,
+        "copper": 2948.105,
+        "controller": 452.298,
+        "aux": 50.708,
+        "resistor": 2900.666,
+        "packResistance": 1118.759,
+        "residual": 0,
+        "residualRelative": 7.077e-9
+      },
+      "thermalJ": {
+        "heatIn": 3042.9286,
+        "stored": 3032.4729,
+        "rejected": 10.4557,
+        "residual": 0
+      },
+      "phases": {
+        "pull": {
+          "duration": 6.283,
+          "userWork": 5337.405,
+          "busEnergy": -4002.128,
+          "busReturned": 4034.72,
+          "busReturnedPeakW": 1096.355,
+          "busReturnedMeanW": 642.144,
+          "packCharged": 1134.055,
+          "resistor": 2900.666,
+          "copper": 730.002
+        },
+        "pause": {
+          "duration": 4,
+          "userWork": 0,
+          "busEnergy": 652.498,
+          "busReturned": 0,
+          "busReturnedPeakW": 0,
+          "busReturnedMeanW": 0,
+          "packCharged": 0,
+          "resistor": 0,
+          "copper": 555.807
+        },
+        "return": {
+          "duration": 10,
+          "userWork": -5337.956,
+          "busEnergy": 7769.827,
+          "busReturned": 0,
+          "busReturnedPeakW": 0,
+          "busReturnedMeanW": 0,
+          "packCharged": 0,
+          "resistor": 0,
+          "copper": 1662.296
+        }
+      },
+      "end": {
+        "t": 20.2832,
+        "soc": 0.4768,
+        "tWinding": 63.2546,
+        "tHousing": 27.1063
+      },
+      "peaks": {
+        "tWinding": 63.255,
+        "tHousing": 27.106,
+        "current": 56.763,
+        "torque": 5.098,
+        "copperW": 193.113,
+        "busReturnedW": 1096.355,
+        "resistorW": 889.125,
+        "packDischargeA": 22.53,
+        "packChargeA": 3.4,
+        "voltageUse": 0.504,
+        "minTerminalV": 49.848,
+        "maxTerminalV": 60.952,
+        "brakeDuty": 0.598
+      },
+      "flags": {
+        "currentLimited": 0,
+        "voltageLimited": 0,
+        "brakeOverload": 0,
+        "slack": 0,
+        "belowCutoff": 0
+      },
+      "forceErrorN": {
+        "maxAbs": 182.381,
+        "rms": 1.45
+      }
+    },
+    "hold30": {
+      "runtimeMs": 68,
+      "steps": 600000,
+      "ledgerJ": {
+        "userWork": 0,
+        "userWorkIn": 0,
+        "userWorkOut": 0,
+        "packChemical": 5097.937,
+        "kinetic": 0,
+        "magnetic": 0,
+        "cable": 0,
+        "reduction": 0,
+        "friction": 0,
+        "iron": 0,
+        "copper": 4268.501,
+        "controller": 651.267,
+        "aux": 75,
+        "resistor": 0,
+        "packResistance": 103.169,
+        "residual": 0,
+        "residualRelative": 1.889e-9
+      },
+      "thermalJ": {
+        "heatIn": 4268.5008,
+        "stored": 4243.075,
+        "rejected": 25.4258,
+        "residual": 0
+      },
+      "phases": {
+        "hold": {
+          "duration": 30,
+          "userWork": 0,
+          "busEnergy": 4994.768,
+          "busReturned": 0,
+          "busReturnedPeakW": 0,
+          "busReturnedMeanW": 0,
+          "packCharged": 0,
+          "resistor": 0,
+          "copper": 4268.501
+        }
+      },
+      "end": {
+        "t": 30,
+        "soc": 0.486,
+        "tWinding": 74.7411,
+        "tHousing": 28.596
+      },
+      "peaks": {
+        "tWinding": 74.741,
+        "tHousing": 28.596,
+        "current": 49.639,
+        "torque": 4.448,
+        "copperW": 154.649,
+        "busReturnedW": 0,
+        "resistorW": 0,
+        "packDischargeA": 3.08,
+        "packChargeA": 0,
+        "voltageUse": 0.065,
+        "minTerminalV": 58.092,
+        "maxTerminalV": 58.424,
+        "brakeDuty": 0
+      },
+      "flags": {
+        "currentLimited": 0,
+        "voltageLimited": 0,
+        "brakeOverload": 0,
+        "slack": 0,
+        "belowCutoff": 0
+      },
+      "forceErrorN": {
+        "maxAbs": 0.001,
+        "rms": 0.001
+      }
+    },
+    "session": {
+      "packWh": 12.615,
+      "runtimeMs": 1260,
+      "steps": 9328319,
+      "ledgerJ": {
+        "userWork": -2.931,
+        "userWorkIn": 26686.877,
+        "userWorkOut": 26689.808,
+        "packChemical": 45415.56,
+        "kinetic": 0,
+        "magnetic": 0,
+        "cable": 1626.064,
+        "reduction": 2742.485,
+        "friction": 119.02,
+        "iron": 355.099,
+        "copper": 16275.396,
+        "controller": 2894.523,
+        "aux": 1166.04,
+        "resistor": 14277.039,
+        "packResistance": 5956.963,
+        "residual": -0.001,
+        "residualRelative": 6.97e-9
+      },
+      "thermalJ": {
+        "heatIn": 16749.5153,
+        "stored": 12499.4514,
+        "rejected": 4250.0638,
+        "residual": 0
+      },
+      "phases": {
+        "pause": {
+          "duration": 25,
+          "userWork": 0,
+          "busEnergy": 3823.156,
+          "busReturned": 0,
+          "busReturnedPeakW": 0,
+          "busReturnedMeanW": 0,
+          "packCharged": 0,
+          "resistor": 0,
+          "copper": 3271.709
+        },
+        "pull": {
+          "duration": 31.416,
+          "userWork": 26686.877,
+          "busEnergy": -19680.387,
+          "busReturned": 19869.766,
+          "busReturnedPeakW": 1096.202,
+          "busReturnedMeanW": 632.474,
+          "packCharged": 5592.727,
+          "resistor": 14277.039,
+          "copper": 3968.012
+        },
+        "return": {
+          "duration": 50,
+          "userWork": -26689.808,
+          "busEnergy": 39598.791,
+          "busReturned": 0,
+          "busReturnedPeakW": 0,
+          "busReturnedMeanW": 0,
+          "packCharged": 0,
+          "resistor": 0,
+          "copper": 9035.675
+        },
+        "rest": {
+          "duration": 360,
+          "userWork": 0,
+          "busEnergy": 1440,
+          "busReturned": 0,
+          "busReturnedPeakW": 0,
+          "busReturnedMeanW": 0,
+          "packCharged": 0,
+          "resistor": 0,
+          "copper": 0
+        }
+      },
+      "end": {
+        "t": 466.416,
+        "soc": 0.3741,
+        "tWinding": 93.4635,
+        "tHousing": 48.9761
+      },
+      "peaks": {
+        "tWinding": 93.735,
+        "tHousing": 48.976,
+        "current": 58.29,
+        "torque": 5.098,
+        "copperW": 224.729,
+        "busReturnedW": 1096.202,
+        "resistorW": 888.975,
+        "packDischargeA": 23.852,
+        "packChargeA": 3.4,
+        "voltageUse": 0.519,
+        "minTerminalV": 48.347,
+        "maxTerminalV": 60.951,
+        "brakeDuty": 0.607
+      },
+      "flags": {
+        "currentLimited": 0,
+        "voltageLimited": 0,
+        "brakeOverload": 0,
+        "slack": 3582518,
+        "belowCutoff": 0
+      },
+      "forceErrorN": {
+        "maxAbs": 182.163,
+        "rms": 0.685
+      }
+    },
+    "sessionUnlimitedAcceptance": {
+      "packWh": 9.066,
+      "resistorJ": 0,
+      "packResistanceJ": 7450.1,
+      "peakChargeA": 16.49
+    },
+    "socVariants": [
+      {
+        "soc": 1,
+        "resistorPerPullJ": 394.3,
+        "packAcceptedPerPullJ": 8.8,
+        "packChemicalPerRepJ": 918.9,
+        "minTerminalV": 58.42,
+        "maxTerminalV": 66.88,
+        "peakPackDischargeA": 19.24,
+        "belowCutoffSteps": 0
+      },
+      {
+        "soc": 0.5,
+        "resistorPerPullJ": 290.1,
+        "packAcceptedPerPullJ": 113.4,
+        "packChemicalPerRepJ": 844,
+        "minTerminalV": 49.85,
+        "maxTerminalV": 60.95,
+        "peakPackDischargeA": 22.53,
+        "belowCutoffSteps": 0
+      },
+      {
+        "soc": 0.1,
+        "resistorPerPullJ": 299.2,
+        "packAcceptedPerPullJ": 104.6,
+        "packChemicalPerRepJ": 884.1,
+        "minTerminalV": 42.24,
+        "maxTerminalV": 56.63,
+        "peakPackDischargeA": 26.57,
+        "belowCutoffSteps": 54894
+      }
+    ],
+    "perCharge": {
+      "completed": 7,
+      "sessions": [
+        {
+          "session": 1,
+          "socStart": 1,
+          "socEnd": 0.8831,
+          "packWh": 13.082,
+          "minTerminalV": 56.26,
+          "belowCutoffSteps": 0
+        },
+        {
+          "session": 2,
+          "socStart": 0.8831,
+          "socEnd": 0.7705,
+          "packWh": 12.248,
+          "minTerminalV": 54.17,
+          "belowCutoffSteps": 0
+        },
+        {
+          "session": 3,
+          "socStart": 0.7705,
+          "socEnd": 0.6541,
+          "packWh": 12.32,
+          "minTerminalV": 52.24,
+          "belowCutoffSteps": 0
+        },
+        {
+          "session": 4,
+          "socStart": 0.6541,
+          "socEnd": 0.5335,
+          "packWh": 12.45,
+          "minTerminalV": 50.35,
+          "belowCutoffSteps": 0
+        },
+        {
+          "session": 5,
+          "socStart": 0.5335,
+          "socEnd": 0.4086,
+          "packWh": 12.583,
+          "minTerminalV": 48.72,
+          "belowCutoffSteps": 0
+        },
+        {
+          "session": 6,
+          "socStart": 0.4086,
+          "socEnd": 0.2801,
+          "packWh": 12.696,
+          "minTerminalV": 47.36,
+          "belowCutoffSteps": 0
+        },
+        {
+          "session": 7,
+          "socStart": 0.2801,
+          "socEnd": 0.1474,
+          "packWh": 12.829,
+          "minTerminalV": 45.3,
+          "belowCutoffSteps": 0
+        },
+        {
+          "session": 8,
+          "socStart": 0.1474,
+          "socEnd": -0.0016,
+          "packWh": 13.249,
+          "minTerminalV": 33.67,
+          "belowCutoffSteps": 19110
+        }
+      ]
+    },
+    "forceSweep": [
+      {
+        "lbf": 200,
+        "packChemicalPerRepJ": 844,
+        "copperPerRepJ": 294.8,
+        "resistorPerRepJ": 290.1,
+        "packAcceptedPerPullJ": 113.4
+      },
+      {
+        "lbf": 100,
+        "packChemicalPerRepJ": 274.9,
+        "copperPerRepJ": 70.5,
+        "resistorPerRepJ": 108.4,
+        "packAcceptedPerPullJ": 109.3
+      },
+      {
+        "lbf": 60,
+        "packChemicalPerRepJ": 119.6,
+        "copperPerRepJ": 25.8,
+        "resistorPerRepJ": 35.5,
+        "packAcceptedPerPullJ": 96.4
+      }
+    ]
+  }
+}

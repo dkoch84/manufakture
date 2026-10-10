@@ -1,0 +1,1353 @@
+{
+  "machine": {
+    "node": "v26.10.0",
+    "cpu": "AMD Ryzen 5 7600X 6-Core Processor",
+    "cores": 12,
+    "memoryGiB": 62,
+    "date": "2026-10-10"
+  },
+  "lossSplit": "no-load loss torque k·I0 split half constant, half proportional to speed",
+  "sheets": [
+    {
+      "maker": "maxon motor",
+      "model": "EC 90 flat, 90 mm, brushless, 90 W, with Hall sensors (order numbers 323772 and 244879)",
+      "source": "maxon EC motor catalog page 197, April 2006 edition (\"Motor Data (provisional)\")",
+      "url": "https://mat.transtechnik.fr/LINMOT/documentation/Moteurs/EC%20Motors/Maxon/Maxon%20-%20EC_90_flat_244879.pdf",
+      "notes": [
+        "Values at nominal voltage and 25 °C ambient. Later editions list different nominal values for 323772 (for example 444 mNm and 6.06 A), so the edition matters."
+      ],
+      "windings": [
+        {
+          "id": "323772 (24 V)",
+          "modelMotor": {
+            "name": "maxon motor 323772 (24 V)",
+            "polePairs": 12,
+            "kt": 0.06393642758925616,
+            "rPhase": 0.1815,
+            "lPhase": 0.000132,
+            "inertia": 0.000306,
+            "frictionCoulomb": 0.01899975,
+            "frictionViscous": 0.000056875939749408865,
+            "ironHyst": 0,
+            "ironEddy": 0,
+            "copperAlpha": 0.00393,
+            "magnetAlpha": 0,
+            "tRef": 25,
+            "commutation": "six-step"
+          },
+          "comparisons": [
+            {
+              "quantity": "No-load speed",
+              "unit": "rpm",
+              "published": 3190,
+              "model": 3224.18045,
+              "error": 0.01071,
+              "kind": "predicted"
+            },
+            {
+              "quantity": "No-load current",
+              "unit": "A",
+              "published": 0.539,
+              "model": 0.54189,
+              "error": 0.00536,
+              "kind": "consistency",
+              "note": "the loss model is fitted to it"
+            },
+            {
+              "quantity": "Starting current",
+              "unit": "A",
+              "published": 66.2,
+              "model": 66.1157,
+              "error": -0.00127,
+              "kind": "consistency",
+              "note": "U/R"
+            },
+            {
+              "quantity": "Stall torque",
+              "unit": "N·m",
+              "published": 4.67,
+              "model": 4.64216,
+              "error": -0.00596,
+              "kind": "predicted",
+              "note": "net of the friction the model carries at standstill"
+            },
+            {
+              "quantity": "Speed-torque slope",
+              "unit": "rpm/N·m",
+              "published": 697,
+              "model": 694.54356,
+              "error": -0.00352,
+              "kind": "predicted"
+            },
+            {
+              "quantity": "Speed constant × torque constant",
+              "unit": "rpm·N·m/(V·A)",
+              "published": 9.5493,
+              "model": 9.5175,
+              "error": -0.00333,
+              "kind": "consistency",
+              "note": "datasheet internal consistency (30/π for an ideal motor)"
+            },
+            {
+              "quantity": "Maximum efficiency",
+              "unit": "%",
+              "published": 83,
+              "model": 83.05678,
+              "error": 0.00068,
+              "kind": "predicted"
+            },
+            {
+              "quantity": "Speed at rated torque, nominal voltage",
+              "unit": "rpm",
+              "published": 2650,
+              "model": 2955.39209,
+              "error": 0.11524,
+              "kind": "predicted",
+              "note": "winding at 25 °C"
+            },
+            {
+              "quantity": "Speed at rated torque, nominal voltage, hot",
+              "unit": "rpm",
+              "published": 2650,
+              "model": 2839.95517,
+              "error": 0.07168,
+              "kind": "predicted",
+              "note": "winding at 125 °C"
+            },
+            {
+              "quantity": "Current at rated torque",
+              "unit": "A",
+              "published": 5.39,
+              "model": 6.00854,
+              "error": 0.11476,
+              "kind": "predicted"
+            },
+            {
+              "quantity": "Mechanical time constant, no inductance or loss (integrator check)",
+              "unit": "ms",
+              "published": 22.3,
+              "model": 22.34125,
+              "error": 0.00185,
+              "kind": "consistency",
+              "note": "against J·R/k² from the datasheet: 22.349 ms"
+            },
+            {
+              "quantity": "Mechanical time constant (time-stepped spin-up)",
+              "unit": "ms",
+              "published": 22.3,
+              "model": 22.26855,
+              "error": -0.00141,
+              "kind": "predicted",
+              "note": "includes inductance and friction; the datasheet uses J·R/k²"
+            },
+            {
+              "quantity": "Continuous current at 125 °C winding",
+              "unit": "A",
+              "published": 5.39,
+              "model": 5.75602,
+              "error": 0.06791,
+              "kind": "predicted",
+              "note": "two-node steady state at the rated speed"
+            }
+          ],
+          "curve": {
+            "maxSpeedErrorOfNoLoad": 0.01395,
+            "maxEfficiencyErrorPoints": 1.403,
+            "rows": [
+              {
+                "torque": 0,
+                "speedPublishedRpm": 3190,
+                "speedModelRpm": 3224.2,
+                "etaPublished": 0,
+                "etaModel": 0
+              },
+              {
+                "torque": 0.2212,
+                "speedPublishedRpm": 3035.8,
+                "speedModelRpm": 3070.5,
+                "etaPublished": 0.797,
+                "etaModel": 0.8083
+              },
+              {
+                "torque": 0.4424,
+                "speedPublishedRpm": 2881.6,
+                "speedModelRpm": 2916.9,
+                "etaPublished": 0.8163,
+                "etaModel": 0.8291
+              },
+              {
+                "torque": 0.6636,
+                "speedPublishedRpm": 2727.4,
+                "speedModelRpm": 2763.3,
+                "etaPublished": 0.7936,
+                "etaModel": 0.8069
+              },
+              {
+                "torque": 0.8848,
+                "speedPublishedRpm": 2573.3,
+                "speedModelRpm": 2609.6,
+                "etaPublished": 0.759,
+                "etaModel": 0.7726
+              },
+              {
+                "torque": 1.1061,
+                "speedPublishedRpm": 2419.1,
+                "speedModelRpm": 2456,
+                "etaPublished": 0.7194,
+                "etaModel": 0.7332
+              },
+              {
+                "torque": 1.3273,
+                "speedPublishedRpm": 2264.9,
+                "speedModelRpm": 2302.3,
+                "etaPublished": 0.6773,
+                "etaModel": 0.6912
+              },
+              {
+                "torque": 1.5485,
+                "speedPublishedRpm": 2110.7,
+                "speedModelRpm": 2148.7,
+                "etaPublished": 0.6337,
+                "etaModel": 0.6477
+              },
+              {
+                "torque": 1.7697,
+                "speedPublishedRpm": 1956.5,
+                "speedModelRpm": 1995.1,
+                "etaPublished": 0.5892,
+                "etaModel": 0.6032
+              },
+              {
+                "torque": 1.9909,
+                "speedPublishedRpm": 1802.3,
+                "speedModelRpm": 1841.4,
+                "etaPublished": 0.544,
+                "etaModel": 0.558
+              },
+              {
+                "torque": 2.2121,
+                "speedPublishedRpm": 1648.2,
+                "speedModelRpm": 1687.8,
+                "etaPublished": 0.4984,
+                "etaModel": 0.5125
+              },
+              {
+                "torque": 2.4333,
+                "speedPublishedRpm": 1494,
+                "speedModelRpm": 1534.1,
+                "etaPublished": 0.4525,
+                "etaModel": 0.4665
+              },
+              {
+                "torque": 2.6545,
+                "speedPublishedRpm": 1339.8,
+                "speedModelRpm": 1380.5,
+                "etaPublished": 0.4063,
+                "etaModel": 0.4203
+              },
+              {
+                "torque": 2.8757,
+                "speedPublishedRpm": 1185.6,
+                "speedModelRpm": 1226.9,
+                "etaPublished": 0.36,
+                "etaModel": 0.374
+              },
+              {
+                "torque": 3.0969,
+                "speedPublishedRpm": 1031.4,
+                "speedModelRpm": 1073.2,
+                "etaPublished": 0.3134,
+                "etaModel": 0.3275
+              },
+              {
+                "torque": 3.3182,
+                "speedPublishedRpm": 877.2,
+                "speedModelRpm": 919.6,
+                "etaPublished": 0.2668,
+                "etaModel": 0.2808
+              },
+              {
+                "torque": 3.5394,
+                "speedPublishedRpm": 723.1,
+                "speedModelRpm": 765.9,
+                "etaPublished": 0.2201,
+                "etaModel": 0.2341
+              },
+              {
+                "torque": 3.7606,
+                "speedPublishedRpm": 568.9,
+                "speedModelRpm": 612.3,
+                "etaPublished": 0.1732,
+                "etaModel": 0.1872
+              },
+              {
+                "torque": 3.9818,
+                "speedPublishedRpm": 414.7,
+                "speedModelRpm": 458.7,
+                "etaPublished": 0.1264,
+                "etaModel": 0.1403
+              },
+              {
+                "torque": 4.203,
+                "speedPublishedRpm": 260.5,
+                "speedModelRpm": 305,
+                "etaPublished": 0.0794,
+                "etaModel": 0.0934
+              }
+            ]
+          }
+        },
+        {
+          "id": "244879 (48 V)",
+          "modelMotor": {
+            "name": "maxon motor 244879 (48 V)",
+            "polePairs": 12,
+            "kt": 0.19679723101941263,
+            "rPhase": 1.15,
+            "lPhase": 0.00125,
+            "inertia": 0.000306,
+            "frictionCoulomb": 0.014105000000000001,
+            "frictionViscous": 0.00006475616747051493,
+            "ironHyst": 0,
+            "ironEddy": 0,
+            "copperAlpha": 0.00393,
+            "magnetAlpha": 0,
+            "tRef": 25,
+            "commutation": "six-step"
+          },
+          "comparisons": [
+            {
+              "quantity": "No-load speed",
+              "unit": "rpm",
+              "published": 2080,
+              "model": 2099.0687,
+              "error": 0.00917,
+              "kind": "predicted"
+            },
+            {
+              "quantity": "No-load current",
+              "unit": "A",
+              "published": 0.13,
+              "model": 0.1306,
+              "error": 0.00458,
+              "kind": "consistency",
+              "note": "the loss model is fitted to it"
+            },
+            {
+              "quantity": "Starting current",
+              "unit": "A",
+              "published": 20.9,
+              "model": 20.86957,
+              "error": -0.00146,
+              "kind": "consistency",
+              "note": "U/R"
+            },
+            {
+              "quantity": "Stall torque",
+              "unit": "N·m",
+              "published": 4.53,
+              "model": 4.51459,
+              "error": -0.0034,
+              "kind": "predicted",
+              "note": "net of the friction the model carries at standstill"
+            },
+            {
+              "quantity": "Speed-torque slope",
+              "unit": "rpm/N·m",
+              "published": 466,
+              "model": 464.95217,
+              "error": -0.00225,
+              "kind": "predicted"
+            },
+            {
+              "quantity": "Speed constant × torque constant",
+              "unit": "rpm·N·m/(V·A)",
+              "published": 9.5493,
+              "model": 9.548,
+              "error": -0.00014,
+              "kind": "consistency",
+              "note": "datasheet internal consistency (30/π for an ideal motor)"
+            },
+            {
+              "quantity": "Maximum efficiency",
+              "unit": "%",
+              "published": 85,
+              "model": 85.07285,
+              "error": 0.00086,
+              "kind": "predicted"
+            },
+            {
+              "quantity": "Speed at rated torque, nominal voltage",
+              "unit": "rpm",
+              "published": 1640,
+              "model": 1869.38233,
+              "error": 0.13987,
+              "kind": "predicted",
+              "note": "winding at 25 °C"
+            },
+            {
+              "quantity": "Speed at rated torque, nominal voltage, hot",
+              "unit": "rpm",
+              "published": 1640,
+              "model": 1774.33963,
+              "error": 0.08191,
+              "kind": "predicted",
+              "note": "winding at 125 °C"
+            },
+            {
+              "quantity": "Current at rated torque",
+              "unit": "A",
+              "published": 2.12,
+              "model": 2.39992,
+              "error": 0.13204,
+              "kind": "predicted"
+            },
+            {
+              "quantity": "Mechanical time constant, no inductance or loss (integrator check)",
+              "unit": "ms",
+              "published": 14.9,
+              "model": 14.94127,
+              "error": 0.00277,
+              "kind": "consistency",
+              "note": "against J·R/k² from the datasheet: 14.946 ms"
+            },
+            {
+              "quantity": "Mechanical time constant (time-stepped spin-up)",
+              "unit": "ms",
+              "published": 14.9,
+              "model": 14.95522,
+              "error": 0.00371,
+              "kind": "predicted",
+              "note": "includes inductance and friction; the datasheet uses J·R/k²"
+            },
+            {
+              "quantity": "Continuous current at 125 °C winding",
+              "unit": "A",
+              "published": 2.12,
+              "model": 2.42326,
+              "error": 0.14305,
+              "kind": "predicted",
+              "note": "two-node steady state at the rated speed"
+            }
+          ],
+          "curve": {
+            "maxSpeedErrorOfNoLoad": 0.01122,
+            "maxEfficiencyErrorPoints": 1.156,
+            "rows": [
+              {
+                "torque": 0,
+                "speedPublishedRpm": 2080,
+                "speedModelRpm": 2099.1,
+                "etaPublished": 0,
+                "etaModel": 0
+              },
+              {
+                "torque": 0.2146,
+                "speedPublishedRpm": 1980,
+                "speedModelRpm": 1999.3,
+                "etaPublished": 0.8285,
+                "etaModel": 0.8384
+              },
+              {
+                "torque": 0.4292,
+                "speedPublishedRpm": 1880,
+                "speedModelRpm": 1899.5,
+                "etaPublished": 0.8351,
+                "etaModel": 0.8461
+              },
+              {
+                "torque": 0.6437,
+                "speedPublishedRpm": 1780,
+                "speedModelRpm": 1799.8,
+                "etaPublished": 0.8073,
+                "etaModel": 0.8186
+              },
+              {
+                "torque": 0.8583,
+                "speedPublishedRpm": 1680,
+                "speedModelRpm": 1700,
+                "etaPublished": 0.77,
+                "etaModel": 0.7815
+              },
+              {
+                "torque": 1.0729,
+                "speedPublishedRpm": 1580,
+                "speedModelRpm": 1600.2,
+                "etaPublished": 0.7289,
+                "etaModel": 0.7404
+              },
+              {
+                "torque": 1.2875,
+                "speedPublishedRpm": 1480,
+                "speedModelRpm": 1500.5,
+                "etaPublished": 0.6857,
+                "etaModel": 0.6972
+              },
+              {
+                "torque": 1.5021,
+                "speedPublishedRpm": 1380,
+                "speedModelRpm": 1400.7,
+                "etaPublished": 0.6413,
+                "etaModel": 0.6529
+              },
+              {
+                "torque": 1.7166,
+                "speedPublishedRpm": 1280,
+                "speedModelRpm": 1300.9,
+                "etaPublished": 0.5962,
+                "etaModel": 0.6078
+              },
+              {
+                "torque": 1.9312,
+                "speedPublishedRpm": 1180.1,
+                "speedModelRpm": 1201.1,
+                "etaPublished": 0.5506,
+                "etaModel": 0.5622
+              },
+              {
+                "torque": 2.1458,
+                "speedPublishedRpm": 1080.1,
+                "speedModelRpm": 1101.4,
+                "etaPublished": 0.5047,
+                "etaModel": 0.5162
+              },
+              {
+                "torque": 2.3604,
+                "speedPublishedRpm": 980.1,
+                "speedModelRpm": 1001.6,
+                "etaPublished": 0.4585,
+                "etaModel": 0.47
+              },
+              {
+                "torque": 2.5749,
+                "speedPublishedRpm": 880.1,
+                "speedModelRpm": 901.8,
+                "etaPublished": 0.4121,
+                "etaModel": 0.4236
+              },
+              {
+                "torque": 2.7895,
+                "speedPublishedRpm": 780.1,
+                "speedModelRpm": 802.1,
+                "etaPublished": 0.3656,
+                "etaModel": 0.3771
+              },
+              {
+                "torque": 3.0041,
+                "speedPublishedRpm": 680.1,
+                "speedModelRpm": 702.3,
+                "etaPublished": 0.319,
+                "etaModel": 0.3304
+              },
+              {
+                "torque": 3.2187,
+                "speedPublishedRpm": 580.1,
+                "speedModelRpm": 602.5,
+                "etaPublished": 0.2722,
+                "etaModel": 0.2836
+              },
+              {
+                "torque": 3.4333,
+                "speedPublishedRpm": 480.1,
+                "speedModelRpm": 502.8,
+                "etaPublished": 0.2254,
+                "etaModel": 0.2368
+              },
+              {
+                "torque": 3.6478,
+                "speedPublishedRpm": 380.1,
+                "speedModelRpm": 403,
+                "etaPublished": 0.1786,
+                "etaModel": 0.1899
+              },
+              {
+                "torque": 3.8624,
+                "speedPublishedRpm": 280.1,
+                "speedModelRpm": 303.2,
+                "etaPublished": 0.1316,
+                "etaModel": 0.143
+              },
+              {
+                "torque": 4.077,
+                "speedPublishedRpm": 180.1,
+                "speedModelRpm": 203.5,
+                "etaPublished": 0.0847,
+                "etaModel": 0.096
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "maker": "FAULHABER",
+      "model": "Brushless DC-flat motor series 4221 ... BXT H, external rotor, with housing (018, 024, 048 BXT H)",
+      "source": "FAULHABER datasheet \"Series 4221 ... BXT H\", edition 2026 Jul. 28",
+      "url": "https://www.faulhaber.com/fileadmin/Import/Media/EN_4221_BXTH_DFF.pdf",
+      "notes": [
+        "Values at 22 °C and nominal voltage. The datasheet lists no starting current; U/R is used. Rated values are the thermal limit in a recommended operating area (plastic or metal flange), not points on the nominal-voltage line, so the rated speed is not compared."
+      ],
+      "windings": [
+        {
+          "id": "4221G018BXTH (18 V)",
+          "modelMotor": {
+            "name": "FAULHABER 4221G018BXTH (18 V)",
+            "polePairs": 7,
+            "kt": 0.027025610527089846,
+            "rPhase": 0.23,
+            "lPhase": 0.000198,
+            "inertia": 0.0000069,
+            "frictionCoulomb": 0.0026373,
+            "frictionViscous": 0.000004410570908051723,
+            "ironHyst": 0,
+            "ironEddy": 0,
+            "copperAlpha": 0.00393,
+            "magnetAlpha": 0,
+            "tRef": 22,
+            "commutation": "six-step"
+          },
+          "comparisons": [
+            {
+              "quantity": "No-load speed",
+              "unit": "rpm",
+              "published": 5710,
+              "model": 5741.86796,
+              "error": 0.00558,
+              "kind": "predicted"
+            },
+            {
+              "quantity": "No-load current",
+              "unit": "A",
+              "published": 0.177,
+              "model": 0.17749,
+              "error": 0.00279,
+              "kind": "consistency",
+              "note": "the loss model is fitted to it"
+            },
+            {
+              "quantity": "Starting current",
+              "unit": "A",
+              "published": 39.13043,
+              "model": 39.13043,
+              "error": 0,
+              "kind": "consistency",
+              "note": "U/R"
+            },
+            {
+              "quantity": "Stall torque",
+              "unit": "N·m",
+              "published": 1.17,
+              "model": 1.16345,
+              "error": -0.0056,
+              "kind": "predicted",
+              "note": "net of the friction the model carries at standstill"
+            },
+            {
+              "quantity": "Speed-torque slope",
+              "unit": "rpm/N·m",
+              "published": 4930,
+              "model": 4935.20964,
+              "error": 0.00106,
+              "kind": "predicted"
+            },
+            {
+              "quantity": "Speed constant × torque constant",
+              "unit": "rpm·N·m/(V·A)",
+              "published": 9.5493,
+              "model": 9.536,
+              "error": -0.00139,
+              "kind": "consistency",
+              "note": "datasheet internal consistency (30/π for an ideal motor)"
+            },
+            {
+              "quantity": "Maximum efficiency",
+              "unit": "%",
+              "published": 88,
+              "model": 87.18242,
+              "error": -0.00929,
+              "kind": "predicted"
+            },
+            {
+              "quantity": "Current at rated torque",
+              "unit": "A",
+              "published": 3.33,
+              "model": 3.59251,
+              "error": 0.07883,
+              "kind": "predicted"
+            },
+            {
+              "quantity": "Mechanical time constant, no inductance or loss (integrator check)",
+              "unit": "ms",
+              "published": 3.56,
+              "model": 3.57299,
+              "error": 0.00365,
+              "kind": "consistency",
+              "note": "against J·R/k² from the datasheet: 3.574 ms"
+            },
+            {
+              "quantity": "Mechanical time constant (time-stepped spin-up)",
+              "unit": "ms",
+              "published": 3.56,
+              "model": 3.81076,
+              "error": 0.07044,
+              "kind": "predicted",
+              "note": "includes inductance and friction; the datasheet uses J·R/k²"
+            }
+          ],
+          "curve": {
+            "maxSpeedErrorOfNoLoad": 0.00558,
+            "maxEfficiencyErrorPoints": 0.697,
+            "rows": [
+              {
+                "torque": 0,
+                "speedPublishedRpm": 5710,
+                "speedModelRpm": 5741.9,
+                "etaPublished": 0,
+                "etaModel": 0
+              },
+              {
+                "torque": 0.0554,
+                "speedPublishedRpm": 5436.8,
+                "speedModelRpm": 5468.4,
+                "etaPublished": 0.8607,
+                "etaModel": 0.8673
+              },
+              {
+                "torque": 0.1108,
+                "speedPublishedRpm": 5163.5,
+                "speedModelRpm": 5194.8,
+                "etaPublished": 0.8545,
+                "etaModel": 0.8615
+              },
+              {
+                "torque": 0.1663,
+                "speedPublishedRpm": 4890.3,
+                "speedModelRpm": 4921.3,
+                "etaPublished": 0.8218,
+                "etaModel": 0.8287
+              },
+              {
+                "torque": 0.2217,
+                "speedPublishedRpm": 4617.1,
+                "speedModelRpm": 4647.8,
+                "etaPublished": 0.7819,
+                "etaModel": 0.7888
+              },
+              {
+                "torque": 0.2771,
+                "speedPublishedRpm": 4343.9,
+                "speedModelRpm": 4374.3,
+                "etaPublished": 0.739,
+                "etaModel": 0.7458
+              },
+              {
+                "torque": 0.3325,
+                "speedPublishedRpm": 4070.6,
+                "speedModelRpm": 4100.8,
+                "etaPublished": 0.6947,
+                "etaModel": 0.7014
+              },
+              {
+                "torque": 0.3879,
+                "speedPublishedRpm": 3797.4,
+                "speedModelRpm": 3827.3,
+                "etaPublished": 0.6495,
+                "etaModel": 0.6561
+              },
+              {
+                "torque": 0.4434,
+                "speedPublishedRpm": 3524.2,
+                "speedModelRpm": 3553.8,
+                "etaPublished": 0.6038,
+                "etaModel": 0.6102
+              },
+              {
+                "torque": 0.4988,
+                "speedPublishedRpm": 3251,
+                "speedModelRpm": 3280.2,
+                "etaPublished": 0.5577,
+                "etaModel": 0.564
+              },
+              {
+                "torque": 0.5542,
+                "speedPublishedRpm": 2977.7,
+                "speedModelRpm": 3006.7,
+                "etaPublished": 0.5114,
+                "etaModel": 0.5175
+              },
+              {
+                "torque": 0.6096,
+                "speedPublishedRpm": 2704.5,
+                "speedModelRpm": 2733.2,
+                "etaPublished": 0.4649,
+                "etaModel": 0.4708
+              },
+              {
+                "torque": 0.6651,
+                "speedPublishedRpm": 2431.3,
+                "speedModelRpm": 2459.7,
+                "etaPublished": 0.4182,
+                "etaModel": 0.424
+              },
+              {
+                "torque": 0.7205,
+                "speedPublishedRpm": 2158.1,
+                "speedModelRpm": 2186.2,
+                "etaPublished": 0.3714,
+                "etaModel": 0.3771
+              },
+              {
+                "torque": 0.7759,
+                "speedPublishedRpm": 1884.8,
+                "speedModelRpm": 1912.7,
+                "etaPublished": 0.3246,
+                "etaModel": 0.3301
+              },
+              {
+                "torque": 0.8313,
+                "speedPublishedRpm": 1611.6,
+                "speedModelRpm": 1639.2,
+                "etaPublished": 0.2776,
+                "etaModel": 0.283
+              },
+              {
+                "torque": 0.8867,
+                "speedPublishedRpm": 1338.4,
+                "speedModelRpm": 1365.6,
+                "etaPublished": 0.2307,
+                "etaModel": 0.2359
+              },
+              {
+                "torque": 0.9422,
+                "speedPublishedRpm": 1065.2,
+                "speedModelRpm": 1092.1,
+                "etaPublished": 0.1836,
+                "etaModel": 0.1887
+              },
+              {
+                "torque": 0.9976,
+                "speedPublishedRpm": 791.9,
+                "speedModelRpm": 818.6,
+                "etaPublished": 0.1366,
+                "etaModel": 0.1415
+              },
+              {
+                "torque": 1.053,
+                "speedPublishedRpm": 518.7,
+                "speedModelRpm": 545.1,
+                "etaPublished": 0.0895,
+                "etaModel": 0.0942
+              }
+            ]
+          }
+        },
+        {
+          "id": "4221G024BXTH (24 V)",
+          "modelMotor": {
+            "name": "FAULHABER 4221G024BXTH (24 V)",
+            "polePairs": 7,
+            "kt": 0.034190118015815,
+            "rPhase": 0.37,
+            "lPhase": 0.000332,
+            "inertia": 0.0000069,
+            "frictionCoulomb": 0.00262015,
+            "frictionViscous": 0.000004142481696777116,
+            "ironHyst": 0,
+            "ironEddy": 0,
+            "copperAlpha": 0.00393,
+            "magnetAlpha": 0,
+            "tRef": 22,
+            "commutation": "six-step"
+          },
+          "comparisons": [
+            {
+              "quantity": "No-load speed",
+              "unit": "rpm",
+              "published": 6040,
+              "model": 6053.04553,
+              "error": 0.00216,
+              "kind": "predicted"
+            },
+            {
+              "quantity": "No-load current",
+              "unit": "A",
+              "published": 0.139,
+              "model": 0.13915,
+              "error": 0.00108,
+              "kind": "consistency",
+              "note": "the loss model is fitted to it"
+            },
+            {
+              "quantity": "Starting current",
+              "unit": "A",
+              "published": 32.43243,
+              "model": 32.43243,
+              "error": 0,
+              "kind": "consistency",
+              "note": "U/R"
+            },
+            {
+              "quantity": "Stall torque",
+              "unit": "N·m",
+              "published": 1.22,
+              "model": 1.22008,
+              "error": 0.00007,
+              "kind": "predicted",
+              "note": "net of the friction the model carries at standstill"
+            },
+            {
+              "quantity": "Speed-torque slope",
+              "unit": "rpm/N·m",
+              "published": 4970,
+              "model": 4961.17703,
+              "error": -0.00178,
+              "kind": "predicted"
+            },
+            {
+              "quantity": "Speed constant × torque constant",
+              "unit": "rpm·N·m/(V·A)",
+              "published": 9.5493,
+              "model": 9.5381,
+              "error": -0.00117,
+              "kind": "consistency",
+              "note": "datasheet internal consistency (30/π for an ideal motor)"
+            },
+            {
+              "quantity": "Maximum efficiency",
+              "unit": "%",
+              "published": 87,
+              "model": 87.51707,
+              "error": 0.00594,
+              "kind": "predicted"
+            },
+            {
+              "quantity": "Current at rated torque",
+              "unit": "A",
+              "published": 2.87,
+              "model": 3.10358,
+              "error": 0.08139,
+              "kind": "predicted"
+            },
+            {
+              "quantity": "Mechanical time constant, no inductance or loss (integrator check)",
+              "unit": "ms",
+              "published": 3.59,
+              "model": 3.59133,
+              "error": 0.00037,
+              "kind": "consistency",
+              "note": "against J·R/k² from the datasheet: 3.593 ms"
+            },
+            {
+              "quantity": "Mechanical time constant (time-stepped spin-up)",
+              "unit": "ms",
+              "published": 3.59,
+              "model": 3.85003,
+              "error": 0.07243,
+              "kind": "predicted",
+              "note": "includes inductance and friction; the datasheet uses J·R/k²"
+            }
+          ],
+          "curve": {
+            "maxSpeedErrorOfNoLoad": 0.00376,
+            "maxEfficiencyErrorPoints": 0.409,
+            "rows": [
+              {
+                "torque": 0,
+                "speedPublishedRpm": 6040,
+                "speedModelRpm": 6053,
+                "etaPublished": 0,
+                "etaModel": 0
+              },
+              {
+                "torque": 0.0578,
+                "speedPublishedRpm": 5752.8,
+                "speedModelRpm": 5766.3,
+                "etaPublished": 0.8676,
+                "etaModel": 0.8713
+              },
+              {
+                "torque": 0.1156,
+                "speedPublishedRpm": 5465.6,
+                "speedModelRpm": 5479.6,
+                "etaPublished": 0.8601,
+                "etaModel": 0.864
+              },
+              {
+                "torque": 0.1734,
+                "speedPublishedRpm": 5178.4,
+                "speedModelRpm": 5192.9,
+                "etaPublished": 0.8268,
+                "etaModel": 0.8309
+              },
+              {
+                "torque": 0.2312,
+                "speedPublishedRpm": 4891.1,
+                "speedModelRpm": 4906.2,
+                "etaPublished": 0.7867,
+                "etaModel": 0.7908
+              },
+              {
+                "torque": 0.2889,
+                "speedPublishedRpm": 4603.9,
+                "speedModelRpm": 4619.5,
+                "etaPublished": 0.7438,
+                "etaModel": 0.7479
+              },
+              {
+                "torque": 0.3467,
+                "speedPublishedRpm": 4316.7,
+                "speedModelRpm": 4332.8,
+                "etaPublished": 0.6995,
+                "etaModel": 0.7036
+              },
+              {
+                "torque": 0.4045,
+                "speedPublishedRpm": 4029.5,
+                "speedModelRpm": 4046.1,
+                "etaPublished": 0.6544,
+                "etaModel": 0.6585
+              },
+              {
+                "torque": 0.4623,
+                "speedPublishedRpm": 3742.3,
+                "speedModelRpm": 3759.4,
+                "etaPublished": 0.6087,
+                "etaModel": 0.6128
+              },
+              {
+                "torque": 0.5201,
+                "speedPublishedRpm": 3455.1,
+                "speedModelRpm": 3472.7,
+                "etaPublished": 0.5627,
+                "etaModel": 0.5668
+              },
+              {
+                "torque": 0.5779,
+                "speedPublishedRpm": 3167.9,
+                "speedModelRpm": 3186,
+                "etaPublished": 0.5164,
+                "etaModel": 0.5205
+              },
+              {
+                "torque": 0.6357,
+                "speedPublishedRpm": 2880.6,
+                "speedModelRpm": 2899.3,
+                "etaPublished": 0.47,
+                "etaModel": 0.474
+              },
+              {
+                "torque": 0.6935,
+                "speedPublishedRpm": 2593.4,
+                "speedModelRpm": 2612.6,
+                "etaPublished": 0.4234,
+                "etaModel": 0.4275
+              },
+              {
+                "torque": 0.7513,
+                "speedPublishedRpm": 2306.2,
+                "speedModelRpm": 2325.9,
+                "etaPublished": 0.3767,
+                "etaModel": 0.3808
+              },
+              {
+                "torque": 0.8091,
+                "speedPublishedRpm": 2019,
+                "speedModelRpm": 2039.2,
+                "etaPublished": 0.33,
+                "etaModel": 0.334
+              },
+              {
+                "torque": 0.8668,
+                "speedPublishedRpm": 1731.8,
+                "speedModelRpm": 1752.5,
+                "etaPublished": 0.2832,
+                "etaModel": 0.2872
+              },
+              {
+                "torque": 0.9246,
+                "speedPublishedRpm": 1444.6,
+                "speedModelRpm": 1465.8,
+                "etaPublished": 0.2363,
+                "etaModel": 0.2403
+              },
+              {
+                "torque": 0.9824,
+                "speedPublishedRpm": 1157.4,
+                "speedModelRpm": 1179.1,
+                "etaPublished": 0.1894,
+                "etaModel": 0.1933
+              },
+              {
+                "torque": 1.0402,
+                "speedPublishedRpm": 870.2,
+                "speedModelRpm": 892.4,
+                "etaPublished": 0.1424,
+                "etaModel": 0.1464
+              },
+              {
+                "torque": 1.098,
+                "speedPublishedRpm": 582.9,
+                "speedModelRpm": 605.7,
+                "etaPublished": 0.0954,
+                "etaModel": 0.0994
+              }
+            ]
+          }
+        },
+        {
+          "id": "4221G048BXTH (48 V)",
+          "modelMotor": {
+            "name": "FAULHABER 4221G048BXTH (48 V)",
+            "polePairs": 7,
+            "kt": 0.0681988560952066,
+            "rPhase": 1.3,
+            "lPhase": 0.001275,
+            "inertia": 0.0000069,
+            "frictionCoulomb": 0.0038728,
+            "frictionViscous": 0.0000060926714689254584,
+            "ironHyst": 0,
+            "ironEddy": 0,
+            "copperAlpha": 0.00393,
+            "magnetAlpha": 0,
+            "tRef": 22,
+            "commutation": "six-step"
+          },
+          "comparisons": [
+            {
+              "quantity": "No-load speed",
+              "unit": "rpm",
+              "published": 6070,
+              "model": 6061.31336,
+              "error": -0.00143,
+              "kind": "predicted"
+            },
+            {
+              "quantity": "No-load current",
+              "unit": "A",
+              "published": 0.103,
+              "model": 0.10293,
+              "error": -0.00072,
+              "kind": "consistency",
+              "note": "the loss model is fitted to it"
+            },
+            {
+              "quantity": "Starting current",
+              "unit": "A",
+              "published": 18.46154,
+              "model": 18.46154,
+              "error": 0,
+              "kind": "consistency",
+              "note": "U/R"
+            },
+            {
+              "quantity": "Stall torque",
+              "unit": "N·m",
+              "published": 1.39,
+              "model": 1.38443,
+              "error": -0.004,
+              "kind": "predicted",
+              "note": "net of the friction the model carries at standstill"
+            },
+            {
+              "quantity": "Speed-torque slope",
+              "unit": "rpm/N·m",
+              "published": 4400,
+              "model": 4378.18592,
+              "error": -0.00496,
+              "kind": "predicted"
+            },
+            {
+              "quantity": "Speed constant × torque constant",
+              "unit": "rpm·N·m/(V·A)",
+              "published": 9.5493,
+              "model": 9.5504,
+              "error": 0.00012,
+              "kind": "consistency",
+              "note": "datasheet internal consistency (30/π for an ideal motor)"
+            },
+            {
+              "quantity": "Maximum efficiency",
+              "unit": "%",
+              "published": 88,
+              "model": 85.86395,
+              "error": -0.02427,
+              "kind": "predicted"
+            },
+            {
+              "quantity": "Current at rated torque",
+              "unit": "A",
+              "published": 1.39,
+              "model": 1.52182,
+              "error": 0.09484,
+              "kind": "predicted"
+            },
+            {
+              "quantity": "Mechanical time constant, no inductance or loss (integrator check)",
+              "unit": "ms",
+              "published": 3.18,
+              "model": 3.17135,
+              "error": -0.00272,
+              "kind": "consistency",
+              "note": "against J·R/k² from the datasheet: 3.172 ms"
+            },
+            {
+              "quantity": "Mechanical time constant (time-stepped spin-up)",
+              "unit": "ms",
+              "published": 3.18,
+              "model": 3.52029,
+              "error": 0.10701,
+              "kind": "predicted",
+              "note": "includes inductance and friction; the datasheet uses J·R/k²"
+            }
+          ],
+          "curve": {
+            "maxSpeedErrorOfNoLoad": 0.00306,
+            "maxEfficiencyErrorPoints": 0.33,
+            "rows": [
+              {
+                "torque": 0,
+                "speedPublishedRpm": 6070,
+                "speedModelRpm": 6061.3,
+                "etaPublished": 0,
+                "etaModel": 0
+              },
+              {
+                "torque": 0.0658,
+                "speedPublishedRpm": 5780.3,
+                "speedModelRpm": 5773,
+                "etaPublished": 0.8485,
+                "etaModel": 0.8496
+              },
+              {
+                "torque": 0.1317,
+                "speedPublishedRpm": 5490.6,
+                "speedModelRpm": 5484.8,
+                "etaPublished": 0.8508,
+                "etaModel": 0.8521
+              },
+              {
+                "torque": 0.1975,
+                "speedPublishedRpm": 5200.9,
+                "speedModelRpm": 5196.5,
+                "etaPublished": 0.8211,
+                "etaModel": 0.8226
+              },
+              {
+                "torque": 0.2634,
+                "speedPublishedRpm": 4911.2,
+                "speedModelRpm": 4908.2,
+                "etaPublished": 0.7827,
+                "etaModel": 0.7844
+              },
+              {
+                "torque": 0.3292,
+                "speedPublishedRpm": 4621.5,
+                "speedModelRpm": 4620,
+                "etaPublished": 0.7408,
+                "etaModel": 0.7426
+              },
+              {
+                "torque": 0.3951,
+                "speedPublishedRpm": 4331.8,
+                "speedModelRpm": 4331.7,
+                "etaPublished": 0.697,
+                "etaModel": 0.6989
+              },
+              {
+                "torque": 0.4609,
+                "speedPublishedRpm": 4042.1,
+                "speedModelRpm": 4043.4,
+                "etaPublished": 0.6522,
+                "etaModel": 0.6542
+              },
+              {
+                "torque": 0.5267,
+                "speedPublishedRpm": 3752.4,
+                "speedModelRpm": 3755.2,
+                "etaPublished": 0.6067,
+                "etaModel": 0.6088
+              },
+              {
+                "torque": 0.5926,
+                "speedPublishedRpm": 3462.7,
+                "speedModelRpm": 3466.9,
+                "etaPublished": 0.5608,
+                "etaModel": 0.563
+              },
+              {
+                "torque": 0.6584,
+                "speedPublishedRpm": 3172.9,
+                "speedModelRpm": 3178.6,
+                "etaPublished": 0.5145,
+                "etaModel": 0.5169
+              },
+              {
+                "torque": 0.7243,
+                "speedPublishedRpm": 2883.2,
+                "speedModelRpm": 2890.4,
+                "etaPublished": 0.468,
+                "etaModel": 0.4705
+              },
+              {
+                "torque": 0.7901,
+                "speedPublishedRpm": 2593.5,
+                "speedModelRpm": 2602.1,
+                "etaPublished": 0.4214,
+                "etaModel": 0.4239
+              },
+              {
+                "torque": 0.8559,
+                "speedPublishedRpm": 2303.8,
+                "speedModelRpm": 2313.8,
+                "etaPublished": 0.3746,
+                "etaModel": 0.3772
+              },
+              {
+                "torque": 0.9218,
+                "speedPublishedRpm": 2014.1,
+                "speedModelRpm": 2025.5,
+                "etaPublished": 0.3277,
+                "etaModel": 0.3305
+              },
+              {
+                "torque": 0.9876,
+                "speedPublishedRpm": 1724.4,
+                "speedModelRpm": 1737.3,
+                "etaPublished": 0.2807,
+                "etaModel": 0.2836
+              },
+              {
+                "torque": 1.0535,
+                "speedPublishedRpm": 1434.7,
+                "speedModelRpm": 1449,
+                "etaPublished": 0.2337,
+                "etaModel": 0.2366
+              },
+              {
+                "torque": 1.1193,
+                "speedPublishedRpm": 1145,
+                "speedModelRpm": 1160.7,
+                "etaPublished": 0.1866,
+                "etaModel": 0.1897
+              },
+              {
+                "torque": 1.1852,
+                "speedPublishedRpm": 855.3,
+                "speedModelRpm": 872.5,
+                "etaPublished": 0.1394,
+                "etaModel": 0.1426
+              },
+              {
+                "torque": 1.251,
+                "speedPublishedRpm": 565.6,
+                "speedModelRpm": 584.2,
+                "etaPublished": 0.0922,
+                "etaModel": 0.0955
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

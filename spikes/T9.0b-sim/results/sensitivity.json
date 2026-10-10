@@ -1,0 +1,59 @@
+{
+  "machine": "direct drive",
+  "rows": [
+    {
+      "cWinding": 100,
+      "rWindingHousing": 0.15,
+      "tWindingHold30": 42.19,
+      "tWindingAfter10Reps": 39.38
+    },
+    {
+      "cWinding": 100,
+      "rWindingHousing": 0.3,
+      "tWindingHold30": 49.31,
+      "tWindingAfter10Reps": 43.73
+    },
+    {
+      "cWinding": 100,
+      "rWindingHousing": 0.6,
+      "tWindingHold30": 55.05,
+      "tWindingAfter10Reps": 46.77
+    },
+    {
+      "cWinding": 200,
+      "rWindingHousing": 0.15,
+      "tWindingHold30": 36.97,
+      "tWindingAfter10Reps": 34.24
+    },
+    {
+      "cWinding": 200,
+      "rWindingHousing": 0.3,
+      "tWindingHold30": 39.6,
+      "tWindingAfter10Reps": 35.66
+    },
+    {
+      "cWinding": 200,
+      "rWindingHousing": 0.6,
+      "tWindingHold30": 41.34,
+      "tWindingAfter10Reps": 36.53
+    },
+    {
+      "cWinding": 400,
+      "rWindingHousing": 0.15,
+      "tWindingHold30": 32.24,
+      "tWindingAfter10Reps": 30.29
+    },
+    {
+      "cWinding": 400,
+      "rWindingHousing": 0.3,
+      "tWindingHold30": 33.05,
+      "tWindingAfter10Reps": 30.7
+    },
+    {
+      "cWinding": 400,
+      "rWindingHousing": 0.6,
+      "tWindingHold30": 33.53,
+      "tWindingAfter10Reps": 30.93
+    }
+  ]
+}
