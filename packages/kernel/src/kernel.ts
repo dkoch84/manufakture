@@ -54,6 +54,7 @@ import type { Names } from './naming';
 import { buildProfile } from './profile';
 import { buildThread, type ThreadGeometry, type ThreadTools } from './threads';
 import { topologyOf } from './topology';
+import { holeWallsOf, type HoleWall, type HoleWallOptions } from './walls';
 import type {
   Axis,
   ChamferEdge,
@@ -947,6 +948,17 @@ export class Kernel {
         frame,
         deflection,
       ),
+    );
+  }
+
+  /**
+   * The thinnest wall around every wall face of the hole features `holes` (by feature id) on a
+   * named shape: the material radially outside each wall, by rays cast outward from it, up to
+   * `range` mm. Makes no shapes. See walls.ts.
+   */
+  holeWalls(shape: ShapeId, holes: readonly string[], options: HoleWallOptions = {}): HoleWall[] {
+    return this.op('holeWalls', (s) =>
+      holeWallsOf(this.oc, s, this.get(shape, 'holeWalls'), this.named(shape), holes, options),
     );
   }
 

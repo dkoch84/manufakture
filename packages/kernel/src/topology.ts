@@ -150,7 +150,7 @@ export function topologyOf(oc: Oc, s: Scope, body: TopoDS_Shape): Topology {
  * to the point. The two agree for every valid cylinder; when the evaluation is degenerate (a
  * zero radius), the frame rule alone decides.
  */
-function cylinderIsHole(
+export function cylinderIsHole(
   s: Scope,
   adaptor: BRepAdaptor_Surface,
   origin: Vec3,

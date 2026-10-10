@@ -464,6 +464,9 @@ importers:
       '@manufakture/kernel':
         specifier: workspace:*
         version: link:../kernel
+      '@manufakture/print':
+        specifier: workspace:*
+        version: link:../print
       '@manufakture/script':
         specifier: workspace:*
         version: link:../script

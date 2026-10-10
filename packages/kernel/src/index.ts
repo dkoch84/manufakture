@@ -153,6 +153,7 @@ export type {
   FaceLoopsOp,
   FeatureOp,
   FilletOp,
+  HoleWallsOp,
   ImportStepOp,
   InterferenceOp,
   KernelOp,
@@ -192,6 +193,8 @@ export type {
   ShapeMeasureTarget,
 } from './measure';
 export { measuredDistance } from './measure';
+export { DEFAULT_WALL_RANGE, MAX_WALL_FACES } from './walls';
+export type { HoleWall, HoleWallOptions } from './walls';
 export { DEFAULT_LOOP_DEFLECTION } from './loops';
 export type {
   FaceLoopsReport,

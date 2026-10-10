@@ -57,6 +57,7 @@ import type {
   Topology,
   Vec3,
 } from './types';
+import type { HoleWall } from './walls';
 
 /**
  * A live shape id, or the shape made by op number `result` earlier in the
@@ -228,6 +229,17 @@ export type FaceLoopsOp = OpCommon & {
 };
 
 /**
+ * The thinnest wall around the wall faces of hole features (`Kernel.holeWalls`): `holes` are
+ * feature ids; rays reach `range` mm (default 10). Makes no shapes.
+ */
+export type HoleWallsOp = OpCommon & {
+  op: 'holeWalls';
+  shape: ShapeRef;
+  holes: readonly string[];
+  range?: number;
+};
+
+/**
  * The section of a body by a frame's plane, moved `height` (default 0) along its normal, as nested
  * loops in the frame's 2D coordinates (`Kernel.section`). Makes no shapes.
  */
@@ -261,7 +273,8 @@ export type KernelOp =
   | InterferenceOp
   | ProjectOp
   | FaceLoopsOp
-  | SectionOp;
+  | SectionOp
+  | HoleWallsOp;
 
 export type OpName = KernelOp['op'];
 
@@ -297,6 +310,7 @@ export interface OpValues {
   project: ProjectResult;
   faceLoops: FaceLoopsReport;
   section: SectionLoops;
+  holeWalls: { walls: HoleWall[] };
 }
 
 export type OpValue<O extends { op: OpName }> = OpValues[O['op']];
@@ -331,6 +345,7 @@ const OP_NAMES: ReadonlySet<string> = new Set<OpName>([
   'project',
   'faceLoops',
   'section',
+  'holeWalls',
 ]);
 
 // Validation ----------------------------------------------------------------------
@@ -449,6 +464,7 @@ const FIELDS: Record<OpName, [Record<string, Check>, Record<string, Check>]> = {
     { shape: shapeRef, frame },
     { height: num, deflection: num },
   ],
+  holeWalls: [{ shape: shapeRef, holes: arrayOf(str) }, { range: num }],
   // Ranges (a zero direction, an up parallel to it, repeated keys) are the kernel's to refuse.
   project: [
     {
@@ -652,6 +668,14 @@ export function executeOp(
         op.height ?? 0,
         ...(op.deflection === undefined ? [] : [op.deflection]),
       );
+    case 'holeWalls':
+      return {
+        walls: kernel.holeWalls(
+          resolve(op.shape, 'holeWalls'),
+          op.holes,
+          op.range === undefined ? {} : { range: op.range },
+        ),
+      };
     case 'release': {
       // Like every other op on a lost kernel: fatal, not a list of unknown ids.
       const lost = kernel.lostReason;

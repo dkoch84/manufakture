@@ -92,6 +92,8 @@ The **Issues** list names each problem with its worst value and the item it is o
 - **Small hole**: a hole below the minimum hole, with its diameter.
 - **Horizontal hole: teardrop or support**: a hole lying flat on its side and wider than the teardrop size.
 
+The holes of a part a print setup prints are also checked in the model itself, outside this workspace: where the material around a hole is thinner than the setup's minimum wall, the hole shows a warning in the feature tree after every regeneration. A heat-set insert hole is checked against its insert's minimum wall instead, printed or not (see [Fits](fits.md#heat-set-inserts-and-self-tapping-screws)).
+
 Click an issue to select what it is about and zoom the view to it; click it again to let go. A hole that a slot or a cross hole cuts into several faces is one entry, and its click selects all of them.
 
 Everything is checked again after every change to the part or the orientation. Overhangs, bed fit and holes are quick and update at once. Walls and gaps take longer, so they run in the background a quarter of a second after you stop editing (the list says "checking walls and gaps..." meanwhile), and each new change replaces the check before it. Until a check of the mesh now drawn comes back (after an edit, or when the finer export mesh replaces the coarse one), the thickness view shows those bodies in their own colour rather than the old mesh's values. Closing the workspace stops a check on its way.

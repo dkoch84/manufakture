@@ -203,6 +203,34 @@ export type RegenWarning =
   /** An instance shows its part as regenerated, and the part's rollback bar is not at its end. */
   | { code: 'rollback'; message: string; partId: string }
   /**
+   * On a hole (#1210): the material radially outside the wall at one of its points is thinner
+   * than the minimum, measured on the part's final bodies (`wall-check.ts`). The minimum is the
+   * insert's `minWall` for a heat-set insert hole (`source.kind: 'insert'`), otherwise the largest
+   * minimum wall of the print setups printing the body (`print-setup`). `wall` and `minimum` are
+   * mm; `face` is the wall face (a split piece or a pattern copy when not `<hole>:wall:<point>`),
+   * `from` is on it, `to` where the material ends, on face `toFace`.
+   */
+  | {
+      code: 'thin-wall';
+      message: string;
+      point: string;
+      face: string;
+      bodyId: string;
+      wall: number;
+      minimum: number;
+      source: { kind: 'insert'; size: string } | { kind: 'print-setup'; setupId: string };
+      from: Vec3;
+      to: Vec3;
+      toFace: string | null;
+      /** The hole breaks out of the body through `toFace`: `wall` is 0, `from` and `to` on the edge. */
+      breakout?: true;
+    }
+  /**
+   * On a hole: its walls at `points` were not checked, the body having more hole walls to check
+   * than the kernel measures in one go (`MAX_WALL_FACES`, 256).
+   */
+  | { code: 'wall-unchecked'; message: string; bodyId: string; points: string[] }
+  /**
    * A text built with something to look at: characters its font has no glyph for (`missing`,
    * left out), kerning that could not be read, glyph loops that touch at a point. Also SVG
    * artwork's (an outline with an `svg` source): contours left open, loops that touch.

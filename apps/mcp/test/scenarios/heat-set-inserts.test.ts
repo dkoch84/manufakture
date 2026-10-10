@@ -70,6 +70,21 @@ function keepImages(name: string, r: CallToolResult) {
   });
 }
 
+/**
+ * The warning get_errors and an apply report give for the insert hole at `point` in the boss
+ * whose side is swept by `entity`: the 7 mm boss leaves 1.5 mm around the 4.0 mm hole.
+ */
+function thinWall(hole: string, point: string, entity: string) {
+  return {
+    where: 'feature',
+    partId: PART,
+    featureId: hole,
+    severity: 'warning',
+    code: 'thin-wall',
+    message: `The wall around ${hole} at ${point} on ${BASE} is 1.5 mm, under the M3 heat-set insert's minimum of ${INSERT.minWall} mm (to extrude#2:side:${entity})`,
+  };
+}
+
 /** Distance between two named items of the base body. */
 async function distance(a: string, b: string, kinds: ['face' | 'edge', 'face' | 'edge']) {
   const r = value(
@@ -264,9 +279,10 @@ describe('heat-set inserts in a printed enclosure (T8.6b)', () => {
         commands: insertBatch(`${row.hole} mm`, `${row.length} mm`, { flat: true, points: 1 }),
       }),
     );
-    expect(r.errors).toEqual([]);
     const hole = r.symbols.$insert;
     const p = r.symbols.$p1;
+    // The boss is still 7 mm across: the apply report warns that the wall is under the insert's.
+    expect(r.errors).toEqual([thinWall(hole, p, BOSSES.entities[0]!)]);
     const faces = value(
       await h.call('find_geometry', {
         sessionId: own,
@@ -311,6 +327,10 @@ describe('heat-set inserts in a printed enclosure (T8.6b)', () => {
         severity: 'error',
         message: expect.stringMatching(/M3 \(internal\) needs a hole 1\.959 to 2\.865 mm across/),
       }),
+      // Errors first, then the warnings: the holes themselves built, in walls too thin.
+      ...BOSSES.entities.map(() =>
+        expect.objectContaining({ severity: 'warning', code: 'thin-wall' }),
+      ),
     ]);
   });
 
@@ -326,9 +346,12 @@ describe('heat-set inserts in a printed enclosure (T8.6b)', () => {
         ],
       }),
     );
-    expect(r.errors).toEqual([]);
     insertHole = r.symbols.$insert;
     insertPoints = [1, 2, 3, 4].map((i) => r.symbols[`$p${i}`]);
+    // No error, and a warning per boss: its wall is 1.5 mm, under the insert's 1.6 mm.
+    expect(r.errors).toEqual(
+      insertPoints.map((p, i) => thinWall(insertHole, p, BOSSES.entities[i]!)),
+    );
     const walls = value(
       await h.call('find_geometry', {
         sessionId,
@@ -364,7 +387,11 @@ describe('heat-set inserts in a printed enclosure (T8.6b)', () => {
         ],
       }),
     );
-    expect(r.errors).toEqual([]);
+    // The report lists the head's errors and warnings: only the boss walls, still too thin. The
+    // lid holes have no minimum (an M3 clearance hole, and no print setup in the document).
+    expect(r.errors.map((e: Data) => [e.severity, e.code, e.featureId])).toEqual(
+      BOSSES.entities.map(() => ['warning', 'thin-wall', insertHole]),
+    );
     const walls = value(
       await h.call('find_geometry', {
         sessionId,
@@ -391,15 +418,18 @@ describe('heat-set inserts in a printed enclosure (T8.6b)', () => {
     expect(hits.every((f) => r6(f.centroid[0]) === 8 && r6(f.centroid[1]) === 8)).toBe(true);
   });
 
-  it('gap probe: a boss wall under the insert minimum passes without a warning', async () => {
+  it('warns in get_errors that a boss wall is under the insert minimum', async () => {
+    // Was a gap probe: the hole said it held an M3 insert, but nothing checked the wall around
+    // it. Regen now measures it on the final body, against the insert's minimum wall.
     const wall = await distance('extrude#2:side:e5', `${insertHole}:wall:${insertPoints[0]}`, [
       'face',
       'face',
     ]);
     expect(wall).toBeCloseTo(BOSSES.radius - INSERT.hole / 2, 6);
     expect(wall).toBeLessThan(INSERT.minWall);
-    // The hole says it holds an M3 insert, but nothing checks the wall around it yet.
-    expect(value(await h.call('get_errors', { sessionId })).errors).toEqual([]);
+    expect(value(await h.call('get_errors', { sessionId })).errors).toEqual(
+      insertPoints.map((p, i) => thinWall(insertHole, p, BOSSES.entities[i]!)),
+    );
   });
 
   it('widens the bosses to 8 mm, so the wall is 2 mm', async () => {
@@ -425,6 +455,7 @@ describe('heat-set inserts in a printed enclosure (T8.6b)', () => {
         ],
       }),
     );
+    // 2 mm walls, over the insert's 1.6 mm: the warnings are gone.
     expect(r.errors).toEqual([]);
     for (const [i, e] of BOSSES.entities.entries()) {
       const wall = await distance(`extrude#2:side:${e}`, `${insertHole}:wall:${insertPoints[i]}`, [

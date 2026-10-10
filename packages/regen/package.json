@@ -23,6 +23,7 @@
     "@manufakture/drawing": "workspace:*",
     "@manufakture/io": "workspace:*",
     "@manufakture/kernel": "workspace:*",
+    "@manufakture/print": "workspace:*",
     "@manufakture/script": "workspace:*",
     "@manufakture/sketch": "workspace:*",
     "@manufakture/text": "workspace:*",

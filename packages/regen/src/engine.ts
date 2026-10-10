@@ -79,12 +79,14 @@ import {
   type Deflection,
   type FeatureInput,
   type FeatureOutcome,
+  type HoleWall,
   type MeasureResult,
   type InterferenceOp,
   type InterferenceResult,
   type KernelOp,
   type MeshData,
   type OpResult,
+  type OpValues,
   type OrientedBox,
   type ReferenceReport,
   type SessionFunction,
@@ -278,6 +280,13 @@ import type {
   SourceResult,
 } from './types';
 import { evaluateFeature, evaluateField, evaluateVariables, type VariableValues } from './values';
+import {
+  thinWallWarnings,
+  wallMinimum,
+  wallRange,
+  type HoleFeature,
+  type WallMinimum,
+} from './wall-check';
 import {
   callOwners,
   callPart,
@@ -802,6 +811,11 @@ export class RegenEngine {
   #lastDocument: ManufaktureDocument | null = null;
   /** Body key per part and body (`slotOf`) as last reported, to send meshes only when a body changed. */
   #reported = new Map<string, string>();
+  /**
+   * Hole walls measured by the last regen (#1210, `wall-check.ts`), by body key, holes and range:
+   * a body that did not change is not measured again.
+   */
+  #walls = new Map<string, HoleWall[]>();
   readonly #stats: EngineStats = { ...emptyCounters(), regens: 0, superseded: 0, retries: 0 };
   readonly #unsubscribe: (() => void) | undefined;
   /**
@@ -1022,6 +1036,7 @@ export class RegenEngine {
     const dropped = await this.#cache.clear();
     await this.#releaseEntries(dropped);
     this.#reported.clear();
+    this.#walls.clear();
     this.#memberGroups.clear();
     this.#memberMeshes.clear();
     this.#reportedSets.clear();
@@ -1189,6 +1204,8 @@ export class RegenEngine {
     const topologies = new Map<string, Topology>();
     const batch = emptyBatch();
     const finalBodies = (state: PartState) => (state.broken ? [] : state.bodies);
+    // The wall checks around holes ride along (#1210): their warnings join the features after it.
+    const finishWalls = this.#wallChecks(document, variables, built, batch);
     for (const { state } of built) {
       for (const b of finalBodies(state)) {
         const slot = slotOf(state.part.id, b.id);
@@ -1219,6 +1236,12 @@ export class RegenEngine {
       names = reply.names;
       batch.metas.forEach((meta, j) => {
         const r = reply.results[j]!;
+        // The wall checks' `holeWalls` ops: an unknown shape among them was already turned into
+        // `StaleShapes` by `#checkLive` above, like the meshes' (their bodies are in `shapesFrom`).
+        if (meta.type === 'resolve') {
+          meta.take(r);
+          return;
+        }
         if (meta.type !== 'mesh' && meta.type !== 'topology') return;
         if (!r.ok) {
           if (r.error.code === 'unknown-shape') throw new StaleShapes(reply.instance);
@@ -1231,6 +1254,7 @@ export class RegenEngine {
       });
     }
     this.#checkStale(run);
+    finishWalls();
 
     // Completed: this is now the state the next edit is compared with.
     const reported = new Map<string, string>();
@@ -1288,6 +1312,74 @@ export class RegenEngine {
       ...measuredResults(document, variables),
       counters: run.counters,
       ms: 0,
+    };
+  }
+
+  /**
+   * The wall checks around the holes of the document's parts (#1210, `wall-check.ts`): per final
+   * body, the holes that built and have a minimum there, measured by one `holeWalls` op added to
+   * `batch`, unless that body (by key) was measured for the same holes before. The returned
+   * function, called once the batch ran, adds the `thin-wall` warnings to `built`'s feature
+   * results and keeps the measurements for the next regen. An op that fails adds no warning.
+   */
+  #wallChecks(
+    document: ManufaktureDocument,
+    variables: VariableValues,
+    built: readonly { state: PartState; features: FeatureResult[] }[],
+    batch: Batch,
+  ): () => void {
+    interface Check {
+      features: FeatureResult[];
+      body: LiveBody;
+      minimums: Map<string, { hole: HoleFeature; minimum: WallMinimum }>;
+      key: string;
+      walls: HoleWall[] | null;
+    }
+    const checks: Check[] = [];
+    for (const { state, features } of built) {
+      if (state.broken) continue;
+      const holes = state.part.features.filter(
+        (f): f is HoleFeature => f.kind === 'hole' && state.results.get(f.id)?.status === 'ok',
+      );
+      if (holes.length === 0) continue;
+      for (const body of state.bodies) {
+        const minimums: Check['minimums'] = new Map();
+        for (const hole of holes) {
+          if (!body.carries.has(hole.id)) continue;
+          const minimum = wallMinimum(document, state.part, hole, body.id, variables);
+          if (minimum !== null) minimums.set(hole.id, { hole, minimum });
+        }
+        if (minimums.size === 0) continue;
+        const holeIds = [...minimums.keys()];
+        const range = wallRange([...minimums.values()].map((m) => m.minimum));
+        const key = `${body.key}\n${holeIds.join(' ')}\n${range}`;
+        const check: Check = { features, body, minimums, key, walls: this.#walls.get(key) ?? null };
+        checks.push(check);
+        if (check.walls !== null) continue;
+        batch.ops.push({ op: 'holeWalls', shape: body.shape, holes: holeIds, range });
+        batch.metas.push({
+          type: 'resolve',
+          take: (r) => {
+            if (r.ok) check.walls = (r.value as OpValues['holeWalls']).walls;
+          },
+        });
+        this.#usesBodies(batch, [body]);
+      }
+    }
+    return () => {
+      const kept = new Map<string, HoleWall[]>();
+      for (const c of checks) {
+        if (c.walls === null) continue;
+        kept.set(c.key, c.walls);
+        for (const { hole, minimum } of c.minimums.values()) {
+          const warnings = thinWallWarnings(hole, c.body.id, c.walls, minimum);
+          if (warnings.length === 0) continue;
+          const i = c.features.findIndex((f) => f.featureId === hole.id);
+          const r = c.features[i];
+          if (r !== undefined) c.features[i] = { ...r, warnings: [...r.warnings, ...warnings] };
+        }
+      }
+      this.#walls = kept;
     };
   }
 

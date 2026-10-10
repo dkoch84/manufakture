@@ -182,6 +182,59 @@ function jointedBoards(kernel: Kernel = k): ShapeId[] {
   return set.map((b) => b.shape);
 }
 
+/** A plate with a 7 mm boss and a flat-bottomed 4 mm hole in it (a 1.5 mm wall); the one body. */
+function holeBoss(kernel: Kernel): ShapeId {
+  let bodies: FeatureBody[] = [];
+  const features: FeatureInput[] = [
+    {
+      kind: 'extrude',
+      id: 'extrude#1',
+      profile: {
+        frame: XY,
+        loops: [
+          {
+            entities: [
+              { kind: 'line', id: 'e1', start: [0, 0], end: [30, 0] },
+              { kind: 'line', id: 'e2', start: [30, 0], end: [30, 30] },
+              { kind: 'line', id: 'e3', start: [30, 30], end: [0, 30] },
+              { kind: 'line', id: 'e4', start: [0, 30], end: [0, 0] },
+            ],
+          },
+        ],
+      },
+      extent: { type: 'blind', distance: 4 },
+      mode: 'new',
+    },
+    {
+      kind: 'extrude',
+      id: 'extrude#2',
+      profile: {
+        frame: { ...XY, origin: [0, 0, 4] },
+        loops: [{ entities: [{ kind: 'circle', id: 'c1', center: [15, 15], radius: 3.5 }] }],
+      },
+      extent: { type: 'blind', distance: 10 },
+      mode: 'add',
+    },
+    {
+      kind: 'hole',
+      id: 'hole#3',
+      frame: { ...XY, origin: [0, 0, 14] },
+      points: [{ id: 'p1', at: [15, 15] }],
+      diameter: 4,
+      extent: { type: 'blind', depth: 6.5, tipAngle: Math.PI },
+      head: { type: 'simple' },
+    },
+  ];
+  for (const f of features) {
+    const out = applyFeature(kernel, bodies, f);
+    expect(out.errors).toEqual([]);
+    for (const b of bodies)
+      if (!out.bodies.some((x) => x.shape === b.shape)) kernel.release(b.shape);
+    bodies = out.bodies.map((b) => ({ id: b.id, shape: b.shape }));
+  }
+  return bodies[0]!.shape;
+}
+
 /** Bytes of wasm heap in use (`heap-probe.ts`). It grows the memory, so call it once per instance. */
 function heapInUse(kernel: Kernel): number {
   return probeHeap(occtAllocator(kernel.oc));
@@ -943,6 +996,22 @@ describe('embind objects', () => {
     expect(tracker.liveNames()).toEqual([]);
   });
 
+  it('holeWalls leaves nothing behind: rays, the face intersectors and boxes, and failures', () => {
+    const body = holeBoss(k);
+    tracker.reset();
+    const walls = k.holeWalls(body, ['hole#3']);
+    expect(walls.map((w) => Math.round(w.wall! * 1e6) / 1e6)).toEqual([1.5]);
+    expect(tracker.createdNames()).toEqual(
+      expect.arrayContaining(['IntCurvesFace_Intersector', 'Bnd_Box']),
+    );
+    expect(tracker.liveNames()).toEqual([]);
+    tracker.reset();
+    expect(() => k.holeWalls(body, ['hole#3'], { range: 0 })).toThrow(KernelError);
+    expect(tracker.liveNames()).toEqual([]);
+    k.release(body);
+    expect(tracker.liveNames()).toEqual([]);
+  });
+
   it('threads leave only the bodies: groove, crest trim and chamfers, on success and failure', () => {
     const [block] = threadedBlock();
     // Only the threaded block is alive; every tool and temporary is gone.
@@ -1139,6 +1208,23 @@ describe('heap', () => {
     expect(section).toBeLessThan(150 * 2 ** 10);
     expect(loops).toBeLessThan(150 * 2 ** 10);
   }, 180_000);
+
+  it('repeated hole wall checks leak only the small values libcascade cannot free', async () => {
+    // Fresh instances after 2 and after 22 checks of the boss's insert hole. Measured: nothing,
+    // with one intersector per face (a handle type); the shape-wide IntCurvesFace_ShapeIntersector
+    // left about 1.6 KB a face, and a new point, direction and line per ray about 25 KiB a check.
+    const inUseAfter = async (n: number) => {
+      const fresh = new Kernel(await createNodeInstance());
+      const body = holeBoss(fresh);
+      for (let i = 0; i < n; i++) expect(fresh.holeWalls(body, ['hole#3'])).toHaveLength(1);
+      fresh.release(body);
+      expect(fresh.shapeCount).toBe(0);
+      return heapInUse(fresh);
+    };
+    const perCheck = ((await inUseAfter(22)) - (await inUseAfter(2))) / 20;
+    console.log(`holeWalls: ${(perCheck / 2 ** 10).toFixed(1)} KiB per check`);
+    expect(perCheck).toBeLessThan(64 * 2 ** 10);
+  }, 120_000);
 
   it('repeated interference checks do not grow the wasm heap', () => {
     const block = k.box(10, 10, 10);

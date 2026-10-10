@@ -993,6 +993,43 @@ blank, never its box). The bodies not yet measured go to the kernel in one batch
 `ORIENTED_CACHE_SIZE` bodies), so asking again for unchanged bodies sends nothing
 (`orientedStats`: `obbOps`, `obbHits`). A body the kernel cannot measure is a `failures` entry.
 
+## Wall checks around holes
+
+`src/wall-check.ts` (#1210): after a regen's parts are built, the material radially outside every
+hole's wall is measured on the final bodies, and a hole thinner than its minimum at some point gets
+a `thin-wall` warning on the hole feature (`point`, `face`, `bodyId`, `wall` and `minimum` in mm,
+`source`, `from`, `to`, `toFace` and `breakout`; one per point, the thinnest of its wall faces, pattern copies
+and split pieces included, the message naming the face when it is not the point's own). The minimum,
+per hole and body:
+
+- a heat-set insert hole (`standard.purpose: 'heat-set-insert'`): the insert's `minWall`, read from
+  packages/print's insert table (`holeInsert`, 1.6 mm for M3); `source: { kind: 'insert', size }`;
+- any other hole: the largest minimum wall of the print setups printing the body (an item naming
+  the part with no body, or this body): the setup's own `minWall` where it evaluates, else its
+  nozzle's default (`printThresholds`, two line widths); `source: { kind: 'print-setup', setupId }`;
+- a plain hole in a part no print setup prints has no minimum and is not measured: a machined,
+  wooden or bought part has no printing wall to keep.
+
+Only holes that built (`ok`) are checked. Per body, one `holeWalls` op (the kernel's rays, see its
+README's "Hole walls") measures every hole of the body with a minimum, reaching twice the largest
+minimum and at least 10 mm; it rides in the mesh batch of the regen. Results are kept per body key,
+holes and reach for the next regen only, so a body that did not change is not measured again, and a
+change of minimum (a print setup's threshold) needs no new measurement. A wall within 1e-6 mm of
+the minimum is at it, not under it. Measuring the final bodies catches a later feature that cuts
+close to a hole, at the cost of measuring after any change to a body with checked holes: a few
+milliseconds per hole wall face on a simple body, up to about 100 ms for one hole on a body with
+many faces (every ray tries each face whose box it crosses). An op that fails adds no warning.
+Wall faces past the kernel's 256 per body are not measured; their holes get one `wall-unchecked`
+warning (`bodyId`, `points`) instead. A hole that breaks out of the body (through a plate's edge, a
+boss's side) reads a wall of 0 with `breakout: true`, and its message says which face it breaks out
+of. The kernel's rays err toward missing a thin wall, never toward inventing one: a ray leaving
+through a face that closes the hole (the face it opens into, its bottom) measures nothing, so a hole
+drilled into a rod is not checked against the rod's surface, nor is a domed boss whose top and side
+are one face; a breakout into a face not parallel to the hole's axis (a slanted pocket wall) is
+missed the same way; and against an outside not parallel to the axis the rays read more than the
+true wall. The heat-set insert scenario (`apps/mcp/test/scenarios/heat-set-inserts.test.ts`) and
+`src/wall-check.test.ts` test it end to end.
+
 ## CAM geometry
 
 `src/cam.ts` is the CAM geometry stage (M5 plan T5.1f; [ADR 0014](../../docs/adr/0014-cam-architecture.md)
@@ -1169,8 +1206,10 @@ line, a hole point) is `reference-lost` on `profile`, `axis` or `points`. Kernel
 same way: `reference` (with `via` and `fragile`, for `ends`, `descendant`, `ancestor`, ordinal and
 fragile resolutions), `missed` and `direction`. Regen adds `expression`, `sketch`, `upstream`,
 `source`, `font` and `extension` errors (the last when a domain's code throws or returns something
-malformed, see "Extensions"), and `sketch`, `redundant`, `reference-body`, `derived-source`, `text`
-and `font-changed` warnings. The `extension` warning is no longer emitted.
+malformed, see "Extensions"), and `sketch`, `redundant`, `reference-body`, `derived-source`, `text`,
+`font-changed`, `thin-wall` and `wall-unchecked` warnings (the last two see "Wall checks around
+holes"). The `extension`
+warning is no longer emitted.
 
 **Propagation.** A failed feature is skipped: the kernel passes the bodies through, so independent
 later features still build on them. A feature naming a failed, suppressed or upstream-errored feature

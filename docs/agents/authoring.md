@@ -647,8 +647,17 @@ depth are what regen drills, so set them from the same row. The diameter is the 
 the hole blind and at least the insert's `length` deep, a little deeper so the plastic it
 displaces has room (an M3 insert: 4.0 mm across, 6 to 6.5 mm deep). A blind hole ends in a 118
 degree drill point unless its extent has a `tipAngle`; `180 deg` gives the flat bottom an insert
-pocket wants. Nothing checks the wall around an insert hole yet, so measure it yourself and widen
-the boss when it is under the minimum.
+pocket wants.
+
+Regen checks the wall around the hole. Where the material radially outside an insert hole's wall
+is thinner than the insert's `minWall`, the hole gets a `thin-wall` warning, in the apply report and
+in `get_errors`: `The wall around hole#2 at e17 on extrude#1 is 1.5 mm, under the M3 heat-set
+insert's minimum of 1.6 mm (to extrude#2:side:e5)`, one per point, naming the face the material
+ends at. A hole that breaks out of the side of its boss or the part reads a wall of 0 and says which
+face it breaks out of. Widen the boss (or move the hole) until the warning is gone; tell the person
+when you cannot. Other holes are checked the same way against the minimum wall of the print setups that
+print the part (the setup's own, or two line widths of its nozzle), and not at all in a part that
+no print setup prints.
 
 The bracket is 6 mm thick, too thin for an M3 insert's 4.0 mm hole and 1.6 mm wall, so here is an
 M2 insert in the end of the foot (the table's M2 row: hole 3.2 mm, length 3.0 mm, wall 1.3 mm): a
@@ -706,9 +715,8 @@ hole drills against the sketch's normal, into the foot):
 }
 ```
 
-Then measure the wall between the hole and the foot's top face. The answer's distance is 1.4 mm
-(give or take floating point), over the M2 insert's 1.3 mm minimum; under it, move or widen the
-hole's surroundings before you go on.
+No warning came back, so the wall is at least the M2 insert's 1.3 mm. To say how much, measure
+the wall between the hole and the foot's top face: 1.4 mm (give or take floating point).
 
 ```json mcp:measure
 {

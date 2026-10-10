@@ -326,6 +326,12 @@ export class FakeKernel implements RegenKernel {
         };
         return { ok: true, op: 'obb', value, ms: 0 };
       }
+      case 'holeWalls': {
+        const body = this.#shape(op.shape, results);
+        if (body !== null && typeof body === 'object') return body.fail;
+        // No geometry to cast rays through: no wall is measured.
+        return { ok: true, op: 'holeWalls', value: { walls: [] }, ms: 0 };
+      }
       case 'tessellate': {
         const body = this.#shape(op.shape, results);
         if (body !== null && typeof body === 'object') return body.fail;
