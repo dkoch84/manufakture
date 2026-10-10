@@ -20,7 +20,7 @@ The [feature tree](feature-tree.md) lists the part's bodies above its features:
 
 - **Colour swatch**: click it to pick the body's colour. New bodies get colours of their own, in turn; the first keeps the usual grey.
 - **Name**: double-click it, or click **Rename**, then type and press Enter (Escape cancels). An empty name goes back to the default one: the part's name when it has one body, **Body 1**, **Body 2** and so on when it has several.
-- **Material**: what the body is made of, for its mass. **Part material** uses the part's material (set in the Measure panel), so bodies of the same stuff need no setting each.
+- **Material**: what the body is made of, for its mass and its mechanical and thermal properties; [Materials](materials.md) lists the built-in ones and where their values come from. **Part material** uses the part's material (set in the Measure panel), so bodies of the same stuff need no setting each.
 - **Hide** and **Show**: a hidden body is not drawn and cannot be clicked or picked, so what is behind it can be. **Isolate** hides every other body; **Show all** brings them back.
 
 Name, colour and material are saved in the document, and each change is one step for **Undo**. Hiding is part of the view, like the camera: it is not an undo step, is not saved in the file, and is remembered for each document while the app is open.

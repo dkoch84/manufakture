@@ -33,19 +33,7 @@ Areas and volumes are shown in the square and cubic length unit (mm², cm³, in�
 
 ## Material and mass
 
-Pick a **Material** under Body to get the body's **Mass**. The choice is saved in the document and is one undo step, like any other change. In a part of several bodies this is the **Part material**: the material of every body that has none of its own. A body's own material is set in the Bodies list of the feature tree, and its mass uses that one. The built-in materials, with the typical density each uses:
-
-| Material             | Typical density | Source                                                   |
-| -------------------- | --------------- | -------------------------------------------------------- |
-| PLA                  | 1240 kg/m³      | NatureWorks Ingeo 4043D data sheet                       |
-| PETG                 | 1270 kg/m³      | Eastman Eastar 6763 data sheet                           |
-| ABS                  | 1040 kg/m³      | INEOS Styrolution Terluran GP-22 data sheet              |
-| Pine (eastern white) | 400 kg/m³       | The Wood Database, at 12% moisture content               |
-| Oak (red)            | 700 kg/m³       | The Wood Database, at 12% moisture content               |
-| Plywood (birch)      | 680 kg/m³       | Birch plywood makers' data (softwood plywood is lighter) |
-| MDF                  | 750 kg/m³       | European Panel Federation (600 to 800 kg/m³)             |
-| Aluminium 6061       | 2700 kg/m³      | ASM data sheet for 6061-T6                               |
-| Steel (carbon)       | 7850 kg/m³      | EN 1993-1-1 (Eurocode 3)                                 |
+Pick a **Material** under Body to get the body's **Mass**. The choice is saved in the document and is one undo step, like any other change. In a part of several bodies this is the **Part material**: the material of every body that has none of its own. A body's own material is set in the Bodies list of the feature tree, and its mass uses that one. The built-in materials, with the typical density each uses and where it comes from, are listed in [Materials](materials.md).
 
 With a material, Body also shows the **moments of inertia**, which say how hard the body is to spin (what a motor needs to speed up a spool or a flywheel):
 

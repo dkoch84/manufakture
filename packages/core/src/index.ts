@@ -9,11 +9,23 @@ export * from './display';
 export {
   MATERIALS,
   MATERIAL_IDS,
+  MATERIAL_PROPERTIES,
+  PRINTED_KNOCKDOWN_START,
+  USER_MATERIAL_ID_PATTERN,
   findMaterial,
   massGrams,
+  type FatigueCurve,
+  type FatiguePoint,
   type Material,
   type MaterialCategory,
+  type MaterialDef,
+  type MaterialDefProperty,
+  type MaterialForm,
   type MaterialId,
+  type MaterialProperties,
+  type MaterialPropertyInfo,
+  type MaterialPropertyKey,
+  type Property,
 } from './materials';
 export {
   bodyCreationProblem,

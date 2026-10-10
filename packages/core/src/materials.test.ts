@@ -4,18 +4,40 @@ import { MATERIALS, MATERIAL_IDS, findMaterial, massGrams } from './materials';
 import { DocumentStore, type ChangeEvent } from './store';
 import { PART, bracket, deepFreeze, unwrap } from './test-helpers';
 
+/** The nine materials before M9, with their densities: neither may ever change (mass results). */
+const ORIGINAL_DENSITIES = {
+  pla: 1240,
+  petg: 1270,
+  abs: 1040,
+  pine: 400,
+  oak: 700,
+  plywood: 680,
+  mdf: 750,
+  'aluminium-6061': 2700,
+  steel: 7850,
+};
+
 describe('the materials table', () => {
   it('has the built-in materials, with unique ids, in display order', () => {
     expect(MATERIAL_IDS).toEqual([
       'pla',
       'petg',
       'abs',
+      'pc',
+      'pa12',
+      'pa-cf',
+      'pom',
       'pine',
       'oak',
       'plywood',
       'mdf',
       'aluminium-6061',
+      'aluminium-7075',
       'steel',
+      'steel-1018',
+      'steel-4140',
+      'steel-304',
+      'brass',
     ]);
     expect(new Set(MATERIAL_IDS).size).toBe(MATERIALS.length);
   });
@@ -33,21 +55,29 @@ describe('the materials table', () => {
     }
   });
 
+  it('keeps the ids and densities of the nine materials before M9 (kg/m3)', () => {
+    const density = Object.fromEntries(MATERIALS.map((m) => [m.id, m.density]));
+    for (const [id, d] of Object.entries(ORIGINAL_DENSITIES)) expect(density[id], id).toBe(d);
+  });
+
   it('has the typical densities it cites (kg/m3)', () => {
     const density = Object.fromEntries(MATERIALS.map((m) => [m.id, m.density]));
     expect(density).toEqual({
-      pla: 1240,
-      petg: 1270,
-      abs: 1040,
-      pine: 400,
-      oak: 700,
-      plywood: 680,
-      mdf: 750,
-      'aluminium-6061': 2700,
-      steel: 7850,
+      ...ORIGINAL_DENSITIES,
+      pc: 1200,
+      pa12: 930,
+      'pa-cf': 1090,
+      pom: 1410,
+      'aluminium-7075': 2810,
+      'steel-1018': 7870,
+      'steel-4140': 7850,
+      'steel-304': 8000,
+      brass: 8500,
     });
-    // Woods float, plastics and metals sink.
-    for (const m of MATERIALS) expect(m.density < 1000, m.id).toBe(m.category === 'wood');
+    // Woods float, plastics and metals sink; laser-sintered PA12 is porous enough to float too.
+    for (const m of MATERIALS) {
+      expect(m.density < 1000, m.id).toBe(m.category === 'wood' || m.id === 'pa12');
+    }
   });
 
   it('finds a material by id', () => {

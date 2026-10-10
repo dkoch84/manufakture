@@ -54,12 +54,22 @@ export const MATERIAL_FEED_CATEGORY: Readonly<Record<string, string>> = {
   pla: 'plastics',
   petg: 'plastics',
   abs: 'plastics',
+  pc: 'plastics',
+  pa12: 'plastics',
+  'pa-cf': 'plastics',
+  pom: 'plastics',
   pine: 'softwood',
   oak: 'hardwood',
   plywood: 'plywood',
   mdf: 'mdf',
   'aluminium-6061': 'aluminium',
+  'aluminium-7075': 'aluminium',
   steel: 'steel',
+  'steel-1018': 'steel',
+  'steel-4140': 'steel',
+  'steel-304': 'steel',
+  // No brass category yet: brass uses the aluminium presets, the nearest non-ferrous metal.
+  brass: 'aluminium',
 };
 
 export function findFeedCategory(id: string): FeedCategory | undefined {
