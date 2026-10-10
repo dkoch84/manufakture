@@ -10,7 +10,7 @@
 // Each family's fields have a version (`fieldsVersion`): an entry written at an older version is
 // migrated in memory by the family's migrations and written back only when the user edits it
 // (decision 7, as ADR 0013 decision 4 does for params). Version 1 is the first; T9.2b to T9.2e
-// add fields by raising it with a migration (motors and controllers are at 2).
+// add fields by raising it with a migration (motors, controllers, cells, packs and BMS are at 2).
 
 import { CATALOG_FAMILIES, type CatalogEntry } from '@manufakture/core';
 import type { PhysicalKind } from '@manufakture/units';
@@ -118,6 +118,15 @@ export const KV_CONVENTIONS = withOutputSide([
  * the motor or at a geared actuator's output.
  */
 export const KT_CONVENTIONS = withOutputSide(['phase amplitude', 'phase rms', 'dc (six-step)']);
+
+/**
+ * The states of charge, in percent, at which a cell's open-circuit voltage curve is entered (T9.2c):
+ * denser at the ends, where every chemistry bends. Each is its own voltage field (`ocv0` to `ocv100`).
+ */
+export const OCV_SOC_PERCENT = [0, 5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 95, 100] as const;
+
+/** The field holding a cell's open-circuit voltage at `percent` state of charge (`ocv50`). */
+export const ocvField = (percent: number): string => `ocv${percent}`;
 
 /** Every family's fields at their current version. */
 export const FAMILY_SCHEMAS: readonly FamilySchema[] = [
@@ -287,15 +296,15 @@ export const FAMILY_SCHEMAS: readonly FamilySchema[] = [
   {
     family: 'cell',
     label: 'Cell',
-    fieldsVersion: 1,
+    fieldsVersion: 2,
     placeholder: 'cylinder',
     dimensions: CYLINDER,
     fields: [
       choice('chemistry', 'chemistry', ['NMC', 'NCA', 'LFP', 'LCO', 'other']),
       choice('format', 'format', ['18650', '21700', '26650', 'pouch', 'prismatic']),
-      { name: 'capacity', label: 'capacity', kind: 'charge', bom: 'at-least' },
+      { name: 'capacity', label: 'capacity (typical, rated)', kind: 'charge', bom: 'at-least' },
       { name: 'nominalVoltage', label: 'nominal voltage', kind: 'voltage', bom: 'equals' },
-      { name: 'chargeVoltage', label: 'charge voltage', kind: 'voltage' },
+      { name: 'chargeVoltage', label: 'maximum (charge) voltage', kind: 'voltage' },
       { name: 'cutoffVoltage', label: 'cutoff voltage', kind: 'voltage' },
       { name: 'maxChargeCurrent', label: 'maximum charge current', kind: 'current', basis: true },
       {
@@ -306,12 +315,48 @@ export const FAMILY_SCHEMAS: readonly FamilySchema[] = [
         bom: 'at-least',
       },
       { name: 'resistanceDC', label: 'DC internal resistance', kind: 'resistance', basis: true },
+      // Fields version 2 (T9.2c).
+      { name: 'minimumCapacity', label: 'minimum capacity', kind: 'charge' },
+      { name: 'energy', label: 'energy, as stated', kind: 'energy' },
+      { name: 'standardChargeCurrent', label: 'standard charge current', kind: 'current' },
+      {
+        name: 'peakDischarge',
+        label: 'peak (pulse) discharge current',
+        kind: 'current',
+        basis: true,
+      },
+      { name: 'impedanceAC', label: 'AC impedance (1 kHz)', kind: 'resistance', basis: true },
+      { name: 'minChargeTemperature', label: 'lowest charge temperature', kind: 'temperature' },
+      { name: 'maxChargeTemperature', label: 'highest charge temperature', kind: 'temperature' },
+      {
+        name: 'minDischargeTemperature',
+        label: 'lowest discharge temperature',
+        kind: 'temperature',
+      },
+      {
+        name: 'maxDischargeTemperature',
+        label: 'highest discharge temperature',
+        kind: 'temperature',
+      },
+      {
+        name: 'specificHeatCapacity',
+        label: 'specific heat capacity',
+        kind: 'number',
+        unit: 'J/(kg*K)',
+      },
+      { name: 'cycleLife', label: 'cycle life (conditions in the notes)', kind: 'count' },
+      { name: 'certifications', label: 'certifications claimed by the maker', kind: 'text' },
+      ...OCV_SOC_PERCENT.map((p): RatingField => ({
+        name: ocvField(p),
+        label: `open-circuit voltage at ${p} % state of charge`,
+        kind: 'voltage',
+      })),
     ],
   },
   {
     family: 'pack',
     label: 'Battery pack',
-    fieldsVersion: 1,
+    fieldsVersion: 2,
     placeholder: 'box',
     dimensions: BOX,
     fields: [
@@ -327,12 +372,29 @@ export const FAMILY_SCHEMAS: readonly FamilySchema[] = [
         basis: true,
         bom: 'at-least',
       },
+      // Fields version 2 (T9.2c).
+      { name: 'cell', label: 'cell (maker and part number, or catalog reference)', kind: 'text' },
+      { name: 'fullVoltage', label: 'full (charge) voltage', kind: 'voltage' },
+      { name: 'emptyVoltage', label: 'empty (cutoff) voltage', kind: 'voltage' },
+      { name: 'resistance', label: 'DC internal resistance', kind: 'resistance', basis: true },
+      {
+        name: 'interconnectResistance',
+        label: 'interconnect resistance, whole pack',
+        kind: 'resistance',
+      },
+      {
+        name: 'peakDischarge',
+        label: 'peak (pulse) discharge current',
+        kind: 'current',
+        basis: true,
+      },
+      { name: 'maxChargeCurrent', label: 'maximum charge current', kind: 'current', basis: true },
     ],
   },
   {
     family: 'bms',
     label: 'Battery management system',
-    fieldsVersion: 1,
+    fieldsVersion: 2,
     placeholder: 'box',
     dimensions: BOX,
     fields: [
@@ -353,6 +415,35 @@ export const FAMILY_SCHEMAS: readonly FamilySchema[] = [
       choice('balancing', 'balancing', ['passive', 'active', 'none']),
       { name: 'balanceCurrent', label: 'balancing current', kind: 'current' },
       { name: 'standbyCurrent', label: 'standby current', kind: 'current' },
+      // Fields version 2 (T9.2c).
+      choice('chemistry', 'cell chemistry it is set for', [
+        'NMC',
+        'NCA',
+        'LFP',
+        'LCO',
+        'other',
+        'configurable',
+      ]),
+      { name: 'peakDischarge', label: 'peak discharge current', kind: 'current', basis: true },
+      { name: 'overchargeVoltage', label: 'cell overcharge protection voltage', kind: 'voltage' },
+      {
+        name: 'overdischargeVoltage',
+        label: 'cell overdischarge protection voltage',
+        kind: 'voltage',
+      },
+      { name: 'shortCircuitDelay', label: 'short-circuit response time', kind: 'time' },
+      { name: 'protections', label: 'protections', kind: 'text' },
+      { name: 'communication', label: 'communication interfaces', kind: 'text' },
+      {
+        name: 'minOperatingTemperature',
+        label: 'lowest operating temperature',
+        kind: 'temperature',
+      },
+      {
+        name: 'maxOperatingTemperature',
+        label: 'highest operating temperature',
+        kind: 'temperature',
+      },
     ],
   },
   {
@@ -615,6 +706,11 @@ const MIGRATIONS: Partial<Record<CatalogFamily, readonly RatingsMigration[]>> = 
   // T9.2b: motor thermal, loss and gear fields; controller power, braking, interface and loss fields.
   motor: [addedFields],
   controller: [addedFields],
+  // T9.2c: cell capacity, current, temperature, thermal and OCV curve fields; pack derived values;
+  // BMS protection, interface and temperature fields.
+  cell: [addedFields],
+  pack: [addedFields],
+  bms: [addedFields],
 };
 
 export type ReadEntry =
@@ -671,7 +767,76 @@ const NUMBER_RANGES: Readonly<Record<string, { ok: (v: number) => boolean; messa
   'motor.ratio': { ok: (v) => v > 0, message: 'must be above zero' },
   'motor.gearEfficiency': { ok: (v) => v > 0 && v <= 1, message: 'must be above 0 and at most 1' },
   'motor.backlash': { ok: (v) => v >= 0, message: 'is not below zero' },
+  'cell.specificHeatCapacity': { ok: (v) => v > 0, message: 'must be above zero' },
+  'pack.series': { ok: (v) => v >= 1, message: 'is at least 1' },
+  'pack.parallel': { ok: (v) => v >= 1, message: 'is at least 1' },
+  'bms.minCells': { ok: (v) => v >= 1, message: 'is at least 1' },
 };
+
+/**
+ * Pairs of ratings whose first may not exceed its second when both are given (T9.2c): a cutoff
+ * above the nominal voltage, a minimum capacity above the typical one or a temperature window
+ * upside down is a typo. A cell's open-circuit voltages are checked apart, in order of charge.
+ */
+const ORDERED: Partial<Record<CatalogFamily, readonly (readonly [string, string])[]>> = {
+  cell: [
+    ['cutoffVoltage', 'nominalVoltage'],
+    ['nominalVoltage', 'chargeVoltage'],
+    ['cutoffVoltage', 'chargeVoltage'],
+    ['minimumCapacity', 'capacity'],
+    ['standardChargeCurrent', 'maxChargeCurrent'],
+    ['continuousDischarge', 'peakDischarge'],
+    ['minChargeTemperature', 'maxChargeTemperature'],
+    ['minDischargeTemperature', 'maxDischargeTemperature'],
+    // The curve's ends lie within the cell's voltage range.
+    ['cutoffVoltage', ocvField(0)],
+    [ocvField(100), 'chargeVoltage'],
+  ],
+  pack: [
+    ['emptyVoltage', 'nominalVoltage'],
+    ['nominalVoltage', 'fullVoltage'],
+    ['emptyVoltage', 'fullVoltage'],
+    ['continuousDischarge', 'peakDischarge'],
+  ],
+  bms: [
+    ['minCells', 'maxCells'],
+    ['continuousDischarge', 'peakDischarge'],
+    ['overdischargeVoltage', 'overchargeVoltage'],
+    ['minOperatingTemperature', 'maxOperatingTemperature'],
+  ],
+};
+
+function valueOf(rated: CatalogEntry['ratings'][string] | undefined): number | undefined {
+  return rated !== undefined && 'value' in rated ? rated.value : undefined;
+}
+
+function orderProblems(entry: CatalogEntry, schema: FamilySchema): FieldProblem[] {
+  const out: FieldProblem[] = [];
+  const label = (name: string) => schema.fields.find((f) => f.name === name)?.label ?? name;
+  for (const [low, high] of ORDERED[entry.family] ?? []) {
+    const a = valueOf(entry.ratings[low]);
+    const b = valueOf(entry.ratings[high]);
+    if (a !== undefined && b !== undefined && a > b) {
+      out.push({ field: high, message: `${label(high)} is below the ${label(low)}` });
+    }
+  }
+  if (entry.family === 'cell') {
+    // Open-circuit voltage never falls as the charge rises; a flat stretch (LFP) is fine.
+    let last: { percent: number; value: number } | undefined;
+    for (const percent of OCV_SOC_PERCENT) {
+      const v = valueOf(entry.ratings[ocvField(percent)]);
+      if (v === undefined) continue;
+      if (last !== undefined && v < last.value) {
+        out.push({
+          field: ocvField(percent),
+          message: `open-circuit voltage at ${percent} % is below the one at ${last.percent} %`,
+        });
+      }
+      last = { percent, value: v };
+    }
+  }
+  return out;
+}
 
 /** A problem with an entry's fields, against its family's schema. */
 export interface FieldProblem {
@@ -690,9 +855,13 @@ function hasRatio(entry: CatalogEntry): boolean {
  * not whole, a physical value below zero, a choice outside its options, a convention outside the
  * field's list or missing where the field has conventions (decision 8: Kv, Kt, R and L), an
  * output-side convention with no gear ratio, a motor's ratio not above zero, gear efficiency
- * outside (0, 1] or backlash below zero, a dimension the family does not read or that is not
- * above zero, and a bidirectional control character in a short text (the maker, the part number,
- * a text rating, a convention, the source's title and revision). Pure.
+ * outside (0, 1] or backlash below zero, a cell's specific heat not above zero, a pack's series or
+ * parallel count or a BMS's fewest cells below 1, a pair out of order (a cutoff voltage above the
+ * nominal, a minimum capacity above the typical, a temperature window upside down, a peak current
+ * below the continuous, an OCV curve's ends outside the cutoff and maximum voltage; `ORDERED`), a cell's open-circuit voltage falling as its charge rises, a
+ * dimension the family does not read or that is not above zero, and a bidirectional control
+ * character in a short text (the maker, the part number, a text rating, a convention, the source's
+ * title and revision). Pure.
  */
 export function entryProblems(entry: CatalogEntry): FieldProblem[] {
   const schema = familySchema(entry.family);
@@ -785,5 +954,6 @@ export function entryProblems(entry: CatalogEntry): FieldProblem[] {
       out.push({ field: 'mass', message: 'a mass is above zero' });
     }
   }
+  out.push(...orderProblems(entry, schema));
   return out;
 }

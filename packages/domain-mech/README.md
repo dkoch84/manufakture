@@ -56,7 +56,7 @@ construction domains. It registers one extension type, `mech.placeholder` (T9.2a
 evaluation stage of decision 15 (`createMechEvaluation`, below: the checks; the simulation joins it
 in T9.4b).
 
-## Purchased parts (`src/parts/`, T9.2a; `src/catalog/`, T9.2b)
+## Purchased parts (`src/parts/`, T9.2a; `src/catalog/`, T9.2b and T9.2c)
 
 One model for every bought part with ratings (ADR 0017 decision 7). Core stores user entries
 (`mech.catalog`, `CatalogEntry`) and uses (`mech.purchased`, `PurchasedUse`); this package gives
@@ -68,14 +68,27 @@ them meaning.
   and viscous loss torques, cogging, and for geared actuators ratio, gear efficiency, backlash, plus
   sensors; controller: continuous and peak power, braking chopper current and smallest resistor,
   feedback and communication interfaces, operating temperatures, and the loss model's fixed loss,
-  leg resistance and switching time). Version 2 only added fields, so the migration from 1 leaves
-  the ratings as they are. Each `RatingField` has a kind (a `packages/units`
+  leg resistance and switching time) and cell, pack and BMS, which T9.2c raised to 2 (cell:
+  minimum capacity, stated energy, standard charge current, peak discharge, AC impedance, charge and
+  discharge temperature windows, specific heat capacity in J/(kg*K), cycle life, certifications and
+  the open-circuit voltage curve as one voltage field per state of charge in `OCV_SOC_PERCENT`, 0,
+  5, 10 to 90 by tens, 95 and 100 %, named by `ocvField` (`ocv50`); pack: the cell, full and empty
+  voltage, DC resistance, interconnect resistance, peak discharge and maximum charge current; BMS:
+  chemistry setting, peak discharge, cell overcharge and overdischarge thresholds, short-circuit
+  response time, protections, communication and operating temperatures). Version 2 only added
+  fields, so the migration from 1 leaves the ratings as they are. Each `RatingField` has a kind (a `packages/units`
   physical kind stored in SI, `number`, `count` or `text`), optional `options`, `conventions`,
   `basis` and `bom` (the comparison a BOM line states: `at-least`, `at-most`, `equals`). Geometric
   sizes are dimensions (mm, `DIMENSION_NAMES`), not ratings. `entryProblems(entry)` checks an
   entry against its family; since T9.2b it requires a convention on any Kv, Kt, R or L given (an
   `unknown` needs none), refuses a convention ending `, output side` when no gear ratio is given,
   and keeps a motor's ratio above zero, gear efficiency in (0, 1] and backlash not below zero.
+  Since T9.2c it also keeps a cell's specific heat above zero and pack counts and a BMS's fewest
+  cells from 1, refuses pairs out of order (cutoff above nominal voltage, nominal above maximum,
+  minimum capacity above typical, standard charge above maximum, peak discharge below continuous,
+  temperature windows upside down, a BMS's fewest cells above its most or overdischarge above
+  overcharge, cutoff above maximum voltage, a pack's empty above its full voltage, `ocv0` below the
+  cutoff, `ocv100` above the maximum voltage) and a cell OCV curve that falls as the charge rises (a flat stretch is fine).
   `KV_CONVENTIONS` and `KT_CONVENTIONS` list the conventions, each also at the output side
   (`OUTPUT_SIDE`). `migrateEntry` migrates ratings in memory and refuses a newer `fieldsVersion`.
 - **The built-in catalog** (`catalog.ts`): `BUILTIN_ENTRIES`, every version ever shipped, sorted
@@ -85,7 +98,13 @@ them meaning.
   `unknown-entry` / `newer-fields`, never a guess; it reports a `newer` version and `deprecated`.
   `copyBuiltin` copies one into a user entry with `derivedFrom`.
 - **The family catalogs** (`src/catalog/`): `MOTOR_ENTRIES` and `CONTROLLER_ENTRIES` (T9.2b),
-  joined into `BUILTIN_ENTRIES`; T9.2c to T9.2e add theirs the same way. Each entry stores Kv, Kt,
+  `CELL_ENTRIES` and `BMS_ENTRIES` (T9.2c), joined into `BUILTIN_ENTRIES`; T9.2d and T9.2e add
+  theirs the same way. Cells: Molicel P45B and P42A, Samsung 40T and 30Q, Murata VTC6, the small
+  high-rate Murata VTC3 (sixteen in series make 92.2 Wh, the class of a 16S pack under 100 Wh) and
+  the A123 ANR26650M1-B (LFP). No maker publishes an OCV table, so built-in cells use the generic
+  curve; no datasheet gives specific heat, so it is a typical value, estimated. BMS boards: Daly
+  16S lithium-ion 30 A and 16S LFP 40 A, Overkill Solar (JBD) 16S LFP 100 A, from distributor
+  pages and search summaries, with the thresholds they are sold set to. Each motor entry stores Kv, Kt,
   R and L as the datasheet gives them, with the convention named, and its sources and notes say
   where they disagree. `motorTorqueConstant`, `motorVelocityConstant`, `motorResistance` and
   `motorInductance` (`conventions.ts`, ADR 0017 decision 8) turn an entry's value into the one
@@ -97,6 +116,27 @@ them meaning.
   `{ ok: false, missing, message }` naming the missing fields (`kt.convention` for no convention
   or one not in the list, `ratio` for an output-side constant without a usable ratio). They never
   guess.
+- **Cells and packs** (`src/catalog/pack.ts`, T9.2c). `cellOcvCurve(cell)` gives a cell's
+  open-circuit voltage curve (`points` of state of charge 0 to 1 and volts): its own `ocv*` fields
+  when both ends (0 and 100 %) are given, points between may be missing; a partial curve without
+  both ends is refused, naming the missing ends; with none, the generic curve of its chemistry
+  (`GENERIC_OCV`: layered oxide for NMC, NCA and LCO, and LFP), marked `generic` and `estimated`;
+  `other` or no chemistry is refused. `ocvAt(points, soc)` interpolates linearly, clamped.
+  `buildPack(cell, { series, parallel, interconnect?, enclosureMass? })` refuses counts that are
+  not whole numbers from 1 to `MAX_PACK_COUNT` (1000), a negative resistance or mass and an entry
+  that is not a cell; otherwise every derived value is a `Normalised` with its working: nominal,
+  full and empty voltage and the OCV curve `series` times the cell's; capacity and continuous,
+  peak and charge current limits `parallel` times the cell's (equal current sharing assumed);
+  energy as nominal voltage times rated capacity (the airline 100 Wh rule's figure); DC resistance
+  `series * R_cell / parallel` plus the interconnects (`per: 'pack'`, or `per: 'series joint'`
+  times `series - 1`); mass of the cells plus the enclosure (everything but the cells); the cells'
+  heat capacity (mass times specific heat); and the short-circuit current, full voltage over DC
+  resistance, always `estimated`. A value whose cell input is missing is `{ ok: false, missing }`,
+  never guessed; estimates carry through. `packRatings(pack, cellName)` writes a built pack as the
+  ratings and mass of a `pack` entry; with no interconnects given, `interconnectResistance` is
+  `unknown` (absent from `Pack`, never a stated zero) and the resistance carries the basis "cells
+  only, interconnects not included". The generic layered-oxide curve tops out at 4.19 V and is not
+  rescaled for cells charged above 4.2 V.
 - **Typing values in** (`input.ts`, `entry.ts`): every value through `packages/units`. With a
   unit the unit decides; a bare number is the document's display unit for the kind (catalog values
   are stored as SI numbers, not expressions, so a stored value never depends on a display
