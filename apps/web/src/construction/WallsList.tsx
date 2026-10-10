@@ -1,7 +1,8 @@
 // The Walls section of the Construction panel: each wall of the part studio with what regen
 // framed for it (its member count by role: the info the takeoff counts), its openings with the
 // header each one used and where that header came from (ADR 0015 decision 7), any error or
-// layout warning, and the wall's own framing settings (height, spacing, plates, kings, corners,
+// layout warning, each one's construction phase when the model has phases (#1213: how many of its
+// members are new and demolished), and the wall's own framing settings (height, spacing, plates, kings, corners,
 // blocking), which override its type's and the document's.
 
 import type { DisplayUnits, ExtensionFeature } from '@manufakture/core';
@@ -21,6 +22,7 @@ import type { ConstructionUiStore } from './state';
 import {
   buildWallFraming,
   framingFormOf,
+  phaseText,
   roleCounts,
   wallsOf,
   type WallFramingForm,
@@ -69,6 +71,7 @@ export function WallsList({
           const counts = roleCounts(set);
           const result = featureResult({ parts }, partId, wall.id);
           const problem = result?.errors[0]?.message;
+          const phase = phaseText(wall.id, result?.metadata, set);
           return (
             <li key={wall.id} data-testid={`wall-${wall.id}`}>
               <div className="construction-row">
@@ -85,6 +88,11 @@ export function WallsList({
                   Framing
                 </button>
               </div>
+              {phase && (
+                <p className="field-note" data-testid={`wall-phase-${wall.id}`}>
+                  {phase}
+                </p>
+              )}
               {problem && (
                 <p className="field-error" data-testid={`wall-error-${wall.id}`}>
                   {problem}
@@ -128,6 +136,7 @@ export function WallsList({
                       settings={settings}
                       units={doc.units}
                       error={featureResult({ parts }, partId, o.id)?.errors[0]?.message}
+                      phase={phaseText(o.id, featureResult({ parts }, partId, o.id)?.metadata, set)}
                       disabled={disabled}
                       onEdit={() =>
                         ui.getState().startTool({ kind: 'opening', featureId: o.id, wall: wall.id })
@@ -150,6 +159,7 @@ function OpeningRow({
   settings,
   units,
   error,
+  phase,
   disabled,
   onEdit,
 }: {
@@ -158,6 +168,7 @@ function OpeningRow({
   settings: ConstructionSettings | undefined;
   units: DisplayUnits;
   error: string | undefined;
+  phase: string | null;
   disabled: boolean;
   onEdit: () => void;
 }) {
@@ -189,6 +200,11 @@ function OpeningRow({
         >
           Header: {headerSourceText(usedAsPreview(used, settings, choice), units)}
           {used.framed ? '' : ' Not framed: see the wall.'}
+        </p>
+      )}
+      {phase && (
+        <p className="field-note" data-testid={`opening-phase-${opening.id}`}>
+          {phase}
         </p>
       )}
       {error && <p className="field-error">{error}</p>}

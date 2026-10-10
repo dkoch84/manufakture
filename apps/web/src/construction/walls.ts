@@ -29,7 +29,9 @@ import {
   MIN_SPACING,
   WALL_SCHEMA_VERSION,
   WALL_TYPE,
+  metadataPhase,
   readWallParams,
+  setPhases,
   type ConstructionSettings,
   type WallMetadata,
   type WallParams,
@@ -502,6 +504,27 @@ export function roleCounts(set: MemberSetView | undefined): {
   const counts = new Map<string, number>();
   for (const m of set.members) counts.set(m.role, (counts.get(m.role) ?? 0) + 1);
   return { total: set.members.length, roles: [...counts] };
+}
+
+/**
+ * A wall's or opening's construction phase as the Walls list shows it (#1213), or null when the
+ * model has no phases there (a design: everything new). `owner` is the feature; `metadata` what
+ * its translator reported; `set` its wall's member set.
+ */
+export function phaseText(
+  owner: string,
+  metadata: unknown,
+  set: MemberSetView | undefined,
+): string | null {
+  const phase = metadataPhase(metadata);
+  const phases = setPhases(set?.metadata);
+  if (!phases.phased && phase === 'new') return null;
+  const label = phase === 'demolish' ? 'Demolish' : phase === 'existing' ? 'Existing' : 'New';
+  const fresh = (set?.members ?? []).filter(
+    (m) => m.owner === owner && phases.phaseOf(`${m.owner}:${m.id}`) === 'new',
+  ).length;
+  const gone = phases.demolished.filter((m) => m.owner === owner).length;
+  return `${label}: ${fresh} member${fresh === 1 ? '' : 's'} new, ${gone} demolished`;
 }
 
 export type { WallParams };

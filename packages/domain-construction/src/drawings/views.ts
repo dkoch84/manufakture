@@ -16,6 +16,12 @@
 // - A **roof framing plan** draws the roof's members from above, with strings along the eave
 //   (rafter layout marks) and the gable end.
 //
+// Phases (#1213): what the work takes out is drawn dashed, on the hidden-line layer: demolished
+// members (a set's `phases`, `phases.ts`) in elevations, plans and roof plans, and a demolished
+// opening's door swing or window symbol in plans (and those of a demolished wall's openings).
+// Strings dimension the design: a demolished opening is not a stop, a demolished wall has none in
+// a plan.
+//
 // The short disclaimer is the domain's title note: regen puts it in the title block of every sheet
 // showing a construction view (drawn or not) or a part with construction features. Every loop is over the part's
 // features or members, linear, and the output is capped (`MAX_VIEW_LINES`, string points).
@@ -36,6 +42,7 @@ import {
   OPENING_TYPE,
   WALL_TYPE,
   framingBand,
+  metadataPhase,
   planSegments,
   readOpeningMetadata,
   readWallMetadata,
@@ -47,6 +54,7 @@ import { FLOOR_TYPE, readFloorMetadata } from '../features/floor';
 import { ROOF_TYPE, readRoofMetadata } from '../features/roof';
 import type { RoofGeometry } from '../framing/roof';
 import { dot, type Vec3 } from '../geom';
+import { setPhases } from '../phases';
 import { cornerRange, memberOutline, memberSection, type Segment3 } from './outline';
 import { VIEW_PARAMS_VERSION, readViewParams, type OpeningStops, type PlanStrings } from './params';
 
@@ -161,6 +169,13 @@ function openings(ctx: DomainViewContext): Opening[] {
   });
 }
 
+/** Whether the work takes an opening out (#1213). */
+const demolished = (o: Opening): boolean => metadataPhase(o.meta) === 'demolish';
+
+/** The members a set's phases say the work takes out (#1213), drawn dashed. */
+const demolishedOf = (set: DomainViewSet): readonly MemberData[] =>
+  setPhases(set.metadata).demolished as readonly MemberData[];
+
 /** Positions along a segment a string stops at for its openings, sorted, in (0, length). */
 function openingStops(list: readonly Opening[], stops: OpeningStops, length: number): number[] {
   const out: number[] = [];
@@ -211,7 +226,14 @@ function capPoints(out: Out, points: Vec3[], what: string): Vec3[] {
  * interior: left of the path) and the arc its edge sweeps to the other jamb. `hand` is as seen
  * from the side it swings into: `left` (the default) hinges on that viewer's left.
  */
-function doorSwing(out: Out, wall: WallMetadata, seg: PlanSegment, o: OpeningMetadata, z: number) {
+function doorSwing(
+  out: Out,
+  wall: WallMetadata,
+  seg: PlanSegment,
+  o: OpeningMetadata,
+  z: number,
+  layer: 'visible' | 'hidden' = 'visible',
+) {
   const tIn = Math.max(
     ...wall.layers.map((l) => l.t[1]),
     framingBand(wall.justification, wall.thickness)[1],
@@ -230,7 +252,7 @@ function doorSwing(out: Out, wall: WallMetadata, seg: PlanSegment, o: OpeningMet
   const hinge = across(along(seg, hingeAtEnd ? j1 : j0), seg, face);
   const latch = across(along(seg, hingeAtEnd ? j0 : j1), seg, face);
   const tip = across(hinge, seg, side * o.width);
-  addLines(out, [[v3(hinge, z), v3(tip, z)]]);
+  addLines(out, [[v3(hinge, z), v3(tip, z)]], layer === 'visible' ? undefined : layer);
   // Counter-clockwise about +z from the open leaf to the closed position, or the other way.
   const u = [tip[0] - hinge[0], tip[1] - hinge[1]];
   const w = [latch[0] - hinge[0], latch[1] - hinge[1]];
@@ -241,7 +263,7 @@ function doorSwing(out: Out, wall: WallMetadata, seg: PlanSegment, o: OpeningMet
       normal: Z,
       from: v3(ccw ? tip : latch, z),
       to: v3(ccw ? latch : tip, z),
-      layer: 'visible',
+      layer,
     });
 }
 
@@ -252,6 +274,7 @@ function windowSymbol(
   seg: PlanSegment,
   o: OpeningMetadata,
   z: number,
+  layer: 'visible' | 'hidden' = 'visible',
 ) {
   const [t0, t1] = framingBand(wall.justification, wall.thickness);
   const a = along(seg, o.position - o.width / 2);
@@ -260,7 +283,7 @@ function windowSymbol(
     v3(across(a, seg, t), z),
     v3(across(b, seg, t), z),
   ]);
-  addLines(out, lines);
+  addLines(out, lines, layer === 'visible' ? undefined : layer);
 }
 
 function floorPlan(
@@ -302,6 +325,7 @@ function floorPlan(
   for (const set of ctx.sets) {
     if (!ids.has(set.group)) continue;
     for (const m of set.members) if (!addLines(out, memberSection(m, Z, z))) break;
+    for (const m of demolishedOf(set)) if (!addLines(out, memberSection(m, Z, z), 'hidden')) break;
   }
   const byWall = new Map<string, Opening[]>();
   for (const o of openings(ctx)) {
@@ -313,15 +337,18 @@ function floorPlan(
   for (const w of onLevel) {
     const segs = planSegments(w.meta.points, w.meta.closed);
     const list = byWall.get(w.id) ?? [];
+    // A demolished wall comes out with its openings: drawn dashed, and no strings.
+    const wallGone = metadataPhase(w.meta) === 'demolish';
     for (const o of list) {
       const seg = segs[o.meta.segment - 1];
       if (seg === undefined) continue;
-      if (o.meta.type === 'door') doorSwing(out, w.meta, seg, o.meta, z);
-      else if (o.meta.type === 'window') windowSymbol(out, w.meta, seg, o.meta, z);
+      const layer = wallGone || demolished(o) ? 'hidden' : 'visible';
+      if (o.meta.type === 'door') doorSwing(out, w.meta, seg, o.meta, z, layer);
+      else if (o.meta.type === 'window') windowSymbol(out, w.meta, seg, o.meta, z, layer);
     }
-    if (stops === 'none') continue;
+    if (stops === 'none' || wallGone) continue;
     segs.forEach((seg, i) => {
-      const on = list.filter((o) => o.meta.segment === i + 1);
+      const on = list.filter((o) => o.meta.segment === i + 1 && !demolished(o));
       // Outside: right of the path (the exterior).
       const side: Vec3 = [-seg.n[0], -seg.n[1], 0];
       if (strings === 'architectural') {
@@ -466,9 +493,14 @@ function framingElevation(
         studs.push((l + h) / 2 - s0);
       }
     }
+    for (const m of demolishedOf(set)) {
+      if (inSlab(m) && !addLines(out, memberOutline(m, direction), 'hidden')) break outer;
+    }
   }
 
-  const list = openings(ctx).filter((o) => o.meta.wall === wallId && o.meta.segment === segment);
+  const list = openings(ctx).filter(
+    (o) => o.meta.wall === wallId && o.meta.segment === segment && !demolished(o),
+  );
   if (stops !== 'none') {
     const ts = [0, ...openingStops(list, stops, seg.length), seg.length];
     pushChain(out, {
@@ -561,6 +593,8 @@ function roofPlan(ctx: DomainViewContext, roofId: string): DomainViewOutput | { 
       rafters.push((l + h) / 2 - dot(e1, o));
     }
   }
+  for (const m of set === undefined ? [] : demolishedOf(set))
+    if (!addLines(out, memberOutline(m, view), 'hidden')) break;
   pushChain(out, {
     id: `${roofId}:eave`,
     kind: 'aligned',

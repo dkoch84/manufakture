@@ -332,6 +332,56 @@ left of the reference line looking from start to end), up `z`. Studs, kings, jac
 corner studs run up with their thin face along the wall; plates, rough sills, blocking and
 backing run along the wall lying flat; header plies and the spacer run along the wall on edge.
 
+## Phases
+
+A remodel changes a building that stands (#1213, `phases.ts`). Each wall, opening, floor and roof
+has a `phase` param: `existing`, `new` or `demolish`. Without one it is `existing` in a document
+marked as built (`domains.construction.asBuilt: true`) and `new` otherwise, so a design that never
+mentions phases frames, counts and draws as it did before them. The translators record the phase
+in their metadata (`existing` and `demolish`; `new` is the absence, `metadataPhase` reads it). A
+demolished opening cuts nothing (the wall is closed up there); a demolished wall, floor or roof
+makes no body, so it is refused with an `operation`, and names its layer bodies in its metadata
+only so the takeoff can list their faces for demolition.
+
+Members: `frameWithPhases` wraps every group's framing (`constructionMembers.frame`). When no
+feature the group owns has a phase other than `new` and no override sets one, it frames as
+before. Otherwise it frames the group as built (its features that were there: existing and
+demolished openings) and as designed (existing and new openings), and matches the design's
+members to the as-built frame's by piece (`pieceKey`: `shapeKey` plus the placement to 0.01 mm),
+whoever owns them: a match is `existing`, any other design member `new`, and an as-built member
+the design does not keep is demolished. So moving an existing opening (demolishing it and adding
+it at its new place) makes its old framing and the studs where it goes demolished, its new framing
+and the studs filling its old place new; a member of the old opening that the new one has in the
+same place (a cripple over both headers) stays. A new wall, floor or roof is all new, a
+demolished one all demolished. An override's `phase` (`{ id, phase }`, any feature) applies to
+the member the override found (`applied` or `moved`, #1215) afterwards: `demolish` takes it out,
+`new` marks it new work (not in the frame as built: an added block, a stud that was missing),
+`existing` keeps it; a lost override does nothing. Added members (#1214) take their feature's
+phase and overrides as any member.
+
+The set's members are the design's: what regen meshes, the viewport draws and exports write, so
+nothing else needed to change. The group metadata adds `phases: { new, demolished }`: the full ids
+of the new members (the others are existing) and the demolished members as data. `setPhases` reads
+it (a set without it is all new). The member listing gives each member's `phase` and the owner's
+`demolished`; the takeoff (`takeoffModel`) puts each member's phase on it and the demolished
+members and the faces of demolished features in `input.demolished`, and `phaseInput` makes the
+input of one phase (`new`: the new material, `existing`, `demolish`: the demolition list). Sheet
+faces take their feature's phase: patching an existing wall's sheathing around a changed opening
+is not counted. The views draw demolished members dashed (on the hidden-line layer) in framing
+elevations, floor plans and roof plans, a demolished door's swing or window symbol dashed in
+plans, and leave demolished openings out of the strings.
+
+An opening whose phase its wall contradicts is framed as the wall says, with a
+`phase-contradiction` warning: a new opening in a demolished wall is not framed, a demolished one
+in a new wall takes nothing out. The IFC adapter leaves demolished walls, openings, floors and
+roofs out (and an opening on a demolished wall), named in its notes.
+
+Not modelled: the corner and tee framing a neighbour frames against a demolished or new wall (a
+group's neighbours frame as they are), a floor's doubled joists under a demolished wall and a roof
+bearing on one (both read every wall in their `dependsOn`), and replacing a member in place (an
+override's `new` says the frame as built lacks it). The takeoff files (`files/`) write what
+stands: they have no phase option. `src/phases.regen.test.ts` covers the cases through regen.
+
 ## Member ids
 
 A member's id is local to the feature that owns it; its **full id** is

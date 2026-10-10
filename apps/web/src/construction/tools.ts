@@ -103,8 +103,8 @@ export function stockName(id: string | undefined): string {
 }
 
 /**
- * What an edit keeps of a feature the tools do not show: its member overrides (params) and their
- * nudges (`move_<n>` expressions).
+ * What an edit keeps of a feature the tools do not show: its member overrides and its phase
+ * (params, #1213) and the overrides' nudges (`move_<n>` expressions).
  */
 export function keptOverrides(existing: ExtensionFeature | undefined): {
   params: Record<string, unknown>;
@@ -114,6 +114,7 @@ export function keptOverrides(existing: ExtensionFeature | undefined): {
   const expressions: Record<string, StoredExpression> = {};
   if (!existing) return { params, expressions };
   if (existing.params.overrides !== undefined) params.overrides = existing.params.overrides;
+  if (existing.params.phase !== undefined) params.phase = existing.params.phase;
   for (const [k, v] of Object.entries(existing.expressions)) {
     if (/^move_[1-9][0-9]*$/.test(k)) expressions[k] = v;
   }

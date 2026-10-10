@@ -30,6 +30,17 @@ describe('construction settings for a reviewer', () => {
     ]);
   });
 
+  it('says when the document is marked as built, or no longer (#1213)', () => {
+    const was = { schemaVersion: 1, data: settings };
+    const now = { schemaVersion: 1, data: { ...settings, asBuilt: true } };
+    expect(constructionDataSummariser.summarise(was, now)).toEqual([
+      'Marked as built: features without a phase are existing',
+    ]);
+    expect(constructionDataSummariser.summarise(now, was)).toEqual([
+      'No longer marked as built: features without a phase are new',
+    ]);
+  });
+
   it('says when the data does not read, or was removed', () => {
     expect(
       constructionDataSummariser.summarise(undefined, {

@@ -7,6 +7,7 @@ import { importSource, writeBinaryStl } from '@manufakture/io';
 import { createNodeService } from '@manufakture/kernel/node';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import type { Session } from './session';
+import { PHASE_NOTE } from './queries';
 import { CABINET, PART, bracketDocument, cabinetDocument, shedDocument } from './test/fixtures';
 import { ok, seeded, type Seeded } from './test/setup';
 
@@ -634,6 +635,57 @@ describe('the shed', () => {
     // The base is what the session opened on, regenerated on an engine of its own, and kept.
     expect(ok(await s.baseQuantities())).toEqual(before);
     expect(ok(await s.baseQuantities({ owners: ['extension#5'] }))).toEqual(own);
+  });
+
+  it('counts a phase alone: new material, what stays, the demolition list (#1213)', async () => {
+    const s = await start(shedDocument());
+    const design = ok(await s.quantities());
+    expect(design.phased).toBeUndefined();
+    // A design: everything is new, and nothing comes out.
+    expect(ok(await s.quantities({ phase: 'new' })).takeoffs).toEqual(design.takeoffs);
+    expect(ok(await s.quantities({ phase: 'demolish' })).takeoffs).toEqual([]);
+    // Recorded as built, window 1 taken out.
+    const data = s.document.domains!.construction!;
+    const window = s.document.parts[0]!.features.find((f) => f.id === 'extension#5')!;
+    const params = (window as { params: Record<string, unknown> }).params;
+    ok(
+      await s.apply({
+        label: 'As built; take window 1 out',
+        commands: [
+          {
+            type: 'setDomainData',
+            namespace: 'construction',
+            schemaVersion: data.schemaVersion,
+            data: { ...(data.data as object), asBuilt: true },
+          },
+          {
+            type: 'editFeature',
+            partId: PART,
+            feature: { ...window, params: { ...params, phase: 'demolish' } },
+          },
+        ],
+      }),
+    );
+    const q = ok(await s.quantities());
+    expect(q.phased).toBe(true);
+    const each = (x: typeof q) =>
+      x.takeoffs[0]?.takeoff.totals.find((t) => t.group === 'framing' && t.unit === 'each')
+        ?.value ?? 0;
+    const fresh = ok(await s.quantities({ phase: 'new' }));
+    const kept = ok(await s.quantities({ phase: 'existing' }));
+    const gone = ok(await s.quantities({ phase: 'demolish' }));
+    for (const x of [fresh, kept, gone]) expect(x.cutList).toBeNull();
+    expect(each(fresh) + each(kept)).toBe(each(q));
+    const listed = ok(await s.members({ kind: 'members', partId: PART, owner: 'extension#5' }));
+    expect(listed).toMatchObject({ phase: 'demolish', count: 0, members: [] });
+    expect(listed.demolished.length).toBeGreaterThan(0);
+    // The window's framing comes out, and the studs that fill its place go in.
+    expect(each(gone)).toBeGreaterThanOrEqual(listed.demolished.length);
+    expect(each(fresh)).toBeGreaterThan(0);
+    expect(gone.notes).toContain(PHASE_NOTE);
+    // A scope of a phase and an owner: the window's members on the demolition list.
+    const own = ok(await s.quantities({ phase: 'demolish', owners: ['extension#5'] }));
+    expect(each(own)).toBe(listed.demolished.length);
   });
 
   it("lists a feature's members along its wall, and its overrides' statuses", async () => {

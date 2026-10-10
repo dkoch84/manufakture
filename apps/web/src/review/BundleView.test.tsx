@@ -1,7 +1,8 @@
 // A bundle's assembly view: the assembly and the pose asked for, each side's mate coordinates as
 // drawn and the pose's warnings, shown as text; every list in full (a page at a time) with what the
 // bundle left out counted, ids with their hidden characters shown; a side that could not be posed
-// shows nothing.
+// shows nothing. The quantities list the head's new material and demolition list when it has
+// construction phases.
 
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
@@ -84,5 +85,79 @@ describe('BundleView', () => {
     expect(listed.textContent).toContain('mate#12 at 600.00 mm');
     expect(head.textContent).toContain('and 3 more left out of the bundle');
     expect(head.textContent).toContain('and 4 more left out of the bundle');
+  });
+
+  it("lists the head's new material and demolition list when it has phases (#1213)", () => {
+    const row = (item: string, quantity: number) => ({
+      key: item,
+      item,
+      category: 'framing',
+      unit: 'each',
+      quantity,
+      extended: quantity,
+    });
+    const phased = {
+      quantities: {
+        rows: { items: [], omitted: 0 },
+        totals: [],
+        notes: [],
+        phases: {
+          newMaterial: [
+            {
+              list: 'takeoff Part 1',
+              rows: { items: [row('Jack stud', 4), row('Header', 4)], omitted: 0 },
+              totals: [],
+            },
+          ],
+          demolition: [
+            { list: 'takeoff Part 1', rows: { items: [row('Header', 2)], omitted: 0 }, totals: [] },
+          ],
+        },
+      },
+    } as unknown as ReviewBundle;
+    render(
+      <BundleView
+        bundle={phased}
+        scripts={[]}
+        commands={{ kind: 'waiting' }}
+        read={async () => null}
+      />,
+    );
+    expect(screen.getByTestId('review-newMaterial-0').querySelectorAll('li')).toHaveLength(2);
+    expect(screen.getByTestId('review-newMaterial-0').textContent).toContain('Jack stud: 4 each');
+    expect(screen.getByTestId('review-demolition-1').textContent).toContain('Header: 2 each');
+    expect(screen.queryByText('No quantity changed.')).toBeNull();
+  });
+
+  it('pages a crafted bundle with thousands of phase lists, and counts what it leaves out', () => {
+    const one = {
+      list: 'takeoff Part 1',
+      rows: { items: [{ item: 'Stud', unit: 'each', quantity: 1 }], omitted: 0 },
+      totals: [],
+    };
+    const crafted = {
+      quantities: {
+        rows: { items: [], omitted: 0 },
+        totals: [],
+        notes: [],
+        phases: {
+          newMaterial: Array.from({ length: 5_000 }, () => one),
+          demolition: Array.from({ length: 3_000 }, () => one),
+        },
+      },
+    } as unknown as ReviewBundle;
+    render(
+      <BundleView
+        bundle={crafted}
+        scripts={[]}
+        commands={{ kind: 'waiting' }}
+        read={async () => null}
+      />,
+    );
+    // One page of lists is drawn; the rest is a button away, and what is past the cap is counted.
+    const shown = screen.getByTestId('review-phases');
+    expect(shown.children.length).toBe(50);
+    expect(screen.getByText('Show 50 more of 1950')).toBeTruthy();
+    expect(screen.getByText('and 6000 more left out of the bundle')).toBeTruthy();
   });
 });

@@ -609,3 +609,22 @@ describe('the construction registration (ADR 0015 decision 1)', () => {
     expect(registered).toEqual(['construction']);
   });
 });
+
+describe('domains.construction: as built (#1213)', () => {
+  it('reads, round-trips and refuses asBuilt', () => {
+    const data = read({ ...full(), asBuilt: true } as Json);
+    expect(data.stored.asBuilt).toBe(true);
+    expect(data.settings.asBuilt).toBe(true);
+    const written = writeConstructionData(data.stored);
+    if (!written.ok || written.value === undefined) throw new Error('nothing written');
+    expect((written.value.data as Record<string, unknown>).asBuilt).toBe(true);
+    expect(read(written.value.data).stored).toEqual(data.stored);
+    // False is the default, and is not written.
+    const design = writeConstructionData({ ...data.stored, asBuilt: false });
+    expect(design.ok && design.value && Object.keys(design.value.data as object)).not.toContain(
+      'asBuilt',
+    );
+    expect(read(full()).stored.asBuilt).toBeUndefined();
+    refused({ ...full(), asBuilt: 'yes' } as Json, ['asBuilt']);
+  });
+});

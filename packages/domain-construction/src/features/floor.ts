@@ -9,8 +9,9 @@
 //   side; `long` the longer; the expression `direction`, an angle in plan, overrides both),
 //   `blocking` (`none` or `mid-span`), `skids` (`{ stock, count }`), `doubleUnderWalls` (with an
 //   outline from points or a sketch, the walls in `dependsOn` stand on the floor and those
-//   running along the joists get doubled joists; default true) and `overrides` (per-member, as a
-//   wall's). Lengths are expressions: `spacing` and `layoutOrigin` (over the floor type's),
+//   running along the joists get doubled joists; default true), `overrides` (per-member, as a
+//   wall's) and `phase` (#1213, as a wall's: a demolished floor makes no subfloor body, so it has
+//   no operation). Lengths are expressions: `spacing` and `layoutOrigin` (over the floor type's),
 //   `skidOverhang`, and `move_<n>`.
 // - **Elevation**: the level's elevation is the top of the subfloor, where the walls stand. The
 //   joists and rims sit below it by the subfloor's thickness, and skids below them.
@@ -66,6 +67,7 @@ import {
   type FloorWall,
   type FrameFloorInput,
 } from '../framing/floor';
+import type { Phase } from '../members';
 import { FramingInputError } from '../framing/wall';
 import { DATA_ID_PATTERN, findLevel } from '../levels';
 import { stockThickness } from '../stock';
@@ -86,6 +88,9 @@ import {
   planSegments,
   readOptionalCount,
   readOverrides,
+  readPhaseParam,
+  featurePhase,
+  phaseField,
   readWallMetadata,
   resolveOverrides,
   stockData,
@@ -134,6 +139,8 @@ export interface FloorParams {
   readonly skids?: { readonly stock: string; readonly count: number };
   readonly doubleUnderWalls: boolean;
   readonly overrides: readonly StoredOverride[];
+  /** Its phase (#1213); absent: the document's default (`featurePhase`). */
+  readonly phase?: Phase;
 }
 
 /** The params migrations of `construction.floor` (none yet: version 1 is current). */
@@ -192,10 +199,13 @@ function readCurrent(params: Json): Read<FloorParams> {
       'skids',
       'doubleUnderWalls',
       'overrides',
+      'phase',
     ],
     [],
   );
   if (!keys.ok) return keys;
+  const phase = readPhaseParam(params);
+  if (!phase.ok) return phase;
   const level = readDataRef(own(params, 'level'), 'level', 'level');
   if (!level.ok) return level;
   const floorType = readDataRef(own(params, 'floorType'), 'floorType', 'floor type');
@@ -241,6 +251,7 @@ function readCurrent(params: Json): Read<FloorParams> {
     ...(skids.value === undefined ? {} : { skids: skids.value }),
     doubleUnderWalls: d !== false,
     overrides: overrides.value,
+    ...(phase.value === undefined ? {} : { phase: phase.value }),
   });
 }
 
@@ -387,6 +398,8 @@ export interface FloorMetadata {
   readonly top: number;
   /** The subfloor body's id, or null when the floor makes none. */
   readonly subfloor: string | null;
+  /** Its phase (#1213); absent: `new`. A demolished floor makes no subfloor body. */
+  readonly phase?: 'existing' | 'demolish';
 }
 
 export function readFloorMetadata(v: unknown): FloorMetadata | undefined {
@@ -702,6 +715,13 @@ function build(ctx: ExtensionContext<FloorParams>): {
     overrides: p.overrides.length === 0 ? undefined : resolveOverrides(p.overrides, v, stock),
   }) as FrameFloorInput;
 
+  const phase = featurePhase(ctx, p.phase);
+  if (phase === 'demolish' && f.operation !== undefined) {
+    throw new Refusal(
+      'a demolished floor makes no body: it has no operation (remove "operation")',
+      ['operation'],
+    );
+  }
   const makes = f.operation === 'new';
   if (makes && subfloor === undefined) {
     throw new Refusal(
@@ -709,7 +729,9 @@ function build(ctx: ExtensionContext<FloorParams>): {
       ['operation'],
     );
   }
-  const body = makes ? `${f.id}:layer/subfloor` : null;
+  // A demolished floor names its subfloor (the takeoff lists it for demolition).
+  const body =
+    makes || (phase === 'demolish' && subfloor !== undefined) ? `${f.id}:layer/subfloor` : null;
   const inputs: ExtrudeInput[] =
     body === null
       ? []
@@ -741,7 +763,14 @@ function build(ctx: ExtensionContext<FloorParams>): {
         ];
   return {
     inputs,
-    metadata: { kind: 'floor', level: level.id, input, top, subfloor: body },
+    metadata: {
+      kind: 'floor',
+      level: level.id,
+      input,
+      top,
+      subfloor: body,
+      ...phaseField(phase),
+    },
   };
 }
 
@@ -749,7 +778,12 @@ function build(ctx: ExtensionContext<FloorParams>): {
 export function translateFloor(ctx: ExtensionContext<FloorParams>): ExtensionOutput {
   try {
     const { inputs, metadata } = build(ctx);
-    return { inputs, metadata: toJson(metadata) };
+    // A demolished one keeps its metadata (its framing and faces are listed for demolition) and
+    // makes no body: what is built does not have it.
+    return {
+      inputs: metadata.phase === 'demolish' ? [] : inputs,
+      metadata: toJson(metadata),
+    };
   } catch (error) {
     if (error instanceof Refusal) return failure(error);
     throw error;

@@ -17,17 +17,27 @@
 // of several), so a row's sources name bodies the viewport can pick; `bodies` maps each face to
 // the bodies it covers. A layer with no sheet stock (a thickness only) cannot be counted in
 // sheets, and `notes` says so.
+//
+// Phases (#1213, `phases.ts`): members carry the phase their set's metadata gives them, and the
+// demolished members go to `demolished`; a sheet face takes its feature's phase (a wall's,
+// floor's or roof's; a gable fill its roof's), and those of demolished features go to
+// `demolished` too. A wall's faces are cut by the openings that are there when the work is done
+// (a demolished wall's: by those that were there as built). `phaseInput` makes the input of a new
+// material or a demolition list. A model with no phases makes the input it made before them.
 
 import type { ExtensionFeature, ManufaktureDocument } from '@manufakture/core';
 import type { FeatureResult, MemberData } from '@manufakture/regen';
 import type { StockData } from '@manufakture/stock';
 import { CONSTRUCTION_NAMESPACE, type ConstructionSettings } from '../data';
 import {
+  metadataPhase,
   readOpeningMetadata,
   readWallMetadata,
   type OpeningMetadata,
   type WallMetadata,
 } from '../features/common';
+import type { Phase } from '../members';
+import { setPhases } from '../phases';
 import { readFloorMetadata } from '../features/floor';
 import { readRoofMetadata, type RoofMetadata } from '../features/roof';
 import { roofSheathingFaces, subfloorFace, wallFace, type FaceOpening } from './faces';
@@ -223,6 +233,8 @@ export interface TakeoffMemberSet {
   /** The domain that framed it. */
   namespace: string;
   members: readonly MemberData[];
+  /** What the member stage returned beside the members: the phases (#1213) are read from it. */
+  metadata?: unknown;
 }
 
 export interface TakeoffSources {
@@ -266,8 +278,10 @@ export function takeoffModel(src: TakeoffSources): TakeoffModel {
   };
   const roofs: RoofMetadata[] = [];
   const hosts: [string, string][] = [];
+  const phaseOf = new Map<string, Phase>();
   for (const f of src.features) {
     if (!isConstruction(f, featureOf.get(f.featureId))) continue;
+    phaseOf.set(f.featureId, metadataPhase(f.metadata));
     const wall = readWallMetadata(f.metadata);
     if (wall) {
       walls.set(f.featureId, wall);
@@ -333,23 +347,45 @@ export function takeoffModel(src: TakeoffSources): TakeoffModel {
       const layer = type?.layers.find((l) => l.id === layerId);
       return layer && layer.kind !== 'framing' ? layer.stock : undefined;
     };
-    wallFaces(wallId, meta, stockOf, openings.get(wallId) ?? [], gables, out);
+    // The openings there when the work is done; a demolished wall's, those there as built.
+    const gone: Phase = meta.phase === 'demolish' ? 'new' : 'demolish';
+    const holes = (openings.get(wallId) ?? []).filter((o) => metadataPhase(o) !== gone);
+    wallFaces(wallId, meta, stockOf, holes, gables, out);
   }
   for (const meta of roofs) roofFaces(meta, out);
 
   const members: TakeoffMember[] = [];
+  const demolishedMembers: TakeoffMember[] = [];
   const ids = new Set<string>();
+  let phased = [...phaseOf.values()].some((p) => p !== 'new');
   for (const set of src.sets) {
     if (set.namespace !== CONSTRUCTION_NAMESPACE) continue;
+    const phases = setPhases(set.metadata);
+    phased ||= phases.phased;
     for (const m of set.members) {
-      members.push(m as TakeoffMember);
-      ids.add(`${m.owner}:${m.id}`);
+      const full = `${m.owner}:${m.id}`;
+      members.push(
+        phases.phased
+          ? { ...(m as TakeoffMember), phase: phases.phaseOf(full) }
+          : (m as TakeoffMember),
+      );
+      ids.add(full);
     }
+    for (const m of phases.demolished) demolishedMembers.push({ ...m, phase: 'demolish' });
+  }
+  // Faces by their feature's phase: a gable fill is its roof's.
+  const faces: SheetFace[] = [];
+  const demolishedFaces: SheetFace[] = [];
+  for (const face of out.faces) {
+    const phase = phaseOf.get(face.owner) ?? 'new';
+    if (phase === 'demolish') demolishedFaces.push({ ...face, phase });
+    else faces.push(phased ? { ...face, phase } : face);
   }
   return {
     input: {
       members,
-      faces: out.faces,
+      faces,
+      ...(phased ? { demolished: { members: demolishedMembers, faces: demolishedFaces } } : {}),
       levels,
       ...(src.stock === undefined ? {} : { stock: src.stock }),
       settings: takeoffSettings(src.settings),
@@ -359,3 +395,33 @@ export function takeoffModel(src: TakeoffSources): TakeoffModel {
     notes: out.notes,
   };
 }
+
+/**
+ * The takeoff input of one phase (#1213): `new` (new material: what the work adds) or `existing`
+ * (what stays as built), from the design's members and faces; `demolish` (the demolition list),
+ * from what the design takes out. A member or face with no phase is new.
+ */
+export function phaseInput(
+  input: ConstructionTakeoffInput,
+  phase: Phase,
+): ConstructionTakeoffInput {
+  const rest = { ...input };
+  delete (rest as { demolished?: unknown }).demolished;
+  if (phase === 'demolish') {
+    return {
+      ...rest,
+      members: input.demolished?.members ?? [],
+      faces: input.demolished?.faces ?? [],
+    };
+  }
+  const of = (x: { phase?: Phase }) => (x.phase ?? 'new') === phase;
+  return {
+    ...rest,
+    members: input.members.filter(of),
+    faces: (input.faces ?? []).filter(of),
+  };
+}
+
+/** Whether a takeoff input has phases (a feature with one, or a set the member stage phased). */
+export const hasPhases = (input: ConstructionTakeoffInput): boolean =>
+  input.demolished !== undefined;

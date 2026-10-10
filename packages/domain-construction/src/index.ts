@@ -23,14 +23,17 @@ export {
 } from './geom';
 export {
   MEMBER_BUDGET,
+  PHASES,
   countByRole,
   memberCorners,
   shapeKey,
   type Cut,
   type Member,
+  type Phase,
   type Role,
   type StockRef,
 } from './members';
+export { frameWithPhases, pieceKey, setPhases, type GroupPhases, type SetPhases } from './phases';
 export {
   MAX_ADDED,
   formatAddedMemberId,
@@ -202,6 +205,7 @@ export {
   WALL_TYPE,
   addAtExpression,
   addZExpression,
+  metadataPhase,
   moveExpression,
   readOpeningMetadata,
   readWallMetadata,
@@ -391,6 +395,8 @@ export {
 } from './takeoff/display';
 export {
   faceSpans,
+  hasPhases,
+  phaseInput,
   takeoffModel,
   takeoffSettings,
   type TakeoffMemberSet,

@@ -5,18 +5,29 @@
 // add it, #1214), and each per-member override its params hold, with the status the last framing
 // gave it.
 //
+// With phases (#1213, `phases.ts`), each member says whether it is existing or new, the feature
+// its own phase, and the members the design takes out are listed apart, as `demolished`.
+//
 // Plain data in, plain data out: the caller passes the part's feature results (for the metadata
 // the translators returned) and the member sets as the last regen left them (members, and the
-// group metadata whose `overrides` list carries each override's status).
+// group metadata whose `overrides` list carries each override's status and whose `phases` the
+// members' phases).
 
 import type { FeatureResult } from '@manufakture/regen';
-import { readOpeningMetadata, readWallMetadata, planSegments, type P2 } from './features/common';
+import {
+  metadataPhase,
+  readOpeningMetadata,
+  readWallMetadata,
+  planSegments,
+  type P2,
+} from './features/common';
 import type { PlanSegment, WallMetadata } from './features/common';
 import { readFloorMetadata } from './features/floor';
 import { readRoofMetadata } from './features/roof';
 import type { MemberOverride } from './framing/wall';
 import { memberFullId, parseAddedMemberId, parseWallMemberId } from './member-ids';
-import { memberCorners, type StockRef } from './members';
+import { memberCorners, type Phase, type StockRef } from './members';
+import { setPhases } from './phases';
 import type { Placement, Vec3 } from './geom';
 
 /**
@@ -55,6 +66,11 @@ export interface ListedMember {
   readonly above: { readonly from: number; readonly to: number } | null;
   /** Present on a member the owner's `add` params add (`add3`, `add3-2`): its layout does not. */
   readonly added?: true;
+  /**
+   * Its phase (#1213): `existing` or `new` for a member of the design (`new` when the group has
+   * no phases), `demolish` for one of `MemberListing.demolished`.
+   */
+  readonly phase: Phase;
 }
 
 /** One override the owner's params hold, in their order. */
@@ -75,6 +91,8 @@ export interface ListedOverride {
   readonly stock?: string;
   /** How far it moves the member along the wall (or across a floor or roof), mm. */
   readonly move?: number;
+  /** The phase it gives the member (#1213). */
+  readonly phase?: Phase;
 }
 
 export type MemberOwnerKind = 'wall' | 'opening' | 'floor' | 'roof';
@@ -89,10 +107,14 @@ export interface MemberListing {
   readonly group: string;
   /** False when the last regen has no members for the group (it failed, or did not run). */
   readonly framed: boolean;
-  /** How many members the owner has. */
+  /** The feature's phase (#1213): its `phase` param, or the document's default. */
+  readonly phase: Phase;
+  /** How many members the owner has (in the design: demolished ones are not counted). */
   readonly count: number;
   /** Sorted along the wall (segment, then centre, then height), else in framing order. */
   readonly members: readonly ListedMember[];
+  /** Members of the owner the design takes out (#1213), sorted as `members`; phase `demolish`. */
+  readonly demolished: readonly ListedMember[];
   readonly overrides: readonly ListedOverride[];
 }
 
@@ -210,7 +232,12 @@ function segmentOf(
   return best;
 }
 
-function listed(m: ListableMember, owner: Owner, segments: readonly PlanSegment[]): ListedMember {
+function listed(
+  m: ListableMember,
+  owner: Owner,
+  segments: readonly PlanSegment[],
+  phase: Phase,
+): ListedMember {
   const corners = memberCorners(m);
   const centre = corners
     .reduce<Vec3>((c, p) => [c[0] + p[0] / 8, c[1] + p[1] / 8, c[2] + p[2] / 8], [0, 0, 0])
@@ -223,6 +250,7 @@ function listed(m: ListableMember, owner: Owner, segments: readonly PlanSegment[
     length: round(m.length),
     centre,
     ...(parseAddedMemberId(m.id) === undefined ? {} : { added: true as const }),
+    phase,
   };
   if (owner.wall === undefined || segments.length === 0) {
     return { ...base, along: null, above: null };
@@ -252,17 +280,23 @@ export function memberListing(src: MemberListingSources): MemberListing | undefi
   if (owner === undefined) return undefined;
   const set = src.sets.find((s) => s.group === owner.group);
   const segments = owner.wall ? planSegments(owner.wall.points, owner.wall.closed) : [];
+  const phases = setPhases(set?.metadata);
   const members = (set?.members ?? [])
     .filter((m) => m.owner === src.owner)
-    .map((m) => listed(m, owner, segments));
+    .map((m) => listed(m, owner, segments, phases.phaseOf(memberFullId(m))));
+  const demolished = phases.demolished
+    .filter((m) => m.owner === src.owner)
+    .map((m) => listed(m, owner, segments, 'demolish'));
   if (owner.wall !== undefined) {
-    members.sort(
-      (a, b) =>
-        a.along!.segment - b.along!.segment ||
-        a.along!.centre - b.along!.centre ||
-        a.above!.from - b.above!.from ||
-        a.local.localeCompare(b.local),
-    );
+    for (const list of [members, demolished]) {
+      list.sort(
+        (a, b) =>
+          a.along!.segment - b.along!.segment ||
+          a.along!.centre - b.along!.centre ||
+          a.above!.from - b.above!.from ||
+          a.local.localeCompare(b.local),
+      );
+    }
   }
   const statuses = statusesOf(set?.metadata, src.owner);
   const overrides = owner.overrides.map((o, i): ListedOverride => {
@@ -279,6 +313,7 @@ export function memberListing(src: MemberListingSources): MemberListing | undefi
       ...(o.delete ? { delete: true as const } : {}),
       ...(o.stock === undefined ? {} : { stock: o.stock.id }),
       ...(o.move === undefined || o.move === 0 ? {} : { move: round(o.move) }),
+      ...(o.phase === undefined ? {} : { phase: o.phase }),
     };
   });
   return {
@@ -287,8 +322,10 @@ export function memberListing(src: MemberListingSources): MemberListing | undefi
     ...(owner.host === undefined ? {} : { wall: owner.host, segment: owner.segment! }),
     group: owner.group,
     framed: set !== undefined,
+    phase: metadataPhase(src.features.find((f) => f.featureId === src.owner)?.metadata),
     count: members.length,
     members,
+    demolished,
     overrides,
   };
 }

@@ -18,34 +18,59 @@ window has its centre line at 96" (an opening's `position` is the distance to it
 [`apps/mcp/test/scenarios/remodel-frame.test.ts`](../../apps/mcp/test/scenarios/remodel-frame.test.ts),
 in the `mcp` vitest project, through the real MCP server in process (about 6 s).
 
-What it does, as an agent would:
+Since follow-up 1 (#1213) the shed is recorded as built in the test's library (its construction
+data has `"asBuilt": true`, so every wall, opening, floor and roof without a `phase` is existing),
+as a surveyed shed would be. What it does, as an agent would:
 
-1. Opens a session on the shed and reads the takeoff as built (156 framing members).
-2. Moves the door with one `editFeature` (position 72" to 96"), and adds the window with one
-   `addFeature` (`extension#$window`, which becomes `extension#10`). No regen errors.
+1. Opens a session on the shed and reads the takeoff as built (156 framing members; every member
+   `existing`, nothing demolished).
+2. Moves the door as a remodel, in one `apply`: an `editFeature` marks the door `demolish` where
+   it is (72"), and an `addFeature` adds its copy, `new`, at 96" (`extension#$door`, which becomes
+   `extension#10`). Adds the window with one `addFeature`, `new` (`extension#$window`, which
+   becomes `extension#11`). No regen errors. (Before #1213 the door moved with one `editFeature` of
+   its position, and nothing could say what was new.)
 3. Renders the back and right walls, members only, base against head.
-4. Works out "new lumber" as the surface allows: the member full ids of the back wall, the right
-   wall, the door and the window, read per feature with `get_object`'s `members` query, before and
-   after, as sets (they match the takeoff's framing row sources).
-5. Exports the takeoff (`takeoff-csv`) and a framing elevation of the back wall
+4. Reads per feature with `get_object`'s `members` query what is new and what comes out: each
+   member's `phase` and each feature's `demolished` members. Then the new lumber with
+   `get_quantities` `phase: "new"` and the demolition list with `phase: "demolish"`.
+5. Exports the takeoff (`takeoff-csv`) and a framing elevation of the right wall
    (`drawing-svg`), made with one `addConstructionSet` command (since follow-up 7, #1219; it
-   built the drawing, sheet and view by hand with `addDrawing` before).
-6. Submits, and reads the stored review bundle's quantities.
+   built the drawing, sheet and view by hand with `addDrawing` before): the old door's framing
+   is dashed.
+6. Submits, and reads the stored review bundle's quantities: the change, and the new material and
+   the demolition list.
 
 Then the gap probes, each asserting today's behaviour so that a fix flips the test (they are named
-`GAP PROBE` in the test): a `phase` param refused; and a partial `setDomainData` that breaks every
-wall. Three more probes are now normal tests: two branches from the same Main whose merges
-replaced each other's wall and domain data whole (since follow-up 4, #1216, the two merge field by
-field), an as-built wall where a stud could be nudged off the layout but none added (since
-follow-up 2, #1214, the wall adds an extra stud and a block, counted and drawn), and a spacing
-change that lost one override and silently re-targeted two others (since follow-up 3, #1215, each
-override finds its stud by the position it recorded, and is reported `moved` or `lost`).
+`GAP PROBE` in the test): a partial `setDomainData` that breaks every wall. Four more probes are
+now normal tests: a door and a stud marked existing, new or demolished (since follow-up 1, #1213,
+a `phase` param on the feature and on a member override; it was refused), two branches from the
+same Main whose merges replaced each other's wall and domain data whole (since follow-up 4, #1216,
+the two merge field by field), an as-built wall where a stud could be nudged off the layout but
+none added (since follow-up 2, #1214, the wall adds an extra stud and a block, counted and drawn),
+and a spacing change that lost one override and silently re-targeted two others (since follow-up
+3, #1215, each override finds its stud by the position it recorded, and is reported `moved` or
+`lost`).
 
-The id diff after step 2: added are the window's 13 members and `extension#3:s3`, `s4` (studs
-back in the door's old spot); removed are `extension#2:s5`, `s6`, `s7` (under the window) and
-`extension#3:s6`, `s7` (under the door's new spot). The door's own 8 members keep their ids, and
-the right wall's bottom plate pieces keep theirs with new lengths (two 4'2-1/2" pieces become
-6'2-1/2" and 2'2-1/2"), so none of them show as new. The bundle's totals say framing 156 to 166.
+The phases after step 2 (follow-up 1, #1213). New, 24 members: the window's 13, the door's 7 at
+its new place, `extension#3:s3`, `s4` (studs filling the door's old place) and the right wall's
+two new bottom plate pieces (6'2-1/2" and 2'2-1/2"). Demolished, 14: the old door's 7,
+`extension#2:s5`, `s6`, `s7` (under the window), `extension#3:s6`, `s7` (where the door goes) and
+the two old bottom plate pieces (4'2-1/2" each). The door's eighth member is a cripple over both
+headers: the old door's cripple at that layout slot is the same 2x4 in the same place, so it stays
+existing (phases follow the lumber, not its owner). The bundle's totals say framing 156 to 166
+(what stands), and its `phases` give the new material (24 members, 11 pieces of lumber to buy) and
+the demolition list (14 members). The `get_quantities` answer for `phase: "new"` without detail is
+6,145 characters, and the compare answer, with its `phases`, 7,769.
+
+Limits: the `export` tool's `takeoff-csv` and `takeoff-pdf` have no phase option (they write what
+stands), and the app's Takeoff panel has no phase filter; the new material and the demolition list
+are `get_quantities` answers and the bundle's. Phases are set by an agent: the app shows them but
+has no field for them.
+
+Before #1213 the id diff was all there was: added were the window's 13 members and
+`extension#3:s3`, `s4`; removed were `extension#2:s5`, `s6`, `s7` and `extension#3:s6`, `s7`; the
+door's own 8 members kept their ids, and the right wall's bottom plate pieces kept theirs with new
+lengths, so none of them showed as new.
 
 ## The live run
 
@@ -90,7 +115,7 @@ being followed more than the agent finding its way.
 
 | Gap                                                                                               | Hypothesis from plan or found | Confirmed / Not confirmed / Partly | Evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | Suggested follow-up                                                                                                                                                                   |
 | ------------------------------------------------------------------------------------------------- | ----------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Members and features have no phase (existing, new, demolish)                                      | Plan                          | Confirmed                          | A `phase` param on the door is refused (`unknown field "phase"`), and on a member override too. Takeoff rows have only the categories framing, linear, faces, lumber, sheet; totals count the whole frame (166 members). The bundle shows base and head totals (156 to 166). The moved door's members keep their ids, so a diff says the door needs nothing. The live agent's answer was a net delta full of layout reshuffles. Drawings draw the head's members only: a framing elevation's params are `kind`, `wall`, `segment`, `from`, `openings`, `marks`, with nothing that could dash removals.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | Phases for construction features and members, a "new material" and a "demolition" takeoff, and dashed removals on framing elevations and plans                                        |
+| Members and features have no phase (existing, new, demolish)                                      | Plan                          | Confirmed                          | Closed by follow-up 1 (#1213). Found: a `phase` param on the door and on a member override was refused (`unknown field "phase"`); the takeoff counted the whole frame; the moved door kept its member ids, so a diff said it needed nothing; drawings could not dash removals. Now walls, openings, floors and roofs have a `phase` param (`existing`, `new`, `demolish`; absent: `existing` in a document whose construction data has `"asBuilt": true`, else `new`), and an override may set its member's (`phases.ts`, packages/domain-construction). A phased wall is framed as built and as designed: a design member the as-built frame has too (same stock and length, same place) is existing, others new; as-built members the design drops are demolished, kept as data in the set's metadata. A demolished opening cuts nothing; moving the door is demolishing it and adding it anew. The scenario's new lumber is the window's members, the door's at its new place, the studs filling its old place and two plate pieces (24); 14 come out. `get_quantities` takes `phase`, the `members` query gives phases and `demolished`, elevations and plans draw demolished members dashed, and the bundle's quantities add `phases`.                                                                                                 | Phases for construction features and members, a "new material" and a "demolition" takeoff, and dashed removals on framing elevations and plans (1): done                              |
 | An as-built frame off the layout cannot be modelled                                               | Plan                          | Partly                             | Closed by follow-up 2 (#1214). Found: a stud could be nudged (`move_<n>`), deleted or restocked, but an override naming a member the wall does not have (`extra1`) was reported lost ("the wall no longer has that member", although it never had it), so no stud could be added. Now a wall or opening lists members its layout does not make in its `add` params, `{ id, role, stock?, plies?, segment? }` (id `add<k>`, role stud or blocking), placed by `add<k>_at` (along the wall from the segment's first point; an opening's from its centre line) and `add<k>_z` (a block's centre above the base). A stud stands on the plates (`plies: 2` makes `add<k>` and `add<k>-2`); a block fits between the verticals either side, as overridden (`frameWall`, `framing/wall.ts`). They are the feature's, take overrides, are counted and drawn, and the `members` query marks them `added: true`; one that does not fit warns `added-member-left-out`. Without `add` nothing changes. The probe's left wall adds a stud 44" along and a block 48" up, in the takeoff and the render; its `extra1` override now says "never had" and points to `add`, while `s40` still says "no longer".                                                                                                                                               | Added members on a wall (an extra stud, blocking, a doubled stud) at a position along the wall, owned by the wall, counted in the takeoff (2): done                                   |
 | Changing the layout renumbers studs and orphans per-member changes                                | Plan                          | Confirmed, and worse               | Closed by follow-up 3 (#1215). Found: left wall overrides delete `s4` and `s8` and nudge `s3` by 3", then the spacing goes from 16" to 24": `s8` was lost with a warning, while the delete of `s4` and the nudge of `s3` silently applied to the studs that inherited their ids (centred at 96" and 72" instead of 64" and 48"), with no warning. Now a wall's override may record `at`: where its member was when it was made, the member's `along.centre` in mm (the app writes it; an agent reads it from the `members` query). An override of a layout stud (`s<k>`) or block (`block<r>:<n>`) with `at` applies to the stud (or block of that row) centred within 1/2" of it, whatever its id: `moved` with `appliedTo` and an `override-moved` warning when the id changed, `lost` with a warning when none is there (`frameWall`, `framing/wall.ts`). Overrides without `at`, and those of plates, corners, openings and added members (ids the layout does not renumber), match by id as before. The probe's `s4` and `s8` are now lost (no stud at 64" or 128") and the nudge of `s3` moves to `s2`, the stud at 48".                                                                                                                                                                                                              | Anchor each override to its member's position along the wall: report `moved` when the slot id changes, `lost` when none is there, and warn on any override whose slot moved (3): done |
 | `setDomainData` replaces a whole namespace: the command diff is unreadable without the summariser | Plan                          | Not confirmed (for the diff)       | The construction domain has a summariser (`constructionDataSummariser`), used by both the bundle's domain section and the `setDomainData` command summary. The replace-whole part is real and a trap for an agent: writing only `{ framing: ... }` drops every level and type, and every wall, the floor and the roof fail (dry run).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | Covered by the next row; the authoring guide should say "read the namespace, change it, send it whole" with an example                                                                |
@@ -103,7 +128,9 @@ being followed more than the agent finding its way.
 
 One per confirmed gap, ready to file (not filed here):
 
-1. **Construction phases: existing, new, demolish.** Add a phase to construction features
+1. **Construction phases: existing, new, demolish.** Done (#1213): see the gap row, "Remodelling:
+   existing, new and demolished" in `docs/agents/authoring.md`, and "Phases" in the
+   `domain-construction` README. Add a phase to construction features
    (walls, openings, floors, roofs) and to per-member overrides, with "existing" the default for a
    document marked as-built. Regen keeps the demolished members as data. The takeoff gains a
    phase filter (new only, demolition list), framing elevations and plans draw demolished members

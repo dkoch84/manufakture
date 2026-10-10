@@ -17,7 +17,14 @@ import {
   type TeeMemberName,
   type WallMemberId,
 } from '../member-ids';
-import { MEMBER_BUDGET, memberCorners, type Member, type Role, type StockRef } from '../members';
+import {
+  MEMBER_BUDGET,
+  memberCorners,
+  type Member,
+  type Phase,
+  type Role,
+  type StockRef,
+} from '../members';
 import { IntervalIndex, firstIndex, overlaps, splice, subtract, type Interval } from './intervals';
 
 // Input --------------------------------------------------------------------------------------
@@ -187,6 +194,12 @@ export interface MemberOverride {
    * and absent on overrides made before #1215, which match by id alone.
    */
   readonly at?: number;
+  /**
+   * The member's phase (#1213), when the override sets it: `demolish` takes it out of the frame
+   * (it is listed as demolished), `new` makes it new work (not in the frame as built), `existing`
+   * keeps it as built. The generators ignore it; the member stage applies it (`phases.ts`).
+   */
+  readonly phase?: Phase;
 }
 
 /**

@@ -437,9 +437,11 @@ All plain JSON; text from the document (names, labels, notes) travels only in da
   `reviewed: false` (ADR 0016 decision 6: on an agent
   branch nothing is reviewed). A `QuantityScope` narrows what is counted before the takeoff is
   made: `owners` keeps the framing members and sheet faces those features own (no cut list), so
-  the purchase rows and layouts are theirs alone. `baseQuantities(scope)` is the same for the
-  branch's base version, regenerated once on an engine of its own (as the review bundle's base
-  is) and kept until the base changes: the MCP server's `get_quantities` `compare`.
+  the purchase rows and layouts are theirs alone; `phase` (#1213) keeps one construction phase:
+  `new` (the new material), `existing` or `demolish` (the demolition list), again with no cut
+  list, and the answer has `phased: true` when the model has phases. `baseQuantities(scope)` is
+  the same for the branch's base version, regenerated once on an engine of its own (as the review
+  bundle's base is) and kept until the base changes: the MCP server's `get_quantities` `compare`.
 - `errors()`: every regen error and warning of the head (features, instances, mates, reference
   imports), errors first.
 - `history()`: the branch's log entries with revisions, causes, labels and times.

@@ -11,6 +11,9 @@
 //   as the roof translator builds the sheathing bodies (`features/roof.ts`).
 // - Members whose owner is not in the model (a feature that failed this regen) are left out and
 //   named in `notes`; the writer refuses members of unknown owners.
+// - What a remodel takes out (#1213, phase `demolish`) is left out, named in `notes`: a demolished
+//   wall, opening, floor or roof, and an opening on a demolished wall. Demolished members are not
+//   in the member sets' members, so they never reach the file.
 
 import type {
   IfcBuildingInput,
@@ -24,7 +27,7 @@ import type {
   IfcWallInput,
 } from '@manufakture/io';
 import { DISCLAIMER_SHORT } from '../disclaimer';
-import { readOpeningMetadata, readWallMetadata } from '../features/common';
+import { metadataPhase, readOpeningMetadata, readWallMetadata } from '../features/common';
 import { readFloorMetadata } from '../features/floor';
 import { readRoofMetadata, sheathingOutlines, type RoofMetadata } from '../features/roof';
 import { resolveRoofSettings } from '../framing/roof';
@@ -111,9 +114,16 @@ export function constructionIfcBuilding(src: ConstructionIfcSource): Constructio
   const openings: IfcOpeningInput[] = [];
   const floors: IfcFloorInput[] = [];
   const roofs: IfcRoofInput[] = [];
+  const demolished = new Set<string>();
   for (const f of src.features) {
     if (f.status !== undefined && f.status !== 'ok') continue;
     const id = f.featureId;
+    // What the work takes out (#1213) is not in the building the file describes.
+    if (metadataPhase(f.metadata) === 'demolish') {
+      demolished.add(id);
+      notes.push(`${name(id)} is left out: it is demolished.`);
+      continue;
+    }
     const wall = readWallMetadata(f.metadata);
     if (wall) {
       walls.push({
@@ -174,6 +184,10 @@ export function constructionIfcBuilding(src: ConstructionIfcSource): Constructio
   const wallIds = new Set(walls.map((w) => w.id));
   const hosted = openings.filter((o) => {
     if (wallIds.has(o.wall)) return true;
+    if (demolished.has(o.wall)) {
+      notes.push(`Opening ${o.name} is left out: its wall is demolished.`);
+      return false;
+    }
     notes.push(`Opening ${o.name} is left out: its wall did not build.`);
     return false;
   });

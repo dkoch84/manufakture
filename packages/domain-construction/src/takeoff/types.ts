@@ -9,11 +9,17 @@ import type { Price, StockData } from '@manufakture/stock';
 import type { SheetLayoutResult, StickLayoutResult } from '@manufakture/nesting';
 import type { TakeoffRow, TakeoffTotal } from '@manufakture/takeoff';
 import type { Vec2 } from '../geom';
-import type { Member } from '../members';
+import type { Member, Phase } from '../members';
 
 /** What the takeoff reads of a member: who owns it, what it is, its stock and blank length. */
 export type TakeoffMember = Pick<Member, 'id' | 'owner' | 'role' | 'length'> & {
   readonly stock: Pick<Member['stock'], 'id' | 'name' | 'width' | 'depth'>;
+  /**
+   * Its phase (#1213), as the member stage worked it out: `existing` or `new` in `members`,
+   * `demolish` in `demolished`. Absent: `new` (no phases). The takeoff itself does not read it;
+   * a phase filter picks the members it counts (`phaseInput`).
+   */
+  readonly phase?: Phase;
 };
 
 /** The sheet layer a face belongs to. */
@@ -55,6 +61,8 @@ export interface SheetFace {
   readonly orientation?: 'horizontal' | 'vertical';
   /** The corner full sheets start from: the face's start (x = 0) or its end. Default `start`. */
   readonly from?: 'start' | 'end';
+  /** Its owner's phase (#1213), as `TakeoffMember.phase`. Absent: `new`. */
+  readonly phase?: Phase;
 }
 
 export interface ConstructionTakeoffSettings {
@@ -81,8 +89,18 @@ export interface ConstructionTakeoffSettings {
 }
 
 export interface ConstructionTakeoffInput {
+  /** The members of the design: what stands when the work is done. */
   readonly members: readonly TakeoffMember[];
   readonly faces?: readonly SheetFace[];
+  /**
+   * What the design takes out (#1213): demolished members, and the sheet faces of demolished
+   * walls, floors and roofs. Not counted by `constructionTakeoff`; `phaseInput` makes the input of
+   * a demolition list from them.
+   */
+  readonly demolished?: {
+    readonly members: readonly TakeoffMember[];
+    readonly faces: readonly SheetFace[];
+  };
   /** The level each feature is on, by feature id, for the per-level subtotals. */
   readonly levels?: Readonly<Record<string, string>>;
   /** The document's stock overrides: actual sizes and prices (`domains.stock`). */

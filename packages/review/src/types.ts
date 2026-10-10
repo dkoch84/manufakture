@@ -276,12 +276,36 @@ export interface QuantityTotalDelta {
   head: number | null;
 }
 
+/** One row of a phase list (#1213): its amount at head. */
+export interface PhaseRow {
+  key: string;
+  item: string;
+  category: string;
+  unit: string;
+  quantity: number;
+  extended: number;
+}
+
+/** One takeoff of a phase at head: its rows and totals. */
+export interface PhaseList {
+  /** `takeoff <part name>`. */
+  list: string;
+  rows: Bounded<PhaseRow>;
+  totals: { group: string; unit: string; value: number }[];
+}
+
 export interface Quantities {
   /** Rows that differ between base and head. */
   rows: Bounded<QuantityDelta>;
   totals: QuantityTotalDelta[];
   /** What could not be counted, at either side. */
   notes: string[];
+  /**
+   * When the head's construction has phases (#1213): the head's takeoff of new material (what the
+   * work adds: what to buy) and of the demolition list (what it takes out), each whole, not a
+   * difference. Absent when the head has no phases.
+   */
+  phases?: { newMaterial: PhaseList[]; demolition: PhaseList[] };
 }
 
 // Merge preview ---------------------------------------------------------------------------------

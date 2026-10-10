@@ -1,5 +1,5 @@
 {
-  "surfaceVersion": "1.10.0",
+  "surfaceVersion": "1.11.0",
   "tools": [
     {
       "name": "apply",
@@ -1354,6 +1354,106 @@
               "count": {
                 "type": "number"
               },
+              "demolished": {
+                "items": {
+                  "additionalProperties": {},
+                  "properties": {
+                    "above": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": {},
+                          "properties": {
+                            "from": {
+                              "type": "number"
+                            },
+                            "to": {
+                              "type": "number"
+                            }
+                          },
+                          "required": ["from", "to"],
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "along": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": {},
+                          "properties": {
+                            "centre": {
+                              "type": "number"
+                            },
+                            "from": {
+                              "type": "number"
+                            },
+                            "segment": {
+                              "type": "number"
+                            },
+                            "to": {
+                              "type": "number"
+                            }
+                          },
+                          "required": ["from", "to", "segment", "centre"],
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "centre": {
+                      "items": {
+                        "type": "number"
+                      },
+                      "type": "array"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "length": {
+                      "type": "number"
+                    },
+                    "local": {
+                      "type": "string"
+                    },
+                    "phase": {
+                      "type": "string"
+                    },
+                    "role": {
+                      "type": "string"
+                    },
+                    "stock": {
+                      "additionalProperties": {},
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["id", "name"],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "local",
+                    "role",
+                    "stock",
+                    "length",
+                    "centre",
+                    "along",
+                    "above",
+                    "phase"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
               "framed": {
                 "type": "boolean"
               },
@@ -1429,6 +1529,9 @@
                     "local": {
                       "type": "string"
                     },
+                    "phase": {
+                      "type": "string"
+                    },
                     "role": {
                       "type": "string"
                     },
@@ -1454,7 +1557,8 @@
                     "length",
                     "centre",
                     "along",
-                    "above"
+                    "above",
+                    "phase"
                   ],
                   "type": "object"
                 },
@@ -1488,6 +1592,9 @@
                     "n": {
                       "type": "number"
                     },
+                    "phase": {
+                      "type": "string"
+                    },
                     "status": {
                       "type": "string"
                     },
@@ -1503,6 +1610,10 @@
               "owner": {
                 "type": "string"
               },
+              "phase": {
+                "enum": ["existing", "new", "demolish"],
+                "type": "string"
+              },
               "segment": {
                 "type": "number"
               },
@@ -1515,9 +1626,11 @@
               "kind",
               "group",
               "framed",
+              "phase",
               "count",
               "omitted",
               "members",
+              "demolished",
               "overrides"
             ],
             "type": "object"
@@ -1610,6 +1723,10 @@
                 "type": "array"
               }
             ]
+          },
+          "phase": {
+            "enum": ["existing", "new", "demolish"],
+            "type": "string"
           },
           "sessionId": {
             "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",

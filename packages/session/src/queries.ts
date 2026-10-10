@@ -15,6 +15,9 @@ import {
   documentConstruction,
   memberListing,
   takeoffModel,
+  hasPhases,
+  phaseInput,
+  type Phase,
   type ConstructionTakeoff,
   type ConstructionTakeoffInput,
   type MemberListing,
@@ -359,7 +362,10 @@ export interface MembersQuery {
   owner: string;
 }
 
-/** `memberListing` with the members past `MAX_MEMBER_RESULTS` left out and counted. */
+/**
+ * `memberListing` with the members past `MAX_MEMBER_RESULTS` left out and counted, in `members`
+ * and in `demolished` alike (`omitted` is both).
+ */
 export type MembersAnswer = MemberListing & { omitted: number };
 
 /**
@@ -393,11 +399,12 @@ export function membersOf(
       'That feature owns no framing members: ask for a built construction wall, opening, floor or roof.',
     );
   }
-  const omitted = Math.max(0, listing.members.length - MAX_MEMBER_RESULTS);
+  const over = (n: number) => Math.max(0, n - MAX_MEMBER_RESULTS);
   return done({
     ...listing,
-    members: omitted === 0 ? listing.members : listing.members.slice(0, MAX_MEMBER_RESULTS),
-    omitted,
+    members: listing.members.slice(0, MAX_MEMBER_RESULTS),
+    demolished: listing.demolished.slice(0, MAX_MEMBER_RESULTS),
+    omitted: over(listing.members.length) + over(listing.demolished.length),
   });
 }
 
@@ -1278,6 +1285,11 @@ export interface Quantities {
   takeoffs: { partId: string; takeoff: ConstructionTakeoff; notes: string[] }[];
   /** What could not be counted, for people. */
   notes: string[];
+  /**
+   * Present when a takeoff counted has construction phases (#1213): a feature with a phase, or
+   * an override that sets one. Then `phase` scopes are worth asking for.
+   */
+  phased?: true;
 }
 
 /**
@@ -1293,6 +1305,14 @@ export interface QuantityScope {
    * wall's.
    */
   owners?: readonly string[];
+  /**
+   * A construction phase (#1213): `new` counts the new material (the members and sheet faces the
+   * work adds), `existing` what stays as built, `demolish` the demolition list (what the work
+   * takes out). Part studios with nothing of that phase are left out, and so are the cut list
+   * and its hardware. With no phases in a model every member is new. Without this, the takeoff
+   * counts what stands when the work is done (existing and new).
+   */
+  phase?: Phase;
 }
 
 /**
@@ -1325,7 +1345,7 @@ export function quantitySources(ctx: Pick<QueryContext, 'document' | 'model'>): 
       const sets = ctx.model
         .sets(part.partId)
         .filter((s) => s.namespace === 'construction')
-        .map((s) => ({ namespace: s.namespace, members: s.members }));
+        .map((s) => ({ namespace: s.namespace, members: s.members, metadata: s.metadata }));
       if (sets.length === 0) continue;
       try {
         const model = takeoffModel({
@@ -1351,10 +1371,16 @@ export function quantitySources(ctx: Pick<QueryContext, 'document' | 'model'>): 
 export function quantitiesOf(sources: QuantitySources, scope: QuantityScope = {}): Quantities {
   const notes = [...sources.notes];
   const owners = scope.owners === undefined ? null : new Set(scope.owners);
-  const cutList = owners === null ? sources.cutList : null;
+  const cutList = owners === null && scope.phase === undefined ? sources.cutList : null;
   const takeoffs: Quantities['takeoffs'] = [];
+  let phased = false;
   for (const t of sources.takeoffs) {
     let input = t.input;
+    phased ||= hasPhases(input);
+    if (scope.phase !== undefined) {
+      input = phaseInput(input, scope.phase);
+      if (input.members.length === 0 && (input.faces ?? []).length === 0) continue;
+    }
     if (owners !== null) {
       const members = input.members.filter((m) => owners.has(m.owner));
       const faces = (input.faces ?? []).filter((f) => owners.has(f.owner));
@@ -1369,8 +1395,20 @@ export function quantitiesOf(sources: QuantitySources, scope: QuantityScope = {}
       );
     }
   }
-  return { reviewed: false, cutList, hardware: cutList?.hardware ?? [], takeoffs, notes };
+  if (scope.phase !== undefined && phased) notes.push(PHASE_NOTE);
+  return {
+    reviewed: false,
+    cutList,
+    hardware: cutList?.hardware ?? [],
+    takeoffs,
+    notes,
+    ...(phased ? { phased: true as const } : {}),
+  };
 }
+
+/** What a phase scope does not count (#1213). */
+export const PHASE_NOTE =
+  "Sheets are counted by their wall's, floor's or roof's phase: patching an existing wall's sheathing where an opening moved or was added is not counted.";
 
 /** Cut list, hardware and takeoffs of the last regen, as data, within `scope`. */
 export function quantities(ctx: QueryContext, scope: QuantityScope = {}): Quantities {

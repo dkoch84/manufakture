@@ -13,7 +13,8 @@ import {
   References,
   errorsOf,
   measure,
-  quantities,
+  quantitiesOf,
+  quantitySources,
   type Engine,
   type EngineApi,
   type ErrorLine,
@@ -52,6 +53,8 @@ export interface SideReport {
   bodiesOmitted: number;
   interference: Map<string, { pairs: InterferencePair[] } | { error: string }>;
   quantities: Quantities;
+  /** With construction phases (#1213): the new material and the demolition list. */
+  phases?: { new: Quantities; demolish: Quantities };
   errors: ErrorLine[];
 }
 
@@ -175,6 +178,20 @@ export class Workbench {
     for (const k of result.memberMeshes?.removed ?? []) this.#memberMeshes.delete(k);
   }
 
+  /** The quantities, and with construction phases (#1213) each phase's, from one read. */
+  #quantities(ctx: QueryContext): Pick<SideReport, 'quantities' | 'phases'> {
+    const sources = quantitySources(ctx);
+    const all = quantitiesOf(sources);
+    if (all.phased !== true) return { quantities: all };
+    return {
+      quantities: all,
+      phases: {
+        new: quantitiesOf(sources, { phase: 'new' }),
+        demolish: quantitiesOf(sources, { phase: 'demolish' }),
+      },
+    };
+  }
+
   #scene(document: ManufaktureDocument, result: RegenResult): SideReport['scene'] {
     const bodyMeshes = new Map<string, CachedBodyMesh>();
     const memberInstances = new Map<string, readonly MemberInstances[]>();
@@ -285,7 +302,7 @@ export class Workbench {
       bodies,
       bodiesOmitted: Math.max(0, all.length - LIMITS.bodies),
       interference,
-      quantities: quantities(ctx),
+      ...this.#quantities(ctx),
       errors: errorsOf(result, this.#references),
     };
   }

@@ -348,6 +348,12 @@ export const Inputs = {
       .describe(
         "Count only the framing members and sheet faces these features own (walls, openings, floors, roofs; an opening's members are its own, not its wall's). The takeoff is made for them alone: its lumber and sheets to buy are theirs. No cut list.",
       ),
+    phase: z
+      .enum(['existing', 'new', 'demolish'])
+      .optional()
+      .describe(
+        "Count only one construction phase: new (the new material: members and sheet faces the work adds, so its lumber and sheets are what to buy), existing (what stays as built) or demolish (the demolition list: what the work takes out). Sheets go by their wall's, floor's or roof's phase. No cut list. Without it, what stands when the work is done. The answer has phased: true when the model has phases.",
+      ),
     detail: z
       .boolean()
       .optional()
@@ -358,7 +364,7 @@ export const Inputs = {
       .boolean()
       .optional()
       .describe(
-        "Answer what changed instead: the base version's quantities against the head's, as the review bundle shows them (rows and totals that differ, each with base and head). lists, categories and owner apply to both sides first.",
+        "Answer what changed instead: the base version's quantities against the head's, as the review bundle shows them (rows and totals that differ, each with base and head). lists, categories, owner and phase apply to both sides first. Without phase, when the head has phases, also phases: the head's newMaterial and demolition takeoffs, whole.",
       ),
   }),
   get_errors: z.strictObject(session),
@@ -470,6 +476,28 @@ const ConnectorFrameOut = z
 
 const SpanOut = z.looseObject({ from: z.number(), to: z.number() });
 
+const MemberOut = z.looseObject({
+  id: z.string().describe('Full id, <owner>:<local>: what render and takeoff sources use.'),
+  local: z.string().describe('Local id: what an override names (s4, king-l, top1:2).'),
+  role: z.string(),
+  stock: z.looseObject({ id: z.string(), name: z.string() }),
+  length: z.number().describe('Blank length, mm.'),
+  centre: z.array(z.number()).describe('Centre of the blank, world mm.'),
+  along: SpanOut.extend({ segment: z.number(), centre: z.number() })
+    .nullable()
+    .describe(
+      "Wall and opening members: extent and centre along the wall segment, mm from the segment's first point (as an opening's position); null for floors and roofs.",
+    ),
+  above: SpanOut.nullable().describe(
+    "Wall and opening members: extent above the wall's base, mm (as an opening's sill).",
+  ),
+  phase: z
+    .string()
+    .describe(
+      'existing or new in members (new when the model has no phases), demolish in demolished. More values may be added later.',
+    ),
+});
+
 const MembersOut = z
   .looseObject({
     owner: z.string(),
@@ -480,26 +508,19 @@ const MembersOut = z
     framed: z
       .boolean()
       .describe('False when the last regen has no members for the group (it failed).'),
-    count: z.number().describe('Members the feature owns.'),
-    omitted: z.number().describe('Members not listed past the limit.'),
-    members: z.array(
-      z.looseObject({
-        id: z.string().describe('Full id, <owner>:<local>: what render and takeoff sources use.'),
-        local: z.string().describe('Local id: what an override names (s4, king-l, top1:2).'),
-        role: z.string(),
-        stock: z.looseObject({ id: z.string(), name: z.string() }),
-        length: z.number().describe('Blank length, mm.'),
-        centre: z.array(z.number()).describe('Centre of the blank, world mm.'),
-        along: SpanOut.extend({ segment: z.number(), centre: z.number() })
-          .nullable()
-          .describe(
-            "Wall and opening members: extent and centre along the wall segment, mm from the segment's first point (as an opening's position); null for floors and roofs.",
-          ),
-        above: SpanOut.nullable().describe(
-          "Wall and opening members: extent above the wall's base, mm (as an opening's sill).",
-        ),
-      }),
-    ),
+    phase: z
+      .enum(['existing', 'new', 'demolish'])
+      .describe(
+        "The feature's construction phase: its phase param, else existing in a document marked as built (the construction domain's asBuilt) and new otherwise.",
+      ),
+    count: z.number().describe('Members the feature owns in the design (not the demolished).'),
+    omitted: z.number().describe('Members and demolished members not listed past the limit.'),
+    members: z.array(MemberOut),
+    demolished: z
+      .array(MemberOut)
+      .describe(
+        "Members of the feature the work takes out (phase demolish): kept as data, not built or rendered, drawn dashed, counted by get_quantities' phase demolish. A demolished member's full id names as-built data only: render and the design's takeoff sources do not know it, and it may equal the full id of a member of the design (a stud filling the same layout slot after the change).",
+      ),
     overrides: z.array(
       z.looseObject({
         n: z.number().describe('1-based; the expression move_<n> nudges it.'),
@@ -523,11 +544,15 @@ const MembersOut = z
         delete: z.boolean().optional(),
         stock: z.string().optional().describe('The stock id it changes the member to.'),
         move: z.number().optional().describe('How far it moves the member, mm.'),
+        phase: z
+          .string()
+          .optional()
+          .describe('The construction phase it gives the member: existing, new or demolish.'),
       }),
     ),
   })
   .describe(
-    "Query kind members only: the feature's framing members, sorted along the wall, and its overrides in params order.",
+    "Query kind members only: the feature's framing members, sorted along the wall, each with its phase; the members the work takes out (demolished); and its overrides in params order.",
   );
 
 function envelope(fields: Record<string, z.ZodType>) {

@@ -38,6 +38,17 @@ export type Role =
   | 'fascia';
 
 /**
+ * A construction phase (#1213): `existing` (there as built, kept), `new` (work the design adds)
+ * or `demolish` (there as built, taken out). A feature's phase is its params' `phase`, by default
+ * `existing` in a document marked as built (`domains.construction.asBuilt`) and `new` otherwise;
+ * a member's is its feature's, worked out against the frame as built and changed by an
+ * override's `phase` (`phases.ts`).
+ */
+export type Phase = 'existing' | 'new' | 'demolish';
+
+export const PHASES: readonly Phase[] = ['existing', 'new', 'demolish'];
+
+/**
  * The most members one generator call may make: regen's `MAX_GROUP_MEMBERS` (one wall, floor or
  * roof is one member group). This package may not load regen at run time (ADR 0015 decision 1),
  * so the number is repeated here and `members.test.ts` pins the two equal. The generators count

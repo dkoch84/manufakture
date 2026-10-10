@@ -337,4 +337,49 @@ describe('the shed through regen as IFC', () => {
     ).toBe(false);
     expect(notes).toHaveLength(2);
   });
+
+  it('leaves out what a remodel demolishes: a door, and a wall with its window (#1213)', async () => {
+    let remodel = shed();
+    const edit = (id: string, change: (f: ExtensionFeature) => ExtensionFeature) => {
+      const f = remodel.parts[0]!.features.find((x) => x.id === id) as ExtensionFeature;
+      const r = applyCommand(remodel, { type: 'editFeature', partId: PART, feature: change(f) });
+      if (!r.ok) throw new Error(r.error.message);
+      remodel = r.value.document;
+    };
+    edit('extension#7', (f) => ({ ...f, params: { ...f.params, phase: 'demolish' } }));
+    // A demolished wall makes no body, so it has no operation.
+    edit('extension#1', (f) =>
+      withoutOperation({ ...f, params: { ...f.params, phase: 'demolish' } }),
+    );
+    const other = engineFor();
+    try {
+      const r = await regen(other, remodel);
+      for (const id of ['extension#1', 'extension#7', 'extension#8']) {
+        const f = r.parts[0]!.features.find((x) => x.featureId === id)!;
+        expect(f.status, `${id}: ${JSON.stringify(f.errors)}`).toBe('ok');
+      }
+      const { building, notes } = constructionIfcBuilding(source(remodel, r));
+      expect(building.walls!.map((w) => w.id)).toEqual([
+        'extension#2',
+        'extension#3',
+        'extension#4',
+      ]);
+      expect(building.openings).toEqual([]);
+      expect(notes).toEqual([
+        'Feature extension#1 is left out: it is demolished.',
+        'Feature extension#7 is left out: it is demolished.',
+        'Opening Feature extension#8 is left out: its wall is demolished.',
+      ]);
+      // Their members are not in the design, so none reach the file.
+      expect(
+        building.members!.some((m) =>
+          ['extension#1', 'extension#7', 'extension#8'].includes(m.owner),
+        ),
+      ).toBe(false);
+      const model = reader.read(await writeIfc(building));
+      expect(reader.counts(model)).toMatchObject({ wall: 3, opening: 0, door: 0, window: 0 });
+    } finally {
+      await other.dispose();
+    }
+  }, 60_000);
 });

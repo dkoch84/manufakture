@@ -10,7 +10,10 @@
 //   lengths), `overrides` (per-member, keyed by local id: `s12`, `top1:2`; `at`, where a layout
 //   stud or block was when the override was made, finds it by position, #1215) and `add` (members
 //   the layout does not make, #1214: `{ id: "add<k>", role: "stud" | "blocking", stock?,
-//   plies?, segment? }`, owned by the wall). Lengths are expressions: `height` (default the
+//   plies?, segment? }`, owned by the wall) and `phase` (#1213: `existing`, `new` or `demolish`;
+//   absent, `existing` in a document marked as built and `new` otherwise; an override may set a
+//   member's own, `phases.ts`). A demolished wall makes no layer bodies, and all its members are
+//   listed as demolished. Lengths are expressions: `height` (default the
 //   level's), `spacing`, `layoutOrigin`, `move_<n>` (the nudge of the n-th override), and
 //   `add<k>_at` (an added member's centre line along its segment, from the segment's first
 //   point) and `add<k>_z` (an added block's centre above the wall's base).
@@ -79,6 +82,7 @@ import {
   type WallSettingsInput,
 } from '../framing/wall';
 import { DATA_ID_PATTERN, findLevel } from '../levels';
+import type { Phase } from '../members';
 import {
   MAX_COORDINATE,
   MAX_LAYER_THICKNESS,
@@ -100,6 +104,9 @@ import {
   moveExpression,
   planSegments,
   readAdds,
+  readPhaseParam,
+  featurePhase,
+  phaseField,
   readOptionalCount,
   readOverrides,
   readWallMetadata,
@@ -144,6 +151,8 @@ export interface WallParams {
   readonly overrides: readonly StoredOverride[];
   /** Members the layout does not make (#1214); absent when the params have none. */
   readonly add?: readonly StoredAdd[];
+  /** Its phase (#1213); absent: the document's default (`featurePhase`). */
+  readonly phase?: Phase;
 }
 
 /** The params migrations of `construction.wall` (none yet: version 1 is current). */
@@ -240,10 +249,13 @@ function readCurrent(params: Json): Read<WallParams> {
       'framing',
       'overrides',
       'add',
+      'phase',
     ],
     [],
   );
   if (!keys.ok) return keys;
+  const phase = readPhaseParam(params);
+  if (!phase.ok) return phase;
   const level = readDataRef(own(params, 'level'), 'level', 'level');
   if (!level.ok) return level;
   const wallType = readDataRef(own(params, 'wallType'), 'wallType', 'wall type');
@@ -291,6 +303,7 @@ function readCurrent(params: Json): Read<WallParams> {
     framing: framing.value,
     overrides: overrides.value,
     ...(add.value.length === 0 ? {} : { add: add.value }),
+    ...(phase.value === undefined ? {} : { phase: phase.value }),
   });
 }
 
@@ -984,7 +997,15 @@ function build(ctx: ExtensionContext<WallParams>): {
     ts[i] = [at, at + widths[i]!];
   }
 
+  const phase = featurePhase(ctx, p.phase);
+  if (phase === 'demolish' && f.operation !== undefined) {
+    throw new Refusal('a demolished wall makes no body: it has no operation (remove "operation")', [
+      'operation',
+    ]);
+  }
   const makes = f.operation === 'new';
+  // A demolished wall names its layer bodies (the takeoff lists their faces for demolition).
+  const named = makes || phase === 'demolish';
   const sheets = type.layers.filter((l) => l.kind !== 'framing');
   if (makes && sheets.length === 0) {
     throw new Refusal(
@@ -995,7 +1016,7 @@ function build(ctx: ExtensionContext<WallParams>): {
   const layers: LayerMetadata[] = type.layers.map((l, i) => ({
     id: l.id,
     kind: l.kind,
-    body: makes && l.kind !== 'framing' ? layerBodyId(f.id, l.id) : null,
+    body: named && l.kind !== 'framing' ? layerBodyId(f.id, l.id) : null,
     t: ts[i]!,
   }));
   const base = level.elevation;
@@ -1013,6 +1034,7 @@ function build(ctx: ExtensionContext<WallParams>): {
     settings,
     overrides: resolveOverrides(p.overrides, ctx.values, stock),
     ...(p.add === undefined ? {} : { add: resolveAdds(p.add, ctx.values, stock) }),
+    ...phaseField(phase),
   };
   const segments = planSegments(points, p.closed).length;
   (p.add ?? []).forEach((a, i) => {
@@ -1025,6 +1047,9 @@ function build(ctx: ExtensionContext<WallParams>): {
       ]);
     }
   });
+  // A demolished wall keeps its layers in its metadata (the takeoff lists them for demolition)
+  // and makes no body of them: what is built does not have it.
+  if (phase === 'demolish') return { inputs: [], metadata };
   // Only a wall that makes layer bodies joins them with the walls it names in dependsOn.
   const joined = makes ? joinLayers(ctx, metadata) : { ends: {}, items: [] };
   const inputs: FeatureInput[] = layers.flatMap((l): ExtrudeInput[] => {

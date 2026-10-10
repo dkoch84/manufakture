@@ -15,7 +15,8 @@
 //   shorter, gable only), `ties` (`{ kind: 'ceiling-joists' | 'rafter-ties', stock, every }`; a
 //   rafter tie's height above the plates is the expression `tieHeight`), `gableStuds` (default
 //   true: gable studs on the gable walls' layout, from the roof generator) and `overrides`
-//   (per-member, keyed by local id: `e1:c4`, `ridge:1`). Expressions: `pitch`, a **slope field**
+//   (per-member, keyed by local id: `e1:c4`, `ridge:1`) and `phase` (#1213, as a wall's: a
+//   demolished roof makes no sheathing or gable bodies). Expressions: `pitch`, a **slope field**
 //   (`6/12`, `6:12`, `25%` or degrees; ADR 0005 as amended by T6.0b), and lengths `overhang`,
 //   `rakeOverhang` and `spacing` (over the roof type's), `tieHeight` and `move_<n>`.
 // - **Layer bodies** (decision 3), with operation `new`:
@@ -80,6 +81,7 @@ import {
   type RoofSettingsInput,
   type RoofTies,
 } from '../framing/roof';
+import type { Phase } from '../members';
 import { FramingInputError, resolveWallSettings } from '../framing/wall';
 import { MAX_LEVEL_LENGTH, findLevel, type Level } from '../levels';
 import { stockThickness } from '../stock';
@@ -99,6 +101,9 @@ import {
   planSegments,
   readOptionalCount,
   readOverrides,
+  readPhaseParam,
+  featurePhase,
+  phaseField,
   resolveOverrides,
   stockData,
   stockFor,
@@ -150,6 +155,8 @@ export interface RoofParams {
   readonly ties: RoofTiesParams;
   readonly gableStuds: boolean;
   readonly overrides: readonly StoredOverride[];
+  /** Its phase (#1213); absent: the document's default (`featurePhase`). */
+  readonly phase?: Phase;
 }
 
 /** The params migrations of `construction.roof` (none yet: version 1 is current). */
@@ -202,10 +209,12 @@ function readCurrent(params: Json): Read<RoofParams> {
   if (!isObject(params)) return fail('expected the roof params object');
   const keys = onlyKeys(
     params,
-    ['level', 'roofType', 'kind', 'ridge', 'ties', 'gableStuds', 'overrides'],
+    ['level', 'roofType', 'kind', 'ridge', 'ties', 'gableStuds', 'overrides', 'phase'],
     [],
   );
   if (!keys.ok) return keys;
+  const phase = readPhaseParam(params);
+  if (!phase.ok) return phase;
   const rawLevel = own(params, 'level');
   const level = rawLevel === undefined ? ok(undefined) : readDataRef(rawLevel, 'level', 'level');
   if (!level.ok) return level;
@@ -235,6 +244,7 @@ function readCurrent(params: Json): Read<RoofParams> {
     ties: ties.value,
     gableStuds: kind.value === 'gable' && g !== false,
     overrides: overrides.value,
+    ...(phase.value === undefined ? {} : { phase: phase.value }),
   });
 }
 
@@ -267,6 +277,8 @@ export interface RoofMetadata {
     readonly wall: string;
     readonly body: string;
   }[];
+  /** Its phase (#1213); absent: `new`. A demolished roof makes no sheathing or gable bodies. */
+  readonly phase?: 'existing' | 'demolish';
 }
 
 export function readRoofMetadata(v: unknown): RoofMetadata | undefined {
@@ -678,7 +690,15 @@ function build(ctx: ExtensionContext<RoofParams>): {
   }
 
   // Bodies.
+  const phase = featurePhase(ctx, p.phase);
+  if (phase === 'demolish' && f.operation !== undefined) {
+    throw new Refusal('a demolished roof makes no body: it has no operation (remove "operation")', [
+      'operation',
+    ]);
+  }
   const makes = f.operation === 'new';
+  // A demolished roof names its sheathing and gables (the takeoff lists them for demolition).
+  const named = makes || phase === 'demolish';
   const L = b.length;
   const W = b.width;
   const cos = Math.cos(pitch);
@@ -699,7 +719,7 @@ function build(ctx: ExtensionContext<RoofParams>): {
   };
   const inputs: ExtrudeInput[] = [];
   let sheathing: RoofMetadata['sheathing'] = null;
-  if (makes && type.sheathing !== undefined) {
+  if (named && type.sheathing !== undefined) {
     stockFor(type.sheathing, stock, 'sheet', 'The roof sheathing', at);
     const thickness = stockThickness(type.sheathing, stock) ?? 0;
     if (!(thickness > 0 && thickness <= MAX_LAYER_THICKNESS)) {
@@ -743,7 +763,7 @@ function build(ctx: ExtensionContext<RoofParams>): {
     sheathing = { stock: type.sheathing, thickness, bodies };
   }
   const gables: { edge: 2 | 4; wall: string; body: string }[] = [];
-  if (makes && p.kind === 'gable' && b.footprint !== undefined) {
+  if (named && p.kind === 'gable' && b.footprint !== undefined) {
     const rise = (W / 2) * tan;
     for (const n of [2, 4] as const) {
       const src = b.footprint.under(n)[0];
@@ -808,6 +828,7 @@ function build(ctx: ExtensionContext<RoofParams>): {
       input,
       sheathing,
       gables,
+      ...phaseField(phase),
     },
   };
 }
@@ -816,7 +837,12 @@ function build(ctx: ExtensionContext<RoofParams>): {
 export function translateRoof(ctx: ExtensionContext<RoofParams>): ExtensionOutput {
   try {
     const { inputs, metadata } = build(ctx);
-    return { inputs, metadata: toJson(metadata) };
+    // A demolished one keeps its metadata (its framing and faces are listed for demolition) and
+    // makes no body: what is built does not have it.
+    return {
+      inputs: metadata.phase === 'demolish' ? [] : inputs,
+      metadata: toJson(metadata),
+    };
   } catch (error) {
     if (error instanceof Refusal) return failure(error);
     throw error;

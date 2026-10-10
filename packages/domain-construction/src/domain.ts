@@ -18,18 +18,20 @@ import { constructionDrawings } from './drawings/views';
 import { FLOOR_TYPE, floorGroups, floorType, frameFloorGroup } from './features/floor';
 import { OPENING_TYPE, openingType } from './features/opening';
 import { ROOF_TYPE, frameRoofGroup, roofGroups, roofType } from './features/roof';
-import { constructionMemberStage } from './features/stage';
+import { constructionMemberStage, frameConstructionGroup } from './features/stage';
 import { WALL_TYPE, wallType } from './features/wall';
+import { frameWithPhases } from './phases';
 
 /**
  * Bump with any change that can alter what a translator or the member stage returns, so results
  * built by older domain code are never served from regen's cache (ADR 0004 decision 8).
  */
-export const CONSTRUCTION_IMPLEMENTATION = 1;
+export const CONSTRUCTION_IMPLEMENTATION = 2;
 
 /**
  * The domain's member stage: each wall with its openings (`stage.ts`), then each floor and each
- * roof on its own. Group ids are feature ids, so they never collide.
+ * roof on its own. Group ids are feature ids, so they never collide. Each group is framed with
+ * its phases (`phases.ts`, #1213): as built and as designed when any of its features has a phase.
  */
 export const constructionMembers: MemberStage = {
   groups(ctx) {
@@ -37,9 +39,9 @@ export const constructionMembers: MemberStage = {
   },
   frame(ctx) {
     const type = ctx.features.find((f) => f.id === ctx.group.id)?.type;
-    if (type === FLOOR_TYPE) return frameFloorGroup(ctx);
-    if (type === ROOF_TYPE) return frameRoofGroup(ctx);
-    return constructionMemberStage.frame(ctx);
+    if (type === FLOOR_TYPE) return frameWithPhases(ctx, frameFloorGroup);
+    if (type === ROOF_TYPE) return frameWithPhases(ctx, frameRoofGroup);
+    return frameWithPhases(ctx, frameConstructionGroup);
   },
 };
 

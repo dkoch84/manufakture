@@ -42,7 +42,7 @@ export {
   summariserMap,
   type DomainSummariser,
 } from './domains';
-export { quantityDeltas } from './quantities';
+export { quantityDeltas, type HeadPhases } from './quantities';
 export {
   DEFAULT_IMAGE_SIZE,
   FIXED_VIEWS,

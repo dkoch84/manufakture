@@ -352,7 +352,12 @@ export async function buildBundle(input: BuildInput): Promise<BuiltBundle> {
       },
       interference: interference(base, head),
     },
-    quantities: quantityDeltas(base.quantities, head.quantities, (id) => names.part(id)),
+    quantities: quantityDeltas(
+      base.quantities,
+      head.quantities,
+      (id) => names.part(id),
+      head.phases,
+    ),
     merge: input.merge ?? null,
   };
   return { bundle, images };

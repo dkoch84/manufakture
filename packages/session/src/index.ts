@@ -50,6 +50,7 @@ export {
   MAX_GEOMETRY_RESULTS,
   MAX_MEASURE_ITEMS,
   MAX_MEMBER_RESULTS,
+  PHASE_NOTE,
   errorsOf,
   measure,
   quantities,

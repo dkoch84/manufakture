@@ -54,6 +54,7 @@ import {
   framingFormOf,
   meetingWalls,
   pathPoints,
+  phaseText,
   roleCounts,
   snapPoint,
   step,
@@ -395,6 +396,34 @@ describe('the wall path', () => {
 
   it('counts members by role', () => {
     expect(roleCounts(undefined)).toEqual({ total: 0, roles: [] });
+  });
+
+  it("says a wall's phase and how many of its members are new and demolished (#1213)", () => {
+    const member = (id: string) => ({
+      id,
+      owner: 'extension#1',
+      role: 'stud',
+      stock: { id: 'us-2x4', name: '2x4', width: 38.1, depth: 88.9 },
+      length: 2000,
+      placement: { origin: [0, 0, 0], x: [0, 0, 1], y: [1, 0, 0] },
+      cuts: [],
+    });
+    const set = {
+      group: 'extension#1',
+      namespace: 'construction',
+      features: ['extension#1'],
+      members: [member('s0'), member('s1')],
+      instances: [],
+      metadata: { phases: { new: ['extension#1:s1'], demolished: [member('s2')] } },
+    } as never;
+    // A design: no phases, nothing to say.
+    expect(phaseText('extension#1', { kind: 'wall' }, undefined)).toBeNull();
+    expect(phaseText('extension#1', { kind: 'wall', phase: 'existing' }, set)).toBe(
+      'Existing: 1 member new, 1 demolished',
+    );
+    expect(phaseText('extension#1', { kind: 'wall', phase: 'demolish' }, undefined)).toBe(
+      'Demolish: 0 members new, 0 demolished',
+    );
   });
 });
 

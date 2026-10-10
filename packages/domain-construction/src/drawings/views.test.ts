@@ -313,3 +313,54 @@ describe('construction views', () => {
     expect(err({ kind: 'plan' })).toMatch(/level/);
   });
 });
+
+describe('construction views with phases (#1213)', () => {
+  /** The door demolished, and the set's phases: stud s2 demolished with it. */
+  function phased(params: Record<string, unknown>): DomainViewOutput {
+    const ctx = context(params);
+    const features = ctx.features.map((f) =>
+      f.id === 'extension#2' ? { ...f, metadata: { ...door(48), phase: 'demolish' } as never } : f,
+    );
+    const sets = [
+      {
+        group: 'extension#1',
+        members: [stud('s0', 0), stud('s1', 15.25)],
+        metadata: { phases: { new: [], demolished: [stud('s2', 31.25)] } } as never,
+      },
+    ];
+    const out = constructionView({ ...ctx, features, sets });
+    if ('error' in out) throw new Error(out.error);
+    const checked = checkDomainView(out);
+    if (!checked.ok) throw new Error(checked.message);
+    return checked.view;
+  }
+
+  it('a framing elevation draws demolished members dashed, and dimensions the design', () => {
+    const v = phased({ kind: 'elevation', wall: 'extension#1' });
+    expect(v.lines!.filter((l) => (l.layer ?? 'visible') === 'visible')).toHaveLength(2 * 4);
+    expect(v.lines!.filter((l) => l.layer === 'hidden')).toHaveLength(4);
+    const [along, up] = v.chains!;
+    // The demolished door is no stop, and its stud no layout mark.
+    expect(inches(along!.points, 0)).toEqual([0, 192]);
+    expect(inches(along!.marks!, 0)).toEqual([0.75, 16]);
+    expect(inches(up!.points, 2)).toEqual([0, 97.125]);
+  });
+
+  it("a plan draws a demolished member's section and a demolished door's swing dashed", () => {
+    const v = phased({ kind: 'plan', level: 'level-1' });
+    expect(v.lines!.filter((l) => l.layer === 'hidden')).toHaveLength(4 + 1);
+    expect(v.arcs!.map((a) => a.layer)).toEqual(['hidden']);
+    expect(inches(v.chains![0]!.points, 0)).toEqual([0, 192]);
+  });
+
+  it("a plan draws a demolished wall's door dashed, with no strings", () => {
+    const ctx = context({ kind: 'plan', level: 'level-1' });
+    const features = ctx.features.map((f) =>
+      f.id === 'extension#1' ? { ...f, metadata: { ...WALL, phase: 'demolish' } as never } : f,
+    );
+    const out = constructionView({ ...ctx, features });
+    if ('error' in out) throw new Error(out.error);
+    expect(out.arcs!.map((a) => a.layer)).toEqual(['hidden']);
+    expect(out.chains).toEqual([]);
+  });
+});

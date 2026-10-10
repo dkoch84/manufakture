@@ -240,6 +240,65 @@ describe('quantities', () => {
     expect(d.totals).toEqual([
       { list: 'cut list', group: 'sheet', unit: 'each', base: 3, head: 5 },
     ]);
+    expect(d).not.toHaveProperty('phases');
+  });
+
+  it("adds the head's new material and demolition list, whole, when it has phases (#1213)", () => {
+    const takeoff = (n: number) =>
+      ({
+        reviewed: false,
+        cutList: null,
+        hardware: [],
+        takeoffs: [
+          {
+            partId: 'part#1',
+            notes: [],
+            takeoff: {
+              rows: [
+                {
+                  key: 'framing|stud',
+                  item: 'Stud',
+                  category: 'framing',
+                  unit: 'each',
+                  quantity: n,
+                  extended: n,
+                  sources: [{ id: 'x' }],
+                },
+              ],
+              totals: [{ group: 'framing', unit: 'each', value: n }],
+            },
+          },
+        ],
+        notes: ['a phase note'],
+      }) as unknown as SessionQuantities;
+    const same = q([{ key: 'a', quantity: 1 }]);
+    const d = quantityDeltas(same, same, () => 'Part 1', { new: takeoff(3), demolish: takeoff(2) });
+    expect(d.rows.items).toEqual([]);
+    expect(d.phases).toEqual({
+      newMaterial: [
+        {
+          list: 'takeoff Part 1',
+          rows: {
+            items: [
+              {
+                key: 'framing|stud',
+                item: 'Stud',
+                category: 'framing',
+                unit: 'each',
+                quantity: 3,
+                extended: 3,
+              },
+            ],
+            omitted: 0,
+          },
+          totals: [{ group: 'framing', unit: 'each', value: 3 }],
+        },
+      ],
+      demolition: [
+        expect.objectContaining({ totals: [{ group: 'framing', unit: 'each', value: 2 }] }),
+      ],
+    });
+    expect(d.notes).toContain('a phase note');
   });
 });
 

@@ -3,16 +3,16 @@
 // tool result. The options narrow it in three independent ways, and `compare` turns it into the
 // review bundle's quantity delta (`quantityDeltas`), base against head:
 //
-// - what is counted (`owner`): a scope the session applies before the takeoff is made, so a
-//   feature's purchase rows and layouts are its own, not cut out of the whole frame's. A later
-//   `phase` filter (new material, demolition) is a scope of the same kind.
+// - what is counted (`owner`, `phase`): a scope the session applies before the takeoff is made,
+//   so a feature's (or a phase's: the new material, the demolition list, #1213) purchase rows and
+//   layouts are its own, not cut out of the whole frame's.
 // - which lists and rows are shown (`lists`, `categories`): a cut of what was counted.
 // - how much of each row is shown (`detail: false`): no source lists and no layouts.
 //
 // No option: the session's quantities as they are.
 
 import type { Quantities, QuantityScope } from '@manufakture/session';
-import { CONSTRUCTION_CATEGORIES } from '@manufakture/domain-construction';
+import { CONSTRUCTION_CATEGORIES, type Phase } from '@manufakture/domain-construction';
 
 /** The lists of the answer, by their field names. */
 export const QUANTITY_LISTS = ['cutList', 'hardware', 'takeoffs'] as const;
@@ -31,15 +31,24 @@ export interface QuantityOptions {
   lists?: readonly QuantityList[] | undefined;
   categories?: readonly string[] | undefined;
   owner?: string | readonly string[] | undefined;
+  phase?: Phase | undefined;
   detail?: boolean | undefined;
   compare?: boolean | undefined;
 }
 
 /** The session scope the options ask for. */
 export function scopeOf(o: QuantityOptions): QuantityScope {
-  if (o.owner === undefined) return {};
-  return { owners: [...new Set(typeof o.owner === 'string' ? [o.owner] : o.owner)] };
+  return {
+    ...(o.owner === undefined
+      ? {}
+      : { owners: [...new Set(typeof o.owner === 'string' ? [o.owner] : o.owner)] }),
+    ...(o.phase === undefined ? {} : { phase: o.phase }),
+  };
 }
+
+/** Whether the options count only construction takeoffs (an owner or a phase). */
+const takeoffsOnly = (o: QuantityOptions): boolean =>
+  o.owner !== undefined || o.phase !== undefined;
 
 /** The owners named, once each. */
 export const ownersOf = (o: QuantityOptions): readonly string[] => scopeOf(o).owners ?? [];
@@ -50,8 +59,9 @@ export const narrows = (o: QuantityOptions): boolean =>
 
 /** Why these options do not go together, or null when they do. */
 export function optionProblem(o: QuantityOptions): string | null {
-  if (o.owner !== undefined && o.lists !== undefined && o.lists.some((l) => l !== 'takeoffs')) {
-    return 'With owner only the construction takeoffs are counted: lists may name only takeoffs.';
+  if (takeoffsOnly(o) && o.lists !== undefined && o.lists.some((l) => l !== 'takeoffs')) {
+    const what = o.owner !== undefined ? 'owner' : 'phase';
+    return `With ${what} only the construction takeoffs are counted: lists may name only takeoffs.`;
   }
   return null;
 }
@@ -64,7 +74,7 @@ interface Row {
 }
 
 const lists = (o: QuantityOptions): Set<QuantityList> =>
-  new Set(o.lists ?? (o.owner !== undefined ? ['takeoffs'] : QUANTITY_LISTS));
+  new Set(o.lists ?? (takeoffsOnly(o) ? ['takeoffs'] : QUANTITY_LISTS));
 
 /**
  * `q` with only the lists and categories asked for, in the session's shape (what
@@ -146,7 +156,7 @@ const bare = <R extends Row>(r: R): Omit<R, 'sources'> => omit(r, ['sources']);
  * lists, a takeoff's `faces`, `sheets` and `lumber`). No option: `q` itself.
  */
 export function quantityView(q: Quantities, o: QuantityOptions): Record<string, unknown> {
-  if (!narrows(o) && o.owner === undefined) return { ...q };
+  if (!narrows(o) && !takeoffsOnly(o)) return { ...q };
   const n = narrowed(q, o);
   const shown = lists(o);
   const detail = o.detail !== false;
@@ -169,5 +179,6 @@ export function quantityView(q: Quantities, o: QuantityOptions): Record<string, 
         });
   }
   out.notes = n.notes;
+  if (q.phased === true) out.phased = true;
   return out;
 }

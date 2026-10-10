@@ -4,10 +4,12 @@
 //   lumber I need."
 //
 // A fixed tool-call sequence through the MCP server in process, on packages/session's M6 shed (the
-// document the authoring guide's framing examples use). The first block does the request as far as
-// the product allows. The second block holds the gap probes: each asserts a fact of the product as
-// it is today that the plan's hypotheses name, so a fix flips the probe and the write-up's gap
-// table must be updated with it.
+// document the authoring guide's framing examples use), recorded as built (`asBuilt`, #1213: every
+// wall, opening, floor and roof is existing). The first block does the request: the door moved by
+// demolishing it and adding it at its new place, the window added as new, and the new lumber and
+// the demolition list read from the phases. The second block holds the gap probes: each asserts a
+// fact of the product as it is today that the plan's hypotheses name, so a fix flips the probe and
+// the write-up's gap table must be updated with it.
 //
 // Facts of the fixture this relies on: the door (extension#7) is on the Right wall (extension#3),
 // which runs from (192", 0) to (192", 144"); seen from outside (looking west), "right" is along
@@ -18,6 +20,7 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import type { ManufaktureDocument } from '@manufakture/core';
 import { MAIN_BRANCH } from '@manufakture/library';
 import { shedDocument } from '@manufakture/session/test-fixtures';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -35,8 +38,20 @@ const IN_MM = (v: number) => v * 25.4;
 
 let h: Harness;
 
+/** The shed recorded as built: every feature without a phase is existing (#1213). */
+function asBuilt(doc: ManufaktureDocument): ManufaktureDocument {
+  const entry = doc.domains!.construction!;
+  return {
+    ...doc,
+    domains: {
+      ...doc.domains,
+      construction: { ...entry, data: { ...(entry.data as object), asBuilt: true } as never },
+    },
+  };
+}
+
 beforeAll(async () => {
-  h = await harness({ document: shedDocument() });
+  h = await harness({ document: asBuilt(shedDocument()) });
 }, 60_000);
 
 afterAll(async () => {
@@ -72,7 +87,6 @@ async function ownedIds(sessionId: string, owners: readonly string[]): Promise<S
   return ids;
 }
 
-const minus = (a: Set<string>, b: Set<string>) => [...a].filter((x) => !b.has(x)).sort();
 const ownedBy = (ids: Iterable<string>, owner: string) =>
   [...ids].filter((id) => id.startsWith(`${owner}:`));
 
@@ -101,16 +115,22 @@ describe('remodel-frame: the request, scripted', () => {
   let sessionId: string;
   let branch: string;
   let window: string;
+  /** The door at its new place: a new opening (the old one is demolished, #1213). */
+  let moved: string;
   let before: Data;
   let after: Data;
   /** Member ids of the back wall, the right wall and the door as built, read per feature. */
   let builtIds: Set<string>;
   let backBefore: Data;
+  let rightBefore: Data;
   let baseVersion: string;
   /** get_quantities' compare answer, base against head. */
   let compared: Data;
+  /** The new members and the demolished ones, read per feature after the edits. */
+  let fresh: Set<string>;
+  let gone: Set<string>;
 
-  it('opens a session on the shed and reads the takeoff as built', async () => {
+  it('opens a session on the shed, recorded as built, and reads the takeoff', async () => {
     const s = value(await h.call('open_session', { documentId: DOC }));
     sessionId = s.sessionId;
     branch = s.branch;
@@ -122,8 +142,21 @@ describe('remodel-frame: the request, scripted', () => {
     );
     before = value(await h.call('get_quantities', { sessionId }));
     expect(memberIds(before).size).toBe(156);
+    // As built, nothing is new and nothing comes out.
+    expect(before.quantities.phased).toBe(true);
     backBefore = await membersOf(sessionId, BACK);
-    expect(backBefore).toMatchObject({ owner: BACK, kind: 'wall', framed: true, overrides: [] });
+    expect(backBefore).toMatchObject({
+      owner: BACK,
+      kind: 'wall',
+      framed: true,
+      phase: 'existing',
+      overrides: [],
+      demolished: [],
+    });
+    expect(new Set((backBefore.members as Data[]).map((m) => m.phase))).toEqual(
+      new Set(['existing']),
+    );
+    rightBefore = await membersOf(sessionId, RIGHT);
     builtIds = await ownedIds(sessionId, [BACK, RIGHT, DOOR]);
     // The same ids the takeoff counts.
     expect([...builtIds].sort()).toEqual(
@@ -134,18 +167,33 @@ describe('remodel-frame: the request, scripted', () => {
     expect(door.expressions.position).toEqual(IN(72));
   });
 
-  it("moves the door 2' right along its wall", async () => {
+  it("moves the door 2' right along its wall: demolished where it was, new where it goes", async () => {
+    // A move in an existing wall is a remodel: the door comes out at 72" and goes in at 96"
+    // (#1213). The new door is the old one's copy with its new position.
     const door = await feature(sessionId, DOOR);
+    const copy = structuredClone(door);
     const r = value(
       await h.call('apply', {
         sessionId,
         label: "Move the door 2' right",
         commands: [
-          edit(door, (f) => ({ ...f, expressions: { ...f.expressions, position: IN(96) } })),
+          edit(door, (f) => ({ ...f, params: { ...f.params, phase: 'demolish' } })),
+          {
+            type: 'addFeature',
+            partId: PART,
+            feature: {
+              ...copy,
+              id: 'extension#$door',
+              params: { ...copy.params, phase: 'new' },
+              expressions: { ...copy.expressions, position: IN(96) },
+            },
+          },
         ],
       }),
     );
     expect(r.errors).toEqual([]);
+    moved = r.symbols.$door;
+    expect(moved).toBe('extension#10');
   });
 
   it("adds a 3' window centred on the back wall", async () => {
@@ -167,7 +215,13 @@ describe('remodel-frame: the request, scripted', () => {
               dependsOn: [BACK],
               references: [],
               expressions: { position: IN(96), width: IN(36), height: IN(36), sill: IN(44) },
-              params: { kind: 'window', segment: 1, from: 'start', header: { kind: 'auto' } },
+              params: {
+                kind: 'window',
+                segment: 1,
+                from: 'start',
+                header: { kind: 'auto' },
+                phase: 'new',
+              },
             },
           },
         ],
@@ -175,7 +229,7 @@ describe('remodel-frame: the request, scripted', () => {
     );
     expect(r.errors).toEqual([]);
     window = r.symbols.$window;
-    expect(window).toBe('extension#10');
+    expect(window).toBe('extension#11');
   });
 
   it('renders the changed walls, base against head, members only', async () => {
@@ -193,29 +247,36 @@ describe('remodel-frame: the request, scripted', () => {
     expect(r.content.filter((c) => c.type === 'image')).toHaveLength(4);
   });
 
-  it('finds "new lumber" only as a difference of member ids, which the move hides', async () => {
+  it('reads per feature what is new and what comes out', async () => {
     after = value(await h.call('get_quantities', { sessionId }));
-    // Ids read per feature with get_object's members query, not from the takeoff's row sources.
-    const b = builtIds;
-    const a = await ownedIds(sessionId, [BACK, RIGHT, DOOR, window]);
-    const added = minus(a, b);
-    const removed = minus(b, a);
-    // The window's own members are all new: kings, jacks, header plies, sill, cripples.
-    const win = await membersOf(sessionId, window);
-    expect(win).toMatchObject({ kind: 'opening', wall: BACK, segment: 1, overrides: [] });
-    const windowMembers = (win.members as Data[]).map((m) => m.id as string);
-    expect(windowMembers.length).toBeGreaterThanOrEqual(8);
-    expect(ownedBy(added, window)).toEqual(windowMembers.sort());
-    // The studs under the window, found by position: the cripples below its 44" sill, within
-    // its 3' rough opening centred at 96" along the back wall.
-    const under = (win.members as Data[]).filter(
-      (m) => m.role === 'cripple' && m.above.to <= 44 * 25.4 + 1e-6,
-    );
-    expect(under.length).toBeGreaterThan(0);
-    for (const m of under) expect(Math.abs(m.along.centre - 96 * 25.4)).toBeLessThan(18 * 25.4);
-    // The window hides back-wall layout studs: they leave the frame as if they never existed,
-    // though on site they are demolished (or reused). They are the ones the wall listed between
-    // the window's king studs before.
+    // Read per feature with get_object's members query: each member's phase, and the members the
+    // work takes out.
+    const owners = [BACK, RIGHT, DOOR, moved, window];
+    fresh = new Set<string>();
+    gone = new Set<string>();
+    const listings = new Map<string, Data>();
+    for (const owner of owners) {
+      const l = await membersOf(sessionId, owner);
+      listings.set(owner, l);
+      for (const m of l.members as Data[]) if (m.phase === 'new') fresh.add(m.id);
+      for (const m of l.demolished as Data[]) {
+        expect(m.phase).toBe('demolish');
+        gone.add(m.id);
+      }
+    }
+    // The walls nobody touched have nothing new and nothing demolished.
+    for (const owner of [LEFT, 'extension#1']) {
+      const l = await membersOf(sessionId, owner);
+      expect(l.demolished).toEqual([]);
+      expect((l.members as Data[]).every((m) => m.phase === 'existing')).toBe(true);
+    }
+
+    // The window is new, every member of it.
+    const win = listings.get(window)!;
+    expect(win).toMatchObject({ kind: 'opening', wall: BACK, phase: 'new', overrides: [] });
+    expect((win.members as Data[]).length).toBeGreaterThanOrEqual(8);
+    expect(ownedBy(fresh, window).sort()).toEqual((win.members as Data[]).map((m) => m.id).sort());
+    // The back-wall studs it displaces come out: the ones between its king studs.
     const kings = (win.members as Data[]).filter((m) => m.role === 'king');
     const zone = [
       Math.min(...kings.map((m) => m.along.from)),
@@ -225,26 +286,93 @@ describe('remodel-frame: the request, scripted', () => {
       .filter((m) => m.role === 'stud' && m.along.centre > zone[0]! && m.along.centre < zone[1]!)
       .map((m) => m.id as string);
     expect(hidden.sort()).toEqual([`${BACK}:s5`, `${BACK}:s6`, `${BACK}:s7`]);
-    expect(ownedBy(removed, BACK)).toEqual(hidden);
-    // The door's old spot gets layout studs back and its new spot loses some.
-    expect(ownedBy(added, RIGHT).length).toBeGreaterThan(0);
-    expect(ownedBy(removed, RIGHT).length).toBeGreaterThan(0);
-    // GAP PROBE (phase): the door's members keep their ids when it moves (they belong to the
-    // opening), so an id diff says the door needs no new lumber, although its kings, jacks,
-    // header and cripples are rebuilt 2' along the wall.
-    expect(ownedBy(a, DOOR).sort()).toEqual(ownedBy(b, DOOR).sort());
-    expect(ownedBy(added, DOOR)).toEqual([]);
-    // Nor do the right wall's bottom plate pieces either side of the door: same ids, new lengths.
-    const rightAfter = (await membersOf(sessionId, RIGHT)).members as Data[];
-    const lengthOf = (q: Data, id: string): number =>
-      (takeoffOf(q).rows as Data[]).find(
-        (r) => r.category === 'framing' && (r.sources as { id: string }[]).some((s) => s.id === id),
-      )!.size.length;
-    for (const piece of [`${RIGHT}:bottom1:1`, `${RIGHT}:bottom1:2`]) {
-      expect(a.has(piece) && b.has(piece)).toBe(true);
-      expect(lengthOf(after, piece)).not.toBeCloseTo(lengthOf(before, piece), 0);
-      expect(rightAfter.find((m) => m.id === piece)!.length).toBeCloseTo(lengthOf(after, piece), 3);
-    }
+    expect(ownedBy(gone, BACK).sort()).toEqual(hidden);
+    expect(ownedBy(fresh, BACK)).toEqual([]);
+
+    // The door at its new place is new, but for a cripple over both headers: the old door's
+    // cripple at that layout slot is the same piece in the same place, so it stays (a member is
+    // matched by stock, length and place, whoever owns it). The rest of the old door comes out.
+    const door2 = listings.get(moved)!;
+    expect(door2).toMatchObject({ phase: 'new', wall: RIGHT });
+    const reused = (door2.members as Data[]).filter((m) => m.phase === 'existing');
+    expect(reused.map((m) => m.role)).toEqual(['cripple']);
+    expect(Math.abs(reused[0]!.along.centre - IN_MM(72))).toBeLessThan(IN_MM(18));
+    expect(Math.abs(reused[0]!.along.centre - IN_MM(96))).toBeLessThan(IN_MM(18));
+    expect(ownedBy(fresh, moved).length).toBe((door2.members as Data[]).length - 1);
+    expect(listings.get(DOOR)).toMatchObject({ phase: 'demolish', count: 0, members: [] });
+    expect(ownedBy(gone, DOOR).length).toBe(ownedBy(builtIds, DOOR).length - 1);
+    for (const id of ownedBy(gone, DOOR)) expect(builtIds.has(id)).toBe(true);
+
+    // In the right wall: studs fill the door's old place (new), the studs where it goes come out,
+    // and so do the bottom plate pieces either side of the old door (replaced by pieces either
+    // side of the new one).
+    // Within a door's rough opening and the king and jack studs either side (18" + 3", and the
+    // layout's 1/2" to spare).
+    const inside = (m: Data, centre: number) =>
+      Math.abs(m.along.centre - IN_MM(centre)) < IN_MM(21.5);
+    const right = listings.get(RIGHT)!;
+    const newStuds = (right.members as Data[]).filter(
+      (m) => m.phase === 'new' && m.role === 'stud',
+    );
+    expect(newStuds.map((m) => m.local).sort()).toEqual(['s3', 's4']);
+    for (const m of newStuds) expect(inside(m, 72)).toBe(true);
+    const outStuds = (right.demolished as Data[]).filter((m) => m.role === 'stud');
+    expect(outStuds.map((m) => m.local).sort()).toEqual(['s6', 's7']);
+    for (const m of outStuds) expect(inside(m, 96)).toBe(true);
+    const plates = (l: Data[]) =>
+      l.filter((m) => m.role === 'bottom-plate').map((m) => [m.local, m.length]);
+    expect(plates(right.demolished as Data[])).toEqual(
+      plates((rightBefore.members as Data[]).filter((m) => m.role === 'bottom-plate')),
+    );
+    expect(plates((right.members as Data[]).filter((m) => m.phase === 'new'))).toEqual(
+      plates((right.members as Data[]).filter((m) => m.role === 'bottom-plate')),
+    );
+    // Nothing else of the right wall changes.
+    expect(ownedBy(fresh, RIGHT).filter((id) => !/:(s3|s4|bottom1:\d)$/.test(id))).toEqual([]);
+
+    // The takeoff of what stands counts what stood before less what comes out plus what is new.
+    expect(memberIds(after).size).toBe(memberIds(before).size - gone.size + fresh.size);
+    expect([...gone].filter((id) => memberIds(after).has(id) && !fresh.has(id))).toEqual([]);
+  });
+
+  it('answers "what new lumber": get_quantities with phase new, and the demolition list', async () => {
+    const length = (r: CallToolResult) => (r.content[0] as { text: string }).text.length;
+    const r = await h.raw('get_quantities', { sessionId, phase: 'new', detail: false });
+    expect(length(r)).toBeLessThan(20_000);
+    const q = value(r.structuredContent as Structured).quantities;
+    expect(q.phased).toBe(true);
+    expect(Object.keys(q).sort()).toEqual(['notes', 'phased', 'reviewed', 'takeoffs']);
+    const t = q.takeoffs[0].takeoff;
+    const each = (x: Data) =>
+      (x.totals as Data[]).find((v) => v.group === 'framing' && v.unit === 'each')!.value;
+    // Exactly the new members: the window's, the door's at its new place, the studs filling its
+    // old place and the right wall's new bottom plate pieces.
+    expect(each(t)).toBe(fresh.size);
+    // What to buy is theirs alone.
+    expect((t.rows as Data[]).some((x) => x.category === 'lumber')).toBe(true);
+    // Sheets go by their wall's phase: an existing wall's sheathing is not new material.
+    expect((t.rows as Data[]).some((x) => x.category === 'faces')).toBe(false);
+    expect(q.notes).toContain(
+      "Sheets are counted by their wall's, floor's or roof's phase: patching an existing wall's sheathing where an opening moved or was added is not counted.",
+    );
+    // With the sources, the rows name the members.
+    const full = value(await h.call('get_quantities', { sessionId, phase: 'new' })).quantities;
+    const ids = new Set(
+      (full.takeoffs[0].takeoff.rows as Data[])
+        .filter((x) => x.category === 'framing')
+        .flatMap((x) => (x.sources as { id: string }[]).map((s) => s.id)),
+    );
+    expect([...ids].sort()).toEqual([...fresh].sort());
+
+    const out = value(
+      await h.call('get_quantities', { sessionId, phase: 'demolish', detail: false }),
+    ).quantities;
+    expect(each(out.takeoffs[0].takeoff)).toBe(gone.size);
+    // A phase counts takeoffs only.
+    const bad = await h.call('get_quantities', { sessionId, phase: 'new', lists: ['cutList'] });
+    expect(bad.ok).toBe(false);
+    const phaseless = await h.call('get_quantities', { sessionId, phase: 'gone' });
+    expect(phaseless.ok).toBe(false);
   });
 
   it('answers "what changed" in one readable result: get_quantities with compare', async () => {
@@ -264,14 +392,20 @@ describe('remodel-frame: the request, scripted', () => {
     // The window's rough sill is new; its two header plies double the header row.
     expect(row('framing', 'Rough sill')).toMatchObject({ base: null, head: { quantity: 1 } });
     expect(row('framing', 'Header').head.quantity - row('framing', 'Header').base.quantity).toBe(2);
-    // GAP PROBE (phase): net counts per row: the studs the window displaces cancel against new
-    // ones, and the door's rebuilt members do not show at all.
+    // The rows are net counts of what stands: the studs the window displaces cancel against new
+    // ones. What is new and what comes out are beside them, whole (#1213).
     const studs = row('framing', 'Stud, Corner stud, King stud');
     expect(studs.head.quantity).toBeLessThan(studs.base.quantity);
     const each = (compared.quantities.totals as Data[]).find(
       (x) => x.group === 'framing' && x.unit === 'each',
     )!;
     expect([each.base, each.head]).toEqual([memberIds(before).size, memberIds(after).size]);
+    const phases = compared.quantities.phases;
+    const total = (l: Data) =>
+      (l.totals as Data[]).find((x) => x.group === 'framing' && x.unit === 'each')!.value;
+    expect(phases.newMaterial.map((l: Data) => l.list)).toEqual(['takeoff Part 1']);
+    expect(total(phases.newMaterial[0])).toBe(fresh.size);
+    expect(total(phases.demolition[0])).toBe(gone.size);
     // What to buy changes too, from the 1D layout of the whole frame.
     expect((rows.items as Data[]).some((x) => x.category === 'lumber')).toBe(true);
 
@@ -294,23 +428,10 @@ describe('remodel-frame: the request, scripted', () => {
     expect(length(lean)).toBeLessThan(20_000);
     expect(Object.keys(value(lean.structuredContent as Structured).quantities).sort()).toEqual([
       'notes',
+      'phased',
       'reviewed',
       'takeoffs',
     ]);
-  });
-
-  it('GAP PROBE (phase): the takeoff counts the whole frame, with no phase on any row', async () => {
-    const t = takeoffOf(after);
-    const each = (t.totals as Data[]).find((x) => x.group === 'framing' && x.unit === 'each');
-    expect(each!.value).toBe(memberIds(after).size);
-    expect(each!.value).toBeGreaterThan(150);
-    for (const row of t.rows as Data[]) {
-      expect(Object.keys(row)).not.toEqual(expect.arrayContaining(['phase']));
-    }
-    // Only categories, no "new" or "demolish" split.
-    expect(new Set((t.rows as Data[]).map((r) => r.category))).toEqual(
-      new Set(['framing', 'linear', 'faces', 'lumber', 'sheet']),
-    );
   });
 
   it('exports the takeoff from the unreviewed branch', async () => {
@@ -322,15 +443,15 @@ describe('remodel-frame: the request, scripted', () => {
     expect(csv).toMatch(/Header/);
   });
 
-  it("makes the back wall's framing elevation with one helper command and exports it", async () => {
+  it("makes the right wall's framing elevation with one helper command: the old door framing dashed", async () => {
     // `addConstructionSet` is the app's "Construction set" button as a session helper (#1219):
     // the session expands it into addDrawing, addSheet and addView, made by the same code.
     const r = value(
       await h.call('apply', {
         sessionId,
-        label: 'Framing elevation of the back wall',
+        label: 'Framing elevation of the right wall',
         commands: [
-          { type: 'addConstructionSet', part: PART, wall: BACK, drawing: 'drawing#$framing' },
+          { type: 'addConstructionSet', part: PART, wall: RIGHT, drawing: 'drawing#$framing' },
         ],
       }),
     );
@@ -343,22 +464,33 @@ describe('remodel-frame: the request, scripted', () => {
         query: { kind: 'drawing', drawingId: r.symbols.$framing },
       }),
     ).object as Data;
-    expect(drawing.name).toBe('Framing: Back');
+    expect(drawing.name).toBe('Framing: Right');
     expect(drawing.sheets).toHaveLength(1);
     const view = drawing.sheets[0].views[0];
-    expect(view.source.params).toEqual({ kind: 'elevation', wall: BACK, segment: 1 });
-    // The back wall runs west: seen from outside, looking south, at the largest scale that fits.
-    expect(view.direction).toEqual({ direction: [-0, -1, 0], up: [0, 0, 1] });
+    expect(view.source.params).toEqual({ kind: 'elevation', wall: RIGHT, segment: 1 });
+    // The right wall runs north: seen from outside, looking west, at the largest scale that fits.
+    expect(view.direction).toEqual({ direction: [-1, 0, 0], up: [0, 0, 1] });
     expect(view.scale.paper.source).toMatch(/"$/);
     const drawingId = r.symbols.$framing as string;
     const svg = value(
-      await h.call('export', { sessionId, format: 'drawing-svg', drawingId, fileName: 'back' }),
+      await h.call('export', { sessionId, format: 'drawing-svg', drawingId, fileName: 'right' }),
     );
     const text = await readFile(path.join(h.outputDir, svg.files[0].name), 'utf8');
     expect(text).toMatch(/^<\?xml|^<svg/);
+    // What comes out is drawn dashed (the hidden-line layer), and only that: the old door's
+    // framing, the studs where the door goes and the old bottom plate pieces, four sides each
+    // (members seen face on are rectangles). Nothing else of a framing elevation is dashed.
+    const hidden = /<g id="layer-hidden"[^>]*stroke-dasharray[^>]*>([\s\S]*?)<\/g>/.exec(text);
+    expect(hidden).not.toBeNull();
+    const dashed = hidden![1]!.match(/<path /g) ?? [];
+    const out = ownedBy(gone, RIGHT).length + ownedBy(gone, DOOR).length;
+    expect(out).toBe(11);
+    expect(dashed).toHaveLength(4 * out);
+    // The visible layer draws what stands; nothing of it is dashed.
+    expect(/<g id="layer-visible"[^>]*>/.exec(text)![0]).not.toMatch(/dasharray/);
   });
 
-  it('submits; the bundle shows the takeoff change as net counts per row', async () => {
+  it('submits; the bundle shows the change, the new material and the demolition list', async () => {
     const r = value(
       await h.call('submit_for_review', {
         sessionId,
@@ -369,16 +501,17 @@ describe('remodel-frame: the request, scripted', () => {
     const stored = await h.app.library.reviewBundle(DOC, branch);
     if (!stored.ok || stored.value === null) throw new Error('no bundle');
     const bundle = (stored.value.record as Data).bundle as Data;
-    // The bundle's quantity delta is the one get_quantities' compare gave (a drawing and an export
+    // The bundle's quantities are the ones get_quantities' compare gave (a drawing and an export
     // since change no quantity).
     expect(bundle.quantities).toEqual(compared.quantities);
-    const totals = bundle.quantities.totals as Data[];
-    const each = totals.find((x) => x.group === 'framing' && x.unit === 'each')!;
-    // GAP PROBE (phase): base and head totals, not new material: the door's rebuilt members do
-    // not show, and the studs the openings remove are netted against those they add.
-    expect(each.head - each.base).toBe(memberIds(after).size - memberIds(before).size);
-    expect(each.head - each.base).toBeLessThan(
-      ownedBy(memberIds(after), window).length + ownedBy(memberIds(after), DOOR).length,
+    const each = (l: Data) =>
+      (l.totals as Data[]).find((x) => x.group === 'framing' && x.unit === 'each')!.value;
+    // New material: the window's members, the door's at its new place, the studs filling its
+    // old place and the new plate pieces; the demolition list: the rest of the change.
+    expect(each(bundle.quantities.phases.newMaterial[0])).toBe(fresh.size);
+    expect(each(bundle.quantities.phases.demolition[0])).toBe(gone.size);
+    expect(fresh.size).toBe(
+      ownedBy(fresh, window).length + ownedBy(fresh, moved).length + ownedBy(fresh, RIGHT).length,
     );
     value(await h.call('close_session', { sessionId }));
   });
@@ -391,7 +524,9 @@ describe('remodel-frame: gap probes', () => {
     sessionId = value(await h.call('open_session', { documentId: DOC })).sessionId;
   });
 
-  it('GAP PROBE (phase): an opening or wall cannot be marked existing, new or demolished', async () => {
+  it('phase: an opening and a member can be marked existing, new or demolished', async () => {
+    // Was the GAP PROBE (phase) "an opening or wall cannot be marked existing, new or
+    // demolished": a phase param was refused (`unknown field "phase"`). Follow-up 1 (#1213).
     const door = await feature(sessionId, DOOR);
     const r = value(
       await h.call('apply', {
@@ -401,20 +536,13 @@ describe('remodel-frame: gap probes', () => {
         commands: [edit(door, (f) => ({ ...f, params: { ...f.params, phase: 'existing' } }))],
       }),
     );
-    expect(r.errors).toEqual([
-      expect.objectContaining({
-        featureId: DOOR,
-        severity: 'error',
-        message: 'unknown field "phase"',
-      }),
-    ]);
-    // Nor a member: an override is { id, delete?, stock? } and a nudge.
+    expect(r.errors).toEqual([]);
+    // A member: an override is { id, delete?, stock?, at?, phase? } and a nudge.
     const left = await feature(sessionId, LEFT);
     const m = value(
       await h.call('apply', {
         sessionId,
         label: 'Mark a stud demolished',
-        dryRun: true,
         commands: [
           edit(left, (f) => ({
             ...f,
@@ -423,14 +551,35 @@ describe('remodel-frame: gap probes', () => {
         ],
       }),
     );
-    // (The floor and roof read that wall, so they fail after it.)
-    expect(m.errors).toContainEqual(
-      expect.objectContaining({
-        featureId: LEFT,
-        severity: 'error',
-        message: 'unknown field "phase"',
+    expect(m.errors).toEqual([]);
+    const listing = await membersOf(sessionId, LEFT);
+    expect(listing.overrides).toEqual([
+      { n: 1, id: 's3', member: `${LEFT}:s3`, status: 'applied', phase: 'demolish' },
+    ]);
+    expect((listing.demolished as Data[]).map((x) => x.id)).toEqual([`${LEFT}:s3`]);
+    expect((listing.members as Data[]).some((x) => x.id === `${LEFT}:s3`)).toBe(false);
+    // Out of the takeoff of what stands, on the demolition list.
+    const q = value(await h.call('get_quantities', { sessionId }));
+    expect(memberIds(q).has(`${LEFT}:s3`)).toBe(false);
+    const out = value(await h.call('get_quantities', { sessionId, phase: 'demolish' }));
+    expect([...memberIds(out)]).toEqual([`${LEFT}:s3`]);
+    // A phase that is not one is refused.
+    const bad = value(
+      await h.call('apply', {
+        sessionId,
+        label: 'A phase that is not one',
+        dryRun: true,
+        commands: [edit(door, (f) => ({ ...f, params: { ...f.params, phase: 'old' } }))],
       }),
     );
+    expect(bad.errors).toEqual([
+      expect.objectContaining({
+        featureId: DOOR,
+        severity: 'error',
+        message: 'expected one of "existing", "new", "demolish"',
+      }),
+    ]);
+    value(await h.call('undo', { sessionId }));
   });
 
   it('as-built: a stud nudged off the layout, two missing, an extra stud and a block added', async () => {
@@ -596,7 +745,7 @@ describe('remodel-frame: gap probes', () => {
       }),
     ).object;
     expect(Object.keys(data.data).sort()).toEqual(
-      ['floorTypes', 'levels', 'roofTypes', 'wallTypes'].sort(),
+      ['asBuilt', 'floorTypes', 'levels', 'roofTypes', 'wallTypes'].sort(),
     );
     // Only the framing defaults, as a change of one setting would naturally be written: every
     // level and type is gone, and every wall, floor and roof fails.

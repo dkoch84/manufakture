@@ -28,6 +28,7 @@
 //     headerRules: [{ maxWidth: SE, header: { stock: id, plies: n, jacks: n, spacer?: id } }],
 //     takeoff: { precuts?: boolean, wastePercent?: n, currency?: 'USD',
 //                lengths?: { [lumber stock id]: SE[] } },             // the takeoff panel's (T6.3b)
+//     asBuilt?: boolean,   // #1213: features without a phase are `existing`, not `new`
 //   }
 //
 // Header rules (ADR 0015 decision 7): a user-edited table, `opening width up to maxWidth: header,
@@ -204,6 +205,11 @@ export interface ConstructionSettings<L = number> {
   readonly headerRules: readonly HeaderRuleData<L>[];
   /** Absent: the takeoff's defaults. */
   readonly takeoff?: TakeoffSettingsData<L>;
+  /**
+   * The document records a building as built (#1213): a wall, opening, floor or roof without a
+   * `phase` param is `existing`, not `new`. Absent or false: a design, everything new.
+   */
+  readonly asBuilt?: boolean;
 }
 
 export type StoredConstructionSettings = ConstructionSettings<StoredExpression>;
@@ -692,10 +698,23 @@ function readCurrent(data: Json): Read<StoredConstructionSettings> {
   if (!isObject(data)) return fail('expected construction settings');
   const keys = onlyKeys(
     data,
-    ['levels', 'wallTypes', 'floorTypes', 'roofTypes', 'framing', 'headerRules', 'takeoff'],
+    [
+      'levels',
+      'wallTypes',
+      'floorTypes',
+      'roofTypes',
+      'framing',
+      'headerRules',
+      'takeoff',
+      'asBuilt',
+    ],
     [],
   );
   if (!keys.ok) return keys;
+  const asBuilt = own(data, 'asBuilt');
+  if (asBuilt !== undefined && typeof asBuilt !== 'boolean') {
+    return fail('expected true or false', ['asBuilt']);
+  }
   const rawLevels = own(data, 'levels');
   const levels = rawLevels === undefined ? ok([]) : readLevels(rawLevels, ['levels']);
   if (!levels.ok) return levels;
@@ -729,6 +748,7 @@ function readCurrent(data: Json): Read<StoredConstructionSettings> {
     levels: levels.value,
     ...r.value,
     ...(takeoff.value === undefined ? {} : { takeoff: takeoff.value }),
+    ...(asBuilt === undefined ? {} : { asBuilt }),
   });
 }
 
@@ -793,6 +813,7 @@ export function mapLengths<A, B>(
                   ),
           }),
         }),
+    ...(s.asBuilt === undefined ? {} : { asBuilt: s.asBuilt }),
   };
 }
 
@@ -842,6 +863,7 @@ export function writeConstructionData(
   if (settings.takeoff !== undefined && Object.keys(settings.takeoff).length > 0) {
     out.takeoff = toJson(settings.takeoff);
   }
+  if (settings.asBuilt === true) out.asBuilt = true;
   const checked = readCurrent(out);
   if (!checked.ok) return checked;
   if (Object.keys(out).length === 0) return ok(undefined);

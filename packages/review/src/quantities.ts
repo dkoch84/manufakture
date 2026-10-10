@@ -1,10 +1,17 @@
 // Quantity deltas (ADR 0016 decision 11): the cut list, its hardware and each construction
 // takeoff at base and at head, row by row (rows are matched by their takeoff key, which names
-// the same thing on both sides) and total by total. Only what differs is listed.
+// the same thing on both sides) and total by total. Only what differs is listed. With phases at
+// head (#1213), the head's new material and demolition list besides, whole (`phaseLists`).
 
 import type { Quantities as SessionQuantities } from '@manufakture/session';
 import { bounded, round, shown } from './text';
-import { LIMITS, type Quantities, type QuantityDelta, type QuantityTotalDelta } from './types';
+import {
+  LIMITS,
+  type PhaseList,
+  type Quantities,
+  type QuantityDelta,
+  type QuantityTotalDelta,
+} from './types';
 
 interface Row {
   key: string;
@@ -46,10 +53,45 @@ function lists(q: SessionQuantities, partName: (id: string) => string): List[] {
 const amounts = (r: Row | undefined) =>
   r === undefined ? null : { quantity: round(r.quantity), extended: round(r.extended) };
 
+/** The head's quantities of each phase (`QuantityScope.phase`), when it has phases. */
+export interface HeadPhases {
+  new: SessionQuantities;
+  demolish: SessionQuantities;
+}
+
+/**
+ * A phase's takeoffs as lists (the takeoffs only: a phase has no cut list), at most
+ * `LIMITS.quantities` of them, as every list of the bundle.
+ */
+function phaseLists(q: SessionQuantities, partName: (id: string) => string): PhaseList[] {
+  return q.takeoffs.slice(0, LIMITS.quantities).map((t) => ({
+    list: shown(`takeoff ${partName(t.partId)}`),
+    rows: bounded(
+      t.takeoff.rows.map((r) => ({
+        key: shown(r.key),
+        item: shown(r.item),
+        category: shown(r.category, 64),
+        unit: shown(r.unit, 32),
+        quantity: round(r.quantity),
+        extended: round(r.extended),
+      })),
+      LIMITS.quantities,
+    ),
+    totals: t.takeoff.totals
+      .slice(0, LIMITS.quantities)
+      .map((x) => ({ group: shown(x.group, 64), unit: shown(x.unit, 32), value: round(x.value) })),
+  }));
+}
+
+/**
+ * `base` against `head`, row by row and total by total; with `phases` (the head's new material
+ * and demolition list, `QuantityScope.phase`) those besides, whole.
+ */
 export function quantityDeltas(
   base: SessionQuantities,
   head: SessionQuantities,
   partName: (id: string) => string,
+  phases?: HeadPhases,
 ): Quantities {
   const a = new Map(lists(base, partName).map((l) => [l.name, l]));
   const b = new Map(lists(head, partName).map((l) => [l.name, l]));
@@ -95,10 +137,20 @@ export function quantityDeltas(
       });
     }
   }
-  const notes = [...new Set([...base.notes, ...head.notes])].map((n) => shown(n));
+  const notes = [...new Set([...base.notes, ...head.notes, ...(phases?.new.notes ?? [])])].map(
+    (n) => shown(n),
+  );
   return {
     rows: bounded(rows, LIMITS.quantities),
     totals: totals.slice(0, LIMITS.quantities),
     notes: notes.slice(0, LIMITS.errors),
+    ...(phases === undefined
+      ? {}
+      : {
+          phases: {
+            newMaterial: phaseLists(phases.new, partName),
+            demolition: phaseLists(phases.demolish, partName),
+          },
+        }),
   };
 }

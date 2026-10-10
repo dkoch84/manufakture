@@ -100,6 +100,13 @@ function settingsLines(a: StoredConstructionSettings, b: StoredConstructionSetti
     lines.push(`Header rule ${i + 1}: ${text(x)} to ${text(y)}`);
   }
   lines.push(...fieldLines('Takeoff', a.takeoff ?? {}, b.takeoff ?? {}));
+  if ((a.asBuilt === true) !== (b.asBuilt === true)) {
+    lines.push(
+      b.asBuilt === true
+        ? 'Marked as built: features without a phase are existing'
+        : 'No longer marked as built: features without a phase are new',
+    );
+  }
   return lines;
 }
 
@@ -109,7 +116,10 @@ function read(entry: DomainData | undefined): StoredConstructionSettings | strin
   return r.ok ? r.value.stored : r.message;
 }
 
-/** `domains.construction`: levels, wall, floor and roof types, framing, header rules, takeoff. */
+/**
+ * `domains.construction`: levels, wall, floor and roof types, framing, header rules, takeoff, and
+ * whether the document is marked as built.
+ */
 export const constructionDataSummariser: DomainDataSummariser = {
   namespace: CONSTRUCTION_NAMESPACE,
   summarise(before, after) {

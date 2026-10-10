@@ -29,7 +29,7 @@ import type {
   WallSettingsInput,
 } from '../framing/wall';
 import { MAX_ADDED, parseAddedMemberId } from '../member-ids';
-import type { StockRef } from '../members';
+import { PHASES, type Phase, type StockRef } from '../members';
 import { stockKind, stockRef } from '../stock';
 
 export const WALL_TYPE = 'construction.wall';
@@ -137,6 +137,8 @@ export interface StoredOverride {
   readonly delete?: boolean;
   readonly stock?: string;
   readonly at?: number;
+  /** The member's phase (#1213): `existing`, `new` or `demolish` (see `MemberOverride.phase`). */
+  readonly phase?: Phase;
 }
 
 /** Local member ids: letters, digits, `-`, `:` and `/` (`s12`, `top1:2`, `seg2/s0`, `king-l`). */
@@ -159,9 +161,12 @@ export function readOverrides(v: unknown, at: Path, positions = false): Read<Sto
     const o: unknown = v[i];
     const oat = [...at, i];
     if (!isObject(o)) {
-      return fail(`expected an override { id, delete?, stock?${positions ? ', at?' : ''} }`, oat);
+      return fail(
+        `expected an override { id, delete?, stock?${positions ? ', at?' : ''}, phase? }`,
+        oat,
+      );
     }
-    const keys = onlyKeys(o, ['id', 'delete', 'stock', ...(positions ? ['at'] : [])], oat);
+    const keys = onlyKeys(o, ['id', 'delete', 'stock', 'phase', ...(positions ? ['at'] : [])], oat);
     if (!keys.ok) return keys;
     const id = own(o, 'id');
     if (typeof id !== 'string' || !LOCAL_ID.test(id)) {
@@ -188,11 +193,19 @@ export function readOverrides(v: unknown, at: Path, positions = false): Read<Sto
         [...oat, 'at'],
       );
     }
+    const phase = own(o, 'phase');
+    let readPhase: Phase | undefined;
+    if (phase !== undefined) {
+      const r = readEnum(phase, PHASES, [...oat, 'phase']);
+      if (!r.ok) return r;
+      readPhase = r.value;
+    }
     out.push({
       id,
       ...(del === undefined ? {} : { delete: del }),
       ...(stock === undefined ? {} : { stock: stock as string }),
       ...(pos === undefined ? {} : { at: pos }),
+      ...(readPhase === undefined ? {} : { phase: readPhase }),
     });
   }
   return ok(out);
@@ -243,8 +256,39 @@ export function resolveOverrides(
           }),
       ...(move === undefined ? {} : { move }),
       ...(o.at === undefined ? {} : { at: o.at }),
+      ...(o.phase === undefined ? {} : { phase: o.phase }),
     };
   });
+}
+
+// Phases -----------------------------------------------------------------------------------------
+
+/** A feature's `phase` param (#1213): absent, or `existing`, `new` or `demolish`. */
+export function readPhaseParam(params: Readonly<Record<string, unknown>>): Read<Phase | undefined> {
+  const v = own(params, 'phase');
+  return v === undefined ? ok(undefined) : readEnum(v, PHASES, ['phase']);
+}
+
+/**
+ * A feature's phase as built into its metadata: its `phase` param, else `existing` in a document
+ * marked as built (`domains.construction.asBuilt`) and `new` otherwise. Metadata records only
+ * `existing` and `demolish` (`phaseField`), so a document that uses no phases reports what it did
+ * before them.
+ */
+export function featurePhase(ctx: ExtensionContext<unknown>, stored: Phase | undefined): Phase {
+  if (stored !== undefined) return stored;
+  return constructionData(ctx)?.settings.asBuilt === true ? 'existing' : 'new';
+}
+
+/** The metadata field of a phase: none for `new`, the default. */
+export const phaseField = (phase: Phase): { phase?: 'existing' | 'demolish' } =>
+  phase === 'new' ? {} : { phase };
+
+/** The phase a feature's metadata records: `new` when it records none. */
+export function metadataPhase(metadata: unknown): Phase {
+  if (!isObject(metadata)) return 'new';
+  const p = own(metadata, 'phase');
+  return p === 'existing' || p === 'demolish' ? p : 'new';
 }
 
 /**
@@ -413,6 +457,8 @@ export interface WallMetadata {
   readonly overrides: readonly MemberOverride[];
   /** Members the wall adds; absent when none (so older metadata reads the same). */
   readonly add?: readonly AddedMember[];
+  /** Its phase (#1213); absent: `new`. A demolished wall makes no layer bodies. */
+  readonly phase?: 'existing' | 'demolish';
 }
 
 /** Which header an opening asks for (ADR 0015 decision 7). */
@@ -445,6 +491,8 @@ export interface OpeningMetadata {
   readonly cuts: readonly string[];
   readonly swing?: 'in' | 'out';
   readonly hand?: 'left' | 'right';
+  /** Its phase (#1213); absent: `new`. A demolished opening cuts nothing. */
+  readonly phase?: 'existing' | 'demolish';
 }
 
 export const toJson = (v: unknown): JsonValue => v as JsonValue;

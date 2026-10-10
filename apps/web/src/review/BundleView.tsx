@@ -295,13 +295,37 @@ function RegenErrors({ bundle }: { bundle: ReviewBundle }) {
   );
 }
 
+/** The most phase lists (#1213) of each kind a bundle view looks at. */
+const MAX_PHASE_LISTS = 1_000;
+
 function QuantityDeltas({ bundle }: { bundle: ReviewBundle }) {
   const q = obj(bundle.quantities);
   const rows = obj(q.rows);
   const items = list(rows.items).map(obj);
   const totals = list(q.totals).map(obj);
   const notes = list(q.notes);
-  if (items.length === 0 && totals.length === 0 && notes.length === 0) {
+  // With construction phases at head (#1213): its new material and demolition list, whole. A
+  // bundle is untrusted: the lists are paged like everything else, and at most
+  // `MAX_PHASE_LISTS` of each are looked at (the rest counted), so a crafted one cannot hang it.
+  const phases = obj(q.phases);
+  const phaseEntries = (key: 'newMaterial' | 'demolition', title: string) => {
+    const all = list(phases[key]);
+    return {
+      items: all.slice(0, MAX_PHASE_LISTS).map((l) => ({ key, title, list: obj(l) })),
+      omitted: Math.max(0, all.length - MAX_PHASE_LISTS),
+    };
+  };
+  const fresh = phaseEntries('newMaterial', 'New material');
+  const gone = phaseEntries('demolition', 'Demolition list');
+  const phased = [...fresh.items, ...gone.items];
+  const phasedOmitted = fresh.omitted + gone.omitted;
+  if (
+    items.length === 0 &&
+    totals.length === 0 &&
+    notes.length === 0 &&
+    phased.length === 0 &&
+    phasedOmitted === 0
+  ) {
     return <p className="field-note">No quantity changed.</p>;
   }
   const side = (x: unknown) => {
@@ -334,6 +358,34 @@ function QuantityDeltas({ bundle }: { bundle: ReviewBundle }) {
         />
       )}
       {notes.length > 0 && <Paged items={notes} render={(n) => <Clipped value={n} max={300} />} />}
+      {(phased.length > 0 || phasedOmitted > 0) && (
+        <Paged
+          items={phased}
+          omitted={phasedOmitted}
+          testId="review-phases"
+          render={(p, i) => {
+            const rows = obj(p.list.rows);
+            return (
+              <>
+                <p className="history-meta">
+                  {p.title}, <Clipped value={p.list.list} max={80} />
+                </p>
+                <Paged
+                  items={list(rows.items).map(obj)}
+                  omitted={count(rows.omitted)}
+                  testId={`review-${p.key}-${i}`}
+                  render={(r) => (
+                    <div className="review-row">
+                      <Clipped value={r.item} max={120} />: {shownNumber(num(r.quantity))}{' '}
+                      <Clipped value={r.unit} max={20} />
+                    </div>
+                  )}
+                />
+              </>
+            );
+          }}
+        />
+      )}
     </>
   );
 }

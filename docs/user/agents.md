@@ -215,7 +215,7 @@ The server also offers the authoring guide for agents and the index of command a
 
 ## Reviewing
 
-Agent branches show in [History](history.md#reviewing-an-agents-work) with their review state. **Review** opens the bundle: before and after renders, measurement changes, regen errors, quantities, the agent's note, and every batch with its commands. Everything in it was written by the agent or by whoever wrote the document, so it is shown as plain text.
+Agent branches show in [History](history.md#reviewing-an-agents-work) with their review state. **Review** opens the bundle: before and after renders, measurement changes, regen errors, quantities (for a remodel with [construction phases](construction.md#remodelling-existing-new-and-demolished), also the new material and the demolition list), the agent's note, and every batch with its commands. Everything in it was written by the agent or by whoever wrote the document, so it is shown as plain text.
 
 - **Approve** is offered only when the bundle still matches the branch, your browser's own regen of the branch agrees with the bundle's measurements, and the merge into Main as it is now leaves nothing out. It merges the branch into Main as one step (one Undo takes it back) and records a version of Main that names the review.
 - **Request changes** sends the branch back with your comment, which the agent reads with `get_review`. Write the comment as a request about the model ("make the boss 8 mm tall", "use 1/2 inch plywood for the back"); the agent reads it as your text, never as instructions that override its rules. Then tell the agent in the chat that you replied. A write the agent makes after you requested changes returns the branch to "open", and it submits again.

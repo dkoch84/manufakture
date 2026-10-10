@@ -28,7 +28,13 @@ import {
   type BranchLocks,
 } from '@manufakture/library';
 import { NodeBackend, NodeBranchLocks } from '@manufakture/library/node';
-import { Names, bundleBuilder, quantityDeltas, type ReviewView } from '@manufakture/review';
+import {
+  Names,
+  bundleBuilder,
+  quantityDeltas,
+  type HeadPhases,
+  type ReviewView,
+} from '@manufakture/review';
 import {
   BackendBundleStore,
   ServerApi,
@@ -122,7 +128,7 @@ const DESCRIPTIONS: Record<ToolName, string> = {
   get_tree:
     'The outline of the head: parts with features (status, errors), bodies, member sets, variables, assemblies with instances and mates, configurations, drawings, CAM setups, domain data.',
   get_object:
-    "The full JSON of one item: the document, a part, feature, variable, assembly, instance, mate, CAM setup, drawing, the configurations, a domain namespace or a script. With kind members, a construction feature's framing members instead (answered as members): each one's full and local id, role, stock, length and place along its wall and above its base, and each override the feature holds with its status (applied, moved with appliedTo, or lost) and its at (where its member was when it was made, if it records it). For a mate, also frames: each connector's resolved frame in world coordinates (origin and unit axes x, y, z, mm) at the solved poses, after flip, rotate and offset, and the axis of connector a's frame each free coordinate runs along or turns about.",
+    "The full JSON of one item: the document, a part, feature, variable, assembly, instance, mate, CAM setup, drawing, the configurations, a domain namespace or a script. With kind members, a construction feature's framing members instead (answered as members): each one's full and local id, role, stock, length, place along its wall and above its base and construction phase (existing or new), the members the work takes out (demolished), and each override the feature holds with its status (applied, moved with appliedTo, or lost) and its at (where its member was when it was made, if it records it). For a mate, also frames: each connector's resolved frame in world coordinates (origin and unit axes x, y, z, mm) at the solved poses, after flip, rotate and offset, and the axis of connector a's frame each free coordinate runs along or turns about.",
   get_schema:
     'The JSON Schema of a command type or feature kind, with descriptions; with neither, the index of both.',
   find_geometry:
@@ -132,7 +138,7 @@ const DESCRIPTIONS: Record<ToolName, string> = {
   render:
     "PNG images of the head (and with compare, of the base version at the same camera): standard or given orthographic cameras, highlighted names, a section plane; the part studio, or an assembly at its solved poses, with sliders and revolutes held at given values, or with instances placed by hand. What each image is comes as data beside it, for an assembly each mate's coordinates as drawn and warnings for a value past a limit or a pose off its mate.",
   get_quantities:
-    "The cut list, hardware and construction takeoffs of the head, as data, marked reviewed: false. The whole answer can be tens of thousands of characters: narrow it with lists, categories, owner (one feature's members alone) and detail: false; with compare, only what changed from the branch's base version, row by row.",
+    "The cut list, hardware and construction takeoffs of the head, as data, marked reviewed: false. The whole answer can be tens of thousands of characters: narrow it with lists, categories, owner (one feature's members alone), phase (new material, or the demolition list) and detail: false; with compare, only what changed from the branch's base version, row by row.",
   get_errors: 'Every regen error and warning of the head, errors first.',
   get_history: "The branch's log: each batch with its revision, cause, label and time.",
   apply:
@@ -481,9 +487,22 @@ export function createMcpServer(options: ServerOptions): ManufaktureServer {
     }
     const was = await s.baseQuantities(scope);
     if (!was.ok) return fromSession(was, () => ({}));
+    // With phases at head and no phase asked for, the head's new material and demolition list,
+    // as the review bundle has them.
+    let phases: HeadPhases | undefined;
+    if (a.phase === undefined && head.value.phased === true) {
+      const fresh = await s.quantities({ ...scope, phase: 'new' });
+      const gone = await s.quantities({ ...scope, phase: 'demolish' });
+      if (!fresh.ok) return fromSession(fresh, () => ({}));
+      if (!gone.ok) return fromSession(gone, () => ({}));
+      phases = { new: narrowed(fresh.value, a), demolish: narrowed(gone.value, a) };
+    }
     const names = new Names([s.document, base]);
-    const delta = quantityDeltas(narrowed(was.value, a), narrowed(head.value, a), (id) =>
-      names.part(id),
+    const delta = quantityDeltas(
+      narrowed(was.value, a),
+      narrowed(head.value, a),
+      (id) => names.part(id),
+      phases,
     );
     return ok({ quantities: delta, reviewed: false, baseVersion });
   });

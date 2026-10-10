@@ -1340,6 +1340,9 @@ wall's base).
 
 Move the shed's door 2' along its wall: read the door, then send the whole feature back with the
 one value changed (`editFeature` replaces the feature, so start from what `get_object` gave you).
+This is a design (the shed's document is not marked as built), so the door is simply elsewhere. In
+a document that records a building as built, moving an opening is a remodel: see "Remodelling:
+existing, new and demolished" below.
 
 ```json mcp:open_session
 { "documentId": "doc-shed" }
@@ -1658,7 +1661,8 @@ are listed, each with `base` and `head` (`null` where the row is not there on th
 These are net counts per row: a stud the window displaces and a stud it adds cancel out, and a
 moved opening keeps its members' ids, so the door's rebuilt framing does not show as new. The
 `lumber` and `sheet` rows (what to buy) come from laying out the whole frame again, so some of
-their changes are only reshuffles. To count one feature alone, name it in `owner` (a list for
+their changes are only reshuffles. For "what new lumber do I need" on an existing building, use
+phases instead (next section): the takeoff of the new material alone. To count one feature alone, name it in `owner` (a list for
 several): the takeoff is then made for its members and sheet faces only, its lumber and sheets to
 buy included. An opening's members are its own, not its wall's. With `owner` there is no cut list.
 
@@ -1725,6 +1729,213 @@ A sheet is drawn when it is exported, so export it to look at it (or to hand it 
   "drawingId": "drawing#1",
   "fileName": "back-wall-framing",
   "overwrite": true
+}
+```
+
+```json mcp:close_session
+{ "sessionId": "<session>" }
+```
+
+### Remodelling: existing, new and demolished
+
+A remodel changes a building that stands. Each wall, opening, floor and roof has a construction
+`phase` in its params: `existing` (there, and staying), `new` (work the design adds) or `demolish`
+(there, and coming out). Without one, a feature is `existing` in a document marked as built (the
+construction domain data's `"asBuilt": true`) and `new` otherwise, so a design that never mentions
+phases is all new. The members follow: the member stage frames each wall twice, as built (its
+existing and demolished openings) and as designed (its existing and new openings), and a member of
+the design that the as-built frame has too (the same stock and length in the same place) is
+`existing`, any other `new`; an as-built member the design does not keep is demolished. A new
+wall, floor or roof is all new, a demolished one all demolished (it makes no body, so it has no
+`operation`: remove it). A per-member override may set a member's own phase with
+`{ "id": "s3", "phase": "demolish" }`: `demolish` takes it out, `new` makes it new work (an extra
+block, a stud that was missing: not in the frame as built), `existing` keeps it.
+
+Demolished members are kept as data: not built, rendered or exported, drawn dashed in framing
+elevations, plans and roof plans, listed apart by the `members` query (`demolished`), and counted
+only by `get_quantities` with `"phase": "demolish"` (the demolition list). `"phase": "new"` is the
+new material: its lumber and sheets to buy are what the work adds. Sheet layers take their wall's,
+floor's or roof's phase (patching an existing wall's sheathing around a changed opening is not
+counted). Without `phase` the takeoff counts what stands when the work is done; with `compare`, the
+answer (and the review bundle) also gives the head's new material and demolition list whole, as
+`phases`. The `export` tool's `takeoff-csv` and `takeoff-pdf` have no phase option yet: they write
+what stands. An opening whose phase its wall contradicts (a new one in a demolished wall, a
+demolished one in a new wall) is framed as the wall says, with a `phase-contradiction` warning.
+
+On a fresh branch of the shed, mark it as built. Domain data is replaced whole, so read it
+(`get_object` with `{ "kind": "domain", "namespace": "construction" }`), add `asBuilt` and send it
+all back:
+
+```json mcp:open_session
+{ "documentId": "doc-shed" }
+```
+
+```json mcp:apply
+{
+  "sessionId": "<session>",
+  "label": "The shed as built",
+  "commands": [
+    {
+      "type": "setDomainData",
+      "namespace": "construction",
+      "schemaVersion": 1,
+      "data": {
+        "levels": [
+          {
+            "id": "level-1",
+            "name": "Level 1",
+            "elevation": { "source": "0", "lengthUnit": "in", "angleUnit": "deg" },
+            "height": { "source": "97.125", "lengthUnit": "in", "angleUnit": "deg" }
+          }
+        ],
+        "wallTypes": [
+          {
+            "id": "ext-2x4",
+            "name": "Exterior 2x4",
+            "layers": [
+              { "id": "sheathing", "kind": "sheathing", "stock": "us-osb-7-16" },
+              {
+                "id": "framing",
+                "kind": "framing",
+                "stock": "us-2x4",
+                "header": { "stock": "us-2x6", "plies": 2, "jacks": 1 }
+              }
+            ]
+          }
+        ],
+        "floorTypes": [
+          {
+            "id": "shed-floor",
+            "name": "Shed floor",
+            "joistStock": "us-2x6",
+            "subfloor": "us-osb-23-32"
+          }
+        ],
+        "roofTypes": [
+          {
+            "id": "shed-roof",
+            "name": "Shed roof",
+            "rafterStock": "us-2x6",
+            "ridgeStock": "us-2x8",
+            "sheathing": "us-osb-7-16",
+            "overhang": { "source": "12", "lengthUnit": "in", "angleUnit": "deg" },
+            "rakeOverhang": { "source": "12", "lengthUnit": "in", "angleUnit": "deg" }
+          }
+        ],
+        "asBuilt": true
+      }
+    }
+  ]
+}
+```
+
+Moving an existing opening is taking it out where it is and putting it in where it goes: mark the
+door `demolish` (a demolished opening cuts nothing: the wall is closed up there) and add its copy,
+`new`, at its new place. Give new work `"phase": "new"` explicitly: in a document marked as built,
+a feature added without a phase is existing (you are recording what is there).
+
+```json mcp:apply
+{
+  "sessionId": "<session>",
+  "label": "Move the door 2 feet along the right wall",
+  "commands": [
+    {
+      "type": "editFeature",
+      "partId": "part#1",
+      "feature": {
+        "id": "extension#7",
+        "kind": "extension",
+        "name": "Door",
+        "suppressed": false,
+        "extension": "construction.opening",
+        "schemaVersion": 1,
+        "dependsOn": ["extension#3"],
+        "references": [],
+        "expressions": {
+          "position": { "source": "72", "lengthUnit": "in", "angleUnit": "deg" },
+          "width": { "source": "36", "lengthUnit": "in", "angleUnit": "deg" },
+          "height": { "source": "80", "lengthUnit": "in", "angleUnit": "deg" }
+        },
+        "params": {
+          "kind": "door",
+          "segment": 1,
+          "from": "start",
+          "header": { "kind": "auto" },
+          "phase": "demolish"
+        }
+      }
+    },
+    {
+      "type": "addFeature",
+      "partId": "part#1",
+      "feature": {
+        "id": "extension#$door",
+        "kind": "extension",
+        "name": "Door",
+        "suppressed": false,
+        "extension": "construction.opening",
+        "schemaVersion": 1,
+        "dependsOn": ["extension#3"],
+        "references": [],
+        "expressions": {
+          "position": { "source": "96", "lengthUnit": "in", "angleUnit": "deg" },
+          "width": { "source": "36", "lengthUnit": "in", "angleUnit": "deg" },
+          "height": { "source": "80", "lengthUnit": "in", "angleUnit": "deg" }
+        },
+        "params": {
+          "kind": "door",
+          "segment": 1,
+          "from": "start",
+          "header": { "kind": "auto" },
+          "phase": "new"
+        }
+      }
+    }
+  ]
+}
+```
+
+```json mcp:result
+{ "ok": true, "symbols": { "$door": "extension#10" }, "errors": [] }
+```
+
+The right wall's members now say what happens to each: the studs that fill the door's old place
+are `new`, those where it goes and the bottom plate pieces either side of the old door are in
+`demolished`, the rest `existing`. A member of the old door that the new one has in the same place
+(a cripple over both headers) stays: phases follow the lumber, not its owner.
+
+```json mcp:get_object
+{
+  "sessionId": "<session>",
+  "query": { "kind": "members", "partId": "part#1", "owner": "extension#3" }
+}
+```
+
+```json mcp:result
+{ "ok": true, "members": { "owner": "extension#3", "phase": "existing" } }
+```
+
+What new lumber is needed, and what comes out:
+
+```json mcp:get_quantities
+{ "sessionId": "<session>", "phase": "new", "detail": false }
+```
+
+```json mcp:result
+{ "ok": true, "quantities": { "phased": true, "reviewed": false } }
+```
+
+```json mcp:get_quantities
+{ "sessionId": "<session>", "phase": "demolish", "detail": false }
+```
+
+The right wall's framing elevation draws the old door's framing dashed:
+
+```json mcp:apply
+{
+  "sessionId": "<session>",
+  "label": "Framing elevation of the right wall",
+  "commands": [{ "type": "addConstructionSet", "part": "part#1", "wall": "extension#3" }]
 }
 ```
 

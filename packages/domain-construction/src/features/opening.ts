@@ -11,7 +11,10 @@
 //   `default`; or `explicit` with its stock, plies, jacks and optional spacer), `kings`, `jacks`,
 //   `swing` and `hand` (doors; drawings only), `overrides` (per-member, keyed by local id:
 //   `king-l`, `header`) and `add` (members its framing does not make, #1214: `{ id: "add<k>",
-//   role: "stud" | "blocking", stock?, plies? }`, owned by the opening). Lengths are
+//   role: "stud" | "blocking", stock?, plies? }`, owned by the opening) and `phase` (#1213:
+//   `existing`, `new` or `demolish`, defaulting as a wall's does; a demolished opening cuts
+//   nothing and is framed only into its wall as built, a new one only into the wall as designed,
+//   `phases.ts`; moving an existing opening is demolishing it and adding a new one). Lengths are
 //   expressions: `position` (to the opening's centre line), `width`, `height`, `sill` (the rough
 //   opening's bottom above the wall's base: 0 for a door, required for a window), `allowance`,
 //   `move_<n>`, and `add<k>_at` (an added member's centre line from the opening's, positive
@@ -64,6 +67,9 @@ import {
   readAdds,
   readOptionalCount,
   readOverrides,
+  readPhaseParam,
+  featurePhase,
+  phaseField,
   readWallMetadata,
   resolveAdds,
   resolveOverrides,
@@ -74,6 +80,7 @@ import {
   type StoredAdd,
   type StoredOverride,
 } from './common';
+import type { Phase } from '../members';
 import { headerSpec, wallLayerBodies } from './wall';
 
 export type OpeningKind = 'door' | 'window' | 'opening';
@@ -96,6 +103,8 @@ export interface OpeningParams {
   readonly overrides: readonly StoredOverride[];
   /** Members its framing does not make (#1214); absent when the params have none. */
   readonly add?: readonly StoredAdd[];
+  /** Its phase (#1213); absent: the document's default (`featurePhase`). */
+  readonly phase?: Phase;
 }
 
 /** The params migrations of `construction.opening` (none yet: version 1 is current). */
@@ -166,10 +175,13 @@ function readCurrent(params: Json): Read<OpeningParams> {
       'hand',
       'overrides',
       'add',
+      'phase',
     ],
     [],
   );
   if (!keys.ok) return keys;
+  const phase = readPhaseParam(params);
+  if (!phase.ok) return phase;
   const kind = readEnum(own(params, 'kind'), KINDS, ['kind']);
   if (!kind.ok) return kind;
   const segment = readOptionalCount(params, 'segment', [], 1, 1000);
@@ -213,6 +225,7 @@ function readCurrent(params: Json): Read<OpeningParams> {
     ...(jacks.value === undefined ? {} : { jacks: jacks.value }),
     ...(swing.value === undefined ? {} : { swing: swing.value }),
     ...(hand.value === undefined ? {} : { hand: hand.value }),
+    ...(phase.value === undefined ? {} : { phase: phase.value }),
   });
 }
 
@@ -370,6 +383,7 @@ function build(ctx: ExtensionContext<OpeningParams>): {
   } else {
     header = { kind: p.header.kind };
   }
+  const phase = featurePhase(ctx, p.phase);
   const metadata: OpeningMetadata = {
     kind: 'opening',
     wall: wallId,
@@ -382,13 +396,16 @@ function build(ctx: ExtensionContext<OpeningParams>): {
     header,
     overrides: resolveOverrides(p.overrides, ctx.values, data),
     ...(p.add === undefined ? {} : { add: resolveAdds(p.add, ctx.values, data) }),
-    cuts: bodies.map((b) => b.body),
+    cuts: phase === 'demolish' ? [] : bodies.map((b) => b.body),
     ...(p.kings === undefined ? {} : { kings: p.kings }),
     ...(p.jacks === undefined ? {} : { jacks: p.jacks }),
     ...(p.swing === undefined ? {} : { swing: p.swing }),
     ...(p.hand === undefined ? {} : { hand: p.hand }),
+    ...phaseField(phase),
   };
-  return { input: { kind: 'tools', id: f.id, items }, metadata };
+  // A demolished opening is closed up in what is built: it cuts nothing.
+  const cut = phase === 'demolish' ? [] : items;
+  return { input: { kind: 'tools', id: f.id, items: cut }, metadata };
 }
 
 /** The cuts and framing input of an opening, or why it cannot be built. */
