@@ -196,6 +196,8 @@ import './features/features.css';
 import './parts/parts.css';
 import './assembly/assembly.css';
 import './print/print.css';
+import { SidePanelFrame } from './components/SidePanelFrame';
+import { panelLayoutStore } from './state/panelLayout';
 
 const defaultSolver = () => lazySolver(spawnDefaultSolver);
 /** The read-only viewer next to the app: what share links open. */
@@ -558,6 +560,15 @@ export function App({
   // The construction group: the panel opens by itself for a document with construction in it.
   const constructionOpen = useStore(constructionUi, (s) => s.open);
   const constructionTool = useStore(constructionUi, (s) => s.tool);
+  // Opening the cut list, history or construction panel shows it: they render at the top of the
+  // right panel, so expand that panel if it was collapsed and scroll it back to the top.
+  const sidePanelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!cutListOpen && !historyOpen && !constructionOpen) return;
+    panelLayoutStore.getState().setCollapsed('right', false);
+    const frame = requestAnimationFrame(() => sidePanelRef.current?.scrollTo({ top: 0 }));
+    return () => cancelAnimationFrame(frame);
+  }, [cutListOpen, historyOpen, constructionOpen]);
   const withConstruction = hasConstruction(document);
   const constructionDoc = useRef<string | null>(null);
   useEffect(() => {
@@ -2488,42 +2499,47 @@ export function App({
         >
           {/* A sketch is edited on its own (the tree cannot change anything meanwhile), so the
             tree steps aside and the sketch gets the room. */}
-          {assemblyId !== null && !printing && (
-            <AssemblyTree
-              documents={shownDocuments}
-              assemblyId={assemblyId}
-              result={assemblyResult}
-              disabled={locked || assemblyPanel?.kind === 'mate'}
-              onEditMate={(mateId) => assemblyUi.getState().open({ kind: 'mate', mateId })}
-            />
-          )}
-          {!sketching.active && machining && assemblyId === null && (
-            <Suspense
-              fallback={
-                <section className="feature-tree" aria-busy="true" aria-label="Manufacture" />
-              }
-            >
-              <CamTree
-                documents={documents}
-                model={model}
-                camUi={camUi}
-                geometer={loader.camGeometer ?? null}
-                client={camClient}
-                disabled={ioBusy}
-              />
-            </Suspense>
-          )}
-          {!sketching.active && !printing && !machining && assemblyId === null && (
-            <FeatureTree
-              documents={shownDocuments}
-              model={shownModel}
-              selection={selection}
-              settings={shownSettings}
-              disabled={dialog !== null || locked}
-              onEdit={onEditFeature}
-              library={library}
-              onOpenSource={onOpenSource}
-            />
+          {((assemblyId !== null && !printing) ||
+            (!sketching.active && assemblyId === null && (machining || !printing))) && (
+            <SidePanelFrame side="left" label="Tree">
+              {assemblyId !== null && !printing && (
+                <AssemblyTree
+                  documents={shownDocuments}
+                  assemblyId={assemblyId}
+                  result={assemblyResult}
+                  disabled={locked || assemblyPanel?.kind === 'mate'}
+                  onEditMate={(mateId) => assemblyUi.getState().open({ kind: 'mate', mateId })}
+                />
+              )}
+              {!sketching.active && machining && assemblyId === null && (
+                <Suspense
+                  fallback={
+                    <section className="feature-tree" aria-busy="true" aria-label="Manufacture" />
+                  }
+                >
+                  <CamTree
+                    documents={documents}
+                    model={model}
+                    camUi={camUi}
+                    geometer={loader.camGeometer ?? null}
+                    client={camClient}
+                    disabled={ioBusy}
+                  />
+                </Suspense>
+              )}
+              {!sketching.active && !printing && !machining && assemblyId === null && (
+                <FeatureTree
+                  documents={shownDocuments}
+                  model={shownModel}
+                  selection={selection}
+                  settings={shownSettings}
+                  disabled={dialog !== null || locked}
+                  onEdit={onEditFeature}
+                  library={library}
+                  onOpenSource={onOpenSource}
+                />
+              )}
+            </SidePanelFrame>
           )}
           <Viewport
             bodies={shownBodies}
@@ -2597,275 +2613,277 @@ export function App({
             )}
             {sketching.active && <SketchStatusBar session={session} />}
           </Viewport>
-          <div className="side-panel">
-            {sketching.active ? (
-              <aside className="selection-panel" aria-label="Sketch">
-                <ConflictPanel session={session} />
-                <h2>Sketch selection</h2>
-                <SketchSelectionList session={session} />
-                <TextPanel session={session} texter={loader.texter ?? null} />
-              </aside>
-            ) : laserOpen && !laserBlocked ? (
-              <Suspense
-                fallback={
-                  <aside className="selection-panel" aria-busy="true">
-                    Opening...
-                  </aside>
-                }
-              >
-                <LaserDialog
-                  key={shownPartId}
-                  documents={shownDocuments}
-                  partId={shownPartId}
-                  bodies={laserBodies}
-                  selection={selection}
-                  resolveFace={resolveCamFace}
-                  services={laserServices}
-                  onSave={onLaserSave}
-                  onClose={() => setLaserOpen(false)}
-                />
-              </Suspense>
-            ) : printing ? (
-              <>
-                <PrintPanel
-                  documents={documents}
-                  printUi={printUi}
-                  parts={allParts}
-                  resolved={print.resolved}
-                  issues={print.issues}
-                  analysis={print.analysis}
-                  onIssue={print.onIssue}
-                  exporter={printExporter}
-                  disabled={ioBusy}
-                  modelPending={modelPending}
-                  onExportBusy={setIoBusy}
-                />
-                <VariablesPanel
-                  documents={documents}
-                  selection={selection}
-                  printSetupId={fitSetupId}
-                  model={model}
-                />
-              </>
-            ) : machining && assemblyId === null ? (
-              <>
-                <Suspense fallback={<aside className="selection-panel" aria-busy="true" />}>
-                  <CamSidePanel
-                    documents={documents}
-                    camUi={camUi}
+          <SidePanelFrame side="right" label="Properties">
+            <div className="side-panel" ref={sidePanelRef}>
+              {sketching.active ? (
+                <aside className="selection-panel" aria-label="Sketch">
+                  <ConflictPanel session={session} />
+                  <h2>Sketch selection</h2>
+                  <SketchSelectionList session={session} />
+                  <TextPanel session={session} texter={loader.texter ?? null} />
+                </aside>
+              ) : laserOpen && !laserBlocked ? (
+                <Suspense
+                  fallback={
+                    <aside className="selection-panel" aria-busy="true">
+                      Opening...
+                    </aside>
+                  }
+                >
+                  <LaserDialog
+                    key={shownPartId}
+                    documents={shownDocuments}
+                    partId={shownPartId}
+                    bodies={laserBodies}
                     selection={selection}
                     resolveFace={resolveCamFace}
-                    bodiesOf={camBodiesOf}
-                    openLibrary={toolLibrary}
-                    disabled={ioBusy}
+                    services={laserServices}
+                    onSave={onLaserSave}
+                    onClose={() => setLaserOpen(false)}
                   />
                 </Suspense>
-                <VariablesPanel
+              ) : printing ? (
+                <>
+                  <PrintPanel
+                    documents={documents}
+                    printUi={printUi}
+                    parts={allParts}
+                    resolved={print.resolved}
+                    issues={print.issues}
+                    analysis={print.analysis}
+                    onIssue={print.onIssue}
+                    exporter={printExporter}
+                    disabled={ioBusy}
+                    modelPending={modelPending}
+                    onExportBusy={setIoBusy}
+                  />
+                  <VariablesPanel
+                    documents={documents}
+                    selection={selection}
+                    printSetupId={fitSetupId}
+                    model={model}
+                  />
+                </>
+              ) : machining && assemblyId === null ? (
+                <>
+                  <Suspense fallback={<aside className="selection-panel" aria-busy="true" />}>
+                    <CamSidePanel
+                      documents={documents}
+                      camUi={camUi}
+                      selection={selection}
+                      resolveFace={resolveCamFace}
+                      bodiesOf={camBodiesOf}
+                      openLibrary={toolLibrary}
+                      disabled={ioBusy}
+                    />
+                  </Suspense>
+                  <VariablesPanel
+                    documents={documents}
+                    selection={selection}
+                    printSetupId={fitSetupId}
+                    model={model}
+                  />
+                </>
+              ) : assemblyId !== null && !locked && assemblyPanel?.kind === 'mate' ? (
+                <MateDialog
+                  key={`${assemblyId}/${assemblyPanel.mateId ?? 'new'}`}
                   documents={documents}
+                  assemblyId={assemblyId}
+                  mateId={assemblyPanel.mateId}
                   selection={selection}
-                  printSetupId={fitSetupId}
-                  model={model}
+                  bodies={instanceBodies}
+                  assembler={loader.assembler}
+                  referencer={loader.referencer}
+                  onPreview={onMatePreview}
+                  onConnectors={setMateConnectors}
+                  onClose={(committed) => {
+                    const ui = assemblyUi.getState();
+                    if (committed) ui.holdUntil(committed);
+                    else ui.clearPoses();
+                    ui.close();
+                  }}
                 />
-              </>
-            ) : assemblyId !== null && !locked && assemblyPanel?.kind === 'mate' ? (
-              <MateDialog
-                key={`${assemblyId}/${assemblyPanel.mateId ?? 'new'}`}
-                documents={documents}
-                assemblyId={assemblyId}
-                mateId={assemblyPanel.mateId}
-                selection={selection}
-                bodies={instanceBodies}
-                assembler={loader.assembler}
-                referencer={loader.referencer}
-                onPreview={onMatePreview}
-                onConnectors={setMateConnectors}
-                onClose={(committed) => {
-                  const ui = assemblyUi.getState();
-                  if (committed) ui.holdUntil(committed);
-                  else ui.clearPoses();
-                  ui.close();
-                }}
-              />
-            ) : assemblyId !== null && !locked && assemblyPanel?.kind === 'interference' ? (
-              <InterferencePanel
-                documents={documents}
-                assemblyId={assemblyId}
-                assemblyUi={assemblyUi}
-                assembler={loader.assembler}
-                result={assemblyResult}
-                onClose={() => assemblyUi.getState().close()}
-              />
-            ) : assemblyId !== null && !locked && assemblyPanel?.kind === 'explode' ? (
-              <ExplodePanel
-                documents={documents}
-                assemblyId={assemblyId}
-                assemblyUi={assemblyUi}
-                result={assemblyResult}
-                selection={selection}
-                onClose={() => assemblyUi.getState().close()}
-              />
-            ) : assemblyId !== null && !locked && assemblyPanel?.kind === 'insert' ? (
-              <InsertPanel
-                documents={documents}
-                assemblyId={assemblyId}
-                library={library}
-                createVersion={autosave ? autosave.createVersion : null}
-                onClose={() => assemblyUi.getState().close()}
-              />
-            ) : constructionTool !== null && !locked && assemblyId === null && dialog === null ? (
-              <Suspense
-                fallback={
-                  <aside className="selection-panel" aria-busy="true">
-                    Opening...
-                  </aside>
-                }
-              >
-                <ConstructionTools
+              ) : assemblyId !== null && !locked && assemblyPanel?.kind === 'interference' ? (
+                <InterferencePanel
                   documents={documents}
-                  model={model}
-                  selection={selection}
-                  ui={constructionUi}
-                  partId={activePartId}
-                  viewport={viewport}
+                  assemblyId={assemblyId}
+                  assemblyUi={assemblyUi}
+                  assembler={loader.assembler}
+                  result={assemblyResult}
+                  onClose={() => assemblyUi.getState().close()}
                 />
-              </Suspense>
-            ) : dialog?.kind === 'board' ? (
-              <Suspense
-                fallback={
-                  <aside className="selection-panel" aria-busy="true">
-                    Opening...
-                  </aside>
-                }
-              >
-                <BoardDialog
-                  key={`board/${dialog.featureId ?? 'new'}`}
-                  featureId={dialog.featureId}
+              ) : assemblyId !== null && !locked && assemblyPanel?.kind === 'explode' ? (
+                <ExplodePanel
                   documents={documents}
-                  model={model}
+                  assemblyId={assemblyId}
+                  assemblyUi={assemblyUi}
+                  result={assemblyResult}
                   selection={selection}
-                  onPreview={onBoardPreview}
-                  onClose={() => setDialog(null)}
+                  onClose={() => assemblyUi.getState().close()}
                 />
-              </Suspense>
-            ) : dialog?.kind === 'joint' ? (
-              <Suspense
-                fallback={
-                  <aside className="selection-panel" aria-busy="true">
-                    Opening...
-                  </aside>
-                }
-              >
-                <JointDialog
-                  key={`joint/${dialog.featureId ?? 'new'}`}
-                  featureId={dialog.featureId}
+              ) : assemblyId !== null && !locked && assemblyPanel?.kind === 'insert' ? (
+                <InsertPanel
                   documents={documents}
-                  model={model}
-                  selection={selection}
-                  onPreview={onBoardPreview}
-                  onClose={() => setDialog(null)}
-                />
-              </Suspense>
-            ) : dialog ? (
-              <Suspense
-                fallback={
-                  <aside className="selection-panel" aria-busy="true">
-                    Opening...
-                  </aside>
-                }
-              >
-                <FeatureDialog
-                  key={`${dialog.kind}/${dialog.featureId ?? 'new'}/${dialog.repick ?? ''}`}
-                  request={dialog}
-                  documents={documents}
-                  model={model}
-                  selection={selection}
-                  resolve={resolveReference}
+                  assemblyId={assemblyId}
                   library={library}
                   createVersion={autosave ? autosave.createVersion : null}
-                  scripts={scriptServices}
-                  onClose={() => setDialog(null)}
+                  onClose={() => assemblyUi.getState().close()}
                 />
-              </Suspense>
-            ) : (
-              <>
-                {historyOpen && library && (
-                  <HistoryPanel
-                    source={library}
-                    documentId={document.id}
-                    branch={branch}
-                    branchName={branchName}
-                    branches={branches}
-                    refresh={historyRevision}
+              ) : constructionTool !== null && !locked && assemblyId === null && dialog === null ? (
+                <Suspense
+                  fallback={
+                    <aside className="selection-panel" aria-busy="true">
+                      Opening...
+                    </aside>
+                  }
+                >
+                  <ConstructionTools
+                    documents={documents}
+                    model={model}
+                    selection={selection}
+                    ui={constructionUi}
+                    partId={activePartId}
+                    viewport={viewport}
+                  />
+                </Suspense>
+              ) : dialog?.kind === 'board' ? (
+                <Suspense
+                  fallback={
+                    <aside className="selection-panel" aria-busy="true">
+                      Opening...
+                    </aside>
+                  }
+                >
+                  <BoardDialog
+                    key={`board/${dialog.featureId ?? 'new'}`}
+                    featureId={dialog.featureId}
+                    documents={documents}
+                    model={model}
+                    selection={selection}
+                    onPreview={onBoardPreview}
+                    onClose={() => setDialog(null)}
+                  />
+                </Suspense>
+              ) : dialog?.kind === 'joint' ? (
+                <Suspense
+                  fallback={
+                    <aside className="selection-panel" aria-busy="true">
+                      Opening...
+                    </aside>
+                  }
+                >
+                  <JointDialog
+                    key={`joint/${dialog.featureId ?? 'new'}`}
+                    featureId={dialog.featureId}
+                    documents={documents}
+                    model={model}
+                    selection={selection}
+                    onPreview={onBoardPreview}
+                    onClose={() => setDialog(null)}
+                  />
+                </Suspense>
+              ) : dialog ? (
+                <Suspense
+                  fallback={
+                    <aside className="selection-panel" aria-busy="true">
+                      Opening...
+                    </aside>
+                  }
+                >
+                  <FeatureDialog
+                    key={`${dialog.kind}/${dialog.featureId ?? 'new'}/${dialog.repick ?? ''}`}
+                    request={dialog}
+                    documents={documents}
+                    model={model}
+                    selection={selection}
+                    resolve={resolveReference}
+                    library={library}
                     createVersion={autosave ? autosave.createVersion : null}
-                    onView={(target) => void onView(target)}
-                    viewing={viewing?.target ?? null}
-                    disabled={exportAll !== null}
-                    createDisabled={locked}
-                    onClose={() => setHistoryOpen(false)}
-                    onReview={(id) => setReviewing({ document: document.id, branch: id })}
+                    scripts={scriptServices}
+                    onClose={() => setDialog(null)}
                   />
-                )}
-                {!locked && cutListOpen && hasWoodwork(document) && (
-                  <Suspense fallback={<aside className="selection-panel" aria-busy="true" />}>
-                    <CutListPanel
-                      documents={documents}
-                      model={model}
-                      selection={selection}
-                      assemblyId={assemblyId}
-                      sizer={loader.sizer ?? null}
+                </Suspense>
+              ) : (
+                <>
+                  {historyOpen && library && (
+                    <HistoryPanel
+                      source={library}
+                      documentId={document.id}
+                      branch={branch}
+                      branchName={branchName}
+                      branches={branches}
+                      refresh={historyRevision}
+                      createVersion={autosave ? autosave.createVersion : null}
+                      onView={(target) => void onView(target)}
+                      viewing={viewing?.target ?? null}
                       disabled={exportAll !== null}
-                      onClose={() => setCutListOpen(false)}
+                      createDisabled={locked}
+                      onClose={() => setHistoryOpen(false)}
+                      onReview={(id) => setReviewing({ document: document.id, branch: id })}
                     />
-                  </Suspense>
-                )}
-                {!locked && constructionOpen && assemblyId === null && (
-                  <Suspense fallback={<aside className="selection-panel" aria-busy="true" />}>
-                    <ConstructionPanel
-                      documents={documents}
-                      model={model}
-                      members={members}
-                      selection={selection}
-                      ui={constructionUi}
-                      partId={activePartId}
-                      disabled={exportAll !== null}
+                  )}
+                  {!locked && cutListOpen && hasWoodwork(document) && (
+                    <Suspense fallback={<aside className="selection-panel" aria-busy="true" />}>
+                      <CutListPanel
+                        documents={documents}
+                        model={model}
+                        selection={selection}
+                        assemblyId={assemblyId}
+                        sizer={loader.sizer ?? null}
+                        disabled={exportAll !== null}
+                        onClose={() => setCutListOpen(false)}
+                      />
+                    </Suspense>
+                  )}
+                  {!locked && constructionOpen && assemblyId === null && (
+                    <Suspense fallback={<aside className="selection-panel" aria-busy="true" />}>
+                      <ConstructionPanel
+                        documents={documents}
+                        model={model}
+                        members={members}
+                        selection={selection}
+                        ui={constructionUi}
+                        partId={activePartId}
+                        disabled={exportAll !== null}
+                      />
+                    </Suspense>
+                  )}
+                  {!locked && (
+                    <>
+                      <VariablesPanel
+                        documents={documents}
+                        selection={selection}
+                        printSetupId={fitSetupId}
+                        model={model}
+                      />
+                      <ScriptsPanel
+                        documents={documents}
+                        grants={scriptGrants}
+                        onEdit={openScript}
+                        disabled={exportAll !== null}
+                      />
+                      <ConfigurationsPanel
+                        documents={documents}
+                        configurationError={configurationError}
+                        disabled={exportAll !== null}
+                      />
+                      {hasWoodwork(document) && (
+                        <StockPanel documents={documents} disabled={exportAll !== null} />
+                      )}
+                    </>
+                  )}
+                  <SelectionPanel selection={selection} />
+                  {assemblyId === null && (
+                    <MeasurePanel
+                      measure={measure}
+                      documents={shownDocuments}
+                      bodies={measuredBodies}
                     />
-                  </Suspense>
-                )}
-                {!locked && (
-                  <>
-                    <VariablesPanel
-                      documents={documents}
-                      selection={selection}
-                      printSetupId={fitSetupId}
-                      model={model}
-                    />
-                    <ScriptsPanel
-                      documents={documents}
-                      grants={scriptGrants}
-                      onEdit={openScript}
-                      disabled={exportAll !== null}
-                    />
-                    <ConfigurationsPanel
-                      documents={documents}
-                      configurationError={configurationError}
-                      disabled={exportAll !== null}
-                    />
-                    {hasWoodwork(document) && (
-                      <StockPanel documents={documents} disabled={exportAll !== null} />
-                    )}
-                  </>
-                )}
-                <SelectionPanel selection={selection} />
-                {assemblyId === null && (
-                  <MeasurePanel
-                    measure={measure}
-                    documents={shownDocuments}
-                    bodies={measuredBodies}
-                  />
-                )}
-              </>
-            )}
-          </div>
+                  )}
+                </>
+              )}
+            </div>
+          </SidePanelFrame>
         </div>
         {library && isAgentBranch(reviewed) && (
           <ReviewPanel

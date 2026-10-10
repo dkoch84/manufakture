@@ -1,0 +1,81 @@
+/* A resizable, collapsible side panel (SidePanelFrame). The frame sets the width; the panel it
+   holds fills it. Collapsed, only the edge with its toggle is left. */
+.side-frame {
+  position: relative;
+  display: flex;
+  flex: none;
+  min-width: 0;
+  min-height: 0;
+}
+
+.side-frame-body {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.side-frame-body > .feature-tree,
+.side-frame-body > .side-panel {
+  width: auto;
+  flex: 1;
+  min-width: 0;
+}
+
+/* Wide panels (the cut list and takeoff tables) ask for room: the frame grows to fit them. */
+.side-frame:has(.takeoff-panel),
+.side-frame:has(.cutlist-panel) {
+  min-width: clamp(26rem, 40vw, 40rem);
+}
+
+.side-frame-edge {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 10px;
+  flex: none;
+  background: #f4f6f9;
+  border-left: 1px solid #d6dce3;
+  border-right: 1px solid #d6dce3;
+}
+
+.side-frame-handle {
+  flex: 1;
+  width: 100%;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.side-frame-handle:hover,
+.side-frame-handle:focus-visible {
+  background: #c9dbf7;
+  outline: none;
+}
+
+.side-frame-toggle {
+  width: 100%;
+  height: 2rem;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid #d6dce3;
+  background: transparent;
+  color: #33404d;
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.side-frame-toggle:hover,
+.side-frame-toggle:focus-visible {
+  background: #e3edff;
+}
+
+.side-frame.collapsed .side-frame-edge {
+  width: 1.5rem;
+}
+
+.side-frame.collapsed .side-frame-toggle {
+  height: 100%;
+  border-bottom: 0;
+}

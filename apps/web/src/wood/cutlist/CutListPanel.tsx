@@ -347,18 +347,22 @@ export function CutListPanel({
         </button>
       </div>
       {warnings.length > 0 && (
-        <div className="cutlist-warnings" role="alert" data-testid="cutlist-excluded">
-          <strong>
-            {list.excluded.length > 0
-              ? `${list.excluded.length} ${list.excluded.length === 1 ? 'body is' : 'bodies are'} not in the cut list`
-              : 'The cut list may be incomplete'}
-          </strong>
+        // Folded to its summary line: a long list of excluded bodies (reference shapes) would
+        // otherwise push the table out of the panel.
+        <details className="cutlist-warnings" role="alert" data-testid="cutlist-excluded">
+          <summary>
+            <strong>
+              {list.excluded.length > 0
+                ? `${list.excluded.length} ${list.excluded.length === 1 ? 'body is' : 'bodies are'} not in the cut list`
+                : 'The cut list may be incomplete'}
+            </strong>
+          </summary>
           <ul>
             {warnings.map((w, i) => (
               <li key={i}>{w}</li>
             ))}
           </ul>
-        </div>
+        </details>
       )}
       {oriented.busy && <p className="field-note">Measuring the shapes that are not boards...</p>}
       {tab === 'list' ? (

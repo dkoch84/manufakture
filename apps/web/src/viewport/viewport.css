@@ -75,8 +75,13 @@ body,
   cursor: pointer;
 }
 
-.toolbar button[aria-pressed='true'] {
-  background: #e3edff;
+/* A button whose content is showing (a panel, a mode, a view setting): clearly pressed. */
+.toolbar button[aria-pressed='true'],
+.document-actions button[aria-pressed='true'] {
+  background: #dbe8ff;
+  border-color: #1a6fe0;
+  color: #0b3d91;
+  box-shadow: inset 0 1px 2px rgb(11 61 145 / 25%);
 }
 
 .app-main {

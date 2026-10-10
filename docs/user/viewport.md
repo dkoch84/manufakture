@@ -29,6 +29,15 @@ Keys, with the viewport focused (click it once): **F** zooms to fit, **Esc** cle
 
 The ground grid lies on the XY plane, with the X axis in red and the Y axis in green. A part standing on the grid hides it, seen from above or below. Its spacing follows the zoom in steps of ten (1 mm, 10 mm, 100 mm, ...), and finer lines fade in as you zoom in. **Show grid** and **Show edges** switch the grid and the model's edge lines off and on.
 
+## Side panels
+
+The feature tree on the left and the panel on the right (variables, scripts, stock, the selection, measurements, and the cut list, history or construction panel when open) sit on either side of the viewport.
+
+- **Resize** a panel by dragging the strip on its edge next to the viewport. With the strip focused (Tab to it), the left and right arrow keys resize it a step at a time (Shift for a bigger step), and Home and End make it as narrow or as wide as it goes.
+- **Hide** a panel with the arrow button at the top of that strip; the viewport takes the room and a narrow rail stays behind. Click the rail's arrow to show the panel again, at the width it had.
+- Each panel's width and whether it is hidden are remembered on this device.
+- Buttons that open something in the right panel (**History**, **Cut list**) look pressed while it shows; click again to close it. Opening one shows the right panel if it was hidden and scrolls it to the top, where the opened panel sits.
+
 ## Selecting
 
 - Hover to see what a click would pick: faces light up, edges thicken and vertices show a dot. The side panel names what is under the cursor.
