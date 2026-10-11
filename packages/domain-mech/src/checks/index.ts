@@ -4,6 +4,13 @@
 
 export { CABLE_TENSION_CHECK, CABLE_TENSION_SERIES, cableTension } from './cable';
 export {
+  BEARING_CHECKS,
+  BEARING_LIFE_CHECK,
+  BEARING_SPEED_CHECK,
+  BEARING_STATIC_CHECK,
+  bearingDuties,
+} from './bearings';
+export {
   MECH_EVALUATION_VERSION,
   builtinChecks,
   checkModel,

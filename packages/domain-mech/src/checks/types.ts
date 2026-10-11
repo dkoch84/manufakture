@@ -82,6 +82,8 @@ export interface CheckModel {
   simulation: SimulationEnvelopes;
   /** What regen measured for the checks' `measures`. */
   measured: MeasuredGeometry;
+  /** A part's final body ids as regen built them (a spool's winding needs them); absent outside regen. */
+  partBodies?: (part: string) => readonly string[] | undefined;
 }
 
 /** A body a check needs measured. */

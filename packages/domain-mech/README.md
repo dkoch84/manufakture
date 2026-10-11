@@ -288,6 +288,24 @@ One way for every check to gather its inputs, compute and report (ADR 0017 decis
   over the cable tension, against the user's strength factor (calc's `loadFactor`). A dynamic load
   case reads the simulation's peak `cable.tension` (`unknown` until T9.4b runs it); a static one,
   its largest cable pull. T9.5e may refine it.
+- **The bearing checks** (`bearings/`, T9.5c): `bearing.l10`, `bearing.static` (strength factor)
+  and `bearing.speed`, one record each per rolling bearing on a spool drivetrain's shaft stages
+  (a bushing gets none), each with the governing load case as its `loadCase` and in its title.
+  `duty.ts` reads, once per model, what each load case does to the spool: a dynamic one's force law
+  sampled over its prescribed motion (256 steps per moving segment), weighted by the spool's exact
+  turning through the wound layers (`spoolAngle`), with its session's reps, sets and duration; a
+  static one's largest cable pull. The simulation's peak `cable.tension` replaces the force law's
+  peak when larger. The life is calc's `bearingDutyLife` of the mean equivalent load
+  (`cubicMeanLoad`, Palmgren-Miner with p = 3 or 10/3) in hours of the duty repeated, against an
+  optional `t_req` override; the shortest life governs. The static factor is calc's
+  `bearingStaticFactor` with ISO 76 X0, Y0 by type, under the largest tension; the speed is calc's
+  `bearingSpeed` against the entry's limiting speed. The shaft nearest the spool with no reduction
+  after it shares the pull evenly (`k = 1/N`); any other shaft's `k` is missing until overridden.
+  Axial load `F_a` is 0 unless overridden; angular contact X, Y, e and X0, Y0 are built in for 40
+  degrees only. A load case that does not read beside readable ones adds a missing input
+  (`lc_unread`) naming it, so the governing record is `unknown`; a use whose entry does not resolve
+  gets its three records `unknown`, naming the entry. `CheckModel.partBodies` lets the spool's winding read its body as the drivetrain
+  analysis does.
 
 ## Requirements and load cases (`src/requirements/`, T9.4a)
 

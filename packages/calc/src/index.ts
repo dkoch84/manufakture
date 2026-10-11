@@ -69,6 +69,13 @@ export {
   type BearingKind,
 } from './bearings';
 export {
+  bearingDutyLife,
+  bearingDutyLoad,
+  bearingSpeed,
+  cubicMeanLoad,
+  type DutyStep,
+} from './bearing-duty';
+export {
   boltOverloadFactor,
   boltProofFactor,
   boltStiffness,

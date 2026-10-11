@@ -132,6 +132,18 @@ Every time the design regenerates, the checks run on it and each one makes **rec
 
 Records are never saved; they are recomputed from the document, and only the ones whose inputs changed are computed again. The first check is the cable's tension against the rope's minimum breaking load, for each load case that pulls the cable; the shaft, bearing, bolt, gear and belt, electrical, thermal and stability checks follow.
 
+### Bearings
+
+Every rolling bearing listed on a drivetrain's shaft gets three records, each naming the load case that governs it:
+
+- **L10 life in hours** of the governing load case's duty, repeated: "L10 life of SKF 6204-2RSH (pp#12) on Shaft (stage#2), governed by Full force rep (R6) (lc#1): ... 1876583 h". The cable tension comes from the load case's force law over its motion, averaged over the spool's turns (the effective radius follows the wound layers); a hold turns nothing and adds no wear. The load case with the shortest life governs. Give a life target as the `t_req` input of a `bearing.l10` override ("1200 h"); below it is a warning, and with none the life is shown with nothing to compare it to.
+- **Static factor**: the static load rating C0 over the static equivalent load from the largest cable tension of any load case (or the simulation's peak, when it has run and is larger), against your strength factor.
+- **Speed**: the shaft's highest speed against the catalog's limiting speed. Above it is a warning: the maker's ratings do not hold there. Some catalog speeds are for the open bearing; the entry's basis says which.
+
+The bearings of the shaft that turns with the spool share the cable's pull evenly (`k`, the radial load per newton of cable tension, is 1/2 for two bearings) and see no axial load. When the spool does not sit midway, or the cable pulls at an angle, give `k` and `F_a` with an override. A shaft before a belt or gear carries forces these checks do not work out, so its records name `k` as missing until you give it. Only spool outputs are read, and a bushing gets no records.
+
+A governing load case is picked from every load case, so when one of them does not read (a force with the wrong unit, say), all three records are not computed and name that load case, rather than quietly picking among the rest. A bearing whose catalog entry cannot be found gets its three records too, not computed, naming the entry. The life ranking uses the mean cable tension, which is exact while there is no axial load.
+
 ## Your own materials
 
 Besides the built-in materials, a document can hold materials of its own, with a density and any of the mechanical and thermal properties (elastic modulus, yield and ultimate strength, endurance limit, conductivity, maximum service temperature and more), each with its source and whether it is a typical value. Material values are constants with units (`1240 kg/m^3`, `45 MPa`); a variable is refused, because a material is a library entry. Parts and bodies can use them like the built-in ones; a material in use cannot be deleted.
