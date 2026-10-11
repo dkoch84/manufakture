@@ -3,8 +3,10 @@
 // second runs every check and returns the records (with their lines) as the result's data and a
 // `mech-check` warning for each record below the user's factor or not computed, with every
 // drivetrain read into numbers (T9.3a: the bodies its stages name are measured in the first step)
-// and a `mech-reference` warning for what a stage names that is not there. A document that
-// uses neither the `mech` section nor `domains.mech` reports nothing.
+// and a `mech-reference` warning for what a stage names that is not there, and the electrical
+// system read into a model (T9.7a) with a `mech-reference` warning for each instance, component,
+// terminal, purchased part or connection it names that is not there. A document that uses neither
+// the `mech` section nor `domains.mech` reports nothing.
 
 import { DISCLAIMER_SHORT } from '../disclaimer';
 import {
@@ -13,6 +15,7 @@ import {
   drivetrainWarnings,
   type DrivetrainAnalysis,
 } from '../drivetrain';
+import { analyseElectrical, electricalWarnings, type ElectricalAnalysis } from '../electrical';
 import { DEFAULT_MECH_SETTINGS, type MechSettings } from '../settings';
 import { cableTension } from './cable';
 import { measuredFrom, NOTHING_MEASURED } from './measured';
@@ -39,6 +42,11 @@ export interface MechEvaluation {
    * none (results of builds before T9.3a lack it too).
    */
   drivetrains?: DrivetrainAnalysis[];
+  /**
+   * The electrical system read into a model (T9.7a); absent when the document has none (results
+   * of builds before T9.7a lack it too).
+   */
+  electrical?: ElectricalAnalysis;
   /** The short notice, shown with the records. */
   disclaimer: string;
 }
@@ -126,16 +134,30 @@ export function createMechEvaluation(options: MechEvaluationOptions): DomainEval
         measured,
         partBodies: partBodies(context),
       });
-      if (run.entries.length === 0 && drivetrains.length === 0) return {};
+      const electrical =
+        context.document.mech?.electrical === undefined
+          ? undefined
+          : analyseElectrical({
+              document: context.document,
+              variables: (n) => context.variables.get(n),
+            });
+      if (run.entries.length === 0 && drivetrains.length === 0 && electrical === undefined) {
+        return {};
+      }
       const data: MechEvaluation = {
         version: MECH_EVALUATION_VERSION,
         checks: run.entries,
         ...(drivetrains.length > 0 ? { drivetrains } : {}),
+        ...(electrical !== undefined ? { electrical } : {}),
         disclaimer: DISCLAIMER_SHORT,
       };
       return {
         data: data as unknown as JsonValue,
-        warnings: [...drivetrainWarnings(drivetrains), ...run.warnings],
+        warnings: [
+          ...drivetrainWarnings(drivetrains),
+          ...(electrical !== undefined ? electricalWarnings(electrical) : []),
+          ...run.warnings,
+        ],
       };
     },
   };

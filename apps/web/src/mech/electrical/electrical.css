@@ -1,0 +1,71 @@
+/* The electrical panel: components, connections and harness, and what the system gives. */
+
+.el-panel {
+  width: min(64rem, 96vw);
+}
+
+.el-panel h3 {
+  margin: 0.4rem 0 0.2rem;
+  font-size: 0.9rem;
+}
+
+.el-form,
+.el-results {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.el-form {
+  padding: 0.5rem;
+  border: 1px solid #e3e7ec;
+  border-radius: 4px;
+}
+
+.el-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: 0.35rem 0.6rem;
+}
+
+.el-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0;
+  padding-left: 1.5em;
+}
+
+.el-item {
+  padding: 0.35rem 0.4rem;
+  border-left: 3px solid #c9d1da;
+}
+
+.el-item-head,
+.el-add {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-bottom: 0.25rem;
+}
+
+.el-template {
+  justify-content: flex-start;
+}
+
+.el-id {
+  color: #5b6672;
+}
+
+.el-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.el-table th,
+.el-table td {
+  padding: 0.15rem 0.3rem;
+  border-bottom: 1px solid #e3e7ec;
+  text-align: left;
+  vertical-align: top;
+}

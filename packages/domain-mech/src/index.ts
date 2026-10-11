@@ -44,3 +44,4 @@ export * from './checks';
 export * from './requirements';
 export * from './drivetrain';
 export * from './spool';
+export * from './electrical';

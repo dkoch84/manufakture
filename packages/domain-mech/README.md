@@ -390,7 +390,8 @@ output; couplings between drivetrains and coupling mates are a later phase.
 - **Through regen**: the evaluation stage's first step also asks for the bodies of every instance a
   drivetrain would measure (`drivetrainNeeds`: nothing typed or catalog-given); its second adds
   `drivetrains: DrivetrainAnalysis[]` to `MechEvaluation` (absent when the document has none) and
-  the `mech-reference` warnings. `MECH_IMPLEMENTATION` is 5 (bumped for the spool, T9.3b).
+  the `mech-reference` warnings. `MECH_IMPLEMENTATION` is 6 (bumped for the spool, T9.3b, then for
+  the electrical system, T9.7a).
 - **The typed override** is core's optional `inertia` (an `inertia` expression) on every stage and
   on spool and rotary outputs, added within format version 19 (ADR 0017 decision 9 lists it).
 - Tests: `drivetrain.test.ts` holds the acceptance, direct drive and a 5:1 belt drive of the same
@@ -462,6 +463,90 @@ regen's `mech` evaluation data with the drivetrain.
   30.5 mm at full wind, 21.5 mm at full payout, 27.5 mm at 1 m out, 8 mm of flange over the top
   layer, D/d 13.3); `spool.regen.test.ts` reads the flange diameter of a placed bearing (47 mm
   across) from its bounding box with the real kernel.
+
+## Electrical system (`src/electrical/`, T9.7a)
+
+Core stores the system (`mech.electrical`, ADR 0017 decision 11: components, connections between
+their terminals, harness segments, and the diagrams' manual nudges); `src/electrical/model/` reads
+it into a model. Nothing in it needs the kernel, so the panel reads it straight from the document.
+
+- **Roles** (`roles.ts`): `ROLE_DEFS` gives each of core's roles its text, its default terminals
+  (a pack `+` and `-`; a controller `bus+`, `bus-`, `a`, `b`, `c`, `brake+`, `brake-`, `signal`; a
+  BMS `b+`, `b-`, `p+`, `p-`, `signal`; and so on), how each terminal takes part in the current
+  paths (`source`, `draw` with a simulated quantity or the typed load, `through` within a group,
+  `precharge`) and the catalog families the role may use (`generic` always may; `other` takes
+  anything). **Terminal ids are a published contract**: connections and schematic ports (decision
+  12, T9.7d) name them, so a default id is never renamed or removed, as a built-in catalog entry is
+  never edited; adding a default terminal is allowed. The test `terminals are stable` pins the list.
+- **Terminals of a component** (`componentTerminals`): its own typed list (core's `terminals`)
+  wins; else a `connector` with a connector entry gets pins `1` to `poles` (kind `power`); else
+  the role's defaults. A connector pin is one node: the wires on both halves of the connector
+  meet at the same pin id. A pin's `effectiveKind` (on the connection's end) is what its net
+  carries: walking the connections through any connector pins, `phase` if it reaches a phase
+  terminal, else `signal` if a signal one, else `power` or `ground`. A phase or signal line
+  through any number of connectors therefore keeps its kind for the kind check and the currents.
+- **The model** (`system.ts`): `analyseElectrical({ document, variables })` gives every component
+  with its terminals and where they came from, its catalog entry in words and whether it is
+  verified, its instance and its typed always-on load (A, V); every connection with its two ends,
+  its wire and the segments that carry it; every segment with its length; and the problems by
+  path from `mech.electrical`:
+  - `reference`: an assembly, instance, component, terminal, purchased part or connection that is
+    not there, or a component's or a wire's catalog entry that does not resolve.
+    `electricalWarnings` turns each into a `mech-reference` warning (`objectId` the component,
+    connection or segment; `target` the missing id, `<component>/<terminal>` for a terminal). A
+    missing assembly is reported on each component and segment that names an instance in it
+    (`target` the assembly), and only once on the system when none does.
+  - `dangling`: a terminal nothing connects to (`target` `<component>/<terminal>`, path ending in
+    the terminal's index in the component's terminals).
+  - `structure`: a part of a family the role does not use, a wire that is not a wire entry, a
+    terminal listed twice, a connection from a terminal to itself, or one joining kinds that do
+    not belong together (power or ground to a signal or a phase), comparing a pin's
+    `effectiveKind`.
+  - `value`: a load or length that does not read, a negative load, a length not above 0.
+- **Harness lengths**: typed, or measured: the straight line between the origins of its two ends'
+  instances (a component end uses the component's `instance`) at their stored poses, plus the
+  typed slack for the route, bends and service loops (`MEASURED_LENGTH_ASSUMPTION`). Nothing
+  follows a route around the parts. A measured segment whose ends are not both placed has no
+  length and says which end is missing.
+- **The current on each connection** (`currents.ts`):
+  `connectionCurrents(ctx, simulation?, analysis?)` is the hook the simulation fills. The structure
+  is final now; the values are not:
+  - Terminals are nodes; connections and each role's `through` groups join them (a fuse's `1` and
+    `2`, a BMS's `b+` and `p+`). A precharge conducts only while the bus charges, so it is not a
+    through path; a connection at it carries the precharge's `precharge-current`.
+  - A **power** connection: take it out, find the side with a source (a pack, a DC-DC converter's
+    output, a controller's brake output or a chopper's resistor output), and sum what draws on
+    the other side: a controller's or chopper's `bus-current`, a braking resistor's
+    `resistor-current`, a charger input's `charge-current` and the typed loads of the always-on
+    parts. Peaks and RMS values add (an upper bound when the parts do not peak together); running
+    and charging are separate modes, and the larger is taken. A connection in a loop of parallel
+    paths, fed from both ends, fed from neither, or with nothing drawing beyond it is
+    `unresolved`, saying why: the model does not divide currents.
+  - A **phase** connection carries the `phase-current` of the controller on that line (through any
+    connector pins), else the motor's. A **signal** connection is taken as negligible (0, with the
+    assumption stated).
+  - Simulated parts are read as series `electrical/<component>/<quantity>`
+    (`electricalSeries`) with statistics `peak` and `rms`, per load case, through
+    `SimulationEnvelopes`. **T9.4b names its series to match.** Until it runs, `NO_SIMULATION`
+    leaves every simulated part unknown, naming the series and the load case
+    (`electrical/el#6/bus-current: no simulation of lc#1 has run`). When a connection's parts are
+    all typed loads, `steady` gives its current now. T9.5f (wire ampacity and voltage drop, fuse
+    and connector ratings) and T9.7c (power budget) read this; `sources` names the components
+    that feed a power connection, for the voltage they will need.
+- **The template** (`template.ts`): `electricalTemplateCommand(doc)` appends the cable trainer's
+  system (14 generic components and 31 connections: pack, BMS, main fuse, contactor with a
+  precharge across it, controller with its brake output to a braking resistor, motor phases, a
+  charger input on the BMS's load side, a DC-DC converter feeding the controller board, encoder,
+  load cell and display) as one `setElectrical`, so one undo step. Its always-on loads are
+  estimates to replace; it has no harness, as segments need the parts placed. With the
+  requirements template's load cases and the series supplied, every connection carries a current
+  in every load case (the acceptance test in `electrical.test.ts`).
+- **Through regen**: the evaluation stage's second step adds `electrical: ElectricalAnalysis` to
+  `MechEvaluation` (absent when the document has none) and the `mech-reference` warnings of
+  `electricalWarnings`, so they reach an agent's `get_errors`; dangling, structure and value
+  problems stay in the model (the panel lists them). Nothing is measured: lengths come from stored
+  poses. `MECH_IMPLEMENTATION` is 6. `electrical.regen.test.ts` checks it with the real kernel.
+- No core change: core already had every field and command this needs.
 
 ## Review
 
