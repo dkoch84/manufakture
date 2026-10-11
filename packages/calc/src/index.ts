@@ -121,3 +121,11 @@ export {
   type InsulationRating,
 } from './electrical';
 export { firstOrderTemperature } from './thermal';
+export {
+  pointLoadDeflectionAt,
+  pointLoadMoment,
+  shaftBearingSlope,
+  shaftPointLoadDeflection,
+} from './shaft-deflection';
+export { keyFactor } from './keys';
+export { pressFitPressure, pressFitSlipFactor } from './fits';

@@ -51,8 +51,11 @@ export interface CheckInput {
   /** Where it came from, in words. */
   source: string;
   ref: InputRef;
-  /** How an override's expression for this input is read. */
-  kind: PhysicalKind | 'number';
+  /**
+   * How an override's expression for this input is read: a length in metres (typed with its unit,
+   * `25 mm`), an angle in radians, a physical kind in SI.
+   */
+  kind: PhysicalKind | 'number' | 'length' | 'angle';
   /** Why there is no value, naming what would give one: "no simulation of lc#1 has run". */
   missing?: string;
   /** The record can be computed without it (a refinement); a missing one is not reported. */

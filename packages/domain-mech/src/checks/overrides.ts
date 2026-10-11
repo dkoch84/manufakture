@@ -126,7 +126,13 @@ export function applyInputOverrides(
         name: base.name,
         kind: base.kind,
         ref,
-        value: r.ok && Number.isFinite(r.value) ? r.value : undefined,
+        // A length evaluates in millimetres; the checks work in metres.
+        value:
+          r.ok && Number.isFinite(r.value)
+            ? base.kind === 'length'
+              ? r.value / 1000
+              : r.value
+            : undefined,
         source: `your value, override ${o.id}`,
       };
       if (base.optional) next.optional = true;

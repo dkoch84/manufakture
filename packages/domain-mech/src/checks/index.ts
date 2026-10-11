@@ -3,6 +3,7 @@
 // wording of a record, the regen evaluation stage, and the sample check `cable.tension`.
 
 export { CABLE_TENSION_CHECK, CABLE_TENSION_SERIES, cableTension } from './cable';
+export { SHAFT_CHECKS, SHAFT_FAMILY, SECTION_FEATURES, type SectionFeature } from './shafts';
 export {
   BEARING_CHECKS,
   BEARING_LIFE_CHECK,

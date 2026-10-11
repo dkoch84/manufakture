@@ -19,6 +19,7 @@ import { analyseElectrical, electricalWarnings, type ElectricalAnalysis } from '
 import { DEFAULT_MECH_SETTINGS, type MechSettings } from '../settings';
 import { BEARING_CHECKS } from './bearings';
 import { cableTension } from './cable';
+import { SHAFT_CHECKS } from './shafts';
 import { measuredFrom, NOTHING_MEASURED } from './measured';
 import { CheckRegistry, RecordCache, runChecks, type CheckEntry } from './registry';
 import { NO_SIMULATION, type SimulationEnvelopes } from './simulation';
@@ -57,6 +58,7 @@ export function builtinChecks(): CheckRegistry {
   const registry = new CheckRegistry();
   registry.register(cableTension);
   for (const check of BEARING_CHECKS) registry.register(check);
+  for (const check of SHAFT_CHECKS) registry.register(check);
   return registry;
 }
 

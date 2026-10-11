@@ -68,6 +68,26 @@ function sample(): CalcRecord[] {
     calc.voltageDrop({ I: 10, resistancePerLength: 0.01, length: 2 }),
     calc.jouleHeating({ I: 10, R20: 0.1 }),
     calc.firstOrderTemperature({ P: 10, Rth: 1, Cth: 10, t: 5, Tambient: 300 }),
+    calc.shaftPointLoadDeflection({
+      F: 100,
+      a: 0.05,
+      L: 0.1,
+      E: 2e11,
+      d: 0.02,
+      maxDeflection: 1e-9,
+    }),
+    calc.shaftBearingSlope({ F: 100, a: 0.15, L: 0.1, E: 2e11, d: 0.02 }, 'B'),
+    calc.keyFactor({ T: 10, d: 0.02, w: 0.005, h: 0.005, l: 0.02, Sy: 3e8, requiredFactor: 2 }),
+    calc.pressFitPressure({
+      delta: 2e-5,
+      d: 0.02,
+      do: 0.04,
+      Eo: 2e11,
+      nuo: 0.3,
+      Ei: 2e11,
+      nui: 0.3,
+    }),
+    calc.pressFitSlipFactor({ T: 10, p: undefined, f: 0.15, l: 0.02, d: 0.02 }),
   ];
 }
 
