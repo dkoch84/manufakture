@@ -19,6 +19,8 @@ export interface MeasuredBody {
   centerOfMass: Vec3 | null;
   /** m⁵, at unit density about the centre of mass (times a density: kg·m²). */
   volumeInertia: Matrix3 | null;
+  /** m, tight, in the part's coordinates; absent or null when not reported (the spool, T9.3b). */
+  boundingBox?: { min: Vec3; max: Vec3 } | null;
 }
 
 export interface MeasuredGeometry {
@@ -57,6 +59,17 @@ export function measuredFrom(answers: readonly EvaluationAnswer[]): MeasuredGeom
         m.volumeInertia === null
           ? null
           : (m.volumeInertia.map((row) => row.map((v) => v * mm ** 5)) as unknown as Matrix3),
+      ...(m.boundingBox !== undefined
+        ? {
+            boundingBox:
+              m.boundingBox === null
+                ? null
+                : {
+                    min: m.boundingBox.min.map((v) => v * mm) as unknown as Vec3,
+                    max: m.boundingBox.max.map((v) => v * mm) as unknown as Vec3,
+                  },
+          }
+        : {}),
     });
   }
   return {

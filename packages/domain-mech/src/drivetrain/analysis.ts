@@ -8,6 +8,7 @@
 import { mechItems, type Drivetrain } from '@manufakture/core';
 import type { DomainEvaluationWarning } from '@manufakture/regen';
 import type { MechRecord } from '../checks/types';
+import { analyseSpool, type SpoolAnalysis } from '../spool/analysis';
 import {
   drivetrainChain,
   drivetrainProblemText,
@@ -22,6 +23,8 @@ export interface DrivetrainAnalysis extends DrivetrainChain {
   inertiaAtMotor?: number;
   inertiaAtOutput?: number;
   records: MechRecord[];
+  /** A spool output, wound and stated (T9.3b): its effective radius against extension. */
+  spool?: SpoolAnalysis;
 }
 
 /** One drivetrain, read and stated. */
@@ -31,11 +34,16 @@ export function analyseDrivetrain(ctx: DrivetrainContext, d: Drivetrain): Drivet
   const value = (check: string) => records.find((r) => r.check === check)?.result ?? undefined;
   const atMotor = value(DRIVETRAIN_INERTIA);
   const atOutput = value(DRIVETRAIN_INERTIA_OUTPUT);
+  const spool = analyseSpool(ctx, d);
   return {
     ...chain,
     ...(atMotor !== undefined ? { inertiaAtMotor: atMotor } : {}),
     ...(atOutput !== undefined ? { inertiaAtOutput: atOutput } : {}),
+    // The spool's own problems (a typed length that does not read, a cable that is not a rope, a
+    // width longer than the body) join the chain's, so the panel and the toolbar count show them.
+    problems: spool === undefined ? chain.problems : [...chain.problems, ...spool.problems],
     records,
+    ...(spool !== undefined ? { spool } : {}),
   };
 }
 

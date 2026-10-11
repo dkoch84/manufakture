@@ -2,9 +2,11 @@
 // by stage, tied to the assembly (each stage names its instances and the motor its revolute mate),
 // and what it gives: the overall ratio and efficiency, every turning element's inertia with where
 // it came from, the inertia reflected to the motor and to the output, and the motor torque for a
-// torque and an acceleration at the output. The numbers are regen's (the kernel measures the
-// instances); a stage naming something that is not there is listed, and the records that need it
-// say what is missing. Numbers only: nothing here calls a design safe.
+// torque and an acceleration at the output; for a spool output, the spool and cable (T9.3b: layers
+// wound, effective radius by extension, flange clearance, bend ratios, travel). The numbers are
+// regen's (the kernel measures the instances); a stage naming something that is not there is
+// listed, and the records that need it say what is missing. Numbers only: nothing here calls a
+// design safe.
 
 import {
   mechItems,
@@ -17,7 +19,6 @@ import {
   OUTPUT_KIND_TEXT,
   STAGE_KIND_TEXT,
   analyseDrivetrain,
-  drivetrainChain,
   drivetrainProblemText,
   entryItem,
   formatSI,
@@ -29,6 +30,7 @@ import {
   type InertiaElement,
   type OutputKind,
   type PowerFlow,
+  type SpoolAnalysis,
   type StageKind,
 } from '@manufakture/domain-mech';
 import {
@@ -298,9 +300,9 @@ function OutputFields({
             {...field('cable')}
           />
           <Text label="Cable length" hint="2.5 m" {...field('length')} />
-          <Text label="Core diameter" hint="from the geometry" {...field('core')} />
-          <Text label="Flange diameter" hint="from the geometry" {...field('flange')} />
-          <Text label="Width" hint="from the geometry" {...field('width')} />
+          <Text label="Core diameter" hint="40 mm" {...field('core')} />
+          <Text label="Flange diameter" hint="the body's outside diameter" {...field('flange')} />
+          <Text label="Width between the flanges" hint="20 mm" {...field('width')} />
         </>
       )}
       {o.kind === 'linear' && (
@@ -350,10 +352,11 @@ function DrivetrainForm({
       setProblems([built.message]);
       return;
     }
-    // Values that do not read and a chain out of order are refused; a reference to something
-    // that is not there is the evaluation's warning, shown with the results.
-    const chain = drivetrainChain({ document: current, variables: lookup(current) }, built.value);
-    const found = chain.problems.filter((p) => p.kind !== 'reference').map(drivetrainProblemText);
+    // Values that do not read, a chain out of order and a spool's own problems (a length not above
+    // zero, a cable that is not a rope) are refused; a reference to something that is not there is
+    // the evaluation's warning, shown with the results.
+    const read = analyseDrivetrain({ document: current, variables: lookup(current) }, built.value);
+    const found = read.problems.filter((p) => p.kind !== 'reference').map(drivetrainProblemText);
     if (found.length > 0) {
       setProblems(found);
       return;
@@ -579,6 +582,84 @@ function TorqueCalc({ doc, analysis }: { doc: ManufaktureDocument; analysis: Dri
   );
 }
 
+/** A length: millimetres below a metre (30.5 mm), metres above (2.85 m). */
+const metres = (v: number) => (Math.abs(v) < 1 ? `${number(v * 1000)} mm` : `${number(v)} m`);
+
+const STATUS_TEXT = { ok: 'ok', warning: 'warning', unknown: 'not known' } as const;
+
+/**
+ * The spool and cable (T9.3b), compactly: one row per record (layers wound, the effective radius at
+ * full wind and at full payout with the torque per newton, the flange clearance, the bend ratios,
+ * the cable length against the travel, the stretch), with its margin and status.
+ */
+function SpoolResults({ spool }: { spool: SpoolAnalysis }) {
+  // A count or a ratio as it is (4 layers, D/d 13.333); a length in mm below a metre.
+  const value = (v: number, unit: string) =>
+    unit === '1' ? number(v) : unit === 'm' ? metres(v) : formatSI(v, unit);
+  const suffix = `, ${spool.drivetrainName}`;
+  // On the two effective-radius rows: the spool torque at the maximum force and the spool speed
+  // at the peak cable speed, when those requirements exist.
+  const atRadius = (r: SpoolAnalysis['records'][number]) => {
+    if (r.check !== 'spool.radius-wound' && r.check !== 'spool.radius-out') return null;
+    const d = (symbol: string) => r.derived.find((v) => v.symbol === symbol)?.value;
+    const f = r.inputs.find((i) => i.symbol === 'F')?.value;
+    const v = r.inputs.find((i) => i.symbol === 'v')?.value;
+    const t = d('T');
+    const w = d('ω');
+    const n = d('n');
+    const parts: string[] = [];
+    if (t !== undefined && f != null) parts.push(`${formatSI(t, 'N·m')} at ${formatSI(f, 'N')}`);
+    if (w !== undefined && n !== undefined && v != null) {
+      parts.push(`${formatSI(w, 'rad/s')} (${number(n)} rpm) at ${formatSI(v, 'm/s')}`);
+    }
+    return parts.length === 0 ? null : (
+      <span className="field-note" data-testid={`dt-spool-at-${r.check}`}>
+        {' '}
+        ({parts.join('; ')})
+      </span>
+    );
+  };
+  return (
+    <>
+      <h3>Spool and cable</h3>
+      <table className="dt-table" data-testid="dt-spool">
+        <tbody>
+          {spool.records.map((r) => (
+            <tr key={r.id} data-testid={`dt-spool-${r.check}`} data-status={r.status}>
+              <th>{r.title.endsWith(suffix) ? r.title.slice(0, -suffix.length) : r.title}</th>
+              <td>
+                {r.result !== null ? value(r.result, r.unit) : 'not known'}
+                {atRadius(r)}
+              </td>
+              <td>
+                {r.limit !== undefined && r.result !== null
+                  ? `against ${value(r.limit, r.unit)}${r.margin !== undefined ? `, margin ${number(r.margin * 100)} %` : ''}`
+                  : ''}
+              </td>
+              <td className={r.status === 'warning' ? 'text-error' : undefined}>
+                {STATUS_TEXT[r.status]}
+                {r.note !== undefined && `: ${r.note}`}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {spool.steps !== undefined && spool.steps.length > 0 && (
+        <p className="field-note" data-testid="dt-spool-steps">
+          Effective radius by extension (outermost layer first):{' '}
+          {spool.steps
+            .map(
+              (st) =>
+                `${metres(st.from)} to ${metres(st.to)}: layer ${st.layer}, ${metres(st.radius)}`,
+            )
+            .join('; ')}
+          . Torque is the cable tension times this radius; spool speed the cable speed over it.
+        </p>
+      )}
+    </>
+  );
+}
+
 function Results({
   doc,
   analysis,
@@ -709,6 +790,7 @@ function Results({
           )}
         </>
       )}
+      {analysis.spool !== undefined && <SpoolResults spool={analysis.spool} />}
       <TorqueCalc doc={doc} analysis={analysis} />
     </section>
   );

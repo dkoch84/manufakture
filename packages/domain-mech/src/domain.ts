@@ -16,7 +16,7 @@ import { MECH_NAMESPACE, MECH_SETTINGS_VERSION, readMechSettings } from './setti
  * Bump with any change that can alter what the domain returns to regen, so results built by older
  * domain code are never served from regen's cache (ADR 0004 decision 8).
  */
-export const MECH_IMPLEMENTATION = 4;
+export const MECH_IMPLEMENTATION = 5;
 
 /** The domain definition: what `registerMech` registers. */
 export const mechDomain: ExtensionDomain = {

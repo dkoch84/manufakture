@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest';
 import type { MeasuredGeometry } from '../checks/measured';
 import { analyseDrivetrain, analyseDrivetrains, drivetrainWarnings } from './analysis';
 import { drivetrainChain, drivetrainNeeds } from './chain';
+import { builtinRef } from '../parts/catalog';
 import { combineBodies, principalMoments, spinMoment } from './inertia';
 import { motorTorque } from './torque';
 
@@ -83,6 +84,16 @@ function design(): ManufaktureDocument {
         name: 'Drive motor',
       },
     },
+    // The spool's cable (T9.3b reads it: a spool's cable must be a rope entry).
+    {
+      type: 'setPurchasedUse',
+      use: {
+        id: 'pp#20',
+        entry: builtinRef('rope/samson-amsteel-blue-3mm')!,
+        alternates: [],
+        name: 'Cable',
+      },
+    },
     { type: 'addAssembly', assemblyId: 'assembly#1', name: 'Trainer' },
     {
       type: 'addInstance',
@@ -106,7 +117,7 @@ const directDrive = (): Drivetrain => ({
   name: 'Direct',
   assembly: 'assembly#1',
   stages: [{ id: 'stage#4', kind: 'motor', use: 'pp#2' }],
-  output: { kind: 'spool', instance: 'inst#1', cable: 'pp#2', length: x('2.5 m') },
+  output: { kind: 'spool', instance: 'inst#1', cable: 'pp#20', length: x('2.5 m') },
 });
 
 const beltDrive = (): Drivetrain => ({
@@ -124,7 +135,7 @@ const beltDrive = (): Drivetrain => ({
       inertia: x('4e-5 kg*m^2'),
     },
   ],
-  output: { kind: 'spool', instance: 'inst#1', cable: 'pp#2', length: x('2.5 m') },
+  output: { kind: 'spool', instance: 'inst#1', cable: 'pp#20', length: x('2.5 m') },
 });
 
 function analyse(doc: ManufaktureDocument, d: Drivetrain) {
@@ -428,6 +439,19 @@ describe('the chain', () => {
         output: { ...typed.output, inertia: x('1 kg*m^2') } as Drivetrain['output'],
       },
     });
+    // The spool's body is still read for its outside diameter (T9.3b) until a flange is typed.
+    expect(drivetrainNeeds(doc, BODIES)).toEqual([{ part: 'part#1', body: 'extrude#1' }]);
+    doc = apply(doc, {
+      type: 'setDrivetrain',
+      drivetrain: {
+        ...typed,
+        output: {
+          ...typed.output,
+          inertia: x('1 kg*m^2'),
+          flange: x('100 mm'),
+        } as Drivetrain['output'],
+      },
+    });
     expect(drivetrainNeeds(doc, BODIES)).toEqual([]);
     // Outside regen nothing is measured: the record says what is missing.
     const outside = drivetrainChain({ document: doc, variables: NO_VARIABLES }, directDrive());
@@ -454,7 +478,7 @@ describe('references', () => {
           kind: 'spool',
           instance: 'inst#1',
           body: 'extrude#4',
-          cable: 'pp#2',
+          cable: 'pp#20',
           length: x('2 m'),
         },
       },

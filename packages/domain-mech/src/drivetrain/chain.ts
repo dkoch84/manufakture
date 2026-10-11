@@ -38,6 +38,7 @@ import { NOTHING_MEASURED, type MeasuredGeometry } from '../checks/measured';
 import type { InputRef } from '../checks/types';
 import { refText, resolveEntry } from '../parts/catalog';
 import { siValue } from '../requirements/values';
+import { spoolNeeds } from '../spool/spool';
 import { combineBodies, principalMoments, spinMoment, type BodyMass } from './inertia';
 
 export type StageKind = Stage['kind'];
@@ -334,6 +335,13 @@ export function drivetrainNeeds(
         seen.add(k);
         out.push({ part: b.part, body });
       }
+    }
+    // The spool's bounding box (T9.3b): its outside diameter when no flange diameter is typed.
+    for (const n of spoolNeeds(doc, d, partBodies)) {
+      const k = `${n.part}\n${n.body}`;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push(n);
     }
   }
   return out;

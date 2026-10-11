@@ -390,12 +390,78 @@ output; couplings between drivetrains and coupling mates are a later phase.
 - **Through regen**: the evaluation stage's first step also asks for the bodies of every instance a
   drivetrain would measure (`drivetrainNeeds`: nothing typed or catalog-given); its second adds
   `drivetrains: DrivetrainAnalysis[]` to `MechEvaluation` (absent when the document has none) and
-  the `mech-reference` warnings. `MECH_IMPLEMENTATION` is 4.
+  the `mech-reference` warnings. `MECH_IMPLEMENTATION` is 5 (bumped for the spool, T9.3b).
 - **The typed override** is core's optional `inertia` (an `inertia` expression) on every stage and
   on spool and rotary outputs, added within format version 19 (ADR 0017 decision 9 lists it).
 - Tests: `drivetrain.test.ts` holds the acceptance, direct drive and a 5:1 belt drive of the same
   spool against a hand calculation written out step by step; `drivetrain.regen.test.ts` measures a
   placed bearing (a tube) with the real kernel against `m (ro^2 + ri^2) / 2`.
+
+## Spool and cable (`src/spool/`, T9.3b)
+
+The output stage of a winch or trainer: a drivetrain's `spool` output read into numbers, wound, and
+stated as calc records. `analyseDrivetrain` carries it as `DrivetrainAnalysis.spool`, so it reaches
+regen's `mech` evaluation data with the drivetrain.
+
+- **Winding** (`winding.ts`, pure, SI, no document vocabulary): `wind({ core, width }, d, length)`
+  gives the layers from the core outward. Simple stacked winding: each layer adds one cable
+  diameter, so layer n's pitch radius is `r_n = D_core/2 + d/2 + (n - 1) d`; every layer holds
+  `N = floor(w / d)` turns (the cable centres from d/2 to w - d/2) and `N 2 pi r_n` of cable; the
+  last layer may be partial. Stacked is the upper bound on the radius (full nesting adds
+  `d sqrt(3)/2` per layer), so it gives the most torque per newton. The cable pays out from the
+  outermost layer first. The functions the simulation (T9.4b) and the checks (T9.5e) read:
+  `layersWound(w, paidOut)`, `effectiveRadius(w, extension)` and `layerAt`, `spoolAt(w, extension)`
+  (layer, radius, which is also the torque per newton, and `1 / r`, the spool speed per m/s of
+  cable), `radiusSteps(w)` (radius against extension as steps, outermost first), `outerSurface`
+  and `bendRatio(D, d)`. Extensions outside 0 to the length are clamped. A length needing more
+  than `MAX_LAYERS` (1000) layers winds nothing (`tooManyLayers`) and the records are `unknown`,
+  so a typo cannot stall regen.
+- **Reading** (`spool.ts`): `readSpool(ctx, d, output)` takes the drivetrain's context. The cable is
+  the purchased use `output.cable`, which must be a `rope` entry (else a `structure` problem): its
+  `diameter` dimension (mm to m), breaking loads, bend ratios, elastic elongation and its
+  reference load, and mass per length, each with its catalog ref. The cable length, core
+  diameter, width between the flanges and the fairlead's bend diameter are typed lengths. The
+  flange diameter is typed or read from the spool body: regen measures the body (or the
+  instance's bodies) and its tight bounding box in the part's coordinates; the axis is the one
+  whose two cross extents agree within `ROUND_TOLERANCE` (1 %) while the third differs, and the
+  outside diameter is taken as the flange diameter. The core and the width are inside the body,
+  where a bounding box cannot see, so they are typed; a record that needs one says to type it,
+  with the body's outside diameter and length. A typed width longer than the body, or a flange
+  smaller than the core, or a typed length not above zero, is a `value` problem; a cable that is
+  not a rope a `structure` one. `analyseDrivetrain` adds them to the drivetrain's `problems`, so
+  the panel lists them, the toolbar counts them and the panel refuses to save the ones it can see
+  without a measurement. `spoolNeeds` (called from `drivetrainNeeds`) asks
+  for the body when no flange is typed or when a width is typed (to compare). The requirements
+  used are the most demanding `travel`, `maxForce` and `peakCableSpeed` (`>=` or `>`) that name
+  this drivetrain or none.
+- **Records** (`records.ts`), subject the drivetrain: `spool.layers` (layers at full wind; the
+  working lists N, each layer's radius and cable, the turns in the top layer and the cable mass),
+  `spool.radius-wound` and `spool.radius-out` (the effective radius at zero extension and at full
+  payout, with the torque per newton, and the torque at the maximum force and the spool speed at
+  the peak cable speed when those requirements exist), `spool.flange-clearance`
+  (`D_f/2 - (D_core/2 + n d)`, compared with `FLANGE_CLEARANCE_GUIDE` = 2 cable diameters, a winch
+  drum rule of thumb stated as one; below it, and below zero where the top layer stands over the
+  flange, the status is `warning`), `spool.bend-ratio` (core diameter over d) and `spool.fairlead-bend-ratio` (when a
+  fairlead is typed), each against the rope's minimum bend ratio with the suggested one beside it
+  (the status is `warning` below the minimum; below the suggested one the note says so; with no
+  minimum in the entry the ratio is shown with nothing to compare), `spool.travel` (the cable
+  length against the travel requirement, or the length alone with a note when none applies) and
+  `spool.stretch` (`eps_ref F / (f_ref F_break) L`, linear through the catalog's one elongation
+  point, at the maximum force over the whole length; a braided fibre rope stiffens with load, so
+  this line understates the stretch below the reference load and overstates it above). The rope's
+  design factor is not a spool
+  record: `cable.tension` (T9.5a) compares tension with the breaking load against the user's
+  factor. No factor ships and no record calls anything safe.
+- **Assumptions** stated in the records: stacked and level winding, the whole length wound at zero
+  extension and all of it paid out (no dead turns, no cable between the spool and the fairlead),
+  a round cable that keeps its diameter, D at the core and at the fairlead's tread.
+- **Measured geometry**: `MeasuredBody.boundingBox` (metres, from regen's `BodyMeasure`) is new for
+  the spool; other readers ignore it.
+- Tests: `spool.test.ts` holds the acceptance, 2.85 m of the 3 mm AmSteel-Blue on a 40 mm core,
+  20 mm wide, against a hand calculation written out step by step (6 turns a layer, 4 layers,
+  30.5 mm at full wind, 21.5 mm at full payout, 27.5 mm at 1 m out, 8 mm of flange over the top
+  layer, D/d 13.3); `spool.regen.test.ts` reads the flange diameter of a placed bearing (47 mm
+  across) from its bounding box with the real kernel.
 
 ## Review
 

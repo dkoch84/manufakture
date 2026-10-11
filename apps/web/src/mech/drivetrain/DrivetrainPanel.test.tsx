@@ -3,10 +3,13 @@ import {
   createDocument,
   parseDocument,
   serialize,
+  storedExpression,
   type Command,
+  type Drivetrain,
   type ManufaktureDocument,
+  type Requirement,
 } from '@manufakture/core';
-import { DISCLAIMER_SHORT, createMechEvaluation } from '@manufakture/domain-mech';
+import { DISCLAIMER_SHORT, builtinRef, createMechEvaluation } from '@manufakture/domain-mech';
 import type { DomainEvaluationResult } from '@manufakture/regen';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
@@ -76,6 +79,54 @@ function setup(doc = design()) {
   const model = createModelStore();
   render(<DrivetrainPanel documents={documents} model={model} onClose={() => {}} />);
   return { documents, model };
+}
+
+const u = (source: string) => storedExpression(source, design().units);
+
+/**
+ * The design with the 3 mm AmSteel-Blue as pp#3 and a spool drivetrain on inst#1: 2.85 m on a
+ * 40 mm core, 20 mm wide, 80 mm flanges, with `output` over it and `without` left untyped.
+ */
+function spoolDesign(
+  output: Record<string, unknown> = {},
+  requirements: Requirement[] = [],
+  without: readonly string[] = [],
+): ManufaktureDocument {
+  const o: Record<string, unknown> = {
+    kind: 'spool',
+    instance: 'inst#1',
+    cable: 'pp#3',
+    length: u('2.85 m'),
+    core: u('40 mm'),
+    width: u('20 mm'),
+    flange: u('80 mm'),
+    inertia: u('1e-4 kg*m^2'),
+    ...output,
+  };
+  for (const k of without) delete o[k];
+  return apply(
+    design(),
+    {
+      type: 'setPurchasedUse',
+      use: {
+        id: 'pp#3',
+        entry: builtinRef('rope/samson-amsteel-blue-3mm')!,
+        alternates: [],
+        name: 'Cable',
+      },
+    },
+    {
+      type: 'setDrivetrain',
+      drivetrain: {
+        id: 'drive#4',
+        name: 'Main',
+        assembly: 'assembly#1',
+        stages: [{ id: 'stage#5', kind: 'motor', use: 'pp#2' }],
+        output: o as Drivetrain['output'],
+      },
+    },
+    ...(requirements.length > 0 ? [{ type: 'setMechRequirements', requirements } as Command] : []),
+  );
 }
 
 const WORDS = /\b(safe|pass(es|ed|ing)?|fail(s|ed|ing|ure)?|certif\w*|complian\w*)\b/i;
@@ -253,5 +304,109 @@ describe('the drivetrain panel', () => {
     expect(screen.getByTestId('dt-working').textContent).toMatch(
       /Missing: Shaft \(stage#2\) \(assembly#1 has no instance inst#7\)/,
     );
+  });
+
+  it('shows the spool and cable: layers, effective radius, torque, speed and margins', () => {
+    // The domain's hand calculation: 2.85 m of 3 mm AmSteel-Blue on a 40 mm core, 20 mm wide,
+    // 80 mm flanges: 4 layers, 30.5 mm at full wind, 21.5 mm at full payout. At 890 N:
+    // 890 x 0.0305 = 27.1 N·m and 890 x 0.0215 = 19.1 N·m; at 2 m/s: 2 / 0.0305 = 65.6 rad/s
+    // (626.2 rpm) and 2 / 0.0215 = 93.0 rad/s (888.3 rpm).
+    setup(
+      spoolDesign({}, [
+        { id: 'req#1', name: 'Force', quantity: 'maxForce', comparison: '>=', value: u('890 N') },
+        {
+          id: 'req#2',
+          name: 'Speed',
+          quantity: 'peakCableSpeed',
+          comparison: '>=',
+          value: u('2 m/s'),
+        },
+      ]),
+    );
+    expect(screen.getByTestId('dt-spool-spool.layers').textContent).toMatch(/^Layers wound4ok/);
+    expect(screen.getByTestId('dt-spool-spool.radius-wound').textContent).toMatch(/30\.5 mm/);
+    expect(screen.getByTestId('dt-spool-spool.radius-out').textContent).toMatch(/21\.5 mm/);
+    expect(screen.getByTestId('dt-spool-at-spool.radius-wound').textContent).toMatch(
+      /27\.1 N·m at 890 N; 65\.6 rad\/s \(626\.\d+ rpm\) at 2\.00 m\/s/,
+    );
+    expect(screen.getByTestId('dt-spool-at-spool.radius-out').textContent).toMatch(
+      /19\.1 N·m at 890 N; 93\.0 rad\/s \(888\.\d+ rpm\) at 2\.00 m\/s/,
+    );
+    const clearance = screen.getByTestId('dt-spool-spool.flange-clearance');
+    expect(clearance.textContent).toMatch(/8 mm.*against 6 mm, margin 33\.333 %/);
+    expect(clearance.getAttribute('data-status')).toBe('ok');
+    expect(screen.getByTestId('dt-spool-spool.travel').textContent).toMatch(
+      /No travel requirement/,
+    );
+    expect(screen.getByTestId('dt-spool-steps').textContent).toMatch(/layer 4, 30\.5 mm/);
+    expect(screen.getByTestId('dt-results').textContent).not.toMatch(WORDS);
+  });
+
+  it('shows no torque or speed on the radius rows without those requirements', () => {
+    setup(spoolDesign());
+    expect(screen.queryByTestId('dt-spool-at-spool.radius-wound')).toBeNull();
+  });
+
+  it('lists a width longer than the spool body regen measured, and counts it', () => {
+    // No flange typed: regen measures the body, 80 mm across and 26 mm along y; 30 mm typed.
+    const doc = spoolDesign({ width: u('30 mm') }, [], ['flange']);
+    const out = createMechEvaluation({ implementation: 1 }).evaluate(
+      {
+        document: doc,
+        data: {},
+        variables: new Map(),
+        parts: [{ partId: 'part#1', built: true, bodies: ['extrude#1'] }],
+        assemblies: [],
+      },
+      [
+        {
+          type: 'body',
+          part: 'part#1',
+          body: 'extrude#1',
+          measure: {
+            volume: 1,
+            area: 1,
+            centerOfMass: null,
+            volumeInertia: null,
+            boundingBox: { min: [-40, 0, -40], max: [40, 26, 40] },
+          },
+        },
+      ],
+    );
+    const model = createModelStore();
+    model.setState({
+      evaluations: [
+        {
+          namespace: 'mech',
+          ...(out.data === undefined ? {} : { data: out.data }),
+          warnings: [...(out.warnings ?? [])],
+          ms: 1,
+        },
+      ],
+      document: doc,
+    });
+    const documents = createDocumentStore(doc);
+    render(<MechDrivetrainButton documents={documents} model={model} disabled={false} />);
+    expect(screen.getByTestId('dt-open').textContent).toBe('Drivetrain (1)');
+    fireEvent.click(screen.getByTestId('dt-open'));
+    expect(screen.getByTestId('dt-warnings').textContent).toBe(
+      'output.width: the width between the flanges is longer than the spool body (26 mm along its axis)',
+    );
+    // The flange read from the body (80 mm): 30 / 3 = 10 turns a layer, 2 layers for 2.85 m
+    // (1.351 m, then 1.539 m), so 40 - (20 + 2 x 3) = 14 mm over the top layer.
+    expect(screen.getByTestId('dt-spool-spool.flange-clearance').textContent).toMatch(
+      /^Flange clearance over the top layer14 mm/,
+    );
+  });
+
+  it('refuses to save a spool whose cable length is not above zero', () => {
+    const { documents } = setup(spoolDesign());
+    type('dt-output-length', '0 m');
+    fireEvent.click(screen.getByTestId('dt-save'));
+    expect(screen.getByTestId('dt-problems').textContent).toBe(
+      'output.length: the cable length must be above zero',
+    );
+    const stored = documents.getState().document.mech!.drivetrains![0]!.output;
+    expect(stored.kind === 'spool' && stored.length.source).toBe('2.85 m');
   });
 });
