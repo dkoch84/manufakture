@@ -566,6 +566,82 @@ it into a model. Nothing in it needs the kernel, so the panel reads it straight 
   poses. `MECH_IMPLEMENTATION` is 6. `electrical.regen.test.ts` checks it with the real kernel.
 - No core change: core already had every field and command this needs.
 
+## Simulation (`src/sim/`, T9.4b)
+
+Decision 6's lumped, deterministic, time-stepped model, productised from the T9.0b spike
+(`docs/spikes/T9.0b-sim.md`, `spikes/T9.0b-sim/src/model.ts`). Pure TypeScript with no clock but
+the budget's, so a browser worker (`apps/web/src/mech/sim/`) and an agent's Node session run the
+same code; the numbers are bit for bit the same on a given JavaScript engine (different engines
+may differ in the last digits of `Math` functions).
+
+- **The machine** (`machine.ts`): `SimMachine`, plain JSON in SI (temperatures in K): the motor in
+  the internal convention of `catalog/conventions.ts` (Kt per A of phase amplitude, R and L phase
+  to neutral) with its loss torques and temperature coefficients; optional two-node motor
+  thermal, and one node each for the pack and the resistor (the plan's decision 6 asks for two
+  nodes for the cells; one is what the catalogs can feed, and T9.5g should revisit it); the
+  transmission (effective radius against extension,
+  `constant` or the spool's `steps` blended over one turn at each layer boundary, ratio,
+  reductions' and cable path's efficiencies, inertia at the rotor); the controller (current
+  limit, modulation, loss model); the pack (OCV curve in pack volts, capacity, resistance, charge
+  limit and taper, cutoff); an optional braking resistor on an ideal chopper; always-on loads.
+- **The profile** (`profile.ts`): `simProfile(resolvedDynamic, { ramp, oneRep })` is the load
+  case's session (`sessionSegments`) with an optional force ramp in and out of each set, each
+  segment's force the law's times a linear `scale` (a rest is 0).
+- **The engine** (`engine.ts`): `Simulation` advances a `SimJob` step by step (`advance(n)`,
+  `progress`, `result()`); `simulate(job)` runs it through, stopping at `options.budgetMs`
+  (status `budget`); `runSimulation(job, { signal, onProgress })` yields between slices and
+  resolves `cancelled` on abort. The spike's model unchanged: ideal force control with the
+  inertia and losses fed forward, the force the user feels from the shaft's torque balance,
+  quasi-static currents at 1 ms by default (`full`: the PI current loop at 50 µs), the pack's
+  current from `P = (OCV − R·I)·I` with the surplus over the charge limit to the resistor (or
+  `unabsorbed` with none), and the theta method (0.5, the implicit midpoint rule) on every state.
+  Two changes from the spike: the effective radius may vary with extension (the cable speed in
+  every power term is the one the shaft moves it at, so the ledger stays exact), and the
+  quasi-static mode no longer books magnetic storage that its steady voltages never supply.
+  Past the most the pack can give (OCV² / 4R) it gives that and the rest is booked as
+  `unsupplied` (an input on the ledger) with a warning, and a pack drawn past empty carries on
+  with its OCV held at the 0 % value, also with a warning, so neither vanishes from the ledger.
+  Commutation is FOC only: a six-step drive's copper loss is about 9 % higher for the same torque,
+  which a run states as an assumption.
+- **Results**: the energy ledger (`SimLedger`, closing to rounding with θ = 0.5), thermal ledgers,
+  per-phase statistics (pull, return, pause, hold, rest), warnings (`current-limit`,
+  `voltage-limit`, `brake-overload`, `unabsorbed`, `below-cutoff`, `pack-power-limit`,
+  `pack-empty`, `slack`, and `ledger` when the ledger misses by more than 1 %), and the series:
+  `SIM_SERIES` names every one with its unit; `envelopes` holds peak, max, min, mean, RMS, the
+  integral and the final value of each, from every step; `series` the recorded points (2000 by
+  default). Electrical parts follow T9.7a's contract: `electrical/<controller>/bus-current` (its
+  brake output included unless a separate chopper is named), `.../phase-current` (the current
+  amplitude, which is what a phase wire carries in the worst case: in a hold the rotor stands
+  still and one phase can carry the full amplitude as DC indefinitely, so the amplitude, not the
+  sinusoid's RMS, is what ampacity should see), `electrical/<resistor>/resistor-current`
+  and `electrical/<chopper>/bus-current`.
+- **For the checks**: `simulationEnvelopes({ [loadCase]: { state, envelopes } })` is the
+  `SimulationEnvelopes` of `checks/simulation.ts`. A run stopped at its budget serves nothing and
+  reports `budget`. Nothing feeds it into the regen evaluation yet (the simulation runs on demand
+  in a worker, not inside regen), so `MECH_IMPLEMENTATION` is unchanged.
+- **From the document** (`job.ts`): `simulationJob(ctx, loadCaseId, options?)`, with `ctx` the
+  `document`, its `variables` and optionally regen's `drivetrains` and `electrical` and the
+  `settings`, reads the load case, its drivetrain (or the only one; regen's analyses when given,
+  for measured inertias), the motor stage's catalog motor (a geared actuator's own gear joins the
+  reductions), and the electrical system's one pack (a
+  pack entry, its OCV from its named catalog cell or the generic curve its full voltage suggests;
+  or a single cell), one controller, an optional braking resistor and the always-on loads. Missing
+  inputs are named (`{ ok: false, missing }`) and no job is made; model constants and unknown
+  catalog figures left out are `assumptions`. A warning when the motor's Kt and Kv disagree by
+  more than 10 % (Kt ≈ (√3/2) / Kv in the internal convention). Options carry what no catalog
+  field holds: the cable path's efficiency, the motor's or the pack's thermal nodes, controller
+  loss figures, a set ramp, the full electrical mode.
+- **Sessions per charge** (`sessions.ts`): `sessionsPerCharge(job)` runs the session back to back
+  from full charge, the charge carried and the temperatures reset, until one drops the pack below
+  its cutoff.
+- Tests: `engine.test.ts` checks the current, the kinetic energy and the charge against closed
+  forms computed from the constants and the motion (a hold's F·r/(G·Kt) and its pack current from
+  the quadratic; J·α/Kt and ½·J·ω² on a free spin; a pack that accepts nothing, everything, or its
+  limit), the two-node step response, and the ledger on seven cases; `spike.test.ts` reproduces the
+  spike's rep, hold, session and sessions per charge (quasi-static within 1e-3, the full mode
+  within 2e-4) and times the template's 13 x 9 session (about 0.25 s for 950 s simulated);
+  `job.test.ts` reads the templates with chosen parts into a job.
+
 ## Review
 
 `mechDataSummariser` describes a change of `domains.mech` (a start lists both factors, set or not)

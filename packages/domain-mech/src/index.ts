@@ -45,3 +45,5 @@ export * from './requirements';
 export * from './drivetrain';
 export * from './spool';
 export * from './electrical';
+// The rep and session simulation (T9.4b): `./sim`.
+export * from './sim';
