@@ -32,20 +32,9 @@ describe('the family field schemas', () => {
       for (const n of names) expect(n, `${s.family}.${n}`).toMatch(FIELD_NAME_PATTERN);
       for (const d of s.dimensions) expect(DIMENSION_NAMES).toContain(d.name);
       // Motors and controllers (T9.2b), cells, packs and BMS (T9.2c), bearings, belts, pulleys,
-      // gears and rope (T9.2d) are at 2; the rest at 1.
-      const raised = [
-        'motor',
-        'controller',
-        'cell',
-        'pack',
-        'bms',
-        'bearing',
-        'belt',
-        'pulley',
-        'gear',
-        'rope',
-      ];
-      expect(s.fieldsVersion, s.family).toBe(raised.includes(s.family) ? 2 : 1);
+      // gears and rope (T9.2d), wire, connectors, fuses, switches and resistors (T9.2e) are at 2;
+      // only the generic family is still at 1.
+      expect(s.fieldsVersion, s.family).toBe(s.family === 'generic' ? 1 : 2);
     }
   });
 

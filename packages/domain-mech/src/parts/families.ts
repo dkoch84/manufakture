@@ -11,7 +11,8 @@
 // migrated in memory by the family's migrations and written back only when the user edits it
 // (decision 7, as ADR 0013 decision 4 does for params). Version 1 is the first; T9.2b to T9.2e
 // add fields by raising it with a migration (motors, controllers, cells, packs and BMS are at 2,
-// and so, since T9.2d, are bearings, belts, pulleys, gears and rope).
+// and so, since T9.2d, are bearings, belts, pulleys, gears and rope, and since T9.2e wire,
+// connectors, fuses, switches and resistors; only `generic` stays at 1).
 
 import { CATALOG_FAMILIES, type CatalogEntry } from '@manufakture/core';
 import type { PhysicalKind } from '@manufakture/units';
@@ -647,7 +648,7 @@ export const FAMILY_SCHEMAS: readonly FamilySchema[] = [
   {
     family: 'wire',
     label: 'Wire',
-    fieldsVersion: 1,
+    fieldsVersion: 2,
     placeholder: 'cylinder',
     dimensions: [dim('diameter', 'outer diameter'), dim('length', 'length')],
     fields: [
@@ -661,12 +662,44 @@ export const FAMILY_SCHEMAS: readonly FamilySchema[] = [
       choice('insulation', 'insulation', ['PVC', 'silicone', 'PTFE', 'other']),
       { name: 'voltageRating', label: 'voltage rating', kind: 'voltage', bom: 'at-least' },
       { name: 'ampacity', label: 'ampacity', kind: 'current', basis: true, bom: 'at-least' },
+      // Fields version 2 (T9.2e). Ampacity is not a property of the gauge alone: the free-air figure
+      // (`ampacity`) and a bundled one with the conductor count it assumes bound it, both at the
+      // ambient they are stated for, and the insulation's temperature rating says which table
+      // column applies. A check (T9.5f) derates from these.
+      {
+        name: 'ampacityBundled',
+        label: 'ampacity in a bundle (raceway or cable)',
+        kind: 'current',
+        basis: true,
+      },
+      {
+        name: 'bundledConductors',
+        label: 'current-carrying conductors the bundled ampacity assumes, at most',
+        kind: 'count',
+      },
+      {
+        name: 'ampacityAmbient',
+        label: 'ambient temperature the ampacities are stated at',
+        kind: 'temperature',
+      },
+      { name: 'temperatureRating', label: 'insulation temperature rating', kind: 'temperature' },
+      { name: 'minTemperature', label: 'lowest rated temperature', kind: 'temperature' },
+      choice('conductor', 'conductor', [
+        'copper',
+        'tinned copper',
+        'copper-clad aluminium',
+        'aluminium',
+      ]),
+      { name: 'conductorArea', label: 'conductor cross-section', kind: 'number', unit: 'mm²' },
+      { name: 'strands', label: 'strands', kind: 'count' },
+      { name: 'strandDiameter', label: 'strand diameter', kind: 'number', unit: 'mm' },
+      { name: 'massPerLength', label: 'mass per length', kind: 'linearDensity' },
     ],
   },
   {
     family: 'connector',
     label: 'Connector',
-    fieldsVersion: 1,
+    fieldsVersion: 2,
     placeholder: 'box',
     dimensions: BOX,
     fields: [
@@ -681,12 +714,27 @@ export const FAMILY_SCHEMAS: readonly FamilySchema[] = [
       { name: 'voltageRating', label: 'voltage rating', kind: 'voltage', bom: 'at-least' },
       { name: 'contactResistance', label: 'contact resistance', kind: 'resistance' },
       { name: 'matingCycles', label: 'mating cycles', kind: 'count' },
+      // Fields version 2 (T9.2e): the burst rating with its duration (Amass: 1 min, under 60 °C
+      // rise), the wire it takes, its temperature window and an anti-spark (pre-charge) contact.
+      { name: 'burstCurrent', label: 'burst (short-time) current', kind: 'current', basis: true },
+      { name: 'wireRange', label: 'wire it takes (AWG or mm²)', kind: 'text' },
+      choice('antiSpark', 'anti-spark (pre-charge) contact', ['yes', 'no']),
+      {
+        name: 'minOperatingTemperature',
+        label: 'lowest operating temperature',
+        kind: 'temperature',
+      },
+      {
+        name: 'maxOperatingTemperature',
+        label: 'highest operating temperature',
+        kind: 'temperature',
+      },
     ],
   },
   {
     family: 'fuse',
     label: 'Fuse',
-    fieldsVersion: 1,
+    fieldsVersion: 2,
     placeholder: 'box',
     dimensions: BOX,
     fields: [
@@ -701,31 +749,98 @@ export const FAMILY_SCHEMAS: readonly FamilySchema[] = [
       },
       choice('format', 'format', ['ATO', 'MINI', 'MAXI', 'MIDI', 'ANL', 'cartridge', 'PCB']),
       { name: 'timeCurrentClass', label: 'time-current class', kind: 'text' },
+      // Fields version 2 (T9.2e): what coordination with the wire and the pack's short-circuit
+      // current reads (T9.5f): the voltage the interrupting rating is stated at, melting I²t, the
+      // longest opening times at 135 % and 200 % of rating, the largest continuous current as a
+      // fraction of the rating, and the fuse's own resistance and voltage drop.
+      {
+        name: 'interruptingVoltage',
+        label: 'voltage the interrupting rating is stated at',
+        kind: 'voltage',
+      },
+      { name: 'i2t', label: 'melting I²t', symbol: 'I²t', kind: 'number', unit: 'A²s' },
+      { name: 'maxOpeningTime135', label: 'longest opening time at 135 % of rating', kind: 'time' },
+      { name: 'maxOpeningTime200', label: 'longest opening time at 200 % of rating', kind: 'time' },
+      {
+        name: 'continuousFraction',
+        label: 'largest continuous current as a fraction of the rating, 0 to 1',
+        kind: 'number',
+      },
+      { name: 'coldResistance', label: 'cold resistance', kind: 'resistance' },
+      { name: 'voltageDrop', label: 'voltage drop at rated current', kind: 'voltage', basis: true },
+      {
+        name: 'minOperatingTemperature',
+        label: 'lowest operating temperature',
+        kind: 'temperature',
+      },
+      {
+        name: 'maxOperatingTemperature',
+        label: 'highest operating temperature',
+        kind: 'temperature',
+      },
     ],
   },
   {
     family: 'switch',
     label: 'Switch or contactor',
-    fieldsVersion: 1,
+    fieldsVersion: 2,
     placeholder: 'box',
     dimensions: BOX,
     fields: [
-      choice('kind', 'kind', ['toggle', 'rocker', 'push', 'contactor', 'solid-state']),
+      choice('kind', 'kind', ['toggle', 'rocker', 'push', 'contactor', 'solid-state', 'rotary']),
       {
         name: 'continuousCurrent',
         label: 'continuous current',
         kind: 'current',
+        basis: true,
         bom: 'at-least',
       },
-      { name: 'breakingCurrent', label: 'DC breaking current', kind: 'current', bom: 'at-least' },
+      {
+        name: 'breakingCurrent',
+        label: 'DC breaking current',
+        kind: 'current',
+        basis: true,
+        bom: 'at-least',
+      },
       { name: 'voltageRating', label: 'DC voltage rating', kind: 'voltage', bom: 'at-least' },
       { name: 'electricalLife', label: 'electrical life (cycles)', kind: 'count' },
+      // Fields version 2 (T9.2e): DC breaking is stated at a voltage, far below the AC rating of the
+      // same part; a short-time rating with its duration; making current; mechanical life; contact
+      // resistance; a contactor's coil (voltage, hold power, inrush) and auxiliary contacts.
+      {
+        name: 'breakingVoltage',
+        label: 'voltage the DC breaking current is stated at',
+        kind: 'voltage',
+      },
+      {
+        name: 'shortTimeCurrent',
+        label: 'short-time (intermittent) current',
+        kind: 'current',
+        basis: true,
+      },
+      { name: 'makingCurrent', label: 'DC making current', kind: 'current', basis: true },
+      { name: 'mechanicalLife', label: 'mechanical life (cycles)', kind: 'count' },
+      { name: 'contactResistance', label: 'contact resistance', kind: 'resistance', basis: true },
+      { name: 'coilVoltage', label: 'coil voltage (contactors)', kind: 'voltage' },
+      { name: 'coilHoldPower', label: 'coil hold power (contactors)', kind: 'power', basis: true },
+      { name: 'coilInrushCurrent', label: 'coil inrush current (contactors)', kind: 'current' },
+      { name: 'auxiliaryContacts', label: 'auxiliary contacts', kind: 'text' },
+      {
+        name: 'minOperatingTemperature',
+        label: 'lowest operating temperature',
+        kind: 'temperature',
+      },
+      {
+        name: 'maxOperatingTemperature',
+        label: 'highest operating temperature',
+        kind: 'temperature',
+      },
     ],
   },
   {
     family: 'resistor',
     label: 'Braking resistor',
-    fieldsVersion: 1,
+    fieldsVersion: 2,
     placeholder: 'box',
     dimensions: BOX,
     fields: [
@@ -740,6 +855,25 @@ export const FAMILY_SCHEMAS: readonly FamilySchema[] = [
       { name: 'pulseEnergy', label: 'pulse energy', kind: 'energy', basis: true },
       { name: 'thermalTimeConstant', label: 'thermal time constant', kind: 'time' },
       { name: 'voltageRating', label: 'voltage rating', kind: 'voltage', bom: 'at-least' },
+      // Fields version 2 (T9.2e): the pulse the energy is stated for (its length and repetition
+      // period), the power with no heat sink beside the mounted one, tolerance, the thermal
+      // resistance surface to ambient and the hottest surface allowed (the touch check reads it).
+      { name: 'pulseDuration', label: 'pulse length the pulse energy is stated for', kind: 'time' },
+      { name: 'pulsePeriod', label: 'repetition period of that pulse', kind: 'time' },
+      {
+        name: 'freeAirPower',
+        label: 'continuous power with no heat sink',
+        kind: 'power',
+        basis: true,
+      },
+      { name: 'tolerance', label: 'tolerance, as a fraction (0.05 is 5 %)', kind: 'number' },
+      {
+        name: 'thermalResistance',
+        label: 'thermal resistance, surface to ambient',
+        kind: 'thermalResistance',
+        basis: true,
+      },
+      { name: 'maxSurfaceTemperature', label: 'hottest surface allowed', kind: 'temperature' },
     ],
   },
   {
@@ -789,6 +923,18 @@ const MIGRATIONS: Partial<Record<CatalogFamily, readonly RatingsMigration[]>> = 
   pulley: [addedFields],
   gear: [addedFields],
   rope: [addedFields],
+  // T9.2e: wire bundled ampacity, ambient, temperature ratings, conductor, area, stranding and
+  // mass; connector burst current, wire range, anti-spark and temperatures; fuse interrupting
+  // voltage, I²t, opening times, continuous fraction, resistance, voltage drop and temperatures;
+  // switch breaking voltage, short-time and making current, mechanical life, contact resistance,
+  // coil and auxiliary contacts, temperatures, and the `rotary` kind; resistor pulse length and
+  // period, free-air power, tolerance, thermal resistance and hottest surface. The switch's
+  // continuous and breaking current gained a basis, which changes no stored value.
+  wire: [addedFields],
+  connector: [addedFields],
+  fuse: [addedFields],
+  switch: [addedFields],
+  resistor: [addedFields],
 };
 
 export type ReadEntry =
@@ -865,6 +1011,18 @@ const NUMBER_RANGES: Readonly<Record<string, { ok: (v: number) => boolean; messa
   'rope.elasticElongation': { ok: (v) => v >= 0 && v < 1, message: 'is from 0 up to 1' },
   'rope.elongationLoad': { ok: (v) => v > 0 && v <= 1, message: 'must be above 0 and at most 1' },
   'rope.designFactor': { ok: (v) => v >= 1, message: 'is at least 1' },
+  'wire.resistancePerLength': { ok: (v) => v > 0, message: 'must be above zero' },
+  'wire.conductorArea': { ok: (v) => v > 0, message: 'must be above zero' },
+  'wire.strands': { ok: (v) => v >= 1, message: 'is at least 1' },
+  'wire.strandDiameter': { ok: (v) => v > 0, message: 'must be above zero' },
+  'wire.bundledConductors': { ok: (v) => v >= 1, message: 'is at least 1' },
+  'connector.poles': { ok: (v) => v >= 1, message: 'is at least 1' },
+  'fuse.i2t': { ok: (v) => v > 0, message: 'must be above zero' },
+  'fuse.continuousFraction': {
+    ok: (v) => v > 0 && v <= 1,
+    message: 'must be above 0 and at most 1',
+  },
+  'resistor.tolerance': { ok: (v) => v >= 0 && v < 1, message: 'is from 0 up to 1' },
 };
 
 /**
@@ -910,6 +1068,34 @@ const ORDERED: Partial<Record<CatalogFamily, readonly (readonly [string, string]
   rope: [
     ['minimumBreakingLoad', 'averageBreakingLoad'],
     ['minimumBendRatio', 'suggestedBendRatio'],
+  ],
+  // T9.2e: a bundled ampacity is not above the free-air one, a rating's ambient and lowest
+  // temperature lie below the insulation's rating, a burst or short-time current is not below the
+  // continuous one, a fuse opens faster at 200 % than at 135 % and interrupts more than its
+  // rating, electrical life is not above mechanical, a resistor takes less with no heat sink and
+  // its pulse is shorter than its period.
+  wire: [
+    ['ampacityBundled', 'ampacity'],
+    ['minTemperature', 'temperatureRating'],
+    ['ampacityAmbient', 'temperatureRating'],
+  ],
+  connector: [
+    ['continuousCurrent', 'burstCurrent'],
+    ['minOperatingTemperature', 'maxOperatingTemperature'],
+  ],
+  fuse: [
+    ['rating', 'interruptingRating'],
+    ['maxOpeningTime200', 'maxOpeningTime135'],
+    ['minOperatingTemperature', 'maxOperatingTemperature'],
+  ],
+  switch: [
+    ['continuousCurrent', 'shortTimeCurrent'],
+    ['electricalLife', 'mechanicalLife'],
+    ['minOperatingTemperature', 'maxOperatingTemperature'],
+  ],
+  resistor: [
+    ['freeAirPower', 'continuousPower'],
+    ['pulseDuration', 'pulsePeriod'],
   ],
 };
 
@@ -965,12 +1151,17 @@ function hasRatio(entry: CatalogEntry): boolean {
  * outside (0, 1] or backlash below zero, a cell's specific heat not above zero, a pack's series or
  * parallel count or a BMS's fewest cells below 1, a plain number outside its range (a bearing's
  * factors, a contact, pressure or helix angle, a belt's efficiency, a rope's bend ratios,
- * elongation, termination efficiency and design factor; `NUMBER_RANGES`), a pair out of order (a
+ * elongation, termination efficiency and design factor, a wire's resistance, area and stranding, a
+ * fuse's I²t and continuous fraction, a resistor's tolerance; `NUMBER_RANGES`), a pair out of order (a
  * cutoff voltage above the nominal, a minimum capacity above the typical, a temperature window
  * upside down, a peak current below the continuous, an OCV curve's ends outside the cutoff and
  * maximum voltage, a bearing's fatigue limit above C0, a belt's tension falling with the pulley or
  * above its breaking strength, a rope's minimum breaking load above the average or minimum bend
- * ratio above the suggested; `ORDERED`), a cell's open-circuit voltage falling as its charge rises, a
+ * ratio above the suggested, and since T9.2e a wire's bundled ampacity above its free-air one, a
+ * connector's burst or a switch's short-time current below the continuous, a fuse's rating above
+ * its interrupting rating or its 200 % opening time above the 135 % one, a switch's electrical life
+ * above its mechanical life, a resistor's free-air power above its mounted power; `ORDERED`), a
+ * cell's open-circuit voltage falling as its charge rises, a
  * dimension the family does not read or that is not above zero, and a bidirectional control
  * character in a short text (the maker, the part number, a text rating, a convention, the source's
  * title and revision). Pure.

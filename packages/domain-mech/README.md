@@ -56,14 +56,14 @@ construction domains. It registers one extension type, `mech.placeholder` (T9.2a
 evaluation stage of decision 15 (`createMechEvaluation`, below: the checks; the simulation joins it
 in T9.4b).
 
-## Purchased parts (`src/parts/`, T9.2a; `src/catalog/`, T9.2b to T9.2d)
+## Purchased parts (`src/parts/`, T9.2a; `src/catalog/`, T9.2b to T9.2e)
 
 One model for every bought part with ratings (ADR 0017 decision 7). Core stores user entries
 (`mech.catalog`, `CatalogEntry`) and uses (`mech.purchased`, `PurchasedUse`); this package gives
 them meaning.
 
 - **Family field schemas** (`families.ts`): `FAMILY_SCHEMAS`, one per `CATALOG_FAMILIES` family,
-  from T9.0c's field lists, at `fieldsVersion` 1 except motor and controller, which T9.2b raised
+  from T9.0c's field lists, at `fieldsVersion` 2 except `generic` (still 1): motor and controller, which T9.2b raised
   to 2 (motor: thermal resistance winding to housing, housing time constant, no-load current, drag
   and viscous loss torques, cogging, and for geared actuators ratio, gear efficiency, backlash, plus
   sensors; controller: continuous and peak power, braking chopper current and smallest resistor,
@@ -84,7 +84,20 @@ them meaning.
   diameter being derived; gear: surface durability torque, helix angle, material, hardness and
   quality grade; rope: suggested bend ratio, what the breaking loads are (`strengthBasis`:
   spliced, unterminated, terminated, not stated), termination efficiency, elastic elongation with
-  the fraction of break it is stated at, design factor, cycle rating, creep and fatigue notes).
+  the fraction of break it is stated at, design factor, cycle rating, creep and fatigue notes),
+  and wire, connector, fuse, switch and resistor, which T9.2e raised to 2 (wire: a bundled
+  ampacity beside the free-air one, the conductor count it assumes and the ambient both are
+  stated at, insulation temperature rating and lowest temperature, conductor (copper, tinned
+  copper, copper-clad aluminium, aluminium), cross-section in mm², strands, strand diameter in mm
+  and mass per length; connector: burst current with its basis, wire range, an anti-spark contact
+  and operating temperatures; fuse: the voltage the interrupting rating is stated at, melting I²t
+  in A²s, the longest opening times at 135 and 200 % of rating, the largest continuous current as
+  a fraction of the rating, cold resistance, voltage drop and operating temperatures; switch: the
+  voltage DC breaking is stated at, short-time and making current, mechanical life, contact
+  resistance, a contactor's coil voltage, hold power and inrush current, auxiliary contacts,
+  operating temperatures and a `rotary` kind, with a basis on continuous and breaking current;
+  resistor: the pulse length and repetition period the pulse energy is stated for, power with no
+  heat sink, tolerance, thermal resistance surface to ambient and hottest surface allowed).
   Version 2 only added fields, so the migration from 1 leaves the ratings as they are. Each `RatingField` has a kind (a `packages/units`
   physical kind stored in SI, `number`, `count` or `text`), optional `options`, `conventions`,
   `basis` and `bom` (the comparison a BOM line states: `at-least`, `at-most`, `equals`). Geometric
@@ -104,6 +117,14 @@ them meaning.
   teeth in mesh from 1, and refuses a bearing's fatigue limit above C0, a belt's large-pulley
   grooves or tension below the fewest-grooves ones or either tension above the breaking strength,
   and a rope's minimum breaking load above the average or minimum bend ratio above the suggested.
+  Since T9.2e it keeps a wire's resistance, cross-section and strand diameter above zero and its
+  strands and bundled conductors from 1, a connector's poles from 1, a fuse's I²t above zero and
+  continuous fraction in (0, 1], and a resistor's tolerance from 0 below 1, and refuses a wire's
+  bundled ampacity above the free-air one or its ambient or lowest temperature above its rating, a
+  connector's burst or a switch's short-time current below the continuous one, a fuse's rating
+  above its interrupting rating or its 200 % opening time above the 135 % one, a switch's
+  electrical life above its mechanical life, and a resistor's free-air power above its mounted
+  power or pulse longer than its period.
   `KV_CONVENTIONS` and `KT_CONVENTIONS` list the conventions, each also at the output side
   (`OUTPUT_SIDE`). `migrateEntry` migrates ratings in memory and refuses a newer `fieldsVersion`.
 - **The built-in catalog** (`catalog.ts`): `BUILTIN_ENTRIES`, every version ever shipped, sorted
@@ -114,8 +135,21 @@ them meaning.
   `copyBuiltin` copies one into a user entry with `derivedFrom`.
 - **The family catalogs** (`src/catalog/`): `MOTOR_ENTRIES` and `CONTROLLER_ENTRIES` (T9.2b),
   `CELL_ENTRIES` and `BMS_ENTRIES` (T9.2c), `BEARING_ENTRIES`, `BELT_ENTRIES`,
-  `PULLEY_ENTRIES`, `GEAR_ENTRIES` and `ROPE_ENTRIES` (T9.2d), joined into `BUILTIN_ENTRIES`;
-  T9.2e adds its own the same way. Bearings: SKF 6202-2RSH, 6204-2RSH, thin-section 61805-2RS1
+  `PULLEY_ENTRIES`, `GEAR_ENTRIES` and `ROPE_ENTRIES` (T9.2d), `WIRE_ENTRIES`,
+  `CONNECTOR_ENTRIES`, `FUSE_ENTRIES`, `SWITCH_ENTRIES` and `RESISTOR_ENTRIES` (T9.2e), joined
+  into `BUILTIN_ENTRIES`. Wire: one seller's fine-stranded silicone wire at 10, 12, 14, 16, 18 and
+  22 AWG (200 °C, 600 V); the cross-section is the stated stranding's, the resistance copper over
+  it and the mass copper plus silicone, both estimated; ampacity is the NEC 200 °C column at 40 °C
+  ambient (free air, and at most three conductors in a raceway) for 10 to 14 AWG and PowerStream's
+  chassis wiring figure for the smaller sizes, each with its basis. Connectors: Amass XT30U, XT60
+  and anti-spark XT90-S (continuous 4 h and burst 1 min under 60 °C rise, as Holybro reproduces
+  Amass), Anderson SB50 and a 17-position JST XH balance lead. Fuses: Littelfuse ATO 32 V 20 A,
+  TAC ATO-style 58 V 30 A and MIDI High Performance 70 V 30 A, the only one rated for a 16S
+  pack's 67.2 V. Switches: a TE KILOVAC EV200 contactor (2000 A break once at 320 V, 1.7 W coil
+  hold), a Blue Sea 6006 battery switch (48 V, no breaking rating) and a Carling V-Series rocker
+  (20 A at 12 V DC). Braking resistors: TE HCH165 and HCH215 at 6.8 ohm (200 and 300 W, pulse
+  energy for a 1 s pulse in a 120 s cycle), an Arcol HS100 3.3 ohm (100 W on its heat sink, 30 W
+  without, no pulse figure) and ODrive's 2 ohm 50 W part. Bearings: SKF 6202-2RSH, 6204-2RSH, thin-section 61805-2RS1
   and angular contact 7202 BEP from a catalogue mirror (SKF's pages render with script), and the
   INA HK1612 drawn cup needle bearing. Belts: Gates 2MGT 6 mm, 3MGT 15 mm and HTD 5M 15 and 25 mm,
   rated at the fewest grooves and at 45 from the design manual's table 6, efficiency typical and
